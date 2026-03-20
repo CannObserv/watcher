@@ -5,7 +5,8 @@ from collections.abc import AsyncGenerator
 
 import pytest
 from httpx import ASGITransport, AsyncClient
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy import event
+from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 
 from src.core.models import Base
 
@@ -33,18 +34,29 @@ async def test_engine():
 
 @pytest.fixture
 async def db_session(test_engine) -> AsyncGenerator[AsyncSession]:
-    session_factory = async_sessionmaker(test_engine, expire_on_commit=False)
-    async with session_factory() as session:
-        async with session.begin():
-            nested = await session.begin_nested()
-            yield session
-            await nested.rollback()
+    async with test_engine.connect() as conn:
+        txn = await conn.begin()
+        session = AsyncSession(bind=conn, expire_on_commit=False)
+
+        # Start a savepoint; route code calling session.commit() will
+        # commit only this savepoint, not the outer real transaction.
+        nested = await conn.begin_nested()
+
+        @event.listens_for(session.sync_session, "after_transaction_end")
+        def restart_savepoint(db_session, transaction):
+            nonlocal nested
+            if not nested.is_active:
+                nested = conn.sync_connection.begin_nested()
+
+        yield session
+
+        await session.close()
+        await txn.rollback()
 
 
 @pytest.fixture
 async def client(test_engine, db_session) -> AsyncGenerator[AsyncClient]:
     from src.api.dependencies import get_db_session
-
     from src.api.main import app
 
     async def override_session() -> AsyncGenerator[AsyncSession]:

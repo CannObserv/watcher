@@ -13,6 +13,14 @@ from src.core.models.watch import Watch
 router = APIRouter(prefix="/api/watches", tags=["watches"])
 
 
+def _parse_ulid(watch_id: str) -> ULID:
+    """Parse a ULID string, raising 404 on invalid format."""
+    try:
+        return ULID.from_str(watch_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail="Watch not found") from exc
+
+
 @router.post("", status_code=201, response_model=WatchResponse)
 async def create_watch(
     data: WatchCreate,
@@ -57,7 +65,7 @@ async def get_watch(
     session: AsyncSession = Depends(get_db_session),
 ):
     """Get a watch by ID."""
-    watch = await session.get(Watch, ULID.from_str(watch_id))
+    watch = await session.get(Watch, _parse_ulid(watch_id))
     if not watch:
         raise HTTPException(status_code=404, detail="Watch not found")
     return watch
@@ -70,7 +78,7 @@ async def update_watch(
     session: AsyncSession = Depends(get_db_session),
 ):
     """Update a watch. Only provided fields are changed."""
-    watch = await session.get(Watch, ULID.from_str(watch_id))
+    watch = await session.get(Watch, _parse_ulid(watch_id))
     if not watch:
         raise HTTPException(status_code=404, detail="Watch not found")
 
@@ -95,7 +103,7 @@ async def deactivate_watch(
     session: AsyncSession = Depends(get_db_session),
 ):
     """Deactivate a watch without deleting it."""
-    watch = await session.get(Watch, ULID.from_str(watch_id))
+    watch = await session.get(Watch, _parse_ulid(watch_id))
     if not watch:
         raise HTTPException(status_code=404, detail="Watch not found")
 

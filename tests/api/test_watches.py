@@ -119,3 +119,53 @@ class TestDeactivateWatch:
     async def test_deactivate_watch_not_found(self, client):
         response = await client.post("/api/watches/00000000000000000000000000/deactivate")
         assert response.status_code == 404
+
+
+class TestAuditLog:
+    async def test_create_writes_audit_entry(self, client, db_session):
+        from sqlalchemy import select
+
+        from src.core.models.audit_log import AuditLog
+
+        await client.post("/api/watches", json={
+            "name": "Audited Watch",
+            "url": "https://example.com/audit",
+            "content_type": "html",
+        })
+        result = await db_session.execute(
+            select(AuditLog).where(AuditLog.event_type == "watch.created")
+        )
+        entries = result.scalars().all()
+        assert len(entries) >= 1
+        assert entries[0].payload["name"] == "Audited Watch"
+
+
+class TestInvalidULID:
+    async def test_get_with_invalid_ulid_returns_404(self, client):
+        response = await client.get("/api/watches/not-a-valid-ulid")
+        assert response.status_code == 404
+
+    async def test_patch_with_invalid_ulid_returns_404(self, client):
+        response = await client.patch(
+            "/api/watches/not-a-valid-ulid", json={"name": "X"}
+        )
+        assert response.status_code == 404
+
+
+class TestListWatchesFilter:
+    async def test_filter_by_active_status(self, client):
+        resp = await client.post("/api/watches", json={
+            "name": "Active Watch",
+            "url": "https://example.com/active",
+            "content_type": "html",
+        })
+        watch_id = resp.json()["id"]
+        await client.post(f"/api/watches/{watch_id}/deactivate")
+
+        active = await client.get("/api/watches?is_active=true")
+        inactive = await client.get("/api/watches?is_active=false")
+
+        active_ids = [w["id"] for w in active.json()]
+        inactive_ids = [w["id"] for w in inactive.json()]
+        assert watch_id not in active_ids
+        assert watch_id in inactive_ids

@@ -35,7 +35,7 @@ markers = [
 [tool.ruff]
 line-length = 100
 target-version = "py312"
-exclude = ["vendor/"]
+exclude = ["vendor/", "alembic/versions/"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "W", "UP"]

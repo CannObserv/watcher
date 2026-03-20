@@ -2,6 +2,7 @@
 
 from ulid import ULID
 
+from src.core.models.audit_log import AuditLog
 from src.core.models.base import ULIDType
 from src.core.models.watch import ContentType, Watch
 
@@ -64,3 +65,23 @@ class TestWatchModel:
         assert ContentType.HTML.value == "html"
         assert ContentType.PDF.value == "pdf"
         assert ContentType.FILE.value == "file"
+
+
+class TestAuditLogModel:
+    def test_create_audit_log_entry(self):
+        entry = AuditLog(
+            event_type="watch.created",
+            payload={"watch_name": "Test Watch"},
+        )
+        assert entry.event_type == "watch.created"
+        assert entry.payload == {"watch_name": "Test Watch"}
+        assert entry.watch_id is None
+
+    def test_create_audit_log_with_watch_id(self):
+        watch_id = ULID()
+        entry = AuditLog(
+            event_type="check.started",
+            watch_id=watch_id,
+            payload={"url": "https://example.com"},
+        )
+        assert entry.watch_id == watch_id

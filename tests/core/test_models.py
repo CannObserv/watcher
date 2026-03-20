@@ -6,6 +6,8 @@ from ulid import ULID
 from src.core.database import get_database_url, get_engine, reset_engine
 from src.core.models.audit_log import AuditLog
 from src.core.models.base import ULIDType
+from src.core.models.change import Change
+from src.core.models.snapshot import Snapshot, SnapshotChunk
 from src.core.models.watch import ContentType, Watch
 
 
@@ -125,3 +127,49 @@ class TestDatabase:
         # After reset, a new engine should be created on next call
         engine2 = get_engine()
         assert engine2 is not engine
+
+
+class TestSnapshotModel:
+    def test_create_snapshot(self):
+        snap = Snapshot(
+            watch_id=ULID(),
+            content_hash="abc123",
+            simhash=42,
+            storage_path="snapshots/w1/s1.html",
+            text_path="snapshots/w1/s1.txt",
+            storage_backend="local",
+            chunk_count=3,
+            text_bytes=1024,
+            fetch_duration_ms=200,
+            fetcher_used="http",
+        )
+        assert snap.content_hash == "abc123"
+        assert snap.chunk_count == 3
+        assert snap.storage_backend == "local"
+
+
+class TestSnapshotChunkModel:
+    def test_create_chunk(self):
+        chunk = SnapshotChunk(
+            snapshot_id=ULID(),
+            chunk_index=0,
+            chunk_type="page",
+            chunk_label="Page 1",
+            content_hash="def456",
+            simhash=99,
+            char_count=500,
+            excerpt="First 500 chars...",
+        )
+        assert chunk.chunk_index == 0
+        assert chunk.chunk_type == "page"
+
+
+class TestChangeModel:
+    def test_create_change(self):
+        change = Change(
+            watch_id=ULID(),
+            previous_snapshot_id=ULID(),
+            current_snapshot_id=ULID(),
+            change_metadata={"modified": [{"index": 0, "label": "Page 1"}]},
+        )
+        assert change.change_metadata["modified"][0]["label"] == "Page 1"

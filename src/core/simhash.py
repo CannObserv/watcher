@@ -17,7 +17,7 @@ def simhash(text: str, hashbits: int = 64) -> int:
 
     v = [0] * hashbits
     for token in tokens:
-        h = int(hashlib.md5(token.encode()).hexdigest(), 16)
+        h = int(hashlib.sha256(token.encode()).hexdigest(), 16)
         for i in range(hashbits):
             if h & (1 << i):
                 v[i] += 1

@@ -54,20 +54,21 @@ class CsvExcelExtractor:
     def _parse_xlsx(self, raw: bytes) -> tuple[list[str], list[list[str]]]:
         """Parse Excel bytes into header and data rows."""
         wb = load_workbook(io.BytesIO(raw), read_only=True, data_only=True)
-        ws = wb.active
-        rows_iter = ws.iter_rows(values_only=True)
         try:
-            header = [str(c) if c is not None else "" for c in next(rows_iter)]
-        except StopIteration:
+            ws = wb.active
+            rows_iter = ws.iter_rows(values_only=True)
+            try:
+                header = [str(c) if c is not None else "" for c in next(rows_iter)]
+            except StopIteration:
+                return [], []
+            rows = [
+                [str(c) if c is not None else "" for c in row]
+                for row in rows_iter
+                if any(c is not None for c in row)
+            ]
+            return header, rows
+        finally:
             wb.close()
-            return [], []
-        rows = [
-            [str(c) if c is not None else "" for c in row]
-            for row in rows_iter
-            if any(c is not None for c in row)
-        ]
-        wb.close()
-        return header, rows
 
     def _sort_rows(
         self, rows: list[list[str]], header: list[str], sort_keys: list[str]
@@ -89,14 +90,12 @@ class CsvExcelExtractor:
     ) -> ExtractionResult:
         """Split rows into chunks of chunk_size."""
         chunks = []
-        header_line = ",".join(header)
 
         for i in range(0, len(rows), chunk_size):
             batch = rows[i : i + chunk_size]
             start = i + 1
             end = i + len(batch)
-            text_lines = [header_line] + [",".join(row) for row in batch]
-            text = "\n".join(text_lines)
+            text = self._rows_to_csv_text(header, batch)
 
             chunks.append(
                 Chunk(
@@ -108,3 +107,11 @@ class CsvExcelExtractor:
             )
 
         return ExtractionResult(chunks=chunks)
+
+    def _rows_to_csv_text(self, header: list[str], rows: list[list[str]]) -> str:
+        """Serialize header + rows to properly quoted CSV text."""
+        buf = io.StringIO()
+        writer = csv.writer(buf)
+        writer.writerow(header)
+        writer.writerows(rows)
+        return buf.getvalue().strip()

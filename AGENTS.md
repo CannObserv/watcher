@@ -17,10 +17,15 @@ Python ≥3.12, uv, pytest, ruff
 ## Project Layout
 
 ```
-src/api/        — FastAPI app (ASGI, routes, schemas)
-src/core/       — Shared domain logic
-tests/          — Mirrors src/ structure
-docs/           — Reference docs (COMMANDS, SKILLS)
+src/api/             — FastAPI app (ASGI, routes, schemas)
+src/core/            — Shared domain logic
+src/core/models/     — SQLAlchemy models (Watch, AuditLog, Snapshot, SnapshotChunk, Change)
+src/core/extractors/ — Content extractors (HTML, PDF, CSV/Excel → Chunks)
+src/core/differ.py   — Chunk-level change detection with SimHash similarity
+src/core/simhash.py  — 64-bit SimHash fingerprinting
+src/core/storage.py  — StorageBackend protocol + LocalStorage
+tests/               — Mirrors src/ structure
+docs/                — Reference docs (COMMANDS, SKILLS)
 ```
 
 ## Services

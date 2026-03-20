@@ -66,13 +66,19 @@ class HtmlExtractor:
         return []
 
     def _chunk_regions(self, regions: list[Tag]) -> list[Chunk]:
-        """Split regions into chunks by semantic sections."""
+        """Split regions into chunks by semantic sections.
+
+        Uses direct children only to avoid duplicate text from nested elements.
+        Falls back to the region itself if no semantic children are found.
+        """
         chunks = []
         index = 0
 
         for region in regions:
-            sections = region.find_all(["section", "article", "div", "main"])
-            if sections and any(self._has_direct_text(s) for s in sections):
+            sections = region.find_all(
+                ["section", "article"], recursive=False
+            )
+            if sections:
                 for section in sections:
                     text = self._normalize_text(section.get_text(separator=" "))
                     if not text:

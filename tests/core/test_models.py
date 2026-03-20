@@ -1,5 +1,6 @@
 """Tests for SQLAlchemy base and ULID column type."""
 
+from sqlalchemy.ext.asyncio import AsyncEngine
 from ulid import ULID
 
 from src.core.database import create_async_engine_from_url, get_database_url
@@ -100,7 +101,5 @@ class TestDatabase:
         assert url == "postgresql+asyncpg://custom:pass@db:5432/mydb"
 
     def test_create_engine_returns_async_engine(self):
-        from sqlalchemy.ext.asyncio import AsyncEngine
-
         engine = create_async_engine_from_url("postgresql+asyncpg://x:x@localhost/test")
         assert isinstance(engine, AsyncEngine)

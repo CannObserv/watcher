@@ -3,7 +3,7 @@
 import pytest
 from ulid import ULID
 
-from src.core.database import get_database_url
+from src.core.database import get_database_url, get_engine, reset_engine
 from src.core.models.audit_log import AuditLog
 from src.core.models.base import ULIDType
 from src.core.models.watch import ContentType, Watch
@@ -68,6 +68,22 @@ class TestWatchModel:
         assert ContentType.PDF.value == "pdf"
         assert ContentType.FILE.value == "file"
 
+    def test_content_type_coerces_string(self):
+        watch = Watch(
+            name="Coerce Test",
+            url="https://example.com",
+            content_type="pdf",
+        )
+        assert watch.content_type is ContentType.PDF
+
+    def test_content_type_rejects_invalid(self):
+        with pytest.raises(ValueError, match="Invalid content_type"):
+            Watch(
+                name="Bad Type",
+                url="https://example.com",
+                content_type="invalid",
+            )
+
 
 class TestAuditLogModel:
     def test_create_audit_log_entry(self):
@@ -99,3 +115,13 @@ class TestDatabase:
         monkeypatch.setenv("DATABASE_URL", "postgresql+asyncpg://custom:pass@db:5432/mydb")
         url = get_database_url()
         assert url == "postgresql+asyncpg://custom:pass@db:5432/mydb"
+
+    def test_reset_engine_clears_singleton(self, monkeypatch):
+        monkeypatch.setenv("DATABASE_URL", "postgresql+asyncpg://x:x@localhost/test")
+        reset_engine()
+        engine = get_engine()
+        assert engine is not None
+        reset_engine()
+        # After reset, a new engine should be created on next call
+        engine2 = get_engine()
+        assert engine2 is not engine

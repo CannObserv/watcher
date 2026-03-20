@@ -4,7 +4,7 @@ import enum
 
 from sqlalchemy import Boolean, String, Text
 from sqlalchemy.dialects.postgresql import JSONB
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, validates
 from ulid import ULID
 
 from src.core.models.base import Base, TimestampMixin, ULIDType, generate_ulid
@@ -37,3 +37,13 @@ class Watch(Base, TimestampMixin):
         kwargs.setdefault("schedule_config", {})
         kwargs.setdefault("is_active", True)
         super().__init__(**kwargs)
+
+    @validates("content_type")
+    def validate_content_type(self, _key: str, value: str | ContentType) -> ContentType:
+        """Coerce string values to ContentType enum."""
+        if isinstance(value, ContentType):
+            return value
+        try:
+            return ContentType(value)
+        except ValueError as exc:
+            raise ValueError(f"Invalid content_type: {value!r}") from exc

@@ -3,6 +3,7 @@
 from ulid import ULID
 
 from src.core.models.base import ULIDType
+from src.core.models.watch import ContentType, Watch
 
 
 class TestULIDType:
@@ -29,3 +30,37 @@ class TestULIDType:
         ulid_type = ULIDType()
         result = ulid_type.process_result_value(None, dialect=None)
         assert result is None
+
+
+class TestWatchModel:
+    def test_create_watch_with_defaults(self):
+        watch = Watch(
+            name="Test Watch",
+            url="https://example.com/agenda",
+            content_type=ContentType.HTML,
+        )
+        assert watch.name == "Test Watch"
+        assert watch.url == "https://example.com/agenda"
+        assert watch.content_type == ContentType.HTML
+        assert watch.is_active is True
+        assert watch.fetch_config == {}
+        assert watch.schedule_config == {}
+
+    def test_create_watch_with_all_fields(self):
+        watch = Watch(
+            name="PDF Watch",
+            url="https://example.com/report.pdf",
+            content_type=ContentType.PDF,
+            fetch_config={"selectors": ["#content"]},
+            schedule_config={"interval": "6h"},
+            is_active=False,
+        )
+        assert watch.content_type == ContentType.PDF
+        assert watch.fetch_config == {"selectors": ["#content"]}
+        assert watch.schedule_config == {"interval": "6h"}
+        assert watch.is_active is False
+
+    def test_content_type_enum_values(self):
+        assert ContentType.HTML.value == "html"
+        assert ContentType.PDF.value == "pdf"
+        assert ContentType.FILE.value == "file"

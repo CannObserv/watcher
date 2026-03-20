@@ -2,6 +2,7 @@
 
 from ulid import ULID
 
+from src.core.database import create_async_engine_from_url, get_database_url
 from src.core.models.audit_log import AuditLog
 from src.core.models.base import ULIDType
 from src.core.models.watch import ContentType, Watch
@@ -85,3 +86,21 @@ class TestAuditLogModel:
             payload={"url": "https://example.com"},
         )
         assert entry.watch_id == watch_id
+
+
+class TestDatabase:
+    def test_get_database_url_default(self, monkeypatch):
+        monkeypatch.delenv("DATABASE_URL", raising=False)
+        url = get_database_url()
+        assert url == "postgresql+asyncpg://watcher:watcher@localhost:5432/watcher"
+
+    def test_get_database_url_from_env(self, monkeypatch):
+        monkeypatch.setenv("DATABASE_URL", "postgresql+asyncpg://custom:pass@db:5432/mydb")
+        url = get_database_url()
+        assert url == "postgresql+asyncpg://custom:pass@db:5432/mydb"
+
+    def test_create_engine_returns_async_engine(self):
+        from sqlalchemy.ext.asyncio import AsyncEngine
+
+        engine = create_async_engine_from_url("postgresql+asyncpg://x:x@localhost/test")
+        assert isinstance(engine, AsyncEngine)

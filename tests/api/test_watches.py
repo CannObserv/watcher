@@ -1,6 +1,9 @@
 """Integration tests for Watch CRUD API endpoints."""
 
 import pytest
+from sqlalchemy import select
+
+from src.core.models.audit_log import AuditLog
 
 pytestmark = pytest.mark.integration
 
@@ -123,10 +126,6 @@ class TestDeactivateWatch:
 
 class TestAuditLog:
     async def test_create_writes_audit_entry(self, client, db_session):
-        from sqlalchemy import select
-
-        from src.core.models.audit_log import AuditLog
-
         await client.post("/api/watches", json={
             "name": "Audited Watch",
             "url": "https://example.com/audit",
@@ -138,6 +137,39 @@ class TestAuditLog:
         entries = result.scalars().all()
         assert len(entries) >= 1
         assert entries[0].payload["name"] == "Audited Watch"
+
+
+    async def test_update_writes_audit_entry(self, client, db_session):
+        resp = await client.post("/api/watches", json={
+            "name": "Update Audit",
+            "url": "https://example.com/upd",
+            "content_type": "html",
+        })
+        watch_id = resp.json()["id"]
+        await client.patch(f"/api/watches/{watch_id}", json={"name": "Changed"})
+
+        result = await db_session.execute(
+            select(AuditLog).where(AuditLog.event_type == "watch.updated")
+        )
+        entries = result.scalars().all()
+        assert len(entries) >= 1
+        assert "name" in entries[0].payload["updated_fields"]
+
+    async def test_deactivate_writes_audit_entry(self, client, db_session):
+        resp = await client.post("/api/watches", json={
+            "name": "Deact Audit",
+            "url": "https://example.com/deact-audit",
+            "content_type": "html",
+        })
+        watch_id = resp.json()["id"]
+        await client.post(f"/api/watches/{watch_id}/deactivate")
+
+        result = await db_session.execute(
+            select(AuditLog).where(AuditLog.event_type == "watch.deactivated")
+        )
+        entries = result.scalars().all()
+        assert len(entries) >= 1
+        assert entries[0].payload["name"] == "Deact Audit"
 
 
 class TestInvalidULID:

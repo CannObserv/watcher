@@ -48,6 +48,7 @@ export $(cat env | xargs)
 
 Currently defined:
 - `GH_TOKEN` — GitHub personal access token (used by `gh` CLI)
+- `DATABASE_URL` — PostgreSQL connection string (used by SQLAlchemy and Alembic)
 
 ## Common Commands
 
@@ -55,11 +56,21 @@ Currently defined:
 # Install dependencies
 uv sync
 
+# Load environment (required before running server or migrations)
+export $(cat env | xargs)
+
 # Run tests
 uv run pytest
 
+# Run integration tests (requires PostgreSQL)
+uv run pytest -m integration
+
 # Run linter
 uv run ruff check .
+
+# Database migrations
+uv run alembic upgrade head          # apply all migrations
+uv run alembic revision --autogenerate -m "description"  # generate new migration
 
 # FastAPI dev server
 uv run uvicorn src.api.main:app --host 0.0.0.0 --port 8000 --reload

@@ -29,10 +29,7 @@ def get_url() -> str:
     """Read database URL from environment or alembic.ini."""
     return os.environ.get(
         "DATABASE_URL",
-        config.get_main_option(
-            "sqlalchemy.url",
-            "postgresql+asyncpg://watcher:watcher@localhost:5432/watcher",
-        ),
+        config.get_main_option("sqlalchemy.url", ""),
     )
 
 

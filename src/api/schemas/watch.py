@@ -3,7 +3,7 @@
 from datetime import datetime
 from typing import Annotated
 
-from pydantic import BaseModel, BeforeValidator, ConfigDict
+from pydantic import BaseModel, BeforeValidator, ConfigDict, Field
 
 from src.core.models.watch import ContentType
 
@@ -16,8 +16,8 @@ class WatchCreate(BaseModel):
     name: str
     url: str
     content_type: ContentType
-    fetch_config: dict = {}
-    schedule_config: dict = {}
+    fetch_config: dict = Field(default_factory=dict)
+    schedule_config: dict = Field(default_factory=dict)
 
 
 class WatchUpdate(BaseModel):

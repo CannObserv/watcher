@@ -83,7 +83,10 @@ async def update_watch(
         raise HTTPException(status_code=404, detail="Watch not found")
 
     updates = data.model_dump(exclude_unset=True)
+    column_names = {c.key for c in Watch.__table__.columns}
     for field, value in updates.items():
+        if field not in column_names:
+            raise HTTPException(status_code=422, detail=f"Unknown field: {field}")
         setattr(watch, field, value)
 
     audit = AuditLog(

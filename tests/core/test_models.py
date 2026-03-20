@@ -1,9 +1,9 @@
 """Tests for SQLAlchemy base and ULID column type."""
 
-from sqlalchemy.ext.asyncio import AsyncEngine
+import pytest
 from ulid import ULID
 
-from src.core.database import create_async_engine_from_url, get_database_url
+from src.core.database import get_database_url
 from src.core.models.audit_log import AuditLog
 from src.core.models.base import ULIDType
 from src.core.models.watch import ContentType, Watch
@@ -90,16 +90,12 @@ class TestAuditLogModel:
 
 
 class TestDatabase:
-    def test_get_database_url_default(self, monkeypatch):
+    def test_get_database_url_raises_without_env(self, monkeypatch):
         monkeypatch.delenv("DATABASE_URL", raising=False)
-        url = get_database_url()
-        assert url == "postgresql+asyncpg://watcher:watcher@localhost:5432/watcher"
+        with pytest.raises(RuntimeError, match="DATABASE_URL environment variable is not set"):
+            get_database_url()
 
     def test_get_database_url_from_env(self, monkeypatch):
         monkeypatch.setenv("DATABASE_URL", "postgresql+asyncpg://custom:pass@db:5432/mydb")
         url = get_database_url()
         assert url == "postgresql+asyncpg://custom:pass@db:5432/mydb"
-
-    def test_create_engine_returns_async_engine(self):
-        engine = create_async_engine_from_url("postgresql+asyncpg://x:x@localhost/test")
-        assert isinstance(engine, AsyncEngine)

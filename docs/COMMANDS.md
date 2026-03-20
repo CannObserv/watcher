@@ -40,6 +40,27 @@ uv run ruff check .
 uv run ruff check --fix .
 ```
 
+## Database
+
+```bash
+# PostgreSQL setup (first time)
+sudo apt-get install -y postgresql postgresql-client
+sudo systemctl start postgresql
+sudo -u postgres psql -c "CREATE USER watcher WITH PASSWORD 'watcher';"
+sudo -u postgres psql -c "CREATE DATABASE watcher OWNER watcher;"
+sudo -u postgres psql -c "CREATE DATABASE watcher_test OWNER watcher;"
+
+# Apply migrations (requires DATABASE_URL in env)
+export $(cat env | xargs)
+uv run alembic upgrade head
+
+# Generate a new migration after model changes
+uv run alembic revision --autogenerate -m "description of change"
+
+# Check current migration state
+uv run alembic current
+```
+
 ## Git Submodules
 
 ```bash

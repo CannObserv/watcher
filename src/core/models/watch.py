@@ -2,7 +2,7 @@
 
 import enum
 
-from sqlalchemy import Boolean, Enum, String, Text
+from sqlalchemy import Boolean, String, Text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 from ulid import ULID
@@ -26,7 +26,7 @@ class Watch(Base, TimestampMixin):
     id: Mapped[ULID] = mapped_column(ULIDType, primary_key=True, default=generate_ulid)
     name: Mapped[str] = mapped_column(String(255))
     url: Mapped[str] = mapped_column(Text)
-    content_type: Mapped[ContentType] = mapped_column(Enum(ContentType, native_enum=False))
+    content_type: Mapped[ContentType] = mapped_column(String(20))
     fetch_config: Mapped[dict] = mapped_column(JSONB, default=dict, server_default="{}")
     schedule_config: Mapped[dict] = mapped_column(JSONB, default=dict, server_default="{}")
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")

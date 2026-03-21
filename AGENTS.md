@@ -19,13 +19,13 @@ Python ≥3.12, uv, pytest, ruff
 ```
 src/api/               — FastAPI app (ASGI, routes, schemas)
 src/core/              — Shared domain logic
-src/core/models/       — SQLAlchemy models (Watch, AuditLog, Snapshot, SnapshotChunk, Change)
+src/core/models/       — SQLAlchemy models (Watch, AuditLog, Snapshot, SnapshotChunk, Change, TemporalProfile)
 src/core/extractors/   — Content extractors (HTML, PDF, CSV/Excel → Chunks)
 src/core/fetchers/     — URL fetchers (HTTP; browser/WebRecorder planned)
 src/core/differ.py     — Chunk-level change detection with SimHash similarity
 src/core/simhash.py    — 64-bit SimHash fingerprinting
 src/core/storage.py    — StorageBackend protocol + LocalStorage
-src/core/scheduler.py  — Watch scheduling logic (interval parsing, due computation)
+src/core/scheduler.py  — Watch scheduling logic (interval parsing, due computation, temporal profile resolution)
 src/core/rate_limiter.py — Per-domain async rate limiting
 src/workers/           — Procrastinate task queue (check_watch, schedule_tick)
 tests/                 — Mirrors src/ structure

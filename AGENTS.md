@@ -17,15 +17,19 @@ Python ≥3.12, uv, pytest, ruff
 ## Project Layout
 
 ```
-src/api/             — FastAPI app (ASGI, routes, schemas)
-src/core/            — Shared domain logic
-src/core/models/     — SQLAlchemy models (Watch, AuditLog, Snapshot, SnapshotChunk, Change)
-src/core/extractors/ — Content extractors (HTML, PDF, CSV/Excel → Chunks)
-src/core/differ.py   — Chunk-level change detection with SimHash similarity
-src/core/simhash.py  — 64-bit SimHash fingerprinting
-src/core/storage.py  — StorageBackend protocol + LocalStorage
-tests/               — Mirrors src/ structure
-docs/                — Reference docs (COMMANDS, SKILLS)
+src/api/               — FastAPI app (ASGI, routes, schemas)
+src/core/              — Shared domain logic
+src/core/models/       — SQLAlchemy models (Watch, AuditLog, Snapshot, SnapshotChunk, Change)
+src/core/extractors/   — Content extractors (HTML, PDF, CSV/Excel → Chunks)
+src/core/fetchers/     — URL fetchers (HTTP; browser/WebRecorder planned)
+src/core/differ.py     — Chunk-level change detection with SimHash similarity
+src/core/simhash.py    — 64-bit SimHash fingerprinting
+src/core/storage.py    — StorageBackend protocol + LocalStorage
+src/core/scheduler.py  — Watch scheduling logic (interval parsing, due computation)
+src/core/rate_limiter.py — Per-domain async rate limiting
+src/workers/           — Procrastinate task queue (check_watch, schedule_tick)
+tests/                 — Mirrors src/ structure
+docs/                  — Reference docs (COMMANDS, SKILLS)
 ```
 
 ## Services
@@ -54,6 +58,7 @@ export $(cat env | xargs)
 Currently defined:
 - `GH_TOKEN` — GitHub personal access token (used by `gh` CLI)
 - `DATABASE_URL` — PostgreSQL connection string (used by SQLAlchemy and Alembic)
+- `PROCRASTINATE_DATABASE_URL` — (optional) libpq-style DSN for procrastinate; falls back to DATABASE_URL with driver prefix stripped
 
 ## Common Commands
 

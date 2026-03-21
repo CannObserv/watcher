@@ -61,6 +61,19 @@ uv run alembic revision --autogenerate -m "description of change"
 uv run alembic current
 ```
 
+## Task Queue (Procrastinate)
+
+```bash
+# Apply procrastinate schema (first time, after DB setup)
+export $(cat env | xargs)
+uv run procrastinate --app=src.workers.app schema --apply
+
+# Run worker standalone (alternative to embedded mode in FastAPI)
+uv run procrastinate --app=src.workers.app worker
+
+# The worker also runs embedded in FastAPI via lifespan — no separate process needed for dev
+```
+
 ## Git Submodules
 
 ```bash

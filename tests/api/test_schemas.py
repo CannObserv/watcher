@@ -5,6 +5,7 @@ from datetime import UTC, datetime
 import pytest
 from pydantic import ValidationError
 
+from src.api.schemas.audit_log import AuditLogResponse
 from src.api.schemas.change import (
     ChangeResponse,
     SnapshotChunkResponse,
@@ -143,3 +144,35 @@ class TestChangeResponse:
         assert data.current_snapshot_id == "01J0000000000000000000SNAP1"
         assert data.change_metadata == {"added": 2, "removed": 1}
         assert data.detected_at == ts
+
+
+class TestAuditLogResponse:
+    def test_from_dict(self):
+        ts = datetime(2026, 3, 21, 12, 0, 0, tzinfo=UTC)
+        data = AuditLogResponse.model_validate(
+            {
+                "id": "01J00000000000000000AUDIT0",
+                "event_type": "watch.created",
+                "watch_id": "01J000000000000000000WATCH",
+                "payload": {"name": "Test Watch"},
+                "created_at": ts,
+            }
+        )
+        assert data.id == "01J00000000000000000AUDIT0"
+        assert data.event_type == "watch.created"
+        assert data.watch_id == "01J000000000000000000WATCH"
+        assert data.payload == {"name": "Test Watch"}
+        assert data.created_at == ts
+
+    def test_nullable_watch_id(self):
+        ts = datetime(2026, 3, 21, 12, 0, 0, tzinfo=UTC)
+        data = AuditLogResponse.model_validate(
+            {
+                "id": "01J00000000000000000AUDIT1",
+                "event_type": "system.startup",
+                "watch_id": None,
+                "payload": {},
+                "created_at": ts,
+            }
+        )
+        assert data.watch_id is None

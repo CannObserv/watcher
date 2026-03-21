@@ -5,7 +5,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.api.dependencies import get_db_session
-from src.api.routes.helpers import parse_ulid
+from src.api.routes.helpers import get_watch_or_404
 from src.api.schemas.watch import WatchCreate, WatchResponse, WatchUpdate
 from src.core.models.audit_log import AuditLog
 from src.core.models.watch import Watch
@@ -57,10 +57,7 @@ async def get_watch(
     session: AsyncSession = Depends(get_db_session),
 ):
     """Get a watch by ID."""
-    watch = await session.get(Watch, parse_ulid(watch_id, "Watch"))
-    if not watch:
-        raise HTTPException(status_code=404, detail="Watch not found")
-    return watch
+    return await get_watch_or_404(watch_id, session)
 
 
 @router.patch("/{watch_id}", response_model=WatchResponse)
@@ -70,9 +67,7 @@ async def update_watch(
     session: AsyncSession = Depends(get_db_session),
 ):
     """Update a watch. Only provided fields are changed."""
-    watch = await session.get(Watch, parse_ulid(watch_id, "Watch"))
-    if not watch:
-        raise HTTPException(status_code=404, detail="Watch not found")
+    watch = await get_watch_or_404(watch_id, session)
 
     updates = data.model_dump(exclude_unset=True)
     column_names = {c.key for c in Watch.__table__.columns}
@@ -98,9 +93,7 @@ async def deactivate_watch(
     session: AsyncSession = Depends(get_db_session),
 ):
     """Deactivate a watch without deleting it."""
-    watch = await session.get(Watch, parse_ulid(watch_id, "Watch"))
-    if not watch:
-        raise HTTPException(status_code=404, detail="Watch not found")
+    watch = await get_watch_or_404(watch_id, session)
 
     watch.is_active = False
     audit = AuditLog(

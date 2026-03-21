@@ -19,9 +19,12 @@ from src.core.logging import get_logger
 from src.core.models.audit_log import AuditLog
 from src.core.models.base import generate_ulid
 from src.core.models.change import Change
+from src.core.models.notification_config import NotificationConfig
 from src.core.models.snapshot import Snapshot, SnapshotChunk
 from src.core.models.temporal_profile import TemporalProfile
 from src.core.models.watch import ContentType, Watch
+from src.core.notifications import ChangeEvent, EmailChannel, SlackChannel, WebhookChannel
+from src.core.notifications.dispatcher import dispatch_notifications
 from src.core.rate_limiter import DomainRateLimiter
 from src.core.scheduler import compute_next_check, evaluate_post_actions
 from src.core.simhash import simhash
@@ -130,6 +133,7 @@ async def _run_check_pipeline(
             "change_id": None,
             "chunk_count": 0,
             "storage_path": None,
+            "change_metadata": {},
         }
 
     # 4. Extract content
@@ -237,6 +241,7 @@ async def _run_check_pipeline(
         "change_id": str(change_id) if change_id else None,
         "chunk_count": len(extraction.chunks),
         "storage_path": raw_path,
+        "change_metadata": metadata if change_id else {},
     }
 
 
@@ -295,6 +300,42 @@ async def check_watch(watch_id: str) -> dict:
             storage=storage,
             session=session,
         )
+
+        # Dispatch notifications if change detected
+        if result.get("change_id"):
+            nc_stmt = select(NotificationConfig).where(
+                NotificationConfig.watch_id == watch.id,
+                NotificationConfig.is_active.is_(True),
+            )
+            nc_result = await session.execute(nc_stmt)
+            nc_configs = [
+                {"channel": nc.channel, **nc.config}
+                for nc in nc_result.scalars().all()
+            ]
+            if nc_configs:
+                event = ChangeEvent(
+                    watch_id=str(watch.id),
+                    watch_name=watch.name,
+                    watch_url=watch.url,
+                    change_id=result["change_id"],
+                    detected_at=datetime.now(UTC),
+                    change_metadata=result.get("change_metadata", {}),
+                )
+                _channels = {
+                    "webhook": WebhookChannel(),
+                    "email": EmailChannel(),
+                    "slack": SlackChannel(),
+                }
+                notif_results = await dispatch_notifications(event, nc_configs, _channels)
+                session.add(AuditLog(
+                    event_type="notification.dispatched",
+                    watch_id=watch.id,
+                    payload={
+                        "change_id": result["change_id"],
+                        "results": notif_results,
+                    },
+                ))
+                await session.commit()
 
         # Update last_checked_at
         watch.last_checked_at = datetime.now(UTC)

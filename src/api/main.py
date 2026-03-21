@@ -5,6 +5,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
+from src.api.routes.audit_log import router as audit_router
 from src.api.routes.changes import router as changes_router
 from src.api.routes.temporal_profiles import router as profiles_router
 from src.api.routes.watches import router as watches_router
@@ -38,3 +39,4 @@ app = FastAPI(title="watcher", version="0.1.0", lifespan=lifespan)
 app.include_router(watches_router)
 app.include_router(changes_router)
 app.include_router(profiles_router)
+app.include_router(audit_router)

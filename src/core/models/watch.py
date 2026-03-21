@@ -1,8 +1,9 @@
 """Watch model — a URL to monitor for changes."""
 
 import enum
+from datetime import datetime
 
-from sqlalchemy import Boolean, String, Text
+from sqlalchemy import Boolean, DateTime, String, Text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, validates
 from ulid import ULID
@@ -30,6 +31,9 @@ class Watch(Base, TimestampMixin):
     fetch_config: Mapped[dict] = mapped_column(JSONB, default=dict, server_default="{}")
     schedule_config: Mapped[dict] = mapped_column(JSONB, default=dict, server_default="{}")
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
+    last_checked_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, default=None,
+    )
 
     def __init__(self, **kwargs: object) -> None:
         """Set Python-side defaults for fields not provided."""

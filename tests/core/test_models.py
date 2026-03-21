@@ -50,6 +50,7 @@ class TestWatchModel:
         assert watch.is_active is True
         assert watch.fetch_config == {}
         assert watch.schedule_config == {}
+        assert watch.last_checked_at is None
 
     def test_create_watch_with_all_fields(self):
         watch = Watch(

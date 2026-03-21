@@ -1,5 +1,7 @@
 """Tests for SQLAlchemy base and ULID column type."""
 
+from datetime import date
+
 import pytest
 from ulid import ULID
 
@@ -8,6 +10,7 @@ from src.core.models.audit_log import AuditLog
 from src.core.models.base import ULIDType
 from src.core.models.change import Change
 from src.core.models.snapshot import Snapshot, SnapshotChunk
+from src.core.models.temporal_profile import PostAction, ProfileType, TemporalProfile
 from src.core.models.watch import ContentType, Watch
 
 
@@ -174,3 +177,49 @@ class TestChangeModel:
             change_metadata={"modified": [{"index": 0, "label": "Page 1"}]},
         )
         assert change.change_metadata["modified"][0]["label"] == "Page 1"
+
+
+class TestTemporalProfileModel:
+    def test_create_event_profile(self):
+        profile = TemporalProfile(
+            watch_id=ULID(),
+            profile_type=ProfileType.EVENT,
+            reference_date=date(2026, 4, 15),
+            rules=[{"days_before": 30, "interval": "6h"}, {"days_before": 7, "interval": "1h"}],
+            post_action=PostAction.REDUCE_FREQUENCY,
+        )
+        assert profile.profile_type == ProfileType.EVENT
+        assert len(profile.rules) == 2
+        assert profile.reference_date == date(2026, 4, 15)
+
+    def test_create_seasonal_profile(self):
+        profile = TemporalProfile(
+            watch_id=ULID(),
+            profile_type=ProfileType.SEASONAL,
+            date_range_start=date(2026, 1, 15),
+            date_range_end=date(2026, 6, 30),
+            rules=[{"days_before": 0, "interval": "1h"}],
+            post_action=PostAction.REDUCE_FREQUENCY,
+        )
+        assert profile.date_range_start == date(2026, 1, 15)
+
+    def test_create_deadline_profile(self):
+        profile = TemporalProfile(
+            watch_id=ULID(),
+            profile_type=ProfileType.DEADLINE,
+            reference_date=date(2026, 5, 1),
+            rules=[{"days_before": 14, "interval": "12h"}],
+            post_action=PostAction.DEACTIVATE,
+        )
+        assert profile.post_action == PostAction.DEACTIVATE
+
+    def test_defaults(self):
+        profile = TemporalProfile(
+            watch_id=ULID(),
+            profile_type=ProfileType.EVENT,
+            reference_date=date(2026, 4, 15),
+            rules=[],
+            post_action=PostAction.REDUCE_FREQUENCY,
+        )
+        assert profile.is_active is True
+        assert profile.date_range_start is None

@@ -1,23 +1,36 @@
-"""Check-watch pipeline — core orchestration for fetching, extracting, diffing."""
+"""Check-watch pipeline and procrastinate task wrappers."""
 
 import hashlib
+from datetime import UTC, datetime
+from pathlib import Path
 
-from sqlalchemy import select
+import procrastinate
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from ulid import ULID
 
+from src.core.database import get_session_factory
 from src.core.differ import ChangeStatus, ChunkFingerprint, diff_chunks
 from src.core.extractors import CsvExcelExtractor, HtmlExtractor, PdfExtractor
 from src.core.extractors.base import ExtractionResult
+from src.core.fetchers.http import HttpFetcher
 from src.core.logging import get_logger
 from src.core.models.audit_log import AuditLog
 from src.core.models.base import generate_ulid
 from src.core.models.change import Change
 from src.core.models.snapshot import Snapshot, SnapshotChunk
 from src.core.models.watch import ContentType, Watch
+from src.core.rate_limiter import DomainRateLimiter
+from src.core.scheduler import compute_next_check, parse_interval
 from src.core.simhash import simhash
-from src.core.storage import StorageBackend
+from src.core.storage import LocalStorage, StorageBackend
+from src.workers import bp
 
 logger = get_logger(__name__)
+
+# Shared resources (created once per worker process)
+_fetcher = HttpFetcher()
+_rate_limiter = DomainRateLimiter()
 
 _INT64_MAX = (1 << 63) - 1
 
@@ -221,3 +234,102 @@ async def _run_check_pipeline(
         "chunk_count": len(extraction.chunks),
         "storage_path": raw_path,
     }
+
+
+# --- Procrastinate task wrappers ---
+
+
+@bp.task(
+    name="check_watch",
+    queue="default",
+    retry=procrastinate.RetryStrategy(
+        max_attempts=3,
+        exponential_wait=5,
+        retry_exceptions={ConnectionError, TimeoutError},
+    ),
+)
+async def check_watch(watch_id: str) -> dict:
+    """Fetch and check a single watch for changes."""
+    async with get_session_factory()() as session:
+        watch = await session.get(Watch, ULID.from_str(watch_id))
+        if not watch or not watch.is_active:
+            logger.warning("watch not found or inactive", extra={"watch_id": watch_id})
+            return {"skipped": True}
+
+        # Fetch with rate limiting
+        async with _rate_limiter.acquire(watch.url):
+            fetch_result = await _fetcher.fetch(watch.url, config=watch.fetch_config)
+
+        if fetch_result.status_code == 429:
+            _rate_limiter.report_rate_limited(watch.url)
+            raise ConnectionError(f"Rate limited by {watch.url}")
+
+        if not fetch_result.is_success:
+            logger.warning(
+                "fetch failed",
+                extra={"watch_id": watch_id, "status": fetch_result.status_code},
+            )
+            session.add(AuditLog(
+                event_type="check.fetch_failed",
+                watch_id=watch.id,
+                payload={"status_code": fetch_result.status_code},
+            ))
+            await session.commit()
+            return {"error": f"HTTP {fetch_result.status_code}"}
+
+        # Run pipeline
+        storage = LocalStorage(base_dir=Path("data"))
+        result = await _run_check_pipeline(
+            watch=watch,
+            raw_content=fetch_result.content,
+            fetcher_used=fetch_result.fetcher_used,
+            fetch_duration_ms=fetch_result.duration_ms,
+            storage=storage,
+            session=session,
+        )
+
+        # Update last_checked_at and capture interval before commit
+        watch.last_checked_at = datetime.now(UTC)
+        interval_str = watch.schedule_config.get("interval") if watch.schedule_config else None
+        await session.commit()
+
+    # Defer next check
+    interval = parse_interval(interval_str)
+    await check_watch.configure(
+        schedule_in={"seconds": int(interval.total_seconds())},
+    ).defer_async(watch_id=watch_id)
+
+    return result
+
+
+@bp.periodic(cron="* * * * *")
+@bp.task(name="schedule_tick", queue="default")
+async def schedule_tick(timestamp: int) -> None:
+    """Find active watches due for checking and defer check_watch jobs."""
+    now = datetime.now(UTC)
+
+    async with get_session_factory()() as session:
+        stmt = select(Watch).where(
+            Watch.is_active.is_(True),
+            or_(
+                Watch.last_checked_at.is_(None),
+                Watch.last_checked_at < now,
+            ),
+        )
+        result = await session.execute(stmt)
+        watches = list(result.scalars().all())
+
+    deferred = 0
+    for watch in watches:
+        next_due = compute_next_check(
+            schedule_config=watch.schedule_config or {},
+            last_checked_at=watch.last_checked_at,
+            now=now,
+        )
+        if next_due <= now:
+            logger.info("deferring check", extra={"watch_id": str(watch.id)})
+            await check_watch.configure().defer_async(watch_id=str(watch.id))
+            deferred += 1
+
+    if deferred:
+        logger.info("schedule_tick deferred checks", extra={"count": deferred})

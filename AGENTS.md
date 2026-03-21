@@ -18,6 +18,7 @@ Python ≥3.12, uv, pytest, ruff
 
 ```
 src/api/               — FastAPI app (ASGI, routes, schemas)
+src/api/routes/        — API endpoints (watches, temporal_profiles, changes, audit_log)
 src/core/              — Shared domain logic
 src/core/models/       — SQLAlchemy models (Watch, AuditLog, Snapshot, SnapshotChunk, Change, TemporalProfile)
 src/core/extractors/   — Content extractors (HTML, PDF, CSV/Excel → Chunks)

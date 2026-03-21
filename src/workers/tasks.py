@@ -20,9 +20,10 @@ from src.core.models.audit_log import AuditLog
 from src.core.models.base import generate_ulid
 from src.core.models.change import Change
 from src.core.models.snapshot import Snapshot, SnapshotChunk
+from src.core.models.temporal_profile import TemporalProfile
 from src.core.models.watch import ContentType, Watch
 from src.core.rate_limiter import DomainRateLimiter
-from src.core.scheduler import compute_next_check
+from src.core.scheduler import compute_next_check, evaluate_post_actions
 from src.core.simhash import simhash
 from src.core.storage import LocalStorage, StorageBackend
 from src.workers import bp
@@ -325,17 +326,80 @@ async def schedule_tick(timestamp: int) -> None:
         result = await session.execute(stmt)
         watches = list(result.scalars().all())
 
-    deferred = 0
-    for watch in watches:
-        next_due = compute_next_check(
-            schedule_config=watch.schedule_config or {},
-            last_checked_at=watch.last_checked_at,
-            now=now,
-        )
-        if next_due <= now:
-            logger.info("deferring check", extra={"watch_id": str(watch.id)})
-            await check_watch.configure().defer_async(watch_id=str(watch.id))
-            deferred += 1
+        deferred = 0
+        for watch in watches:
+            # Load active temporal profiles for this watch
+            tp_stmt = select(TemporalProfile).where(
+                TemporalProfile.watch_id == watch.id,
+                TemporalProfile.is_active.is_(True),
+            )
+            tp_result = await session.execute(tp_stmt)
+            profiles_orm = list(tp_result.scalars().all())
+
+            # Convert to dicts for scheduler functions
+            profiles = [
+                {
+                    "id": str(p.id),
+                    "type": p.profile_type,
+                    "reference_date": p.reference_date,
+                    "date_range_start": p.date_range_start,
+                    "date_range_end": p.date_range_end,
+                    "rules": p.rules,
+                    "post_action": p.post_action,
+                    "is_active": p.is_active,
+                }
+                for p in profiles_orm
+            ]
+
+            # Evaluate and apply post-event actions
+            if profiles:
+                actions = evaluate_post_actions(profiles, today=now.date())
+                for action_info in actions:
+                    action = action_info["action"]
+                    profile_dict = action_info["profile"]
+                    # Find the ORM profile to deactivate
+                    orm_profile = next(
+                        (p for p in profiles_orm if str(p.id) == profile_dict["id"]),
+                        None,
+                    )
+                    if action == "deactivate":
+                        watch.is_active = False
+                        logger.info(
+                            "post-action: deactivate watch",
+                            extra={"watch_id": str(watch.id), "profile_id": profile_dict["id"]},
+                        )
+                    elif action == "reduce_frequency":
+                        watch.schedule_config = {**(watch.schedule_config or {}), "interval": "1d"}
+                        logger.info(
+                            "post-action: reduce frequency",
+                            extra={"watch_id": str(watch.id), "profile_id": profile_dict["id"]},
+                        )
+                    elif action == "archive":
+                        watch.is_active = False
+                        logger.info(
+                            "post-action: archive watch",
+                            extra={"watch_id": str(watch.id), "profile_id": profile_dict["id"]},
+                        )
+                    if orm_profile:
+                        orm_profile.is_active = False
+
+            # Skip deferred check if watch was deactivated by post-action
+            if not watch.is_active:
+                continue
+
+            next_due = compute_next_check(
+                schedule_config=watch.schedule_config or {},
+                last_checked_at=watch.last_checked_at,
+                now=now,
+                profiles=profiles if profiles else None,
+            )
+            if next_due <= now:
+                logger.info("deferring check", extra={"watch_id": str(watch.id)})
+                await check_watch.configure().defer_async(watch_id=str(watch.id))
+                deferred += 1
+
+        # Commit any post-action changes (deactivated profiles, modified watches)
+        await session.commit()
 
     if deferred:
         logger.info("schedule_tick deferred checks", extra={"count": deferred})

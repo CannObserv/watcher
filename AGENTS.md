@@ -18,9 +18,10 @@ Python ≥3.12, uv, pytest, ruff
 
 ```
 src/api/               — FastAPI app (ASGI, routes, schemas)
-src/api/routes/        — API endpoints (watches, temporal_profiles, changes, audit_log)
+src/api/routes/        — API endpoints (watches, temporal_profiles, changes, audit_log, notification_configs)
 src/core/              — Shared domain logic
-src/core/models/       — SQLAlchemy models (Watch, AuditLog, Snapshot, SnapshotChunk, Change, TemporalProfile)
+src/core/models/       — SQLAlchemy models (Watch, AuditLog, Snapshot, SnapshotChunk, Change, TemporalProfile, NotificationConfig)
+src/core/notifications/  — Notification channels (webhook, email, Slack) and dispatcher
 src/core/extractors/   — Content extractors (HTML, PDF, CSV/Excel → Chunks)
 src/core/fetchers/     — URL fetchers (HTTP; browser/WebRecorder planned)
 src/core/differ.py     — Chunk-level change detection with SimHash similarity

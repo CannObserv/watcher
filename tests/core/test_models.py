@@ -9,6 +9,7 @@ from src.core.database import get_database_url, get_engine, reset_engine
 from src.core.models.audit_log import AuditLog
 from src.core.models.base import ULIDType
 from src.core.models.change import Change
+from src.core.models.notification_config import NotificationConfig
 from src.core.models.snapshot import Snapshot, SnapshotChunk
 from src.core.models.temporal_profile import PostAction, ProfileType, TemporalProfile
 from src.core.models.watch import ContentType, Watch
@@ -223,3 +224,30 @@ class TestTemporalProfileModel:
         )
         assert profile.is_active is True
         assert profile.date_range_start is None
+
+
+class TestNotificationConfigModel:
+    def test_create_webhook_config(self):
+        config = NotificationConfig(
+            watch_id=ULID(),
+            channel="webhook",
+            config={"url": "https://hooks.example.com/abc"},
+        )
+        assert config.channel == "webhook"
+        assert config.is_active is True
+
+    def test_create_email_config(self):
+        config = NotificationConfig(
+            watch_id=ULID(),
+            channel="email",
+            config={"to": "alerts@example.com", "from": "watcher@example.com"},
+        )
+        assert config.channel == "email"
+
+    def test_create_slack_config(self):
+        config = NotificationConfig(
+            watch_id=ULID(),
+            channel="slack",
+            config={"webhook_url": "https://hooks.slack.com/abc"},
+        )
+        assert config.channel == "slack"

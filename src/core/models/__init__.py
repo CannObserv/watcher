@@ -3,6 +3,7 @@
 from src.core.models.audit_log import AuditLog
 from src.core.models.base import Base, TimestampMixin, ULIDType, generate_ulid
 from src.core.models.change import Change
+from src.core.models.notification_config import NotificationConfig
 from src.core.models.snapshot import Snapshot, SnapshotChunk
 from src.core.models.temporal_profile import PostAction, ProfileType, TemporalProfile
 from src.core.models.watch import ContentType, Watch
@@ -12,6 +13,7 @@ __all__ = [
     "Base",
     "Change",
     "ContentType",
+    "NotificationConfig",
     "PostAction",
     "ProfileType",
     "Snapshot",

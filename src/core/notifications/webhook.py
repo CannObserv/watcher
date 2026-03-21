@@ -11,8 +11,8 @@ logger = get_logger(__name__)
 class WebhookChannel:
     """Deliver change notifications via HTTP POST with a JSON payload."""
 
-    def __init__(self, client: httpx.AsyncClient) -> None:
-        self._client = client
+    def __init__(self, client: httpx.AsyncClient | None = None) -> None:
+        self._client = client or httpx.AsyncClient()
 
     async def send(self, event: ChangeEvent, config: dict) -> bool:
         """POST event data to *config['url']*. Return True on 2xx."""

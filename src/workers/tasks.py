@@ -5,6 +5,7 @@ import os
 from datetime import UTC, datetime
 from pathlib import Path
 
+import httpx
 import procrastinate
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -321,12 +322,15 @@ async def check_watch(watch_id: str) -> dict:
                     detected_at=datetime.now(UTC),
                     change_metadata=result.get("change_metadata", {}),
                 )
-                _channels = {
-                    "webhook": WebhookChannel(),
-                    "email": EmailChannel(),
-                    "slack": SlackChannel(),
-                }
-                notif_results = await dispatch_notifications(event, nc_configs, _channels)
+                async with httpx.AsyncClient() as http_client:
+                    _channels = {
+                        "webhook": WebhookChannel(client=http_client),
+                        "email": EmailChannel(),
+                        "slack": SlackChannel(client=http_client),
+                    }
+                    notif_results = await dispatch_notifications(
+                        event, nc_configs, _channels
+                    )
                 session.add(AuditLog(
                     event_type="notification.dispatched",
                     watch_id=watch.id,

@@ -24,9 +24,9 @@ class ChangeEvent:
         meta = self.change_metadata
         parts: list[str] = []
         for label in ("added", "modified", "removed"):
-            count = meta.get(label, 0)
-            if count:
-                parts.append(f"{count} {label}")
+            items = meta.get(label, [])
+            if items:
+                parts.append(f"{len(items)} {label}")
         detail = ", ".join(parts) if parts else "details pending"
         return f"Change detected: {self.watch_name} — {detail}"
 

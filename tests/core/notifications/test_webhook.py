@@ -17,7 +17,7 @@ def _make_event(**overrides):
         "watch_url": "https://example.com",
         "change_id": "c1",
         "detected_at": datetime(2026, 1, 1, tzinfo=UTC),
-        "change_metadata": {"added": 2, "modified": 1, "removed": 0},
+        "change_metadata": {"added": ["Page 2", "Page 3"], "modified": ["Page 1"], "removed": []},
     }
     defaults.update(overrides)
     return ChangeEvent(**defaults)

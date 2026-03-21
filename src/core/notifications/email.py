@@ -17,7 +17,7 @@ class EmailChannel:
         """Send an email using *config* SMTP settings. Return True on success.
 
         Required config keys: host, port, from_addr, to_addr.
-        Optional: username, password, use_tls (default True).
+        Optional: username, password, start_tls (default True for STARTTLS on port 587).
         """
         host = config.get("host")
         port = config.get("port")
@@ -41,7 +41,7 @@ class EmailChannel:
                 port=port,
                 username=config.get("username"),
                 password=config.get("password"),
-                use_tls=config.get("use_tls", True),
+                start_tls=config.get("start_tls", True),
             )
             return True
         except (aiosmtplib.SMTPException, OSError) as exc:

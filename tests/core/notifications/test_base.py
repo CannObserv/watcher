@@ -17,7 +17,11 @@ class TestChangeEvent:
             "watch_url": "https://example.com",
             "change_id": "c1",
             "detected_at": datetime(2026, 1, 1, tzinfo=UTC),
-            "change_metadata": {"added": 2, "modified": 1, "removed": 0},
+            "change_metadata": {
+                "added": ["Page 2", "Page 3"],
+                "modified": ["Page 1"],
+                "removed": [],
+            },
         }
         defaults.update(overrides)
         return ChangeEvent(**defaults)
@@ -28,11 +32,19 @@ class TestChangeEvent:
             event.watch_name = "other"  # type: ignore[misc]
 
     def test_summary_with_counts(self):
-        event = self._make_event(change_metadata={"added": 3, "modified": 1, "removed": 2})
+        event = self._make_event(change_metadata={
+            "added": ["Page 2", "Page 3", "Page 4"],
+            "modified": ["Page 1"],
+            "removed": ["Page 5", "Page 6"],
+        })
         assert event.summary == "Change detected: Test Watch — 3 added, 1 modified, 2 removed"
 
     def test_summary_skips_zero_counts(self):
-        event = self._make_event(change_metadata={"added": 0, "modified": 5, "removed": 0})
+        event = self._make_event(change_metadata={
+            "added": [],
+            "modified": ["Section A", "Section B", "Section C", "Section D", "Section E"],
+            "removed": [],
+        })
         assert event.summary == "Change detected: Test Watch — 5 modified"
 
     def test_summary_empty_metadata(self):

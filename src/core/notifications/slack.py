@@ -11,8 +11,8 @@ logger = get_logger(__name__)
 class SlackChannel:
     """Deliver change notifications to a Slack incoming webhook."""
 
-    def __init__(self, client: httpx.AsyncClient) -> None:
-        self._client = client
+    def __init__(self, client: httpx.AsyncClient | None = None) -> None:
+        self._client = client or httpx.AsyncClient()
 
     async def send(self, event: ChangeEvent, config: dict) -> bool:
         """POST a Slack message to *config['webhook_url']*. Return True on success."""

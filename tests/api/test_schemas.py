@@ -78,8 +78,8 @@ class TestSnapshotChunkResponse:
     def test_from_dict(self):
         data = SnapshotChunkResponse.model_validate(
             {
-                "id": "01J0000000000000000000CHUNK",
-                "snapshot_id": "01J0000000000000000000SNAP0",
+                "id": "01KM7A9TP2B0BQCNZ5PZX4MH86",
+                "snapshot_id": "01KM7A9TP2B0BQCNZ5PZX4MH87",
                 "chunk_index": 0,
                 "chunk_type": "text",
                 "chunk_label": "section-1",
@@ -89,8 +89,8 @@ class TestSnapshotChunkResponse:
                 "excerpt": "First 200 chars...",
             }
         )
-        assert data.id == "01J0000000000000000000CHUNK"
-        assert data.snapshot_id == "01J0000000000000000000SNAP0"
+        assert data.id == "01KM7A9TP2B0BQCNZ5PZX4MH86"
+        assert data.snapshot_id == "01KM7A9TP2B0BQCNZ5PZX4MH87"
         assert data.chunk_index == 0
         assert data.chunk_type == "text"
         assert data.chunk_label == "section-1"
@@ -105,8 +105,8 @@ class TestSnapshotResponse:
         ts = datetime(2026, 3, 21, 12, 0, 0, tzinfo=UTC)
         data = SnapshotResponse.model_validate(
             {
-                "id": "01J0000000000000000000SNAP0",
-                "watch_id": "01J000000000000000000WATCH",
+                "id": "01KM7A9TP2B0BQCNZ5PZX4MH87",
+                "watch_id": "01KM7A9TP2B0BQCNZ5PZX4MH89",
                 "content_hash": "sha256abc",
                 "simhash": 99999999,
                 "storage_path": "/data/snapshots/abc.html",
@@ -119,8 +119,8 @@ class TestSnapshotResponse:
                 "fetched_at": ts,
             }
         )
-        assert data.id == "01J0000000000000000000SNAP0"
-        assert data.watch_id == "01J000000000000000000WATCH"
+        assert data.id == "01KM7A9TP2B0BQCNZ5PZX4MH87"
+        assert data.watch_id == "01KM7A9TP2B0BQCNZ5PZX4MH89"
         assert data.content_hash == "sha256abc"
         assert data.chunk_count == 3
         assert data.fetched_at == ts
@@ -131,17 +131,17 @@ class TestChangeResponse:
         ts = datetime(2026, 3, 21, 12, 0, 0, tzinfo=UTC)
         data = ChangeResponse.model_validate(
             {
-                "id": "01J00000000000000000CHANGE",
-                "watch_id": "01J000000000000000000WATCH",
-                "previous_snapshot_id": "01J0000000000000000000SNAP0",
-                "current_snapshot_id": "01J0000000000000000000SNAP1",
+                "id": "01KM7A9TP2B0BQCNZ5PZX4MH8A",
+                "watch_id": "01KM7A9TP2B0BQCNZ5PZX4MH89",
+                "previous_snapshot_id": "01KM7A9TP2B0BQCNZ5PZX4MH87",
+                "current_snapshot_id": "01KM7A9TP2B0BQCNZ5PZX4MH88",
                 "change_metadata": {"added": 2, "removed": 1},
                 "detected_at": ts,
             }
         )
-        assert data.id == "01J00000000000000000CHANGE"
-        assert data.previous_snapshot_id == "01J0000000000000000000SNAP0"
-        assert data.current_snapshot_id == "01J0000000000000000000SNAP1"
+        assert data.id == "01KM7A9TP2B0BQCNZ5PZX4MH8A"
+        assert data.previous_snapshot_id == "01KM7A9TP2B0BQCNZ5PZX4MH87"
+        assert data.current_snapshot_id == "01KM7A9TP2B0BQCNZ5PZX4MH88"
         assert data.change_metadata == {"added": 2, "removed": 1}
         assert data.detected_at == ts
 
@@ -151,16 +151,16 @@ class TestAuditLogResponse:
         ts = datetime(2026, 3, 21, 12, 0, 0, tzinfo=UTC)
         data = AuditLogResponse.model_validate(
             {
-                "id": "01J00000000000000000AUDIT0",
+                "id": "01KM7A9TP2B0BQCNZ5PZX4MH8B",
                 "event_type": "watch.created",
-                "watch_id": "01J000000000000000000WATCH",
+                "watch_id": "01KM7A9TP2B0BQCNZ5PZX4MH89",
                 "payload": {"name": "Test Watch"},
                 "created_at": ts,
             }
         )
-        assert data.id == "01J00000000000000000AUDIT0"
+        assert data.id == "01KM7A9TP2B0BQCNZ5PZX4MH8B"
         assert data.event_type == "watch.created"
-        assert data.watch_id == "01J000000000000000000WATCH"
+        assert data.watch_id == "01KM7A9TP2B0BQCNZ5PZX4MH89"
         assert data.payload == {"name": "Test Watch"}
         assert data.created_at == ts
 
@@ -168,7 +168,7 @@ class TestAuditLogResponse:
         ts = datetime(2026, 3, 21, 12, 0, 0, tzinfo=UTC)
         data = AuditLogResponse.model_validate(
             {
-                "id": "01J00000000000000000AUDIT1",
+                "id": "01KM7A9TP2B0BQCNZ5Q0000000",
                 "event_type": "system.startup",
                 "watch_id": None,
                 "payload": {},

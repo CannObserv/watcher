@@ -16,7 +16,7 @@ router = APIRouter(prefix="/api/changes", tags=["changes"])
 class SnapshotWithChunksResponse(SnapshotResponse):
     """Snapshot response with embedded chunks."""
 
-    chunks: list[SnapshotChunkResponse]
+    chunks: list[SnapshotChunkResponse] = []
 
 
 class ChangeDetailResponse(ChangeResponse):
@@ -36,7 +36,7 @@ def _parse_ulid(value: str) -> ULID:
 
 @router.get("", response_model=list[ChangeResponse])
 async def list_changes(
-    watch_id: str | None = None,
+    watch_id: str | None = Query(None),
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
     session: AsyncSession = Depends(get_db_session),

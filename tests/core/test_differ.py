@@ -1,6 +1,6 @@
 """Tests for chunk-level differ."""
 
-from src.core.differ import ChangeStatus, diff_chunks
+from src.core.differ import ChangeStatus, ChunkFingerprint, diff_chunks
 from src.core.extractors.base import Chunk
 
 
@@ -69,3 +69,17 @@ class TestDiffChunks:
         curr = [_chunk(0, "new text")]
         result = diff_chunks(prev, curr)
         assert any(c.status != ChangeStatus.UNCHANGED for c in result)
+
+
+class TestChunkFingerprint:
+    def test_diff_with_fingerprints(self):
+        prev = [ChunkFingerprint(index=0, label="P1", content_hash="aaa", simhash=100)]
+        curr = [ChunkFingerprint(index=0, label="P1", content_hash="bbb", simhash=101)]
+        result = diff_chunks(prev, curr)
+        assert result[0].status == ChangeStatus.MODIFIED
+
+    def test_fingerprint_unchanged(self):
+        fp1 = ChunkFingerprint(index=0, label="P1", content_hash="same", simhash=42)
+        fp2 = ChunkFingerprint(index=0, label="P1", content_hash="same", simhash=42)
+        result = diff_chunks([fp1], [fp2])
+        assert result[0].status == ChangeStatus.UNCHANGED

@@ -1,10 +1,19 @@
-"""Chunk-level change detection -- compare two sets of chunks by hash."""
+"""Chunk-level change detection — compare two sets of chunks by hash."""
 
 import enum
 from dataclasses import dataclass
 
-from src.core.extractors.base import Chunk
 from src.core.simhash import similarity as simhash_similarity
+
+
+@dataclass
+class ChunkFingerprint:
+    """Lightweight DTO for chunk comparison — no text, no hash recomputation."""
+
+    index: int
+    label: str
+    content_hash: str
+    simhash: int
 
 
 class ChangeStatus(enum.StrEnum):
@@ -26,10 +35,11 @@ class ChunkChange:
     similarity: float | None = None
 
 
-def diff_chunks(previous: list[Chunk], current: list[Chunk]) -> list[ChunkChange]:
-    """Compare two ordered lists of chunks by index and content hash.
+def diff_chunks(previous: list, current: list) -> list[ChunkChange]:
+    """Compare two ordered lists of diffable objects by index and content hash.
 
-    Returns a list of ChunkChange describing each chunk's status.
+    Accepts any objects with index, label, content_hash, and simhash attributes
+    (Chunk, ChunkFingerprint, or any duck-typed equivalent).
     """
     prev_by_index = {c.index: c for c in previous}
     curr_by_index = {c.index: c for c in current}

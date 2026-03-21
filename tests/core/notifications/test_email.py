@@ -5,7 +5,6 @@ from email.message import EmailMessage
 from unittest.mock import AsyncMock, patch
 
 import aiosmtplib
-import pytest
 
 from src.core.notifications.base import ChangeEvent
 from src.core.notifications.email import EmailChannel

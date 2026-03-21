@@ -36,7 +36,10 @@ class WebhookChannel:
             resp.raise_for_status()
             return True
         except httpx.HTTPStatusError as exc:
-            logger.warning("webhook_http_error", extra={"status": exc.response.status_code, "url": url})
+            logger.warning(
+                "webhook_http_error",
+                extra={"status": exc.response.status_code, "url": url},
+            )
             return False
         except httpx.ConnectError:
             logger.warning("webhook_connect_error", extra={"url": url})

@@ -59,6 +59,7 @@ Currently defined:
 - `GH_TOKEN` — GitHub personal access token (used by `gh` CLI)
 - `DATABASE_URL` — PostgreSQL connection string (used by SQLAlchemy and Alembic)
 - `PROCRASTINATE_DATABASE_URL` — (optional) libpq-style DSN for procrastinate; falls back to DATABASE_URL with driver prefix stripped
+- `WATCHER_DATA_DIR` — (optional) absolute path for snapshot/content storage; defaults to `/var/lib/watcher/data`
 
 ## Common Commands
 

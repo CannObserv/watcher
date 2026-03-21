@@ -1,6 +1,7 @@
 """Check-watch pipeline and procrastinate task wrappers."""
 
 import hashlib
+import os
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -21,7 +22,7 @@ from src.core.models.change import Change
 from src.core.models.snapshot import Snapshot, SnapshotChunk
 from src.core.models.watch import ContentType, Watch
 from src.core.rate_limiter import DomainRateLimiter
-from src.core.scheduler import compute_next_check, parse_interval
+from src.core.scheduler import compute_next_check
 from src.core.simhash import simhash
 from src.core.storage import LocalStorage, StorageBackend
 from src.workers import bp
@@ -31,6 +32,8 @@ logger = get_logger(__name__)
 # Shared resources (created once per worker process)
 _fetcher = HttpFetcher()
 _rate_limiter = DomainRateLimiter()
+
+STORAGE_BASE_DIR = Path(os.environ.get("WATCHER_DATA_DIR", "/var/lib/watcher/data"))
 
 _INT64_MAX = (1 << 63) - 1
 
@@ -256,9 +259,13 @@ async def check_watch(watch_id: str) -> dict:
             logger.warning("watch not found or inactive", extra={"watch_id": watch_id})
             return {"skipped": True}
 
-        # Fetch with rate limiting
+        # Fetch with rate limiting — only pass fetcher-relevant config keys
+        fetch_config = {
+            k: v for k, v in (watch.fetch_config or {}).items()
+            if k in ("headers", "timeout")
+        }
         async with _rate_limiter.acquire(watch.url):
-            fetch_result = await _fetcher.fetch(watch.url, config=watch.fetch_config)
+            fetch_result = await _fetcher.fetch(watch.url, config=fetch_config)
 
         if fetch_result.status_code == 429:
             _rate_limiter.report_rate_limited(watch.url)
@@ -278,7 +285,7 @@ async def check_watch(watch_id: str) -> dict:
             return {"error": f"HTTP {fetch_result.status_code}"}
 
         # Run pipeline
-        storage = LocalStorage(base_dir=Path("data"))
+        storage = LocalStorage(base_dir=STORAGE_BASE_DIR)
         result = await _run_check_pipeline(
             watch=watch,
             raw_content=fetch_result.content,
@@ -288,17 +295,13 @@ async def check_watch(watch_id: str) -> dict:
             session=session,
         )
 
-        # Update last_checked_at and capture interval before commit
+        # Update last_checked_at
         watch.last_checked_at = datetime.now(UTC)
-        interval_str = watch.schedule_config.get("interval") if watch.schedule_config else None
         await session.commit()
 
-    # Defer next check
-    interval = parse_interval(interval_str)
-    await check_watch.configure(
-        schedule_in={"seconds": int(interval.total_seconds())},
-    ).defer_async(watch_id=watch_id)
-
+    # schedule_tick is the sole scheduler — no self-deferral here.
+    # This avoids double-deferral races and keeps scheduling logic
+    # in one place (important for Phase 4 temporal profiles).
     return result
 
 
@@ -308,6 +311,9 @@ async def schedule_tick(timestamp: int) -> None:
     """Find active watches due for checking and defer check_watch jobs."""
     now = datetime.now(UTC)
 
+    # Load all active watches that might be due. Can't filter by interval in SQL
+    # (per-watch JSONB config), so we load all and filter in Python.
+    # Acceptable at 2,000 watches; revisit if scale increases significantly.
     async with get_session_factory()() as session:
         stmt = select(Watch).where(
             Watch.is_active.is_(True),

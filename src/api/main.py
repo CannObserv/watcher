@@ -14,6 +14,8 @@ configure_logging()
 @asynccontextmanager
 async def lifespan(application: FastAPI):
     """Start procrastinate worker alongside FastAPI."""
+    # Local import: avoids importing procrastinate at module level, which would
+    # add startup overhead for contexts that don't need the worker (e.g., pytest).
     from src.workers import get_app
 
     proc_app = get_app()

@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ulid import ULID
 
 from src.api.dependencies import get_db_session
+from src.api.routes.helpers import parse_ulid
 from src.api.schemas.change import ChangeResponse, SnapshotChunkResponse, SnapshotResponse
 from src.core.models.change import Change
 from src.core.models.snapshot import Snapshot, SnapshotChunk
@@ -26,14 +27,6 @@ class ChangeDetailResponse(ChangeResponse):
     previous_snapshot: SnapshotWithChunksResponse | None
 
 
-def _parse_ulid(value: str) -> ULID:
-    """Parse a ULID string, raising 404 on invalid format."""
-    try:
-        return ULID.from_str(value)
-    except ValueError as exc:
-        raise HTTPException(status_code=404, detail="Change not found") from exc
-
-
 @router.get("", response_model=list[ChangeResponse])
 async def list_changes(
     watch_id: str | None = Query(None),
@@ -44,7 +37,7 @@ async def list_changes(
     """List changes with optional watch_id filter and pagination."""
     stmt = select(Change).order_by(Change.detected_at.desc())
     if watch_id is not None:
-        stmt = stmt.where(Change.watch_id == _parse_ulid(watch_id))
+        stmt = stmt.where(Change.watch_id == parse_ulid(watch_id, "Watch"))
     stmt = stmt.limit(limit).offset(offset)
     result = await session.execute(stmt)
     return result.scalars().all()
@@ -78,7 +71,7 @@ async def get_change_detail(
     session: AsyncSession = Depends(get_db_session),
 ):
     """Get change detail with embedded snapshots and their chunks."""
-    change = await session.get(Change, _parse_ulid(change_id))
+    change = await session.get(Change, parse_ulid(change_id, "Change"))
     if not change:
         raise HTTPException(status_code=404, detail="Change not found")
 

@@ -34,9 +34,26 @@ from src.workers import bp
 
 logger = get_logger(__name__)
 
-# Shared resources (created once per worker process)
-_fetcher = HttpFetcher()
-_rate_limiter = DomainRateLimiter()
+# Shared resources — lazy-initialized on first use to avoid binding to an
+# event loop at import time (important for DomainRateLimiter's asyncio primitives).
+_fetcher: HttpFetcher | None = None
+_rate_limiter: DomainRateLimiter | None = None
+
+
+def get_fetcher() -> HttpFetcher:
+    """Return the shared fetcher, creating it on first call."""
+    global _fetcher
+    if _fetcher is None:
+        _fetcher = HttpFetcher()
+    return _fetcher
+
+
+def get_rate_limiter() -> DomainRateLimiter:
+    """Return the shared rate limiter, creating it on first call."""
+    global _rate_limiter
+    if _rate_limiter is None:
+        _rate_limiter = DomainRateLimiter()
+    return _rate_limiter
 
 STORAGE_BASE_DIR = Path(os.environ.get("WATCHER_DATA_DIR", "/var/lib/watcher/data"))
 
@@ -91,12 +108,21 @@ async def _get_snapshot_chunks(
 
 
 def _extract_content(watch: Watch, raw_content: bytes) -> ExtractionResult:
-    """Run the appropriate extractor based on watch content_type."""
+    """Run the appropriate extractor based on watch content_type.
+
+    For FILE watches, passes fetch_config extraction settings (e.g., content_type,
+    chunk_row_size, sort_columns) through to CsvExcelExtractor.
+    """
     extractor_cls = _EXTRACTOR_MAP[watch.content_type]
     extractor = extractor_cls()
     config: dict | None = None
     if watch.content_type == ContentType.FILE:
-        config = {"content_type": "csv"}
+        fetch_cfg = watch.fetch_config or {}
+        config = {
+            "content_type": fetch_cfg.get("file_format", "csv"),
+            **{k: v for k, v in fetch_cfg.items()
+               if k in ("chunk_row_size", "sort_columns", "sheet_name")},
+        }
     return extractor.extract(raw_content, config=config)
 
 
@@ -182,6 +208,7 @@ async def _run_check_pipeline(
 
     # 8-9. Diff against previous if exists
     change_id = None
+    metadata: dict = {}
     if prev_snapshot:
         prev_chunks_db = await _get_snapshot_chunks(session, prev_snapshot.id)
         prev_fingerprints = [
@@ -271,11 +298,11 @@ async def check_watch(watch_id: str) -> dict:
             k: v for k, v in (watch.fetch_config or {}).items()
             if k in ("headers", "timeout")
         }
-        async with _rate_limiter.acquire(watch.url):
-            fetch_result = await _fetcher.fetch(watch.url, config=fetch_config)
+        async with get_rate_limiter().acquire(watch.url):
+            fetch_result = await get_fetcher().fetch(watch.url, config=fetch_config)
 
         if fetch_result.status_code == 429:
-            _rate_limiter.report_rate_limited(watch.url)
+            get_rate_limiter().report_rate_limited(watch.url)
             raise ConnectionError(f"Rate limited by {watch.url}")
 
         if not fetch_result.is_success:

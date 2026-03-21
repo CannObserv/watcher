@@ -15,7 +15,6 @@ class HttpFetcher:
 
     def __init__(self, client: httpx.AsyncClient | None = None) -> None:
         self._client = client
-        self._owns_client = client is None
 
     async def fetch(self, url: str, config: dict | None = None) -> FetchResult:
         """Fetch content from a URL.
@@ -34,16 +33,15 @@ class HttpFetcher:
             **config.get("headers", {}),
         }
 
-        client = self._client or httpx.AsyncClient(follow_redirects=True)
-        try:
-            start = time.monotonic()
-            response = await client.get(
-                url, headers=headers, timeout=timeout, follow_redirects=True
-            )
-            duration_ms = int((time.monotonic() - start) * 1000)
-        finally:
-            if self._owns_client and client is not self._client:
-                await client.aclose()
+        # Reuse persistent client for connection pooling; create on first call
+        if self._client is None:
+            self._client = httpx.AsyncClient(follow_redirects=True)
+
+        start = time.monotonic()
+        response = await self._client.get(
+            url, headers=headers, timeout=timeout, follow_redirects=True
+        )
+        duration_ms = int((time.monotonic() - start) * 1000)
 
         return FetchResult(
             content=response.content,

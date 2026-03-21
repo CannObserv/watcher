@@ -3,31 +3,14 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from ulid import ULID
 
 from src.api.dependencies import get_db_session
+from src.api.routes.helpers import get_watch_or_404, parse_ulid
 from src.api.schemas.temporal_profile import ProfileCreate, ProfileResponse
 from src.core.models.audit_log import AuditLog
 from src.core.models.temporal_profile import TemporalProfile
-from src.core.models.watch import Watch
 
 router = APIRouter(prefix="/api/watches/{watch_id}/profiles", tags=["temporal-profiles"])
-
-
-def _parse_ulid(value: str, label: str = "Resource") -> ULID:
-    """Parse a ULID string, raising 404 on invalid format."""
-    try:
-        return ULID.from_str(value)
-    except ValueError as exc:
-        raise HTTPException(status_code=404, detail=f"{label} not found") from exc
-
-
-async def _get_watch(watch_id: str, session: AsyncSession) -> Watch:
-    """Fetch watch or raise 404."""
-    watch = await session.get(Watch, _parse_ulid(watch_id, "Watch"))
-    if not watch:
-        raise HTTPException(status_code=404, detail="Watch not found")
-    return watch
 
 
 @router.post("", status_code=201, response_model=ProfileResponse)
@@ -37,7 +20,7 @@ async def create_profile(
     session: AsyncSession = Depends(get_db_session),
 ):
     """Create a temporal profile for a watch."""
-    watch = await _get_watch(watch_id, session)
+    watch = await get_watch_or_404(watch_id, session)
     profile = TemporalProfile(
         watch_id=watch.id,
         profile_type=data.profile_type,
@@ -65,7 +48,7 @@ async def list_profiles(
     session: AsyncSession = Depends(get_db_session),
 ):
     """List temporal profiles for a watch."""
-    watch = await _get_watch(watch_id, session)
+    watch = await get_watch_or_404(watch_id, session)
     stmt = (
         select(TemporalProfile)
         .where(TemporalProfile.watch_id == watch.id)
@@ -82,8 +65,8 @@ async def delete_profile(
     session: AsyncSession = Depends(get_db_session),
 ):
     """Delete a temporal profile."""
-    watch = await _get_watch(watch_id, session)
-    profile = await session.get(TemporalProfile, _parse_ulid(profile_id, "Profile"))
+    watch = await get_watch_or_404(watch_id, session)
+    profile = await session.get(TemporalProfile, parse_ulid(profile_id, "Profile"))
     if not profile or profile.watch_id != watch.id:
         raise HTTPException(status_code=404, detail="Profile not found")
     audit = AuditLog(

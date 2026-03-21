@@ -3,9 +3,9 @@
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from ulid import ULID
 
 from src.api.dependencies import get_db_session
+from src.api.routes.helpers import parse_ulid
 from src.api.schemas.audit_log import AuditLogResponse
 from src.core.models.audit_log import AuditLog
 
@@ -25,11 +25,7 @@ async def list_audit_entries(
     if event_type:
         stmt = stmt.where(AuditLog.event_type == event_type)
     if watch_id:
-        try:
-            parsed = ULID.from_str(watch_id)
-        except ValueError:
-            return []
-        stmt = stmt.where(AuditLog.watch_id == parsed)
+        stmt = stmt.where(AuditLog.watch_id == parse_ulid(watch_id, "Watch"))
     stmt = stmt.limit(limit).offset(offset)
     result = await session.execute(stmt)
     return result.scalars().all()

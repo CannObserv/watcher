@@ -10,10 +10,12 @@ from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 
 from src.core.models import Base
 
-TEST_DATABASE_URL = os.environ.get(
-    "TEST_DATABASE_URL",
-    "postgresql+asyncpg://watcher:watcher@localhost:5432/watcher_test",
-)
+TEST_DATABASE_URL = os.environ.get("TEST_DATABASE_URL")
+if not TEST_DATABASE_URL:
+    raise RuntimeError(
+        "TEST_DATABASE_URL environment variable is not set. "
+        "Load it from the env file: export $(cat env | xargs)"
+    )
 
 
 @pytest.fixture(scope="session")

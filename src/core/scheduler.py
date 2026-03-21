@@ -108,4 +108,19 @@ def evaluate_post_actions(
     today: date | None = None,
 ) -> list[dict]:
     """Return post-event actions for profiles whose date has passed."""
-    raise NotImplementedError
+    today = today or date.today()
+    actions = []
+    for profile in profiles:
+        if not profile.get("is_active", True):
+            continue
+        ptype = profile.get("type")
+        past = False
+        if ptype in ("event", "deadline"):
+            ref = _to_date(profile["reference_date"])
+            past = today > ref
+        elif ptype == "seasonal":
+            end = _to_date(profile["date_range_end"])
+            past = today > end
+        if past and "post_action" in profile:
+            actions.append({"action": profile["post_action"], "profile": profile})
+    return actions

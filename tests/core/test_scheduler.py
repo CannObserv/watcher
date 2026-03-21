@@ -6,6 +6,7 @@ import pytest
 
 from src.core.scheduler import (
     compute_next_check,
+    evaluate_post_actions,
     parse_interval,
     resolve_effective_interval,
 )
@@ -219,3 +220,59 @@ class TestComputeNextCheckWithProfiles:
         result = compute_next_check(cfg, last, now=now, profiles=profiles)
         expected = last + timedelta(days=1)
         assert result == expected
+
+
+class TestEvaluatePostActions:
+    def test_no_profiles_no_actions(self):
+        assert evaluate_post_actions([]) == []
+
+    def test_event_past_returns_action(self):
+        today = date(2026, 4, 16)
+        profile = {
+            "type": "event",
+            "is_active": True,
+            "reference_date": "2026-04-15",
+            "post_action": "deactivate",
+            "rules": [{"days_before": 30, "interval": "6h"}],
+        }
+        result = evaluate_post_actions([profile], today=today)
+        assert len(result) == 1
+        assert result[0]["action"] == "deactivate"
+        assert result[0]["profile"] is profile
+
+    def test_event_not_yet_passed_no_action(self):
+        today = date(2026, 4, 10)
+        profile = {
+            "type": "event",
+            "is_active": True,
+            "reference_date": "2026-04-15",
+            "post_action": "deactivate",
+            "rules": [{"days_before": 30, "interval": "6h"}],
+        }
+        assert evaluate_post_actions([profile], today=today) == []
+
+    def test_seasonal_past_end_returns_action(self):
+        today = date(2026, 9, 1)
+        profile = {
+            "type": "seasonal",
+            "is_active": True,
+            "date_range_start": "2026-06-01",
+            "date_range_end": "2026-08-31",
+            "post_action": "reduce_frequency",
+            "rules": [{"interval": "1h"}],
+        }
+        result = evaluate_post_actions([profile], today=today)
+        assert len(result) == 1
+        assert result[0]["action"] == "reduce_frequency"
+        assert result[0]["profile"] is profile
+
+    def test_inactive_profile_no_action(self):
+        today = date(2026, 4, 16)
+        profile = {
+            "type": "event",
+            "is_active": False,
+            "reference_date": "2026-04-15",
+            "post_action": "deactivate",
+            "rules": [{"days_before": 30, "interval": "6h"}],
+        }
+        assert evaluate_post_actions([profile], today=today) == []

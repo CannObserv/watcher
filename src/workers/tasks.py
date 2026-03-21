@@ -326,21 +326,24 @@ async def schedule_tick(timestamp: int) -> None:
         result = await session.execute(stmt)
         watches = list(result.scalars().all())
 
+        # Batch-load all active temporal profiles (avoids N+1 per watch)
+        tp_stmt = select(TemporalProfile).where(TemporalProfile.is_active.is_(True))
+        tp_result = await session.execute(tp_stmt)
+        all_profiles_orm = list(tp_result.scalars().all())
+        profiles_by_watch: dict[str, list] = {}
+        for p in all_profiles_orm:
+            profiles_by_watch.setdefault(str(p.watch_id), []).append(p)
+
         deferred = 0
         for watch in watches:
-            # Load active temporal profiles for this watch
-            tp_stmt = select(TemporalProfile).where(
-                TemporalProfile.watch_id == watch.id,
-                TemporalProfile.is_active.is_(True),
-            )
-            tp_result = await session.execute(tp_stmt)
-            profiles_orm = list(tp_result.scalars().all())
+            watch_id_str = str(watch.id)
+            profiles_orm = profiles_by_watch.get(watch_id_str, [])
 
             # Convert to dicts for scheduler functions
             profiles = [
                 {
                     "id": str(p.id),
-                    "type": p.profile_type,
+                    "profile_type": p.profile_type,
                     "reference_date": p.reference_date,
                     "date_range_start": p.date_range_start,
                     "date_range_end": p.date_range_end,
@@ -362,23 +365,17 @@ async def schedule_tick(timestamp: int) -> None:
                         (p for p in profiles_orm if str(p.id) == profile_dict["id"]),
                         None,
                     )
-                    if action == "deactivate":
+                    if action in ("deactivate", "archive"):
                         watch.is_active = False
                         logger.info(
-                            "post-action: deactivate watch",
-                            extra={"watch_id": str(watch.id), "profile_id": profile_dict["id"]},
+                            f"post-action: {action} watch",
+                            extra={"watch_id": watch_id_str, "profile_id": profile_dict["id"]},
                         )
                     elif action == "reduce_frequency":
                         watch.schedule_config = {**(watch.schedule_config or {}), "interval": "1d"}
                         logger.info(
                             "post-action: reduce frequency",
-                            extra={"watch_id": str(watch.id), "profile_id": profile_dict["id"]},
-                        )
-                    elif action == "archive":
-                        watch.is_active = False
-                        logger.info(
-                            "post-action: archive watch",
-                            extra={"watch_id": str(watch.id), "profile_id": profile_dict["id"]},
+                            extra={"watch_id": watch_id_str, "profile_id": profile_dict["id"]},
                         )
                     if orm_profile:
                         orm_profile.is_active = False
@@ -394,8 +391,8 @@ async def schedule_tick(timestamp: int) -> None:
                 profiles=profiles if profiles else None,
             )
             if next_due <= now:
-                logger.info("deferring check", extra={"watch_id": str(watch.id)})
-                await check_watch.configure().defer_async(watch_id=str(watch.id))
+                logger.info("deferring check", extra={"watch_id": watch_id_str})
+                await check_watch.configure().defer_async(watch_id=watch_id_str)
                 deferred += 1
 
         # Commit any post-action changes (deactivated profiles, modified watches)

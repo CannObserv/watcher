@@ -34,7 +34,9 @@ def _resolve_date_profile(profile: dict, today: date) -> timedelta | None:
     """Resolve event/deadline profile to interval. None if past or no rule matches."""
     ref = _to_date(profile["reference_date"])
     if today > ref:
-        return None
+        return None  # Past the event/deadline date
+    # On the reference date itself (days_until=0), profile still applies —
+    # the event is happening today, so intensive checking is appropriate.
     days_until = (ref - today).days
     # Find tightest matching rule (smallest days_before that still covers days_until)
     best_rule = None
@@ -51,14 +53,17 @@ def _resolve_seasonal_profile(profile: dict, today: date) -> timedelta | None:
     """Resolve seasonal profile to interval. None if outside date range."""
     start = _to_date(profile["date_range_start"])
     end = _to_date(profile["date_range_end"])
-    if start <= today <= end:
-        return parse_interval(profile["rules"][0]["interval"])
-    return None
+    if not (start <= today <= end):
+        return None
+    rules = profile.get("rules", [])
+    if not rules:
+        return None
+    return parse_interval(rules[0]["interval"])
 
 
 def _resolve_single_profile(profile: dict, today: date) -> timedelta | None:
     """Dispatch to type-specific resolver."""
-    ptype = profile.get("type")
+    ptype = profile.get("profile_type")
     if ptype in ("event", "deadline"):
         return _resolve_date_profile(profile, today)
     if ptype == "seasonal":
@@ -113,7 +118,7 @@ def evaluate_post_actions(
     for profile in profiles:
         if not profile.get("is_active", True):
             continue
-        ptype = profile.get("type")
+        ptype = profile.get("profile_type")
         past = False
         if ptype in ("event", "deadline"):
             ref = _to_date(profile["reference_date"])

@@ -71,7 +71,7 @@ class TestResolveEffectiveInterval:
         """25 days before event matches '30 days before' rule -> 6h."""
         today = date(2026, 3, 21)
         profile = {
-            "type": "event",
+            "profile_type": "event",
             "is_active": True,
             "reference_date": "2026-04-15",
             "rules": [
@@ -86,7 +86,7 @@ class TestResolveEffectiveInterval:
         """5 days before event matches '7 days before' rule -> 1h."""
         today = date(2026, 4, 10)
         profile = {
-            "type": "event",
+            "profile_type": "event",
             "is_active": True,
             "reference_date": "2026-04-15",
             "rules": [
@@ -100,7 +100,7 @@ class TestResolveEffectiveInterval:
     def test_event_profile_after_event_returns_none(self):
         today = date(2026, 4, 16)
         profile = {
-            "type": "event",
+            "profile_type": "event",
             "is_active": True,
             "reference_date": "2026-04-15",
             "rules": [
@@ -112,7 +112,7 @@ class TestResolveEffectiveInterval:
     def test_seasonal_within_range(self):
         today = date(2026, 6, 15)
         profile = {
-            "type": "seasonal",
+            "profile_type": "seasonal",
             "is_active": True,
             "date_range_start": "2026-06-01",
             "date_range_end": "2026-08-31",
@@ -124,7 +124,7 @@ class TestResolveEffectiveInterval:
     def test_seasonal_outside_range_returns_none(self):
         today = date(2026, 5, 15)
         profile = {
-            "type": "seasonal",
+            "profile_type": "seasonal",
             "is_active": True,
             "date_range_start": "2026-06-01",
             "date_range_end": "2026-08-31",
@@ -136,7 +136,7 @@ class TestResolveEffectiveInterval:
         """10 days before deadline matches '14 days before' rule -> 12h."""
         today = date(2026, 4, 5)
         profile = {
-            "type": "deadline",
+            "profile_type": "deadline",
             "is_active": True,
             "reference_date": "2026-04-15",
             "rules": [
@@ -150,7 +150,7 @@ class TestResolveEffectiveInterval:
     def test_deadline_after_date_returns_none(self):
         today = date(2026, 4, 16)
         profile = {
-            "type": "deadline",
+            "profile_type": "deadline",
             "is_active": True,
             "reference_date": "2026-04-15",
             "rules": [
@@ -163,13 +163,13 @@ class TestResolveEffectiveInterval:
         """event 6h + deadline 2h -> 2h."""
         today = date(2026, 4, 1)
         event_profile = {
-            "type": "event",
+            "profile_type": "event",
             "is_active": True,
             "reference_date": "2026-04-15",
             "rules": [{"days_before": 30, "interval": "6h"}],
         }
         deadline_profile = {
-            "type": "deadline",
+            "profile_type": "deadline",
             "is_active": True,
             "reference_date": "2026-04-15",
             "rules": [{"days_before": 30, "interval": "2h"}],
@@ -180,7 +180,7 @@ class TestResolveEffectiveInterval:
     def test_inactive_profile_ignored(self):
         today = date(2026, 4, 1)
         profile = {
-            "type": "event",
+            "profile_type": "event",
             "is_active": False,
             "reference_date": "2026-04-15",
             "rules": [{"days_before": 30, "interval": "6h"}],
@@ -195,7 +195,7 @@ class TestComputeNextCheckWithProfiles:
         cfg = {"interval": "1d"}
         profiles = [
             {
-                "type": "event",
+                "profile_type": "event",
                 "is_active": True,
                 "reference_date": "2026-04-15",
                 "rules": [{"days_before": 30, "interval": "6h"}],
@@ -211,7 +211,7 @@ class TestComputeNextCheckWithProfiles:
         cfg = {"interval": "1d"}
         profiles = [
             {
-                "type": "event",
+                "profile_type": "event",
                 "is_active": True,
                 "reference_date": "2026-04-15",
                 "rules": [{"days_before": 30, "interval": "6h"}],
@@ -229,7 +229,7 @@ class TestEvaluatePostActions:
     def test_event_past_returns_action(self):
         today = date(2026, 4, 16)
         profile = {
-            "type": "event",
+            "profile_type": "event",
             "is_active": True,
             "reference_date": "2026-04-15",
             "post_action": "deactivate",
@@ -243,7 +243,7 @@ class TestEvaluatePostActions:
     def test_event_not_yet_passed_no_action(self):
         today = date(2026, 4, 10)
         profile = {
-            "type": "event",
+            "profile_type": "event",
             "is_active": True,
             "reference_date": "2026-04-15",
             "post_action": "deactivate",
@@ -254,7 +254,7 @@ class TestEvaluatePostActions:
     def test_seasonal_past_end_returns_action(self):
         today = date(2026, 9, 1)
         profile = {
-            "type": "seasonal",
+            "profile_type": "seasonal",
             "is_active": True,
             "date_range_start": "2026-06-01",
             "date_range_end": "2026-08-31",
@@ -269,7 +269,7 @@ class TestEvaluatePostActions:
     def test_inactive_profile_no_action(self):
         today = date(2026, 4, 16)
         profile = {
-            "type": "event",
+            "profile_type": "event",
             "is_active": False,
             "reference_date": "2026-04-15",
             "post_action": "deactivate",

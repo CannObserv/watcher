@@ -1,13 +1,11 @@
 """Pydantic schemas for temporal profile CRUD."""
 
 from datetime import date, datetime
-from typing import Annotated
 
-from pydantic import BaseModel, BeforeValidator, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field
 
+from src.api.schemas.types import ULIDStr
 from src.core.models.temporal_profile import PostAction, ProfileType
-
-ULIDStr = Annotated[str, BeforeValidator(lambda v: str(v))]
 
 
 class ProfileRuleItem(BaseModel):

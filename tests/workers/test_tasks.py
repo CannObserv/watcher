@@ -1,7 +1,8 @@
 """Tests for check_watch pipeline and task wrappers."""
 
 from contextlib import asynccontextmanager
-from unittest.mock import MagicMock
+from datetime import UTC, date, datetime, timedelta
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
 import pytest
@@ -10,10 +11,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.fetchers.http import HttpFetcher
 from src.core.models.audit_log import AuditLog
+from src.core.models.temporal_profile import PostAction, ProfileType, TemporalProfile
 from src.core.models.watch import ContentType, Watch
 from src.core.rate_limiter import DomainRateLimiter
 from src.core.storage import LocalStorage
-from src.workers.tasks import _run_check_pipeline, check_watch
+from src.workers.tasks import _run_check_pipeline, check_watch, schedule_tick
 
 pytestmark = pytest.mark.integration
 
@@ -202,3 +204,104 @@ class TestCheckWatchTask:
         entries = audit_result.scalars().all()
         assert len(entries) >= 1
         assert entries[0].payload["status_code"] == 500
+
+
+class TestScheduleTickWithProfiles:
+    """Integration tests for schedule_tick temporal profile awareness."""
+
+    async def test_profile_accelerates_check_interval(self, db_session, monkeypatch):
+        """A watch with a temporal profile should be deferred sooner than its base interval."""
+        import src.workers.tasks as tasks_mod
+
+        # Watch with 1-day base interval, last checked 2 hours ago
+        now = datetime(2026, 4, 10, 12, 0, 0, tzinfo=UTC)
+        watch = Watch(
+            name="Profiled",
+            url="https://example.com/agenda",
+            content_type=ContentType.HTML,
+            schedule_config={"interval": "1d"},
+            last_checked_at=now - timedelta(hours=2),
+        )
+        db_session.add(watch)
+        await db_session.flush()
+
+        # Event profile: 7 days before April 15 → 1h interval
+        profile = TemporalProfile(
+            watch_id=watch.id,
+            profile_type=ProfileType.EVENT,
+            reference_date=date(2026, 4, 15),
+            rules=[{"days_before": 7, "interval": "1h"}],
+            post_action=PostAction.REDUCE_FREQUENCY,
+        )
+        db_session.add(profile)
+        await db_session.commit()
+
+        monkeypatch.setattr(
+            tasks_mod, "get_session_factory", lambda: _mock_session_factory(db_session)
+        )
+
+        # Mock check_watch.configure().defer_async to capture calls
+        defer_calls = []
+        mock_configure = MagicMock()
+        mock_configure.return_value.defer_async = AsyncMock(
+            side_effect=lambda **kw: defer_calls.append(kw)
+        )
+        monkeypatch.setattr(check_watch, "configure", mock_configure)
+
+        with patch("src.workers.tasks.datetime") as mock_dt:
+            mock_dt.now.return_value = now
+            mock_dt.side_effect = lambda *a, **kw: datetime(*a, **kw)
+            await schedule_tick(int(now.timestamp()))
+
+        # Without profile: 1d interval, last checked 2h ago → not due
+        # With profile: 1h interval, last checked 2h ago → overdue → should defer
+        assert len(defer_calls) == 1
+        assert defer_calls[0]["watch_id"] == str(watch.id)
+
+    async def test_post_action_deactivates_watch(self, db_session, monkeypatch):
+        """A watch with an expired event profile and deactivate action should be deactivated."""
+        import src.workers.tasks as tasks_mod
+
+        # Event was April 5, today is April 10 → past
+        now = datetime(2026, 4, 10, 12, 0, 0, tzinfo=UTC)
+        watch = Watch(
+            name="Expired Event",
+            url="https://example.com/past-event",
+            content_type=ContentType.HTML,
+            schedule_config={"interval": "1d"},
+            last_checked_at=now - timedelta(hours=25),
+        )
+        db_session.add(watch)
+        await db_session.flush()
+
+        profile = TemporalProfile(
+            watch_id=watch.id,
+            profile_type=ProfileType.EVENT,
+            reference_date=date(2026, 4, 5),
+            rules=[{"days_before": 7, "interval": "1h"}],
+            post_action=PostAction.DEACTIVATE,
+        )
+        db_session.add(profile)
+        await db_session.commit()
+
+        monkeypatch.setattr(
+            tasks_mod, "get_session_factory", lambda: _mock_session_factory(db_session)
+        )
+
+        mock_configure = MagicMock()
+        mock_configure.return_value.defer_async = AsyncMock()
+        monkeypatch.setattr(check_watch, "configure", mock_configure)
+
+        with patch("src.workers.tasks.datetime") as mock_dt:
+            mock_dt.now.return_value = now
+            mock_dt.side_effect = lambda *a, **kw: datetime(*a, **kw)
+            await schedule_tick(int(now.timestamp()))
+
+        # Watch should be deactivated, no check deferred
+        await db_session.refresh(watch)
+        assert watch.is_active is False
+        mock_configure.return_value.defer_async.assert_not_called()
+
+        # Profile should be deactivated
+        await db_session.refresh(profile)
+        assert profile.is_active is False

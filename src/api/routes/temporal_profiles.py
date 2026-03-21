@@ -65,10 +65,10 @@ async def list_profiles(
     session: AsyncSession = Depends(get_db_session),
 ):
     """List temporal profiles for a watch."""
-    await _get_watch(watch_id, session)
+    watch = await _get_watch(watch_id, session)
     stmt = (
         select(TemporalProfile)
-        .where(TemporalProfile.watch_id == _parse_ulid(watch_id, "Watch"))
+        .where(TemporalProfile.watch_id == watch.id)
         .order_by(TemporalProfile.created_at.desc())
     )
     result = await session.execute(stmt)

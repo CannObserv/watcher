@@ -1,13 +1,11 @@
 """Pydantic schemas for Watch CRUD operations."""
 
 from datetime import datetime
-from typing import Annotated
 
-from pydantic import BaseModel, BeforeValidator, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field
 
+from src.api.schemas.types import ULIDStr
 from src.core.models.watch import ContentType
-
-ULIDStr = Annotated[str, BeforeValidator(lambda v: str(v))]
 
 
 class WatchCreate(BaseModel):

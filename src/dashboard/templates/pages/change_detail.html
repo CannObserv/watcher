@@ -83,21 +83,20 @@
   <div class="flex items-center gap-4 mb-4">
     <h3 class="text-lg font-semibold text-gray-900">Diff</h3>
     <div class="flex gap-1">
-      <button data-diff-toggle="extracted" onclick="toggleDiffView('extracted')" class="px-3 py-1 text-xs rounded-md bg-gray-200">Extracted Text</button>
-      <button data-diff-toggle="raw" onclick="toggleDiffView('raw')" class="px-3 py-1 text-xs rounded-md bg-white border border-gray-200"
+      <button
+        hx-get="/partials/diff/{{ change.id }}?mode=extracted"
+        hx-target="#diff-content"
+        hx-swap="innerHTML"
+        class="px-3 py-1 text-xs rounded-md bg-gray-200 hover:bg-gray-300">Extracted Text</button>
+      <button
         hx-get="/partials/diff/{{ change.id }}?mode=raw"
         hx-target="#diff-content"
         hx-swap="innerHTML"
-        hx-trigger="click once">Raw Content</button>
+        class="px-3 py-1 text-xs rounded-md bg-white border border-gray-200 hover:bg-gray-100">Raw Content</button>
     </div>
   </div>
   <div id="diff-content">
-    <div data-diff-view="extracted">
-      {% include "partials/diff_view.html" %}
-    </div>
-    <div data-diff-view="raw" class="hidden">
-      <p class="text-gray-500 text-sm">Click "Raw Content" to load.</p>
-    </div>
+    {% include "partials/diff_view.html" %}
   </div>
 </div>
 {% endblock %}

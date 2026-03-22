@@ -334,6 +334,19 @@ async def partial_watch_changes(
     )
 
 
+def _load_snapshot_text(storage: LocalStorage, snapshot, path_attr: str) -> str:
+    """Load text content from a snapshot's storage path. Returns empty string on failure."""
+    if not snapshot:
+        return ""
+    path = getattr(snapshot, path_attr, None)
+    if not path:
+        return ""
+    try:
+        return storage.load(path).decode(errors="replace")
+    except FileNotFoundError:
+        return ""
+
+
 @router.get("/changes/{change_id}")
 async def change_detail_page(
     request: Request,
@@ -345,23 +358,9 @@ async def change_detail_page(
     if not detail:
         return HTMLResponse(status_code=404, content="Change not found")
 
-    # Generate diff from extracted text stored on disk
     storage = LocalStorage(base_dir=STORAGE_BASE_DIR)
-    prev_text = ""
-    curr_text = ""
-    if detail["previous_snapshot"] and detail["previous_snapshot"].text_path:
-        try:
-            raw = storage.load(detail["previous_snapshot"].text_path)
-            prev_text = raw.decode(errors="replace")
-        except FileNotFoundError:
-            pass
-    if detail["current_snapshot"] and detail["current_snapshot"].text_path:
-        try:
-            raw = storage.load(detail["current_snapshot"].text_path)
-            curr_text = raw.decode(errors="replace")
-        except FileNotFoundError:
-            pass
-
+    prev_text = _load_snapshot_text(storage, detail["previous_snapshot"], "text_path")
+    curr_text = _load_snapshot_text(storage, detail["current_snapshot"], "text_path")
     diff = generate_diff(prev_text, curr_text)
 
     context = {
@@ -386,29 +385,9 @@ async def partial_diff(
         return HTMLResponse(status_code=404, content="Change not found")
 
     storage = LocalStorage(base_dir=STORAGE_BASE_DIR)
-    prev_text = ""
-    curr_text = ""
-
-    if mode == "raw":
-        path_attr = "storage_path"
-    else:
-        path_attr = "text_path"
-
-    prev_snap = detail["previous_snapshot"]
-    curr_snap = detail["current_snapshot"]
-    if prev_snap and getattr(prev_snap, path_attr):
-        try:
-            raw = storage.load(getattr(prev_snap, path_attr))
-            prev_text = raw.decode(errors="replace")
-        except FileNotFoundError:
-            pass
-    if curr_snap and getattr(curr_snap, path_attr):
-        try:
-            raw = storage.load(getattr(curr_snap, path_attr))
-            curr_text = raw.decode(errors="replace")
-        except FileNotFoundError:
-            pass
-
+    path_attr = "storage_path" if mode == "raw" else "text_path"
+    prev_text = _load_snapshot_text(storage, detail["previous_snapshot"], path_attr)
+    curr_text = _load_snapshot_text(storage, detail["current_snapshot"], path_attr)
     diff = generate_diff(prev_text, curr_text)
     return templates.TemplateResponse("partials/diff_view.html", {"request": request, "diff": diff})
 

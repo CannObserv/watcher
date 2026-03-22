@@ -10,7 +10,7 @@ from src.api.schemas.domain import DomainPatch, DomainResponse
 from src.core.models.domain import DEFAULT_MAX_CONCURRENCY, DEFAULT_MIN_INTERVAL, Domain
 from src.core.models.watch import Watch
 
-router = APIRouter(prefix="/api/domains", tags=["domains"])
+router = APIRouter(prefix="/domains", tags=["domains"])
 
 
 async def _get_domain_or_404(name: str, session: AsyncSession) -> Domain:

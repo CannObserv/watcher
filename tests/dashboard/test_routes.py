@@ -58,7 +58,7 @@ class TestWatchList:
 class TestWatchDetail:
     async def test_detail_page_returns_200(self, client):
         resp = await client.post(
-            "/api/watches",
+            "/api/v1/watches",
             json={
                 "name": "Detail Watch",
                 "url": "https://example.com",
@@ -76,7 +76,7 @@ class TestWatchDetail:
 
     async def test_detail_page_has_edit_link(self, client):
         resp = await client.post(
-            "/api/watches",
+            "/api/v1/watches",
             json={
                 "name": "Edit Link",
                 "url": "https://example.com",
@@ -128,7 +128,7 @@ class TestWatchCreate:
 class TestWatchEdit:
     async def test_edit_form_returns_200(self, client):
         resp = await client.post(
-            "/api/watches",
+            "/api/v1/watches",
             json={
                 "name": "Editable",
                 "url": "https://example.com",
@@ -142,7 +142,7 @@ class TestWatchEdit:
 
     async def test_edit_form_prefills(self, client):
         resp = await client.post(
-            "/api/watches",
+            "/api/v1/watches",
             json={
                 "name": "Prefilled",
                 "url": "https://prefilled.com",
@@ -156,7 +156,7 @@ class TestWatchEdit:
 
     async def test_edit_watch_redirects(self, client):
         resp = await client.post(
-            "/api/watches",
+            "/api/v1/watches",
             json={
                 "name": "ToEdit",
                 "url": "https://example.com",
@@ -219,7 +219,7 @@ class TestAuditLog:
 class TestWatchDeactivate:
     async def test_deactivate_returns_updated_row(self, client):
         resp = await client.post(
-            "/api/watches",
+            "/api/v1/watches",
             json={
                 "name": "Deactivate Me",
                 "url": "https://example.com",

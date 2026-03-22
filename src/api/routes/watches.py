@@ -16,7 +16,7 @@ from src.core.models.audit_log import AuditLog
 from src.core.models.domain import DEFAULT_MAX_CONCURRENCY, DEFAULT_MIN_INTERVAL, Domain
 from src.core.models.watch import Watch
 
-router = APIRouter(prefix="/api/watches", tags=["watches"])
+router = APIRouter(prefix="/watches", tags=["watches"])
 
 
 @router.post("", status_code=201, response_model=WatchResponse)

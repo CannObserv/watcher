@@ -11,7 +11,7 @@ from src.api.schemas.change import ChangeResponse, SnapshotChunkResponse, Snapsh
 from src.core.models.change import Change
 from src.core.models.snapshot import Snapshot, SnapshotChunk
 
-router = APIRouter(prefix="/api/changes", tags=["changes"])
+router = APIRouter(prefix="/changes", tags=["changes"])
 
 
 class SnapshotWithChunksResponse(SnapshotResponse):

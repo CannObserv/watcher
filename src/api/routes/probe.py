@@ -10,7 +10,7 @@ from pydantic import BaseModel
 from src.api.dependencies import get_probe_fn
 from src.core.probe import ProbeResult
 
-router = APIRouter(prefix="/api/probe", tags=["probe"])
+router = APIRouter(prefix="/probe", tags=["probe"])
 
 
 class ProbeRequest(BaseModel):

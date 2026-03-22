@@ -1,0 +1,21 @@
+{% if watches %}
+<table class="data-table">
+  <thead>
+    <tr>
+      <th>Name</th>
+      <th>URL</th>
+      <th>Type</th>
+      <th>Status</th>
+      <th>Last Checked</th>
+      <th></th>
+    </tr>
+  </thead>
+  <tbody class="divide-y divide-gray-100">
+    {% for watch in watches %}
+      {% include "partials/watch_row.html" %}
+    {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p class="text-gray-500 text-sm">No watches found.</p>
+{% endif %}

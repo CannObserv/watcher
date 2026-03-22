@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block title %}Watches — watcher{% endblock %}
+{% block content %}
+<div class="flex justify-between items-center mb-6">
+  <h2 class="text-2xl font-bold text-gray-900">Watches</h2>
+  <a href="/watches/new" class="inline-flex items-center px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-md hover:bg-blue-700">
+    New Watch
+  </a>
+</div>
+
+<div class="flex gap-2 mb-4">
+  <button hx-get="/partials/watch-table" hx-target="#watch-table" class="px-3 py-1 text-sm rounded-md bg-gray-200 hover:bg-gray-300">All</button>
+  <button hx-get="/partials/watch-table?is_active=true" hx-target="#watch-table" class="px-3 py-1 text-sm rounded-md bg-gray-200 hover:bg-gray-300">Active</button>
+  <button hx-get="/partials/watch-table?is_active=false" hx-target="#watch-table" class="px-3 py-1 text-sm rounded-md bg-gray-200 hover:bg-gray-300">Inactive</button>
+</div>
+
+<div id="watch-table">
+  {% include "partials/watch_table.html" %}
+</div>
+{% endblock %}

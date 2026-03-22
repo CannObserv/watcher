@@ -6,7 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.api.dependencies import get_db_session
 from src.api.routes.helpers import get_watch_or_404, parse_ulid
-from src.api.schemas.temporal_profile import ProfileCreate, ProfileResponse
+from src.api.schemas.temporal_profile import ProfileCreate, ProfileResponse, ProfileUpdate
 from src.core.models.audit_log import AuditLog
 from src.core.models.temporal_profile import TemporalProfile
 
@@ -56,6 +56,35 @@ async def list_profiles(
     )
     result = await session.execute(stmt)
     return result.scalars().all()
+
+
+@router.patch("/{profile_id}", response_model=ProfileResponse)
+async def update_profile(
+    watch_id: str,
+    profile_id: str,
+    data: ProfileUpdate,
+    session: AsyncSession = Depends(get_db_session),
+):
+    """Partially update a temporal profile."""
+    watch = await get_watch_or_404(watch_id, session)
+    profile = await session.get(TemporalProfile, parse_ulid(profile_id, "Profile"))
+    if not profile or profile.watch_id != watch.id:
+        raise HTTPException(status_code=404, detail="Profile not found")
+    updates = data.model_dump(exclude_unset=True)
+    if "rules" in updates:
+        updates["rules"] = [r.model_dump() for r in data.rules]
+    for field, value in updates.items():
+        setattr(profile, field, value)
+    if updates:
+        audit = AuditLog(
+            event_type="profile.updated",
+            watch_id=watch.id,
+            payload={"profile_id": str(profile.id), "updated_fields": list(updates.keys())},
+        )
+        session.add(audit)
+    await session.commit()
+    await session.refresh(profile)
+    return profile
 
 
 @router.delete("/{profile_id}", status_code=204)

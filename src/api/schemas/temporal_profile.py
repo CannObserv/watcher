@@ -26,6 +26,14 @@ class ProfileCreate(BaseModel):
     post_action: PostAction
 
 
+class ProfileUpdate(BaseModel):
+    """Schema for partially updating a temporal profile."""
+
+    is_active: bool | None = None
+    rules: list[ProfileRuleItem] | None = None
+    post_action: PostAction | None = None
+
+
 class ProfileResponse(BaseModel):
     """Schema for returning a temporal profile."""
 

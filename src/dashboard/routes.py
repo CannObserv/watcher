@@ -442,3 +442,20 @@ async def partial_audit_table(
     return templates.TemplateResponse(
         "partials/audit_table.html", {"request": request, "entries": entries}
     )
+
+
+@router.get("/system")
+async def system_page(
+    request: Request,
+    session: AsyncSession = Depends(get_db_session),
+):
+    """System monitoring page -- queue health and rate limiter state."""
+    queue = await get_queue_health(session)
+    domains = get_rate_limiter_state(get_rate_limiter())
+    context = {
+        "request": request,
+        "active_page": "system",
+        "queue": queue,
+        "domains": domains,
+    }
+    return templates.TemplateResponse("pages/system.html", context)

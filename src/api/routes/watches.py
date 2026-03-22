@@ -1,6 +1,6 @@
 """Watch CRUD API endpoints."""
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Response
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -85,6 +85,28 @@ async def update_watch(
     await session.commit()
     await session.refresh(watch)
     return watch
+
+
+@router.delete("/{watch_id}", status_code=204, response_class=Response)
+async def delete_watch(
+    watch_id: str,
+    session: AsyncSession = Depends(get_db_session),
+):
+    """Permanently delete an inactive watch and all related data."""
+    watch = await get_watch_or_404(watch_id, session)
+
+    if watch.is_active:
+        raise HTTPException(status_code=409, detail="Deactivate watch before deleting")
+
+    audit = AuditLog(
+        event_type="watch.deleted",
+        watch_id=watch.id,
+        payload={"name": watch.name, "url": watch.url},
+    )
+    session.add(audit)
+    await session.delete(watch)
+    await session.commit()
+    return Response(status_code=204)
 
 
 @router.post("/{watch_id}/deactivate", response_model=WatchResponse)

@@ -17,7 +17,9 @@ class AuditLog(Base):
 
     id: Mapped[ULID] = mapped_column(ULIDType, primary_key=True, default=generate_ulid)
     event_type: Mapped[str] = mapped_column(String(100))
-    watch_id: Mapped[ULID | None] = mapped_column(ULIDType, ForeignKey("watches.id"), nullable=True)
+    watch_id: Mapped[ULID | None] = mapped_column(
+        ULIDType, ForeignKey("watches.id", ondelete="SET NULL"), nullable=True
+    )
     payload: Mapped[dict] = mapped_column(JSONB, default=dict, server_default="{}")
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

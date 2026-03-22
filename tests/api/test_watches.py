@@ -4,6 +4,10 @@ import pytest
 from sqlalchemy import select
 
 from src.core.models.audit_log import AuditLog
+from src.core.models.notification_config import NotificationConfig
+from src.core.models.snapshot import Snapshot, SnapshotChunk
+from src.core.models.temporal_profile import TemporalProfile
+from src.core.models.watch import Watch
 
 pytestmark = pytest.mark.integration
 
@@ -234,3 +238,154 @@ class TestListWatchesFilter:
         inactive_ids = [w["id"] for w in inactive.json()]
         assert watch_id not in active_ids
         assert watch_id in inactive_ids
+
+
+class TestDeleteWatch:
+    async def _create_inactive_watch(self, client):
+        """Create a watch and deactivate it; return its ID."""
+        resp = await client.post(
+            "/api/watches",
+            json={
+                "name": "Delete Me",
+                "url": "https://example.com/delete",
+                "content_type": "html",
+            },
+        )
+        watch_id = resp.json()["id"]
+        await client.post(f"/api/watches/{watch_id}/deactivate")
+        return watch_id
+
+    async def test_delete_inactive_watch_returns_204(self, client):
+        watch_id = await self._create_inactive_watch(client)
+        response = await client.delete(f"/api/watches/{watch_id}")
+        assert response.status_code == 204
+
+    async def test_delete_watch_removes_from_db(self, client):
+        watch_id = await self._create_inactive_watch(client)
+        await client.delete(f"/api/watches/{watch_id}")
+        response = await client.get(f"/api/watches/{watch_id}")
+        assert response.status_code == 404
+
+    async def test_delete_active_watch_returns_409(self, client):
+        resp = await client.post(
+            "/api/watches",
+            json={
+                "name": "Still Active",
+                "url": "https://example.com/active",
+                "content_type": "html",
+            },
+        )
+        watch_id = resp.json()["id"]
+        response = await client.delete(f"/api/watches/{watch_id}")
+        assert response.status_code == 409
+
+    async def test_delete_not_found(self, client):
+        response = await client.delete("/api/watches/00000000000000000000000000")
+        assert response.status_code == 404
+
+    async def test_delete_writes_audit_entry(self, client, db_session):
+        watch_id = await self._create_inactive_watch(client)
+        await client.delete(f"/api/watches/{watch_id}")
+        result = await db_session.execute(
+            select(AuditLog).where(AuditLog.event_type == "watch.deleted")
+        )
+        entries = result.scalars().all()
+        assert len(entries) >= 1
+        entry = entries[-1]
+        assert entry.payload["name"] == "Delete Me"
+        assert entry.payload["url"] == "https://example.com/delete"
+        assert entry.watch_id is None  # SET NULL after cascade
+
+    async def test_delete_cascades_children(self, client, db_session):
+        """Deleting a watch cascades to all child records."""
+        watch_id = await self._create_inactive_watch(client)
+
+        # Insert child records directly via session
+        from ulid import ULID as ulidlib
+
+        watch_ulid = ulidlib.from_str(watch_id)
+
+        snapshot = Snapshot(
+            watch_id=watch_ulid,
+            content_hash="a" * 64,
+            simhash=123,
+            storage_path="/tmp/test",
+            text_path="/tmp/test.txt",
+            chunk_count=1,
+            text_bytes=100,
+            fetch_duration_ms=50,
+            fetcher_used="http",
+        )
+        db_session.add(snapshot)
+        await db_session.flush()
+
+        chunk = SnapshotChunk(
+            snapshot_id=snapshot.id,
+            chunk_index=0,
+            chunk_type="section",
+            chunk_label="test",
+            content_hash="b" * 64,
+            simhash=456,
+            char_count=50,
+            excerpt="test content",
+        )
+        profile = TemporalProfile(
+            watch_id=watch_ulid,
+            profile_type="event",
+            post_action="deactivate",
+        )
+        config = NotificationConfig(
+            watch_id=watch_ulid,
+            channel="webhook",
+        )
+        db_session.add_all([chunk, profile, config])
+        await db_session.flush()
+
+        # Delete the watch
+        await client.delete(f"/api/watches/{watch_id}")
+
+        # Verify children are gone
+        watches = (
+            (await db_session.execute(select(Watch).where(Watch.id == watch_ulid))).scalars().all()
+        )
+        assert len(watches) == 0
+
+        snapshots = (
+            (await db_session.execute(select(Snapshot).where(Snapshot.watch_id == watch_ulid)))
+            .scalars()
+            .all()
+        )
+        assert len(snapshots) == 0
+
+        chunks = (
+            (
+                await db_session.execute(
+                    select(SnapshotChunk).where(SnapshotChunk.snapshot_id == snapshot.id)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert len(chunks) == 0
+
+        profiles = (
+            (
+                await db_session.execute(
+                    select(TemporalProfile).where(TemporalProfile.watch_id == watch_ulid)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert len(profiles) == 0
+
+        configs = (
+            (
+                await db_session.execute(
+                    select(NotificationConfig).where(NotificationConfig.watch_id == watch_ulid)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert len(configs) == 0

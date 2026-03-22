@@ -14,7 +14,7 @@ class NotificationConfig(Base, TimestampMixin):
     __tablename__ = "notification_configs"
 
     id: Mapped[ULID] = mapped_column(ULIDType, primary_key=True, default=generate_ulid)
-    watch_id: Mapped[ULID] = mapped_column(ULIDType, ForeignKey("watches.id"))
+    watch_id: Mapped[ULID] = mapped_column(ULIDType, ForeignKey("watches.id", ondelete="CASCADE"))
     channel: Mapped[str] = mapped_column(String(20))
     config: Mapped[dict] = mapped_column(JSONB, default=dict, server_default="{}")
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")

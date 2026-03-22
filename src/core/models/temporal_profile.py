@@ -33,7 +33,7 @@ class TemporalProfile(Base, TimestampMixin):
     __tablename__ = "temporal_profiles"
 
     id: Mapped[ULID] = mapped_column(ULIDType, primary_key=True, default=generate_ulid)
-    watch_id: Mapped[ULID] = mapped_column(ULIDType, ForeignKey("watches.id"))
+    watch_id: Mapped[ULID] = mapped_column(ULIDType, ForeignKey("watches.id", ondelete="CASCADE"))
     profile_type: Mapped[ProfileType] = mapped_column(String(20))
     reference_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     date_range_start: Mapped[date | None] = mapped_column(Date, nullable=True)

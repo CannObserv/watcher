@@ -16,9 +16,13 @@ class Change(Base):
     __tablename__ = "changes"
 
     id: Mapped[ULID] = mapped_column(ULIDType, primary_key=True, default=generate_ulid)
-    watch_id: Mapped[ULID] = mapped_column(ULIDType, ForeignKey("watches.id"))
-    previous_snapshot_id: Mapped[ULID] = mapped_column(ULIDType, ForeignKey("snapshots.id"))
-    current_snapshot_id: Mapped[ULID] = mapped_column(ULIDType, ForeignKey("snapshots.id"))
+    watch_id: Mapped[ULID] = mapped_column(ULIDType, ForeignKey("watches.id", ondelete="CASCADE"))
+    previous_snapshot_id: Mapped[ULID] = mapped_column(
+        ULIDType, ForeignKey("snapshots.id", ondelete="CASCADE")
+    )
+    current_snapshot_id: Mapped[ULID] = mapped_column(
+        ULIDType, ForeignKey("snapshots.id", ondelete="CASCADE")
+    )
     change_metadata: Mapped[dict] = mapped_column(JSONB, default=dict, server_default="{}")
     detected_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

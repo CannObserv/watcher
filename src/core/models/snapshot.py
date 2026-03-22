@@ -15,7 +15,7 @@ class Snapshot(Base):
     __tablename__ = "snapshots"
 
     id: Mapped[ULID] = mapped_column(ULIDType, primary_key=True, default=generate_ulid)
-    watch_id: Mapped[ULID] = mapped_column(ULIDType, ForeignKey("watches.id"))
+    watch_id: Mapped[ULID] = mapped_column(ULIDType, ForeignKey("watches.id", ondelete="CASCADE"))
     content_hash: Mapped[str] = mapped_column(String(64))
     simhash: Mapped[int] = mapped_column(BigInteger)
     storage_path: Mapped[str] = mapped_column(Text)
@@ -38,7 +38,9 @@ class SnapshotChunk(Base):
     __tablename__ = "snapshot_chunks"
 
     id: Mapped[ULID] = mapped_column(ULIDType, primary_key=True, default=generate_ulid)
-    snapshot_id: Mapped[ULID] = mapped_column(ULIDType, ForeignKey("snapshots.id"))
+    snapshot_id: Mapped[ULID] = mapped_column(
+        ULIDType, ForeignKey("snapshots.id", ondelete="CASCADE")
+    )
     chunk_index: Mapped[int] = mapped_column(SmallInteger)
     chunk_type: Mapped[str] = mapped_column(String(20))
     chunk_label: Mapped[str] = mapped_column(String(255))

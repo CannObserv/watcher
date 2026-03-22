@@ -2,6 +2,7 @@
 
 import hashlib
 from datetime import UTC, datetime
+from urllib.parse import urlparse
 
 import httpx
 import procrastinate
@@ -18,6 +19,7 @@ from src.core.logging import get_logger
 from src.core.models.audit_log import AuditLog
 from src.core.models.base import generate_ulid
 from src.core.models.change import Change
+from src.core.models.domain import Domain
 from src.core.models.notification_config import NotificationConfig
 from src.core.models.snapshot import Snapshot, SnapshotChunk
 from src.core.models.temporal_profile import TemporalProfile
@@ -66,6 +68,20 @@ _EXTRACTOR_MAP = {
     "pdf": PdfExtractor,
     "file": CsvExcelExtractor,
 }
+
+
+async def _persist_backoff(domain_name: str, new_interval: float, session: AsyncSession) -> None:
+    """Persist backoff state to the Domain table after a 429 response.
+
+    Caller is responsible for committing the session after this call.
+    """
+    stmt = select(Domain).where(Domain.name == domain_name)
+    result = await session.execute(stmt)
+    domain = result.scalar_one_or_none()
+    if domain is None:
+        return
+    domain.current_interval = new_interval
+    domain.last_request_at = datetime.now(UTC)
 
 
 async def _get_previous_snapshot(
@@ -302,12 +318,17 @@ async def check_watch(watch_id: str) -> dict:
         fetch_config = {
             k: v for k, v in (watch.fetch_config or {}).items() if k in ("headers", "timeout")
         }
-        async with get_rate_limiter().acquire(watch.url):
+        # Use effective_domain if resolved; fall back to URL parsing for old watches
+        rate_limit_domain = watch.effective_domain or urlparse(watch.url).hostname or watch.url
+
+        async with get_rate_limiter().acquire_for_domain(rate_limit_domain):
             fetch_result = await get_fetcher().fetch(watch.url, config=fetch_config)
 
         if fetch_result.status_code == 429:
-            get_rate_limiter().report_rate_limited(watch.url)
-            raise ConnectionError(f"Rate limited by {watch.url}")
+            new_interval = get_rate_limiter().report_rate_limited_for_domain(rate_limit_domain)
+            await _persist_backoff(rate_limit_domain, new_interval, session)
+            await session.commit()
+            raise ConnectionError(f"Rate limited by {rate_limit_domain}")
 
         if not fetch_result.is_success:
             logger.warning(

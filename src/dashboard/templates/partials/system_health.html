@@ -1,0 +1,40 @@
+<div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+  <div class="stat-card">
+    <h4 class="text-sm font-medium text-gray-500 mb-3">Task Queue</h4>
+    <dl class="space-y-2">
+      <div class="flex justify-between">
+        <dt class="text-sm text-gray-600">Pending</dt>
+        <dd class="text-sm font-medium text-yellow-600">{{ queue.todo }}</dd>
+      </div>
+      <div class="flex justify-between">
+        <dt class="text-sm text-gray-600">Running</dt>
+        <dd class="text-sm font-medium text-blue-600">{{ queue.doing }}</dd>
+      </div>
+      <div class="flex justify-between">
+        <dt class="text-sm text-gray-600">Failed</dt>
+        <dd class="text-sm font-medium text-red-600">{{ queue.failed }}</dd>
+      </div>
+      <div class="flex justify-between">
+        <dt class="text-sm text-gray-600">Succeeded (today)</dt>
+        <dd class="text-sm font-medium text-green-600">{{ queue.succeeded_today }}</dd>
+      </div>
+    </dl>
+  </div>
+  <div class="stat-card">
+    <h4 class="text-sm font-medium text-gray-500 mb-3">Rate Limiter</h4>
+    {% if domains %}
+    <dl class="space-y-2">
+      {% for domain in domains %}
+      <div class="flex justify-between">
+        <dt class="text-sm text-gray-600 truncate max-w-[200px]" title="{{ domain.name }}">{{ domain.name }}</dt>
+        <dd class="text-sm font-medium {% if domain.in_backoff %}text-orange-600{% else %}text-gray-600{% endif %}">
+          {{ "%.1f"|format(domain.interval) }}s{% if domain.in_backoff %} ⚠{% endif %}
+        </dd>
+      </div>
+      {% endfor %}
+    </dl>
+    {% else %}
+    <p class="text-gray-500 text-sm">No domains tracked yet.</p>
+    {% endif %}
+  </div>
+</div>

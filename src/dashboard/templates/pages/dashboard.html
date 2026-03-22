@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block title %}Dashboard — watcher{% endblock %}
+{% block content %}
+<h2 class="text-2xl font-bold text-gray-900 mb-6">Dashboard</h2>
+<div id="stats-cards" hx-get="/partials/stats-cards" hx-trigger="every 30s" hx-swap="innerHTML">
+  {% include "partials/stats_cards.html" %}
+</div>
+<div class="mt-8">
+  <h3 class="text-lg font-semibold text-gray-900 mb-4">Recent Changes</h3>
+  <div id="recent-changes" hx-get="/partials/recent-changes" hx-trigger="every 30s" hx-swap="innerHTML">
+    {% include "partials/recent_changes.html" %}
+  </div>
+</div>
+<div class="mt-8">
+  <h3 class="text-lg font-semibold text-gray-900 mb-4">System Health</h3>
+  <div id="system-health" hx-get="/partials/system-health" hx-trigger="every 10s" hx-swap="innerHTML">
+    {% include "partials/system_health.html" %}
+  </div>
+</div>
+{% endblock %}

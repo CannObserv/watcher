@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full bg-gray-50">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{% block title %}watcher{% endblock %}</title>
+  <link rel="stylesheet" href="/static/css/output.css">
+  <script src="/static/js/htmx.min.js"></script>
+  <script src="/static/js/app.js"></script>
+</head>
+<body class="h-full">
+  <div class="flex h-full">
+    <nav class="w-64 bg-white shadow-sm border-r border-gray-200 flex flex-col">
+      <div class="p-4 border-b border-gray-200">
+        <h1 class="text-lg font-bold text-gray-900">watcher</h1>
+      </div>
+      <div class="flex-1 p-4 space-y-1">
+        <a href="/" class="nav-link {% if active_page == 'dashboard' %}nav-link-active{% endif %}">Dashboard</a>
+        <a href="/watches" class="nav-link {% if active_page == 'watches' %}nav-link-active{% endif %}">Watches</a>
+        <a href="/audit" class="nav-link {% if active_page == 'audit' %}nav-link-active{% endif %}">Audit Log</a>
+        <a href="/system" class="nav-link {% if active_page == 'system' %}nav-link-active{% endif %}">System</a>
+      </div>
+    </nav>
+    <main class="flex-1 overflow-y-auto p-8">
+      {% block content %}{% endblock %}
+    </main>
+  </div>
+</body>
+</html>

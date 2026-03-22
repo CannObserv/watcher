@@ -24,7 +24,7 @@ from src.core.models.temporal_profile import TemporalProfile
 from src.core.models.watch import Watch
 from src.core.notifications import ChangeEvent, EmailChannel, SlackChannel, WebhookChannel
 from src.core.notifications.dispatcher import dispatch_notifications
-from src.core.rate_limiter import DomainRateLimiter
+from src.core.rate_limiter import get_rate_limiter
 from src.core.scheduler import compute_next_check, evaluate_post_actions
 from src.core.simhash import simhash
 from src.core.storage import STORAGE_BASE_DIR, LocalStorage, StorageBackend
@@ -35,7 +35,6 @@ logger = get_logger(__name__)
 # Shared resources — lazy-initialized on first use to avoid binding to an
 # event loop at import time (important for DomainRateLimiter's asyncio primitives).
 _fetcher: HttpFetcher | None = None
-_rate_limiter: DomainRateLimiter | None = None
 
 
 def get_fetcher() -> HttpFetcher:
@@ -44,14 +43,6 @@ def get_fetcher() -> HttpFetcher:
     if _fetcher is None:
         _fetcher = HttpFetcher()
     return _fetcher
-
-
-def get_rate_limiter() -> DomainRateLimiter:
-    """Return the shared rate limiter, creating it on first call."""
-    global _rate_limiter
-    if _rate_limiter is None:
-        _rate_limiter = DomainRateLimiter()
-    return _rate_limiter
 
 
 _INT64_MAX = (1 << 63) - 1

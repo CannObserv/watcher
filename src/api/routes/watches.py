@@ -27,6 +27,7 @@ async def create_watch(
         schedule_config=data.schedule_config,
     )
     session.add(watch)
+    await session.flush()
     audit = AuditLog(
         event_type="watch.created",
         watch_id=watch.id,

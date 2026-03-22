@@ -171,6 +171,7 @@ class TestAuditLog:
         )
         entry = result.scalar_one()
         assert entry.payload["url"] == "https://example.com/audit"
+        assert entry.watch_id is not None
 
     async def test_update_writes_audit_entry(self, client, db_session):
         resp = await client.post(

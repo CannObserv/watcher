@@ -1,0 +1,102 @@
+{% extends "base.html" %}
+{% block title %}{{ watch.name }} — watcher{% endblock %}
+{% block content %}
+<div class="flex justify-between items-center mb-6">
+  <div>
+    <h2 class="text-2xl font-bold text-gray-900">{{ watch.name }}</h2>
+    <p class="text-sm text-gray-500 mt-1">{{ watch.url }}</p>
+  </div>
+  <div class="flex gap-2">
+    <a href="/watches/{{ watch.id }}/edit" class="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50">Edit</a>
+    {% if watch.is_active %}
+    <button
+      hx-post="/watches/{{ watch.id }}/deactivate"
+      hx-target="#watch-status"
+      hx-swap="innerHTML"
+      hx-confirm="Deactivate {{ watch.name }}?"
+      class="px-4 py-2 text-sm font-medium text-red-600 bg-white border border-red-300 rounded-md hover:bg-red-50">
+      Deactivate
+    </button>
+    {% endif %}
+  </div>
+</div>
+
+<!-- Status and config -->
+<div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
+  <div class="stat-card">
+    <h3 class="text-sm font-medium text-gray-500 mb-3">Configuration</h3>
+    <dl class="space-y-2">
+      <div class="flex justify-between">
+        <dt class="text-sm text-gray-600">Content Type</dt>
+        <dd class="text-sm font-medium">{{ watch.content_type }}</dd>
+      </div>
+      <div id="watch-status" class="flex justify-between">
+        <dt class="text-sm text-gray-600">Status</dt>
+        <dd class="text-sm font-medium {% if watch.is_active %}text-green-600{% else %}text-gray-500{% endif %}">
+          {{ "Active" if watch.is_active else "Inactive" }}
+        </dd>
+      </div>
+      <div class="flex justify-between">
+        <dt class="text-sm text-gray-600">Check Interval</dt>
+        <dd class="text-sm font-medium">{{ watch.schedule_config.get('interval', '1d') if watch.schedule_config else '1d' }}</dd>
+      </div>
+      <div class="flex justify-between">
+        <dt class="text-sm text-gray-600">Last Checked</dt>
+        <dd class="text-sm font-medium">
+          {% if watch.last_checked_at %}{{ watch.last_checked_at.strftime('%Y-%m-%d %H:%M UTC') }}{% else %}Never{% endif %}
+        </dd>
+      </div>
+    </dl>
+  </div>
+
+  <div class="stat-card">
+    <h3 class="text-sm font-medium text-gray-500 mb-3">Fetch Config</h3>
+    {% if watch.fetch_config %}
+    <pre class="text-xs text-gray-600 bg-gray-50 p-3 rounded overflow-x-auto">{{ watch.fetch_config | tojson(indent=2) }}</pre>
+    {% else %}
+    <p class="text-gray-500 text-sm">Default configuration</p>
+    {% endif %}
+  </div>
+</div>
+
+<!-- Temporal Profiles (read-only) -->
+{% if profiles %}
+<div class="mb-8">
+  <h3 class="text-lg font-semibold text-gray-900 mb-4">Temporal Profiles</h3>
+  <div class="space-y-2">
+    {% for profile in profiles %}
+    <div class="stat-card text-sm">
+      <span class="font-medium">{{ profile.profile_type }}</span>
+      {% if profile.reference_date %} — {{ profile.reference_date }}{% endif %}
+      {% if profile.date_range_start %} — {{ profile.date_range_start }} to {{ profile.date_range_end }}{% endif %}
+      <span class="text-gray-500 ml-2">({{ profile.post_action }})</span>
+      {% if not profile.is_active %}<span class="text-gray-400 ml-1">[inactive]</span>{% endif %}
+    </div>
+    {% endfor %}
+  </div>
+</div>
+{% endif %}
+
+<!-- Notification Configs (read-only) -->
+{% if notifications %}
+<div class="mb-8">
+  <h3 class="text-lg font-semibold text-gray-900 mb-4">Notifications</h3>
+  <div class="space-y-2">
+    {% for nc in notifications %}
+    <div class="stat-card text-sm">
+      <span class="font-medium">{{ nc.channel }}</span>
+      {% if not nc.is_active %}<span class="text-gray-400 ml-1">[inactive]</span>{% endif %}
+    </div>
+    {% endfor %}
+  </div>
+</div>
+{% endif %}
+
+<!-- Change history -->
+<div>
+  <h3 class="text-lg font-semibold text-gray-900 mb-4">Change History</h3>
+  <div id="watch-changes" hx-get="/partials/watch-changes/{{ watch.id }}" hx-trigger="every 30s" hx-swap="innerHTML">
+    {% include "partials/watch_changes.html" %}
+  </div>
+</div>
+{% endblock %}

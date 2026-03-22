@@ -1,13 +1,18 @@
 """Watch CRUD API endpoints."""
 
+from collections.abc import Awaitable, Callable
+from typing import Annotated
+
+import httpx
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.api.dependencies import get_db_session
+from src.api.dependencies import get_db_session, get_probe_fn
 from src.api.routes.helpers import get_watch_or_404
 from src.api.schemas.watch import WatchCreate, WatchResponse, WatchUpdate
 from src.core.models.audit_log import AuditLog
+from src.core.models.domain import DEFAULT_MAX_CONCURRENCY, DEFAULT_MIN_INTERVAL, Domain
 from src.core.models.watch import Watch
 
 router = APIRouter(prefix="/api/watches", tags=["watches"])
@@ -17,21 +22,48 @@ router = APIRouter(prefix="/api/watches", tags=["watches"])
 async def create_watch(
     data: WatchCreate,
     session: AsyncSession = Depends(get_db_session),
+    probe_fn: Annotated[Callable[[str], Awaitable], Depends(get_probe_fn)] = None,
 ):
-    """Create a new watch."""
+    """Create a new watch. Probes the URL to resolve effective domain."""
+    try:
+        probe_result = await probe_fn(data.url)
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=422, detail=f"URL unreachable: {exc}") from exc
+
+    # Upsert domain — insert with defaults if new, leave config intact if exists
+    domain_stmt = select(Domain).where(Domain.name == probe_result.effective_domain)
+    domain_result = await session.execute(domain_stmt)
+    if not domain_result.scalar_one_or_none():
+        session.add(
+            Domain(
+                name=probe_result.effective_domain,
+                min_interval=DEFAULT_MIN_INTERVAL,
+                max_concurrency=DEFAULT_MAX_CONCURRENCY,
+                current_interval=DEFAULT_MIN_INTERVAL,
+            )
+        )
+
     watch = Watch(
         name=data.name,
         url=data.url,
         content_type=data.content_type,
         fetch_config=data.fetch_config,
         schedule_config=data.schedule_config,
+        effective_url=probe_result.effective_url,
+        effective_domain=probe_result.effective_domain,
     )
     session.add(watch)
     await session.flush()
     audit = AuditLog(
         event_type="watch.created",
         watch_id=watch.id,
-        payload={"name": data.name, "url": data.url, "content_type": data.content_type.value},
+        payload={
+            "name": data.name,
+            "url": data.url,
+            "content_type": data.content_type.value,
+            "effective_url": probe_result.effective_url,
+            "effective_domain": probe_result.effective_domain,
+        },
     )
     session.add(audit)
     await session.commit()

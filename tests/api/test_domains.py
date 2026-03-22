@@ -78,7 +78,6 @@ class TestDeleteDomain:
         response = await client.delete("/api/domains/nope.com")
         assert response.status_code == 404
 
-    @pytest.mark.xfail(strict=False, reason="requires probe in watch creation (Task 6)")
     async def test_delete_domain_with_watches_returns_409(self, client):
         await client.post(
             "/api/watches",

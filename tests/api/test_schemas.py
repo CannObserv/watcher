@@ -55,13 +55,11 @@ class TestWatchUpdate:
     def test_update_partial(self):
         data = WatchUpdate(name="New Name")
         assert data.name == "New Name"
-        assert data.url is None
         assert data.is_active is None
 
     def test_update_all_fields(self):
         data = WatchUpdate(
             name="Updated",
-            url="https://new.example.com",
             content_type="pdf",
             fetch_config={"selectors": ["#main"]},
             schedule_config={"interval": "1h"},
@@ -72,6 +70,11 @@ class TestWatchUpdate:
     def test_update_empty_is_valid(self):
         data = WatchUpdate()
         assert data.name is None
+
+    def test_update_url_field_not_present(self):
+        """URL is intentionally omitted from WatchUpdate — immutable after creation."""
+        data = WatchUpdate(name="No URL change")
+        assert not hasattr(data, "url")
 
 
 class TestSnapshotChunkResponse:

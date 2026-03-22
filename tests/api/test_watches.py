@@ -395,3 +395,42 @@ class TestDeleteWatch:
             .all()
         )
         assert len(configs) == 0
+
+
+class TestCreateWatchProbe:
+    async def test_create_watch_populates_effective_fields(self, client):
+        response = await client.post(
+            "/api/watches",
+            json={"name": "W", "url": "https://example.com/page", "content_type": "html"},
+        )
+        assert response.status_code == 201
+        data = response.json()
+        assert data["effective_url"] == "https://example.com/page"
+        assert data["effective_domain"] == "example.com"
+
+    async def test_create_watch_upserts_domain(self, client):
+        await client.post(
+            "/api/watches",
+            json={"name": "W", "url": "https://example.com/p", "content_type": "html"},
+        )
+        domains = (await client.get("/api/domains")).json()
+        assert any(d["name"] == "example.com" for d in domains)
+
+    async def test_create_watch_does_not_overwrite_existing_domain_config(self, client):
+        await client.patch("/api/domains/example.com", json={"min_interval": 10.0})
+        await client.post(
+            "/api/watches",
+            json={"name": "W", "url": "https://example.com/p", "content_type": "html"},
+        )
+        domain = (await client.get("/api/domains/example.com")).json()
+        assert domain["min_interval"] == 10.0  # operator config preserved
+
+    async def test_patch_watch_url_is_unchanged(self, client):
+        resp = await client.post(
+            "/api/watches",
+            json={"name": "W", "url": "https://example.com/p", "content_type": "html"},
+        )
+        watch_id = resp.json()["id"]
+        response = await client.patch(f"/api/watches/{watch_id}", json={"name": "Updated"})
+        assert response.status_code == 200
+        assert response.json()["url"] == "https://example.com/p"  # unchanged

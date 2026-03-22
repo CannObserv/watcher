@@ -89,6 +89,18 @@ class TestGetQueueHealth:
 
 
 class TestGetRateLimiterState:
-    def test_returns_list(self):
-        domains = get_rate_limiter_state()
+    def test_returns_empty_without_limiter(self):
+        assert get_rate_limiter_state() == []
+
+    def test_returns_domains_from_limiter(self):
+        from src.core.rate_limiter import DomainRateLimiter
+
+        limiter = DomainRateLimiter()
+        # Access a domain to create an entry
+        limiter.extract_domain("https://example.com")
+        _ = limiter._domains["example.com"]
+        domains = get_rate_limiter_state(limiter)
         assert isinstance(domains, list)
+        assert len(domains) == 1
+        assert domains[0]["name"] == "example.com"
+        assert domains[0]["in_backoff"] is False

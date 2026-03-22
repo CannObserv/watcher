@@ -11,6 +11,7 @@ from src.dashboard.context import (
     get_rate_limiter_state,
     get_recent_changes,
 )
+from src.workers.tasks import get_rate_limiter
 
 router = APIRouter(tags=["dashboard"])
 
@@ -24,7 +25,7 @@ async def dashboard_home(
     stats = await get_dashboard_stats(session)
     changes = await get_recent_changes(session, limit=20)
     queue = await get_queue_health(session)
-    domains = get_rate_limiter_state()
+    domains = get_rate_limiter_state(get_rate_limiter())
 
     context = {
         "request": request,
@@ -68,7 +69,7 @@ async def partial_system_health(
 ):
     """HTMX partial: queue health and rate limiter."""
     queue = await get_queue_health(session)
-    domains = get_rate_limiter_state()
+    domains = get_rate_limiter_state(get_rate_limiter())
     return templates.TemplateResponse(
         "partials/system_health.html",
         {"request": request, "queue": queue, "domains": domains},

@@ -3,12 +3,12 @@
 from datetime import UTC, datetime
 
 from sqlalchemy import func, select, text
+from sqlalchemy.exc import ProgrammingError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.models.audit_log import AuditLog
 from src.core.models.change import Change
 from src.core.models.watch import Watch
-from src.core.rate_limiter import DEFAULT_MIN_INTERVAL
 
 
 async def get_dashboard_stats(session: AsyncSession) -> dict:
@@ -77,18 +77,20 @@ async def get_recent_changes(session: AsyncSession, limit: int = 20) -> list[dic
 
 
 async def get_queue_health(session: AsyncSession) -> dict:
-    """Query procrastinate_jobs table for queue status counts."""
+    """Query procrastinate_jobs table for queue status counts.
+
+    Returns zeros if the procrastinate_jobs table doesn't exist (e.g., test
+    environments without procrastinate migrations applied).
+    """
     today_start = datetime.now(UTC).replace(hour=0, minute=0, second=0, microsecond=0)
+    default = {"todo": 0, "doing": 0, "failed": 0, "succeeded_today": 0}
 
     try:
         result = await session.execute(
             text("SELECT status, count(*) FROM procrastinate_jobs GROUP BY status")
         )
         counts = {row[0]: row[1] for row in result.all()}
-    except Exception:
-        counts = {}
 
-    try:
         succeeded_today = await session.scalar(
             text(
                 "SELECT count(*) FROM procrastinate_jobs "
@@ -96,8 +98,9 @@ async def get_queue_health(session: AsyncSession) -> dict:
             ),
             {"today_start": today_start},
         )
-    except Exception:
-        succeeded_today = 0
+    except ProgrammingError:
+        await session.rollback()
+        return default
 
     return {
         "todo": counts.get("todo", 0),
@@ -107,22 +110,13 @@ async def get_queue_health(session: AsyncSession) -> dict:
     }
 
 
-def get_rate_limiter_state() -> list[dict]:
-    """Get current rate limiter domain states."""
-    try:
-        from src.workers.tasks import get_rate_limiter
+def get_rate_limiter_state(limiter=None) -> list[dict]:
+    """Get current rate limiter domain states.
 
-        limiter = get_rate_limiter()
-    except Exception:
+    Args:
+        limiter: A DomainRateLimiter instance. If None, returns empty list
+                 (caller is responsible for providing the limiter).
+    """
+    if limiter is None:
         return []
-
-    domains = []
-    for domain, state in limiter._domains.items():
-        domains.append(
-            {
-                "name": domain,
-                "interval": state.min_interval,
-                "in_backoff": state.min_interval > DEFAULT_MIN_INTERVAL,
-            }
-        )
-    return sorted(domains, key=lambda d: d["name"])
+    return limiter.get_domain_states()

@@ -68,3 +68,18 @@ class TestDomainRateLimiter:
         domain = limiter.extract_domain("https://example.com/a")
         state = limiter._domains[domain]
         assert state.min_interval > 0.0
+
+    def test_get_domain_states_empty(self):
+        limiter = DomainRateLimiter()
+        assert limiter.get_domain_states() == []
+
+    def test_get_domain_states_reports_backoff(self):
+        limiter = DomainRateLimiter(min_interval=1.0)
+        # Trigger domain creation
+        _ = limiter._domains["example.com"]
+        limiter.report_rate_limited("https://example.com/a")
+        states = limiter.get_domain_states()
+        assert len(states) == 1
+        assert states[0]["name"] == "example.com"
+        assert states[0]["in_backoff"] is True
+        assert states[0]["interval"] > 1.0

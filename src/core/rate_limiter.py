@@ -67,6 +67,23 @@ class DomainRateLimiter:
         finally:
             state.semaphore.release()
 
+    def get_domain_states(self) -> list[dict]:
+        """Return current state of all tracked domains for monitoring.
+
+        Returns list of dicts with 'name', 'interval', and 'in_backoff' keys.
+        """
+        return sorted(
+            [
+                {
+                    "name": domain,
+                    "interval": state.min_interval,
+                    "in_backoff": state.min_interval > self._default_min_interval,
+                }
+                for domain, state in self._domains.items()
+            ],
+            key=lambda d: d["name"],
+        )
+
     def report_rate_limited(self, url: str) -> None:
         """Report a 429 response — increase the domain's min_interval via backoff."""
         domain = self.extract_domain(url)

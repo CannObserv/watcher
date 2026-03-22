@@ -11,6 +11,15 @@ from src.core.models.change import Change
 from src.core.models.watch import Watch
 
 
+async def get_watch_list(session: AsyncSession, is_active: bool | None = None) -> list[Watch]:
+    """Fetch watches for list display, optionally filtered by active status."""
+    stmt = select(Watch).order_by(Watch.created_at.desc())
+    if is_active is not None:
+        stmt = stmt.where(Watch.is_active == is_active)
+    result = await session.execute(stmt)
+    return list(result.scalars().all())
+
+
 async def get_dashboard_stats(session: AsyncSession) -> dict:
     """Aggregate counts for dashboard stat cards."""
     total = await session.scalar(select(func.count(Watch.id)))

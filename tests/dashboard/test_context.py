@@ -10,6 +10,7 @@ from src.dashboard.context import (
     get_queue_health,
     get_rate_limiter_state,
     get_recent_changes,
+    get_watch_list,
 )
 
 pytestmark = pytest.mark.integration
@@ -104,3 +105,35 @@ class TestGetRateLimiterState:
         assert len(domains) == 1
         assert domains[0]["name"] == "example.com"
         assert domains[0]["in_backoff"] is False
+
+
+class TestGetWatchList:
+    async def test_empty_returns_empty_list(self, db_session):
+        result = await get_watch_list(db_session)
+        assert result == []
+
+    async def test_returns_watches(self, db_session):
+        watch = Watch(name="W1", url="https://a.com", content_type="html")
+        db_session.add(watch)
+        await db_session.flush()
+
+        result = await get_watch_list(db_session)
+        assert len(result) == 1
+        assert result[0].name == "W1"
+        assert hasattr(result[0], "last_checked_at")
+
+    async def test_filter_active(self, db_session):
+        db_session.add(Watch(name="Active", url="https://a.com", content_type="html"))
+        db_session.add(
+            Watch(
+                name="Inactive",
+                url="https://b.com",
+                content_type="html",
+                is_active=False,
+            )
+        )
+        await db_session.flush()
+
+        active_only = await get_watch_list(db_session, is_active=True)
+        assert len(active_only) == 1
+        assert active_only[0].name == "Active"

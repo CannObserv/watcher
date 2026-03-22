@@ -2,6 +2,7 @@
 
 import pytest
 from sqlalchemy import select
+from ulid import ULID
 
 from src.core.models.audit_log import AuditLog
 from src.core.models.notification_config import NotificationConfig
@@ -163,11 +164,13 @@ class TestAuditLog:
             },
         )
         result = await db_session.execute(
-            select(AuditLog).where(AuditLog.event_type == "watch.created")
+            select(AuditLog).where(
+                AuditLog.event_type == "watch.created",
+                AuditLog.payload["name"].astext == "Audited Watch",
+            )
         )
-        entries = result.scalars().all()
-        assert len(entries) >= 1
-        assert entries[0].payload["name"] == "Audited Watch"
+        entry = result.scalar_one()
+        assert entry.payload["url"] == "https://example.com/audit"
 
     async def test_update_writes_audit_entry(self, client, db_session):
         resp = await client.post(
@@ -182,11 +185,13 @@ class TestAuditLog:
         await client.patch(f"/api/watches/{watch_id}", json={"name": "Changed"})
 
         result = await db_session.execute(
-            select(AuditLog).where(AuditLog.event_type == "watch.updated")
+            select(AuditLog).where(
+                AuditLog.event_type == "watch.updated",
+                AuditLog.payload["updated_fields"].astext.contains("name"),
+            )
         )
-        entries = result.scalars().all()
-        assert len(entries) >= 1
-        assert "name" in entries[0].payload["updated_fields"]
+        entry = result.scalar_one()
+        assert str(entry.watch_id) == watch_id
 
     async def test_deactivate_writes_audit_entry(self, client, db_session):
         resp = await client.post(
@@ -201,11 +206,13 @@ class TestAuditLog:
         await client.post(f"/api/watches/{watch_id}/deactivate")
 
         result = await db_session.execute(
-            select(AuditLog).where(AuditLog.event_type == "watch.deactivated")
+            select(AuditLog).where(
+                AuditLog.event_type == "watch.deactivated",
+                AuditLog.payload["name"].astext == "Deact Audit",
+            )
         )
-        entries = result.scalars().all()
-        assert len(entries) >= 1
-        assert entries[0].payload["name"] == "Deact Audit"
+        entry = result.scalar_one()
+        assert str(entry.watch_id) == watch_id
 
 
 class TestInvalidULID:
@@ -287,12 +294,12 @@ class TestDeleteWatch:
         watch_id = await self._create_inactive_watch(client)
         await client.delete(f"/api/watches/{watch_id}")
         result = await db_session.execute(
-            select(AuditLog).where(AuditLog.event_type == "watch.deleted")
+            select(AuditLog).where(
+                AuditLog.event_type == "watch.deleted",
+                AuditLog.payload["name"].astext == "Delete Me",
+            )
         )
-        entries = result.scalars().all()
-        assert len(entries) >= 1
-        entry = entries[-1]
-        assert entry.payload["name"] == "Delete Me"
+        entry = result.scalar_one()
         assert entry.payload["url"] == "https://example.com/delete"
         assert entry.watch_id is None  # SET NULL after cascade
 
@@ -301,9 +308,7 @@ class TestDeleteWatch:
         watch_id = await self._create_inactive_watch(client)
 
         # Insert child records directly via session
-        from ulid import ULID as ulidlib
-
-        watch_ulid = ulidlib.from_str(watch_id)
+        watch_ulid = ULID.from_str(watch_id)
 
         snapshot = Snapshot(
             watch_id=watch_ulid,

@@ -1,6 +1,6 @@
 """Watch CRUD API endpoints."""
 
-from fastapi import APIRouter, Depends, HTTPException, Response
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -87,7 +87,7 @@ async def update_watch(
     return watch
 
 
-@router.delete("/{watch_id}", status_code=204, response_class=Response)
+@router.delete("/{watch_id}", status_code=204)
 async def delete_watch(
     watch_id: str,
     session: AsyncSession = Depends(get_db_session),
@@ -106,7 +106,6 @@ async def delete_watch(
     session.add(audit)
     await session.delete(watch)
     await session.commit()
-    return Response(status_code=204)
 
 
 @router.post("/{watch_id}/deactivate", response_model=WatchResponse)

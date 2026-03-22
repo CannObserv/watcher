@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% block title %}{{ "Edit" if watch else "New" }} Watch — watcher{% endblock %}
+{% block content %}
+<h2 class="text-2xl font-bold text-gray-900 mb-6">{{ "Edit" if watch else "New" }} Watch</h2>
+
+{% include "partials/flash.html" %}
+
+<form method="post" class="max-w-xl space-y-6">
+  <div>
+    <label for="name" class="block text-sm font-medium text-gray-700">Name</label>
+    <input type="text" name="name" id="name" required
+      value="{{ watch.name if watch else '' }}"
+      class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 text-sm p-2 border">
+  </div>
+
+  <div>
+    <label for="url" class="block text-sm font-medium text-gray-700">URL</label>
+    <input type="url" name="url" id="url" required
+      value="{{ watch.url if watch else '' }}"
+      class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 text-sm p-2 border">
+  </div>
+
+  <div>
+    <label for="content_type" class="block text-sm font-medium text-gray-700">Content Type</label>
+    <select name="content_type" id="content_type"
+      class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 text-sm p-2 border">
+      {% for ct in ["html", "pdf", "file"] %}
+      <option value="{{ ct }}" {% if watch and watch.content_type == ct %}selected{% endif %}>{{ ct | upper }}</option>
+      {% endfor %}
+    </select>
+  </div>
+
+  <div>
+    <label for="interval" class="block text-sm font-medium text-gray-700">Check Interval</label>
+    <input type="text" name="interval" id="interval" placeholder="1d"
+      value="{{ watch.schedule_config.get('interval', '') if watch and watch.schedule_config else '' }}"
+      class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 text-sm p-2 border">
+    <p class="mt-1 text-xs text-gray-500">Format: 30s, 15m, 6h, 1d</p>
+  </div>
+
+  <div class="flex gap-3">
+    <button type="submit" class="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-md hover:bg-blue-700">
+      {{ "Save Changes" if watch else "Create Watch" }}
+    </button>
+    <a href="{{ '/watches/' ~ watch.id if watch else '/watches' }}" class="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50">
+      Cancel
+    </a>
+  </div>
+</form>
+{% endblock %}

@@ -1,0 +1,8 @@
+{% if flash %}
+<div data-auto-dismiss class="mb-4 p-4 rounded-md
+  {% if flash.type == 'success' %}bg-green-50 text-green-800 border border-green-200
+  {% elif flash.type == 'error' %}bg-red-50 text-red-800 border border-red-200
+  {% else %}bg-blue-50 text-blue-800 border border-blue-200{% endif %}">
+  {{ flash.message }}
+</div>
+{% endif %}

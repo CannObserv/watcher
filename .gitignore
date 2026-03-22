@@ -28,3 +28,7 @@ gunicorn.ctl
 
 # Git worktrees
 .worktrees/
+
+# Tailwind
+src/dashboard/static/css/output.css
+scripts/tailwindcss

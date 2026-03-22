@@ -3,9 +3,10 @@
 import pytest
 
 from src.core.models.change import Change
-from src.core.models.snapshot import Snapshot
+from src.core.models.snapshot import Snapshot, SnapshotChunk
 from src.core.models.watch import Watch
 from src.dashboard.context import (
+    get_change_detail,
     get_dashboard_stats,
     get_queue_health,
     get_rate_limiter_state,
@@ -157,6 +158,65 @@ class TestGetWatchDetail:
 
     async def test_invalid_ulid(self, db_session):
         result = await get_watch_detail(db_session, "not-a-ulid")
+        assert result is None
+
+
+class TestGetChangeDetail:
+    async def test_returns_change_with_snapshots(self, db_session):
+        watch = Watch(name="W", url="https://example.com", content_type="html")
+        db_session.add(watch)
+        await db_session.flush()
+
+        snap_kwargs = dict(
+            watch_id=watch.id,
+            content_hash="a" * 64,
+            simhash=0,
+            storage_path="/tmp/s",
+            text_path="/tmp/t",
+            chunk_count=1,
+            text_bytes=100,
+            fetch_duration_ms=50,
+            fetcher_used="http",
+        )
+        prev_snap = Snapshot(**snap_kwargs)
+        curr_snap = Snapshot(**snap_kwargs)
+        db_session.add_all([prev_snap, curr_snap])
+        await db_session.flush()
+
+        chunk = SnapshotChunk(
+            snapshot_id=curr_snap.id,
+            chunk_index=0,
+            chunk_type="section",
+            chunk_label="Main",
+            content_hash="b" * 64,
+            simhash=0,
+            char_count=100,
+            excerpt="Hello world",
+        )
+        db_session.add(chunk)
+
+        change = Change(
+            watch_id=watch.id,
+            previous_snapshot_id=prev_snap.id,
+            current_snapshot_id=curr_snap.id,
+            change_metadata={"added": ["Section A"], "modified": [], "removed": []},
+        )
+        db_session.add(change)
+        await db_session.flush()
+
+        result = await get_change_detail(db_session, str(change.id))
+        assert result is not None
+        assert result["change"] is not None
+        assert result["watch_name"] == "W"
+        assert result["current_snapshot"] is not None
+        assert len(result["current_chunks"]) == 1
+
+    async def test_not_found(self, db_session):
+        result = await get_change_detail(db_session, "01JNZZZZZZZZZZZZZZZZZZZZZZ")
+        assert result is None
+
+    async def test_invalid_id(self, db_session):
+        result = await get_change_detail(db_session, "bad")
         assert result is None
 
 

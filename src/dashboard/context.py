@@ -10,6 +10,7 @@ from ulid import ULID
 from src.core.models.audit_log import AuditLog
 from src.core.models.change import Change
 from src.core.models.notification_config import NotificationConfig
+from src.core.models.snapshot import Snapshot, SnapshotChunk
 from src.core.models.temporal_profile import TemporalProfile
 from src.core.models.watch import Watch
 
@@ -132,6 +133,58 @@ def get_rate_limiter_state(limiter=None) -> list[dict]:
     if limiter is None:
         return []
     return limiter.get_domain_states()
+
+
+async def get_change_detail(session: AsyncSession, change_id: str) -> dict | None:
+    """Fetch a change with its snapshots, chunks, and watch name."""
+    try:
+        parsed = ULID.from_str(change_id)
+    except ValueError:
+        return None
+
+    change = await session.get(Change, parsed)
+    if not change:
+        return None
+
+    # Watch name
+    watch = await session.get(Watch, change.watch_id)
+    watch_name = watch.name if watch else "Unknown"
+
+    # Snapshots
+    prev_snap = await session.get(Snapshot, change.previous_snapshot_id)
+    curr_snap = await session.get(Snapshot, change.current_snapshot_id)
+
+    # Chunks for current snapshot
+    curr_chunks = []
+    if curr_snap:
+        stmt = (
+            select(SnapshotChunk)
+            .where(SnapshotChunk.snapshot_id == curr_snap.id)
+            .order_by(SnapshotChunk.chunk_index)
+        )
+        result = await session.execute(stmt)
+        curr_chunks = list(result.scalars().all())
+
+    # Chunks for previous snapshot
+    prev_chunks = []
+    if prev_snap:
+        stmt = (
+            select(SnapshotChunk)
+            .where(SnapshotChunk.snapshot_id == prev_snap.id)
+            .order_by(SnapshotChunk.chunk_index)
+        )
+        result = await session.execute(stmt)
+        prev_chunks = list(result.scalars().all())
+
+    return {
+        "change": change,
+        "watch_name": watch_name,
+        "watch_id": str(change.watch_id),
+        "current_snapshot": curr_snap,
+        "previous_snapshot": prev_snap,
+        "current_chunks": curr_chunks,
+        "previous_chunks": prev_chunks,
+    }
 
 
 async def get_watch_detail(session: AsyncSession, watch_id: str) -> Watch | None:

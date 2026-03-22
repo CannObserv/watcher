@@ -1,7 +1,10 @@
 """Storage backend protocol and local filesystem implementation."""
 
+import os
 from pathlib import Path
 from typing import Protocol
+
+STORAGE_BASE_DIR = Path(os.environ.get("WATCHER_DATA_DIR", "/var/lib/watcher/data"))
 
 
 class StorageBackend(Protocol):

@@ -1,8 +1,5 @@
 """Dashboard page routes — server-rendered HTML via Jinja2 + HTMX."""
 
-import os
-from pathlib import Path
-
 from fastapi import APIRouter, Depends, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -10,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.api.dependencies import get_db_session
 from src.core.models.audit_log import AuditLog
 from src.core.models.watch import ContentType, Watch
-from src.core.storage import LocalStorage
+from src.core.storage import STORAGE_BASE_DIR, LocalStorage
 from src.dashboard import templates
 from src.dashboard.context import (
     generate_diff,
@@ -27,8 +24,6 @@ from src.dashboard.context import (
     get_watch_profiles,
 )
 from src.workers.tasks import get_rate_limiter
-
-STORAGE_BASE_DIR = Path(os.environ.get("WATCHER_DATA_DIR", "/var/lib/watcher/data"))
 
 router = APIRouter(tags=["dashboard"])
 

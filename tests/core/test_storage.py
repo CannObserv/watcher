@@ -1,8 +1,12 @@
 """Tests for StorageBackend protocol and LocalStorage implementation."""
 
+import importlib
+from pathlib import Path
+
 import pytest
 
-from src.core.storage import LocalStorage
+import src.core.storage as storage_mod
+from src.core.storage import STORAGE_BASE_DIR, LocalStorage
 
 
 class TestLocalStorage:
@@ -46,3 +50,24 @@ class TestLocalStorage:
         path = storage.snapshot_path("watch123", "snap456", "pdf")
 
         assert path == "snapshots/watch123/snap456.pdf"
+
+
+class TestStorageBaseDir:
+    @pytest.fixture(autouse=True)
+    def _reload_teardown(self):
+        """Restore storage module state after reload-based tests."""
+        yield
+        importlib.reload(storage_mod)
+
+    def test_is_path_instance(self):
+        assert isinstance(STORAGE_BASE_DIR, Path)
+
+    def test_default_value(self, monkeypatch):
+        monkeypatch.delenv("WATCHER_DATA_DIR", raising=False)
+        importlib.reload(storage_mod)
+        assert storage_mod.STORAGE_BASE_DIR == Path("/var/lib/watcher/data")
+
+    def test_respects_env_var(self, monkeypatch, tmp_path):
+        monkeypatch.setenv("WATCHER_DATA_DIR", str(tmp_path))
+        importlib.reload(storage_mod)
+        assert storage_mod.STORAGE_BASE_DIR == tmp_path

@@ -1,9 +1,7 @@
 """Check-watch pipeline and procrastinate task wrappers."""
 
 import hashlib
-import os
 from datetime import UTC, datetime
-from pathlib import Path
 
 import httpx
 import procrastinate
@@ -29,7 +27,7 @@ from src.core.notifications.dispatcher import dispatch_notifications
 from src.core.rate_limiter import DomainRateLimiter
 from src.core.scheduler import compute_next_check, evaluate_post_actions
 from src.core.simhash import simhash
-from src.core.storage import LocalStorage, StorageBackend
+from src.core.storage import STORAGE_BASE_DIR, LocalStorage, StorageBackend
 from src.workers import bp
 
 logger = get_logger(__name__)
@@ -55,8 +53,6 @@ def get_rate_limiter() -> DomainRateLimiter:
         _rate_limiter = DomainRateLimiter()
     return _rate_limiter
 
-
-STORAGE_BASE_DIR = Path(os.environ.get("WATCHER_DATA_DIR", "/var/lib/watcher/data"))
 
 _INT64_MAX = (1 << 63) - 1
 

@@ -48,9 +48,7 @@ class TestHttpFetcher:
             headers={"content-type": "text/html"},
             request=httpx.Request("GET", "https://example.com"),
         )
-        mock_client = httpx.AsyncClient(
-            transport=httpx.MockTransport(lambda req: mock_response)
-        )
+        mock_client = httpx.AsyncClient(transport=httpx.MockTransport(lambda req: mock_response))
         fetcher = HttpFetcher(client=mock_client)
         result = await fetcher.fetch("https://example.com")
         assert result.is_success
@@ -60,9 +58,7 @@ class TestHttpFetcher:
         mock_response = httpx.Response(
             200, content=b"ok", request=httpx.Request("GET", "https://example.com")
         )
-        mock_client = httpx.AsyncClient(
-            transport=httpx.MockTransport(lambda req: mock_response)
-        )
+        mock_client = httpx.AsyncClient(transport=httpx.MockTransport(lambda req: mock_response))
         fetcher = HttpFetcher(client=mock_client)
         result = await fetcher.fetch("https://example.com")
         assert result.duration_ms >= 0
@@ -76,7 +72,5 @@ class TestHttpFetcher:
 
         mock_client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
         fetcher = HttpFetcher(client=mock_client)
-        await fetcher.fetch(
-            "https://example.com", config={"headers": {"X-Custom": "test"}}
-        )
+        await fetcher.fetch("https://example.com", config={"headers": {"X-Custom": "test"}})
         assert captured.get("x-custom") == "test"

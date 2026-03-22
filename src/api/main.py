@@ -24,9 +24,7 @@ async def lifespan(application: FastAPI):
 
     proc_app = get_app()
     await proc_app.open_async()
-    worker_task = asyncio.create_task(
-        proc_app.run_worker_async(install_signal_handlers=False)
-    )
+    worker_task = asyncio.create_task(proc_app.run_worker_async(install_signal_handlers=False))
     yield
     worker_task.cancel()
     try:

@@ -112,9 +112,7 @@ class TestListChanges:
         assert all(c["watch_id"] == watch_id for c in data)
 
     async def test_filter_by_nonexistent_watch(self, client, watch_with_changes):
-        response = await client.get(
-            "/api/changes?watch_id=00000000000000000000000000"
-        )
+        response = await client.get("/api/changes?watch_id=00000000000000000000000000")
         assert response.status_code == 200
         assert response.json() == []
 
@@ -142,7 +140,5 @@ class TestGetChangeDetail:
         assert data["previous_snapshot"]["chunks"] == []
 
     async def test_get_nonexistent_change(self, client, watch_with_changes):
-        response = await client.get(
-            "/api/changes/00000000000000000000000000"
-        )
+        response = await client.get("/api/changes/00000000000000000000000000")
         assert response.status_code == 404

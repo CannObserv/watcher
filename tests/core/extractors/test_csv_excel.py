@@ -36,9 +36,7 @@ class TestCsvExtractor:
 
     def test_chunk_row_size_configurable(self):
         csv_bytes = _make_csv(rows=100)
-        result = self.extractor.extract(
-            csv_bytes, config={"content_type": "csv", "chunk_rows": 50}
-        )
+        result = self.extractor.extract(csv_bytes, config={"content_type": "csv", "chunk_rows": 50})
         assert len(result.chunks) == 2
 
     def test_empty_csv_returns_empty(self):

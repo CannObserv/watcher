@@ -55,6 +55,7 @@ def get_rate_limiter() -> DomainRateLimiter:
         _rate_limiter = DomainRateLimiter()
     return _rate_limiter
 
+
 STORAGE_BASE_DIR = Path(os.environ.get("WATCHER_DATA_DIR", "/var/lib/watcher/data"))
 
 _INT64_MAX = (1 << 63) - 1
@@ -81,7 +82,8 @@ _EXTRACTOR_MAP = {
 
 
 async def _get_previous_snapshot(
-    session: AsyncSession, watch_id: object,
+    session: AsyncSession,
+    watch_id: object,
 ) -> Snapshot | None:
     """Fetch most recent snapshot for a watch, or None."""
     stmt = (
@@ -95,7 +97,8 @@ async def _get_previous_snapshot(
 
 
 async def _get_snapshot_chunks(
-    session: AsyncSession, snapshot_id: object,
+    session: AsyncSession,
+    snapshot_id: object,
 ) -> list[SnapshotChunk]:
     """Fetch all chunks for a snapshot ordered by index."""
     stmt = (
@@ -120,8 +123,11 @@ def _extract_content(watch: Watch, raw_content: bytes) -> ExtractionResult:
         fetch_cfg = watch.fetch_config or {}
         config = {
             "content_type": fetch_cfg.get("file_format", "csv"),
-            **{k: v for k, v in fetch_cfg.items()
-               if k in ("chunk_row_size", "sort_columns", "sheet_name")},
+            **{
+                k: v
+                for k, v in fetch_cfg.items()
+                if k in ("chunk_row_size", "sort_columns", "sheet_name")
+            },
         }
     return extractor.extract(raw_content, config=config)
 
@@ -148,11 +154,13 @@ async def _run_check_pipeline(
     # 3. Fast path: identical content
     if prev_snapshot and prev_snapshot.content_hash == content_hash:
         logger.info("no change detected", extra={"watch_id": str(watch.id)})
-        session.add(AuditLog(
-            event_type="check.no_change",
-            watch_id=watch.id,
-            payload={"content_hash": content_hash},
-        ))
+        session.add(
+            AuditLog(
+                event_type="check.no_change",
+                watch_id=watch.id,
+                payload={"content_hash": content_hash},
+            )
+        )
         await session.flush()
         return {
             "snapshot_id": None,
@@ -194,16 +202,18 @@ async def _run_check_pipeline(
 
     # 7. Create SnapshotChunk records
     for chunk in extraction.chunks:
-        session.add(SnapshotChunk(
-            snapshot_id=snapshot_id,
-            chunk_index=chunk.index,
-            chunk_type=chunk.chunk_type,
-            chunk_label=chunk.label,
-            content_hash=chunk.content_hash,
-            simhash=_to_signed64(chunk.simhash),
-            char_count=chunk.char_count,
-            excerpt=chunk.excerpt,
-        ))
+        session.add(
+            SnapshotChunk(
+                snapshot_id=snapshot_id,
+                chunk_index=chunk.index,
+                chunk_type=chunk.chunk_type,
+                chunk_label=chunk.label,
+                content_hash=chunk.content_hash,
+                simhash=_to_signed64(chunk.simhash),
+                char_count=chunk.char_count,
+                excerpt=chunk.excerpt,
+            )
+        )
     await session.flush()
 
     # 8-9. Diff against previous if exists
@@ -213,15 +223,19 @@ async def _run_check_pipeline(
         prev_chunks_db = await _get_snapshot_chunks(session, prev_snapshot.id)
         prev_fingerprints = [
             ChunkFingerprint(
-                index=c.chunk_index, label=c.chunk_label,
-                content_hash=c.content_hash, simhash=c.simhash,
+                index=c.chunk_index,
+                label=c.chunk_label,
+                content_hash=c.content_hash,
+                simhash=c.simhash,
             )
             for c in prev_chunks_db
         ]
         curr_fingerprints = [
             ChunkFingerprint(
-                index=c.index, label=c.label,
-                content_hash=c.content_hash, simhash=c.simhash,
+                index=c.index,
+                label=c.label,
+                content_hash=c.content_hash,
+                simhash=c.simhash,
             )
             for c in extraction.chunks
         ]
@@ -236,7 +250,8 @@ async def _run_check_pipeline(
                 "removed": [c.chunk_label for c in changes if c.status == ChangeStatus.REMOVED],
                 "modified": [
                     {"label": c.chunk_label, "similarity": c.similarity}
-                    for c in changes if c.status == ChangeStatus.MODIFIED
+                    for c in changes
+                    if c.status == ChangeStatus.MODIFIED
                 ],
             }
             change = Change(
@@ -250,16 +265,18 @@ async def _run_check_pipeline(
             change_id = change.id
 
     # 10. Audit log
-    session.add(AuditLog(
-        event_type="check.snapshot_created",
-        watch_id=watch.id,
-        payload={
-            "snapshot_id": str(snapshot_id),
-            "content_hash": content_hash,
-            "chunk_count": len(extraction.chunks),
-            "is_changed": change_id is not None or prev_snapshot is None,
-        },
-    ))
+    session.add(
+        AuditLog(
+            event_type="check.snapshot_created",
+            watch_id=watch.id,
+            payload={
+                "snapshot_id": str(snapshot_id),
+                "content_hash": content_hash,
+                "chunk_count": len(extraction.chunks),
+                "is_changed": change_id is not None or prev_snapshot is None,
+            },
+        )
+    )
     await session.flush()
 
     # 11. Return result
@@ -295,8 +312,7 @@ async def check_watch(watch_id: str) -> dict:
 
         # Fetch with rate limiting — only pass fetcher-relevant config keys
         fetch_config = {
-            k: v for k, v in (watch.fetch_config or {}).items()
-            if k in ("headers", "timeout")
+            k: v for k, v in (watch.fetch_config or {}).items() if k in ("headers", "timeout")
         }
         async with get_rate_limiter().acquire(watch.url):
             fetch_result = await get_fetcher().fetch(watch.url, config=fetch_config)
@@ -310,11 +326,13 @@ async def check_watch(watch_id: str) -> dict:
                 "fetch failed",
                 extra={"watch_id": watch_id, "status": fetch_result.status_code},
             )
-            session.add(AuditLog(
-                event_type="check.fetch_failed",
-                watch_id=watch.id,
-                payload={"status_code": fetch_result.status_code},
-            ))
+            session.add(
+                AuditLog(
+                    event_type="check.fetch_failed",
+                    watch_id=watch.id,
+                    payload={"status_code": fetch_result.status_code},
+                )
+            )
             await session.commit()
             return {"error": f"HTTP {fetch_result.status_code}"}
 
@@ -336,10 +354,7 @@ async def check_watch(watch_id: str) -> dict:
                 NotificationConfig.is_active.is_(True),
             )
             nc_result = await session.execute(nc_stmt)
-            nc_configs = [
-                {"channel": nc.channel, **nc.config}
-                for nc in nc_result.scalars().all()
-            ]
+            nc_configs = [{"channel": nc.channel, **nc.config} for nc in nc_result.scalars().all()]
             if nc_configs:
                 event = ChangeEvent(
                     watch_id=str(watch.id),
@@ -355,17 +370,17 @@ async def check_watch(watch_id: str) -> dict:
                         "email": EmailChannel(),
                         "slack": SlackChannel(client=http_client),
                     }
-                    notif_results = await dispatch_notifications(
-                        event, nc_configs, _channels
+                    notif_results = await dispatch_notifications(event, nc_configs, _channels)
+                session.add(
+                    AuditLog(
+                        event_type="notification.dispatched",
+                        watch_id=watch.id,
+                        payload={
+                            "change_id": result["change_id"],
+                            "results": notif_results,
+                        },
                     )
-                session.add(AuditLog(
-                    event_type="notification.dispatched",
-                    watch_id=watch.id,
-                    payload={
-                        "change_id": result["change_id"],
-                        "results": notif_results,
-                    },
-                ))
+                )
                 await session.commit()
 
         # Update last_checked_at

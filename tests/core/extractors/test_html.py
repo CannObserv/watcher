@@ -25,9 +25,7 @@ class TestHtmlExtractor:
         assert "Home" not in full_text  # nav stripped
 
     def test_selector_targeting(self):
-        result = self.extractor.extract(
-            self.html, config={"selectors": ["#agenda"]}
-        )
+        result = self.extractor.extract(self.html, config={"selectors": ["#agenda"]})
         full_text = " ".join(c.text for c in result.chunks)
         assert "Budget review" in full_text
         assert "Previous Minutes" not in full_text

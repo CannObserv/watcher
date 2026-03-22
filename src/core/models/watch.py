@@ -32,7 +32,9 @@ class Watch(Base, TimestampMixin):
     schedule_config: Mapped[dict] = mapped_column(JSONB, default=dict, server_default="{}")
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
     last_checked_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True, default=None,
+        DateTime(timezone=True),
+        nullable=True,
+        default=None,
     )
 
     def __init__(self, **kwargs: object) -> None:

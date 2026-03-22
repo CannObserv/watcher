@@ -73,7 +73,5 @@ class TestDeleteNotificationConfig:
             json={"channel": "webhook", "config": {"url": "https://hooks.example.com"}},
         )
         config_id = create_resp.json()["id"]
-        response = await client.delete(
-            f"/api/watches/{watch_id}/notifications/{config_id}"
-        )
+        response = await client.delete(f"/api/watches/{watch_id}/notifications/{config_id}")
         assert response.status_code == 204

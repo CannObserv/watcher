@@ -43,7 +43,9 @@ class TestSlackChannel:
 
     async def test_sends_to_webhook_url(self, captured):
         channel = self._make_channel(200, captured)
-        result = await channel.send(_make_event(), {"webhook_url": "https://hooks.slack.com/T1/B1/xxx"})
+        result = await channel.send(
+            _make_event(), {"webhook_url": "https://hooks.slack.com/T1/B1/xxx"}
+        )
         assert result is True
         assert captured["url"] == "https://hooks.slack.com/T1/B1/xxx"
 
@@ -54,5 +56,7 @@ class TestSlackChannel:
 
     async def test_returns_false_on_error(self):
         channel = self._make_channel(500)
-        result = await channel.send(_make_event(), {"webhook_url": "https://hooks.slack.com/T1/B1/xxx"})
+        result = await channel.send(
+            _make_event(), {"webhook_url": "https://hooks.slack.com/T1/B1/xxx"}
+        )
         assert result is False

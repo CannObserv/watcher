@@ -75,26 +75,34 @@ class HtmlExtractor:
         index = 0
 
         for region in regions:
-            sections = region.find_all(
-                ["section", "article"], recursive=False
-            )
+            sections = region.find_all(["section", "article"], recursive=False)
             if sections:
                 for section in sections:
                     text = self._normalize_text(section.get_text(separator=" "))
                     if not text:
                         continue
                     label = self._section_label(section, index)
-                    chunks.append(Chunk(
-                        index=index, chunk_type="section", label=label, text=text,
-                    ))
+                    chunks.append(
+                        Chunk(
+                            index=index,
+                            chunk_type="section",
+                            label=label,
+                            text=text,
+                        )
+                    )
                     index += 1
             else:
                 text = self._normalize_text(region.get_text(separator=" "))
                 if text:
                     label = self._section_label(region, index)
-                    chunks.append(Chunk(
-                        index=index, chunk_type="section", label=label, text=text,
-                    ))
+                    chunks.append(
+                        Chunk(
+                            index=index,
+                            chunk_type="section",
+                            label=label,
+                            text=text,
+                        )
+                    )
                     index += 1
 
         return chunks

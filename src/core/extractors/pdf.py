@@ -35,12 +35,14 @@ class PdfExtractor:
             if skip_empty and not text.strip():
                 continue
 
-            chunks.append(Chunk(
-                index=chunk_index,
-                chunk_type="page",
-                label=f"Page {page_num + 1}",
-                text=text,
-            ))
+            chunks.append(
+                Chunk(
+                    index=chunk_index,
+                    chunk_type="page",
+                    label=f"Page {page_num + 1}",
+                    text=text,
+                )
+            )
             chunk_index += 1
 
         return ExtractionResult(chunks=chunks)

@@ -13,9 +13,7 @@ from src.api.schemas.notification_config import (
 from src.core.models.audit_log import AuditLog
 from src.core.models.notification_config import NotificationConfig
 
-router = APIRouter(
-    prefix="/api/watches/{watch_id}/notifications", tags=["notification-configs"]
-)
+router = APIRouter(prefix="/api/watches/{watch_id}/notifications", tags=["notification-configs"])
 
 
 @router.post("", status_code=201, response_model=NotificationConfigResponse)

@@ -10,11 +10,14 @@ pytestmark = pytest.mark.integration
 
 class TestCreateWatch:
     async def test_create_watch_returns_201(self, client):
-        response = await client.post("/api/watches", json={
-            "name": "Test Watch",
-            "url": "https://example.com/page",
-            "content_type": "html",
-        })
+        response = await client.post(
+            "/api/watches",
+            json={
+                "name": "Test Watch",
+                "url": "https://example.com/page",
+                "content_type": "html",
+            },
+        )
         assert response.status_code == 201
         data = response.json()
         assert data["name"] == "Test Watch"
@@ -25,23 +28,29 @@ class TestCreateWatch:
         assert "created_at" in data
 
     async def test_create_watch_with_config(self, client):
-        response = await client.post("/api/watches", json={
-            "name": "PDF Watch",
-            "url": "https://example.com/report.pdf",
-            "content_type": "pdf",
-            "fetch_config": {"timeout": 30},
-            "schedule_config": {"interval": "6h"},
-        })
+        response = await client.post(
+            "/api/watches",
+            json={
+                "name": "PDF Watch",
+                "url": "https://example.com/report.pdf",
+                "content_type": "pdf",
+                "fetch_config": {"timeout": 30},
+                "schedule_config": {"interval": "6h"},
+            },
+        )
         assert response.status_code == 201
         data = response.json()
         assert data["fetch_config"] == {"timeout": 30}
 
     async def test_create_watch_invalid_content_type(self, client):
-        response = await client.post("/api/watches", json={
-            "name": "Bad",
-            "url": "https://example.com",
-            "content_type": "invalid",
-        })
+        response = await client.post(
+            "/api/watches",
+            json={
+                "name": "Bad",
+                "url": "https://example.com",
+                "content_type": "invalid",
+            },
+        )
         assert response.status_code == 422
 
 
@@ -52,11 +61,14 @@ class TestListWatches:
         assert response.json() == []
 
     async def test_list_watches_returns_created(self, client):
-        await client.post("/api/watches", json={
-            "name": "Watch 1",
-            "url": "https://example.com/1",
-            "content_type": "html",
-        })
+        await client.post(
+            "/api/watches",
+            json={
+                "name": "Watch 1",
+                "url": "https://example.com/1",
+                "content_type": "html",
+            },
+        )
         response = await client.get("/api/watches")
         assert response.status_code == 200
         data = response.json()
@@ -66,11 +78,14 @@ class TestListWatches:
 
 class TestGetWatch:
     async def test_get_watch_by_id(self, client):
-        create_resp = await client.post("/api/watches", json={
-            "name": "Get Me",
-            "url": "https://example.com/get",
-            "content_type": "html",
-        })
+        create_resp = await client.post(
+            "/api/watches",
+            json={
+                "name": "Get Me",
+                "url": "https://example.com/get",
+                "content_type": "html",
+            },
+        )
         watch_id = create_resp.json()["id"]
 
         response = await client.get(f"/api/watches/{watch_id}")
@@ -84,16 +99,22 @@ class TestGetWatch:
 
 class TestUpdateWatch:
     async def test_update_watch_partial(self, client):
-        create_resp = await client.post("/api/watches", json={
-            "name": "Original",
-            "url": "https://example.com/orig",
-            "content_type": "html",
-        })
+        create_resp = await client.post(
+            "/api/watches",
+            json={
+                "name": "Original",
+                "url": "https://example.com/orig",
+                "content_type": "html",
+            },
+        )
         watch_id = create_resp.json()["id"]
 
-        response = await client.patch(f"/api/watches/{watch_id}", json={
-            "name": "Updated",
-        })
+        response = await client.patch(
+            f"/api/watches/{watch_id}",
+            json={
+                "name": "Updated",
+            },
+        )
         assert response.status_code == 200
         assert response.json()["name"] == "Updated"
         assert response.json()["url"] == "https://example.com/orig"
@@ -108,11 +129,14 @@ class TestUpdateWatch:
 
 class TestDeactivateWatch:
     async def test_deactivate_watch(self, client):
-        create_resp = await client.post("/api/watches", json={
-            "name": "Deactivate Me",
-            "url": "https://example.com/deact",
-            "content_type": "html",
-        })
+        create_resp = await client.post(
+            "/api/watches",
+            json={
+                "name": "Deactivate Me",
+                "url": "https://example.com/deact",
+                "content_type": "html",
+            },
+        )
         watch_id = create_resp.json()["id"]
 
         response = await client.post(f"/api/watches/{watch_id}/deactivate")
@@ -126,11 +150,14 @@ class TestDeactivateWatch:
 
 class TestAuditLog:
     async def test_create_writes_audit_entry(self, client, db_session):
-        await client.post("/api/watches", json={
-            "name": "Audited Watch",
-            "url": "https://example.com/audit",
-            "content_type": "html",
-        })
+        await client.post(
+            "/api/watches",
+            json={
+                "name": "Audited Watch",
+                "url": "https://example.com/audit",
+                "content_type": "html",
+            },
+        )
         result = await db_session.execute(
             select(AuditLog).where(AuditLog.event_type == "watch.created")
         )
@@ -138,13 +165,15 @@ class TestAuditLog:
         assert len(entries) >= 1
         assert entries[0].payload["name"] == "Audited Watch"
 
-
     async def test_update_writes_audit_entry(self, client, db_session):
-        resp = await client.post("/api/watches", json={
-            "name": "Update Audit",
-            "url": "https://example.com/upd",
-            "content_type": "html",
-        })
+        resp = await client.post(
+            "/api/watches",
+            json={
+                "name": "Update Audit",
+                "url": "https://example.com/upd",
+                "content_type": "html",
+            },
+        )
         watch_id = resp.json()["id"]
         await client.patch(f"/api/watches/{watch_id}", json={"name": "Changed"})
 
@@ -156,11 +185,14 @@ class TestAuditLog:
         assert "name" in entries[0].payload["updated_fields"]
 
     async def test_deactivate_writes_audit_entry(self, client, db_session):
-        resp = await client.post("/api/watches", json={
-            "name": "Deact Audit",
-            "url": "https://example.com/deact-audit",
-            "content_type": "html",
-        })
+        resp = await client.post(
+            "/api/watches",
+            json={
+                "name": "Deact Audit",
+                "url": "https://example.com/deact-audit",
+                "content_type": "html",
+            },
+        )
         watch_id = resp.json()["id"]
         await client.post(f"/api/watches/{watch_id}/deactivate")
 
@@ -178,19 +210,20 @@ class TestInvalidULID:
         assert response.status_code == 404
 
     async def test_patch_with_invalid_ulid_returns_404(self, client):
-        response = await client.patch(
-            "/api/watches/not-a-valid-ulid", json={"name": "X"}
-        )
+        response = await client.patch("/api/watches/not-a-valid-ulid", json={"name": "X"})
         assert response.status_code == 404
 
 
 class TestListWatchesFilter:
     async def test_filter_by_active_status(self, client):
-        resp = await client.post("/api/watches", json={
-            "name": "Active Watch",
-            "url": "https://example.com/active",
-            "content_type": "html",
-        })
+        resp = await client.post(
+            "/api/watches",
+            json={
+                "name": "Active Watch",
+                "url": "https://example.com/active",
+                "content_type": "html",
+            },
+        )
         watch_id = resp.json()["id"]
         await client.post(f"/api/watches/{watch_id}/deactivate")
 

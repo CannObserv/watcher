@@ -43,9 +43,7 @@ async def list_changes(
     return result.scalars().all()
 
 
-async def _load_snapshot_with_chunks(
-    session: AsyncSession, snapshot_id: ULID
-) -> dict | None:
+async def _load_snapshot_with_chunks(session: AsyncSession, snapshot_id: ULID) -> dict | None:
     """Load a snapshot and its chunks, returning a dict for response construction."""
     snapshot = await session.get(Snapshot, snapshot_id)
     if snapshot is None:
@@ -59,9 +57,7 @@ async def _load_snapshot_with_chunks(
     chunks = chunk_result.scalars().all()
 
     snap_dict = SnapshotResponse.model_validate(snapshot).model_dump()
-    snap_dict["chunks"] = [
-        SnapshotChunkResponse.model_validate(c).model_dump() for c in chunks
-    ]
+    snap_dict["chunks"] = [SnapshotChunkResponse.model_validate(c).model_dump() for c in chunks]
     return snap_dict
 
 

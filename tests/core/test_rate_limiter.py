@@ -20,10 +20,12 @@ class TestDomainRateLimiter:
     async def test_max_concurrent_enforced(self):
         limiter = DomainRateLimiter(max_concurrent=1, min_interval=0.0)
         acquired = []
+
         async def task(url, delay):
             async with limiter.acquire(url):
                 acquired.append(time.monotonic())
                 await asyncio.sleep(delay)
+
         await asyncio.gather(
             task("https://example.com/a", 0.05),
             task("https://example.com/b", 0.05),
@@ -34,10 +36,12 @@ class TestDomainRateLimiter:
     async def test_different_domains_independent(self):
         limiter = DomainRateLimiter(max_concurrent=1, min_interval=0.0)
         acquired = []
+
         async def task(url):
             async with limiter.acquire(url):
                 acquired.append(time.monotonic())
                 await asyncio.sleep(0.05)
+
         await asyncio.gather(
             task("https://example.com/a"),
             task("https://other.com/b"),
@@ -48,9 +52,11 @@ class TestDomainRateLimiter:
     async def test_min_interval_enforced(self):
         limiter = DomainRateLimiter(max_concurrent=2, min_interval=0.1)
         times = []
+
         async def task(url):
             async with limiter.acquire(url):
                 times.append(time.monotonic())
+
         await task("https://example.com/a")
         await task("https://example.com/b")
         assert len(times) == 2

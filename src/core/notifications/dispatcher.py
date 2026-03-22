@@ -30,11 +30,13 @@ async def dispatch_notifications(
                 "unknown notification channel",
                 extra={"channel": channel_name},
             )
-            results.append({
-                "channel": channel_name,
-                "success": False,
-                "error": f"unknown channel: {channel_name}",
-            })
+            results.append(
+                {
+                    "channel": channel_name,
+                    "success": False,
+                    "error": f"unknown channel: {channel_name}",
+                }
+            )
             continue
         try:
             success = await channel.send(event, config)

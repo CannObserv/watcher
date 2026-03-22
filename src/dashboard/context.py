@@ -225,6 +225,28 @@ def generate_diff(previous_text: str, current_text: str) -> dict:
     return {"has_changes": has_changes, "lines": lines}
 
 
+async def get_audit_entries(
+    session: AsyncSession,
+    event_type: str | None = None,
+    watch_id: str | None = None,
+    limit: int = 100,
+    offset: int = 0,
+) -> list[AuditLog]:
+    """Fetch audit log entries with optional filters."""
+    stmt = select(AuditLog).order_by(AuditLog.created_at.desc())
+    if event_type:
+        stmt = stmt.where(AuditLog.event_type == event_type)
+    if watch_id:
+        try:
+            parsed = ULID.from_str(watch_id)
+            stmt = stmt.where(AuditLog.watch_id == parsed)
+        except ValueError:
+            pass
+    stmt = stmt.limit(limit).offset(offset)
+    result = await session.execute(stmt)
+    return list(result.scalars().all())
+
+
 async def get_watch_detail(session: AsyncSession, watch_id: str) -> Watch | None:
     """Fetch a single watch by ID string. Returns None if not found or invalid."""
     try:

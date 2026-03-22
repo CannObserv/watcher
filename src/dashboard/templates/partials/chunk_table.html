@@ -1,0 +1,26 @@
+{% if chunks %}
+<table class="data-table">
+  <thead>
+    <tr>
+      <th>#</th>
+      <th>Label</th>
+      <th>Type</th>
+      <th>Characters</th>
+      <th>Excerpt</th>
+    </tr>
+  </thead>
+  <tbody class="divide-y divide-gray-100">
+    {% for chunk in chunks %}
+    <tr>
+      <td>{{ chunk.chunk_index }}</td>
+      <td class="font-medium">{{ chunk.chunk_label }}</td>
+      <td>{{ chunk.chunk_type }}</td>
+      <td>{{ chunk.char_count }}</td>
+      <td class="text-gray-500 truncate max-w-[300px]" title="{{ chunk.excerpt }}">{{ chunk.excerpt[:100] }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p class="text-gray-500 text-sm">No chunks.</p>
+{% endif %}

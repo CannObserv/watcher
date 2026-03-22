@@ -176,6 +176,16 @@ class TestWatchEdit:
         assert response.status_code == 303
 
 
+class TestChangeDetail:
+    async def test_change_detail_404_invalid(self, client):
+        response = await client.get("/changes/bad-id")
+        assert response.status_code == 404
+
+    async def test_change_detail_404_not_found(self, client):
+        response = await client.get("/changes/01JNZZZZZZZZZZZZZZZZZZZZZZ")
+        assert response.status_code == 404
+
+
 class TestWatchDeactivate:
     async def test_deactivate_returns_updated_row(self, client):
         resp = await client.post(

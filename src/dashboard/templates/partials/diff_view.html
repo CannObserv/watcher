@@ -1,0 +1,22 @@
+{% if diff.has_changes %}
+<div class="overflow-x-auto">
+  <table class="w-full text-xs font-mono border border-gray-200">
+    <thead>
+      <tr>
+        <th class="w-1/2 px-3 py-2 text-left bg-red-50 text-red-800 border-r">Previous</th>
+        <th class="w-1/2 px-3 py-2 text-left bg-green-50 text-green-800">Current</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for tag, prev_line, curr_line in diff.lines %}
+      <tr class="{% if tag == 'replace' %}bg-yellow-50{% elif tag == 'delete' %}bg-red-50{% elif tag == 'insert' %}bg-green-50{% endif %}">
+        <td class="px-3 py-0.5 border-r border-gray-200 whitespace-pre-wrap {% if tag in ('delete', 'replace') %}text-red-700{% else %}text-gray-600{% endif %}">{{ prev_line }}</td>
+        <td class="px-3 py-0.5 whitespace-pre-wrap {% if tag in ('insert', 'replace') %}text-green-700{% else %}text-gray-600{% endif %}">{{ curr_line }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% else %}
+<p class="text-gray-500 text-sm">No textual differences found.</p>
+{% endif %}

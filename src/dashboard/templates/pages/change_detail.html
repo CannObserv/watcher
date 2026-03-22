@@ -1,0 +1,103 @@
+{% extends "base.html" %}
+{% block title %}Change — {{ watch_name }} — watcher{% endblock %}
+{% block content %}
+<div class="mb-6">
+  <h2 class="text-2xl font-bold text-gray-900">Change Detail</h2>
+  <p class="text-sm text-gray-500 mt-1">
+    <a href="/watches/{{ watch_id }}" class="text-blue-600 hover:underline">{{ watch_name }}</a>
+    — detected {{ change.detected_at.strftime('%Y-%m-%d %H:%M UTC') }}
+  </p>
+</div>
+
+<!-- Change metadata -->
+<div class="stat-card mb-6">
+  <h3 class="text-sm font-medium text-gray-500 mb-3">Change Summary</h3>
+  <div class="flex gap-4">
+    {% set meta = change.change_metadata or {} %}
+    {% set added = meta.get('added', []) %}
+    {% set modified = meta.get('modified', []) %}
+    {% set removed = meta.get('removed', []) %}
+    {% if added %}
+    <div>
+      <span class="text-green-600 font-medium">{{ added | length }} added</span>
+      <ul class="text-xs text-gray-500 mt-1">{% for item in added %}<li>{{ item if item is string else item.label }}</li>{% endfor %}</ul>
+    </div>
+    {% endif %}
+    {% if modified %}
+    <div>
+      <span class="text-yellow-600 font-medium">{{ modified | length }} modified</span>
+      <ul class="text-xs text-gray-500 mt-1">{% for item in modified %}<li>{{ item if item is string else item.label }} {% if item is mapping and item.similarity is defined %}({{ "%.0f" | format(item.similarity * 100) }}% similar){% endif %}</li>{% endfor %}</ul>
+    </div>
+    {% endif %}
+    {% if removed %}
+    <div>
+      <span class="text-red-600 font-medium">{{ removed | length }} removed</span>
+      <ul class="text-xs text-gray-500 mt-1">{% for item in removed %}<li>{{ item if item is string else item.label }}</li>{% endfor %}</ul>
+    </div>
+    {% endif %}
+  </div>
+</div>
+
+<!-- Snapshot info -->
+<div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+  <div class="stat-card">
+    <h3 class="text-sm font-medium text-gray-500 mb-2">Previous Snapshot</h3>
+    {% if previous_snapshot %}
+    <dl class="space-y-1 text-sm">
+      <div class="flex justify-between"><dt class="text-gray-600">Fetched</dt><dd>{{ previous_snapshot.fetched_at.strftime('%Y-%m-%d %H:%M UTC') }}</dd></div>
+      <div class="flex justify-between"><dt class="text-gray-600">Chunks</dt><dd>{{ previous_snapshot.chunk_count }}</dd></div>
+      <div class="flex justify-between"><dt class="text-gray-600">Size</dt><dd>{{ previous_snapshot.text_bytes }} bytes</dd></div>
+      <div class="flex justify-between"><dt class="text-gray-600">Fetcher</dt><dd>{{ previous_snapshot.fetcher_used }}</dd></div>
+    </dl>
+    {% else %}
+    <p class="text-gray-500 text-sm">Not available</p>
+    {% endif %}
+  </div>
+  <div class="stat-card">
+    <h3 class="text-sm font-medium text-gray-500 mb-2">Current Snapshot</h3>
+    {% if current_snapshot %}
+    <dl class="space-y-1 text-sm">
+      <div class="flex justify-between"><dt class="text-gray-600">Fetched</dt><dd>{{ current_snapshot.fetched_at.strftime('%Y-%m-%d %H:%M UTC') }}</dd></div>
+      <div class="flex justify-between"><dt class="text-gray-600">Chunks</dt><dd>{{ current_snapshot.chunk_count }}</dd></div>
+      <div class="flex justify-between"><dt class="text-gray-600">Size</dt><dd>{{ current_snapshot.text_bytes }} bytes</dd></div>
+      <div class="flex justify-between"><dt class="text-gray-600">Fetcher</dt><dd>{{ current_snapshot.fetcher_used }}</dd></div>
+    </dl>
+    {% else %}
+    <p class="text-gray-500 text-sm">Not available</p>
+    {% endif %}
+  </div>
+</div>
+
+<!-- Current chunks -->
+{% if current_chunks %}
+<div class="mb-6">
+  <h3 class="text-lg font-semibold text-gray-900 mb-4">Current Chunks</h3>
+  {% with chunks=current_chunks %}
+  {% include "partials/chunk_table.html" %}
+  {% endwith %}
+</div>
+{% endif %}
+
+<!-- Diff view -->
+<div class="mb-6">
+  <div class="flex items-center gap-4 mb-4">
+    <h3 class="text-lg font-semibold text-gray-900">Diff</h3>
+    <div class="flex gap-1">
+      <button data-diff-toggle="extracted" onclick="toggleDiffView('extracted')" class="px-3 py-1 text-xs rounded-md bg-gray-200">Extracted Text</button>
+      <button data-diff-toggle="raw" onclick="toggleDiffView('raw')" class="px-3 py-1 text-xs rounded-md bg-white border border-gray-200"
+        hx-get="/partials/diff/{{ change.id }}?mode=raw"
+        hx-target="#diff-content"
+        hx-swap="innerHTML"
+        hx-trigger="click once">Raw Content</button>
+    </div>
+  </div>
+  <div id="diff-content">
+    <div data-diff-view="extracted">
+      {% include "partials/diff_view.html" %}
+    </div>
+    <div data-diff-view="raw" class="hidden">
+      <p class="text-gray-500 text-sm">Click "Raw Content" to load.</p>
+    </div>
+  </div>
+</div>
+{% endblock %}

@@ -10,7 +10,7 @@ from src.api.schemas.temporal_profile import ProfileCreate, ProfileResponse, Pro
 from src.core.models.audit_log import AuditLog
 from src.core.models.temporal_profile import TemporalProfile
 
-router = APIRouter(prefix="/api/watches/{watch_id}/profiles", tags=["temporal-profiles"])
+router = APIRouter(prefix="/watches/{watch_id}/profiles", tags=["temporal-profiles"])
 
 
 @router.post("", status_code=201, response_model=ProfileResponse)

@@ -9,7 +9,7 @@ from src.api.routes.helpers import parse_ulid
 from src.api.schemas.audit_log import AuditLogResponse
 from src.core.models.audit_log import AuditLog
 
-router = APIRouter(prefix="/api/audit", tags=["audit-log"])
+router = APIRouter(prefix="/audit", tags=["audit-log"])
 
 
 @router.get("", response_model=list[AuditLogResponse])

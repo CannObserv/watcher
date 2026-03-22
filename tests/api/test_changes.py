@@ -96,7 +96,7 @@ async def watch_with_changes(db_session):
 
 class TestListChanges:
     async def test_list_all_changes(self, client, watch_with_changes):
-        response = await client.get("/api/changes")
+        response = await client.get("/api/v1/changes")
         assert response.status_code == 200
         data = response.json()
         assert len(data) >= 1
@@ -105,19 +105,19 @@ class TestListChanges:
 
     async def test_filter_by_watch_id(self, client, watch_with_changes):
         watch_id = str(watch_with_changes["watch"].id)
-        response = await client.get(f"/api/changes?watch_id={watch_id}")
+        response = await client.get(f"/api/v1/changes?watch_id={watch_id}")
         assert response.status_code == 200
         data = response.json()
         assert len(data) >= 1
         assert all(c["watch_id"] == watch_id for c in data)
 
     async def test_filter_by_nonexistent_watch(self, client, watch_with_changes):
-        response = await client.get("/api/changes?watch_id=00000000000000000000000000")
+        response = await client.get("/api/v1/changes?watch_id=00000000000000000000000000")
         assert response.status_code == 200
         assert response.json() == []
 
     async def test_pagination(self, client, watch_with_changes):
-        response = await client.get("/api/changes?limit=1&offset=0")
+        response = await client.get("/api/v1/changes?limit=1&offset=0")
         assert response.status_code == 200
         data = response.json()
         assert len(data) <= 1
@@ -126,7 +126,7 @@ class TestListChanges:
 class TestGetChangeDetail:
     async def test_get_change_with_chunks(self, client, watch_with_changes):
         change_id = str(watch_with_changes["change"].id)
-        response = await client.get(f"/api/changes/{change_id}")
+        response = await client.get(f"/api/v1/changes/{change_id}")
         assert response.status_code == 200
         data = response.json()
         assert data["id"] == change_id
@@ -140,5 +140,5 @@ class TestGetChangeDetail:
         assert data["previous_snapshot"]["chunks"] == []
 
     async def test_get_nonexistent_change(self, client, watch_with_changes):
-        response = await client.get("/api/changes/00000000000000000000000000")
+        response = await client.get("/api/v1/changes/00000000000000000000000000")
         assert response.status_code == 404

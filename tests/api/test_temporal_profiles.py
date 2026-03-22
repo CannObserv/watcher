@@ -8,7 +8,7 @@ pytestmark = pytest.mark.integration
 class TestCreateProfile:
     async def test_create_event_profile(self, client):
         watch_resp = await client.post(
-            "/api/watches",
+            "/api/v1/watches",
             json={
                 "name": "Profiled Watch",
                 "url": "https://example.com",
@@ -17,7 +17,7 @@ class TestCreateProfile:
         )
         watch_id = watch_resp.json()["id"]
         response = await client.post(
-            f"/api/watches/{watch_id}/profiles",
+            f"/api/v1/watches/{watch_id}/profiles",
             json={
                 "profile_type": "event",
                 "reference_date": "2026-04-15",
@@ -36,7 +36,7 @@ class TestCreateProfile:
 
     async def test_create_profile_invalid_watch(self, client):
         response = await client.post(
-            "/api/watches/00000000000000000000000000/profiles",
+            "/api/v1/watches/00000000000000000000000000/profiles",
             json={
                 "profile_type": "event",
                 "reference_date": "2026-04-15",
@@ -50,7 +50,7 @@ class TestCreateProfile:
 class TestListProfiles:
     async def test_list_profiles_for_watch(self, client):
         watch_resp = await client.post(
-            "/api/watches",
+            "/api/v1/watches",
             json={
                 "name": "Multi-Profile Watch",
                 "url": "https://example.com",
@@ -59,7 +59,7 @@ class TestListProfiles:
         )
         watch_id = watch_resp.json()["id"]
         await client.post(
-            f"/api/watches/{watch_id}/profiles",
+            f"/api/v1/watches/{watch_id}/profiles",
             json={
                 "profile_type": "event",
                 "reference_date": "2026-04-15",
@@ -68,7 +68,7 @@ class TestListProfiles:
             },
         )
         await client.post(
-            f"/api/watches/{watch_id}/profiles",
+            f"/api/v1/watches/{watch_id}/profiles",
             json={
                 "profile_type": "seasonal",
                 "date_range_start": "2026-01-15",
@@ -77,7 +77,7 @@ class TestListProfiles:
                 "post_action": "reduce_frequency",
             },
         )
-        response = await client.get(f"/api/watches/{watch_id}/profiles")
+        response = await client.get(f"/api/v1/watches/{watch_id}/profiles")
         assert response.status_code == 200
         assert len(response.json()) == 2
 
@@ -85,12 +85,12 @@ class TestListProfiles:
 class TestUpdateProfile:
     async def test_update_rules(self, client):
         watch_resp = await client.post(
-            "/api/watches",
+            "/api/v1/watches",
             json={"name": "Update Watch", "url": "https://example.com", "content_type": "html"},
         )
         watch_id = watch_resp.json()["id"]
         create_resp = await client.post(
-            f"/api/watches/{watch_id}/profiles",
+            f"/api/v1/watches/{watch_id}/profiles",
             json={
                 "profile_type": "event",
                 "reference_date": "2026-04-15",
@@ -100,7 +100,7 @@ class TestUpdateProfile:
         )
         profile_id = create_resp.json()["id"]
         response = await client.patch(
-            f"/api/watches/{watch_id}/profiles/{profile_id}",
+            f"/api/v1/watches/{watch_id}/profiles/{profile_id}",
             json={
                 "rules": [
                     {"days_before": 7, "interval": "1h"},
@@ -115,12 +115,12 @@ class TestUpdateProfile:
 
     async def test_update_is_active(self, client):
         watch_resp = await client.post(
-            "/api/watches",
+            "/api/v1/watches",
             json={"name": "Deactivate Watch", "url": "https://example.com", "content_type": "html"},
         )
         watch_id = watch_resp.json()["id"]
         create_resp = await client.post(
-            f"/api/watches/{watch_id}/profiles",
+            f"/api/v1/watches/{watch_id}/profiles",
             json={
                 "profile_type": "deadline",
                 "reference_date": "2026-05-01",
@@ -130,7 +130,7 @@ class TestUpdateProfile:
         )
         profile_id = create_resp.json()["id"]
         response = await client.patch(
-            f"/api/watches/{watch_id}/profiles/{profile_id}",
+            f"/api/v1/watches/{watch_id}/profiles/{profile_id}",
             json={"is_active": False},
         )
         assert response.status_code == 200
@@ -138,12 +138,12 @@ class TestUpdateProfile:
 
     async def test_update_post_action(self, client):
         watch_resp = await client.post(
-            "/api/watches",
+            "/api/v1/watches",
             json={"name": "Action Watch", "url": "https://example.com", "content_type": "html"},
         )
         watch_id = watch_resp.json()["id"]
         create_resp = await client.post(
-            f"/api/watches/{watch_id}/profiles",
+            f"/api/v1/watches/{watch_id}/profiles",
             json={
                 "profile_type": "event",
                 "reference_date": "2026-04-15",
@@ -153,7 +153,7 @@ class TestUpdateProfile:
         )
         profile_id = create_resp.json()["id"]
         response = await client.patch(
-            f"/api/watches/{watch_id}/profiles/{profile_id}",
+            f"/api/v1/watches/{watch_id}/profiles/{profile_id}",
             json={"post_action": "archive"},
         )
         assert response.status_code == 200
@@ -161,12 +161,12 @@ class TestUpdateProfile:
 
     async def test_update_creates_audit_log(self, client):
         watch_resp = await client.post(
-            "/api/watches",
+            "/api/v1/watches",
             json={"name": "Audit Watch", "url": "https://example.com", "content_type": "html"},
         )
         watch_id = watch_resp.json()["id"]
         create_resp = await client.post(
-            f"/api/watches/{watch_id}/profiles",
+            f"/api/v1/watches/{watch_id}/profiles",
             json={
                 "profile_type": "event",
                 "reference_date": "2026-04-15",
@@ -176,10 +176,10 @@ class TestUpdateProfile:
         )
         profile_id = create_resp.json()["id"]
         await client.patch(
-            f"/api/watches/{watch_id}/profiles/{profile_id}",
+            f"/api/v1/watches/{watch_id}/profiles/{profile_id}",
             json={"is_active": False},
         )
-        response = await client.get("/api/audit", params={"event_type": "profile.updated"})
+        response = await client.get("/api/v1/audit", params={"event_type": "profile.updated"})
         events = response.json()
         assert len(events) >= 1
         assert events[0]["payload"]["profile_id"] == profile_id
@@ -187,24 +187,24 @@ class TestUpdateProfile:
 
     async def test_update_nonexistent_profile(self, client):
         watch_resp = await client.post(
-            "/api/watches",
+            "/api/v1/watches",
             json={"name": "Missing Watch", "url": "https://example.com", "content_type": "html"},
         )
         watch_id = watch_resp.json()["id"]
         response = await client.patch(
-            f"/api/watches/{watch_id}/profiles/00000000000000000000000000",
+            f"/api/v1/watches/{watch_id}/profiles/00000000000000000000000000",
             json={"is_active": False},
         )
         assert response.status_code == 404
 
     async def test_update_empty_body(self, client):
         watch_resp = await client.post(
-            "/api/watches",
+            "/api/v1/watches",
             json={"name": "Empty Watch", "url": "https://example.com", "content_type": "html"},
         )
         watch_id = watch_resp.json()["id"]
         create_resp = await client.post(
-            f"/api/watches/{watch_id}/profiles",
+            f"/api/v1/watches/{watch_id}/profiles",
             json={
                 "profile_type": "event",
                 "reference_date": "2026-04-15",
@@ -214,7 +214,7 @@ class TestUpdateProfile:
         )
         profile_id = create_resp.json()["id"]
         response = await client.patch(
-            f"/api/watches/{watch_id}/profiles/{profile_id}",
+            f"/api/v1/watches/{watch_id}/profiles/{profile_id}",
             json={},
         )
         assert response.status_code == 200
@@ -225,12 +225,12 @@ class TestUpdateProfile:
 
     async def test_update_multiple_fields(self, client):
         watch_resp = await client.post(
-            "/api/watches",
+            "/api/v1/watches",
             json={"name": "Multi Watch", "url": "https://example.com", "content_type": "html"},
         )
         watch_id = watch_resp.json()["id"]
         create_resp = await client.post(
-            f"/api/watches/{watch_id}/profiles",
+            f"/api/v1/watches/{watch_id}/profiles",
             json={
                 "profile_type": "event",
                 "reference_date": "2026-04-15",
@@ -240,7 +240,7 @@ class TestUpdateProfile:
         )
         profile_id = create_resp.json()["id"]
         response = await client.patch(
-            f"/api/watches/{watch_id}/profiles/{profile_id}",
+            f"/api/v1/watches/{watch_id}/profiles/{profile_id}",
             json={"is_active": False, "post_action": "archive"},
         )
         assert response.status_code == 200
@@ -251,7 +251,7 @@ class TestUpdateProfile:
         assert len(data["rules"]) == 1
         # Audit records both fields
         audit_resp = await client.get(
-            "/api/audit",
+            "/api/v1/audit",
             params={"event_type": "profile.updated"},
         )
         events = audit_resp.json()
@@ -265,7 +265,7 @@ class TestUpdateProfile:
 class TestDeleteProfile:
     async def test_delete_profile(self, client):
         watch_resp = await client.post(
-            "/api/watches",
+            "/api/v1/watches",
             json={
                 "name": "Delete Profile Watch",
                 "url": "https://example.com",
@@ -274,7 +274,7 @@ class TestDeleteProfile:
         )
         watch_id = watch_resp.json()["id"]
         create_resp = await client.post(
-            f"/api/watches/{watch_id}/profiles",
+            f"/api/v1/watches/{watch_id}/profiles",
             json={
                 "profile_type": "event",
                 "reference_date": "2026-04-15",
@@ -283,5 +283,5 @@ class TestDeleteProfile:
             },
         )
         profile_id = create_resp.json()["id"]
-        response = await client.delete(f"/api/watches/{watch_id}/profiles/{profile_id}")
+        response = await client.delete(f"/api/v1/watches/{watch_id}/profiles/{profile_id}")
         assert response.status_code == 204

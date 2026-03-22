@@ -24,8 +24,8 @@
     <label for="content_type" class="block text-sm font-medium text-gray-700">Content Type</label>
     <select name="content_type" id="content_type"
       class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 text-sm p-2 border">
-      {% for ct in ["html", "pdf", "file"] %}
-      <option value="{{ ct }}" {% if watch and watch.content_type == ct %}selected{% endif %}>{{ ct | upper }}</option>
+      {% for ct in content_types %}
+      <option value="{{ ct.value }}" {% if watch and watch.content_type == ct.value %}selected{% endif %}>{{ ct.value | upper }}</option>
       {% endfor %}
     </select>
   </div>

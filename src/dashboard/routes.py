@@ -2,14 +2,11 @@
 
 from fastapi import APIRouter, Depends, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.api.dependencies import get_db_session
 from src.core.models.audit_log import AuditLog
-from src.core.models.notification_config import NotificationConfig
-from src.core.models.temporal_profile import TemporalProfile
-from src.core.models.watch import Watch
+from src.core.models.watch import ContentType, Watch
 from src.dashboard import templates
 from src.dashboard.context import (
     get_dashboard_stats,
@@ -19,6 +16,8 @@ from src.dashboard.context import (
     get_watch_changes,
     get_watch_detail,
     get_watch_list,
+    get_watch_notifications,
+    get_watch_profiles,
 )
 from src.workers.tasks import get_rate_limiter
 
@@ -64,7 +63,13 @@ async def watch_create_form(request: Request):
     """Watch creation form."""
     return templates.TemplateResponse(
         "pages/watch_form.html",
-        {"request": request, "active_page": "watches", "watch": None, "flash": None},
+        {
+            "request": request,
+            "active_page": "watches",
+            "watch": None,
+            "flash": None,
+            "content_types": list(ContentType),
+        },
     )
 
 
@@ -88,7 +93,13 @@ async def watch_create_submit(
         flash = {"type": "error", "message": ". ".join(errors)}
         return templates.TemplateResponse(
             "pages/watch_form.html",
-            {"request": request, "active_page": "watches", "watch": None, "flash": flash},
+            {
+                "request": request,
+                "active_page": "watches",
+                "watch": None,
+                "flash": flash,
+                "content_types": list(ContentType),
+            },
         )
 
     schedule_config = {}
@@ -124,16 +135,8 @@ async def watch_detail_page(
     if not watch:
         return HTMLResponse(status_code=404, content="Watch not found")
     changes = await get_watch_changes(session, watch_id)
-
-    # Load profiles and notification configs
-    profiles_result = await session.execute(
-        select(TemporalProfile).where(TemporalProfile.watch_id == watch.id)
-    )
-    profiles = list(profiles_result.scalars().all())
-    nc_result = await session.execute(
-        select(NotificationConfig).where(NotificationConfig.watch_id == watch.id)
-    )
-    notifications = list(nc_result.scalars().all())
+    profiles = await get_watch_profiles(session, watch.id)
+    notifications = await get_watch_notifications(session, watch.id)
 
     context = {
         "request": request,
@@ -158,7 +161,13 @@ async def watch_edit_form(
         return HTMLResponse(status_code=404, content="Watch not found")
     return templates.TemplateResponse(
         "pages/watch_form.html",
-        {"request": request, "active_page": "watches", "watch": watch, "flash": None},
+        {
+            "request": request,
+            "active_page": "watches",
+            "watch": watch,
+            "flash": None,
+            "content_types": list(ContentType),
+        },
     )
 
 
@@ -187,15 +196,23 @@ async def watch_edit_submit(
         flash = {"type": "error", "message": ". ".join(errors)}
         return templates.TemplateResponse(
             "pages/watch_form.html",
-            {"request": request, "active_page": "watches", "watch": watch, "flash": flash},
+            {
+                "request": request,
+                "active_page": "watches",
+                "watch": watch,
+                "flash": flash,
+                "content_types": list(ContentType),
+            },
         )
 
     watch.name = name.strip()
     watch.url = url.strip()
     watch.content_type = content_type
-    schedule_config = watch.schedule_config or {}
+    schedule_config = dict(watch.schedule_config or {})
     if interval.strip():
         schedule_config["interval"] = interval.strip()
+    else:
+        schedule_config.pop("interval", None)
     watch.schedule_config = schedule_config
 
     session.add(

@@ -9,6 +9,8 @@ from ulid import ULID
 
 from src.core.models.audit_log import AuditLog
 from src.core.models.change import Change
+from src.core.models.notification_config import NotificationConfig
+from src.core.models.temporal_profile import TemporalProfile
 from src.core.models.watch import Watch
 
 
@@ -175,3 +177,21 @@ async def get_watch_changes(session: AsyncSession, watch_id: str, limit: int = 5
             }
         )
     return changes
+
+
+async def get_watch_profiles(session: AsyncSession, watch_id: ULID) -> list[TemporalProfile]:
+    """Fetch temporal profiles for a watch."""
+    result = await session.execute(
+        select(TemporalProfile).where(TemporalProfile.watch_id == watch_id)
+    )
+    return list(result.scalars().all())
+
+
+async def get_watch_notifications(
+    session: AsyncSession, watch_id: ULID
+) -> list[NotificationConfig]:
+    """Fetch notification configs for a watch."""
+    result = await session.execute(
+        select(NotificationConfig).where(NotificationConfig.watch_id == watch_id)
+    )
+    return list(result.scalars().all())

@@ -1,5 +1,6 @@
 """Dashboard context helpers — DB queries for stats, changes, queue health."""
 
+import difflib
 from datetime import UTC, datetime
 
 from sqlalchemy import func, select, text
@@ -185,6 +186,43 @@ async def get_change_detail(session: AsyncSession, change_id: str) -> dict | Non
         "current_chunks": curr_chunks,
         "previous_chunks": prev_chunks,
     }
+
+
+def generate_diff(previous_text: str, current_text: str) -> dict:
+    """Generate a side-by-side diff between two text strings.
+
+    Returns dict with 'has_changes' bool and 'lines' list of
+    (tag, prev_line, curr_line) tuples where tag is 'equal', 'insert',
+    'delete', or 'replace'.
+    """
+    prev_lines = previous_text.splitlines(keepends=True)
+    curr_lines = current_text.splitlines(keepends=True)
+
+    sm = difflib.SequenceMatcher(None, prev_lines, curr_lines)
+    lines = []
+    has_changes = False
+
+    for tag, i1, i2, j1, j2 in sm.get_opcodes():
+        if tag == "equal":
+            for k in range(i2 - i1):
+                lines.append(("equal", prev_lines[i1 + k].rstrip(), curr_lines[j1 + k].rstrip()))
+        elif tag == "replace":
+            has_changes = True
+            max_len = max(i2 - i1, j2 - j1)
+            for k in range(max_len):
+                prev = prev_lines[i1 + k].rstrip() if i1 + k < i2 else ""
+                curr = curr_lines[j1 + k].rstrip() if j1 + k < j2 else ""
+                lines.append(("replace", prev, curr))
+        elif tag == "delete":
+            has_changes = True
+            for k in range(i1, i2):
+                lines.append(("delete", prev_lines[k].rstrip(), ""))
+        elif tag == "insert":
+            has_changes = True
+            for k in range(j1, j2):
+                lines.append(("insert", "", curr_lines[k].rstrip()))
+
+    return {"has_changes": has_changes, "lines": lines}
 
 
 async def get_watch_detail(session: AsyncSession, watch_id: str) -> Watch | None:

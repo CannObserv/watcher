@@ -6,6 +6,7 @@ from src.core.models.change import Change
 from src.core.models.snapshot import Snapshot, SnapshotChunk
 from src.core.models.watch import Watch
 from src.dashboard.context import (
+    generate_diff,
     get_change_detail,
     get_dashboard_stats,
     get_queue_health,
@@ -16,9 +17,8 @@ from src.dashboard.context import (
     get_watch_list,
 )
 
-pytestmark = pytest.mark.integration
 
-
+@pytest.mark.integration
 class TestGetDashboardStats:
     async def test_empty_database(self, db_session):
         stats = await get_dashboard_stats(db_session)
@@ -43,6 +43,7 @@ class TestGetDashboardStats:
         assert stats["active_watches"] == 1
 
 
+@pytest.mark.integration
 class TestGetRecentChanges:
     async def test_empty(self, db_session):
         changes = await get_recent_changes(db_session)
@@ -83,6 +84,7 @@ class TestGetRecentChanges:
         assert changes[0]["id"] is not None
 
 
+@pytest.mark.integration
 class TestGetQueueHealth:
     async def test_returns_queue_stats(self, db_session):
         queue = await get_queue_health(db_session)
@@ -110,6 +112,7 @@ class TestGetRateLimiterState:
         assert domains[0]["in_backoff"] is False
 
 
+@pytest.mark.integration
 class TestGetWatchList:
     async def test_empty_returns_empty_list(self, db_session):
         result = await get_watch_list(db_session)
@@ -142,6 +145,7 @@ class TestGetWatchList:
         assert active_only[0].name == "Active"
 
 
+@pytest.mark.integration
 class TestGetWatchDetail:
     async def test_returns_watch(self, db_session):
         watch = Watch(name="Detail", url="https://a.com", content_type="html")
@@ -161,6 +165,7 @@ class TestGetWatchDetail:
         assert result is None
 
 
+@pytest.mark.integration
 class TestGetChangeDetail:
     async def test_returns_change_with_snapshots(self, db_session):
         watch = Watch(name="W", url="https://example.com", content_type="html")
@@ -220,6 +225,7 @@ class TestGetChangeDetail:
         assert result is None
 
 
+@pytest.mark.integration
 class TestGetWatchChanges:
     async def test_empty(self, db_session):
         watch = Watch(name="No Changes", url="https://a.com", content_type="html")
@@ -228,3 +234,22 @@ class TestGetWatchChanges:
 
         result = await get_watch_changes(db_session, str(watch.id))
         assert result == []
+
+
+class TestGenerateDiff:
+    def test_identical_text(self):
+        result = generate_diff("hello\nworld", "hello\nworld")
+        assert result["has_changes"] is False
+
+    def test_modified_text(self):
+        result = generate_diff("hello\nworld", "hello\nplanet")
+        assert result["has_changes"] is True
+        assert len(result["lines"]) > 0
+
+    def test_empty_previous(self):
+        result = generate_diff("", "new content")
+        assert result["has_changes"] is True
+
+    def test_empty_both(self):
+        result = generate_diff("", "")
+        assert result["has_changes"] is False

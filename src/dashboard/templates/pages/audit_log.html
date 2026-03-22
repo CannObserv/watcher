@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{% block title %}Audit Log — watcher{% endblock %}
+{% block content %}
+<h2 class="text-2xl font-bold text-gray-900 mb-6">Audit Log</h2>
+
+<div class="flex gap-2 mb-4 flex-wrap">
+  <button hx-get="/partials/audit-table" hx-target="#audit-table" class="px-3 py-1 text-sm rounded-md bg-gray-200 hover:bg-gray-300">All</button>
+  <button hx-get="/partials/audit-table?event_type=watch.created" hx-target="#audit-table" class="px-3 py-1 text-sm rounded-md bg-gray-200 hover:bg-gray-300">watch.created</button>
+  <button hx-get="/partials/audit-table?event_type=watch.updated" hx-target="#audit-table" class="px-3 py-1 text-sm rounded-md bg-gray-200 hover:bg-gray-300">watch.updated</button>
+  <button hx-get="/partials/audit-table?event_type=check.snapshot_created" hx-target="#audit-table" class="px-3 py-1 text-sm rounded-md bg-gray-200 hover:bg-gray-300">check.snapshot_created</button>
+  <button hx-get="/partials/audit-table?event_type=check.no_change" hx-target="#audit-table" class="px-3 py-1 text-sm rounded-md bg-gray-200 hover:bg-gray-300">check.no_change</button>
+  <button hx-get="/partials/audit-table?event_type=check.fetch_failed" hx-target="#audit-table" class="px-3 py-1 text-sm rounded-md bg-gray-200 hover:bg-gray-300">check.fetch_failed</button>
+  <button hx-get="/partials/audit-table?event_type=notification.dispatched" hx-target="#audit-table" class="px-3 py-1 text-sm rounded-md bg-gray-200 hover:bg-gray-300">notification.dispatched</button>
+</div>
+
+<div id="audit-table">
+  {% include "partials/audit_table.html" %}
+</div>
+{% endblock %}

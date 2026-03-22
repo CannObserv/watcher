@@ -14,6 +14,7 @@ from src.core.storage import LocalStorage
 from src.dashboard import templates
 from src.dashboard.context import (
     generate_diff,
+    get_audit_entries,
     get_change_detail,
     get_dashboard_stats,
     get_queue_health,
@@ -410,3 +411,34 @@ async def partial_diff(
 
     diff = generate_diff(prev_text, curr_text)
     return templates.TemplateResponse("partials/diff_view.html", {"request": request, "diff": diff})
+
+
+@router.get("/audit")
+async def audit_log_page(
+    request: Request,
+    event_type: str | None = None,
+    watch_id: str | None = None,
+    session: AsyncSession = Depends(get_db_session),
+):
+    """Audit log page with filtering."""
+    entries = await get_audit_entries(session, event_type=event_type, watch_id=watch_id)
+    context = {
+        "request": request,
+        "active_page": "audit",
+        "entries": entries,
+    }
+    return templates.TemplateResponse("pages/audit_log.html", context)
+
+
+@router.get("/partials/audit-table")
+async def partial_audit_table(
+    request: Request,
+    event_type: str | None = None,
+    watch_id: str | None = None,
+    session: AsyncSession = Depends(get_db_session),
+):
+    """HTMX partial: filtered audit log table."""
+    entries = await get_audit_entries(session, event_type=event_type, watch_id=watch_id)
+    return templates.TemplateResponse(
+        "partials/audit_table.html", {"request": request, "entries": entries}
+    )

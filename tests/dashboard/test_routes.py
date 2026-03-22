@@ -186,6 +186,21 @@ class TestChangeDetail:
         assert response.status_code == 404
 
 
+class TestAuditLog:
+    async def test_audit_page_returns_200(self, client):
+        response = await client.get("/audit")
+        assert response.status_code == 200
+        assert b"Audit Log" in response.content
+
+    async def test_audit_table_partial(self, client):
+        response = await client.get("/partials/audit-table")
+        assert response.status_code == 200
+
+    async def test_audit_filter_by_event_type(self, client):
+        response = await client.get("/partials/audit-table?event_type=watch.created")
+        assert response.status_code == 200
+
+
 class TestWatchDeactivate:
     async def test_deactivate_returns_updated_row(self, client):
         resp = await client.post(

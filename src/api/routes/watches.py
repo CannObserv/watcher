@@ -6,6 +6,7 @@ from typing import Annotated
 import httpx
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.api.dependencies import get_db_session, get_probe_fn
@@ -35,18 +36,24 @@ async def create_watch(
     except httpx.HTTPError as exc:
         raise HTTPException(status_code=422, detail=f"URL unreachable: {exc}") from exc
 
-    # Upsert domain — insert with defaults if new, leave config intact if exists
+    # Upsert domain — insert with defaults if new, leave config intact if exists.
+    # Guard against TOCTOU race: concurrent requests may both pass the
+    # scalar_one_or_none() check and hit the unique constraint simultaneously.
     domain_stmt = select(Domain).where(Domain.name == probe_result.effective_domain)
     domain_result = await session.execute(domain_stmt)
     if not domain_result.scalar_one_or_none():
-        session.add(
-            Domain(
-                name=probe_result.effective_domain,
-                min_interval=DEFAULT_MIN_INTERVAL,
-                max_concurrency=DEFAULT_MAX_CONCURRENCY,
-                current_interval=DEFAULT_MIN_INTERVAL,
+        try:
+            session.add(
+                Domain(
+                    name=probe_result.effective_domain,
+                    min_interval=DEFAULT_MIN_INTERVAL,
+                    max_concurrency=DEFAULT_MAX_CONCURRENCY,
+                    current_interval=DEFAULT_MIN_INTERVAL,
+                )
             )
-        )
+            await session.flush()
+        except IntegrityError:
+            await session.rollback()
 
     watch = Watch(
         name=data.name,

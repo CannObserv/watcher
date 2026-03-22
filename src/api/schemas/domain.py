@@ -2,7 +2,7 @@
 
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from src.api.schemas.types import ULIDStr
 
@@ -10,8 +10,8 @@ from src.api.schemas.types import ULIDStr
 class DomainPatch(BaseModel):
     """Schema for creating or updating a domain config (upsert via PATCH)."""
 
-    min_interval: float | None = None
-    max_concurrency: int | None = None
+    min_interval: float | None = Field(None, ge=0)
+    max_concurrency: int | None = Field(None, ge=1)
 
 
 class DomainResponse(BaseModel):

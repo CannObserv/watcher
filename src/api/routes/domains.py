@@ -2,6 +2,7 @@
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.api.dependencies import get_db_session
@@ -61,6 +62,13 @@ async def upsert_domain(
             current_interval=min_iv,
         )
         session.add(domain)
+        try:
+            await session.flush()
+        except IntegrityError:
+            # Concurrent request created the domain between our select and insert.
+            await session.rollback()
+            result = await session.execute(select(Domain).where(Domain.name == name))
+            domain = result.scalar_one()
     else:
         if "min_interval" in updates:
             domain.min_interval = updates["min_interval"]

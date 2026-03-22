@@ -11,6 +11,7 @@ from src.api.routes.notification_configs import router as notification_configs_r
 from src.api.routes.temporal_profiles import router as profiles_router
 from src.api.routes.watches import router as watches_router
 from src.core.logging import configure_logging
+from src.dashboard import register_dashboard
 
 configure_logging()
 
@@ -40,3 +41,4 @@ app.include_router(changes_router)
 app.include_router(profiles_router)
 app.include_router(notification_configs_router)
 app.include_router(audit_router)
+register_dashboard(app)

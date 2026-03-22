@@ -3,6 +3,7 @@
 from src.core.models.audit_log import AuditLog
 from src.core.models.base import Base, TimestampMixin, ULIDType, generate_ulid
 from src.core.models.change import Change
+from src.core.models.domain import DEFAULT_MAX_CONCURRENCY, DEFAULT_MIN_INTERVAL, Domain
 from src.core.models.notification_config import NotificationConfig
 from src.core.models.snapshot import Snapshot, SnapshotChunk
 from src.core.models.temporal_profile import PostAction, ProfileType, TemporalProfile
@@ -13,6 +14,9 @@ __all__ = [
     "Base",
     "Change",
     "ContentType",
+    "DEFAULT_MAX_CONCURRENCY",
+    "DEFAULT_MIN_INTERVAL",
+    "Domain",
     "NotificationConfig",
     "PostAction",
     "ProfileType",

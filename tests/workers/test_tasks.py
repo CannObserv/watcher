@@ -15,9 +15,36 @@ from src.core.models.temporal_profile import PostAction, ProfileType, TemporalPr
 from src.core.models.watch import ContentType, Watch
 from src.core.rate_limiter import DomainRateLimiter
 from src.core.storage import LocalStorage
-from src.workers.tasks import _run_check_pipeline, check_watch, schedule_tick
+from src.workers.tasks import _persist_backoff, _run_check_pipeline, check_watch, schedule_tick
 
 pytestmark = pytest.mark.integration
+
+
+class TestPersistBackoff:
+    async def test_persist_backoff_updates_domain(self):
+        domain = MagicMock()
+        domain.current_interval = 1.0
+        domain.last_request_at = None
+
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = domain
+        mock_session = AsyncMock()
+        mock_session.execute = AsyncMock(return_value=mock_result)
+
+        before = datetime.now(UTC)
+        await _persist_backoff("example.com", 4.0, mock_session)
+
+        assert domain.current_interval == 4.0
+        assert domain.last_request_at >= before
+
+    async def test_persist_backoff_noop_if_domain_missing(self):
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = None
+        mock_session = AsyncMock()
+        mock_session.execute = AsyncMock(return_value=mock_result)
+
+        # Should not raise
+        await _persist_backoff("unknown.com", 4.0, mock_session)
 
 
 def _mock_session_factory(db_session: AsyncSession):
@@ -160,8 +187,9 @@ class TestCheckWatchTask:
         )
         mock_client = httpx.AsyncClient(transport=httpx.MockTransport(lambda req: mock_response))
 
+        fast_limiter = DomainRateLimiter(min_interval=0.0)
         monkeypatch.setattr(tasks_mod, "_fetcher", HttpFetcher(client=mock_client))
-        monkeypatch.setattr(tasks_mod, "_rate_limiter", DomainRateLimiter(min_interval=0.0))
+        monkeypatch.setattr(tasks_mod, "get_rate_limiter", lambda: fast_limiter)
         monkeypatch.setattr(tasks_mod, "STORAGE_BASE_DIR", tmp_path)
         monkeypatch.setattr(
             tasks_mod, "get_session_factory", lambda: _mock_session_factory(db_session)
@@ -210,8 +238,9 @@ class TestCheckWatchTask:
         )
         mock_client = httpx.AsyncClient(transport=httpx.MockTransport(lambda req: mock_response))
 
+        fast_limiter = DomainRateLimiter(min_interval=0.0)
         monkeypatch.setattr(tasks_mod, "_fetcher", HttpFetcher(client=mock_client))
-        monkeypatch.setattr(tasks_mod, "_rate_limiter", DomainRateLimiter(min_interval=0.0))
+        monkeypatch.setattr(tasks_mod, "get_rate_limiter", lambda: fast_limiter)
         monkeypatch.setattr(tasks_mod, "STORAGE_BASE_DIR", tmp_path)
         monkeypatch.setattr(
             tasks_mod, "get_session_factory", lambda: _mock_session_factory(db_session)

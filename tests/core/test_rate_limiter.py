@@ -83,3 +83,76 @@ class TestDomainRateLimiter:
         assert states[0]["name"] == "example.com"
         assert states[0]["in_backoff"] is True
         assert states[0]["interval"] > 1.0
+
+
+class TestConfigureDomain:
+    def test_configure_domain_stores_current_interval_as_effective_rate(self):
+        """configure_domain stores current_interval as the effective in-memory rate.
+
+        DomainState only has min_interval — it is the effective rate used during
+        acquire. configure_domain loads current_interval here so that backoff
+        state persists across restarts. The operator min_interval floor is
+        DB-only; in-memory state only tracks the current effective rate.
+        """
+        limiter = DomainRateLimiter()
+        limiter.configure_domain(
+            name="example.com",
+            max_concurrency=1,
+            current_interval=5.0,
+        )
+        state = limiter._domains["example.com"]
+        assert state.min_interval == 5.0  # current_interval becomes the effective rate
+
+    def test_configure_domain_sets_concurrency(self):
+        limiter = DomainRateLimiter()
+        limiter.configure_domain(
+            name="example.com",
+            max_concurrency=3,
+            current_interval=1.0,
+        )
+        state = limiter._domains["example.com"]
+        assert state.semaphore._value == 3
+
+    async def test_acquire_for_domain_works(self):
+        limiter = DomainRateLimiter(max_concurrent=2, min_interval=0.0)
+        async with limiter.acquire_for_domain("example.com"):
+            pass  # should not raise
+
+    async def test_acquire_for_domain_uses_domain_config(self):
+        limiter = DomainRateLimiter(max_concurrent=2, min_interval=0.0)
+        limiter.configure_domain(
+            name="example.com",
+            max_concurrency=1,
+            current_interval=0.1,
+        )
+        times = []
+
+        async def task():
+            async with limiter.acquire_for_domain("example.com"):
+                times.append(asyncio.get_event_loop().time())
+
+        await task()
+        await task()
+        assert times[1] - times[0] >= 0.09
+
+    def test_report_rate_limited_for_domain_increases_interval(self):
+        limiter = DomainRateLimiter(min_interval=1.0)
+        limiter.report_rate_limited_for_domain("example.com")
+        state = limiter._domains["example.com"]
+        assert state.min_interval > 1.0
+
+    def test_report_rate_limited_for_domain_returns_new_interval(self):
+        limiter = DomainRateLimiter(min_interval=1.0)
+        new_interval = limiter.report_rate_limited_for_domain("example.com")
+        assert new_interval == limiter._domains["example.com"].min_interval
+
+
+class TestGetRateLimiter:
+    def test_get_rate_limiter_returns_same_instance(self):
+        from src.core.rate_limiter import get_rate_limiter, reset_rate_limiter
+
+        reset_rate_limiter()
+        a = get_rate_limiter()
+        b = get_rate_limiter()
+        assert a is b
+        reset_rate_limiter()  # clean up

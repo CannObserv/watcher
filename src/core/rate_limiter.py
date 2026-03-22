@@ -94,3 +94,76 @@ class DomainRateLimiter:
             "rate limited, increasing interval",
             extra={"domain": domain, "new_interval": state.min_interval},
         )
+
+    def configure_domain(
+        self,
+        name: str,
+        max_concurrency: int,
+        current_interval: float,
+    ) -> None:
+        """Hydrate in-memory state from a persisted Domain record.
+
+        Loads current_interval as the effective rate (state.min_interval) so
+        backoff state survives restarts. The operator-configured min_interval
+        floor is DB-only; in-memory DomainState only tracks the current
+        effective rate.
+        """
+        self._domains[name] = DomainState(
+            semaphore=asyncio.Semaphore(max_concurrency),
+            min_interval=current_interval,
+        )
+
+    @asynccontextmanager
+    async def acquire_for_domain(self, domain: str):
+        """Acquire rate-limited slot using a known domain name.
+
+        Prefer over acquire(url) when effective_domain is already resolved.
+        Unknown domains are auto-initialised with global defaults via defaultdict.
+        """
+        state = self._domains[domain]
+        await state.semaphore.acquire()
+        try:
+            async with state.lock:
+                now = time.monotonic()
+                elapsed = now - state.last_request_at
+                if elapsed < state.min_interval:
+                    await asyncio.sleep(state.min_interval - elapsed)
+                state.last_request_at = time.monotonic()
+            yield
+        finally:
+            state.semaphore.release()
+
+    def report_rate_limited_for_domain(self, domain: str) -> float:
+        """Report a 429 for a known domain name; return the new interval.
+
+        Use instead of report_rate_limited(url) when effective_domain is known.
+        """
+        state = self._domains[domain]
+        new_interval = max(state.min_interval * BACKOFF_MULTIPLIER, 2.0)
+        state.min_interval = min(new_interval, BACKOFF_MAX_INTERVAL)
+        logger.warning(
+            "rate limited, increasing interval",
+            extra={"domain": domain, "new_interval": state.min_interval},
+        )
+        return state.min_interval
+
+
+_rate_limiter: DomainRateLimiter | None = None
+
+
+def get_rate_limiter() -> DomainRateLimiter:
+    """Return the shared DomainRateLimiter, creating it on first call.
+
+    Both the API app (for startup hydration) and workers (for fetch rate limiting)
+    must import this function to share the same in-memory state.
+    """
+    global _rate_limiter
+    if _rate_limiter is None:
+        _rate_limiter = DomainRateLimiter()
+    return _rate_limiter
+
+
+def reset_rate_limiter() -> None:
+    """Reset the shared rate limiter singleton. For testing only."""
+    global _rate_limiter
+    _rate_limiter = None

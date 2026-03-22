@@ -2,13 +2,16 @@
 
 import os
 from collections.abc import AsyncGenerator
+from urllib.parse import urlparse
 
 import pytest
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import event
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 
+from src.api.dependencies import get_db_session, get_probe_fn
 from src.core.models import Base
+from src.core.probe import ProbeResult
 
 TEST_DATABASE_URL = os.environ.get("TEST_DATABASE_URL")
 if not TEST_DATABASE_URL:
@@ -16,6 +19,22 @@ if not TEST_DATABASE_URL:
         "TEST_DATABASE_URL environment variable is not set. "
         "Load it from the env file: export $(cat env | xargs)"
     )
+
+
+def _make_mock_probe():
+    """Return a mock probe that resolves URLs without real HTTP calls."""
+
+    async def mock_probe(url: str) -> ProbeResult:
+        hostname = urlparse(url).hostname or ""
+        return ProbeResult(
+            effective_url=url,
+            effective_domain=hostname,
+            redirect_chain=[url],
+            status_code=200,
+            content_type="text/html",
+        )
+
+    return mock_probe
 
 
 @pytest.fixture(scope="session")
@@ -58,13 +77,16 @@ async def db_session(test_engine) -> AsyncGenerator[AsyncSession]:
 
 @pytest.fixture
 async def client(test_engine, db_session) -> AsyncGenerator[AsyncClient]:
-    from src.api.dependencies import get_db_session
     from src.api.main import app
 
     async def override_session() -> AsyncGenerator[AsyncSession]:
         yield db_session
 
+    async def override_probe_fn():
+        return _make_mock_probe()
+
     app.dependency_overrides[get_db_session] = override_session
+    app.dependency_overrides[get_probe_fn] = override_probe_fn
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as c:
         yield c

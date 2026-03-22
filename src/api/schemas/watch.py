@@ -19,10 +19,10 @@ class WatchCreate(BaseModel):
 
 
 class WatchUpdate(BaseModel):
-    """Schema for updating a watch. All fields optional."""
+    """Schema for updating a watch. All fields optional. URL is immutable after creation."""
 
     name: str | None = None
-    url: str | None = None
+    # url intentionally omitted — URL cannot change; delete and recreate to change
     content_type: ContentType | None = None
     fetch_config: dict | None = None
     schedule_config: dict | None = None
@@ -43,3 +43,5 @@ class WatchResponse(BaseModel):
     is_active: bool
     created_at: datetime
     updated_at: datetime
+    effective_url: str | None = None
+    effective_domain: str | None = None

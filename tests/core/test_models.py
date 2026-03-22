@@ -9,6 +9,7 @@ from src.core.database import get_database_url, get_engine, reset_engine
 from src.core.models.audit_log import AuditLog
 from src.core.models.base import ULIDType
 from src.core.models.change import Change
+from src.core.models.domain import Domain
 from src.core.models.notification_config import NotificationConfig
 from src.core.models.snapshot import Snapshot, SnapshotChunk
 from src.core.models.temporal_profile import PostAction, ProfileType, TemporalProfile
@@ -90,6 +91,15 @@ class TestWatchModel:
                 url="https://example.com",
                 content_type="invalid",
             )
+
+    def test_watch_effective_fields_default_none(self):
+        watch = Watch(
+            name="Test",
+            url="https://example.com",
+            content_type=ContentType.HTML,
+        )
+        assert watch.effective_url is None
+        assert watch.effective_domain is None
 
 
 class TestAuditLogModel:
@@ -224,6 +234,26 @@ class TestTemporalProfileModel:
         )
         assert profile.is_active is True
         assert profile.date_range_start is None
+
+
+class TestDomainModel:
+    def test_create_domain_with_defaults(self):
+        d = Domain(name="example.com")
+        assert d.name == "example.com"
+        assert d.min_interval == 1.0
+        assert d.max_concurrency == 2
+        assert d.current_interval == 1.0
+        assert d.last_request_at is None
+
+    def test_create_domain_custom(self):
+        d = Domain(name="slow.gov", min_interval=5.0, max_concurrency=1, current_interval=10.0)
+        assert d.min_interval == 5.0
+        assert d.max_concurrency == 1
+        assert d.current_interval == 10.0
+
+    def test_current_interval_defaults_to_min_interval(self):
+        d = Domain(name="example.com", min_interval=3.0)
+        assert d.current_interval == 3.0
 
 
 class TestNotificationConfigModel:

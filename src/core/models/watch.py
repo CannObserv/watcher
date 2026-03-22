@@ -36,6 +36,8 @@ class Watch(Base, TimestampMixin):
         nullable=True,
         default=None,
     )
+    effective_url: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
+    effective_domain: Mapped[str | None] = mapped_column(String(253), nullable=True, default=None)
 
     def __init__(self, **kwargs: object) -> None:
         """Set Python-side defaults for fields not provided."""

@@ -29,9 +29,15 @@ src/core/simhash.py    — 64-bit SimHash fingerprinting
 src/core/storage.py    — StorageBackend protocol + LocalStorage
 src/core/scheduler.py  — Watch scheduling logic (interval parsing, due computation, temporal profile resolution)
 src/core/rate_limiter.py — Per-domain async rate limiting
+src/dashboard/           — Server-rendered dashboard (Jinja2 + HTMX + Tailwind)
+src/dashboard/routes.py  — Dashboard page and partial routes
+src/dashboard/context.py — Dashboard-specific DB query helpers
+src/dashboard/static/    — CSS, JS (vendored HTMX), compiled Tailwind
+src/dashboard/templates/ — Jinja2 templates (base, pages, partials)
 src/workers/           — Procrastinate task queue (check_watch, schedule_tick)
 tests/                 — Mirrors src/ structure
 docs/                  — Reference docs (COMMANDS, SKILLS)
+scripts/                 — Build scripts (Tailwind CSS)
 ```
 
 ## Services

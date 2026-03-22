@@ -74,6 +74,16 @@ uv run procrastinate --app=src.workers.app worker
 # The worker also runs embedded in FastAPI via lifespan — no separate process needed for dev
 ```
 
+## Tailwind CSS
+
+```bash
+# Build Tailwind CSS
+bash scripts/build-css.sh
+
+# Watch mode (auto-rebuild on changes)
+bash scripts/build-css.sh --watch
+```
+
 ## Git Submodules
 
 ```bash

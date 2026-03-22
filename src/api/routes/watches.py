@@ -21,10 +21,15 @@ router = APIRouter(prefix="/api/watches", tags=["watches"])
 @router.post("", status_code=201, response_model=WatchResponse)
 async def create_watch(
     data: WatchCreate,
+    probe_fn: Annotated[Callable[[str], Awaitable], Depends(get_probe_fn)],
     session: AsyncSession = Depends(get_db_session),
-    probe_fn: Annotated[Callable[[str], Awaitable], Depends(get_probe_fn)] = None,
 ):
-    """Create a new watch. Probes the URL to resolve effective domain."""
+    """Create a new watch. Probes the URL to resolve effective domain.
+
+    The probe fails fast on connection errors (httpx.HTTPError). Non-2xx HTTP
+    responses (e.g. 404, 500) are treated as reachable — the watch is still
+    created so monitoring can begin and detect when the URL becomes healthy.
+    """
     try:
         probe_result = await probe_fn(data.url)
     except httpx.HTTPError as exc:

@@ -31,7 +31,6 @@ async def hydrate_rate_limiter(limiter: DomainRateLimiter) -> None:
     for d in domains:
         limiter.configure_domain(
             name=d.name,
-            min_interval=d.min_interval,
             max_concurrency=d.max_concurrency,
             current_interval=d.current_interval,
         )

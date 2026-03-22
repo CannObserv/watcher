@@ -87,28 +87,26 @@ class TestDomainRateLimiter:
 
 class TestConfigureDomain:
     def test_configure_domain_stores_current_interval_as_effective_rate(self):
-        """configure_domain stores current_interval in state.min_interval.
+        """configure_domain stores current_interval as the effective in-memory rate.
 
         DomainState only has min_interval — it is the effective rate used during
         acquire. configure_domain loads current_interval here so that backoff
-        state persists across restarts. The operator min_interval floor is stored
-        in the DB only; in-memory state just tracks the effective rate.
+        state persists across restarts. The operator min_interval floor is
+        DB-only; in-memory state only tracks the current effective rate.
         """
         limiter = DomainRateLimiter()
         limiter.configure_domain(
             name="example.com",
-            min_interval=2.0,
             max_concurrency=1,
             current_interval=5.0,
         )
         state = limiter._domains["example.com"]
-        assert state.min_interval == 5.0  # current_interval, not min_interval arg
+        assert state.min_interval == 5.0  # current_interval becomes the effective rate
 
     def test_configure_domain_sets_concurrency(self):
         limiter = DomainRateLimiter()
         limiter.configure_domain(
             name="example.com",
-            min_interval=1.0,
             max_concurrency=3,
             current_interval=1.0,
         )
@@ -124,7 +122,6 @@ class TestConfigureDomain:
         limiter = DomainRateLimiter(max_concurrent=2, min_interval=0.0)
         limiter.configure_domain(
             name="example.com",
-            min_interval=0.1,
             max_concurrency=1,
             current_interval=0.1,
         )

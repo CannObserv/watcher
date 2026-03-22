@@ -15,15 +15,13 @@ from src.core.models.temporal_profile import PostAction, ProfileType, TemporalPr
 from src.core.models.watch import ContentType, Watch
 from src.core.rate_limiter import DomainRateLimiter
 from src.core.storage import LocalStorage
-from src.workers.tasks import _run_check_pipeline, check_watch, schedule_tick
+from src.workers.tasks import _persist_backoff, _run_check_pipeline, check_watch, schedule_tick
 
 pytestmark = pytest.mark.integration
 
 
 class TestPersistBackoff:
     async def test_persist_backoff_updates_domain(self):
-        from src.workers.tasks import _persist_backoff
-
         domain = MagicMock()
         domain.current_interval = 1.0
         domain.last_request_at = None
@@ -40,8 +38,6 @@ class TestPersistBackoff:
         assert domain.last_request_at >= before
 
     async def test_persist_backoff_noop_if_domain_missing(self):
-        from src.workers.tasks import _persist_backoff
-
         mock_result = MagicMock()
         mock_result.scalar_one_or_none.return_value = None
         mock_session = AsyncMock()

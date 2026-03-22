@@ -98,7 +98,6 @@ class DomainRateLimiter:
     def configure_domain(
         self,
         name: str,
-        min_interval: float,
         max_concurrency: int,
         current_interval: float,
     ) -> None:
@@ -106,8 +105,8 @@ class DomainRateLimiter:
 
         Loads current_interval as the effective rate (state.min_interval) so
         backoff state survives restarts. The operator-configured min_interval
-        floor is stored in the DB; in-memory DomainState only tracks the
-        current effective rate.
+        floor is DB-only; in-memory DomainState only tracks the current
+        effective rate.
         """
         self._domains[name] = DomainState(
             semaphore=asyncio.Semaphore(max_concurrency),

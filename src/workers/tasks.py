@@ -23,7 +23,7 @@ from src.core.models.change import Change
 from src.core.models.notification_config import NotificationConfig
 from src.core.models.snapshot import Snapshot, SnapshotChunk
 from src.core.models.temporal_profile import TemporalProfile
-from src.core.models.watch import ContentType, Watch
+from src.core.models.watch import Watch
 from src.core.notifications import ChangeEvent, EmailChannel, SlackChannel, WebhookChannel
 from src.core.notifications.dispatcher import dispatch_notifications
 from src.core.rate_limiter import DomainRateLimiter
@@ -69,15 +69,15 @@ def _to_signed64(val: int) -> int:
 
 
 _EXT_MAP = {
-    ContentType.HTML: "html",
-    ContentType.PDF: "pdf",
-    ContentType.FILE: "csv",
+    "html": "html",
+    "pdf": "pdf",
+    "file": "csv",
 }
 
 _EXTRACTOR_MAP = {
-    ContentType.HTML: HtmlExtractor,
-    ContentType.PDF: PdfExtractor,
-    ContentType.FILE: CsvExcelExtractor,
+    "html": HtmlExtractor,
+    "pdf": PdfExtractor,
+    "file": CsvExcelExtractor,
 }
 
 
@@ -116,10 +116,11 @@ def _extract_content(watch: Watch, raw_content: bytes) -> ExtractionResult:
     For FILE watches, passes fetch_config extraction settings (e.g., content_type,
     chunk_row_size, sort_columns) through to CsvExcelExtractor.
     """
-    extractor_cls = _EXTRACTOR_MAP[watch.content_type]
+    ct = str(watch.content_type).lower()
+    extractor_cls = _EXTRACTOR_MAP[ct]
     extractor = extractor_cls()
     config: dict | None = None
-    if watch.content_type == ContentType.FILE:
+    if ct == "file":
         fetch_cfg = watch.fetch_config or {}
         config = {
             "content_type": fetch_cfg.get("file_format", "csv"),
@@ -176,7 +177,7 @@ async def _run_check_pipeline(
 
     # 5. Store raw + extracted text
     snapshot_id = generate_ulid()
-    ext = _EXT_MAP[watch.content_type]
+    ext = _EXT_MAP[str(watch.content_type).lower()]
     raw_path = storage.snapshot_path(str(watch.id), str(snapshot_id), ext)
     text_path = storage.snapshot_path(str(watch.id), str(snapshot_id), "txt")
     storage.save(raw_path, raw_content)

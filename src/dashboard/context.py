@@ -5,6 +5,7 @@ from datetime import UTC, datetime
 from sqlalchemy import func, select, text
 from sqlalchemy.exc import ProgrammingError
 from sqlalchemy.ext.asyncio import AsyncSession
+from ulid import ULID
 
 from src.core.models.audit_log import AuditLog
 from src.core.models.change import Change
@@ -129,3 +130,48 @@ def get_rate_limiter_state(limiter=None) -> list[dict]:
     if limiter is None:
         return []
     return limiter.get_domain_states()
+
+
+async def get_watch_detail(session: AsyncSession, watch_id: str) -> Watch | None:
+    """Fetch a single watch by ID string. Returns None if not found or invalid."""
+    try:
+        parsed = ULID.from_str(watch_id)
+    except ValueError:
+        return None
+    return await session.get(Watch, parsed)
+
+
+async def get_watch_changes(session: AsyncSession, watch_id: str, limit: int = 50) -> list[dict]:
+    """Fetch change history for a specific watch."""
+    try:
+        parsed = ULID.from_str(watch_id)
+    except ValueError:
+        return []
+    stmt = (
+        select(Change)
+        .where(Change.watch_id == parsed)
+        .order_by(Change.detected_at.desc())
+        .limit(limit)
+    )
+    result = await session.execute(stmt)
+    changes = []
+    for change in result.scalars().all():
+        meta = change.change_metadata or {}
+        added = len(meta.get("added", []))
+        modified = len(meta.get("modified", []))
+        removed = len(meta.get("removed", []))
+        parts = []
+        if added:
+            parts.append(f"{added} added")
+        if modified:
+            parts.append(f"{modified} modified")
+        if removed:
+            parts.append(f"{removed} removed")
+        changes.append(
+            {
+                "id": str(change.id),
+                "detected_at": change.detected_at,
+                "summary": ", ".join(parts) if parts else "change detected",
+            }
+        )
+    return changes

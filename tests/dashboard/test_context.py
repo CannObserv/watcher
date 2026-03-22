@@ -10,6 +10,8 @@ from src.dashboard.context import (
     get_queue_health,
     get_rate_limiter_state,
     get_recent_changes,
+    get_watch_changes,
+    get_watch_detail,
     get_watch_list,
 )
 
@@ -137,3 +139,32 @@ class TestGetWatchList:
         active_only = await get_watch_list(db_session, is_active=True)
         assert len(active_only) == 1
         assert active_only[0].name == "Active"
+
+
+class TestGetWatchDetail:
+    async def test_returns_watch(self, db_session):
+        watch = Watch(name="Detail", url="https://a.com", content_type="html")
+        db_session.add(watch)
+        await db_session.flush()
+
+        result = await get_watch_detail(db_session, str(watch.id))
+        assert result is not None
+        assert result.name == "Detail"
+
+    async def test_not_found(self, db_session):
+        result = await get_watch_detail(db_session, "01JNZZZZZZZZZZZZZZZZZZZZZZ")
+        assert result is None
+
+    async def test_invalid_ulid(self, db_session):
+        result = await get_watch_detail(db_session, "not-a-ulid")
+        assert result is None
+
+
+class TestGetWatchChanges:
+    async def test_empty(self, db_session):
+        watch = Watch(name="No Changes", url="https://a.com", content_type="html")
+        db_session.add(watch)
+        await db_session.flush()
+
+        result = await get_watch_changes(db_session, str(watch.id))
+        assert result == []

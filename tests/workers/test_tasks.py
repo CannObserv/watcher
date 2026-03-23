@@ -18,6 +18,7 @@ from src.core.models.watch import ContentType, Watch
 from src.core.rate_limiter import DomainRateLimiter
 from src.core.registry import ServiceRegistry
 from src.core.storage import LocalStorage
+from src.workers.pipeline import _maybe_decay_backoff
 from src.workers.tasks import _persist_backoff, _run_check_pipeline, check_watch, schedule_tick
 
 pytestmark = pytest.mark.integration
@@ -525,3 +526,76 @@ class TestScheduleTickWithProfiles:
         await db_session.refresh(watch)
         assert watch.is_active is False
         assert watch.is_archived is False
+
+
+class TestMaybeDecayBackoff:
+    async def test_resets_when_decay_window_exceeded(self):
+        domain = MagicMock()
+        domain.name = "example.com"
+        domain.min_interval = 1.0
+        domain.current_interval = 8.0
+        domain.decay_window = 1800.0
+        domain.last_request_at = datetime.now(UTC) - timedelta(seconds=1801)
+
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = domain
+        mock_session = AsyncMock()
+        mock_session.execute = AsyncMock(return_value=mock_result)
+
+        limiter = DomainRateLimiter()
+        limiter.configure_domain(
+            "example.com", max_concurrency=2, min_interval=1.0, current_interval=8.0
+        )
+
+        decayed = await _maybe_decay_backoff("example.com", limiter, mock_session)
+        assert decayed is True
+        assert domain.current_interval == 1.0
+        assert limiter._domains["example.com"].current_interval == 1.0
+
+    async def test_no_reset_when_within_decay_window(self):
+        domain = MagicMock()
+        domain.name = "example.com"
+        domain.min_interval = 1.0
+        domain.current_interval = 8.0
+        domain.decay_window = 1800.0
+        domain.last_request_at = datetime.now(UTC) - timedelta(seconds=600)
+
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = domain
+        mock_session = AsyncMock()
+        mock_session.execute = AsyncMock(return_value=mock_result)
+
+        limiter = DomainRateLimiter()
+        limiter.configure_domain(
+            "example.com", max_concurrency=2, min_interval=1.0, current_interval=8.0
+        )
+
+        decayed = await _maybe_decay_backoff("example.com", limiter, mock_session)
+        assert decayed is False
+        assert limiter._domains["example.com"].current_interval == 8.0
+
+    async def test_noop_when_not_in_backoff(self):
+        domain = MagicMock()
+        domain.name = "example.com"
+        domain.min_interval = 1.0
+        domain.current_interval = 1.0
+        domain.decay_window = 1800.0
+
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = domain
+        mock_session = AsyncMock()
+        mock_session.execute = AsyncMock(return_value=mock_result)
+
+        limiter = DomainRateLimiter()
+        decayed = await _maybe_decay_backoff("example.com", limiter, mock_session)
+        assert decayed is False
+
+    async def test_noop_when_domain_not_found(self):
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = None
+        mock_session = AsyncMock()
+        mock_session.execute = AsyncMock(return_value=mock_result)
+
+        limiter = DomainRateLimiter()
+        decayed = await _maybe_decay_backoff("unknown.com", limiter, mock_session)
+        assert decayed is False

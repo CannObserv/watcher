@@ -18,7 +18,7 @@ from src.core.scheduler import compute_next_check, evaluate_post_actions
 from src.core.storage import STORAGE_BASE_DIR, LocalStorage
 from src.workers import bp
 from src.workers.notify import dispatch_change_notifications
-from src.workers.pipeline import _persist_backoff, _run_check_pipeline
+from src.workers.pipeline import _maybe_decay_backoff, _persist_backoff, _run_check_pipeline
 
 logger = get_logger(__name__)
 
@@ -89,6 +89,10 @@ async def check_watch(watch_id: str, registry: ServiceRegistry | None = None) ->
         # notifications. This ensures snapshot/change data is persisted even if
         # notification dispatch fails.
         watch.last_checked_at = datetime.now(UTC)
+        await session.commit()
+
+        # Check if domain backoff should decay after successful fetch
+        await _maybe_decay_backoff(rate_limit_domain, get_rate_limiter(), session)
         await session.commit()
 
         # Dispatch notifications in a separate transaction scope

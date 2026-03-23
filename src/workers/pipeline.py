@@ -17,6 +17,7 @@ from src.core.models.change import Change
 from src.core.models.domain import Domain
 from src.core.models.snapshot import Snapshot, SnapshotChunk
 from src.core.models.watch import Watch
+from src.core.rate_limiter import DomainRateLimiter
 from src.core.simhash import simhash
 from src.core.storage import StorageBackend
 
@@ -84,6 +85,39 @@ async def _persist_backoff(domain_name: str, new_interval: float, session: Async
         return
     domain.current_interval = new_interval
     domain.last_request_at = datetime.now(UTC)
+
+
+async def _maybe_decay_backoff(
+    domain_name: str,
+    limiter: DomainRateLimiter,
+    session: AsyncSession,
+) -> bool:
+    """Check if a domain's backoff should decay and reset if so.
+
+    Returns True if decay was applied, False otherwise.
+    Caller is responsible for committing the session.
+    """
+    stmt = select(Domain).where(Domain.name == domain_name)
+    result = await session.execute(stmt)
+    domain = result.scalar_one_or_none()
+    if domain is None:
+        return False
+    if domain.current_interval <= domain.min_interval:
+        return False
+    if domain.last_request_at is None:
+        return False
+
+    elapsed = (datetime.now(UTC) - domain.last_request_at).total_seconds()
+    if elapsed < domain.decay_window:
+        return False
+
+    domain.current_interval = domain.min_interval
+    limiter.reset_domain_interval(domain_name, domain.min_interval)
+    logger.info(
+        "backoff decayed",
+        extra={"domain": domain_name, "reset_to": domain.min_interval},
+    )
+    return True
 
 
 async def _get_previous_snapshot(

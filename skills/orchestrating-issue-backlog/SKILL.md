@@ -242,6 +242,12 @@ Each worker agent follows this protocol before signaling completion:
 - Deployment context: pre-production (runway to build right)
 - Output: design doc + GitHub tracking issue + this skill
 
+**Observed agent behavior (2026-03-23 execution):**
+- `isolation: "worktree"` agents auto-merge their completed changes back to the repo's current branch (main) rather than leaving them on an isolated feature branch. This means per-agent branches cannot be selectively merged by the orchestrator — work lands on main as agents complete.
+- **Impact on batch/a strategy**: batch/a still functions as a human review checkpoint. After all Batch A agents complete, fast-forward `batch/a` to the current main HEAD, run the test suite, and notify the user. The integration safety comes from the test run, not from a separate branch.
+- **Impact on single-agent batches** (B–E): no change — the agent's worktree branch is the batch branch anyway.
+- **Future consideration**: to preserve per-agent isolation in a multi-agent batch, explicitly instruct agents to create and stay on a named feature branch (e.g. `git checkout -b feature/batch-a-13`) rather than relying on the isolation parameter to enforce this.
+
 **Clarifications added after initial design:**
 - Orchestrator launches all unblocked batches simultaneously — not just the next numbered batch. Initial design implied sequential launching; user clarified all safe parallel work should start at once.
 - Worker agents self-review and fix all findings before signaling completion. Keeps human review focused on merge decisions, not catching obvious issues.

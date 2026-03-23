@@ -15,6 +15,7 @@ from src.dashboard.context import (
     get_watch_changes,
     get_watch_detail,
     get_watch_list,
+    summarize_change_metadata,
 )
 
 
@@ -234,6 +235,31 @@ class TestGetWatchChanges:
 
         result = await get_watch_changes(db_session, str(watch.id))
         assert result == []
+
+
+class TestSummarizeChangeMetadata:
+    def test_all_counts(self):
+        meta = {"added": ["a", "b"], "modified": ["c"], "removed": ["d", "e", "f"]}
+        assert summarize_change_metadata(meta) == "2 added, 1 modified, 3 removed"
+
+    def test_only_added(self):
+        assert summarize_change_metadata({"added": ["x"]}) == "1 added"
+
+    def test_only_modified(self):
+        assert summarize_change_metadata({"modified": ["x", "y"]}) == "2 modified"
+
+    def test_only_removed(self):
+        assert summarize_change_metadata({"removed": ["x"]}) == "1 removed"
+
+    def test_empty_metadata(self):
+        assert summarize_change_metadata({}) == "change detected"
+
+    def test_zero_counts(self):
+        meta = {"added": [], "modified": [], "removed": []}
+        assert summarize_change_metadata(meta) == "change detected"
+
+    def test_missing_keys(self):
+        assert summarize_change_metadata({"added": ["x"], "removed": []}) == "1 added"
 
 
 class TestGenerateDiff:

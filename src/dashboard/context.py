@@ -16,6 +16,26 @@ from src.core.models.temporal_profile import TemporalProfile
 from src.core.models.watch import Watch
 
 
+def summarize_change_metadata(metadata: dict) -> str:
+    """Summarize change metadata as a human-readable string.
+
+    Counts added, modified, and removed chunks from *metadata* and returns
+    a comma-joined description (e.g. ``"2 added, 1 modified"``).  Returns
+    ``"change detected"`` when all counts are zero or keys are absent.
+    """
+    added = len(metadata.get("added", []))
+    modified = len(metadata.get("modified", []))
+    removed = len(metadata.get("removed", []))
+    parts = []
+    if added:
+        parts.append(f"{added} added")
+    if modified:
+        parts.append(f"{modified} modified")
+    if removed:
+        parts.append(f"{removed} removed")
+    return ", ".join(parts) if parts else "change detected"
+
+
 async def get_watch_list(session: AsyncSession, is_active: bool | None = None) -> list[Watch]:
     """Fetch watches for list display, optionally filtered by active status."""
     stmt = select(Watch).order_by(Watch.created_at.desc())
@@ -65,18 +85,7 @@ async def get_recent_changes(session: AsyncSession, limit: int = 20) -> list[dic
 
     changes = []
     for change, watch_name in rows:
-        meta = change.change_metadata or {}
-        added = len(meta.get("added", []))
-        modified = len(meta.get("modified", []))
-        removed = len(meta.get("removed", []))
-        parts = []
-        if added:
-            parts.append(f"{added} added")
-        if modified:
-            parts.append(f"{modified} modified")
-        if removed:
-            parts.append(f"{removed} removed")
-        summary = ", ".join(parts) if parts else "change detected"
+        summary = summarize_change_metadata(change.change_metadata or {})
 
         changes.append(
             {
@@ -271,22 +280,11 @@ async def get_watch_changes(session: AsyncSession, watch_id: str, limit: int = 5
     result = await session.execute(stmt)
     changes = []
     for change in result.scalars().all():
-        meta = change.change_metadata or {}
-        added = len(meta.get("added", []))
-        modified = len(meta.get("modified", []))
-        removed = len(meta.get("removed", []))
-        parts = []
-        if added:
-            parts.append(f"{added} added")
-        if modified:
-            parts.append(f"{modified} modified")
-        if removed:
-            parts.append(f"{removed} removed")
         changes.append(
             {
                 "id": str(change.id),
                 "detected_at": change.detected_at,
-                "summary": ", ".join(parts) if parts else "change detected",
+                "summary": summarize_change_metadata(change.change_metadata or {}),
             }
         )
     return changes

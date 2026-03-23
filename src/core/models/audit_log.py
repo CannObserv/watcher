@@ -1,9 +1,11 @@
 """AuditLog model — immutable record of every system operation."""
 
 from datetime import UTC, datetime
+from typing import Any
 
 from sqlalchemy import DateTime, ForeignKey, String, func
 from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Mapped, mapped_column
 from ulid import ULID
 
@@ -48,3 +50,25 @@ class AuditLog(Base):
         """Set Python-side defaults for fields not provided."""
         kwargs.setdefault("payload", {})
         super().__init__(**kwargs)
+
+
+def audit(
+    session: AsyncSession,
+    event_type: str,
+    watch_id: Any = None,
+    **payload: Any,
+) -> "AuditLog":
+    """Create an AuditLog entry and add it to the session.
+
+    Args:
+        session: The active database session.
+        event_type: The event type string (use EventType constants).
+        watch_id: Optional watch ULID to associate with the entry.
+        **payload: Arbitrary keyword arguments stored as the entry payload.
+
+    Returns:
+        The newly created AuditLog instance (already added to session).
+    """
+    entry = AuditLog(event_type=event_type, watch_id=watch_id, payload=payload)
+    session.add(entry)
+    return entry

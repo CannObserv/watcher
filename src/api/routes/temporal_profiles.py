@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.api.dependencies import get_db_session
 from src.api.routes.helpers import get_watch_or_404, parse_ulid
 from src.api.schemas.temporal_profile import ProfileCreate, ProfileResponse, ProfileUpdate
-from src.core.models.audit_log import AuditLog, EventType
+from src.core.models.audit_log import EventType, audit
 from src.core.models.temporal_profile import TemporalProfile
 
 router = APIRouter(prefix="/watches/{watch_id}/profiles", tags=["temporal-profiles"])
@@ -31,12 +31,13 @@ async def create_profile(
         post_action=data.post_action,
     )
     session.add(profile)
-    audit = AuditLog(
-        event_type=EventType.PROFILE_CREATED,
+    audit(
+        session,
+        EventType.PROFILE_CREATED,
         watch_id=watch.id,
-        payload={"profile_id": str(profile.id), "profile_type": data.profile_type.value},
+        profile_id=str(profile.id),
+        profile_type=data.profile_type.value,
     )
-    session.add(audit)
     await session.commit()
     await session.refresh(profile)
     return profile
@@ -76,12 +77,13 @@ async def update_profile(
     for field, value in updates.items():
         setattr(profile, field, value)
     if updates:
-        audit = AuditLog(
-            event_type="profile.updated",
+        audit(
+            session,
+            "profile.updated",
             watch_id=watch.id,
-            payload={"profile_id": str(profile.id), "updated_fields": list(updates.keys())},
+            profile_id=str(profile.id),
+            updated_fields=list(updates.keys()),
         )
-        session.add(audit)
     await session.commit()
     await session.refresh(profile)
     return profile
@@ -98,11 +100,11 @@ async def delete_profile(
     profile = await session.get(TemporalProfile, parse_ulid(profile_id, "Profile"))
     if not profile or profile.watch_id != watch.id:
         raise HTTPException(status_code=404, detail="Profile not found")
-    audit = AuditLog(
-        event_type=EventType.PROFILE_DELETED,
+    audit(
+        session,
+        EventType.PROFILE_DELETED,
         watch_id=watch.id,
-        payload={"profile_id": str(profile.id)},
+        profile_id=str(profile.id),
     )
-    session.add(audit)
     await session.delete(profile)
     await session.commit()

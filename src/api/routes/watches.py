@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.api.dependencies import get_db_session, get_probe_fn
 from src.api.routes.helpers import get_watch_or_404
 from src.api.schemas.watch import WatchCreate, WatchResponse, WatchUpdate
-from src.core.models.audit_log import AuditLog, EventType
+from src.core.models.audit_log import EventType, audit
 from src.core.models.domain import DEFAULT_MAX_CONCURRENCY, DEFAULT_MIN_INTERVAL, Domain
 from src.core.models.watch import Watch
 
@@ -66,18 +66,16 @@ async def create_watch(
     )
     session.add(watch)
     await session.flush()
-    audit = AuditLog(
-        event_type=EventType.WATCH_CREATED,
+    audit(
+        session,
+        EventType.WATCH_CREATED,
         watch_id=watch.id,
-        payload={
-            "name": data.name,
-            "url": data.url,
-            "content_type": data.content_type.value,
-            "effective_url": probe_result.effective_url,
-            "effective_domain": probe_result.effective_domain,
-        },
+        name=data.name,
+        url=data.url,
+        content_type=data.content_type.value,
+        effective_url=probe_result.effective_url,
+        effective_domain=probe_result.effective_domain,
     )
-    session.add(audit)
     await session.commit()
     await session.refresh(watch)
     return watch
@@ -121,12 +119,12 @@ async def update_watch(
             raise HTTPException(status_code=422, detail=f"Unknown field: {field}")
         setattr(watch, field, value)
 
-    audit = AuditLog(
-        event_type=EventType.WATCH_UPDATED,
+    audit(
+        session,
+        EventType.WATCH_UPDATED,
         watch_id=watch.id,
-        payload={"updated_fields": list(updates.keys())},
+        updated_fields=list(updates.keys()),
     )
-    session.add(audit)
     await session.commit()
     await session.refresh(watch)
     return watch
@@ -143,12 +141,13 @@ async def delete_watch(
     if watch.is_active:
         raise HTTPException(status_code=409, detail="Deactivate watch before deleting")
 
-    audit = AuditLog(
-        event_type=EventType.WATCH_DELETED,
+    audit(
+        session,
+        EventType.WATCH_DELETED,
         watch_id=watch.id,
-        payload={"name": watch.name, "url": watch.url},
+        name=watch.name,
+        url=watch.url,
     )
-    session.add(audit)
     await session.delete(watch)
     await session.commit()
 
@@ -162,12 +161,12 @@ async def deactivate_watch(
     watch = await get_watch_or_404(watch_id, session)
 
     watch.is_active = False
-    audit = AuditLog(
-        event_type=EventType.WATCH_DEACTIVATED,
+    audit(
+        session,
+        EventType.WATCH_DEACTIVATED,
         watch_id=watch.id,
-        payload={"name": watch.name},
+        name=watch.name,
     )
-    session.add(audit)
     await session.commit()
     await session.refresh(watch)
     return watch

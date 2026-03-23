@@ -102,6 +102,52 @@ class TestWatchModel:
         assert watch.effective_domain is None
 
 
+class TestAuditHelper:
+    """Tests for the audit() helper function."""
+
+    def test_audit_creates_entry_with_correct_fields(self):
+        from unittest.mock import MagicMock
+
+        from src.core.models.audit_log import AuditLog, EventType, audit
+
+        mock_session = MagicMock()
+        watch_id = ULID()
+
+        entry = audit(
+            mock_session,
+            EventType.WATCH_CREATED,
+            watch_id=watch_id,
+            name="Test Watch",
+        )
+
+        assert isinstance(entry, AuditLog)
+        assert entry.event_type == EventType.WATCH_CREATED
+        assert entry.watch_id == watch_id
+        assert entry.payload == {"name": "Test Watch"}
+        mock_session.add.assert_called_once_with(entry)
+
+    def test_audit_without_watch_id(self):
+        from unittest.mock import MagicMock
+
+        from src.core.models.audit_log import EventType, audit
+
+        mock_session = MagicMock()
+        entry = audit(mock_session, EventType.CHECK_FETCH_FAILED, status_code=500)
+
+        assert entry.watch_id is None
+        assert entry.payload == {"status_code": 500}
+        mock_session.add.assert_called_once_with(entry)
+
+    def test_audit_adds_to_session(self):
+        from unittest.mock import MagicMock
+
+        from src.core.models.audit_log import EventType, audit
+
+        mock_session = MagicMock()
+        entry = audit(mock_session, EventType.WATCH_DELETED)
+        mock_session.add.assert_called_once_with(entry)
+
+
 class TestEventType:
     """Tests for EventType string constants."""
 

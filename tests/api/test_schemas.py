@@ -142,6 +142,7 @@ class TestChangeResponse:
                 "previous_snapshot_id": "01KM7A9TP2B0BQCNZ5PZX4MH87",
                 "current_snapshot_id": "01KM7A9TP2B0BQCNZ5PZX4MH88",
                 "change_metadata": {"added": 2, "removed": 1},
+                "significance": None,
                 "detected_at": ts,
             }
         )
@@ -149,6 +150,7 @@ class TestChangeResponse:
         assert data.previous_snapshot_id == "01KM7A9TP2B0BQCNZ5PZX4MH87"
         assert data.current_snapshot_id == "01KM7A9TP2B0BQCNZ5PZX4MH88"
         assert data.change_metadata == {"added": 2, "removed": 1}
+        assert data.significance is None
         assert data.detected_at == ts
 
 
@@ -206,6 +208,7 @@ class TestChangeDetailResponse:
                 "previous_snapshot_id": "01KM7A9TP2B0BQCNZ5PZX4MH87",
                 "current_snapshot_id": "01KM7A9TP2B0BQCNZ5PZX4MH88",
                 "change_metadata": {},
+                "significance": None,
                 "detected_at": ts,
                 "current_snapshot": snapshot_dict,
                 "previous_snapshot": None,

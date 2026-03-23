@@ -2,7 +2,7 @@
 
 from datetime import UTC, datetime
 
-from sqlalchemy import DateTime, ForeignKey, func
+from sqlalchemy import DateTime, Float, ForeignKey, func
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 from ulid import ULID
@@ -24,6 +24,7 @@ class Change(Base):
         ULIDType, ForeignKey("snapshots.id", ondelete="CASCADE")
     )
     change_metadata: Mapped[dict] = mapped_column(JSONB, default=dict, server_default="{}")
+    significance: Mapped[float | None] = mapped_column(Float, nullable=True)
     detected_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         default=lambda: datetime.now(UTC),

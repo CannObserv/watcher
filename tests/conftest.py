@@ -11,6 +11,9 @@ from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 
 from src.api.dependencies import get_db_session, get_probe_fn
 from src.core.models import Base
+from src.core.models.change import Change
+from src.core.models.snapshot import Snapshot
+from src.core.models.watch import Watch
 from src.core.probe import ProbeResult
 
 TEST_DATABASE_URL = os.environ.get("TEST_DATABASE_URL")
@@ -73,6 +76,50 @@ async def db_session(test_engine) -> AsyncGenerator[AsyncSession]:
 
         await session.close()
         await txn.rollback()
+
+
+@pytest.fixture
+def make_watch(db_session):
+    """Factory fixture: create and flush a Watch row."""
+
+    async def _make(name="Test Watch", url="https://example.com", content_type="html", **kwargs):
+        watch = Watch(name=name, url=url, content_type=content_type, **kwargs)
+        db_session.add(watch)
+        await db_session.flush()
+        return watch
+
+    return _make
+
+
+@pytest.fixture
+def make_snapshot(db_session):
+    """Factory fixture: create and flush a Snapshot row attached to *watch*."""
+
+    async def _make(watch, fetcher_used="http", **kwargs):
+        snapshot = Snapshot(watch_id=watch.id, fetcher_used=fetcher_used, **kwargs)
+        db_session.add(snapshot)
+        await db_session.flush()
+        return snapshot
+
+    return _make
+
+
+@pytest.fixture
+def make_change(db_session):
+    """Factory fixture: create and flush a Change row linking two snapshots."""
+
+    async def _make(watch, current_snapshot, previous_snapshot=None, **kwargs):
+        change = Change(
+            watch_id=watch.id,
+            current_snapshot_id=current_snapshot.id,
+            previous_snapshot_id=previous_snapshot.id if previous_snapshot else None,
+            **kwargs,
+        )
+        db_session.add(change)
+        await db_session.flush()
+        return change
+
+    return _make
 
 
 @pytest.fixture

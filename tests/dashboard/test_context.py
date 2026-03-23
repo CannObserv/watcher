@@ -50,13 +50,10 @@ class TestGetRecentChanges:
         changes = await get_recent_changes(db_session)
         assert changes == []
 
-    async def test_returns_changes_with_watch_name(self, db_session):
-        watch = Watch(name="Test Watch", url="https://example.com", content_type="html")
-        db_session.add(watch)
-        await db_session.flush()
-
-        snap_kwargs = dict(
-            watch_id=watch.id,
+    async def test_returns_changes_with_watch_name(
+        self, db_session, make_watch, make_snapshot, make_change
+    ):
+        snap_defaults = dict(
             content_hash="a" * 64,
             simhash=0,
             storage_path="/tmp/s",
@@ -64,21 +61,12 @@ class TestGetRecentChanges:
             chunk_count=1,
             text_bytes=100,
             fetch_duration_ms=50,
-            fetcher_used="http",
         )
-        prev_snap = Snapshot(**snap_kwargs)
-        curr_snap = Snapshot(**snap_kwargs)
-        db_session.add_all([prev_snap, curr_snap])
-        await db_session.flush()
+        watch = await make_watch(name="Test Watch")
+        prev_snap = await make_snapshot(watch, **snap_defaults)
+        curr_snap = await make_snapshot(watch, **snap_defaults)
+        await make_change(watch, curr_snap, prev_snap, change_metadata={"added": ["Page 1"]})
 
-        change = Change(
-            watch_id=watch.id,
-            previous_snapshot_id=prev_snap.id,
-            current_snapshot_id=curr_snap.id,
-            change_metadata={"added": ["Page 1"]},
-        )
-        db_session.add(change)
-        await db_session.flush()
         changes = await get_recent_changes(db_session, limit=10)
         assert len(changes) == 1
         assert changes[0]["watch_name"] == "Test Watch"

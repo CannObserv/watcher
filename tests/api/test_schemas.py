@@ -13,7 +13,7 @@ from src.api.schemas.change import (
     SnapshotResponse,
     SnapshotWithChunksResponse,
 )
-from src.api.schemas.watch import WatchCreate, WatchUpdate
+from src.api.schemas.watch import WatchCreate, WatchResponse, WatchUpdate
 from src.core.models.audit_log import EventType
 
 
@@ -252,6 +252,45 @@ class TestChangeDetailResponse:
         assert data.current_snapshot is not None
         assert data.current_snapshot.id == "01KM7A9TP2B0BQCNZ5PZX4MH88"
         assert data.previous_snapshot is None
+
+
+class TestWatchResponse:
+    def test_watch_response_includes_is_archived(self):
+        from datetime import UTC, datetime
+
+        from ulid import ULID
+
+        from src.core.models.watch import ContentType, Watch
+
+        watch = Watch(
+            name="Test",
+            url="https://example.com",
+            content_type=ContentType.HTML,
+        )
+        watch.id = ULID()
+        watch.created_at = datetime(2026, 3, 20, 0, 0, 0, tzinfo=UTC)
+        watch.updated_at = datetime(2026, 3, 20, 0, 0, 0, tzinfo=UTC)
+        response = WatchResponse.model_validate(watch)
+        assert response.is_archived is False
+
+    def test_watch_response_is_archived_true(self):
+        from datetime import UTC, datetime
+
+        from ulid import ULID
+
+        from src.core.models.watch import ContentType, Watch
+
+        watch = Watch(
+            name="Archived",
+            url="https://example.com",
+            content_type=ContentType.HTML,
+            is_archived=True,
+        )
+        watch.id = ULID()
+        watch.created_at = datetime(2026, 3, 20, 0, 0, 0, tzinfo=UTC)
+        watch.updated_at = datetime(2026, 3, 20, 0, 0, 0, tzinfo=UTC)
+        response = WatchResponse.model_validate(watch)
+        assert response.is_archived is True
 
 
 class TestAuditLogResponse:

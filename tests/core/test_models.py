@@ -102,6 +102,23 @@ class TestWatchModel:
         assert watch.effective_url is None
         assert watch.effective_domain is None
 
+    def test_watch_is_archived_defaults_false(self):
+        watch = Watch(
+            name="Test",
+            url="https://example.com",
+            content_type=ContentType.HTML,
+        )
+        assert watch.is_archived is False
+
+    def test_watch_can_set_is_archived_true(self):
+        watch = Watch(
+            name="Archived",
+            url="https://example.com",
+            content_type=ContentType.HTML,
+            is_archived=True,
+        )
+        assert watch.is_archived is True
+
 
 class TestAuditHelper:
     """Tests for the audit() helper function."""

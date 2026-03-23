@@ -444,3 +444,88 @@ class TestScheduleTickWithProfiles:
         # Profile should be deactivated
         await db_session.refresh(profile)
         assert profile.is_active is False
+
+    async def test_post_action_archive_sets_is_archived(self, db_session, monkeypatch):
+        """Archive post-action sets both is_active=False and is_archived=True."""
+        import src.workers.tasks as tasks_mod
+
+        now = datetime(2026, 4, 10, 12, 0, 0, tzinfo=UTC)
+        watch = Watch(
+            name="Archive Event",
+            url="https://example.com/archive-event",
+            content_type=ContentType.HTML,
+            schedule_config={"interval": "1d"},
+            last_checked_at=now - timedelta(hours=25),
+        )
+        db_session.add(watch)
+        await db_session.flush()
+
+        profile = TemporalProfile(
+            watch_id=watch.id,
+            profile_type=ProfileType.EVENT,
+            reference_date=date(2026, 4, 5),
+            rules=[{"days_before": 7, "interval": "1h"}],
+            post_action=PostAction.ARCHIVE,
+        )
+        db_session.add(profile)
+        await db_session.commit()
+
+        monkeypatch.setattr(
+            tasks_mod, "get_session_factory", lambda: _mock_session_factory(db_session)
+        )
+
+        mock_configure = MagicMock()
+        mock_configure.return_value.defer_async = AsyncMock()
+        monkeypatch.setattr(check_watch, "configure", mock_configure)
+
+        with patch("src.workers.tasks.datetime") as mock_dt:
+            mock_dt.now.return_value = now
+            mock_dt.side_effect = lambda *a, **kw: datetime(*a, **kw)
+            await schedule_tick(int(now.timestamp()))
+
+        await db_session.refresh(watch)
+        assert watch.is_active is False
+        assert watch.is_archived is True
+        mock_configure.return_value.defer_async.assert_not_called()
+
+    async def test_post_action_deactivate_does_not_set_is_archived(self, db_session, monkeypatch):
+        """Deactivate post-action sets is_active=False but leaves is_archived=False."""
+        import src.workers.tasks as tasks_mod
+
+        now = datetime(2026, 4, 10, 12, 0, 0, tzinfo=UTC)
+        watch = Watch(
+            name="Deactivate Event",
+            url="https://example.com/deact-event",
+            content_type=ContentType.HTML,
+            schedule_config={"interval": "1d"},
+            last_checked_at=now - timedelta(hours=25),
+        )
+        db_session.add(watch)
+        await db_session.flush()
+
+        profile = TemporalProfile(
+            watch_id=watch.id,
+            profile_type=ProfileType.EVENT,
+            reference_date=date(2026, 4, 5),
+            rules=[{"days_before": 7, "interval": "1h"}],
+            post_action=PostAction.DEACTIVATE,
+        )
+        db_session.add(profile)
+        await db_session.commit()
+
+        monkeypatch.setattr(
+            tasks_mod, "get_session_factory", lambda: _mock_session_factory(db_session)
+        )
+
+        mock_configure = MagicMock()
+        mock_configure.return_value.defer_async = AsyncMock()
+        monkeypatch.setattr(check_watch, "configure", mock_configure)
+
+        with patch("src.workers.tasks.datetime") as mock_dt:
+            mock_dt.now.return_value = now
+            mock_dt.side_effect = lambda *a, **kw: datetime(*a, **kw)
+            await schedule_tick(int(now.timestamp()))
+
+        await db_session.refresh(watch)
+        assert watch.is_active is False
+        assert watch.is_archived is False

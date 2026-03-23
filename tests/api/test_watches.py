@@ -423,6 +423,80 @@ class TestDeleteWatch:
         assert len(configs) == 0
 
 
+class TestListWatchesArchivedFilter:
+    async def test_list_watches_excludes_archived_by_default(self, client, db_session):
+        """Default list (no ?archived param) excludes archived watches."""
+        from src.core.models.watch import Watch
+
+        archived = Watch(
+            name="Archived Watch",
+            url="https://example.com/archived",
+            content_type="html",
+            is_active=False,
+            is_archived=True,
+        )
+        db_session.add(archived)
+        await db_session.commit()
+
+        response = await client.get("/api/v1/watches")
+        ids = [w["id"] for w in response.json()]
+        assert str(archived.id) not in ids
+
+    async def test_list_watches_archived_true_returns_archived(self, client, db_session):
+        """?archived=true returns only archived watches."""
+        from src.core.models.watch import Watch
+
+        archived = Watch(
+            name="Archived Only",
+            url="https://example.com/arch-only",
+            content_type="html",
+            is_active=False,
+            is_archived=True,
+        )
+        active = Watch(
+            name="Active Only",
+            url="https://example.com/active-only",
+            content_type="html",
+            is_active=True,
+            is_archived=False,
+        )
+        db_session.add_all([archived, active])
+        await db_session.commit()
+
+        response = await client.get("/api/v1/watches?archived=true")
+        assert response.status_code == 200
+        ids = [w["id"] for w in response.json()]
+        assert str(archived.id) in ids
+        assert str(active.id) not in ids
+
+    async def test_list_watches_archived_false_excludes_archived(self, client, db_session):
+        """?archived=false explicitly excludes archived watches."""
+        from src.core.models.watch import Watch
+
+        archived = Watch(
+            name="Arch False Test",
+            url="https://example.com/arch-false",
+            content_type="html",
+            is_active=False,
+            is_archived=True,
+        )
+        db_session.add(archived)
+        await db_session.commit()
+
+        response = await client.get("/api/v1/watches?archived=false")
+        ids = [w["id"] for w in response.json()]
+        assert str(archived.id) not in ids
+
+    async def test_watch_response_includes_is_archived_field(self, client):
+        """Create watch response includes is_archived=False."""
+        resp = await client.post(
+            "/api/v1/watches",
+            json={"name": "W", "url": "https://example.com/w", "content_type": "html"},
+        )
+        assert resp.status_code == 201
+        assert resp.json()["is_archived"] is False
+
+
 class TestCreateWatchProbe:
     async def test_create_watch_populates_effective_fields(self, client):
         response = await client.post(

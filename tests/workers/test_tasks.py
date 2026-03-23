@@ -10,7 +10,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.fetchers.http import HttpFetcher
-from src.core.models.audit_log import AuditLog
+from src.core.models.audit_log import AuditLog, EventType
 from src.core.models.temporal_profile import PostAction, ProfileType, TemporalProfile
 from src.core.models.watch import ContentType, Watch
 from src.core.rate_limiter import DomainRateLimiter
@@ -250,7 +250,7 @@ class TestCheckWatchTask:
         assert "error" in result
 
         # Verify audit log entry was written
-        stmt = select(AuditLog).where(AuditLog.event_type == "check.fetch_failed")
+        stmt = select(AuditLog).where(AuditLog.event_type == EventType.CHECK_FETCH_FAILED)
         audit_result = await db_session.execute(stmt)
         entries = audit_result.scalars().all()
         assert len(entries) >= 1

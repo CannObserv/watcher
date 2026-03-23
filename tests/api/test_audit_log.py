@@ -2,6 +2,8 @@
 
 import pytest
 
+from src.core.models.audit_log import EventType
+
 pytestmark = pytest.mark.integration
 
 
@@ -19,7 +21,7 @@ class TestListAuditLog:
         assert response.status_code == 200
         data = response.json()
         assert len(data) >= 1
-        assert any(e["event_type"] == "watch.created" for e in data)
+        assert any(e["event_type"] == EventType.WATCH_CREATED for e in data)
 
     async def test_filter_by_event_type(self, client):
         await client.post(
@@ -30,9 +32,9 @@ class TestListAuditLog:
                 "content_type": "html",
             },
         )
-        response = await client.get("/api/v1/audit?event_type=watch.created")
+        response = await client.get(f"/api/v1/audit?event_type={EventType.WATCH_CREATED}")
         assert response.status_code == 200
-        assert all(e["event_type"] == "watch.created" for e in response.json())
+        assert all(e["event_type"] == EventType.WATCH_CREATED for e in response.json())
 
     async def test_filter_by_watch_id(self, client):
         resp = await client.post(

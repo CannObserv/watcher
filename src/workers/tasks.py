@@ -16,7 +16,7 @@ from src.core.extractors import CsvExcelExtractor, HtmlExtractor, PdfExtractor
 from src.core.extractors.base import ExtractionResult
 from src.core.fetchers.http import HttpFetcher
 from src.core.logging import get_logger
-from src.core.models.audit_log import AuditLog
+from src.core.models.audit_log import AuditLog, EventType
 from src.core.models.base import generate_ulid
 from src.core.models.change import Change
 from src.core.models.domain import Domain
@@ -160,7 +160,7 @@ async def _run_check_pipeline(
         logger.info("no change detected", extra={"watch_id": str(watch.id)})
         session.add(
             AuditLog(
-                event_type="check.no_change",
+                event_type=EventType.CHECK_NO_CHANGE,
                 watch_id=watch.id,
                 payload={"content_hash": content_hash},
             )
@@ -271,7 +271,7 @@ async def _run_check_pipeline(
     # 10. Audit log
     session.add(
         AuditLog(
-            event_type="check.snapshot_created",
+            event_type=EventType.CHECK_SNAPSHOT_CREATED,
             watch_id=watch.id,
             payload={
                 "snapshot_id": str(snapshot_id),
@@ -337,7 +337,7 @@ async def check_watch(watch_id: str) -> dict:
             )
             session.add(
                 AuditLog(
-                    event_type="check.fetch_failed",
+                    event_type=EventType.CHECK_FETCH_FAILED,
                     watch_id=watch.id,
                     payload={"status_code": fetch_result.status_code},
                 )
@@ -388,7 +388,7 @@ async def check_watch(watch_id: str) -> dict:
                     notif_results = await dispatch_notifications(event, nc_configs, _channels)
                 session.add(
                     AuditLog(
-                        event_type="notification.dispatched",
+                        event_type=EventType.NOTIFICATION_DISPATCHED,
                         watch_id=watch.id,
                         payload={
                             "change_id": result["change_id"],

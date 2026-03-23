@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.api.dependencies import get_db_session
 from src.api.routes.helpers import get_watch_or_404, parse_ulid
 from src.api.schemas.temporal_profile import ProfileCreate, ProfileResponse, ProfileUpdate
-from src.core.models.audit_log import AuditLog
+from src.core.models.audit_log import AuditLog, EventType
 from src.core.models.temporal_profile import TemporalProfile
 
 router = APIRouter(prefix="/watches/{watch_id}/profiles", tags=["temporal-profiles"])
@@ -32,7 +32,7 @@ async def create_profile(
     )
     session.add(profile)
     audit = AuditLog(
-        event_type="profile.created",
+        event_type=EventType.PROFILE_CREATED,
         watch_id=watch.id,
         payload={"profile_id": str(profile.id), "profile_type": data.profile_type.value},
     )
@@ -99,7 +99,7 @@ async def delete_profile(
     if not profile or profile.watch_id != watch.id:
         raise HTTPException(status_code=404, detail="Profile not found")
     audit = AuditLog(
-        event_type="profile.deleted",
+        event_type=EventType.PROFILE_DELETED,
         watch_id=watch.id,
         payload={"profile_id": str(profile.id)},
     )

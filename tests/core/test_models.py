@@ -102,6 +102,32 @@ class TestWatchModel:
         assert watch.effective_domain is None
 
 
+class TestEventType:
+    """Tests for EventType string constants."""
+
+    def test_constants_have_expected_values(self):
+        from src.core.models.audit_log import EventType
+
+        assert EventType.WATCH_CREATED == "watch.created"
+        assert EventType.WATCH_UPDATED == "watch.updated"
+        assert EventType.WATCH_DEACTIVATED == "watch.deactivated"
+        assert EventType.WATCH_DELETED == "watch.deleted"
+        assert EventType.CHECK_SNAPSHOT_CREATED == "check.snapshot_created"
+        assert EventType.CHECK_NO_CHANGE == "check.no_change"
+        assert EventType.CHECK_FETCH_FAILED == "check.fetch_failed"
+        assert EventType.NOTIFICATION_DISPATCHED == "notification.dispatched"
+        assert EventType.NOTIFICATION_CONFIG_CREATED == "notification_config.created"
+        assert EventType.NOTIFICATION_CONFIG_DELETED == "notification_config.deleted"
+        assert EventType.PROFILE_CREATED == "profile.created"
+        assert EventType.PROFILE_DELETED == "profile.deleted"
+
+    def test_all_constants_are_unique(self):
+        from src.core.models.audit_log import EventType
+
+        values = [v for k, v in vars(EventType).items() if not k.startswith("_")]
+        assert len(values) == len(set(values)), "EventType constants must be unique"
+
+
 class TestAuditLogModel:
     def test_create_audit_log_entry(self):
         entry = AuditLog(

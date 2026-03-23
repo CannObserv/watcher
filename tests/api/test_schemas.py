@@ -14,6 +14,7 @@ from src.api.schemas.change import (
     SnapshotWithChunksResponse,
 )
 from src.api.schemas.watch import WatchCreate, WatchUpdate
+from src.core.models.audit_log import EventType
 
 
 class TestWatchCreate:
@@ -221,14 +222,14 @@ class TestAuditLogResponse:
         data = AuditLogResponse.model_validate(
             {
                 "id": "01KM7A9TP2B0BQCNZ5PZX4MH8B",
-                "event_type": "watch.created",
+                "event_type": EventType.WATCH_CREATED,
                 "watch_id": "01KM7A9TP2B0BQCNZ5PZX4MH89",
                 "payload": {"name": "Test Watch"},
                 "created_at": ts,
             }
         )
         assert data.id == "01KM7A9TP2B0BQCNZ5PZX4MH8B"
-        assert data.event_type == "watch.created"
+        assert data.event_type == EventType.WATCH_CREATED
         assert data.watch_id == "01KM7A9TP2B0BQCNZ5PZX4MH89"
         assert data.payload == {"name": "Test Watch"}
         assert data.created_at == ts

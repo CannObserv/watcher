@@ -10,6 +10,23 @@ from ulid import ULID
 from src.core.models.base import Base, ULIDType, generate_ulid
 
 
+class EventType:
+    """String constants for audit log event_type values."""
+
+    WATCH_CREATED = "watch.created"
+    WATCH_UPDATED = "watch.updated"
+    WATCH_DEACTIVATED = "watch.deactivated"
+    WATCH_DELETED = "watch.deleted"
+    CHECK_SNAPSHOT_CREATED = "check.snapshot_created"
+    CHECK_NO_CHANGE = "check.no_change"
+    CHECK_FETCH_FAILED = "check.fetch_failed"
+    NOTIFICATION_DISPATCHED = "notification.dispatched"
+    NOTIFICATION_CONFIG_CREATED = "notification_config.created"
+    NOTIFICATION_CONFIG_DELETED = "notification_config.deleted"
+    PROFILE_CREATED = "profile.created"
+    PROFILE_DELETED = "profile.deleted"
+
+
 class AuditLog(Base):
     """Immutable audit log entry."""
 

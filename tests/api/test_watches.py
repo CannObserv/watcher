@@ -4,7 +4,7 @@ import pytest
 from sqlalchemy import select
 from ulid import ULID
 
-from src.core.models.audit_log import AuditLog
+from src.core.models.audit_log import AuditLog, EventType
 from src.core.models.notification_config import NotificationConfig
 from src.core.models.snapshot import Snapshot, SnapshotChunk
 from src.core.models.temporal_profile import TemporalProfile
@@ -165,7 +165,7 @@ class TestAuditLog:
         )
         result = await db_session.execute(
             select(AuditLog).where(
-                AuditLog.event_type == "watch.created",
+                AuditLog.event_type == EventType.WATCH_CREATED,
                 AuditLog.payload["name"].astext == "Audited Watch",
             )
         )
@@ -187,7 +187,7 @@ class TestAuditLog:
 
         result = await db_session.execute(
             select(AuditLog).where(
-                AuditLog.event_type == "watch.updated",
+                AuditLog.event_type == EventType.WATCH_UPDATED,
                 AuditLog.payload["updated_fields"].astext.contains("name"),
             )
         )
@@ -208,7 +208,7 @@ class TestAuditLog:
 
         result = await db_session.execute(
             select(AuditLog).where(
-                AuditLog.event_type == "watch.deactivated",
+                AuditLog.event_type == EventType.WATCH_DEACTIVATED,
                 AuditLog.payload["name"].astext == "Deact Audit",
             )
         )
@@ -296,7 +296,7 @@ class TestDeleteWatch:
         await client.delete(f"/api/v1/watches/{watch_id}")
         result = await db_session.execute(
             select(AuditLog).where(
-                AuditLog.event_type == "watch.deleted",
+                AuditLog.event_type == EventType.WATCH_DELETED,
                 AuditLog.payload["name"].astext == "Delete Me",
             )
         )

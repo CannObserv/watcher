@@ -6,7 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.api.dependencies import get_db_session
 from src.api.routes.watches import delete_watch as api_delete_watch
-from src.core.models.audit_log import AuditLog
+from src.core.models.audit_log import AuditLog, EventType
 from src.core.models.watch import ContentType, Watch
 from src.core.storage import STORAGE_BASE_DIR, LocalStorage
 from src.dashboard import templates
@@ -120,7 +120,7 @@ async def watch_create_submit(
     session.add(watch)
     session.add(
         AuditLog(
-            event_type="watch.created",
+            event_type=EventType.WATCH_CREATED,
             watch_id=watch.id,
             payload={"name": name, "url": url, "source": "dashboard"},
         )
@@ -222,7 +222,7 @@ async def watch_edit_submit(
 
     session.add(
         AuditLog(
-            event_type="watch.updated",
+            event_type=EventType.WATCH_UPDATED,
             watch_id=watch.id,
             payload={
                 "updated_fields": ["name", "url", "content_type", "schedule_config"],
@@ -247,7 +247,7 @@ async def watch_deactivate(
     watch.is_active = False
     session.add(
         AuditLog(
-            event_type="watch.deactivated",
+            event_type=EventType.WATCH_DEACTIVATED,
             watch_id=watch.id,
             payload={"name": watch.name, "source": "dashboard"},
         )

@@ -11,7 +11,7 @@ from src.api.schemas.notification_config import (
     NotificationConfigCreate,
     NotificationConfigResponse,
 )
-from src.core.models.audit_log import AuditLog
+from src.core.models.audit_log import AuditLog, EventType
 from src.core.models.notification_config import NotificationConfig
 from src.core.notifications.email import EmailConfig
 from src.core.notifications.slack import SlackConfig
@@ -60,7 +60,7 @@ async def create_notification_config(
     )
     session.add(config)
     audit = AuditLog(
-        event_type="notification_config.created",
+        event_type=EventType.NOTIFICATION_CONFIG_CREATED,
         watch_id=watch.id,
         payload={"config_id": str(config.id), "channel": data.channel},
     )
@@ -98,7 +98,7 @@ async def delete_notification_config(
     if not nc or nc.watch_id != watch.id:
         raise HTTPException(status_code=404, detail="Config not found")
     audit = AuditLog(
-        event_type="notification_config.deleted",
+        event_type=EventType.NOTIFICATION_CONFIG_DELETED,
         watch_id=watch.id,
         payload={"config_id": str(nc.id)},
     )

@@ -61,5 +61,5 @@ class SnapshotWithChunksResponse(SnapshotResponse):
 class ChangeDetailResponse(ChangeResponse):
     """Change response with embedded current and previous snapshots."""
 
-    current_snapshot: SnapshotWithChunksResponse | None
+    current_snapshot: SnapshotWithChunksResponse
     previous_snapshot: SnapshotWithChunksResponse | None

@@ -40,7 +40,13 @@ async def create_notification_config(
         known = ", ".join(_CHANNEL_CONFIG_MODELS)
         raise HTTPException(
             status_code=422,
-            detail=f"Unknown channel '{data.channel}'. Must be one of: {known}",
+            detail=[
+                {
+                    "loc": ["body", "channel"],
+                    "msg": f"Unknown channel '{data.channel}'. Must be one of: {known}",
+                    "type": "value_error",
+                }
+            ],
         )
     try:
         config_model.model_validate(data.config)

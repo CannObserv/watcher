@@ -1,10 +1,11 @@
 """Dashboard page routes — server-rendered HTML via Jinja2 + HTMX."""
 
-from fastapi import APIRouter, Depends, Form, Request
+from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.api.dependencies import get_db_session
+from src.api.routes.watches import delete_watch as api_delete_watch
 from src.core.models.audit_log import AuditLog
 from src.core.models.watch import ContentType, Watch
 from src.core.storage import STORAGE_BASE_DIR, LocalStorage
@@ -271,22 +272,25 @@ async def watch_delete(
     watch_id: str,
     session: AsyncSession = Depends(get_db_session),
 ):
-    """Delete an inactive watch via HTMX — redirects to watch list on success."""
+    """Delete an inactive watch via HTMX — delegates to the API layer, adapts response for HTMX.
+
+    Business logic (active-check, audit log, deletion, commit) lives in the API
+    route. This handler's sole responsibility is translating the API outcome into
+    an HTMX-compatible response: HX-Redirect on success, an inline error snippet
+    on 409, or a 404 template if the watch is gone.
+    """
     watch = await get_watch_detail(session, watch_id)
     if not watch:
         return templates.TemplateResponse("pages/404.html", {"request": request}, status_code=404)
-    if watch.is_active:
-        msg = '<p class="text-red-600 text-sm mt-2">Deactivate the watch before deleting it.</p>'
-        return HTMLResponse(status_code=409, content=msg)
-    session.add(
-        AuditLog(
-            event_type="watch.deleted",
-            watch_id=watch.id,
-            payload={"name": watch.name, "url": watch.url, "source": "dashboard"},
-        )
-    )
-    await session.delete(watch)
-    await session.commit()
+    try:
+        await api_delete_watch(watch_id=watch_id, session=session)
+    except HTTPException as exc:
+        if exc.status_code == 409:
+            msg = (
+                '<p class="text-red-600 text-sm mt-2">Deactivate the watch before deleting it.</p>'
+            )
+            return HTMLResponse(status_code=409, content=msg)
+        raise
     return HTMLResponse(status_code=200, content="", headers={"HX-Redirect": "/watches"})
 
 

@@ -1,11 +1,12 @@
 """Health and readiness check endpoints."""
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.core.database import get_session_factory
+from src.api.dependencies import get_db_session
 
 router = APIRouter(tags=["health"])
 
@@ -17,7 +18,7 @@ async def health() -> dict:
 
 
 @router.get("/ready")
-async def ready() -> JSONResponse:
+async def ready(session: AsyncSession = Depends(get_db_session)) -> JSONResponse:
     """Readiness probe — checks DB connectivity and queue accessibility.
 
     Returns 200 when all dependencies are reachable, 503 otherwise.
@@ -26,12 +27,10 @@ async def ready() -> JSONResponse:
     introspection is added.
     """
     db_ok = False
-    # queue: procrastinate has no lightweight ping; mark as available
-    queue_ok = True  # noqa: SIM910 — intentional stub
+    queue_ok = True  # procrastinate has no lightweight ping; always reported available
 
     try:
-        async with get_session_factory()() as session:
-            await session.execute(text("SELECT 1"))
+        await session.execute(text("SELECT 1"))
         db_ok = True
     except SQLAlchemyError:
         db_ok = False

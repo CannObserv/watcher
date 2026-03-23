@@ -1,10 +1,14 @@
 """Tests for /health and /ready operational endpoints."""
 
-from unittest.mock import AsyncMock, patch
+from collections.abc import AsyncGenerator
+from unittest.mock import AsyncMock
 
 import pytest
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.exc import OperationalError
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from src.api.dependencies import get_db_session
 
 pytestmark = pytest.mark.anyio
 
@@ -41,16 +45,18 @@ class TestReadyEndpoint:
         """/ready returns 200 with status ready when DB responds."""
         from src.api.main import app
 
-        # Patch the session execute to succeed
-        mock_session = AsyncMock()
-        mock_session.__aenter__ = AsyncMock(return_value=mock_session)
-        mock_session.__aexit__ = AsyncMock(return_value=False)
+        mock_session = AsyncMock(spec=AsyncSession)
         mock_session.execute = AsyncMock(return_value=None)
 
-        with patch("src.api.routes.health.get_session_factory") as mock_factory:
-            mock_factory.return_value.return_value = mock_session
+        async def override_session() -> AsyncGenerator[AsyncSession]:
+            yield mock_session
+
+        app.dependency_overrides[get_db_session] = override_session
+        try:
             async with await _make_client(app) as c:
                 response = await c.get("/ready")
+        finally:
+            app.dependency_overrides.pop(get_db_session, None)
 
         assert response.status_code == 200
         data = response.json()
@@ -62,17 +68,20 @@ class TestReadyEndpoint:
         """/ready returns 503 with status not_ready when DB raises."""
         from src.api.main import app
 
-        mock_session = AsyncMock()
-        mock_session.__aenter__ = AsyncMock(return_value=mock_session)
-        mock_session.__aexit__ = AsyncMock(return_value=False)
+        mock_session = AsyncMock(spec=AsyncSession)
         mock_session.execute = AsyncMock(
             side_effect=OperationalError("conn failed", {}, Exception("conn failed"))
         )
 
-        with patch("src.api.routes.health.get_session_factory") as mock_factory:
-            mock_factory.return_value.return_value = mock_session
+        async def override_session() -> AsyncGenerator[AsyncSession]:
+            yield mock_session
+
+        app.dependency_overrides[get_db_session] = override_session
+        try:
             async with await _make_client(app) as c:
                 response = await c.get("/ready")
+        finally:
+            app.dependency_overrides.pop(get_db_session, None)
 
         assert response.status_code == 503
         data = response.json()

@@ -19,6 +19,7 @@ Python ≥3.12, uv, pytest, ruff
 ```
 src/api/               — FastAPI app (ASGI, routes, schemas)
 src/api/routes/        — API endpoints (watches, temporal_profiles, changes, audit_log, notification_configs, domains, probe); mounted at /api/v1/
+src/api/routes/health.py — /health (liveness) and /ready (readiness) endpoints; root-level, not versioned
 src/core/              — Shared domain logic
 src/core/models/       — SQLAlchemy models (Watch, AuditLog, Snapshot, SnapshotChunk, Change, TemporalProfile, NotificationConfig, Domain)
 src/core/probe.py      — URL probe: follow redirects, resolve effective URL and domain (ProbeResult + probe_url)

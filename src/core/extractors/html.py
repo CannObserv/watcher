@@ -3,7 +3,7 @@
 import re
 
 from bs4 import BeautifulSoup, Tag
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 from src.core.extractors.base import Chunk, ExtractionResult
 
@@ -12,6 +12,8 @@ BOILERPLATE_TAGS = {"nav", "footer", "header", "script", "style", "aside", "nosc
 
 class HtmlExtractorConfig(BaseModel):
     """Pydantic config model for HtmlExtractor."""
+
+    model_config = ConfigDict(extra="ignore")
 
     selectors: list[str] = []
     exclude_selectors: list[str] = []
@@ -25,13 +27,17 @@ class HtmlExtractor:
     async def extract(self, raw: bytes, config: dict | None = None) -> ExtractionResult:
         """Extract text from HTML, applying selectors and normalization.
 
+        Config is validated against :class:`HtmlExtractorConfig`. Extra keys are ignored;
+        unknown keys in existing watch ``fetch_config`` dicts will not cause errors.
+
         Config keys:
             selectors: list[str] — CSS selectors to include (default: whole body)
             exclude_selectors: list[str] — CSS selectors to remove within included content
             dynamic_id_patterns: list[str] — attribute names to strip (e.g. "data-block-id")
             strip_boilerplate: bool — remove nav/footer/script/style (default: True)
         """
-        config = config or {}
+        cfg = HtmlExtractorConfig.model_validate(config or {})
+        config = cfg.model_dump()
         soup = BeautifulSoup(raw, "lxml")
 
         if config.get("strip_boilerplate", True):

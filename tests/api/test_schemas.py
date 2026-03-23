@@ -183,6 +183,21 @@ class TestChangeDetailResponse:
 
     def test_has_snapshot_fields(self):
         ts = datetime(2026, 3, 21, 12, 0, 0, tzinfo=UTC)
+        snapshot_dict = {
+            "id": "01KM7A9TP2B0BQCNZ5PZX4MH88",
+            "watch_id": "01KM7A9TP2B0BQCNZ5PZX4MH89",
+            "content_hash": "sha256abc",
+            "simhash": 99999999,
+            "storage_path": "/data/snapshots/abc.html",
+            "text_path": "/data/snapshots/abc.txt",
+            "storage_backend": "local",
+            "chunk_count": 0,
+            "text_bytes": 0,
+            "fetch_duration_ms": 100,
+            "fetcher_used": "http",
+            "fetched_at": ts,
+            "chunks": [],
+        }
         data = ChangeDetailResponse.model_validate(
             {
                 "id": "01KM7A9TP2B0BQCNZ5PZX4MH8A",
@@ -191,11 +206,12 @@ class TestChangeDetailResponse:
                 "current_snapshot_id": "01KM7A9TP2B0BQCNZ5PZX4MH88",
                 "change_metadata": {},
                 "detected_at": ts,
-                "current_snapshot": None,
+                "current_snapshot": snapshot_dict,
                 "previous_snapshot": None,
             }
         )
-        assert data.current_snapshot is None
+        assert data.current_snapshot is not None
+        assert data.current_snapshot.id == "01KM7A9TP2B0BQCNZ5PZX4MH88"
         assert data.previous_snapshot is None
 
 

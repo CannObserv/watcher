@@ -167,10 +167,17 @@ async def schedule_tick(timestamp: int) -> None:
                         (p for p in profiles_orm if str(p.id) == profile_dict["id"]),
                         None,
                     )
-                    if action in ("deactivate", "archive"):
+                    if action == "deactivate":
                         watch.is_active = False
                         logger.info(
-                            f"post-action: {action} watch",
+                            "post-action: deactivate watch",
+                            extra={"watch_id": watch_id_str, "profile_id": profile_dict["id"]},
+                        )
+                    elif action == "archive":
+                        watch.is_active = False
+                        watch.is_archived = True
+                        logger.info(
+                            "post-action: archive watch",
                             extra={"watch_id": watch_id_str, "profile_id": profile_dict["id"]},
                         )
                     elif action == "reduce_frequency":

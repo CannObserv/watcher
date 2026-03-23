@@ -36,11 +36,21 @@ def summarize_change_metadata(metadata: dict) -> str:
     return ", ".join(parts) if parts else "change detected"
 
 
-async def get_watch_list(session: AsyncSession, is_active: bool | None = None) -> list[Watch]:
-    """Fetch watches for list display, optionally filtered by active status."""
+async def get_watch_list(
+    session: AsyncSession,
+    is_active: bool | None = None,
+    include_archived: bool = False,
+) -> list[Watch]:
+    """Fetch watches for list display, optionally filtered by active status.
+
+    Archived watches are excluded by default. Pass ``include_archived=True``
+    to include them.
+    """
     stmt = select(Watch).order_by(Watch.created_at.desc())
     if is_active is not None:
         stmt = stmt.where(Watch.is_active == is_active)
+    if not include_archived:
+        stmt = stmt.where(Watch.is_archived.is_(False))
     result = await session.execute(stmt)
     return list(result.scalars().all())
 

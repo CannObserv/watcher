@@ -2,11 +2,14 @@
 
 import pytest
 
+from src.core.extractors.base import Chunk
 from src.core.models.watch import ContentType, Watch
 from src.core.storage import LocalStorage
 from src.workers.pipeline import (
     _EXT_MAP,
     _EXTRACTOR_MAP,
+    _apply_ignore_patterns,
+    _compute_significance,
     _extract_content,
     _run_check_pipeline,
     _to_signed64,
@@ -158,3 +161,65 @@ class TestRunCheckPipeline:
         )
         stored = storage.load(result["storage_path"])
         assert stored == content
+
+
+def _make_chunk(text: str, index: int = 0) -> Chunk:
+    """Helper to build a Chunk with given text."""
+    return Chunk(index=index, chunk_type="text", label=f"chunk-{index}", text=text)
+
+
+class TestApplyIgnorePatterns:
+    def test_matching_pattern_excludes_chunk(self):
+        chunks = [_make_chunk("foo bar"), _make_chunk("keep me", index=1)]
+        result = _apply_ignore_patterns(chunks, [r"foo bar"])
+        assert len(result) == 1
+        assert result[0].text == "keep me"
+
+    def test_non_matching_pattern_preserves_chunk(self):
+        chunks = [_make_chunk("hello world")]
+        result = _apply_ignore_patterns(chunks, [r"something else"])
+        assert len(result) == 1
+        assert result[0].text == "hello world"
+
+    def test_empty_patterns_returns_all_chunks(self):
+        chunks = [_make_chunk("a"), _make_chunk("b", index=1)]
+        result = _apply_ignore_patterns(chunks, [])
+        assert result == chunks
+
+    def test_partial_match_does_not_exclude(self):
+        """fullmatch required — partial regex hit must not drop the chunk."""
+        chunks = [_make_chunk("foo bar baz")]
+        result = _apply_ignore_patterns(chunks, [r"foo bar"])
+        assert len(result) == 1
+
+    def test_regex_pattern_matches(self):
+        chunks = [_make_chunk("2024-01-15"), _make_chunk("keep", index=1)]
+        result = _apply_ignore_patterns(chunks, [r"\d{4}-\d{2}-\d{2}"])
+        assert len(result) == 1
+        assert result[0].text == "keep"
+
+
+class TestComputeSignificance:
+    def test_all_new_chunks_significance_zero(self):
+        """No previous snapshot → all curr chunks are 'added' → 0.0."""
+        sig = _compute_significance(added=3, removed=0, modified=0, total_curr=3)
+        assert sig == 0.0
+
+    def test_all_removed_clamps_to_zero(self):
+        """More removed than curr chunks → clamp to 0.0."""
+        sig = _compute_significance(added=0, removed=5, modified=0, total_curr=2)
+        assert sig == 0.0
+
+    def test_no_changes_significance_one(self):
+        sig = _compute_significance(added=0, removed=0, modified=0, total_curr=5)
+        assert sig == 1.0
+
+    def test_mixed_significance(self):
+        # 2 changed out of 10 curr → 1 - 2/10 = 0.8
+        sig = _compute_significance(added=1, removed=0, modified=1, total_curr=10)
+        assert abs(sig - 0.8) < 1e-9
+
+    def test_zero_total_curr_returns_one(self):
+        """Edge case: no chunks at all → treat as unchanged."""
+        sig = _compute_significance(added=0, removed=0, modified=0, total_curr=0)
+        assert sig == 1.0

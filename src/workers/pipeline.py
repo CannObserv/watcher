@@ -1,6 +1,7 @@
 """Check-watch pipeline: content extraction, diffing, and snapshot persistence."""
 
 import hashlib
+import re
 from datetime import UTC, datetime
 
 from sqlalchemy import select
@@ -8,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.differ import ChangeStatus, ChunkFingerprint, diff_chunks
 from src.core.extractors import CsvExcelExtractor, HtmlExtractor, PdfExtractor
-from src.core.extractors.base import ExtractionResult
+from src.core.extractors.base import Chunk, ExtractionResult
 from src.core.logging import get_logger
 from src.core.models.audit_log import EventType, audit
 from src.core.models.base import generate_ulid
@@ -22,6 +23,28 @@ from src.core.storage import StorageBackend
 logger = get_logger(__name__)
 
 _INT64_MAX = (1 << 63) - 1
+
+
+def _apply_ignore_patterns(chunks: list[Chunk], ignore_patterns: list[str]) -> list[Chunk]:
+    """Filter out chunks whose text fully matches any ignore pattern."""
+    if not ignore_patterns:
+        return chunks
+    compiled = [re.compile(p) for p in ignore_patterns]
+    return [c for c in chunks if not any(r.fullmatch(c.text) for r in compiled)]
+
+
+def _compute_significance(*, added: int, removed: int, modified: int, total_curr: int) -> float:
+    """Compute change significance as fraction of unchanged chunks.
+
+    Returns 1.0 - (changed / total_curr), clamped to [0.0, 1.0].
+    A value of 1.0 means no chunks changed; 0.0 means all chunks changed.
+    """
+    if total_curr == 0:
+        return 1.0
+    changed = added + removed + modified
+    sig = 1.0 - changed / total_curr
+    return max(0.0, min(1.0, sig))
+
 
 _EXT_MAP = {
     "html": "html",
@@ -145,13 +168,18 @@ async def _run_check_pipeline(
     # 4. Extract content
     extraction = await _extract_content(watch, raw_content)
 
+    # 4a. Apply ignore patterns — filter before diffing and persisting
+    fetch_cfg = watch.fetch_config or {}
+    ignore_patterns: list[str] = fetch_cfg.get("ignore_patterns", [])
+    filtered_chunks = _apply_ignore_patterns(extraction.chunks, ignore_patterns)
+
     # 5. Store raw + extracted text
     snapshot_id = generate_ulid()
     ext = _EXT_MAP[str(watch.content_type).lower()]
     raw_path = storage.snapshot_path(str(watch.id), str(snapshot_id), ext)
     text_path = storage.snapshot_path(str(watch.id), str(snapshot_id), "txt")
     storage.save(raw_path, raw_content)
-    full_text = "\n".join(c.text for c in extraction.chunks)
+    full_text = "\n".join(c.text for c in filtered_chunks)
     storage.save(text_path, full_text.encode())
 
     # 6. Create Snapshot record
@@ -163,7 +191,7 @@ async def _run_check_pipeline(
         storage_path=raw_path,
         text_path=text_path,
         storage_backend="local",
-        chunk_count=len(extraction.chunks),
+        chunk_count=len(filtered_chunks),
         text_bytes=len(full_text.encode()),
         fetch_duration_ms=fetch_duration_ms,
         fetcher_used=fetcher_used,
@@ -172,7 +200,7 @@ async def _run_check_pipeline(
     await session.flush()
 
     # 7. Create SnapshotChunk records
-    for chunk in extraction.chunks:
+    for chunk in filtered_chunks:
         session.add(
             SnapshotChunk(
                 snapshot_id=snapshot_id,
@@ -208,7 +236,7 @@ async def _run_check_pipeline(
                 content_hash=c.content_hash,
                 simhash=c.simhash,
             )
-            for c in extraction.chunks
+            for c in filtered_chunks
         ]
         changes = diff_chunks(prev_fingerprints, curr_fingerprints)
         has_real_changes = any(
@@ -216,6 +244,15 @@ async def _run_check_pipeline(
             for ch in changes
         )
         if has_real_changes:
+            n_added = sum(1 for c in changes if c.status == ChangeStatus.ADDED)
+            n_removed = sum(1 for c in changes if c.status == ChangeStatus.REMOVED)
+            n_modified = sum(1 for c in changes if c.status == ChangeStatus.MODIFIED)
+            significance = _compute_significance(
+                added=n_added,
+                removed=n_removed,
+                modified=n_modified,
+                total_curr=len(filtered_chunks),
+            )
             metadata = {
                 "added": [c.chunk_label for c in changes if c.status == ChangeStatus.ADDED],
                 "removed": [c.chunk_label for c in changes if c.status == ChangeStatus.REMOVED],
@@ -230,6 +267,7 @@ async def _run_check_pipeline(
                 previous_snapshot_id=prev_snapshot.id,
                 current_snapshot_id=snapshot_id,
                 change_metadata=metadata,
+                significance=significance,
             )
             session.add(change)
             await session.flush()
@@ -242,7 +280,7 @@ async def _run_check_pipeline(
         watch_id=watch.id,
         snapshot_id=str(snapshot_id),
         content_hash=content_hash,
-        chunk_count=len(extraction.chunks),
+        chunk_count=len(filtered_chunks),
         is_changed=change_id is not None or prev_snapshot is None,
     )
     await session.flush()
@@ -252,7 +290,7 @@ async def _run_check_pipeline(
         "snapshot_id": str(snapshot_id),
         "is_changed": change_id is not None or prev_snapshot is None,
         "change_id": str(change_id) if change_id else None,
-        "chunk_count": len(extraction.chunks),
+        "chunk_count": len(filtered_chunks),
         "storage_path": raw_path,
         "change_metadata": metadata if change_id else {},
     }

@@ -68,6 +68,30 @@ class TestGetDomainByName:
         assert response.json()["name"] == "example.com"
 
 
+class TestDecayWindow:
+    async def test_patch_creates_domain_with_default_decay_window(self, client):
+        response = await client.patch("/api/v1/domains/decay-test.com", json={"min_interval": 2.0})
+        assert response.status_code == 200
+        data = response.json()
+        assert data["decay_window"] == 1800.0
+
+    async def test_patch_sets_custom_decay_window(self, client):
+        response = await client.patch(
+            "/api/v1/domains/custom-decay.com",
+            json={"min_interval": 2.0, "decay_window": 900.0},
+        )
+        assert response.status_code == 200
+        assert response.json()["decay_window"] == 900.0
+
+    async def test_patch_updates_decay_window(self, client):
+        await client.patch("/api/v1/domains/update-decay.com", json={"min_interval": 1.0})
+        response = await client.patch(
+            "/api/v1/domains/update-decay.com", json={"decay_window": 600.0}
+        )
+        assert response.status_code == 200
+        assert response.json()["decay_window"] == 600.0
+
+
 class TestDeleteDomain:
     async def test_delete_orphaned_domain_returns_204(self, client):
         await client.patch("/api/v1/domains/orphan.com", json={"min_interval": 1.0})

@@ -10,6 +10,7 @@ from src.core.models.base import Base, TimestampMixin, ULIDType, generate_ulid
 
 DEFAULT_MIN_INTERVAL = 1.0
 DEFAULT_MAX_CONCURRENCY = 2
+DEFAULT_DECAY_WINDOW = 1800.0
 
 
 class Domain(Base, TimestampMixin):
@@ -31,10 +32,14 @@ class Domain(Base, TimestampMixin):
     last_request_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True, default=None
     )
+    decay_window: Mapped[float] = mapped_column(
+        Float, nullable=False, default=DEFAULT_DECAY_WINDOW, server_default="1800.0"
+    )
 
     def __init__(self, **kwargs: object) -> None:
         """Set Python-side defaults."""
         kwargs.setdefault("min_interval", DEFAULT_MIN_INTERVAL)
         kwargs.setdefault("max_concurrency", DEFAULT_MAX_CONCURRENCY)
         kwargs.setdefault("current_interval", kwargs.get("min_interval", DEFAULT_MIN_INTERVAL))
+        kwargs.setdefault("decay_window", DEFAULT_DECAY_WINDOW)
         super().__init__(**kwargs)

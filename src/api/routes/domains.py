@@ -7,7 +7,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.api.dependencies import get_db_session
 from src.api.schemas.domain import DomainPatch, DomainResponse
-from src.core.models.domain import DEFAULT_MAX_CONCURRENCY, DEFAULT_MIN_INTERVAL, Domain
+from src.core.models.domain import (
+    DEFAULT_DECAY_WINDOW,
+    DEFAULT_MAX_CONCURRENCY,
+    DEFAULT_MIN_INTERVAL,
+    Domain,
+)
 from src.core.models.watch import Watch
 
 router = APIRouter(prefix="/domains", tags=["domains"])
@@ -60,6 +65,7 @@ async def upsert_domain(
             min_interval=min_iv,
             max_concurrency=updates.get("max_concurrency", DEFAULT_MAX_CONCURRENCY),
             current_interval=min_iv,
+            decay_window=updates.get("decay_window", DEFAULT_DECAY_WINDOW),
         )
         session.add(domain)
         try:
@@ -74,6 +80,8 @@ async def upsert_domain(
             domain.min_interval = updates["min_interval"]
         if "max_concurrency" in updates:
             domain.max_concurrency = updates["max_concurrency"]
+        if "decay_window" in updates:
+            domain.decay_window = updates["decay_window"]
 
     await session.commit()
     await session.refresh(domain)

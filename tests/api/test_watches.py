@@ -58,6 +58,19 @@ class TestCreateWatch:
         )
         assert response.status_code == 422
 
+    async def test_create_watch_invalid_ignore_pattern_returns_422(self, client):
+        response = await client.post(
+            "/api/v1/watches",
+            json={
+                "name": "Bad Regex",
+                "url": "https://example.com",
+                "content_type": "html",
+                "fetch_config": {"ignore_patterns": [r"[invalid"]},
+            },
+        )
+        assert response.status_code == 422
+        assert "not a valid regex" in response.text
+
 
 class TestListWatches:
     async def test_list_watches_empty(self, client):
@@ -130,6 +143,19 @@ class TestUpdateWatch:
             json={"name": "Nope"},
         )
         assert response.status_code == 404
+
+    async def test_update_watch_invalid_ignore_pattern_returns_422(self, client):
+        create_resp = await client.post(
+            "/api/v1/watches",
+            json={"name": "W", "url": "https://example.com", "content_type": "html"},
+        )
+        watch_id = create_resp.json()["id"]
+        response = await client.patch(
+            f"/api/v1/watches/{watch_id}",
+            json={"fetch_config": {"ignore_patterns": [r"[bad"]}},
+        )
+        assert response.status_code == 422
+        assert "not a valid regex" in response.text
 
 
 class TestDeactivateWatch:

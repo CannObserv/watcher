@@ -29,15 +29,21 @@ def _apply_ignore_patterns(chunks: list[Chunk], ignore_patterns: list[str]) -> l
     """Filter out chunks whose text fully matches any ignore pattern."""
     if not ignore_patterns:
         return chunks
-    compiled = [re.compile(p) for p in ignore_patterns]
+    compiled = []
+    for p in ignore_patterns:
+        try:
+            compiled.append(re.compile(p))
+        except re.error:
+            logger.warning("invalid ignore_pattern skipped", extra={"pattern": p})
     return [c for c in chunks if not any(r.fullmatch(c.text) for r in compiled)]
 
 
 def _compute_significance(*, added: int, removed: int, modified: int, total_curr: int) -> float:
     """Compute change significance as fraction of unchanged chunks.
 
-    Returns 1.0 - (changed / total_curr), clamped to [0.0, 1.0].
-    A value of 1.0 means no chunks changed; 0.0 means all chunks changed.
+    Returns 1.0 - (added + removed + modified) / total_curr, clamped to [0.0, 1.0].
+    1.0 = no chunks changed; 0.0 = all or more chunks changed (including when
+    removed exceeds total_curr, which clamps to 0.0).
     """
     if total_curr == 0:
         return 1.0

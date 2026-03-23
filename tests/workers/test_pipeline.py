@@ -1,8 +1,10 @@
 """Tests for _run_check_pipeline and helpers in workers.pipeline."""
 
 import pytest
+from sqlalchemy import select
 
 from src.core.extractors.base import Chunk
+from src.core.models.change import Change
 from src.core.models.watch import ContentType, Watch
 from src.core.storage import LocalStorage
 from src.workers.pipeline import (
@@ -161,6 +163,76 @@ class TestRunCheckPipeline:
         )
         stored = storage.load(result["storage_path"])
         assert stored == content
+
+    async def test_ignore_patterns_filter_chunks_in_pipeline(self, db_session, tmp_path):
+        """Chunks matching ignore_patterns are excluded from diff and snapshot."""
+        watch = Watch(
+            name="Filtered",
+            url="https://example.com",
+            content_type=ContentType.HTML,
+            fetch_config={"ignore_patterns": [r"Noise.*"]},
+        )
+        db_session.add(watch)
+        await db_session.flush()
+
+        storage = LocalStorage(base_dir=tmp_path)
+        # First run: establishes baseline
+        content_v1 = b"<html><body><p>Signal</p><p>Noise: ignored</p></body></html>"
+        result1 = await _run_check_pipeline(
+            watch=watch,
+            raw_content=content_v1,
+            fetcher_used="http",
+            fetch_duration_ms=100,
+            storage=storage,
+            session=db_session,
+        )
+        # chunk_count reflects filtered chunks only
+        assert result1["chunk_count"] >= 1
+
+        # Second run: only the noisy chunk changes; signal is stable
+        content_v2 = b"<html><body><p>Signal</p><p>Noise: also ignored</p></body></html>"
+        result2 = await _run_check_pipeline(
+            watch=watch,
+            raw_content=content_v2,
+            fetcher_used="http",
+            fetch_duration_ms=100,
+            storage=storage,
+            session=db_session,
+        )
+        # Both runs produce a new snapshot (different raw hash), but since the
+        # matching chunk is filtered, no Change record should be created.
+        assert result2["change_id"] is None
+
+    async def test_significance_stored_on_change_record(self, db_session, tmp_path):
+        """Persisted Change record has correct significance value."""
+        watch = Watch(name="Sig", url="https://example.com", content_type=ContentType.HTML)
+        db_session.add(watch)
+        await db_session.flush()
+
+        storage = LocalStorage(base_dir=tmp_path)
+        await _run_check_pipeline(
+            watch=watch,
+            raw_content=b"<html><body><p>V1</p></body></html>",
+            fetcher_used="http",
+            fetch_duration_ms=100,
+            storage=storage,
+            session=db_session,
+        )
+        result2 = await _run_check_pipeline(
+            watch=watch,
+            raw_content=b"<html><body><p>V2</p></body></html>",
+            fetcher_used="http",
+            fetch_duration_ms=100,
+            storage=storage,
+            session=db_session,
+        )
+        assert result2["change_id"] is not None
+
+        stmt = select(Change).where(Change.watch_id == watch.id)
+        change = (await db_session.execute(stmt)).scalar_one()
+        assert change is not None
+        assert change.significance is not None
+        assert 0.0 <= change.significance <= 1.0
 
 
 def _make_chunk(text: str, index: int = 0) -> Chunk:

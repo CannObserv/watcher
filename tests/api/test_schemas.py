@@ -53,6 +53,33 @@ class TestWatchCreate:
         assert data.fetch_config == {"timeout": 30}
         assert data.schedule_config == {"interval": "6h"}
 
+    def test_watch_create_valid_ignore_patterns(self):
+        data = WatchCreate(
+            name="Filtered",
+            url="https://example.com",
+            content_type="html",
+            fetch_config={"ignore_patterns": [r"\d{4}-\d{2}-\d{2}", r"foo bar"]},
+        )
+        assert data.fetch_config["ignore_patterns"] == [r"\d{4}-\d{2}-\d{2}", r"foo bar"]
+
+    def test_watch_create_invalid_regex_in_ignore_patterns(self):
+        with pytest.raises(ValidationError, match="not a valid regex"):
+            WatchCreate(
+                name="Bad",
+                url="https://example.com",
+                content_type="html",
+                fetch_config={"ignore_patterns": [r"[invalid"]},
+            )
+
+    def test_watch_create_ignore_patterns_must_be_list(self):
+        with pytest.raises(ValidationError, match="must be a list"):
+            WatchCreate(
+                name="Bad",
+                url="https://example.com",
+                content_type="html",
+                fetch_config={"ignore_patterns": r"\d+"},
+            )
+
 
 class TestWatchUpdate:
     def test_update_partial(self):
@@ -78,6 +105,14 @@ class TestWatchUpdate:
         """URL is intentionally omitted from WatchUpdate — immutable after creation."""
         data = WatchUpdate(name="No URL change")
         assert not hasattr(data, "url")
+
+    def test_update_invalid_regex_in_ignore_patterns(self):
+        with pytest.raises(ValidationError, match="not a valid regex"):
+            WatchUpdate(fetch_config={"ignore_patterns": [r"[bad"]})
+
+    def test_update_none_fetch_config_is_valid(self):
+        data = WatchUpdate(fetch_config=None)
+        assert data.fetch_config is None
 
 
 class TestSnapshotChunkResponse:

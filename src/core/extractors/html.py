@@ -3,16 +3,26 @@
 import re
 
 from bs4 import BeautifulSoup, Tag
+from pydantic import BaseModel
 
 from src.core.extractors.base import Chunk, ExtractionResult
 
 BOILERPLATE_TAGS = {"nav", "footer", "header", "script", "style", "aside", "noscript"}
 
 
+class HtmlExtractorConfig(BaseModel):
+    """Pydantic config model for HtmlExtractor."""
+
+    selectors: list[str] = []
+    exclude_selectors: list[str] = []
+    strip_boilerplate: bool = True
+    dynamic_id_patterns: list[str] = []
+
+
 class HtmlExtractor:
     """Extract normalized text chunks from HTML content."""
 
-    def extract(self, raw: bytes, config: dict | None = None) -> ExtractionResult:
+    async def extract(self, raw: bytes, config: dict | None = None) -> ExtractionResult:
         """Extract text from HTML, applying selectors and normalization.
 
         Config keys:

@@ -12,7 +12,7 @@ from src.core.extractors.base import Chunk, ExtractionResult
 class PdfExtractor:
     """Extract normalized text chunks from PDF content, one chunk per page."""
 
-    def extract(self, raw: bytes, config: dict | None = None) -> ExtractionResult:
+    async def extract(self, raw: bytes, config: dict | None = None) -> ExtractionResult:
         """Extract text from each PDF page.
 
         Config keys:

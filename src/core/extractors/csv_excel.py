@@ -13,7 +13,7 @@ DEFAULT_CHUNK_ROWS = 100
 class CsvExcelExtractor:
     """Extract normalized text chunks from CSV or Excel content."""
 
-    def extract(self, raw: bytes, config: dict | None = None) -> ExtractionResult:
+    async def extract(self, raw: bytes, config: dict | None = None) -> ExtractionResult:
         """Extract text from CSV or Excel, chunked by row ranges.
 
         Config keys:

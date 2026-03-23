@@ -4,6 +4,7 @@ import json
 
 import httpx
 import pytest
+from pydantic import ValidationError
 
 from src.core.notifications.slack import SlackChannel
 
@@ -45,3 +46,8 @@ class TestSlackChannel:
             make_event(), {"webhook_url": "https://hooks.slack.com/T1/B1/xxx"}
         )
         assert result is False
+
+    async def test_invalid_config_raises_validation_error(self):
+        channel = self._make_channel(200)
+        with pytest.raises(ValidationError):
+            await channel.send(_make_event(), {"webhook_url": "not-a-url"})

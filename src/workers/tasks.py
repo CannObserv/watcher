@@ -113,7 +113,7 @@ async def _get_snapshot_chunks(
     return list(result.scalars().all())
 
 
-def _extract_content(watch: Watch, raw_content: bytes) -> ExtractionResult:
+async def _extract_content(watch: Watch, raw_content: bytes) -> ExtractionResult:
     """Run the appropriate extractor based on watch content_type.
 
     For FILE watches, passes fetch_config extraction settings (e.g., content_type,
@@ -133,7 +133,7 @@ def _extract_content(watch: Watch, raw_content: bytes) -> ExtractionResult:
                 if k in ("chunk_row_size", "sort_columns", "sheet_name")
             },
         }
-    return extractor.extract(raw_content, config=config)
+    return await extractor.extract(raw_content, config=config)
 
 
 async def _run_check_pipeline(
@@ -176,7 +176,7 @@ async def _run_check_pipeline(
         }
 
     # 4. Extract content
-    extraction = _extract_content(watch, raw_content)
+    extraction = await _extract_content(watch, raw_content)
 
     # 5. Store raw + extracted text
     snapshot_id = generate_ulid()

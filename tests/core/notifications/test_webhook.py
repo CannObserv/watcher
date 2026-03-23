@@ -4,6 +4,7 @@ import json
 
 import httpx
 import pytest
+from pydantic import ValidationError
 
 from src.core.notifications.webhook import WebhookChannel
 
@@ -54,3 +55,8 @@ class TestWebhookChannel:
         channel = WebhookChannel(client)
         result = await channel.send(make_event(), {"url": "https://hook.example.com/abc"})
         assert result is False
+
+    async def test_invalid_config_raises_validation_error(self):
+        channel = self._make_channel(200)
+        with pytest.raises(ValidationError):
+            await channel.send(_make_event(), {"url": "not-a-url"})

@@ -177,25 +177,25 @@ Update this skill file if patterns emerged that should be generalized.
 
 ### Branch strategy
 
-Each **multi-agent batch** gets a shared feature branch (e.g. `batch/a`, `batch/f`). Workers use individual worktree branches (e.g. `feature/batch-a-13-schema-move`). The orchestrator merges worker branches into the batch branch sequentially, respecting any intra-batch ordering. Conflicts are returned to the responsible worker agent to resolve.
+Each **multi-agent batch** gets a shared integration branch (e.g. `batch/a`, `batch/f`). The orchestrator creates this branch and checks it out **before spawning any agents**. Worker agents use `isolation: "worktree"` — because that parameter merges completed work to the caller's current branch, each agent's output accumulates on the batch branch automatically.
 
 **Single-agent batches** do not need a separate batch branch — the agent's feature branch serves directly.
 
-The human review happens against the **batch branch**: run tests, inspect the combined diff, then merge to `main` with a regular merge commit (preserving per-agent commit history).
+The human review happens against the **batch branch**: run tests, inspect the combined diff, then merge to `main`. After merge, the orchestrator checks `main` back out, pulls to sync, and uses it as the base for the next batch branch.
 
 Ask the user their preferred merge strategy (regular, squash, rebase) and record it in the design doc.
 
 ### Orchestrator agent
 
 The orchestrator reads the batch plan and manages progression. It:
-1. **Sync local main before every batch launch** — `git fetch origin && git merge --ff-only origin/main`. Agents worktree from local main; if local main is stale, agents base their work on the wrong commit.
-2. Creates `batch/<X>` branch from `main` for each multi-agent batch at launch time
+1. **Sync local main before every batch launch** — `git checkout main && git pull --ff-only`. Agents worktree from local main; if local main is stale, agents base their work on the wrong commit.
+2. **Check out the batch branch before spawning agents** — `git checkout -b batch/<X>`. Because `isolation: "worktree"` merges to the caller's current branch, this ensures all worker output accumulates on `batch/<X>` rather than `main` (see Rule 3).
 3. Launches all worker agents whose batch gate is currently satisfied simultaneously
-4. On each worker completion signal, merges that worker's branch into the batch branch (respecting intra-batch ordering; returns conflicts to the worker)
-5. When all workers are merged, runs the full test suite against the batch branch
+4. On each worker completion signal, verifies the merge landed on `batch/<X>` (respecting any intra-batch ordering; returns conflicts to the responsible worker agent to resolve)
+5. When all workers are merged, runs the full test suite against `batch/<X>`
 6. Notifies the user: "Batch X ready for review: `batch/<X>`, N issues, tests passing"
-7. Waits for merge confirmation before launching the next batch
-8. On confirmation, syncs local main again, then launches all newly unblocked batches simultaneously
+7. Waits for merge confirmation before proceeding
+8. **On confirmation**, checks out `main`, merges `batch/<X>`, pushes, then syncs local main before launching the next batch
 
 Never writes implementation code itself.
 
@@ -220,7 +220,7 @@ Each worker agent follows this protocol before signaling completion:
 - **Blast radius ≠ priority** — a high-blast issue may score high but still must wait for lower-priority isolates to merge first
 - **Correctness fixes lead refactors** — if a bug fix and a structural refactor both touch the same file, fix the bug in the first commit of the refactor branch, not in a separate earlier batch
 - **Bundle when cohesive** — two issues that naturally sequence (define → use, protocol → config) belong in one agent with sequential commits, not two agents with a gate
-- **Worktrees always** — each agent branch gets an isolated worktree; no shared working directory state between concurrent agents
+- **Worktrees always** — use `isolation: "worktree"` for all worker agents; each gets an isolated working directory. Pre-create and check out the batch branch first so their output lands there, not on `main`.
 - **Deferred is a decision** — explicitly name what is out of scope and why; don't silently omit
 - **Batch feature branches for multi-agent batches** — gives the user a single integration point to test and review before merging to main; surfaces intra-batch conflicts at the batch branch, not at main
 - **Single-agent batches skip the extra branch** — the agent's feature branch is the batch branch
@@ -260,15 +260,33 @@ Or, if agents auto-merged to main (see Rule 3), just:
 git push origin main   # from local main after verifying it is up to date
 ```
 
-### Rule 3 — `isolation: "worktree"` auto-merges to local main, not origin/main
+### Rule 3 — `isolation: "worktree"` merges to the caller's current local branch
 
-The `isolation: "worktree"` Agent tool parameter creates a temporary worktree, runs the agent in it, then merges any changes back to **the current local branch** (not to origin). This means:
-- Per-agent feature branches do not persist after the agent completes
-- Work lands on local `main` as agents complete — which is fine
-- But local `main` diverges from `origin/main` until you push
-- The next agent launch must therefore start with a `git pull --ff-only` to get any intervening pushes
+The `isolation: "worktree"` Agent tool parameter creates a temporary worktree, runs the agent in it, then merges any changes back to **the current local branch** of the calling process (not to origin, not to a named feature branch).
 
-To preserve isolated feature branches through agent completion, instruct the agent explicitly: `git checkout -b feature/batch-x` as its first step, commit there, and do **not** use `isolation: "worktree"`. The orchestrator then merges manually.
+**Canonical pattern for multi-agent batches:** check out the batch branch *before* spawning agents. Because `isolation: "worktree"` merges to the current branch, all agent output accumulates on `batch/<X>` rather than `main`:
+
+```bash
+git checkout main
+git pull --ff-only               # sync (Rule 1)
+git checkout -b batch/f          # switch workspace to batch branch
+# spawn all worker agents with isolation: "worktree"
+# their completed work merges into batch/f as each agent finishes
+```
+
+After human review and merge approval:
+
+```bash
+git checkout main
+git merge --ff-only batch/f      # or rebase/squash per agreed strategy
+git push origin main
+# sync local main before next batch (Rule 1)
+```
+
+Consequences of this model:
+- Per-agent worktree branches are temporary; work accumulates on `batch/<X>`
+- `main` is only updated when the human explicitly merges the batch branch
+- The next batch launch must start with `git pull --ff-only` on `main` (Rule 1) before creating the new batch branch
 
 ### Rule 4 — Fix commit messages before continuing after a rebase conflict
 
@@ -294,10 +312,10 @@ git commit --amend -m "..."    # fix message before doing anything else
 - Output: design doc + GitHub tracking issue + this skill
 
 **Observed agent behavior (2026-03-23 execution):**
-- `isolation: "worktree"` agents auto-merge their completed changes back to the repo's current branch (main) rather than leaving them on an isolated feature branch. This means per-agent branches cannot be selectively merged by the orchestrator — work lands on main as agents complete.
-- **Impact on batch/a strategy**: batch/a still functions as a human review checkpoint. After all Batch A agents complete, fast-forward `batch/a` to the current main HEAD, run the test suite, and notify the user. The integration safety comes from the test run, not from a separate branch.
+- `isolation: "worktree"` agents auto-merge their completed changes back to the orchestrator's **current local branch**. Per-agent worktree branches do not persist after completion.
+- **Corrected batch branch pattern** (retrofitted after session): the orchestrator should check out `batch/<X>` *before* spawning agents. Since `isolation: "worktree"` merges to the current branch, this routes all agent output to the batch branch rather than `main`. After review, the orchestrator merges `batch/<X>` → `main` and checks `main` back out.
+- **Impact during this session**: agents ran with the workspace on `main` — batch branches served as fast-forward checkpoints, not isolation boundaries. The test run at the end of each batch provided the safety net.
 - **Impact on single-agent batches** (B–E): no change — the agent's worktree branch is the batch branch anyway.
-- **Future consideration**: to preserve per-agent isolation in a multi-agent batch, explicitly instruct agents to create and stay on a named feature branch (e.g. `git checkout -b feature/batch-a-13`) rather than relying on the isolation parameter to enforce this.
 
 **Clarifications added after initial design:**
 - Orchestrator launches all unblocked batches simultaneously — not just the next numbered batch. Initial design implied sequential launching; user clarified all safe parallel work should start at once.

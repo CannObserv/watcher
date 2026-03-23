@@ -424,10 +424,8 @@ class TestDeleteWatch:
 
 
 class TestListWatchesArchivedFilter:
-    async def test_list_watches_excludes_archived_by_default(self, client, db_session):
-        """Default list (no ?archived param) excludes archived watches."""
-        from src.core.models.watch import Watch
-
+    async def test_list_watches_no_filter_includes_archived(self, client, db_session):
+        """No ?is_archived param returns all watches, including archived ones."""
         archived = Watch(
             name="Archived Watch",
             url="https://example.com/archived",
@@ -440,12 +438,10 @@ class TestListWatchesArchivedFilter:
 
         response = await client.get("/api/v1/watches")
         ids = [w["id"] for w in response.json()]
-        assert str(archived.id) not in ids
+        assert str(archived.id) in ids
 
-    async def test_list_watches_archived_true_returns_archived(self, client, db_session):
-        """?archived=true returns only archived watches."""
-        from src.core.models.watch import Watch
-
+    async def test_list_watches_is_archived_true_returns_archived_only(self, client, db_session):
+        """?is_archived=true returns only archived watches."""
         archived = Watch(
             name="Archived Only",
             url="https://example.com/arch-only",
@@ -463,16 +459,14 @@ class TestListWatchesArchivedFilter:
         db_session.add_all([archived, active])
         await db_session.commit()
 
-        response = await client.get("/api/v1/watches?archived=true")
+        response = await client.get("/api/v1/watches?is_archived=true")
         assert response.status_code == 200
         ids = [w["id"] for w in response.json()]
         assert str(archived.id) in ids
         assert str(active.id) not in ids
 
-    async def test_list_watches_archived_false_excludes_archived(self, client, db_session):
-        """?archived=false explicitly excludes archived watches."""
-        from src.core.models.watch import Watch
-
+    async def test_list_watches_is_archived_false_excludes_archived(self, client, db_session):
+        """?is_archived=false explicitly excludes archived watches."""
         archived = Watch(
             name="Arch False Test",
             url="https://example.com/arch-false",
@@ -483,7 +477,7 @@ class TestListWatchesArchivedFilter:
         db_session.add(archived)
         await db_session.commit()
 
-        response = await client.get("/api/v1/watches?archived=false")
+        response = await client.get("/api/v1/watches?is_archived=false")
         ids = [w["id"] for w in response.json()]
         assert str(archived.id) not in ids
 

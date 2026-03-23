@@ -133,6 +133,42 @@ class TestGetWatchList:
         assert len(active_only) == 1
         assert active_only[0].name == "Active"
 
+    async def test_excludes_archived_by_default(self, db_session):
+        db_session.add(Watch(name="Normal", url="https://a.com", content_type="html"))
+        db_session.add(
+            Watch(
+                name="Archived",
+                url="https://b.com",
+                content_type="html",
+                is_active=False,
+                is_archived=True,
+            )
+        )
+        await db_session.flush()
+
+        result = await get_watch_list(db_session)
+        names = [w.name for w in result]
+        assert "Normal" in names
+        assert "Archived" not in names
+
+    async def test_include_archived_returns_all(self, db_session):
+        db_session.add(Watch(name="Normal", url="https://a.com", content_type="html"))
+        db_session.add(
+            Watch(
+                name="Archived",
+                url="https://b.com",
+                content_type="html",
+                is_active=False,
+                is_archived=True,
+            )
+        )
+        await db_session.flush()
+
+        result = await get_watch_list(db_session, include_archived=True)
+        names = [w.name for w in result]
+        assert "Normal" in names
+        assert "Archived" in names
+
 
 @pytest.mark.integration
 class TestGetWatchDetail:

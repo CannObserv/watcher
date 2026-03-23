@@ -4,6 +4,7 @@ from datetime import UTC, datetime
 
 import pytest
 from pydantic import ValidationError
+from ulid import ULID
 
 from src.api.schemas.audit_log import AuditLogResponse
 from src.api.schemas.change import (
@@ -15,6 +16,7 @@ from src.api.schemas.change import (
 )
 from src.api.schemas.watch import WatchCreate, WatchResponse, WatchUpdate
 from src.core.models.audit_log import EventType
+from src.core.models.watch import ContentType, Watch
 
 
 class TestWatchCreate:
@@ -256,12 +258,6 @@ class TestChangeDetailResponse:
 
 class TestWatchResponse:
     def test_watch_response_includes_is_archived(self):
-        from datetime import UTC, datetime
-
-        from ulid import ULID
-
-        from src.core.models.watch import ContentType, Watch
-
         watch = Watch(
             name="Test",
             url="https://example.com",
@@ -274,12 +270,6 @@ class TestWatchResponse:
         assert response.is_archived is False
 
     def test_watch_response_is_archived_true(self):
-        from datetime import UTC, datetime
-
-        from ulid import ULID
-
-        from src.core.models.watch import ContentType, Watch
-
         watch = Watch(
             name="Archived",
             url="https://example.com",

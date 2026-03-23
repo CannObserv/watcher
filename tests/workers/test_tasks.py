@@ -447,8 +447,6 @@ class TestScheduleTickWithProfiles:
 
     async def test_post_action_archive_sets_is_archived(self, db_session, monkeypatch):
         """Archive post-action sets both is_active=False and is_archived=True."""
-        import src.workers.tasks as tasks_mod
-
         now = datetime(2026, 4, 10, 12, 0, 0, tzinfo=UTC)
         watch = Watch(
             name="Archive Event",
@@ -490,8 +488,6 @@ class TestScheduleTickWithProfiles:
 
     async def test_post_action_deactivate_does_not_set_is_archived(self, db_session, monkeypatch):
         """Deactivate post-action sets is_active=False but leaves is_archived=False."""
-        import src.workers.tasks as tasks_mod
-
         now = datetime(2026, 4, 10, 12, 0, 0, tzinfo=UTC)
         watch = Watch(
             name="Deactivate Event",

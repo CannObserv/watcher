@@ -84,18 +84,20 @@ async def create_watch(
 @router.get("", response_model=list[WatchResponse])
 async def list_watches(
     is_active: bool | None = None,
-    archived: bool = False,
+    is_archived: bool | None = None,
     session: AsyncSession = Depends(get_db_session),
 ):
-    """List all watches, optionally filtered by active status.
+    """List all watches, optionally filtered by active or archived status.
 
-    By default, archived watches are excluded. Pass ``archived=true`` to include
-    only archived watches, or ``archived=false`` (default) to exclude them.
+    Omitting ``is_archived`` returns all watches regardless of archive status.
+    Pass ``is_archived=false`` to exclude archived watches, or ``is_archived=true``
+    to return only archived watches.
     """
     stmt = select(Watch).order_by(Watch.created_at.desc())
     if is_active is not None:
         stmt = stmt.where(Watch.is_active == is_active)
-    stmt = stmt.where(Watch.is_archived.is_(archived))
+    if is_archived is not None:
+        stmt = stmt.where(Watch.is_archived.is_(is_archived))
     result = await session.execute(stmt)
     return result.scalars().all()
 

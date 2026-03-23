@@ -67,7 +67,7 @@ class TestDomainRateLimiter:
         limiter.report_rate_limited("https://example.com/a")
         domain = limiter.extract_domain("https://example.com/a")
         state = limiter._domains[domain]
-        assert state.min_interval > 0.0
+        assert state.current_interval > 0.0
 
     def test_get_domain_states_empty(self):
         limiter = DomainRateLimiter()
@@ -82,32 +82,33 @@ class TestDomainRateLimiter:
         assert len(states) == 1
         assert states[0]["name"] == "example.com"
         assert states[0]["in_backoff"] is True
-        assert states[0]["interval"] > 1.0
+        assert states[0]["current_interval"] > 1.0
 
 
 class TestConfigureDomain:
     def test_configure_domain_stores_current_interval_as_effective_rate(self):
-        """configure_domain stores current_interval as the effective in-memory rate.
+        """configure_domain stores both min_interval and current_interval.
 
-        DomainState only has min_interval — it is the effective rate used during
-        acquire. configure_domain loads current_interval here so that backoff
-        state persists across restarts. The operator min_interval floor is
-        DB-only; in-memory state only tracks the current effective rate.
+        min_interval is the operator-configured floor; current_interval is the
+        effective rate used during acquire (may be elevated by backoff).
         """
         limiter = DomainRateLimiter()
         limiter.configure_domain(
             name="example.com",
             max_concurrency=1,
+            min_interval=1.0,
             current_interval=5.0,
         )
         state = limiter._domains["example.com"]
-        assert state.min_interval == 5.0  # current_interval becomes the effective rate
+        assert state.current_interval == 5.0
+        assert state.min_interval == 1.0
 
     def test_configure_domain_sets_concurrency(self):
         limiter = DomainRateLimiter()
         limiter.configure_domain(
             name="example.com",
             max_concurrency=3,
+            min_interval=1.0,
             current_interval=1.0,
         )
         state = limiter._domains["example.com"]
@@ -123,6 +124,7 @@ class TestConfigureDomain:
         limiter.configure_domain(
             name="example.com",
             max_concurrency=1,
+            min_interval=0.1,
             current_interval=0.1,
         )
         times = []
@@ -139,12 +141,60 @@ class TestConfigureDomain:
         limiter = DomainRateLimiter(min_interval=1.0)
         limiter.report_rate_limited_for_domain("example.com")
         state = limiter._domains["example.com"]
-        assert state.min_interval > 1.0
+        assert state.current_interval > 1.0
 
     def test_report_rate_limited_for_domain_returns_new_interval(self):
         limiter = DomainRateLimiter(min_interval=1.0)
         new_interval = limiter.report_rate_limited_for_domain("example.com")
-        assert new_interval == limiter._domains["example.com"].min_interval
+        assert new_interval == limiter._domains["example.com"].current_interval
+
+
+class TestDomainStateSplit:
+    def test_configure_domain_stores_both_intervals(self):
+        limiter = DomainRateLimiter()
+        limiter.configure_domain(
+            name="example.com", max_concurrency=2, min_interval=1.0, current_interval=5.0
+        )
+        state = limiter._domains["example.com"]
+        assert state.min_interval == 1.0
+        assert state.current_interval == 5.0
+
+    def test_acquire_uses_current_interval_not_min(self):
+        limiter = DomainRateLimiter()
+        limiter.configure_domain(
+            name="example.com", max_concurrency=2, min_interval=0.0, current_interval=0.1
+        )
+        state = limiter._domains["example.com"]
+        assert state.current_interval == 0.1
+
+    def test_backoff_increases_current_interval_not_min(self):
+        limiter = DomainRateLimiter()
+        limiter.configure_domain(
+            name="example.com", max_concurrency=2, min_interval=1.0, current_interval=1.0
+        )
+        limiter.report_rate_limited_for_domain("example.com")
+        state = limiter._domains["example.com"]
+        assert state.min_interval == 1.0
+        assert state.current_interval > 1.0
+
+    def test_get_domain_states_includes_both_intervals(self):
+        limiter = DomainRateLimiter()
+        limiter.configure_domain(
+            name="example.com", max_concurrency=2, min_interval=1.0, current_interval=4.0
+        )
+        states = limiter.get_domain_states()
+        assert len(states) == 1
+        assert states[0]["min_interval"] == 1.0
+        assert states[0]["current_interval"] == 4.0
+        assert states[0]["in_backoff"] is True
+
+    def test_get_domain_states_not_in_backoff_when_equal(self):
+        limiter = DomainRateLimiter()
+        limiter.configure_domain(
+            name="example.com", max_concurrency=2, min_interval=1.0, current_interval=1.0
+        )
+        states = limiter.get_domain_states()
+        assert states[0]["in_backoff"] is False
 
 
 class TestGetRateLimiter:

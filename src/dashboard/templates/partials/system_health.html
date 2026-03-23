@@ -28,7 +28,7 @@
       <div class="flex justify-between">
         <dt class="text-sm text-gray-600 truncate max-w-[200px]" title="{{ domain.name }}">{{ domain.name }}</dt>
         <dd class="text-sm font-medium {% if domain.in_backoff %}text-orange-600{% else %}text-gray-600{% endif %}">
-          {{ "%.1f"|format(domain.interval) }}s{% if domain.in_backoff %} ⚠{% endif %}
+          {{ "%.1f"|format(domain.current_interval) }}s{% if domain.in_backoff %} ⚠{% endif %}
         </dd>
       </div>
       {% endfor %}

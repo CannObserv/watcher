@@ -26,6 +26,7 @@ class DomainState:
     )
     last_request_at: float = 0.0
     min_interval: float = DEFAULT_MIN_INTERVAL
+    current_interval: float = DEFAULT_MIN_INTERVAL
     lock: asyncio.Lock = field(default_factory=asyncio.Lock)
 
 
@@ -43,6 +44,7 @@ class DomainRateLimiter:
             lambda: DomainState(
                 semaphore=asyncio.Semaphore(self._max_concurrent),
                 min_interval=self._default_min_interval,
+                current_interval=self._default_min_interval,
             )
         )
 
@@ -60,8 +62,8 @@ class DomainRateLimiter:
             async with state.lock:
                 now = time.monotonic()
                 elapsed = now - state.last_request_at
-                if elapsed < state.min_interval:
-                    await asyncio.sleep(state.min_interval - elapsed)
+                if elapsed < state.current_interval:
+                    await asyncio.sleep(state.current_interval - elapsed)
                 state.last_request_at = time.monotonic()
             yield
         finally:
@@ -70,14 +72,16 @@ class DomainRateLimiter:
     def get_domain_states(self) -> list[dict]:
         """Return current state of all tracked domains for monitoring.
 
-        Returns list of dicts with 'name', 'interval', and 'in_backoff' keys.
+        Returns list of dicts with 'name', 'min_interval', 'current_interval',
+        and 'in_backoff' keys.
         """
         return sorted(
             [
                 {
                     "name": domain,
-                    "interval": state.min_interval,
-                    "in_backoff": state.min_interval > self._default_min_interval,
+                    "min_interval": state.min_interval,
+                    "current_interval": state.current_interval,
+                    "in_backoff": state.current_interval > state.min_interval,
                 }
                 for domain, state in self._domains.items()
             ],
@@ -85,33 +89,39 @@ class DomainRateLimiter:
         )
 
     def report_rate_limited(self, url: str) -> None:
-        """Report a 429 response — increase the domain's min_interval via backoff."""
+        """Report a 429 response — increase the domain's current_interval via backoff."""
         domain = self.extract_domain(url)
         state = self._domains[domain]
-        new_interval = max(state.min_interval * BACKOFF_MULTIPLIER, 2.0)
-        state.min_interval = min(new_interval, BACKOFF_MAX_INTERVAL)
+        new_interval = max(state.current_interval * BACKOFF_MULTIPLIER, 2.0)
+        state.current_interval = min(new_interval, BACKOFF_MAX_INTERVAL)
         logger.warning(
             "rate limited, increasing interval",
-            extra={"domain": domain, "new_interval": state.min_interval},
+            extra={"domain": domain, "new_interval": state.current_interval},
         )
 
     def configure_domain(
         self,
         name: str,
         max_concurrency: int,
+        min_interval: float,
         current_interval: float,
     ) -> None:
         """Hydrate in-memory state from a persisted Domain record.
 
-        Loads current_interval as the effective rate (state.min_interval) so
-        backoff state survives restarts. The operator-configured min_interval
-        floor is DB-only; in-memory DomainState only tracks the current
-        effective rate.
+        Loads both min_interval (the operator-configured floor) and
+        current_interval (the effective rate, which may be elevated by backoff).
+        Backoff state survives restarts via current_interval.
         """
         self._domains[name] = DomainState(
             semaphore=asyncio.Semaphore(max_concurrency),
-            min_interval=current_interval,
+            min_interval=min_interval,
+            current_interval=current_interval,
         )
+
+    def reset_domain_interval(self, domain: str, min_interval: float) -> None:
+        """Reset a domain's current_interval to min_interval (clear backoff)."""
+        if domain in self._domains:
+            self._domains[domain].current_interval = min_interval
 
     @asynccontextmanager
     async def acquire_for_domain(self, domain: str):
@@ -126,8 +136,8 @@ class DomainRateLimiter:
             async with state.lock:
                 now = time.monotonic()
                 elapsed = now - state.last_request_at
-                if elapsed < state.min_interval:
-                    await asyncio.sleep(state.min_interval - elapsed)
+                if elapsed < state.current_interval:
+                    await asyncio.sleep(state.current_interval - elapsed)
                 state.last_request_at = time.monotonic()
             yield
         finally:
@@ -139,13 +149,13 @@ class DomainRateLimiter:
         Use instead of report_rate_limited(url) when effective_domain is known.
         """
         state = self._domains[domain]
-        new_interval = max(state.min_interval * BACKOFF_MULTIPLIER, 2.0)
-        state.min_interval = min(new_interval, BACKOFF_MAX_INTERVAL)
+        new_interval = max(state.current_interval * BACKOFF_MULTIPLIER, 2.0)
+        state.current_interval = min(new_interval, BACKOFF_MAX_INTERVAL)
         logger.warning(
             "rate limited, increasing interval",
-            extra={"domain": domain, "new_interval": state.min_interval},
+            extra={"domain": domain, "new_interval": state.current_interval},
         )
-        return state.min_interval
+        return state.current_interval
 
 
 _rate_limiter: DomainRateLimiter | None = None

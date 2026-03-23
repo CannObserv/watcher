@@ -9,6 +9,7 @@ from sqlalchemy import select
 from src.api.routes.audit_log import router as audit_router
 from src.api.routes.changes import router as changes_router
 from src.api.routes.domains import router as domains_router
+from src.api.routes.health import router as health_router
 from src.api.routes.notification_configs import router as notification_configs_router
 from src.api.routes.probe import router as probe_router
 from src.api.routes.temporal_profiles import router as profiles_router
@@ -67,4 +68,5 @@ v1_router.include_router(audit_router)
 v1_router.include_router(domains_router)
 v1_router.include_router(probe_router)
 app.include_router(v1_router)
+app.include_router(health_router)
 register_dashboard(app)

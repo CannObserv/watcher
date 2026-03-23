@@ -356,7 +356,13 @@ async def check_watch(watch_id: str) -> dict:
             session=session,
         )
 
-        # Dispatch notifications if change detected
+        # Commit pipeline results (snapshot/change records) before dispatching
+        # notifications. This ensures snapshot/change data is persisted even if
+        # notification dispatch fails.
+        watch.last_checked_at = datetime.now(UTC)
+        await session.commit()
+
+        # Dispatch notifications in a separate transaction scope
         if result.get("change_id"):
             nc_stmt = select(NotificationConfig).where(
                 NotificationConfig.watch_id == watch.id,
@@ -391,10 +397,6 @@ async def check_watch(watch_id: str) -> dict:
                     )
                 )
                 await session.commit()
-
-        # Update last_checked_at
-        watch.last_checked_at = datetime.now(UTC)
-        await session.commit()
 
     # schedule_tick is the sole scheduler — no self-deferral here.
     # This avoids double-deferral races and keeps scheduling logic

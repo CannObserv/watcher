@@ -257,6 +257,94 @@ class TestCheckWatchTask:
         assert entries[0].payload["status_code"] == 500
 
 
+class TestCheckWatchSavepointBoundary:
+    """Integration tests for savepoint boundary: pipeline commits before notifications."""
+
+    async def test_pipeline_committed_before_notifications(self, db_session, tmp_path, monkeypatch):
+        """Snapshot/change records must be committed before notification dispatch.
+
+        Verifies that check_watch calls session.commit() after _run_check_pipeline()
+        and before dispatch_notifications(), ensuring pipeline results survive a
+        notification failure.
+        """
+        import src.workers.tasks as tasks_mod
+        from src.core.models.notification_config import NotificationConfig
+
+        watch = Watch(
+            name="Savepoint Test",
+            url="https://example.com/savepoint",
+            content_type=ContentType.HTML,
+        )
+        db_session.add(watch)
+        await db_session.flush()
+
+        # Add an active notification config so dispatch is triggered
+        nc = NotificationConfig(
+            watch_id=watch.id,
+            channel="webhook",
+            config={"url": "https://hooks.example.com/test"},
+            is_active=True,
+        )
+        db_session.add(nc)
+        await db_session.commit()
+
+        # First check to establish a baseline snapshot (no change_id on first check)
+        from src.core.storage import LocalStorage
+
+        storage = LocalStorage(base_dir=tmp_path)
+        await _run_check_pipeline(
+            watch=watch,
+            raw_content=b"<html><body><p>Original</p></body></html>",
+            fetcher_used="http",
+            fetch_duration_ms=50,
+            storage=storage,
+            session=db_session,
+        )
+        await db_session.commit()
+
+        # Second check with changed content triggers change detection → dispatch
+        mock_response = httpx.Response(
+            200,
+            content=b"<html><body><p>Changed content</p></body></html>",
+            request=httpx.Request("GET", "https://example.com/savepoint"),
+        )
+        mock_client = httpx.AsyncClient(transport=httpx.MockTransport(lambda req: mock_response))
+
+        fast_limiter = DomainRateLimiter(min_interval=0.0)
+        monkeypatch.setattr(tasks_mod, "_fetcher", HttpFetcher(client=mock_client))
+        monkeypatch.setattr(tasks_mod, "get_rate_limiter", lambda: fast_limiter)
+        monkeypatch.setattr(tasks_mod, "STORAGE_BASE_DIR", tmp_path)
+        monkeypatch.setattr(
+            tasks_mod, "get_session_factory", lambda: _mock_session_factory(db_session)
+        )
+
+        commit_calls: list[str] = []
+        original_commit = db_session.commit
+
+        async def tracking_commit():
+            commit_calls.append("commit")
+            await original_commit()
+
+        monkeypatch.setattr(db_session, "commit", tracking_commit)
+
+        # dispatch_notifications records the commit count at call time
+        dispatch_call_index: list[int] = []
+
+        async def mock_dispatch(event, configs, channels):
+            dispatch_call_index.append(len(commit_calls))
+            return []
+
+        monkeypatch.setattr(tasks_mod, "dispatch_notifications", mock_dispatch)
+
+        await check_watch(str(watch.id))
+
+        # dispatch must have been called after at least one commit (the pipeline commit)
+        assert len(dispatch_call_index) == 1, "dispatch_notifications should be called once"
+        assert dispatch_call_index[0] >= 1, (
+            "dispatch_notifications must be called after at least one session.commit()"
+        )
+
+
 class TestScheduleTickWithProfiles:
     """Integration tests for schedule_tick temporal profile awareness."""
 

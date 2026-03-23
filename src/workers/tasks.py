@@ -1,36 +1,24 @@
-"""Check-watch pipeline and procrastinate task wrappers."""
+"""Procrastinate task wrappers: check_watch and schedule_tick."""
 
-import hashlib
 from datetime import UTC, datetime
 from urllib.parse import urlparse
 
-import httpx
 import procrastinate
 from sqlalchemy import or_, select
-from sqlalchemy.ext.asyncio import AsyncSession
 from ulid import ULID
 
 from src.core.database import get_session_factory
-from src.core.differ import ChangeStatus, ChunkFingerprint, diff_chunks
-from src.core.extractors import CsvExcelExtractor, HtmlExtractor, PdfExtractor
-from src.core.extractors.base import ExtractionResult
 from src.core.fetchers.http import HttpFetcher
 from src.core.logging import get_logger
 from src.core.models.audit_log import EventType, audit
-from src.core.models.base import generate_ulid
-from src.core.models.change import Change
-from src.core.models.domain import Domain
-from src.core.models.notification_config import NotificationConfig
-from src.core.models.snapshot import Snapshot, SnapshotChunk
 from src.core.models.temporal_profile import TemporalProfile
 from src.core.models.watch import Watch
-from src.core.notifications import ChangeEvent, EmailChannel, SlackChannel, WebhookChannel
-from src.core.notifications.dispatcher import dispatch_notifications
 from src.core.rate_limiter import get_rate_limiter
 from src.core.scheduler import compute_next_check, evaluate_post_actions
-from src.core.simhash import simhash
-from src.core.storage import STORAGE_BASE_DIR, LocalStorage, StorageBackend
+from src.core.storage import STORAGE_BASE_DIR, LocalStorage
 from src.workers import bp
+from src.workers.notify import dispatch_change_notifications
+from src.workers.pipeline import _persist_backoff, _run_check_pipeline
 
 logger = get_logger(__name__)
 
@@ -45,244 +33,6 @@ def get_fetcher() -> HttpFetcher:
     if _fetcher is None:
         _fetcher = HttpFetcher()
     return _fetcher
-
-
-_INT64_MAX = (1 << 63) - 1
-
-
-def _to_signed64(val: int) -> int:
-    """Convert unsigned 64-bit simhash to signed int64 for PostgreSQL BIGINT."""
-    if val > _INT64_MAX:
-        return val - (1 << 64)
-    return val
-
-
-_EXT_MAP = {
-    "html": "html",
-    "pdf": "pdf",
-    "file": "csv",
-}
-
-_EXTRACTOR_MAP = {
-    "html": HtmlExtractor,
-    "pdf": PdfExtractor,
-    "file": CsvExcelExtractor,
-}
-
-
-async def _persist_backoff(domain_name: str, new_interval: float, session: AsyncSession) -> None:
-    """Persist backoff state to the Domain table after a 429 response.
-
-    Caller is responsible for committing the session after this call.
-    """
-    stmt = select(Domain).where(Domain.name == domain_name)
-    result = await session.execute(stmt)
-    domain = result.scalar_one_or_none()
-    if domain is None:
-        return
-    domain.current_interval = new_interval
-    domain.last_request_at = datetime.now(UTC)
-
-
-async def _get_previous_snapshot(
-    session: AsyncSession,
-    watch_id: object,
-) -> Snapshot | None:
-    """Fetch most recent snapshot for a watch, or None."""
-    stmt = (
-        select(Snapshot)
-        .where(Snapshot.watch_id == watch_id)
-        .order_by(Snapshot.fetched_at.desc())
-        .limit(1)
-    )
-    result = await session.execute(stmt)
-    return result.scalar_one_or_none()
-
-
-async def _get_snapshot_chunks(
-    session: AsyncSession,
-    snapshot_id: object,
-) -> list[SnapshotChunk]:
-    """Fetch all chunks for a snapshot ordered by index."""
-    stmt = (
-        select(SnapshotChunk)
-        .where(SnapshotChunk.snapshot_id == snapshot_id)
-        .order_by(SnapshotChunk.chunk_index)
-    )
-    result = await session.execute(stmt)
-    return list(result.scalars().all())
-
-
-async def _extract_content(watch: Watch, raw_content: bytes) -> ExtractionResult:
-    """Run the appropriate extractor based on watch content_type.
-
-    For FILE watches, passes fetch_config extraction settings (e.g., content_type,
-    chunk_row_size, sort_columns) through to CsvExcelExtractor.
-    """
-    ct = str(watch.content_type).lower()
-    extractor_cls = _EXTRACTOR_MAP[ct]
-    extractor = extractor_cls()
-    config: dict | None = None
-    if ct == "file":
-        fetch_cfg = watch.fetch_config or {}
-        config = {
-            "content_type": fetch_cfg.get("file_format", "csv"),
-            **{
-                k: v
-                for k, v in fetch_cfg.items()
-                if k in ("chunk_row_size", "sort_columns", "sheet_name")
-            },
-        }
-    return await extractor.extract(raw_content, config=config)
-
-
-async def _run_check_pipeline(
-    watch: Watch,
-    raw_content: bytes,
-    fetcher_used: str,
-    fetch_duration_ms: int,
-    storage: StorageBackend,
-    session: AsyncSession,
-) -> dict:
-    """Core check pipeline: hash, extract, diff, store.
-
-    Returns dict with snapshot_id, is_changed, change_id, chunk_count, storage_path.
-    """
-    # 1. Compute content hash and doc-level simhash
-    content_hash = hashlib.sha256(raw_content).hexdigest()
-    doc_simhash = _to_signed64(simhash(raw_content.decode(errors="replace")))
-
-    # 2. Check previous snapshot
-    prev_snapshot = await _get_previous_snapshot(session, watch.id)
-
-    # 3. Fast path: identical content
-    if prev_snapshot and prev_snapshot.content_hash == content_hash:
-        logger.info("no change detected", extra={"watch_id": str(watch.id)})
-        audit(session, EventType.CHECK_NO_CHANGE, watch_id=watch.id, content_hash=content_hash)
-        await session.flush()
-        return {
-            "snapshot_id": None,
-            "is_changed": False,
-            "change_id": None,
-            "chunk_count": 0,
-            "storage_path": None,
-            "change_metadata": {},
-        }
-
-    # 4. Extract content
-    extraction = await _extract_content(watch, raw_content)
-
-    # 5. Store raw + extracted text
-    snapshot_id = generate_ulid()
-    ext = _EXT_MAP[str(watch.content_type).lower()]
-    raw_path = storage.snapshot_path(str(watch.id), str(snapshot_id), ext)
-    text_path = storage.snapshot_path(str(watch.id), str(snapshot_id), "txt")
-    storage.save(raw_path, raw_content)
-    full_text = "\n".join(c.text for c in extraction.chunks)
-    storage.save(text_path, full_text.encode())
-
-    # 6. Create Snapshot record
-    snapshot = Snapshot(
-        id=snapshot_id,
-        watch_id=watch.id,
-        content_hash=content_hash,
-        simhash=doc_simhash,
-        storage_path=raw_path,
-        text_path=text_path,
-        storage_backend="local",
-        chunk_count=len(extraction.chunks),
-        text_bytes=len(full_text.encode()),
-        fetch_duration_ms=fetch_duration_ms,
-        fetcher_used=fetcher_used,
-    )
-    session.add(snapshot)
-    await session.flush()
-
-    # 7. Create SnapshotChunk records
-    for chunk in extraction.chunks:
-        session.add(
-            SnapshotChunk(
-                snapshot_id=snapshot_id,
-                chunk_index=chunk.index,
-                chunk_type=chunk.chunk_type,
-                chunk_label=chunk.label,
-                content_hash=chunk.content_hash,
-                simhash=_to_signed64(chunk.simhash),
-                char_count=chunk.char_count,
-                excerpt=chunk.excerpt,
-            )
-        )
-    await session.flush()
-
-    # 8-9. Diff against previous if exists
-    change_id = None
-    metadata: dict = {}
-    if prev_snapshot:
-        prev_chunks_db = await _get_snapshot_chunks(session, prev_snapshot.id)
-        prev_fingerprints = [
-            ChunkFingerprint(
-                index=c.chunk_index,
-                label=c.chunk_label,
-                content_hash=c.content_hash,
-                simhash=c.simhash,
-            )
-            for c in prev_chunks_db
-        ]
-        curr_fingerprints = [
-            ChunkFingerprint(
-                index=c.index,
-                label=c.label,
-                content_hash=c.content_hash,
-                simhash=c.simhash,
-            )
-            for c in extraction.chunks
-        ]
-        changes = diff_chunks(prev_fingerprints, curr_fingerprints)
-        has_real_changes = any(
-            ch.status in (ChangeStatus.ADDED, ChangeStatus.REMOVED, ChangeStatus.MODIFIED)
-            for ch in changes
-        )
-        if has_real_changes:
-            metadata = {
-                "added": [c.chunk_label for c in changes if c.status == ChangeStatus.ADDED],
-                "removed": [c.chunk_label for c in changes if c.status == ChangeStatus.REMOVED],
-                "modified": [
-                    {"label": c.chunk_label, "similarity": c.similarity}
-                    for c in changes
-                    if c.status == ChangeStatus.MODIFIED
-                ],
-            }
-            change = Change(
-                watch_id=watch.id,
-                previous_snapshot_id=prev_snapshot.id,
-                current_snapshot_id=snapshot_id,
-                change_metadata=metadata,
-            )
-            session.add(change)
-            await session.flush()
-            change_id = change.id
-
-    # 10. Audit log
-    audit(
-        session,
-        EventType.CHECK_SNAPSHOT_CREATED,
-        watch_id=watch.id,
-        snapshot_id=str(snapshot_id),
-        content_hash=content_hash,
-        chunk_count=len(extraction.chunks),
-        is_changed=change_id is not None or prev_snapshot is None,
-    )
-    await session.flush()
-
-    # 11. Return result
-    return {
-        "snapshot_id": str(snapshot_id),
-        "is_changed": change_id is not None or prev_snapshot is None,
-        "change_id": str(change_id) if change_id else None,
-        "chunk_count": len(extraction.chunks),
-        "storage_path": raw_path,
-        "change_metadata": metadata if change_id else {},
-    }
 
 
 # --- Procrastinate task wrappers ---
@@ -354,36 +104,13 @@ async def check_watch(watch_id: str) -> dict:
 
         # Dispatch notifications in a separate transaction scope
         if result.get("change_id"):
-            nc_stmt = select(NotificationConfig).where(
-                NotificationConfig.watch_id == watch.id,
-                NotificationConfig.is_active.is_(True),
+            await dispatch_change_notifications(
+                session=session,
+                watch=watch,
+                change_id=result["change_id"],
+                change_metadata=result.get("change_metadata", {}),
             )
-            nc_result = await session.execute(nc_stmt)
-            nc_configs = [{"channel": nc.channel, **nc.config} for nc in nc_result.scalars().all()]
-            if nc_configs:
-                event = ChangeEvent(
-                    watch_id=str(watch.id),
-                    watch_name=watch.name,
-                    watch_url=watch.url,
-                    change_id=result["change_id"],
-                    detected_at=datetime.now(UTC),
-                    change_metadata=result.get("change_metadata", {}),
-                )
-                async with httpx.AsyncClient() as http_client:
-                    _channels = {
-                        "webhook": WebhookChannel(client=http_client),
-                        "email": EmailChannel(),
-                        "slack": SlackChannel(client=http_client),
-                    }
-                    notif_results = await dispatch_notifications(event, nc_configs, _channels)
-                audit(
-                    session,
-                    EventType.NOTIFICATION_DISPATCHED,
-                    watch_id=watch.id,
-                    change_id=result["change_id"],
-                    results=notif_results,
-                )
-                await session.commit()
+            await session.commit()
 
     # schedule_tick is the sole scheduler — no self-deferral here.
     # This avoids double-deferral races and keeps scheduling logic

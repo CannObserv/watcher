@@ -8,6 +8,7 @@ from src.api.dependencies import get_db_session
 from src.api.routes.watches import delete_watch as api_delete_watch
 from src.core.models.audit_log import EventType, audit
 from src.core.models.watch import ContentType, Watch
+from src.core.rate_limiter import get_rate_limiter
 from src.core.storage import STORAGE_BASE_DIR, LocalStorage
 from src.dashboard import templates
 from src.dashboard.context import (
@@ -24,7 +25,6 @@ from src.dashboard.context import (
     get_watch_notifications,
     get_watch_profiles,
 )
-from src.workers.tasks import get_rate_limiter
 
 router = APIRouter(tags=["dashboard"])
 

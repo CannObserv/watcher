@@ -173,6 +173,32 @@ Update this skill file if patterns emerged that should be generalized.
 
 ---
 
+## Agent Roles
+
+### Orchestrator agent
+
+The orchestrator reads the batch plan and manages progression. It:
+- Launches all worker agents whose batch gate is currently satisfied (not just the first batch — if multiple batches are unblocked, launch all of them)
+- Monitors for worker completion signals
+- Notifies the user when a batch is ready for PR review and merge
+- Waits for merge confirmation before launching the next batch
+- Never writes implementation code itself
+
+### Worker agents
+
+Each worker agent follows this protocol before signaling completion:
+
+1. **Set up worktree** — isolated branch in `.worktrees/<feature-branch>`
+2. **Implement with TDD** — red → green → refactor
+3. **Run full test suite** — all tests must pass
+4. **Run linter** — no violations
+5. **Self-review diff** — check: correctness, test coverage, project conventions, no unintended side effects outside issue scope
+6. **Address findings** — fix before opening PR; do not signal completion with known issues
+7. **Open PR** — conventional title, body summarizes work and links issues
+8. **Signal completion** — post comment on the tracking issue with PR number and self-review confirmation
+
+**Orchestrator gate**: after all agents in a batch signal completion, orchestrator notifies user → waits for merge confirmation → launches next batch.
+
 ## Key Principles
 
 - **One question at a time** — stacking questions gets partial answers
@@ -182,6 +208,8 @@ Update this skill file if patterns emerged that should be generalized.
 - **Bundle when cohesive** — two issues that naturally sequence (define → use, protocol → config) belong in one agent with sequential commits, not two agents with a gate
 - **Worktrees always** — each agent branch gets an isolated worktree; no shared working directory state between concurrent agents
 - **Deferred is a decision** — explicitly name what is out of scope and why; don't silently omit
+- **Self-review before PR** — worker agents must review their own diff and resolve all findings before opening a PR; no known issues at signal time
+- **Orchestrator launches all unblocked batches** — not just the next one in sequence; if two independent batches become unblocked simultaneously, launch both
 
 ---
 
@@ -195,6 +223,11 @@ Update this skill file if patterns emerged that should be generalized.
 - Parallelism: maximize where file coverage is disjoint; git worktrees for isolation
 - Deployment context: pre-production (runway to build right)
 - Output: design doc + GitHub tracking issue + this skill
+
+**Clarifications added after initial design:**
+- Orchestrator agent launches all unblocked batches simultaneously, not just the next one in the numbered sequence. Initial design implied sequential batch launching; user clarified that all safe parallel work should start at once.
+- Worker agents must self-review their diff and address all findings before opening a PR. This eliminates the need for a separate review pass and keeps the human-in-the-loop role focused on merge decisions, not finding obvious issues.
+- These two requirements together define the agent protocol: orchestrator manages progression and parallelism; workers own quality before handoff.
 
 **Non-obvious decisions:**
 - #25 (savepoint correctness fix) leads Batch B's refactor sequence rather than going in Batch A. Rationale: it fixes a race condition in `tasks.py` — the same file that Batch B's mechanical refactors will touch. Fixing it first ensures the refactors inherit correct transaction semantics.

@@ -16,6 +16,7 @@ from src.core.models.notification_config import NotificationConfig
 from src.core.models.temporal_profile import PostAction, ProfileType, TemporalProfile
 from src.core.models.watch import ContentType, Watch
 from src.core.rate_limiter import DomainRateLimiter
+from src.core.registry import ServiceRegistry
 from src.core.storage import LocalStorage
 from src.workers.tasks import _persist_backoff, _run_check_pipeline, check_watch, schedule_tick
 
@@ -190,7 +191,8 @@ class TestCheckWatchTask:
         mock_client = httpx.AsyncClient(transport=httpx.MockTransport(lambda req: mock_response))
 
         fast_limiter = DomainRateLimiter(min_interval=0.0)
-        monkeypatch.setattr(tasks_mod, "_fetcher", HttpFetcher(client=mock_client))
+        mock_registry = ServiceRegistry(fetcher=HttpFetcher(client=mock_client))
+        monkeypatch.setattr(tasks_mod, "get_registry", lambda: mock_registry)
         monkeypatch.setattr(tasks_mod, "get_rate_limiter", lambda: fast_limiter)
         monkeypatch.setattr(tasks_mod, "STORAGE_BASE_DIR", tmp_path)
         monkeypatch.setattr(
@@ -241,7 +243,8 @@ class TestCheckWatchTask:
         mock_client = httpx.AsyncClient(transport=httpx.MockTransport(lambda req: mock_response))
 
         fast_limiter = DomainRateLimiter(min_interval=0.0)
-        monkeypatch.setattr(tasks_mod, "_fetcher", HttpFetcher(client=mock_client))
+        mock_registry = ServiceRegistry(fetcher=HttpFetcher(client=mock_client))
+        monkeypatch.setattr(tasks_mod, "get_registry", lambda: mock_registry)
         monkeypatch.setattr(tasks_mod, "get_rate_limiter", lambda: fast_limiter)
         monkeypatch.setattr(tasks_mod, "STORAGE_BASE_DIR", tmp_path)
         monkeypatch.setattr(

@@ -8,12 +8,12 @@ from sqlalchemy import or_, select
 from ulid import ULID
 
 from src.core.database import get_session_factory
-from src.core.fetchers.http import HttpFetcher
 from src.core.logging import get_logger
 from src.core.models.audit_log import EventType, audit
 from src.core.models.temporal_profile import TemporalProfile
 from src.core.models.watch import Watch
 from src.core.rate_limiter import get_rate_limiter
+from src.core.registry import ServiceRegistry
 from src.core.scheduler import compute_next_check, evaluate_post_actions
 from src.core.storage import STORAGE_BASE_DIR, LocalStorage
 from src.workers import bp
@@ -24,15 +24,15 @@ logger = get_logger(__name__)
 
 # Shared resources — lazy-initialized on first use to avoid binding to an
 # event loop at import time (important for DomainRateLimiter's asyncio primitives).
-_fetcher: HttpFetcher | None = None
+_registry: ServiceRegistry | None = None
 
 
-def get_fetcher() -> HttpFetcher:
-    """Return the shared fetcher, creating it on first call."""
-    global _fetcher
-    if _fetcher is None:
-        _fetcher = HttpFetcher()
-    return _fetcher
+def get_registry() -> ServiceRegistry:
+    """Return the shared ServiceRegistry, creating it on first call."""
+    global _registry
+    if _registry is None:
+        _registry = ServiceRegistry()
+    return _registry
 
 
 # --- Procrastinate task wrappers ---
@@ -47,8 +47,9 @@ def get_fetcher() -> HttpFetcher:
         retry_exceptions={ConnectionError, TimeoutError},
     ),
 )
-async def check_watch(watch_id: str) -> dict:
+async def check_watch(watch_id: str, registry: ServiceRegistry | None = None) -> dict:
     """Fetch and check a single watch for changes."""
+    reg = registry if registry is not None else get_registry()
     async with get_session_factory()() as session:
         watch = await session.get(Watch, ULID.from_str(watch_id))
         if not watch or not watch.is_active:
@@ -63,7 +64,7 @@ async def check_watch(watch_id: str) -> dict:
         rate_limit_domain = watch.effective_domain or urlparse(watch.url).hostname or watch.url
 
         async with get_rate_limiter().acquire_for_domain(rate_limit_domain):
-            fetch_result = await get_fetcher().fetch(watch.url, config=fetch_config)
+            fetch_result = await reg.get_fetcher().fetch(watch.url, config=fetch_config)
 
         if fetch_result.status_code == 429:
             new_interval = get_rate_limiter().report_rate_limited_for_domain(rate_limit_domain)

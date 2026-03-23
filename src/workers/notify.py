@@ -10,8 +10,9 @@ from src.core.logging import get_logger
 from src.core.models.audit_log import AuditLog
 from src.core.models.notification_config import NotificationConfig
 from src.core.models.watch import Watch
-from src.core.notifications import ChangeEvent, EmailChannel, SlackChannel, WebhookChannel
+from src.core.notifications import ChangeEvent
 from src.core.notifications.dispatcher import dispatch_notifications
+from src.core.registry import ServiceRegistry
 
 logger = get_logger(__name__)
 
@@ -21,12 +22,15 @@ async def dispatch_change_notifications(
     watch: Watch,
     change_id: str,
     change_metadata: dict,
+    registry: ServiceRegistry | None = None,
 ) -> None:
     """Dispatch notifications for a detected change and write an audit log entry.
 
     Fetches active NotificationConfig records for the watch, builds a ChangeEvent,
     and calls dispatch_notifications with the configured channels. Does not commit
     the session; caller is responsible for committing.
+
+    If registry is None, a default ServiceRegistry is used.
     """
     nc_stmt = select(NotificationConfig).where(
         NotificationConfig.watch_id == watch.id,
@@ -37,6 +41,7 @@ async def dispatch_change_notifications(
     if not nc_configs:
         return
 
+    reg = registry if registry is not None else ServiceRegistry()
     event = ChangeEvent(
         watch_id=str(watch.id),
         watch_name=watch.name,
@@ -46,11 +51,7 @@ async def dispatch_change_notifications(
         change_metadata=change_metadata,
     )
     async with httpx.AsyncClient() as http_client:
-        channels = {
-            "webhook": WebhookChannel(client=http_client),
-            "email": EmailChannel(),
-            "slack": SlackChannel(client=http_client),
-        }
+        channels = reg.get_channels(http_client)
         notif_results = await dispatch_notifications(event, nc_configs, channels)
 
     session.add(

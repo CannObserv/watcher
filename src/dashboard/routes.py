@@ -137,7 +137,7 @@ async def watch_detail_page(
     """Watch detail page with profiles, notifications, and change history."""
     watch = await get_watch_detail(session, watch_id)
     if not watch:
-        return HTMLResponse(status_code=404, content="Watch not found")
+        return templates.TemplateResponse("pages/404.html", {"request": request}, status_code=404)
     changes = await get_watch_changes(session, watch_id)
     profiles = await get_watch_profiles(session, watch.id)
     notifications = await get_watch_notifications(session, watch.id)
@@ -162,7 +162,7 @@ async def watch_edit_form(
     """Watch edit form, prefilled with current values."""
     watch = await get_watch_detail(session, watch_id)
     if not watch:
-        return HTMLResponse(status_code=404, content="Watch not found")
+        return templates.TemplateResponse("pages/404.html", {"request": request}, status_code=404)
     return templates.TemplateResponse(
         "pages/watch_form.html",
         {
@@ -188,7 +188,7 @@ async def watch_edit_submit(
     """Handle watch edit form submission."""
     watch = await get_watch_detail(session, watch_id)
     if not watch:
-        return HTMLResponse(status_code=404, content="Watch not found")
+        return templates.TemplateResponse("pages/404.html", {"request": request}, status_code=404)
 
     errors = []
     if not name.strip():
@@ -242,7 +242,7 @@ async def watch_deactivate(
     """Deactivate a watch via HTMX — returns updated row or status snippet."""
     watch = await get_watch_detail(session, watch_id)
     if not watch:
-        return HTMLResponse(status_code=404, content="Watch not found")
+        return templates.TemplateResponse("pages/404.html", {"request": request}, status_code=404)
     watch.is_active = False
     session.add(
         AuditLog(
@@ -351,7 +351,7 @@ async def change_detail_page(
     """Change detail page with metadata, chunks, and diff."""
     detail = await get_change_detail(session, change_id)
     if not detail:
-        return HTMLResponse(status_code=404, content="Change not found")
+        return templates.TemplateResponse("pages/404.html", {"request": request}, status_code=404)
 
     storage = LocalStorage(base_dir=STORAGE_BASE_DIR)
     prev_text = _load_snapshot_text(storage, detail["previous_snapshot"], "text_path")
@@ -377,7 +377,7 @@ async def partial_diff(
     """HTMX partial: diff view (extracted text or raw content)."""
     detail = await get_change_detail(session, change_id)
     if not detail:
-        return HTMLResponse(status_code=404, content="Change not found")
+        return templates.TemplateResponse("pages/404.html", {"request": request}, status_code=404)
 
     storage = LocalStorage(base_dir=STORAGE_BASE_DIR)
     path_attr = "storage_path" if mode == "raw" else "text_path"

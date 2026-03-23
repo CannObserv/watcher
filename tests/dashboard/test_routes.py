@@ -230,3 +230,25 @@ class TestWatchDeactivate:
         response = await client.post(f"/watches/{watch_id}/deactivate")
         assert response.status_code == 200
         assert b"Inactive" in response.content
+
+
+class Test404Template:
+    async def test_watch_detail_404_uses_template(self, client):
+        response = await client.get("/watches/not-a-ulid")
+        assert response.status_code == 404
+        assert b"Not Found" in response.content
+
+    async def test_watch_edit_404_uses_template(self, client):
+        response = await client.get("/watches/not-a-ulid/edit")
+        assert response.status_code == 404
+        assert b"Not Found" in response.content
+
+    async def test_change_detail_404_uses_template(self, client):
+        response = await client.get("/changes/01JNZZZZZZZZZZZZZZZZZZZZZZ")
+        assert response.status_code == 404
+        assert b"Not Found" in response.content
+
+    async def test_404_template_has_nav_link(self, client):
+        response = await client.get("/watches/not-a-ulid")
+        assert response.status_code == 404
+        assert b"/watches" in response.content

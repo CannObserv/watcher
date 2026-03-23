@@ -17,6 +17,17 @@ Each **multi-agent batch** gets a shared feature branch (e.g. `batch/a`, `batch/
 
 The human-in-the-loop review happens against the **batch branch** (not individual agent branches): run tests, inspect the combined diff, then merge to `main` with a regular merge commit (preserving per-agent commit history).
 
+### Branch Hygiene — Required Before Every Batch Launch
+
+> Learned from Batch B→C failure: `git push origin HEAD:main` from a feature branch advances `origin/main` but leaves local `main` stale. The next worktree agent silently branches from the wrong base.
+
+```bash
+git checkout main
+git pull --ff-only    # abort and investigate if this fails
+```
+
+Never push to `origin/main` from a feature branch. Always merge or fast-forward local `main` first, then push from there. See [Branch Hygiene Rules](../../skills/orchestrating-issue-backlog/SKILL.md#branch-hygiene-rules) in the skill for full detail.
+
 ### Agent Roles
 
 **Orchestrator agent** — reads this plan, creates batch branches for multi-agent batches, launches all worker agents whose batch gate is satisfied, sequences intra-batch merges into the batch branch, surfaces conflicts to the responsible worker, notifies the user when the batch branch is ready for review, and waits for merge confirmation before advancing. Never writes implementation code itself.

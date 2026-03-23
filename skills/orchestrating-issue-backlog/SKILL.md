@@ -188,13 +188,14 @@ Ask the user their preferred merge strategy (regular, squash, rebase) and record
 ### Orchestrator agent
 
 The orchestrator reads the batch plan and manages progression. It:
-1. Creates `batch/<X>` branch from `main` for each multi-agent batch at launch time
-2. Launches all worker agents whose batch gate is currently satisfied simultaneously
-3. On each worker completion signal, merges that worker's branch into the batch branch (respecting intra-batch ordering; returns conflicts to the worker)
-4. When all workers are merged, runs the full test suite against the batch branch
-5. Notifies the user: "Batch X ready for review: `batch/<X>`, N issues, tests passing"
-6. Waits for merge confirmation before launching the next batch
-7. On confirmation, launches all newly unblocked batches simultaneously
+1. **Sync local main before every batch launch** — `git fetch origin && git merge --ff-only origin/main`. Agents worktree from local main; if local main is stale, agents base their work on the wrong commit.
+2. Creates `batch/<X>` branch from `main` for each multi-agent batch at launch time
+3. Launches all worker agents whose batch gate is currently satisfied simultaneously
+4. On each worker completion signal, merges that worker's branch into the batch branch (respecting intra-batch ordering; returns conflicts to the worker)
+5. When all workers are merged, runs the full test suite against the batch branch
+6. Notifies the user: "Batch X ready for review: `batch/<X>`, N issues, tests passing"
+7. Waits for merge confirmation before launching the next batch
+8. On confirmation, syncs local main again, then launches all newly unblocked batches simultaneously
 
 Never writes implementation code itself.
 
@@ -229,6 +230,56 @@ Each worker agent follows this protocol before signaling completion:
 - **Orchestrator launches all unblocked batches** — not just the next one in sequence; if two independent batches become unblocked simultaneously, launch both
 - **Regular merge commit to main** — preserves per-agent commit history; ask user preference at design time
 
+## Branch Hygiene Rules
+
+These rules prevent the class of failures that produced the Batch B→C conflict:
+
+### Rule 1 — Sync local main before every agent launch
+
+`git push origin HEAD:main` from a feature branch advances `origin/main` but does **not** move local `main`. Worktree agents branch from local `main`. If local `main` is behind `origin/main`, agents silently base their work on the wrong commit.
+
+**Before launching any batch:**
+```bash
+git checkout main
+git pull --ff-only   # or: git fetch origin && git merge --ff-only origin/main
+```
+
+If `--ff-only` fails, the branches have diverged — stop and investigate before proceeding.
+
+### Rule 2 — Never use `git push origin HEAD:main` to advance main
+
+This is the root cause of Rule 1 violations. Always push from local `main`:
+```bash
+git checkout main
+git merge --ff-only feature/batch-x   # or rebase; whatever the agreed strategy is
+git push origin main
+```
+
+Or, if agents auto-merged to main (see Rule 3), just:
+```bash
+git push origin main   # from local main after verifying it is up to date
+```
+
+### Rule 3 — `isolation: "worktree"` auto-merges to local main, not origin/main
+
+The `isolation: "worktree"` Agent tool parameter creates a temporary worktree, runs the agent in it, then merges any changes back to **the current local branch** (not to origin). This means:
+- Per-agent feature branches do not persist after the agent completes
+- Work lands on local `main` as agents complete — which is fine
+- But local `main` diverges from `origin/main` until you push
+- The next agent launch must therefore start with a `git pull --ff-only` to get any intervening pushes
+
+To preserve isolated feature branches through agent completion, instruct the agent explicitly: `git checkout -b feature/batch-x` as its first step, commit there, and do **not** use `isolation: "worktree"`. The orchestrator then merges manually.
+
+### Rule 4 — Fix commit messages before continuing after a rebase conflict
+
+When `git rebase --continue` auto-generates a commit message from the conflict resolution, it replaces the original `#N type: description` format with a verbose blob. Fix it immediately with `git commit --amend` on that commit **before** continuing the rebase or adding more commits — amending the wrong commit requires a `reset --soft` recovery.
+
+```bash
+git rebase --continue          # resolves conflict, creates commit with bad message
+git commit --amend -m "..."    # fix message before doing anything else
+# only then: git rebase --continue for the next patch (if any)
+```
+
 ---
 
 ## Process Log — Session 2026-03-23
@@ -252,6 +303,16 @@ Each worker agent follows this protocol before signaling completion:
 - Orchestrator launches all unblocked batches simultaneously — not just the next numbered batch. Initial design implied sequential launching; user clarified all safe parallel work should start at once.
 - Worker agents self-review and fix all findings before signaling completion. Keeps human review focused on merge decisions, not catching obvious issues.
 - Multi-agent batches use a shared `batch/<X>` feature branch. The orchestrator merges worker branches into it sequentially; user tests and reviews the batch branch as a whole before merging to main. Surfaces intra-batch conflicts before they reach main.
+
+**Branch management failures observed (2026-03-23, Batches B–C):**
+
+1. **Local main staleness** — Batch B was pushed to `origin/main` via `git push origin HEAD:main` from a feature branch. This advanced `origin/main` to `aa24b27` but left local `main` at `15c15c9`. The Batch C agent launched from the stale local `main`, silently missing all Batch B commits. Consequence: `pipeline.py` and `notify.py` were carved from the pre-Batch-B `tasks.py`, introducing regressions in audit log patterns that Batch B had already migrated. Caught by CR, fixed in post-CR commit.
+   - **Rule added**: Sync local main (`git pull --ff-only`) before every batch launch. Never push to origin from a feature branch using `HEAD:main`.
+
+2. **`isolation: "worktree"` auto-merges to local branch** — Confirmed again: agents using this parameter commit to the orchestrator's current local branch, not to an isolated feature branch. Batch/x branches are manual fast-forward checkpoints, not isolation boundaries.
+
+3. **`git rebase --continue` clobbers commit messages** — After manual conflict resolution in `tasks.py`, `git rebase --continue` replaced the `#14 refactor:` message with the full diff summary. Attempting to fix it via `git commit --amend` on the wrong HEAD commit (which was actually #19) required `git reset --soft` recovery and two additional commits.
+   - **Rule added**: Immediately after `git rebase --continue`, amend the commit message before doing anything else.
 - Single-agent batches skip the extra branch — agent's feature branch serves directly.
 - Workers signal to the orchestrator, not by opening PRs. No individual agent PRs.
 - Regular merge commit when merging batch branch to main (preserves per-agent history).

@@ -1,6 +1,7 @@
 """Notification config CRUD API endpoints."""
 
 from fastapi import APIRouter, Depends, HTTPException
+from pydantic import ValidationError
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -12,8 +13,17 @@ from src.api.schemas.notification_config import (
 )
 from src.core.models.audit_log import AuditLog
 from src.core.models.notification_config import NotificationConfig
+from src.core.notifications.email import EmailConfig
+from src.core.notifications.slack import SlackConfig
+from src.core.notifications.webhook import WebhookConfig
 
 router = APIRouter(prefix="/watches/{watch_id}/notifications", tags=["notification-configs"])
+
+_CHANNEL_CONFIG_MODELS = {
+    "webhook": WebhookConfig,
+    "email": EmailConfig,
+    "slack": SlackConfig,
+}
 
 
 @router.post("", status_code=201, response_model=NotificationConfigResponse)
@@ -24,6 +34,19 @@ async def create_notification_config(
 ):
     """Create a notification config for a watch."""
     watch = await get_watch_or_404(watch_id, session)
+
+    config_model = _CHANNEL_CONFIG_MODELS.get(data.channel)
+    if config_model is None:
+        known = ", ".join(_CHANNEL_CONFIG_MODELS)
+        raise HTTPException(
+            status_code=422,
+            detail=f"Unknown channel '{data.channel}'. Must be one of: {known}",
+        )
+    try:
+        config_model.model_validate(data.config)
+    except ValidationError as exc:
+        raise HTTPException(status_code=422, detail=exc.errors()) from exc
+
     config = NotificationConfig(
         watch_id=watch.id,
         channel=data.channel,

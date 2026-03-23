@@ -1,11 +1,18 @@
 """Slack notification channel — POST to an incoming webhook."""
 
 import httpx
+from pydantic import BaseModel, HttpUrl
 
 from src.core.logging import get_logger
 from src.core.notifications.base import ChangeEvent
 
 logger = get_logger(__name__)
+
+
+class SlackConfig(BaseModel):
+    """Pydantic config model for SlackChannel."""
+
+    webhook_url: HttpUrl
 
 
 class SlackChannel:
@@ -16,10 +23,8 @@ class SlackChannel:
 
     async def send(self, event: ChangeEvent, config: dict) -> bool:
         """POST a Slack message to *config['webhook_url']*. Return True on success."""
-        url = config.get("webhook_url")
-        if not url:
-            logger.warning("slack_missing_webhook_url")
-            return False
+        cfg = SlackConfig.model_validate(config)
+        url = str(cfg.webhook_url)
 
         payload = {
             "text": f"Change detected: {event.watch_name}",

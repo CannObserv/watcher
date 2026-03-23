@@ -5,6 +5,8 @@ from email.message import EmailMessage
 from unittest.mock import AsyncMock, patch
 
 import aiosmtplib
+import pytest
+from pydantic import ValidationError
 
 from src.core.notifications.base import ChangeEvent
 from src.core.notifications.email import EmailChannel
@@ -57,7 +59,7 @@ class TestEmailChannel:
         result = await channel.send(_make_event(), _VALID_CONFIG)
         assert result is False
 
-    async def test_missing_config_returns_false(self):
+    async def test_missing_config_raises_validation_error(self):
         channel = EmailChannel()
-        result = await channel.send(_make_event(), {})
-        assert result is False
+        with pytest.raises(ValidationError):
+            await channel.send(_make_event(), {})

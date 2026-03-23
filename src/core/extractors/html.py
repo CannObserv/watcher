@@ -3,10 +3,20 @@
 import re
 
 from bs4 import BeautifulSoup, Tag
+from pydantic import BaseModel
 
 from src.core.extractors.base import Chunk, ExtractionResult
 
 BOILERPLATE_TAGS = {"nav", "footer", "header", "script", "style", "aside", "noscript"}
+
+
+class HtmlExtractorConfig(BaseModel):
+    """Pydantic config model for HtmlExtractor."""
+
+    selectors: list[str] = []
+    exclude_selectors: list[str] = []
+    strip_boilerplate: bool = True
+    dynamic_id_patterns: list[str] = []
 
 
 class HtmlExtractor:

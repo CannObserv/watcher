@@ -32,6 +32,86 @@ class TestCreateNotificationConfig:
         )
         assert response.status_code == 404
 
+    async def test_create_webhook_invalid_config_returns_422(self, client):
+        watch_resp = await client.post(
+            "/api/v1/watches",
+            json={"name": "W", "url": "https://example.com", "content_type": "html"},
+        )
+        watch_id = watch_resp.json()["id"]
+        response = await client.post(
+            f"/api/v1/watches/{watch_id}/notifications",
+            json={"channel": "webhook", "config": {"url": "not-a-url"}},
+        )
+        assert response.status_code == 422
+
+    async def test_create_webhook_missing_url_returns_422(self, client):
+        watch_resp = await client.post(
+            "/api/v1/watches",
+            json={"name": "W2", "url": "https://example.com", "content_type": "html"},
+        )
+        watch_id = watch_resp.json()["id"]
+        response = await client.post(
+            f"/api/v1/watches/{watch_id}/notifications",
+            json={"channel": "webhook", "config": {}},
+        )
+        assert response.status_code == 422
+
+    async def test_create_slack_invalid_config_returns_422(self, client):
+        watch_resp = await client.post(
+            "/api/v1/watches",
+            json={"name": "W3", "url": "https://example.com", "content_type": "html"},
+        )
+        watch_id = watch_resp.json()["id"]
+        response = await client.post(
+            f"/api/v1/watches/{watch_id}/notifications",
+            json={"channel": "slack", "config": {"webhook_url": "not-a-url"}},
+        )
+        assert response.status_code == 422
+
+    async def test_create_email_invalid_config_returns_422(self, client):
+        watch_resp = await client.post(
+            "/api/v1/watches",
+            json={"name": "W4", "url": "https://example.com", "content_type": "html"},
+        )
+        watch_id = watch_resp.json()["id"]
+        response = await client.post(
+            f"/api/v1/watches/{watch_id}/notifications",
+            json={"channel": "email", "config": {"host": "smtp.example.com"}},
+        )
+        assert response.status_code == 422
+
+    async def test_create_unknown_channel_returns_422(self, client):
+        watch_resp = await client.post(
+            "/api/v1/watches",
+            json={"name": "W5", "url": "https://example.com", "content_type": "html"},
+        )
+        watch_id = watch_resp.json()["id"]
+        response = await client.post(
+            f"/api/v1/watches/{watch_id}/notifications",
+            json={"channel": "telegram", "config": {}},
+        )
+        assert response.status_code == 422
+
+    async def test_create_email_valid_config_succeeds(self, client):
+        watch_resp = await client.post(
+            "/api/v1/watches",
+            json={"name": "W6", "url": "https://example.com", "content_type": "html"},
+        )
+        watch_id = watch_resp.json()["id"]
+        response = await client.post(
+            f"/api/v1/watches/{watch_id}/notifications",
+            json={
+                "channel": "email",
+                "config": {
+                    "host": "smtp.example.com",
+                    "port": 587,
+                    "from_addr": "from@example.com",
+                    "to_addr": "to@example.com",
+                },
+            },
+        )
+        assert response.status_code == 201
+
 
 class TestListNotificationConfigs:
     async def test_list_configs(self, client):

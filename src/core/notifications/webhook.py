@@ -1,11 +1,19 @@
 """Webhook notification channel — POST JSON to a URL."""
 
 import httpx
+from pydantic import BaseModel, HttpUrl
 
 from src.core.logging import get_logger
 from src.core.notifications.base import ChangeEvent
 
 logger = get_logger(__name__)
+
+
+class WebhookConfig(BaseModel):
+    """Pydantic config model for WebhookChannel."""
+
+    url: HttpUrl
+    headers: dict[str, str] = {}
 
 
 class WebhookChannel:
@@ -16,10 +24,8 @@ class WebhookChannel:
 
     async def send(self, event: ChangeEvent, config: dict) -> bool:
         """POST event data to *config['url']*. Return True on 2xx."""
-        url = config.get("url")
-        if not url:
-            logger.warning("webhook_missing_url")
-            return False
+        cfg = WebhookConfig.model_validate(config)
+        url = str(cfg.url)
 
         payload = {
             "watch_id": event.watch_id,

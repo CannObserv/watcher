@@ -26,9 +26,11 @@ async def test_hydrate_rate_limiter_loads_domains():
     with patch("src.api.main.get_session_factory", return_value=mock_factory):
         await hydrate_rate_limiter(limiter)
 
-    assert limiter._domains["example.com"].min_interval == 4.0  # current_interval loaded
+    assert limiter._domains["example.com"].min_interval == 2.0
+    assert limiter._domains["example.com"].current_interval == 4.0
     assert limiter._domains["example.com"].semaphore._value == 1
     assert limiter._domains["other.gov"].min_interval == 5.0
+    assert limiter._domains["other.gov"].current_interval == 5.0
 
 
 async def test_hydrate_rate_limiter_empty_db():

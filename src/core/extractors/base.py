@@ -44,6 +44,6 @@ class ExtractionResult:
 class Extractor(Protocol):
     """Protocol for content extractors."""
 
-    def extract(self, raw: bytes, config: dict | None = None) -> ExtractionResult:
+    async def extract(self, raw: bytes, config: dict | None = None) -> ExtractionResult:
         """Extract text chunks from raw content bytes."""
         ...

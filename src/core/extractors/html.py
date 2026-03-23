@@ -12,7 +12,7 @@ BOILERPLATE_TAGS = {"nav", "footer", "header", "script", "style", "aside", "nosc
 class HtmlExtractor:
     """Extract normalized text chunks from HTML content."""
 
-    def extract(self, raw: bytes, config: dict | None = None) -> ExtractionResult:
+    async def extract(self, raw: bytes, config: dict | None = None) -> ExtractionResult:
         """Extract text from HTML, applying selectors and normalization.
 
         Config keys:

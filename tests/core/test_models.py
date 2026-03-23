@@ -1,12 +1,13 @@
 """Tests for SQLAlchemy base and ULID column type."""
 
 from datetime import date
+from unittest.mock import MagicMock
 
 import pytest
 from ulid import ULID
 
 from src.core.database import get_database_url, get_engine, reset_engine
-from src.core.models.audit_log import AuditLog
+from src.core.models.audit_log import AuditLog, EventType, audit
 from src.core.models.base import ULIDType
 from src.core.models.change import Change
 from src.core.models.domain import Domain
@@ -106,10 +107,6 @@ class TestAuditHelper:
     """Tests for the audit() helper function."""
 
     def test_audit_creates_entry_with_correct_fields(self):
-        from unittest.mock import MagicMock
-
-        from src.core.models.audit_log import AuditLog, EventType, audit
-
         mock_session = MagicMock()
         watch_id = ULID()
 
@@ -127,10 +124,6 @@ class TestAuditHelper:
         mock_session.add.assert_called_once_with(entry)
 
     def test_audit_without_watch_id(self):
-        from unittest.mock import MagicMock
-
-        from src.core.models.audit_log import EventType, audit
-
         mock_session = MagicMock()
         entry = audit(mock_session, EventType.CHECK_FETCH_FAILED, status_code=500)
 
@@ -139,10 +132,6 @@ class TestAuditHelper:
         mock_session.add.assert_called_once_with(entry)
 
     def test_audit_adds_to_session(self):
-        from unittest.mock import MagicMock
-
-        from src.core.models.audit_log import EventType, audit
-
         mock_session = MagicMock()
         entry = audit(mock_session, EventType.WATCH_DELETED)
         mock_session.add.assert_called_once_with(entry)
@@ -152,8 +141,6 @@ class TestEventType:
     """Tests for EventType string constants."""
 
     def test_constants_have_expected_values(self):
-        from src.core.models.audit_log import EventType
-
         assert EventType.WATCH_CREATED == "watch.created"
         assert EventType.WATCH_UPDATED == "watch.updated"
         assert EventType.WATCH_DEACTIVATED == "watch.deactivated"
@@ -165,11 +152,10 @@ class TestEventType:
         assert EventType.NOTIFICATION_CONFIG_CREATED == "notification_config.created"
         assert EventType.NOTIFICATION_CONFIG_DELETED == "notification_config.deleted"
         assert EventType.PROFILE_CREATED == "profile.created"
+        assert EventType.PROFILE_UPDATED == "profile.updated"
         assert EventType.PROFILE_DELETED == "profile.deleted"
 
     def test_all_constants_are_unique(self):
-        from src.core.models.audit_log import EventType
-
         values = [v for k, v in vars(EventType).items() if not k.startswith("_")]
         assert len(values) == len(set(values)), "EventType constants must be unique"
 
@@ -177,10 +163,10 @@ class TestEventType:
 class TestAuditLogModel:
     def test_create_audit_log_entry(self):
         entry = AuditLog(
-            event_type="watch.created",
+            event_type=EventType.WATCH_CREATED,
             payload={"watch_name": "Test Watch"},
         )
-        assert entry.event_type == "watch.created"
+        assert entry.event_type == EventType.WATCH_CREATED
         assert entry.payload == {"watch_name": "Test Watch"}
         assert entry.watch_id is None
 

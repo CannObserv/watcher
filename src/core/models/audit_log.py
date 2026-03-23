@@ -26,6 +26,7 @@ class EventType:
     NOTIFICATION_CONFIG_CREATED = "notification_config.created"
     NOTIFICATION_CONFIG_DELETED = "notification_config.deleted"
     PROFILE_CREATED = "profile.created"
+    PROFILE_UPDATED = "profile.updated"
     PROFILE_DELETED = "profile.deleted"
 
 

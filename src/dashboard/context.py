@@ -8,7 +8,7 @@ from sqlalchemy.exc import ProgrammingError
 from sqlalchemy.ext.asyncio import AsyncSession
 from ulid import ULID
 
-from src.core.models.audit_log import AuditLog
+from src.core.models.audit_log import AuditLog, EventType
 from src.core.models.change import Change
 from src.core.models.notification_config import NotificationConfig
 from src.core.models.snapshot import Snapshot, SnapshotChunk
@@ -58,7 +58,11 @@ async def get_dashboard_stats(session: AsyncSession) -> dict:
     checks_today = await session.scalar(
         select(func.count(AuditLog.id)).where(
             AuditLog.event_type.in_(
-                ["check.snapshot_created", "check.no_change", "check.fetch_failed"]
+                [
+                    EventType.CHECK_SNAPSHOT_CREATED,
+                    EventType.CHECK_NO_CHANGE,
+                    EventType.CHECK_FETCH_FAILED,
+                ]
             ),
             AuditLog.created_at >= today_start,
         )

@@ -79,7 +79,7 @@ async def update_profile(
     if updates:
         audit(
             session,
-            "profile.updated",
+            EventType.PROFILE_UPDATED,
             watch_id=watch.id,
             profile_id=str(profile.id),
             updated_fields=list(updates.keys()),

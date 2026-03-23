@@ -9,8 +9,10 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+import src.workers.tasks as tasks_mod
 from src.core.fetchers.http import HttpFetcher
 from src.core.models.audit_log import AuditLog, EventType
+from src.core.models.notification_config import NotificationConfig
 from src.core.models.temporal_profile import PostAction, ProfileType, TemporalProfile
 from src.core.models.watch import ContentType, Watch
 from src.core.rate_limiter import DomainRateLimiter
@@ -267,9 +269,6 @@ class TestCheckWatchSavepointBoundary:
         and before dispatch_notifications(), ensuring pipeline results survive a
         notification failure.
         """
-        import src.workers.tasks as tasks_mod
-        from src.core.models.notification_config import NotificationConfig
-
         watch = Watch(
             name="Savepoint Test",
             url="https://example.com/savepoint",
@@ -289,8 +288,6 @@ class TestCheckWatchSavepointBoundary:
         await db_session.commit()
 
         # First check to establish a baseline snapshot (no change_id on first check)
-        from src.core.storage import LocalStorage
-
         storage = LocalStorage(base_dir=tmp_path)
         await _run_check_pipeline(
             watch=watch,

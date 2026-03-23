@@ -175,29 +175,42 @@ Update this skill file if patterns emerged that should be generalized.
 
 ## Agent Roles
 
+### Branch strategy
+
+Each **multi-agent batch** gets a shared feature branch (e.g. `batch/a`, `batch/f`). Workers use individual worktree branches (e.g. `feature/batch-a-13-schema-move`). The orchestrator merges worker branches into the batch branch sequentially, respecting any intra-batch ordering. Conflicts are returned to the responsible worker agent to resolve.
+
+**Single-agent batches** do not need a separate batch branch — the agent's feature branch serves directly.
+
+The human review happens against the **batch branch**: run tests, inspect the combined diff, then merge to `main` with a regular merge commit (preserving per-agent commit history).
+
+Ask the user their preferred merge strategy (regular, squash, rebase) and record it in the design doc.
+
 ### Orchestrator agent
 
 The orchestrator reads the batch plan and manages progression. It:
-- Launches all worker agents whose batch gate is currently satisfied (not just the first batch — if multiple batches are unblocked, launch all of them)
-- Monitors for worker completion signals
-- Notifies the user when a batch is ready for PR review and merge
-- Waits for merge confirmation before launching the next batch
-- Never writes implementation code itself
+1. Creates `batch/<X>` branch from `main` for each multi-agent batch at launch time
+2. Launches all worker agents whose batch gate is currently satisfied simultaneously
+3. On each worker completion signal, merges that worker's branch into the batch branch (respecting intra-batch ordering; returns conflicts to the worker)
+4. When all workers are merged, runs the full test suite against the batch branch
+5. Notifies the user: "Batch X ready for review: `batch/<X>`, N issues, tests passing"
+6. Waits for merge confirmation before launching the next batch
+7. On confirmation, launches all newly unblocked batches simultaneously
+
+Never writes implementation code itself.
 
 ### Worker agents
 
 Each worker agent follows this protocol before signaling completion:
 
-1. **Set up worktree** — isolated branch in `.worktrees/<feature-branch>`
+1. **Set up worktree** — isolated branch `feature/batch-<X>-<issue>` in `.worktrees/`
 2. **Implement with TDD** — red → green → refactor
 3. **Run full test suite** — all tests must pass
 4. **Run linter** — no violations
 5. **Self-review diff** — check: correctness, test coverage, project conventions, no unintended side effects outside issue scope
-6. **Address findings** — fix before opening PR; do not signal completion with known issues
-7. **Open PR** — conventional title, body summarizes work and links issues
-8. **Signal completion** — post comment on the tracking issue with PR number and self-review confirmation
+6. **Address findings** — fix before signaling; do not signal with known issues
+7. **Signal completion** — notify orchestrator the branch is ready to merge into the batch branch
 
-**Orchestrator gate**: after all agents in a batch signal completion, orchestrator notifies user → waits for merge confirmation → launches next batch.
+**No PR is opened by the worker.** The orchestrator merges into the batch branch; the user reviews the batch branch as a whole.
 
 ## Key Principles
 
@@ -208,8 +221,13 @@ Each worker agent follows this protocol before signaling completion:
 - **Bundle when cohesive** — two issues that naturally sequence (define → use, protocol → config) belong in one agent with sequential commits, not two agents with a gate
 - **Worktrees always** — each agent branch gets an isolated worktree; no shared working directory state between concurrent agents
 - **Deferred is a decision** — explicitly name what is out of scope and why; don't silently omit
-- **Self-review before PR** — worker agents must review their own diff and resolve all findings before opening a PR; no known issues at signal time
+- **Batch feature branches for multi-agent batches** — gives the user a single integration point to test and review before merging to main; surfaces intra-batch conflicts at the batch branch, not at main
+- **Single-agent batches skip the extra branch** — the agent's feature branch is the batch branch
+- **No worker PRs** — workers signal to the orchestrator; the orchestrator merges into the batch branch; the user reviews the batch branch
+- **Conflict resolution stays with the worker** — if a merge into the batch branch conflicts, the orchestrator sends it back to that agent
+- **Self-review before signal** — worker agents resolve all findings before signaling; no known issues at signal time
 - **Orchestrator launches all unblocked batches** — not just the next one in sequence; if two independent batches become unblocked simultaneously, launch both
+- **Regular merge commit to main** — preserves per-agent commit history; ask user preference at design time
 
 ---
 
@@ -225,9 +243,12 @@ Each worker agent follows this protocol before signaling completion:
 - Output: design doc + GitHub tracking issue + this skill
 
 **Clarifications added after initial design:**
-- Orchestrator agent launches all unblocked batches simultaneously, not just the next one in the numbered sequence. Initial design implied sequential batch launching; user clarified that all safe parallel work should start at once.
-- Worker agents must self-review their diff and address all findings before opening a PR. This eliminates the need for a separate review pass and keeps the human-in-the-loop role focused on merge decisions, not finding obvious issues.
-- These two requirements together define the agent protocol: orchestrator manages progression and parallelism; workers own quality before handoff.
+- Orchestrator launches all unblocked batches simultaneously — not just the next numbered batch. Initial design implied sequential launching; user clarified all safe parallel work should start at once.
+- Worker agents self-review and fix all findings before signaling completion. Keeps human review focused on merge decisions, not catching obvious issues.
+- Multi-agent batches use a shared `batch/<X>` feature branch. The orchestrator merges worker branches into it sequentially; user tests and reviews the batch branch as a whole before merging to main. Surfaces intra-batch conflicts before they reach main.
+- Single-agent batches skip the extra branch — agent's feature branch serves directly.
+- Workers signal to the orchestrator, not by opening PRs. No individual agent PRs.
+- Regular merge commit when merging batch branch to main (preserves per-agent history).
 
 **Non-obvious decisions:**
 - #25 (savepoint correctness fix) leads Batch B's refactor sequence rather than going in Batch A. Rationale: it fixes a race condition in `tasks.py` — the same file that Batch B's mechanical refactors will touch. Fixing it first ensures the refactors inherit correct transaction semantics.

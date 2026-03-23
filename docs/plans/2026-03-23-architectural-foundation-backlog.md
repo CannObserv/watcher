@@ -9,11 +9,19 @@ Clear the open issue backlog in priority order, establishing testability, correc
 
 Six sequential merge batches managed by an **orchestrator agent**. Peak parallelism is 6 agents (Batch A). Batches B–E are single agents on the critical path through `tasks.py`. Phase 7 issues (#3, #4, #5) are explicitly deferred until Batch F is stable.
 
+### Branch Strategy
+
+Each **multi-agent batch** gets a shared feature branch (e.g. `batch/a`, `batch/f`). Worker agents work on individual worktree branches (e.g. `feature/batch-a-13-schema-move`). When a worker signals completion, the **orchestrator** merges the worktree branch into the batch branch, respecting any intra-batch ordering constraints. If a merge conflict occurs, it is sent back to the responsible worker agent to resolve before the merge proceeds.
+
+**Single-agent batches** (B, C, D, E) do not need a separate batch branch — the agent's feature branch serves as the batch branch directly.
+
+The human-in-the-loop review happens against the **batch branch** (not individual agent branches): run tests, inspect the combined diff, then merge to `main` with a regular merge commit (preserving per-agent commit history).
+
 ### Agent Roles
 
-**Orchestrator agent** — reads this plan, launches all worker agents whose batch gate is satisfied, monitors for completion signals, and prompts the user to review and merge PRs before advancing to the next batch. Never writes code itself.
+**Orchestrator agent** — reads this plan, creates batch branches for multi-agent batches, launches all worker agents whose batch gate is satisfied, sequences intra-batch merges into the batch branch, surfaces conflicts to the responsible worker, notifies the user when the batch branch is ready for review, and waits for merge confirmation before advancing. Never writes implementation code itself.
 
-**Worker agents** — each implements its assigned issues in a dedicated git worktree, runs the full test suite, performs a self-review of its diff (correctness, style, test coverage, adherence to project conventions), addresses any issues found, then signals completion by opening a PR and posting a summary comment.
+**Worker agents** — each implements its assigned issues in a dedicated git worktree branch, runs the full test suite, performs a self-review of its diff (correctness, style, test coverage, adherence to project conventions), addresses any issues found, then signals completion to the orchestrator.
 
 ## Prioritization Rubrics
 
@@ -145,22 +153,32 @@ F1 and F2 both touch `workers/pipeline.py` in different functions (diff step vs.
 
 Each worker agent must follow this sequence before signaling completion:
 
-1. **Set up worktree** — create isolated branch in `.worktrees/<feature-branch>`
+1. **Set up worktree** — create isolated branch `feature/batch-<X>-<issue>` in `.worktrees/`
 2. **Implement with TDD** — red → green → refactor per project convention
 3. **Run full test suite** — `uv run pytest`; all tests must pass
 4. **Run linter** — `uv run ruff check .`; no violations
-5. **Self-review diff** — check for: correctness, test coverage, adherence to project conventions (imports at top, docstrings on public APIs, commit message format), no unintended side effects outside the issue scope
-6. **Address any findings** — fix before proceeding; do not open PR with known issues
-7. **Open PR** — title follows `#<n> [type]: <description>` convention; body summarizes what was done and links the issue(s)
-8. **Signal completion** — post a comment on the tracking issue (#31) noting the PR number and confirming self-review passed
+5. **Self-review diff** — check for: correctness, test coverage, adherence to project conventions (imports at top, docstrings on public APIs, commit message format), no unintended side effects outside issue scope
+6. **Address any findings** — fix before signaling; do not signal with known issues
+7. **Signal completion** — notify orchestrator that the worktree branch is ready to merge into the batch branch
 
-**Orchestrator gate behavior**: after all agents in a batch have signaled completion, the orchestrator notifies the user that the batch is ready for PR review and merge, then waits. It does not launch the next batch until the user confirms all PRs are merged.
+## Orchestrator Protocol
+
+1. **On batch start** — create `batch/<X>` branch from `main` (multi-agent batches only)
+2. **Launch workers** — start all worker agents whose batch gate is satisfied simultaneously
+3. **On worker completion signal** — merge `feature/batch-<X>-<issue>` into `batch/<X>`, respecting intra-batch ordering (e.g. F1 before F2); if conflict, return to worker agent to resolve
+4. **When all workers merged** — run full test suite against `batch/<X>` branch; post results to tracking issue #31
+5. **Notify user** — "Batch X ready for review: `batch/<X>` branch, N issues, tests passing. Please review and merge to main."
+6. **Wait for merge confirmation** — do not launch the next batch until user confirms `batch/<X>` is merged to `main`
+7. **Advance** — launch all newly unblocked batches simultaneously
 
 ## Key Decisions
 
-- **Orchestrator manages progression** — launches all agents whose dependencies are met, waits for merge confirmation before advancing
-- **Worker self-review before PR** — no PR is opened until the agent has reviewed its own diff and resolved all findings
-- **Worktrees**: each agent works in an isolated `.worktrees/<branch>` worktree; no shared working directory state
+- **Batch feature branches** — multi-agent batches (A, F) use a `batch/<X>` branch; orchestrator merges worker branches in; user reviews and tests the batch branch before merging to main with a regular merge commit
+- **Single-agent batches** (B, C, D, E) — the agent's feature branch serves directly as the batch branch; no extra branch needed
+- **Conflict resolution** — if the orchestrator hits a conflict merging a worker branch into the batch branch, it returns to that worker agent to resolve before proceeding
+- **Orchestrator manages progression** — launches all unblocked batches simultaneously, sequences intra-batch merges, waits for merge confirmation before advancing
+- **Worker self-review before signal** — worker does not signal completion until tests pass, linter is clean, and self-review findings are addressed
+- **Worktrees**: each worker agent uses an isolated `.worktrees/feature/batch-<X>-<issue>` branch; no shared working directory state
 - **TDD throughout**: all implementations follow red → green → refactor per project convention
 - **Batch B bundles #25+#16+#18**: one PR covers all three to reduce merge ceremony on the wide-reach mechanical changes
 - **Phase 7 deferred**: browser-based fetching is more valuable built on a clean DI foundation (#19) and decomposed pipeline (#14)

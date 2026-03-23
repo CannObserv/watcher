@@ -13,7 +13,7 @@ from src.core.models.audit_log import EventType, audit
 from src.core.models.temporal_profile import TemporalProfile
 from src.core.models.watch import Watch
 from src.core.rate_limiter import get_rate_limiter
-from src.core.registry import ServiceRegistry
+from src.core.registry import ServiceRegistry, get_registry
 from src.core.scheduler import compute_next_check, evaluate_post_actions
 from src.core.storage import STORAGE_BASE_DIR, LocalStorage
 from src.workers import bp
@@ -21,18 +21,6 @@ from src.workers.notify import dispatch_change_notifications
 from src.workers.pipeline import _persist_backoff, _run_check_pipeline
 
 logger = get_logger(__name__)
-
-# Shared resources — lazy-initialized on first use to avoid binding to an
-# event loop at import time (important for DomainRateLimiter's asyncio primitives).
-_registry: ServiceRegistry | None = None
-
-
-def get_registry() -> ServiceRegistry:
-    """Return the shared ServiceRegistry, creating it on first call."""
-    global _registry
-    if _registry is None:
-        _registry = ServiceRegistry()
-    return _registry
 
 
 # --- Procrastinate task wrappers ---
@@ -110,6 +98,7 @@ async def check_watch(watch_id: str, registry: ServiceRegistry | None = None) ->
                 watch=watch,
                 change_id=result["change_id"],
                 change_metadata=result.get("change_metadata", {}),
+                registry=reg,
             )
             await session.commit()
 

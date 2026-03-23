@@ -7,12 +7,12 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.logging import get_logger
-from src.core.models.audit_log import AuditLog
+from src.core.models.audit_log import EventType, audit
 from src.core.models.notification_config import NotificationConfig
 from src.core.models.watch import Watch
 from src.core.notifications import ChangeEvent
 from src.core.notifications.dispatcher import dispatch_notifications
-from src.core.registry import ServiceRegistry
+from src.core.registry import ServiceRegistry, get_registry
 
 logger = get_logger(__name__)
 
@@ -41,7 +41,7 @@ async def dispatch_change_notifications(
     if not nc_configs:
         return
 
-    reg = registry if registry is not None else ServiceRegistry()
+    reg = registry if registry is not None else get_registry()
     event = ChangeEvent(
         watch_id=str(watch.id),
         watch_name=watch.name,
@@ -54,13 +54,10 @@ async def dispatch_change_notifications(
         channels = reg.get_channels(http_client)
         notif_results = await dispatch_notifications(event, nc_configs, channels)
 
-    session.add(
-        AuditLog(
-            event_type="notification.dispatched",
-            watch_id=watch.id,
-            payload={
-                "change_id": change_id,
-                "results": notif_results,
-            },
-        )
+    audit(
+        session,
+        EventType.NOTIFICATION_DISPATCHED,
+        watch_id=watch.id,
+        change_id=change_id,
+        results=notif_results,
     )

@@ -1,7 +1,5 @@
 """Lightweight registry for swappable protocol implementations."""
 
-import inspect
-
 import httpx
 
 from src.core.extractors import CsvExcelExtractor, HtmlExtractor, PdfExtractor
@@ -64,10 +62,19 @@ class ServiceRegistry:
         """
         channels: dict[str, NotificationChannel] = {}
         for name, cls in self._channel_map.items():
-            sig = inspect.signature(cls.__init__)
-            params = set(sig.parameters.keys()) - {"self"}
-            if "client" in params:
+            try:
                 channels[name] = cls(client=client)
-            else:
+            except TypeError:
                 channels[name] = cls()
         return channels
+
+
+_default_registry: "ServiceRegistry | None" = None
+
+
+def get_registry() -> "ServiceRegistry":
+    """Return the process-level ServiceRegistry singleton, creating it on first call."""
+    global _default_registry
+    if _default_registry is None:
+        _default_registry = ServiceRegistry()
+    return _default_registry

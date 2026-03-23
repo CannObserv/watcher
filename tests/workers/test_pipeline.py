@@ -12,8 +12,6 @@ from src.workers.pipeline import (
     _to_signed64,
 )
 
-pytestmark = pytest.mark.integration
-
 
 class TestToSigned64:
     def test_small_positive_value_unchanged(self):
@@ -68,6 +66,7 @@ class TestExtractContent:
         assert len(result.chunks) >= 1
 
 
+@pytest.mark.integration
 class TestRunCheckPipeline:
     async def test_first_check_creates_snapshot(self, db_session, tmp_path):
         watch = Watch(name="Test", url="https://example.com", content_type=ContentType.HTML)

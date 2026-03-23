@@ -10,7 +10,7 @@ from src.core.differ import ChangeStatus, ChunkFingerprint, diff_chunks
 from src.core.extractors import CsvExcelExtractor, HtmlExtractor, PdfExtractor
 from src.core.extractors.base import ExtractionResult
 from src.core.logging import get_logger
-from src.core.models.audit_log import AuditLog
+from src.core.models.audit_log import EventType, audit
 from src.core.models.base import generate_ulid
 from src.core.models.change import Change
 from src.core.models.domain import Domain
@@ -131,13 +131,7 @@ async def _run_check_pipeline(
     # 3. Fast path: identical content
     if prev_snapshot and prev_snapshot.content_hash == content_hash:
         logger.info("no change detected", extra={"watch_id": str(watch.id)})
-        session.add(
-            AuditLog(
-                event_type="check.no_change",
-                watch_id=watch.id,
-                payload={"content_hash": content_hash},
-            )
-        )
+        audit(session, EventType.CHECK_NO_CHANGE, watch_id=watch.id, content_hash=content_hash)
         await session.flush()
         return {
             "snapshot_id": None,
@@ -242,17 +236,14 @@ async def _run_check_pipeline(
             change_id = change.id
 
     # 10. Audit log
-    session.add(
-        AuditLog(
-            event_type="check.snapshot_created",
-            watch_id=watch.id,
-            payload={
-                "snapshot_id": str(snapshot_id),
-                "content_hash": content_hash,
-                "chunk_count": len(extraction.chunks),
-                "is_changed": change_id is not None or prev_snapshot is None,
-            },
-        )
+    audit(
+        session,
+        EventType.CHECK_SNAPSHOT_CREATED,
+        watch_id=watch.id,
+        snapshot_id=str(snapshot_id),
+        content_hash=content_hash,
+        chunk_count=len(extraction.chunks),
+        is_changed=change_id is not None or prev_snapshot is None,
     )
     await session.flush()
 

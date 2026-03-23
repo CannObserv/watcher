@@ -37,6 +37,9 @@ src/dashboard/context.py — Dashboard-specific DB query helpers
 src/dashboard/static/    — CSS, JS (vendored HTMX), compiled Tailwind
 src/dashboard/templates/ — Jinja2 templates (base, pages, partials)
 src/workers/           — Procrastinate task queue (check_watch, schedule_tick)
+src/workers/pipeline.py  — Core check pipeline: hash, extract, diff, store snapshots
+src/workers/notify.py    — Notification dispatch: dispatch_change_notifications()
+src/core/registry.py     — ServiceRegistry: swappable fetcher, extractor, channel implementations
 tests/                 — Mirrors src/ structure
 docs/                  — Reference docs (COMMANDS, SKILLS)
 scripts/                 — Build scripts (Tailwind CSS)

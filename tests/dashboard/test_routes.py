@@ -252,3 +252,61 @@ class Test404Template:
         response = await client.get("/watches/not-a-ulid")
         assert response.status_code == 404
         assert b"/watches" in response.content
+
+
+class TestWatchDelete:
+    async def _create_and_deactivate(self, client):
+        resp = await client.post(
+            "/api/v1/watches",
+            json={
+                "name": "Delete Me",
+                "url": "https://example.com",
+                "content_type": "html",
+            },
+        )
+        watch_id = resp.json()["id"]
+        await client.post(f"/watches/{watch_id}/deactivate")
+        return watch_id
+
+    async def test_delete_button_shown_for_inactive_watch(self, client):
+        watch_id = await self._create_and_deactivate(client)
+        response = await client.get(f"/watches/{watch_id}")
+        assert response.status_code == 200
+        assert b"hx-delete" in response.content
+
+    async def test_delete_button_not_shown_for_active_watch(self, client):
+        resp = await client.post(
+            "/api/v1/watches",
+            json={
+                "name": "Active Watch",
+                "url": "https://example.com",
+                "content_type": "html",
+            },
+        )
+        watch_id = resp.json()["id"]
+        response = await client.get(f"/watches/{watch_id}")
+        assert response.status_code == 200
+        assert b"hx-delete" not in response.content
+
+    async def test_delete_inactive_watch_redirects(self, client):
+        watch_id = await self._create_and_deactivate(client)
+        response = await client.delete(f"/watches/{watch_id}")
+        assert response.status_code == 200
+        assert response.headers.get("hx-redirect") == "/watches"
+
+    async def test_delete_active_watch_returns_409(self, client):
+        resp = await client.post(
+            "/api/v1/watches",
+            json={
+                "name": "Cannot Delete Active",
+                "url": "https://example.com",
+                "content_type": "html",
+            },
+        )
+        watch_id = resp.json()["id"]
+        response = await client.delete(f"/watches/{watch_id}")
+        assert response.status_code == 409
+
+    async def test_delete_missing_watch_returns_404(self, client):
+        response = await client.delete("/watches/not-a-ulid")
+        assert response.status_code == 404

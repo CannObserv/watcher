@@ -265,6 +265,31 @@ async def watch_deactivate(
     )
 
 
+@router.delete("/watches/{watch_id}")
+async def watch_delete(
+    request: Request,
+    watch_id: str,
+    session: AsyncSession = Depends(get_db_session),
+):
+    """Delete an inactive watch via HTMX — redirects to watch list on success."""
+    watch = await get_watch_detail(session, watch_id)
+    if not watch:
+        return templates.TemplateResponse("pages/404.html", {"request": request}, status_code=404)
+    if watch.is_active:
+        msg = '<p class="text-red-600 text-sm mt-2">Deactivate the watch before deleting it.</p>'
+        return HTMLResponse(status_code=409, content=msg)
+    session.add(
+        AuditLog(
+            event_type="watch.deleted",
+            watch_id=watch.id,
+            payload={"name": watch.name, "url": watch.url, "source": "dashboard"},
+        )
+    )
+    await session.delete(watch)
+    await session.commit()
+    return HTMLResponse(status_code=200, content="", headers={"HX-Redirect": "/watches"})
+
+
 @router.get("/partials/stats-cards")
 async def partial_stats_cards(
     request: Request,

@@ -50,3 +50,16 @@ class ChangeResponse(BaseModel):
     current_snapshot_id: ULIDStr
     change_metadata: dict
     detected_at: datetime
+
+
+class SnapshotWithChunksResponse(SnapshotResponse):
+    """Snapshot response with embedded chunks."""
+
+    chunks: list[SnapshotChunkResponse] = []
+
+
+class ChangeDetailResponse(ChangeResponse):
+    """Change response with embedded current and previous snapshots."""
+
+    current_snapshot: SnapshotWithChunksResponse | None
+    previous_snapshot: SnapshotWithChunksResponse | None

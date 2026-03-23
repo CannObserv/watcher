@@ -7,24 +7,16 @@ from ulid import ULID
 
 from src.api.dependencies import get_db_session
 from src.api.routes.helpers import parse_ulid
-from src.api.schemas.change import ChangeResponse, SnapshotChunkResponse, SnapshotResponse
+from src.api.schemas.change import (
+    ChangeDetailResponse,
+    ChangeResponse,
+    SnapshotChunkResponse,
+    SnapshotResponse,
+)
 from src.core.models.change import Change
 from src.core.models.snapshot import Snapshot, SnapshotChunk
 
 router = APIRouter(prefix="/changes", tags=["changes"])
-
-
-class SnapshotWithChunksResponse(SnapshotResponse):
-    """Snapshot response with embedded chunks."""
-
-    chunks: list[SnapshotChunkResponse] = []
-
-
-class ChangeDetailResponse(ChangeResponse):
-    """Change response with embedded current and previous snapshots."""
-
-    current_snapshot: SnapshotWithChunksResponse | None
-    previous_snapshot: SnapshotWithChunksResponse | None
 
 
 @router.get("", response_model=list[ChangeResponse])

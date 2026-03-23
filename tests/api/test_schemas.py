@@ -7,9 +7,11 @@ from pydantic import ValidationError
 
 from src.api.schemas.audit_log import AuditLogResponse
 from src.api.schemas.change import (
+    ChangeDetailResponse,
     ChangeResponse,
     SnapshotChunkResponse,
     SnapshotResponse,
+    SnapshotWithChunksResponse,
 )
 from src.api.schemas.watch import WatchCreate, WatchUpdate
 
@@ -147,6 +149,54 @@ class TestChangeResponse:
         assert data.current_snapshot_id == "01KM7A9TP2B0BQCNZ5PZX4MH88"
         assert data.change_metadata == {"added": 2, "removed": 1}
         assert data.detected_at == ts
+
+
+class TestSnapshotWithChunksResponse:
+    def test_importable_from_schemas(self):
+        assert SnapshotWithChunksResponse is not None
+
+    def test_has_chunks_field(self):
+        ts = datetime(2026, 3, 21, 12, 0, 0, tzinfo=UTC)
+        data = SnapshotWithChunksResponse.model_validate(
+            {
+                "id": "01KM7A9TP2B0BQCNZ5PZX4MH87",
+                "watch_id": "01KM7A9TP2B0BQCNZ5PZX4MH89",
+                "content_hash": "sha256abc",
+                "simhash": 99999999,
+                "storage_path": "/data/snapshots/abc.html",
+                "text_path": "/data/snapshots/abc.txt",
+                "storage_backend": "local",
+                "chunk_count": 0,
+                "text_bytes": 0,
+                "fetch_duration_ms": 100,
+                "fetcher_used": "http",
+                "fetched_at": ts,
+                "chunks": [],
+            }
+        )
+        assert data.chunks == []
+
+
+class TestChangeDetailResponse:
+    def test_importable_from_schemas(self):
+        assert ChangeDetailResponse is not None
+
+    def test_has_snapshot_fields(self):
+        ts = datetime(2026, 3, 21, 12, 0, 0, tzinfo=UTC)
+        data = ChangeDetailResponse.model_validate(
+            {
+                "id": "01KM7A9TP2B0BQCNZ5PZX4MH8A",
+                "watch_id": "01KM7A9TP2B0BQCNZ5PZX4MH89",
+                "previous_snapshot_id": "01KM7A9TP2B0BQCNZ5PZX4MH87",
+                "current_snapshot_id": "01KM7A9TP2B0BQCNZ5PZX4MH88",
+                "change_metadata": {},
+                "detected_at": ts,
+                "current_snapshot": None,
+                "previous_snapshot": None,
+            }
+        )
+        assert data.current_snapshot is None
+        assert data.previous_snapshot is None
 
 
 class TestAuditLogResponse:

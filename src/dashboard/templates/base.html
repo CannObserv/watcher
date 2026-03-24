@@ -1,18 +1,29 @@
 <!DOCTYPE html>
-<html lang="en" class="h-full bg-gray-50">
+<html lang="en" dir="ltr" class="h-full">
 <head>
-  <meta charset="UTF-8">
+  <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>{% block title %}watcher{% endblock %}</title>
-  <link rel="stylesheet" href="/static/css/output.css">
-  <script src="/static/js/htmx.min.js"></script>
-  <script src="/static/js/app.js"></script>
+  <script>
+    (function(){
+      var k='watcher-color-scheme',s=localStorage.getItem(k),
+          d=window.matchMedia('(prefers-color-scheme: dark)').matches;
+      if(s==='dark'||(s===null&&d)){document.documentElement.classList.add('dark');}
+    })();
+  </script>
+  <link rel="stylesheet" href="/static/css/output.css?v={{ build_id }}">
+  <link rel="icon" href="/static/images/cannabis_observer-icon-square.svg?v={{ build_id }}" type="image/svg+xml">
+  <noscript><style>@media(prefers-color-scheme:dark){html:not(.light){color-scheme:dark}}</style></noscript>
 </head>
-<body class="h-full">
+<body class="h-full bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-gray-100">
+  <a class="skip-link" href="#main-content">Skip to main content</a>
+
   <div class="flex h-full">
-    <nav class="w-64 bg-white shadow-sm border-r border-gray-200 flex flex-col">
-      <div class="p-4 border-b border-gray-200">
-        <h1 class="text-lg font-bold text-gray-900">watcher</h1>
+    <!-- Sidebar (desktop) -->
+    <nav class="hidden md:flex w-60 flex-col bg-white dark:bg-gray-800 shadow-sm border-r border-gray-200 dark:border-gray-700" aria-label="Main navigation">
+      <div class="p-4 border-b border-gray-200 dark:border-gray-700 flex items-center gap-2">
+        <img src="/static/images/cannabis_observer-icon-square.svg?v={{ build_id }}" alt="" width="28" height="28" aria-hidden="true">
+        <span class="text-lg font-bold text-gray-900 dark:text-white">watcher</span>
       </div>
       <div class="flex-1 p-4 space-y-1">
         <a href="/" class="nav-link {% if active_page == 'dashboard' %}nav-link-active{% endif %}">Dashboard</a>
@@ -21,10 +32,101 @@
         <a href="/audit" class="nav-link {% if active_page == 'audit' %}nav-link-active{% endif %}">Audit Log</a>
         <a href="/system" class="nav-link {% if active_page == 'system' %}nav-link-active{% endif %}">System</a>
       </div>
+      <div class="p-4 border-t border-gray-200 dark:border-gray-700">
+        <button class="btn btn-ghost w-full justify-start gap-2" id="theme-toggle" type="button" aria-label="Switch to dark mode">
+          <span data-theme-icon aria-hidden="true">&#9789;</span>
+          <span class="text-sm">Theme</span>
+        </button>
+      </div>
     </nav>
-    <main class="flex-1 overflow-y-auto p-8">
-      {% block content %}{% endblock %}
-    </main>
+
+    <!-- Mobile topbar + drawer -->
+    <div class="flex flex-col flex-1 min-w-0">
+      <header class="md:hidden flex items-center justify-between px-4 h-14 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700">
+        <div class="flex items-center gap-2">
+          <button id="menu-toggle" class="btn btn-ghost p-2 min-h-[44px] min-w-[44px]" aria-expanded="false" aria-controls="mobile-nav" aria-label="Open navigation menu" type="button">
+            <span aria-hidden="true">&#9776;</span>
+          </button>
+          <span class="text-lg font-bold text-gray-900 dark:text-white">watcher</span>
+        </div>
+        <button class="btn btn-ghost p-2" id="theme-toggle-mobile" type="button" aria-label="Switch to dark mode">
+          <span data-theme-icon aria-hidden="true">&#9789;</span>
+        </button>
+      </header>
+
+      <!-- Mobile drawer -->
+      <div id="mobile-nav" class="fixed inset-0 z-40 hidden md:hidden" role="dialog" aria-modal="true" aria-label="Navigation menu">
+        <div id="mobile-backdrop" class="absolute inset-0 bg-black/50"></div>
+        <nav class="absolute inset-y-0 left-0 w-65 bg-white dark:bg-gray-800 shadow-lg flex flex-col" aria-label="Main navigation">
+          <div class="p-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
+            <div class="flex items-center gap-2">
+              <img src="/static/images/cannabis_observer-icon-square.svg?v={{ build_id }}" alt="" width="28" height="28" aria-hidden="true">
+              <span class="text-lg font-bold text-gray-900 dark:text-white">watcher</span>
+            </div>
+            <button id="menu-close" class="btn btn-ghost p-2 min-h-[44px] min-w-[44px]" aria-label="Close navigation menu" type="button">
+              <span aria-hidden="true">&times;</span>
+            </button>
+          </div>
+          <div class="flex-1 p-4 space-y-1">
+            <a href="/" class="nav-link {% if active_page == 'dashboard' %}nav-link-active{% endif %}">Dashboard</a>
+            <a href="/domains" class="nav-link {% if active_page == 'domains' %}nav-link-active{% endif %}">Domains</a>
+            <a href="/watches" class="nav-link {% if active_page == 'watches' %}nav-link-active{% endif %}">Watches</a>
+            <a href="/audit" class="nav-link {% if active_page == 'audit' %}nav-link-active{% endif %}">Audit Log</a>
+            <a href="/system" class="nav-link {% if active_page == 'system' %}nav-link-active{% endif %}">System</a>
+          </div>
+        </nav>
+      </div>
+
+      <!-- Flash region (OOB target) -->
+      <div id="flash-region" class="px-4 md:px-8 pt-4" aria-live="polite" aria-atomic="false">
+        {% block flash %}{% endblock %}
+      </div>
+
+      <!-- Main content -->
+      <main id="main-content" class="flex-1 overflow-y-auto px-4 md:px-8 py-6">
+        {% block content %}{% endblock %}
+
+        <!-- Footer -->
+        <footer class="mt-12 pt-4 border-t border-gray-200 dark:border-gray-700 text-center text-xs text-gray-500 dark:text-gray-400">
+          A project of
+          <img src="/static/images/cannabis_observer-icon-square.svg?v={{ build_id }}" alt="" width="16" height="16" class="inline-block align-text-bottom" aria-hidden="true">
+          Cannabis Observer
+          <span aria-hidden="true">🌱🏛️🔍</span>
+        </footer>
+      </main>
+    </div>
   </div>
+
+  <script src="/static/js/htmx.min.js?v={{ build_id }}" defer></script>
+  <script src="/static/js/app.js?v={{ build_id }}" defer></script>
+  <script src="/static/js/dark-mode.js?v={{ build_id }}" defer></script>
+  <script src="/static/js/htmx-a11y.js?v={{ build_id }}" defer></script>
+  <script>
+    /* Mobile nav toggle */
+    (function(){
+      var toggle=document.getElementById('menu-toggle');
+      var close=document.getElementById('menu-close');
+      var drawer=document.getElementById('mobile-nav');
+      var backdrop=document.getElementById('mobile-backdrop');
+      if(!toggle||!drawer)return;
+      function open(){drawer.classList.remove('hidden');toggle.setAttribute('aria-expanded','true');}
+      function shut(){drawer.classList.add('hidden');toggle.setAttribute('aria-expanded','false');toggle.focus();}
+      toggle.addEventListener('click',open);
+      if(close)close.addEventListener('click',shut);
+      if(backdrop)backdrop.addEventListener('click',shut);
+      document.addEventListener('keydown',function(e){if(e.key==='Escape'&&!drawer.classList.contains('hidden'))shut();});
+    })();
+    /* Wire up mobile theme toggle to main toggle */
+    (function(){
+      var main=document.getElementById('theme-toggle');
+      var mobile=document.getElementById('theme-toggle-mobile');
+      if(main&&mobile)mobile.addEventListener('click',function(){main.click();
+        var icon=mobile.querySelector('[data-theme-icon]');
+        var mainIcon=main.querySelector('[data-theme-icon]');
+        if(icon&&mainIcon)icon.textContent=mainIcon.textContent;
+        mobile.setAttribute('aria-label',main.getAttribute('aria-label'));
+      });
+    })();
+  </script>
 </body>
 </html>

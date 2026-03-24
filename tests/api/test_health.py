@@ -28,7 +28,9 @@ class TestHealthEndpoint:
             response = await c.get("/health")
 
         assert response.status_code == 200
-        assert response.json() == {"status": "ok"}
+        body = response.json()
+        assert body["status"] == "ok"
+        assert "build" in body
 
     async def test_health_not_under_api_v1(self):
         """Health endpoint must NOT be mounted under /api/v1/."""

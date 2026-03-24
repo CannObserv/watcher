@@ -1,8 +1,13 @@
+{# Inline flash — used in page templates via {% include %} #}
 {% if flash %}
-<div data-auto-dismiss class="mb-4 p-4 rounded-md
-  {% if flash.type == 'success' %}bg-green-50 text-green-800 border border-green-200
-  {% elif flash.type == 'error' %}bg-red-50 text-red-800 border border-red-200
-  {% else %}bg-blue-50 text-blue-800 border border-blue-200{% endif %}">
-  {{ flash.message }}
+<div class="flash flash-{{ flash.type or 'info' }} flex items-center justify-between mb-4" data-auto-dismiss role="alert">
+  <span>{{ flash.message }}</span>
+  <button type="button" class="ms-4 text-current opacity-60 hover:opacity-100" aria-label="Dismiss" onclick="this.parentElement.remove()">
+    <span aria-hidden="true">&times;</span>
+  </button>
 </div>
 {% endif %}
+
+{# OOB flash macro — call from HTMX partial responses:
+   {% include "partials/flash_oob.html" with context %}
+   Set flash_oob_level and flash_oob_message before including. #}

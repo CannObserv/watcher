@@ -1,20 +1,28 @@
 /**
  * watcher dashboard — custom JS
  */
-document.addEventListener("DOMContentLoaded", function () {
-  document.querySelectorAll("[data-auto-dismiss]").forEach(function (el) {
-    setTimeout(function () {
-      el.remove();
-    }, 5000);
-  });
-});
+(function () {
+  var DISMISS_MS = 5000;
 
-function toggleDiffView(mode) {
-  document.querySelectorAll("[data-diff-view]").forEach(function (el) {
-    el.classList.toggle("hidden", el.dataset.diffView !== mode);
+  function setupAutoDismiss(el) {
+    var timer;
+    function start() {
+      timer = setTimeout(function () { el.remove(); }, DISMISS_MS);
+    }
+    function pause() { clearTimeout(timer); }
+    el.addEventListener("mouseenter", pause);
+    el.addEventListener("mouseleave", start);
+    start();
+  }
+
+  /* Initial page load */
+  document.querySelectorAll("[data-auto-dismiss]").forEach(setupAutoDismiss);
+
+  /* HTMX-injected flash messages (OOB swaps into #flash-region) */
+  document.addEventListener("htmx:afterSettle", function (evt) {
+    var target = evt.detail.target;
+    if (target && target.id === "flash-region") {
+      target.querySelectorAll("[data-auto-dismiss]").forEach(setupAutoDismiss);
+    }
   });
-  document.querySelectorAll("[data-diff-toggle]").forEach(function (btn) {
-    btn.classList.toggle("bg-gray-200", btn.dataset.diffToggle === mode);
-    btn.classList.toggle("bg-white", btn.dataset.diffToggle !== mode);
-  });
-}
+})();

@@ -7,14 +7,16 @@ Type=simple
 User=exedev
 WorkingDirectory=/home/exedev/watcher
 
+RuntimeDirectory=watcher
+
 # Write current git SHA to a runtime env file before starting
-ExecStartPre=/bin/bash -c 'echo BUILD_ID=$(git -C /home/exedev/watcher rev-parse --short HEAD) > /run/watcher-build-id'
+ExecStartPre=/bin/bash -c 'echo BUILD_ID=$(git rev-parse --short HEAD) > /run/watcher/build-id'
 
 # Load BUILD_ID from the runtime file, then secrets/config from the repo env file
-EnvironmentFile=/run/watcher-build-id
+EnvironmentFile=/run/watcher/build-id
 EnvironmentFile=/home/exedev/watcher/env
 
-ExecStart=/home/exedev/.local/bin/uv run uvicorn src.api.main:app --host 0.0.0.0 --port 8000
+ExecStart=/usr/local/bin/uv run uvicorn src.api.main:app --host 0.0.0.0 --port 8000
 Restart=on-failure
 RestartSec=5
 

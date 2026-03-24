@@ -43,7 +43,8 @@ src/workers/pipeline.py  — Core check pipeline: hash, extract, diff, store sna
 src/workers/notify.py    — Notification dispatch: dispatch_change_notifications()
 src/core/registry.py     — ServiceRegistry: swappable fetcher, extractor, channel implementations
 tests/                 — Mirrors src/ structure
-docs/                  — Reference docs (COMMANDS, SKILLS)
+deploy/                — Systemd unit and deployment config
+docs/                  — Reference docs (COMMANDS, SKILLS, DEPLOYMENT.md at repo root)
 scripts/                 — Build scripts (Tailwind CSS)
 ```
 

@@ -35,7 +35,8 @@ src/core/config_poller.py  — Background polling: sync domain configs from DB i
 src/dashboard/           — Server-rendered dashboard (Jinja2 + HTMX + Tailwind)
 src/dashboard/routes.py  — Dashboard page and partial routes
 src/dashboard/context.py — Dashboard-specific DB query helpers
-src/dashboard/static/    — CSS, JS (vendored HTMX), compiled Tailwind
+src/dashboard/static/    — CSS, JS (vendored HTMX, dark-mode, htmx-a11y), compiled Tailwind
+src/dashboard/static/images/ — Brand assets (Cannabis Observer icon)
 src/dashboard/templates/ — Jinja2 templates (base, pages, partials)
 src/workers/           — Procrastinate task queue (check_watch, schedule_tick)
 src/workers/pipeline.py  — Core check pipeline: hash, extract, diff, store snapshots
@@ -75,6 +76,7 @@ Currently defined:
 - `PROCRASTINATE_DATABASE_URL` — (optional) libpq-style DSN for procrastinate; falls back to DATABASE_URL with driver prefix stripped
 - `TEST_DATABASE_URL` — PostgreSQL connection string for test database (used by pytest)
 - `WATCHER_DATA_DIR` — (optional) absolute path for snapshot/content storage; defaults to `/var/lib/watcher/data`
+- `BUILD_ID` — (optional) git SHA for static asset cache-busting; defaults to `"dev"`
 
 ## Common Commands
 
@@ -134,3 +136,19 @@ Entry points only: call `configure_logging()` once.
 - Test structure mirrors source (`src/foo.py` → `tests/test_foo.py`)
 - Explicit imports only
 - Small, focused functions
+
+## Style & UI Conventions
+
+Authoritative reference: `docs/STYLE.md`
+
+**Brand:** Cannabis Observer — `co-purple-600` (#6d4488) primary accent. Never use brand colors for semantic status (green/yellow/red/blue).
+
+**Dark Mode:** Tailwind `dark:` variants on every color utility. Class-based toggle (`<html class="dark">`). localStorage key: `watcher-color-scheme`.
+
+**Accessibility:** WCAG 2.1 AA. Skip link, ARIA landmarks, `focus-visible` rings, 44px touch targets, `aria-live` on HTMX swap targets, reduced motion. Wrap decorative emoji in `<span aria-hidden="true">`. No `title` attributes.
+
+**CSS:** Tailwind v4 with `@theme` in `input.css`. Use component classes (`.btn`, `.badge`, `.stat-card`, `.data-table`, `.form-input`, `.link`, `.filter-pill`, `.detail-grid`). CSS logical properties (`margin-inline-start` not `margin-left`).
+
+**HTMX:** OOB flash via `partials/flash_oob.html`. CSS `.htmx-request` for loading states. `_is_htmx(request)` checks `HX-Request` with `HX-Boosted` guard. All mutation routes provide non-HTMX redirect fallback.
+
+**Performance:** Pre-built Tailwind (no CDN). `BUILD_ID` env var for cache-busting (`?v={{ build_id }}`). `defer` on all non-critical scripts. System font stack.

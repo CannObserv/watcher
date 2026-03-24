@@ -14,6 +14,7 @@ from src.api.routes.notification_configs import router as notification_configs_r
 from src.api.routes.probe import router as probe_router
 from src.api.routes.temporal_profiles import router as profiles_router
 from src.api.routes.watches import router as watches_router
+from src.core.config_poller import start_config_poller
 from src.core.database import get_session_factory
 from src.core.logging import configure_logging, get_logger
 from src.core.models.domain import Domain
@@ -41,20 +42,21 @@ async def hydrate_rate_limiter(limiter: DomainRateLimiter) -> None:
 
 @asynccontextmanager
 async def lifespan(application: FastAPI):
-    """Hydrate rate limiter and start procrastinate worker at startup."""
+    """Hydrate rate limiter, start config poller, and start procrastinate worker."""
     from src.workers import get_app
 
-    await hydrate_rate_limiter(get_rate_limiter())
+    limiter = get_rate_limiter()
+    await hydrate_rate_limiter(limiter)
+
+    poller_task = await start_config_poller(limiter, get_session_factory())
 
     proc_app = get_app()
     await proc_app.open_async()
     worker_task = asyncio.create_task(proc_app.run_worker_async(install_signal_handlers=False))
     yield
+    poller_task.cancel()
     worker_task.cancel()
-    try:
-        await worker_task
-    except asyncio.CancelledError:
-        pass
+    await asyncio.gather(poller_task, worker_task, return_exceptions=True)
     await proc_app.close_async()
 
 

@@ -55,6 +55,9 @@ async def start_config_poller(
         last_poll = datetime.now(UTC)
         while True:
             await asyncio.sleep(interval)
-            last_poll = await poll_domain_configs(limiter, session_factory, last_poll)
+            try:
+                last_poll = await poll_domain_configs(limiter, session_factory, last_poll)
+            except Exception:
+                logger.warning("config poller unexpected error", exc_info=True)
 
     return asyncio.create_task(_poll_loop())

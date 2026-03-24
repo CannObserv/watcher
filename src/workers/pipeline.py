@@ -112,6 +112,7 @@ async def _maybe_decay_backoff(
         return False
 
     domain.current_interval = domain.min_interval
+    domain.last_request_at = None
     limiter.reset_domain_interval(domain_name, domain.min_interval)
     logger.info(
         "backoff decayed",

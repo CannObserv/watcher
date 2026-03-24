@@ -12,7 +12,7 @@ class DomainPatch(BaseModel):
 
     min_interval: float | None = Field(None, ge=0)
     max_concurrency: int | None = Field(None, ge=1)
-    decay_window: float | None = Field(None, ge=0)
+    decay_window: float | None = Field(None, ge=1)
 
 
 class DomainResponse(BaseModel):

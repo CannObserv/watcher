@@ -92,8 +92,11 @@ async def check_watch(watch_id: str, registry: ServiceRegistry | None = None) ->
         await session.commit()
 
         # Check if domain backoff should decay after successful fetch
-        await _maybe_decay_backoff(rate_limit_domain, get_rate_limiter(), session)
-        await session.commit()
+        _limiter = get_rate_limiter()
+        _state = _limiter._domains.get(rate_limit_domain)
+        if _state and _state.current_interval > _state.min_interval:
+            await _maybe_decay_backoff(rate_limit_domain, _limiter, session)
+            await session.commit()
 
         # Dispatch notifications in a separate transaction scope
         if result.get("change_id"):

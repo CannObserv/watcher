@@ -550,6 +550,7 @@ class TestMaybeDecayBackoff:
         decayed = await _maybe_decay_backoff("example.com", limiter, mock_session)
         assert decayed is True
         assert domain.current_interval == 1.0
+        assert domain.last_request_at is None
         assert limiter._domains["example.com"].current_interval == 1.0
 
     async def test_no_reset_when_within_decay_window(self):

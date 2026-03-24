@@ -8,7 +8,6 @@ from src.api.dependencies import get_db_session
 from src.api.routes.watches import delete_watch as api_delete_watch
 from src.core.models.audit_log import EventType, audit
 from src.core.models.watch import ContentType, Watch
-from src.core.rate_limiter import get_rate_limiter
 from src.core.storage import STORAGE_BASE_DIR, LocalStorage
 from src.dashboard import templates
 from src.dashboard.context import (
@@ -18,7 +17,6 @@ from src.dashboard.context import (
     get_dashboard_stats,
     get_domains_with_watch_counts,
     get_queue_health,
-    get_rate_limiter_state,
     get_recent_changes,
     get_watch_changes,
     get_watch_detail,
@@ -39,7 +37,7 @@ async def dashboard_home(
     stats = await get_dashboard_stats(session)
     changes = await get_recent_changes(session, limit=20)
     queue = await get_queue_health(session)
-    domains = get_rate_limiter_state(get_rate_limiter())
+    domains = await get_domains_with_watch_counts(session)
 
     context = {
         "request": request,
@@ -347,7 +345,7 @@ async def partial_system_health(
 ):
     """HTMX partial: queue health and rate limiter."""
     queue = await get_queue_health(session)
-    domains = get_rate_limiter_state(get_rate_limiter())
+    domains = await get_domains_with_watch_counts(session)
     return templates.TemplateResponse(
         "partials/system_health.html",
         {"request": request, "queue": queue, "domains": domains},
@@ -476,7 +474,7 @@ async def system_page(
 ):
     """System monitoring page -- queue health and rate limiter state."""
     queue = await get_queue_health(session)
-    domains = get_rate_limiter_state(get_rate_limiter())
+    domains = await get_domains_with_watch_counts(session)
     context = {
         "request": request,
         "active_page": "system",

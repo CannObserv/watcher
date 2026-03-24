@@ -31,6 +31,7 @@ src/core/simhash.py    — 64-bit SimHash fingerprinting
 src/core/storage.py    — StorageBackend protocol + LocalStorage
 src/core/scheduler.py  — Watch scheduling logic (interval parsing, due computation, temporal profile resolution)
 src/core/rate_limiter.py — Per-domain async rate limiting
+src/core/config_poller.py  — Background polling: sync domain configs from DB into rate limiter
 src/dashboard/           — Server-rendered dashboard (Jinja2 + HTMX + Tailwind)
 src/dashboard/routes.py  — Dashboard page and partial routes
 src/dashboard/context.py — Dashboard-specific DB query helpers

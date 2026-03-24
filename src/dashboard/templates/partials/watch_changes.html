@@ -1,22 +1,24 @@
 {% if changes %}
-<table class="data-table">
-  <thead>
-    <tr>
-      <th>Detected</th>
-      <th>Summary</th>
-    </tr>
-  </thead>
-  <tbody class="divide-y divide-gray-100">
-    {% for change in changes %}
-    <tr>
-      <td class="text-gray-500">{{ change.detected_at.strftime('%Y-%m-%d %H:%M UTC') }}</td>
-      <td>
-        <a href="/changes/{{ change.id }}" class="text-blue-600 hover:underline">{{ change.summary }}</a>
-      </td>
-    </tr>
-    {% endfor %}
-  </tbody>
-</table>
+<div class="overflow-x-auto">
+  <table class="data-table">
+    <thead>
+      <tr>
+        <th>Detected</th>
+        <th>Summary</th>
+      </tr>
+    </thead>
+    <tbody class="divide-y divide-gray-100 dark:divide-gray-700">
+      {% for change in changes %}
+      <tr class="hover:bg-gray-50 dark:hover:bg-gray-800">
+        <td class="text-gray-500 dark:text-gray-400">{{ change.detected_at.strftime('%Y-%m-%d %H:%M UTC') }}</td>
+        <td>
+          <a href="/changes/{{ change.id }}" class="link">{{ change.summary }}</a>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
 {% else %}
-<p class="text-gray-500 text-sm">No changes detected yet.</p>
+<p class="text-gray-500 dark:text-gray-400 text-sm">No changes detected yet.</p>
 {% endif %}

@@ -2,37 +2,37 @@
 {% block title %}Change — {{ watch_name }} — watcher{% endblock %}
 {% block content %}
 <div class="mb-6">
-  <h2 class="text-2xl font-bold text-gray-900">Change Detail</h2>
-  <p class="text-sm text-gray-500 mt-1">
-    <a href="/watches/{{ watch_id }}" class="text-blue-600 hover:underline">{{ watch_name }}</a>
+  <h2 class="text-2xl font-bold text-gray-900 dark:text-white">Change Detail</h2>
+  <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">
+    <a href="/watches/{{ watch_id }}" class="link">{{ watch_name }}</a>
     — detected {{ change.detected_at.strftime('%Y-%m-%d %H:%M UTC') }}
   </p>
 </div>
 
 <!-- Change metadata -->
 <div class="stat-card mb-6">
-  <h3 class="text-sm font-medium text-gray-500 mb-3">Change Summary</h3>
-  <div class="flex gap-4">
+  <h3 class="text-sm font-medium text-gray-500 dark:text-gray-400 mb-3">Change Summary</h3>
+  <div class="flex gap-4 flex-wrap">
     {% set meta = change.change_metadata or {} %}
     {% set added = meta.get('added', []) %}
     {% set modified = meta.get('modified', []) %}
     {% set removed = meta.get('removed', []) %}
     {% if added %}
     <div>
-      <span class="text-green-600 font-medium">{{ added | length }} added</span>
-      <ul class="text-xs text-gray-500 mt-1">{% for item in added %}<li>{{ item if item is string else item.label }}</li>{% endfor %}</ul>
+      <span class="text-green-600 dark:text-green-400 font-medium">{{ added | length }} added</span>
+      <ul class="text-xs text-gray-500 dark:text-gray-400 mt-1">{% for item in added %}<li>{{ item if item is string else item.label }}</li>{% endfor %}</ul>
     </div>
     {% endif %}
     {% if modified %}
     <div>
-      <span class="text-yellow-600 font-medium">{{ modified | length }} modified</span>
-      <ul class="text-xs text-gray-500 mt-1">{% for item in modified %}<li>{{ item if item is string else item.label }} {% if item is mapping and item.similarity is defined %}({{ "%.0f" | format(item.similarity * 100) }}% similar){% endif %}</li>{% endfor %}</ul>
+      <span class="text-yellow-600 dark:text-yellow-400 font-medium">{{ modified | length }} modified</span>
+      <ul class="text-xs text-gray-500 dark:text-gray-400 mt-1">{% for item in modified %}<li>{{ item if item is string else item.label }} {% if item is mapping and item.similarity is defined %}({{ "%.0f" | format(item.similarity * 100) }}% similar){% endif %}</li>{% endfor %}</ul>
     </div>
     {% endif %}
     {% if removed %}
     <div>
-      <span class="text-red-600 font-medium">{{ removed | length }} removed</span>
-      <ul class="text-xs text-gray-500 mt-1">{% for item in removed %}<li>{{ item if item is string else item.label }}</li>{% endfor %}</ul>
+      <span class="text-red-600 dark:text-red-400 font-medium">{{ removed | length }} removed</span>
+      <ul class="text-xs text-gray-500 dark:text-gray-400 mt-1">{% for item in removed %}<li>{{ item if item is string else item.label }}</li>{% endfor %}</ul>
     </div>
     {% endif %}
   </div>
@@ -41,29 +41,29 @@
 <!-- Snapshot info -->
 <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
   <div class="stat-card">
-    <h3 class="text-sm font-medium text-gray-500 mb-2">Previous Snapshot</h3>
+    <h3 class="text-sm font-medium text-gray-500 dark:text-gray-400 mb-2">Previous Snapshot</h3>
     {% if previous_snapshot %}
-    <dl class="space-y-1 text-sm">
-      <div class="flex justify-between"><dt class="text-gray-600">Fetched</dt><dd>{{ previous_snapshot.fetched_at.strftime('%Y-%m-%d %H:%M UTC') }}</dd></div>
-      <div class="flex justify-between"><dt class="text-gray-600">Chunks</dt><dd>{{ previous_snapshot.chunk_count }}</dd></div>
-      <div class="flex justify-between"><dt class="text-gray-600">Size</dt><dd>{{ previous_snapshot.text_bytes }} bytes</dd></div>
-      <div class="flex justify-between"><dt class="text-gray-600">Fetcher</dt><dd>{{ previous_snapshot.fetcher_used }}</dd></div>
+    <dl class="detail-grid">
+      <dt>Fetched</dt><dd>{{ previous_snapshot.fetched_at.strftime('%Y-%m-%d %H:%M UTC') }}</dd>
+      <dt>Chunks</dt><dd>{{ previous_snapshot.chunk_count }}</dd>
+      <dt>Size</dt><dd>{{ previous_snapshot.text_bytes }} bytes</dd>
+      <dt>Fetcher</dt><dd>{{ previous_snapshot.fetcher_used }}</dd>
     </dl>
     {% else %}
-    <p class="text-gray-500 text-sm">Not available</p>
+    <p class="text-gray-500 dark:text-gray-400 text-sm">Not available</p>
     {% endif %}
   </div>
   <div class="stat-card">
-    <h3 class="text-sm font-medium text-gray-500 mb-2">Current Snapshot</h3>
+    <h3 class="text-sm font-medium text-gray-500 dark:text-gray-400 mb-2">Current Snapshot</h3>
     {% if current_snapshot %}
-    <dl class="space-y-1 text-sm">
-      <div class="flex justify-between"><dt class="text-gray-600">Fetched</dt><dd>{{ current_snapshot.fetched_at.strftime('%Y-%m-%d %H:%M UTC') }}</dd></div>
-      <div class="flex justify-between"><dt class="text-gray-600">Chunks</dt><dd>{{ current_snapshot.chunk_count }}</dd></div>
-      <div class="flex justify-between"><dt class="text-gray-600">Size</dt><dd>{{ current_snapshot.text_bytes }} bytes</dd></div>
-      <div class="flex justify-between"><dt class="text-gray-600">Fetcher</dt><dd>{{ current_snapshot.fetcher_used }}</dd></div>
+    <dl class="detail-grid">
+      <dt>Fetched</dt><dd>{{ current_snapshot.fetched_at.strftime('%Y-%m-%d %H:%M UTC') }}</dd>
+      <dt>Chunks</dt><dd>{{ current_snapshot.chunk_count }}</dd>
+      <dt>Size</dt><dd>{{ current_snapshot.text_bytes }} bytes</dd>
+      <dt>Fetcher</dt><dd>{{ current_snapshot.fetcher_used }}</dd>
     </dl>
     {% else %}
-    <p class="text-gray-500 text-sm">Not available</p>
+    <p class="text-gray-500 dark:text-gray-400 text-sm">Not available</p>
     {% endif %}
   </div>
 </div>
@@ -71,7 +71,7 @@
 <!-- Current chunks -->
 {% if current_chunks %}
 <div class="mb-6">
-  <h3 class="text-lg font-semibold text-gray-900 mb-4">Current Chunks</h3>
+  <h3 class="text-lg font-semibold text-gray-900 dark:text-white mb-4">Current Chunks</h3>
   {% with chunks=current_chunks %}
   {% include "partials/chunk_table.html" %}
   {% endwith %}
@@ -80,22 +80,22 @@
 
 <!-- Diff view -->
 <div class="mb-6">
-  <div class="flex items-center gap-4 mb-4">
-    <h3 class="text-lg font-semibold text-gray-900">Diff</h3>
+  <div class="flex items-center gap-4 mb-4 flex-wrap">
+    <h3 class="text-lg font-semibold text-gray-900 dark:text-white">Diff</h3>
     <div class="flex gap-1">
       <button
         hx-get="/partials/diff/{{ change.id }}?mode=extracted"
         hx-target="#diff-content"
         hx-swap="innerHTML"
-        class="px-3 py-1 text-xs rounded-md bg-gray-200 hover:bg-gray-300">Extracted Text</button>
+        class="filter-pill">Extracted Text</button>
       <button
         hx-get="/partials/diff/{{ change.id }}?mode=raw"
         hx-target="#diff-content"
         hx-swap="innerHTML"
-        class="px-3 py-1 text-xs rounded-md bg-white border border-gray-200 hover:bg-gray-100">Raw Content</button>
+        class="filter-pill">Raw Content</button>
     </div>
   </div>
-  <div id="diff-content">
+  <div id="diff-content" aria-live="polite" aria-atomic="false">
     {% include "partials/diff_view.html" %}
   </div>
 </div>

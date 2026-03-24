@@ -11,8 +11,9 @@ Wire `BUILD_ID` env var to the current git commit SHA automatically at service s
 
 ### Systemd unit file (`deploy/watcher.service`)
 
-- `ExecStartPre` runs a bash one-liner: `git -C /home/exedev/watcher rev-parse --short HEAD` → writes `BUILD_ID=<sha>` to `/run/watcher-build-id`
-- `EnvironmentFile=/run/watcher-build-id` loads the SHA into the process environment
+- `RuntimeDirectory=watcher` ensures `/run/watcher/` is created with correct ownership
+- `ExecStartPre` runs a bash one-liner: `git rev-parse --short HEAD` → writes `BUILD_ID=<sha>` to `/run/watcher/build-id`
+- `EnvironmentFile=/run/watcher/build-id` loads the SHA into the process environment
 - Second `EnvironmentFile` loads secrets from `/home/exedev/watcher/env`
 - Main `ExecStart` launches uvicorn via `uv run`
 

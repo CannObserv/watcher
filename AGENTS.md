@@ -44,7 +44,7 @@ src/workers/notify.py    — Notification dispatch: dispatch_change_notification
 src/core/registry.py     — ServiceRegistry: swappable fetcher, extractor, channel implementations
 tests/                 — Mirrors src/ structure
 deploy/                — Systemd unit and deployment config
-docs/                  — Reference docs (COMMANDS, SKILLS, DEPLOYMENT.md at repo root)
+docs/                  — Reference docs (COMMANDS, SKILLS, DEPLOYMENT)
 scripts/                 — Build scripts (Tailwind CSS)
 ```
 

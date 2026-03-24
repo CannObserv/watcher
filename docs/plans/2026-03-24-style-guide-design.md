@@ -19,7 +19,7 @@ Adopt full Cannabis Observer brand:
 
 ### Color System
 
-Define in `tailwind.config.js` under `theme.extend.colors`:
+Define via `@theme` block in `input.css` (Tailwind v4 CSS-based config — no `tailwind.config.js`):
 
 | Token | Hex | Purpose |
 |---|---|---|
@@ -140,7 +140,7 @@ Full reskin of all existing pages and partials:
 - `pages/404.html` — brand styling
 - All partials — dark variants, brand colors, accessibility attributes
 - `input.css` — component classes, dark mode tokens, reduced motion
-- `tailwind.config.js` — brand colors, darkMode: 'class'
+- `input.css` `@theme` block — brand colors (Tailwind v4 CSS-based config, no `tailwind.config.js`)
 - `app.js` — dark mode toggle, HTMX aria-busy listeners, flash auto-dismiss
 - New: FOUC prevention script, flash macro, `_is_htmx()` helper
 - New: `BUILD_ID` env var reading + Jinja2 global

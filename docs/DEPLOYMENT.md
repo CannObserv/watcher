@@ -38,7 +38,7 @@ To pin a specific build ID, set it in the `env` file:
 echo 'BUILD_ID=abc1234' >> env
 ```
 
-The `env` file is loaded after `/run/watcher/build-id`, so values in `env` take precedence.
+The `env` file is loaded after `/run/watcher/build-id` (which uses the `-` prefix to be optional), so values in `env` take precedence.
 
 ### Fallback
 

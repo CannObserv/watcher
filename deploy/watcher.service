@@ -1,7 +1,6 @@
 [Unit]
 Description=Watcher — Cannabis Observer monitoring service
 After=network.target postgresql.service
-StartLimitIntervalSec=0
 
 [Service]
 Type=simple

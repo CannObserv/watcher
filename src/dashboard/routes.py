@@ -16,6 +16,7 @@ from src.dashboard.context import (
     get_audit_entries,
     get_change_detail,
     get_dashboard_stats,
+    get_domains_with_watch_counts,
     get_queue_health,
     get_rate_limiter_state,
     get_recent_changes,
@@ -290,6 +291,29 @@ async def watch_delete(
             return HTMLResponse(status_code=409, content=msg)
         raise
     return HTMLResponse(status_code=200, content="", headers={"HX-Redirect": "/watches"})
+
+
+@router.get("/domains")
+async def domains_page(
+    request: Request,
+    session: AsyncSession = Depends(get_db_session),
+):
+    """Domains rate limiter config page."""
+    domains = await get_domains_with_watch_counts(session)
+    context = {"request": request, "active_page": "domains", "domains": domains}
+    return templates.TemplateResponse("pages/domains.html", context)
+
+
+@router.get("/partials/domains-table")
+async def partial_domains_table(
+    request: Request,
+    session: AsyncSession = Depends(get_db_session),
+):
+    """HTMX partial: domains table with watch counts and backoff status."""
+    domains = await get_domains_with_watch_counts(session)
+    return templates.TemplateResponse(
+        "partials/domains_table.html", {"request": request, "domains": domains}
+    )
 
 
 @router.get("/partials/stats-cards")

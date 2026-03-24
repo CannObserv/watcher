@@ -3,12 +3,14 @@
 import pytest
 
 from src.core.models.change import Change
+from src.core.models.domain import Domain
 from src.core.models.snapshot import Snapshot, SnapshotChunk
-from src.core.models.watch import Watch
+from src.core.models.watch import ContentType, Watch
 from src.dashboard.context import (
     generate_diff,
     get_change_detail,
     get_dashboard_stats,
+    get_domains_with_watch_counts,
     get_queue_health,
     get_rate_limiter_state,
     get_recent_changes,
@@ -303,3 +305,46 @@ class TestGenerateDiff:
     def test_empty_both(self):
         result = generate_diff("", "")
         assert result["has_changes"] is False
+
+
+@pytest.mark.integration
+class TestGetDomainsWithWatchCounts:
+    async def test_empty_domains(self, db_session):
+        result = await get_domains_with_watch_counts(db_session)
+        assert result == []
+
+    async def test_domain_with_watches(self, db_session):
+        domain = Domain(name="example.com", min_interval=1.0, max_concurrency=2)
+        db_session.add(domain)
+        watch = Watch(
+            name="Test",
+            url="https://example.com",
+            content_type=ContentType.HTML,
+            effective_domain="example.com",
+        )
+        db_session.add(watch)
+        await db_session.flush()
+
+        result = await get_domains_with_watch_counts(db_session)
+        assert len(result) == 1
+        assert result[0]["name"] == "example.com"
+        assert result[0]["watch_count"] == 1
+        assert result[0]["in_backoff"] is False
+
+    async def test_domain_with_no_watches(self, db_session):
+        domain = Domain(name="orphan.com", min_interval=1.0, max_concurrency=2)
+        db_session.add(domain)
+        await db_session.flush()
+
+        result = await get_domains_with_watch_counts(db_session)
+        assert len(result) == 1
+        assert result[0]["watch_count"] == 0
+
+    async def test_domain_in_backoff(self, db_session):
+        domain = Domain(name="slow.com", min_interval=1.0, max_concurrency=2, current_interval=4.0)
+        db_session.add(domain)
+        await db_session.flush()
+
+        result = await get_domains_with_watch_counts(db_session)
+        assert result[0]["in_backoff"] is True
+        assert result[0]["current_interval"] == 4.0

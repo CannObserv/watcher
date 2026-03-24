@@ -1,0 +1,40 @@
+{% if domains %}
+<div class="overflow-x-auto">
+  <table class="data-table">
+    <thead>
+      <tr>
+        <th>Domain</th>
+        <th>Min Interval</th>
+        <th>Current Interval</th>
+        <th>Decay Window</th>
+        <th>Concurrency</th>
+        <th>Watches</th>
+        <th>Last 429</th>
+        <th>Status</th>
+      </tr>
+    </thead>
+    <tbody class="divide-y divide-gray-100">
+      {% for domain in domains %}
+      <tr class="{% if domain.in_backoff %}bg-red-50{% endif %}">
+        <td class="font-medium">{{ domain.name }}</td>
+        <td>{{ "%.1f"|format(domain.min_interval) }}s</td>
+        <td>{{ "%.1f"|format(domain.current_interval) }}s</td>
+        <td>{{ "%.0f"|format(domain.decay_window / 60) }}m</td>
+        <td>{{ domain.max_concurrency }}</td>
+        <td>{{ domain.watch_count }}</td>
+        <td>{{ domain.last_request_at.strftime("%Y-%m-%d %H:%M") if domain.last_request_at else "—" }}</td>
+        <td>
+          {% if domain.in_backoff %}
+          <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-800">Active</span>
+          {% else %}
+          <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">Normal</span>
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% else %}
+<p class="text-gray-500 text-sm">No domains configured yet.</p>
+{% endif %}

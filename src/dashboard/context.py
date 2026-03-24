@@ -10,6 +10,7 @@ from ulid import ULID
 
 from src.core.models.audit_log import AuditLog, EventType
 from src.core.models.change import Change
+from src.core.models.domain import Domain
 from src.core.models.notification_config import NotificationConfig
 from src.core.models.snapshot import Snapshot, SnapshotChunk
 from src.core.models.temporal_profile import TemporalProfile
@@ -320,3 +321,31 @@ async def get_watch_notifications(
         select(NotificationConfig).where(NotificationConfig.watch_id == watch_id)
     )
     return list(result.scalars().all())
+
+
+async def get_domains_with_watch_counts(session: AsyncSession) -> list[dict]:
+    """Fetch all domains with watch count per domain."""
+    stmt = (
+        select(
+            Domain,
+            func.count(Watch.id).label("watch_count"),
+        )
+        .outerjoin(Watch, Watch.effective_domain == Domain.name)
+        .group_by(Domain.id)
+        .order_by(Domain.name)
+    )
+    result = await session.execute(stmt)
+    rows = result.all()
+    return [
+        {
+            "name": domain.name,
+            "min_interval": domain.min_interval,
+            "current_interval": domain.current_interval,
+            "decay_window": domain.decay_window,
+            "max_concurrency": domain.max_concurrency,
+            "last_request_at": domain.last_request_at,
+            "in_backoff": domain.current_interval > domain.min_interval,
+            "watch_count": watch_count,
+        }
+        for domain, watch_count in rows
+    ]

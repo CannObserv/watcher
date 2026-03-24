@@ -23,7 +23,7 @@ All `<img>` tags for the icon carry `alt="" aria-hidden="true"` and explicit `wi
 | Token | Hex | Usage |
 |---|---|---|
 | `--color-co-purple-50` | `#f5f0f8` | Active nav background (light) |
-| `--color-co-purple-100` | `#ebe1f1` | — |
+| `--color-co-purple-100` | `#ebe1f1` | Link hover text (dark) |
 | `--color-co-purple-400` | `#a78bc4` | Active nav text (dark), focus rings (dark) |
 | `--color-co-purple-600` | `#6d4488` | Primary buttons, links, focus rings (light) |
 | `--color-co-purple-700` | `#5a3870` | Primary button hover |
@@ -268,7 +268,7 @@ Dialog overlay with focus trapping. Focus trap implementation deferred to #35.
 
 ## 9. HTMX Patterns
 
-- **Detection**: `_is_htmx(request)` in `src/dashboard/routes.py` — checks `HX-Request` header, excludes `HX-Boosted` (full-page navigations).
+- **Detection pattern**: When a route needs to distinguish HTMX partials from full-page requests, use `request.headers.get("HX-Request") and not request.headers.get("HX-Boosted")`. The `HX-Boosted` guard prevents boosted navigation from receiving bare fragments.
 - **OOB flash**: Set `flash_oob_level` and `flash_oob_message`, then `{% include "partials/flash_oob.html" %}`. Swaps into `#flash-region` via `hx-swap-oob="beforeend"`.
 - **Loading states**: `.htmx-request` class (auto-applied by htmx) sets `opacity: 0.6`, `cursor: wait`, `pointer-events: none` on the element and child buttons/inputs/selects.
 - **`aria-busy`**: `src/dashboard/static/js/htmx-a11y.js` sets `aria-busy="true"` on the swap target during `htmx:beforeRequest`, removes it on `htmx:afterSettle`.

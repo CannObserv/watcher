@@ -149,6 +149,6 @@ Authoritative reference: `docs/STYLE.md`
 
 **CSS:** Tailwind v4 with `@theme` in `input.css`. Use component classes (`.btn`, `.badge`, `.stat-card`, `.data-table`, `.form-input`, `.link`, `.filter-pill`, `.detail-grid`). CSS logical properties (`margin-inline-start` not `margin-left`).
 
-**HTMX:** OOB flash via `partials/flash_oob.html`. CSS `.htmx-request` for loading states. `_is_htmx(request)` checks `HX-Request` with `HX-Boosted` guard. All mutation routes provide non-HTMX redirect fallback.
+**HTMX:** OOB flash via `partials/flash_oob.html`. CSS `.htmx-request` for loading states. Detect HTMX via `HX-Request` header with `HX-Boosted` guard. All mutation routes provide non-HTMX redirect fallback.
 
 **Performance:** Pre-built Tailwind (no CDN). `BUILD_ID` env var for cache-busting (`?v={{ build_id }}`). `defer` on all non-critical scripts. System font stack.

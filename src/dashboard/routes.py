@@ -25,12 +25,6 @@ from src.dashboard.context import (
     get_watch_profiles,
 )
 
-
-def _is_htmx(request: Request) -> bool:
-    """Check if request is HTMX (but not boosted navigation)."""
-    return bool(request.headers.get("HX-Request") and not request.headers.get("HX-Boosted"))
-
-
 router = APIRouter(tags=["dashboard"])
 
 

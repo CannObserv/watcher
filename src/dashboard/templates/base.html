@@ -57,7 +57,7 @@
       <!-- Mobile drawer -->
       <div id="mobile-nav" class="fixed inset-0 z-40 hidden md:hidden" role="dialog" aria-modal="true" aria-label="Navigation menu">
         <div id="mobile-backdrop" class="absolute inset-0 bg-black/50"></div>
-        <nav class="absolute inset-y-0 left-0 w-65 bg-white dark:bg-gray-800 shadow-lg flex flex-col" aria-label="Main navigation">
+        <nav class="absolute inset-y-0 start-0 w-65 bg-white dark:bg-gray-800 shadow-lg flex flex-col" aria-label="Main navigation">
           <div class="p-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
             <div class="flex items-center gap-2">
               <img src="/static/images/cannabis_observer-icon-square.svg?v={{ build_id }}" alt="" width="28" height="28" aria-hidden="true">
@@ -87,12 +87,14 @@
         {% block content %}{% endblock %}
 
         <!-- Footer -->
-        <footer class="mt-12 pt-4 border-t border-gray-200 dark:border-gray-700 text-center text-xs text-gray-500 dark:text-gray-400">
-          A project of
-          <img src="/static/images/cannabis_observer-icon-square.svg?v={{ build_id }}" alt="" width="16" height="16" class="inline-block align-text-bottom" aria-hidden="true">
-          Cannabis Observer
-          <span aria-hidden="true">🌱🏛️🔍</span>
-          <div class="mt-1 text-gray-400 dark:text-gray-600">{{ build_id }}</div>
+        <footer class="mt-12 pt-4 border-t border-gray-200 dark:border-gray-700 flex flex-col items-center gap-1 text-xs text-gray-500 dark:text-gray-400">
+          <span>
+            A project of
+            <img src="/static/images/cannabis_observer-icon-square.svg?v={{ build_id }}" alt="" width="16" height="16" class="inline-block align-text-bottom" aria-hidden="true">
+            Cannabis Observer
+            <span aria-hidden="true">🌱🏛️🔍</span>
+          </span>
+          <span class="text-gray-400 dark:text-gray-600">{{ build_id }}</span>
         </footer>
       </main>
     </div>

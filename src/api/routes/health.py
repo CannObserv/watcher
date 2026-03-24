@@ -1,7 +1,5 @@
 """Health and readiness check endpoints."""
 
-import os
-
 from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse
 from sqlalchemy import text
@@ -9,8 +7,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.api.dependencies import get_db_session
-
-BUILD_ID = os.environ.get("BUILD_ID", "dev")
+from src.core.config import BUILD_ID
 
 router = APIRouter(tags=["health"])
 

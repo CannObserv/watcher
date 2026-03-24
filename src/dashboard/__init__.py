@@ -1,16 +1,15 @@
 """Dashboard — server-rendered UI for watcher."""
 
-import os
 from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from starlette.templating import Jinja2Templates
 
+from src.core.config import BUILD_ID
+
 STATIC_DIR = Path(__file__).parent / "static"
 TEMPLATE_DIR = Path(__file__).parent / "templates"
-
-BUILD_ID = os.environ.get("BUILD_ID", "dev")
 
 templates = Jinja2Templates(directory=str(TEMPLATE_DIR))
 templates.env.globals["build_id"] = BUILD_ID

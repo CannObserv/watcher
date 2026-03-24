@@ -1,4 +1,7 @@
 {# Inline flash — used in page templates via {% include %} #}
+{# flash.message is auto-escaped by Jinja2. Do not use |safe here.
+   If a route needs to pass pre-formatted HTML, escape DB values with
+   markupsafe.escape() before building the message string. #}
 {% if flash %}
 <div class="flash flash-{{ flash.type or 'info' }} flex items-center justify-between mb-4" data-auto-dismiss role="alert">
   <span>{{ flash.message }}</span>

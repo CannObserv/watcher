@@ -1,5 +1,6 @@
 """Dashboard — server-rendered UI for watcher."""
 
+import os
 from pathlib import Path
 
 from fastapi import FastAPI
@@ -9,7 +10,10 @@ from starlette.templating import Jinja2Templates
 STATIC_DIR = Path(__file__).parent / "static"
 TEMPLATE_DIR = Path(__file__).parent / "templates"
 
+BUILD_ID = os.environ.get("BUILD_ID", "dev")
+
 templates = Jinja2Templates(directory=str(TEMPLATE_DIR))
+templates.env.globals["build_id"] = BUILD_ID
 
 
 def register_dashboard(app: FastAPI) -> None:

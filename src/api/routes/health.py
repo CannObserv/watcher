@@ -1,5 +1,7 @@
 """Health and readiness check endpoints."""
 
+import os
+
 from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse
 from sqlalchemy import text
@@ -8,13 +10,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.api.dependencies import get_db_session
 
+BUILD_ID = os.environ.get("BUILD_ID", "dev")
+
 router = APIRouter(tags=["health"])
 
 
 @router.get("/health")
 async def health() -> dict:
     """Liveness probe — confirms the app process is running. No DB call."""
-    return {"status": "ok"}
+    return {"status": "ok", "build": BUILD_ID}
 
 
 @router.get("/ready")

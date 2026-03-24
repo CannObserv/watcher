@@ -25,6 +25,12 @@ from src.dashboard.context import (
     get_watch_profiles,
 )
 
+
+def _is_htmx(request: Request) -> bool:
+    """Check if request is HTMX (but not boosted navigation)."""
+    return bool(request.headers.get("HX-Request") and not request.headers.get("HX-Boosted"))
+
+
 router = APIRouter(tags=["dashboard"])
 
 
@@ -255,8 +261,8 @@ async def watch_deactivate(
     # Detail page targets #watch-status; list page targets #watch-{id} row
     hx_target = request.headers.get("HX-Target", "")
     if hx_target == "watch-status":
-        html = '<dt class="text-sm text-gray-600">Status</dt>'
-        html += '<dd class="text-sm font-medium text-gray-500">Inactive</dd>'
+        html = '<dt class="text-sm text-gray-600 dark:text-gray-400">Status</dt>'
+        html += '<dd class="text-sm font-medium text-gray-500 dark:text-gray-400">Inactive</dd>'
         return HTMLResponse(content=html)
     return templates.TemplateResponse(
         "partials/watch_row.html", {"request": request, "watch": watch}

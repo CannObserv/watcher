@@ -26,7 +26,10 @@ async def poll_domain_configs(
     now = datetime.now(UTC)
     try:
         async with session_factory() as session:
-            stmt = select(Domain).where(Domain.updated_at > last_poll)
+            stmt = select(Domain).where(
+                Domain.updated_at > last_poll,
+                Domain.archived_at.is_(None),
+            )
             result = await session.execute(stmt)
             domains = result.scalars().all()
         for d in domains:

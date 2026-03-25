@@ -51,6 +51,38 @@ async def test_poll_no_changes():
     assert new_poll > last_poll
 
 
+async def test_poll_excludes_archived_domains():
+    """Archived domains must not be synced into the rate limiter."""
+    limiter = DomainRateLimiter()
+    archived = Domain(
+        name="archived.com",
+        min_interval=1.0,
+        max_concurrency=1,
+        archived_at=datetime.now(UTC),
+    )
+
+    mock_result = MagicMock()
+    mock_result.scalars.return_value.all.return_value = [archived]
+
+    mock_session = AsyncMock()
+    mock_session.execute = AsyncMock(return_value=mock_result)
+    mock_session.__aenter__ = AsyncMock(return_value=mock_session)
+    mock_session.__aexit__ = AsyncMock(return_value=False)
+
+    mock_factory = MagicMock(return_value=mock_session)
+
+    last_poll = datetime.now(UTC) - timedelta(seconds=60)
+    await poll_domain_configs(limiter, mock_factory, last_poll)
+
+    # Because the DB filter is applied in SQL, the mock returns the archived
+    # domain anyway — this test instead verifies the WHERE clause is built
+    # with archived_at.is_(None) by inspecting the SQL statement sent.
+    call_args = mock_session.execute.call_args
+    stmt = call_args[0][0]
+    compiled = stmt.compile(compile_kwargs={"literal_binds": True})
+    assert "archived_at IS NULL" in str(compiled)
+
+
 async def test_poll_handles_db_error():
     limiter = DomainRateLimiter()
 

@@ -15,6 +15,7 @@ from src.dashboard.context import (
     get_audit_entries,
     get_change_detail,
     get_dashboard_stats,
+    get_domains_total_count,
     get_domains_with_watch_counts,
     get_queue_health,
     get_recent_changes,
@@ -294,23 +295,65 @@ async def watch_delete(
 @router.get("/domains")
 async def domains_page(
     request: Request,
+    q: str | None = None,
+    status: str | None = "active",
+    page: int = 1,
+    page_size: int = 25,
     session: AsyncSession = Depends(get_db_session),
 ):
-    """Domains rate limiter config page."""
-    domains = await get_domains_with_watch_counts(session)
-    context = {"request": request, "active_page": "domains", "domains": domains}
+    """Domains list page with search, filter, and pagination."""
+    domains = await get_domains_with_watch_counts(
+        session,
+        search=q,
+        status=status,
+        page=page,
+        page_size=page_size,
+    )
+    total_count = await get_domains_total_count(session, search=q, status=status)
+    context = {
+        "request": request,
+        "active_page": "domains",
+        "domains": domains,
+        "search": q,
+        "status": status,
+        "page": page,
+        "page_size": page_size,
+        "total_count": total_count,
+        "base_url": "/partials/domains-table",
+        "extra_params": {k: v for k, v in {"q": q, "status": status}.items() if v},
+    }
     return templates.TemplateResponse("pages/domains.html", context)
 
 
 @router.get("/partials/domains-table")
 async def partial_domains_table(
     request: Request,
+    q: str | None = None,
+    status: str | None = "active",
+    page: int = 1,
+    page_size: int = 25,
     session: AsyncSession = Depends(get_db_session),
 ):
-    """HTMX partial: domains table with watch counts and backoff status."""
-    domains = await get_domains_with_watch_counts(session)
+    """HTMX partial: domains table with search, filter, and pagination."""
+    domains = await get_domains_with_watch_counts(
+        session,
+        search=q,
+        status=status,
+        page=page,
+        page_size=page_size,
+    )
+    total_count = await get_domains_total_count(session, search=q, status=status)
     return templates.TemplateResponse(
-        "partials/domains_table.html", {"request": request, "domains": domains}
+        "partials/domains_table.html",
+        {
+            "request": request,
+            "domains": domains,
+            "page": page,
+            "page_size": page_size,
+            "total_count": total_count,
+            "base_url": "/partials/domains-table",
+            "extra_params": {k: v for k, v in {"q": q, "status": status}.items() if v},
+        },
     )
 
 

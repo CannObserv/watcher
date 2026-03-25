@@ -1,40 +1,43 @@
-{% if domains %}
 <div class="overflow-x-auto">
   <table class="data-table">
     <thead>
       <tr>
         <th>Domain</th>
-        <th>Min Interval</th>
-        <th>Current Interval</th>
-        <th>Decay Window</th>
-        <th>Concurrency</th>
-        <th>Watches</th>
-        <th>Last 429</th>
         <th>Status</th>
+        <th>Watches</th>
+        <th>Last Checked</th>
+        <th><span class="sr-only">Actions</span></th>
       </tr>
     </thead>
     <tbody class="divide-y divide-gray-100 dark:divide-gray-700">
+      {% if domains %}
       {% for domain in domains %}
-      <tr class="{% if domain.in_backoff %}bg-red-50 dark:bg-red-900/20 hover:bg-red-100 dark:hover:bg-red-900/30{% else %}hover:bg-gray-50 dark:hover:bg-gray-800{% endif %}">
+      <tr class="{% if domain.status == 'archived' %}opacity-60{% elif domain.in_backoff %}bg-red-50 dark:bg-red-900/20 hover:bg-red-100 dark:hover:bg-red-900/30{% else %}hover:bg-gray-50 dark:hover:bg-gray-800{% endif %}">
         <td class="font-medium text-gray-900 dark:text-white">{{ domain.name }}</td>
-        <td>{{ "%.1f"|format(domain.min_interval) }}s</td>
-        <td>{{ "%.1f"|format(domain.current_interval) }}s</td>
-        <td>{{ "%.0f"|format(domain.decay_window / 60) }}m</td>
-        <td>{{ domain.max_concurrency }}</td>
-        <td>{{ domain.watch_count }}</td>
-        <td>{{ domain.last_request_at.strftime("%Y-%m-%d %H:%M") if domain.last_request_at else "—" }}</td>
         <td>
-          {% if domain.in_backoff %}
+          {% if domain.status == "archived" %}
+          <span class="badge badge-inactive">Archived</span>
+          {% elif domain.status == "backoff" %}
           <span class="badge badge-warning">Backoff</span>
           {% else %}
-          <span class="badge badge-active">Normal</span>
+          <span class="badge badge-active">Active</span>
           {% endif %}
+        </td>
+        <td>{{ domain.watch_count }}</td>
+        <td>{{ domain.last_checked.strftime("%Y-%m-%d %H:%M") if domain.last_checked else "—" }}</td>
+        <td class="text-end">
+          <a href="/domains/{{ domain.name }}" class="btn btn-secondary py-1 px-3 text-sm min-h-[44px]">Edit</a>
         </td>
       </tr>
       {% endfor %}
+      {% else %}
+      <tr>
+        <td colspan="5" class="text-gray-500 dark:text-gray-400 text-sm">No domains found.</td>
+      </tr>
+      {% endif %}
     </tbody>
   </table>
 </div>
-{% else %}
-<p class="text-gray-500 dark:text-gray-400 text-sm">No domains configured yet.</p>
+{% if domains %}
+{% include "partials/pagination.html" %}
 {% endif %}

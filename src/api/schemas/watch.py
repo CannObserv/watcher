@@ -54,6 +54,8 @@ class WatchUpdate(BaseModel):
     fetch_config: dict | None = None
     schedule_config: dict | None = None
     is_active: bool | None = None
+    effective_url: str | None = None
+    effective_domain: str | None = Field(default=None, max_length=253)
 
     @field_validator("fetch_config")
     @classmethod

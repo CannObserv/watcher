@@ -528,3 +528,87 @@ class TestCreateWatchProbe:
         response = await client.patch(f"/api/v1/watches/{watch_id}", json={"name": "Updated"})
         assert response.status_code == 200
         assert response.json()["url"] == "https://example.com/p"  # unchanged
+
+
+class TestUpdateWatchEffectiveFields:
+    async def test_patch_effective_url(self, client):
+        resp = await client.post(
+            "/api/v1/watches",
+            json={"name": "W", "url": "https://example.com/p", "content_type": "html"},
+        )
+        watch_id = resp.json()["id"]
+        response = await client.patch(
+            f"/api/v1/watches/{watch_id}",
+            json={"effective_url": "https://example.com/resolved"},
+        )
+        assert response.status_code == 200
+        assert response.json()["effective_url"] == "https://example.com/resolved"
+
+    async def test_patch_effective_domain(self, client):
+        resp = await client.post(
+            "/api/v1/watches",
+            json={"name": "W", "url": "https://example.com/p", "content_type": "html"},
+        )
+        watch_id = resp.json()["id"]
+        response = await client.patch(
+            f"/api/v1/watches/{watch_id}",
+            json={"effective_domain": "cdn.example.com"},
+        )
+        assert response.status_code == 200
+        assert response.json()["effective_domain"] == "cdn.example.com"
+
+    async def test_patch_both_effective_fields(self, client):
+        resp = await client.post(
+            "/api/v1/watches",
+            json={"name": "W", "url": "https://example.com/p", "content_type": "html"},
+        )
+        watch_id = resp.json()["id"]
+        response = await client.patch(
+            f"/api/v1/watches/{watch_id}",
+            json={
+                "effective_url": "https://cdn.example.com/p",
+                "effective_domain": "cdn.example.com",
+            },
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert data["effective_url"] == "https://cdn.example.com/p"
+        assert data["effective_domain"] == "cdn.example.com"
+
+    async def test_patch_effective_url_null(self, client):
+        resp = await client.post(
+            "/api/v1/watches",
+            json={"name": "W", "url": "https://example.com/p", "content_type": "html"},
+        )
+        watch_id = resp.json()["id"]
+        response = await client.patch(
+            f"/api/v1/watches/{watch_id}",
+            json={"effective_url": None},
+        )
+        assert response.status_code == 200
+        assert response.json()["effective_url"] is None
+
+    async def test_patch_effective_domain_null(self, client):
+        resp = await client.post(
+            "/api/v1/watches",
+            json={"name": "W", "url": "https://example.com/p", "content_type": "html"},
+        )
+        watch_id = resp.json()["id"]
+        response = await client.patch(
+            f"/api/v1/watches/{watch_id}",
+            json={"effective_domain": None},
+        )
+        assert response.status_code == 200
+        assert response.json()["effective_domain"] is None
+
+    async def test_patch_effective_domain_too_long_returns_422(self, client):
+        resp = await client.post(
+            "/api/v1/watches",
+            json={"name": "W", "url": "https://example.com/p", "content_type": "html"},
+        )
+        watch_id = resp.json()["id"]
+        response = await client.patch(
+            f"/api/v1/watches/{watch_id}",
+            json={"effective_domain": "a" * 254},
+        )
+        assert response.status_code == 422

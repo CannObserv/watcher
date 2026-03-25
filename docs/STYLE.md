@@ -237,8 +237,24 @@ Two-column `dt`/`dd` grid: `minmax(140px, max-content) 1fr`.
 
 ```html
 <label class="form-label" for="url">URL</label>
-<input class="form-input" id="url" name="url" type="url">
+<input class="form-input" id="url" name="url" type="url"
+  aria-describedby="url-error">
+<p id="url-error" class="mt-1 text-xs text-red-600 dark:text-red-400" hidden></p>
 ```
+
+**Hint + error `aria-describedby` pattern:**
+
+```html
+<label class="form-label" for="interval">Check Interval</label>
+<input class="form-input" id="interval" name="interval"
+  aria-describedby="interval-hint interval-error">
+<p id="interval-hint" class="mt-1 text-xs text-gray-500 dark:text-gray-400">Format: 30s, 15m, 6h, 1d</p>
+<p id="interval-error" class="mt-1 text-xs text-red-600 dark:text-red-400" hidden></p>
+```
+
+- **ID convention**: `{field_name}-hint` for hints, `{field_name}-error` for validation errors.
+- `aria-describedby` references both IDs (space-separated); omit the hint ID when no hint text exists.
+- Error element is `hidden` by default; remove `hidden` and populate text when validation fails.
 
 ### Links
 
@@ -262,7 +278,7 @@ Top bar with result count + page-size `<select>` (options: 25, 50, 100, 250). St
 
 ### Modal (pattern — for future use)
 
-Dialog overlay with focus trapping. Focus trap implementation deferred to #35.
+Dialog overlay with focus trapping. Focus trap implementation deferred to #39.
 
 ---
 
@@ -293,6 +309,7 @@ Dialog overlay with focus trapping. Focus trap implementation deferred to #35.
 - **Decorative emoji**: Wrapped in `<span aria-hidden="true">`.
 - **Focus rings**: `focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-co-purple-600` (light) / `dark:focus-visible:outline-co-purple-400` (dark). Applied on `.btn`, `.form-input`, `.skip-link`.
 - **Icon-only buttons**: Must have `aria-label` (e.g., theme toggle, hamburger, close, dismiss).
+- **Contextual action buttons**: Table row action buttons include `aria-label` with the entity name for screen reader context (e.g., `aria-label="Deactivate {{ watch.name }}"`).
 - **HTMX live regions**: `#flash-region` has `aria-live="polite" aria-atomic="false"`. `aria-busy` auto-managed by `htmx-a11y.js`.
 - **Skip link**: `.skip-link` — first element in `<body>`, targets `#main-content`.
 - **Reduced motion**: Global `@media (prefers-reduced-motion: reduce)` forces `animation-duration` and `transition-duration` to `0.01ms`.

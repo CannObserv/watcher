@@ -123,3 +123,43 @@ class TestDomainArchiveFields:
         response = await client.patch("/api/v1/domains/notes-test.com", json={"notes": "test note"})
         data = response.json()
         assert data["notes"] == "test note"
+
+
+class TestArchiveDomain:
+    async def test_archive_sets_archived_at(self, client):
+        await client.patch("/api/v1/domains/arch.com", json={})
+        response = await client.post("/api/v1/domains/arch.com/archive")
+        assert response.status_code == 200
+        assert response.json()["archived_at"] is not None
+
+    async def test_archive_nonexistent_returns_404(self, client):
+        response = await client.post("/api/v1/domains/nope.com/archive")
+        assert response.status_code == 404
+
+    async def test_archive_already_archived_is_idempotent(self, client):
+        await client.patch("/api/v1/domains/idem.com", json={})
+        await client.post("/api/v1/domains/idem.com/archive")
+        response = await client.post("/api/v1/domains/idem.com/archive")
+        assert response.status_code == 200
+        assert response.json()["archived_at"] is not None
+
+
+class TestRestoreDomain:
+    async def test_restore_clears_archived_at(self, client):
+        await client.patch("/api/v1/domains/rest.com", json={})
+        await client.post("/api/v1/domains/rest.com/archive")
+        response = await client.post("/api/v1/domains/rest.com/restore")
+        assert response.status_code == 200
+        assert response.json()["archived_at"] is None
+
+    async def test_restore_nonexistent_returns_404(self, client):
+        response = await client.post("/api/v1/domains/nope.com/restore")
+        assert response.status_code == 404
+
+
+class TestDeleteDomainViaApi:
+    async def test_delete_domain_still_works_without_archive(self, client):
+        """API delete does NOT require archive — only the dashboard enforces that."""
+        await client.patch("/api/v1/domains/api-del.com", json={})
+        response = await client.delete("/api/v1/domains/api-del.com")
+        assert response.status_code == 204

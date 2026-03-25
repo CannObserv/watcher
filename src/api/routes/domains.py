@@ -1,5 +1,7 @@
 """Domain rate limiter config API endpoints."""
 
+from datetime import UTC, datetime
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
@@ -109,3 +111,24 @@ async def delete_domain(name: str, session: AsyncSession = Depends(get_db_sessio
 
     await session.delete(domain)
     await session.commit()
+
+
+@router.post("/{name}/archive", response_model=DomainResponse)
+async def archive_domain(name: str, session: AsyncSession = Depends(get_db_session)):
+    """Archive a domain — excludes it from rate-limiter sync."""
+    domain = await _get_domain_or_404(name, session)
+    if domain.archived_at is None:
+        domain.archived_at = datetime.now(UTC)
+    await session.commit()
+    await session.refresh(domain)
+    return domain
+
+
+@router.post("/{name}/restore", response_model=DomainResponse)
+async def restore_domain(name: str, session: AsyncSession = Depends(get_db_session)):
+    """Restore an archived domain."""
+    domain = await _get_domain_or_404(name, session)
+    domain.archived_at = None
+    await session.commit()
+    await session.refresh(domain)
+    return domain

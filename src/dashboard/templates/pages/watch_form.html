@@ -10,7 +10,6 @@
     <label for="name" class="form-label">Name</label>
     <input type="text" name="name" id="name" required
       value="{{ watch.name if watch else '' }}"
-      aria-describedby="name-error"
       class="form-input mt-1">
     <p id="name-error" class="mt-1 text-xs text-red-600 dark:text-red-400" hidden></p>
   </div>
@@ -19,7 +18,6 @@
     <label for="url" class="form-label">URL</label>
     <input type="url" name="url" id="url" required
       value="{{ watch.url if watch else '' }}"
-      aria-describedby="url-error"
       class="form-input mt-1">
     <p id="url-error" class="mt-1 text-xs text-red-600 dark:text-red-400" hidden></p>
   </div>
@@ -27,7 +25,6 @@
   <div>
     <label for="content_type" class="form-label">Content Type</label>
     <select name="content_type" id="content_type"
-      aria-describedby="content_type-error"
       class="form-input mt-1">
       {% for ct in content_types %}
       <option value="{{ ct.value }}" {% if watch and watch.content_type == ct.value %}selected{% endif %}>{{ ct.value | upper }}</option>
@@ -40,7 +37,7 @@
     <label for="interval" class="form-label">Check Interval</label>
     <input type="text" name="interval" id="interval" placeholder="1d"
       value="{{ watch.schedule_config.get('interval', '') if watch and watch.schedule_config else '' }}"
-      aria-describedby="interval-hint interval-error"
+      aria-describedby="interval-hint"
       class="form-input mt-1">
     <p id="interval-hint" class="mt-1 text-xs text-gray-500 dark:text-gray-400">Format: 30s, 15m, 6h, 1d</p>
     <p id="interval-error" class="mt-1 text-xs text-red-600 dark:text-red-400" hidden></p>

@@ -237,8 +237,7 @@ Two-column `dt`/`dd` grid: `minmax(140px, max-content) 1fr`.
 
 ```html
 <label class="form-label" for="url">URL</label>
-<input class="form-input" id="url" name="url" type="url"
-  aria-describedby="url-error">
+<input class="form-input" id="url" name="url" type="url">
 <p id="url-error" class="mt-1 text-xs text-red-600 dark:text-red-400" hidden></p>
 ```
 
@@ -247,13 +246,14 @@ Two-column `dt`/`dd` grid: `minmax(140px, max-content) 1fr`.
 ```html
 <label class="form-label" for="interval">Check Interval</label>
 <input class="form-input" id="interval" name="interval"
-  aria-describedby="interval-hint interval-error">
+  aria-describedby="interval-hint">
 <p id="interval-hint" class="mt-1 text-xs text-gray-500 dark:text-gray-400">Format: 30s, 15m, 6h, 1d</p>
 <p id="interval-error" class="mt-1 text-xs text-red-600 dark:text-red-400" hidden></p>
 ```
 
 - **ID convention**: `{field_name}-hint` for hints, `{field_name}-error` for validation errors.
-- `aria-describedby` references both IDs (space-separated); omit the hint ID when no hint text exists.
+- `aria-describedby` references hint IDs statically in the template. Omit `aria-describedby` entirely when no hint exists.
+- **Error wiring is dynamic**: validation JS adds the error ID to `aria-describedby` when showing the error, and removes it when clearing. This avoids screen readers announcing empty hidden elements.
 - Error element is `hidden` by default; remove `hidden` and populate text when validation fails.
 
 ### Links

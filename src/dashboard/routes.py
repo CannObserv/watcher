@@ -1,13 +1,18 @@
 """Dashboard page routes — server-rendered HTML via Jinja2 + HTMX."""
 
+from collections.abc import Awaitable, Callable
+
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.api.dependencies import get_db_session
+from src.api.dependencies import get_db_session, get_probe_fn
 from src.api.routes.watches import delete_watch as api_delete_watch
 from src.core.models.audit_log import EventType, audit
+from src.core.models.domain import Domain
 from src.core.models.watch import ContentType, Watch
+from src.core.probe import ProbeResult
 from src.core.storage import STORAGE_BASE_DIR, LocalStorage
 from src.dashboard import templates
 from src.dashboard.context import (
@@ -355,6 +360,62 @@ async def partial_domains_table(
             "extra_params": {k: v for k, v in {"q": q, "status": status}.items() if v},
         },
     )
+
+
+@router.get("/domains/new")
+async def domain_create_form(request: Request):
+    """Domain creation form."""
+    return templates.TemplateResponse(
+        "pages/domain_form.html",
+        {"request": request, "active_page": "domains", "flash": None, "url": ""},
+    )
+
+
+@router.post("/domains")
+async def domain_create_submit(
+    request: Request,
+    url: str = Form(""),
+    probe_fn: Callable[[str], Awaitable[ProbeResult]] = Depends(get_probe_fn),
+    session: AsyncSession = Depends(get_db_session),
+):
+    """Create domain by probing a URL to extract the effective domain."""
+    if not url.strip():
+        flash = {"type": "error", "message": "URL is required"}
+        return templates.TemplateResponse(
+            "pages/domain_form.html",
+            {"request": request, "active_page": "domains", "flash": flash, "url": url},
+        )
+
+    try:
+        result = await probe_fn(url.strip())
+    except Exception:
+        flash = {
+            "type": "error",
+            "message": "Could not reach URL. Check the address and try again.",
+        }
+        return templates.TemplateResponse(
+            "pages/domain_form.html",
+            {"request": request, "active_page": "domains", "flash": flash, "url": url},
+        )
+
+    domain_name = result.effective_domain
+    if not domain_name:
+        flash = {"type": "error", "message": "Could not extract domain from URL."}
+        return templates.TemplateResponse(
+            "pages/domain_form.html",
+            {"request": request, "active_page": "domains", "flash": flash, "url": url},
+        )
+
+    # Check if domain already exists
+    existing = await session.execute(select(Domain).where(Domain.name == domain_name))
+    if existing.scalar_one_or_none():
+        return RedirectResponse(url=f"/domains/{domain_name}", status_code=303)
+
+    domain = Domain(name=domain_name)
+    session.add(domain)
+    audit(session, EventType.DOMAIN_CREATED, domain_name=domain_name, source="dashboard")
+    await session.commit()
+    return RedirectResponse(url=f"/domains/{domain_name}", status_code=303)
 
 
 @router.get("/partials/stats-cards")

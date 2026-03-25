@@ -66,7 +66,12 @@ async def watches_page(
 ):
     """Watch list page."""
     watches = await get_watch_list(session, is_active=is_active)
-    context = {"request": request, "active_page": "watches", "watches": watches}
+    context = {
+        "request": request,
+        "active_page": "watches",
+        "watches": watches,
+        "is_active": is_active,
+    }
     return templates.TemplateResponse("pages/watches.html", context)
 
 

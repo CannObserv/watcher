@@ -338,3 +338,16 @@ class TestDomainsPage:
         """filter-pill class should not appear in domains page."""
         response = await client.get("/domains")
         assert b"filter-pill" not in response.content
+
+
+class TestWatchListFilters:
+    async def test_watches_page_has_segment_control(self, client):
+        response = await client.get("/watches")
+        body = response.content
+        assert b'role="radiogroup"' in body
+        assert b'name="is_active"' in body
+        assert b'type="radio"' in body
+
+    async def test_watches_page_no_filter_pill(self, client):
+        response = await client.get("/watches")
+        assert b"filter-pill" not in response.content

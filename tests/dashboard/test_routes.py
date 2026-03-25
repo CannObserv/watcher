@@ -310,3 +310,31 @@ class TestWatchDelete:
     async def test_delete_missing_watch_returns_404(self, client):
         response = await client.delete("/watches/not-a-ulid")
         assert response.status_code == 404
+
+
+class TestDomainsPage:
+    async def test_domains_page_returns_200(self, client):
+        response = await client.get("/domains")
+        assert response.status_code == 200
+        assert b"Domains" in response.content
+
+    async def test_domains_page_has_segment_control(self, client):
+        response = await client.get("/domains")
+        body = response.content
+        assert b'role="radiogroup"' in body
+        assert b'name="status"' in body
+        assert b'type="radio"' in body
+
+    async def test_domains_page_active_filter_checked(self, client):
+        """Default status is 'active', so the active radio should be checked."""
+        import re
+
+        response = await client.get("/domains")
+        body = response.text
+        # The "active" radio should have the checked attribute
+        assert re.search(r'value="active"\s+checked', body)
+
+    async def test_domains_page_no_filter_pill(self, client):
+        """filter-pill class should not appear in domains page."""
+        response = await client.get("/domains")
+        assert b"filter-pill" not in response.content

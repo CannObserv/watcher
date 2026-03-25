@@ -22,20 +22,24 @@
         hx-include="[name='status'],[name='page_size']"
         aria-label="Search domains by name">
     </div>
-    <div class="flex gap-1" role="group" aria-label="Filter by status">
-      {% for value, label in [("", "All"), ("active", "Active"), ("archived", "Archived"), ("backoff", "Backoff")] %}
-      <button
-        class="filter-pill {% if status == value or (not status and value == 'active') %}filter-pill-active{% endif %} min-h-[44px]"
-        name="status"
-        value="{{ value }}"
-        hx-get="/partials/domains-table"
-        hx-target="#domains-table-container"
-        hx-swap="innerHTML"
-        hx-include="[name='q'],[name='page_size']">
-        {{ label }}
-      </button>
-      {% endfor %}
-    </div>
+    <form method="get" action="/domains" class="flex gap-1">
+      <input type="hidden" name="q" value="{{ search or '' }}">
+      <fieldset class="segment-group" role="radiogroup" aria-label="Filter by status">
+        {% for value, label in [("", "All"), ("active", "Active"), ("archived", "Archived"), ("backoff", "Backoff")] %}
+        <label class="segment">
+          <input type="radio" name="status" value="{{ value }}"
+            {% if status == value %}checked{% endif %}
+            hx-get="/partials/domains-table"
+            hx-target="#domains-table-container"
+            hx-swap="innerHTML"
+            hx-trigger="change"
+            hx-include="[name='q'],[name='page_size']">
+          <span>{{ label }}</span>
+        </label>
+        {% endfor %}
+      </fieldset>
+      <noscript><button type="submit" class="btn btn-secondary">Apply</button></noscript>
+    </form>
   </div>
 </div>
 

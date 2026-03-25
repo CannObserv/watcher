@@ -110,3 +110,16 @@ class TestDeleteDomain:
         response = await client.delete("/api/v1/domains/example.com")
         assert response.status_code == 409
         assert "watches" in response.json()["detail"].lower()
+
+
+class TestDomainArchiveFields:
+    async def test_domain_response_includes_archived_at(self, client):
+        response = await client.patch("/api/v1/domains/archive-test.com", json={})
+        data = response.json()
+        assert "archived_at" in data
+        assert data["archived_at"] is None
+
+    async def test_domain_response_includes_notes(self, client):
+        response = await client.patch("/api/v1/domains/notes-test.com", json={"notes": "test note"})
+        data = response.json()
+        assert data["notes"] == "test note"

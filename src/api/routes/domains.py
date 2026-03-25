@@ -66,6 +66,7 @@ async def upsert_domain(
             max_concurrency=updates.get("max_concurrency", DEFAULT_MAX_CONCURRENCY),
             current_interval=min_iv,
             decay_window=updates.get("decay_window", DEFAULT_DECAY_WINDOW),
+            notes=updates.get("notes"),
         )
         session.add(domain)
         try:
@@ -82,6 +83,8 @@ async def upsert_domain(
             domain.max_concurrency = updates["max_concurrency"]
         if "decay_window" in updates:
             domain.decay_window = updates["decay_window"]
+        if "notes" in updates:
+            domain.notes = updates["notes"]
 
     await session.commit()
     await session.refresh(domain)

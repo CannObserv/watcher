@@ -1,0 +1,221 @@
+{% extends "base.html" %}
+{% block title %}{{ domain.name }} — watcher{% endblock %}
+{% block content %}
+<div class="mb-6">
+  <div class="flex items-center gap-3 flex-wrap">
+    <h2 class="text-2xl font-bold text-gray-900 dark:text-white">{{ domain.name }}</h2>
+    {% if domain.status == "archived" %}
+    <span class="badge badge-inactive">Archived</span>
+    {% elif domain.status == "backoff" %}
+    <span class="badge badge-warning">Backoff</span>
+    {% else %}
+    <span class="badge badge-active">Active</span>
+    {% endif %}
+  </div>
+</div>
+
+{% include "partials/flash.html" %}
+
+{# Details — inline-editable fields #}
+<section class="mb-8">
+  <h3 class="text-lg font-semibold text-gray-900 dark:text-white mb-4">Details</h3>
+  <div class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 divide-y divide-gray-200 dark:divide-gray-700">
+
+    {# min_interval #}
+    <div class="p-4" id="field-min_interval">
+      <form method="post" action="/domains/{{ domain.name }}" class="flex flex-col sm:flex-row sm:items-center gap-2">
+        <input type="hidden" name="field" value="min_interval">
+        <div class="flex-1">
+          <label for="min_interval" class="form-label mb-0">Min Interval</label>
+          <p class="text-xs text-gray-500 dark:text-gray-400">Minimum seconds between requests to this domain</p>
+        </div>
+        <div class="flex items-center gap-2">
+          <input type="number" name="value" id="min_interval" step="0.1" min="0.1"
+            value="{{ '%.1f'|format(domain.min_interval) }}"
+            class="form-input w-28 text-sm"
+            hx-post="/domains/{{ domain.name }}"
+            hx-target="#field-min_interval"
+            hx-swap="outerHTML"
+            hx-vals='{"field": "min_interval"}'
+            hx-trigger="change">
+          <span class="text-sm text-gray-500 dark:text-gray-400">seconds</span>
+          <noscript><button type="submit" class="btn btn-secondary py-1 px-2 text-sm">Save</button></noscript>
+        </div>
+      </form>
+    </div>
+
+    {# max_concurrency #}
+    <div class="p-4" id="field-max_concurrency">
+      <form method="post" action="/domains/{{ domain.name }}" class="flex flex-col sm:flex-row sm:items-center gap-2">
+        <input type="hidden" name="field" value="max_concurrency">
+        <div class="flex-1">
+          <label for="max_concurrency" class="form-label mb-0">Max Concurrency</label>
+          <p class="text-xs text-gray-500 dark:text-gray-400">Maximum simultaneous requests allowed</p>
+        </div>
+        <div class="flex items-center gap-2">
+          <input type="number" name="value" id="max_concurrency" min="1"
+            value="{{ domain.max_concurrency }}"
+            class="form-input w-28 text-sm"
+            hx-post="/domains/{{ domain.name }}"
+            hx-target="#field-max_concurrency"
+            hx-swap="outerHTML"
+            hx-vals='{"field": "max_concurrency"}'
+            hx-trigger="change">
+          <noscript><button type="submit" class="btn btn-secondary py-1 px-2 text-sm">Save</button></noscript>
+        </div>
+      </form>
+    </div>
+
+    {# decay_window #}
+    <div class="p-4" id="field-decay_window">
+      <form method="post" action="/domains/{{ domain.name }}" class="flex flex-col sm:flex-row sm:items-center gap-2">
+        <input type="hidden" name="field" value="decay_window">
+        <div class="flex-1">
+          <label for="decay_window" class="form-label mb-0">Decay Window</label>
+          <p class="text-xs text-gray-500 dark:text-gray-400">Seconds before backoff interval decays toward minimum</p>
+        </div>
+        <div class="flex items-center gap-2">
+          <input type="number" name="value" id="decay_window" step="1" min="1"
+            value="{{ '%.0f'|format(domain.decay_window) }}"
+            class="form-input w-28 text-sm"
+            hx-post="/domains/{{ domain.name }}"
+            hx-target="#field-decay_window"
+            hx-swap="outerHTML"
+            hx-vals='{"field": "decay_window"}'
+            hx-trigger="change">
+          <span class="text-sm text-gray-500 dark:text-gray-400">seconds</span>
+          <noscript><button type="submit" class="btn btn-secondary py-1 px-2 text-sm">Save</button></noscript>
+        </div>
+      </form>
+    </div>
+
+    {# notes #}
+    <div class="p-4" id="field-notes">
+      <form method="post" action="/domains/{{ domain.name }}" class="flex flex-col gap-2">
+        <input type="hidden" name="field" value="notes">
+        <label for="notes" class="form-label mb-0">Notes</label>
+        <textarea name="value" id="notes" rows="3"
+          class="form-input text-sm"
+          hx-post="/domains/{{ domain.name }}"
+          hx-target="#field-notes"
+          hx-swap="outerHTML"
+          hx-vals='{"field": "notes"}'
+          hx-trigger="change"
+          placeholder="Operator notes about this domain…">{{ domain.notes or '' }}</textarea>
+        <noscript><button type="submit" class="btn btn-secondary py-1 px-2 text-sm self-start">Save</button></noscript>
+      </form>
+    </div>
+  </div>
+</section>
+
+{# Watches section #}
+<section class="mb-8">
+  <h3 class="text-lg font-semibold text-gray-900 dark:text-white mb-4">
+    Watches ({{ watches|length }})
+  </h3>
+
+  {% if watches or watch_q or watch_status %}
+  <div class="flex flex-wrap gap-3 items-end mb-4">
+    <div class="flex-1 min-w-[200px]">
+      <label for="watch-search" class="sr-only">Search watches</label>
+      <input type="search" id="watch-search" name="watch_q"
+        placeholder="Search watches…"
+        value="{{ watch_q or '' }}"
+        class="form-input text-sm"
+        hx-get="/domains/{{ domain.name }}"
+        hx-target="#domain-watches"
+        hx-select="#domain-watches"
+        hx-swap="outerHTML"
+        hx-trigger="input changed delay:300ms, search"
+        hx-include="[name='watch_status']"
+        aria-label="Search watches by name">
+    </div>
+    <div class="flex gap-1" role="group" aria-label="Filter watches by status">
+      {% for value, label in [("", "All"), ("active", "Active"), ("inactive", "Inactive")] %}
+      <button
+        class="filter-pill {% if watch_status == value or (not watch_status and value == '') %}filter-pill-active{% endif %} min-h-[44px]"
+        name="watch_status"
+        value="{{ value }}"
+        hx-get="/domains/{{ domain.name }}"
+        hx-target="#domain-watches"
+        hx-select="#domain-watches"
+        hx-swap="outerHTML"
+        hx-include="[name='watch_q']">
+        {{ label }}
+      </button>
+      {% endfor %}
+    </div>
+  </div>
+  {% endif %}
+
+  <div id="domain-watches">
+    {% include "partials/domain_watches_table.html" %}
+  </div>
+</section>
+
+{# Metadata #}
+<p class="text-xs text-gray-400 dark:text-gray-500 mb-8">
+  Metadata · ID: {{ domain.id }} · Created: {{ domain.created_at.strftime("%Y-%m-%d") }} · Updated: {{ domain.updated_at.strftime("%Y-%m-%d") }}
+</p>
+
+{# Danger Zone #}
+<section class="border border-red-200 dark:border-red-800 rounded-lg p-6">
+  <h3 class="text-lg font-semibold text-red-600 dark:text-red-400 mb-4">Danger Zone</h3>
+  <div id="danger-zone-error"></div>
+
+  {% if domain.archived_at is none %}
+  <div class="flex items-center justify-between">
+    <div>
+      <p class="text-sm font-medium text-gray-900 dark:text-white">Archive this domain</p>
+      <p class="text-xs text-gray-500 dark:text-gray-400">Excludes from rate-limiter sync. Can be restored.</p>
+    </div>
+    <button
+      hx-post="/domains/{{ domain.name }}/archive"
+      hx-confirm="Archive {{ domain.name }}? It will be excluded from rate limiting."
+      class="btn btn-danger-outline min-h-[44px]">
+      Archive
+    </button>
+  </div>
+  {% else %}
+  <div class="space-y-4">
+    <div class="flex items-center justify-between">
+      <div>
+        <p class="text-sm font-medium text-gray-900 dark:text-white">Restore this domain</p>
+        <p class="text-xs text-gray-500 dark:text-gray-400">Re-enable rate-limiter sync.</p>
+      </div>
+      <button
+        hx-post="/domains/{{ domain.name }}/restore"
+        class="btn btn-secondary min-h-[44px]">
+        Restore
+      </button>
+    </div>
+    <hr class="border-red-200 dark:border-red-800">
+    <div class="flex items-center justify-between">
+      <div>
+        <p class="text-sm font-medium text-gray-900 dark:text-white">Delete this domain</p>
+        <p class="text-xs text-gray-500 dark:text-gray-400">
+          {% if watches|length > 0 %}
+          Cannot delete — {{ watches|length }} watch{{ 'es' if watches|length != 1 }} still reference this domain.
+          {% else %}
+          Permanently remove this domain. This cannot be undone.
+          {% endif %}
+        </p>
+      </div>
+      <button
+        {% if watches|length == 0 %}
+        hx-post="/domains/{{ domain.name }}/delete"
+        hx-target="#danger-zone-error"
+        hx-swap="innerHTML"
+        hx-confirm="Permanently delete {{ domain.name }}? This cannot be undone."
+        class="btn btn-danger min-h-[44px]"
+        {% else %}
+        disabled
+        class="btn btn-danger min-h-[44px] opacity-50 cursor-not-allowed"
+        {% endif %}>
+        Delete
+      </button>
+    </div>
+  </div>
+  {% endif %}
+</section>
+{% endblock %}

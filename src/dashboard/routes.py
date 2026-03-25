@@ -1,6 +1,7 @@
 """Dashboard page routes — server-rendered HTML via Jinja2 + HTMX."""
 
 from collections.abc import Awaitable, Callable
+from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
@@ -20,6 +21,7 @@ from src.dashboard.context import (
     get_audit_entries,
     get_change_detail,
     get_dashboard_stats,
+    get_domain_watches,
     get_domains_total_count,
     get_domains_with_watch_counts,
     get_queue_health,
@@ -416,6 +418,162 @@ async def domain_create_submit(
     audit(session, EventType.DOMAIN_CREATED, domain_name=domain_name, source="dashboard")
     await session.commit()
     return RedirectResponse(url=f"/domains/{domain_name}", status_code=303)
+
+
+@router.post("/domains/{name}/archive")
+async def domain_archive(
+    request: Request,
+    name: str,
+    session: AsyncSession = Depends(get_db_session),
+):
+    """Archive a domain from the dashboard."""
+    result = await session.execute(select(Domain).where(Domain.name == name))
+    domain = result.scalar_one_or_none()
+    if not domain:
+        return templates.TemplateResponse("pages/404.html", {"request": request}, status_code=404)
+
+    if domain.archived_at is None:
+        domain.archived_at = datetime.now(UTC)
+        audit(session, EventType.DOMAIN_ARCHIVED, domain_name=name, source="dashboard")
+        await session.commit()
+
+    return RedirectResponse(url=f"/domains/{name}", status_code=303)
+
+
+@router.post("/domains/{name}/restore")
+async def domain_restore(
+    request: Request,
+    name: str,
+    session: AsyncSession = Depends(get_db_session),
+):
+    """Restore an archived domain from the dashboard."""
+    result = await session.execute(select(Domain).where(Domain.name == name))
+    domain = result.scalar_one_or_none()
+    if not domain:
+        return templates.TemplateResponse("pages/404.html", {"request": request}, status_code=404)
+
+    domain.archived_at = None
+    audit(session, EventType.DOMAIN_RESTORED, domain_name=name, source="dashboard")
+    await session.commit()
+
+    return RedirectResponse(url=f"/domains/{name}", status_code=303)
+
+
+@router.post("/domains/{name}/delete")
+async def domain_delete(
+    request: Request,
+    name: str,
+    session: AsyncSession = Depends(get_db_session),
+):
+    """Hard-delete an archived domain with no watches."""
+    result = await session.execute(select(Domain).where(Domain.name == name))
+    domain = result.scalar_one_or_none()
+    if not domain:
+        return templates.TemplateResponse("pages/404.html", {"request": request}, status_code=404)
+
+    if domain.archived_at is None:
+        raise HTTPException(status_code=409, detail="Archive the domain before deleting it")
+
+    watch_result = await session.execute(
+        select(Watch).where(Watch.effective_domain == name).limit(1)
+    )
+    if watch_result.scalar_one_or_none():
+        raise HTTPException(
+            status_code=409,
+            detail=f"Cannot delete: watches still reference domain '{name}'",
+        )
+
+    audit(session, EventType.DOMAIN_DELETED, domain_name=name, source="dashboard")
+    await session.delete(domain)
+    await session.commit()
+
+    return RedirectResponse(url="/domains", status_code=303)
+
+
+EDITABLE_DOMAIN_FIELDS = {"min_interval", "max_concurrency", "decay_window", "notes"}
+DOMAIN_FIELD_TYPES: dict[str, type] = {
+    "min_interval": float,
+    "max_concurrency": int,
+    "decay_window": float,
+    "notes": str,
+}
+
+
+@router.post("/domains/{name}")
+async def domain_inline_update(
+    request: Request,
+    name: str,
+    field: str = Form(""),
+    value: str = Form(""),
+    session: AsyncSession = Depends(get_db_session),
+):
+    """Update a single domain field (inline edit from detail view)."""
+    if field not in EDITABLE_DOMAIN_FIELDS:
+        raise HTTPException(status_code=400, detail=f"Field '{field}' is not editable")
+
+    result = await session.execute(select(Domain).where(Domain.name == name))
+    domain = result.scalar_one_or_none()
+    if not domain:
+        raise HTTPException(status_code=404, detail="Domain not found")
+
+    cast_fn = DOMAIN_FIELD_TYPES[field]
+    try:
+        typed_value: str | int | float = cast_fn(value) if field != "notes" else value
+    except (ValueError, TypeError):
+        raise HTTPException(status_code=400, detail=f"Invalid value for {field}")
+
+    setattr(domain, field, typed_value)
+    audit(session, EventType.DOMAIN_UPDATED, domain_name=name, field=field, source="dashboard")
+    await session.commit()
+    await session.refresh(domain)
+
+    watches = await get_domain_watches(session, name)
+    return templates.TemplateResponse(
+        "pages/domain_detail.html",
+        {
+            "request": request,
+            "active_page": "domains",
+            "domain": domain,
+            "watches": watches,
+            "watch_q": None,
+            "watch_status": None,
+            "flash": None,
+        },
+    )
+
+
+@router.get("/domains/{name}")
+async def domain_detail_page(
+    request: Request,
+    name: str,
+    watch_q: str | None = None,
+    watch_status: str | None = None,
+    session: AsyncSession = Depends(get_db_session),
+):
+    """Domain detail page with config, watches, and danger zone."""
+    result = await session.execute(select(Domain).where(Domain.name == name))
+    domain = result.scalar_one_or_none()
+    if not domain:
+        return templates.TemplateResponse("pages/404.html", {"request": request}, status_code=404)
+
+    is_active = None
+    if watch_status == "active":
+        is_active = True
+    elif watch_status == "inactive":
+        is_active = False
+
+    watches = await get_domain_watches(session, name, search=watch_q, is_active=is_active)
+
+    context = {
+        "request": request,
+        "active_page": "domains",
+        "domain": domain,
+        "watches": watches,
+        "watch_q": watch_q,
+        "watch_status": watch_status,
+        "flash": None,
+    }
+    return templates.TemplateResponse("pages/domain_detail.html", context)
 
 
 @router.get("/partials/stats-cards")

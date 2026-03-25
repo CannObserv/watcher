@@ -1,5 +1,7 @@
 """Integration tests for domain dashboard routes."""
 
+from datetime import UTC, datetime
+
 import pytest
 
 from src.core.models.domain import Domain
@@ -85,3 +87,160 @@ class TestDomainCreate:
         )
         assert response.status_code == 303
         assert "existing.com" in response.headers["location"]
+
+
+class TestDomainDetail:
+    async def test_detail_page_returns_200(self, client, db_session):
+        db_session.add(Domain(name="detail.com"))
+        await db_session.flush()
+        response = await client.get("/domains/detail.com")
+        assert response.status_code == 200
+        assert b"detail.com" in response.content
+
+    async def test_detail_page_404_nonexistent(self, client):
+        response = await client.get("/domains/nonexistent.com")
+        assert response.status_code == 404
+
+    async def test_detail_page_shows_config_fields(self, client, db_session):
+        db_session.add(Domain(name="config.com", min_interval=3.5, max_concurrency=5))
+        await db_session.flush()
+        response = await client.get("/domains/config.com")
+        assert b"3.5" in response.content
+        assert b"Minimum seconds between requests" in response.content
+
+    async def test_detail_page_shows_notes(self, client, db_session):
+        db_session.add(Domain(name="noted.com", notes="Important note"))
+        await db_session.flush()
+        response = await client.get("/domains/noted.com")
+        assert b"Important note" in response.content
+
+    async def test_detail_page_shows_watches_section(self, client, db_session):
+        from src.core.models.watch import Watch
+
+        db_session.add(Domain(name="watched.com"))
+        db_session.add(
+            Watch(
+                name="My Watch",
+                url="https://watched.com/page",
+                content_type="html",
+                effective_domain="watched.com",
+            )
+        )
+        await db_session.flush()
+        response = await client.get("/domains/watched.com")
+        assert b"Watches" in response.content
+        assert b"My Watch" in response.content
+
+    async def test_detail_page_shows_metadata(self, client, db_session):
+        db_session.add(Domain(name="meta.com"))
+        await db_session.flush()
+        response = await client.get("/domains/meta.com")
+        assert b"Metadata" in response.content
+
+    async def test_detail_page_shows_danger_zone(self, client, db_session):
+        db_session.add(Domain(name="danger.com"))
+        await db_session.flush()
+        response = await client.get("/domains/danger.com")
+        assert b"Danger Zone" in response.content
+        assert b"Archive" in response.content
+
+
+class TestDomainInlineUpdate:
+    async def test_update_min_interval(self, client, db_session):
+        db_session.add(Domain(name="update.com"))
+        await db_session.flush()
+        response = await client.post(
+            "/domains/update.com",
+            data={"field": "min_interval", "value": "5.0"},
+        )
+        assert response.status_code == 200
+
+    async def test_update_notes(self, client, db_session):
+        db_session.add(Domain(name="notes-update.com"))
+        await db_session.flush()
+        response = await client.post(
+            "/domains/notes-update.com",
+            data={"field": "notes", "value": "Updated note"},
+        )
+        assert response.status_code == 200
+        assert b"Updated note" in response.content
+
+    async def test_update_invalid_field_returns_400(self, client, db_session):
+        db_session.add(Domain(name="bad-field.com"))
+        await db_session.flush()
+        response = await client.post(
+            "/domains/bad-field.com",
+            data={"field": "name", "value": "hacked"},
+        )
+        assert response.status_code == 400
+
+    async def test_update_nonexistent_returns_404(self, client):
+        response = await client.post(
+            "/domains/nope.com",
+            data={"field": "min_interval", "value": "5.0"},
+        )
+        assert response.status_code == 404
+
+    async def test_update_non_htmx_redirects(self, client, db_session):
+        db_session.add(Domain(name="redirect.com"))
+        await db_session.flush()
+        response = await client.post(
+            "/domains/redirect.com",
+            data={"field": "min_interval", "value": "5.0"},
+            follow_redirects=False,
+        )
+        assert response.status_code in (200, 303)
+
+
+class TestDomainArchive:
+    async def test_archive_domain(self, client, db_session):
+        db_session.add(Domain(name="to-archive.com"))
+        await db_session.flush()
+        response = await client.post("/domains/to-archive.com/archive", follow_redirects=False)
+        assert response.status_code == 303
+
+    async def test_archive_nonexistent_returns_404(self, client):
+        response = await client.post("/domains/nope.com/archive")
+        assert response.status_code == 404
+
+
+class TestDomainRestore:
+    async def test_restore_domain(self, client, db_session):
+        db_session.add(Domain(name="to-restore.com", archived_at=datetime.now(UTC)))
+        await db_session.flush()
+        response = await client.post("/domains/to-restore.com/restore", follow_redirects=False)
+        assert response.status_code == 303
+
+
+class TestDomainDelete:
+    async def test_delete_archived_domain(self, client, db_session):
+        db_session.add(Domain(name="to-delete.com", archived_at=datetime.now(UTC)))
+        await db_session.flush()
+        response = await client.post("/domains/to-delete.com/delete", follow_redirects=False)
+        assert response.status_code == 303
+
+    async def test_delete_active_domain_returns_409(self, client, db_session):
+        db_session.add(Domain(name="no-delete.com"))
+        await db_session.flush()
+        response = await client.post("/domains/no-delete.com/delete")
+        assert response.status_code == 409
+
+    async def test_delete_domain_with_watches_returns_409(self, client, db_session):
+        from src.core.models.watch import Watch
+
+        db_session.add(Domain(name="busy-del.com", archived_at=datetime.now(UTC)))
+        db_session.add(
+            Watch(
+                name="W",
+                url="https://busy-del.com/p",
+                content_type="html",
+                effective_domain="busy-del.com",
+            )
+        )
+        await db_session.flush()
+        response = await client.post("/domains/busy-del.com/delete")
+        assert response.status_code == 409
+
+    async def test_delete_nonexistent_returns_404(self, client):
+        response = await client.post("/domains/nope.com/delete")
+        assert response.status_code == 404

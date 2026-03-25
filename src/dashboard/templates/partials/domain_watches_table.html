@@ -1,0 +1,30 @@
+{% if watches %}
+<div class="overflow-x-auto">
+  <table class="data-table">
+    <thead>
+      <tr>
+        <th>Name</th>
+        <th>Status</th>
+        <th>Last Checked</th>
+      </tr>
+    </thead>
+    <tbody class="divide-y divide-gray-100 dark:divide-gray-700">
+      {% for watch in watches %}
+      <tr class="hover:bg-gray-50 dark:hover:bg-gray-800">
+        <td class="font-medium text-gray-900 dark:text-white">
+          <a href="/watches/{{ watch.id }}" class="link">{{ watch.name }}</a>
+        </td>
+        <td>
+          <span class="badge {% if watch.is_active %}badge-active{% else %}badge-inactive{% endif %}">
+            {{ "Active" if watch.is_active else "Inactive" }}
+          </span>
+        </td>
+        <td>{{ watch.last_checked_at.strftime("%Y-%m-%d %H:%M") if watch.last_checked_at else "—" }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% else %}
+<p class="text-gray-500 dark:text-gray-400 text-sm">No watches using this domain.</p>
+{% endif %}

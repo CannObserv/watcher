@@ -112,7 +112,8 @@ All interactive elements enforce 44px minimum height:
 
 - `.btn`: `min-h-[44px]`
 - `.nav-link`: `min-h-[44px]`
-- `.filter-pill`: `min-h-[44px]`
+- `.segment span`: `min-h-[44px]`
+- `.chip span`: `min-h-[44px]`
 - `.form-input`: `min-h-[44px]`
 - Mobile hamburger/close: `min-h-[44px] min-w-[44px]`
 
@@ -166,11 +167,60 @@ Sticky header with `z-10`, `box-shadow` separator. `th` is uppercase, `text-xs`,
 <button class="btn btn-danger-outline">Delete</button>
 ```
 
-### Filter pill
+### Segmented control (single-select filter)
+
+Radio-based control for mutually exclusive filter options (e.g., status). Renders as a connected bar with `input:checked + span` for pure-CSS active state.
 
 ```html
-<a href="?status=active" class="filter-pill">Active</a>
+<form method="get" action="/target">
+  <fieldset class="segment-group" role="radiogroup" aria-label="Filter by status">
+    <label class="segment">
+      <input type="radio" name="status" value="" checked>
+      <span>All</span>
+    </label>
+    <label class="segment">
+      <input type="radio" name="status" value="active">
+      <span>Active</span>
+    </label>
+  </fieldset>
+  <noscript><button type="submit" class="btn btn-secondary">Apply</button></noscript>
+</form>
 ```
+
+| State | Appearance |
+|---|---|
+| Inactive | Transparent bg, gray text |
+| Active (`input:checked + span`) | `co-purple-600` bg, white text |
+| Hover (inactive) | Light gray bg |
+| Focus-visible | Purple outline ring |
+
+Used in: domains list, watches list, domain detail watches, change detail diff toggle.
+
+### Chip group (multi-select filter)
+
+Checkbox-based control for toggling multiple filter options (e.g., event types). Renders as separate pills with gaps.
+
+```html
+<form method="get" action="/target">
+  <fieldset class="chip-group" aria-label="Filter by event type">
+    <legend class="sr-only">Event types</legend>
+    <label class="chip">
+      <input type="checkbox" name="event_type" value="watch.created" checked>
+      <span>watch.created</span>
+    </label>
+  </fieldset>
+  <noscript><button type="submit" class="btn btn-secondary">Apply</button></noscript>
+</form>
+```
+
+| State | Appearance |
+|---|---|
+| Inactive | Transparent bg, gray text, gray border, fully rounded |
+| Active (`input:checked + span`) | Light purple tint, purple border, purple text |
+| Hover (inactive) | Light gray bg |
+| Focus-visible | Purple outline ring |
+
+Used in: audit log.
 
 ### Badges
 

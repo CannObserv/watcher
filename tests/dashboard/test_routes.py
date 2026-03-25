@@ -351,3 +351,45 @@ class TestWatchListFilters:
     async def test_watches_page_no_filter_pill(self, client):
         response = await client.get("/watches")
         assert b"filter-pill" not in response.content
+
+
+class TestDomainDetailFilters:
+    async def _create_domain(self, client):
+        """Create a domain via dashboard probe route and return the name."""
+        response = await client.post(
+            "/domains",
+            data={"url": "https://example.com/page"},
+            follow_redirects=False,
+        )
+        # redirect location is /domains/<name>
+        location = response.headers["location"]
+        return location.rstrip("/").split("/")[-1]
+
+    async def test_domain_detail_has_segment_control(self, client):
+        name = await self._create_domain(client)
+        # Create a watch so the filter section appears
+        await client.post(
+            "/api/v1/watches",
+            json={
+                "name": "Domain Filter Watch",
+                "url": f"https://{name}/page",
+                "content_type": "html",
+            },
+        )
+        response = await client.get(f"/domains/{name}")
+        body = response.content
+        assert b'role="radiogroup"' in body
+        assert b'name="watch_status"' in body
+
+    async def test_domain_detail_no_filter_pill(self, client):
+        name = await self._create_domain(client)
+        await client.post(
+            "/api/v1/watches",
+            json={
+                "name": "Domain Filter Watch 2",
+                "url": f"https://{name}/page2",
+                "content_type": "html",
+            },
+        )
+        response = await client.get(f"/domains/{name}")
+        assert b"filter-pill" not in response.content

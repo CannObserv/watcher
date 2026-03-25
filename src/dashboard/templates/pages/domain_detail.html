@@ -85,21 +85,24 @@
         hx-include="[name='watch_status']"
         aria-label="Search watches by name">
     </div>
-    <div class="flex gap-1" role="group" aria-label="Filter watches by status">
-      {% for value, label in [("", "All"), ("active", "Active"), ("inactive", "Inactive")] %}
-      <button
-        class="filter-pill {% if watch_status == value or (not watch_status and value == '') %}filter-pill-active{% endif %} min-h-[44px]"
-        name="watch_status"
-        value="{{ value }}"
-        hx-get="/domains/{{ domain.name }}"
-        hx-target="#domain-watches"
-        hx-select="#domain-watches"
-        hx-swap="outerHTML"
-        hx-include="[name='watch_q']">
-        {{ label }}
-      </button>
-      {% endfor %}
-    </div>
+    <form method="get" action="/domains/{{ domain.name }}" class="flex gap-1">
+      <fieldset class="segment-group" role="radiogroup" aria-label="Filter watches by status">
+        {% for value, label in [("", "All"), ("active", "Active"), ("inactive", "Inactive")] %}
+        <label class="segment">
+          <input type="radio" name="watch_status" value="{{ value }}"
+            {% if watch_status == value or (not watch_status and value == '') %}checked{% endif %}
+            hx-get="/domains/{{ domain.name }}"
+            hx-target="#domain-watches"
+            hx-select="#domain-watches"
+            hx-swap="outerHTML"
+            hx-trigger="change"
+            hx-include="[name='watch_q']">
+          <span>{{ label }}</span>
+        </label>
+        {% endfor %}
+      </fieldset>
+      <noscript><button type="submit" class="btn btn-secondary">Apply</button></noscript>
+    </form>
   </div>
   {% endif %}
 

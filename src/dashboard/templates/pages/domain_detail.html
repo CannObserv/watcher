@@ -27,11 +27,12 @@
         <input type="hidden" name="field" value="min_interval">
         <div class="flex-1">
           <label for="min_interval" class="form-label mb-0">Min Interval</label>
-          <p class="text-xs text-gray-500 dark:text-gray-400">Minimum seconds between requests to this domain</p>
+          <p class="text-xs text-gray-500 dark:text-gray-400" id="min_interval-hint">Minimum seconds between requests to this domain</p>
         </div>
         <div class="flex items-center gap-2">
           <input type="number" name="value" id="min_interval" step="0.1" min="0.1"
             value="{{ '%.1f'|format(domain.min_interval) }}"
+            aria-describedby="min_interval-hint"
             class="form-input w-28 text-sm"
             hx-post="/domains/{{ domain.name }}"
             hx-target="#field-min_interval"
@@ -50,11 +51,12 @@
         <input type="hidden" name="field" value="max_concurrency">
         <div class="flex-1">
           <label for="max_concurrency" class="form-label mb-0">Max Concurrency</label>
-          <p class="text-xs text-gray-500 dark:text-gray-400">Maximum simultaneous requests allowed</p>
+          <p class="text-xs text-gray-500 dark:text-gray-400" id="max_concurrency-hint">Maximum simultaneous requests allowed</p>
         </div>
         <div class="flex items-center gap-2">
           <input type="number" name="value" id="max_concurrency" min="1"
             value="{{ domain.max_concurrency }}"
+            aria-describedby="max_concurrency-hint"
             class="form-input w-28 text-sm"
             hx-post="/domains/{{ domain.name }}"
             hx-target="#field-max_concurrency"
@@ -72,11 +74,12 @@
         <input type="hidden" name="field" value="decay_window">
         <div class="flex-1">
           <label for="decay_window" class="form-label mb-0">Decay Window</label>
-          <p class="text-xs text-gray-500 dark:text-gray-400">Seconds before backoff interval decays toward minimum</p>
+          <p class="text-xs text-gray-500 dark:text-gray-400" id="decay_window-hint">Seconds before backoff interval decays toward minimum</p>
         </div>
         <div class="flex items-center gap-2">
           <input type="number" name="value" id="decay_window" step="1" min="1"
             value="{{ '%.0f'|format(domain.decay_window) }}"
+            aria-describedby="decay_window-hint"
             class="form-input w-28 text-sm"
             hx-post="/domains/{{ domain.name }}"
             hx-target="#field-decay_window"
@@ -169,12 +172,14 @@
       <p class="text-sm font-medium text-gray-900 dark:text-white">Archive this domain</p>
       <p class="text-xs text-gray-500 dark:text-gray-400">Excludes from rate-limiter sync. Can be restored.</p>
     </div>
-    <button
-      hx-post="/domains/{{ domain.name }}/archive"
-      hx-confirm="Archive {{ domain.name }}? It will be excluded from rate limiting."
-      class="btn btn-danger-outline min-h-[44px]">
-      Archive
-    </button>
+    <form method="post" action="/domains/{{ domain.name }}/archive">
+      <button type="submit"
+        hx-post="/domains/{{ domain.name }}/archive"
+        hx-confirm="Archive {{ domain.name }}? It will be excluded from rate limiting."
+        class="btn btn-danger-outline min-h-[44px]">
+        Archive
+      </button>
+    </form>
   </div>
   {% else %}
   <div class="space-y-4">
@@ -183,11 +188,13 @@
         <p class="text-sm font-medium text-gray-900 dark:text-white">Restore this domain</p>
         <p class="text-xs text-gray-500 dark:text-gray-400">Re-enable rate-limiter sync.</p>
       </div>
-      <button
-        hx-post="/domains/{{ domain.name }}/restore"
-        class="btn btn-secondary min-h-[44px]">
-        Restore
-      </button>
+      <form method="post" action="/domains/{{ domain.name }}/restore">
+        <button type="submit"
+          hx-post="/domains/{{ domain.name }}/restore"
+          class="btn btn-secondary min-h-[44px]">
+          Restore
+        </button>
+      </form>
     </div>
     <hr class="border-red-200 dark:border-red-800">
     <div class="flex items-center justify-between">
@@ -201,19 +208,23 @@
           {% endif %}
         </p>
       </div>
-      <button
-        {% if watches|length == 0 %}
-        hx-post="/domains/{{ domain.name }}/delete"
-        hx-target="#danger-zone-error"
-        hx-swap="innerHTML"
-        hx-confirm="Permanently delete {{ domain.name }}? This cannot be undone."
-        class="btn btn-danger min-h-[44px]"
-        {% else %}
-        disabled
-        class="btn btn-danger min-h-[44px] opacity-50 cursor-not-allowed"
-        {% endif %}>
+      {% if watches|length == 0 %}
+      <form method="post" action="/domains/{{ domain.name }}/delete">
+        <button type="submit"
+          hx-post="/domains/{{ domain.name }}/delete"
+          hx-target="#danger-zone-error"
+          hx-swap="innerHTML"
+          hx-confirm="Permanently delete {{ domain.name }}? This cannot be undone."
+          class="btn btn-danger min-h-[44px]">
+          Delete
+        </button>
+      </form>
+      {% else %}
+      <button disabled
+        class="btn btn-danger min-h-[44px] opacity-50 cursor-not-allowed">
         Delete
       </button>
+      {% endif %}
     </div>
   </div>
   {% endif %}

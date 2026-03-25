@@ -146,21 +146,23 @@ class TestDomainDetail:
 
 
 class TestDomainInlineUpdate:
-    async def test_update_min_interval(self, client, db_session):
+    async def test_update_min_interval_htmx(self, client, db_session):
         db_session.add(Domain(name="update.com"))
         await db_session.flush()
         response = await client.post(
             "/domains/update.com",
             data={"field": "min_interval", "value": "5.0"},
+            headers={"HX-Request": "true"},
         )
         assert response.status_code == 200
 
-    async def test_update_notes(self, client, db_session):
+    async def test_update_notes_htmx(self, client, db_session):
         db_session.add(Domain(name="notes-update.com"))
         await db_session.flush()
         response = await client.post(
             "/domains/notes-update.com",
             data={"field": "notes", "value": "Updated note"},
+            headers={"HX-Request": "true"},
         )
         assert response.status_code == 200
         assert b"Updated note" in response.content
@@ -189,7 +191,7 @@ class TestDomainInlineUpdate:
             data={"field": "min_interval", "value": "5.0"},
             follow_redirects=False,
         )
-        assert response.status_code in (200, 303)
+        assert response.status_code == 303
 
 
 class TestDomainArchive:

@@ -497,6 +497,44 @@ DOMAIN_FIELD_TYPES: dict[str, type] = {
     "decay_window": float,
     "notes": str,
 }
+DOMAIN_FIELD_META: dict[str, dict] = {
+    "min_interval": {
+        "label": "Min Interval",
+        "hint": "Minimum seconds between requests to this domain",
+        "type": "number",
+        "step": "0.1",
+        "min": "0.1",
+        "unit": "seconds",
+        "format": lambda v: f"{v:.1f}",
+    },
+    "max_concurrency": {
+        "label": "Max Concurrency",
+        "hint": "Maximum simultaneous requests allowed",
+        "type": "number",
+        "step": None,
+        "min": "1",
+        "unit": None,
+        "format": lambda v: str(v),
+    },
+    "decay_window": {
+        "label": "Decay Window",
+        "hint": "Seconds before backoff interval decays toward minimum",
+        "type": "number",
+        "step": "1",
+        "min": "1",
+        "unit": "seconds",
+        "format": lambda v: f"{v:.0f}",
+    },
+    "notes": {
+        "label": "Notes",
+        "hint": None,
+        "type": "textarea",
+        "step": None,
+        "min": None,
+        "unit": None,
+        "format": lambda v: v or "",
+    },
+}
 
 
 @router.post("/domains/{name}")
@@ -527,19 +565,24 @@ async def domain_inline_update(
     await session.commit()
     await session.refresh(domain)
 
-    watches = await get_domain_watches(session, name)
-    return templates.TemplateResponse(
-        "pages/domain_detail.html",
-        {
-            "request": request,
-            "active_page": "domains",
-            "domain": domain,
-            "watches": watches,
-            "watch_q": None,
-            "watch_status": None,
-            "flash": None,
-        },
-    )
+    if request.headers.get("HX-Request") == "true":
+        meta = DOMAIN_FIELD_META[field]
+        return templates.TemplateResponse(
+            "partials/domain_field.html",
+            {
+                "request": request,
+                "domain": domain,
+                "field_name": field,
+                "field_label": meta["label"],
+                "field_hint": meta["hint"],
+                "field_value": meta["format"](getattr(domain, field)),
+                "field_type": meta["type"],
+                "field_step": meta["step"],
+                "field_min": meta["min"],
+                "field_unit": meta["unit"],
+            },
+        )
+    return RedirectResponse(url=f"/domains/{name}", status_code=303)
 
 
 @router.get("/domains/{name}")

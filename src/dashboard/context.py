@@ -323,6 +323,26 @@ async def get_watch_notifications(
     return list(result.scalars().all())
 
 
+def _apply_domain_filters(stmt, *, search: str | None = None, status: str | None = None):
+    """Apply search and status filters to a domain query."""
+    if search:
+        escaped = search.replace("%", "\\%").replace("_", "\\_")
+        stmt = stmt.where(Domain.name.ilike(f"%{escaped}%"))
+    if status == "active":
+        stmt = stmt.where(
+            Domain.archived_at.is_(None),
+            Domain.current_interval <= Domain.min_interval,
+        )
+    elif status == "archived":
+        stmt = stmt.where(Domain.archived_at.isnot(None))
+    elif status == "backoff":
+        stmt = stmt.where(
+            Domain.archived_at.is_(None),
+            Domain.current_interval > Domain.min_interval,
+        )
+    return stmt
+
+
 async def get_domains_with_watch_counts(
     session: AsyncSession,
     *,
@@ -349,21 +369,7 @@ async def get_domains_with_watch_counts(
         .group_by(Domain.id)
     )
 
-    if search:
-        stmt = stmt.where(Domain.name.ilike(f"%{search}%"))
-
-    if status == "active":
-        stmt = stmt.where(
-            Domain.archived_at.is_(None),
-            Domain.current_interval <= Domain.min_interval,
-        )
-    elif status == "archived":
-        stmt = stmt.where(Domain.archived_at.isnot(None))
-    elif status == "backoff":
-        stmt = stmt.where(
-            Domain.archived_at.is_(None),
-            Domain.current_interval > Domain.min_interval,
-        )
+    stmt = _apply_domain_filters(stmt, search=search, status=status)
 
     stmt = stmt.order_by(Domain.name)
     if page_size is not None:
@@ -399,20 +405,7 @@ async def get_domains_total_count(
 ) -> int:
     """Count total domains matching search/filter (for pagination)."""
     stmt = select(func.count(Domain.id))
-    if search:
-        stmt = stmt.where(Domain.name.ilike(f"%{search}%"))
-    if status == "active":
-        stmt = stmt.where(
-            Domain.archived_at.is_(None),
-            Domain.current_interval <= Domain.min_interval,
-        )
-    elif status == "archived":
-        stmt = stmt.where(Domain.archived_at.isnot(None))
-    elif status == "backoff":
-        stmt = stmt.where(
-            Domain.archived_at.is_(None),
-            Domain.current_interval > Domain.min_interval,
-        )
+    stmt = _apply_domain_filters(stmt, search=search, status=status)
     result = await session.execute(stmt)
     return result.scalar_one()
 
@@ -427,7 +420,8 @@ async def get_domain_watches(
     """Fetch watches for a domain with optional name search and status filter."""
     stmt = select(Watch).where(Watch.effective_domain == domain_name)
     if search:
-        stmt = stmt.where(Watch.name.ilike(f"%{search}%"))
+        escaped = search.replace("%", "\\%").replace("_", "\\_")
+        stmt = stmt.where(Watch.name.ilike(f"%{escaped}%"))
     if is_active is not None:
         stmt = stmt.where(Watch.is_active == is_active)
     stmt = stmt.order_by(Watch.name)

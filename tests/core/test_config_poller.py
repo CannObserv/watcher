@@ -3,6 +3,8 @@
 from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock
 
+import pytest
+
 from src.core.config_poller import poll_domain_configs
 from src.core.models.domain import Domain
 from src.core.rate_limiter import DomainRateLimiter
@@ -81,6 +83,29 @@ async def test_poll_excludes_archived_domains():
     stmt = call_args[0][0]
     compiled = stmt.compile(compile_kwargs={"literal_binds": True})
     assert "archived_at IS NULL" in str(compiled)
+
+
+@pytest.mark.integration
+async def test_poll_excludes_archived_domains_integration(db_session):
+    """Archived domains must not appear in poll results."""
+    from sqlalchemy import select
+
+    active = Domain(name="active.com", min_interval=2.0)
+    archived = Domain(name="archived.com", min_interval=1.0, archived_at=datetime.now(UTC))
+    db_session.add_all([active, archived])
+    await db_session.flush()
+
+    last_poll = datetime(2020, 1, 1, tzinfo=UTC)
+    stmt = select(Domain).where(
+        Domain.updated_at > last_poll,
+        Domain.archived_at.is_(None),
+    )
+    result = await db_session.execute(stmt)
+    domains = result.scalars().all()
+
+    names = [d.name for d in domains]
+    assert "active.com" in names
+    assert "archived.com" not in names
 
 
 async def test_poll_handles_db_error():

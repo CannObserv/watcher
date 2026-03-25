@@ -310,6 +310,7 @@ Dialog overlay with focus trapping. Focus trap implementation deferred to #39.
 - **Focus rings**: `focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-co-purple-600` (light) / `dark:focus-visible:outline-co-purple-400` (dark). Applied on `.btn`, `.form-input`, `.skip-link`.
 - **Icon-only buttons**: Must have `aria-label` (e.g., theme toggle, hamburger, close, dismiss).
 - **Contextual action buttons**: Table row action buttons include `aria-label` with the entity name for screen reader context (e.g., `aria-label="Deactivate {{ watch.name }}"`).
+- **Table rows are not clickable**: Rows contain discrete `<a>` and `<button>` elements — no `tabindex="0"` or `role="link"` on `<tr>`. This avoids the nested interactive elements anti-pattern (buttons/links inside a link-role container). Keyboard users tab through the individual interactive elements within each row.
 - **HTMX live regions**: `#flash-region` has `aria-live="polite" aria-atomic="false"`. `aria-busy` auto-managed by `htmx-a11y.js`.
 - **Skip link**: `.skip-link` — first element in `<body>`, targets `#main-content`.
 - **Reduced motion**: Global `@media (prefers-reduced-motion: reduce)` forces `animation-duration` and `transition-duration` to `0.01ms`.

@@ -393,3 +393,16 @@ class TestDomainDetailFilters:
         )
         response = await client.get(f"/domains/{name}")
         assert b"filter-pill" not in response.content
+
+
+class TestAuditLogFilters:
+    async def test_audit_page_has_chip_group(self, client):
+        response = await client.get("/audit")
+        body = response.content
+        assert b'class="chip-group"' in body
+        assert b'type="checkbox"' in body
+        assert b'name="event_type"' in body
+
+    async def test_audit_page_no_filter_pill(self, client):
+        response = await client.get("/audit")
+        assert b"filter-pill" not in response.content

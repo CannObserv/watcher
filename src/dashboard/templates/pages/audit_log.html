@@ -3,15 +3,37 @@
 {% block content %}
 <h2 class="text-2xl font-bold text-gray-900 dark:text-white mb-6">Audit Log</h2>
 
-<div class="flex gap-2 mb-4 flex-wrap">
-  <button hx-get="/partials/audit-table" hx-target="#audit-table" class="filter-pill">All</button>
-  <button hx-get="/partials/audit-table?event_type=watch.created" hx-target="#audit-table" class="filter-pill">watch.created</button>
-  <button hx-get="/partials/audit-table?event_type=watch.updated" hx-target="#audit-table" class="filter-pill">watch.updated</button>
-  <button hx-get="/partials/audit-table?event_type=check.snapshot_created" hx-target="#audit-table" class="filter-pill">check.snapshot_created</button>
-  <button hx-get="/partials/audit-table?event_type=check.no_change" hx-target="#audit-table" class="filter-pill">check.no_change</button>
-  <button hx-get="/partials/audit-table?event_type=check.fetch_failed" hx-target="#audit-table" class="filter-pill">check.fetch_failed</button>
-  <button hx-get="/partials/audit-table?event_type=notification.dispatched" hx-target="#audit-table" class="filter-pill">notification.dispatched</button>
-</div>
+<form method="get" action="/audit" class="mb-4">
+  <fieldset class="chip-group" aria-label="Filter by event type">
+    <legend class="sr-only">Event types</legend>
+    {% for value, label in [
+      ("watch.created", "watch.created"),
+      ("watch.updated", "watch.updated"),
+      ("check.snapshot_created", "check.snapshot_created"),
+      ("check.no_change", "check.no_change"),
+      ("check.fetch_failed", "check.fetch_failed"),
+      ("notification.dispatched", "notification.dispatched"),
+    ] %}
+    <label class="chip">
+      <input type="checkbox" name="event_type" value="{{ value }}"
+        {% if event_type == value %}checked{% endif %}
+        hx-get="/partials/audit-table"
+        hx-target="#audit-table"
+        hx-swap="innerHTML"
+        hx-trigger="change"
+        hx-include=".chip-group input:checked">
+      <span>{{ label }}</span>
+    </label>
+    {% endfor %}
+  </fieldset>
+  {% if event_type %}
+  <a href="/audit" class="link text-sm inline-flex items-center min-h-[44px]"
+     hx-get="/partials/audit-table"
+     hx-target="#audit-table"
+     hx-swap="innerHTML">Clear filter</a>
+  {% endif %}
+  <noscript><button type="submit" class="btn btn-secondary">Apply</button></noscript>
+</form>
 
 <div id="audit-table" aria-live="polite" aria-atomic="false">
   {% include "partials/audit_table.html" %}

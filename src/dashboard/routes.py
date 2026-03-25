@@ -757,6 +757,7 @@ async def audit_log_page(
         "request": request,
         "active_page": "audit",
         "entries": entries,
+        "event_type": event_type,
     }
     return templates.TemplateResponse("pages/audit_log.html", context)
 

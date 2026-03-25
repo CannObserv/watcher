@@ -323,21 +323,57 @@ async def get_watch_notifications(
     return list(result.scalars().all())
 
 
-async def get_domains_with_watch_counts(session: AsyncSession) -> list[dict]:
-    """Fetch all domains with watch count per domain."""
+async def get_domains_with_watch_counts(
+    session: AsyncSession,
+    *,
+    search: str | None = None,
+    status: str | None = None,
+    page: int = 1,
+    page_size: int | None = None,
+) -> list[dict]:
+    """Fetch domains with watch count, last_checked, search, filter, and pagination.
+
+    Args:
+        search: Substring match on domain name.
+        status: Filter — "active", "archived", "backoff", or None (all).
+        page: 1-based page number (only used when page_size is set).
+        page_size: Results per page. None means no pagination (return all).
+    """
     stmt = (
         select(
             Domain,
             func.count(Watch.id).label("watch_count"),
+            func.max(Watch.last_checked_at).label("last_checked"),
         )
         .outerjoin(Watch, Watch.effective_domain == Domain.name)
         .group_by(Domain.id)
-        .order_by(Domain.name)
     )
+
+    if search:
+        stmt = stmt.where(Domain.name.ilike(f"%{search}%"))
+
+    if status == "active":
+        stmt = stmt.where(
+            Domain.archived_at.is_(None),
+            Domain.current_interval <= Domain.min_interval,
+        )
+    elif status == "archived":
+        stmt = stmt.where(Domain.archived_at.isnot(None))
+    elif status == "backoff":
+        stmt = stmt.where(
+            Domain.archived_at.is_(None),
+            Domain.current_interval > Domain.min_interval,
+        )
+
+    stmt = stmt.order_by(Domain.name)
+    if page_size is not None:
+        stmt = stmt.offset((page - 1) * page_size).limit(page_size)
+
     result = await session.execute(stmt)
     rows = result.all()
     return [
         {
+            "id": str(domain.id),
             "name": domain.name,
             "min_interval": domain.min_interval,
             "current_interval": domain.current_interval,
@@ -346,6 +382,54 @@ async def get_domains_with_watch_counts(session: AsyncSession) -> list[dict]:
             "last_request_at": domain.last_request_at,
             "in_backoff": domain.current_interval > domain.min_interval,
             "watch_count": watch_count,
+            "last_checked": last_checked,
+            "status": domain.status,
+            "notes": domain.notes,
+            "archived_at": domain.archived_at,
         }
-        for domain, watch_count in rows
+        for domain, watch_count, last_checked in rows
     ]
+
+
+async def get_domains_total_count(
+    session: AsyncSession,
+    *,
+    search: str | None = None,
+    status: str | None = None,
+) -> int:
+    """Count total domains matching search/filter (for pagination)."""
+    stmt = select(func.count(Domain.id))
+    if search:
+        stmt = stmt.where(Domain.name.ilike(f"%{search}%"))
+    if status == "active":
+        stmt = stmt.where(
+            Domain.archived_at.is_(None),
+            Domain.current_interval <= Domain.min_interval,
+        )
+    elif status == "archived":
+        stmt = stmt.where(Domain.archived_at.isnot(None))
+    elif status == "backoff":
+        stmt = stmt.where(
+            Domain.archived_at.is_(None),
+            Domain.current_interval > Domain.min_interval,
+        )
+    result = await session.execute(stmt)
+    return result.scalar_one()
+
+
+async def get_domain_watches(
+    session: AsyncSession,
+    domain_name: str,
+    *,
+    search: str | None = None,
+    is_active: bool | None = None,
+) -> list[Watch]:
+    """Fetch watches for a domain with optional name search and status filter."""
+    stmt = select(Watch).where(Watch.effective_domain == domain_name)
+    if search:
+        stmt = stmt.where(Watch.name.ilike(f"%{search}%"))
+    if is_active is not None:
+        stmt = stmt.where(Watch.is_active == is_active)
+    stmt = stmt.order_by(Watch.name)
+    result = await session.execute(stmt)
+    return list(result.scalars().all())

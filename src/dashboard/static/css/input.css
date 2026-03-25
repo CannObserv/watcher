@@ -59,6 +59,50 @@
     @apply text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700;
   }
 
+  /* -- Segmented control (single-select radio group) -- */
+  .segment-group {
+    @apply inline-flex border border-gray-300 dark:border-gray-600 rounded-lg overflow-hidden;
+  }
+  .segment {
+    @apply relative cursor-pointer;
+  }
+  .segment input {
+    @apply absolute opacity-0 w-0 h-0;
+  }
+  .segment span {
+    @apply inline-flex items-center px-4 py-2 text-sm font-medium min-h-[44px] border-e border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-400 bg-transparent hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors select-none;
+  }
+  .segment:last-child span {
+    @apply border-e-0;
+  }
+  .segment input:checked + span {
+    @apply bg-co-purple-600 text-white dark:bg-co-purple-600 dark:text-white;
+  }
+  .segment input:focus-visible + span {
+    @apply outline-2 outline-offset-2 outline-co-purple-600 dark:outline-co-purple-400;
+  }
+
+  /* -- Chip group (multi-select checkbox group) -- */
+  .chip-group {
+    @apply flex flex-wrap gap-2;
+  }
+  .chip {
+    @apply relative cursor-pointer;
+  }
+  .chip input {
+    @apply absolute opacity-0 w-0 h-0;
+  }
+  .chip span {
+    @apply inline-flex items-center px-3 py-1 text-sm rounded-full min-h-[44px] border border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-400 bg-transparent hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors select-none;
+  }
+  .chip input:checked + span {
+    @apply bg-co-purple-100 dark:bg-co-purple-800 border-co-purple-600 dark:border-co-purple-400 text-co-purple-700 dark:text-co-purple-400;
+    /* Design spec called for co-purple-900/300; using 800/400 since those are the closest tokens defined in @theme */
+  }
+  .chip input:focus-visible + span {
+    @apply outline-2 outline-offset-2 outline-co-purple-600 dark:outline-co-purple-400;
+  }
+
   /* -- Filter pill -- */
   .filter-pill {
     @apply px-3 py-1 text-sm rounded-md bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-300 dark:hover:bg-gray-600 min-h-[44px] inline-flex items-center;

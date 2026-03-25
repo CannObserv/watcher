@@ -103,10 +103,6 @@
     @apply outline-2 outline-offset-2 outline-co-purple-600 dark:outline-co-purple-400;
   }
 
-  /* -- Filter pill -- */
-  .filter-pill {
-    @apply px-3 py-1 text-sm rounded-md bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-300 dark:hover:bg-gray-600 min-h-[44px] inline-flex items-center;
-  }
 
   /* -- Badge -- */
   .badge {

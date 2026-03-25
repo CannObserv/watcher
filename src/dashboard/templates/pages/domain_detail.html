@@ -21,93 +21,45 @@
   <h3 class="text-lg font-semibold text-gray-900 dark:text-white mb-4">Details</h3>
   <div class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 divide-y divide-gray-200 dark:divide-gray-700">
 
-    {# min_interval #}
-    <div class="p-4" id="field-min_interval">
-      <form method="post" action="/domains/{{ domain.name }}" class="flex flex-col sm:flex-row sm:items-center gap-2">
-        <input type="hidden" name="field" value="min_interval">
-        <div class="flex-1">
-          <label for="min_interval" class="form-label mb-0">Min Interval</label>
-          <p class="text-xs text-gray-500 dark:text-gray-400" id="min_interval-hint">Minimum seconds between requests to this domain</p>
-        </div>
-        <div class="flex items-center gap-2">
-          <input type="number" name="value" id="min_interval" step="0.1" min="0.1"
-            value="{{ '%.1f'|format(domain.min_interval) }}"
-            aria-describedby="min_interval-hint"
-            class="form-input w-28 text-sm"
-            hx-post="/domains/{{ domain.name }}"
-            hx-target="#field-min_interval"
-            hx-swap="outerHTML"
-            hx-vals='{"field": "min_interval"}'
-            hx-trigger="change">
-          <span class="text-sm text-gray-500 dark:text-gray-400">seconds</span>
-          <noscript><button type="submit" class="btn btn-secondary py-1 px-2 text-sm">Save</button></noscript>
-        </div>
-      </form>
-    </div>
+    {% set field_name = "min_interval" %}
+    {% set field_label = "Min Interval" %}
+    {% set field_hint = "Minimum seconds between requests to this domain" %}
+    {% set field_value = "%.1f"|format(domain.min_interval) %}
+    {% set field_type = "number" %}
+    {% set field_step = "0.1" %}
+    {% set field_min = "0.1" %}
+    {% set field_unit = "seconds" %}
+    {% include "partials/domain_field.html" %}
 
-    {# max_concurrency #}
-    <div class="p-4" id="field-max_concurrency">
-      <form method="post" action="/domains/{{ domain.name }}" class="flex flex-col sm:flex-row sm:items-center gap-2">
-        <input type="hidden" name="field" value="max_concurrency">
-        <div class="flex-1">
-          <label for="max_concurrency" class="form-label mb-0">Max Concurrency</label>
-          <p class="text-xs text-gray-500 dark:text-gray-400" id="max_concurrency-hint">Maximum simultaneous requests allowed</p>
-        </div>
-        <div class="flex items-center gap-2">
-          <input type="number" name="value" id="max_concurrency" min="1"
-            value="{{ domain.max_concurrency }}"
-            aria-describedby="max_concurrency-hint"
-            class="form-input w-28 text-sm"
-            hx-post="/domains/{{ domain.name }}"
-            hx-target="#field-max_concurrency"
-            hx-swap="outerHTML"
-            hx-vals='{"field": "max_concurrency"}'
-            hx-trigger="change">
-          <noscript><button type="submit" class="btn btn-secondary py-1 px-2 text-sm">Save</button></noscript>
-        </div>
-      </form>
-    </div>
+    {% set field_name = "max_concurrency" %}
+    {% set field_label = "Max Concurrency" %}
+    {% set field_hint = "Maximum simultaneous requests allowed" %}
+    {% set field_value = domain.max_concurrency %}
+    {% set field_type = "number" %}
+    {% set field_step = None %}
+    {% set field_min = "1" %}
+    {% set field_unit = None %}
+    {% include "partials/domain_field.html" %}
 
-    {# decay_window #}
-    <div class="p-4" id="field-decay_window">
-      <form method="post" action="/domains/{{ domain.name }}" class="flex flex-col sm:flex-row sm:items-center gap-2">
-        <input type="hidden" name="field" value="decay_window">
-        <div class="flex-1">
-          <label for="decay_window" class="form-label mb-0">Decay Window</label>
-          <p class="text-xs text-gray-500 dark:text-gray-400" id="decay_window-hint">Seconds before backoff interval decays toward minimum</p>
-        </div>
-        <div class="flex items-center gap-2">
-          <input type="number" name="value" id="decay_window" step="1" min="1"
-            value="{{ '%.0f'|format(domain.decay_window) }}"
-            aria-describedby="decay_window-hint"
-            class="form-input w-28 text-sm"
-            hx-post="/domains/{{ domain.name }}"
-            hx-target="#field-decay_window"
-            hx-swap="outerHTML"
-            hx-vals='{"field": "decay_window"}'
-            hx-trigger="change">
-          <span class="text-sm text-gray-500 dark:text-gray-400">seconds</span>
-          <noscript><button type="submit" class="btn btn-secondary py-1 px-2 text-sm">Save</button></noscript>
-        </div>
-      </form>
-    </div>
+    {% set field_name = "decay_window" %}
+    {% set field_label = "Decay Window" %}
+    {% set field_hint = "Seconds before backoff interval decays toward minimum" %}
+    {% set field_value = "%.0f"|format(domain.decay_window) %}
+    {% set field_type = "number" %}
+    {% set field_step = "1" %}
+    {% set field_min = "1" %}
+    {% set field_unit = "seconds" %}
+    {% include "partials/domain_field.html" %}
 
-    {# notes #}
-    <div class="p-4" id="field-notes">
-      <form method="post" action="/domains/{{ domain.name }}" class="flex flex-col gap-2">
-        <input type="hidden" name="field" value="notes">
-        <label for="notes" class="form-label mb-0">Notes</label>
-        <textarea name="value" id="notes" rows="3"
-          class="form-input text-sm"
-          hx-post="/domains/{{ domain.name }}"
-          hx-target="#field-notes"
-          hx-swap="outerHTML"
-          hx-vals='{"field": "notes"}'
-          hx-trigger="change"
-          placeholder="Operator notes about this domain…">{{ domain.notes or '' }}</textarea>
-        <noscript><button type="submit" class="btn btn-secondary py-1 px-2 text-sm self-start">Save</button></noscript>
-      </form>
-    </div>
+    {% set field_name = "notes" %}
+    {% set field_label = "Notes" %}
+    {% set field_hint = None %}
+    {% set field_value = domain.notes or '' %}
+    {% set field_type = "textarea" %}
+    {% set field_step = None %}
+    {% set field_min = None %}
+    {% set field_unit = None %}
+    {% include "partials/domain_field.html" %}
   </div>
 </section>
 

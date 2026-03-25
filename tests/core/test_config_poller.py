@@ -88,24 +88,24 @@ async def test_poll_excludes_archived_domains():
 @pytest.mark.integration
 async def test_poll_excludes_archived_domains_integration(db_session):
     """Archived domains must not appear in poll results."""
-    from sqlalchemy import select
+    from contextlib import asynccontextmanager
 
     active = Domain(name="active.com", min_interval=2.0)
     archived = Domain(name="archived.com", min_interval=1.0, archived_at=datetime.now(UTC))
     db_session.add_all([active, archived])
     await db_session.flush()
 
+    limiter = DomainRateLimiter()
     last_poll = datetime(2020, 1, 1, tzinfo=UTC)
-    stmt = select(Domain).where(
-        Domain.updated_at > last_poll,
-        Domain.archived_at.is_(None),
-    )
-    result = await db_session.execute(stmt)
-    domains = result.scalars().all()
 
-    names = [d.name for d in domains]
-    assert "active.com" in names
-    assert "archived.com" not in names
+    @asynccontextmanager
+    async def session_factory():
+        yield db_session
+
+    await poll_domain_configs(limiter, session_factory, last_poll)
+
+    assert "active.com" in limiter._domains
+    assert "archived.com" not in limiter._domains
 
 
 async def test_poll_handles_db_error():

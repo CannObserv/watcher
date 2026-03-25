@@ -37,7 +37,7 @@ src/dashboard/routes.py  — Dashboard page and partial routes
 src/dashboard/context.py — Dashboard-specific DB query helpers
 src/dashboard/static/    — CSS, JS (vendored HTMX, dark-mode, htmx-a11y), compiled Tailwind
 src/dashboard/static/images/ — Brand assets (Cannabis Observer icon)
-src/dashboard/templates/ — Jinja2 templates (base, pages, partials); partials/pagination.html reusable cursor-based pagination; partials/domain_field.html reusable inline-editable domain field
+src/dashboard/templates/ — Jinja2 templates (base, pages, partials); partials/pagination.html reusable offset-based pagination; partials/domain_field.html reusable inline-editable domain field
 src/workers/           — Procrastinate task queue (check_watch, schedule_tick)
 src/workers/pipeline.py  — Core check pipeline: hash, extract, diff, store snapshots
 src/workers/notify.py    — Notification dispatch: dispatch_change_notifications()

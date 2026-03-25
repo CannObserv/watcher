@@ -490,13 +490,6 @@ async def domain_delete(
     return RedirectResponse(url="/domains", status_code=303)
 
 
-EDITABLE_DOMAIN_FIELDS = {"min_interval", "max_concurrency", "decay_window", "notes"}
-DOMAIN_FIELD_TYPES: dict[str, type] = {
-    "min_interval": float,
-    "max_concurrency": int,
-    "decay_window": float,
-    "notes": str,
-}
 DOMAIN_FIELD_META: dict[str, dict] = {
     "min_interval": {
         "label": "Min Interval",
@@ -506,6 +499,7 @@ DOMAIN_FIELD_META: dict[str, dict] = {
         "min": "0.1",
         "unit": "seconds",
         "format": lambda v: f"{v:.1f}",
+        "cast": float,
     },
     "max_concurrency": {
         "label": "Max Concurrency",
@@ -515,6 +509,7 @@ DOMAIN_FIELD_META: dict[str, dict] = {
         "min": "1",
         "unit": None,
         "format": lambda v: str(v),
+        "cast": int,
     },
     "decay_window": {
         "label": "Decay Window",
@@ -524,6 +519,7 @@ DOMAIN_FIELD_META: dict[str, dict] = {
         "min": "1",
         "unit": "seconds",
         "format": lambda v: f"{v:.0f}",
+        "cast": float,
     },
     "notes": {
         "label": "Notes",
@@ -533,8 +529,10 @@ DOMAIN_FIELD_META: dict[str, dict] = {
         "min": None,
         "unit": None,
         "format": lambda v: v or "",
+        "cast": str,
     },
 }
+EDITABLE_DOMAIN_FIELDS = set(DOMAIN_FIELD_META.keys())
 
 
 @router.post("/domains/{name}")
@@ -554,7 +552,7 @@ async def domain_inline_update(
     if not domain:
         raise HTTPException(status_code=404, detail="Domain not found")
 
-    cast_fn = DOMAIN_FIELD_TYPES[field]
+    cast_fn = DOMAIN_FIELD_META[field]["cast"]
     try:
         typed_value: str | int | float = cast_fn(value) if field != "notes" else value
     except (ValueError, TypeError):

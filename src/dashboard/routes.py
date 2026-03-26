@@ -703,6 +703,7 @@ def _load_snapshot_text(storage: LocalStorage, snapshot, path_attr: str) -> str:
 async def change_detail_page(
     request: Request,
     change_id: str,
+    mode: str = "extracted",
     session: AsyncSession = Depends(get_db_session),
 ):
     """Change detail page with metadata, chunks, and diff."""
@@ -711,8 +712,9 @@ async def change_detail_page(
         return templates.TemplateResponse("pages/404.html", {"request": request}, status_code=404)
 
     storage = LocalStorage(base_dir=STORAGE_BASE_DIR)
-    prev_text = _load_snapshot_text(storage, detail["previous_snapshot"], "text_path")
-    curr_text = _load_snapshot_text(storage, detail["current_snapshot"], "text_path")
+    path_attr = "storage_path" if mode == "raw" else "text_path"
+    prev_text = _load_snapshot_text(storage, detail["previous_snapshot"], path_attr)
+    curr_text = _load_snapshot_text(storage, detail["current_snapshot"], path_attr)
     diff = generate_diff(prev_text, curr_text)
 
     context = {
@@ -752,6 +754,7 @@ async def audit_log_page(
     session: AsyncSession = Depends(get_db_session),
 ):
     """Audit log page with filtering."""
+    event_type = event_type or None
     entries = await get_audit_entries(session, event_type=event_type, watch_id=watch_id)
     context = {
         "request": request,
@@ -770,6 +773,7 @@ async def partial_audit_table(
     session: AsyncSession = Depends(get_db_session),
 ):
     """HTMX partial: filtered audit log table."""
+    event_type = event_type or None
     entries = await get_audit_entries(session, event_type=event_type, watch_id=watch_id)
     return templates.TemplateResponse(
         "partials/audit_table.html", {"request": request, "entries": entries}

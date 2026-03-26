@@ -3,7 +3,7 @@
 from datetime import UTC, datetime
 
 import pytest
-from pydantic import ValidationError
+from pydantic import BaseModel, ValidationError
 from ulid import ULID
 
 from src.api.schemas.audit_log import AuditLogResponse
@@ -14,9 +14,74 @@ from src.api.schemas.change import (
     SnapshotResponse,
     SnapshotWithChunksResponse,
 )
+from src.api.schemas.types import HttpUrlStr
 from src.api.schemas.watch import WatchCreate, WatchResponse, WatchUpdate
 from src.core.models.audit_log import EventType
 from src.core.models.watch import ContentType, Watch
+
+
+class TestHttpUrlStr:
+    """Tests for the HttpUrlStr reusable type."""
+
+    def test_valid_https_url(self):
+        class M(BaseModel):
+            url: HttpUrlStr
+
+        m = M(url="https://example.com/page")
+        assert m.url == "https://example.com/page"
+        assert isinstance(m.url, str)
+
+    def test_valid_http_url(self):
+        class M(BaseModel):
+            url: HttpUrlStr
+
+        m = M(url="http://example.com")
+        assert m.url == "http://example.com/"
+        assert isinstance(m.url, str)
+
+    def test_rejects_bare_string(self):
+        class M(BaseModel):
+            url: HttpUrlStr
+
+        with pytest.raises(ValidationError):
+            M(url="not-a-url")
+
+    def test_rejects_ftp_scheme(self):
+        class M(BaseModel):
+            url: HttpUrlStr
+
+        with pytest.raises(ValidationError):
+            M(url="ftp://example.com/file")
+
+    def test_normalizes_bare_domain_with_trailing_slash(self):
+        """HttpUrl adds a trailing slash to bare domains — document this is intentional."""
+
+        class M(BaseModel):
+            url: HttpUrlStr
+
+        m = M(url="https://example.com")
+        assert m.url == "https://example.com/"
+
+    def test_preserves_path_without_trailing_slash(self):
+        class M(BaseModel):
+            url: HttpUrlStr
+
+        m = M(url="https://example.com/page")
+        assert m.url == "https://example.com/page"
+
+    def test_optional_field_allows_none(self):
+        class M(BaseModel):
+            url: HttpUrlStr | None = None
+
+        m = M()
+        assert m.url is None
+
+    def test_optional_field_validates_when_present(self):
+        class M(BaseModel):
+            url: HttpUrlStr | None = None
+
+        with pytest.raises(ValidationError):
+            M(url="not-a-url")
 
 
 class TestWatchCreate:
@@ -73,6 +138,14 @@ class TestWatchCreate:
                 fetch_config={"ignore_patterns": [r"[invalid"]},
             )
 
+    def test_watch_create_rejects_invalid_url(self):
+        with pytest.raises(ValidationError):
+            WatchCreate(name="Bad", url="not-a-url", content_type="html")
+
+    def test_watch_create_rejects_ftp_url(self):
+        with pytest.raises(ValidationError):
+            WatchCreate(name="Bad", url="ftp://example.com/file", content_type="html")
+
     def test_watch_create_ignore_patterns_must_be_list(self):
         with pytest.raises(ValidationError, match="must be a list"):
             WatchCreate(
@@ -107,6 +180,14 @@ class TestWatchUpdate:
         """URL is intentionally omitted from WatchUpdate — immutable after creation."""
         data = WatchUpdate(name="No URL change")
         assert not hasattr(data, "url")
+
+    def test_update_rejects_invalid_effective_url(self):
+        with pytest.raises(ValidationError):
+            WatchUpdate(effective_url="not-a-url")
+
+    def test_update_accepts_valid_effective_url(self):
+        data = WatchUpdate(effective_url="https://example.com/resolved")
+        assert data.effective_url == "https://example.com/resolved"
 
     def test_update_invalid_regex_in_ignore_patterns(self):
         with pytest.raises(ValidationError, match="not a valid regex"):

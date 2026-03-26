@@ -5,7 +5,7 @@ from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from src.api.schemas.types import ULIDStr
+from src.api.schemas.types import HttpUrlStr, ULIDStr
 from src.core.models.watch import ContentType
 
 
@@ -34,7 +34,7 @@ class WatchCreate(BaseModel):
     """Schema for creating a new watch."""
 
     name: str
-    url: str
+    url: HttpUrlStr
     content_type: ContentType
     fetch_config: dict = Field(default_factory=dict)
     schedule_config: dict = Field(default_factory=dict)
@@ -54,7 +54,7 @@ class WatchUpdate(BaseModel):
     fetch_config: dict | None = None
     schedule_config: dict | None = None
     is_active: bool | None = None
-    effective_url: str | None = None
+    effective_url: HttpUrlStr | None = None
     effective_domain: str | None = Field(default=None, max_length=253)
 
     @field_validator("fetch_config")

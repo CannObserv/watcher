@@ -21,6 +21,8 @@
   <h3 class="text-lg font-semibold text-gray-900 dark:text-white mb-4">Details</h3>
   <div class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 divide-y divide-gray-200 dark:divide-gray-700">
 
+    {% set field_mode = "view" %}
+
     {% set field_name = "min_interval" %}
     {% set field_label = "Min Interval" %}
     {% set field_hint = "Minimum seconds between requests to this domain" %}

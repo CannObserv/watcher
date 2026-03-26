@@ -540,6 +540,48 @@ DOMAIN_FIELD_META: dict[str, dict] = {
 EDITABLE_DOMAIN_FIELDS = set(DOMAIN_FIELD_META.keys())
 
 
+def _field_context(request: Request, domain: Domain, field_name: str, mode: str = "view") -> dict:
+    """Build template context for a single domain field partial."""
+    meta = DOMAIN_FIELD_META[field_name]
+    return {
+        "request": request,
+        "domain": domain,
+        "field_name": field_name,
+        "field_label": meta["label"],
+        "field_hint": meta["hint"],
+        "field_value": meta["format"](getattr(domain, field_name)),
+        "field_type": meta["type"],
+        "field_step": meta["step"],
+        "field_min": meta["min"],
+        "field_unit": meta["unit"],
+        "field_mode": mode,
+    }
+
+
+@router.get("/domains/{name}/field/{field_name}")
+async def domain_field_partial(
+    request: Request,
+    name: str,
+    field_name: str,
+    mode: str = "view",
+    session: AsyncSession = Depends(get_db_session),
+):
+    """Serve a single domain field partial in view or edit mode."""
+    if field_name not in EDITABLE_DOMAIN_FIELDS:
+        raise HTTPException(status_code=400, detail=f"Field '{field_name}' is not editable")
+
+    result = await session.execute(select(Domain).where(Domain.name == name))
+    domain = result.scalar_one_or_none()
+    if not domain:
+        raise HTTPException(status_code=404, detail="Domain not found")
+
+    if request.headers.get("HX-Request") != "true":
+        return RedirectResponse(url=f"/domains/{name}", status_code=303)
+
+    ctx = _field_context(request, domain, field_name, mode=mode)
+    return templates.TemplateResponse("partials/domain_field.html", ctx)
+
+
 @router.post("/domains/{name}")
 async def domain_inline_update(
     request: Request,
@@ -569,22 +611,8 @@ async def domain_inline_update(
     await session.refresh(domain)
 
     if request.headers.get("HX-Request") == "true":
-        meta = DOMAIN_FIELD_META[field]
-        return templates.TemplateResponse(
-            "partials/domain_field.html",
-            {
-                "request": request,
-                "domain": domain,
-                "field_name": field,
-                "field_label": meta["label"],
-                "field_hint": meta["hint"],
-                "field_value": meta["format"](getattr(domain, field)),
-                "field_type": meta["type"],
-                "field_step": meta["step"],
-                "field_min": meta["min"],
-                "field_unit": meta["unit"],
-            },
-        )
+        ctx = _field_context(request, domain, field, mode="view")
+        return templates.TemplateResponse("partials/domain_field.html", ctx)
     return RedirectResponse(url=f"/domains/{name}", status_code=303)
 
 

@@ -1,75 +1,75 @@
 {# Single domain field partial. Expects: domain, field_name, field_label, field_hint (optional), field_value, field_type ("number"|"textarea"), field_step (optional), field_min (optional), field_unit (optional), field_mode ("view"|"edit", default "view"). #}
 {% set mode = field_mode|default("view") %}
+{# --- Action buttons (shared by both field types) --- #}
+{% macro action_buttons() %}
+  {% if mode == "view" %}
+  <button type="button" class="btn btn-edit py-1 px-3 text-sm min-h-0"
+    hx-get="/domains/{{ domain.name }}/field/{{ field_name }}?mode=edit"
+    hx-target="#field-{{ field_name }}"
+    hx-swap="outerHTML">Edit</button>
+  {% else %}
+  <button type="submit" class="btn btn-primary py-1 px-3 text-sm min-h-0"
+    hx-post="/domains/{{ domain.name }}"
+    hx-target="#field-{{ field_name }}"
+    hx-swap="outerHTML"
+    hx-include="closest form">Save</button>
+  <button type="button" class="btn btn-secondary py-1 px-3 text-sm min-h-0"
+    hx-get="/domains/{{ domain.name }}/field/{{ field_name }}"
+    hx-target="#field-{{ field_name }}"
+    hx-swap="outerHTML">Cancel</button>
+  {% endif %}
+{% endmacro %}
 <div class="p-4" id="field-{{ field_name }}">
-  <form method="post" action="/domains/{{ domain.name }}" class="flex flex-col {% if field_type != 'textarea' %}sm:flex-row sm:items-center{% endif %} gap-2">
+  {# No-JS: fields are always enabled and Save button is visible.
+     The edit/save/cancel workflow is a progressive enhancement —
+     without JS there is no way to enter edit mode, so we keep
+     fields enabled and show a plain Save button via <noscript>. #}
+  <form method="post" action="/domains/{{ domain.name }}">
     <input type="hidden" name="field" value="{{ field_name }}">
     {% if field_type == "textarea" %}
-    {# Textarea: label row with Edit/Save+Cancel inline #}
-    <div class="flex items-center gap-2">
+    {# Textarea: label row with buttons inline, textarea below #}
+    <div class="flex items-center justify-between mb-2">
       <label for="{{ field_name }}" class="form-label mb-0">{{ field_label }}</label>
-      {% if mode == "view" %}
-      <button type="button" class="btn btn-ghost py-1 px-2 text-sm min-h-0"
-        hx-get="/domains/{{ domain.name }}/field/{{ field_name }}?mode=edit"
-        hx-target="#field-{{ field_name }}"
-        hx-swap="outerHTML">Edit</button>
-      {% else %}
-      <div class="flex gap-1">
-        <button type="submit" class="btn btn-primary py-1 px-2 text-sm min-h-0"
-          hx-post="/domains/{{ domain.name }}"
-          hx-target="#field-{{ field_name }}"
-          hx-swap="outerHTML"
-          hx-include="closest form">Save</button>
-        <button type="button" class="btn btn-secondary py-1 px-2 text-sm min-h-0"
-          hx-get="/domains/{{ domain.name }}/field/{{ field_name }}"
-          hx-target="#field-{{ field_name }}"
-          hx-swap="outerHTML">Cancel</button>
+      <div class="flex items-center gap-1">
+        {{ action_buttons() }}
       </div>
-      {% endif %}
     </div>
     {% if field_hint %}
-    <p class="text-xs text-gray-500 dark:text-gray-400" id="{{ field_name }}-hint">{{ field_hint }}</p>
+    <p class="text-xs text-gray-500 dark:text-gray-400 mb-1" id="{{ field_name }}-hint">{{ field_hint }}</p>
     {% endif %}
     <textarea name="value" id="{{ field_name }}" rows="3"
       class="form-input text-sm"
       {% if mode == "view" %}disabled{% endif %}
       placeholder="Operator notes about this domain…">{{ field_value }}</textarea>
-    <noscript><button type="submit" class="btn btn-secondary py-1 px-2 text-sm self-start">Save</button></noscript>
+    <noscript><button type="submit" class="btn btn-secondary py-1 px-3 text-sm mt-2">Save</button></noscript>
     {% else %}
-    {# Number fields: label + hint (left), input + unit + button (right) #}
-    <div class="flex-1">
-      <label for="{{ field_name }}" class="form-label mb-0">{{ field_label }}</label>
-      {% if field_hint %}
-      <p class="text-xs text-gray-500 dark:text-gray-400" id="{{ field_name }}-hint">{{ field_hint }}</p>
-      {% endif %}
-    </div>
-    <div class="flex items-center gap-2">
-      <input type="number" name="value" id="{{ field_name }}"
-        {% if field_step %}step="{{ field_step }}"{% endif %}
-        {% if field_min %}min="{{ field_min }}"{% endif %}
-        value="{{ field_value }}"
-        {% if field_hint %}aria-describedby="{{ field_name }}-hint"{% endif %}
-        class="form-input w-28 text-sm"
-        {% if mode == "view" %}disabled{% endif %}>
-      {% if field_unit %}
-      <span class="text-sm text-gray-500 dark:text-gray-400">{{ field_unit }}</span>
-      {% endif %}
-      {% if mode == "view" %}
-      <button type="button" class="btn btn-ghost py-1 px-2 text-sm min-h-0"
-        hx-get="/domains/{{ domain.name }}/field/{{ field_name }}?mode=edit"
-        hx-target="#field-{{ field_name }}"
-        hx-swap="outerHTML">Edit</button>
-      {% else %}
-      <button type="submit" class="btn btn-primary py-1 px-2 text-sm min-h-0"
-        hx-post="/domains/{{ domain.name }}"
-        hx-target="#field-{{ field_name }}"
-        hx-swap="outerHTML"
-        hx-include="closest form">Save</button>
-      <button type="button" class="btn btn-secondary py-1 px-2 text-sm min-h-0"
-        hx-get="/domains/{{ domain.name }}/field/{{ field_name }}"
-        hx-target="#field-{{ field_name }}"
-        hx-swap="outerHTML">Cancel</button>
-      {% endif %}
-      <noscript><button type="submit" class="btn btn-secondary py-1 px-2 text-sm">Save</button></noscript>
+    {# Number fields: label | input+unit | flex space | buttons #}
+    {# Wide: single row — label column fixed at min(18rem,40%) for cross-row alignment #}
+    {# Narrow: label+input stack left, buttons span both rows vertically centered right #}
+    <div class="grid grid-cols-[1fr_auto] sm:grid-cols-[min(18rem,40%)_auto_1fr_auto] items-center gap-x-4 gap-y-1">
+      <div class="min-w-0">
+        <label for="{{ field_name }}" class="form-label mb-0">{{ field_label }}</label>
+        {% if field_hint %}
+        <p class="text-xs text-gray-500 dark:text-gray-400" id="{{ field_name }}-hint">{{ field_hint }}</p>
+        {% endif %}
+      </div>
+      {# Buttons: far right, span 2 rows on narrow so they vertically center with stacked label+input #}
+      <div class="flex items-center gap-1 row-span-2 sm:row-span-1 sm:col-start-[-1] justify-self-end">
+        {{ action_buttons() }}
+      </div>
+      <div class="flex items-center gap-2">
+        <input type="number" name="value" id="{{ field_name }}"
+          {% if field_step %}step="{{ field_step }}"{% endif %}
+          {% if field_min %}min="{{ field_min }}"{% endif %}
+          value="{{ field_value }}"
+          {% if field_hint %}aria-describedby="{{ field_name }}-hint"{% endif %}
+          class="form-input w-28 text-sm"
+          {% if mode == "view" %}disabled{% endif %}>
+        {% if field_unit %}
+        <span class="text-sm text-gray-500 dark:text-gray-400">{{ field_unit }}</span>
+        {% endif %}
+        <noscript><button type="submit" class="btn btn-secondary py-1 px-3 text-sm">Save</button></noscript>
+      </div>
     </div>
     {% endif %}
   </form>

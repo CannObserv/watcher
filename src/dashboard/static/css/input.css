@@ -58,6 +58,11 @@
   .btn-ghost {
     @apply text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700;
   }
+  .btn-edit {
+    @apply bg-co-purple-50 dark:bg-co-purple-800 text-co-purple-600 dark:text-co-purple-400
+           hover:bg-co-purple-100 dark:hover:bg-co-purple-700
+           border border-co-purple-100 dark:border-co-purple-700;
+  }
 
   /* -- Segmented control (single-select radio group) -- */
   .segment-group {

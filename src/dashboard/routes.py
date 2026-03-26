@@ -2,6 +2,7 @@
 
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
+from typing import Literal
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
@@ -563,7 +564,7 @@ async def domain_field_partial(
     request: Request,
     name: str,
     field_name: str,
-    mode: str = "view",
+    mode: Literal["view", "edit"] = "view",
     session: AsyncSession = Depends(get_db_session),
 ):
     """Serve a single domain field partial in view or edit mode."""

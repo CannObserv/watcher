@@ -33,7 +33,7 @@
             hx-target="#domains-table-container"
             hx-swap="innerHTML"
             hx-trigger="change"
-            hx-include="[name='q'],[name='page_size']">
+            hx-include="#domain-search,[name='page_size']">
           <span>{{ label }}</span>
         </label>
         {% endfor %}

@@ -1,5 +1,7 @@
 """Integration tests for dashboard routes."""
 
+import re
+
 import pytest
 
 pytestmark = pytest.mark.integration
@@ -327,8 +329,6 @@ class TestDomainsPage:
 
     async def test_domains_page_active_filter_checked(self, client):
         """Default status is 'active', so the active radio should be checked."""
-        import re
-
         response = await client.get("/domains")
         body = response.text
         # The "active" radio should have the checked attribute
@@ -354,43 +354,38 @@ class TestWatchListFilters:
 
 
 class TestDomainDetailFilters:
-    async def _create_domain(self, client):
-        """Create a domain via dashboard probe route and return the name."""
-        response = await client.post(
+    async def _create_domain_with_watch(self, client, watch_name="Filter Watch"):
+        """Create a domain and a watch whose effective_domain matches it.
+
+        The mock probe extracts hostname from URL, so the watch URL must
+        use the domain name as its hostname for the watch to appear in
+        the domain's watch list.
+        """
+        resp = await client.post(
             "/domains",
             data={"url": "https://example.com/page"},
             follow_redirects=False,
         )
-        # redirect location is /domains/<name>
-        location = response.headers["location"]
-        return location.rstrip("/").split("/")[-1]
-
-    async def test_domain_detail_has_segment_control(self, client):
-        name = await self._create_domain(client)
-        # Create a watch so the filter section appears
+        name = resp.headers["location"].rstrip("/").split("/")[-1]
         await client.post(
             "/api/v1/watches",
             json={
-                "name": "Domain Filter Watch",
+                "name": watch_name,
                 "url": f"https://{name}/page",
                 "content_type": "html",
             },
         )
+        return name
+
+    async def test_domain_detail_has_segment_control(self, client):
+        name = await self._create_domain_with_watch(client, "Domain Filter Watch")
         response = await client.get(f"/domains/{name}")
         body = response.content
         assert b'role="radiogroup"' in body
         assert b'name="watch_status"' in body
 
     async def test_domain_detail_no_filter_pill(self, client):
-        name = await self._create_domain(client)
-        await client.post(
-            "/api/v1/watches",
-            json={
-                "name": "Domain Filter Watch 2",
-                "url": f"https://{name}/page2",
-                "content_type": "html",
-            },
-        )
+        name = await self._create_domain_with_watch(client, "Domain Filter Watch 2")
         response = await client.get(f"/domains/{name}")
         assert b"filter-pill" not in response.content
 

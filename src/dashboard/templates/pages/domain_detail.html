@@ -86,6 +86,7 @@
         aria-label="Search watches by name">
     </div>
     <form method="get" action="/domains/{{ domain.name }}" class="flex gap-1">
+      <input type="hidden" name="watch_q" value="{{ watch_q or '' }}">
       <fieldset class="segment-group" role="radiogroup" aria-label="Filter watches by status">
         {% for value, label in [("", "All"), ("active", "Active"), ("inactive", "Inactive")] %}
         <label class="segment">

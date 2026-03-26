@@ -21,7 +21,7 @@
         hx-target="#audit-table"
         hx-swap="innerHTML"
         hx-trigger="change"
-        hx-include=".chip-group input:checked">
+        hx-vals='js:{event_type: this.checked ? "{{ value }}" : ""}'>
       <span>{{ label }}</span>
     </label>
     {% endfor %}

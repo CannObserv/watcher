@@ -82,24 +82,27 @@
 <div class="mb-6">
   <div class="flex items-center gap-4 mb-4 flex-wrap">
     <h3 class="text-lg font-semibold text-gray-900 dark:text-white">Diff</h3>
-    <fieldset class="segment-group" role="radiogroup" aria-label="Diff mode">
-      <label class="segment">
-        <input type="radio" name="mode" value="extracted" checked
-          hx-get="/partials/diff/{{ change.id }}?mode=extracted"
-          hx-target="#diff-content"
-          hx-swap="innerHTML"
-          hx-trigger="change">
-        <span>Extracted Text</span>
-      </label>
-      <label class="segment">
-        <input type="radio" name="mode" value="raw"
-          hx-get="/partials/diff/{{ change.id }}?mode=raw"
-          hx-target="#diff-content"
-          hx-swap="innerHTML"
-          hx-trigger="change">
-        <span>Raw Content</span>
-      </label>
-    </fieldset>
+    <form method="get" action="/changes/{{ change.id }}">
+      <fieldset class="segment-group" role="radiogroup" aria-label="Diff mode">
+        <label class="segment">
+          <input type="radio" name="mode" value="extracted" checked
+            hx-get="/partials/diff/{{ change.id }}?mode=extracted"
+            hx-target="#diff-content"
+            hx-swap="innerHTML"
+            hx-trigger="change">
+          <span>Extracted Text</span>
+        </label>
+        <label class="segment">
+          <input type="radio" name="mode" value="raw"
+            hx-get="/partials/diff/{{ change.id }}?mode=raw"
+            hx-target="#diff-content"
+            hx-swap="innerHTML"
+            hx-trigger="change">
+          <span>Raw Content</span>
+        </label>
+      </fieldset>
+      <noscript><button type="submit" class="btn btn-secondary">Apply</button></noscript>
+    </form>
   </div>
   <div id="diff-content" aria-live="polite" aria-atomic="false">
     {% include "partials/diff_view.html" %}

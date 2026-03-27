@@ -903,7 +903,7 @@ async def domain_detail_page(
     watches = await get_domain_watches(session, name, search=watch_q, is_active=is_active)
 
     field_contexts = {
-        name: _field_context(request, domain, name, mode="view") for name in DOMAIN_FIELD_META
+        fname: _field_context(request, domain, fname, mode="view") for fname in DOMAIN_FIELD_META
     }
 
     context = {

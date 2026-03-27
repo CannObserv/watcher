@@ -312,7 +312,8 @@ class TestCheckWatchSavepointBoundary:
         mock_client = httpx.AsyncClient(transport=httpx.MockTransport(lambda req: mock_response))
 
         fast_limiter = DomainRateLimiter(min_interval=0.0)
-        monkeypatch.setattr(tasks_mod, "_fetcher", HttpFetcher(client=mock_client))
+        mock_registry = ServiceRegistry(fetcher=HttpFetcher(client=mock_client))
+        monkeypatch.setattr(tasks_mod, "get_registry", lambda: mock_registry)
         monkeypatch.setattr(tasks_mod, "get_rate_limiter", lambda: fast_limiter)
         monkeypatch.setattr(tasks_mod, "STORAGE_BASE_DIR", tmp_path)
         monkeypatch.setattr(
@@ -331,11 +332,11 @@ class TestCheckWatchSavepointBoundary:
         # dispatch_notifications records the commit count at call time
         dispatch_call_index: list[int] = []
 
-        async def mock_dispatch(event, configs, channels):
+        async def mock_dispatch(**kwargs):
             dispatch_call_index.append(len(commit_calls))
             return []
 
-        monkeypatch.setattr(tasks_mod, "dispatch_notifications", mock_dispatch)
+        monkeypatch.setattr(tasks_mod, "dispatch_change_notifications", mock_dispatch)
 
         await check_watch(str(watch.id))
 

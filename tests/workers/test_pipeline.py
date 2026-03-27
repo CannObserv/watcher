@@ -177,7 +177,11 @@ class TestRunCheckPipeline:
 
         storage = LocalStorage(base_dir=tmp_path)
         # First run: establishes baseline
-        content_v1 = b"<html><body><p>Signal</p><p>Noise: ignored</p></body></html>"
+        # Use <section> tags so the HTML extractor produces separate chunks
+        # (without them, the body text becomes a single chunk and fullmatch fails).
+        content_v1 = (
+            b"<html><body><section>Signal</section><section>Noise: ignored</section></body></html>"
+        )
         result1 = await _run_check_pipeline(
             watch=watch,
             raw_content=content_v1,
@@ -190,7 +194,12 @@ class TestRunCheckPipeline:
         assert result1["chunk_count"] >= 1
 
         # Second run: only the noisy chunk changes; signal is stable
-        content_v2 = b"<html><body><p>Signal</p><p>Noise: also ignored</p></body></html>"
+        content_v2 = (
+            b"<html><body>"
+            b"<section>Signal</section>"
+            b"<section>Noise: also ignored</section>"
+            b"</body></html>"
+        )
         result2 = await _run_check_pipeline(
             watch=watch,
             raw_content=content_v2,

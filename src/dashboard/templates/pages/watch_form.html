@@ -1,7 +1,7 @@
 {% extends "base.html" %}
-{% block title %}{{ "Edit" if watch else "New" }} Watch — watcher{% endblock %}
+{% block title %}New Watch — watcher{% endblock %}
 {% block content %}
-<h2 class="text-2xl font-bold text-gray-900 dark:text-white mb-6">{{ "Edit" if watch else "New" }} Watch</h2>
+<h2 class="text-2xl font-bold text-gray-900 dark:text-white mb-6">New Watch</h2>
 
 {% include "partials/flash.html" %}
 
@@ -9,7 +9,7 @@
   <div>
     <label for="name" class="form-label">Name</label>
     <input type="text" name="name" id="name" required
-      value="{{ watch.name if watch else '' }}"
+      value=""
       class="form-input mt-1">
     <p id="name-error" class="mt-1 text-xs text-red-600 dark:text-red-400" hidden></p>
   </div>
@@ -17,7 +17,7 @@
   <div>
     <label for="url" class="form-label">URL</label>
     <input type="url" name="url" id="url" required
-      value="{{ watch.url if watch else '' }}"
+      value=""
       class="form-input mt-1">
     <p id="url-error" class="mt-1 text-xs text-red-600 dark:text-red-400" hidden></p>
   </div>
@@ -27,7 +27,7 @@
     <select name="content_type" id="content_type"
       class="form-input mt-1">
       {% for ct in content_types %}
-      <option value="{{ ct.value }}" {% if watch and watch.content_type == ct.value %}selected{% endif %}>{{ ct.value | upper }}</option>
+      <option value="{{ ct.value }}">{{ ct.value | upper }}</option>
       {% endfor %}
     </select>
     <p id="content_type-error" class="mt-1 text-xs text-red-600 dark:text-red-400" hidden></p>
@@ -36,7 +36,7 @@
   <div>
     <label for="interval" class="form-label">Check Interval</label>
     <input type="text" name="interval" id="interval" placeholder="1d"
-      value="{{ watch.schedule_config.get('interval', '') if watch and watch.schedule_config else '' }}"
+      value=""
       aria-describedby="interval-hint"
       class="form-input mt-1">
     <p id="interval-hint" class="mt-1 text-xs text-gray-500 dark:text-gray-400">Format: 30s, 15m, 6h, 1d</p>
@@ -44,12 +44,8 @@
   </div>
 
   <div class="flex gap-3">
-    <button type="submit" class="btn btn-primary">
-      {{ "Save Changes" if watch else "Create Watch" }}
-    </button>
-    <a href="{{ '/watches/' ~ watch.id if watch else '/watches' }}" class="btn btn-secondary">
-      Cancel
-    </a>
+    <button type="submit" class="btn btn-primary">Create Watch</button>
+    <a href="/watches" class="btn btn-secondary">Cancel</a>
   </div>
 </form>
 {% endblock %}

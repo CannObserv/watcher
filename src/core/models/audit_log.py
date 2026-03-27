@@ -18,6 +18,8 @@ class EventType:
     WATCH_CREATED = "watch.created"
     WATCH_UPDATED = "watch.updated"
     WATCH_DEACTIVATED = "watch.deactivated"
+    WATCH_ARCHIVED = "watch.archived"
+    WATCH_RESTORED = "watch.restored"
     WATCH_DELETED = "watch.deleted"
     CHECK_SNAPSHOT_CREATED = "check.snapshot_created"
     CHECK_NO_CHANGE = "check.no_change"

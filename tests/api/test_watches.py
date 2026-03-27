@@ -275,8 +275,8 @@ class TestListWatchesFilter:
 
 
 class TestDeleteWatch:
-    async def _create_inactive_watch(self, client):
-        """Create a watch and deactivate it; return its ID."""
+    async def _create_archived_watch(self, client, db_session):
+        """Create a watch, archive it, return its ID."""
         resp = await client.post(
             "/api/v1/watches",
             json={
@@ -286,21 +286,25 @@ class TestDeleteWatch:
             },
         )
         watch_id = resp.json()["id"]
-        await client.post(f"/api/v1/watches/{watch_id}/deactivate")
+        # Archive via DB (no archive API endpoint)
+        watch = await db_session.get(Watch, ULID.from_str(watch_id))
+        watch.is_active = False
+        watch.is_archived = True
+        await db_session.commit()
         return watch_id
 
-    async def test_delete_inactive_watch_returns_204(self, client):
-        watch_id = await self._create_inactive_watch(client)
+    async def test_delete_archived_watch_returns_204(self, client, db_session):
+        watch_id = await self._create_archived_watch(client, db_session)
         response = await client.delete(f"/api/v1/watches/{watch_id}")
         assert response.status_code == 204
 
-    async def test_delete_watch_removes_from_db(self, client):
-        watch_id = await self._create_inactive_watch(client)
+    async def test_delete_watch_removes_from_db(self, client, db_session):
+        watch_id = await self._create_archived_watch(client, db_session)
         await client.delete(f"/api/v1/watches/{watch_id}")
         response = await client.get(f"/api/v1/watches/{watch_id}")
         assert response.status_code == 404
 
-    async def test_delete_active_watch_returns_409(self, client):
+    async def test_delete_non_archived_watch_returns_409(self, client):
         resp = await client.post(
             "/api/v1/watches",
             json={
@@ -318,7 +322,7 @@ class TestDeleteWatch:
         assert response.status_code == 404
 
     async def test_delete_writes_audit_entry(self, client, db_session):
-        watch_id = await self._create_inactive_watch(client)
+        watch_id = await self._create_archived_watch(client, db_session)
         await client.delete(f"/api/v1/watches/{watch_id}")
         result = await db_session.execute(
             select(AuditLog).where(
@@ -332,7 +336,7 @@ class TestDeleteWatch:
 
     async def test_delete_cascades_children(self, client, db_session):
         """Deleting a watch cascades to all child records."""
-        watch_id = await self._create_inactive_watch(client)
+        watch_id = await self._create_archived_watch(client, db_session)
 
         # Insert child records directly via session
         watch_ulid = ULID.from_str(watch_id)

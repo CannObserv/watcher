@@ -143,11 +143,11 @@ async def delete_watch(
     watch_id: str,
     session: AsyncSession = Depends(get_db_session),
 ):
-    """Permanently delete an inactive watch and all related data."""
+    """Permanently delete an archived watch and all related data."""
     watch = await get_watch_or_404(watch_id, session)
 
-    if watch.is_active:
-        raise HTTPException(status_code=409, detail="Deactivate watch before deleting")
+    if not watch.is_archived:
+        raise HTTPException(status_code=409, detail="Archive watch before deleting")
 
     audit(
         session,

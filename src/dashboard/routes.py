@@ -476,6 +476,9 @@ async def watch_field_update(
     if not watch:
         raise HTTPException(status_code=404, detail="Watch not found")
 
+    if field_name in ("name", "url") and not value.strip():
+        raise HTTPException(status_code=400, detail=f"{field_name.title()} cannot be empty")
+
     try:
         _apply_watch_field_update(watch, field_name, value)
     except (ValueError, TypeError, json.JSONDecodeError):
@@ -540,9 +543,7 @@ async def watch_archive(
 
     watch.is_archived = True
     watch.is_active = False
-    audit(
-        session, EventType.WATCH_DEACTIVATED, watch_id=watch.id, name=watch.name, source="dashboard"
-    )
+    audit(session, EventType.WATCH_ARCHIVED, watch_id=watch.id, name=watch.name, source="dashboard")
     await session.commit()
 
     return RedirectResponse(url=f"/watches/{watch_id}", status_code=303)
@@ -561,7 +562,7 @@ async def watch_restore(
 
     watch.is_archived = False
     # Watch stays inactive after restore — user re-activates via toggle
-    audit(session, EventType.WATCH_UPDATED, watch_id=watch.id, name=watch.name, source="dashboard")
+    audit(session, EventType.WATCH_RESTORED, watch_id=watch.id, name=watch.name, source="dashboard")
     await session.commit()
 
     return RedirectResponse(url=f"/watches/{watch_id}", status_code=303)

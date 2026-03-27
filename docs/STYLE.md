@@ -161,10 +161,12 @@ Sticky header with `z-10`, `box-shadow` separator. `th` is uppercase, `text-xs`,
 | `.btn-danger` | Red bg, white text |
 | `.btn-danger-outline` | White bg, red border/text |
 | `.btn-ghost` | Transparent, gray text, hover bg |
+| `.btn-edit` | Light purple tint bg, purple border/text; used for inline field Edit actions |
 
 ```html
 <button class="btn btn-primary">Save</button>
 <button class="btn btn-danger-outline">Delete</button>
+<button class="btn btn-edit py-1 px-3 text-sm min-h-0">Edit</button>
 ```
 
 ### Segmented control (single-select filter)
@@ -229,13 +231,14 @@ Used in: audit log.
 <span class="badge badge-error">Error</span>
 ```
 
-| Class | Color scheme |
-|---|---|
-| `.badge-active` | Green |
-| `.badge-inactive` | Gray |
-| `.badge-error` | Red |
-| `.badge-warning` | Orange |
-| `.badge-info` | Blue |
+| Class | Color scheme | Semantic use |
+|---|---|---|
+| `.badge-active` | Green | Watch/domain is actively monitored |
+| `.badge-inactive` | Gray | Watch/domain exists but is paused |
+| `.badge-archived` | Amber | Watch is archived (soft-deleted, restorable) |
+| `.badge-error` | Red | Processing error state |
+| `.badge-warning` | Orange | Non-blocking warning |
+| `.badge-info` | Blue | Informational |
 
 ### Flash messages
 
@@ -262,15 +265,19 @@ Variants: `.alert-notice` (blue), `.alert-warning` (yellow).
 
 ### Danger zone
 
+The `.danger-zone` component provides a row with label+description on the left and an action button on the right:
+
 ```html
 <div class="danger-zone">
   <div>
-    <div class="danger-zone__label">Delete this watch</div>
-    <div class="danger-zone__desc">This action cannot be undone.</div>
+    <div class="danger-zone__label">Archive this watch</div>
+    <div class="danger-zone__desc">Deactivates and marks as archived. Can be restored.</div>
   </div>
-  <button class="btn btn-danger">Delete</button>
+  <button class="btn btn-danger-outline">Archive</button>
 </div>
 ```
+
+**Archive → Delete workflow:** The watch detail page wraps one or more `.danger-zone` rows in a `<section>` with a red `<h3>`. The API enforces archive-before-delete: `DELETE /watches/{id}` returns `409` if `is_archived` is false. UI progression: Archive button (`btn-danger-outline`) appears first; once archived, Restore (`btn-secondary`) and Delete permanently (`btn-danger`) appear together.
 
 ### Detail grid
 
@@ -282,6 +289,72 @@ Variants: `.alert-notice` (blue), `.alert-warning` (yellow).
 ```
 
 Two-column `dt`/`dd` grid: `minmax(140px, max-content) 1fr`.
+
+### Toggle switch
+
+Boolean toggle that auto-saves on change (no Edit/Save step).
+
+```html
+<label class="toggle">
+  <input type="hidden" name="value" value="false">
+  <input type="checkbox" name="value" value="true" checked
+    hx-post="/watches/{id}/field/{field}"
+    hx-target="#field-{field}"
+    hx-swap="outerHTML"
+    hx-include="closest form">
+  <span class="toggle__track"><span class="toggle__thumb"></span></span>
+  <span class="toggle__label">Label text</span>
+</label>
+```
+
+The hidden input provides the `false` value when the checkbox is unchecked. Starlette returns the **last** value for duplicate keys, so the checkbox value (`true`) wins when checked. The toggle submits immediately on change; no explicit Save button needed.
+
+### Inline field edit/save/cancel
+
+Detail pages (watches, domains) use per-field inline editing via HTMX. Each field row swaps between **view mode** and **edit mode** in place (`hx-swap="outerHTML"` on `#field-{name}`).
+
+**Editing requires JS.** The Edit button is `<button type="button">` with only `hx-get` — no `<a href>` or `<form>` fallback. Without HTMX, fields remain read-only.
+
+**View mode** — no disabled form controls; values render as plain content:
+- Text/number: plain `<span>` with the value. Unit (e.g. `s`, `rows`) appended in muted text.
+- URL: `<a class="link" target="_blank" rel="noopener noreferrer">` hyperlink, with a Copy button (left of Edit) that writes to the clipboard and shows a flash confirmation.
+- Textarea: a `<div>` with the same border-radius and padding as the edit textarea, but a lighter border (`border-gray-200 dark:border-gray-700`) to signal read-only. Content rendered with `whitespace-pre-wrap` to preserve line breaks.
+- Select: plain `<span>` showing the matching option label (resolved by iterating `field_options`).
+- Toggle: renders immediately without an Edit step (auto-saves on change).
+
+**Edit mode** — the actual form control appears with Save + Cancel buttons:
+- Text fields: `<input type="text">` filling available width (`1fr` in the layout grid).
+- URL fields: `<input type="url">`.
+- Number fields: `<input type="number" class="w-28">` — fixed narrow width.
+- Textarea: `<textarea rows="3" class="form-input">`.
+- Select: `<select class="form-input w-32">`.
+
+**Layout — text/number/URL fields:**
+
+Wide (`sm+`): 3-column grid `[label(min(18rem,40%)) | value/input(1fr) | buttons(auto)]` — all on one row.
+Narrow: label + buttons on row 1; value/input spans both columns on row 2 below.
+
+```
+sm+: [Label / Hint]  [Value or Input (fills)]  [Edit / Save Cancel]
+xs:  [Label / Hint]                             [Edit / Save Cancel]
+     [Value or Input (full width)]
+```
+
+**Layout — textarea fields:**
+
+Two-column grid `[label+hint(1fr) | buttons(auto)]` on the header row; textarea/container spans full width below.
+
+```
+[Label / Hint]  [Edit / Save Cancel]
+[Textarea or bordered container      ]
+```
+
+Buttons use `self-start pt-0.5` to align with the top of the label+hint stack.
+
+**Route conventions:**
+- `GET /watches/{id}/field/{name}` — returns field partial in view mode (cancel).
+- `GET /watches/{id}/field/{name}?mode=edit` — returns field partial in edit mode.
+- `POST /watches/{id}/field/{name}` — saves and returns field partial in view mode.
 
 ### Form controls
 
@@ -346,6 +419,7 @@ Dialog overlay with focus trapping. Focus trap implementation deferred to #39.
 
 - **Inline flash**: `{% include "partials/flash.html" %}` — renders from `flash` context variable.
 - **OOB flash**: `{% include "partials/flash_oob.html" %}` — used in HTMX partial responses. Set `flash_oob_level` and `flash_oob_message` before including.
+- **Programmatic flash (JS)**: `window.watcher.showFlash(level, message)` — creates and appends a flash element to `#flash-region` from client-side JS. Wires up auto-dismiss and hover-pause. Use for purely client-side events (e.g., clipboard copy confirmation) where no server round-trip is needed.
 - **Levels**: `success`, `error`, `info`, `warning`.
 - **Auto-dismiss**: 5 seconds (`DISMISS_MS` in `app.js`). Hover pauses timer; mouseleave restarts.
 - **Close button**: `&times;` with `aria-label="Dismiss"`, removes parent on click. Uses `ms-4` (logical margin-inline-start).

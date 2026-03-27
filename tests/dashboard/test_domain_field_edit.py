@@ -19,7 +19,7 @@ class TestDomainFieldPartialGet:
         )
         assert response.status_code == 200
         assert b"2.5" in response.content
-        assert b"disabled" in response.content
+        assert b"<input" not in response.content
         assert b"Edit" in response.content
 
     async def test_field_partial_edit_mode(self, client, db_session):
@@ -43,7 +43,7 @@ class TestDomainFieldPartialGet:
         )
         assert response.status_code == 200
         assert b"Some notes" in response.content
-        assert b"disabled" in response.content
+        assert b"<textarea" not in response.content
         assert b"Edit" in response.content
 
     async def test_field_partial_textarea_edit_mode(self, client, db_session):
@@ -81,12 +81,12 @@ class TestDomainFieldPartialGet:
 class TestDomainDetailFieldViewMode:
     """Domain detail page renders fields in view mode by default."""
 
-    async def test_detail_page_fields_disabled(self, client, db_session):
+    async def test_detail_page_fields_show_edit_button_in_view_mode(self, client, db_session):
         db_session.add(Domain(name="viewmode.com"))
         await db_session.flush()
         response = await client.get("/domains/viewmode.com")
         assert response.status_code == 200
-        assert b"disabled" in response.content
+        assert b"disabled" not in response.content
         assert b"Edit" in response.content
 
     async def test_detail_page_has_no_save_cancel_initially(self, client, db_session):
@@ -111,6 +111,6 @@ class TestDomainInlineUpdateReturnsViewMode:
             headers={"HX-Request": "true"},
         )
         assert response.status_code == 200
-        assert b"disabled" in response.content
+        assert b"<input" not in response.content
         assert b"Edit" in response.content
         assert b"5.0" in response.content

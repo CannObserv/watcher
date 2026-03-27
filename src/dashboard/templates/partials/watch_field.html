@@ -1,5 +1,5 @@
 {# Single watch field partial. Expects: watch, field_name, field_label, field_hint (optional),
-   field_value, field_type ("text"|"number"|"textarea"|"select"|"toggle"|"readonly"),
+   field_value, field_type ("text"|"number"|"url"|"textarea"|"select"|"toggle"|"readonly"),
    field_step (optional), field_min (optional), field_unit (optional),
    field_options (optional, for select), field_mode ("view"|"edit", default "view"). #}
 {% set mode = field_mode|default("view") %}
@@ -33,48 +33,65 @@
   </div>
 
   {% elif field_type == "textarea" %}
-  {# Textarea: label row with buttons inline, textarea below #}
+  {# Textarea — view mode: bordered container; edit mode: live textarea #}
+  {% if mode == "edit" %}
   <form method="post" action="/watches/{{ watch.id }}/field/{{ field_name }}"
     hx-post="/watches/{{ watch.id }}/field/{{ field_name }}"
     hx-target="#field-{{ field_name }}"
     hx-swap="outerHTML">
-    <div class="flex items-center justify-between mb-2">
-      <label for="{{ field_name }}" class="form-label mb-0">{{ field_label }}</label>
-      <div class="flex items-center gap-1">
+    <div class="grid grid-cols-[1fr_auto] gap-x-4 gap-y-2 mb-2">
+      <div class="min-w-0">
+        <label for="{{ field_name }}" class="form-label mb-0">{{ field_label }}</label>
+        {% if field_hint %}
+        <p class="text-xs text-gray-500 dark:text-gray-400 mt-0.5" id="{{ field_name }}-hint">{{ field_hint }}</p>
+        {% endif %}
+      </div>
+      <div class="flex items-start gap-1 self-start pt-0.5">
         {{ action_buttons() }}
       </div>
     </div>
-    {% if field_hint %}
-    <p class="text-xs text-gray-500 dark:text-gray-400 mb-1" id="{{ field_name }}-hint">{{ field_hint }}</p>
-    {% endif %}
     <textarea name="value" id="{{ field_name }}" rows="3"
       class="form-input text-sm"
-      {% if field_hint %}aria-describedby="{{ field_name }}-hint"{% endif %}
-      {% if mode == "view" %}disabled{% endif %}>{{ field_value }}</textarea>
+      {% if field_hint %}aria-describedby="{{ field_name }}-hint"{% endif %}>{{ field_value }}</textarea>
     <noscript><button type="submit" class="btn btn-secondary py-1 px-3 text-sm mt-2">Save</button></noscript>
   </form>
+  {% else %}
+  {# View mode: styled container — same border/shape as edit textarea, lighter to signal read-only #}
+  <div class="grid grid-cols-[1fr_auto] gap-x-4 gap-y-2 mb-2">
+    <div class="min-w-0">
+      <span class="form-label mb-0">{{ field_label }}</span>
+      {% if field_hint %}
+      <p class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">{{ field_hint }}</p>
+      {% endif %}
+    </div>
+    <div class="flex items-start gap-1 self-start pt-0.5">
+      {{ action_buttons() }}
+    </div>
+  </div>
+  <div class="w-full rounded-md border border-gray-200 dark:border-gray-700 text-gray-900 dark:text-gray-100 text-sm p-2 whitespace-pre-wrap min-h-[76px]">{{ field_value }}</div>
+  {% endif %}
 
   {% elif field_type == "select" %}
-  {# Select dropdown #}
+  {# Select — view mode: plain text label; edit mode: dropdown #}
+  {% if mode == "edit" %}
   <form method="post" action="/watches/{{ watch.id }}/field/{{ field_name }}"
     hx-post="/watches/{{ watch.id }}/field/{{ field_name }}"
     hx-target="#field-{{ field_name }}"
     hx-swap="outerHTML">
-    <div class="grid grid-cols-[1fr_auto] sm:grid-cols-[min(18rem,40%)_auto_1fr_auto] items-center gap-x-4 gap-y-1">
+    <div class="grid grid-cols-[1fr_auto] sm:grid-cols-[min(18rem,40%)_1fr_auto] items-center gap-x-4 gap-y-2">
       <div class="min-w-0">
         <label for="{{ field_name }}" class="form-label mb-0">{{ field_label }}</label>
         {% if field_hint %}
         <p class="text-xs text-gray-500 dark:text-gray-400" id="{{ field_name }}-hint">{{ field_hint }}</p>
         {% endif %}
       </div>
-      <div class="flex items-center gap-1 row-span-2 sm:row-span-1 sm:col-start-[-1] justify-self-end">
+      <div class="flex items-center gap-1 justify-self-end sm:col-start-3 sm:row-start-1">
         {{ action_buttons() }}
       </div>
-      <div class="flex items-center gap-2">
+      <div class="col-span-2 sm:col-span-1 sm:col-start-2 sm:row-start-1 flex items-center gap-2">
         <select name="value" id="{{ field_name }}"
           {% if field_hint %}aria-describedby="{{ field_name }}-hint"{% endif %}
-          class="form-input w-32 text-sm"
-          {% if mode == "view" %}disabled{% endif %}>
+          class="form-input w-32 text-sm">
           {% for val, label in field_options %}
           <option value="{{ val }}" {% if field_value == val %}selected{% endif %}>{{ label }}</option>
           {% endfor %}
@@ -83,6 +100,27 @@
       </div>
     </div>
   </form>
+  {% else %}
+  {# View mode: show the matching option label as plain text #}
+  <div class="grid grid-cols-[1fr_auto] sm:grid-cols-[min(18rem,40%)_1fr_auto] items-center gap-x-4 gap-y-2">
+    <div class="min-w-0">
+      <span class="form-label mb-0">{{ field_label }}</span>
+      {% if field_hint %}
+      <p class="text-xs text-gray-500 dark:text-gray-400">{{ field_hint }}</p>
+      {% endif %}
+    </div>
+    <div class="flex items-center gap-1 justify-self-end sm:col-start-3 sm:row-start-1">
+      {{ action_buttons() }}
+    </div>
+    <div class="col-span-2 sm:col-span-1 sm:col-start-2 sm:row-start-1 flex items-center gap-2">
+      <span class="text-sm text-gray-900 dark:text-gray-100 font-medium">
+        {%- for val, label in field_options -%}
+          {%- if val == field_value %}{{ label }}{% endif -%}
+        {%- endfor -%}
+      </span>
+    </div>
+  </div>
+  {% endif %}
 
   {% elif field_type == "toggle" %}
   {# Boolean toggle — auto-saves on change #}
@@ -114,29 +152,29 @@
   </form>
 
   {% else %}
-  {# Text / Number fields: label | input+unit | flex space | buttons #}
+  {# Text / Number / URL fields — view mode: plain display; edit mode: input #}
+  {% if mode == "edit" %}
   <form method="post" action="/watches/{{ watch.id }}/field/{{ field_name }}"
     hx-post="/watches/{{ watch.id }}/field/{{ field_name }}"
     hx-target="#field-{{ field_name }}"
     hx-swap="outerHTML">
-    <div class="grid grid-cols-[1fr_auto] sm:grid-cols-[min(18rem,40%)_auto_1fr_auto] items-center gap-x-4 gap-y-1">
+    <div class="grid grid-cols-[1fr_auto] sm:grid-cols-[min(18rem,40%)_1fr_auto] items-center gap-x-4 gap-y-2">
       <div class="min-w-0">
         <label for="{{ field_name }}" class="form-label mb-0">{{ field_label }}</label>
         {% if field_hint %}
         <p class="text-xs text-gray-500 dark:text-gray-400" id="{{ field_name }}-hint">{{ field_hint }}</p>
         {% endif %}
       </div>
-      <div class="flex items-center gap-1 row-span-2 sm:row-span-1 sm:col-start-[-1] justify-self-end">
+      <div class="flex items-center gap-1 justify-self-end sm:col-start-3 sm:row-start-1">
         {{ action_buttons() }}
       </div>
-      <div class="flex items-center gap-2">
+      <div class="col-span-2 sm:col-span-1 sm:col-start-2 sm:row-start-1 flex items-center gap-2">
         <input type="{{ field_type }}" name="value" id="{{ field_name }}"
           {% if field_step %}step="{{ field_step }}"{% endif %}
           {% if field_min %}min="{{ field_min }}"{% endif %}
           value="{{ field_value }}"
           {% if field_hint %}aria-describedby="{{ field_name }}-hint"{% endif %}
-          class="form-input {% if field_type == 'number' %}w-28{% endif %} text-sm"
-          {% if mode == "view" %}disabled{% endif %}>
+          class="form-input {% if field_type == 'number' %}w-28{% endif %} text-sm">
         {% if field_unit %}
         <span class="text-sm text-gray-500 dark:text-gray-400">{{ field_unit }}</span>
         {% endif %}
@@ -144,5 +182,31 @@
       </div>
     </div>
   </form>
+  {% else %}
+  {# View mode: plain text — no disabled input #}
+  <div class="grid grid-cols-[1fr_auto] sm:grid-cols-[min(18rem,40%)_1fr_auto] items-center gap-x-4 gap-y-2">
+    <div class="min-w-0">
+      <span class="form-label mb-0">{{ field_label }}</span>
+      {% if field_hint %}
+      <p class="text-xs text-gray-500 dark:text-gray-400">{{ field_hint }}</p>
+      {% endif %}
+    </div>
+    <div class="flex items-center gap-1 justify-self-end sm:col-start-3 sm:row-start-1">
+      {% if field_type == "url" %}
+      <button type="button" class="btn btn-secondary py-1 px-3 text-sm min-h-0"
+        data-copy-url="{{ field_value }}"
+        aria-label="Copy URL to clipboard">Copy</button>
+      {% endif %}
+      {{ action_buttons() }}
+    </div>
+    <div class="col-span-2 sm:col-span-1 sm:col-start-2 sm:row-start-1 flex items-center gap-2 min-w-0">
+      {% if field_type == "url" %}
+      <a href="{{ field_value }}" class="link text-sm break-all" target="_blank" rel="noopener noreferrer">{{ field_value }}</a>
+      {% else %}
+      <span class="text-sm text-gray-900 dark:text-gray-100 font-medium">{{ field_value }}{% if field_unit %} <span class="text-gray-500 dark:text-gray-400 font-normal">{{ field_unit }}</span>{% endif %}</span>
+      {% endif %}
+    </div>
+  </div>
+  {% endif %}
   {% endif %}
 </div>

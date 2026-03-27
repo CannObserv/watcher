@@ -4,13 +4,6 @@
 <div class="mb-6">
   <div class="flex items-center gap-3 flex-wrap">
     <h2 class="text-2xl font-bold text-gray-900 dark:text-white">{{ watch.name }}</h2>
-    {% if watch.is_archived %}
-    <span class="badge badge-archived">Archived</span>
-    {% elif watch.is_active %}
-    <span class="badge badge-active">Active</span>
-    {% else %}
-    <span class="badge badge-inactive">Inactive</span>
-    {% endif %}
   </div>
   <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">{{ watch.url }}</p>
 </div>
@@ -66,19 +59,6 @@
       </div>
     </div>
 
-    {# Last Checked (read-only) #}
-    <div class="p-4" id="field-last_checked_at">
-      <div class="grid grid-cols-[1fr_auto] sm:grid-cols-[min(18rem,40%)_auto_1fr_auto] items-center gap-x-4 gap-y-1">
-        <div class="min-w-0">
-          <span class="form-label mb-0">Last Checked</span>
-        </div>
-        <div class="flex items-center gap-2">
-          <span class="text-sm text-gray-900 dark:text-gray-100 font-medium">
-            {% if watch.last_checked_at %}{{ watch.last_checked_at.strftime('%Y-%m-%d %H:%M UTC') }}{% else %}Never{% endif %}
-          </span>
-        </div>
-      </div>
-    </div>
   </div>
 </section>
 
@@ -99,13 +79,27 @@
     {% set field_mode = ctx.field_mode %}
     {% include "partials/watch_field.html" %}
     {% endwith %}
+
+    {# Last Checked (read-only) #}
+    <div class="p-4" id="field-last_checked_at">
+      <div class="grid grid-cols-[1fr_auto] sm:grid-cols-[min(18rem,40%)_auto_1fr_auto] items-center gap-x-4 gap-y-1">
+        <div class="min-w-0">
+          <span class="form-label mb-0">Last Checked</span>
+        </div>
+        <div class="flex items-center gap-2">
+          <span class="text-sm text-gray-900 dark:text-gray-100 font-medium">
+            {% if watch.last_checked_at %}{{ watch.last_checked_at.strftime('%Y-%m-%d %H:%M UTC') }}{% else %}Never{% endif %}
+          </span>
+        </div>
+      </div>
+    </div>
   </div>
 </section>
 
 {# Fetch Config — content-type-aware fields #}
 {% set fetch_fields = ["timeout", "headers", "ignore_patterns", "selectors", "exclude_selectors", "dynamic_id_patterns", "strip_boilerplate", "skip_empty_pages", "file_format", "chunk_row_size", "sort_columns", "sheet_name"] %}
 <section class="mb-8">
-  <h3 class="text-lg font-semibold text-gray-900 dark:text-white mb-4">Fetch Config</h3>
+  <h3 class="text-lg font-semibold text-gray-900 dark:text-white mb-4">Configuration</h3>
   <div class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 divide-y divide-gray-200 dark:divide-gray-700">
     {% for fname in fetch_fields %}
     {% if fname in field_contexts %}

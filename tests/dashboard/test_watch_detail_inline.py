@@ -19,13 +19,13 @@ class TestWatchDetailPage:
         assert b"watch-status-toggle" in response.content
         assert b"Active" in response.content
 
-    async def test_detail_page_fields_disabled_in_view_mode(self, client, db_session):
+    async def test_detail_page_fields_show_edit_button_in_view_mode(self, client, db_session):
         watch = Watch(name="View Mode", url="https://example.com", content_type=ContentType.HTML)
         db_session.add(watch)
         await db_session.flush()
         response = await client.get(f"/watches/{watch.id}")
         assert response.status_code == 200
-        assert b"disabled" in response.content
+        assert b"disabled" not in response.content
         assert b"Edit" in response.content
 
     async def test_detail_page_shows_content_type_readonly(self, client, db_session):
@@ -109,7 +109,7 @@ class TestWatchFieldPartialGet:
         )
         assert response.status_code == 200
         assert b"Field View" in response.content
-        assert b"disabled" in response.content
+        assert b"<input" not in response.content
         assert b"Edit" in response.content
 
     async def test_field_partial_edit_mode(self, client, db_session):
@@ -164,7 +164,7 @@ class TestWatchFieldUpdate:
         )
         assert response.status_code == 200
         assert b"New Name" in response.content
-        assert b"disabled" in response.content
+        assert b"<input" not in response.content
 
     async def test_update_url(self, client, db_session):
         watch = Watch(name="URL Test", url="https://old.com", content_type=ContentType.HTML)

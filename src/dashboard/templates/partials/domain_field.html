@@ -20,57 +20,93 @@
   {% endif %}
 {% endmacro %}
 <div class="p-4" id="field-{{ field_name }}">
-  {# No-JS: fields are always enabled and Save button is visible.
-     The edit/save/cancel workflow is a progressive enhancement —
-     without JS there is no way to enter edit mode, so we keep
-     fields enabled and show a plain Save button via <noscript>. #}
+  {# Field editing requires JS (HTMX). Without JS the Edit button is inert and
+     fields remain read-only — there is no no-JS fallback for edit mode. #}
+  {% if field_type == "textarea" %}
+  {# Textarea — view mode: bordered container; edit mode: live textarea #}
+  {% if mode == "edit" %}
   <form method="post" action="/domains/{{ domain.name }}">
     <input type="hidden" name="field" value="{{ field_name }}">
-    {% if field_type == "textarea" %}
-    {# Textarea: label row with buttons inline, textarea below #}
-    <div class="flex items-center justify-between mb-2">
-      <label for="{{ field_name }}" class="form-label mb-0">{{ field_label }}</label>
-      <div class="flex items-center gap-1">
+    <div class="grid grid-cols-[1fr_auto] gap-x-4 gap-y-2 mb-2">
+      <div class="min-w-0">
+        <label for="{{ field_name }}" class="form-label mb-0">{{ field_label }}</label>
+        {% if field_hint %}
+        <p class="text-xs text-gray-500 dark:text-gray-400 mt-0.5" id="{{ field_name }}-hint">{{ field_hint }}</p>
+        {% endif %}
+      </div>
+      <div class="flex items-start gap-1 self-start pt-0.5">
         {{ action_buttons() }}
       </div>
     </div>
-    {% if field_hint %}
-    <p class="text-xs text-gray-500 dark:text-gray-400 mb-1" id="{{ field_name }}-hint">{{ field_hint }}</p>
-    {% endif %}
     <textarea name="value" id="{{ field_name }}" rows="3"
       class="form-input text-sm"
-      {% if mode == "view" %}disabled{% endif %}
+      {% if field_hint %}aria-describedby="{{ field_name }}-hint"{% endif %}
       placeholder="Operator notes about this domain…">{{ field_value }}</textarea>
     <noscript><button type="submit" class="btn btn-secondary py-1 px-3 text-sm mt-2">Save</button></noscript>
-    {% else %}
-    {# Number fields: label | input+unit | flex space | buttons #}
-    {# Wide: single row — label column fixed at min(18rem,40%) for cross-row alignment #}
-    {# Narrow: label+input stack left, buttons span both rows vertically centered right #}
-    <div class="grid grid-cols-[1fr_auto] sm:grid-cols-[min(18rem,40%)_auto_1fr_auto] items-center gap-x-4 gap-y-1">
+  </form>
+  {% else %}
+  {# View mode: styled container — same border/shape as edit textarea, lighter to signal read-only #}
+  <div class="grid grid-cols-[1fr_auto] gap-x-4 gap-y-2 mb-2">
+    <div class="min-w-0">
+      <span class="form-label mb-0">{{ field_label }}</span>
+      {% if field_hint %}
+      <p class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">{{ field_hint }}</p>
+      {% endif %}
+    </div>
+    <div class="flex items-start gap-1 self-start pt-0.5">
+      {{ action_buttons() }}
+    </div>
+  </div>
+  <div class="w-full rounded-md border border-gray-200 dark:border-gray-700 text-gray-900 dark:text-gray-100 text-sm p-2 whitespace-pre-wrap min-h-[76px]">{{ field_value }}</div>
+  {% endif %}
+
+  {% else %}
+  {# Number fields — view mode: plain text; edit mode: input #}
+  {% if mode == "edit" %}
+  {# Wide: single row — label column fixed at min(18rem,40%) for cross-row alignment #}
+  {# Narrow: label+buttons on top row, input wraps below #}
+  <form method="post" action="/domains/{{ domain.name }}">
+    <input type="hidden" name="field" value="{{ field_name }}">
+    <div class="grid grid-cols-[1fr_auto] sm:grid-cols-[min(18rem,40%)_1fr_auto] items-center gap-x-4 gap-y-2">
       <div class="min-w-0">
         <label for="{{ field_name }}" class="form-label mb-0">{{ field_label }}</label>
         {% if field_hint %}
         <p class="text-xs text-gray-500 dark:text-gray-400" id="{{ field_name }}-hint">{{ field_hint }}</p>
         {% endif %}
       </div>
-      {# Buttons: far right, span 2 rows on narrow so they vertically center with stacked label+input #}
-      <div class="flex items-center gap-1 row-span-2 sm:row-span-1 sm:col-start-[-1] justify-self-end">
+      <div class="flex items-center gap-1 justify-self-end sm:col-start-3 sm:row-start-1">
         {{ action_buttons() }}
       </div>
-      <div class="flex items-center gap-2">
+      <div class="col-span-2 sm:col-span-1 sm:col-start-2 sm:row-start-1 flex items-center gap-2">
         <input type="number" name="value" id="{{ field_name }}"
           {% if field_step %}step="{{ field_step }}"{% endif %}
           {% if field_min %}min="{{ field_min }}"{% endif %}
           value="{{ field_value }}"
           {% if field_hint %}aria-describedby="{{ field_name }}-hint"{% endif %}
-          class="form-input w-28 text-sm"
-          {% if mode == "view" %}disabled{% endif %}>
+          class="form-input w-28 text-sm">
         {% if field_unit %}
         <span class="text-sm text-gray-500 dark:text-gray-400">{{ field_unit }}</span>
         {% endif %}
         <noscript><button type="submit" class="btn btn-secondary py-1 px-3 text-sm">Save</button></noscript>
       </div>
     </div>
-    {% endif %}
   </form>
+  {% else %}
+  {# View mode: plain text — no disabled input #}
+  <div class="grid grid-cols-[1fr_auto] sm:grid-cols-[min(18rem,40%)_1fr_auto] items-center gap-x-4 gap-y-2">
+    <div class="min-w-0">
+      <span class="form-label mb-0">{{ field_label }}</span>
+      {% if field_hint %}
+      <p class="text-xs text-gray-500 dark:text-gray-400">{{ field_hint }}</p>
+      {% endif %}
+    </div>
+    <div class="flex items-center gap-1 justify-self-end sm:col-start-3 sm:row-start-1">
+      {{ action_buttons() }}
+    </div>
+    <div class="col-span-2 sm:col-span-1 sm:col-start-2 sm:row-start-1 flex items-center gap-2">
+      <span class="text-sm text-gray-900 dark:text-gray-100 font-medium">{{ field_value }}{% if field_unit %} <span class="text-gray-500 dark:text-gray-400 font-normal">{{ field_unit }}</span>{% endif %}</span>
+    </div>
+  </div>
+  {% endif %}
+  {% endif %}
 </div>

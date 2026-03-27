@@ -236,7 +236,7 @@ WATCH_FIELD_META: dict[str, dict] = {
     "url": {
         "label": "URL",
         "hint": None,
-        "type": "text",
+        "type": "url",
         "source": "column",
         "cast": lambda v: v.strip(),
         "format": lambda w: w.url,

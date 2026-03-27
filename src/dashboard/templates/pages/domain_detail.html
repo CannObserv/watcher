@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "macros/fields.html" import domain_field with context %}
 {% block title %}{{ domain.name }} — watcher{% endblock %}
 {% block content %}
 <div class="mb-6">
@@ -21,47 +22,10 @@
   <h3 class="text-lg font-semibold text-gray-900 dark:text-white mb-4">Details</h3>
   <div class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 divide-y divide-gray-200 dark:divide-gray-700">
 
-    {% set field_mode = "view" %}
-
-    {% set field_name = "min_interval" %}
-    {% set field_label = "Min Interval" %}
-    {% set field_hint = "Minimum seconds between requests to this domain" %}
-    {% set field_value = "%.1f"|format(domain.min_interval) %}
-    {% set field_type = "number" %}
-    {% set field_step = "0.1" %}
-    {% set field_min = "0.1" %}
-    {% set field_unit = "seconds" %}
-    {% include "partials/domain_field.html" %}
-
-    {% set field_name = "max_concurrency" %}
-    {% set field_label = "Max Concurrency" %}
-    {% set field_hint = "Maximum simultaneous requests allowed" %}
-    {% set field_value = domain.max_concurrency %}
-    {% set field_type = "number" %}
-    {% set field_step = None %}
-    {% set field_min = "1" %}
-    {% set field_unit = None %}
-    {% include "partials/domain_field.html" %}
-
-    {% set field_name = "decay_window" %}
-    {% set field_label = "Decay Window" %}
-    {% set field_hint = "Seconds before backoff interval decays toward minimum" %}
-    {% set field_value = "%.0f"|format(domain.decay_window) %}
-    {% set field_type = "number" %}
-    {% set field_step = "1" %}
-    {% set field_min = "1" %}
-    {% set field_unit = "seconds" %}
-    {% include "partials/domain_field.html" %}
-
-    {% set field_name = "notes" %}
-    {% set field_label = "Notes" %}
-    {% set field_hint = None %}
-    {% set field_value = domain.notes or '' %}
-    {% set field_type = "textarea" %}
-    {% set field_step = None %}
-    {% set field_min = None %}
-    {% set field_unit = None %}
-    {% include "partials/domain_field.html" %}
+    {{ domain_field(field_contexts["min_interval"]) }}
+    {{ domain_field(field_contexts["max_concurrency"]) }}
+    {{ domain_field(field_contexts["decay_window"]) }}
+    {{ domain_field(field_contexts["notes"]) }}
   </div>
 </section>
 

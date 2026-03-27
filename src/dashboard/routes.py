@@ -1,5 +1,6 @@
 """Dashboard page routes — server-rendered HTML via Jinja2 + HTMX."""
 
+import json
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from typing import Literal
@@ -157,6 +158,12 @@ async def watch_detail_page(
     profiles = await get_watch_profiles(session, watch.id)
     notifications = await get_watch_notifications(session, watch.id)
 
+    # Build field contexts for content-type-aware rendering
+    applicable_fields = _watch_fields_for_content_type(watch.content_type)
+    field_contexts = {
+        name: _watch_field_context(request, watch, name, mode="view") for name in applicable_fields
+    }
+
     context = {
         "request": request,
         "active_page": "watches",
@@ -164,117 +171,9 @@ async def watch_detail_page(
         "changes": changes,
         "profiles": profiles,
         "notifications": notifications,
+        "field_contexts": field_contexts,
     }
     return templates.TemplateResponse("pages/watch_detail.html", context)
-
-
-@router.get("/watches/{watch_id}/edit")
-async def watch_edit_form(
-    request: Request,
-    watch_id: str,
-    session: AsyncSession = Depends(get_db_session),
-):
-    """Watch edit form, prefilled with current values."""
-    watch = await get_watch_detail(session, watch_id)
-    if not watch:
-        return templates.TemplateResponse("pages/404.html", {"request": request}, status_code=404)
-    return templates.TemplateResponse(
-        "pages/watch_form.html",
-        {
-            "request": request,
-            "active_page": "watches",
-            "watch": watch,
-            "flash": None,
-            "content_types": list(ContentType),
-        },
-    )
-
-
-@router.post("/watches/{watch_id}/edit")
-async def watch_edit_submit(
-    request: Request,
-    watch_id: str,
-    name: str = Form(""),
-    url: str = Form(""),
-    content_type: str = Form("html"),
-    interval: str = Form(""),
-    session: AsyncSession = Depends(get_db_session),
-):
-    """Handle watch edit form submission."""
-    watch = await get_watch_detail(session, watch_id)
-    if not watch:
-        return templates.TemplateResponse("pages/404.html", {"request": request}, status_code=404)
-
-    errors = []
-    if not name.strip():
-        errors.append("Name is required")
-    if not url.strip():
-        errors.append("URL is required")
-
-    if errors:
-        flash = {"type": "error", "message": ". ".join(errors)}
-        return templates.TemplateResponse(
-            "pages/watch_form.html",
-            {
-                "request": request,
-                "active_page": "watches",
-                "watch": watch,
-                "flash": flash,
-                "content_types": list(ContentType),
-            },
-        )
-
-    watch.name = name.strip()
-    watch.url = url.strip()
-    watch.content_type = content_type
-    schedule_config = dict(watch.schedule_config or {})
-    if interval.strip():
-        schedule_config["interval"] = interval.strip()
-    else:
-        schedule_config.pop("interval", None)
-    watch.schedule_config = schedule_config
-
-    audit(
-        session,
-        EventType.WATCH_UPDATED,
-        watch_id=watch.id,
-        updated_fields=["name", "url", "content_type", "schedule_config"],
-        source="dashboard",
-    )
-    await session.commit()
-    return RedirectResponse(url=f"/watches/{watch.id}", status_code=303)
-
-
-@router.post("/watches/{watch_id}/deactivate")
-async def watch_deactivate(
-    request: Request,
-    watch_id: str,
-    session: AsyncSession = Depends(get_db_session),
-):
-    """Deactivate a watch via HTMX — returns updated row or status snippet."""
-    watch = await get_watch_detail(session, watch_id)
-    if not watch:
-        return templates.TemplateResponse("pages/404.html", {"request": request}, status_code=404)
-    watch.is_active = False
-    audit(
-        session,
-        EventType.WATCH_DEACTIVATED,
-        watch_id=watch.id,
-        name=watch.name,
-        source="dashboard",
-    )
-    await session.commit()
-    await session.refresh(watch)
-
-    # Detail page targets #watch-status; list page targets #watch-{id} row
-    hx_target = request.headers.get("HX-Target", "")
-    if hx_target == "watch-status":
-        html = '<dt class="text-sm text-gray-600 dark:text-gray-400">Status</dt>'
-        html += '<dd class="text-sm font-medium text-gray-500 dark:text-gray-400">Inactive</dd>'
-        return HTMLResponse(content=html)
-    return templates.TemplateResponse(
-        "partials/watch_row.html", {"request": request, "watch": watch}
-    )
 
 
 @router.delete("/watches/{watch_id}")
@@ -283,26 +182,389 @@ async def watch_delete(
     watch_id: str,
     session: AsyncSession = Depends(get_db_session),
 ):
-    """Delete an inactive watch via HTMX — delegates to the API layer, adapts response for HTMX.
+    """Delete an archived watch — requires is_archived=True.
 
-    Business logic (active-check, audit log, deletion, commit) lives in the API
-    route. This handler's sole responsibility is translating the API outcome into
-    an HTMX-compatible response: HX-Redirect on success, an inline error snippet
-    on 409, or a 404 template if the watch is gone.
+    Delegates to the API layer for business logic and translates the outcome
+    into an HTMX-compatible response.
     """
     watch = await get_watch_detail(session, watch_id)
     if not watch:
         return templates.TemplateResponse("pages/404.html", {"request": request}, status_code=404)
+    if not watch.is_archived:
+        msg = '<p class="text-red-600 text-sm mt-2">Archive the watch before deleting it.</p>'
+        return HTMLResponse(status_code=409, content=msg)
     try:
         await api_delete_watch(watch_id=watch_id, session=session)
     except HTTPException as exc:
         if exc.status_code == 409:
-            msg = (
-                '<p class="text-red-600 text-sm mt-2">Deactivate the watch before deleting it.</p>'
-            )
+            msg = '<p class="text-red-600 text-sm mt-2">Archive the watch before deleting it.</p>'
             return HTMLResponse(status_code=409, content=msg)
         raise
     return HTMLResponse(status_code=200, content="", headers={"HX-Redirect": "/watches"})
+
+
+# --- Watch inline field editing ---
+
+
+def _split_lines(text: str) -> list[str]:
+    """Split text into non-empty lines."""
+    return [line.strip() for line in text.splitlines() if line.strip()]
+
+
+def _parse_json_dict(text: str) -> dict:
+    """Parse JSON text as a dict, or return empty dict for empty input."""
+    text = text.strip()
+    if not text:
+        return {}
+    result = json.loads(text)
+    if not isinstance(result, dict):
+        raise ValueError("Expected a JSON object")
+    return result
+
+
+WATCH_FIELD_META: dict[str, dict] = {
+    # -- Details section (column fields) --
+    "name": {
+        "label": "Name",
+        "hint": None,
+        "type": "text",
+        "source": "column",
+        "cast": lambda v: v.strip(),
+        "format": lambda w: w.name,
+        "content_types": None,
+    },
+    "url": {
+        "label": "URL",
+        "hint": None,
+        "type": "text",
+        "source": "column",
+        "cast": lambda v: v.strip(),
+        "format": lambda w: w.url,
+        "content_types": None,
+    },
+    # -- Schedule section --
+    "interval": {
+        "label": "Check Interval",
+        "hint": "Format: 30s, 15m, 6h, 1d",
+        "type": "text",
+        "source": "schedule_config",
+        "cast": lambda v: v.strip(),
+        "format": lambda w: (w.schedule_config or {}).get("interval", "1d"),
+        "content_types": None,
+    },
+    # -- Fetch config: shared --
+    "timeout": {
+        "label": "Timeout",
+        "hint": "Request timeout in seconds",
+        "type": "number",
+        "step": "1",
+        "min": "1",
+        "unit": "seconds",
+        "source": "fetch_config",
+        "cast": float,
+        "format": lambda w: str((w.fetch_config or {}).get("timeout", 30)),
+        "content_types": None,
+    },
+    "headers": {
+        "label": "Headers",
+        "hint": 'JSON object, e.g. {"Authorization": "Bearer ..."}',
+        "type": "textarea",
+        "source": "fetch_config",
+        "cast": _parse_json_dict,
+        "format": lambda w: (
+            json.dumps((w.fetch_config or {}).get("headers", {}), indent=2)
+            if (w.fetch_config or {}).get("headers")
+            else ""
+        ),
+        "content_types": None,
+    },
+    "ignore_patterns": {
+        "label": "Ignore Patterns",
+        "hint": "One regex per line (fullmatch against chunk text)",
+        "type": "textarea",
+        "source": "fetch_config",
+        "cast": _split_lines,
+        "format": lambda w: "\n".join((w.fetch_config or {}).get("ignore_patterns", [])),
+        "content_types": None,
+    },
+    # -- Fetch config: HTML-specific --
+    "selectors": {
+        "label": "CSS Selectors",
+        "hint": "One CSS selector per line (empty = whole body)",
+        "type": "textarea",
+        "source": "fetch_config",
+        "cast": _split_lines,
+        "format": lambda w: "\n".join((w.fetch_config or {}).get("selectors", [])),
+        "content_types": ["html"],
+    },
+    "exclude_selectors": {
+        "label": "Exclude Selectors",
+        "hint": "CSS selectors to remove from included content",
+        "type": "textarea",
+        "source": "fetch_config",
+        "cast": _split_lines,
+        "format": lambda w: "\n".join((w.fetch_config or {}).get("exclude_selectors", [])),
+        "content_types": ["html"],
+    },
+    "dynamic_id_patterns": {
+        "label": "Dynamic ID Patterns",
+        "hint": "HTML attribute names to strip (e.g. data-block-id)",
+        "type": "textarea",
+        "source": "fetch_config",
+        "cast": _split_lines,
+        "format": lambda w: "\n".join((w.fetch_config or {}).get("dynamic_id_patterns", [])),
+        "content_types": ["html"],
+    },
+    "strip_boilerplate": {
+        "label": "Strip Boilerplate",
+        "hint": "Remove nav, footer, header, script, style elements",
+        "type": "toggle",
+        "source": "fetch_config",
+        "cast": lambda v: v == "true",
+        "format": lambda w: (w.fetch_config or {}).get("strip_boilerplate", True),
+        "content_types": ["html"],
+    },
+    # -- Fetch config: PDF-specific --
+    "skip_empty_pages": {
+        "label": "Skip Empty Pages",
+        "hint": "Omit pages with no text content",
+        "type": "toggle",
+        "source": "fetch_config",
+        "cast": lambda v: v == "true",
+        "format": lambda w: (w.fetch_config or {}).get("skip_empty_pages", False),
+        "content_types": ["pdf"],
+    },
+    # -- Fetch config: File-specific --
+    "file_format": {
+        "label": "File Format",
+        "hint": None,
+        "type": "select",
+        "options": [("csv", "CSV"), ("xlsx", "Excel")],
+        "source": "fetch_config",
+        "cast": lambda v: v.strip(),
+        "format": lambda w: (w.fetch_config or {}).get("file_format", "csv"),
+        "content_types": ["file"],
+    },
+    "chunk_row_size": {
+        "label": "Chunk Row Size",
+        "hint": "Number of rows per chunk",
+        "type": "number",
+        "step": "1",
+        "min": "1",
+        "unit": "rows",
+        "source": "fetch_config",
+        "cast": int,
+        "format": lambda w: str((w.fetch_config or {}).get("chunk_row_size", 100)),
+        "content_types": ["file"],
+    },
+    "sort_columns": {
+        "label": "Sort Columns",
+        "hint": "Column names to sort by before chunking (one per line)",
+        "type": "textarea",
+        "source": "fetch_config",
+        "cast": _split_lines,
+        "format": lambda w: "\n".join((w.fetch_config or {}).get("sort_columns", [])),
+        "content_types": ["file"],
+    },
+    "sheet_name": {
+        "label": "Sheet Name",
+        "hint": "Excel sheet name (empty = active sheet)",
+        "type": "text",
+        "source": "fetch_config",
+        "cast": lambda v: v.strip(),
+        "format": lambda w: (w.fetch_config or {}).get("sheet_name", ""),
+        "content_types": ["file"],
+    },
+}
+EDITABLE_WATCH_FIELDS = set(WATCH_FIELD_META.keys())
+
+
+def _watch_fields_for_content_type(content_type: str) -> list[str]:
+    """Return field names applicable to a given content type."""
+    ct = str(content_type).lower()
+    return [
+        name
+        for name, meta in WATCH_FIELD_META.items()
+        if meta["content_types"] is None or ct in meta["content_types"]
+    ]
+
+
+def _watch_field_context(
+    request: Request, watch: Watch, field_name: str, mode: str = "view"
+) -> dict:
+    """Build template context for a single watch field partial."""
+    meta = WATCH_FIELD_META[field_name]
+    ctx = {
+        "request": request,
+        "watch": watch,
+        "field_name": field_name,
+        "field_label": meta["label"],
+        "field_hint": meta.get("hint"),
+        "field_value": meta["format"](watch),
+        "field_type": meta["type"],
+        "field_step": meta.get("step"),
+        "field_min": meta.get("min"),
+        "field_unit": meta.get("unit"),
+        "field_options": meta.get("options"),
+        "field_mode": mode,
+    }
+    return ctx
+
+
+def _apply_watch_field_update(watch: Watch, field_name: str, raw_value: str) -> None:
+    """Apply a single field update to a Watch object."""
+    meta = WATCH_FIELD_META[field_name]
+    cast_fn = meta["cast"]
+    typed_value = cast_fn(raw_value)
+
+    source = meta["source"]
+    if source == "column":
+        setattr(watch, field_name, typed_value)
+    elif source == "schedule_config":
+        config = dict(watch.schedule_config or {})
+        if typed_value:
+            config[field_name] = typed_value
+        else:
+            config.pop(field_name, None)
+        watch.schedule_config = config
+    elif source == "fetch_config":
+        config = dict(watch.fetch_config or {})
+        # Only store non-default values; remove key if empty/default
+        if typed_value in (None, "", [], {}):
+            config.pop(field_name, None)
+        else:
+            config[field_name] = typed_value
+        watch.fetch_config = config
+
+
+@router.get("/watches/{watch_id}/field/{field_name}")
+async def watch_field_partial(
+    request: Request,
+    watch_id: str,
+    field_name: str,
+    mode: Literal["view", "edit"] = "view",
+    session: AsyncSession = Depends(get_db_session),
+):
+    """Serve a single watch field partial in view or edit mode."""
+    if field_name not in EDITABLE_WATCH_FIELDS:
+        raise HTTPException(status_code=400, detail=f"Field '{field_name}' is not editable")
+
+    watch = await get_watch_detail(session, watch_id)
+    if not watch:
+        raise HTTPException(status_code=404, detail="Watch not found")
+
+    if request.headers.get("HX-Request") != "true":
+        return RedirectResponse(url=f"/watches/{watch_id}", status_code=303)
+
+    ctx = _watch_field_context(request, watch, field_name, mode=mode)
+    return templates.TemplateResponse("partials/watch_field.html", ctx)
+
+
+@router.post("/watches/{watch_id}/field/{field_name}")
+async def watch_field_update(
+    request: Request,
+    watch_id: str,
+    field_name: str,
+    value: str = Form(""),
+    session: AsyncSession = Depends(get_db_session),
+):
+    """Update a single watch field (inline edit from detail view)."""
+    if field_name not in EDITABLE_WATCH_FIELDS:
+        raise HTTPException(status_code=400, detail=f"Field '{field_name}' is not editable")
+
+    watch = await get_watch_detail(session, watch_id)
+    if not watch:
+        raise HTTPException(status_code=404, detail="Watch not found")
+
+    try:
+        _apply_watch_field_update(watch, field_name, value)
+    except (ValueError, TypeError, json.JSONDecodeError):
+        raise HTTPException(status_code=400, detail=f"Invalid value for {field_name}")
+
+    audit(
+        session,
+        EventType.WATCH_UPDATED,
+        watch_id=watch.id,
+        updated_fields=[field_name],
+        source="dashboard",
+    )
+    await session.commit()
+    await session.refresh(watch)
+
+    if request.headers.get("HX-Request") == "true":
+        ctx = _watch_field_context(request, watch, field_name, mode="view")
+        return templates.TemplateResponse("partials/watch_field.html", ctx)
+    return RedirectResponse(url=f"/watches/{watch_id}", status_code=303)
+
+
+@router.post("/watches/{watch_id}/toggle-active")
+async def watch_toggle_active(
+    request: Request,
+    watch_id: str,
+    active: str = Form(""),
+    session: AsyncSession = Depends(get_db_session),
+):
+    """Toggle watch active status via HTMX checkbox."""
+    watch = await get_watch_detail(session, watch_id)
+    if not watch:
+        raise HTTPException(status_code=404, detail="Watch not found")
+
+    if watch.is_archived:
+        raise HTTPException(status_code=409, detail="Cannot toggle archived watch")
+
+    new_active = active == "true"
+    watch.is_active = new_active
+
+    event = EventType.WATCH_UPDATED if new_active else EventType.WATCH_DEACTIVATED
+    audit(session, event, watch_id=watch.id, name=watch.name, source="dashboard")
+    await session.commit()
+    await session.refresh(watch)
+
+    if request.headers.get("HX-Request") == "true":
+        return templates.TemplateResponse(
+            "partials/watch_status_toggle.html", {"request": request, "watch": watch}
+        )
+    return RedirectResponse(url=f"/watches/{watch_id}", status_code=303)
+
+
+@router.post("/watches/{watch_id}/archive")
+async def watch_archive(
+    request: Request,
+    watch_id: str,
+    session: AsyncSession = Depends(get_db_session),
+):
+    """Archive a watch — sets is_archived=True and is_active=False."""
+    watch = await get_watch_detail(session, watch_id)
+    if not watch:
+        return templates.TemplateResponse("pages/404.html", {"request": request}, status_code=404)
+
+    watch.is_archived = True
+    watch.is_active = False
+    audit(
+        session, EventType.WATCH_DEACTIVATED, watch_id=watch.id, name=watch.name, source="dashboard"
+    )
+    await session.commit()
+
+    return RedirectResponse(url=f"/watches/{watch_id}", status_code=303)
+
+
+@router.post("/watches/{watch_id}/restore")
+async def watch_restore(
+    request: Request,
+    watch_id: str,
+    session: AsyncSession = Depends(get_db_session),
+):
+    """Restore an archived watch — clears is_archived, stays inactive."""
+    watch = await get_watch_detail(session, watch_id)
+    if not watch:
+        return templates.TemplateResponse("pages/404.html", {"request": request}, status_code=404)
+
+    watch.is_archived = False
+    # Watch stays inactive after restore — user re-activates via toggle
+    audit(session, EventType.WATCH_UPDATED, watch_id=watch.id, name=watch.name, source="dashboard")
+    await session.commit()
+
+    return RedirectResponse(url=f"/watches/{watch_id}", status_code=303)
 
 
 @router.get("/domains")

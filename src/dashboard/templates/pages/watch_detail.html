@@ -1,68 +1,135 @@
 {% extends "base.html" %}
 {% block title %}{{ watch.name }} — watcher{% endblock %}
 {% block content %}
-<div class="flex justify-between items-center mb-6 flex-wrap gap-4">
-  <div>
+<div class="mb-6">
+  <div class="flex items-center gap-3 flex-wrap">
     <h2 class="text-2xl font-bold text-gray-900 dark:text-white">{{ watch.name }}</h2>
-    <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">{{ watch.url }}</p>
-  </div>
-  <div class="flex gap-2">
-    <a href="/watches/{{ watch.id }}/edit" class="btn btn-secondary">Edit</a>
-    {% if watch.is_active %}
-    <button
-      hx-post="/watches/{{ watch.id }}/deactivate"
-      hx-target="#watch-status"
-      hx-swap="innerHTML"
-      hx-confirm="Deactivate {{ watch.name }}?"
-      class="btn btn-danger-outline">
-      Deactivate
-    </button>
+    {% if watch.is_archived %}
+    <span class="badge badge-archived">Archived</span>
+    {% elif watch.is_active %}
+    <span class="badge badge-active">Active</span>
     {% else %}
-    <button
-      hx-delete="/watches/{{ watch.id }}"
-      hx-target="#delete-error"
-      hx-swap="innerHTML"
-      hx-confirm="Permanently delete {{ watch.name }}? This cannot be undone."
-      class="btn btn-danger">
-      Delete
-    </button>
+    <span class="badge badge-inactive">Inactive</span>
     {% endif %}
   </div>
+  <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">{{ watch.url }}</p>
 </div>
 
-<div id="delete-error"></div>
+{% include "partials/flash.html" %}
 
-<!-- Status and config -->
-<div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
-  <div class="stat-card">
-    <h3 class="text-sm font-medium text-gray-500 dark:text-gray-400 mb-3">Configuration</h3>
-    <dl class="detail-grid" id="watch-status">
-      <dt>Content Type</dt>
-      <dd>{{ watch.content_type }}</dd>
-      <dt>Status</dt>
-      <dd class="{% if watch.is_active %}text-green-600 dark:text-green-400{% else %}text-gray-500 dark:text-gray-400{% endif %}">
-        {{ "Active" if watch.is_active else "Inactive" }}
-      </dd>
-      <dt>Check Interval</dt>
-      <dd>{{ watch.schedule_config.get('interval', '1d') if watch.schedule_config else '1d' }}</dd>
-      <dt>Last Checked</dt>
-      <dd>{% if watch.last_checked_at %}{{ watch.last_checked_at.strftime('%Y-%m-%d %H:%M UTC') }}{% else %}Never{% endif %}</dd>
-    </dl>
+{# Details — status toggle + core fields #}
+<section class="mb-8">
+  <h3 class="text-lg font-semibold text-gray-900 dark:text-white mb-4">Details</h3>
+  <div class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 divide-y divide-gray-200 dark:divide-gray-700">
+
+    {% include "partials/watch_status_toggle.html" %}
+
+    {# Name field #}
+    {% with ctx = field_contexts["name"] %}
+    {% set field_name = ctx.field_name %}
+    {% set field_label = ctx.field_label %}
+    {% set field_hint = ctx.field_hint %}
+    {% set field_value = ctx.field_value %}
+    {% set field_type = ctx.field_type %}
+    {% set field_step = ctx.field_step %}
+    {% set field_min = ctx.field_min %}
+    {% set field_unit = ctx.field_unit %}
+    {% set field_options = ctx.field_options %}
+    {% set field_mode = ctx.field_mode %}
+    {% include "partials/watch_field.html" %}
+    {% endwith %}
+
+    {# URL field #}
+    {% with ctx = field_contexts["url"] %}
+    {% set field_name = ctx.field_name %}
+    {% set field_label = ctx.field_label %}
+    {% set field_hint = ctx.field_hint %}
+    {% set field_value = ctx.field_value %}
+    {% set field_type = ctx.field_type %}
+    {% set field_step = ctx.field_step %}
+    {% set field_min = ctx.field_min %}
+    {% set field_unit = ctx.field_unit %}
+    {% set field_options = ctx.field_options %}
+    {% set field_mode = ctx.field_mode %}
+    {% include "partials/watch_field.html" %}
+    {% endwith %}
+
+    {# Content Type (read-only) #}
+    <div class="p-4" id="field-content_type">
+      <div class="grid grid-cols-[1fr_auto] sm:grid-cols-[min(18rem,40%)_auto_1fr_auto] items-center gap-x-4 gap-y-1">
+        <div class="min-w-0">
+          <span class="form-label mb-0">Content Type</span>
+        </div>
+        <div class="flex items-center gap-2">
+          <span class="text-sm text-gray-900 dark:text-gray-100 font-medium">{{ watch.content_type|upper }}</span>
+        </div>
+      </div>
+    </div>
+
+    {# Last Checked (read-only) #}
+    <div class="p-4" id="field-last_checked_at">
+      <div class="grid grid-cols-[1fr_auto] sm:grid-cols-[min(18rem,40%)_auto_1fr_auto] items-center gap-x-4 gap-y-1">
+        <div class="min-w-0">
+          <span class="form-label mb-0">Last Checked</span>
+        </div>
+        <div class="flex items-center gap-2">
+          <span class="text-sm text-gray-900 dark:text-gray-100 font-medium">
+            {% if watch.last_checked_at %}{{ watch.last_checked_at.strftime('%Y-%m-%d %H:%M UTC') }}{% else %}Never{% endif %}
+          </span>
+        </div>
+      </div>
+    </div>
   </div>
+</section>
 
-  <div class="stat-card">
-    <h3 class="text-sm font-medium text-gray-500 dark:text-gray-400 mb-3">Fetch Config</h3>
-    {% if watch.fetch_config %}
-    <pre class="text-xs text-gray-600 dark:text-gray-400 bg-gray-50 dark:bg-gray-900 p-3 rounded overflow-x-auto">{{ watch.fetch_config | tojson(indent=2) }}</pre>
-    {% else %}
-    <p class="text-gray-500 dark:text-gray-400 text-sm">Default configuration</p>
+{# Schedule #}
+<section class="mb-8">
+  <h3 class="text-lg font-semibold text-gray-900 dark:text-white mb-4">Schedule</h3>
+  <div class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 divide-y divide-gray-200 dark:divide-gray-700">
+    {% with ctx = field_contexts["interval"] %}
+    {% set field_name = ctx.field_name %}
+    {% set field_label = ctx.field_label %}
+    {% set field_hint = ctx.field_hint %}
+    {% set field_value = ctx.field_value %}
+    {% set field_type = ctx.field_type %}
+    {% set field_step = ctx.field_step %}
+    {% set field_min = ctx.field_min %}
+    {% set field_unit = ctx.field_unit %}
+    {% set field_options = ctx.field_options %}
+    {% set field_mode = ctx.field_mode %}
+    {% include "partials/watch_field.html" %}
+    {% endwith %}
+  </div>
+</section>
+
+{# Fetch Config — content-type-aware fields #}
+{% set fetch_fields = ["timeout", "headers", "ignore_patterns", "selectors", "exclude_selectors", "dynamic_id_patterns", "strip_boilerplate", "skip_empty_pages", "file_format", "chunk_row_size", "sort_columns", "sheet_name"] %}
+<section class="mb-8">
+  <h3 class="text-lg font-semibold text-gray-900 dark:text-white mb-4">Fetch Config</h3>
+  <div class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 divide-y divide-gray-200 dark:divide-gray-700">
+    {% for fname in fetch_fields %}
+    {% if fname in field_contexts %}
+    {% with ctx = field_contexts[fname] %}
+    {% set field_name = ctx.field_name %}
+    {% set field_label = ctx.field_label %}
+    {% set field_hint = ctx.field_hint %}
+    {% set field_value = ctx.field_value %}
+    {% set field_type = ctx.field_type %}
+    {% set field_step = ctx.field_step %}
+    {% set field_min = ctx.field_min %}
+    {% set field_unit = ctx.field_unit %}
+    {% set field_options = ctx.field_options %}
+    {% set field_mode = ctx.field_mode %}
+    {% include "partials/watch_field.html" %}
+    {% endwith %}
     {% endif %}
+    {% endfor %}
   </div>
-</div>
+</section>
 
-<!-- Temporal Profiles (read-only) -->
+{# Temporal Profiles (read-only) #}
 {% if profiles %}
-<div class="mb-8">
+<section class="mb-8">
   <h3 class="text-lg font-semibold text-gray-900 dark:text-white mb-4">Temporal Profiles</h3>
   <div class="space-y-2">
     {% for profile in profiles %}
@@ -75,12 +142,12 @@
     </div>
     {% endfor %}
   </div>
-</div>
+</section>
 {% endif %}
 
-<!-- Notification Configs (read-only) -->
+{# Notification Configs (read-only) #}
 {% if notifications %}
-<div class="mb-8">
+<section class="mb-8">
   <h3 class="text-lg font-semibold text-gray-900 dark:text-white mb-4">Notifications</h3>
   <div class="space-y-2">
     {% for nc in notifications %}
@@ -90,14 +157,74 @@
     </div>
     {% endfor %}
   </div>
-</div>
+</section>
 {% endif %}
 
-<!-- Change history -->
-<div>
+{# Change history #}
+<section class="mb-8">
   <h3 class="text-lg font-semibold text-gray-900 dark:text-white mb-4">Change History</h3>
   <div id="watch-changes" hx-get="/partials/watch-changes/{{ watch.id }}" hx-trigger="every 30s" hx-swap="innerHTML" aria-live="polite" aria-atomic="false">
     {% include "partials/watch_changes.html" %}
   </div>
-</div>
+</section>
+
+{# Metadata #}
+<p class="text-xs text-gray-400 dark:text-gray-500 mb-8">
+  Metadata · ID: {{ watch.id }} · Created: {{ watch.created_at.strftime("%Y-%m-%d") }} · Updated: {{ watch.updated_at.strftime("%Y-%m-%d") }}
+</p>
+
+{# Danger Zone #}
+<section class="border border-red-200 dark:border-red-800 rounded-lg p-6">
+  <h3 class="text-lg font-semibold text-red-600 dark:text-red-400 mb-4">Danger Zone</h3>
+  <div id="danger-zone-error"></div>
+
+  {% if not watch.is_archived %}
+  <div class="flex items-center justify-between">
+    <div>
+      <p class="text-sm font-medium text-gray-900 dark:text-white">Archive this watch</p>
+      <p class="text-xs text-gray-500 dark:text-gray-400">Deactivates the watch and marks it as archived. Can be restored.</p>
+    </div>
+    <form method="post" action="/watches/{{ watch.id }}/archive">
+      <button type="submit"
+        hx-post="/watches/{{ watch.id }}/archive"
+        hx-confirm="Archive {{ watch.name }}? It will be deactivated."
+        class="btn btn-danger-outline min-h-[44px]">
+        Archive
+      </button>
+    </form>
+  </div>
+  {% else %}
+  <div class="space-y-4">
+    <div class="flex items-center justify-between">
+      <div>
+        <p class="text-sm font-medium text-gray-900 dark:text-white">Restore this watch</p>
+        <p class="text-xs text-gray-500 dark:text-gray-400">Removes archived status. Watch remains inactive until re-activated.</p>
+      </div>
+      <form method="post" action="/watches/{{ watch.id }}/restore">
+        <button type="submit"
+          hx-post="/watches/{{ watch.id }}/restore"
+          hx-target="body"
+          class="btn btn-secondary min-h-[44px]">
+          Restore
+        </button>
+      </form>
+    </div>
+    <hr class="border-red-200 dark:border-red-800">
+    <div class="flex items-center justify-between">
+      <div>
+        <p class="text-sm font-medium text-gray-900 dark:text-white">Delete this watch</p>
+        <p class="text-xs text-gray-500 dark:text-gray-400">Permanently remove this watch and all its data. This cannot be undone.</p>
+      </div>
+      <button
+        hx-delete="/watches/{{ watch.id }}"
+        hx-target="#danger-zone-error"
+        hx-swap="innerHTML"
+        hx-confirm="Permanently delete {{ watch.name }}? This cannot be undone."
+        class="btn btn-danger min-h-[44px]">
+        Delete permanently
+      </button>
+    </div>
+  </div>
+  {% endif %}
+</section>
 {% endblock %}

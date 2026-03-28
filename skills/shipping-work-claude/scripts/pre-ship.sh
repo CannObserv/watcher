@@ -21,6 +21,9 @@ fi
 PROJECT_ROOT=$(git rev-parse --show-toplevel 2>/dev/null || pwd)
 cd "$PROJECT_ROOT"
 
+# Load env files (system secrets + repo-local overrides)
+export $(cat /etc/watcher/.env "$PROJECT_ROOT/.env" 2>/dev/null | xargs)
+
 echo "=== Lint (ruff) ==="
 uv run ruff check .
 

@@ -20,13 +20,14 @@ _session_factory: async_sessionmaker[AsyncSession] | None = None
 def get_database_url() -> str:
     """Read database URL from DATABASE_URL environment variable.
 
-    Raises RuntimeError if not set — requires explicit configuration via env file.
+    Raises RuntimeError if not set — requires explicit configuration via
+    /etc/watcher/.env (production) or repo .env (development).
     """
     url = os.environ.get("DATABASE_URL")
     if not url:
         raise RuntimeError(
             "DATABASE_URL environment variable is not set. "
-            "Load it from the env file: export $(cat env | xargs)"
+            "Load env: export $(cat /etc/watcher/.env .env 2>/dev/null | xargs)"
         )
     return url
 

@@ -20,7 +20,7 @@ TEST_DATABASE_URL = os.environ.get("TEST_DATABASE_URL")
 if not TEST_DATABASE_URL:
     raise RuntimeError(
         "TEST_DATABASE_URL environment variable is not set. "
-        "Load it from the env file: export $(cat env | xargs)"
+        "Load env: export $(cat /etc/watcher/.env .env 2>/dev/null | xargs)"
     )
 
 

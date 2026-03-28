@@ -37,4 +37,6 @@ git log --oneline -10
 
 echo ""
 echo "=== Test suite ==="
+# Load env files (system secrets + repo-local overrides)
+export $(cat /etc/watcher/.env "$PROJECT_ROOT/.env" 2>/dev/null | xargs)
 uv run pytest --no-cov -m "not integration"

@@ -48,34 +48,65 @@ docs/                  — Reference docs (COMMANDS, SKILLS, DEPLOYMENT)
 scripts/                 — Build scripts (Tailwind CSS)
 ```
 
-## Services
+**Environment files** (not in the repo tree):
+- `/etc/watcher/.env` — Production secrets (`DATABASE_URL`); outside repo, persistent
+- `.env` (repo root) — Dev/agent secrets (`GH_TOKEN`, `TEST_DATABASE_URL`); git-ignored
 
-| Service | Framework | Port |
-|---|---|---|
-| API | FastAPI | 8000 |
+## Infrastructure
+
+**Single-VM setup.** This VM is both development and production. Code committed to main is the deployed code. The systemd service (`watcher`) runs the live site on port 8000.
+
+| Service | Framework | Port | Managed by |
+|---|---|---|---|
+| API (live) | FastAPI | 8000 | `systemctl` (`watcher.service`) |
+| API (dev) | FastAPI | 8001 | manual uvicorn |
+
+The exe.dev proxy transparently forwards ports 3000–9999. Dev server on 8001 is accessible at `https://watcher.exe.xyz:8001/`.
+
+## Server Lifecycle
+
+**Port 8000 belongs to systemd.** Never start uvicorn manually on port 8000.
+
+| Situation | Action |
+|---|---|
+| Code committed to main | `sudo systemctl restart watcher` |
+| Testing a worktree/branch | `uv run uvicorn ... --port 8001 --reload` |
+| Debugging the live service | `sudo journalctl -u watcher -f` |
+| After editing `deploy/watcher.service` | `sudo systemctl daemon-reload && sudo systemctl restart watcher` |
+| After Tailwind CSS changes | `bash scripts/build-css.sh` then restart |
+| After DB model changes | `uv run alembic upgrade head` then restart |
+
+**Dev server workflow:** Run on port 8001 so the live service stays up. Load env first:
 
 ```bash
-# FastAPI dev server
-uv run uvicorn src.api.main:app --host 0.0.0.0 --port 8000 --reload
+export $(cat /etc/watcher/.env .env 2>/dev/null | xargs)
+uv run uvicorn src.api.main:app --host 0.0.0.0 --port 8001 --reload
 ```
 
-After any code change in production deployments, restart uvicorn/gunicorn — they do not auto-reload.
-
-## Secrets
-
-`env` (git-ignored): API keys and tokens. Never commit secrets.
-
-Load before running any command that needs env vars (e.g. `gh`):
+**After finishing work:** Always restart the systemd service to pick up changes merged to main:
 
 ```bash
-export $(cat env | xargs)
+sudo systemctl restart watcher
+```
+
+## Environment Variables
+
+Two env files, loaded in order (later values override):
+
+1. **`/etc/watcher/.env`** — production secrets (`DATABASE_URL`). Survives repo resets and worktree switches. Managed manually on the VM.
+2. **`.env`** (repo root, git-ignored) — dev/agent secrets (`GH_TOKEN`, `TEST_DATABASE_URL`). Never commit.
+
+The systemd service loads both automatically. For shell commands:
+
+```bash
+export $(cat /etc/watcher/.env .env 2>/dev/null | xargs)
 ```
 
 Currently defined:
-- `GH_TOKEN` — GitHub personal access token (used by `gh` CLI)
-- `DATABASE_URL` — PostgreSQL connection string (used by SQLAlchemy and Alembic)
+- `DATABASE_URL` — PostgreSQL connection string (in `/etc/watcher/.env`)
 - `PROCRASTINATE_DATABASE_URL` — (optional) libpq-style DSN for procrastinate; falls back to DATABASE_URL with driver prefix stripped
-- `TEST_DATABASE_URL` — PostgreSQL connection string for test database (used by pytest)
+- `GH_TOKEN` — GitHub personal access token (in `.env`)
+- `TEST_DATABASE_URL` — PostgreSQL connection string for test database (in `.env`)
 - `WATCHER_DATA_DIR` — (optional) absolute path for snapshot/content storage; defaults to `/var/lib/watcher/data`
 - `BUILD_ID` — (optional) git SHA for static asset cache-busting; defaults to `"dev"`
 
@@ -85,8 +116,8 @@ Currently defined:
 # Install dependencies
 uv sync
 
-# Load environment (required before running server or migrations)
-export $(cat env | xargs)
+# Load environment (required before running server, migrations, or gh)
+export $(cat /etc/watcher/.env .env 2>/dev/null | xargs)
 
 # Run tests
 uv run pytest
@@ -101,8 +132,8 @@ uv run ruff check .
 uv run alembic upgrade head          # apply all migrations
 uv run alembic revision --autogenerate -m "description"  # generate new migration
 
-# FastAPI dev server
-uv run uvicorn src.api.main:app --host 0.0.0.0 --port 8000 --reload
+# FastAPI dev server (port 8001 — port 8000 belongs to systemd)
+uv run uvicorn src.api.main:app --host 0.0.0.0 --port 8001 --reload
 ```
 
 Full reference: `docs/COMMANDS.md`

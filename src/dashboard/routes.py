@@ -818,6 +818,7 @@ def _field_context(request: Request, domain: Domain, field_name: str, mode: str 
         "field_step": meta["step"],
         "field_min": meta["min"],
         "field_unit": meta["unit"],
+        "field_options": meta.get("options"),
         "field_mode": mode,
     }
 

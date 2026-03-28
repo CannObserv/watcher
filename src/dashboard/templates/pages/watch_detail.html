@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "macros/fields.html" import watch_field with context %}
 {% block title %}{{ watch.name }} — watcher{% endblock %}
 {% block content %}
 <div class="mb-6">
@@ -18,34 +19,10 @@
     {% include "partials/watch_status_toggle.html" %}
 
     {# Name field #}
-    {% with ctx = field_contexts["name"] %}
-    {% set field_name = ctx.field_name %}
-    {% set field_label = ctx.field_label %}
-    {% set field_hint = ctx.field_hint %}
-    {% set field_value = ctx.field_value %}
-    {% set field_type = ctx.field_type %}
-    {% set field_step = ctx.field_step %}
-    {% set field_min = ctx.field_min %}
-    {% set field_unit = ctx.field_unit %}
-    {% set field_options = ctx.field_options %}
-    {% set field_mode = ctx.field_mode %}
-    {% include "partials/watch_field.html" %}
-    {% endwith %}
+    {{ watch_field(field_contexts["name"]) }}
 
     {# URL field #}
-    {% with ctx = field_contexts["url"] %}
-    {% set field_name = ctx.field_name %}
-    {% set field_label = ctx.field_label %}
-    {% set field_hint = ctx.field_hint %}
-    {% set field_value = ctx.field_value %}
-    {% set field_type = ctx.field_type %}
-    {% set field_step = ctx.field_step %}
-    {% set field_min = ctx.field_min %}
-    {% set field_unit = ctx.field_unit %}
-    {% set field_options = ctx.field_options %}
-    {% set field_mode = ctx.field_mode %}
-    {% include "partials/watch_field.html" %}
-    {% endwith %}
+    {{ watch_field(field_contexts["url"]) }}
 
     {# Content Type (read-only) #}
     <div class="p-4" id="field-content_type">
@@ -66,19 +43,7 @@
 <section class="mb-8">
   <h3 class="text-lg font-semibold text-gray-900 dark:text-white mb-4">Schedule</h3>
   <div class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 divide-y divide-gray-200 dark:divide-gray-700">
-    {% with ctx = field_contexts["interval"] %}
-    {% set field_name = ctx.field_name %}
-    {% set field_label = ctx.field_label %}
-    {% set field_hint = ctx.field_hint %}
-    {% set field_value = ctx.field_value %}
-    {% set field_type = ctx.field_type %}
-    {% set field_step = ctx.field_step %}
-    {% set field_min = ctx.field_min %}
-    {% set field_unit = ctx.field_unit %}
-    {% set field_options = ctx.field_options %}
-    {% set field_mode = ctx.field_mode %}
-    {% include "partials/watch_field.html" %}
-    {% endwith %}
+    {{ watch_field(field_contexts["interval"]) }}
 
     {# Last Checked (read-only) #}
     <div class="p-4" id="field-last_checked_at">
@@ -103,19 +68,7 @@
   <div class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 divide-y divide-gray-200 dark:divide-gray-700">
     {% for fname in fetch_fields %}
     {% if fname in field_contexts %}
-    {% with ctx = field_contexts[fname] %}
-    {% set field_name = ctx.field_name %}
-    {% set field_label = ctx.field_label %}
-    {% set field_hint = ctx.field_hint %}
-    {% set field_value = ctx.field_value %}
-    {% set field_type = ctx.field_type %}
-    {% set field_step = ctx.field_step %}
-    {% set field_min = ctx.field_min %}
-    {% set field_unit = ctx.field_unit %}
-    {% set field_options = ctx.field_options %}
-    {% set field_mode = ctx.field_mode %}
-    {% include "partials/watch_field.html" %}
-    {% endwith %}
+    {{ watch_field(field_contexts[fname]) }}
     {% endif %}
     {% endfor %}
   </div>

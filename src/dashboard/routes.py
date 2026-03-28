@@ -818,6 +818,7 @@ def _field_context(request: Request, domain: Domain, field_name: str, mode: str 
         "field_step": meta["step"],
         "field_min": meta["min"],
         "field_unit": meta["unit"],
+        "field_options": meta.get("options"),
         "field_mode": mode,
     }
 
@@ -902,6 +903,10 @@ async def domain_detail_page(
 
     watches = await get_domain_watches(session, name, search=watch_q, is_active=is_active)
 
+    field_contexts = {
+        fname: _field_context(request, domain, fname, mode="view") for fname in DOMAIN_FIELD_META
+    }
+
     context = {
         "request": request,
         "active_page": "domains",
@@ -910,6 +915,7 @@ async def domain_detail_page(
         "watch_q": watch_q,
         "watch_status": watch_status,
         "flash": None,
+        "field_contexts": field_contexts,
     }
     return templates.TemplateResponse("pages/domain_detail.html", context)
 

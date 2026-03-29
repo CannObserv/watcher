@@ -133,7 +133,7 @@ active, 8001 should not be running.
 
 ```bash
 # Kill any existing process on 8001 (stale worktree, accidental main, etc.)
-lsof -ti :8001 | xargs kill -9 2>/dev/null
+lsof -ti :8001 | xargs -r kill -9 2>/dev/null
 
 # Start dev server from the worktree, backgrounded with reload
 export $(cat /etc/watcher/.env .env 2>/dev/null | xargs)
@@ -147,7 +147,7 @@ ss -tlnp | grep 8001
 Accessible at `https://watcher.exe.xyz:8001/` via the exe.dev proxy.
 
 This step runs automatically — no user prompt. The result is included in the
-Step 6 report. If the server fails to bind, report the error and ask the user.
+report (next step). If the server fails to bind, report the error and ask the user.
 
 ### 6. Report Location
 
@@ -168,6 +168,7 @@ Ready to implement <feature-name>
 | Neither exists | Check CLAUDE.md, then ask user |
 | Directory not ignored | Add to .gitignore + commit |
 | Tests fail during baseline | Report failures + ask |
+| Dev server on 8001 from wrong worktree | Automatically killed and restarted |
 
 ## Common Mistakes
 

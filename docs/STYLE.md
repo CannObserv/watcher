@@ -8,11 +8,13 @@ Authoritative reference for the dashboard UI. Documents what IS implemented, not
 
 | Asset | Path | Details |
 |---|---|---|
-| Icon (SVG) | `src/dashboard/static/images/cannabis_observer-icon-square.svg` | Square; used at 28x28 (sidebar) and 16x16 (footer) |
-| Favicon | Same SVG, served as `type="image/svg+xml"` | `<link rel="icon">` in `base.html` |
+| Cannabis Observer icon | `src/dashboard/static/images/cannabis_observer-icon-square.svg` | Org logo; 16x16 in footer |
+| Cannabis Observer name | `src/dashboard/static/images/cannabis_observer-name.svg` | Org wordmark; available for future use |
+| Magnifying glass icon | `src/dashboard/static/images/magnifying-glass.svg` | Project icon; `#17de6b` green; 28x28 in sidebar/drawer |
+| Favicon | Inline data URI in `base.html` | Green magnifying glass (`#17de6b`), no external file |
 | Footer emoji | `🌱🏛️🔍` | Wrapped in `<span aria-hidden="true">` — purely decorative |
 
-All `<img>` tags for the icon carry `alt="" aria-hidden="true"` and explicit `width`/`height`.
+All `<img>` tags for icons carry `alt="" aria-hidden="true"` and explicit `width`/`height`.
 
 ---
 

@@ -36,7 +36,7 @@ src/dashboard/           — Server-rendered dashboard (Jinja2 + HTMX + Tailwind
 src/dashboard/routes.py  — Dashboard page and partial routes
 src/dashboard/context.py — Dashboard-specific DB query helpers
 src/dashboard/static/    — CSS, JS (vendored HTMX, dark-mode, htmx-a11y), compiled Tailwind
-src/dashboard/static/images/ — Brand assets (Cannabis Observer icon)
+src/dashboard/static/images/ — Brand assets and project icons (Cannabis Observer logo, magnifying glass)
 src/dashboard/templates/ — Jinja2 templates (base, pages, partials); partials/pagination.html reusable offset-based pagination; partials/domain_field.html reusable inline-editable domain field (view/edit modes via GET /domains/{name}/field/{field_name}?mode=view|edit); partials/watch_field.html inline-editable watch field (text/number/textarea/select/toggle types, content-type-aware via WATCH_FIELD_META); partials/watch_status_toggle.html Active/Inactive/Archived toggle with badge; macros/fields.html — watch_field(ctx) and domain_field(ctx) macros (import with context; centralise {% set %} boilerplate for field partials)
 src/workers/           — Procrastinate task queue (check_watch, schedule_tick)
 src/workers/pipeline.py  — Core check pipeline: hash, extract, diff, store snapshots

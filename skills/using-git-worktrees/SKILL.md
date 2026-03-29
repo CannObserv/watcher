@@ -126,24 +126,37 @@ uv run pytest --no-cov -m "not integration"
 
 **If tests pass:** Report ready.
 
-### 5. Report Location
+### 5. Start Dev Server
+
+**Port 8001 belongs to worktrees.** Never serve main on 8001. When no worktree is
+active, 8001 should not be running.
+
+```bash
+# Kill any existing process on 8001 (stale worktree, accidental main, etc.)
+lsof -ti :8001 | xargs kill -9 2>/dev/null
+
+# Start dev server from the worktree, backgrounded with reload
+export $(cat /etc/watcher/.env .env 2>/dev/null | xargs)
+uv run uvicorn src.api.main:app --host 0.0.0.0 --port 8001 --reload &
+
+# Verify port is bound
+sleep 2
+ss -tlnp | grep 8001
+```
+
+Accessible at `https://watcher.exe.xyz:8001/` via the exe.dev proxy.
+
+This step runs automatically — no user prompt. The result is included in the
+Step 6 report. If the server fails to bind, report the error and ask the user.
+
+### 6. Report Location
 
 ```
 Worktree ready at <full-path>
 Tests passing (<N> tests, 0 failures)
+Dev server running on port 8001 (https://watcher.exe.xyz:8001/)
 Ready to implement <feature-name>
 ```
-
-## Dev Server in a Worktree
-
-Use port 8001 to avoid conflicting with the systemd service on port 8000:
-
-```bash
-export $(cat /etc/watcher/.env .env 2>/dev/null | xargs)
-uv run uvicorn src.api.main:app --host 0.0.0.0 --port 8001 --reload
-```
-
-Accessible at `https://watcher.exe.xyz:8001/` via the exe.dev proxy.
 
 ## Quick Reference
 
@@ -182,6 +195,11 @@ Accessible at `https://watcher.exe.xyz:8001/` via the exe.dev proxy.
 
 - **Problem:** Conflicts with the systemd service running the live site
 - **Fix:** Always use `--port 8001` in worktrees (and in dev generally)
+
+### Running dev server from main
+
+- **Problem:** Port 8001 belongs to worktrees; serving main breaks operational separation
+- **Fix:** Only start 8001 from a worktree directory. Stop 8001 when worktree is torn down.
 
 ## Integration
 

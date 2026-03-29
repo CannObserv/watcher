@@ -38,9 +38,12 @@ def get_app() -> procrastinate.App:
     """Return the procrastinate App, creating it on first call."""
     global _app
     if _app is None:
+        # Import tasks module so decorators register on the blueprint
+        # before we copy tasks into the App.
+        import src.workers.tasks  # noqa: F401
+
         _app = procrastinate.App(
             connector=procrastinate.PsycopgConnector(conninfo=_get_conninfo()),
-            import_paths=["src.workers.tasks"],
         )
         _app.add_tasks_from(bp, namespace="")
         logger.info("procrastinate app created")

@@ -19,11 +19,11 @@
     >
   </a>
   <p class="mt-2 text-xs text-gray-500 dark:text-gray-400 max-w-sm">
-    {{ snapshot_meta.fetched_at.strftime('%Y-%m-%d %H:%M UTC') }}
+    <a href="/watches/{{ watch.id }}/screenshot" target="_blank" rel="noopener" class="link">Screenshot</a> captured at {{ snapshot_meta.fetched_at.strftime('%Y-%m-%d %H:%M UTC') }}
     &middot;
     {% if snapshot_meta.raw_bytes is not none %}{{ (snapshot_meta.raw_bytes / 1024) | round(0) | int }} KB raw &middot; {% endif %}{{ (snapshot_meta.text_bytes / 1024) | round(0) | int }} KB text
     &middot;
-    {{ snapshot_meta.chunk_count }} chunk{{ 's' if snapshot_meta.chunk_count != 1 }}
+    {{ snapshot_meta.chunk_count }} chunk{{ 's' if snapshot_meta.chunk_count != 1 }}{% if snapshot_meta.screenshot_browser %} &middot; using {{ snapshot_meta.screenshot_browser }}{% endif %}
   </p>
 </div>
 {% endif %}

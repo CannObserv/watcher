@@ -330,11 +330,12 @@ async def _run_check_pipeline(
     # 11. Screenshot (optional — non-fatal if Playwright not installed or capture fails)
     screenshot_path: str | None = None
     try:
-        png_bytes = await capture_screenshot(watch.url)
-        if png_bytes is not None:
+        screenshot_result = await capture_screenshot(watch.url)
+        if screenshot_result is not None:
             screenshot_path = storage.snapshot_path(str(watch.id), str(snapshot_id), "png")
-            storage.save(screenshot_path, png_bytes)
+            storage.save(screenshot_path, screenshot_result.png_bytes)
             snapshot.screenshot_path = screenshot_path
+            snapshot.screenshot_browser = screenshot_result.browser
             await session.flush()
     except Exception as exc:
         logger.warning("screenshot step failed for watch %s: %s", str(watch.id), exc)

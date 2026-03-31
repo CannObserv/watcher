@@ -9,6 +9,7 @@ from src.core.extractors.base import Chunk
 from src.core.models.change import Change
 from src.core.models.snapshot import Snapshot
 from src.core.models.watch import ContentType, Watch
+from src.core.screenshot import ScreenshotResult
 from src.core.storage import LocalStorage
 from src.workers.pipeline import (
     _EXT_MAP,
@@ -318,9 +319,13 @@ class TestRunCheckPipelineScreenshot:
         await db_session.flush()
 
         fake_png = b"\x89PNG\r\nfake"
+        fake_result = ScreenshotResult(png_bytes=fake_png, browser="Chromium 130.0.0")
         storage = LocalStorage(base_dir=tmp_path)
 
-        with patch("src.workers.pipeline.capture_screenshot", new=AsyncMock(return_value=fake_png)):
+        with patch(
+            "src.workers.pipeline.capture_screenshot",
+            new=AsyncMock(return_value=fake_result),
+        ):
             result = await _run_check_pipeline(
                 watch=watch,
                 raw_content=b"<html><body><p>Hi</p></body></html>",
@@ -336,11 +341,12 @@ class TestRunCheckPipelineScreenshot:
         stored = storage.load(result["screenshot_path"])
         assert stored == fake_png
 
-        # Snapshot record should reflect the path
+        # Snapshot record should reflect path and browser
         snap = (
             await db_session.execute(select(Snapshot).where(Snapshot.watch_id == watch.id))
         ).scalar_one()
         assert snap.screenshot_path == result["screenshot_path"]
+        assert snap.screenshot_browser == "Chromium 130.0.0"
 
     async def test_screenshot_path_none_when_capture_fails(self, db_session, tmp_path):
         """Pipeline leaves screenshot_path null when capture returns None."""

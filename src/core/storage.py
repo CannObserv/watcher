@@ -39,7 +39,7 @@ class LocalStorage:
         return (self.base_dir / path).is_file()
 
     def size(self, path: str) -> int:
-        """Return the byte size of a stored file. Raises FileNotFoundError if missing."""
+        """Return the byte size of a stored file. Raises OSError if not accessible."""
         return (self.base_dir / path).stat().st_size
 
     def snapshot_path(self, watch_id: str, snapshot_id: str, extension: str) -> str:

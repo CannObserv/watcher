@@ -248,6 +248,8 @@ class TestSnapshotResponse:
         assert data.content_hash == "sha256abc"
         assert data.chunk_count == 3
         assert data.fetched_at == ts
+        assert data.screenshot_path is None
+        assert data.screenshot_browser is None
 
 
 class TestChangeResponse:

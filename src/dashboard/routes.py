@@ -168,12 +168,23 @@ async def watch_detail_page(
         name: _watch_field_context(request, watch, name, mode="view") for name in applicable_fields
     }
 
-    # Determine whether a screenshot is available
-    has_screenshot = (
+    # Build screenshot metadata if a screenshot is available
+    storage = LocalStorage(STORAGE_BASE_DIR)
+    snapshot_meta = None
+    if (
         latest_snapshot is not None
         and latest_snapshot.screenshot_path is not None
-        and LocalStorage(STORAGE_BASE_DIR).exists(latest_snapshot.screenshot_path)
-    )
+        and storage.exists(latest_snapshot.screenshot_path)
+    ):
+        raw_bytes = None
+        if latest_snapshot.storage_path and storage.exists(latest_snapshot.storage_path):
+            raw_bytes = (STORAGE_BASE_DIR / latest_snapshot.storage_path).stat().st_size
+        snapshot_meta = {
+            "fetched_at": latest_snapshot.fetched_at,
+            "chunk_count": latest_snapshot.chunk_count,
+            "text_bytes": latest_snapshot.text_bytes,
+            "raw_bytes": raw_bytes,
+        }
 
     context = {
         "request": request,
@@ -183,7 +194,7 @@ async def watch_detail_page(
         "profiles": profiles,
         "notifications": notifications,
         "field_contexts": field_contexts,
-        "has_screenshot": has_screenshot,
+        "snapshot_meta": snapshot_meta,
     }
     return templates.TemplateResponse("pages/watch_detail.html", context)
 

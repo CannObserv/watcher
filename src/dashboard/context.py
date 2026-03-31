@@ -305,6 +305,18 @@ async def get_watch_changes(session: AsyncSession, watch_id: str, limit: int = 5
     return changes
 
 
+async def get_latest_snapshot(session: AsyncSession, watch_id: ULID) -> Snapshot | None:
+    """Fetch the most recent snapshot for a watch, or None."""
+    stmt = (
+        select(Snapshot)
+        .where(Snapshot.watch_id == watch_id)
+        .order_by(Snapshot.fetched_at.desc())
+        .limit(1)
+    )
+    result = await session.execute(stmt)
+    return result.scalar_one_or_none()
+
+
 async def get_watch_profiles(session: AsyncSession, watch_id: ULID) -> list[TemporalProfile]:
     """Fetch temporal profiles for a watch."""
     result = await session.execute(

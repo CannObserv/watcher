@@ -1,10 +1,13 @@
 """Tests for _run_check_pipeline and helpers in workers.pipeline."""
 
+from unittest.mock import AsyncMock, patch
+
 import pytest
 from sqlalchemy import select
 
 from src.core.extractors.base import Chunk
 from src.core.models.change import Change
+from src.core.models.snapshot import Snapshot
 from src.core.models.watch import ContentType, Watch
 from src.core.storage import LocalStorage
 from src.workers.pipeline import (
@@ -304,3 +307,85 @@ class TestComputeSignificance:
         """Edge case: no chunks at all → treat as unchanged."""
         sig = _compute_significance(added=0, removed=0, modified=0, total_curr=0)
         assert sig == 1.0
+
+
+@pytest.mark.integration
+class TestRunCheckPipelineScreenshot:
+    async def test_screenshot_saved_when_capture_succeeds(self, db_session, tmp_path):
+        """Pipeline sets screenshot_path on snapshot when capture returns bytes."""
+        watch = Watch(name="Shot", url="https://example.com", content_type=ContentType.HTML)
+        db_session.add(watch)
+        await db_session.flush()
+
+        fake_png = b"\x89PNG\r\nfake"
+        storage = LocalStorage(base_dir=tmp_path)
+
+        with patch("src.workers.pipeline.capture_screenshot", new=AsyncMock(return_value=fake_png)):
+            result = await _run_check_pipeline(
+                watch=watch,
+                raw_content=b"<html><body><p>Hi</p></body></html>",
+                fetcher_used="http",
+                fetch_duration_ms=100,
+                storage=storage,
+                session=db_session,
+            )
+
+        assert result["screenshot_path"] is not None
+        assert result["screenshot_path"].endswith(".png")
+        assert storage.exists(result["screenshot_path"])
+        stored = storage.load(result["screenshot_path"])
+        assert stored == fake_png
+
+        # Snapshot record should reflect the path
+        snap = (
+            await db_session.execute(select(Snapshot).where(Snapshot.watch_id == watch.id))
+        ).scalar_one()
+        assert snap.screenshot_path == result["screenshot_path"]
+
+    async def test_screenshot_path_none_when_capture_fails(self, db_session, tmp_path):
+        """Pipeline leaves screenshot_path null when capture returns None."""
+        watch = Watch(name="NoShot", url="https://example.com", content_type=ContentType.HTML)
+        db_session.add(watch)
+        await db_session.flush()
+
+        storage = LocalStorage(base_dir=tmp_path)
+
+        with patch("src.workers.pipeline.capture_screenshot", new=AsyncMock(return_value=None)):
+            result = await _run_check_pipeline(
+                watch=watch,
+                raw_content=b"<html><body><p>Hi</p></body></html>",
+                fetcher_used="http",
+                fetch_duration_ms=100,
+                storage=storage,
+                session=db_session,
+            )
+
+        assert result["screenshot_path"] is None
+        snap = (
+            await db_session.execute(select(Snapshot).where(Snapshot.watch_id == watch.id))
+        ).scalar_one()
+        assert snap.screenshot_path is None
+
+    async def test_pipeline_succeeds_when_screenshot_raises(self, db_session, tmp_path):
+        """Screenshot failure never propagates — pipeline still returns a snapshot."""
+        watch = Watch(name="CrashShot", url="https://example.com", content_type=ContentType.HTML)
+        db_session.add(watch)
+        await db_session.flush()
+
+        storage = LocalStorage(base_dir=tmp_path)
+
+        async def _raise(*_a, **_kw):
+            raise RuntimeError("boom")
+
+        with patch("src.workers.pipeline.capture_screenshot", new=_raise):
+            result = await _run_check_pipeline(
+                watch=watch,
+                raw_content=b"<html><body><p>Hi</p></body></html>",
+                fetcher_used="http",
+                fetch_duration_ms=100,
+                storage=storage,
+                session=db_session,
+            )
+
+        # The pipeline result should still have a snapshot_id
+        assert result["snapshot_id"] is not None

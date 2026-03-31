@@ -184,6 +184,7 @@ async def watch_detail_page(
             "chunk_count": latest_snapshot.chunk_count,
             "text_bytes": latest_snapshot.text_bytes,
             "raw_bytes": raw_bytes,
+            "screenshot_browser": latest_snapshot.screenshot_browser,
         }
 
     context = {

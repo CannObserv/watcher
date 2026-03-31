@@ -2,7 +2,7 @@
 
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from src.core.screenshot import capture_screenshot
+from src.core.screenshot import ScreenshotResult, capture_screenshot
 
 
 class TestCaptureScreenshot:
@@ -11,13 +11,14 @@ class TestCaptureScreenshot:
             result = await capture_screenshot("https://example.com")
         assert result is None
 
-    async def test_returns_png_bytes_on_success(self):
+    async def test_returns_screenshot_result_on_success(self):
         fake_png = b"\x89PNG\r\nfake"
         mock_page = AsyncMock()
         mock_page.goto = AsyncMock()
         mock_page.screenshot = AsyncMock(return_value=fake_png)
 
         mock_browser = AsyncMock()
+        mock_browser.version = "130.0.0"
         mock_browser.new_page = AsyncMock(return_value=mock_page)
         mock_browser.close = AsyncMock()
 
@@ -35,7 +36,9 @@ class TestCaptureScreenshot:
         ):
             result = await capture_screenshot("https://example.com")
 
-        assert result == fake_png
+        assert isinstance(result, ScreenshotResult)
+        assert result.png_bytes == fake_png
+        assert result.browser == "Chromium 130.0.0"
 
     async def test_returns_none_on_exception(self):
         mock_pw = MagicMock()
@@ -57,6 +60,7 @@ class TestCaptureScreenshot:
         mock_page.screenshot = AsyncMock(return_value=fake_png)
 
         mock_browser = AsyncMock()
+        mock_browser.version = "130.0.0"
         mock_browser.new_page = AsyncMock(return_value=mock_page)
         mock_browser.close = AsyncMock()
 

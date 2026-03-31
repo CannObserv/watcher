@@ -24,6 +24,7 @@ class Snapshot(Base):
     chunk_count: Mapped[int] = mapped_column(Integer)
     text_bytes: Mapped[int] = mapped_column(BigInteger)
     screenshot_path: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
+    screenshot_browser: Mapped[str | None] = mapped_column(String(100), nullable=True, default=None)
     fetch_duration_ms: Mapped[int] = mapped_column(Integer)
     fetcher_used: Mapped[str] = mapped_column(String(50))
     fetched_at: Mapped[datetime] = mapped_column(

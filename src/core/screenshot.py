@@ -4,6 +4,8 @@ If the ``browser`` extra is not installed, all functions in this module
 are no-ops and return ``None``.  No import error is raised.
 """
 
+from typing import NamedTuple
+
 from src.core.logging import get_logger
 
 logger = get_logger(__name__)
@@ -23,12 +25,19 @@ SCREENSHOT_WIDTH = 1280
 SCREENSHOT_HEIGHT = 800
 
 
-async def capture_screenshot(url: str) -> bytes | None:
-    """Capture a full-viewport PNG screenshot of *url* and return the bytes.
+class ScreenshotResult(NamedTuple):
+    """Result of a successful screenshot capture."""
 
-    Returns PNG bytes on success, ``None`` on any failure (including Playwright
-    not being installed).  Never raises — failures are logged as warnings so
-    they cannot break the check pipeline.
+    png_bytes: bytes
+    browser: str
+
+
+async def capture_screenshot(url: str) -> ScreenshotResult | None:
+    """Capture a full-viewport PNG screenshot of *url*.
+
+    Returns a :class:`ScreenshotResult` on success, ``None`` on any failure
+    (including Playwright not being installed).  Never raises — failures are
+    logged as warnings so they cannot break the check pipeline.
 
     Args:
         url: The URL to screenshot.
@@ -40,6 +49,7 @@ async def capture_screenshot(url: str) -> bytes | None:
         async with async_playwright() as pw:
             browser = await pw.chromium.launch()
             try:
+                browser_version = browser.version
                 page = await browser.new_page(
                     viewport={"width": SCREENSHOT_WIDTH, "height": SCREENSHOT_HEIGHT}
                 )
@@ -47,7 +57,7 @@ async def capture_screenshot(url: str) -> bytes | None:
                 png_bytes: bytes = await page.screenshot(type="png")
             finally:
                 await browser.close()
-        return png_bytes
+        return ScreenshotResult(png_bytes=png_bytes, browser=f"Chromium {browser_version}")
     except Exception as exc:
         logger.warning("screenshot capture failed for %s: %s", url, exc)
         return None

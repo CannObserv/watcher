@@ -178,7 +178,7 @@ async def watch_detail_page(
     ):
         raw_bytes = None
         if latest_snapshot.storage_path and storage.exists(latest_snapshot.storage_path):
-            raw_bytes = (STORAGE_BASE_DIR / latest_snapshot.storage_path).stat().st_size
+            raw_bytes = storage.size(latest_snapshot.storage_path)
         snapshot_meta = {
             "fetched_at": latest_snapshot.fetched_at,
             "chunk_count": latest_snapshot.chunk_count,

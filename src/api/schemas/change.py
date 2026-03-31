@@ -35,6 +35,8 @@ class SnapshotResponse(BaseModel):
     storage_backend: str
     chunk_count: int
     text_bytes: int
+    screenshot_path: str | None = None
+    screenshot_browser: str | None = None
     fetch_duration_ms: int
     fetcher_used: str
     fetched_at: datetime

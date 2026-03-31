@@ -48,12 +48,12 @@ async def capture_screenshot(url: str) -> ScreenshotResult | None:
     try:
         async with async_playwright() as pw:
             browser = await pw.chromium.launch()
+            browser_version = browser.version
             try:
-                browser_version = browser.version
                 page = await browser.new_page(
                     viewport={"width": SCREENSHOT_WIDTH, "height": SCREENSHOT_HEIGHT}
                 )
-                await page.goto(url, wait_until="networkidle", timeout=30_000)
+                await page.goto(url, wait_until="load", timeout=30_000)
                 png_bytes: bytes = await page.screenshot(type="png")
             finally:
                 await browser.close()

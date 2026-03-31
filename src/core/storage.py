@@ -13,6 +13,7 @@ class StorageBackend(Protocol):
     def save(self, path: str, content: bytes) -> None: ...
     def load(self, path: str) -> bytes: ...
     def exists(self, path: str) -> bool: ...
+    def size(self, path: str) -> int: ...
     def snapshot_path(self, watch_id: str, snapshot_id: str, extension: str) -> str: ...
 
 
@@ -36,6 +37,10 @@ class LocalStorage:
     def exists(self, path: str) -> bool:
         """Check if a path exists."""
         return (self.base_dir / path).is_file()
+
+    def size(self, path: str) -> int:
+        """Return the byte size of a stored file. Raises FileNotFoundError if missing."""
+        return (self.base_dir / path).stat().st_size
 
     def snapshot_path(self, watch_id: str, snapshot_id: str, extension: str) -> str:
         """Build the conventional storage path for a snapshot."""

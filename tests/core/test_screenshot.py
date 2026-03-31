@@ -79,4 +79,4 @@ class TestCaptureScreenshot:
         ):
             await capture_screenshot(url)
 
-        mock_page.goto.assert_called_once_with(url, wait_until="networkidle", timeout=30_000)
+        mock_page.goto.assert_called_once_with(url, wait_until="load", timeout=30_000)

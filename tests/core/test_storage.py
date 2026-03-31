@@ -45,6 +45,19 @@ class TestLocalStorage:
 
         assert storage.exists("nope.txt") is False
 
+    def test_size_returns_byte_count(self, tmp_path):
+        storage = LocalStorage(base_dir=tmp_path)
+        content = b"hello"
+        storage.save("test.bin", content)
+
+        assert storage.size("test.bin") == 5
+
+    def test_size_nonexistent_raises(self, tmp_path):
+        storage = LocalStorage(base_dir=tmp_path)
+
+        with pytest.raises(FileNotFoundError):
+            storage.size("nope.bin")
+
     def test_build_snapshot_path(self, tmp_path):
         storage = LocalStorage(base_dir=tmp_path)
         path = storage.snapshot_path("watch123", "snap456", "pdf")

@@ -28,13 +28,14 @@ src/core/extractors/   — Content extractors (HTML, PDF, CSV/Excel → Chunks)
 src/core/fetchers/     — URL fetchers (HTTP; browser/WebRecorder planned)
 src/core/differ.py     — Chunk-level change detection with SimHash similarity
 src/core/simhash.py    — 64-bit SimHash fingerprinting
-src/core/storage.py    — StorageBackend protocol + LocalStorage
+src/core/screenshot.py — Playwright screenshot capture (optional [browser] extra); ScreenshotResult + capture_screenshot; guards on PLAYWRIGHT_AVAILABLE
+src/core/storage.py    — StorageBackend protocol + LocalStorage (save, load, exists, size, snapshot_path)
 src/core/scheduler.py  — Watch scheduling logic (interval parsing, due computation, temporal profile resolution)
 src/core/rate_limiter.py — Per-domain async rate limiting
 src/core/config_poller.py  — Background polling: sync domain configs from DB into rate limiter
 src/dashboard/           — Server-rendered dashboard (Jinja2 + HTMX + Tailwind)
 src/dashboard/routes.py  — Dashboard page and partial routes
-src/dashboard/context.py — Dashboard-specific DB query helpers
+src/dashboard/context.py — Dashboard-specific DB query helpers; includes get_latest_snapshot
 src/dashboard/static/    — CSS, JS (vendored HTMX, dark-mode, htmx-a11y), compiled Tailwind
 src/dashboard/static/images/ — Brand assets and project icons (Cannabis Observer logo, magnifying glass)
 src/dashboard/templates/ — Jinja2 templates (base, pages, partials); partials/pagination.html reusable offset-based pagination; partials/domain_field.html reusable inline-editable domain field (view/edit modes via GET /domains/{name}/field/{field_name}?mode=view|edit); partials/watch_field.html inline-editable watch field (text/number/textarea/select/toggle types, content-type-aware via WATCH_FIELD_META); partials/watch_status_toggle.html Active/Inactive/Archived toggle with badge; macros/fields.html — watch_field(ctx) and domain_field(ctx) macros (import with context; centralise {% set %} boilerplate for field partials)

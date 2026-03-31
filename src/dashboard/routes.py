@@ -6,14 +6,16 @@ from datetime import UTC, datetime
 from typing import Literal
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from ulid import ULID
 
 from src.api.dependencies import get_db_session, get_probe_fn
 from src.api.routes.watches import delete_watch as api_delete_watch
 from src.core.models.audit_log import EventType, audit
 from src.core.models.domain import Domain
+from src.core.models.snapshot import Snapshot
 from src.core.models.watch import ContentType, Watch
 from src.core.probe import ProbeResult
 from src.core.storage import STORAGE_BASE_DIR, LocalStorage
@@ -26,6 +28,7 @@ from src.dashboard.context import (
     get_domain_watches,
     get_domains_total_count,
     get_domains_with_watch_counts,
+    get_latest_snapshot,
     get_queue_health,
     get_recent_changes,
     get_watch_changes,
@@ -157,12 +160,20 @@ async def watch_detail_page(
     changes = await get_watch_changes(session, watch_id)
     profiles = await get_watch_profiles(session, watch.id)
     notifications = await get_watch_notifications(session, watch.id)
+    latest_snapshot = await get_latest_snapshot(session, watch.id)
 
     # Build field contexts for content-type-aware rendering
     applicable_fields = _watch_fields_for_content_type(watch.content_type)
     field_contexts = {
         name: _watch_field_context(request, watch, name, mode="view") for name in applicable_fields
     }
+
+    # Determine whether a screenshot is available
+    has_screenshot = (
+        latest_snapshot is not None
+        and latest_snapshot.screenshot_path is not None
+        and LocalStorage(STORAGE_BASE_DIR).exists(latest_snapshot.screenshot_path)
+    )
 
     context = {
         "request": request,
@@ -172,8 +183,44 @@ async def watch_detail_page(
         "profiles": profiles,
         "notifications": notifications,
         "field_contexts": field_contexts,
+        "has_screenshot": has_screenshot,
     }
     return templates.TemplateResponse("pages/watch_detail.html", context)
+
+
+@router.get("/watches/{watch_id}/screenshot")
+async def watch_screenshot(
+    watch_id: str,
+    snapshot_id: str | None = None,
+    session: AsyncSession = Depends(get_db_session),
+):
+    """Serve the PNG screenshot for the latest (or specified) snapshot of a watch."""
+    watch = await get_watch_detail(session, watch_id)
+    if not watch:
+        raise HTTPException(status_code=404, detail="Watch not found")
+
+    if snapshot_id:
+        try:
+            sid = ULID.from_str(snapshot_id)
+        except ValueError:
+            raise HTTPException(status_code=404, detail="Snapshot not found")
+        result = await session.execute(
+            select(Snapshot).where(Snapshot.id == sid, Snapshot.watch_id == watch.id)
+        )
+        snapshot = result.scalar_one_or_none()
+    else:
+        snapshot = await get_latest_snapshot(session, watch.id)
+
+    storage = LocalStorage(STORAGE_BASE_DIR)
+    if (
+        snapshot is None
+        or snapshot.screenshot_path is None
+        or not storage.exists(snapshot.screenshot_path)
+    ):
+        raise HTTPException(status_code=404, detail="Screenshot not available")
+
+    png_bytes = storage.load(snapshot.screenshot_path)
+    return Response(content=png_bytes, media_type="image/png")
 
 
 @router.delete("/watches/{watch_id}")

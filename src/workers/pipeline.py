@@ -18,6 +18,7 @@ from src.core.models.domain import Domain
 from src.core.models.snapshot import Snapshot, SnapshotChunk
 from src.core.models.watch import Watch
 from src.core.rate_limiter import DomainRateLimiter
+from src.core.screenshot import capture_screenshot
 from src.core.simhash import simhash
 from src.core.storage import StorageBackend
 
@@ -326,12 +327,25 @@ async def _run_check_pipeline(
     )
     await session.flush()
 
-    # 11. Return result
+    # 11. Screenshot (optional — non-fatal if Playwright not installed or capture fails)
+    screenshot_path: str | None = None
+    try:
+        png_bytes = await capture_screenshot(watch.url)
+        if png_bytes is not None:
+            screenshot_path = storage.snapshot_path(str(watch.id), str(snapshot_id), "png")
+            storage.save(screenshot_path, png_bytes)
+            snapshot.screenshot_path = screenshot_path
+            await session.flush()
+    except Exception as exc:
+        logger.warning("screenshot step failed for watch %s: %s", str(watch.id), exc)
+
+    # 12. Return result
     return {
         "snapshot_id": str(snapshot_id),
         "is_changed": change_id is not None or prev_snapshot is None,
         "change_id": str(change_id) if change_id else None,
         "chunk_count": len(filtered_chunks),
         "storage_path": raw_path,
+        "screenshot_path": screenshot_path,
         "change_metadata": metadata if change_id else {},
     }

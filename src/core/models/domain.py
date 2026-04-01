@@ -2,7 +2,7 @@
 
 from datetime import datetime
 
-from sqlalchemy import DateTime, Float, Integer, String, Text
+from sqlalchemy import Boolean, DateTime, Float, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 from ulid import ULID
 
@@ -36,6 +36,9 @@ class Domain(Base, TimestampMixin):
         Float, nullable=False, default=DEFAULT_DECAY_WINDOW, server_default="1800.0"
     )
     notes: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
+    is_active: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True, server_default="true"
+    )
     archived_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True, default=None
     )
@@ -46,13 +49,16 @@ class Domain(Base, TimestampMixin):
         kwargs.setdefault("max_concurrency", DEFAULT_MAX_CONCURRENCY)
         kwargs.setdefault("current_interval", kwargs.get("min_interval", DEFAULT_MIN_INTERVAL))
         kwargs.setdefault("decay_window", DEFAULT_DECAY_WINDOW)
+        kwargs.setdefault("is_active", True)
         super().__init__(**kwargs)
 
     @property
     def status(self) -> str:
-        """Derived status: archived > backoff > active."""
+        """Derived status: archived > inactive > backoff > active."""
         if self.archived_at is not None:
             return "archived"
+        if not self.is_active:
+            return "inactive"
         if self.current_interval > self.min_interval:
             return "backoff"
         return "active"

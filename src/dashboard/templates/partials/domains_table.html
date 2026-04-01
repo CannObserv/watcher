@@ -17,6 +17,8 @@
         <td>
           {% if domain.status == "archived" %}
           <span class="badge badge-inactive">Archived</span>
+          {% elif domain.status == "inactive" %}
+          <span class="badge badge-inactive">Inactive</span>
           {% elif domain.status == "backoff" %}
           <span class="badge badge-warning">Backoff</span>
           {% else %}

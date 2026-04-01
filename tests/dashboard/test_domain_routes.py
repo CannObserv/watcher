@@ -3,8 +3,10 @@
 from datetime import UTC, datetime
 
 import pytest
+from sqlalchemy import select
 
 from src.core.models.domain import Domain
+from src.core.models.watch import Watch
 
 pytestmark = pytest.mark.integration
 
@@ -246,3 +248,148 @@ class TestDomainDelete:
     async def test_delete_nonexistent_returns_404(self, client):
         response = await client.post("/domains/nope.com/delete")
         assert response.status_code == 404
+
+
+class TestDomainToggleActive:
+    async def test_toggle_inactive_deactivates_domain(self, client, db_session):
+        db_session.add(Domain(name="toggle-off.com"))
+        await db_session.flush()
+        response = await client.post(
+            "/domains/toggle-off.com/toggle-active",
+            data={"active": "false"},
+            follow_redirects=False,
+        )
+        assert response.status_code == 303
+        result = await db_session.execute(select(Domain).where(Domain.name == "toggle-off.com"))
+        domain = result.scalar_one()
+        assert domain.is_active is False
+
+    async def test_toggle_active_reactivates_domain(self, client, db_session):
+        db_session.add(Domain(name="toggle-on.com", is_active=False))
+        await db_session.flush()
+        response = await client.post(
+            "/domains/toggle-on.com/toggle-active",
+            data={"active": "true"},
+            follow_redirects=False,
+        )
+        assert response.status_code == 303
+        result = await db_session.execute(select(Domain).where(Domain.name == "toggle-on.com"))
+        domain = result.scalar_one()
+        assert domain.is_active is True
+
+    async def test_toggle_inactive_suspends_active_watches(self, client, db_session):
+        db_session.add(Domain(name="suspend.com"))
+        watch = Watch(
+            name="Active Watch",
+            url="https://suspend.com/p",
+            content_type="html",
+            effective_domain="suspend.com",
+            is_active=True,
+        )
+        db_session.add(watch)
+        await db_session.flush()
+
+        await client.post("/domains/suspend.com/toggle-active", data={"active": "false"})
+
+        await db_session.refresh(watch)
+        assert watch.is_active is False
+        assert watch.domain_suspended is True
+
+    async def test_toggle_inactive_skips_already_inactive_watches(self, client, db_session):
+        db_session.add(Domain(name="skip-inactive.com"))
+        watch = Watch(
+            name="Already Inactive",
+            url="https://skip-inactive.com/p",
+            content_type="html",
+            effective_domain="skip-inactive.com",
+            is_active=False,
+        )
+        db_session.add(watch)
+        await db_session.flush()
+
+        await client.post("/domains/skip-inactive.com/toggle-active", data={"active": "false"})
+
+        await db_session.refresh(watch)
+        assert watch.domain_suspended is False
+
+    async def test_toggle_inactive_skips_archived_watches(self, client, db_session):
+        db_session.add(Domain(name="skip-archived.com"))
+        watch = Watch(
+            name="Archived Watch",
+            url="https://skip-archived.com/p",
+            content_type="html",
+            effective_domain="skip-archived.com",
+            is_active=False,
+            is_archived=True,
+        )
+        db_session.add(watch)
+        await db_session.flush()
+
+        await client.post("/domains/skip-archived.com/toggle-active", data={"active": "false"})
+
+        await db_session.refresh(watch)
+        assert watch.domain_suspended is False
+
+    async def test_toggle_active_restores_suspended_watches(self, client, db_session):
+        db_session.add(Domain(name="restore.com", is_active=False))
+        watch = Watch(
+            name="Suspended Watch",
+            url="https://restore.com/p",
+            content_type="html",
+            effective_domain="restore.com",
+            is_active=False,
+            domain_suspended=True,
+        )
+        db_session.add(watch)
+        await db_session.flush()
+
+        await client.post("/domains/restore.com/toggle-active", data={"active": "true"})
+
+        await db_session.refresh(watch)
+        assert watch.is_active is True
+        assert watch.domain_suspended is False
+
+    async def test_toggle_active_does_not_restore_manually_inactive_watches(
+        self, client, db_session
+    ):
+        db_session.add(Domain(name="manual.com", is_active=False))
+        watch = Watch(
+            name="Manual Inactive",
+            url="https://manual.com/p",
+            content_type="html",
+            effective_domain="manual.com",
+            is_active=False,
+            domain_suspended=False,
+        )
+        db_session.add(watch)
+        await db_session.flush()
+
+        await client.post("/domains/manual.com/toggle-active", data={"active": "true"})
+
+        await db_session.refresh(watch)
+        assert watch.is_active is False
+
+    async def test_toggle_htmx_returns_partial(self, client, db_session):
+        db_session.add(Domain(name="htmx-toggle.com"))
+        await db_session.flush()
+        response = await client.post(
+            "/domains/htmx-toggle.com/toggle-active",
+            data={"active": "false"},
+            headers={"HX-Request": "true"},
+        )
+        assert response.status_code == 200
+        assert b"domain-status-toggle" in response.content
+
+    async def test_toggle_nonexistent_returns_404(self, client):
+        response = await client.post(
+            "/domains/nope-toggle.com/toggle-active", data={"active": "false"}
+        )
+        assert response.status_code == 404
+
+    async def test_toggle_archived_domain_returns_409(self, client, db_session):
+        db_session.add(Domain(name="archived-toggle.com", archived_at=datetime.now(UTC)))
+        await db_session.flush()
+        response = await client.post(
+            "/domains/archived-toggle.com/toggle-active", data={"active": "false"}
+        )
+        assert response.status_code == 409

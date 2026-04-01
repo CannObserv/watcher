@@ -32,6 +32,7 @@ class Watch(Base, TimestampMixin):
     schedule_config: Mapped[dict] = mapped_column(JSONB, default=dict, server_default="{}")
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
     is_archived: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+    domain_suspended: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
     last_checked_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True),
         nullable=True,
@@ -46,6 +47,7 @@ class Watch(Base, TimestampMixin):
         kwargs.setdefault("schedule_config", {})
         kwargs.setdefault("is_active", True)
         kwargs.setdefault("is_archived", False)
+        kwargs.setdefault("domain_suspended", False)
         super().__init__(**kwargs)
 
     @validates("content_type")

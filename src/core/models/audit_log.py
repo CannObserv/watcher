@@ -32,6 +32,8 @@ class EventType:
     PROFILE_DELETED = "profile.deleted"
     DOMAIN_CREATED = "domain.created"
     DOMAIN_UPDATED = "domain.updated"
+    DOMAIN_DEACTIVATED = "domain.deactivated"
+    DOMAIN_ACTIVATED = "domain.activated"
     DOMAIN_ARCHIVED = "domain.archived"
     DOMAIN_RESTORED = "domain.restored"
     DOMAIN_DELETED = "domain.deleted"

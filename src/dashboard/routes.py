@@ -187,6 +187,16 @@ async def watch_detail_page(
             "screenshot_browser": latest_snapshot.screenshot_browser,
         }
 
+    # Check if the watch's domain is inactive (disables the status toggle)
+    domain_inactive = False
+    if watch.effective_domain:
+        domain_result = await session.execute(
+            select(Domain).where(Domain.name == watch.effective_domain)
+        )
+        domain = domain_result.scalar_one_or_none()
+        if domain and not domain.is_active:
+            domain_inactive = True
+
     context = {
         "request": request,
         "active_page": "watches",
@@ -196,6 +206,7 @@ async def watch_detail_page(
         "notifications": notifications,
         "field_contexts": field_contexts,
         "snapshot_meta": snapshot_meta,
+        "domain_inactive": domain_inactive,
     }
     return templates.TemplateResponse("pages/watch_detail.html", context)
 
@@ -575,6 +586,22 @@ async def watch_toggle_active(
         raise HTTPException(status_code=409, detail="Cannot toggle archived watch")
 
     new_active = active == "true"
+
+    # Block activation while the watch's domain is inactive (kill-switch)
+    domain_inactive = False
+    if watch.effective_domain:
+        domain_result = await session.execute(
+            select(Domain).where(Domain.name == watch.effective_domain)
+        )
+        domain = domain_result.scalar_one_or_none()
+        if domain and not domain.is_active:
+            domain_inactive = True
+            if new_active:
+                raise HTTPException(
+                    status_code=409,
+                    detail="Cannot activate watch while its domain is inactive",
+                )
+
     watch.is_active = new_active
 
     event = EventType.WATCH_UPDATED if new_active else EventType.WATCH_DEACTIVATED
@@ -584,7 +611,8 @@ async def watch_toggle_active(
 
     if request.headers.get("HX-Request") == "true":
         return templates.TemplateResponse(
-            "partials/watch_status_toggle.html", {"request": request, "watch": watch}
+            "partials/watch_status_toggle.html",
+            {"request": request, "watch": watch, "domain_inactive": domain_inactive},
         )
     return RedirectResponse(url=f"/watches/{watch_id}", status_code=303)
 
@@ -784,6 +812,65 @@ async def domain_restore(
     audit(session, EventType.DOMAIN_RESTORED, domain_name=name, source="dashboard")
     await session.commit()
 
+    return RedirectResponse(url=f"/domains/{name}", status_code=303)
+
+
+@router.post("/domains/{name}/toggle-active")
+async def domain_toggle_active(
+    request: Request,
+    name: str,
+    active: str = Form(""),
+    session: AsyncSession = Depends(get_db_session),
+):
+    """Toggle domain active status.
+
+    Deactivating suspends all active watches; reactivating restores them.
+    """
+    result = await session.execute(select(Domain).where(Domain.name == name))
+    domain = result.scalar_one_or_none()
+    if not domain:
+        raise HTTPException(status_code=404, detail="Domain not found")
+
+    if domain.archived_at is not None:
+        raise HTTPException(status_code=409, detail="Cannot toggle archived domain")
+
+    new_active = active == "true"
+    domain.is_active = new_active
+
+    if not new_active:
+        # Suspend all currently-active, non-archived watches in this domain
+        watches_result = await session.execute(
+            select(Watch).where(
+                Watch.effective_domain == name,
+                Watch.is_active == True,  # noqa: E712
+                Watch.is_archived == False,  # noqa: E712
+            )
+        )
+        for watch in watches_result.scalars().all():
+            watch.is_active = False
+            watch.domain_suspended = True
+        audit(session, EventType.DOMAIN_DEACTIVATED, domain_name=name, source="dashboard")
+    else:
+        # Restore only watches that were suspended by a previous domain deactivation
+        watches_result = await session.execute(
+            select(Watch).where(
+                Watch.effective_domain == name,
+                Watch.domain_suspended == True,  # noqa: E712
+                Watch.is_archived == False,  # noqa: E712
+            )
+        )
+        for watch in watches_result.scalars().all():
+            watch.is_active = True
+            watch.domain_suspended = False
+        audit(session, EventType.DOMAIN_ACTIVATED, domain_name=name, source="dashboard")
+
+    await session.commit()
+    await session.refresh(domain)
+
+    if request.headers.get("HX-Request") == "true":
+        return templates.TemplateResponse(
+            "partials/domain_status_toggle.html", {"request": request, "domain": domain}
+        )
     return RedirectResponse(url=f"/domains/{name}", status_code=303)
 
 

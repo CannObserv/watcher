@@ -2,6 +2,7 @@
 
 import pytest
 
+from src.core.models.domain import Domain
 from src.core.models.watch import ContentType, Watch
 
 pytestmark = pytest.mark.integration
@@ -296,6 +297,42 @@ class TestWatchStatusToggle:
             data={"active": "true"},
         )
         assert response.status_code == 409
+
+    async def test_toggle_activate_blocked_when_domain_inactive(self, client, db_session):
+        db_session.add(Domain(name="inactive-domain.com", is_active=False))
+        watch = Watch(
+            name="Suspended Watch",
+            url="https://inactive-domain.com/p",
+            content_type=ContentType.HTML,
+            effective_domain="inactive-domain.com",
+            is_active=False,
+            domain_suspended=True,
+        )
+        db_session.add(watch)
+        await db_session.flush()
+        response = await client.post(
+            f"/watches/{watch.id}/toggle-active",
+            data={"active": "true"},
+        )
+        assert response.status_code == 409
+
+    async def test_toggle_deactivate_allowed_when_domain_inactive(self, client, db_session):
+        """Deactivating is always allowed; only activation is blocked."""
+        db_session.add(Domain(name="inactive-domain2.com", is_active=False))
+        watch = Watch(
+            name="Active Despite Inactive Domain",
+            url="https://inactive-domain2.com/p",
+            content_type=ContentType.HTML,
+            effective_domain="inactive-domain2.com",
+            is_active=True,
+        )
+        db_session.add(watch)
+        await db_session.flush()
+        response = await client.post(
+            f"/watches/{watch.id}/toggle-active",
+            data={"active": ""},
+        )
+        assert response.status_code in (200, 303)
 
 
 class TestWatchArchiveRestore:

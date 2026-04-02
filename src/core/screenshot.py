@@ -32,7 +32,12 @@ class ScreenshotResult(NamedTuple):
     browser: str
 
 
-async def capture_screenshot(url: str) -> ScreenshotResult | None:
+async def capture_screenshot(
+    url: str,
+    *,
+    viewport_width: int = SCREENSHOT_WIDTH,
+    viewport_height: int = SCREENSHOT_HEIGHT,
+) -> ScreenshotResult | None:
     """Capture a full-viewport PNG screenshot of *url*.
 
     Returns a :class:`ScreenshotResult` on success, ``None`` on any failure
@@ -41,6 +46,8 @@ async def capture_screenshot(url: str) -> ScreenshotResult | None:
 
     Args:
         url: The URL to screenshot.
+        viewport_width: Viewport width in pixels (default: 1280).
+        viewport_height: Viewport height in pixels (default: 800).
     """
     if not PLAYWRIGHT_AVAILABLE:
         return None
@@ -51,7 +58,7 @@ async def capture_screenshot(url: str) -> ScreenshotResult | None:
             browser_version = browser.version
             try:
                 page = await browser.new_page(
-                    viewport={"width": SCREENSHOT_WIDTH, "height": SCREENSHOT_HEIGHT}
+                    viewport={"width": viewport_width, "height": viewport_height}
                 )
                 await page.goto(url, wait_until="load", timeout=30_000)
                 png_bytes: bytes = await page.screenshot(type="png")

@@ -182,6 +182,34 @@ class TestWatchCreate:
                 fetch_config={"ignore_selectors": "#sidebar"},
             )
 
+    def test_watch_create_valid_viewport(self):
+        data = WatchCreate(
+            name="Wide Watch",
+            url="https://example.com",
+            content_type="html",
+            fetch_config={"viewport_width": 1920, "viewport_height": 1080},
+        )
+        assert data.fetch_config["viewport_width"] == 1920
+        assert data.fetch_config["viewport_height"] == 1080
+
+    def test_watch_create_rejects_nonpositive_viewport_width(self):
+        with pytest.raises(ValidationError, match="viewport_width must be"):
+            WatchCreate(
+                name="Bad",
+                url="https://example.com",
+                content_type="html",
+                fetch_config={"viewport_width": -1},
+            )
+
+    def test_watch_create_rejects_oversized_viewport_height(self):
+        with pytest.raises(ValidationError, match="viewport_height must be"):
+            WatchCreate(
+                name="Bad",
+                url="https://example.com",
+                content_type="html",
+                fetch_config={"viewport_height": 99999},
+            )
+
 
 class TestWatchUpdate:
     def test_update_partial(self):
@@ -231,6 +259,19 @@ class TestWatchUpdate:
     def test_update_invalid_css_selector(self):
         with pytest.raises(ValidationError, match="not a valid CSS selector"):
             WatchUpdate(fetch_config={"ignore_selectors": ["###bad"]})
+
+    def test_update_valid_viewport(self):
+        data = WatchUpdate(fetch_config={"viewport_width": 1920, "viewport_height": 1080})
+        assert data.fetch_config["viewport_width"] == 1920
+        assert data.fetch_config["viewport_height"] == 1080
+
+    def test_update_rejects_zero_viewport_width(self):
+        with pytest.raises(ValidationError, match="viewport_width must be"):
+            WatchUpdate(fetch_config={"viewport_width": 0})
+
+    def test_update_rejects_oversized_viewport(self):
+        with pytest.raises(ValidationError, match="viewport_width must be"):
+            WatchUpdate(fetch_config={"viewport_width": 99999})
 
 
 class TestSnapshotChunkResponse:

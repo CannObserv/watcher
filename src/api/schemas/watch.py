@@ -53,10 +53,26 @@ def _validate_ignore_selectors(fetch_config: dict | None) -> dict | None:
     return fetch_config
 
 
+def _validate_viewport(fetch_config: dict | None) -> dict | None:
+    """Validate fetch_config viewport_width and viewport_height."""
+    if not fetch_config:
+        return fetch_config
+    for key, max_val in (("viewport_width", 7680), ("viewport_height", 4320)):
+        val = fetch_config.get(key)
+        if val is None:
+            continue
+        if not isinstance(val, int) or val <= 0 or val > max_val:
+            raise ValueError(
+                f"fetch_config.{key} must be a positive integer no greater than {max_val}"
+            )
+    return fetch_config
+
+
 def _validate_fetch_config(fetch_config: dict | None) -> dict | None:
     """Run all fetch_config validators."""
     fetch_config = _validate_ignore_patterns(fetch_config)
     fetch_config = _validate_ignore_selectors(fetch_config)
+    fetch_config = _validate_viewport(fetch_config)
     return fetch_config
 
 

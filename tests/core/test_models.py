@@ -264,6 +264,23 @@ class TestChangeModel:
         )
         assert change.change_metadata["modified"][0]["label"] == "Page 1"
 
+    def test_visual_change_score_defaults_to_none(self):
+        change = Change(
+            watch_id=ULID(),
+            previous_snapshot_id=ULID(),
+            current_snapshot_id=ULID(),
+        )
+        assert change.visual_change_score is None
+
+    def test_visual_change_score_can_be_set(self):
+        change = Change(
+            watch_id=ULID(),
+            previous_snapshot_id=ULID(),
+            current_snapshot_id=ULID(),
+            visual_change_score=0.42,
+        )
+        assert change.visual_change_score == pytest.approx(0.42)
+
 
 class TestTemporalProfileModel:
     def test_create_event_profile(self):

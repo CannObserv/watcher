@@ -38,6 +38,38 @@
   </div>
 </div>
 
+<!-- Visual comparison -->
+{% if previous_snapshot and previous_snapshot.screenshot_path and current_snapshot and current_snapshot.screenshot_path %}
+<div class="stat-card mb-6">
+  <h3 class="text-sm font-medium text-gray-500 dark:text-gray-400 mb-3">Visual Comparison</h3>
+  {% if change.visual_change_score is not none %}
+  <p class="text-xs text-gray-500 dark:text-gray-400 mb-3">
+    Visual change score: <span class="badge badge-info">{{ "%.0f" | format(change.visual_change_score * 100) }}%</span>
+  </p>
+  {% endif %}
+  <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+    <div>
+      <p class="text-xs font-medium text-gray-500 dark:text-gray-400 mb-2">Before</p>
+      <img
+        src="/watches/{{ watch_id }}/screenshot?snapshot_id={{ previous_snapshot.id }}"
+        alt="Previous snapshot screenshot"
+        class="w-full rounded border border-gray-200 dark:border-gray-700"
+        loading="lazy"
+      >
+    </div>
+    <div>
+      <p class="text-xs font-medium text-gray-500 dark:text-gray-400 mb-2">After</p>
+      <img
+        src="/watches/{{ watch_id }}/screenshot?snapshot_id={{ current_snapshot.id }}"
+        alt="Current snapshot screenshot"
+        class="w-full rounded border border-gray-200 dark:border-gray-700"
+        loading="lazy"
+      >
+    </div>
+  </div>
+</div>
+{% endif %}
+
 <!-- Snapshot info -->
 <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
   <div class="stat-card">

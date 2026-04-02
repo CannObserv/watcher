@@ -25,6 +25,7 @@ class Change(Base):
     )
     change_metadata: Mapped[dict] = mapped_column(JSONB, default=dict, server_default="{}")
     significance: Mapped[float | None] = mapped_column(Float, nullable=True)
+    visual_change_score: Mapped[float | None] = mapped_column(Float, nullable=True)
     detected_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         default=lambda: datetime.now(UTC),

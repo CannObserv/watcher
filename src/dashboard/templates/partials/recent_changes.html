@@ -13,7 +13,12 @@
       <tr class="hover:bg-gray-50 dark:hover:bg-gray-800">
         <td><a href="/watches/{{ change.watch_id }}" class="link">{{ change.watch_name }}</a></td>
         <td class="text-gray-500 dark:text-gray-400">{{ change.detected_at.strftime('%Y-%m-%d %H:%M UTC') }}</td>
-        <td><a href="/changes/{{ change.id }}" class="link">{{ change.summary }}</a></td>
+        <td>
+          <a href="/changes/{{ change.id }}" class="link">{{ change.summary }}</a>
+          {% if change.visual_change_score is not none %}
+          <span class="badge badge-info ms-1">{{ "%.0f" | format(change.visual_change_score * 100) }}% visual</span>
+          {% endif %}
+        </td>
       </tr>
       {% endfor %}
     </tbody>

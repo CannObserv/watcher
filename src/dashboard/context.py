@@ -2,6 +2,7 @@
 
 import difflib
 from datetime import UTC, datetime
+from typing import Any
 
 from sqlalchemy import func, select, text
 from sqlalchemy.exc import ProgrammingError
@@ -90,8 +91,8 @@ def compute_watch_health(
 
 async def get_watch_health_map(
     session: AsyncSession,
-    watch_ids: list,
-) -> dict:
+    watch_ids: list[Any],
+) -> dict[Any, EventType | None]:
     """Return a mapping of watch_id → latest check event_type (or None).
 
     Queries the audit log for the most recent check-related event per watch.

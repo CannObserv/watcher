@@ -21,7 +21,7 @@ src/api/               — FastAPI app (ASGI, routes, schemas)
 src/api/routes/        — API endpoints (watches, temporal_profiles, changes, audit_log, notification_configs, domains, probe); mounted at /api/v1/
 src/api/routes/health.py — /health (liveness) and /ready (readiness) endpoints; root-level, not versioned
 src/core/              — Shared domain logic
-src/core/models/       — SQLAlchemy models (Watch, AuditLog, Snapshot, SnapshotChunk, Change, TemporalProfile, NotificationConfig, Domain)
+src/core/models/       — SQLAlchemy models (Watch, AuditLog, Snapshot, SnapshotChunk, Change [+visual_change_score float nullable], TemporalProfile, NotificationConfig, Domain)
 src/core/probe.py      — URL probe: follow redirects, resolve effective URL and domain (ProbeResult + probe_url)
 src/core/notifications/  — Notification channels (webhook, email, Slack) and dispatcher
 src/core/extractors/   — Content extractors (HTML, PDF, CSV/Excel → Chunks)
@@ -35,7 +35,7 @@ src/core/rate_limiter.py — Per-domain async rate limiting
 src/core/config_poller.py  — Background polling: sync domain configs from DB into rate limiter
 src/dashboard/           — Server-rendered dashboard (Jinja2 + HTMX + Tailwind)
 src/dashboard/routes.py  — Dashboard page and partial routes
-src/dashboard/context.py — Dashboard-specific DB query helpers; includes get_latest_snapshot
+src/dashboard/context.py — Dashboard-specific DB query helpers; includes get_latest_snapshot, compute_watch_health (pure fn), get_watch_health_map (per-watch latest check event)
 src/dashboard/static/    — CSS, JS (vendored HTMX, dark-mode, htmx-a11y), compiled Tailwind
 src/dashboard/static/images/ — Brand assets and project icons (Cannabis Observer logo, magnifying glass)
 src/dashboard/templates/ — Jinja2 templates (base, pages, partials); partials/pagination.html reusable offset-based pagination; partials/domain_field.html reusable inline-editable domain field (view/edit modes via GET /domains/{name}/field/{field_name}?mode=view|edit); partials/watch_field.html inline-editable watch field (text/number/textarea/select/toggle types, content-type-aware via WATCH_FIELD_META); partials/watch_status_toggle.html Active/Inactive/Archived toggle with badge; macros/fields.html — watch_field(ctx) and domain_field(ctx) macros (import with context; centralise {% set %} boilerplate for field partials)

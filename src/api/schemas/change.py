@@ -52,6 +52,7 @@ class ChangeResponse(BaseModel):
     current_snapshot_id: ULIDStr
     change_metadata: dict
     significance: float | None
+    visual_change_score: float | None = None
     detected_at: datetime
 
 

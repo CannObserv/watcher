@@ -685,7 +685,7 @@ class TestCheckWatchInactiveDomain:
             is_active=True,
         )
         db_session.add(watch)
-        await db_session.flush()
+        await db_session.commit()
 
         monkeypatch.setattr(tasks_mod, "STORAGE_BASE_DIR", tmp_path)
         monkeypatch.setattr(

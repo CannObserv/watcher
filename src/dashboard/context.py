@@ -66,7 +66,7 @@ async def get_watch_list(
 
 def compute_watch_health(
     watch: Watch,
-    latest_event_type: str | None,
+    latest_event_type: EventType | None,
     now: datetime,
 ) -> str:
     """Derive health state for a watch from its last check metadata.

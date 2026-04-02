@@ -16,7 +16,7 @@ from src.core.models.base import generate_ulid
 from src.core.models.change import Change
 from src.core.models.domain import Domain
 from src.core.models.snapshot import Snapshot, SnapshotChunk
-from src.core.models.watch import Watch
+from src.core.models.watch import ContentType, Watch
 from src.core.rate_limiter import DomainRateLimiter
 from src.core.screenshot import capture_screenshot
 from src.core.simhash import simhash
@@ -329,7 +329,7 @@ async def _run_check_pipeline(
 
     # 11. Screenshot (optional — HTML only; non-fatal if Playwright not installed or capture fails)
     screenshot_path: str | None = None
-    if str(watch.content_type).lower() == "html":
+    if watch.content_type == ContentType.HTML:
         try:
             screenshot_result = await capture_screenshot(watch.url)
             if screenshot_result is not None:

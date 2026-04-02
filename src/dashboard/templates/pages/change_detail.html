@@ -52,7 +52,7 @@
       <p class="text-xs font-medium text-gray-500 dark:text-gray-400 mb-2">Before</p>
       <img
         src="/watches/{{ watch_id }}/screenshot?snapshot_id={{ previous_snapshot.id }}"
-        alt="Previous snapshot screenshot"
+        alt="Screenshot of {{ watch_name }} before this change"
         class="w-full rounded border border-gray-200 dark:border-gray-700"
         loading="lazy"
       >
@@ -61,7 +61,7 @@
       <p class="text-xs font-medium text-gray-500 dark:text-gray-400 mb-2">After</p>
       <img
         src="/watches/{{ watch_id }}/screenshot?snapshot_id={{ current_snapshot.id }}"
-        alt="Current snapshot screenshot"
+        alt="Screenshot of {{ watch_name }} after this change"
         class="w-full rounded border border-gray-200 dark:border-gray-700"
         loading="lazy"
       >

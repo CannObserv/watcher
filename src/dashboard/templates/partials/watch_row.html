@@ -23,7 +23,7 @@
     {% endif %}
   </td>
   <td>
-    {% set health = health_map.get(watch.id, "unknown") if health_map is defined else "unknown" %}
+    {% set health = health_map.get(watch.id, "unknown") %}
     {% if health == "healthy" %}
       <span class="badge badge-active">Healthy</span>
     {% elif health == "warning" %}

@@ -65,8 +65,12 @@ async def dashboard_home(
     return templates.TemplateResponse("pages/dashboard.html", context)
 
 
-async def _build_watch_health(session, watches: list) -> dict:
-    """Build health_map and compute per-watch health strings."""
+async def _build_watch_health(session: AsyncSession, watches: list[Watch]) -> dict:
+    """Return a mapping of watch.id → health string for each watch in the list.
+
+    Health strings: ``"healthy"``, ``"warning"``, ``"error"``, or ``"unknown"``.
+    Passes directly to templates as ``health_map``.
+    """
     now = datetime.now(UTC)
     watch_ids = [w.id for w in watches]
     event_map = await get_watch_health_map(session, watch_ids)

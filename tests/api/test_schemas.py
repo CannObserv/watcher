@@ -155,6 +155,33 @@ class TestWatchCreate:
                 fetch_config={"ignore_patterns": r"\d+"},
             )
 
+    def test_watch_create_valid_ignore_selectors(self):
+        data = WatchCreate(
+            name="Selector Watch",
+            url="https://example.com",
+            content_type="html",
+            fetch_config={"ignore_selectors": ["#sidebar", ".ads", "nav > ul"]},
+        )
+        assert data.fetch_config["ignore_selectors"] == ["#sidebar", ".ads", "nav > ul"]
+
+    def test_watch_create_invalid_css_selector(self):
+        with pytest.raises(ValidationError, match="not a valid CSS selector"):
+            WatchCreate(
+                name="Bad",
+                url="https://example.com",
+                content_type="html",
+                fetch_config={"ignore_selectors": ["###invalid!!!"]},
+            )
+
+    def test_watch_create_ignore_selectors_must_be_list(self):
+        with pytest.raises(ValidationError, match="must be a list"):
+            WatchCreate(
+                name="Bad",
+                url="https://example.com",
+                content_type="html",
+                fetch_config={"ignore_selectors": "#sidebar"},
+            )
+
 
 class TestWatchUpdate:
     def test_update_partial(self):
@@ -196,6 +223,14 @@ class TestWatchUpdate:
     def test_update_none_fetch_config_is_valid(self):
         data = WatchUpdate(fetch_config=None)
         assert data.fetch_config is None
+
+    def test_update_valid_ignore_selectors(self):
+        data = WatchUpdate(fetch_config={"ignore_selectors": [".promo", "#cookie-banner"]})
+        assert data.fetch_config["ignore_selectors"] == [".promo", "#cookie-banner"]
+
+    def test_update_invalid_css_selector(self):
+        with pytest.raises(ValidationError, match="not a valid CSS selector"):
+            WatchUpdate(fetch_config={"ignore_selectors": ["###bad"]})
 
 
 class TestSnapshotChunkResponse:

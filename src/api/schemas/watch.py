@@ -3,6 +3,7 @@
 import re
 from datetime import datetime
 
+from bs4 import BeautifulSoup
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from src.api.schemas.types import HttpUrlStr, ULIDStr
@@ -30,6 +31,35 @@ def _validate_ignore_patterns(fetch_config: dict | None) -> dict | None:
     return fetch_config
 
 
+def _validate_ignore_selectors(fetch_config: dict | None) -> dict | None:
+    """Validate that fetch_config['ignore_selectors'] contains valid CSS selectors."""
+    if not fetch_config:
+        return fetch_config
+    selectors = fetch_config.get("ignore_selectors")
+    if selectors is None:
+        return fetch_config
+    if not isinstance(selectors, list):
+        raise ValueError("fetch_config.ignore_selectors must be a list of strings")
+    soup = BeautifulSoup("", "lxml")
+    for i, s in enumerate(selectors):
+        if not isinstance(s, str):
+            raise ValueError(f"fetch_config.ignore_selectors[{i}] must be a string")
+        try:
+            soup.select(s)
+        except Exception as exc:
+            raise ValueError(
+                f"fetch_config.ignore_selectors[{i}] is not a valid CSS selector: {exc}"
+            ) from exc
+    return fetch_config
+
+
+def _validate_fetch_config(fetch_config: dict | None) -> dict | None:
+    """Run all fetch_config validators."""
+    fetch_config = _validate_ignore_patterns(fetch_config)
+    fetch_config = _validate_ignore_selectors(fetch_config)
+    return fetch_config
+
+
 class WatchCreate(BaseModel):
     """Schema for creating a new watch."""
 
@@ -42,7 +72,7 @@ class WatchCreate(BaseModel):
     @field_validator("fetch_config")
     @classmethod
     def validate_fetch_config(cls, v: dict) -> dict:
-        return _validate_ignore_patterns(v)
+        return _validate_fetch_config(v)
 
 
 class WatchUpdate(BaseModel):
@@ -60,7 +90,7 @@ class WatchUpdate(BaseModel):
     @field_validator("fetch_config")
     @classmethod
     def validate_fetch_config(cls, v: dict | None) -> dict | None:
-        return _validate_ignore_patterns(v)
+        return _validate_fetch_config(v)
 
 
 class WatchResponse(BaseModel):

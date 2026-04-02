@@ -17,6 +17,7 @@ class HtmlExtractorConfig(BaseModel):
 
     selectors: list[str] = []
     exclude_selectors: list[str] = []
+    ignore_selectors: list[str] = []
     strip_boilerplate: bool = True
     dynamic_id_patterns: list[str] = []
 
@@ -33,6 +34,8 @@ class HtmlExtractor:
         Config keys:
             selectors: list[str] — CSS selectors to include (default: whole body)
             exclude_selectors: list[str] — CSS selectors to remove within included content
+            ignore_selectors: list[str] — CSS selectors to remove from the DOM before any
+                extraction; runs before ``ignore_patterns`` (which operate on extracted text)
             dynamic_id_patterns: list[str] — attribute names to strip (e.g. "data-block-id")
             strip_boilerplate: bool — remove nav/footer/script/style (default: True)
         """
@@ -44,6 +47,13 @@ class HtmlExtractor:
             self._strip_boilerplate(soup)
 
         self._strip_dynamic_ids(soup, config.get("dynamic_id_patterns", []))
+
+        # Remove ignore_selectors from the DOM first, before region selection and text extraction.
+        # This runs before ignore_patterns, which filter on extracted text.
+        if config.get("ignore_selectors"):
+            for sel in config["ignore_selectors"]:
+                for el in soup.select(sel):
+                    el.decompose()
 
         regions = self._select_regions(soup, config)
 

@@ -70,3 +70,46 @@ class TestHtmlExtractor:
     async def test_empty_html_returns_empty(self):
         result = await self.extractor.extract(b"<html><body></body></html>")
         assert len(result.chunks) == 0 or result.total_chars == 0
+
+    async def test_ignore_selectors_removes_matching_elements(self):
+        """Elements matching ignore_selectors are removed before text extraction."""
+        html = b"""
+        <html><body>
+          <div id="main">Keep this content</div>
+          <div id="sidebar">Remove this sidebar</div>
+          <div id="ads">Remove these ads</div>
+        </body></html>
+        """
+        result = await self.extractor.extract(
+            html,
+            config={"ignore_selectors": ["#sidebar", "#ads"]},
+        )
+        full_text = " ".join(c.text for c in result.chunks)
+        assert "Keep this content" in full_text
+        assert "Remove this sidebar" not in full_text
+        assert "Remove these ads" not in full_text
+
+    async def test_ignore_selectors_runs_before_ignore_patterns(self):
+        """ignore_selectors remove DOM elements; ignore_patterns filter on resulting text."""
+        html = b"""
+        <html><body>
+          <p id="noise">NOISE</p>
+          <p id="content">Good content here</p>
+        </body></html>
+        """
+        # ignore_selectors removes #noise from DOM; ignore_patterns would also match "NOISE"
+        # Verify both together still yield only the good content
+        result = await self.extractor.extract(
+            html,
+            config={"ignore_selectors": ["#noise"], "ignore_patterns": ["NOISE"]},
+        )
+        full_text = " ".join(c.text for c in result.chunks)
+        assert "Good content here" in full_text
+        assert "NOISE" not in full_text
+
+    async def test_ignore_selectors_empty_list_is_noop(self):
+        """Empty ignore_selectors list leaves extraction unchanged."""
+        html = b"<html><body><p>All content</p></body></html>"
+        result_with = await self.extractor.extract(html, config={"ignore_selectors": []})
+        result_without = await self.extractor.extract(html)
+        assert [c.text for c in result_with.chunks] == [c.text for c in result_without.chunks]

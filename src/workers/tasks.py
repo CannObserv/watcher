@@ -40,22 +40,28 @@ async def check_watch(watch_id: str, registry: ServiceRegistry | None = None) ->
     """Fetch and check a single watch for changes."""
     reg = registry if registry is not None else get_registry()
     async with get_session_factory()() as session:
-        watch = await session.get(Watch, ULID.from_str(watch_id))
-        if not watch or not watch.is_active:
-            logger.warning("watch not found or inactive", extra={"watch_id": watch_id})
+        row = (
+            await session.execute(
+                select(Watch, Domain)
+                .outerjoin(Domain, Domain.name == Watch.effective_domain)
+                .where(Watch.id == ULID.from_str(watch_id))
+            )
+        ).one_or_none()
+        if not row:
+            logger.warning("watch not found", extra={"watch_id": watch_id})
+            return {"skipped": True}
+        watch, domain = row
+
+        if not watch.is_active:
+            logger.warning("watch inactive", extra={"watch_id": watch_id})
             return {"skipped": True}
 
-        if watch.effective_domain:
-            domain_result = await session.execute(
-                select(Domain).where(Domain.name == watch.effective_domain)
+        if domain and not domain.is_active:
+            logger.warning(
+                "domain inactive, skipping watch",
+                extra={"watch_id": watch_id, "domain": watch.effective_domain},
             )
-            domain = domain_result.scalar_one_or_none()
-            if domain and not domain.is_active:
-                logger.warning(
-                    "domain inactive, skipping watch",
-                    extra={"watch_id": watch_id, "domain": watch.effective_domain},
-                )
-                return {"skipped": True}
+            return {"skipped": True}
 
         # Fetch with rate limiting — only pass fetcher-relevant config keys
         fetch_config = {
@@ -143,11 +149,7 @@ async def schedule_tick(timestamp: int) -> None:
             .join(Domain, Domain.name == Watch.effective_domain, isouter=True)
             .where(
                 Watch.is_active.is_(True),
-                or_(
-                    Watch.effective_domain.is_(None),
-                    Domain.id.is_(None),
-                    Domain.is_active.is_(True),
-                ),
+                or_(Domain.id.is_(None), Domain.is_active.is_(True)),
                 or_(
                     Watch.last_checked_at.is_(None),
                     Watch.last_checked_at < now,

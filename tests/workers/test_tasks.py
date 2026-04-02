@@ -637,6 +637,37 @@ class TestScheduleTickInactiveDomain:
 
         assert defer_calls == [], "should not defer check for watch on inactive domain"
 
+    async def test_defers_watches_on_active_domain(self, db_session, monkeypatch):
+        import src.workers.tasks as tasks_mod
+
+        domain = Domain(name="active-ctrl.com", is_active=True)
+        db_session.add(domain)
+        watch = Watch(
+            name="On Active Domain",
+            url="https://active-ctrl.com/p",
+            content_type=ContentType.HTML,
+            effective_domain="active-ctrl.com",
+            is_active=True,
+        )
+        db_session.add(watch)
+        await db_session.commit()
+
+        monkeypatch.setattr(
+            tasks_mod, "get_session_factory", lambda: _mock_session_factory(db_session)
+        )
+
+        defer_calls = []
+        mock_configure = MagicMock()
+        mock_configure.return_value.defer_async = AsyncMock(
+            side_effect=lambda **kw: defer_calls.append(kw)
+        )
+        monkeypatch.setattr(check_watch, "configure", mock_configure)
+
+        await schedule_tick(0)
+
+        assert len(defer_calls) == 1
+        assert defer_calls[0]["watch_id"] == str(watch.id)
+
 
 class TestCheckWatchInactiveDomain:
     """check_watch must skip if the watch's domain is inactive."""

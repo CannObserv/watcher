@@ -395,3 +395,56 @@ class TestRunCheckPipelineScreenshot:
 
         # The pipeline result should still have a snapshot_id
         assert result["snapshot_id"] is not None
+
+    @pytest.mark.parametrize("content_type", [ContentType.PDF, ContentType.FILE])
+    async def test_screenshot_skipped_for_non_html(self, db_session, tmp_path, content_type):
+        """Screenshot step is skipped entirely for non-HTML content types."""
+        import csv
+        import io
+
+        if content_type == ContentType.FILE:
+            buf = io.StringIO()
+            csv.writer(buf).writerows([["col"], ["val"]])
+            raw = buf.getvalue().encode()
+            fetch_config = {"file_format": "csv"}
+        else:
+            # Minimal valid single-page PDF
+            raw = (
+                b"%PDF-1.4\n"
+                b"1 0 obj\n<</Type /Catalog /Pages 2 0 R>>\nendobj\n"
+                b"2 0 obj\n<</Type /Pages /Kids [3 0 R] /Count 1>>\nendobj\n"
+                b"3 0 obj\n<</Type /Page /Parent 2 0 R /MediaBox [0 0 612 792]>>\nendobj\n"
+                b"xref\n0 4\n"
+                b"0000000000 65535 f \n"
+                b"0000000009 00000 n \n"
+                b"0000000058 00000 n \n"
+                b"0000000115 00000 n \n"
+                b"trailer\n<</Size 4 /Root 1 0 R>>\n"
+                b"startxref\n190\n%%EOF\n"
+            )
+            fetch_config = None
+
+        watch = Watch(
+            name="NonHTML",
+            url="https://example.com/file",
+            content_type=content_type,
+            fetch_config=fetch_config,
+        )
+        db_session.add(watch)
+        await db_session.flush()
+
+        storage = LocalStorage(base_dir=tmp_path)
+        mock_capture = AsyncMock(return_value=ScreenshotResult(png_bytes=b"fakepng", browser="x"))
+
+        with patch("src.workers.pipeline.capture_screenshot", new=mock_capture):
+            result = await _run_check_pipeline(
+                watch=watch,
+                raw_content=raw,
+                fetcher_used="http",
+                fetch_duration_ms=100,
+                storage=storage,
+                session=db_session,
+            )
+
+        mock_capture.assert_not_called()
+        assert result["screenshot_path"] is None

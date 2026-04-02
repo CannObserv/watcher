@@ -38,6 +38,8 @@ from src.dashboard.context import (
     get_watch_list,
     get_watch_notifications,
     get_watch_profiles,
+    get_watch_timeline,
+    get_watch_timeline_count,
 )
 
 router = APIRouter(tags=["dashboard"])
@@ -173,7 +175,6 @@ async def watch_detail_page(
     watch = await get_watch_detail(session, watch_id)
     if not watch:
         return templates.TemplateResponse("pages/404.html", {"request": request}, status_code=404)
-    changes = await get_watch_changes(session, watch_id)
     profiles = await get_watch_profiles(session, watch.id)
     notifications = await get_watch_notifications(session, watch.id)
     latest_snapshot = await get_latest_snapshot(session, watch.id)
@@ -213,16 +214,31 @@ async def watch_detail_page(
         if domain and not domain.is_active:
             domain_inactive = True
 
+    # Initial timeline page (page 1, no category filter)
+    timeline_page_size = 25
+    timeline = await get_watch_timeline(session, watch_id, offset=0, limit=timeline_page_size)
+    timeline_total = await get_watch_timeline_count(session, watch_id)
+
     context = {
         "request": request,
         "active_page": "watches",
         "watch": watch,
-        "changes": changes,
         "profiles": profiles,
         "notifications": notifications,
         "field_contexts": field_contexts,
         "snapshot_meta": snapshot_meta,
         "domain_inactive": domain_inactive,
+        "timeline": timeline,
+        "timeline_total": timeline_total,
+        "timeline_page": 1,
+        "timeline_page_size": timeline_page_size,
+        "timeline_category": None,
+        # Pagination vars for partials/pagination.html (used inside the timeline include)
+        "page": 1,
+        "page_size": timeline_page_size,
+        "total_count": timeline_total,
+        "base_url": f"/partials/watch-timeline/{watch_id}",
+        "extra_params": {},
     }
     return templates.TemplateResponse("pages/watch_detail.html", context)
 
@@ -1143,10 +1159,51 @@ async def partial_watch_changes(
     watch_id: str,
     session: AsyncSession = Depends(get_db_session),
 ):
-    """HTMX partial: change history for a watch."""
+    """HTMX partial: change history for a watch (legacy endpoint)."""
     changes = await get_watch_changes(session, watch_id)
     return templates.TemplateResponse(
         "partials/watch_changes.html", {"request": request, "changes": changes}
+    )
+
+
+@router.get("/partials/watch-timeline/{watch_id}")
+async def partial_watch_timeline(
+    request: Request,
+    watch_id: str,
+    page: int = 1,
+    page_size: int = 25,
+    category: str | None = None,
+    session: AsyncSession = Depends(get_db_session),
+):
+    """HTMX partial: unified lifecycle event timeline for a watch."""
+    watch = await get_watch_detail(session, watch_id)
+    if not watch:
+        raise HTTPException(status_code=404, detail="Watch not found")
+
+    offset = (page - 1) * page_size
+    timeline = await get_watch_timeline(session, watch_id, offset=offset, limit=page_size)
+    timeline_total = await get_watch_timeline_count(session, watch_id)
+
+    # Client-side category filter (applied after DB fetch)
+    if category and category != "all":
+        timeline = [e for e in timeline if e["category"] == category]
+
+    return templates.TemplateResponse(
+        "partials/watch_timeline.html",
+        {
+            "request": request,
+            "watch": watch,
+            "timeline": timeline,
+            "timeline_total": timeline_total,
+            "timeline_page": page,
+            "timeline_page_size": page_size,
+            "timeline_category": category,
+            "page": page,
+            "page_size": page_size,
+            "total_count": timeline_total,
+            "base_url": f"/partials/watch-timeline/{watch_id}",
+            "extra_params": {k: v for k, v in {"category": category}.items() if v and v != "all"},
+        },
     )
 
 

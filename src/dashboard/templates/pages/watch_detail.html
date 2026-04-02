@@ -139,12 +139,17 @@
 </section>
 {% endif %}
 
-{# Change history #}
+{# Event Timeline #}
 <section class="mb-8">
-  <h3 class="text-lg font-semibold text-gray-900 dark:text-white mb-4">Change History</h3>
-  <div id="watch-changes" hx-get="/partials/watch-changes/{{ watch.id }}" hx-trigger="every 30s" hx-swap="innerHTML" aria-live="polite" aria-atomic="false"
+  <h3 class="text-lg font-semibold text-gray-900 dark:text-white mb-4">Event Timeline</h3>
+  <div id="watch-timeline"
+    hx-get="/partials/watch-timeline/{{ watch.id }}"
+    hx-trigger="every 60s"
+    hx-swap="innerHTML"
+    aria-live="polite"
+    aria-atomic="false"
     class="rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden">
-    {% include "partials/watch_changes.html" %}
+    {% include "partials/watch_timeline.html" %}
   </div>
 </section>
 

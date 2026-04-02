@@ -1,0 +1,62 @@
+{# Unified lifecycle event timeline for a single watch. #}
+{# Expects: timeline (list of dicts), timeline_category, watch, timeline_page_size, #}
+{#          and pagination vars: page, page_size, total_count, base_url, extra_params. #}
+
+{# Category filter controls #}
+<div class="px-4 pt-4 pb-3 border-b border-gray-200 dark:border-gray-700">
+  <fieldset class="segment-group" role="radiogroup" aria-label="Filter timeline by category">
+    <legend class="sr-only">Filter by category</legend>
+    {% set active_cat = timeline_category or "all" %}
+    {% for value, label in [("all", "All"), ("changes", "Changes"), ("errors", "Errors"), ("config", "Config")] %}
+    <label class="segment">
+      <input type="radio" name="category" value="{{ value }}"
+        {% if active_cat == value %}checked{% endif %}
+        hx-get="/partials/watch-timeline/{{ watch.id }}?category={{ value }}&page=1&page_size={{ timeline_page_size }}"
+        hx-target="#watch-timeline"
+        hx-swap="innerHTML">
+      <span>{{ label }}</span>
+    </label>
+    {% endfor %}
+  </fieldset>
+</div>
+
+{% if timeline %}
+<ul class="divide-y divide-gray-100 dark:divide-gray-700" role="list">
+  {% for entry in timeline %}
+  <li class="flex items-start gap-3 px-4 py-3 hover:bg-gray-50 dark:hover:bg-gray-800/50">
+    {# Category badge #}
+    <span class="mt-0.5 flex-shrink-0">
+      {% if entry.category == "change" %}
+      <span class="badge badge-info" aria-label="Content change"></span>
+      {% elif entry.category == "error" %}
+      <span class="badge badge-error" aria-label="Error"></span>
+      {% elif entry.category == "run" %}
+      <span class="badge badge-active" aria-label="Pipeline run"></span>
+      {% else %}
+      <span class="badge badge-inactive" aria-label="Config event"></span>
+      {% endif %}
+    </span>
+    {# Content #}
+    <div class="min-w-0 flex-1">
+      <p class="text-sm text-gray-900 dark:text-gray-100">
+        {% if entry.detail_url %}
+        <a href="{{ entry.detail_url }}" class="link">{{ entry.summary }}</a>
+        {% else %}
+        {{ entry.summary }}
+        {% endif %}
+      </p>
+      <p class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+        {{ entry.timestamp.strftime('%Y-%m-%d %H:%M UTC') }}
+      </p>
+    </div>
+  </li>
+  {% endfor %}
+</ul>
+
+{# Pagination #}
+{% set hx_target = "#watch-timeline" %}
+{% include "partials/pagination.html" %}
+
+{% else %}
+<p class="text-gray-500 dark:text-gray-400 text-sm p-4">No events recorded yet.</p>
+{% endif %}

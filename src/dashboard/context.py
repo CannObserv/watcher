@@ -380,6 +380,186 @@ async def get_watch_changes(session: AsyncSession, watch_id: str, limit: int = 5
     return changes
 
 
+_TIMELINE_SUMMARY: dict[str, str] = {
+    EventType.WATCH_CREATED: "Watch created",
+    EventType.WATCH_UPDATED: "Watch config updated",
+    EventType.WATCH_DEACTIVATED: "Watch deactivated",
+    EventType.WATCH_ARCHIVED: "Watch archived",
+    EventType.WATCH_RESTORED: "Watch restored",
+    EventType.WATCH_DELETED: "Watch deleted",
+    EventType.CHECK_SNAPSHOT_CREATED: "Snapshot fetched",
+    EventType.CHECK_NO_CHANGE: "Checked — no change",
+    EventType.CHECK_FETCH_FAILED: "Fetch failed",
+    EventType.NOTIFICATION_DISPATCHED: "Notification dispatched",
+    EventType.NOTIFICATION_CONFIG_CREATED: "Notification config added",
+    EventType.NOTIFICATION_CONFIG_DELETED: "Notification config removed",
+    EventType.PROFILE_CREATED: "Temporal profile added",
+    EventType.PROFILE_UPDATED: "Temporal profile updated",
+    EventType.PROFILE_DELETED: "Temporal profile removed",
+}
+
+_TIMELINE_CATEGORY: dict[str, str] = {
+    EventType.WATCH_CREATED: "config",
+    EventType.WATCH_UPDATED: "config",
+    EventType.WATCH_DEACTIVATED: "config",
+    EventType.WATCH_ARCHIVED: "config",
+    EventType.WATCH_RESTORED: "config",
+    EventType.WATCH_DELETED: "config",
+    EventType.CHECK_SNAPSHOT_CREATED: "run",
+    EventType.CHECK_NO_CHANGE: "run",
+    EventType.CHECK_FETCH_FAILED: "error",
+    EventType.NOTIFICATION_DISPATCHED: "config",
+    EventType.NOTIFICATION_CONFIG_CREATED: "config",
+    EventType.NOTIFICATION_CONFIG_DELETED: "config",
+    EventType.PROFILE_CREATED: "config",
+    EventType.PROFILE_UPDATED: "config",
+    EventType.PROFILE_DELETED: "config",
+}
+
+
+async def get_watch_timeline(
+    session: AsyncSession,
+    watch_id: str,
+    offset: int = 0,
+    limit: int = 50,
+) -> list[dict]:
+    """Return a unified lifecycle event timeline for a watch.
+
+    Merges AuditLog entries, Snapshot rows (as pipeline run events), and
+    Change rows (as change-detected events) into a single chronological list
+    sorted newest-first.  Supports offset-based pagination.
+
+    Each entry is a dict with keys:
+    - ``event_type`` — string identifier for the event
+    - ``timestamp`` — timezone-aware datetime
+    - ``summary`` — short human-readable description
+    - ``detail_url`` — optional URL for a detail page (or ``None``)
+    - ``category`` — one of ``"change"``, ``"error"``, ``"config"``, ``"run"``
+    """
+    try:
+        parsed = ULID.from_str(watch_id)
+    except ValueError:
+        return []
+
+    # --- AuditLog rows (config + check events) ---
+    audit_stmt = select(
+        AuditLog.event_type.label("event_type"),
+        AuditLog.created_at.label("timestamp"),
+        AuditLog.payload.label("payload"),
+        AuditLog.id.label("source_id"),
+    ).where(AuditLog.watch_id == parsed)
+
+    # --- Snapshot rows (pipeline run events not already covered by AuditLog) ---
+    # We surface each snapshot as a "check.snapshot_created" run event so that
+    # pipeline runs are always visible even if the audit log entry was pruned.
+    # To avoid double-counting when the audit log entry exists, we rely on the
+    # fact that templates simply show both — they share the same timestamp and
+    # the snapshot row is the authoritative record.  For simplicity we only
+    # emit snapshot rows; audit log covers failures and config changes.
+    snap_stmt = (
+        select(
+            AuditLog.event_type.label("event_type"),
+            AuditLog.created_at.label("timestamp"),
+            AuditLog.payload.label("payload"),
+            AuditLog.id.label("source_id"),
+        )
+        .where(AuditLog.watch_id == parsed)
+        .where(False)  # placeholder — we pull snapshots separately below
+    )
+    _ = snap_stmt  # not used; snapshots handled as plain select
+
+    snapshot_stmt = select(
+        Snapshot.id.label("source_id"),
+        Snapshot.fetched_at.label("timestamp"),
+    ).where(Snapshot.watch_id == parsed)
+
+    # --- Change rows ---
+    change_stmt = select(
+        Change.id.label("source_id"),
+        Change.detected_at.label("timestamp"),
+        Change.change_metadata.label("change_metadata"),
+    ).where(Change.watch_id == parsed)
+
+    # Execute all three queries
+    audit_rows = list((await session.execute(audit_stmt)).all())
+    snapshot_rows = list((await session.execute(snapshot_stmt)).all())
+    change_rows = list((await session.execute(change_stmt)).all())
+
+    entries: list[dict] = []
+
+    for row in audit_rows:
+        et = row.event_type
+        category = _TIMELINE_CATEGORY.get(et, "config")
+        summary = _TIMELINE_SUMMARY.get(et, et)
+        # Enrich fetch-failed summary with error detail from payload
+        if et == EventType.CHECK_FETCH_FAILED:
+            payload = row.payload or {}
+            error_msg = payload.get("error") or payload.get("message") or ""
+            if error_msg:
+                summary = f"Fetch failed — {error_msg[:80]}"
+        entries.append(
+            {
+                "event_type": et,
+                "timestamp": row.timestamp,
+                "summary": summary,
+                "detail_url": None,
+                "category": category,
+            }
+        )
+
+    for row in snapshot_rows:
+        entries.append(
+            {
+                "event_type": "check.snapshot_created",
+                "timestamp": row.timestamp,
+                "summary": "Snapshot fetched",
+                "detail_url": None,
+                "category": "run",
+            }
+        )
+
+    for row in change_rows:
+        meta = row.change_metadata or {}
+        summary = summarize_change_metadata(meta)
+        entries.append(
+            {
+                "event_type": "change.detected",
+                "timestamp": row.timestamp,
+                "summary": summary,
+                "detail_url": f"/changes/{row.source_id}",
+                "category": "change",
+            }
+        )
+
+    # Sort all entries newest-first, then apply pagination
+    entries.sort(key=lambda e: e["timestamp"], reverse=True)
+    return entries[offset : offset + limit]
+
+
+async def get_watch_timeline_count(
+    session: AsyncSession,
+    watch_id: str,
+) -> int:
+    """Return total number of timeline entries for a watch (for pagination)."""
+    try:
+        parsed = ULID.from_str(watch_id)
+    except ValueError:
+        return 0
+
+    audit_count = (
+        await session.scalar(select(func.count(AuditLog.id)).where(AuditLog.watch_id == parsed))
+        or 0
+    )
+    snapshot_count = (
+        await session.scalar(select(func.count(Snapshot.id)).where(Snapshot.watch_id == parsed))
+        or 0
+    )
+    change_count = (
+        await session.scalar(select(func.count(Change.id)).where(Change.watch_id == parsed)) or 0
+    )
+    return audit_count + snapshot_count + change_count
+
+
 async def get_latest_snapshot(session: AsyncSession, watch_id: ULID) -> Snapshot | None:
     """Fetch the most recent snapshot for a watch, or None."""
     stmt = (

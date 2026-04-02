@@ -438,3 +438,40 @@ class TestAuditLogFilters:
     async def test_audit_page_no_filter_pill(self, client):
         response = await client.get("/audit")
         assert b"filter-pill" not in response.content
+
+
+class TestWatchTimeline:
+    async def _create_watch(self, client):
+        resp = await client.post(
+            "/api/v1/watches",
+            json={"name": "Timeline Watch", "url": "https://example.com", "content_type": "html"},
+        )
+        return resp.json()["id"]
+
+    async def test_timeline_partial_returns_200(self, client):
+        watch_id = await self._create_watch(client)
+        response = await client.get(f"/partials/watch-timeline/{watch_id}")
+        assert response.status_code == 200
+
+    async def test_timeline_partial_404_invalid_id(self, client):
+        response = await client.get("/partials/watch-timeline/not-a-ulid")
+        assert response.status_code == 404
+
+    async def test_detail_page_shows_timeline_section(self, client):
+        watch_id = await self._create_watch(client)
+        response = await client.get(f"/watches/{watch_id}")
+        assert response.status_code == 200
+        # Should show "Event Timeline" heading, not old "Change History"
+        assert b"Event Timeline" in response.content
+
+    async def test_detail_page_no_change_history_heading(self, client):
+        watch_id = await self._create_watch(client)
+        response = await client.get(f"/watches/{watch_id}")
+        # Old section heading should be gone
+        assert b"Change History" not in response.content
+
+    async def test_timeline_partial_filter_param(self, client):
+        watch_id = await self._create_watch(client)
+        for category in ("all", "changes", "errors", "config"):
+            response = await client.get(f"/partials/watch-timeline/{watch_id}?category={category}")
+            assert response.status_code == 200

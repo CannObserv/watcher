@@ -22,6 +22,7 @@ from src.dashboard.context import (
     get_watch_detail,
     get_watch_health_map,
     get_watch_list,
+    get_watch_timeline,
     summarize_change_metadata,
 )
 
@@ -642,3 +643,164 @@ class TestGetWatchHealthMap:
         result = await get_watch_health_map(db_session, [w1.id, w2.id])
         assert result[w1.id] == EventType.CHECK_FETCH_FAILED
         assert result[w2.id] == EventType.CHECK_SNAPSHOT_CREATED
+
+
+@pytest.mark.integration
+class TestGetWatchTimeline:
+    """Tests for the unified lifecycle event timeline."""
+
+    _snap_kwargs = dict(
+        content_hash="a" * 64,
+        simhash=0,
+        storage_path="/tmp/s",
+        text_path="/tmp/t",
+        chunk_count=1,
+        text_bytes=100,
+        fetch_duration_ms=50,
+        fetcher_used="http",
+    )
+
+    async def test_empty_watch_returns_empty(self, db_session):
+        watch = Watch(name="Empty", url="https://a.com", content_type="html")
+        db_session.add(watch)
+        await db_session.flush()
+
+        result = await get_watch_timeline(db_session, str(watch.id), offset=0, limit=50)
+        assert result == []
+
+    async def test_invalid_ulid_returns_empty(self, db_session):
+        result = await get_watch_timeline(db_session, "not-a-ulid", offset=0, limit=50)
+        assert result == []
+
+    async def test_audit_log_event_surfaces_as_config_entry(self, db_session):
+        watch = Watch(name="Config Watch", url="https://a.com", content_type="html")
+        db_session.add(watch)
+        await db_session.flush()
+
+        entry = AuditLog(
+            event_type=EventType.WATCH_CREATED,
+            watch_id=watch.id,
+            payload={"name": "Config Watch"},
+        )
+        db_session.add(entry)
+        await db_session.flush()
+
+        result = await get_watch_timeline(db_session, str(watch.id), offset=0, limit=50)
+        assert len(result) == 1
+        item = result[0]
+        assert item["category"] == "config"
+        assert item["event_type"] == EventType.WATCH_CREATED
+        assert item["timestamp"] is not None
+        assert isinstance(item["summary"], str)
+        assert len(item["summary"]) > 0
+
+    async def test_snapshot_surfaces_as_run_entry(self, db_session):
+        watch = Watch(name="Run Watch", url="https://a.com", content_type="html")
+        db_session.add(watch)
+        await db_session.flush()
+
+        snap = Snapshot(watch_id=watch.id, **self._snap_kwargs)
+        db_session.add(snap)
+        await db_session.flush()
+
+        result = await get_watch_timeline(db_session, str(watch.id), offset=0, limit=50)
+        run_entries = [r for r in result if r["category"] == "run"]
+        assert len(run_entries) == 1
+        assert run_entries[0]["event_type"] == "check.snapshot_created"
+        assert run_entries[0]["timestamp"] is not None
+
+    async def test_change_surfaces_as_change_entry(self, db_session):
+        watch = Watch(name="Change Watch", url="https://a.com", content_type="html")
+        db_session.add(watch)
+        await db_session.flush()
+
+        prev_snap = Snapshot(watch_id=watch.id, **self._snap_kwargs)
+        curr_snap = Snapshot(watch_id=watch.id, **self._snap_kwargs)
+        db_session.add_all([prev_snap, curr_snap])
+        await db_session.flush()
+
+        change = Change(
+            watch_id=watch.id,
+            previous_snapshot_id=prev_snap.id,
+            current_snapshot_id=curr_snap.id,
+            change_metadata={"added": ["Page 1"]},
+        )
+        db_session.add(change)
+        await db_session.flush()
+
+        result = await get_watch_timeline(db_session, str(watch.id), offset=0, limit=50)
+        change_entries = [r for r in result if r["category"] == "change"]
+        assert len(change_entries) == 1
+        assert change_entries[0]["event_type"] == "change.detected"
+        assert change_entries[0]["detail_url"] is not None
+        assert str(change.id) in change_entries[0]["detail_url"]
+
+    async def test_fetch_failed_audit_event_surfaces_as_error(self, db_session):
+        watch = Watch(name="Error Watch", url="https://a.com", content_type="html")
+        db_session.add(watch)
+        await db_session.flush()
+
+        entry = AuditLog(
+            event_type=EventType.CHECK_FETCH_FAILED,
+            watch_id=watch.id,
+            payload={"error": "timeout"},
+        )
+        db_session.add(entry)
+        await db_session.flush()
+
+        result = await get_watch_timeline(db_session, str(watch.id), offset=0, limit=50)
+        error_entries = [r for r in result if r["category"] == "error"]
+        assert len(error_entries) == 1
+
+    async def test_ordering_newest_first(self, db_session):
+        watch = Watch(name="Order Watch", url="https://a.com", content_type="html")
+        db_session.add(watch)
+        await db_session.flush()
+
+        t1 = datetime(2025, 1, 1, 12, 0, tzinfo=UTC)
+        t2 = datetime(2025, 1, 2, 12, 0, tzinfo=UTC)
+
+        snap1 = Snapshot(watch_id=watch.id, fetched_at=t1, **self._snap_kwargs)
+        snap2 = Snapshot(watch_id=watch.id, fetched_at=t2, **self._snap_kwargs)
+        db_session.add_all([snap1, snap2])
+        await db_session.flush()
+
+        result = await get_watch_timeline(db_session, str(watch.id), offset=0, limit=50)
+        timestamps = [r["timestamp"] for r in result]
+        assert timestamps == sorted(timestamps, reverse=True)
+
+    async def test_pagination_offset_and_limit(self, db_session):
+        watch = Watch(name="Page Watch", url="https://a.com", content_type="html")
+        db_session.add(watch)
+        await db_session.flush()
+
+        for _ in range(5):
+            db_session.add(Snapshot(watch_id=watch.id, **self._snap_kwargs))
+        await db_session.flush()
+
+        all_results = await get_watch_timeline(db_session, str(watch.id), offset=0, limit=50)
+        page1 = await get_watch_timeline(db_session, str(watch.id), offset=0, limit=3)
+        page2 = await get_watch_timeline(db_session, str(watch.id), offset=3, limit=3)
+
+        assert len(page1) == 3
+        assert len(page2) == 2
+        # Combined pages should match the full result
+        assert [r["timestamp"] for r in page1 + page2] == [r["timestamp"] for r in all_results]
+
+    async def test_entry_keys_present(self, db_session):
+        watch = Watch(name="Key Watch", url="https://a.com", content_type="html")
+        db_session.add(watch)
+        await db_session.flush()
+
+        snap = Snapshot(watch_id=watch.id, **self._snap_kwargs)
+        db_session.add(snap)
+        await db_session.flush()
+
+        result = await get_watch_timeline(db_session, str(watch.id), offset=0, limit=50)
+        assert len(result) == 1
+        item = result[0]
+        assert "event_type" in item
+        assert "timestamp" in item
+        assert "summary" in item
+        assert "detail_url" in item
+        assert "category" in item

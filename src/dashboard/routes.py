@@ -21,6 +21,7 @@ from src.core.probe import ProbeResult
 from src.core.storage import STORAGE_BASE_DIR, LocalStorage
 from src.dashboard import templates
 from src.dashboard.context import (
+    compute_watch_health,
     generate_diff,
     get_audit_entries,
     get_change_detail,
@@ -33,6 +34,7 @@ from src.dashboard.context import (
     get_recent_changes,
     get_watch_changes,
     get_watch_detail,
+    get_watch_health_map,
     get_watch_list,
     get_watch_notifications,
     get_watch_profiles,
@@ -63,6 +65,14 @@ async def dashboard_home(
     return templates.TemplateResponse("pages/dashboard.html", context)
 
 
+async def _build_watch_health(session, watches: list) -> dict:
+    """Build health_map and compute per-watch health strings."""
+    now = datetime.now(UTC)
+    watch_ids = [w.id for w in watches]
+    event_map = await get_watch_health_map(session, watch_ids)
+    return {w.id: compute_watch_health(w, event_map.get(w.id), now) for w in watches}
+
+
 @router.get("/watches")
 async def watches_page(
     request: Request,
@@ -71,11 +81,13 @@ async def watches_page(
 ):
     """Watch list page."""
     watches = await get_watch_list(session, is_active=is_active)
+    health_map = await _build_watch_health(session, watches)
     context = {
         "request": request,
         "active_page": "watches",
         "watches": watches,
         "is_active": is_active,
+        "health_map": health_map,
     }
     return templates.TemplateResponse("pages/watches.html", context)
 
@@ -1114,8 +1126,10 @@ async def partial_watch_table(
 ):
     """HTMX partial: watch table with optional filter."""
     watches = await get_watch_list(session, is_active=is_active)
+    health_map = await _build_watch_health(session, watches)
     return templates.TemplateResponse(
-        "partials/watch_table.html", {"request": request, "watches": watches}
+        "partials/watch_table.html",
+        {"request": request, "watches": watches, "health_map": health_map},
     )
 
 

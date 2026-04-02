@@ -22,6 +22,18 @@
       <span class="badge badge-inactive">Inactive</span>
     {% endif %}
   </td>
+  <td>
+    {% set health = health_map.get(watch.id, "unknown") if health_map is defined else "unknown" %}
+    {% if health == "healthy" %}
+      <span class="badge badge-active">Healthy</span>
+    {% elif health == "warning" %}
+      <span class="badge badge-warning">Warning</span>
+    {% elif health == "error" %}
+      <span class="badge badge-error">Error</span>
+    {% else %}
+      <span class="badge badge-inactive">Unknown</span>
+    {% endif %}
+  </td>
   <td class="text-gray-500 dark:text-gray-400">
     {% if watch.last_checked_at %}{{ watch.last_checked_at.strftime('%Y-%m-%d %H:%M UTC') }}{% else %}Never{% endif %}
   </td>

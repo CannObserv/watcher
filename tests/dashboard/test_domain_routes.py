@@ -404,6 +404,7 @@ class TestDomainToggleActive:
         assert watch.is_active is False
 
     async def test_toggle_htmx_returns_partial(self, client, db_session):
+        """Response includes both the toggle partial and an OOB watches table."""
         db_session.add(Domain(name="htmx-toggle.com"))
         await db_session.flush()
         response = await client.post(
@@ -413,6 +414,8 @@ class TestDomainToggleActive:
         )
         assert response.status_code == 200
         assert b"domain-status-toggle" in response.content
+        assert b"domain-watches" in response.content
+        assert b"hx-swap-oob" in response.content
 
     async def test_toggle_htmx_response_includes_watches_oob(self, client, db_session):
         """HTMX toggle response must include OOB swap for watches table."""

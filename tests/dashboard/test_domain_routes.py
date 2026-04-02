@@ -414,6 +414,50 @@ class TestDomainToggleActive:
         assert response.status_code == 200
         assert b"domain-status-toggle" in response.content
 
+    async def test_toggle_htmx_response_includes_watches_oob(self, client, db_session):
+        """HTMX toggle response must include OOB swap for watches table."""
+        db_session.add(Domain(name="htmx-oob.com"))
+        db_session.add(
+            Watch(
+                name="OOB Watch",
+                url="https://htmx-oob.com/p",
+                content_type="html",
+                effective_domain="htmx-oob.com",
+                is_active=True,
+            )
+        )
+        await db_session.commit()
+        response = await client.post(
+            "/domains/htmx-oob.com/toggle-active",
+            data={"active": "false"},
+            headers={"HX-Request": "true"},
+        )
+        assert response.status_code == 200
+        assert b"domain-watches" in response.content
+
+    async def test_toggle_htmx_deactivate_shows_domain_inactive_in_watches(
+        self, client, db_session
+    ):
+        """Watches table in OOB response shows Domain Inactive badge after deactivation."""
+        db_session.add(Domain(name="htmx-badge.com"))
+        db_session.add(
+            Watch(
+                name="Badge Watch",
+                url="https://htmx-badge.com/p",
+                content_type="html",
+                effective_domain="htmx-badge.com",
+                is_active=True,
+            )
+        )
+        await db_session.commit()
+        response = await client.post(
+            "/domains/htmx-badge.com/toggle-active",
+            data={"active": "false"},
+            headers={"HX-Request": "true"},
+        )
+        assert response.status_code == 200
+        assert b"Domain Inactive" in response.content
+
     async def test_toggle_nonexistent_returns_404(self, client):
         response = await client.post(
             "/domains/nope-toggle.com/toggle-active", data={"active": "false"}

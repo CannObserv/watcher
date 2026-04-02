@@ -868,8 +868,10 @@ async def domain_toggle_active(
     await session.refresh(domain)
 
     if request.headers.get("HX-Request") == "true":
+        watches = await get_domain_watches(session, name)
         return templates.TemplateResponse(
-            "partials/domain_status_toggle.html", {"request": request, "domain": domain}
+            "partials/domain_toggle_oob.html",
+            {"request": request, "domain": domain, "watches": watches},
         )
     return RedirectResponse(url=f"/domains/{name}", status_code=303)
 

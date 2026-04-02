@@ -16,6 +16,8 @@
   <td>
     {% if watch.is_active %}
       <span class="badge badge-active">Active</span>
+    {% elif watch.domain_suspended %}
+      <span class="badge badge-warning">Domain Inactive</span>
     {% else %}
       <span class="badge badge-inactive">Inactive</span>
     {% endif %}

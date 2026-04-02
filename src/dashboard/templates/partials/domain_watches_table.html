@@ -15,9 +15,13 @@
           <a href="/watches/{{ watch.id }}" class="link">{{ watch.name }}</a>
         </td>
         <td>
-          <span class="badge {% if watch.is_active %}badge-active{% else %}badge-inactive{% endif %}">
-            {{ "Active" if watch.is_active else "Inactive" }}
-          </span>
+          {% if watch.is_active %}
+            <span class="badge badge-active">Active</span>
+          {% elif watch.domain_suspended %}
+            <span class="badge badge-warning">Domain Inactive</span>
+          {% else %}
+            <span class="badge badge-inactive">Inactive</span>
+          {% endif %}
         </td>
         <td>{{ watch.last_checked_at.strftime("%Y-%m-%d %H:%M") if watch.last_checked_at else "—" }}</td>
       </tr>

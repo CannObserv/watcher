@@ -4,6 +4,8 @@ import re
 
 import pytest
 
+from src.core.models.watch import ContentType, Watch
+
 pytestmark = pytest.mark.integration
 
 
@@ -112,6 +114,40 @@ class TestWatchCreate:
         )
         assert response.status_code == 200
         assert b"required" in response.content.lower() or b"error" in response.content.lower()
+
+
+class TestWatchRowDomainInactiveBadge:
+    async def test_domain_suspended_watch_shows_domain_inactive_badge(self, client, db_session):
+        watch = Watch(
+            name="Suspended Watch",
+            url="https://ds-badge.com/p",
+            content_type=ContentType.HTML,
+            effective_domain="ds-badge.com",
+            is_active=False,
+            domain_suspended=True,
+        )
+        db_session.add(watch)
+        await db_session.flush()
+        response = await client.get("/partials/watch-table")
+        assert response.status_code == 200
+        assert b"Domain Inactive" in response.content
+
+    async def test_manually_inactive_watch_shows_inactive_not_domain_inactive(
+        self, client, db_session
+    ):
+        watch = Watch(
+            name="Manual Inactive",
+            url="https://mi-badge.com/p",
+            content_type=ContentType.HTML,
+            effective_domain="mi-badge.com",
+            is_active=False,
+            domain_suspended=False,
+        )
+        db_session.add(watch)
+        await db_session.flush()
+        response = await client.get("/partials/watch-table")
+        assert response.status_code == 200
+        assert b"Domain Inactive" not in response.content
 
 
 class TestChangeDetail:

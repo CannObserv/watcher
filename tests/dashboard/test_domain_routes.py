@@ -147,6 +147,40 @@ class TestDomainDetail:
         assert b"Archive" in response.content
 
 
+class TestDomainWatchesTableDomainInactiveBadge:
+    async def test_suspended_watch_shows_domain_inactive_badge(self, client, db_session):
+        db_session.add(Domain(name="ds-tbl.com", is_active=False))
+        db_session.add(
+            Watch(
+                name="Suspended",
+                url="https://ds-tbl.com/p",
+                content_type="html",
+                effective_domain="ds-tbl.com",
+                is_active=False,
+                domain_suspended=True,
+            )
+        )
+        await db_session.flush()
+        response = await client.get("/domains/ds-tbl.com")
+        assert b"Domain Inactive" in response.content
+
+    async def test_manually_inactive_watch_does_not_show_domain_inactive(self, client, db_session):
+        db_session.add(Domain(name="mi-tbl.com"))
+        db_session.add(
+            Watch(
+                name="Manual Off",
+                url="https://mi-tbl.com/p",
+                content_type="html",
+                effective_domain="mi-tbl.com",
+                is_active=False,
+                domain_suspended=False,
+            )
+        )
+        await db_session.flush()
+        response = await client.get("/domains/mi-tbl.com")
+        assert b"Domain Inactive" not in response.content
+
+
 class TestDomainInlineUpdate:
     async def test_update_min_interval_htmx(self, client, db_session):
         db_session.add(Domain(name="update.com"))

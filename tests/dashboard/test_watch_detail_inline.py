@@ -248,6 +248,49 @@ class TestWatchFieldUpdate:
         assert response.status_code == 303
 
 
+class TestWatchDetailDomainRow:
+    """GET /watches/{id} — Domain row in Details section."""
+
+    async def test_detail_page_shows_domain_link(self, client, db_session):
+        watch = Watch(
+            name="Domain Row",
+            url="https://domain-row.com/p",
+            content_type=ContentType.HTML,
+            effective_domain="domain-row.com",
+        )
+        db_session.add(watch)
+        await db_session.flush()
+        response = await client.get(f"/watches/{watch.id}")
+        assert response.status_code == 200
+        assert b"/domains/domain-row.com" in response.content
+
+    async def test_detail_page_domain_row_label(self, client, db_session):
+        watch = Watch(
+            name="Domain Label",
+            url="https://domain-label.com/p",
+            content_type=ContentType.HTML,
+            effective_domain="domain-label.com",
+        )
+        db_session.add(watch)
+        await db_session.flush()
+        response = await client.get(f"/watches/{watch.id}")
+        content = response.content.decode()
+        assert "Domain" in content
+        assert "domain-label.com" in content
+
+    async def test_detail_page_no_domain_row_when_no_effective_domain(self, client, db_session):
+        watch = Watch(
+            name="No Domain",
+            url="https://nodomain.com/p",
+            content_type=ContentType.HTML,
+            effective_domain=None,
+        )
+        db_session.add(watch)
+        await db_session.flush()
+        response = await client.get(f"/watches/{watch.id}")
+        assert b"/domains/" not in response.content
+
+
 class TestWatchStatusToggle:
     """POST /watches/{id}/toggle-active — toggles active status."""
 
@@ -264,6 +307,38 @@ class TestWatchStatusToggle:
         )
         assert response.status_code == 200
         assert b"Inactive" in response.content
+
+    async def test_domain_suspended_watch_detail_shows_domain_inactive_badge(
+        self, client, db_session
+    ):
+        watch = Watch(
+            name="Suspended Badge",
+            url="https://susp-badge.com/p",
+            content_type=ContentType.HTML,
+            is_active=False,
+            domain_suspended=True,
+        )
+        db_session.add(watch)
+        await db_session.flush()
+        response = await client.get(f"/watches/{watch.id}")
+        assert b"Domain Inactive" in response.content
+
+    async def test_manually_inactive_watch_detail_shows_inactive_not_domain_inactive(
+        self, client, db_session
+    ):
+        watch = Watch(
+            name="Manual Badge",
+            url="https://manual-badge.com/p",
+            content_type=ContentType.HTML,
+            is_active=False,
+            domain_suspended=False,
+        )
+        db_session.add(watch)
+        await db_session.flush()
+        response = await client.get(f"/watches/{watch.id}")
+        content = response.content.decode()
+        assert "Domain Inactive" not in content
+        assert "Inactive" in content
 
     async def test_toggle_inactive_to_active(self, client, db_session):
         watch = Watch(

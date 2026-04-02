@@ -121,6 +121,15 @@ async def update_watch(
     watch = await get_watch_or_404(watch_id, session)
 
     updates = data.model_dump(exclude_unset=True)
+
+    if updates.get("is_active") is True and watch.effective_domain:
+        domain_result = await session.execute(
+            select(Domain).where(Domain.name == watch.effective_domain)
+        )
+        domain = domain_result.scalar_one_or_none()
+        if domain and not domain.is_active:
+            raise HTTPException(status_code=409, detail="Domain is inactive")
+
     column_names = {c.key for c in Watch.__table__.columns}
     for field, value in updates.items():
         if field not in column_names:

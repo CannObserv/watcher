@@ -10,6 +10,7 @@ from ulid import ULID
 from src.core.database import get_session_factory
 from src.core.logging import get_logger
 from src.core.models.audit_log import EventType, audit
+from src.core.models.domain import Domain
 from src.core.models.temporal_profile import TemporalProfile
 from src.core.models.watch import Watch
 from src.core.rate_limiter import get_rate_limiter
@@ -43,6 +44,18 @@ async def check_watch(watch_id: str, registry: ServiceRegistry | None = None) ->
         if not watch or not watch.is_active:
             logger.warning("watch not found or inactive", extra={"watch_id": watch_id})
             return {"skipped": True}
+
+        if watch.effective_domain:
+            domain_result = await session.execute(
+                select(Domain).where(Domain.name == watch.effective_domain)
+            )
+            domain = domain_result.scalar_one_or_none()
+            if domain and not domain.is_active:
+                logger.warning(
+                    "domain inactive, skipping watch",
+                    extra={"watch_id": watch_id, "domain": watch.effective_domain},
+                )
+                return {"skipped": True}
 
         # Fetch with rate limiting — only pass fetcher-relevant config keys
         fetch_config = {
@@ -125,12 +138,21 @@ async def schedule_tick(timestamp: int) -> None:
     # (per-watch JSONB config), so we load all and filter in Python.
     # Acceptable at 2,000 watches; revisit if scale increases significantly.
     async with get_session_factory()() as session:
-        stmt = select(Watch).where(
-            Watch.is_active.is_(True),
-            or_(
-                Watch.last_checked_at.is_(None),
-                Watch.last_checked_at < now,
-            ),
+        stmt = (
+            select(Watch)
+            .join(Domain, Domain.name == Watch.effective_domain, isouter=True)
+            .where(
+                Watch.is_active.is_(True),
+                or_(
+                    Watch.effective_domain.is_(None),
+                    Domain.id.is_(None),
+                    Domain.is_active.is_(True),
+                ),
+                or_(
+                    Watch.last_checked_at.is_(None),
+                    Watch.last_checked_at < now,
+                ),
+            )
         )
         result = await session.execute(stmt)
         watches = list(result.scalars().all())

@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 import src.workers.tasks as tasks_mod
 from src.core.fetchers.http import HttpFetcher
 from src.core.models.audit_log import AuditLog, EventType
+from src.core.models.domain import Domain
 from src.core.models.notification_config import NotificationConfig
 from src.core.models.temporal_profile import PostAction, ProfileType, TemporalProfile
 from src.core.models.watch import ContentType, Watch
@@ -601,3 +602,64 @@ class TestMaybeDecayBackoff:
         limiter = DomainRateLimiter()
         decayed = await _maybe_decay_backoff("unknown.com", limiter, mock_session)
         assert decayed is False
+
+
+class TestScheduleTickInactiveDomain:
+    """schedule_tick must not defer checks for watches on inactive domains."""
+
+    async def test_skips_watches_on_inactive_domain(self, db_session, monkeypatch):
+        import src.workers.tasks as tasks_mod
+
+        domain = Domain(name="paused.com", is_active=False)
+        db_session.add(domain)
+        watch = Watch(
+            name="On Paused Domain",
+            url="https://paused.com/p",
+            content_type=ContentType.HTML,
+            effective_domain="paused.com",
+            is_active=True,
+        )
+        db_session.add(watch)
+        await db_session.commit()
+
+        monkeypatch.setattr(
+            tasks_mod, "get_session_factory", lambda: _mock_session_factory(db_session)
+        )
+
+        defer_calls = []
+        mock_configure = MagicMock()
+        mock_configure.return_value.defer_async = AsyncMock(
+            side_effect=lambda **kw: defer_calls.append(kw)
+        )
+        monkeypatch.setattr(check_watch, "configure", mock_configure)
+
+        await schedule_tick(0)
+
+        assert defer_calls == [], "should not defer check for watch on inactive domain"
+
+
+class TestCheckWatchInactiveDomain:
+    """check_watch must skip if the watch's domain is inactive."""
+
+    async def test_skips_when_domain_inactive(self, db_session, tmp_path, monkeypatch):
+        import src.workers.tasks as tasks_mod
+
+        domain = Domain(name="skipped.com", is_active=False)
+        db_session.add(domain)
+        watch = Watch(
+            name="Domain Inactive Watch",
+            url="https://skipped.com/p",
+            content_type=ContentType.HTML,
+            effective_domain="skipped.com",
+            is_active=True,
+        )
+        db_session.add(watch)
+        await db_session.flush()
+
+        monkeypatch.setattr(tasks_mod, "STORAGE_BASE_DIR", tmp_path)
+        monkeypatch.setattr(
+            tasks_mod, "get_session_factory", lambda: _mock_session_factory(db_session)
+        )
+
+        result = await check_watch(str(watch.id))
+        assert result.get("skipped") is True

@@ -5,6 +5,7 @@ from sqlalchemy import select
 from ulid import ULID
 
 from src.core.models.audit_log import AuditLog, EventType
+from src.core.models.domain import Domain
 from src.core.models.notification_config import NotificationConfig
 from src.core.models.snapshot import Snapshot, SnapshotChunk
 from src.core.models.temporal_profile import TemporalProfile
@@ -156,6 +157,23 @@ class TestUpdateWatch:
         )
         assert response.status_code == 422
         assert "not a valid regex" in response.text
+
+    async def test_update_activate_blocked_when_domain_inactive(self, client, db_session):
+        db_session.add(Domain(name="blocked-api.com", is_active=False))
+        watch = Watch(
+            name="Suspended",
+            url="https://blocked-api.com/p",
+            content_type="html",
+            effective_domain="blocked-api.com",
+            is_active=False,
+        )
+        db_session.add(watch)
+        await db_session.flush()
+        response = await client.patch(
+            f"/api/v1/watches/{watch.id}",
+            json={"is_active": True},
+        )
+        assert response.status_code == 409
 
 
 class TestDeactivateWatch:

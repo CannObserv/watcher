@@ -34,7 +34,7 @@ src/core/scheduler.py  — Watch scheduling logic (interval parsing, due computa
 src/core/rate_limiter.py — Per-domain async rate limiting
 src/core/config_poller.py  — Background polling: sync domain configs from DB into rate limiter
 src/dashboard/           — Server-rendered dashboard (Jinja2 + HTMX + Tailwind)
-src/dashboard/routes.py  — Dashboard page and partial routes
+src/dashboard/routes.py  — Dashboard page and partial routes; includes POST /watches/{id}/screenshot (on-demand re-capture) and GET /watches/{id}/snapshots/{snapshot_id}/content (escaped text viewer)
 src/dashboard/context.py — Dashboard-specific DB query helpers; includes get_latest_snapshot, compute_watch_health (pure fn), get_watch_health_map (per-watch latest check event), get_watch_timeline + get_watch_timeline_count (unified lifecycle timeline)
 src/dashboard/static/    — CSS, JS (vendored HTMX, dark-mode, htmx-a11y), compiled Tailwind
 src/dashboard/static/images/ — Brand assets and project icons (Cannabis Observer logo, magnifying glass)

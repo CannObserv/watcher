@@ -1,12 +1,13 @@
 """Dashboard page routes — server-rendered HTML via Jinja2 + HTMX."""
 
+import html as html_lib
 import json
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from typing import Literal
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
-from fastapi.responses import HTMLResponse, RedirectResponse, Response
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from ulid import ULID
@@ -186,24 +187,24 @@ async def watch_detail_page(
         name: _watch_field_context(request, watch, name, mode="view") for name in applicable_fields
     }
 
-    # Build screenshot metadata if a screenshot is available
+    # Build snapshot metadata whenever a snapshot exists; screenshot fields are conditional.
     storage = LocalStorage(STORAGE_BASE_DIR)
     snapshot_meta = None
-    if (
-        latest_snapshot is not None
-        and latest_snapshot.screenshot_path is not None
-        and storage.exists(latest_snapshot.screenshot_path)
-    ):
+    if latest_snapshot is not None:
         raw_bytes = None
         if latest_snapshot.storage_path and storage.exists(latest_snapshot.storage_path):
             raw_bytes = storage.size(latest_snapshot.storage_path)
+        has_screenshot = latest_snapshot.screenshot_path is not None and storage.exists(
+            latest_snapshot.screenshot_path
+        )
         snapshot_meta = {
             "snapshot_id": str(latest_snapshot.id),
             "fetched_at": latest_snapshot.fetched_at,
             "chunk_count": latest_snapshot.chunk_count,
             "text_bytes": latest_snapshot.text_bytes,
             "raw_bytes": raw_bytes,
-            "screenshot_browser": latest_snapshot.screenshot_browser,
+            "screenshot_browser": latest_snapshot.screenshot_browser if has_screenshot else None,
+            "has_screenshot": has_screenshot,
         }
 
     # Check if the watch's domain is inactive (disables the status toggle)
@@ -292,8 +293,6 @@ async def watch_screenshot_recapture(
     - ``{"status": "unavailable", "detail": "..."}`` if Playwright not installed.
     - 404 if the watch or its latest snapshot does not exist.
     """
-    from fastapi.responses import JSONResponse
-
     watch = await get_watch_detail(session, watch_id)
     if not watch:
         raise HTTPException(status_code=404, detail="Watch not found")
@@ -334,8 +333,6 @@ async def watch_snapshot_content(
     Prefers ``text_path`` (extracted text); falls back to ``storage_path`` (raw content).
     Returns 404 if the watch, snapshot, or storage file is not found.
     """
-    import html as html_lib
-
     watch = await get_watch_detail(session, watch_id)
     if not watch:
         raise HTTPException(status_code=404, detail="Watch not found")

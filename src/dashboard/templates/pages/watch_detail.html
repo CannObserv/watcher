@@ -10,6 +10,7 @@
 
 {% if snapshot_meta %}
 <div class="mb-6">
+  {% if snapshot_meta.has_screenshot %}
   <a href="/watches/{{ watch.id }}/screenshot" target="_blank" rel="noopener">
     <img
       src="/watches/{{ watch.id }}/screenshot"
@@ -17,16 +18,20 @@
       class="rounded-lg border border-gray-200 dark:border-gray-700 max-w-sm w-full object-cover shadow-sm hover:opacity-90 transition-opacity"
     >
   </a>
+  {% endif %}
   <p class="mt-2 text-xs text-gray-500 dark:text-gray-400 max-w-sm">
+    {% if snapshot_meta.has_screenshot %}
     <a href="/watches/{{ watch.id }}/screenshot" target="_blank" rel="noopener" class="link">Screenshot</a> captured at {{ snapshot_meta.fetched_at.strftime('%Y-%m-%d %H:%M UTC') }}{% if snapshot_meta.screenshot_browser %} using {{ snapshot_meta.screenshot_browser }}{% endif %}
     &middot;
+    {% else %}
+    Snapshot captured at {{ snapshot_meta.fetched_at.strftime('%Y-%m-%d %H:%M UTC') }}
+    &middot;
+    {% endif %}
     {% if snapshot_meta.raw_bytes is not none %}{{ (snapshot_meta.raw_bytes / 1024) | round(0) | int }} KB raw &middot; {% endif %}{{ (snapshot_meta.text_bytes / 1024) | round(0) | int }} KB text
     &middot;
     {{ snapshot_meta.chunk_count }} chunk{{ 's' if snapshot_meta.chunk_count != 1 }}
-    {% if snapshot_meta.snapshot_id %}
     &middot;
     <a href="/watches/{{ watch.id }}/snapshots/{{ snapshot_meta.snapshot_id }}/content" target="_blank" rel="noopener" class="link">View captured content</a>
-    {% endif %}
   </p>
   <div class="mt-2 max-w-sm" id="screenshot-recapture-result" aria-live="polite">
     <button

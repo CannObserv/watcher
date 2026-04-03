@@ -1,12 +1,13 @@
 """Dashboard page routes — server-rendered HTML via Jinja2 + HTMX."""
 
+import html as html_lib
 import json
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from typing import Literal
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
-from fastapi.responses import HTMLResponse, RedirectResponse, Response
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from ulid import ULID
@@ -18,6 +19,7 @@ from src.core.models.domain import Domain
 from src.core.models.snapshot import Snapshot
 from src.core.models.watch import ContentType, Watch
 from src.core.probe import ProbeResult
+from src.core.screenshot import capture_screenshot
 from src.core.storage import STORAGE_BASE_DIR, LocalStorage
 from src.dashboard import templates
 from src.dashboard.context import (
@@ -185,23 +187,24 @@ async def watch_detail_page(
         name: _watch_field_context(request, watch, name, mode="view") for name in applicable_fields
     }
 
-    # Build screenshot metadata if a screenshot is available
+    # Build snapshot metadata whenever a snapshot exists; screenshot fields are conditional.
     storage = LocalStorage(STORAGE_BASE_DIR)
     snapshot_meta = None
-    if (
-        latest_snapshot is not None
-        and latest_snapshot.screenshot_path is not None
-        and storage.exists(latest_snapshot.screenshot_path)
-    ):
+    if latest_snapshot is not None:
         raw_bytes = None
         if latest_snapshot.storage_path and storage.exists(latest_snapshot.storage_path):
             raw_bytes = storage.size(latest_snapshot.storage_path)
+        has_screenshot = latest_snapshot.screenshot_path is not None and storage.exists(
+            latest_snapshot.screenshot_path
+        )
         snapshot_meta = {
+            "snapshot_id": str(latest_snapshot.id),
             "fetched_at": latest_snapshot.fetched_at,
             "chunk_count": latest_snapshot.chunk_count,
             "text_bytes": latest_snapshot.text_bytes,
             "raw_bytes": raw_bytes,
-            "screenshot_browser": latest_snapshot.screenshot_browser,
+            "screenshot_browser": latest_snapshot.screenshot_browser if has_screenshot else None,
+            "has_screenshot": has_screenshot,
         }
 
     # Check if the watch's domain is inactive (disables the status toggle)
@@ -276,6 +279,103 @@ async def watch_screenshot(
 
     png_bytes = storage.load(snapshot.screenshot_path)
     return Response(content=png_bytes, media_type="image/png")
+
+
+@router.post("/watches/{watch_id}/screenshot")
+async def watch_screenshot_recapture(
+    watch_id: str,
+    session: AsyncSession = Depends(get_db_session),
+):
+    """Trigger an on-demand screenshot re-capture for the latest snapshot of a watch.
+
+    Returns JSON:
+    - ``{"status": "ok", "screenshot_path": "..."}`` on success.
+    - ``{"status": "unavailable", "detail": "..."}`` if Playwright not installed.
+    - 404 if the watch or its latest snapshot does not exist.
+    """
+    watch = await get_watch_detail(session, watch_id)
+    if not watch:
+        raise HTTPException(status_code=404, detail="Watch not found")
+
+    snapshot = await get_latest_snapshot(session, watch.id)
+    if snapshot is None:
+        raise HTTPException(status_code=404, detail="No snapshot available for this watch")
+
+    result = await capture_screenshot(watch.url)
+    if result is None:
+        return JSONResponse(
+            status_code=200,
+            content={"status": "unavailable", "detail": "Playwright not installed"},
+        )
+
+    storage = LocalStorage(STORAGE_BASE_DIR)
+    screenshot_path = storage.snapshot_path(str(watch.id), str(snapshot.id), "png")
+    storage.save(screenshot_path, result.png_bytes)
+
+    snapshot.screenshot_path = screenshot_path
+    snapshot.screenshot_browser = result.browser
+    await session.flush()
+
+    return JSONResponse(
+        status_code=200,
+        content={"status": "ok", "screenshot_path": screenshot_path},
+    )
+
+
+@router.get("/watches/{watch_id}/snapshots/{snapshot_id}/content")
+async def watch_snapshot_content(
+    watch_id: str,
+    snapshot_id: str,
+    session: AsyncSession = Depends(get_db_session),
+):
+    """Serve the stored snapshot text/content as an escaped HTML page.
+
+    Prefers ``text_path`` (extracted text); falls back to ``storage_path`` (raw content).
+    Returns 404 if the watch, snapshot, or storage file is not found.
+    """
+    watch = await get_watch_detail(session, watch_id)
+    if not watch:
+        raise HTTPException(status_code=404, detail="Watch not found")
+
+    try:
+        sid = ULID.from_str(snapshot_id)
+    except ValueError:
+        raise HTTPException(status_code=404, detail="Snapshot not found")
+
+    result = await session.execute(
+        select(Snapshot).where(Snapshot.id == sid, Snapshot.watch_id == watch.id)
+    )
+    snapshot = result.scalar_one_or_none()
+    if snapshot is None:
+        raise HTTPException(status_code=404, detail="Snapshot not found")
+
+    storage = LocalStorage(STORAGE_BASE_DIR)
+
+    # Prefer extracted text; fall back to raw storage
+    content_path: str | None = None
+    if snapshot.text_path and storage.exists(snapshot.text_path):
+        content_path = snapshot.text_path
+    elif snapshot.storage_path and storage.exists(snapshot.storage_path):
+        content_path = snapshot.storage_path
+
+    if content_path is None:
+        raise HTTPException(status_code=404, detail="Snapshot content not available")
+
+    raw_bytes = storage.load(content_path)
+    text = raw_bytes.decode("utf-8", errors="replace")
+    escaped = html_lib.escape(text)
+
+    html_page = (
+        "<!doctype html><html><head>"
+        "<meta charset='utf-8'>"
+        f"<title>Snapshot content — {html_lib.escape(watch.name)}</title>"
+        "<style>body{font-family:monospace;white-space:pre-wrap;padding:1rem;}"
+        "pre{margin:0;}</style>"
+        "</head><body>"
+        f"<pre>{escaped}</pre>"
+        "</body></html>"
+    )
+    return HTMLResponse(content=html_page)
 
 
 @router.delete("/watches/{watch_id}")

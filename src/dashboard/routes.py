@@ -18,6 +18,7 @@ from src.core.models.domain import Domain
 from src.core.models.snapshot import Snapshot
 from src.core.models.watch import ContentType, Watch
 from src.core.probe import ProbeResult
+from src.core.screenshot import capture_screenshot
 from src.core.storage import STORAGE_BASE_DIR, LocalStorage
 from src.dashboard import templates
 from src.dashboard.context import (
@@ -197,6 +198,7 @@ async def watch_detail_page(
         if latest_snapshot.storage_path and storage.exists(latest_snapshot.storage_path):
             raw_bytes = storage.size(latest_snapshot.storage_path)
         snapshot_meta = {
+            "snapshot_id": str(latest_snapshot.id),
             "fetched_at": latest_snapshot.fetched_at,
             "chunk_count": latest_snapshot.chunk_count,
             "text_bytes": latest_snapshot.text_bytes,
@@ -276,6 +278,49 @@ async def watch_screenshot(
 
     png_bytes = storage.load(snapshot.screenshot_path)
     return Response(content=png_bytes, media_type="image/png")
+
+
+@router.post("/watches/{watch_id}/screenshot")
+async def watch_screenshot_recapture(
+    watch_id: str,
+    session: AsyncSession = Depends(get_db_session),
+):
+    """Trigger an on-demand screenshot re-capture for the latest snapshot of a watch.
+
+    Returns JSON:
+    - ``{"status": "ok", "screenshot_path": "..."}`` on success.
+    - ``{"status": "unavailable", "detail": "..."}`` if Playwright not installed.
+    - 404 if the watch or its latest snapshot does not exist.
+    """
+    from fastapi.responses import JSONResponse
+
+    watch = await get_watch_detail(session, watch_id)
+    if not watch:
+        raise HTTPException(status_code=404, detail="Watch not found")
+
+    snapshot = await get_latest_snapshot(session, watch.id)
+    if snapshot is None:
+        raise HTTPException(status_code=404, detail="No snapshot available for this watch")
+
+    result = await capture_screenshot(watch.url)
+    if result is None:
+        return JSONResponse(
+            status_code=200,
+            content={"status": "unavailable", "detail": "Playwright not installed"},
+        )
+
+    storage = LocalStorage(STORAGE_BASE_DIR)
+    screenshot_path = storage.snapshot_path(str(watch.id), str(snapshot.id), "png")
+    storage.save(screenshot_path, result.png_bytes)
+
+    snapshot.screenshot_path = screenshot_path
+    snapshot.screenshot_browser = result.browser
+    await session.flush()
+
+    return JSONResponse(
+        status_code=200,
+        content={"status": "ok", "screenshot_path": screenshot_path},
+    )
 
 
 @router.delete("/watches/{watch_id}")

@@ -475,3 +475,97 @@ class TestWatchTimeline:
         for category in ("all", "changes", "errors", "config"):
             response = await client.get(f"/partials/watch-timeline/{watch_id}?category={category}")
             assert response.status_code == 200
+
+
+class TestScreenshotRecapture:
+    async def _create_watch(self, client):
+        resp = await client.post(
+            "/api/v1/watches",
+            json={"name": "Recapture Watch", "url": "https://example.com", "content_type": "html"},
+        )
+        return resp.json()["id"]
+
+    async def test_recapture_no_snapshot_returns_404(self, client):
+        watch_id = await self._create_watch(client)
+        response = await client.post(f"/watches/{watch_id}/screenshot")
+        assert response.status_code == 404
+
+    async def test_recapture_missing_watch_returns_404(self, client):
+        response = await client.post("/watches/not-a-ulid/screenshot")
+        assert response.status_code == 404
+
+    async def test_recapture_playwright_unavailable_returns_200_unavailable(
+        self, client, db_session, monkeypatch
+    ):
+        watch = Watch(name="No PW Watch", url="https://example.com", content_type=ContentType.HTML)
+        db_session.add(watch)
+        await db_session.flush()
+
+        snap = Snapshot(
+            watch_id=watch.id,
+            content_hash="a" * 64,
+            simhash=0,
+            storage_path="snapshots/w/s.html",
+            text_path="snapshots/w/s.txt",
+            chunk_count=1,
+            text_bytes=100,
+            fetch_duration_ms=50,
+            fetcher_used="http",
+        )
+        db_session.add(snap)
+        await db_session.flush()
+
+        import src.dashboard.routes as routes_mod
+
+        monkeypatch.setattr(routes_mod, "capture_screenshot", lambda *a, **kw: _async_none())
+        response = await client.post(f"/watches/{watch.id}/screenshot")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["status"] == "unavailable"
+
+    async def test_recapture_success_returns_200_ok(
+        self, client, db_session, monkeypatch, tmp_path
+    ):
+        watch = Watch(name="PW Watch", url="https://example.com", content_type=ContentType.HTML)
+        db_session.add(watch)
+        await db_session.flush()
+
+        snap = Snapshot(
+            watch_id=watch.id,
+            content_hash="b" * 64,
+            simhash=0,
+            storage_path="snapshots/w/s.html",
+            text_path="snapshots/w/s.txt",
+            chunk_count=1,
+            text_bytes=100,
+            fetch_duration_ms=50,
+            fetcher_used="http",
+        )
+        db_session.add(snap)
+        await db_session.flush()
+
+        import src.dashboard.routes as routes_mod
+        from src.core.screenshot import ScreenshotResult
+
+        fake_png = b"\x89PNG\r\n"
+        fake_result = ScreenshotResult(png_bytes=fake_png, browser="Chromium 0")
+        monkeypatch.setattr(
+            routes_mod,
+            "capture_screenshot",
+            lambda *a, **kw: _async_result(fake_result),
+        )
+        monkeypatch.setattr(routes_mod, "STORAGE_BASE_DIR", tmp_path)
+
+        response = await client.post(f"/watches/{watch.id}/screenshot")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["status"] == "ok"
+        assert "screenshot_path" in data
+
+
+async def _async_none():
+    return None
+
+
+async def _async_result(value):
+    return value

@@ -24,6 +24,15 @@
     &middot;
     {{ snapshot_meta.chunk_count }} chunk{{ 's' if snapshot_meta.chunk_count != 1 }}
   </p>
+  <div class="mt-2 max-w-sm" id="screenshot-recapture-result" aria-live="polite">
+    <button
+      hx-post="/watches/{{ watch.id }}/screenshot"
+      hx-target="#screenshot-recapture-result"
+      hx-swap="innerHTML"
+      class="btn btn-secondary text-xs min-h-[44px] htmx-request:opacity-60">
+      Re-capture screenshot
+    </button>
+  </div>
 </div>
 {% endif %}
 

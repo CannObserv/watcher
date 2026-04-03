@@ -408,7 +408,7 @@ _TIMELINE_CATEGORY: dict[str, str] = {
     EventType.CHECK_SNAPSHOT_CREATED: "run",
     EventType.CHECK_NO_CHANGE: "run",
     EventType.CHECK_FETCH_FAILED: "error",
-    EventType.NOTIFICATION_DISPATCHED: "config",
+    EventType.NOTIFICATION_DISPATCHED: "run",
     EventType.NOTIFICATION_CONFIG_CREATED: "config",
     EventType.NOTIFICATION_CONFIG_DELETED: "config",
     EventType.PROFILE_CREATED: "config",
@@ -441,33 +441,19 @@ async def get_watch_timeline(
     except ValueError:
         return []
 
-    # --- AuditLog rows (config + check events) ---
+    # --- AuditLog rows (config + error events; excludes CHECK_SNAPSHOT_CREATED to avoid
+    #     double-counting with the Snapshot rows fetched below) ---
     audit_stmt = select(
         AuditLog.event_type.label("event_type"),
         AuditLog.created_at.label("timestamp"),
         AuditLog.payload.label("payload"),
         AuditLog.id.label("source_id"),
-    ).where(AuditLog.watch_id == parsed)
-
-    # --- Snapshot rows (pipeline run events not already covered by AuditLog) ---
-    # We surface each snapshot as a "check.snapshot_created" run event so that
-    # pipeline runs are always visible even if the audit log entry was pruned.
-    # To avoid double-counting when the audit log entry exists, we rely on the
-    # fact that templates simply show both — they share the same timestamp and
-    # the snapshot row is the authoritative record.  For simplicity we only
-    # emit snapshot rows; audit log covers failures and config changes.
-    snap_stmt = (
-        select(
-            AuditLog.event_type.label("event_type"),
-            AuditLog.created_at.label("timestamp"),
-            AuditLog.payload.label("payload"),
-            AuditLog.id.label("source_id"),
-        )
-        .where(AuditLog.watch_id == parsed)
-        .where(False)  # placeholder — we pull snapshots separately below
+    ).where(
+        AuditLog.watch_id == parsed,
+        AuditLog.event_type != EventType.CHECK_SNAPSHOT_CREATED,
     )
-    _ = snap_stmt  # not used; snapshots handled as plain select
 
+    # --- Snapshot rows (authoritative source for pipeline run events) ---
     snapshot_stmt = select(
         Snapshot.id.label("source_id"),
         Snapshot.fetched_at.label("timestamp"),
@@ -547,7 +533,12 @@ async def get_watch_timeline_count(
         return 0
 
     audit_count = (
-        await session.scalar(select(func.count(AuditLog.id)).where(AuditLog.watch_id == parsed))
+        await session.scalar(
+            select(func.count(AuditLog.id)).where(
+                AuditLog.watch_id == parsed,
+                AuditLog.event_type != EventType.CHECK_SNAPSHOT_CREATED,
+            )
+        )
         or 0
     )
     snapshot_count = (

@@ -7,7 +7,7 @@
   <fieldset class="segment-group" role="radiogroup" aria-label="Filter timeline by category">
     <legend class="sr-only">Filter by category</legend>
     {% set active_cat = timeline_category or "all" %}
-    {% for value, label in [("all", "All"), ("changes", "Changes"), ("errors", "Errors"), ("config", "Config")] %}
+    {% for value, label in [("all", "All"), ("change", "Changes"), ("error", "Errors"), ("config", "Config")] %}
     <label class="segment">
       <input type="radio" name="category" value="{{ value }}"
         {% if active_cat == value %}checked{% endif %}

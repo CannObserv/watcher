@@ -333,9 +333,9 @@ async def _run_check_pipeline(
         try:
             viewport_kwargs: dict = {}
             if fetch_cfg.get("viewport_width") is not None:
-                viewport_kwargs["viewport_width"] = int(fetch_cfg["viewport_width"])
+                viewport_kwargs["viewport_width"] = fetch_cfg["viewport_width"]
             if fetch_cfg.get("viewport_height") is not None:
-                viewport_kwargs["viewport_height"] = int(fetch_cfg["viewport_height"])
+                viewport_kwargs["viewport_height"] = fetch_cfg["viewport_height"]
             screenshot_result = await capture_screenshot(watch.url, **viewport_kwargs)
             if screenshot_result is not None:
                 screenshot_path = storage.snapshot_path(str(watch.id), str(snapshot_id), "png")

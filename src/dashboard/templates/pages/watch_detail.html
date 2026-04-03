@@ -23,6 +23,10 @@
     {% if snapshot_meta.raw_bytes is not none %}{{ (snapshot_meta.raw_bytes / 1024) | round(0) | int }} KB raw &middot; {% endif %}{{ (snapshot_meta.text_bytes / 1024) | round(0) | int }} KB text
     &middot;
     {{ snapshot_meta.chunk_count }} chunk{{ 's' if snapshot_meta.chunk_count != 1 }}
+    {% if snapshot_meta.snapshot_id %}
+    &middot;
+    <a href="/watches/{{ watch.id }}/snapshots/{{ snapshot_meta.snapshot_id }}/content" target="_blank" rel="noopener" class="link">View captured content</a>
+    {% endif %}
   </p>
   <div class="mt-2 max-w-sm" id="screenshot-recapture-result" aria-live="polite">
     <button

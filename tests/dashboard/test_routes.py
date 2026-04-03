@@ -569,3 +569,118 @@ async def _async_none():
 
 async def _async_result(value):
     return value
+
+
+class TestSnapshotContentViewer:
+    async def _create_watch(self, client):
+        resp = await client.post(
+            "/api/v1/watches",
+            json={"name": "Content Watch", "url": "https://example.com", "content_type": "html"},
+        )
+        return resp.json()["id"]
+
+    async def test_content_missing_watch_returns_404(self, client):
+        url = "/watches/not-a-ulid/snapshots/01JNZZZZZZZZZZZZZZZZZZZZZZ/content"
+        response = await client.get(url)
+        assert response.status_code == 404
+
+    async def test_content_missing_snapshot_returns_404(self, client):
+        watch_id = await self._create_watch(client)
+        response = await client.get(
+            f"/watches/{watch_id}/snapshots/01JNZZZZZZZZZZZZZZZZZZZZZZ/content"
+        )
+        assert response.status_code == 404
+
+    async def test_content_no_storage_path_returns_404(self, client, db_session):
+        watch = Watch(
+            name="No Path Watch", url="https://example.com", content_type=ContentType.HTML
+        )
+        db_session.add(watch)
+        await db_session.flush()
+
+        snap = Snapshot(
+            watch_id=watch.id,
+            content_hash="c" * 64,
+            simhash=0,
+            storage_path="snapshots/w/nonexistent.html",
+            text_path="snapshots/w/nonexistent.txt",
+            chunk_count=1,
+            text_bytes=100,
+            fetch_duration_ms=50,
+            fetcher_used="http",
+        )
+        db_session.add(snap)
+        await db_session.flush()
+
+        response = await client.get(f"/watches/{watch.id}/snapshots/{snap.id}/content")
+        assert response.status_code == 404
+
+    async def test_content_serves_text_path(self, client, db_session, monkeypatch, tmp_path):
+        watch = Watch(
+            name="Text Path Watch", url="https://example.com", content_type=ContentType.HTML
+        )
+        db_session.add(watch)
+        await db_session.flush()
+
+        text_path = "snapshots/w/snap.txt"
+        full_path = tmp_path / text_path
+        full_path.parent.mkdir(parents=True, exist_ok=True)
+        full_path.write_bytes(b"Hello extracted content")
+
+        snap = Snapshot(
+            watch_id=watch.id,
+            content_hash="d" * 64,
+            simhash=0,
+            storage_path="snapshots/w/snap.html",
+            text_path=text_path,
+            chunk_count=1,
+            text_bytes=23,
+            fetch_duration_ms=50,
+            fetcher_used="http",
+        )
+        db_session.add(snap)
+        await db_session.flush()
+
+        import src.dashboard.routes as routes_mod
+
+        monkeypatch.setattr(routes_mod, "STORAGE_BASE_DIR", tmp_path)
+
+        response = await client.get(f"/watches/{watch.id}/snapshots/{snap.id}/content")
+        assert response.status_code == 200
+        assert b"Hello extracted content" in response.content
+
+    async def test_content_falls_back_to_storage_path(
+        self, client, db_session, monkeypatch, tmp_path
+    ):
+        watch = Watch(
+            name="Fallback Watch", url="https://example.com", content_type=ContentType.HTML
+        )
+        db_session.add(watch)
+        await db_session.flush()
+
+        storage_path = "snapshots/w/snap_raw.html"
+        full_path = tmp_path / storage_path
+        full_path.parent.mkdir(parents=True, exist_ok=True)
+        full_path.write_bytes(b"<html>raw content</html>")
+
+        snap = Snapshot(
+            watch_id=watch.id,
+            content_hash="e" * 64,
+            simhash=0,
+            storage_path=storage_path,
+            text_path="snapshots/w/nonexistent.txt",
+            chunk_count=1,
+            text_bytes=23,
+            fetch_duration_ms=50,
+            fetcher_used="http",
+        )
+        db_session.add(snap)
+        await db_session.flush()
+
+        import src.dashboard.routes as routes_mod
+
+        monkeypatch.setattr(routes_mod, "STORAGE_BASE_DIR", tmp_path)
+
+        response = await client.get(f"/watches/{watch.id}/snapshots/{snap.id}/content")
+        assert response.status_code == 200
+        assert b"raw content" in response.content

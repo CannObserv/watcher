@@ -323,6 +323,64 @@ async def watch_screenshot_recapture(
     )
 
 
+@router.get("/watches/{watch_id}/snapshots/{snapshot_id}/content")
+async def watch_snapshot_content(
+    watch_id: str,
+    snapshot_id: str,
+    session: AsyncSession = Depends(get_db_session),
+):
+    """Serve the stored snapshot text/content as an escaped HTML page.
+
+    Prefers ``text_path`` (extracted text); falls back to ``storage_path`` (raw content).
+    Returns 404 if the watch, snapshot, or storage file is not found.
+    """
+    import html as html_lib
+
+    watch = await get_watch_detail(session, watch_id)
+    if not watch:
+        raise HTTPException(status_code=404, detail="Watch not found")
+
+    try:
+        sid = ULID.from_str(snapshot_id)
+    except ValueError:
+        raise HTTPException(status_code=404, detail="Snapshot not found")
+
+    result = await session.execute(
+        select(Snapshot).where(Snapshot.id == sid, Snapshot.watch_id == watch.id)
+    )
+    snapshot = result.scalar_one_or_none()
+    if snapshot is None:
+        raise HTTPException(status_code=404, detail="Snapshot not found")
+
+    storage = LocalStorage(STORAGE_BASE_DIR)
+
+    # Prefer extracted text; fall back to raw storage
+    content_path: str | None = None
+    if snapshot.text_path and storage.exists(snapshot.text_path):
+        content_path = snapshot.text_path
+    elif snapshot.storage_path and storage.exists(snapshot.storage_path):
+        content_path = snapshot.storage_path
+
+    if content_path is None:
+        raise HTTPException(status_code=404, detail="Snapshot content not available")
+
+    raw_bytes = storage.load(content_path)
+    text = raw_bytes.decode("utf-8", errors="replace")
+    escaped = html_lib.escape(text)
+
+    html_page = (
+        "<!doctype html><html><head>"
+        "<meta charset='utf-8'>"
+        f"<title>Snapshot content — {html_lib.escape(watch.name)}</title>"
+        "<style>body{font-family:monospace;white-space:pre-wrap;padding:1rem;}"
+        "pre{margin:0;}</style>"
+        "</head><body>"
+        f"<pre>{escaped}</pre>"
+        "</body></html>"
+    )
+    return HTMLResponse(content=html_page)
+
+
 @router.delete("/watches/{watch_id}")
 async def watch_delete(
     request: Request,

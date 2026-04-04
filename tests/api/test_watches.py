@@ -390,7 +390,8 @@ class TestDeleteWatch:
         )
         config = NotificationConfig(
             watch_id=watch_ulid,
-            channel="webhook",
+            apprise_url="https://hooks.example.com/abc",
+            channel_hint="https",
         )
         db_session.add_all([chunk, profile, config])
         await db_session.flush()

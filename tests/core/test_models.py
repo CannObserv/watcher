@@ -349,27 +349,28 @@ class TestDomainModel:
 
 
 class TestNotificationConfigModel:
-    def test_create_webhook_config(self):
+    def test_create_apprise_config(self):
         config = NotificationConfig(
             watch_id=ULID(),
-            channel="webhook",
-            config={"url": "https://hooks.example.com/abc"},
+            apprise_url="slack://T/A/T/#ops",
+            channel_hint="slack",
         )
-        assert config.channel == "webhook"
+        assert config.channel_hint == "slack"
         assert config.is_active is True
 
-    def test_create_email_config(self):
+    def test_default_events(self):
         config = NotificationConfig(
             watch_id=ULID(),
-            channel="email",
-            config={"to": "alerts@example.com", "from": "watcher@example.com"},
+            apprise_url="mailto://user:pass@example.com",
+            channel_hint="mailto",
         )
-        assert config.channel == "email"
+        assert config.events == ["change_detected"]
 
-    def test_create_slack_config(self):
+    def test_custom_events(self):
         config = NotificationConfig(
             watch_id=ULID(),
-            channel="slack",
-            config={"webhook_url": "https://hooks.slack.com/abc"},
+            apprise_url="slack://T/A/T/#ops",
+            channel_hint="slack",
+            events=["change_detected", "watch_error"],
         )
-        assert config.channel == "slack"
+        assert config.events == ["change_detected", "watch_error"]

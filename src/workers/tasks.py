@@ -12,13 +12,14 @@ from src.core.logging import get_logger
 from src.core.models.audit_log import EventType, audit
 from src.core.models.domain import Domain
 from src.core.models.temporal_profile import TemporalProfile
-from src.core.models.watch import Watch
+from src.core.models.watch import Watch, WatchHealthStatus
+from src.core.notifications.events import WatchEvent, WatchEventType
 from src.core.rate_limiter import get_rate_limiter
 from src.core.registry import ServiceRegistry, get_registry
 from src.core.scheduler import compute_next_check, evaluate_post_actions
 from src.core.storage import STORAGE_BASE_DIR, LocalStorage
 from src.workers import bp
-from src.workers.notify import dispatch_change_notifications
+from src.workers.notify import dispatch_event_notifications
 from src.workers.pipeline import _maybe_decay_backoff, _persist_backoff, _run_check_pipeline
 
 logger = get_logger(__name__)
@@ -90,7 +91,21 @@ async def check_watch(watch_id: str, registry: ServiceRegistry | None = None) ->
                 watch_id=watch.id,
                 status_code=fetch_result.status_code,
             )
+            # Detect watch_error state transition (only fire on first failure)
+            previous_health = watch.health_status
+            watch.health_status = WatchHealthStatus.ERROR
             await session.commit()
+            if previous_health != WatchHealthStatus.ERROR:
+                error_event = WatchEvent(
+                    event_type=WatchEventType.WATCH_ERROR,
+                    watch_id=str(watch.id),
+                    watch_name=watch.name,
+                    watch_url=watch.url,
+                    occurred_at=datetime.now(UTC),
+                    metadata={"status_code": fetch_result.status_code},
+                )
+                await dispatch_event_notifications(session=session, event=error_event)
+                await session.commit()
             return {"error": f"HTTP {fetch_result.status_code}"}
 
         # Run pipeline
@@ -104,9 +119,9 @@ async def check_watch(watch_id: str, registry: ServiceRegistry | None = None) ->
             session=session,
         )
 
-        # Commit pipeline results (snapshot/change records) before dispatching
-        # notifications. This ensures snapshot/change data is persisted even if
-        # notification dispatch fails.
+        # Update health + timestamp; commit pipeline + health together.
+        previous_health = watch.health_status
+        watch.health_status = WatchHealthStatus.OK
         watch.last_checked_at = datetime.now(UTC)
         await session.commit()
 
@@ -117,15 +132,30 @@ async def check_watch(watch_id: str, registry: ServiceRegistry | None = None) ->
             await _maybe_decay_backoff(rate_limit_domain, _limiter, session)
             await session.commit()
 
-        # Dispatch notifications in a separate transaction scope
-        if result.get("change_id"):
-            await dispatch_change_notifications(
-                session=session,
-                watch=watch,
-                change_id=result["change_id"],
-                change_metadata=result.get("change_metadata", {}),
-                registry=reg,
+        # Dispatch recovery notification on state transition ERROR → OK
+        if previous_health == WatchHealthStatus.ERROR:
+            recovery_event = WatchEvent(
+                event_type=WatchEventType.WATCH_RECOVERED,
+                watch_id=str(watch.id),
+                watch_name=watch.name,
+                watch_url=watch.url,
+                occurred_at=datetime.now(UTC),
+                metadata={},
             )
+            await dispatch_event_notifications(session=session, event=recovery_event)
+            await session.commit()
+
+        # Dispatch change_detected notification if content changed
+        if result.get("change_id"):
+            change_event = WatchEvent(
+                event_type=WatchEventType.CHANGE_DETECTED,
+                watch_id=str(watch.id),
+                watch_name=watch.name,
+                watch_url=watch.url,
+                occurred_at=datetime.now(UTC),
+                metadata=result.get("change_metadata", {}),
+            )
+            await dispatch_event_notifications(session=session, event=change_event)
             await session.commit()
 
     # schedule_tick is the sole scheduler — no self-deferral here.

@@ -15,7 +15,8 @@ from src.core.models.audit_log import AuditLog, EventType
 from src.core.models.domain import Domain
 from src.core.models.notification_config import NotificationConfig
 from src.core.models.temporal_profile import PostAction, ProfileType, TemporalProfile
-from src.core.models.watch import ContentType, Watch
+from src.core.models.watch import ContentType, Watch, WatchHealthStatus
+from src.core.notifications.events import WatchEventType
 from src.core.rate_limiter import DomainRateLimiter
 from src.core.registry import ServiceRegistry
 from src.core.storage import LocalStorage
@@ -333,11 +334,10 @@ class TestCheckWatchSavepointBoundary:
         # dispatch_notifications records the commit count at call time
         dispatch_call_index: list[int] = []
 
-        async def mock_dispatch(**kwargs):
+        async def mock_dispatch(session, event):
             dispatch_call_index.append(len(commit_calls))
-            return []
 
-        monkeypatch.setattr(tasks_mod, "dispatch_change_notifications", mock_dispatch)
+        monkeypatch.setattr(tasks_mod, "dispatch_event_notifications", mock_dispatch)
 
         await check_watch(str(watch.id))
 
@@ -694,3 +694,122 @@ class TestCheckWatchInactiveDomain:
 
         result = await check_watch(str(watch.id))
         assert result.get("skipped") is True
+
+
+class TestCheckWatchHealthTransitions:
+    """Test watch_error and watch_recovered state transition events."""
+
+    async def test_fetch_failure_sets_health_error_and_emits_watch_error(
+        self, db_session, monkeypatch
+    ):
+        """First fetch failure transitions health_status to ERROR and notifies."""
+        watch = Watch(
+            name="Health Test",
+            url="https://example.com",
+            content_type=ContentType.HTML,
+            health_status=WatchHealthStatus.OK,
+        )
+        db_session.add(watch)
+        await db_session.commit()
+        await db_session.refresh(watch)
+
+        mock_fetch_result = MagicMock()
+        mock_fetch_result.is_success = False
+        mock_fetch_result.status_code = 503
+        mock_fetcher = AsyncMock()
+        mock_fetcher.fetch = AsyncMock(return_value=mock_fetch_result)
+
+        dispatched_events = []
+
+        async def fake_dispatch(session, event):
+            dispatched_events.append(event)
+
+        monkeypatch.setattr("src.workers.tasks.dispatch_event_notifications", fake_dispatch)
+        monkeypatch.setattr(
+            tasks_mod, "get_session_factory", lambda: _mock_session_factory(db_session)
+        )
+
+        reg = ServiceRegistry(fetcher=mock_fetcher)
+        await check_watch(str(watch.id), registry=reg)
+
+        await db_session.refresh(watch)
+        assert watch.health_status == WatchHealthStatus.ERROR
+        assert any(e.event_type == WatchEventType.WATCH_ERROR for e in dispatched_events)
+
+    async def test_repeated_failure_does_not_emit_watch_error_again(self, db_session, monkeypatch):
+        """Repeated failures after first do NOT re-emit watch_error."""
+        watch = Watch(
+            name="Already Error",
+            url="https://example.com",
+            content_type=ContentType.HTML,
+            health_status=WatchHealthStatus.ERROR,
+        )
+        db_session.add(watch)
+        await db_session.commit()
+        await db_session.refresh(watch)
+
+        mock_fetch_result = MagicMock()
+        mock_fetch_result.is_success = False
+        mock_fetch_result.status_code = 503
+        mock_fetcher = AsyncMock()
+        mock_fetcher.fetch = AsyncMock(return_value=mock_fetch_result)
+
+        dispatched_events = []
+
+        async def fake_dispatch(session, event):
+            dispatched_events.append(event)
+
+        monkeypatch.setattr("src.workers.tasks.dispatch_event_notifications", fake_dispatch)
+        monkeypatch.setattr(
+            tasks_mod, "get_session_factory", lambda: _mock_session_factory(db_session)
+        )
+
+        reg = ServiceRegistry(fetcher=mock_fetcher)
+        await check_watch(str(watch.id), registry=reg)
+
+        assert not any(e.event_type == WatchEventType.WATCH_ERROR for e in dispatched_events)
+
+    async def test_recovery_emits_watch_recovered(self, db_session, monkeypatch, tmp_path):
+        """Successful fetch after ERROR state emits watch_recovered."""
+        watch = Watch(
+            name="Recovering",
+            url="https://example.com",
+            content_type=ContentType.HTML,
+            health_status=WatchHealthStatus.ERROR,
+        )
+        db_session.add(watch)
+        await db_session.commit()
+        await db_session.refresh(watch)
+
+        content = b"<html><body>hello</body></html>"
+        mock_fetch_result = MagicMock()
+        mock_fetch_result.is_success = True
+        mock_fetch_result.status_code = 200
+        mock_fetch_result.content = content
+        mock_fetch_result.fetcher_used = "http"
+        mock_fetch_result.duration_ms = 100
+        mock_fetcher = AsyncMock()
+        mock_fetcher.fetch = AsyncMock(return_value=mock_fetch_result)
+
+        dispatched_events = []
+
+        async def fake_dispatch(session, event):
+            dispatched_events.append(event)
+
+        monkeypatch.setattr("src.workers.tasks.dispatch_event_notifications", fake_dispatch)
+        monkeypatch.setattr(
+            tasks_mod, "get_session_factory", lambda: _mock_session_factory(db_session)
+        )
+
+        mock_storage = MagicMock()
+        mock_storage.snapshot_path = MagicMock(return_value=str(tmp_path / "snap.html"))
+        mock_storage.save = MagicMock()
+        mock_storage.exists = MagicMock(return_value=False)
+        monkeypatch.setattr(tasks_mod, "LocalStorage", lambda **kw: mock_storage)
+
+        reg = ServiceRegistry(fetcher=mock_fetcher)
+        await check_watch(str(watch.id), registry=reg)
+
+        await db_session.refresh(watch)
+        assert watch.health_status == WatchHealthStatus.OK
+        assert any(e.event_type == WatchEventType.WATCH_RECOVERED for e in dispatched_events)

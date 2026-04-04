@@ -125,6 +125,9 @@ class TestWatchNotificationsPartialRoute:
         assert resp.status_code == 200
         assert b"change_detected" in resp.content
         assert b"watch_error" in resp.content
+        assert b"watch_recovered" in resp.content
+        assert b"watch_created" in resp.content
+        assert b"watch_paused" in resp.content
         assert b"watch_resumed" in resp.content
 
 

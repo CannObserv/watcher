@@ -19,6 +19,14 @@ class ContentType(enum.StrEnum):
     FILE = "file"
 
 
+class WatchHealthStatus(enum.StrEnum):
+    """Last known health state of a watch, updated after each check."""
+
+    UNKNOWN = "unknown"
+    OK = "ok"
+    ERROR = "error"
+
+
 class Watch(Base, TimestampMixin):
     """A URL to monitor for changes."""
 
@@ -40,6 +48,11 @@ class Watch(Base, TimestampMixin):
     )
     effective_url: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
     effective_domain: Mapped[str | None] = mapped_column(String(253), nullable=True, default=None)
+    health_status: Mapped[WatchHealthStatus] = mapped_column(
+        String(10),
+        default=WatchHealthStatus.UNKNOWN,
+        server_default="unknown",
+    )
 
     def __init__(self, **kwargs: object) -> None:
         """Set Python-side defaults for fields not provided."""
@@ -48,6 +61,7 @@ class Watch(Base, TimestampMixin):
         kwargs.setdefault("is_active", True)
         kwargs.setdefault("is_archived", False)
         kwargs.setdefault("domain_suspended", False)
+        kwargs.setdefault("health_status", WatchHealthStatus.UNKNOWN)
         super().__init__(**kwargs)
 
     @validates("content_type")
@@ -59,3 +73,15 @@ class Watch(Base, TimestampMixin):
             return ContentType(value)
         except ValueError as exc:
             raise ValueError(f"Invalid content_type: {value!r}") from exc
+
+    @validates("health_status")
+    def validate_health_status(
+        self, _key: str, value: str | WatchHealthStatus
+    ) -> WatchHealthStatus:
+        """Coerce string values to WatchHealthStatus enum."""
+        if isinstance(value, WatchHealthStatus):
+            return value
+        try:
+            return WatchHealthStatus(value)
+        except ValueError as exc:
+            raise ValueError(f"Invalid health_status: {value!r}") from exc

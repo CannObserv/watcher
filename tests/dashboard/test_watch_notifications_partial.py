@@ -87,8 +87,8 @@ class TestWatchNotificationsPartialRoute:
         nc = _make_mock_nc(events=["change_detected", "watch_error"])
         resp = await self._get(str(watch.id), mock_watch=watch, mock_notifications=[nc])
         assert resp.status_code == 200
-        assert b"change_detected" in resp.content
-        assert b"watch_error" in resp.content
+        assert b"Change Detected" in resp.content
+        assert b"Watch Error" in resp.content
 
     async def test_renders_inactive_badge_when_not_active(self):
         watch = _make_mock_watch()

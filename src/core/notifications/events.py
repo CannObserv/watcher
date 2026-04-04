@@ -27,6 +27,9 @@ _TITLES: dict[WatchEventType, str] = {
     WatchEventType.WATCH_RESUMED: "Watch Resumed",
 }
 
+EVENT_TITLES: dict[str, str] = {e.value: t for e, t in _TITLES.items()}
+"""Public mapping of event type value strings to human-readable titles."""
+
 _APPRISE_TYPES: dict[WatchEventType, str] = {
     WatchEventType.CHANGE_DETECTED: "info",
     WatchEventType.WATCH_ERROR: "failure",

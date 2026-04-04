@@ -1,20 +1,68 @@
-"""Notification dispatch for detected watch changes."""
+"""Notification dispatch for watch lifecycle events."""
 
 from datetime import UTC, datetime
 
-import httpx
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from ulid import ULID
 
 from src.core.logging import get_logger
 from src.core.models.audit_log import EventType, audit
 from src.core.models.notification_config import NotificationConfig
 from src.core.models.watch import Watch
-from src.core.notifications import ChangeEvent
-from src.core.notifications.dispatcher import dispatch_notifications
-from src.core.registry import ServiceRegistry, get_registry
+from src.core.notifications.dispatcher import dispatch_event
+from src.core.notifications.events import WatchEvent, WatchEventType
+from src.core.registry import ServiceRegistry
 
 logger = get_logger(__name__)
+
+
+async def dispatch_event_notifications(
+    session: AsyncSession,
+    event: WatchEvent,
+) -> None:
+    """Dispatch a WatchEvent to all active, opted-in NotificationConfig rows.
+
+    Queries configs where watch_id matches, is_active is True, and the event
+    type code is in the events array. Dispatches sequentially.
+    Failures are logged but never raise. Writes a single audit log entry
+    with per-config results. Does not commit; caller is responsible.
+    """
+    stmt = select(NotificationConfig).where(
+        NotificationConfig.watch_id == ULID.from_str(event.watch_id),
+        NotificationConfig.is_active.is_(True),
+        NotificationConfig.events.contains([event.event_type.value]),
+    )
+    result = await session.execute(stmt)
+    configs = result.scalars().all()
+    if not configs:
+        return
+
+    results = []
+    for config in configs:
+        try:
+            success = await dispatch_event(event, config.apprise_url)
+            results.append({"config_id": str(config.id), "success": success})
+            extra = {
+                "config_id": str(config.id),
+                "watch_id": event.watch_id,
+                "event_type": event.event_type,
+            }
+            if success:
+                logger.info("notification sent", extra=extra)
+            else:
+                logger.warning("notification failed", extra=extra)
+        except Exception:
+            logger.exception("notification error", extra={"config_id": str(config.id)})
+            results.append({"config_id": str(config.id), "success": False, "error": "exception"})
+
+    audit(
+        session,
+        EventType.NOTIFICATION_DISPATCHED,
+        watch_id=event.watch_id,
+        watch_event_type=event.event_type,
+        results=results,
+    )
 
 
 async def dispatch_change_notifications(
@@ -24,40 +72,20 @@ async def dispatch_change_notifications(
     change_metadata: dict,
     registry: ServiceRegistry | None = None,
 ) -> None:
-    """Dispatch notifications for a detected change and write an audit log entry.
+    """Dispatch notifications for a detected change.
 
-    Fetches active NotificationConfig records for the watch, builds a ChangeEvent,
-    and calls dispatch_notifications with the configured channels. Does not commit
-    the session; caller is responsible for committing.
+    Deprecated: Use dispatch_event_notifications with WatchEvent directly.
+    This wrapper is maintained for backward compatibility until Task 11 cleanup.
 
-    If registry is None, a default ServiceRegistry is used.
+    Builds a CHANGE_DETECTED WatchEvent and dispatches to all active,
+    opted-in configs for the watch. Does not commit the session.
     """
-    nc_stmt = select(NotificationConfig).where(
-        NotificationConfig.watch_id == watch.id,
-        NotificationConfig.is_active.is_(True),
-    )
-    nc_result = await session.execute(nc_stmt)
-    nc_configs = [{"channel": nc.channel, **nc.config} for nc in nc_result.scalars().all()]
-    if not nc_configs:
-        return
-
-    reg = registry if registry is not None else get_registry()
-    event = ChangeEvent(
+    event = WatchEvent(
+        event_type=WatchEventType.CHANGE_DETECTED,
         watch_id=str(watch.id),
         watch_name=watch.name,
         watch_url=watch.url,
-        change_id=change_id,
-        detected_at=datetime.now(UTC),
-        change_metadata=change_metadata,
+        occurred_at=datetime.now(UTC),
+        metadata=change_metadata,
     )
-    async with httpx.AsyncClient() as http_client:
-        channels = reg.get_channels(http_client)
-        notif_results = await dispatch_notifications(event, nc_configs, channels)
-
-    audit(
-        session,
-        EventType.NOTIFICATION_DISPATCHED,
-        watch_id=watch.id,
-        change_id=change_id,
-        results=notif_results,
-    )
+    await dispatch_event_notifications(session, event)

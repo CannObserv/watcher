@@ -122,6 +122,7 @@ class WatchResponse(BaseModel):
     schedule_config: dict
     is_active: bool
     is_archived: bool
+    health_status: str
     created_at: datetime
     updated_at: datetime
     effective_url: str | None = None

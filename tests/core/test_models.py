@@ -14,7 +14,7 @@ from src.core.models.domain import Domain
 from src.core.models.notification_config import NotificationConfig
 from src.core.models.snapshot import Snapshot, SnapshotChunk
 from src.core.models.temporal_profile import PostAction, ProfileType, TemporalProfile
-from src.core.models.watch import ContentType, Watch
+from src.core.models.watch import ContentType, Watch, WatchHealthStatus
 
 
 class TestULIDType:
@@ -118,6 +118,28 @@ class TestWatchModel:
             is_archived=True,
         )
         assert watch.is_archived is True
+
+    def test_health_status_default_is_unknown(self):
+        w = Watch(name="T", url="https://example.com", content_type=ContentType.HTML)
+        assert w.health_status == WatchHealthStatus.UNKNOWN
+
+    def test_health_status_coercion_from_string(self):
+        w = Watch(
+            name="T",
+            url="https://example.com",
+            content_type=ContentType.HTML,
+            health_status="ok",
+        )
+        assert w.health_status == WatchHealthStatus.OK
+
+    def test_health_status_invalid_raises(self):
+        with pytest.raises(ValueError, match="Invalid health_status"):
+            Watch(
+                name="T",
+                url="https://example.com",
+                content_type=ContentType.HTML,
+                health_status="bad",
+            )
 
 
 class TestAuditHelper:

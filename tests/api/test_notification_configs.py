@@ -1,157 +1,187 @@
-"""Integration tests for notification config API endpoints."""
+"""Integration tests for notification config API endpoints (Apprise v2)."""
 
 import pytest
+from cryptography.fernet import Fernet
 
 pytestmark = pytest.mark.integration
 
+# A real Apprise URL that parses correctly (json:// is always available)
+VALID_URL = "json://hooks.example.com/notify"
+INVALID_URL = "notaschema://whatever"
+
+
+@pytest.fixture(autouse=True)
+def set_test_key(monkeypatch):
+    key = Fernet.generate_key().decode()
+    monkeypatch.setenv("APPRISE_SECRET_KEY", key)
+
+
+async def _make_watch(client):
+    resp = await client.post(
+        "/api/v1/watches",
+        json={"name": "Test Watch", "url": "https://example.com", "content_type": "html"},
+    )
+    return resp.json()["id"]
+
 
 class TestCreateNotificationConfig:
-    async def test_create_webhook_config(self, client):
-        watch_resp = await client.post(
-            "/api/v1/watches",
-            json={
-                "name": "Notified Watch",
-                "url": "https://example.com",
-                "content_type": "html",
-            },
-        )
-        watch_id = watch_resp.json()["id"]
-        response = await client.post(
+    async def test_create_with_valid_url(self, client):
+        watch_id = await _make_watch(client)
+        resp = await client.post(
             f"/api/v1/watches/{watch_id}/notifications",
-            json={"channel": "webhook", "config": {"url": "https://hooks.example.com/abc"}},
+            json={"apprise_url": VALID_URL, "events": ["change_detected"]},
         )
-        assert response.status_code == 201
-        data = response.json()
-        assert data["channel"] == "webhook"
+        assert resp.status_code == 201
+        data = resp.json()
+        assert data["channel_hint"] == "json"
+        assert data["events"] == ["change_detected"]
         assert data["is_active"] is True
+        # apprise_url must NOT be in response
+        assert "apprise_url" not in data
 
-    async def test_create_config_invalid_watch(self, client):
-        response = await client.post(
+    async def test_default_events_is_change_detected(self, client):
+        watch_id = await _make_watch(client)
+        resp = await client.post(
+            f"/api/v1/watches/{watch_id}/notifications",
+            json={"apprise_url": VALID_URL},
+        )
+        assert resp.status_code == 201
+        assert resp.json()["events"] == ["change_detected"]
+
+    async def test_invalid_apprise_url_returns_422(self, client):
+        watch_id = await _make_watch(client)
+        resp = await client.post(
+            f"/api/v1/watches/{watch_id}/notifications",
+            json={"apprise_url": INVALID_URL},
+        )
+        assert resp.status_code == 422
+
+    async def test_invalid_event_type_returns_422(self, client):
+        watch_id = await _make_watch(client)
+        resp = await client.post(
+            f"/api/v1/watches/{watch_id}/notifications",
+            json={"apprise_url": VALID_URL, "events": ["nonexistent_event"]},
+        )
+        assert resp.status_code == 422
+
+    async def test_invalid_watch_returns_404(self, client):
+        resp = await client.post(
             "/api/v1/watches/00000000000000000000000000/notifications",
-            json={"channel": "webhook", "config": {}},
+            json={"apprise_url": VALID_URL},
         )
-        assert response.status_code == 404
+        assert resp.status_code == 404
 
-    async def test_create_webhook_invalid_config_returns_422(self, client):
-        watch_resp = await client.post(
-            "/api/v1/watches",
-            json={"name": "W", "url": "https://example.com", "content_type": "html"},
-        )
-        watch_id = watch_resp.json()["id"]
-        response = await client.post(
+    async def test_multiple_events(self, client):
+        watch_id = await _make_watch(client)
+        resp = await client.post(
             f"/api/v1/watches/{watch_id}/notifications",
-            json={"channel": "webhook", "config": {"url": "not-a-url"}},
+            json={"apprise_url": VALID_URL, "events": ["change_detected", "watch_error"]},
         )
-        assert response.status_code == 422
-
-    async def test_create_webhook_missing_url_returns_422(self, client):
-        watch_resp = await client.post(
-            "/api/v1/watches",
-            json={"name": "W2", "url": "https://example.com", "content_type": "html"},
-        )
-        watch_id = watch_resp.json()["id"]
-        response = await client.post(
-            f"/api/v1/watches/{watch_id}/notifications",
-            json={"channel": "webhook", "config": {}},
-        )
-        assert response.status_code == 422
-
-    async def test_create_slack_invalid_config_returns_422(self, client):
-        watch_resp = await client.post(
-            "/api/v1/watches",
-            json={"name": "W3", "url": "https://example.com", "content_type": "html"},
-        )
-        watch_id = watch_resp.json()["id"]
-        response = await client.post(
-            f"/api/v1/watches/{watch_id}/notifications",
-            json={"channel": "slack", "config": {"webhook_url": "not-a-url"}},
-        )
-        assert response.status_code == 422
-
-    async def test_create_email_invalid_config_returns_422(self, client):
-        watch_resp = await client.post(
-            "/api/v1/watches",
-            json={"name": "W4", "url": "https://example.com", "content_type": "html"},
-        )
-        watch_id = watch_resp.json()["id"]
-        response = await client.post(
-            f"/api/v1/watches/{watch_id}/notifications",
-            json={"channel": "email", "config": {"host": "smtp.example.com"}},
-        )
-        assert response.status_code == 422
-
-    async def test_create_unknown_channel_returns_422(self, client):
-        watch_resp = await client.post(
-            "/api/v1/watches",
-            json={"name": "W5", "url": "https://example.com", "content_type": "html"},
-        )
-        watch_id = watch_resp.json()["id"]
-        response = await client.post(
-            f"/api/v1/watches/{watch_id}/notifications",
-            json={"channel": "telegram", "config": {}},
-        )
-        assert response.status_code == 422
-
-    async def test_create_email_valid_config_succeeds(self, client):
-        watch_resp = await client.post(
-            "/api/v1/watches",
-            json={"name": "W6", "url": "https://example.com", "content_type": "html"},
-        )
-        watch_id = watch_resp.json()["id"]
-        response = await client.post(
-            f"/api/v1/watches/{watch_id}/notifications",
-            json={
-                "channel": "email",
-                "config": {
-                    "host": "smtp.example.com",
-                    "port": 587,
-                    "from_addr": "from@example.com",
-                    "to_addr": "to@example.com",
-                },
-            },
-        )
-        assert response.status_code == 201
+        assert resp.status_code == 201
+        assert set(resp.json()["events"]) == {"change_detected", "watch_error"}
 
 
 class TestListNotificationConfigs:
-    async def test_list_configs(self, client):
-        watch_resp = await client.post(
-            "/api/v1/watches",
-            json={
-                "name": "Multi Notify",
-                "url": "https://example.com",
-                "content_type": "html",
-            },
-        )
-        watch_id = watch_resp.json()["id"]
+    async def test_list_returns_all_configs(self, client):
+        watch_id = await _make_watch(client)
         await client.post(
             f"/api/v1/watches/{watch_id}/notifications",
-            json={"channel": "webhook", "config": {"url": "https://a.example.com"}},
+            json={"apprise_url": VALID_URL, "events": ["change_detected"]},
         )
         await client.post(
             f"/api/v1/watches/{watch_id}/notifications",
-            json={"channel": "slack", "config": {"webhook_url": "https://hooks.slack.com/b"}},
+            json={"apprise_url": "json://second.example.com/notify", "events": ["watch_error"]},
         )
-        response = await client.get(f"/api/v1/watches/{watch_id}/notifications")
-        assert response.status_code == 200
-        assert len(response.json()) == 2
+        resp = await client.get(f"/api/v1/watches/{watch_id}/notifications")
+        assert resp.status_code == 200
+        assert len(resp.json()) == 2
+
+    async def test_list_excludes_other_watch_configs(self, client):
+        watch_a = await _make_watch(client)
+        watch_b = await _make_watch(client)
+        await client.post(
+            f"/api/v1/watches/{watch_a}/notifications",
+            json={"apprise_url": VALID_URL},
+        )
+        resp = await client.get(f"/api/v1/watches/{watch_b}/notifications")
+        assert resp.json() == []
+
+
+class TestPatchNotificationConfig:
+    async def test_toggle_is_active(self, client):
+        watch_id = await _make_watch(client)
+        create_resp = await client.post(
+            f"/api/v1/watches/{watch_id}/notifications",
+            json={"apprise_url": VALID_URL},
+        )
+        config_id = create_resp.json()["id"]
+        resp = await client.patch(
+            f"/api/v1/watches/{watch_id}/notifications/{config_id}",
+            json={"is_active": False},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["is_active"] is False
+
+    async def test_update_events(self, client):
+        watch_id = await _make_watch(client)
+        create_resp = await client.post(
+            f"/api/v1/watches/{watch_id}/notifications",
+            json={"apprise_url": VALID_URL},
+        )
+        config_id = create_resp.json()["id"]
+        resp = await client.patch(
+            f"/api/v1/watches/{watch_id}/notifications/{config_id}",
+            json={"events": ["watch_error", "watch_recovered"]},
+        )
+        assert resp.status_code == 200
+        assert set(resp.json()["events"]) == {"watch_error", "watch_recovered"}
+
+    async def test_patch_invalid_event_type_returns_422(self, client):
+        watch_id = await _make_watch(client)
+        create_resp = await client.post(
+            f"/api/v1/watches/{watch_id}/notifications",
+            json={"apprise_url": VALID_URL},
+        )
+        config_id = create_resp.json()["id"]
+        resp = await client.patch(
+            f"/api/v1/watches/{watch_id}/notifications/{config_id}",
+            json={"events": ["bad_event"]},
+        )
+        assert resp.status_code == 422
+
+    async def test_patch_wrong_watch_returns_404(self, client):
+        watch_id = await _make_watch(client)
+        create_resp = await client.post(
+            f"/api/v1/watches/{watch_id}/notifications",
+            json={"apprise_url": VALID_URL},
+        )
+        config_id = create_resp.json()["id"]
+        other_watch_id = await _make_watch(client)
+        resp = await client.patch(
+            f"/api/v1/watches/{other_watch_id}/notifications/{config_id}",
+            json={"is_active": False},
+        )
+        assert resp.status_code == 404
 
 
 class TestDeleteNotificationConfig:
     async def test_delete_config(self, client):
-        watch_resp = await client.post(
-            "/api/v1/watches",
-            json={
-                "name": "Delete Notify",
-                "url": "https://example.com",
-                "content_type": "html",
-            },
-        )
-        watch_id = watch_resp.json()["id"]
+        watch_id = await _make_watch(client)
         create_resp = await client.post(
             f"/api/v1/watches/{watch_id}/notifications",
-            json={"channel": "webhook", "config": {"url": "https://hooks.example.com"}},
+            json={"apprise_url": VALID_URL},
         )
         config_id = create_resp.json()["id"]
-        response = await client.delete(f"/api/v1/watches/{watch_id}/notifications/{config_id}")
-        assert response.status_code == 204
+        resp = await client.delete(f"/api/v1/watches/{watch_id}/notifications/{config_id}")
+        assert resp.status_code == 204
+
+    async def test_delete_wrong_watch_returns_404(self, client):
+        watch_id = await _make_watch(client)
+        create_resp = await client.post(
+            f"/api/v1/watches/{watch_id}/notifications",
+            json={"apprise_url": VALID_URL},
+        )
+        config_id = create_resp.json()["id"]
+        other = await _make_watch(client)
+        resp = await client.delete(f"/api/v1/watches/{other}/notifications/{config_id}")
+        assert resp.status_code == 404

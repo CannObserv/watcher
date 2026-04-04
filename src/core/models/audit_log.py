@@ -26,6 +26,7 @@ class EventType:
     CHECK_FETCH_FAILED = "check.fetch_failed"
     NOTIFICATION_DISPATCHED = "notification.dispatched"
     NOTIFICATION_CONFIG_CREATED = "notification_config.created"
+    NOTIFICATION_CONFIG_UPDATED = "notification_config.updated"
     NOTIFICATION_CONFIG_DELETED = "notification_config.deleted"
     PROFILE_CREATED = "profile.created"
     PROFILE_UPDATED = "profile.updated"

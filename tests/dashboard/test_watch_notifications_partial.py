@@ -134,10 +134,11 @@ class TestWatchNotificationsPartialRoute:
         watch = _make_mock_watch()
         resp = await self._get(str(watch.id), mock_watch=watch)
         assert resp.status_code == 200
-        assert b"watch_created" in resp.content
-        assert b"disabled" in resp.content
+        # "disabled" attr is on the watch_created input specifically
+        wc_input = resp.text.split('value="watch_created"')[1].split(">")[0]
+        assert "disabled" in wc_input
         # No hidden input when watch_created is not in form_events
-        assert b'<input type="hidden" name="events" value="watch_created">' not in resp.content
+        assert '<input type="hidden" name="events" value="watch_created">' not in resp.text
 
     def test_watch_created_hidden_input_when_previously_set(self):
         """Template renders hidden input to preserve watch_created when form_events includes it."""
@@ -151,9 +152,10 @@ class TestWatchNotificationsPartialRoute:
             form_events=["watch_created", "change_detected"],
         )
         assert '<input type="hidden" name="events" value="watch_created">' in rendered
-        # Checkbox should also render as checked
-        assert "watch_created" in rendered
-        assert "checked" in rendered
+        # "checked" attr is on the checkbox (last occurrence of value="watch_created"),
+        # between that attribute and "disabled"
+        wc_attrs = rendered.split('value="watch_created"')[-1].split("disabled")[0]
+        assert "checked" in wc_attrs
 
 
 # ---------------------------------------------------------------------------

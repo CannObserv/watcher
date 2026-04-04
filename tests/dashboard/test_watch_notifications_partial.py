@@ -130,6 +130,31 @@ class TestWatchNotificationsPartialRoute:
         assert b"watch_paused" in resp.content
         assert b"watch_resumed" in resp.content
 
+    async def test_watch_created_checkbox_is_disabled(self):
+        watch = _make_mock_watch()
+        resp = await self._get(str(watch.id), mock_watch=watch)
+        assert resp.status_code == 200
+        assert b"watch_created" in resp.content
+        assert b"disabled" in resp.content
+        # No hidden input when watch_created is not in form_events
+        assert b'<input type="hidden" name="events" value="watch_created">' not in resp.content
+
+    def test_watch_created_hidden_input_when_previously_set(self):
+        """Template renders hidden input to preserve watch_created when form_events includes it."""
+        from src.dashboard import templates
+
+        watch = _make_mock_watch()
+        rendered = templates.get_template("partials/watch_notifications.html").render(
+            request=MagicMock(),
+            watch=watch,
+            notifications=[],
+            form_events=["watch_created", "change_detected"],
+        )
+        assert '<input type="hidden" name="events" value="watch_created">' in rendered
+        # Checkbox should also render as checked
+        assert "watch_created" in rendered
+        assert "checked" in rendered
+
 
 # ---------------------------------------------------------------------------
 # Helper for POST mutations

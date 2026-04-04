@@ -23,7 +23,7 @@ src/api/routes/health.py — /health (liveness) and /ready (readiness) endpoints
 src/core/              — Shared domain logic
 src/core/models/       — SQLAlchemy models (Watch [+health_status: WatchHealthStatus], AuditLog, Snapshot, SnapshotChunk, Change [+visual_change_score float nullable], TemporalProfile, NotificationConfig [apprise_url encrypted, channel_hint, events ARRAY], Domain); notification_event_types seed table in migrations
 src/core/probe.py      — URL probe: follow redirects, resolve effective URL and domain (ProbeResult + probe_url)
-src/core/notifications/  — Apprise-based notification dispatcher; WatchEvent + WatchEventType (events.py), dispatch_event() (dispatcher.py)
+src/core/notifications/  — Apprise-based notification dispatcher; WatchEvent + WatchEventType + EVENT_TITLES (events.py), dispatch_event() (dispatcher.py)
 src/core/extractors/   — Content extractors (HTML, PDF, CSV/Excel → Chunks)
 src/core/fetchers/     — URL fetchers (HTTP; browser/WebRecorder planned)
 src/core/differ.py     — Chunk-level change detection with SimHash similarity
@@ -33,7 +33,7 @@ src/core/storage.py    — StorageBackend protocol + LocalStorage (save, load, e
 src/core/scheduler.py  — Watch scheduling logic (interval parsing, due computation, temporal profile resolution)
 src/core/rate_limiter.py — Per-domain async rate limiting
 src/core/config_poller.py  — Background polling: sync domain configs from DB into rate limiter
-src/dashboard/           — Server-rendered dashboard (Jinja2 + HTMX + Tailwind)
+src/dashboard/           — Server-rendered dashboard (Jinja2 + HTMX + Tailwind); __init__.py registers Jinja2 globals: build_id, event_titles (human-readable event name map from EVENT_TITLES)
 src/dashboard/routes.py  — Dashboard page and partial routes; includes POST /watches/{id}/screenshot (on-demand re-capture) and GET /watches/{id}/snapshots/{snapshot_id}/content (escaped text viewer)
 src/dashboard/context.py — Dashboard-specific DB query helpers; includes get_latest_snapshot, compute_watch_health (pure fn), get_watch_health_map (per-watch latest check event), get_watch_timeline + get_watch_timeline_count (unified lifecycle timeline)
 src/dashboard/static/    — CSS, JS (vendored HTMX, dark-mode, htmx-a11y), compiled Tailwind

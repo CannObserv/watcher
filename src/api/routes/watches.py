@@ -1,6 +1,7 @@
 """Watch CRUD API endpoints."""
 
 from collections.abc import Awaitable, Callable
+from datetime import UTC, datetime
 from typing import Annotated
 
 import httpx
@@ -15,6 +16,8 @@ from src.api.schemas.watch import WatchCreate, WatchResponse, WatchUpdate
 from src.core.models.audit_log import EventType, audit
 from src.core.models.domain import DEFAULT_MAX_CONCURRENCY, DEFAULT_MIN_INTERVAL, Domain
 from src.core.models.watch import Watch
+from src.core.notifications.events import WatchEvent, WatchEventType
+from src.workers.notify import dispatch_event_notifications
 
 router = APIRouter(prefix="/watches", tags=["watches"])
 
@@ -76,6 +79,16 @@ async def create_watch(
         effective_url=probe_result.effective_url,
         effective_domain=probe_result.effective_domain,
     )
+    await dispatch_event_notifications(
+        session=session,
+        event=WatchEvent(
+            event_type=WatchEventType.WATCH_CREATED,
+            watch_id=str(watch.id),
+            watch_name=watch.name,
+            watch_url=watch.url,
+            occurred_at=datetime.now(UTC),
+        ),
+    )
     await session.commit()
     await session.refresh(watch)
     return watch
@@ -121,6 +134,7 @@ async def update_watch(
     watch = await get_watch_or_404(watch_id, session)
 
     updates = data.model_dump(exclude_unset=True)
+    previous_active = watch.is_active
 
     if updates.get("is_active") is True and watch.effective_domain:
         domain_result = await session.execute(
@@ -142,6 +156,29 @@ async def update_watch(
         watch_id=watch.id,
         updated_fields=list(updates.keys()),
     )
+    if "is_active" in updates:
+        if previous_active and not watch.is_active:
+            await dispatch_event_notifications(
+                session=session,
+                event=WatchEvent(
+                    event_type=WatchEventType.WATCH_PAUSED,
+                    watch_id=str(watch.id),
+                    watch_name=watch.name,
+                    watch_url=watch.url,
+                    occurred_at=datetime.now(UTC),
+                ),
+            )
+        elif not previous_active and watch.is_active:
+            await dispatch_event_notifications(
+                session=session,
+                event=WatchEvent(
+                    event_type=WatchEventType.WATCH_RESUMED,
+                    watch_id=str(watch.id),
+                    watch_name=watch.name,
+                    watch_url=watch.url,
+                    occurred_at=datetime.now(UTC),
+                ),
+            )
     await session.commit()
     await session.refresh(watch)
     return watch

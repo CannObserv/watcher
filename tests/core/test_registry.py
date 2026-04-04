@@ -2,19 +2,11 @@
 
 from unittest.mock import MagicMock
 
-import httpx
 import pytest
 
 from src.core.extractors import CsvExcelExtractor, HtmlExtractor, PdfExtractor
 from src.core.fetchers.http import HttpFetcher
-from src.core.notifications import EmailChannel, SlackChannel, WebhookChannel
 from src.core.registry import ServiceRegistry
-
-
-@pytest.fixture
-def mock_client() -> MagicMock:
-    """Return a mock httpx.AsyncClient to avoid unclosed-resource warnings."""
-    return MagicMock(spec=httpx.AsyncClient)
 
 
 class TestServiceRegistryDefaults:
@@ -53,28 +45,6 @@ class TestServiceRegistryDefaults:
         with pytest.raises(KeyError):
             registry.get_extractor("unknown")
 
-    def test_get_channels_returns_all_three(self, mock_client):
-        registry = ServiceRegistry()
-        channels = registry.get_channels(mock_client)
-        assert "webhook" in channels
-        assert "email" in channels
-        assert "slack" in channels
-
-    def test_get_channels_webhook_type(self, mock_client):
-        registry = ServiceRegistry()
-        channels = registry.get_channels(mock_client)
-        assert isinstance(channels["webhook"], WebhookChannel)
-
-    def test_get_channels_email_type(self, mock_client):
-        registry = ServiceRegistry()
-        channels = registry.get_channels(mock_client)
-        assert isinstance(channels["email"], EmailChannel)
-
-    def test_get_channels_slack_type(self, mock_client):
-        registry = ServiceRegistry()
-        channels = registry.get_channels(mock_client)
-        assert isinstance(channels["slack"], SlackChannel)
-
 
 class TestServiceRegistryCustomInjection:
     def test_custom_fetcher_is_returned(self):
@@ -88,9 +58,3 @@ class TestServiceRegistryCustomInjection:
         extractor = registry.get_extractor("custom")
         mock_cls.assert_called_once()
         assert extractor is mock_cls.return_value
-
-    def test_custom_channel_map(self, mock_client):
-        mock_channel_cls = MagicMock(return_value=MagicMock())
-        registry = ServiceRegistry(channel_map={"custom": mock_channel_cls})
-        channels = registry.get_channels(mock_client)
-        assert "custom" in channels

@@ -1,14 +1,10 @@
-"""Notification channels for change alerts."""
+"""Notification subsystem — Apprise-based dispatch for watch lifecycle events."""
 
-from src.core.notifications.base import ChangeEvent, NotificationChannel
-from src.core.notifications.email import EmailChannel
-from src.core.notifications.slack import SlackChannel
-from src.core.notifications.webhook import WebhookChannel
+from src.core.notifications.dispatcher import dispatch_event
+from src.core.notifications.events import WatchEvent, WatchEventType
 
 __all__ = [
-    "ChangeEvent",
-    "EmailChannel",
-    "NotificationChannel",
-    "SlackChannel",
-    "WebhookChannel",
+    "WatchEvent",
+    "WatchEventType",
+    "dispatch_event",
 ]

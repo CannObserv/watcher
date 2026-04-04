@@ -1,7 +1,5 @@
 """Notification dispatch for watch lifecycle events."""
 
-from datetime import UTC, datetime
-
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from ulid import ULID
@@ -9,10 +7,8 @@ from ulid import ULID
 from src.core.logging import get_logger
 from src.core.models.audit_log import EventType, audit
 from src.core.models.notification_config import NotificationConfig
-from src.core.models.watch import Watch
 from src.core.notifications.dispatcher import dispatch_event
-from src.core.notifications.events import WatchEvent, WatchEventType
-from src.core.registry import ServiceRegistry
+from src.core.notifications.events import WatchEvent
 
 logger = get_logger(__name__)
 
@@ -63,29 +59,3 @@ async def dispatch_event_notifications(
         watch_event_type=event.event_type,
         results=results,
     )
-
-
-async def dispatch_change_notifications(
-    session: AsyncSession,
-    watch: Watch,
-    change_id: str,
-    change_metadata: dict,
-    registry: ServiceRegistry | None = None,
-) -> None:
-    """Dispatch notifications for a detected change.
-
-    Deprecated: Use dispatch_event_notifications with WatchEvent directly.
-    This wrapper is maintained for backward compatibility until Task 11 cleanup.
-
-    Builds a CHANGE_DETECTED WatchEvent and dispatches to all active,
-    opted-in configs for the watch. Does not commit the session.
-    """
-    event = WatchEvent(
-        event_type=WatchEventType.CHANGE_DETECTED,
-        watch_id=str(watch.id),
-        watch_name=watch.name,
-        watch_url=watch.url,
-        occurred_at=datetime.now(UTC),
-        metadata=change_metadata,
-    )
-    await dispatch_event_notifications(session, event)

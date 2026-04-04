@@ -1,5 +1,7 @@
 """Notification config CRUD API endpoints (Apprise v2)."""
 
+from datetime import UTC, datetime
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -13,8 +15,13 @@ from src.api.schemas.notification_config import (
     extract_channel_hint,
 )
 from src.core.crypto import encrypt_apprise_url
+from src.core.logging import get_logger
 from src.core.models.audit_log import EventType, audit
 from src.core.models.notification_config import NotificationConfig
+from src.core.notifications.dispatcher import dispatch_event
+from src.core.notifications.events import WatchEvent, WatchEventType
+
+logger = get_logger(__name__)
 
 router = APIRouter(prefix="/watches/{watch_id}/notifications", tags=["notification-configs"])
 
@@ -108,3 +115,30 @@ async def delete_notification_config(
     )
     await session.delete(nc)
     await session.commit()
+
+
+@router.post("/{config_id}/test")
+async def test_notification_config(
+    watch_id: str,
+    config_id: str,
+    session: AsyncSession = Depends(get_db_session),
+):
+    """Send a test notification for a config. Returns {success: bool}, never 5xx."""
+    watch = await get_watch_or_404(watch_id, session)
+    nc = await session.get(NotificationConfig, parse_ulid(config_id, "Config"))
+    if not nc or nc.watch_id != watch.id:
+        raise HTTPException(status_code=404, detail="Config not found")
+    event = WatchEvent(
+        event_type=WatchEventType.CHANGE_DETECTED,
+        watch_id=str(watch.id),
+        watch_name=watch.name,
+        watch_url=watch.url,
+        occurred_at=datetime.now(UTC),
+        metadata={"test": True},
+    )
+    try:
+        success = await dispatch_event(event, nc.apprise_url)
+    except Exception:
+        logger.exception("test notification error", extra={"config_id": config_id})
+        success = False
+    return {"success": success}

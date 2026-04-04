@@ -185,3 +185,74 @@ class TestDeleteNotificationConfig:
         other = await _make_watch(client)
         resp = await client.delete(f"/api/v1/watches/{other}/notifications/{config_id}")
         assert resp.status_code == 404
+
+
+class TestTestNotificationConfig:
+    async def _make_config(self, client, watch_id):
+        resp = await client.post(
+            f"/api/v1/watches/{watch_id}/notifications",
+            json={"apprise_url": VALID_URL, "events": ["change_detected"]},
+        )
+        return resp.json()["id"]
+
+    async def test_test_sends_notification_and_returns_success(self, client):
+        from unittest.mock import AsyncMock, patch
+
+        watch_id = await _make_watch(client)
+        config_id = await self._make_config(client, watch_id)
+        with patch(
+            "src.api.routes.notification_configs.dispatch_event",
+            new_callable=AsyncMock,
+            return_value=True,
+        ):
+            resp = await client.post(f"/api/v1/watches/{watch_id}/notifications/{config_id}/test")
+        assert resp.status_code == 200
+        assert resp.json() == {"success": True}
+
+    async def test_test_returns_success_false_on_dispatch_failure(self, client):
+        from unittest.mock import AsyncMock, patch
+
+        watch_id = await _make_watch(client)
+        config_id = await self._make_config(client, watch_id)
+        with patch(
+            "src.api.routes.notification_configs.dispatch_event",
+            new_callable=AsyncMock,
+            return_value=False,
+        ):
+            resp = await client.post(f"/api/v1/watches/{watch_id}/notifications/{config_id}/test")
+        assert resp.status_code == 200
+        assert resp.json() == {"success": False}
+
+    async def test_test_returns_404_for_unknown_config(self, client):
+        watch_id = await _make_watch(client)
+        fake_id = "01JNVAJNVAJNVAJNVAJNVAJNVA"
+        resp = await client.post(f"/api/v1/watches/{watch_id}/notifications/{fake_id}/test")
+        assert resp.status_code == 404
+
+    async def test_test_returns_404_for_wrong_watch(self, client):
+        from unittest.mock import AsyncMock, patch
+
+        watch_id = await _make_watch(client)
+        other_id = await _make_watch(client)
+        config_id = await self._make_config(client, watch_id)
+        with patch(
+            "src.api.routes.notification_configs.dispatch_event",
+            new_callable=AsyncMock,
+            return_value=True,
+        ):
+            resp = await client.post(f"/api/v1/watches/{other_id}/notifications/{config_id}/test")
+        assert resp.status_code == 404
+
+    async def test_test_returns_success_false_on_exception(self, client):
+        from unittest.mock import AsyncMock, patch
+
+        watch_id = await _make_watch(client)
+        config_id = await self._make_config(client, watch_id)
+        with patch(
+            "src.api.routes.notification_configs.dispatch_event",
+            new_callable=AsyncMock,
+            side_effect=Exception("boom"),
+        ):
+            resp = await client.post(f"/api/v1/watches/{watch_id}/notifications/{config_id}/test")
+        assert resp.status_code == 200
+        assert resp.json() == {"success": False}

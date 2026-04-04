@@ -21,9 +21,9 @@ src/api/               — FastAPI app (ASGI, routes, schemas)
 src/api/routes/        — API endpoints (watches, temporal_profiles, changes, audit_log, notification_configs, domains, probe); mounted at /api/v1/
 src/api/routes/health.py — /health (liveness) and /ready (readiness) endpoints; root-level, not versioned
 src/core/              — Shared domain logic
-src/core/models/       — SQLAlchemy models (Watch, AuditLog, Snapshot, SnapshotChunk, Change [+visual_change_score float nullable], TemporalProfile, NotificationConfig, Domain)
+src/core/models/       — SQLAlchemy models (Watch [+health_status: WatchHealthStatus], AuditLog, Snapshot, SnapshotChunk, Change [+visual_change_score float nullable], TemporalProfile, NotificationConfig [apprise_url encrypted, channel_hint, events ARRAY], Domain); notification_event_types seed table in migrations
 src/core/probe.py      — URL probe: follow redirects, resolve effective URL and domain (ProbeResult + probe_url)
-src/core/notifications/  — Notification channels (webhook, email, Slack) and dispatcher
+src/core/notifications/  — Apprise-based notification dispatcher; WatchEvent + WatchEventType (events.py), dispatch_event() (dispatcher.py)
 src/core/extractors/   — Content extractors (HTML, PDF, CSV/Excel → Chunks)
 src/core/fetchers/     — URL fetchers (HTTP; browser/WebRecorder planned)
 src/core/differ.py     — Chunk-level change detection with SimHash similarity
@@ -41,8 +41,9 @@ src/dashboard/static/images/ — Brand assets and project icons (Cannabis Observ
 src/dashboard/templates/ — Jinja2 templates (base, pages, partials); partials/pagination.html reusable offset-based pagination; partials/domain_field.html reusable inline-editable domain field (view/edit modes via GET /domains/{name}/field/{field_name}?mode=view|edit); partials/watch_field.html inline-editable watch field (text/number/textarea/select/toggle types, content-type-aware via WATCH_FIELD_META); partials/watch_status_toggle.html Active/Inactive/Archived toggle with badge; partials/watch_timeline.html unified lifecycle event timeline with category filter (change/error/run/config) and pagination; macros/fields.html — watch_field(ctx) and domain_field(ctx) macros (import with context; centralise {% set %} boilerplate for field partials)
 src/workers/           — Procrastinate task queue (check_watch, schedule_tick)
 src/workers/pipeline.py  — Core check pipeline: hash, extract, diff, store snapshots
-src/workers/notify.py    — Notification dispatch: dispatch_change_notifications()
-src/core/registry.py     — ServiceRegistry: swappable fetcher, extractor, channel implementations
+src/workers/notify.py    — Notification dispatch: dispatch_event_notifications(session, event)
+src/core/crypto.py       — Fernet encryption for Apprise URLs (encrypt_apprise_url, decrypt_apprise_url); requires APPRISE_SECRET_KEY env var
+src/core/registry.py     — ServiceRegistry: swappable fetcher and extractor implementations
 tests/                 — Mirrors src/ structure
 deploy/                — Systemd unit and deployment config
 docs/                  — Reference docs (COMMANDS, SKILLS, DEPLOYMENT)
@@ -110,6 +111,7 @@ Currently defined:
 - `TEST_DATABASE_URL` — PostgreSQL connection string for test database (in `.env`)
 - `WATCHER_DATA_DIR` — (optional) absolute path for snapshot/content storage; defaults to `/var/lib/watcher/data`
 - `BUILD_ID` — (optional) git SHA for static asset cache-busting; defaults to `"dev"`
+- `APPRISE_SECRET_KEY` — Fernet key for encrypting Apprise URLs at rest (in `/etc/watcher/.env`); generate with `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"`
 
 ## Common Commands
 

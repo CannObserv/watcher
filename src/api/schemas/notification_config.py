@@ -23,7 +23,7 @@ def _validate_apprise_url(url: str) -> str:
     return url
 
 
-def _extract_channel_hint(url: str) -> str:
+def extract_channel_hint(url: str) -> str:
     """Return the URL scheme portion (e.g. 'slack' from 'slack://...')."""
     return url.split("://")[0].lower() if "://" in url else url.lower()
 

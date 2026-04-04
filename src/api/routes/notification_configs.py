@@ -10,7 +10,7 @@ from src.api.schemas.notification_config import (
     NotificationConfigCreate,
     NotificationConfigResponse,
     NotificationConfigUpdate,
-    _extract_channel_hint,
+    extract_channel_hint,
 )
 from src.core.crypto import encrypt_apprise_url
 from src.core.models.audit_log import EventType, audit
@@ -30,7 +30,7 @@ async def create_notification_config(
     config = NotificationConfig(
         watch_id=watch.id,
         apprise_url=encrypt_apprise_url(data.apprise_url),
-        channel_hint=_extract_channel_hint(data.apprise_url),
+        channel_hint=extract_channel_hint(data.apprise_url),
         events=data.events,
     )
     session.add(config)

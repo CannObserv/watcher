@@ -6,10 +6,12 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
 import pytest
+from cryptography.fernet import Fernet
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 import src.workers.tasks as tasks_mod
+from src.core.crypto import encrypt_apprise_url
 from src.core.fetchers.http import HttpFetcher
 from src.core.models.audit_log import AuditLog, EventType
 from src.core.models.domain import Domain
@@ -24,6 +26,12 @@ from src.workers.pipeline import _maybe_decay_backoff
 from src.workers.tasks import _persist_backoff, _run_check_pipeline, check_watch, schedule_tick
 
 pytestmark = pytest.mark.integration
+
+
+@pytest.fixture(autouse=True)
+def set_test_key(monkeypatch):
+    key = Fernet.generate_key().decode()
+    monkeypatch.setenv("APPRISE_SECRET_KEY", key)
 
 
 class TestPersistBackoff:
@@ -286,8 +294,9 @@ class TestCheckWatchSavepointBoundary:
         # Add an active notification config so dispatch is triggered
         nc = NotificationConfig(
             watch_id=watch.id,
-            channel="webhook",
-            config={"url": "https://hooks.example.com/test"},
+            apprise_url=encrypt_apprise_url("json://localhost/notify"),
+            channel_hint="json",
+            events=["change_detected"],
             is_active=True,
         )
         db_session.add(nc)

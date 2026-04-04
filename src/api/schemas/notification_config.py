@@ -12,7 +12,7 @@ from src.core.notifications.events import WatchEventType
 _VALID_EVENT_TYPES = {e.value for e in WatchEventType}
 
 
-def _validate_apprise_url(url: str) -> str:
+def validate_apprise_url(url: str) -> str:
     """Reject URLs that Apprise cannot parse."""
     ap = apprise.Apprise()
     if not ap.add(url):
@@ -37,7 +37,7 @@ class NotificationConfigCreate(BaseModel):
     @field_validator("apprise_url")
     @classmethod
     def validate_url(cls, v: str) -> str:
-        return _validate_apprise_url(v)
+        return validate_apprise_url(v)
 
     @field_validator("events")
     @classmethod

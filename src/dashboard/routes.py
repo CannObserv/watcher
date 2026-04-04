@@ -6,7 +6,6 @@ from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from typing import Literal
 
-import apprise as _apprise
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from sqlalchemy import select
@@ -16,7 +15,7 @@ from ulid import ULID
 from src.api.dependencies import get_db_session, get_probe_fn
 from src.api.routes.helpers import parse_ulid
 from src.api.routes.watches import delete_watch as api_delete_watch
-from src.api.schemas.notification_config import extract_channel_hint
+from src.api.schemas.notification_config import extract_channel_hint, validate_apprise_url
 from src.core.crypto import encrypt_apprise_url
 from src.core.logging import get_logger
 from src.core.models.audit_log import EventType, audit
@@ -1346,8 +1345,9 @@ async def watch_notification_create(
     if not watch:
         raise HTTPException(status_code=404, detail="Watch not found")
 
-    ap = _apprise.Apprise()
-    if not ap.add(apprise_url):
+    try:
+        validate_apprise_url(apprise_url)
+    except ValueError as exc:
         notifications = await get_watch_notifications(session, watch.id)
         return templates.TemplateResponse(
             "partials/watch_notifications.html",
@@ -1355,7 +1355,7 @@ async def watch_notification_create(
                 "request": request,
                 "watch": watch,
                 "notifications": notifications,
-                "error": f"Invalid Apprise URL: {apprise_url!r}",
+                "error": str(exc),
             },
         )
 

@@ -1,52 +1,31 @@
-"""Notification dispatcher — route events to configured channels."""
+"""Apprise-based notification dispatcher."""
 
+import apprise
+
+from src.core.crypto import decrypt_apprise_url
 from src.core.logging import get_logger
-from src.core.notifications.base import ChangeEvent
+from src.core.notifications.events import WatchEvent
 
 logger = get_logger(__name__)
 
 
-async def dispatch_notifications(
-    event: ChangeEvent,
-    configs: list[dict],
-    channels: dict,
-) -> list[dict]:
-    """Dispatch a change event to all configured notification channels.
+async def dispatch_event(event: WatchEvent, apprise_url_encrypted: str) -> bool:
+    """Dispatch a WatchEvent to a single Apprise target.
 
-    Args:
-        event: The change event to notify about.
-        configs: List of notification config dicts, each with a "channel" key.
-        channels: Map of channel name -> channel instance.
-
-    Returns:
-        List of result dicts: {"channel", "success", "error"?}
+    Decrypts the stored URL, hands it to Apprise, and awaits async_notify.
+    Returns True on success, False on failure or if nothing was dispatched.
     """
-    results = []
-    for config in configs:
-        channel_name = config.get("channel", "unknown")
-        channel = channels.get(channel_name)
-        if not channel:
-            logger.warning(
-                "unknown notification channel",
-                extra={"channel": channel_name},
-            )
-            results.append(
-                {
-                    "channel": channel_name,
-                    "success": False,
-                    "error": f"unknown channel: {channel_name}",
-                }
-            )
-            continue
-        try:
-            success = await channel.send(event, config)
-            results.append({"channel": channel_name, "success": success})
-            extra = {"channel": channel_name, "watch_id": event.watch_id}
-            if success:
-                logger.info("notification sent", extra=extra)
-            else:
-                logger.warning("notification failed", extra=extra)
-        except Exception:
-            logger.exception("notification error", extra={"channel": channel_name})
-            results.append({"channel": channel_name, "success": False, "error": "exception"})
-    return results
+    url = decrypt_apprise_url(apprise_url_encrypted)
+    ap = apprise.Apprise()
+    if not ap.add(url):
+        logger.warning(
+            "invalid apprise url in notification config",
+            extra={"watch_id": event.watch_id, "event_type": event.event_type},
+        )
+        return False
+    result = await ap.async_notify(
+        body=event.body,
+        title=event.title,
+        notify_type=event.apprise_notify_type,
+    )
+    return result is True

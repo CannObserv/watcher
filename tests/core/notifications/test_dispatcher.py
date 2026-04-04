@@ -1,56 +1,124 @@
-"""Tests for notification dispatcher."""
+"""Tests for the Apprise-based notification dispatcher."""
 
 from datetime import UTC, datetime
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from cryptography.fernet import Fernet
 
-from src.core.notifications.base import ChangeEvent
-from src.core.notifications.dispatcher import dispatch_notifications
+from src.core.notifications.dispatcher import dispatch_event
+from src.core.notifications.events import WatchEvent, WatchEventType
 
 
-@pytest.fixture
-def event():
-    return ChangeEvent(
-        watch_id="01KM7A9TP2B0BQCNZ5PZX4MH89",
+@pytest.fixture(autouse=True)
+def set_test_key(monkeypatch):
+    key = Fernet.generate_key().decode()
+    monkeypatch.setenv("APPRISE_SECRET_KEY", key)
+
+
+def make_event(event_type=WatchEventType.CHANGE_DETECTED, metadata=None):
+    return WatchEvent(
+        event_type=event_type,
+        watch_id="01HV0000000000000000000001",
         watch_name="Test Watch",
         watch_url="https://example.com",
-        change_id="01KM7A9TP2B0BQCNZ5PZX4MH8A",
-        detected_at=datetime(2026, 3, 21, 12, 0, tzinfo=UTC),
-        change_metadata={"added": ["Page 2"], "modified": [], "removed": []},
+        occurred_at=datetime(2026, 4, 4, tzinfo=UTC),
+        metadata=metadata or {"added": ["sec-a"], "modified": [], "removed": []},
     )
 
 
-class TestDispatchNotifications:
-    async def test_dispatches_to_all_configs(self, event):
-        configs = [
-            {"channel": "webhook", "url": "https://hooks.example.com/a"},
-            {"channel": "webhook", "url": "https://hooks.example.com/b"},
-        ]
-        mock_channel = AsyncMock()
-        mock_channel.send.return_value = True
-        results = await dispatch_notifications(event, configs, {"webhook": mock_channel})
-        assert mock_channel.send.call_count == 2
-        assert all(r["success"] for r in results)
+def make_encrypted_url(url: str) -> str:
+    from src.core.crypto import encrypt_apprise_url
 
-    async def test_unknown_channel_skipped(self, event):
-        results = await dispatch_notifications(event, [{"channel": "pigeon"}], {})
-        assert len(results) == 1
-        assert results[0]["success"] is False
-        assert "unknown" in results[0]["error"]
+    return encrypt_apprise_url(url)
 
-    async def test_channel_failure_does_not_block_others(self, event):
-        configs = [
-            {"channel": "webhook", "url": "https://fail.example.com"},
-            {"channel": "slack", "webhook_url": "https://hooks.slack.com/ok"},
-        ]
-        fail_ch = AsyncMock()
-        fail_ch.send.return_value = False
-        ok_ch = AsyncMock()
-        ok_ch.send.return_value = True
-        results = await dispatch_notifications(event, configs, {"webhook": fail_ch, "slack": ok_ch})
-        assert results[0]["success"] is False
-        assert results[1]["success"] is True
 
-    async def test_empty_configs_returns_empty(self, event):
-        assert await dispatch_notifications(event, [], {}) == []
+class TestDispatchEvent:
+    async def test_returns_true_on_apprise_success(self):
+        event = make_event()
+        encrypted = make_encrypted_url("json://localhost/notify")
+
+        with patch("src.core.notifications.dispatcher.apprise.Apprise") as MockApprise:
+            instance = MagicMock()
+            instance.add.return_value = True
+            instance.async_notify = AsyncMock(return_value=True)
+            MockApprise.return_value = instance
+
+            result = await dispatch_event(event, encrypted)
+
+        assert result is True
+        instance.async_notify.assert_awaited_once()
+
+    async def test_returns_false_on_apprise_failure(self):
+        event = make_event()
+        encrypted = make_encrypted_url("json://localhost/notify")
+
+        with patch("src.core.notifications.dispatcher.apprise.Apprise") as MockApprise:
+            instance = MagicMock()
+            instance.add.return_value = True
+            instance.async_notify = AsyncMock(return_value=False)
+            MockApprise.return_value = instance
+
+            result = await dispatch_event(event, encrypted)
+
+        assert result is False
+
+    async def test_returns_false_on_apprise_none(self):
+        """None from async_notify means nothing was dispatched."""
+        event = make_event()
+        encrypted = make_encrypted_url("json://localhost/notify")
+
+        with patch("src.core.notifications.dispatcher.apprise.Apprise") as MockApprise:
+            instance = MagicMock()
+            instance.add.return_value = True
+            instance.async_notify = AsyncMock(return_value=None)
+            MockApprise.return_value = instance
+
+            result = await dispatch_event(event, encrypted)
+
+        assert result is False
+
+    async def test_returns_false_on_invalid_url(self):
+        """add() returning False means Apprise rejected the URL."""
+        event = make_event()
+        encrypted = make_encrypted_url("notaschema://whatever")
+
+        with patch("src.core.notifications.dispatcher.apprise.Apprise") as MockApprise:
+            instance = MagicMock()
+            instance.add.return_value = False
+            MockApprise.return_value = instance
+
+            result = await dispatch_event(event, encrypted)
+
+        assert result is False
+
+    async def test_passes_correct_notify_type(self):
+        event = make_event(WatchEventType.WATCH_ERROR, metadata={"status_code": 500})
+        encrypted = make_encrypted_url("json://localhost/notify")
+
+        with patch("src.core.notifications.dispatcher.apprise.Apprise") as MockApprise:
+            instance = MagicMock()
+            instance.add.return_value = True
+            instance.async_notify = AsyncMock(return_value=True)
+            MockApprise.return_value = instance
+
+            await dispatch_event(event, encrypted)
+
+        call_kwargs = instance.async_notify.call_args.kwargs
+        assert call_kwargs["notify_type"] == "failure"
+
+    async def test_passes_title_and_body(self):
+        event = make_event()
+        encrypted = make_encrypted_url("json://localhost/notify")
+
+        with patch("src.core.notifications.dispatcher.apprise.Apprise") as MockApprise:
+            instance = MagicMock()
+            instance.add.return_value = True
+            instance.async_notify = AsyncMock(return_value=True)
+            MockApprise.return_value = instance
+
+            await dispatch_event(event, encrypted)
+
+        call_kwargs = instance.async_notify.call_args.kwargs
+        assert "Test Watch" in call_kwargs["title"]
+        assert "example.com" in call_kwargs["body"]

@@ -142,28 +142,20 @@
 </section>
 {% endif %}
 
-{# Notification Configs (read-only) #}
-{% if notifications %}
+{# Notification Configs — interactive management #}
 <section class="mb-8">
   <h3 class="text-lg font-semibold text-gray-900 dark:text-white mb-4">Notifications</h3>
-  <div class="space-y-2">
-    {% for nc in notifications %}
-    <div class="stat-card text-sm flex items-center justify-between gap-4">
-      <div class="flex items-center gap-3 min-w-0">
-        <span class="font-medium text-gray-900 dark:text-white truncate">{{ nc.channel_hint }}</span>
-        <span class="flex flex-wrap gap-1">
-          {% for evt in nc.events %}
-          <span class="badge badge-info">{{ evt }}</span>
-          {% endfor %}
-        </span>
-      </div>
-      {% if not nc.is_active %}<span class="badge badge-inactive shrink-0">Inactive</span>{% endif %}
-    </div>
-    {% endfor %}
+  <div
+    id="watch-notifications"
+    hx-get="/partials/watch-notifications/{{ watch.id }}"
+    hx-trigger="load"
+    hx-swap="innerHTML"
+    aria-live="polite"
+    aria-atomic="false">
+    {# Rendered server-side on initial page load #}
+    {% include "partials/watch_notifications.html" %}
   </div>
-  <p class="text-xs text-gray-400 dark:text-gray-500 mt-3">Manage via API: <code>POST /api/v1/watches/{{ watch.id }}/notifications</code></p>
 </section>
-{% endif %}
 
 {# Event Timeline #}
 <section class="mb-8">

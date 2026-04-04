@@ -1307,6 +1307,23 @@ async def partial_watch_timeline(
     )
 
 
+@router.get("/partials/watch-notifications/{watch_id}")
+async def partial_watch_notifications(
+    request: Request,
+    watch_id: str,
+    session: AsyncSession = Depends(get_db_session),
+):
+    """HTMX partial: notification config list for a watch."""
+    watch = await get_watch_detail(session, watch_id)
+    if not watch:
+        raise HTTPException(status_code=404, detail="Watch not found")
+    notifications = await get_watch_notifications(session, watch.id)
+    return templates.TemplateResponse(
+        "partials/watch_notifications.html",
+        {"request": request, "watch": watch, "notifications": notifications},
+    )
+
+
 def _load_snapshot_text(storage: LocalStorage, snapshot, path_attr: str) -> str:
     """Load text content from a snapshot's storage path. Returns empty string on failure."""
     if not snapshot:

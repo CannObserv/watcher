@@ -1,0 +1,126 @@
+{# Notification config list and add form for a single watch. #}
+{# Expects: watch, notifications (list of NotificationConfig). #}
+
+<div id="watch-notifications-list" aria-live="polite" aria-atomic="false">
+  {% if notifications %}
+  <ul class="space-y-2 mb-4" role="list">
+    {% for nc in notifications %}
+    <li class="stat-card flex items-center justify-between gap-4 text-sm"
+        id="nc-{{ nc.id }}">
+      {# Left: channel hint + event chips + inactive badge #}
+      <div class="flex flex-wrap items-center gap-3 min-w-0">
+        <span class="font-medium text-gray-900 dark:text-white truncate">{{ nc.channel_hint }}</span>
+        <span class="flex flex-wrap gap-1" aria-label="Subscribed events">
+          {% for evt in nc.events %}
+          <span class="badge badge-info">{{ evt }}</span>
+          {% endfor %}
+        </span>
+        {% if not nc.is_active %}
+        <span class="badge badge-inactive shrink-0">Inactive</span>
+        {% endif %}
+      </div>
+
+      {# Right: action buttons #}
+      <div class="flex items-center gap-2 shrink-0">
+        {# Toggle active / inactive #}
+        <button
+          hx-patch="/api/v1/watches/{{ watch.id }}/notifications/{{ nc.id }}"
+          hx-vals='{"is_active": {{ ("false" if nc.is_active else "true") }}}'
+          hx-target="#watch-notifications-list"
+          hx-swap="outerHTML"
+          hx-trigger="click"
+          hx-on::after-request="htmx.trigger('#watch-notifications-list', 'refreshNotifications')"
+          class="btn btn-secondary text-xs min-h-[44px] htmx-request:opacity-60"
+          aria-label="{{ 'Deactivate' if nc.is_active else 'Activate' }} {{ nc.channel_hint }} notification">
+          {{ "Deactivate" if nc.is_active else "Activate" }}
+        </button>
+
+        {# Send test #}
+        <button
+          hx-post="/api/v1/watches/{{ watch.id }}/notifications/{{ nc.id }}/test"
+          hx-target="#nc-test-result-{{ nc.id }}"
+          hx-swap="innerHTML"
+          class="btn btn-secondary text-xs min-h-[44px] htmx-request:opacity-60"
+          aria-label="Send test notification for {{ nc.channel_hint }}">
+          Test
+        </button>
+
+        {# Delete #}
+        <button
+          hx-delete="/api/v1/watches/{{ watch.id }}/notifications/{{ nc.id }}"
+          hx-target="#watch-notifications-list"
+          hx-swap="outerHTML"
+          hx-confirm="Delete this {{ nc.channel_hint }} notification config?"
+          hx-on::after-request="htmx.trigger('#watch-notifications-list', 'refreshNotifications')"
+          class="btn btn-danger-outline text-xs min-h-[44px] htmx-request:opacity-60"
+          aria-label="Delete {{ nc.channel_hint }} notification config">
+          Delete
+        </button>
+      </div>
+    </li>
+    {# Inline test result area #}
+    <li id="nc-test-result-{{ nc.id }}" aria-live="polite" class="text-xs text-gray-500 dark:text-gray-400 px-1"></li>
+    {% endfor %}
+  </ul>
+  {% else %}
+  <p class="text-sm text-gray-500 dark:text-gray-400 mb-4">No notification configs yet.</p>
+  {% endif %}
+</div>
+
+{# HTMX re-fetch: after toggle/delete mutations, re-fetch this partial #}
+<div
+  hx-get="/partials/watch-notifications/{{ watch.id }}"
+  hx-trigger="refreshNotifications from:body"
+  hx-target="#watch-notifications-list"
+  hx-swap="outerHTML"
+  aria-hidden="true">
+</div>
+
+{# Add notification form #}
+<form
+  id="add-notification-form"
+  hx-post="/api/v1/watches/{{ watch.id }}/notifications"
+  hx-target="#add-notification-result"
+  hx-swap="innerHTML"
+  hx-on::after-request="if(event.detail.successful && event.detail.xhr.status === 201) { this.reset(); htmx.trigger(document.body, 'refreshNotifications'); }"
+  class="mt-4 space-y-4 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-4">
+  <h4 class="text-sm font-semibold text-gray-900 dark:text-white">Add notification</h4>
+
+  <div>
+    <label for="apprise_url" class="form-label">Apprise URL</label>
+    <input
+      type="text"
+      id="apprise_url"
+      name="apprise_url"
+      class="form-input mt-1"
+      placeholder="slack://T.../A.../T.../#channel"
+      required
+      aria-required="true">
+  </div>
+
+  <fieldset>
+    <legend class="form-label mb-2">Events</legend>
+    <div class="flex flex-wrap gap-4">
+      <label class="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300 cursor-pointer min-h-[44px]">
+        <input type="checkbox" name="events" value="change_detected" checked class="rounded border-gray-300 dark:border-gray-600">
+        change_detected
+      </label>
+      <label class="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300 cursor-pointer min-h-[44px]">
+        <input type="checkbox" name="events" value="watch_error" class="rounded border-gray-300 dark:border-gray-600">
+        watch_error
+      </label>
+      <label class="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300 cursor-pointer min-h-[44px]">
+        <input type="checkbox" name="events" value="watch_resumed" class="rounded border-gray-300 dark:border-gray-600">
+        watch_resumed
+      </label>
+    </div>
+  </fieldset>
+
+  <div class="flex items-center gap-3">
+    <button type="submit" class="btn btn-primary min-h-[44px] htmx-request:opacity-60">
+      Add
+    </button>
+  </div>
+
+  <div id="add-notification-result" aria-live="polite" class="text-sm"></div>
+</form>

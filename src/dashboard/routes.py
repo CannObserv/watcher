@@ -6,6 +6,7 @@ from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from typing import Literal
 
+import apprise as _apprise
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from sqlalchemy import select
@@ -13,11 +14,18 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ulid import ULID
 
 from src.api.dependencies import get_db_session, get_probe_fn
+from src.api.routes.helpers import parse_ulid
 from src.api.routes.watches import delete_watch as api_delete_watch
+from src.api.schemas.notification_config import extract_channel_hint
+from src.core.crypto import encrypt_apprise_url
+from src.core.logging import get_logger
 from src.core.models.audit_log import EventType, audit
 from src.core.models.domain import Domain
+from src.core.models.notification_config import NotificationConfig
 from src.core.models.snapshot import Snapshot
 from src.core.models.watch import ContentType, Watch
+from src.core.notifications.dispatcher import dispatch_event
+from src.core.notifications.events import WatchEvent, WatchEventType
 from src.core.probe import ProbeResult
 from src.core.screenshot import capture_screenshot
 from src.core.storage import STORAGE_BASE_DIR, LocalStorage
@@ -45,6 +53,7 @@ from src.dashboard.context import (
 )
 
 router = APIRouter(tags=["dashboard"])
+logger = get_logger(__name__)
 
 
 @router.get("/")
@@ -1322,6 +1331,123 @@ async def partial_watch_notifications(
         "partials/watch_notifications.html",
         {"request": request, "watch": watch, "notifications": notifications},
     )
+
+
+@router.post("/watches/{watch_id}/notifications/new")
+async def watch_notification_create(
+    request: Request,
+    watch_id: str,
+    apprise_url: str = Form(...),
+    events: list[str] = Form(default=[]),
+    session: AsyncSession = Depends(get_db_session),
+):
+    """Create a notification config from dashboard form. Returns refreshed partial."""
+    watch = await get_watch_detail(session, watch_id)
+    if not watch:
+        raise HTTPException(status_code=404, detail="Watch not found")
+
+    ap = _apprise.Apprise()
+    if not ap.add(apprise_url):
+        notifications = await get_watch_notifications(session, watch.id)
+        return templates.TemplateResponse(
+            "partials/watch_notifications.html",
+            {
+                "request": request,
+                "watch": watch,
+                "notifications": notifications,
+                "error": f"Invalid Apprise URL: {apprise_url!r}",
+            },
+        )
+
+    valid_event_values = {e.value for e in WatchEventType}
+    invalid = [e for e in events if e not in valid_event_values]
+    if invalid:
+        notifications = await get_watch_notifications(session, watch.id)
+        return templates.TemplateResponse(
+            "partials/watch_notifications.html",
+            {
+                "request": request,
+                "watch": watch,
+                "notifications": notifications,
+                "error": f"Unknown event types: {invalid}",
+            },
+        )
+
+    config = NotificationConfig(
+        watch_id=watch.id,
+        apprise_url=encrypt_apprise_url(apprise_url),
+        channel_hint=extract_channel_hint(apprise_url),
+        events=events or ["change_detected"],
+    )
+    session.add(config)
+    audit(
+        session,
+        EventType.NOTIFICATION_CONFIG_CREATED,
+        watch_id=watch.id,
+        config_id=str(config.id),
+        channel_hint=config.channel_hint,
+    )
+    await session.commit()
+    notifications = await get_watch_notifications(session, watch.id)
+    return templates.TemplateResponse(
+        "partials/watch_notifications.html",
+        {"request": request, "watch": watch, "notifications": notifications},
+    )
+
+
+@router.post("/watches/{watch_id}/notifications/{config_id}/toggle")
+async def watch_notification_toggle(
+    request: Request,
+    watch_id: str,
+    config_id: str,
+    session: AsyncSession = Depends(get_db_session),
+):
+    """Toggle is_active on a notification config. Returns refreshed partial."""
+    watch = await get_watch_detail(session, watch_id)
+    if not watch:
+        raise HTTPException(status_code=404, detail="Watch not found")
+    nc = await session.get(NotificationConfig, parse_ulid(config_id, "Config"))
+    if not nc or nc.watch_id != watch.id:
+        raise HTTPException(status_code=404, detail="Config not found")
+    nc.is_active = not nc.is_active
+    audit(session, EventType.NOTIFICATION_CONFIG_UPDATED, watch_id=watch.id, config_id=str(nc.id))
+    await session.commit()
+    notifications = await get_watch_notifications(session, watch.id)
+    return templates.TemplateResponse(
+        "partials/watch_notifications.html",
+        {"request": request, "watch": watch, "notifications": notifications},
+    )
+
+
+@router.post("/watches/{watch_id}/notifications/{config_id}/test-result")
+async def watch_notification_test_result(
+    watch_id: str,
+    config_id: str,
+    session: AsyncSession = Depends(get_db_session),
+):
+    """Send a test notification and return an HTML badge result."""
+    watch = await get_watch_detail(session, watch_id)
+    if not watch:
+        raise HTTPException(status_code=404, detail="Watch not found")
+    nc = await session.get(NotificationConfig, parse_ulid(config_id, "Config"))
+    if not nc or nc.watch_id != watch.id:
+        raise HTTPException(status_code=404, detail="Config not found")
+    event = WatchEvent(
+        event_type=WatchEventType.CHANGE_DETECTED,
+        watch_id=str(watch.id),
+        watch_name=watch.name,
+        watch_url=watch.url,
+        occurred_at=datetime.now(UTC),
+        metadata={"test": True},
+    )
+    try:
+        success = await dispatch_event(event, nc.apprise_url)
+    except Exception:
+        logger.exception("test notification error", extra={"config_id": config_id})
+        success = False
+    if success:
+        return HTMLResponse('<span class="badge badge-active">Sent</span>')
+    return HTMLResponse('<span class="badge badge-error">Failed</span>')
 
 
 def _load_snapshot_text(storage: LocalStorage, snapshot, path_attr: str) -> str:

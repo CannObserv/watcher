@@ -36,20 +36,33 @@ def _extract_path_tokens(template: str) -> set[str]:
     return set(re.findall(r"\{(\w+)\}", template)) - {"schema"}
 
 
-def _detect_variants(plugin_entry: dict) -> list[dict]:
+def _group_templates(entry: dict) -> dict[frozenset, list[int]]:
     """
-    Group templates by their required-token set.
-    Returns [] if only one group (no variant selector needed).
-    """
-    tokens = plugin_entry["details"]["tokens"]
-    required_set = {k for k, v in tokens.items() if v.get("required") and k != "schema"}
-    templates = plugin_entry["details"]["templates"]
+    Group template indices by the set of required path tokens each uses.
 
+    Returns a mapping from frozenset(required_path_tokens) → list[template_index].
+
+    Variant order is determined by the order templates appear in
+    apprise.Apprise().details()["schemas"], which is stable within an Apprise
+    version but may change between versions.
+    """
+    tokens = entry["details"]["tokens"]
+    required_set = {k for k, v in tokens.items() if v.get("required") and k != "schema"}
+    templates = entry["details"]["templates"]
     groups: dict[frozenset, list[int]] = {}
     for i, template in enumerate(templates):
         path_tokens = _extract_path_tokens(template)
         used_required = frozenset(path_tokens & required_set)
         groups.setdefault(used_required, []).append(i)
+    return groups
+
+
+def _detect_variants(plugin_entry: dict) -> list[dict]:
+    """
+    Group templates by their required-token set.
+    Returns [] if only one group (no variant selector needed).
+    """
+    groups = _group_templates(plugin_entry)
 
     if len(groups) <= 1:
         return []
@@ -139,6 +152,10 @@ def assemble_url(
     """
     Assemble a valid Apprise URL from a plugin schema and token values.
 
+    variant_index is a positional index into the list returned by
+    get_plugin_detail(schema)["variants"]. Out-of-range values fall back to
+    trying all templates.
+
     Raises ValueError if schema is unknown, required tokens are missing,
     or the assembled URL fails Apprise validation.
     """
@@ -152,15 +169,14 @@ def assemble_url(
     required_set = {k for k, v in all_tokens.items() if v.get("required") and k != "schema"}
     templates = list(entry["details"]["templates"])
 
-    # Filter to variant templates if requested
+    # Filter to variant templates if requested.
+    # variant_index is a positional index into the list returned by
+    # get_plugin_detail(schema)["variants"]; out-of-range values are ignored
+    # and fall back to trying all templates.
     if variant_index is not None:
         variants = _detect_variants(entry)
         if variants and 0 <= variant_index < len(variants):
-            groups: dict[frozenset, list[int]] = {}
-            for i, t in enumerate(templates):
-                path_tokens = _extract_path_tokens(t)
-                used_required = frozenset(path_tokens & required_set)
-                groups.setdefault(used_required, []).append(i)
+            groups = _group_templates(entry)
             variant_indices = list(groups.values())[variant_index]
             templates = [templates[i] for i in variant_indices]
 

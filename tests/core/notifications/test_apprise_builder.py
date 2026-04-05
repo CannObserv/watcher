@@ -1,5 +1,6 @@
 """Unit tests for apprise_builder catalog + URL assembly."""
 
+import apprise
 import pytest
 
 from src.core.notifications.apprise_builder import (
@@ -61,6 +62,22 @@ class TestGetPluginDetail:
         detail = get_plugin_detail("discord")
         assert detail["variants"] == []
 
+    def test_alias_tokens_excluded(self):
+        # Alias tokens (those with alias_of key) should not appear in the token dict.
+        # Discord has none, but Slack has aliases like 'access', 'secret', 'to', etc.
+        detail = get_plugin_detail("slack")
+        for name, tok in detail["tokens"].items():
+            assert "alias_of" not in tok
+
+    def test_variant_index_out_of_range_falls_back(self):
+        # Out-of-range variant_index should not raise; falls back to all templates.
+        url = assemble_url(
+            "discord",
+            {"webhook_id": "abc123", "webhook_token": "xyz789"},
+            variant_index=99,
+        )
+        assert url.startswith("discord://")
+
 
 class TestAssembleUrl:
     def test_discord_assembles_correctly(self):
@@ -68,8 +85,6 @@ class TestAssembleUrl:
         assert url.startswith("discord://abc123/xyz789")
 
     def test_assembled_url_is_valid_apprise_url(self):
-        import apprise
-
         url = assemble_url("discord", {"webhook_id": "abc123", "webhook_token": "xyz789"})
         ap = apprise.Apprise()
         assert ap.add(url)

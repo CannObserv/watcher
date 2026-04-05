@@ -111,8 +111,8 @@ def _build_token_meta(tokens_dict: dict) -> dict[str, dict]:
 
 
 @lru_cache(maxsize=1)
-def list_plugins() -> list[dict]:
-    """Return sorted list of {schema, service_name, category} for all plugins."""
+def _list_plugins_cached() -> tuple[dict, ...]:
+    """Build and cache the sorted plugin list as an immutable tuple."""
     catalog = _build_catalog()
     items = [
         {
@@ -122,7 +122,12 @@ def list_plugins() -> list[dict]:
         }
         for scheme, entry in catalog.items()
     ]
-    return sorted(items, key=lambda x: x["service_name"].lower())
+    return tuple(sorted(items, key=lambda x: x["service_name"].lower()))
+
+
+def list_plugins() -> list[dict]:
+    """Return sorted list of {schema, service_name, category} for all plugins."""
+    return list(_list_plugins_cached())
 
 
 def get_plugin_detail(schema: str) -> dict | None:

@@ -117,7 +117,8 @@ class TestWatchNotificationsPartialRoute:
         watch = _make_mock_watch()
         resp = await self._get(str(watch.id), mock_watch=watch)
         assert resp.status_code == 200
-        assert b"apprise_url" in resp.content
+        assert b"add-notification-form" in resp.content
+        assert b"channel-picker" in resp.content
 
     async def test_event_checkboxes_present(self):
         watch = _make_mock_watch()

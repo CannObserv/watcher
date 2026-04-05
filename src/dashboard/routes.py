@@ -1329,7 +1329,12 @@ async def partial_watch_notifications(
     notifications = await get_watch_notifications(session, watch.id)
     return templates.TemplateResponse(
         "partials/watch_notifications.html",
-        {"request": request, "watch": watch, "notifications": notifications},
+        {
+            "request": request,
+            "watch": watch,
+            "notifications": notifications,
+            "apprise_plugins": list_plugins(),
+        },
     )
 
 

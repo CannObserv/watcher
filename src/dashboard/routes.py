@@ -1376,7 +1376,7 @@ async def watch_notification_create(
 
     form = await request.form()
     events = form.getlist("events")
-    schema_val = form.get("schema") or ""
+    schema_val = form.get("plugin_schema") or ""
 
     # Determine the Apprise URL: token path or raw URL path
     if schema_val:

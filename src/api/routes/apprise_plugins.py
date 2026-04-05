@@ -21,7 +21,7 @@ async def get_apprise_plugin(schema: str):
     if detail is None:
         raise HTTPException(status_code=404, detail=f"Unknown Apprise plugin: {schema!r}")
     return PluginDetail(
-        schema=detail["schema"],
+        plugin_schema=detail["plugin_schema"],
         service_name=detail["service_name"],
         tokens={k: TokenMeta(**v) for k, v in detail["tokens"].items()},
         variants=[PluginVariant(**v) for v in detail["variants"]],

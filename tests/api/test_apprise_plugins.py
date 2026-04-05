@@ -18,13 +18,13 @@ class TestListApprisePlugins:
 
     async def test_contains_discord(self, client):
         data = (await client.get("/api/v1/apprise/plugins")).json()
-        schemas = [p["schema"] for p in data]
+        schemas = [p["plugin_schema"] for p in data]
         assert "discord" in schemas
 
     async def test_item_shape(self, client):
         data = (await client.get("/api/v1/apprise/plugins")).json()
-        item = next(p for p in data if p["schema"] == "discord")
-        assert set(item.keys()) >= {"schema", "service_name", "category"}
+        item = next(p for p in data if p["plugin_schema"] == "discord")
+        assert set(item.keys()) >= {"plugin_schema", "service_name", "category"}
 
 
 class TestGetApprisePlugin:
@@ -34,7 +34,7 @@ class TestGetApprisePlugin:
 
     async def test_discord_response_shape(self, client):
         data = (await client.get("/api/v1/apprise/plugins/discord")).json()
-        assert data["schema"] == "discord"
+        assert data["plugin_schema"] == "discord"
         assert data["service_name"] == "Discord"
         assert "tokens" in data
         assert "variants" in data

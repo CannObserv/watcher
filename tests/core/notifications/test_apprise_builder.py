@@ -23,13 +23,13 @@ class TestListPlugins:
 
     def test_contains_discord(self):
         plugins = list_plugins()
-        schemas = [p["schema"] for p in plugins]
+        schemas = [p["plugin_schema"] for p in plugins]
         assert "discord" in schemas
 
     def test_each_item_has_required_keys(self):
         plugins = list_plugins()
         for p in plugins:
-            assert "schema" in p
+            assert "plugin_schema" in p
             assert "service_name" in p
             assert "category" in p
 
@@ -38,7 +38,7 @@ class TestGetPluginDetail:
     def test_returns_detail_for_discord(self):
         detail = get_plugin_detail("discord")
         assert detail is not None
-        assert detail["schema"] == "discord"
+        assert detail["plugin_schema"] == "discord"
         assert detail["service_name"] == "Discord"
 
     def test_discord_has_required_tokens(self):

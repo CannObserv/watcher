@@ -116,7 +116,7 @@ def _list_plugins_cached() -> tuple[dict, ...]:
     catalog = _build_catalog()
     items = [
         {
-            "schema": scheme,
+            "plugin_schema": scheme,
             "service_name": str(entry["service_name"]),
             "category": entry.get("category"),
         }
@@ -126,7 +126,7 @@ def _list_plugins_cached() -> tuple[dict, ...]:
 
 
 def list_plugins() -> list[dict]:
-    """Return sorted list of {schema, service_name, category} for all plugins."""
+    """Return sorted list of {plugin_schema, service_name, category} for all plugins."""
     return list(_list_plugins_cached())
 
 
@@ -143,7 +143,7 @@ def get_plugin_detail(schema: str) -> dict | None:
     tokens = _build_token_meta(entry["details"]["tokens"])
     variants = _detect_variants(entry)
     return {
-        "schema": schema.lower(),
+        "plugin_schema": schema.lower(),
         "service_name": str(entry["service_name"]),
         "tokens": tokens,
         "variants": variants,

@@ -1,13 +1,8 @@
 """Pydantic response schemas for the Apprise plugin catalog endpoints."""
 
-import warnings
 from typing import Any
 
 from pydantic import BaseModel
-
-# Field name "schema" is intentional (matches API contract); it shadows the
-# deprecated BaseModel.schema() classmethod (superseded by model_json_schema()).
-warnings.filterwarnings("ignore", message=r'Field name "schema"', category=UserWarning)
 
 
 class TokenMeta(BaseModel):
@@ -32,7 +27,7 @@ class PluginVariant(BaseModel):
 class PluginListItem(BaseModel):
     """Summary item for the plugin list endpoint."""
 
-    schema: str
+    plugin_schema: str
     service_name: str
     category: str | None = None
 
@@ -40,7 +35,7 @@ class PluginListItem(BaseModel):
 class PluginDetail(BaseModel):
     """Full plugin detail including token definitions and variants."""
 
-    schema: str
+    plugin_schema: str
     service_name: str
     tokens: dict[str, TokenMeta]
     variants: list[PluginVariant]

@@ -8,7 +8,7 @@
 
 <div id="plugin-token-form">
   {# Hidden schema field for POST handler #}
-  <input type="hidden" name="schema" value="{{ plugin.schema }}">
+  <input type="hidden" name="plugin_schema" value="{{ plugin.plugin_schema }}">
 
   {# Variant selector — only shown when plugin has divergent template variants #}
   {% if plugin.variants | length > 1 %}
@@ -23,7 +23,7 @@
           value="{{ loop.index0 }}"
           {% if loop.index0 == variant %}checked{% endif %}
           hx-get="/partials/apprise-plugin-form"
-          hx-vals='{"schema": "{{ plugin.schema }}", "variant": "{{ loop.index0 }}"}'
+          hx-vals='{"schema": "{{ plugin.plugin_schema }}", "variant": "{{ loop.index0 }}"}'
           hx-target="#plugin-token-form"
           hx-swap="outerHTML"
           class="border-gray-300 dark:border-gray-600">

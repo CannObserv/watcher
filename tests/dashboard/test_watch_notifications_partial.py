@@ -359,7 +359,7 @@ class TestWatchNotificationCreateFromTokens:
                 patch("src.dashboard.routes.extract_channel_hint", return_value=schema),
                 patch("src.dashboard.routes.assemble_url", return_value=f"{schema}://assembled"),
             ):
-                form_data = {"schema": schema, **(events or {})}
+                form_data = {"plugin_schema": schema, **(events or {})}
                 form_data.update({f"tok_{k}": v for k, v in token_fields.items()})
                 transport = ASGITransport(app=app)
                 async with AsyncClient(transport=transport, base_url="http://test") as client:
@@ -410,7 +410,7 @@ class TestWatchNotificationCreateFromTokens:
                 async with AsyncClient(transport=transport, base_url="http://test") as client:
                     resp = await client.post(
                         f"/watches/{watch.id}/notifications/new",
-                        data={"schema": "notaschema", "tok_x": "y"},
+                        data={"plugin_schema": "notaschema", "tok_x": "y"},
                     )
             assert "Unknown" in resp.text
         finally:

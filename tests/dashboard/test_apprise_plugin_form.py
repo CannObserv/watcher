@@ -39,7 +39,7 @@ class TestApprisePluginFormPartial:
 
     async def test_discord_has_hidden_schema_input(self):
         resp = await _get(schema="discord")
-        assert 'name="schema"' in resp.text
+        assert 'name="plugin_schema"' in resp.text
         assert 'value="discord"' in resp.text
 
     async def test_discord_webhook_id_is_password_input(self):

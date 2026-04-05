@@ -1,6 +1,5 @@
 """Pydantic schemas for notification config CRUD (Apprise v2)."""
 
-import warnings
 from datetime import datetime
 
 import apprise
@@ -9,10 +8,6 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 from src.api.schemas.types import ULIDStr
 from src.core.notifications.apprise_builder import assemble_url
 from src.core.notifications.events import WatchEventType
-
-# Field name "schema" is intentional (matches API contract); it shadows the
-# deprecated BaseModel.schema() classmethod (superseded by model_json_schema()).
-warnings.filterwarnings("ignore", message=r'Field name "schema"', category=UserWarning)
 
 _VALID_EVENT_TYPES = {e.value for e in WatchEventType}
 
@@ -53,7 +48,7 @@ class NotificationConfigCreate(BaseModel):
     """
 
     apprise_url: str | None = None
-    schema: str | None = None
+    plugin_schema: str | None = None
     tokens: dict[str, str] | None = None
     events: list[str] = Field(default_factory=lambda: ["change_detected"])
 
@@ -62,14 +57,14 @@ class NotificationConfigCreate(BaseModel):
         if self.apprise_url is not None:
             # Raw URL path — validate it
             validate_apprise_url(self.apprise_url)
-        elif self.schema is not None:
+        elif self.plugin_schema is not None:
             # Token path — assemble the URL
             try:
-                self.apprise_url = assemble_url(self.schema, self.tokens or {})
+                self.apprise_url = assemble_url(self.plugin_schema, self.tokens or {})
             except ValueError as exc:
                 raise ValueError(str(exc)) from exc
         else:
-            raise ValueError("Provide either 'apprise_url' or 'schema' + 'tokens'.")
+            raise ValueError("Provide either 'apprise_url' or 'plugin_schema' + 'tokens'.")
         return self
 
     @field_validator("events")

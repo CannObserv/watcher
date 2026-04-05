@@ -193,7 +193,7 @@ class TestCreateNotificationConfigFromTokens:
         resp = await client.post(
             f"/api/v1/watches/{watch_id}/notifications",
             json={
-                "schema": "discord",
+                "plugin_schema": "discord",
                 "tokens": {"webhook_id": "abc123", "webhook_token": "xyz789"},
                 "events": ["change_detected"],
             },
@@ -208,7 +208,7 @@ class TestCreateNotificationConfigFromTokens:
         resp = await client.post(
             f"/api/v1/watches/{watch_id}/notifications",
             json={
-                "schema": "discord",
+                "plugin_schema": "discord",
                 "tokens": {"webhook_id": "abc123"},  # missing webhook_token
             },
         )
@@ -218,7 +218,7 @@ class TestCreateNotificationConfigFromTokens:
         watch_id = await _make_watch(client)
         resp = await client.post(
             f"/api/v1/watches/{watch_id}/notifications",
-            json={"schema": "notaschema", "tokens": {}},
+            json={"plugin_schema": "notaschema", "tokens": {}},
         )
         assert resp.status_code == 422
 

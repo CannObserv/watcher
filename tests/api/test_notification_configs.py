@@ -187,6 +187,50 @@ class TestDeleteNotificationConfig:
         assert resp.status_code == 404
 
 
+class TestCreateNotificationConfigFromTokens:
+    async def test_create_discord_from_tokens(self, client):
+        watch_id = await _make_watch(client)
+        resp = await client.post(
+            f"/api/v1/watches/{watch_id}/notifications",
+            json={
+                "schema": "discord",
+                "tokens": {"webhook_id": "abc123", "webhook_token": "xyz789"},
+                "events": ["change_detected"],
+            },
+        )
+        assert resp.status_code == 201
+        data = resp.json()
+        assert data["channel_hint"] == "discord"
+        assert "apprise_url" not in data
+
+    async def test_missing_required_token_returns_422(self, client):
+        watch_id = await _make_watch(client)
+        resp = await client.post(
+            f"/api/v1/watches/{watch_id}/notifications",
+            json={
+                "schema": "discord",
+                "tokens": {"webhook_id": "abc123"},  # missing webhook_token
+            },
+        )
+        assert resp.status_code == 422
+
+    async def test_unknown_schema_returns_422(self, client):
+        watch_id = await _make_watch(client)
+        resp = await client.post(
+            f"/api/v1/watches/{watch_id}/notifications",
+            json={"schema": "notaschema", "tokens": {}},
+        )
+        assert resp.status_code == 422
+
+    async def test_neither_url_nor_schema_returns_422(self, client):
+        watch_id = await _make_watch(client)
+        resp = await client.post(
+            f"/api/v1/watches/{watch_id}/notifications",
+            json={"events": ["change_detected"]},
+        )
+        assert resp.status_code == 422
+
+
 class TestTestNotificationConfig:
     async def _make_config(self, client, watch_id):
         resp = await client.post(

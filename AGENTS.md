@@ -26,7 +26,7 @@ src/core/              — Shared domain logic
 src/core/models/       — SQLAlchemy models (Watch [+health_status: WatchHealthStatus], AuditLog, Snapshot, SnapshotChunk, Change [+visual_change_score float nullable], TemporalProfile, NotificationConfig [apprise_url encrypted, channel_hint, events ARRAY], Domain); notification_event_types seed table in migrations
 src/core/probe.py      — URL probe: follow redirects, resolve effective URL and domain (ProbeResult + probe_url)
 src/core/notifications/  — Apprise-based notification dispatcher; WatchEvent + WatchEventType + EVENT_TITLES (events.py), dispatch_event() (dispatcher.py)
-src/core/notifications/apprise_builder.py — Apprise plugin catalog introspection + URL assembly; list_plugins(), get_plugin_detail(schema), assemble_url(schema, tokens, variant_index); _build_catalog() lru_cached
+src/core/notifications/apprise_builder.py — Apprise plugin catalog introspection + URL assembly; list_plugins(), get_plugin_detail(schema), assemble_url(schema, tokens, variant_index); _build_catalog() + _list_plugins_cached() lru_cached
 src/core/extractors/   — Content extractors (HTML, PDF, CSV/Excel → Chunks)
 src/core/fetchers/     — URL fetchers (HTTP; browser/WebRecorder planned)
 src/core/differ.py     — Chunk-level change detection with SimHash similarity

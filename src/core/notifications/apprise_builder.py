@@ -136,6 +136,14 @@ def list_plugins() -> list[dict]:
     return list(copy.deepcopy(_list_plugins_cached()))
 
 
+def get_service_name(schema: str) -> str:
+    """Return human-readable service name for a plugin schema, or the schema itself."""
+    for p in _list_plugins_cached():
+        if p["plugin_schema"] == schema:
+            return p["service_name"]
+    return schema
+
+
 def get_plugin_detail(schema: str) -> dict | None:
     """
     Return token defs and variant info for a plugin, or None if unknown.

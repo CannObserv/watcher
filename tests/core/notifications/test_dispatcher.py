@@ -46,10 +46,11 @@ class TestDispatchEvent:
 
             result = await dispatch_event(event, encrypted)
 
-        assert result is True
+        assert result.success is True
+        assert result.reason
         instance.async_notify.assert_awaited_once()
 
-    async def test_returns_false_on_apprise_failure(self):
+    async def test_returns_failure_on_apprise_failure(self):
         event = make_event()
         encrypted = make_encrypted_url("json://localhost/notify")
 
@@ -61,9 +62,10 @@ class TestDispatchEvent:
 
             result = await dispatch_event(event, encrypted)
 
-        assert result is False
+        assert result.success is False
+        assert "rejected" in result.reason.lower() or "delivery" in result.reason.lower()
 
-    async def test_returns_false_on_apprise_none(self):
+    async def test_returns_failure_on_apprise_none(self):
         """None from async_notify means nothing was dispatched."""
         event = make_event()
         encrypted = make_encrypted_url("json://localhost/notify")
@@ -76,9 +78,9 @@ class TestDispatchEvent:
 
             result = await dispatch_event(event, encrypted)
 
-        assert result is False
+        assert result.success is False
 
-    async def test_returns_false_on_invalid_url(self):
+    async def test_returns_failure_on_invalid_url(self):
         """add() returning False means Apprise rejected the URL."""
         event = make_event()
         encrypted = make_encrypted_url("notaschema://whatever")
@@ -90,7 +92,8 @@ class TestDispatchEvent:
 
             result = await dispatch_event(event, encrypted)
 
-        assert result is False
+        assert result.success is False
+        assert "invalid" in result.reason.lower()
 
     async def test_passes_correct_notify_type(self):
         event = make_event(WatchEventType.WATCH_ERROR, metadata={"status_code": 500})

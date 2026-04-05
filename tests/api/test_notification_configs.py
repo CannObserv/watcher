@@ -200,7 +200,7 @@ class TestCreateNotificationConfigFromTokens:
         )
         assert resp.status_code == 201
         data = resp.json()
-        assert data["channel_hint"] == "discord"
+        assert data["channel_hint"] == "Discord"
         assert "apprise_url" not in data
 
     async def test_missing_required_token_returns_422(self, client):
@@ -239,6 +239,11 @@ class TestTestNotificationConfig:
         )
         return resp.json()["id"]
 
+    def _mock_result(self, success=True, reason="ok"):
+        from src.core.notifications.dispatcher import DispatchResult
+
+        return DispatchResult(success=success, reason=reason)
+
     async def test_test_sends_notification_and_returns_success(self, client):
         from unittest.mock import AsyncMock, patch
 
@@ -247,11 +252,13 @@ class TestTestNotificationConfig:
         with patch(
             "src.api.routes.notification_configs.dispatch_event",
             new_callable=AsyncMock,
-            return_value=True,
+            return_value=self._mock_result(True, "Notification sent successfully"),
         ):
             resp = await client.post(f"/api/v1/watches/{watch_id}/notifications/{config_id}/test")
         assert resp.status_code == 200
-        assert resp.json() == {"success": True}
+        data = resp.json()
+        assert data["success"] is True
+        assert "reason" in data
 
     async def test_test_returns_success_false_on_dispatch_failure(self, client):
         from unittest.mock import AsyncMock, patch
@@ -261,11 +268,13 @@ class TestTestNotificationConfig:
         with patch(
             "src.api.routes.notification_configs.dispatch_event",
             new_callable=AsyncMock,
-            return_value=False,
+            return_value=self._mock_result(False, "Delivery failed"),
         ):
             resp = await client.post(f"/api/v1/watches/{watch_id}/notifications/{config_id}/test")
         assert resp.status_code == 200
-        assert resp.json() == {"success": False}
+        data = resp.json()
+        assert data["success"] is False
+        assert "reason" in data
 
     async def test_test_returns_404_for_unknown_config(self, client):
         watch_id = await _make_watch(client)
@@ -282,7 +291,7 @@ class TestTestNotificationConfig:
         with patch(
             "src.api.routes.notification_configs.dispatch_event",
             new_callable=AsyncMock,
-            return_value=True,
+            return_value=self._mock_result(True),
         ):
             resp = await client.post(f"/api/v1/watches/{other_id}/notifications/{config_id}/test")
         assert resp.status_code == 404
@@ -299,4 +308,6 @@ class TestTestNotificationConfig:
         ):
             resp = await client.post(f"/api/v1/watches/{watch_id}/notifications/{config_id}/test")
         assert resp.status_code == 200
-        assert resp.json() == {"success": False}
+        data = resp.json()
+        assert data["success"] is False
+        assert "reason" in data

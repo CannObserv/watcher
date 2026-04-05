@@ -27,7 +27,12 @@ from src.core.models.domain import Domain
 from src.core.models.notification_config import NotificationConfig
 from src.core.models.snapshot import Snapshot
 from src.core.models.watch import ContentType, Watch
-from src.core.notifications.apprise_builder import assemble_url, get_plugin_detail, list_plugins
+from src.core.notifications.apprise_builder import (
+    assemble_url,
+    get_plugin_detail,
+    get_service_name,
+    list_plugins,
+)
 from src.core.notifications.dispatcher import dispatch_event
 from src.core.notifications.events import WatchEvent, WatchEventType
 from src.core.probe import ProbeResult
@@ -1450,10 +1455,11 @@ async def watch_notification_create(
             },
         )
 
+    hint = get_service_name(schema_val) if schema_val else extract_channel_hint(apprise_url)
     config = NotificationConfig(
         watch_id=watch.id,
         apprise_url=encrypt_apprise_url(apprise_url),
-        channel_hint=extract_channel_hint(apprise_url),
+        channel_hint=hint,
         events=events,
     )
     session.add(config)
@@ -1503,11 +1509,12 @@ async def watch_notification_toggle(
 
 @router.post("/watches/{watch_id}/notifications/{config_id}/test-result")
 async def watch_notification_test_result(
+    request: Request,
     watch_id: str,
     config_id: str,
     session: AsyncSession = Depends(get_db_session),
 ):
-    """Send a test notification and return an HTML badge result."""
+    """Send a test notification and return an OOB flash with the result."""
     watch = await get_watch_detail(session, watch_id)
     if not watch:
         raise HTTPException(status_code=404, detail="Watch not found")
@@ -1523,13 +1530,34 @@ async def watch_notification_test_result(
         metadata={"test": True},
     )
     try:
-        success = await dispatch_event(event, nc.apprise_url)
+        outcome = await dispatch_event(event, nc.apprise_url)
     except Exception:
         logger.exception("test notification error", extra={"config_id": config_id})
+        reason = "Internal error during dispatch"
         success = False
-    if success:
-        return HTMLResponse('<span class="badge badge-active">Sent</span>')
-    return HTMLResponse('<span class="badge badge-error">Failed</span>')
+    else:
+        success = outcome.success
+        reason = outcome.reason
+    audit(
+        session,
+        EventType.NOTIFICATION_TEST,
+        watch_id=watch.id,
+        config_id=str(nc.id),
+        channel_hint=nc.channel_hint,
+        success=success,
+        reason=reason,
+    )
+    await session.commit()
+    level = "success" if success else "error"
+    message = f"Test notification: {reason}"
+    return templates.TemplateResponse(
+        "partials/flash_oob.html",
+        {
+            "request": request,
+            "flash_oob_level": level,
+            "flash_oob_message": message,
+        },
+    )
 
 
 def _load_snapshot_text(storage: LocalStorage, snapshot, path_attr: str) -> str:

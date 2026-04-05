@@ -25,6 +25,7 @@ class EventType:
     CHECK_NO_CHANGE = "check.no_change"
     CHECK_FETCH_FAILED = "check.fetch_failed"
     NOTIFICATION_DISPATCHED = "notification.dispatched"
+    NOTIFICATION_TEST = "notification.test"
     NOTIFICATION_CONFIG_CREATED = "notification_config.created"
     NOTIFICATION_CONFIG_UPDATED = "notification_config.updated"
     NOTIFICATION_CONFIG_DELETED = "notification_config.deleted"

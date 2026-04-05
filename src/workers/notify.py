@@ -37,14 +37,14 @@ async def dispatch_event_notifications(
     results = []
     for config in configs:
         try:
-            success = await dispatch_event(event, config.apprise_url)
-            results.append({"config_id": str(config.id), "success": success})
+            outcome = await dispatch_event(event, config.apprise_url)
+            results.append({"config_id": str(config.id), "success": outcome.success})
             extra = {
                 "config_id": str(config.id),
                 "watch_id": event.watch_id,
                 "event_type": event.event_type,
             }
-            if success:
+            if outcome.success:
                 logger.info("notification sent", extra=extra)
             else:
                 logger.warning("notification failed", extra=extra)

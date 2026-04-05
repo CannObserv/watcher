@@ -6,6 +6,7 @@ import pytest
 from src.core.notifications.apprise_builder import (
     assemble_url,
     get_plugin_detail,
+    get_service_name,
     list_plugins,
 )
 
@@ -136,3 +137,17 @@ class TestAssembleUrl:
         )
         assert url.startswith("slack://")
         assert "xoxb-abc" in url
+
+
+class TestGetServiceName:
+    def test_known_schema_returns_service_name(self):
+        name = get_service_name("discord")
+        assert name == "Discord"
+
+    def test_unknown_schema_returns_schema(self):
+        name = get_service_name("notaschema")
+        assert name == "notaschema"
+
+    def test_slack_returns_slack(self):
+        name = get_service_name("slack")
+        assert name == "Slack"

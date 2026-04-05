@@ -288,31 +288,21 @@ class TestWatchNotificationCreateRoute:
 class TestWatchNotificationTestResultRoute:
     """POST /watches/{watch_id}/notifications/{config_id}/test-result"""
 
-    async def test_success_returns_sent_badge(self):
-        watch = _make_mock_watch()
-        nc = _make_mock_nc()
-        nc.watch_id = watch.id
-        session = MagicMock()
-        session.get = AsyncMock(return_value=nc)
-        with patch(
-            "src.dashboard.routes.dispatch_event", new_callable=AsyncMock, return_value=True
-        ):
-            resp = await _post_dashboard(
-                f"/watches/{watch.id}/notifications/{nc.id}/test-result",
-                mock_watch=watch,
-                mock_session=session,
-            )
-        assert resp.status_code == 200
-        assert b"Sent" in resp.content
+    def _mock_result(self, success=True, reason="ok"):
+        from src.core.notifications.dispatcher import DispatchResult
 
-    async def test_failure_returns_failed_badge(self):
+        return DispatchResult(success=success, reason=reason)
+
+    async def test_success_returns_flash_with_reason(self):
         watch = _make_mock_watch()
         nc = _make_mock_nc()
         nc.watch_id = watch.id
         session = MagicMock()
         session.get = AsyncMock(return_value=nc)
+        session.commit = AsyncMock()
+        result = self._mock_result(True, "Notification sent successfully")
         with patch(
-            "src.dashboard.routes.dispatch_event", new_callable=AsyncMock, return_value=False
+            "src.dashboard.routes.dispatch_event", new_callable=AsyncMock, return_value=result
         ):
             resp = await _post_dashboard(
                 f"/watches/{watch.id}/notifications/{nc.id}/test-result",
@@ -320,7 +310,30 @@ class TestWatchNotificationTestResultRoute:
                 mock_session=session,
             )
         assert resp.status_code == 200
-        assert b"Failed" in resp.content
+        assert b"flash-region" in resp.content
+        assert b"flash-success" in resp.content
+        assert b"Notification sent successfully" in resp.content
+
+    async def test_failure_returns_flash_with_reason(self):
+        watch = _make_mock_watch()
+        nc = _make_mock_nc()
+        nc.watch_id = watch.id
+        session = MagicMock()
+        session.get = AsyncMock(return_value=nc)
+        session.commit = AsyncMock()
+        result = self._mock_result(False, "Delivery failed")
+        with patch(
+            "src.dashboard.routes.dispatch_event", new_callable=AsyncMock, return_value=result
+        ):
+            resp = await _post_dashboard(
+                f"/watches/{watch.id}/notifications/{nc.id}/test-result",
+                mock_watch=watch,
+                mock_session=session,
+            )
+        assert resp.status_code == 200
+        assert b"flash-region" in resp.content
+        assert b"flash-error" in resp.content
+        assert b"Delivery failed" in resp.content
 
     async def test_missing_watch_returns_404(self):
         resp = await _post_dashboard(

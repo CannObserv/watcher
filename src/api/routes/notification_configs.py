@@ -18,6 +18,7 @@ from src.core.crypto import encrypt_apprise_url
 from src.core.logging import get_logger
 from src.core.models.audit_log import EventType, audit
 from src.core.models.notification_config import NotificationConfig
+from src.core.notifications.apprise_builder import get_service_name
 from src.core.notifications.dispatcher import dispatch_event
 from src.core.notifications.events import WatchEvent, WatchEventType
 
@@ -34,10 +35,15 @@ async def create_notification_config(
 ):
     """Create a notification config for a watch."""
     watch = await get_watch_or_404(watch_id, session)
+    hint = (
+        get_service_name(data.plugin_schema)
+        if data.plugin_schema
+        else extract_channel_hint(data.apprise_url)
+    )
     config = NotificationConfig(
         watch_id=watch.id,
         apprise_url=encrypt_apprise_url(data.apprise_url),
-        channel_hint=extract_channel_hint(data.apprise_url),
+        channel_hint=hint,
         events=data.events,
     )
     session.add(config)
@@ -137,8 +143,22 @@ async def test_notification_config(
         metadata={"test": True},
     )
     try:
-        success = await dispatch_event(event, nc.apprise_url)
+        outcome = await dispatch_event(event, nc.apprise_url)
     except Exception:
         logger.exception("test notification error", extra={"config_id": config_id})
+        reason = "Internal error during dispatch"
         success = False
-    return {"success": success}
+    else:
+        success = outcome.success
+        reason = outcome.reason
+    audit(
+        session,
+        EventType.NOTIFICATION_TEST,
+        watch_id=watch.id,
+        config_id=str(nc.id),
+        channel_hint=nc.channel_hint,
+        success=success,
+        reason=reason,
+    )
+    await session.commit()
+    return {"success": success, "reason": reason}

@@ -32,11 +32,10 @@
           {{ "Deactivate" if nc.is_active else "Activate" }}
         </button>
 
-        {# Send test #}
+        {# Send test — response is an OOB flash, no local target needed #}
         <button
           hx-post="/watches/{{ watch.id }}/notifications/{{ nc.id }}/test-result"
-          hx-target="#nc-test-result-{{ nc.id }}"
-          hx-swap="innerHTML"
+          hx-swap="none"
           class="btn btn-secondary text-xs min-h-[44px] htmx-request:opacity-60"
           aria-label="Send test notification for {{ nc.channel_hint }}">
           Test
@@ -53,8 +52,6 @@
         </button>
       </div>
     </li>
-    {# Inline test result area #}
-    <li id="nc-test-result-{{ nc.id }}" aria-live="polite" class="text-xs text-gray-500 dark:text-gray-400 px-1"></li>
     {% endfor %}
   </ul>
   {% else %}

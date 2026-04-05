@@ -96,7 +96,7 @@
         hx-get="/partials/apprise-plugin-form"
         hx-target="#plugin-token-form"
         hx-swap="outerHTML"
-        hx-vals='js:{schema: document.getElementById("channel-picker").value}'
+        hx-vals='js:{schema: htmx.find("#channel-picker").value}'
         hx-trigger="change"
         aria-label="Select notification plugin">
         <option value="">— pick a channel —</option>

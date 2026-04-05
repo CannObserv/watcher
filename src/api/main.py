@@ -6,6 +6,7 @@ from contextlib import asynccontextmanager
 from fastapi import APIRouter, FastAPI
 from sqlalchemy import select
 
+from src.api.routes.apprise_plugins import router as apprise_plugins_router
 from src.api.routes.audit_log import router as audit_router
 from src.api.routes.changes import router as changes_router
 from src.api.routes.domains import router as domains_router
@@ -70,6 +71,7 @@ v1_router.include_router(notification_configs_router)
 v1_router.include_router(audit_router)
 v1_router.include_router(domains_router)
 v1_router.include_router(probe_router)
+v1_router.include_router(apprise_plugins_router)
 app.include_router(v1_router)
 app.include_router(health_router)
 register_dashboard(app)

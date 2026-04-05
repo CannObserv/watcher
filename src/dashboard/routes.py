@@ -23,6 +23,7 @@ from src.core.models.domain import Domain
 from src.core.models.notification_config import NotificationConfig
 from src.core.models.snapshot import Snapshot
 from src.core.models.watch import ContentType, Watch
+from src.core.notifications.apprise_builder import get_plugin_detail
 from src.core.notifications.dispatcher import dispatch_event
 from src.core.notifications.events import WatchEvent, WatchEventType
 from src.core.probe import ProbeResult
@@ -1329,6 +1330,27 @@ async def partial_watch_notifications(
     return templates.TemplateResponse(
         "partials/watch_notifications.html",
         {"request": request, "watch": watch, "notifications": notifications},
+    )
+
+
+@router.get("/partials/apprise-plugin-form")
+async def partial_apprise_plugin_form(
+    request: Request,
+    schema: str | None = None,
+    variant: int = 0,
+    raw: bool = False,
+):
+    """HTMX partial: token form for a selected Apprise plugin, or raw URL input."""
+    if raw or schema is None:
+        return templates.TemplateResponse(
+            "partials/apprise_raw_url_form.html", {"request": request}
+        )
+    detail = get_plugin_detail(schema)
+    if detail is None:
+        raise HTTPException(status_code=404, detail=f"Unknown Apprise plugin: {schema!r}")
+    return templates.TemplateResponse(
+        "partials/apprise_plugin_form.html",
+        {"request": request, "plugin": detail, "variant": variant},
     )
 
 

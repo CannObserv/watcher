@@ -1357,6 +1357,21 @@ async def partial_apprise_plugin_form(
     detail = get_plugin_detail(schema)
     if detail is None:
         raise HTTPException(status_code=404, detail=f"Unknown Apprise plugin: {schema!r}")
+
+    # Filter tokens to match selected variant: show only that variant's
+    # required tokens + all globally optional tokens.  Hide required tokens
+    # belonging to other variants.
+    variants = detail["variants"]
+    if variants and 0 <= variant < len(variants):
+        selected_required = set(variants[variant]["required_token_names"])
+        other_required: set[str] = set()
+        for i, v in enumerate(variants):
+            if i != variant:
+                other_required |= set(v["required_token_names"])
+        # Exclude tokens that are required only in other variants
+        exclude = other_required - selected_required
+        detail["tokens"] = {k: v for k, v in detail["tokens"].items() if k not in exclude}
+
     return templates.TemplateResponse(
         "partials/apprise_plugin_form.html",
         {"request": request, "plugin": detail, "variant": variant},

@@ -63,6 +63,26 @@ class TestApprisePluginFormPartial:
         assert resp.status_code == 200
         assert "Setup guide" in resp.text
 
+    async def test_slack_variant0_shows_webhook_tokens(self):
+        resp = await _get(schema="slack", variant=0)
+        assert resp.status_code == 200
+        assert 'name="tok_token_a"' in resp.text
+        assert 'name="tok_token_b"' in resp.text
+        assert 'name="tok_token_c"' in resp.text
+        # access_token belongs to variant 1 — must be hidden
+        assert 'name="tok_access_token"' not in resp.text
+        # optional tokens shared across variants survive filtering
+        assert "tok_targets" in resp.text
+
+    async def test_slack_variant1_shows_oauth_token(self):
+        resp = await _get(schema="slack", variant=1)
+        assert resp.status_code == 200
+        assert 'name="tok_access_token"' in resp.text
+        # webhook tokens belong to variant 0 — must be hidden
+        assert 'name="tok_token_a"' not in resp.text
+        assert 'name="tok_token_b"' not in resp.text
+        assert 'name="tok_token_c"' not in resp.text
+
     async def test_raw_mode_returns_url_input(self):
         resp = await _get(raw=True)
         assert resp.status_code == 200

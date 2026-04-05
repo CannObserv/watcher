@@ -1,5 +1,6 @@
 """Pydantic schemas for notification config CRUD (Apprise v2)."""
 
+import warnings
 from datetime import datetime
 
 import apprise
@@ -9,7 +10,21 @@ from src.api.schemas.types import ULIDStr
 from src.core.notifications.apprise_builder import assemble_url
 from src.core.notifications.events import WatchEventType
 
+# Field name "schema" is intentional (matches API contract); it shadows the
+# deprecated BaseModel.schema() classmethod (superseded by model_json_schema()).
+warnings.filterwarnings("ignore", message=r'Field name "schema"', category=UserWarning)
+
 _VALID_EVENT_TYPES = {e.value for e in WatchEventType}
+
+
+def validate_event_list(events: list[str]) -> list[str]:
+    """Raise ValueError if any event string is not a known WatchEventType value."""
+    invalid = [e for e in events if e not in _VALID_EVENT_TYPES]
+    if invalid:
+        raise ValueError(
+            f"Unknown event type(s): {invalid}. Valid types: {sorted(_VALID_EVENT_TYPES)}"
+        )
+    return events
 
 
 def validate_apprise_url(url: str) -> str:
@@ -60,12 +75,7 @@ class NotificationConfigCreate(BaseModel):
     @field_validator("events")
     @classmethod
     def validate_events(cls, v: list[str]) -> list[str]:
-        invalid = [e for e in v if e not in _VALID_EVENT_TYPES]
-        if invalid:
-            raise ValueError(
-                f"Unknown event type(s): {invalid}. Valid types: {sorted(_VALID_EVENT_TYPES)}"
-            )
-        return v
+        return validate_event_list(v)
 
 
 class NotificationConfigUpdate(BaseModel):
@@ -79,12 +89,7 @@ class NotificationConfigUpdate(BaseModel):
     def validate_events(cls, v: list[str] | None) -> list[str] | None:
         if v is None:
             return v
-        invalid = [e for e in v if e not in _VALID_EVENT_TYPES]
-        if invalid:
-            raise ValueError(
-                f"Unknown event type(s): {invalid}. Valid types: {sorted(_VALID_EVENT_TYPES)}"
-            )
-        return v
+        return validate_event_list(v)
 
 
 class NotificationConfigResponse(BaseModel):

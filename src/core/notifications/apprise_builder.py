@@ -110,6 +110,7 @@ def _build_token_meta(tokens_dict: dict) -> dict[str, dict]:
     return result
 
 
+@lru_cache(maxsize=1)
 def list_plugins() -> list[dict]:
     """Return sorted list of {schema, service_name, category} for all plugins."""
     catalog = _build_catalog()

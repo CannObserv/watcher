@@ -1,0 +1,50 @@
+{# Macro: token_input(name, tok, required)
+   Renders the appropriate input element for an Apprise plugin token.
+   name    — token key (used for id/name attributes, prefixed with tok_)
+   tok     — token metadata dict (name, type, required, private, default, values, regex)
+   required — bool; adds required / aria-required when True
+#}
+{% macro token_input(name, tok, required) %}
+{% if tok.type.startswith('choice') %}
+<select id="tok_{{ name }}" name="tok_{{ name }}" class="form-input mt-1"
+        {% if required %}required aria-required="true"{% endif %}>
+  {% if not required %}<option value="">— default —</option>{% endif %}
+  {% for val in tok.values %}
+  <option value="{{ val }}" {% if tok.default == val %}selected{% endif %}>{{ val }}</option>
+  {% endfor %}
+</select>
+{% elif tok.type == 'bool' %}
+<input type="checkbox" id="tok_{{ name }}" name="tok_{{ name }}" value="yes"
+       {% if tok.default %}checked{% endif %}
+       class="rounded border-gray-300 dark:border-gray-600 mt-1">
+{% elif tok.private %}
+<div class="relative mt-1">
+  <input type="password" id="tok_{{ name }}" name="tok_{{ name }}"
+         class="form-input pe-10"
+         {% if required %}required aria-required="true"{% endif %}
+         {% if tok.regex %}pattern="{{ tok.regex }}"{% endif %}>
+  <button type="button"
+          onclick="var i=this.previousElementSibling;i.type=i.type==='password'?'text':'password'"
+          class="absolute inset-y-0 end-0 flex items-center px-3 text-gray-400 dark:text-gray-500"
+          aria-label="Toggle {{ tok.name }} visibility">
+    <span aria-hidden="true">👁</span>
+  </button>
+</div>
+{% elif tok.type == 'list:string' %}
+<input type="text" id="tok_{{ name }}" name="tok_{{ name }}"
+       class="form-input mt-1"
+       {% if required %}required aria-required="true"{% endif %}
+       {% if tok.default %}value="{{ tok.default }}"{% endif %}
+       {% if tok.regex %}pattern="{{ tok.regex }}"{% endif %}
+       aria-describedby="tok_{{ name }}_hint">
+<p id="tok_{{ name }}_hint" class="text-xs text-gray-500 dark:text-gray-400 mt-1">Separate multiple values with commas</p>
+{% else %}
+<input type="{{ 'number' if tok.type in ('int', 'float') else 'text' }}"
+       {% if tok.type == 'int' %}step="1"{% elif tok.type == 'float' %}step="any"{% endif %}
+       id="tok_{{ name }}" name="tok_{{ name }}"
+       class="form-input mt-1"
+       {% if required %}required aria-required="true"{% endif %}
+       {% if tok.default is not none %}value="{{ tok.default }}"{% endif %}
+       {% if tok.regex %}pattern="{{ tok.regex }}"{% endif %}>
+{% endif %}
+{% endmacro %}

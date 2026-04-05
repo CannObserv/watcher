@@ -18,12 +18,15 @@ Python ≥3.12, uv, pytest, ruff
 
 ```
 src/api/               — FastAPI app (ASGI, routes, schemas)
-src/api/routes/        — API endpoints (watches, temporal_profiles, changes, audit_log, notification_configs, domains, probe); mounted at /api/v1/
+src/api/routes/        — API endpoints (watches, temporal_profiles, changes, audit_log, notification_configs, domains, probe, apprise_plugins); mounted at /api/v1/
+src/api/routes/apprise_plugins.py — GET /api/v1/apprise/plugins (sorted list) and /api/v1/apprise/plugins/{schema} (token defs + variants); 404 for unknown schema
+src/api/schemas/apprise_plugin.py — PluginListItem, PluginDetail, TokenMeta, PluginVariant response schemas
 src/api/routes/health.py — /health (liveness) and /ready (readiness) endpoints; root-level, not versioned
 src/core/              — Shared domain logic
 src/core/models/       — SQLAlchemy models (Watch [+health_status: WatchHealthStatus], AuditLog, Snapshot, SnapshotChunk, Change [+visual_change_score float nullable], TemporalProfile, NotificationConfig [apprise_url encrypted, channel_hint, events ARRAY], Domain); notification_event_types seed table in migrations
 src/core/probe.py      — URL probe: follow redirects, resolve effective URL and domain (ProbeResult + probe_url)
 src/core/notifications/  — Apprise-based notification dispatcher; WatchEvent + WatchEventType + EVENT_TITLES (events.py), dispatch_event() (dispatcher.py)
+src/core/notifications/apprise_builder.py — Apprise plugin catalog introspection + URL assembly; list_plugins(), get_plugin_detail(schema), assemble_url(schema, tokens, variant_index); _build_catalog() lru_cached
 src/core/extractors/   — Content extractors (HTML, PDF, CSV/Excel → Chunks)
 src/core/fetchers/     — URL fetchers (HTTP; browser/WebRecorder planned)
 src/core/differ.py     — Chunk-level change detection with SimHash similarity
@@ -34,11 +37,11 @@ src/core/scheduler.py  — Watch scheduling logic (interval parsing, due computa
 src/core/rate_limiter.py — Per-domain async rate limiting
 src/core/config_poller.py  — Background polling: sync domain configs from DB into rate limiter
 src/dashboard/           — Server-rendered dashboard (Jinja2 + HTMX + Tailwind); __init__.py registers Jinja2 globals: build_id, event_titles (human-readable event name map from EVENT_TITLES)
-src/dashboard/routes.py  — Dashboard page and partial routes; includes POST /watches/{id}/screenshot (on-demand re-capture) and GET /watches/{id}/snapshots/{snapshot_id}/content (escaped text viewer)
+src/dashboard/routes.py  — Dashboard page and partial routes; includes POST /watches/{id}/screenshot (on-demand re-capture), GET /watches/{id}/snapshots/{snapshot_id}/content (escaped text viewer), GET /partials/apprise-plugin-form (HTMX token form for selected Apprise plugin or raw URL fallback)
 src/dashboard/context.py — Dashboard-specific DB query helpers; includes get_latest_snapshot, compute_watch_health (pure fn), get_watch_health_map (per-watch latest check event), get_watch_timeline + get_watch_timeline_count (unified lifecycle timeline)
 src/dashboard/static/    — CSS, JS (vendored HTMX, dark-mode, htmx-a11y), compiled Tailwind
 src/dashboard/static/images/ — Brand assets and project icons (Cannabis Observer logo, magnifying glass)
-src/dashboard/templates/ — Jinja2 templates (base, pages, partials); partials/pagination.html reusable offset-based pagination; partials/domain_field.html reusable inline-editable domain field (view/edit modes via GET /domains/{name}/field/{field_name}?mode=view|edit); partials/watch_field.html inline-editable watch field (text/number/textarea/select/toggle types, content-type-aware via WATCH_FIELD_META); partials/watch_status_toggle.html Active/Inactive/Archived toggle with badge; partials/watch_timeline.html unified lifecycle event timeline with category filter (change/error/run/config) and pagination; partials/watch_notifications.html interactive notification config list + add form (toggle/delete/test actions via HTMX to dashboard wrapper routes); macros/fields.html — watch_field(ctx) and domain_field(ctx) macros (import with context; centralise {% set %} boilerplate for field partials)
+src/dashboard/templates/ — Jinja2 templates (base, pages, partials); partials/pagination.html reusable offset-based pagination; partials/domain_field.html reusable inline-editable domain field (view/edit modes via GET /domains/{name}/field/{field_name}?mode=view|edit); partials/watch_field.html inline-editable watch field (text/number/textarea/select/toggle types, content-type-aware via WATCH_FIELD_META); partials/watch_status_toggle.html Active/Inactive/Archived toggle with badge; partials/watch_timeline.html unified lifecycle event timeline with category filter (change/error/run/config) and pagination; partials/watch_notifications.html interactive notification config list + add form (toggle/delete/test actions via HTMX to dashboard wrapper routes); partials/apprise_plugin_form.html HTMX-swapped token form for a selected Apprise plugin (variant selector, required first, optional under "Advanced options"); partials/apprise_raw_url_form.html raw Apprise URL fallback input; macros/fields.html — watch_field(ctx) and domain_field(ctx) macros (import with context; centralise {% set %} boilerplate for field partials); macros/apprise_token_input.html — token_input(name, tok, required) macro for Apprise plugin token fields (shared by apprise_plugin_form.html)
 src/workers/           — Procrastinate task queue (check_watch, schedule_tick)
 src/workers/pipeline.py  — Core check pipeline: hash, extract, diff, store snapshots
 src/workers/notify.py    — Notification dispatch: dispatch_event_notifications(session, event)

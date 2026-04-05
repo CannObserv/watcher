@@ -4,6 +4,7 @@
   plugin.tokens is a dict of {token_name: {name, type, required, private, default, values, regex}}.
   Tokens named tok_{name} to avoid collision with other form fields.
 #}
+{% from "macros/apprise_token_input.html" import token_input %}
 
 <div id="plugin-token-form">
   {# Hidden schema field for POST handler #}
@@ -33,7 +34,7 @@
   </div>
   {% endif %}
 
-  {# Render required tokens first, then optional under "Advanced options" #}
+  {# Detect whether any optional tokens exist #}
   {% set ns = namespace(has_optional=false) %}
   {% for name, tok in plugin.tokens.items() %}
     {% if not tok.required %}{% set ns.has_optional = true %}{% endif %}
@@ -47,46 +48,7 @@
       {{ tok.name }}
       <span class="text-red-500 dark:text-red-400 ms-0.5" aria-hidden="true">*</span>
     </label>
-    {% if tok.type.startswith('choice') %}
-    <select id="tok_{{ name }}" name="tok_{{ name }}" class="form-input mt-1" required aria-required="true">
-      {% for val in tok.values %}
-      <option value="{{ val }}" {% if tok.default == val %}selected{% endif %}>{{ val }}</option>
-      {% endfor %}
-    </select>
-    {% elif tok.type == 'bool' %}
-    <input type="checkbox" id="tok_{{ name }}" name="tok_{{ name }}" value="yes"
-           {% if tok.default %}checked{% endif %}
-           class="rounded border-gray-300 dark:border-gray-600 mt-1">
-    {% elif tok.private %}
-    <div class="relative mt-1">
-      <input type="password" id="tok_{{ name }}" name="tok_{{ name }}"
-             class="form-input pe-10"
-             required aria-required="true"
-             {% if tok.regex %}pattern="{{ tok.regex }}"{% endif %}>
-      <button type="button"
-              onclick="var i=this.previousElementSibling;i.type=i.type==='password'?'text':'password'"
-              class="absolute inset-y-0 end-0 flex items-center px-3 text-gray-400 dark:text-gray-500"
-              aria-label="Toggle {{ tok.name }} visibility">
-        <span aria-hidden="true">👁</span>
-      </button>
-    </div>
-    {% elif tok.type == 'list:string' %}
-    <input type="text" id="tok_{{ name }}" name="tok_{{ name }}"
-           class="form-input mt-1"
-           required aria-required="true"
-           {% if tok.default %}value="{{ tok.default }}"{% endif %}
-           {% if tok.regex %}pattern="{{ tok.regex }}"{% endif %}
-           aria-describedby="tok_{{ name }}_hint">
-    <p id="tok_{{ name }}_hint" class="text-xs text-gray-500 dark:text-gray-400 mt-1">Separate multiple values with commas</p>
-    {% else %}
-    <input type="{{ 'number' if tok.type in ('int', 'float') else 'text' }}"
-           {% if tok.type == 'int' %}step="1"{% elif tok.type == 'float' %}step="any"{% endif %}
-           id="tok_{{ name }}" name="tok_{{ name }}"
-           class="form-input mt-1"
-           required aria-required="true"
-           {% if tok.default is not none %}value="{{ tok.default }}"{% endif %}
-           {% if tok.regex %}pattern="{{ tok.regex }}"{% endif %}>
-    {% endif %}
+    {{ token_input(name, tok, true) }}
   </div>
   {% endif %}
   {% endfor %}
@@ -102,44 +64,7 @@
       {% if not tok.required %}
       <div>
         <label for="tok_{{ name }}" class="form-label">{{ tok.name }}</label>
-        {% if tok.type.startswith('choice') %}
-        <select id="tok_{{ name }}" name="tok_{{ name }}" class="form-input mt-1">
-          <option value="">— default —</option>
-          {% for val in tok.values %}
-          <option value="{{ val }}" {% if tok.default == val %}selected{% endif %}>{{ val }}</option>
-          {% endfor %}
-        </select>
-        {% elif tok.type == 'bool' %}
-        <input type="checkbox" id="tok_{{ name }}" name="tok_{{ name }}" value="yes"
-               {% if tok.default %}checked{% endif %}
-               class="rounded border-gray-300 dark:border-gray-600 mt-1">
-        {% elif tok.private %}
-        <div class="relative mt-1">
-          <input type="password" id="tok_{{ name }}" name="tok_{{ name }}"
-                 class="form-input pe-10"
-                 {% if tok.regex %}pattern="{{ tok.regex }}"{% endif %}>
-          <button type="button"
-                  onclick="var i=this.previousElementSibling;i.type=i.type==='password'?'text':'password'"
-                  class="absolute inset-y-0 end-0 flex items-center px-3 text-gray-400 dark:text-gray-500"
-                  aria-label="Toggle {{ tok.name }} visibility">
-            <span aria-hidden="true">👁</span>
-          </button>
-        </div>
-        {% elif tok.type == 'list:string' %}
-        <input type="text" id="tok_{{ name }}" name="tok_{{ name }}"
-               class="form-input mt-1"
-               {% if tok.default %}value="{{ tok.default }}"{% endif %}
-               {% if tok.regex %}pattern="{{ tok.regex }}"{% endif %}
-               aria-describedby="tok_{{ name }}_hint">
-        <p id="tok_{{ name }}_hint" class="text-xs text-gray-500 dark:text-gray-400 mt-1">Separate multiple values with commas</p>
-        {% else %}
-        <input type="{{ 'number' if tok.type in ('int', 'float') else 'text' }}"
-               {% if tok.type == 'int' %}step="1"{% elif tok.type == 'float' %}step="any"{% endif %}
-               id="tok_{{ name }}" name="tok_{{ name }}"
-               class="form-input mt-1"
-               {% if tok.default is not none %}value="{{ tok.default }}"{% endif %}
-               {% if tok.regex %}pattern="{{ tok.regex }}"{% endif %}>
-        {% endif %}
+        {{ token_input(name, tok, false) }}
       </div>
       {% endif %}
       {% endfor %}

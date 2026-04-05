@@ -15,7 +15,11 @@ from ulid import ULID
 from src.api.dependencies import get_db_session, get_probe_fn
 from src.api.routes.helpers import parse_ulid
 from src.api.routes.watches import delete_watch as api_delete_watch
-from src.api.schemas.notification_config import extract_channel_hint, validate_apprise_url
+from src.api.schemas.notification_config import (
+    extract_channel_hint,
+    validate_apprise_url,
+    validate_event_list,
+)
 from src.core.crypto import encrypt_apprise_url
 from src.core.logging import get_logger
 from src.core.models.audit_log import EventType, audit
@@ -1416,9 +1420,9 @@ async def watch_notification_create(
                 },
             )
 
-    valid_event_values = {e.value for e in WatchEventType}
-    invalid = [e for e in events if e not in valid_event_values]
-    if invalid:
+    try:
+        validate_event_list(events)
+    except ValueError as exc:
         notifications = await get_watch_notifications(session, watch.id)
         return templates.TemplateResponse(
             "partials/watch_notifications.html",
@@ -1426,7 +1430,7 @@ async def watch_notification_create(
                 "request": request,
                 "watch": watch,
                 "notifications": notifications,
-                "error": f"Unknown event types: {invalid}",
+                "error": str(exc),
                 "apprise_plugins": list_plugins(),
             },
         )

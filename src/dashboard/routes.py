@@ -23,6 +23,7 @@ from src.core.models.domain import Domain
 from src.core.models.notification_config import NotificationConfig
 from src.core.models.snapshot import Snapshot
 from src.core.models.watch import ContentType, Watch
+from src.core.notifications.apprise_builder import assemble_url, get_plugin_detail, list_plugins
 from src.core.notifications.dispatcher import dispatch_event
 from src.core.notifications.events import WatchEvent, WatchEventType
 from src.core.probe import ProbeResult
@@ -1328,7 +1329,33 @@ async def partial_watch_notifications(
     notifications = await get_watch_notifications(session, watch.id)
     return templates.TemplateResponse(
         "partials/watch_notifications.html",
-        {"request": request, "watch": watch, "notifications": notifications},
+        {
+            "request": request,
+            "watch": watch,
+            "notifications": notifications,
+            "apprise_plugins": list_plugins(),
+        },
+    )
+
+
+@router.get("/partials/apprise-plugin-form")
+async def partial_apprise_plugin_form(
+    request: Request,
+    schema: str | None = None,
+    variant: int = 0,
+    raw: bool = False,
+):
+    """HTMX partial: token form for a selected Apprise plugin, or raw URL input."""
+    if raw or schema is None:
+        return templates.TemplateResponse(
+            "partials/apprise_raw_url_form.html", {"request": request}
+        )
+    detail = get_plugin_detail(schema)
+    if detail is None:
+        raise HTTPException(status_code=404, detail=f"Unknown Apprise plugin: {schema!r}")
+    return templates.TemplateResponse(
+        "partials/apprise_plugin_form.html",
+        {"request": request, "plugin": detail, "variant": variant},
     )
 
 
@@ -1336,8 +1363,6 @@ async def partial_watch_notifications(
 async def watch_notification_create(
     request: Request,
     watch_id: str,
-    apprise_url: str = Form(...),
-    events: list[str] = Form(default=[]),
     session: AsyncSession = Depends(get_db_session),
 ):
     """Create a notification config from dashboard form. Returns refreshed partial."""
@@ -1345,19 +1370,51 @@ async def watch_notification_create(
     if not watch:
         raise HTTPException(status_code=404, detail="Watch not found")
 
-    try:
-        validate_apprise_url(apprise_url)
-    except ValueError as exc:
-        notifications = await get_watch_notifications(session, watch.id)
-        return templates.TemplateResponse(
-            "partials/watch_notifications.html",
-            {
-                "request": request,
-                "watch": watch,
-                "notifications": notifications,
-                "error": str(exc),
-            },
-        )
+    form = await request.form()
+    events = form.getlist("events")
+    schema_val = form.get("schema") or ""
+
+    # Determine the Apprise URL: token path or raw URL path
+    if schema_val:
+        # Token-based submission: collect tok_{name} fields
+        tokens = {
+            key[4:]: str(value)
+            for key, value in form.items()
+            if key.startswith("tok_") and str(value).strip()
+        }
+        try:
+            variant_raw = form.get("variant")
+            variant_index = int(variant_raw) if variant_raw is not None else None
+            apprise_url = assemble_url(schema_val, tokens, variant_index=variant_index)
+        except ValueError as exc:
+            notifications = await get_watch_notifications(session, watch.id)
+            return templates.TemplateResponse(
+                "partials/watch_notifications.html",
+                {
+                    "request": request,
+                    "watch": watch,
+                    "notifications": notifications,
+                    "error": str(exc),
+                    "apprise_plugins": list_plugins(),
+                },
+            )
+    else:
+        # Raw URL submission (legacy path)
+        apprise_url = str(form.get("apprise_url") or "")
+        try:
+            validate_apprise_url(apprise_url)
+        except ValueError as exc:
+            notifications = await get_watch_notifications(session, watch.id)
+            return templates.TemplateResponse(
+                "partials/watch_notifications.html",
+                {
+                    "request": request,
+                    "watch": watch,
+                    "notifications": notifications,
+                    "error": str(exc),
+                    "apprise_plugins": list_plugins(),
+                },
+            )
 
     valid_event_values = {e.value for e in WatchEventType}
     invalid = [e for e in events if e not in valid_event_values]
@@ -1370,6 +1427,7 @@ async def watch_notification_create(
                 "watch": watch,
                 "notifications": notifications,
                 "error": f"Unknown event types: {invalid}",
+                "apprise_plugins": list_plugins(),
             },
         )
 
@@ -1377,7 +1435,7 @@ async def watch_notification_create(
         watch_id=watch.id,
         apprise_url=encrypt_apprise_url(apprise_url),
         channel_hint=extract_channel_hint(apprise_url),
-        events=events or ["change_detected"],
+        events=events,
     )
     session.add(config)
     audit(
@@ -1391,7 +1449,12 @@ async def watch_notification_create(
     notifications = await get_watch_notifications(session, watch.id)
     return templates.TemplateResponse(
         "partials/watch_notifications.html",
-        {"request": request, "watch": watch, "notifications": notifications},
+        {
+            "request": request,
+            "watch": watch,
+            "notifications": notifications,
+            "apprise_plugins": list_plugins(),
+        },
     )
 
 

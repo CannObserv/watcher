@@ -117,7 +117,8 @@ class TestWatchNotificationsPartialRoute:
         watch = _make_mock_watch()
         resp = await self._get(str(watch.id), mock_watch=watch)
         assert resp.status_code == 200
-        assert b"apprise_url" in resp.content
+        assert b"add-notification-form" in resp.content
+        assert b"channel-picker" in resp.content
 
     async def test_event_checkboxes_present(self):
         watch = _make_mock_watch()
@@ -319,3 +320,98 @@ class TestWatchNotificationTestResultRoute:
             mock_watch=None,
         )
         assert resp.status_code == 404
+
+
+class TestWatchNotificationCreateFromTokens:
+    """POST /watches/{id}/notifications/new with schema+tokens payload."""
+
+    async def _post_token_form(
+        self,
+        watch_id: str,
+        schema: str,
+        token_fields: dict,
+        mock_watch=None,
+        events=None,
+    ):
+        from src.api.dependencies import get_db_session
+        from src.api.main import app
+
+        _session = MagicMock()
+        _session.commit = AsyncMock()
+
+        async def override_session():
+            yield _session
+
+        app.dependency_overrides[get_db_session] = override_session
+        try:
+            with (
+                patch(
+                    "src.dashboard.routes.get_watch_detail",
+                    new_callable=AsyncMock,
+                    return_value=mock_watch or _make_mock_watch(),
+                ),
+                patch(
+                    "src.dashboard.routes.get_watch_notifications",
+                    new_callable=AsyncMock,
+                    return_value=[],
+                ),
+                patch("src.dashboard.routes.encrypt_apprise_url", return_value="encrypted"),
+                patch("src.dashboard.routes.extract_channel_hint", return_value=schema),
+                patch("src.dashboard.routes.assemble_url", return_value=f"{schema}://assembled"),
+            ):
+                form_data = {"schema": schema, **(events or {})}
+                form_data.update({f"tok_{k}": v for k, v in token_fields.items()})
+                transport = ASGITransport(app=app)
+                async with AsyncClient(transport=transport, base_url="http://test") as client:
+                    return await client.post(
+                        f"/watches/{watch_id}/notifications/new",
+                        data=form_data,
+                    )
+        finally:
+            app.dependency_overrides.clear()
+
+    async def test_token_form_submission_returns_200(self):
+        watch = _make_mock_watch()
+        resp = await self._post_token_form(
+            str(watch.id),
+            "discord",
+            {"webhook_id": "abc123", "webhook_token": "xyz789"},
+            mock_watch=watch,
+        )
+        assert resp.status_code == 200
+
+    async def test_unknown_schema_shows_error(self):
+        watch = _make_mock_watch()
+        from src.api.dependencies import get_db_session
+        from src.api.main import app
+
+        async def override_session():
+            yield MagicMock()
+
+        app.dependency_overrides[get_db_session] = override_session
+        try:
+            with (
+                patch(
+                    "src.dashboard.routes.get_watch_detail",
+                    new_callable=AsyncMock,
+                    return_value=watch,
+                ),
+                patch(
+                    "src.dashboard.routes.get_watch_notifications",
+                    new_callable=AsyncMock,
+                    return_value=[],
+                ),
+                patch(
+                    "src.dashboard.routes.assemble_url",
+                    side_effect=ValueError("Unknown Apprise plugin schema"),
+                ),
+            ):
+                transport = ASGITransport(app=app)
+                async with AsyncClient(transport=transport, base_url="http://test") as client:
+                    resp = await client.post(
+                        f"/watches/{watch.id}/notifications/new",
+                        data={"schema": "notaschema", "tok_x": "y"},
+                    )
+            assert "Unknown" in resp.text
+        finally:
+            app.dependency_overrides.clear()

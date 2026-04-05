@@ -1,12 +1,12 @@
 """Pydantic schemas for notification config CRUD (Apprise v2)."""
 
 from datetime import datetime
-from typing import Annotated
 
 import apprise
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from src.api.schemas.types import ULIDStr
+from src.core.notifications.apprise_builder import assemble_url
 from src.core.notifications.events import WatchEventType
 
 _VALID_EVENT_TYPES = {e.value for e in WatchEventType}
@@ -29,15 +29,33 @@ def extract_channel_hint(url: str) -> str:
 
 
 class NotificationConfigCreate(BaseModel):
-    """Request body for creating a notification config."""
+    """
+    Request body for creating a notification config.
 
-    apprise_url: Annotated[str, Field(min_length=1)]
+    Accepts either:
+    - apprise_url (raw Apprise URL string), or
+    - schema + tokens (assembled server-side into an Apprise URL).
+    """
+
+    apprise_url: str | None = None
+    schema: str | None = None
+    tokens: dict[str, str] | None = None
     events: list[str] = Field(default_factory=lambda: ["change_detected"])
 
-    @field_validator("apprise_url")
-    @classmethod
-    def validate_url(cls, v: str) -> str:
-        return validate_apprise_url(v)
+    @model_validator(mode="after")
+    def resolve_apprise_url(self) -> "NotificationConfigCreate":
+        if self.apprise_url is not None:
+            # Raw URL path — validate it
+            validate_apprise_url(self.apprise_url)
+        elif self.schema is not None:
+            # Token path — assemble the URL
+            try:
+                self.apprise_url = assemble_url(self.schema, self.tokens or {})
+            except ValueError as exc:
+                raise ValueError(str(exc)) from exc
+        else:
+            raise ValueError("Provide either 'apprise_url' or 'schema' + 'tokens'.")
+        return self
 
     @field_validator("events")
     @classmethod

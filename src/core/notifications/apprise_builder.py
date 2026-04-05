@@ -128,7 +128,7 @@ def _list_plugins_cached() -> tuple[dict, ...]:
 
 def list_plugins() -> list[dict]:
     """Return sorted list of {plugin_schema, service_name, category} for all plugins."""
-    return copy.deepcopy(list(_list_plugins_cached()))
+    return list(copy.deepcopy(_list_plugins_cached()))
 
 
 def get_plugin_detail(schema: str) -> dict | None:

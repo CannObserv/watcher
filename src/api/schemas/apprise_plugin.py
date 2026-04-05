@@ -29,6 +29,8 @@ class PluginListItem(BaseModel):
 
     plugin_schema: str
     service_name: str
+    setup_url: str | None = None
+    service_url: str | None = None
     category: str | None = None
 
 
@@ -37,5 +39,7 @@ class PluginDetail(BaseModel):
 
     plugin_schema: str
     service_name: str
+    setup_url: str | None = None
+    service_url: str | None = None
     tokens: dict[str, TokenMeta]
     variants: list[PluginVariant]

@@ -120,6 +120,14 @@ class TestWatchNotificationsPartialRoute:
         assert b"add-notification-form" in resp.content
         assert b"channel-picker" in resp.content
 
+    async def test_builder_manual_segment_toggle_present(self):
+        watch = _make_mock_watch()
+        resp = await self._get(str(watch.id), mock_watch=watch)
+        assert resp.status_code == 200
+        assert b'value="builder"' in resp.content
+        assert b'value="manual"' in resp.content
+        assert b"segment-group" in resp.content
+
     async def test_event_checkboxes_present(self):
         watch = _make_mock_watch()
         resp = await self._get(str(watch.id), mock_watch=watch)

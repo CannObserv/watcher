@@ -33,6 +33,18 @@ class TestListPlugins:
             assert "service_name" in p
             assert "category" in p
 
+    def test_items_include_setup_url(self):
+        plugins = list_plugins()
+        discord = next(p for p in plugins if p["plugin_schema"] == "discord")
+        assert "setup_url" in discord
+        assert discord["setup_url"].startswith("http")
+
+    def test_items_include_service_url(self):
+        plugins = list_plugins()
+        discord = next(p for p in plugins if p["plugin_schema"] == "discord")
+        assert "service_url" in discord
+        assert discord["service_url"].startswith("http")
+
 
 class TestGetPluginDetail:
     def test_returns_detail_for_discord(self):
@@ -61,6 +73,16 @@ class TestGetPluginDetail:
     def test_discord_has_no_variants(self):
         detail = get_plugin_detail("discord")
         assert detail["variants"] == []
+
+    def test_detail_includes_setup_url(self):
+        detail = get_plugin_detail("discord")
+        assert "setup_url" in detail
+        assert detail["setup_url"].startswith("http")
+
+    def test_detail_includes_service_url(self):
+        detail = get_plugin_detail("discord")
+        assert "service_url" in detail
+        assert detail["service_url"].startswith("http")
 
     def test_alias_tokens_excluded(self):
         # Alias tokens (those with alias_of key) should not appear in the token dict.

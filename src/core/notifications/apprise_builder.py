@@ -119,6 +119,8 @@ def _list_plugins_cached() -> tuple[dict, ...]:
         {
             "plugin_schema": scheme,
             "service_name": str(entry["service_name"]),
+            "setup_url": entry.get("setup_url"),
+            "service_url": entry.get("service_url"),
             "category": entry.get("category"),
         }
         for scheme, entry in catalog.items()
@@ -127,7 +129,10 @@ def _list_plugins_cached() -> tuple[dict, ...]:
 
 
 def list_plugins() -> list[dict]:
-    """Return sorted list of {plugin_schema, service_name, category} for all plugins."""
+    """Return sorted list of plugin dicts for all plugins.
+
+    Keys: plugin_schema, service_name, setup_url, service_url, category.
+    """
     return list(copy.deepcopy(_list_plugins_cached()))
 
 
@@ -135,7 +140,8 @@ def get_plugin_detail(schema: str) -> dict | None:
     """
     Return token defs and variant info for a plugin, or None if unknown.
 
-    Returns: {schema, service_name, tokens: {name: TokenMeta}, variants: [...]}
+    Returns: {plugin_schema, service_name, setup_url, service_url,
+              tokens: {name: TokenMeta}, variants: [...]}
     """
     catalog = _build_catalog()
     entry = catalog.get(schema.lower())
@@ -146,6 +152,8 @@ def get_plugin_detail(schema: str) -> dict | None:
     return {
         "plugin_schema": schema.lower(),
         "service_name": str(entry["service_name"]),
+        "setup_url": entry.get("setup_url"),
+        "service_url": entry.get("service_url"),
         "tokens": tokens,
         "variants": variants,
     }

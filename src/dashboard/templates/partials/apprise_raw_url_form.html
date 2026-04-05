@@ -1,5 +1,5 @@
-{# Raw URL fallback input — swapped in when user clicks "Enter URL manually". #}
-{# Provides a plain Apprise URL text field. #}
+{# Raw URL fallback input — swapped in when user selects Manual mode. #}
+{# Provides a plain Apprise URL text field with links to Apprise docs. #}
 <div id="plugin-token-form">
   <label for="apprise_url" class="form-label">Apprise URL</label>
   <input
@@ -10,4 +10,9 @@
     placeholder="slack://T.../A.../T.../#channel"
     required
     aria-required="true">
+  <p class="text-xs text-gray-500 dark:text-gray-400 mt-2">
+    <a href="https://appriseit.com/getting-started/universal-syntax/" target="_blank" rel="noopener noreferrer" class="link">URL syntax guide</a>
+    <span aria-hidden="true"> · </span>
+    <a href="https://appriseit.com/tools/url-builder/" target="_blank" rel="noopener noreferrer" class="link">Apprise URL Builder</a>
+  </p>
 </div>

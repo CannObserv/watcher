@@ -1,6 +1,6 @@
 {#
   Apprise plugin token form partial.
-  Expects: plugin (dict with schema, service_name, tokens, variants), variant (int).
+  Expects: plugin (dict with plugin_schema, service_name, setup_url, service_url, tokens, variants), variant (int).
   plugin.tokens is a dict of {token_name: {name, type, required, private, default, values, regex}}.
   Tokens named tok_{name} to avoid collision with other form fields.
 #}
@@ -9,6 +9,21 @@
 <div id="plugin-token-form">
   {# Hidden schema field for POST handler #}
   <input type="hidden" name="plugin_schema" value="{{ plugin.plugin_schema }}">
+
+  {# Documentation links #}
+  {% if plugin.setup_url or plugin.service_url %}
+  <p class="text-xs text-gray-500 dark:text-gray-400 mb-3">
+    {% if plugin.setup_url %}
+    <a href="{{ plugin.setup_url }}" target="_blank" rel="noopener noreferrer" class="link">Setup guide</a>
+    {% endif %}
+    {% if plugin.setup_url and plugin.service_url %}
+    <span aria-hidden="true"> · </span>
+    {% endif %}
+    {% if plugin.service_url %}
+    <a href="{{ plugin.service_url }}" target="_blank" rel="noopener noreferrer" class="link">{{ plugin.service_name }}</a>
+    {% endif %}
+  </p>
+  {% endif %}
 
   {# Variant selector — only shown when plugin has divergent template variants #}
   {% if plugin.variants | length > 1 %}

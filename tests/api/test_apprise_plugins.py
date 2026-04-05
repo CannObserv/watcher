@@ -26,6 +26,18 @@ class TestListApprisePlugins:
         item = next(p for p in data if p["plugin_schema"] == "discord")
         assert set(item.keys()) >= {"plugin_schema", "service_name", "category"}
 
+    async def test_item_includes_setup_url(self, client):
+        data = (await client.get("/api/v1/apprise/plugins")).json()
+        item = next(p for p in data if p["plugin_schema"] == "discord")
+        assert "setup_url" in item
+        assert item["setup_url"].startswith("http")
+
+    async def test_item_includes_service_url(self, client):
+        data = (await client.get("/api/v1/apprise/plugins")).json()
+        item = next(p for p in data if p["plugin_schema"] == "discord")
+        assert "service_url" in item
+        assert item["service_url"].startswith("http")
+
 
 class TestGetApprisePlugin:
     async def test_discord_returns_200(self, client):
@@ -38,6 +50,16 @@ class TestGetApprisePlugin:
         assert data["service_name"] == "Discord"
         assert "tokens" in data
         assert "variants" in data
+
+    async def test_discord_includes_setup_url(self, client):
+        data = (await client.get("/api/v1/apprise/plugins/discord")).json()
+        assert "setup_url" in data
+        assert data["setup_url"].startswith("http")
+
+    async def test_discord_includes_service_url(self, client):
+        data = (await client.get("/api/v1/apprise/plugins/discord")).json()
+        assert "service_url" in data
+        assert data["service_url"].startswith("http")
 
     async def test_discord_has_webhook_id_token(self, client):
         data = (await client.get("/api/v1/apprise/plugins/discord")).json()

@@ -20,13 +20,13 @@ Python ≥3.12, uv, pytest, ruff
 src/api/               — FastAPI app (ASGI, routes, schemas)
 src/api/routes/        — API endpoints (watches, temporal_profiles, changes, audit_log, notification_configs, domains, probe, apprise_plugins); mounted at /api/v1/
 src/api/routes/apprise_plugins.py — GET /api/v1/apprise/plugins (sorted list) and /api/v1/apprise/plugins/{schema} (token defs + variants); 404 for unknown schema
-src/api/schemas/apprise_plugin.py — PluginListItem, PluginDetail, TokenMeta, PluginVariant response schemas
+src/api/schemas/apprise_plugin.py — PluginListItem [+setup_url, service_url], PluginDetail [+setup_url, service_url], TokenMeta, PluginVariant response schemas
 src/api/routes/health.py — /health (liveness) and /ready (readiness) endpoints; root-level, not versioned
 src/core/              — Shared domain logic
 src/core/models/       — SQLAlchemy models (Watch [+health_status: WatchHealthStatus], AuditLog, Snapshot, SnapshotChunk, Change [+visual_change_score float nullable], TemporalProfile, NotificationConfig [apprise_url encrypted, channel_hint, events ARRAY], Domain); notification_event_types seed table in migrations
 src/core/probe.py      — URL probe: follow redirects, resolve effective URL and domain (ProbeResult + probe_url)
 src/core/notifications/  — Apprise-based notification dispatcher; WatchEvent + WatchEventType + EVENT_TITLES (events.py), dispatch_event() (dispatcher.py)
-src/core/notifications/apprise_builder.py — Apprise plugin catalog introspection + URL assembly; list_plugins(), get_plugin_detail(schema), assemble_url(schema, tokens, variant_index); _build_catalog() + _list_plugins_cached() lru_cached
+src/core/notifications/apprise_builder.py — Apprise plugin catalog introspection + URL assembly; list_plugins(), get_plugin_detail(schema), assemble_url(schema, tokens, variant_index); returns setup_url + service_url per plugin; _build_catalog() + _list_plugins_cached() lru_cached
 src/core/extractors/   — Content extractors (HTML, PDF, CSV/Excel → Chunks)
 src/core/fetchers/     — URL fetchers (HTTP; browser/WebRecorder planned)
 src/core/differ.py     — Chunk-level change detection with SimHash similarity

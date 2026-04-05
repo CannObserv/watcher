@@ -4,7 +4,7 @@
 
 {# Category filter controls #}
 <div class="px-4 pt-4 pb-3 border-b border-gray-200 dark:border-gray-700">
-  <fieldset class="segment-group" role="radiogroup" aria-label="Filter timeline by category">
+  <fieldset class="segment-group" aria-label="Filter timeline by category">
     <legend class="sr-only">Filter by category</legend>
     {% set active_cat = timeline_category or "all" %}
     {% for value, label in [("all", "All"), ("change", "Changes"), ("error", "Errors"), ("config", "Config")] %}

@@ -85,7 +85,7 @@
   class="mt-4 space-y-4 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-4">
   <h4 class="text-sm font-semibold text-gray-900 dark:text-white">Add notification</h4>
 
-  {# Step 1: Plugin picker #}
+  {# Step 1: Plugin picker + mode toggle #}
   <div>
     <label for="channel-picker" class="form-label">Notification channel</label>
     <div class="flex items-center gap-3 mt-1">
@@ -98,20 +98,32 @@
         hx-swap="outerHTML"
         hx-vals='js:{schema: htmx.find("#channel-picker").value}'
         hx-trigger="change"
+        onchange="document.querySelector('input[name=_url_mode][value=builder]').checked = true"
         aria-label="Select notification plugin">
         <option value="">— pick a channel —</option>
         {% for plugin in apprise_plugins %}
         <option value="{{ plugin.plugin_schema }}">{{ plugin.service_name }}</option>
         {% endfor %}
       </select>
-      <button
-        type="button"
-        hx-get="/partials/apprise-plugin-form?raw=1"
-        hx-target="#plugin-token-form"
-        hx-swap="outerHTML"
-        class="btn btn-secondary text-xs min-h-[44px] shrink-0">
-        Enter URL manually
-      </button>
+      <fieldset class="segment-group shrink-0" aria-label="URL entry mode">
+        <legend class="sr-only">URL entry mode</legend>
+        <label class="segment">
+          <input type="radio" name="_url_mode" value="builder" checked
+            hx-get="/partials/apprise-plugin-form"
+            hx-vals='js:{schema: htmx.find("#channel-picker").value}'
+            hx-target="#plugin-token-form"
+            hx-swap="outerHTML"
+            hx-trigger="click[htmx.find('#channel-picker').value !== '']">
+          <span class="text-xs">Builder</span>
+        </label>
+        <label class="segment">
+          <input type="radio" name="_url_mode" value="manual"
+            hx-get="/partials/apprise-plugin-form?raw=1"
+            hx-target="#plugin-token-form"
+            hx-swap="outerHTML">
+          <span class="text-xs">Manual</span>
+        </label>
+      </fieldset>
     </div>
   </div>
 

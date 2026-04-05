@@ -58,7 +58,18 @@ class TestApprisePluginFormPartial:
         # Slack has 2 variants — variant selector must be present
         assert "variant" in resp.text.lower()
 
+    async def test_discord_shows_setup_guide_link(self):
+        resp = await _get(schema="discord")
+        assert resp.status_code == 200
+        assert "Setup guide" in resp.text
+
     async def test_raw_mode_returns_url_input(self):
         resp = await _get(raw=True)
         assert resp.status_code == 200
         assert 'name="apprise_url"' in resp.text
+
+    async def test_raw_mode_shows_apprise_doc_links(self):
+        resp = await _get(raw=True)
+        assert resp.status_code == 200
+        assert "appriseit.com/getting-started/universal-syntax/" in resp.text
+        assert "appriseit.com/tools/url-builder/" in resp.text

@@ -23,6 +23,8 @@ async def get_apprise_plugin(schema: str):
     return PluginDetail(
         plugin_schema=detail["plugin_schema"],
         service_name=detail["service_name"],
+        setup_url=detail.get("setup_url"),
+        service_url=detail.get("service_url"),
         tokens={k: TokenMeta(**v) for k, v in detail["tokens"].items()},
         variants=[PluginVariant(**v) for v in detail["variants"]],
     )

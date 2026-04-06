@@ -38,7 +38,13 @@ async def dispatch_event_notifications(
     for config in configs:
         try:
             outcome = await dispatch_event(event, config.apprise_url)
-            results.append({"config_id": str(config.id), "success": outcome.success})
+            results.append(
+                {
+                    "config_id": str(config.id),
+                    "success": outcome.success,
+                    "reason": outcome.reason,
+                }
+            )
             extra = {
                 "config_id": str(config.id),
                 "watch_id": event.watch_id,

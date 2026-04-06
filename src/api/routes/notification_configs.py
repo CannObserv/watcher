@@ -129,7 +129,7 @@ async def test_notification_config(
     config_id: str,
     session: AsyncSession = Depends(get_db_session),
 ):
-    """Send a test notification for a config. Returns {success: bool}, never 5xx."""
+    """Send a test notification for a config. Returns {success, reason}, never 5xx."""
     watch = await get_watch_or_404(watch_id, session)
     nc = await session.get(NotificationConfig, parse_ulid(config_id, "Config"))
     if not nc or nc.watch_id != watch.id:

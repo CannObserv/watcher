@@ -377,7 +377,6 @@ class TestWatchNotificationCreateFromTokens:
                     return_value=[],
                 ),
                 patch("src.dashboard.routes.encrypt_apprise_url", return_value="encrypted"),
-                patch("src.dashboard.routes.extract_channel_hint", return_value=schema),
                 patch("src.dashboard.routes.assemble_url", return_value=f"{schema}://assembled"),
             ):
                 form_data = {"plugin_schema": schema, **(events or {})}

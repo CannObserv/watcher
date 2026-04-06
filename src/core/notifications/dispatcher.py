@@ -32,9 +32,7 @@ async def dispatch_event(event: WatchEvent, apprise_url_encrypted: str) -> Dispa
             "invalid apprise url in notification config",
             extra={"watch_id": event.watch_id, "event_type": event.event_type},
         )
-        return DispatchResult(
-            success=False, reason="Invalid Apprise URL — check your configuration"
-        )
+        return DispatchResult(success=False, reason="Invalid Apprise URL: check your configuration")
     result = await ap.async_notify(
         body=event.body,
         title=event.title,
@@ -44,5 +42,5 @@ async def dispatch_event(event: WatchEvent, apprise_url_encrypted: str) -> Dispa
         return DispatchResult(success=True, reason="Notification sent successfully")
     return DispatchResult(
         success=False,
-        reason="Delivery failed — the service rejected or could not process the request",
+        reason="Delivery failed: the service rejected or could not process the request",
     )

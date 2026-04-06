@@ -56,7 +56,7 @@ async def dispatch_event_notifications(
                 logger.warning("notification failed", extra=extra)
         except Exception:
             logger.exception("notification error", extra={"config_id": str(config.id)})
-            results.append({"config_id": str(config.id), "success": False, "error": "exception"})
+            results.append({"config_id": str(config.id), "success": False, "reason": "exception"})
 
     audit(
         session,

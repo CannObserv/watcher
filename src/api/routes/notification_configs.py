@@ -82,7 +82,7 @@ async def update_notification_config(
     data: NotificationConfigUpdate,
     session: AsyncSession = Depends(get_db_session),
 ):
-    """Update is_active or events on a notification config."""
+    """Update is_active, events, or apprise_url on a notification config."""
     watch = await get_watch_or_404(watch_id, session)
     nc = await session.get(NotificationConfig, parse_ulid(config_id, "Config"))
     if not nc or nc.watch_id != watch.id:

@@ -189,6 +189,16 @@ class TestWatchNotificationsPartialRoute:
         assert b"<details" in resp.content
         assert b"Show URL" in resp.content
 
+    async def test_edit_button_present_for_each_config(self):
+        """Edit button appears per notification config, targeting the config row."""
+        watch = _make_mock_watch()
+        nc = _make_mock_nc()
+        with patch("src.dashboard.routes.decrypt_apprise_url", return_value="json://x.com"):
+            resp = await self._get(str(watch.id), mock_watch=watch, mock_notifications=[nc])
+        assert resp.status_code == 200
+        assert b"edit-form" in resp.content  # hx-get URL includes "edit-form"
+        assert b"Edit" in resp.content
+
 
 # ---------------------------------------------------------------------------
 # Helper for POST mutations

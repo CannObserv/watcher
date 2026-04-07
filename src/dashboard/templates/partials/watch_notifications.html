@@ -30,6 +30,16 @@
 
       {# Right: action buttons #}
       <div class="flex items-center gap-2 shrink-0">
+        {# Edit URL and events #}
+        <button
+          hx-get="/watches/{{ watch.id }}/notifications/{{ nc.id }}/edit-form"
+          hx-target="#nc-{{ nc.id }}"
+          hx-swap="outerHTML"
+          class="btn btn-secondary text-xs min-h-[44px] htmx-request:opacity-60"
+          aria-label="Edit {{ nc.channel_hint }} notification URL and events">
+          Edit
+        </button>
+
         {# Toggle active / inactive #}
         <button
           hx-post="/watches/{{ watch.id }}/notifications/{{ nc.id }}/toggle"

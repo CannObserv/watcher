@@ -20,7 +20,7 @@ from src.api.schemas.notification_config import (
     validate_apprise_url,
     validate_event_list,
 )
-from src.core.crypto import encrypt_apprise_url
+from src.core.crypto import decrypt_apprise_url, encrypt_apprise_url
 from src.core.logging import get_logger
 from src.core.models.audit_log import EventType, audit
 from src.core.models.domain import Domain
@@ -246,6 +246,7 @@ async def watch_detail_page(
         "watch": watch,
         "profiles": profiles,
         "notifications": notifications,
+        "notification_urls": _decrypt_notification_urls(notifications),
         "field_contexts": field_contexts,
         "snapshot_meta": snapshot_meta,
         "domain_inactive": domain_inactive,
@@ -1325,6 +1326,21 @@ async def partial_watch_timeline(
     )
 
 
+def _decrypt_notification_urls(notifications: list) -> dict[str, str]:
+    """Decrypt Apprise URLs for a list of NotificationConfig objects.
+
+    Returns a mapping from config ID (str) to plaintext URL.
+    Silently stores an error placeholder if decryption fails.
+    """
+    result = {}
+    for nc in notifications:
+        try:
+            result[str(nc.id)] = decrypt_apprise_url(nc.apprise_url)
+        except Exception:
+            result[str(nc.id)] = "(decryption error)"
+    return result
+
+
 @router.get("/partials/watch-notifications/{watch_id}")
 async def partial_watch_notifications(
     request: Request,
@@ -1342,6 +1358,7 @@ async def partial_watch_notifications(
             "request": request,
             "watch": watch,
             "notifications": notifications,
+            "notification_urls": _decrypt_notification_urls(notifications),
             "apprise_plugins": list_plugins(),
         },
     )
@@ -1418,6 +1435,7 @@ async def watch_notification_create(
                     "request": request,
                     "watch": watch,
                     "notifications": notifications,
+                    "notification_urls": _decrypt_notification_urls(notifications),
                     "error": str(exc),
                     "apprise_plugins": list_plugins(),
                 },
@@ -1435,6 +1453,7 @@ async def watch_notification_create(
                     "request": request,
                     "watch": watch,
                     "notifications": notifications,
+                    "notification_urls": _decrypt_notification_urls(notifications),
                     "error": str(exc),
                     "apprise_plugins": list_plugins(),
                 },
@@ -1450,6 +1469,7 @@ async def watch_notification_create(
                 "request": request,
                 "watch": watch,
                 "notifications": notifications,
+                "notification_urls": _decrypt_notification_urls(notifications),
                 "error": str(exc),
                 "apprise_plugins": list_plugins(),
             },
@@ -1478,6 +1498,7 @@ async def watch_notification_create(
             "request": request,
             "watch": watch,
             "notifications": notifications,
+            "notification_urls": _decrypt_notification_urls(notifications),
             "apprise_plugins": list_plugins(),
         },
     )
@@ -1503,7 +1524,13 @@ async def watch_notification_toggle(
     notifications = await get_watch_notifications(session, watch.id)
     return templates.TemplateResponse(
         "partials/watch_notifications.html",
-        {"request": request, "watch": watch, "notifications": notifications},
+        {
+            "request": request,
+            "watch": watch,
+            "notifications": notifications,
+            "notification_urls": _decrypt_notification_urls(notifications),
+            "apprise_plugins": list_plugins(),
+        },
     )
 
 

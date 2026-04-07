@@ -7,7 +7,7 @@
     {% for nc in notifications %}
     <li class="stat-card flex items-center justify-between gap-4 text-sm"
         id="nc-{{ nc.id }}">
-      {# Left: channel hint + event chips + inactive badge #}
+      {# Left: channel hint + event chips + inactive badge + URL reveal #}
       <div class="flex flex-wrap items-center gap-3 min-w-0">
         <span class="font-medium text-gray-900 dark:text-white truncate">{{ nc.channel_hint }}</span>
         <span class="flex flex-wrap gap-1" aria-label="Subscribed events">
@@ -17,6 +17,14 @@
         </span>
         {% if not nc.is_active %}
         <span class="badge badge-inactive shrink-0">Inactive</span>
+        {% endif %}
+        {% if notification_urls is defined and nc.id|string in notification_urls %}
+        <details class="w-full mt-1">
+          <summary class="text-xs text-gray-500 dark:text-gray-400 cursor-pointer select-none hover:text-gray-700 dark:hover:text-gray-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-co-purple-600 rounded">
+            Show URL
+          </summary>
+          <code class="block mt-1 text-xs font-mono break-all text-gray-700 dark:text-gray-300 bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 p-2 rounded">{{ notification_urls[nc.id|string] }}</code>
+        </details>
         {% endif %}
       </div>
 

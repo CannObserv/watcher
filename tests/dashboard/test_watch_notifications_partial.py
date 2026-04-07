@@ -23,6 +23,7 @@ def _make_mock_nc(
     channel_hint="slack",
     events=None,
     is_active=True,
+    apprise_url="encrypted_token",
 ):
     """Build a minimal NotificationConfig-like mock."""
     nc = MagicMock()
@@ -30,6 +31,7 @@ def _make_mock_nc(
     nc.channel_hint = channel_hint
     nc.events = events if events is not None else ["change_detected"]
     nc.is_active = is_active
+    nc.apprise_url = apprise_url
     return nc
 
 
@@ -165,6 +167,27 @@ class TestWatchNotificationsPartialRoute:
         # between that attribute and "disabled"
         wc_attrs = rendered.split('value="watch_created"')[-1].split("disabled")[0]
         assert "checked" in wc_attrs
+
+    async def test_renders_decrypted_url_in_details(self):
+        """Notification list reveals decrypted URL via <details> element."""
+        watch = _make_mock_watch()
+        nc = _make_mock_nc(apprise_url="some_fernet_token")
+        with patch(
+            "src.dashboard.routes.decrypt_apprise_url", return_value="discord://abc/def/ghi"
+        ):
+            resp = await self._get(str(watch.id), mock_watch=watch, mock_notifications=[nc])
+        assert resp.status_code == 200
+        assert b"discord://abc/def/ghi" in resp.content
+        assert b"Show URL" in resp.content
+
+    async def test_url_reveal_uses_details_element(self):
+        """Show URL toggle uses native <details> element for accessibility."""
+        watch = _make_mock_watch()
+        nc = _make_mock_nc()
+        with patch("src.dashboard.routes.decrypt_apprise_url", return_value="slack://T/A/T"):
+            resp = await self._get(str(watch.id), mock_watch=watch, mock_notifications=[nc])
+        assert b"<details" in resp.content
+        assert b"Show URL" in resp.content
 
 
 # ---------------------------------------------------------------------------

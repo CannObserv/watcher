@@ -56,6 +56,14 @@ class TestCreateNotificationConfig:
         )
         assert resp.status_code == 422
 
+    async def test_empty_events_returns_422(self, client):
+        watch_id = await _make_watch(client)
+        resp = await client.post(
+            f"/api/v1/watches/{watch_id}/notifications",
+            json={"apprise_url": VALID_URL, "events": []},
+        )
+        assert resp.status_code == 422
+
     async def test_invalid_event_type_returns_422(self, client):
         watch_id = await _make_watch(client)
         resp = await client.post(

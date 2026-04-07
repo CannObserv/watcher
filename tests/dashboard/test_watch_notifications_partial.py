@@ -571,7 +571,7 @@ class TestNotificationEditFormRoute:
         # OOB flash region present in response
         assert b"flash-region" in resp.content
         # URL input is blank (not populated with garbage)
-        assert b'value=""' in resp.content or b"value=" not in resp.content
+        assert b'value=""' in resp.content
 
 
 class TestNotificationEditRoute:

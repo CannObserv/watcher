@@ -1549,7 +1549,10 @@ async def watch_notification_edit_form(
     nc = await session.get(NotificationConfig, parse_ulid(config_id, "Config"))
     if not nc or nc.watch_id != watch.id:
         raise HTTPException(status_code=404, detail="Config not found")
-    decrypted_url = decrypt_apprise_url(nc.apprise_url)
+    try:
+        decrypted_url = decrypt_apprise_url(nc.apprise_url)
+    except (InvalidToken, ValueError):
+        decrypted_url = ""
     return templates.TemplateResponse(
         "partials/notification_edit_form.html",
         {
@@ -1583,8 +1586,11 @@ async def watch_notification_edit(
     try:
         validate_apprise_url(apprise_url)
     except ValueError as exc:
-        decrypted_url = decrypt_apprise_url(nc.apprise_url)
-        return templates.TemplateResponse(
+        try:
+            decrypted_url = decrypt_apprise_url(nc.apprise_url)
+        except (InvalidToken, ValueError):
+            decrypted_url = ""
+        response = templates.TemplateResponse(
             "partials/notification_edit_form.html",
             {
                 "request": request,
@@ -1594,12 +1600,18 @@ async def watch_notification_edit(
                 "error": str(exc),
             },
         )
+        response.headers["HX-Retarget"] = f"#nc-{nc.id}"
+        response.headers["HX-Reswap"] = "outerHTML"
+        return response
 
     try:
         validate_event_list(events)
     except ValueError as exc:
-        decrypted_url = decrypt_apprise_url(nc.apprise_url)
-        return templates.TemplateResponse(
+        try:
+            decrypted_url = decrypt_apprise_url(nc.apprise_url)
+        except (InvalidToken, ValueError):
+            decrypted_url = ""
+        response = templates.TemplateResponse(
             "partials/notification_edit_form.html",
             {
                 "request": request,
@@ -1609,6 +1621,9 @@ async def watch_notification_edit(
                 "error": str(exc),
             },
         )
+        response.headers["HX-Retarget"] = f"#nc-{nc.id}"
+        response.headers["HX-Reswap"] = "outerHTML"
+        return response
 
     nc.apprise_url = encrypt_apprise_url(apprise_url)
     nc.channel_hint = extract_channel_hint(apprise_url)

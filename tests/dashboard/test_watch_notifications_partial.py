@@ -658,3 +658,24 @@ class TestNotificationEditRoute:
             )
         assert resp.status_code == 200
         assert b"Apprise URL" in resp.content  # edit form re-rendered
+
+    async def test_invalid_url_error_response_retargets_row(self):
+        """Error response sets HX-Retarget to the config row, not the list."""
+        watch = _make_mock_watch()
+        nc = _make_mock_nc()
+        nc.watch_id = watch.id
+        session = MagicMock()
+        session.get = AsyncMock(return_value=nc)
+        with patch("src.dashboard.routes.decrypt_apprise_url", return_value="json://old.com"):
+            resp = await _post_dashboard(
+                f"/watches/{watch.id}/notifications/{nc.id}/edit",
+                form_data={
+                    "apprise_url": "notascheme://bad",
+                    "events": "change_detected",
+                },
+                mock_watch=watch,
+                mock_session=session,
+            )
+        assert resp.status_code == 200
+        assert resp.headers.get("hx-retarget") == f"#nc-{nc.id}"
+        assert resp.headers.get("hx-reswap") == "outerHTML"

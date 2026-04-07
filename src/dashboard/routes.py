@@ -6,6 +6,7 @@ from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from typing import Literal
 
+from cryptography.fernet import InvalidToken
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from sqlalchemy import select
@@ -1336,7 +1337,7 @@ def _decrypt_notification_urls(notifications: list) -> dict[str, str]:
     for nc in notifications:
         try:
             result[str(nc.id)] = decrypt_apprise_url(nc.apprise_url)
-        except Exception:
+        except (InvalidToken, ValueError):
             result[str(nc.id)] = "(decryption error)"
     return result
 

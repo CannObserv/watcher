@@ -1,7 +1,7 @@
 {#
   Edit form for an existing notification config.
   Replaces the <li> row for the config being edited.
-  Expects: watch, nc (NotificationConfig), decrypted_url (str), event_titles (global).
+  Expects: watch, nc (NotificationConfig), decrypted_url (str); error (str, optional). event_titles is a Jinja2 global.
 #}
 <li id="nc-{{ nc.id }}"
     class="stat-card text-sm">
@@ -43,37 +43,37 @@
                  {% if "watch_created" in nc.events %}checked{% endif %}
                  disabled
                  class="rounded border-gray-300 dark:border-gray-600 opacity-50 cursor-not-allowed">
-          Watch Created
+          {{ event_titles.get("watch_created", "Watch Created") }}
         </label>
         <label class="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300 cursor-pointer min-h-[44px]">
           <input type="checkbox" name="events" value="change_detected"
                  {% if "change_detected" in nc.events %}checked{% endif %}
                  class="rounded border-gray-300 dark:border-gray-600">
-          Change Detected
+          {{ event_titles.get("change_detected", "Change Detected") }}
         </label>
         <label class="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300 cursor-pointer min-h-[44px]">
           <input type="checkbox" name="events" value="watch_error"
                  {% if "watch_error" in nc.events %}checked{% endif %}
                  class="rounded border-gray-300 dark:border-gray-600">
-          Watch Error
+          {{ event_titles.get("watch_error", "Watch Error") }}
         </label>
         <label class="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300 cursor-pointer min-h-[44px]">
           <input type="checkbox" name="events" value="watch_recovered"
                  {% if "watch_recovered" in nc.events %}checked{% endif %}
                  class="rounded border-gray-300 dark:border-gray-600">
-          Watch Recovered
+          {{ event_titles.get("watch_recovered", "Watch Recovered") }}
         </label>
         <label class="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300 cursor-pointer min-h-[44px]">
           <input type="checkbox" name="events" value="watch_paused"
                  {% if "watch_paused" in nc.events %}checked{% endif %}
                  class="rounded border-gray-300 dark:border-gray-600">
-          Watch Paused
+          {{ event_titles.get("watch_paused", "Watch Paused") }}
         </label>
         <label class="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300 cursor-pointer min-h-[44px]">
           <input type="checkbox" name="events" value="watch_resumed"
                  {% if "watch_resumed" in nc.events %}checked{% endif %}
                  class="rounded border-gray-300 dark:border-gray-600">
-          Watch Resumed
+          {{ event_titles.get("watch_resumed", "Watch Resumed") }}
         </label>
       </div>
     </fieldset>
@@ -92,7 +92,7 @@
               hx-get="/partials/watch-notifications/{{ watch.id }}"
               hx-target="#watch-notifications-list"
               hx-swap="outerHTML"
-              class="btn btn-secondary text-xs min-h-[44px]">
+              class="btn btn-secondary text-xs min-h-[44px] htmx-request:opacity-60">
         Cancel
       </button>
     </div>

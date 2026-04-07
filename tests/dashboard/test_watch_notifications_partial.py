@@ -227,6 +227,35 @@ async def _post_dashboard(
         app.dependency_overrides.clear()
 
 
+async def _get_dashboard(path: str, mock_watch=None, mock_session=None):
+    """Make an authenticated GET to a dashboard route with mocked dependencies.
+
+    Patches get_watch_detail with mock_watch and injects mock_session via
+    the DB dependency override (session.get, session.commit etc. are all set
+    on the mock before calling this helper).
+    """
+    from src.api.dependencies import get_db_session
+    from src.api.main import app
+
+    _session = mock_session or MagicMock()
+
+    async def override_session():
+        yield _session
+
+    app.dependency_overrides[get_db_session] = override_session
+    try:
+        with patch(
+            "src.dashboard.routes.get_watch_detail",
+            new_callable=AsyncMock,
+            return_value=mock_watch,
+        ):
+            transport = ASGITransport(app=app)
+            async with AsyncClient(transport=transport, base_url="http://test") as client:
+                return await client.get(path)
+    finally:
+        app.dependency_overrides.clear()
+
+
 class TestWatchNotificationToggleRoute:
     """POST /watches/{watch_id}/notifications/{config_id}/toggle"""
 
@@ -458,3 +487,57 @@ class TestWatchNotificationCreateFromTokens:
             assert "Unknown" in resp.text
         finally:
             app.dependency_overrides.clear()
+
+
+class TestNotificationEditFormRoute:
+    """GET /watches/{watch_id}/notifications/{config_id}/edit-form"""
+
+    async def test_returns_200_with_decrypted_url(self):
+        watch = _make_mock_watch()
+        nc = _make_mock_nc(apprise_url="encrypted_blob")
+        nc.watch_id = watch.id
+        session = MagicMock()
+        session.get = AsyncMock(return_value=nc)
+        with patch("src.dashboard.routes.decrypt_apprise_url", return_value="discord://T/A/T"):
+            resp = await _get_dashboard(
+                f"/watches/{watch.id}/notifications/{nc.id}/edit-form",
+                mock_watch=watch,
+                mock_session=session,
+            )
+        assert resp.status_code == 200
+        assert b"discord://T/A/T" in resp.content
+
+    async def test_returns_form_with_events_checked(self):
+        watch = _make_mock_watch()
+        nc = _make_mock_nc(events=["change_detected", "watch_error"])
+        nc.watch_id = watch.id
+        session = MagicMock()
+        session.get = AsyncMock(return_value=nc)
+        with patch("src.dashboard.routes.decrypt_apprise_url", return_value="json://x.com"):
+            resp = await _get_dashboard(
+                f"/watches/{watch.id}/notifications/{nc.id}/edit-form",
+                mock_watch=watch,
+                mock_session=session,
+            )
+        assert resp.status_code == 200
+        assert b"watch_error" in resp.content
+
+    async def test_returns_404_for_missing_watch(self):
+        resp = await _get_dashboard(
+            "/watches/01ZZZZZZZZZZZZZZZZZZZZZZZZ/notifications/01ZZZZZZZZZZZZZZZZZZZZZZZZ/edit-form",
+            mock_watch=None,
+        )
+        assert resp.status_code == 404
+
+    async def test_returns_404_for_config_not_belonging_to_watch(self):
+        watch = _make_mock_watch()
+        nc = _make_mock_nc()
+        nc.watch_id = MagicMock()  # different — won't equal watch.id
+        session = MagicMock()
+        session.get = AsyncMock(return_value=nc)
+        resp = await _get_dashboard(
+            f"/watches/{watch.id}/notifications/{nc.id}/edit-form",
+            mock_watch=watch,
+            mock_session=session,
+        )
+        assert resp.status_code == 404

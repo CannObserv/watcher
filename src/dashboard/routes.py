@@ -1535,6 +1535,32 @@ async def watch_notification_toggle(
     )
 
 
+@router.get("/watches/{watch_id}/notifications/{config_id}/edit-form")
+async def watch_notification_edit_form(
+    request: Request,
+    watch_id: str,
+    config_id: str,
+    session: AsyncSession = Depends(get_db_session),
+):
+    """HTMX partial: edit form for an existing notification config."""
+    watch = await get_watch_detail(session, watch_id)
+    if not watch:
+        raise HTTPException(status_code=404, detail="Watch not found")
+    nc = await session.get(NotificationConfig, parse_ulid(config_id, "Config"))
+    if not nc or nc.watch_id != watch.id:
+        raise HTTPException(status_code=404, detail="Config not found")
+    decrypted_url = decrypt_apprise_url(nc.apprise_url)
+    return templates.TemplateResponse(
+        "partials/notification_edit_form.html",
+        {
+            "request": request,
+            "watch": watch,
+            "nc": nc,
+            "decrypted_url": decrypted_url,
+        },
+    )
+
+
 @router.post("/watches/{watch_id}/notifications/{config_id}/test-result")
 async def watch_notification_test_result(
     request: Request,

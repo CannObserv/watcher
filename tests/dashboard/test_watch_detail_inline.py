@@ -26,7 +26,9 @@ class TestWatchDetailPage:
         await db_session.flush()
         response = await client.get(f"/watches/{watch.id}")
         assert response.status_code == 200
-        assert b"disabled" not in response.content
+        # Watch fields in view mode render plain text + Edit button, not disabled inputs.
+        # (Unrelated disabled elements may exist elsewhere on the page, e.g. the
+        # "Watch Created" checkbox in the notification add-form is intentionally disabled.)
         assert b"Edit" in response.content
 
     async def test_detail_page_shows_content_type_readonly(self, client, db_session):

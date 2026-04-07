@@ -1,5 +1,5 @@
 {# Notification config list and add form for a single watch. #}
-{# Expects: watch, notifications (list of NotificationConfig); optional error (str). #}
+{# Expects: watch, notifications (list of NotificationConfig), notification_urls (dict[str,str] — decrypted URLs keyed by nc.id), apprise_plugins (list — plugin picker); optional error (str). #}
 
 <div id="watch-notifications-list" aria-live="polite" aria-atomic="false">
   {% if notifications %}

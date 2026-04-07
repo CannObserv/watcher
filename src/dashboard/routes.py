@@ -1549,10 +1549,12 @@ async def watch_notification_edit_form(
     nc = await session.get(NotificationConfig, parse_ulid(config_id, "Config"))
     if not nc or nc.watch_id != watch.id:
         raise HTTPException(status_code=404, detail="Config not found")
+    decryption_failed = False
     try:
         decrypted_url = decrypt_apprise_url(nc.apprise_url)
     except (InvalidToken, ValueError):
         decrypted_url = ""
+        decryption_failed = True
     return templates.TemplateResponse(
         "partials/notification_edit_form.html",
         {
@@ -1560,6 +1562,7 @@ async def watch_notification_edit_form(
             "watch": watch,
             "nc": nc,
             "decrypted_url": decrypted_url,
+            "decryption_failed": decryption_failed,
         },
     )
 

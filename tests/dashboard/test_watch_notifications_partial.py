@@ -552,6 +552,27 @@ class TestNotificationEditFormRoute:
         )
         assert resp.status_code == 404
 
+    async def test_decryption_failure_returns_oob_flash(self):
+        """InvalidToken during decryption should produce an OOB flash warning."""
+        from cryptography.fernet import InvalidToken
+
+        watch = _make_mock_watch()
+        nc = _make_mock_nc(apprise_url="bad_blob")
+        nc.watch_id = watch.id
+        session = MagicMock()
+        session.get = AsyncMock(return_value=nc)
+        with patch("src.dashboard.routes.decrypt_apprise_url", side_effect=InvalidToken):
+            resp = await _get_dashboard(
+                f"/watches/{watch.id}/notifications/{nc.id}/edit-form",
+                mock_watch=watch,
+                mock_session=session,
+            )
+        assert resp.status_code == 200
+        # OOB flash region present in response
+        assert b"flash-region" in resp.content
+        # URL input is blank (not populated with garbage)
+        assert b'value=""' in resp.content or b"value=" not in resp.content
+
 
 class TestNotificationEditRoute:
     """POST /watches/{watch_id}/notifications/{config_id}/edit"""
@@ -658,6 +679,23 @@ class TestNotificationEditRoute:
             )
         assert resp.status_code == 200
         assert b"Apprise URL" in resp.content  # edit form re-rendered
+
+    async def test_no_events_returns_edit_form_with_error(self):
+        watch = _make_mock_watch()
+        nc = _make_mock_nc(events=["change_detected"])
+        nc.watch_id = watch.id
+        session = MagicMock()
+        session.get = AsyncMock(return_value=nc)
+        with patch("src.dashboard.routes.decrypt_apprise_url", return_value="json://old.com"):
+            resp = await _post_dashboard(
+                f"/watches/{watch.id}/notifications/{nc.id}/edit",
+                form_data={"apprise_url": "json://hooks.example.com/notify"},
+                mock_watch=watch,
+                mock_session=session,
+            )
+        assert resp.status_code == 200
+        assert b"Apprise URL" in resp.content  # edit form re-rendered
+        assert resp.headers.get("hx-retarget") == f"#nc-{nc.id}"
 
     async def test_invalid_url_error_response_retargets_row(self):
         """Error response sets HX-Retarget to the config row, not the list."""

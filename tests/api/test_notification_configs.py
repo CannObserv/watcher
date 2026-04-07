@@ -193,6 +193,19 @@ class TestPatchNotificationConfig:
         )
         assert resp.status_code == 422
 
+    async def test_patch_empty_events_returns_422(self, client):
+        watch_id = await _make_watch(client)
+        create_resp = await client.post(
+            f"/api/v1/watches/{watch_id}/notifications",
+            json={"apprise_url": VALID_URL},
+        )
+        config_id = create_resp.json()["id"]
+        resp = await client.patch(
+            f"/api/v1/watches/{watch_id}/notifications/{config_id}",
+            json={"events": []},
+        )
+        assert resp.status_code == 422
+
 
 class TestDeleteNotificationConfig:
     async def test_delete_config(self, client):

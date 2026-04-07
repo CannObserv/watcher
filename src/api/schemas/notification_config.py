@@ -13,7 +13,9 @@ _VALID_EVENT_TYPES = {e.value for e in WatchEventType}
 
 
 def validate_event_list(events: list[str]) -> list[str]:
-    """Raise ValueError if any event string is not a known WatchEventType value."""
+    """Raise ValueError if events is empty or contains unknown WatchEventType values."""
+    if not events:
+        raise ValueError("At least one event must be selected.")
     invalid = [e for e in events if e not in _VALID_EVENT_TYPES]
     if invalid:
         raise ValueError(

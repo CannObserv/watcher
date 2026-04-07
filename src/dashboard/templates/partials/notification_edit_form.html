@@ -1,7 +1,7 @@
 {#
   Edit form for an existing notification config.
   Replaces the <li> row for the config being edited.
-  Expects: watch, nc (NotificationConfig), decrypted_url (str); error (str, optional). event_titles is a Jinja2 global.
+  Expects: watch, nc (NotificationConfig), decrypted_url (str); error (str, optional); decryption_failed (bool, optional — triggers OOB flash). event_titles is a Jinja2 global.
 #}
 <li id="nc-{{ nc.id }}"
     class="stat-card text-sm">
@@ -98,3 +98,10 @@
     </div>
   </form>
 </li>
+
+{# OOB flash when Apprise URL could not be decrypted #}
+{% if decryption_failed %}
+{% set flash_oob_level = "warning" %}
+{% set flash_oob_message = "Could not decrypt the stored URL — the field has been left blank. Enter the full Apprise URL to update it." %}
+{% include "partials/flash_oob.html" %}
+{% endif %}

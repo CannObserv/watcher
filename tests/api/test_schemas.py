@@ -480,8 +480,9 @@ class TestValidateEventList:
         result = validate_event_list(["change_detected", "watch_error"])
         assert result == ["change_detected", "watch_error"]
 
-    def test_empty_list_is_valid(self):
-        assert validate_event_list([]) == []
+    def test_empty_list_raises(self):
+        with pytest.raises(ValueError, match="At least one event"):
+            validate_event_list([])
 
     def test_single_valid_event(self):
         assert validate_event_list(["watch_created"]) == ["watch_created"]

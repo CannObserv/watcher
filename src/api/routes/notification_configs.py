@@ -91,6 +91,9 @@ async def update_notification_config(
         nc.is_active = data.is_active
     if data.events is not None:
         nc.events = data.events
+    if data.apprise_url is not None:
+        nc.apprise_url = encrypt_apprise_url(data.apprise_url)
+        nc.channel_hint = extract_channel_hint(data.apprise_url)
     audit(
         session,
         EventType.NOTIFICATION_CONFIG_UPDATED,

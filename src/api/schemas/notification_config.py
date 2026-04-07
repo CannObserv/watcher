@@ -78,6 +78,7 @@ class NotificationConfigUpdate(BaseModel):
 
     is_active: bool | None = None
     events: list[str] | None = None
+    apprise_url: str | None = None
 
     @field_validator("events")
     @classmethod
@@ -85,6 +86,13 @@ class NotificationConfigUpdate(BaseModel):
         if v is None:
             return v
         return validate_event_list(v)
+
+    @field_validator("apprise_url")
+    @classmethod
+    def validate_url(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
+        return validate_apprise_url(v)
 
 
 class NotificationConfigResponse(BaseModel):

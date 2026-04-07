@@ -163,6 +163,36 @@ class TestPatchNotificationConfig:
         )
         assert resp.status_code == 404
 
+    async def test_patch_apprise_url_updates_stored_url(self, client):
+        watch_id = await _make_watch(client)
+        create_resp = await client.post(
+            f"/api/v1/watches/{watch_id}/notifications",
+            json={"apprise_url": VALID_URL},
+        )
+        config_id = create_resp.json()["id"]
+        new_url = "json://updated.example.com/notify"
+        resp = await client.patch(
+            f"/api/v1/watches/{watch_id}/notifications/{config_id}",
+            json={"apprise_url": new_url},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "apprise_url" not in data  # never exposed
+        assert data["channel_hint"] == "json"  # re-derived from new URL
+
+    async def test_patch_invalid_apprise_url_returns_422(self, client):
+        watch_id = await _make_watch(client)
+        create_resp = await client.post(
+            f"/api/v1/watches/{watch_id}/notifications",
+            json={"apprise_url": VALID_URL},
+        )
+        config_id = create_resp.json()["id"]
+        resp = await client.patch(
+            f"/api/v1/watches/{watch_id}/notifications/{config_id}",
+            json={"apprise_url": INVALID_URL},
+        )
+        assert resp.status_code == 422
+
 
 class TestDeleteNotificationConfig:
     async def test_delete_config(self, client):

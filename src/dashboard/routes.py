@@ -1561,6 +1561,79 @@ async def watch_notification_edit_form(
     )
 
 
+@router.post("/watches/{watch_id}/notifications/{config_id}/edit")
+async def watch_notification_edit(
+    request: Request,
+    watch_id: str,
+    config_id: str,
+    session: AsyncSession = Depends(get_db_session),
+):
+    """Update apprise_url and/or events for a notification config. Returns refreshed partial."""
+    watch = await get_watch_detail(session, watch_id)
+    if not watch:
+        raise HTTPException(status_code=404, detail="Watch not found")
+    nc = await session.get(NotificationConfig, parse_ulid(config_id, "Config"))
+    if not nc or nc.watch_id != watch.id:
+        raise HTTPException(status_code=404, detail="Config not found")
+
+    form = await request.form()
+    apprise_url = str(form.get("apprise_url") or "").strip()
+    events = form.getlist("events")
+
+    try:
+        validate_apprise_url(apprise_url)
+    except ValueError as exc:
+        decrypted_url = decrypt_apprise_url(nc.apprise_url)
+        return templates.TemplateResponse(
+            "partials/notification_edit_form.html",
+            {
+                "request": request,
+                "watch": watch,
+                "nc": nc,
+                "decrypted_url": decrypted_url,
+                "error": str(exc),
+            },
+        )
+
+    try:
+        validate_event_list(events)
+    except ValueError as exc:
+        decrypted_url = decrypt_apprise_url(nc.apprise_url)
+        return templates.TemplateResponse(
+            "partials/notification_edit_form.html",
+            {
+                "request": request,
+                "watch": watch,
+                "nc": nc,
+                "decrypted_url": decrypted_url,
+                "error": str(exc),
+            },
+        )
+
+    nc.apprise_url = encrypt_apprise_url(apprise_url)
+    nc.channel_hint = extract_channel_hint(apprise_url)
+    nc.events = events
+    audit(
+        session,
+        EventType.NOTIFICATION_CONFIG_UPDATED,
+        watch_id=watch.id,
+        config_id=str(nc.id),
+        channel_hint=nc.channel_hint,
+    )
+    await session.commit()
+    notifications = await get_watch_notifications(session, watch.id)
+    return templates.TemplateResponse(
+        "partials/watch_notifications.html",
+        {
+            "request": request,
+            "watch": watch,
+            "notifications": notifications,
+            "notification_urls": _decrypt_notification_urls(notifications),
+            "apprise_plugins": list_plugins(),
+        },
+    )
+
+
 @router.post("/watches/{watch_id}/notifications/{config_id}/test-result")
 async def watch_notification_test_result(
     request: Request,

@@ -541,3 +541,76 @@ class TestNotificationEditFormRoute:
             mock_session=session,
         )
         assert resp.status_code == 404
+
+
+class TestNotificationEditRoute:
+    """POST /watches/{watch_id}/notifications/{config_id}/edit"""
+
+    async def test_valid_url_saves_and_returns_list(self):
+        watch = _make_mock_watch()
+        nc = _make_mock_nc()
+        nc.watch_id = watch.id
+        session = MagicMock()
+        session.get = AsyncMock(return_value=nc)
+        session.commit = AsyncMock()
+        with patch("src.dashboard.routes.encrypt_apprise_url", return_value="new_encrypted"):
+            resp = await _post_dashboard(
+                f"/watches/{watch.id}/notifications/{nc.id}/edit",
+                form_data={
+                    "apprise_url": "json://hooks.example.com/notify",
+                    "events": "change_detected",
+                },
+                mock_watch=watch,
+                mock_session=session,
+            )
+        assert resp.status_code == 200
+        assert b"watch-notifications-list" in resp.content
+        assert nc.apprise_url == "new_encrypted"
+
+    async def test_updates_events(self):
+        watch = _make_mock_watch()
+        nc = _make_mock_nc(events=["change_detected"])
+        nc.watch_id = watch.id
+        session = MagicMock()
+        session.get = AsyncMock(return_value=nc)
+        session.commit = AsyncMock()
+        with patch("src.dashboard.routes.encrypt_apprise_url", return_value="enc"):
+            resp = await _post_dashboard(
+                f"/watches/{watch.id}/notifications/{nc.id}/edit",
+                form_data={
+                    "apprise_url": "json://hooks.example.com",
+                    "events": ["change_detected", "watch_error"],
+                },
+                mock_watch=watch,
+                mock_session=session,
+            )
+        assert resp.status_code == 200
+        assert nc.events == ["change_detected", "watch_error"]
+
+    async def test_invalid_url_returns_edit_form_with_error(self):
+        watch = _make_mock_watch()
+        nc = _make_mock_nc()
+        nc.watch_id = watch.id
+        session = MagicMock()
+        session.get = AsyncMock(return_value=nc)
+        with patch("src.dashboard.routes.decrypt_apprise_url", return_value="json://old.com"):
+            resp = await _post_dashboard(
+                f"/watches/{watch.id}/notifications/{nc.id}/edit",
+                form_data={
+                    "apprise_url": "notascheme://bad",
+                    "events": "change_detected",
+                },
+                mock_watch=watch,
+                mock_session=session,
+            )
+        assert resp.status_code == 200
+        # Returns the edit form again with an error message
+        assert b"edit-url-" in resp.content or b"Apprise URL" in resp.content
+
+    async def test_missing_watch_returns_404(self):
+        resp = await _post_dashboard(
+            "/watches/01ZZZZZZZZZZZZZZZZZZZZZZZZ/notifications/01ZZZZZZZZZZZZZZZZZZZZZZZZ/edit",
+            form_data={"apprise_url": "json://x.com", "events": "change_detected"},
+            mock_watch=None,
+        )
+        assert resp.status_code == 404

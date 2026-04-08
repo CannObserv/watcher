@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from cryptography.fernet import Fernet
 
-from src.core.notifications.dispatcher import dispatch_event
+from src.core.notifications.dispatcher import _ASSET, dispatch_event
 from src.core.notifications.events import WatchEvent, WatchEventType
 
 
@@ -33,7 +33,30 @@ def make_encrypted_url(url: str) -> str:
     return encrypt_apprise_url(url)
 
 
+class TestAppriseAsset:
+    def test_asset_app_id(self):
+        assert _ASSET.app_id == "CO Watcher"
+
+    def test_asset_images_suppressed(self):
+        assert _ASSET.image_url_mask == ""
+        assert _ASSET.image_url_logo == ""
+
+
 class TestDispatchEvent:
+    async def test_apprise_constructed_with_asset(self):
+        event = make_event()
+        encrypted = make_encrypted_url("json://localhost/notify")
+
+        with patch("src.core.notifications.dispatcher.apprise.Apprise") as MockApprise:
+            instance = MagicMock()
+            instance.add.return_value = True
+            instance.async_notify = AsyncMock(return_value=True)
+            MockApprise.return_value = instance
+
+            await dispatch_event(event, encrypted)
+
+        MockApprise.assert_called_once_with(asset=_ASSET)
+
     async def test_returns_true_on_apprise_success(self):
         event = make_event()
         encrypted = make_encrypted_url("json://localhost/notify")

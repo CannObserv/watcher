@@ -3,12 +3,23 @@
 from dataclasses import dataclass
 
 import apprise
+from apprise import AppriseAsset
 
 from src.core.crypto import decrypt_apprise_url
 from src.core.logging import get_logger
 from src.core.notifications.events import WatchEvent
 
 logger = get_logger(__name__)
+
+# Watcher brand identity for all outbound notifications.
+# image_url_mask/logo suppressed (empty) so plugins don't pull Apprise CDN icons.
+_ASSET = AppriseAsset(
+    app_id="CO Watcher",
+    app_desc="Cannabis Observer Watcher",
+    app_url="https://watcher.exe.xyz",
+    image_url_mask="",
+    image_url_logo="",
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -26,7 +37,7 @@ async def dispatch_event(event: WatchEvent, apprise_url_encrypted: str) -> Dispa
     Returns a DispatchResult with success flag and human-readable reason.
     """
     url = decrypt_apprise_url(apprise_url_encrypted)
-    ap = apprise.Apprise()
+    ap = apprise.Apprise(asset=_ASSET)
     if not ap.add(url):
         logger.warning(
             "invalid apprise url in notification config",

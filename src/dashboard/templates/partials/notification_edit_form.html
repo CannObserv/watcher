@@ -1,118 +1,119 @@
 {#
   Edit form for an existing notification config.
-  Replaces the <li> row for the config being edited.
+  Replaces the <tr> row for the config being edited (outerHTML swap).
   Expects: watch, nc (NotificationConfig), decrypted_url (str); error (str, optional); decryption_failed (bool, optional — triggers OOB flash). event_titles is a Jinja2 global.
 #}
-<li id="nc-{{ nc.id }}"
-    class="stat-card text-sm">
-  <form
-    hx-post="/watches/{{ watch.id }}/notifications/{{ nc.id }}/edit"
-    hx-target="#watch-notifications"
-    hx-swap="innerHTML"
-    class="space-y-4">
+<tr id="nc-{{ nc.id }}">
+  <td colspan="3" class="p-4 bg-white dark:bg-gray-800">
+    <form
+      hx-post="/watches/{{ watch.id }}/notifications/{{ nc.id }}/edit"
+      hx-target="#watch-notifications"
+      hx-swap="innerHTML"
+      class="space-y-4">
 
-    <h4 class="text-sm font-semibold text-gray-900 dark:text-white">
-      Edit {{ nc.channel_hint }} notification
-    </h4>
+      <h4 class="text-sm font-semibold text-gray-900 dark:text-white">
+        Edit {{ nc.channel_hint }} notification
+      </h4>
 
-    {# Title input #}
-    <div>
-      <label for="edit-title-{{ nc.id }}" class="form-label">
-        Title <span class="text-gray-400 dark:text-gray-500 font-normal">(optional)</span>
-      </label>
-      <input
-        type="text"
-        id="edit-title-{{ nc.id }}"
-        name="title"
-        value="{{ nc.title or '' }}"
-        maxlength="100"
-        class="form-input mt-1"
-        placeholder="{{ nc.channel_hint }}">
-    </div>
-
-    {# Apprise URL input #}
-    <div>
-      <label for="edit-url-{{ nc.id }}" class="form-label">
-        Apprise URL
-      </label>
-      <input
-        type="text"
-        id="edit-url-{{ nc.id }}"
-        name="apprise_url"
-        value="{{ decrypted_url }}"
-        class="form-input mt-1"
-        required
-        aria-required="true">
-    </div>
-
-    {# Event checkboxes — mirrors the add form #}
-    <fieldset>
-      <legend class="form-label mb-2">Events</legend>
-      <div class="flex flex-wrap gap-4">
-        <label class="flex items-center gap-2 text-sm text-gray-500 dark:text-gray-500 min-h-[44px]"
-               aria-label="Watch Created (not applicable — watch already exists)">
-          {% if "watch_created" in nc.events %}
-          <input type="hidden" name="events" value="watch_created">
-          {% endif %}
-          <input type="checkbox" name="events" value="watch_created"
-                 {% if "watch_created" in nc.events %}checked{% endif %}
-                 disabled
-                 class="rounded border-gray-300 dark:border-gray-600 opacity-50 cursor-not-allowed">
-          {{ event_titles.get("watch_created", "Watch Created") }}
+      {# Title input #}
+      <div>
+        <label for="edit-title-{{ nc.id }}" class="form-label">
+          Title <span class="text-gray-400 dark:text-gray-500 font-normal">(optional)</span>
         </label>
-        <label class="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300 cursor-pointer min-h-[44px]">
-          <input type="checkbox" name="events" value="change_detected"
-                 {% if "change_detected" in nc.events %}checked{% endif %}
-                 class="rounded border-gray-300 dark:border-gray-600">
-          {{ event_titles.get("change_detected", "Change Detected") }}
-        </label>
-        <label class="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300 cursor-pointer min-h-[44px]">
-          <input type="checkbox" name="events" value="watch_error"
-                 {% if "watch_error" in nc.events %}checked{% endif %}
-                 class="rounded border-gray-300 dark:border-gray-600">
-          {{ event_titles.get("watch_error", "Watch Error") }}
-        </label>
-        <label class="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300 cursor-pointer min-h-[44px]">
-          <input type="checkbox" name="events" value="watch_recovered"
-                 {% if "watch_recovered" in nc.events %}checked{% endif %}
-                 class="rounded border-gray-300 dark:border-gray-600">
-          {{ event_titles.get("watch_recovered", "Watch Recovered") }}
-        </label>
-        <label class="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300 cursor-pointer min-h-[44px]">
-          <input type="checkbox" name="events" value="watch_paused"
-                 {% if "watch_paused" in nc.events %}checked{% endif %}
-                 class="rounded border-gray-300 dark:border-gray-600">
-          {{ event_titles.get("watch_paused", "Watch Paused") }}
-        </label>
-        <label class="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300 cursor-pointer min-h-[44px]">
-          <input type="checkbox" name="events" value="watch_resumed"
-                 {% if "watch_resumed" in nc.events %}checked{% endif %}
-                 class="rounded border-gray-300 dark:border-gray-600">
-          {{ event_titles.get("watch_resumed", "Watch Resumed") }}
-        </label>
+        <input
+          type="text"
+          id="edit-title-{{ nc.id }}"
+          name="title"
+          value="{{ nc.title or '' }}"
+          maxlength="100"
+          class="form-input mt-1"
+          placeholder="{{ nc.channel_hint }}">
       </div>
-    </fieldset>
 
-    {# Error display #}
-    {% if error %}
-    <div class="text-sm text-red-600 dark:text-red-400" role="alert">{{ error }}</div>
-    {% endif %}
+      {# Apprise URL input #}
+      <div>
+        <label for="edit-url-{{ nc.id }}" class="form-label">
+          Apprise URL
+        </label>
+        <input
+          type="text"
+          id="edit-url-{{ nc.id }}"
+          name="apprise_url"
+          value="{{ decrypted_url }}"
+          class="form-input mt-1"
+          required
+          aria-required="true">
+      </div>
 
-    <div class="flex items-center gap-2">
-      <button type="submit"
-              class="btn btn-primary text-xs min-h-[44px] htmx-request:opacity-60">
-        Save
-      </button>
-      <button type="button"
-              hx-get="/partials/watch-notifications/{{ watch.id }}"
-              hx-target="#watch-notifications"
-              hx-swap="innerHTML"
-              class="btn btn-secondary text-xs min-h-[44px] htmx-request:opacity-60">
-        Cancel
-      </button>
-    </div>
-  </form>
-</li>
+      {# Event checkboxes — mirrors the add form #}
+      <fieldset>
+        <legend class="form-label mb-2">Events</legend>
+        <div class="flex flex-wrap gap-4">
+          <label class="flex items-center gap-2 text-sm text-gray-500 dark:text-gray-500 min-h-[44px]"
+                 aria-label="Watch Created (not applicable — watch already exists)">
+            {% if "watch_created" in nc.events %}
+            <input type="hidden" name="events" value="watch_created">
+            {% endif %}
+            <input type="checkbox" name="events" value="watch_created"
+                   {% if "watch_created" in nc.events %}checked{% endif %}
+                   disabled
+                   class="rounded border-gray-300 dark:border-gray-600 opacity-50 cursor-not-allowed">
+            {{ event_titles.get("watch_created", "Watch Created") }}
+          </label>
+          <label class="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300 cursor-pointer min-h-[44px]">
+            <input type="checkbox" name="events" value="change_detected"
+                   {% if "change_detected" in nc.events %}checked{% endif %}
+                   class="rounded border-gray-300 dark:border-gray-600">
+            {{ event_titles.get("change_detected", "Change Detected") }}
+          </label>
+          <label class="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300 cursor-pointer min-h-[44px]">
+            <input type="checkbox" name="events" value="watch_error"
+                   {% if "watch_error" in nc.events %}checked{% endif %}
+                   class="rounded border-gray-300 dark:border-gray-600">
+            {{ event_titles.get("watch_error", "Watch Error") }}
+          </label>
+          <label class="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300 cursor-pointer min-h-[44px]">
+            <input type="checkbox" name="events" value="watch_recovered"
+                   {% if "watch_recovered" in nc.events %}checked{% endif %}
+                   class="rounded border-gray-300 dark:border-gray-600">
+            {{ event_titles.get("watch_recovered", "Watch Recovered") }}
+          </label>
+          <label class="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300 cursor-pointer min-h-[44px]">
+            <input type="checkbox" name="events" value="watch_paused"
+                   {% if "watch_paused" in nc.events %}checked{% endif %}
+                   class="rounded border-gray-300 dark:border-gray-600">
+            {{ event_titles.get("watch_paused", "Watch Paused") }}
+          </label>
+          <label class="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300 cursor-pointer min-h-[44px]">
+            <input type="checkbox" name="events" value="watch_resumed"
+                   {% if "watch_resumed" in nc.events %}checked{% endif %}
+                   class="rounded border-gray-300 dark:border-gray-600">
+            {{ event_titles.get("watch_resumed", "Watch Resumed") }}
+          </label>
+        </div>
+      </fieldset>
+
+      {# Error display #}
+      {% if error %}
+      <div class="text-sm text-red-600 dark:text-red-400" role="alert">{{ error }}</div>
+      {% endif %}
+
+      <div class="flex items-center gap-2">
+        <button type="submit"
+                class="btn btn-primary text-xs min-h-[44px] htmx-request:opacity-60">
+          Save
+        </button>
+        <button type="button"
+                hx-get="/partials/watch-notifications/{{ watch.id }}"
+                hx-target="#watch-notifications"
+                hx-swap="innerHTML"
+                class="btn btn-secondary text-xs min-h-[44px] htmx-request:opacity-60">
+          Cancel
+        </button>
+      </div>
+    </form>
+  </td>
+</tr>
 
 {# OOB flash when Apprise URL could not be decrypted #}
 {% if decryption_failed %}

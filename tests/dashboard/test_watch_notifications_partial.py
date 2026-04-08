@@ -820,3 +820,85 @@ class TestNotificationEditRoute:
         assert resp.status_code == 200
         assert resp.headers.get("hx-retarget") == f"#nc-{nc.id}"
         assert resp.headers.get("hx-reswap") == "outerHTML"
+
+
+class TestNotificationEditFormHtmxAttributes:
+    """Ensure edit form and cancel button target the container, not just the list div.
+
+    Using hx-target="#watch-notifications-list" with hx-swap="outerHTML" when
+    the response is the full watch_notifications.html partial causes elements
+    outside the list div (trigger helper, add form) to be duplicated in the DOM.
+    The correct target is "#watch-notifications" with hx-swap="innerHTML".
+    """
+
+    async def test_edit_form_targets_container_not_list(self):
+        """Edit form hx-target must be #watch-notifications (the container)."""
+        watch = _make_mock_watch()
+        nc = _make_mock_nc(apprise_url="blob")
+        nc.watch_id = watch.id
+        session = MagicMock()
+        session.get = AsyncMock(return_value=nc)
+        with patch("src.dashboard.routes.decrypt_apprise_url", return_value="json://x.com"):
+            resp = await _get_dashboard(
+                f"/watches/{watch.id}/notifications/{nc.id}/edit-form",
+                mock_watch=watch,
+                mock_session=session,
+            )
+        assert resp.status_code == 200
+        assert b'hx-target="#watch-notifications"' in resp.content
+        assert b'hx-target="#watch-notifications-list"' not in resp.content
+
+    async def test_edit_form_uses_innerhtml_swap(self):
+        """Edit form hx-swap must be innerHTML, not outerHTML."""
+        watch = _make_mock_watch()
+        nc = _make_mock_nc(apprise_url="blob")
+        nc.watch_id = watch.id
+        session = MagicMock()
+        session.get = AsyncMock(return_value=nc)
+        with patch("src.dashboard.routes.decrypt_apprise_url", return_value="json://x.com"):
+            resp = await _get_dashboard(
+                f"/watches/{watch.id}/notifications/{nc.id}/edit-form",
+                mock_watch=watch,
+                mock_session=session,
+            )
+        assert resp.status_code == 200
+        # Should not contain outerHTML swap on the form or cancel button
+        assert b'hx-swap="outerHTML"' not in resp.content
+
+    async def test_refresh_trigger_targets_container_not_list(self):
+        """The refreshNotifications trigger div must target #watch-notifications."""
+        watch = _make_mock_watch()
+
+        from src.api.dependencies import get_db_session
+        from src.api.main import app
+
+        async def override_session():
+            yield MagicMock()
+
+        app.dependency_overrides[get_db_session] = override_session
+        try:
+            with (
+                patch(
+                    "src.dashboard.routes.get_watch_detail",
+                    new_callable=AsyncMock,
+                    return_value=watch,
+                ),
+                patch(
+                    "src.dashboard.routes.get_watch_notifications",
+                    new_callable=AsyncMock,
+                    return_value=[],
+                ),
+            ):
+                from httpx import ASGITransport, AsyncClient
+
+                transport = ASGITransport(app=app)
+                async with AsyncClient(transport=transport, base_url="http://test") as client:
+                    resp = await client.get(f"/partials/watch-notifications/{watch.id}")
+        finally:
+            app.dependency_overrides.clear()
+
+        assert resp.status_code == 200
+        # The refresh trigger div must target the outer container, not the list div
+        trigger_section = resp.text.split("refreshNotifications from:body")[1]
+        assert 'hx-target="#watch-notifications"' in trigger_section
+        assert 'hx-target="#watch-notifications-list"' not in trigger_section

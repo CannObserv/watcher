@@ -7,8 +7,8 @@
     class="stat-card text-sm">
   <form
     hx-post="/watches/{{ watch.id }}/notifications/{{ nc.id }}/edit"
-    hx-target="#watch-notifications-list"
-    hx-swap="outerHTML"
+    hx-target="#watch-notifications"
+    hx-swap="innerHTML"
     class="space-y-4">
 
     <h4 class="text-sm font-semibold text-gray-900 dark:text-white">
@@ -105,8 +105,8 @@
       </button>
       <button type="button"
               hx-get="/partials/watch-notifications/{{ watch.id }}"
-              hx-target="#watch-notifications-list"
-              hx-swap="outerHTML"
+              hx-target="#watch-notifications"
+              hx-swap="innerHTML"
               class="btn btn-secondary text-xs min-h-[44px] htmx-request:opacity-60">
         Cancel
       </button>

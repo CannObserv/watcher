@@ -42,6 +42,7 @@ async def create_notification_config(
     )
     config = NotificationConfig(
         watch_id=watch.id,
+        title=data.title,
         apprise_url=encrypt_apprise_url(data.apprise_url),
         channel_hint=hint,
         events=data.events,
@@ -94,6 +95,8 @@ async def update_notification_config(
     if data.apprise_url is not None:
         nc.apprise_url = encrypt_apprise_url(data.apprise_url)
         nc.channel_hint = extract_channel_hint(data.apprise_url)
+    if "title" in data.model_fields_set:
+        nc.title = data.title
     audit(
         session,
         EventType.NOTIFICATION_CONFIG_UPDATED,

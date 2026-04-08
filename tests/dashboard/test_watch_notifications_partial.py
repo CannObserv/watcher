@@ -24,6 +24,7 @@ def _make_mock_nc(
     events=None,
     is_active=True,
     apprise_url="encrypted_token",
+    title=None,
 ):
     """Build a minimal NotificationConfig-like mock."""
     nc = MagicMock()
@@ -32,6 +33,7 @@ def _make_mock_nc(
     nc.events = events if events is not None else ["change_detected"]
     nc.is_active = is_active
     nc.apprise_url = apprise_url
+    nc.title = title
     return nc
 
 
@@ -199,6 +201,24 @@ class TestWatchNotificationsPartialRoute:
         assert b"edit-form" in resp.content  # hx-get URL includes "edit-form"
         assert b"Edit" in resp.content
 
+    async def test_renders_title_when_set(self):
+        """Title appears in the notification row when the nc has a non-null title."""
+        watch = _make_mock_watch()
+        nc = _make_mock_nc(title="Slack ops channel")
+        with patch("src.dashboard.routes.decrypt_apprise_url", return_value="json://x.com"):
+            resp = await self._get(str(watch.id), mock_watch=watch, mock_notifications=[nc])
+        assert resp.status_code == 200
+        assert b"Slack ops channel" in resp.content
+
+    async def test_falls_back_to_channel_hint_when_no_title(self):
+        """When title is None, the channel_hint is still visible."""
+        watch = _make_mock_watch()
+        nc = _make_mock_nc(channel_hint="discord", title=None)
+        with patch("src.dashboard.routes.decrypt_apprise_url", return_value="json://x.com"):
+            resp = await self._get(str(watch.id), mock_watch=watch, mock_notifications=[nc])
+        assert resp.status_code == 200
+        assert b"discord" in resp.content
+
 
 # ---------------------------------------------------------------------------
 # Helper for POST mutations
@@ -323,6 +343,50 @@ class TestWatchNotificationCreateRoute:
             )
         assert resp.status_code == 200
         assert b"watch-notifications-list" in resp.content
+
+    async def test_title_stored_on_create(self):
+        """Title submitted in the add form is stored on the new NotificationConfig."""
+        watch = _make_mock_watch()
+        session = MagicMock()
+        session.add = MagicMock()
+        session.commit = AsyncMock()
+        with patch("src.dashboard.routes.encrypt_apprise_url", return_value="encrypted"):
+            resp = await _post_dashboard(
+                f"/watches/{watch.id}/notifications/new",
+                form_data={
+                    "apprise_url": "json://hooks.example.com",
+                    "events": "change_detected",
+                    "title": "Slack ops",
+                },
+                mock_watch=watch,
+                mock_session=session,
+            )
+        assert resp.status_code == 200
+        # session.add is called twice: first NotificationConfig, then AuditLog
+        added_config = session.add.call_args_list[0][0][0]
+        assert added_config.title == "Slack ops"
+
+    async def test_blank_title_stored_as_null(self):
+        """An empty title field is stored as None, not empty string."""
+        watch = _make_mock_watch()
+        session = MagicMock()
+        session.add = MagicMock()
+        session.commit = AsyncMock()
+        with patch("src.dashboard.routes.encrypt_apprise_url", return_value="encrypted"):
+            resp = await _post_dashboard(
+                f"/watches/{watch.id}/notifications/new",
+                form_data={
+                    "apprise_url": "json://hooks.example.com",
+                    "events": "change_detected",
+                    "title": "   ",  # whitespace only
+                },
+                mock_watch=watch,
+                mock_session=session,
+            )
+        assert resp.status_code == 200
+        # session.add is called twice: first NotificationConfig, then AuditLog
+        added_config = session.add.call_args_list[0][0][0]
+        assert added_config.title is None
 
     async def test_invalid_url_returns_200_with_error(self):
         watch = _make_mock_watch()
@@ -552,6 +616,23 @@ class TestNotificationEditFormRoute:
         )
         assert resp.status_code == 404
 
+    async def test_edit_form_includes_title_input(self):
+        """Edit form renders a title text input pre-filled with existing title."""
+        watch = _make_mock_watch()
+        nc = _make_mock_nc(apprise_url="blob", title="My Slack")
+        nc.watch_id = watch.id
+        session = MagicMock()
+        session.get = AsyncMock(return_value=nc)
+        with patch("src.dashboard.routes.decrypt_apprise_url", return_value="json://x.com"):
+            resp = await _get_dashboard(
+                f"/watches/{watch.id}/notifications/{nc.id}/edit-form",
+                mock_watch=watch,
+                mock_session=session,
+            )
+        assert resp.status_code == 200
+        assert b"My Slack" in resp.content
+        assert b'name="title"' in resp.content
+
     async def test_decryption_failure_returns_oob_flash(self):
         """InvalidToken during decryption should produce an OOB flash warning."""
         from cryptography.fernet import InvalidToken
@@ -679,6 +760,28 @@ class TestNotificationEditRoute:
             )
         assert resp.status_code == 200
         assert b"Apprise URL" in resp.content  # edit form re-rendered
+
+    async def test_edit_saves_title(self):
+        """POST edit saves title onto the notification config."""
+        watch = _make_mock_watch()
+        nc = _make_mock_nc(title=None)
+        nc.watch_id = watch.id
+        session = MagicMock()
+        session.get = AsyncMock(return_value=nc)
+        session.commit = AsyncMock()
+        with patch("src.dashboard.routes.encrypt_apprise_url", return_value="enc"):
+            resp = await _post_dashboard(
+                f"/watches/{watch.id}/notifications/{nc.id}/edit",
+                form_data={
+                    "apprise_url": "json://hooks.example.com/notify",
+                    "events": "change_detected",
+                    "title": "Alerts channel",
+                },
+                mock_watch=watch,
+                mock_session=session,
+            )
+        assert resp.status_code == 200
+        assert nc.title == "Alerts channel"
 
     async def test_no_events_returns_edit_form_with_error(self):
         watch = _make_mock_watch()

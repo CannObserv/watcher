@@ -1415,6 +1415,7 @@ async def watch_notification_create(
     form = await request.form()
     events = form.getlist("events")
     schema_val = form.get("plugin_schema") or ""
+    title = str(form.get("title") or "").strip() or None
 
     # Determine the Apprise URL: token path or raw URL path
     if schema_val:
@@ -1479,6 +1480,7 @@ async def watch_notification_create(
     hint = get_service_name(schema_val) if schema_val else extract_channel_hint(apprise_url)
     config = NotificationConfig(
         watch_id=watch.id,
+        title=title,
         apprise_url=encrypt_apprise_url(apprise_url),
         channel_hint=hint,
         events=events,
@@ -1585,6 +1587,7 @@ async def watch_notification_edit(
     form = await request.form()
     apprise_url = str(form.get("apprise_url") or "").strip()
     events = form.getlist("events")
+    title = str(form.get("title") or "").strip() or None
 
     try:
         validate_apprise_url(apprise_url)
@@ -1631,6 +1634,7 @@ async def watch_notification_edit(
     nc.apprise_url = encrypt_apprise_url(apprise_url)
     nc.channel_hint = extract_channel_hint(apprise_url)
     nc.events = events
+    nc.title = title
     audit(
         session,
         EventType.NOTIFICATION_CONFIG_UPDATED,

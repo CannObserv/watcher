@@ -15,6 +15,21 @@
       Edit {{ nc.channel_hint }} notification
     </h4>
 
+    {# Title input #}
+    <div>
+      <label for="edit-title-{{ nc.id }}" class="form-label">
+        Title <span class="text-gray-400 dark:text-gray-500 font-normal">(optional)</span>
+      </label>
+      <input
+        type="text"
+        id="edit-title-{{ nc.id }}"
+        name="title"
+        value="{{ nc.title or '' }}"
+        maxlength="100"
+        class="form-input mt-1"
+        placeholder="{{ nc.channel_hint }}">
+    </div>
+
     {# Apprise URL input #}
     <div>
       <label for="edit-url-{{ nc.id }}" class="form-label">

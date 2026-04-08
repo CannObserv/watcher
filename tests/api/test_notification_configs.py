@@ -39,6 +39,32 @@ class TestCreateNotificationConfig:
         # apprise_url must NOT be in response
         assert "apprise_url" not in data
 
+    async def test_create_with_title(self, client):
+        watch_id = await _make_watch(client)
+        resp = await client.post(
+            f"/api/v1/watches/{watch_id}/notifications",
+            json={"apprise_url": VALID_URL, "title": "Slack ops"},
+        )
+        assert resp.status_code == 201
+        assert resp.json()["title"] == "Slack ops"
+
+    async def test_title_defaults_to_null(self, client):
+        watch_id = await _make_watch(client)
+        resp = await client.post(
+            f"/api/v1/watches/{watch_id}/notifications",
+            json={"apprise_url": VALID_URL},
+        )
+        assert resp.status_code == 201
+        assert resp.json()["title"] is None
+
+    async def test_title_max_length_100(self, client):
+        watch_id = await _make_watch(client)
+        resp = await client.post(
+            f"/api/v1/watches/{watch_id}/notifications",
+            json={"apprise_url": VALID_URL, "title": "x" * 101},
+        )
+        assert resp.status_code == 422
+
     async def test_default_events_is_change_detected(self, client):
         watch_id = await _make_watch(client)
         resp = await client.post(
@@ -116,6 +142,34 @@ class TestListNotificationConfigs:
 
 
 class TestPatchNotificationConfig:
+    async def test_patch_title(self, client):
+        watch_id = await _make_watch(client)
+        create_resp = await client.post(
+            f"/api/v1/watches/{watch_id}/notifications",
+            json={"apprise_url": VALID_URL, "title": "Original"},
+        )
+        config_id = create_resp.json()["id"]
+        resp = await client.patch(
+            f"/api/v1/watches/{watch_id}/notifications/{config_id}",
+            json={"title": "Updated"},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["title"] == "Updated"
+
+    async def test_patch_title_to_null(self, client):
+        watch_id = await _make_watch(client)
+        create_resp = await client.post(
+            f"/api/v1/watches/{watch_id}/notifications",
+            json={"apprise_url": VALID_URL, "title": "Remove me"},
+        )
+        config_id = create_resp.json()["id"]
+        resp = await client.patch(
+            f"/api/v1/watches/{watch_id}/notifications/{config_id}",
+            json={"title": None},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["title"] is None
+
     async def test_toggle_is_active(self, client):
         watch_id = await _make_watch(client)
         create_resp = await client.post(

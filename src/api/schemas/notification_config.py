@@ -52,6 +52,7 @@ class NotificationConfigCreate(BaseModel):
     apprise_url: str | None = None
     plugin_schema: str | None = None
     tokens: dict[str, str] | None = None
+    title: str | None = Field(default=None, max_length=100)
     events: list[str] = Field(default_factory=lambda: ["change_detected"])
 
     @model_validator(mode="after")
@@ -81,6 +82,10 @@ class NotificationConfigUpdate(BaseModel):
     is_active: bool | None = None
     events: list[str] | None = None
     apprise_url: str | None = None
+    # title uses model_fields_set in the route to distinguish "omitted" (no-op)
+    # from "explicitly set to null" (clears the title). Default None means an
+    # absent key won't end up in model_fields_set, so skipping the field is safe.
+    title: str | None = Field(default=None, max_length=100)
 
     @field_validator("events")
     @classmethod
@@ -104,6 +109,7 @@ class NotificationConfigResponse(BaseModel):
 
     id: ULIDStr
     watch_id: ULIDStr
+    title: str | None
     channel_hint: str
     events: list[str]
     is_active: bool

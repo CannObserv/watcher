@@ -9,7 +9,7 @@
         id="nc-{{ nc.id }}">
       {# Left: channel hint + event chips + inactive badge + URL reveal #}
       <div class="flex flex-wrap items-center gap-3 min-w-0">
-        <span class="font-medium text-gray-900 dark:text-white truncate">{{ nc.channel_hint }}</span>
+        <span class="font-medium text-gray-900 dark:text-white truncate">{{ nc.title if nc.title else nc.channel_hint }}</span>
         <span class="flex flex-wrap gap-1" aria-label="Subscribed events">
           {% for evt in nc.events %}
           <span class="badge badge-info">{{ event_titles.get(evt, evt) }}</span>
@@ -99,6 +99,20 @@
   hx-swap="innerHTML"
   class="mt-4 space-y-4 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-4">
   <h4 class="text-sm font-semibold text-gray-900 dark:text-white">Add notification</h4>
+
+  {# Title input #}
+  <div>
+    <label for="add-title-{{ watch.id }}" class="form-label">
+      Title <span class="text-gray-400 dark:text-gray-500 font-normal">(optional)</span>
+    </label>
+    <input
+      type="text"
+      id="add-title-{{ watch.id }}"
+      name="title"
+      maxlength="100"
+      class="form-input mt-1"
+      placeholder="e.g. Slack ops channel">
+  </div>
 
   {# Step 1: Plugin picker + mode toggle #}
   <div>

@@ -20,6 +20,7 @@ class NotificationConfig(Base, TimestampMixin):
 
     id: Mapped[ULID] = mapped_column(ULIDType, primary_key=True, default=generate_ulid)
     watch_id: Mapped[ULID] = mapped_column(ULIDType, ForeignKey("watches.id", ondelete="CASCADE"))
+    title: Mapped[str | None] = mapped_column(String(100), nullable=True)
     apprise_url: Mapped[str] = mapped_column(Text, nullable=False)
     channel_hint: Mapped[str] = mapped_column(String(50), nullable=False)
     events: Mapped[list[str]] = mapped_column(

@@ -144,14 +144,78 @@ All component classes defined in `@layer components` in `src/dashboard/static/cs
 
 ### Data table
 
+Always wrap with a border/clip container — `overflow-hidden` is required to clip the `thead` background inside `rounded-lg`:
+
 ```html
-<table class="data-table">
-  <thead><tr><th>Column</th></tr></thead>
-  <tbody><tr><td>Value</td></tr></tbody>
-</table>
+<div class="rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden">
+  <table class="data-table w-full">
+    <thead>
+      <tr>
+        <th scope="col" class="w-full">Name</th>
+        <th scope="col">Status</th>
+        <th scope="col"><span class="sr-only">Actions</span></th>
+      </tr>
+    </thead>
+    <tbody id="table-tbody">
+      <tr id="row-{id}">
+        <td class="font-medium text-gray-900 dark:text-white">…</td>
+        <td><span class="badge badge-active">Active</span></td>
+        <td class="whitespace-nowrap">
+          <div class="flex items-center gap-2 justify-end">
+            <button class="btn btn-secondary text-xs min-h-[44px]"
+                    aria-label="Edit {name}">Edit</button>
+            <button class="btn btn-danger-outline text-xs min-h-[44px]"
+                    aria-label="Delete {name}">Delete</button>
+          </div>
+        </td>
+      </tr>
+    </tbody>
+  </table>
+</div>
 ```
 
 Sticky header with `z-10`, `box-shadow` separator. `th` is uppercase, `text-xs`, `tracking-wider`.
+
+**Actions column pattern:**
+- `<th scope="col"><span class="sr-only">Actions</span></th>` — the `<th>` itself must be visible (not `class="sr-only"`) so the header row has a cell above the buttons; the `<span class="sr-only">` hides the text visually while remaining accessible
+- `class="w-full"` on the primary content column forces the actions column to shrink to its content width, aligning buttons to the right edge of the row
+- `whitespace-nowrap` on the action `<td>` prevents button wrapping at narrow widths
+
+**Empty-state row:**
+
+```html
+<tr id="table-empty-state">
+  <td colspan="3" class="px-4 py-3 text-sm text-gray-500 dark:text-gray-400">
+    No items yet.
+  </td>
+</tr>
+```
+
+Give the empty-state `<tr>` a stable `id`. When rows are added via HTMX `afterbegin` swap (bypassing a full refresh), remove the empty-state row client-side — see §9 for the guard pattern. Cancel/refresh returns the full partial, which re-renders the empty state naturally if the table is still empty.
+
+**Inline table row editing:**
+
+Edit forms that replace a row use `hx-swap="outerHTML"` targeting the `<tr>`:
+
+```html
+<!-- data row -->
+<tr id="row-{id}">…</tr>
+
+<!-- edit button -->
+<button
+  hx-get="/watches/{id}/notifications/{nc_id}/edit-form"
+  hx-target="#row-{id}"
+  hx-swap="outerHTML">Edit</button>
+
+<!-- edit form partial — must be a <tr> with the same id -->
+<tr id="row-{id}">
+  <td colspan="3" class="p-4">
+    <form hx-post="…" hx-target="#table-container" hx-swap="innerHTML">…</form>
+  </td>
+</tr>
+```
+
+Cancel returns either the single refreshed `<tr>` (preferred — avoids full table re-render) or the full partial. The form `<tr>` must carry the same `id` as the data row so the `outerHTML` swap lands correctly.
 
 ### Buttons
 
@@ -414,6 +478,61 @@ Dialog overlay with focus trapping. Focus trap implementation deferred to #39.
 - **Loading states**: `.htmx-request` class (auto-applied by htmx) sets `opacity: 0.6`, `cursor: wait`, `pointer-events: none` on the element and child buttons/inputs/selects.
 - **`aria-busy`**: `src/dashboard/static/js/htmx-a11y.js` sets `aria-busy="true"` on the swap target during `htmx:beforeRequest`, removes it on `htmx:afterSettle`.
 - **Graceful degradation**: Routes return full-page template for non-HTMX requests, partial for HTMX — standard redirect fallback.
+
+### `hx-on::` event handlers
+
+`hx-on::event-name` (double colon) is the shorthand for HTMX internal events (`htmx:*`). Single colon (`hx-on:click`) is for native DOM events. Do not mix the forms:
+
+```html
+hx-on::before-request="…"   <!-- htmx:beforeRequest -->
+hx-on::after-request="…"    <!-- htmx:afterRequest -->
+hx-on::after-settle="…"     <!-- htmx:afterSettle -->
+hx-on:click="…"             <!-- native click event -->
+```
+
+**Idempotency guard** — prevent a button from firing if its target already exists in the DOM:
+
+```html
+<button
+  hx-get="/watches/{id}/notifications/add-row"
+  hx-target="#tbody"
+  hx-swap="afterbegin"
+  hx-on::before-request="if(document.getElementById('add-row')){event.preventDefault();}">
+  + Add
+</button>
+```
+
+`event.preventDefault()` on `htmx:beforeRequest` cancels the request entirely. Use this whenever a button inserts a unique element and should be a no-op if that element is already present.
+
+**Success guard for `after-request` DOM manipulation** — always check `event.detail.successful` before touching the DOM:
+
+```html
+hx-on::after-request="if(event.detail.successful){const e=document.getElementById('empty-state');if(e)e.remove();}"
+```
+
+Without the guard, DOM manipulation fires on error responses (4xx/5xx) too.
+
+### Form error retargeting
+
+When a form validation error should keep the form visible with an inline error message — rather than replacing it — return the form partial with `HX-Retarget` and `HX-Reswap` headers:
+
+```python
+return templates.TemplateResponse(
+    "partials/notification_add_row.html",
+    {"request": request, "watch": watch, "error": str(exc), ...},
+    headers={"HX-Retarget": "#add-row", "HX-Reswap": "outerHTML"},
+)
+```
+
+HTMX processes these response headers and redirects the swap to `#add-row` instead of the original form target. The form template must render the `error` variable inline:
+
+```html
+{% if error %}
+<div class="text-sm text-red-600 dark:text-red-400" role="alert">{{ error }}</div>
+{% endif %}
+```
+
+Use this pattern instead of OOB flash for validation errors that are specific to a form still in the page — flash is for transient success/failure messages, not inline field errors.
 
 ---
 

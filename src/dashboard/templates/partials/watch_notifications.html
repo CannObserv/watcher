@@ -1,13 +1,13 @@
 {# Notification config table for a single watch. #}
 {# Expects: watch, notifications (list of NotificationConfig); optional error (str). #}
 
-<div id="watch-notifications-list" aria-live="polite" aria-atomic="false">
+<div id="watch-notifications-list" class="rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden" aria-live="polite" aria-atomic="false">
   <table class="data-table w-full">
     <thead>
       <tr>
-        <th scope="col">Title</th>
+        <th scope="col" class="w-full">Title</th>
         <th scope="col">Status</th>
-        <th scope="col" class="sr-only">Actions</th>
+        <th scope="col"><span class="sr-only">Actions</span></th>
       </tr>
     </thead>
     <tbody id="notifications-tbody">

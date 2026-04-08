@@ -150,6 +150,8 @@
       hx-get="/watches/{{ watch.id }}/notifications/add-row"
       hx-target="#notifications-tbody"
       hx-swap="afterbegin"
+      hx-on:htmx:before-request="if(document.getElementById('notification-add-row')){event.preventDefault();}"
+      hx-on::after-request="const e=document.getElementById('notifications-empty-state');if(e)e.remove();"
       class="btn btn-secondary text-sm min-h-[44px] htmx-request:opacity-60">
       + Add
     </button>

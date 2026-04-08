@@ -1432,15 +1432,15 @@ async def watch_notification_create(
             variant_index = int(variant_raw) if variant_raw is not None else None
             apprise_url = assemble_url(schema_val, tokens, variant_index=variant_index)
         except ValueError as exc:
-            notifications = await get_watch_notifications(session, watch.id)
             return templates.TemplateResponse(
-                "partials/watch_notifications.html",
+                "partials/notification_add_row.html",
                 {
                     "request": request,
                     "watch": watch,
-                    "notifications": notifications,
+                    "apprise_plugins": list_plugins(),
                     "error": str(exc),
                 },
+                headers={"HX-Retarget": "#notification-add-row", "HX-Reswap": "outerHTML"},
             )
     else:
         # Raw URL submission (legacy path)
@@ -1448,29 +1448,29 @@ async def watch_notification_create(
         try:
             validate_apprise_url(apprise_url)
         except ValueError as exc:
-            notifications = await get_watch_notifications(session, watch.id)
             return templates.TemplateResponse(
-                "partials/watch_notifications.html",
+                "partials/notification_add_row.html",
                 {
                     "request": request,
                     "watch": watch,
-                    "notifications": notifications,
+                    "apprise_plugins": list_plugins(),
                     "error": str(exc),
                 },
+                headers={"HX-Retarget": "#notification-add-row", "HX-Reswap": "outerHTML"},
             )
 
     try:
         validate_event_list(events)
     except ValueError as exc:
-        notifications = await get_watch_notifications(session, watch.id)
         return templates.TemplateResponse(
-            "partials/watch_notifications.html",
+            "partials/notification_add_row.html",
             {
                 "request": request,
                 "watch": watch,
-                "notifications": notifications,
+                "apprise_plugins": list_plugins(),
                 "error": str(exc),
             },
+            headers={"HX-Retarget": "#notification-add-row", "HX-Reswap": "outerHTML"},
         )
 
     hint = get_service_name(schema_val) if schema_val else extract_channel_hint(apprise_url)

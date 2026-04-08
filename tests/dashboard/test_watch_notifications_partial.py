@@ -114,6 +114,13 @@ class TestWatchNotificationsPartialRoute:
         # No notification cards — no channel_hint present
         assert b"channel_hint" not in resp.content
 
+    async def test_empty_state_row_has_id(self):
+        """Empty-state <tr> has id='notifications-empty-state' so JS can remove it."""
+        watch = _make_mock_watch()
+        resp = await self._get(str(watch.id), mock_watch=watch, mock_notifications=[])
+        assert resp.status_code == 200
+        assert b'id="notifications-empty-state"' in resp.content
+
     async def test_renders_table_structure(self):
         """Notification list renders as a <table> with thead/tbody."""
         watch = _make_mock_watch()
@@ -379,6 +386,29 @@ class TestWatchNotificationCreateRoute:
             or b"invalid" in resp.content
             or b"error" in resp.content.lower()
         )
+
+    async def test_invalid_url_error_retargets_add_row(self):
+        """On create validation error, response retargets #notification-add-row (outerHTML)."""
+        watch = _make_mock_watch()
+        resp = await _post_dashboard(
+            f"/watches/{watch.id}/notifications/new",
+            form_data={"apprise_url": "notascheme://bad", "events": "change_detected"},
+            mock_watch=watch,
+        )
+        assert resp.status_code == 200
+        assert resp.headers.get("HX-Retarget") == "#notification-add-row"
+        assert resp.headers.get("HX-Reswap") == "outerHTML"
+
+    async def test_invalid_url_error_response_contains_add_form(self):
+        """Error response for create includes the add form (not the notifications table)."""
+        watch = _make_mock_watch()
+        resp = await _post_dashboard(
+            f"/watches/{watch.id}/notifications/new",
+            form_data={"apprise_url": "notascheme://bad", "events": "change_detected"},
+            mock_watch=watch,
+        )
+        assert resp.status_code == 200
+        assert b"add-notification-form" in resp.content
 
     async def test_missing_watch_returns_404(self):
         resp = await _post_dashboard(

@@ -86,14 +86,6 @@ class TestWatchNotificationsPartialRoute:
         assert resp.status_code == 200
         assert b"discord" in resp.content
 
-    async def test_renders_events_as_chips(self):
-        watch = _make_mock_watch()
-        nc = _make_mock_nc(events=["change_detected", "watch_error"])
-        resp = await self._get(str(watch.id), mock_watch=watch, mock_notifications=[nc])
-        assert resp.status_code == 200
-        assert b"Change Detected" in resp.content
-        assert b"Watch Error" in resp.content
-
     async def test_renders_inactive_badge_when_not_active(self):
         watch = _make_mock_watch()
         nc = _make_mock_nc(is_active=False)
@@ -106,9 +98,14 @@ class TestWatchNotificationsPartialRoute:
         nc = _make_mock_nc(is_active=True)
         resp = await self._get(str(watch.id), mock_watch=watch, mock_notifications=[nc])
         assert resp.status_code == 200
-        # "Inactive" badge should not appear for active configs
-        # (The word may appear in aria labels etc., so check the badge class)
         assert b"badge-inactive" not in resp.content
+
+    async def test_active_badge_when_active(self):
+        watch = _make_mock_watch()
+        nc = _make_mock_nc(is_active=True)
+        resp = await self._get(str(watch.id), mock_watch=watch, mock_notifications=[nc])
+        assert resp.status_code == 200
+        assert b"badge-active" in resp.content
 
     async def test_empty_list_shows_empty_state(self):
         watch = _make_mock_watch()
@@ -117,79 +114,67 @@ class TestWatchNotificationsPartialRoute:
         # No notification cards — no channel_hint present
         assert b"channel_hint" not in resp.content
 
-    async def test_add_form_present(self):
+    async def test_empty_state_row_has_id(self):
+        """Empty-state <tr> has id='notifications-empty-state' so JS can remove it."""
+        watch = _make_mock_watch()
+        resp = await self._get(str(watch.id), mock_watch=watch, mock_notifications=[])
+        assert resp.status_code == 200
+        assert b'id="notifications-empty-state"' in resp.content
+
+    async def test_renders_table_structure(self):
+        """Notification list renders as a <table> with thead/tbody."""
         watch = _make_mock_watch()
         resp = await self._get(str(watch.id), mock_watch=watch)
         assert resp.status_code == 200
-        assert b"add-notification-form" in resp.content
-        assert b"channel-picker" in resp.content
+        assert b"<table" in resp.content
+        assert b"<thead" in resp.content
+        assert b'id="notifications-tbody"' in resp.content
 
-    async def test_builder_manual_segment_toggle_present(self):
+    async def test_no_add_form_in_partial(self):
+        """Add form is no longer embedded in the partial — it lives in the add-row route."""
         watch = _make_mock_watch()
         resp = await self._get(str(watch.id), mock_watch=watch)
         assert resp.status_code == 200
-        assert b'value="builder"' in resp.content
-        assert b'value="manual"' in resp.content
-        assert b"segment-group" in resp.content
+        assert b"add-notification-form" not in resp.content
+        assert b"channel-picker" not in resp.content
 
-    async def test_event_checkboxes_present(self):
+    async def test_pause_button_for_active_config(self):
+        """Active notification config shows a Pause toggle button."""
         watch = _make_mock_watch()
-        resp = await self._get(str(watch.id), mock_watch=watch)
+        nc = _make_mock_nc(is_active=True)
+        resp = await self._get(str(watch.id), mock_watch=watch, mock_notifications=[nc])
         assert resp.status_code == 200
-        assert b"change_detected" in resp.content
-        assert b"watch_error" in resp.content
-        assert b"watch_recovered" in resp.content
-        assert b"watch_created" in resp.content
-        assert b"watch_paused" in resp.content
-        assert b"watch_resumed" in resp.content
+        assert b"Pause" in resp.content
 
-    async def test_watch_created_checkbox_is_disabled(self):
+    async def test_activate_button_for_inactive_config(self):
+        """Inactive notification config shows an Activate toggle button."""
         watch = _make_mock_watch()
-        resp = await self._get(str(watch.id), mock_watch=watch)
+        nc = _make_mock_nc(is_active=False)
+        resp = await self._get(str(watch.id), mock_watch=watch, mock_notifications=[nc])
         assert resp.status_code == 200
-        # "disabled" attr is on the watch_created input specifically
-        wc_input = resp.text.split('value="watch_created"')[1].split(">")[0]
-        assert "disabled" in wc_input
-        # No hidden input when watch_created is not in form_events
-        assert '<input type="hidden" name="events" value="watch_created">' not in resp.text
+        assert b"Activate" in resp.content
 
-    def test_watch_created_hidden_input_when_previously_set(self):
-        """Template renders hidden input to preserve watch_created when form_events includes it."""
-        from src.dashboard import templates
-
+    async def test_no_deactivate_button_label(self):
+        """'Deactivate' label is replaced by 'Pause' — must not appear."""
         watch = _make_mock_watch()
-        rendered = templates.get_template("partials/watch_notifications.html").render(
-            request=MagicMock(),
-            watch=watch,
-            notifications=[],
-            form_events=["watch_created", "change_detected"],
-        )
-        assert '<input type="hidden" name="events" value="watch_created">' in rendered
-        # "checked" attr is on the checkbox (last occurrence of value="watch_created"),
-        # between that attribute and "disabled"
-        wc_attrs = rendered.split('value="watch_created"')[-1].split("disabled")[0]
-        assert "checked" in wc_attrs
-
-    async def test_renders_decrypted_url_in_details(self):
-        """Notification list reveals decrypted URL via <details> element."""
-        watch = _make_mock_watch()
-        nc = _make_mock_nc(apprise_url="some_fernet_token")
-        with patch(
-            "src.dashboard.routes.decrypt_apprise_url", return_value="discord://abc/def/ghi"
-        ):
-            resp = await self._get(str(watch.id), mock_watch=watch, mock_notifications=[nc])
+        nc = _make_mock_nc(is_active=True)
+        resp = await self._get(str(watch.id), mock_watch=watch, mock_notifications=[nc])
         assert resp.status_code == 200
-        assert b"discord://abc/def/ghi" in resp.content
-        assert b"Show URL" in resp.content
+        assert b"Deactivate" not in resp.content
 
-    async def test_url_reveal_uses_details_element(self):
-        """Show URL toggle uses native <details> element for accessibility."""
+    async def test_button_order_edit_test_pause_delete(self):
+        """Action buttons appear in order: Edit, Test, Pause/Activate, Delete."""
         watch = _make_mock_watch()
-        nc = _make_mock_nc()
-        with patch("src.dashboard.routes.decrypt_apprise_url", return_value="slack://T/A/T"):
-            resp = await self._get(str(watch.id), mock_watch=watch, mock_notifications=[nc])
-        assert b"<details" in resp.content
-        assert b"Show URL" in resp.content
+        nc = _make_mock_nc(is_active=True)
+        resp = await self._get(str(watch.id), mock_watch=watch, mock_notifications=[nc])
+        assert resp.status_code == 200
+        # Use aria-label attributes to find button positions (button text has whitespace)
+        text = resp.text
+        edit_pos = text.index("edit-form")  # hx-get URL contains "edit-form"
+        test_pos = text.index("test-result")  # hx-post URL contains "test-result"
+        pause_pos = text.index("/toggle")  # hx-post URL contains "/toggle"
+        delete_pos = text.index("hx-delete")  # delete uses hx-delete
+        assert edit_pos < test_pos < pause_pos < delete_pos
 
     async def test_edit_button_present_for_each_config(self):
         """Edit button appears per notification config, targeting the config row."""
@@ -302,7 +287,7 @@ class TestWatchNotificationToggleRoute:
             mock_session=session,
         )
         assert resp.status_code == 200
-        assert b"watch-notifications-list" in resp.content
+        assert b"notifications-tbody" in resp.content
 
     async def test_returns_404_for_missing_watch(self):
         resp = await _post_dashboard(
@@ -342,7 +327,7 @@ class TestWatchNotificationCreateRoute:
                 mock_session=session,
             )
         assert resp.status_code == 200
-        assert b"watch-notifications-list" in resp.content
+        assert b"notifications-tbody" in resp.content
 
     async def test_title_stored_on_create(self):
         """Title submitted in the add form is stored on the new NotificationConfig."""
@@ -401,6 +386,29 @@ class TestWatchNotificationCreateRoute:
             or b"invalid" in resp.content
             or b"error" in resp.content.lower()
         )
+
+    async def test_invalid_url_error_retargets_add_row(self):
+        """On create validation error, response retargets #notification-add-row (outerHTML)."""
+        watch = _make_mock_watch()
+        resp = await _post_dashboard(
+            f"/watches/{watch.id}/notifications/new",
+            form_data={"apprise_url": "notascheme://bad", "events": "change_detected"},
+            mock_watch=watch,
+        )
+        assert resp.status_code == 200
+        assert resp.headers.get("HX-Retarget") == "#notification-add-row"
+        assert resp.headers.get("HX-Reswap") == "outerHTML"
+
+    async def test_invalid_url_error_response_contains_add_form(self):
+        """Error response for create includes the add form (not the notifications table)."""
+        watch = _make_mock_watch()
+        resp = await _post_dashboard(
+            f"/watches/{watch.id}/notifications/new",
+            form_data={"apprise_url": "notascheme://bad", "events": "change_detected"},
+            mock_watch=watch,
+        )
+        assert resp.status_code == 200
+        assert b"add-notification-form" in resp.content
 
     async def test_missing_watch_returns_404(self):
         resp = await _post_dashboard(
@@ -676,7 +684,7 @@ class TestNotificationEditRoute:
                 mock_session=session,
             )
         assert resp.status_code == 200
-        assert b"watch-notifications-list" in resp.content
+        assert b"notifications-tbody" in resp.content
         assert nc.apprise_url == "new_encrypted"
         assert nc.channel_hint == "json"  # re-derived from new URL
 
@@ -820,6 +828,92 @@ class TestNotificationEditRoute:
         assert resp.status_code == 200
         assert resp.headers.get("hx-retarget") == f"#nc-{nc.id}"
         assert resp.headers.get("hx-reswap") == "outerHTML"
+
+
+class TestWatchNotificationAddRowRoute:
+    """GET /watches/{watch_id}/notifications/add-row"""
+
+    async def _get_add_row(self, watch_id: str, mock_watch=None):
+        from src.api.dependencies import get_db_session
+        from src.api.main import app
+
+        async def override_session():
+            yield MagicMock()
+
+        app.dependency_overrides[get_db_session] = override_session
+        try:
+            with patch(
+                "src.dashboard.routes.get_watch_detail",
+                new_callable=AsyncMock,
+                return_value=mock_watch,
+            ):
+                transport = ASGITransport(app=app)
+                async with AsyncClient(transport=transport, base_url="http://test") as client:
+                    return await client.get(f"/watches/{watch_id}/notifications/add-row")
+        finally:
+            app.dependency_overrides.clear()
+
+    async def test_returns_200_for_valid_watch(self):
+        watch = _make_mock_watch()
+        resp = await self._get_add_row(str(watch.id), mock_watch=watch)
+        assert resp.status_code == 200
+
+    async def test_returns_404_for_unknown_watch(self):
+        resp = await self._get_add_row("01ZZZZZZZZZZZZZZZZZZZZZZZZ", mock_watch=None)
+        assert resp.status_code == 404
+
+    async def test_is_table_row(self):
+        """Response is a <tr> element for afterbegin insertion into <tbody>."""
+        watch = _make_mock_watch()
+        resp = await self._get_add_row(str(watch.id), mock_watch=watch)
+        assert resp.status_code == 200
+        assert b"<tr" in resp.content
+
+    async def test_add_form_present(self):
+        watch = _make_mock_watch()
+        resp = await self._get_add_row(str(watch.id), mock_watch=watch)
+        assert resp.status_code == 200
+        assert b"add-notification-form" in resp.content
+
+    async def test_channel_picker_present(self):
+        watch = _make_mock_watch()
+        resp = await self._get_add_row(str(watch.id), mock_watch=watch)
+        assert resp.status_code == 200
+        assert b"channel-picker" in resp.content
+
+    async def test_builder_manual_segment_toggle_present(self):
+        watch = _make_mock_watch()
+        resp = await self._get_add_row(str(watch.id), mock_watch=watch)
+        assert resp.status_code == 200
+        assert b'value="builder"' in resp.content
+        assert b'value="manual"' in resp.content
+        assert b"segment-group" in resp.content
+
+    async def test_event_checkboxes_present(self):
+        watch = _make_mock_watch()
+        resp = await self._get_add_row(str(watch.id), mock_watch=watch)
+        assert resp.status_code == 200
+        assert b"change_detected" in resp.content
+        assert b"watch_error" in resp.content
+        assert b"watch_recovered" in resp.content
+        assert b"watch_created" in resp.content
+        assert b"watch_paused" in resp.content
+        assert b"watch_resumed" in resp.content
+
+    async def test_watch_created_checkbox_is_disabled(self):
+        watch = _make_mock_watch()
+        resp = await self._get_add_row(str(watch.id), mock_watch=watch)
+        assert resp.status_code == 200
+        wc_input = resp.text.split('value="watch_created"')[1].split(">")[0]
+        assert "disabled" in wc_input
+
+    async def test_form_targets_watch_notifications_container(self):
+        """Add form targets #watch-notifications container with innerHTML swap."""
+        watch = _make_mock_watch()
+        resp = await self._get_add_row(str(watch.id), mock_watch=watch)
+        assert resp.status_code == 200
+        assert b'hx-target="#watch-notifications"' in resp.content
+        assert b'hx-swap="innerHTML"' in resp.content
 
 
 class TestNotificationEditFormHtmxAttributes:

@@ -247,7 +247,6 @@ async def watch_detail_page(
         "watch": watch,
         "profiles": profiles,
         "notifications": notifications,
-        "notification_urls": _decrypt_notification_urls(notifications),
         "field_contexts": field_contexts,
         "snapshot_meta": snapshot_meta,
         "domain_inactive": domain_inactive,
@@ -1327,28 +1326,13 @@ async def partial_watch_timeline(
     )
 
 
-def _decrypt_notification_urls(notifications: list) -> dict[str, str]:
-    """Decrypt Apprise URLs for a list of NotificationConfig objects.
-
-    Returns a mapping from config ID (str) to plaintext URL.
-    Silently stores an error placeholder if decryption fails.
-    """
-    result = {}
-    for nc in notifications:
-        try:
-            result[str(nc.id)] = decrypt_apprise_url(nc.apprise_url)
-        except (InvalidToken, ValueError):
-            result[str(nc.id)] = "(decryption error)"
-    return result
-
-
 @router.get("/partials/watch-notifications/{watch_id}")
 async def partial_watch_notifications(
     request: Request,
     watch_id: str,
     session: AsyncSession = Depends(get_db_session),
 ):
-    """HTMX partial: notification config list for a watch."""
+    """HTMX partial: notification config table for a watch."""
     watch = await get_watch_detail(session, watch_id)
     if not watch:
         raise HTTPException(status_code=404, detail="Watch not found")
@@ -1359,7 +1343,25 @@ async def partial_watch_notifications(
             "request": request,
             "watch": watch,
             "notifications": notifications,
-            "notification_urls": _decrypt_notification_urls(notifications),
+        },
+    )
+
+
+@router.get("/watches/{watch_id}/notifications/add-row")
+async def watch_notification_add_row(
+    request: Request,
+    watch_id: str,
+    session: AsyncSession = Depends(get_db_session),
+):
+    """HTMX partial: inline add-row form for the notifications table."""
+    watch = await get_watch_detail(session, watch_id)
+    if not watch:
+        raise HTTPException(status_code=404, detail="Watch not found")
+    return templates.TemplateResponse(
+        "partials/notification_add_row.html",
+        {
+            "request": request,
+            "watch": watch,
             "apprise_plugins": list_plugins(),
         },
     )
@@ -1430,17 +1432,15 @@ async def watch_notification_create(
             variant_index = int(variant_raw) if variant_raw is not None else None
             apprise_url = assemble_url(schema_val, tokens, variant_index=variant_index)
         except ValueError as exc:
-            notifications = await get_watch_notifications(session, watch.id)
             return templates.TemplateResponse(
-                "partials/watch_notifications.html",
+                "partials/notification_add_row.html",
                 {
                     "request": request,
                     "watch": watch,
-                    "notifications": notifications,
-                    "notification_urls": _decrypt_notification_urls(notifications),
-                    "error": str(exc),
                     "apprise_plugins": list_plugins(),
+                    "error": str(exc),
                 },
+                headers={"HX-Retarget": "#notification-add-row", "HX-Reswap": "outerHTML"},
             )
     else:
         # Raw URL submission (legacy path)
@@ -1448,33 +1448,29 @@ async def watch_notification_create(
         try:
             validate_apprise_url(apprise_url)
         except ValueError as exc:
-            notifications = await get_watch_notifications(session, watch.id)
             return templates.TemplateResponse(
-                "partials/watch_notifications.html",
+                "partials/notification_add_row.html",
                 {
                     "request": request,
                     "watch": watch,
-                    "notifications": notifications,
-                    "notification_urls": _decrypt_notification_urls(notifications),
-                    "error": str(exc),
                     "apprise_plugins": list_plugins(),
+                    "error": str(exc),
                 },
+                headers={"HX-Retarget": "#notification-add-row", "HX-Reswap": "outerHTML"},
             )
 
     try:
         validate_event_list(events)
     except ValueError as exc:
-        notifications = await get_watch_notifications(session, watch.id)
         return templates.TemplateResponse(
-            "partials/watch_notifications.html",
+            "partials/notification_add_row.html",
             {
                 "request": request,
                 "watch": watch,
-                "notifications": notifications,
-                "notification_urls": _decrypt_notification_urls(notifications),
-                "error": str(exc),
                 "apprise_plugins": list_plugins(),
+                "error": str(exc),
             },
+            headers={"HX-Retarget": "#notification-add-row", "HX-Reswap": "outerHTML"},
         )
 
     hint = get_service_name(schema_val) if schema_val else extract_channel_hint(apprise_url)
@@ -1501,8 +1497,6 @@ async def watch_notification_create(
             "request": request,
             "watch": watch,
             "notifications": notifications,
-            "notification_urls": _decrypt_notification_urls(notifications),
-            "apprise_plugins": list_plugins(),
         },
     )
 
@@ -1531,8 +1525,6 @@ async def watch_notification_toggle(
             "request": request,
             "watch": watch,
             "notifications": notifications,
-            "notification_urls": _decrypt_notification_urls(notifications),
-            "apprise_plugins": list_plugins(),
         },
     )
 
@@ -1650,8 +1642,6 @@ async def watch_notification_edit(
             "request": request,
             "watch": watch,
             "notifications": notifications,
-            "notification_urls": _decrypt_notification_urls(notifications),
-            "apprise_plugins": list_plugins(),
         },
     )
 

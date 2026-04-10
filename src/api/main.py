@@ -12,6 +12,7 @@ from src.api.routes.changes import router as changes_router
 from src.api.routes.domains import router as domains_router
 from src.api.routes.health import router as health_router
 from src.api.routes.notification_configs import router as notification_configs_router
+from src.api.routes.notification_templates import router as notification_templates_router
 from src.api.routes.probe import router as probe_router
 from src.api.routes.temporal_profiles import router as profiles_router
 from src.api.routes.watches import router as watches_router
@@ -68,6 +69,7 @@ v1_router.include_router(watches_router)
 v1_router.include_router(changes_router)
 v1_router.include_router(profiles_router)
 v1_router.include_router(notification_configs_router)
+v1_router.include_router(notification_templates_router)
 v1_router.include_router(audit_router)
 v1_router.include_router(domains_router)
 v1_router.include_router(probe_router)

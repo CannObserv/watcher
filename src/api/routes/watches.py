@@ -13,13 +13,50 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.api.dependencies import get_db_session, get_probe_fn
 from src.api.routes.helpers import get_watch_or_404
 from src.api.schemas.watch import WatchCreate, WatchResponse, WatchUpdate
+from src.core.logging import get_logger
 from src.core.models.audit_log import EventType, audit
 from src.core.models.domain import DEFAULT_MAX_CONCURRENCY, DEFAULT_MIN_INTERVAL, Domain
+from src.core.models.notification_template import DomainNcRef, NotificationTemplate, WatchNcRef
 from src.core.models.watch import Watch
 from src.core.notifications.events import WatchEvent, WatchEventType
 from src.workers.notify import dispatch_event_notifications
 
+logger = get_logger(__name__)
+
 router = APIRouter(prefix="/watches", tags=["watches"])
+
+
+async def _assign_default_templates(session: AsyncSession, watch: Watch) -> None:
+    """Assign global and domain NC defaults to a newly created watch. Non-fatal."""
+    try:
+        template_ids: set = set()
+
+        # Global defaults
+        global_result = await session.execute(
+            select(NotificationTemplate.id).where(
+                NotificationTemplate.is_global_default.is_(True),
+                NotificationTemplate.is_active.is_(True),
+            )
+        )
+        template_ids.update(row[0] for row in global_result)
+
+        # Domain defaults
+        if watch.effective_domain:
+            domain_result = await session.execute(
+                select(DomainNcRef.template_id).where(
+                    DomainNcRef.domain_name == watch.effective_domain
+                )
+            )
+            template_ids.update(row[0] for row in domain_result)
+
+        for template_id in template_ids:
+            session.add(WatchNcRef(watch_id=watch.id, template_id=template_id))
+
+        if template_ids:
+            await session.flush()
+
+    except Exception:
+        logger.warning("Failed to assign default NC templates to watch", watch_id=str(watch.id))
 
 
 @router.post("", status_code=201, response_model=WatchResponse)
@@ -89,6 +126,7 @@ async def create_watch(
             occurred_at=datetime.now(UTC),
         ),
     )
+    await _assign_default_templates(session, watch)
     await session.commit()
     await session.refresh(watch)
     return watch

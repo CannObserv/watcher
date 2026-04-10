@@ -102,6 +102,105 @@ class TestGetPluginDetail:
         assert url.startswith("discord://")
 
 
+class TestAssembleUrlMailgunRegression:
+    """Regression tests for caronc/apprise#1576.
+
+    Apprise's Mailgun (and SparkPost, SMTP2Go) templates place the API key in
+    the URL port position: {schema}://{user}@{host}:{apikey}/{targets}
+    Python's URL parser silently drops non-numeric port values, so without
+    correction the key is read back as None and the URL fails to load.
+    """
+
+    def test_mailgun_url_is_loadable_by_apprise(self):
+        url = assemble_url(
+            "mailgun",
+            {
+                "user": "postmaster",
+                "host": "mail.example.com",
+                "apikey": "abc123def456",
+                "target_email": "recipient@example.com",
+            },
+        )
+        ap = apprise.Apprise()
+        assert ap.add(url), f"Apprise could not load assembled Mailgun URL: {url}"
+
+    def test_mailgun_url_contains_slash_not_colon_before_apikey(self):
+        # The raw Apprise template uses {host}:{apikey} (port position).
+        # We must normalise to {host}/{apikey} (path segment) so the key
+        # is not silently dropped by the URL parser.
+        url = assemble_url(
+            "mailgun",
+            {
+                "user": "postmaster",
+                "host": "mail.example.com",
+                "apikey": "abc123def456",
+            },
+        )
+        assert "mail.example.com/abc123def456" in url, (
+            f"apikey should follow host as a path segment, not a port: {url}"
+        )
+        assert "mail.example.com:abc123def456" not in url
+
+    def test_mailgun_target_email_map_to_targets(self):
+        # Apprise defines target_email with map_to=targets. Submitting
+        # target_email must substitute into {targets} in the template.
+        url = assemble_url(
+            "mailgun",
+            {
+                "user": "postmaster",
+                "host": "mail.example.com",
+                "apikey": "abc123def456",
+                "target_email": "recipient@example.com",
+            },
+        )
+        assert "recipient%40example.com" in url, (
+            f"target_email should appear percent-encoded in URL path: {url}"
+        )
+
+    def test_mailgun_at_sign_in_target_is_percent_encoded(self):
+        # Unencoded @ in a URL path segment corrupts URL structure.
+        url = assemble_url(
+            "mailgun",
+            {
+                "user": "postmaster",
+                "host": "mail.example.com",
+                "apikey": "abc123def456",
+                "target_email": "recipient@example.com",
+            },
+        )
+        # After the host/apikey portion, @ must be encoded
+        path_part = url.split("abc123def456", 1)[-1]
+        assert "@" not in path_part, f"@ in target email must be percent-encoded in path: {url}"
+
+    def test_sparkpost_url_is_loadable_by_apprise(self):
+        # SparkPost uses the same broken {host}:{apikey} template pattern.
+        url = assemble_url(
+            "sparkpost",
+            {
+                "user": "postmaster",
+                "host": "sp.example.com",
+                "apikey": "abc123def456",
+                "target_email": "recipient@example.com",
+            },
+        )
+        ap = apprise.Apprise()
+        assert ap.add(url), f"Apprise could not load assembled SparkPost URL: {url}"
+
+    def test_smtp2go_url_is_loadable_by_apprise(self):
+        # SMTP2Go uses the same broken {host}:{apikey} template pattern.
+        url = assemble_url(
+            "smtp2go",
+            {
+                "user": "postmaster",
+                "host": "smtp2go.example.com",
+                "apikey": "abc123def456",
+                "target_email": "recipient@example.com",
+            },
+        )
+        ap = apprise.Apprise()
+        assert ap.add(url), f"Apprise could not load assembled SMTP2Go URL: {url}"
+
+
 class TestAssembleUrl:
     def test_discord_assembles_correctly(self):
         url = assemble_url("discord", {"webhook_id": "abc123", "webhook_token": "xyz789"})

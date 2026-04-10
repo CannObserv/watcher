@@ -6,7 +6,7 @@ from ulid import ULID
 
 from src.core.logging import get_logger
 from src.core.models.audit_log import EventType, audit
-from src.core.models.notification_config import NotificationConfig
+from src.core.models.notification_config import WatchNotificationConfig
 from src.core.notifications.dispatcher import dispatch_event
 from src.core.notifications.events import WatchEvent
 
@@ -17,17 +17,17 @@ async def dispatch_event_notifications(
     session: AsyncSession,
     event: WatchEvent,
 ) -> None:
-    """Dispatch a WatchEvent to all active, opted-in NotificationConfig rows.
+    """Dispatch a WatchEvent to all active, opted-in WatchNotificationConfig rows.
 
     Queries configs where watch_id matches, is_active is True, and the event
     type code is in the events array. Dispatches sequentially.
     Failures are logged but never raise. Writes a single audit log entry
     with per-config results. Does not commit; caller is responsible.
     """
-    stmt = select(NotificationConfig).where(
-        NotificationConfig.watch_id == ULID.from_str(event.watch_id),
-        NotificationConfig.is_active.is_(True),
-        NotificationConfig.events.contains([event.event_type.value]),
+    stmt = select(WatchNotificationConfig).where(
+        WatchNotificationConfig.watch_id == ULID.from_str(event.watch_id),
+        WatchNotificationConfig.is_active.is_(True),
+        WatchNotificationConfig.events.contains([event.event_type.value]),
     )
     result = await session.execute(stmt)
     configs = result.scalars().all()

@@ -12,7 +12,7 @@ from ulid import ULID
 from src.core.models.audit_log import AuditLog, EventType
 from src.core.models.change import Change
 from src.core.models.domain import Domain
-from src.core.models.notification_config import NotificationConfig
+from src.core.models.notification_config import WatchNotificationConfig
 from src.core.models.snapshot import Snapshot, SnapshotChunk
 from src.core.models.temporal_profile import TemporalProfile
 from src.core.models.watch import Watch
@@ -573,10 +573,10 @@ async def get_watch_profiles(session: AsyncSession, watch_id: ULID) -> list[Temp
 
 async def get_watch_notifications(
     session: AsyncSession, watch_id: ULID
-) -> list[NotificationConfig]:
+) -> list[WatchNotificationConfig]:
     """Fetch notification configs for a watch."""
     result = await session.execute(
-        select(NotificationConfig).where(NotificationConfig.watch_id == watch_id)
+        select(WatchNotificationConfig).where(WatchNotificationConfig.watch_id == watch_id)
     )
     return list(result.scalars().all())
 

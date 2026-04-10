@@ -40,7 +40,7 @@ def extract_channel_hint(url: str) -> str:
     return url.split("://")[0].lower() if "://" in url else url.lower()
 
 
-class NotificationConfigCreate(BaseModel):
+class WatchNotificationConfigCreate(BaseModel):
     """
     Request body for creating a notification config.
 
@@ -56,7 +56,7 @@ class NotificationConfigCreate(BaseModel):
     events: list[str] = Field(default_factory=lambda: ["change_detected"])
 
     @model_validator(mode="after")
-    def resolve_apprise_url(self) -> "NotificationConfigCreate":
+    def resolve_apprise_url(self) -> "WatchNotificationConfigCreate":
         if self.apprise_url is not None:
             # Raw URL path — validate it
             validate_apprise_url(self.apprise_url)
@@ -76,7 +76,7 @@ class NotificationConfigCreate(BaseModel):
         return validate_event_list(v)
 
 
-class NotificationConfigUpdate(BaseModel):
+class WatchNotificationConfigUpdate(BaseModel):
     """Request body for PATCH — all fields optional."""
 
     is_active: bool | None = None
@@ -102,7 +102,7 @@ class NotificationConfigUpdate(BaseModel):
         return validate_apprise_url(v)
 
 
-class NotificationConfigResponse(BaseModel):
+class WatchNotificationConfigResponse(BaseModel):
     """Response schema — never exposes apprise_url."""
 
     model_config = ConfigDict(from_attributes=True)

@@ -11,7 +11,7 @@ from src.core.models.audit_log import AuditLog, EventType, audit
 from src.core.models.base import ULIDType
 from src.core.models.change import Change
 from src.core.models.domain import Domain
-from src.core.models.notification_config import NotificationConfig
+from src.core.models.notification_config import WatchNotificationConfig
 from src.core.models.snapshot import Snapshot, SnapshotChunk
 from src.core.models.temporal_profile import PostAction, ProfileType, TemporalProfile
 from src.core.models.watch import ContentType, Watch, WatchHealthStatus
@@ -372,7 +372,7 @@ class TestDomainModel:
 
 class TestNotificationConfigModel:
     def test_create_apprise_config(self):
-        config = NotificationConfig(
+        config = WatchNotificationConfig(
             watch_id=ULID(),
             apprise_url="slack://T/A/T/#ops",
             channel_hint="slack",
@@ -381,7 +381,7 @@ class TestNotificationConfigModel:
         assert config.is_active is True
 
     def test_default_events(self):
-        config = NotificationConfig(
+        config = WatchNotificationConfig(
             watch_id=ULID(),
             apprise_url="mailto://user:pass@example.com",
             channel_hint="mailto",
@@ -389,7 +389,7 @@ class TestNotificationConfigModel:
         assert config.events == ["change_detected"]
 
     def test_custom_events(self):
-        config = NotificationConfig(
+        config = WatchNotificationConfig(
             watch_id=ULID(),
             apprise_url="slack://T/A/T/#ops",
             channel_hint="slack",

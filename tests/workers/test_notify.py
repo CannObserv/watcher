@@ -43,10 +43,10 @@ class TestDispatchEventNotifications:
 
     async def test_dispatches_to_matching_config(self):
         from src.core.crypto import encrypt_apprise_url
-        from src.core.models.notification_config import NotificationConfig
+        from src.core.models.notification_config import WatchNotificationConfig
 
         watch_ulid = ULID()
-        config = MagicMock(spec=NotificationConfig)
+        config = MagicMock(spec=WatchNotificationConfig)
         config.id = ULID()
         config.watch_id = watch_ulid
         config.apprise_url = encrypt_apprise_url("json://localhost/notify")
@@ -66,10 +66,10 @@ class TestDispatchEventNotifications:
 
     async def test_failure_does_not_raise(self):
         from src.core.crypto import encrypt_apprise_url
-        from src.core.models.notification_config import NotificationConfig
+        from src.core.models.notification_config import WatchNotificationConfig
 
         watch_ulid = ULID()
-        config = MagicMock(spec=NotificationConfig)
+        config = MagicMock(spec=WatchNotificationConfig)
         config.id = ULID()
         config.watch_id = watch_ulid
         config.apprise_url = encrypt_apprise_url("json://localhost/notify")

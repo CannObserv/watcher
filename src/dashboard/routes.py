@@ -25,7 +25,7 @@ from src.core.crypto import decrypt_apprise_url, encrypt_apprise_url
 from src.core.logging import get_logger
 from src.core.models.audit_log import EventType, audit
 from src.core.models.domain import Domain
-from src.core.models.notification_config import NotificationConfig
+from src.core.models.notification_config import WatchNotificationConfig
 from src.core.models.snapshot import Snapshot
 from src.core.models.watch import ContentType, Watch
 from src.core.notifications.apprise_builder import (
@@ -1474,7 +1474,7 @@ async def watch_notification_create(
         )
 
     hint = get_service_name(schema_val) if schema_val else extract_channel_hint(apprise_url)
-    config = NotificationConfig(
+    config = WatchNotificationConfig(
         watch_id=watch.id,
         title=title,
         apprise_url=encrypt_apprise_url(apprise_url),
@@ -1512,7 +1512,7 @@ async def watch_notification_toggle(
     watch = await get_watch_detail(session, watch_id)
     if not watch:
         raise HTTPException(status_code=404, detail="Watch not found")
-    nc = await session.get(NotificationConfig, parse_ulid(config_id, "Config"))
+    nc = await session.get(WatchNotificationConfig, parse_ulid(config_id, "Config"))
     if not nc or nc.watch_id != watch.id:
         raise HTTPException(status_code=404, detail="Config not found")
     nc.is_active = not nc.is_active
@@ -1540,7 +1540,7 @@ async def watch_notification_edit_form(
     watch = await get_watch_detail(session, watch_id)
     if not watch:
         raise HTTPException(status_code=404, detail="Watch not found")
-    nc = await session.get(NotificationConfig, parse_ulid(config_id, "Config"))
+    nc = await session.get(WatchNotificationConfig, parse_ulid(config_id, "Config"))
     if not nc or nc.watch_id != watch.id:
         raise HTTPException(status_code=404, detail="Config not found")
     decryption_failed = False
@@ -1572,7 +1572,7 @@ async def watch_notification_edit(
     watch = await get_watch_detail(session, watch_id)
     if not watch:
         raise HTTPException(status_code=404, detail="Watch not found")
-    nc = await session.get(NotificationConfig, parse_ulid(config_id, "Config"))
+    nc = await session.get(WatchNotificationConfig, parse_ulid(config_id, "Config"))
     if not nc or nc.watch_id != watch.id:
         raise HTTPException(status_code=404, detail="Config not found")
 
@@ -1657,7 +1657,7 @@ async def watch_notification_test_result(
     watch = await get_watch_detail(session, watch_id)
     if not watch:
         raise HTTPException(status_code=404, detail="Watch not found")
-    nc = await session.get(NotificationConfig, parse_ulid(config_id, "Config"))
+    nc = await session.get(WatchNotificationConfig, parse_ulid(config_id, "Config"))
     if not nc or nc.watch_id != watch.id:
         raise HTTPException(status_code=404, detail="Config not found")
     event = WatchEvent(

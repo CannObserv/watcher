@@ -15,7 +15,7 @@ from src.core.crypto import encrypt_apprise_url
 from src.core.fetchers.http import HttpFetcher
 from src.core.models.audit_log import AuditLog, EventType
 from src.core.models.domain import Domain
-from src.core.models.notification_config import NotificationConfig
+from src.core.models.notification_config import WatchNotificationConfig
 from src.core.models.temporal_profile import PostAction, ProfileType, TemporalProfile
 from src.core.models.watch import ContentType, Watch, WatchHealthStatus
 from src.core.notifications.events import WatchEventType
@@ -292,7 +292,7 @@ class TestCheckWatchSavepointBoundary:
         await db_session.flush()
 
         # Add an active notification config so dispatch is triggered
-        nc = NotificationConfig(
+        nc = WatchNotificationConfig(
             watch_id=watch.id,
             apprise_url=encrypt_apprise_url("json://localhost/notify"),
             channel_hint="json",

@@ -3,6 +3,7 @@
 import copy
 import re
 from functools import lru_cache
+from urllib.parse import quote
 
 import apprise
 
@@ -192,6 +193,26 @@ def assemble_url(
     required_set = {k for k, v in all_tokens.items() if v.get("required") and k != "schema"}
     templates = list(entry["details"]["templates"])
 
+    # Build map_to mapping: token name → URL placeholder name.
+    # e.g. Mailgun's target_email has map_to="targets", so submitting
+    # {"target_email": "x"} should substitute into {targets} in the template.
+    map_to: dict[str, str] = {}
+    for tok_name, tok_def in all_tokens.items():
+        dest = tok_def.get("map_to")
+        if dest and dest != tok_name:
+            map_to[tok_name] = dest
+
+    # Remap submitted token keys using map_to, preserving any direct-match keys.
+    remapped_tokens: dict[str, str] = {}
+    for name, value in tokens.items():
+        dest = map_to.get(name, name)
+        # Direct key wins over remapped key if both provided
+        if dest not in tokens:
+            remapped_tokens[dest] = value
+        else:
+            remapped_tokens[name] = value
+    tokens = remapped_tokens
+
     # Filter to variant templates if requested.
     # variant_index is a positional index into the list returned by
     # get_plugin_detail(schema)["variants"]; out-of-range values are ignored
@@ -203,16 +224,48 @@ def assemble_url(
             variant_indices = list(groups.values())[variant_index]
             templates = [templates[i] for i in variant_indices]
 
+    # Prefer templates that use more of the provided tokens (e.g. include
+    # {targets} when a target was provided) before falling back to shorter ones.
+    provided_keys = set(tokens.keys())
+    templates = sorted(
+        templates,
+        key=lambda t: len(_extract_path_tokens(t) & provided_keys),
+        reverse=True,
+    )
+
     for template in templates:
         path_tokens = _extract_path_tokens(template)
         needed_required = path_tokens & required_set
         if not needed_required.issubset(tokens.keys()):
             continue
+        # Apprise templates for some plugins (Mailgun, SparkPost, SMTP2Go) use
+        # {host}:{apikey} which places the key in the URL port position. Python's
+        # URL parser drops non-numeric ports, so Apprise reads apikey as None.
+        # Normalise: replace {host}:{non_port_token} with {host}/{non_port_token}.
+        normalised = re.sub(
+            r"(\{(?:host|domain|hostname)\}):\{(?!port\})(\w+)\}",
+            r"\1/{\2}",
+            template,
+        )
         # Substitute schema value
-        url = template.replace("{schema}", scheme or schema)
-        # Substitute provided tokens
+        url = normalised.replace("{schema}", scheme or schema)
+        # Substitute provided tokens; percent-encode values placed in URL path
+        # segments so that characters like @ in email addresses don't corrupt
+        # the URL structure. Values in the user/password positions (before @)
+        # use the standard URL auth encoding (safe chars include most punctuation).
         for name, value in tokens.items():
-            url = url.replace("{" + name + "}", str(value))
+            placeholder = "{" + name + "}"
+            if placeholder in url:
+                # Determine position: before the last @ in netloc = auth, else path
+                pos = url.find(placeholder)
+                at_in_netloc = url.rfind("@", url.find("://") + 3)
+                if at_in_netloc != -1 and pos < at_in_netloc:
+                    # Auth position — encode only truly unsafe chars
+                    encoded = quote(str(value), safe="!$&'()*+,;=-._~")
+                else:
+                    # Path position — encode @ and other delimiters
+                    encoded = quote(str(value), safe="-._~!$&'()*+,;=")
+                url = url.replace(placeholder, encoded)
         # Strip remaining unfilled optional tokens (path segments)
         url = re.sub(r"/\{[^}]+\}", "", url)
         url = re.sub(r"\{[^}]+\}", "", url)

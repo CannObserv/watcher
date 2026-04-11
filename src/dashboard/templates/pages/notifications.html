@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% block title %}Notification Templates — Watcher{% endblock %}
+{% block content %}
+<div class="flex justify-between items-center mb-6">
+  <h2 class="text-2xl font-bold text-gray-900 dark:text-white">Notification Templates</h2>
+  <button
+    hx-get="/notifications/add-row"
+    hx-target="#templates-tbody"
+    hx-swap="afterbegin"
+    class="btn btn-primary">
+    New Template
+  </button>
+</div>
+
+<p class="text-sm text-gray-600 dark:text-gray-400 mb-6">
+  Reusable notification destinations. Assign templates to watches or domains to receive alerts.
+</p>
+
+<div id="templates-table-wrapper" aria-live="polite" aria-atomic="false">
+  <table class="data-table w-full" id="templates-table">
+    <thead>
+      <tr>
+        <th scope="col">Title</th>
+        <th scope="col">Channel</th>
+        <th scope="col">Events</th>
+        <th scope="col">Global Default</th>
+        <th scope="col">Status</th>
+        <th scope="col"><span class="sr-only">Actions</span></th>
+      </tr>
+    </thead>
+    <tbody
+      id="templates-tbody"
+      hx-trigger="refreshTemplates from:body"
+      hx-get="/partials/notification-templates-list"
+      hx-swap="innerHTML">
+      {% include "partials/notification_template_list.html" %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

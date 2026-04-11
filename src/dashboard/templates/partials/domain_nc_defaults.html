@@ -1,0 +1,81 @@
+{# Notification defaults for a domain — assigned templates + picker. #}
+{# Expects: domain_name (str), assigned (list[NotificationTemplate]), unassigned (list[NotificationTemplate]). #}
+
+<div id="domain-nc-defaults" aria-live="polite">
+  {% if assigned %}
+  <table class="data-table mb-4">
+    <thead>
+      <tr>
+        <th>Template</th>
+        <th>Channel</th>
+        <th>Events</th>
+        <th><span class="sr-only">Actions</span></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for tpl in assigned %}
+      <tr>
+        <td class="font-medium">{{ tpl.title }}</td>
+        <td><span class="chip">{{ tpl.channel_hint }}</span></td>
+        <td>
+          <span class="chip-group">
+            {% for ev in tpl.events %}
+            <span class="chip">{{ ev }}</span>
+            {% endfor %}
+          </span>
+        </td>
+        <td>
+          <button
+            type="button"
+            hx-post="/domains/{{ domain_name }}/nc-defaults/remove/{{ tpl.id }}"
+            hx-target="#domain-nc-defaults"
+            hx-swap="outerHTML"
+            hx-confirm="Remove {{ tpl.title }} as a default for this domain?"
+            class="btn btn-danger-outline btn-sm min-h-[44px] htmx-request:opacity-60">
+            Remove
+          </button>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="text-sm text-gray-500 dark:text-gray-400 mb-4">No notification defaults set for this domain.</p>
+  {% endif %}
+
+  {% if unassigned %}
+  <div class="flex flex-wrap gap-3 items-end mt-2">
+    <div>
+      <label for="domain-nc-add-select-{{ domain_name }}" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+        Add default
+      </label>
+      <select
+        id="domain-nc-add-select-{{ domain_name }}"
+        class="form-input"
+        aria-label="Select a notification template to add as domain default">
+        <option value="">— choose template —</option>
+        {% for tpl in unassigned %}
+        <option value="{{ tpl.id }}">{{ tpl.title }} ({{ tpl.channel_hint }})</option>
+        {% endfor %}
+      </select>
+    </div>
+    <button
+      type="button"
+      class="btn min-h-[44px] htmx-request:opacity-60"
+      onclick="
+        var sel = document.getElementById('domain-nc-add-select-{{ domain_name }}');
+        if (!sel.value) { return; }
+        htmx.ajax('POST', '/domains/{{ domain_name }}/nc-defaults/add/' + sel.value, {
+          target: '#domain-nc-defaults',
+          swap: 'outerHTML'
+        });
+      ">
+      Add
+    </button>
+  </div>
+  {% endif %}
+
+  <p class="text-xs text-gray-400 dark:text-gray-500 mt-3">
+    Templates added here are automatically assigned to new watches created under this domain.
+  </p>
+</div>

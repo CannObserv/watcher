@@ -9,7 +9,7 @@ from typing import Literal
 from cryptography.fernet import InvalidToken
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from ulid import ULID
 
@@ -25,7 +25,8 @@ from src.core.crypto import decrypt_apprise_url, encrypt_apprise_url
 from src.core.logging import get_logger
 from src.core.models.audit_log import EventType, audit
 from src.core.models.domain import Domain
-from src.core.models.notification_config import NotificationConfig
+from src.core.models.notification_config import WatchNotificationConfig
+from src.core.models.notification_template import DomainNcRef, NotificationTemplate, WatchNcRef
 from src.core.models.snapshot import Snapshot
 from src.core.models.watch import ContentType, Watch
 from src.core.notifications.apprise_builder import (
@@ -1219,6 +1220,102 @@ async def domain_detail_page(
     return templates.TemplateResponse("pages/domain_detail.html", context)
 
 
+async def _render_domain_nc_defaults(request: Request, domain_name: str, session: AsyncSession):
+    """Render the domain_nc_defaults partial for *domain_name*."""
+    assigned_result = await session.execute(
+        select(NotificationTemplate)
+        .join(DomainNcRef, DomainNcRef.template_id == NotificationTemplate.id)
+        .where(DomainNcRef.domain_name == domain_name)
+        .order_by(NotificationTemplate.title)
+    )
+    assigned = assigned_result.scalars().all()
+    all_result = await session.execute(
+        select(NotificationTemplate)
+        .where(NotificationTemplate.is_active.is_(True))
+        .order_by(NotificationTemplate.title)
+    )
+    all_templates = all_result.scalars().all()
+    assigned_ids = {str(t.id) for t in assigned}
+    unassigned = [t for t in all_templates if str(t.id) not in assigned_ids]
+    return templates.TemplateResponse(
+        request,
+        "partials/domain_nc_defaults.html",
+        {"domain_name": domain_name, "assigned": assigned, "unassigned": unassigned},
+    )
+
+
+@router.get("/domains/{domain_name}/nc-defaults")
+async def domain_nc_defaults_partial(
+    request: Request,
+    domain_name: str,
+    session: AsyncSession = Depends(get_db_session),
+):
+    """HTMX partial: notification defaults assigned to a domain."""
+    return await _render_domain_nc_defaults(request, domain_name, session)
+
+
+@router.post("/domains/{domain_name}/nc-defaults/add/{template_id}")
+async def domain_nc_default_add(
+    request: Request,
+    domain_name: str,
+    template_id: str,
+    session: AsyncSession = Depends(get_db_session),
+):
+    """Add a notification template as a default for a domain."""
+    if request.headers.get("HX-Request") != "true":
+        return RedirectResponse(url=f"/domains/{domain_name}", status_code=303)
+    domain = await session.scalar(select(Domain).where(Domain.name == domain_name))
+    if not domain:
+        raise HTTPException(status_code=404, detail="Domain not found")
+    existing = await session.scalar(
+        select(DomainNcRef).where(
+            DomainNcRef.domain_name == domain_name,
+            DomainNcRef.template_id == template_id,  # type: ignore[arg-type]
+        )
+    )
+    if not existing:
+        session.add(
+            DomainNcRef(domain_name=domain_name, template_id=template_id)  # type: ignore[arg-type]
+        )
+        audit(
+            session,
+            EventType.DOMAIN_NC_DEFAULT_ADDED,
+            domain_name=domain_name,
+            template_id=template_id,
+        )
+        await session.commit()
+    return await _render_domain_nc_defaults(request, domain_name, session)
+
+
+@router.post("/domains/{domain_name}/nc-defaults/remove/{template_id}")
+async def domain_nc_default_remove(
+    request: Request,
+    domain_name: str,
+    template_id: str,
+    session: AsyncSession = Depends(get_db_session),
+):
+    """Remove a notification template default from a domain."""
+    if request.headers.get("HX-Request") != "true":
+        return RedirectResponse(url=f"/domains/{domain_name}", status_code=303)
+    result = await session.execute(
+        select(DomainNcRef).where(
+            DomainNcRef.domain_name == domain_name,
+            DomainNcRef.template_id == template_id,  # type: ignore[arg-type]
+        )
+    )
+    ref = result.scalar_one_or_none()
+    if ref:
+        await session.delete(ref)
+        audit(
+            session,
+            EventType.DOMAIN_NC_DEFAULT_REMOVED,
+            domain_name=domain_name,
+            template_id=template_id,
+        )
+        await session.commit()
+    return await _render_domain_nc_defaults(request, domain_name, session)
+
+
 @router.get("/partials/stats-cards")
 async def partial_stats_cards(
     request: Request,
@@ -1336,15 +1433,7 @@ async def partial_watch_notifications(
     watch = await get_watch_detail(session, watch_id)
     if not watch:
         raise HTTPException(status_code=404, detail="Watch not found")
-    notifications = await get_watch_notifications(session, watch.id)
-    return templates.TemplateResponse(
-        "partials/watch_notifications.html",
-        {
-            "request": request,
-            "watch": watch,
-            "notifications": notifications,
-        },
-    )
+    return await _render_watch_notifications(request, watch, session)
 
 
 @router.get("/watches/{watch_id}/notifications/add-row")
@@ -1474,7 +1563,7 @@ async def watch_notification_create(
         )
 
     hint = get_service_name(schema_val) if schema_val else extract_channel_hint(apprise_url)
-    config = NotificationConfig(
+    config = WatchNotificationConfig(
         watch_id=watch.id,
         title=title,
         apprise_url=encrypt_apprise_url(apprise_url),
@@ -1490,15 +1579,7 @@ async def watch_notification_create(
         channel_hint=config.channel_hint,
     )
     await session.commit()
-    notifications = await get_watch_notifications(session, watch.id)
-    return templates.TemplateResponse(
-        "partials/watch_notifications.html",
-        {
-            "request": request,
-            "watch": watch,
-            "notifications": notifications,
-        },
-    )
+    return await _render_watch_notifications(request, watch, session)
 
 
 @router.post("/watches/{watch_id}/notifications/{config_id}/toggle")
@@ -1512,21 +1593,13 @@ async def watch_notification_toggle(
     watch = await get_watch_detail(session, watch_id)
     if not watch:
         raise HTTPException(status_code=404, detail="Watch not found")
-    nc = await session.get(NotificationConfig, parse_ulid(config_id, "Config"))
+    nc = await session.get(WatchNotificationConfig, parse_ulid(config_id, "Config"))
     if not nc or nc.watch_id != watch.id:
         raise HTTPException(status_code=404, detail="Config not found")
     nc.is_active = not nc.is_active
     audit(session, EventType.NOTIFICATION_CONFIG_UPDATED, watch_id=watch.id, config_id=str(nc.id))
     await session.commit()
-    notifications = await get_watch_notifications(session, watch.id)
-    return templates.TemplateResponse(
-        "partials/watch_notifications.html",
-        {
-            "request": request,
-            "watch": watch,
-            "notifications": notifications,
-        },
-    )
+    return await _render_watch_notifications(request, watch, session)
 
 
 @router.get("/watches/{watch_id}/notifications/{config_id}/edit-form")
@@ -1540,7 +1613,7 @@ async def watch_notification_edit_form(
     watch = await get_watch_detail(session, watch_id)
     if not watch:
         raise HTTPException(status_code=404, detail="Watch not found")
-    nc = await session.get(NotificationConfig, parse_ulid(config_id, "Config"))
+    nc = await session.get(WatchNotificationConfig, parse_ulid(config_id, "Config"))
     if not nc or nc.watch_id != watch.id:
         raise HTTPException(status_code=404, detail="Config not found")
     decryption_failed = False
@@ -1572,7 +1645,7 @@ async def watch_notification_edit(
     watch = await get_watch_detail(session, watch_id)
     if not watch:
         raise HTTPException(status_code=404, detail="Watch not found")
-    nc = await session.get(NotificationConfig, parse_ulid(config_id, "Config"))
+    nc = await session.get(WatchNotificationConfig, parse_ulid(config_id, "Config"))
     if not nc or nc.watch_id != watch.id:
         raise HTTPException(status_code=404, detail="Config not found")
 
@@ -1635,15 +1708,202 @@ async def watch_notification_edit(
         channel_hint=nc.channel_hint,
     )
     await session.commit()
+    return await _render_watch_notifications(request, watch, session)
+
+
+async def _render_watch_notifications(
+    request: Request,
+    watch,
+    session: AsyncSession,
+):
+    """Fetch notifications + assigned templates and render watch_notifications partial."""
     notifications = await get_watch_notifications(session, watch.id)
+    assigned_result = await session.execute(
+        select(NotificationTemplate)
+        .join(WatchNcRef, WatchNcRef.template_id == NotificationTemplate.id)
+        .where(WatchNcRef.watch_id == watch.id)
+        .order_by(NotificationTemplate.title)
+    )
+    assigned_templates = assigned_result.scalars().all()
+    all_result = await session.execute(
+        select(NotificationTemplate)
+        .where(NotificationTemplate.is_active.is_(True))
+        .order_by(NotificationTemplate.title)
+    )
+    assigned_ids = {str(t.id) for t in assigned_templates}
+    unassigned_templates = [t for t in all_result.scalars().all() if str(t.id) not in assigned_ids]
     return templates.TemplateResponse(
         "partials/watch_notifications.html",
         {
             "request": request,
             "watch": watch,
             "notifications": notifications,
+            "assigned_templates": assigned_templates,
+            "unassigned_templates": unassigned_templates,
         },
     )
+
+
+@router.get("/watches/{watch_id}/notifications/assign-row")
+async def watch_nc_assign_row(
+    request: Request,
+    watch_id: str,
+    session: AsyncSession = Depends(get_db_session),
+):
+    """HTMX partial: inline assign-row form with picker of unassigned templates."""
+    watch = await get_watch_detail(session, watch_id)
+    if not watch:
+        raise HTTPException(status_code=404, detail="Watch not found")
+    assigned_result = await session.execute(
+        select(NotificationTemplate.id)
+        .join(WatchNcRef, WatchNcRef.template_id == NotificationTemplate.id)
+        .where(WatchNcRef.watch_id == watch.id)
+    )
+    assigned_ids = {str(row[0]) for row in assigned_result}
+    all_result = await session.execute(
+        select(NotificationTemplate)
+        .where(NotificationTemplate.is_active.is_(True))
+        .order_by(NotificationTemplate.title)
+    )
+    unassigned = [t for t in all_result.scalars().all() if str(t.id) not in assigned_ids]
+    return templates.TemplateResponse(
+        "partials/watch_nc_assign_row.html",
+        {
+            "request": request,
+            "watch": watch,
+            "unassigned_templates": unassigned,
+        },
+    )
+
+
+@router.post("/watches/{watch_id}/notifications/assign/{template_id}")
+async def watch_nc_assign(
+    request: Request,
+    watch_id: str,
+    template_id: str,
+    session: AsyncSession = Depends(get_db_session),
+):
+    """Assign a library template to a watch. Returns refreshed notifications partial."""
+    if request.headers.get("HX-Request") != "true":
+        return RedirectResponse(url=f"/watches/{watch_id}", status_code=303)
+    watch = await get_watch_detail(session, watch_id)
+    if not watch:
+        raise HTTPException(status_code=404, detail="Watch not found")
+    existing = await session.scalar(
+        select(WatchNcRef).where(
+            WatchNcRef.watch_id == watch.id,
+            WatchNcRef.template_id == template_id,  # type: ignore[arg-type]
+        )
+    )
+    if not existing:
+        session.add(WatchNcRef(watch_id=watch.id, template_id=template_id))  # type: ignore[arg-type]
+        audit(session, EventType.WATCH_NC_ASSIGNED, watch_id=str(watch.id), template_id=template_id)
+        await session.commit()
+    return await _render_watch_notifications(request, watch, session)
+
+
+@router.post("/watches/{watch_id}/notifications/unassign/{template_id}")
+async def watch_nc_unassign(
+    request: Request,
+    watch_id: str,
+    template_id: str,
+    session: AsyncSession = Depends(get_db_session),
+):
+    """Remove a library template assignment from a watch. Returns refreshed partial."""
+    if request.headers.get("HX-Request") != "true":
+        return RedirectResponse(url=f"/watches/{watch_id}", status_code=303)
+    watch = await get_watch_detail(session, watch_id)
+    if not watch:
+        raise HTTPException(status_code=404, detail="Watch not found")
+    ref = await session.scalar(
+        select(WatchNcRef).where(
+            WatchNcRef.watch_id == watch.id,
+            WatchNcRef.template_id == template_id,  # type: ignore[arg-type]
+        )
+    )
+    if ref:
+        await session.delete(ref)
+        audit(
+            session,
+            EventType.WATCH_NC_UNASSIGNED,
+            watch_id=str(watch.id),
+            template_id=template_id,
+        )
+        await session.commit()
+    return await _render_watch_notifications(request, watch, session)
+
+
+@router.post("/watches/{watch_id}/notifications/copy-template/{template_id}")
+async def watch_nc_copy_template(
+    request: Request,
+    watch_id: str,
+    template_id: str,
+    session: AsyncSession = Depends(get_db_session),
+):
+    """Copy a library template ref to a local WatchNotificationConfig, removing the ref."""
+    if request.headers.get("HX-Request") != "true":
+        return RedirectResponse(url=f"/watches/{watch_id}", status_code=303)
+    watch = await get_watch_detail(session, watch_id)
+    if not watch:
+        raise HTTPException(status_code=404, detail="Watch not found")
+    tpl = await session.scalar(
+        select(NotificationTemplate).where(NotificationTemplate.id == template_id)  # type: ignore[arg-type]
+    )
+    if not tpl:
+        raise HTTPException(status_code=404, detail="Template not found")
+    local = WatchNotificationConfig(
+        watch_id=watch.id,
+        title=tpl.title,
+        apprise_url=tpl.apprise_url,
+        channel_hint=tpl.channel_hint,
+        events=tpl.events,
+    )
+    session.add(local)
+    ref = await session.scalar(
+        select(WatchNcRef).where(
+            WatchNcRef.watch_id == watch.id,
+            WatchNcRef.template_id == template_id,  # type: ignore[arg-type]
+        )
+    )
+    if ref:
+        await session.delete(ref)
+    audit(session, EventType.NOTIFICATION_CONFIG_CREATED, watch_id=str(watch.id))
+    await session.commit()
+    return await _render_watch_notifications(request, watch, session)
+
+
+@router.post("/watches/{watch_id}/notifications/{config_id}/copy")
+async def watch_nc_copy_local(
+    request: Request,
+    watch_id: str,
+    config_id: str,
+    session: AsyncSession = Depends(get_db_session),
+):
+    """Duplicate a local WatchNotificationConfig on the same watch."""
+    if request.headers.get("HX-Request") != "true":
+        return RedirectResponse(url=f"/watches/{watch_id}", status_code=303)
+    watch = await get_watch_detail(session, watch_id)
+    if not watch:
+        raise HTTPException(status_code=404, detail="Watch not found")
+    orig = await session.scalar(
+        select(WatchNotificationConfig).where(
+            WatchNotificationConfig.id == config_id,  # type: ignore[arg-type]
+            WatchNotificationConfig.watch_id == watch.id,
+        )
+    )
+    if not orig:
+        raise HTTPException(status_code=404)
+    copy = WatchNotificationConfig(
+        watch_id=watch.id,
+        title=f"{orig.title} (copy)" if orig.title else None,
+        apprise_url=orig.apprise_url,
+        channel_hint=orig.channel_hint,
+        events=orig.events,
+    )
+    session.add(copy)
+    audit(session, EventType.NOTIFICATION_CONFIG_CREATED, watch_id=str(watch.id))
+    await session.commit()
+    return await _render_watch_notifications(request, watch, session)
 
 
 @router.post("/watches/{watch_id}/notifications/{config_id}/test-result")
@@ -1657,7 +1917,7 @@ async def watch_notification_test_result(
     watch = await get_watch_detail(session, watch_id)
     if not watch:
         raise HTTPException(status_code=404, detail="Watch not found")
-    nc = await session.get(NotificationConfig, parse_ulid(config_id, "Config"))
+    nc = await session.get(WatchNotificationConfig, parse_ulid(config_id, "Config"))
     if not nc or nc.watch_id != watch.id:
         raise HTTPException(status_code=404, detail="Config not found")
     event = WatchEvent(
@@ -1808,3 +2068,439 @@ async def system_page(
         "domains": domains,
     }
     return templates.TemplateResponse("pages/system.html", context)
+
+
+# ---------------------------------------------------------------------------
+# Notification Template Library — /notifications/*
+# ---------------------------------------------------------------------------
+
+
+@router.get("/partials/notification-templates-list")
+async def partial_notification_templates_list(
+    request: Request,
+    session: AsyncSession = Depends(get_db_session),
+):
+    """HTMX partial: notification template table rows (tbody content)."""
+    result = await session.execute(
+        select(NotificationTemplate).order_by(NotificationTemplate.title)
+    )
+    notification_templates = result.scalars().all()
+    return templates.TemplateResponse(
+        "partials/notification_template_list.html",
+        {"request": request, "notification_templates": notification_templates},
+    )
+
+
+@router.get("/notifications")
+async def notifications_page(
+    request: Request,
+    session: AsyncSession = Depends(get_db_session),
+):
+    """Notification template library page."""
+    result = await session.execute(
+        select(NotificationTemplate).order_by(NotificationTemplate.title)
+    )
+    notification_templates = result.scalars().all()
+    apprise_plugins = list_plugins()
+    return templates.TemplateResponse(
+        "pages/notifications.html",
+        {
+            "request": request,
+            "active_page": "notifications",
+            "notification_templates": notification_templates,
+            "apprise_plugins": apprise_plugins,
+        },
+    )
+
+
+@router.get("/notifications/add-row")
+async def notification_template_add_row(
+    request: Request,
+    session: AsyncSession = Depends(get_db_session),
+):
+    """HTMX: inline add-row form for a new notification template."""
+    apprise_plugins = list_plugins()
+    return templates.TemplateResponse(
+        "partials/notification_template_add_row.html",
+        {"request": request, "apprise_plugins": apprise_plugins},
+    )
+
+
+@router.post("/notifications/new")
+async def notification_template_create(
+    request: Request,
+    session: AsyncSession = Depends(get_db_session),
+):
+    """Create notification template from dashboard form. Returns refreshed list or error form."""
+    if request.headers.get("HX-Request") != "true":
+        return RedirectResponse(url="/notifications", status_code=303)
+    form = await request.form()
+    events = form.getlist("events")
+    schema_val = form.get("plugin_schema") or ""
+    title = str(form.get("title") or "").strip()
+    is_global_default = bool(form.get("is_global_default"))
+
+    if not title:
+        return templates.TemplateResponse(
+            "partials/notification_template_add_row.html",
+            {
+                "request": request,
+                "apprise_plugins": list_plugins(),
+                "error": "Title is required.",
+            },
+            headers={"HX-Retarget": "#template-add-row", "HX-Reswap": "outerHTML"},
+        )
+
+    # Determine Apprise URL: token builder or raw input
+    if schema_val:
+        tokens = {
+            key[4:]: str(value)
+            for key, value in form.items()
+            if key.startswith("tok_") and str(value).strip()
+        }
+        try:
+            variant_raw = form.get("variant")
+            variant_index = int(variant_raw) if variant_raw is not None else None
+            apprise_url = assemble_url(schema_val, tokens, variant_index=variant_index)
+        except ValueError as exc:
+            return templates.TemplateResponse(
+                "partials/notification_template_add_row.html",
+                {
+                    "request": request,
+                    "apprise_plugins": list_plugins(),
+                    "error": str(exc),
+                },
+                headers={"HX-Retarget": "#template-add-row", "HX-Reswap": "outerHTML"},
+            )
+    else:
+        apprise_url = str(form.get("apprise_url") or "")
+        try:
+            validate_apprise_url(apprise_url)
+        except ValueError as exc:
+            return templates.TemplateResponse(
+                "partials/notification_template_add_row.html",
+                {
+                    "request": request,
+                    "apprise_plugins": list_plugins(),
+                    "error": str(exc),
+                },
+                headers={"HX-Retarget": "#template-add-row", "HX-Reswap": "outerHTML"},
+            )
+
+    try:
+        validate_event_list(events)
+    except ValueError as exc:
+        return templates.TemplateResponse(
+            "partials/notification_template_add_row.html",
+            {
+                "request": request,
+                "apprise_plugins": list_plugins(),
+                "error": str(exc),
+            },
+            headers={"HX-Retarget": "#template-add-row", "HX-Reswap": "outerHTML"},
+        )
+
+    hint = get_service_name(schema_val) if schema_val else extract_channel_hint(apprise_url)
+    tpl = NotificationTemplate(
+        title=title,
+        apprise_url=encrypt_apprise_url(apprise_url),
+        channel_hint=hint,
+        events=events,
+        is_global_default=is_global_default,
+    )
+    session.add(tpl)
+    audit(
+        session,
+        EventType.NOTIFICATION_TEMPLATE_CREATED,
+        template_id=str(tpl.id),
+        title=title,
+        channel_hint=hint,
+        source="dashboard",
+    )
+    await session.commit()
+    result = await session.execute(
+        select(NotificationTemplate).order_by(NotificationTemplate.title)
+    )
+    notification_templates = result.scalars().all()
+    response = templates.TemplateResponse(
+        "partials/notification_template_list.html",
+        {"request": request, "notification_templates": notification_templates},
+    )
+    response.headers["HX-Trigger"] = "refreshTemplates"
+    return response
+
+
+@router.get("/notifications/{template_id}/edit-form")
+async def notification_template_edit_form(
+    request: Request,
+    template_id: str,
+    session: AsyncSession = Depends(get_db_session),
+):
+    """HTMX: edit form for an existing notification template (outerHTML swap on the row)."""
+    result = await session.execute(
+        select(NotificationTemplate).where(
+            NotificationTemplate.id == parse_ulid(template_id, "Template")
+        )
+    )
+    tpl = result.scalar_one_or_none()
+    if not tpl:
+        raise HTTPException(status_code=404, detail="Template not found")
+    decrypted_url = ""
+    decryption_failed = False
+    try:
+        decrypted_url = decrypt_apprise_url(tpl.apprise_url)
+    except (InvalidToken, ValueError):
+        decryption_failed = True
+    watch_count = (
+        await session.scalar(select(func.count()).where(WatchNcRef.template_id == tpl.id)) or 0
+    )
+    domain_count = (
+        await session.scalar(select(func.count()).where(DomainNcRef.template_id == tpl.id)) or 0
+    )
+    return templates.TemplateResponse(
+        "partials/notification_template_edit_form.html",
+        {
+            "request": request,
+            "tpl": tpl,
+            "decrypted_url": decrypted_url,
+            "decryption_failed": decryption_failed,
+            "watch_count": watch_count,
+            "domain_count": domain_count,
+        },
+    )
+
+
+@router.post("/notifications/{template_id}/edit")
+async def notification_template_edit(
+    request: Request,
+    template_id: str,
+    session: AsyncSession = Depends(get_db_session),
+):
+    """Save changes to a notification template. Returns refreshed list or retargeted error form."""
+    if request.headers.get("HX-Request") != "true":
+        return RedirectResponse(url="/notifications", status_code=303)
+    result = await session.execute(
+        select(NotificationTemplate).where(
+            NotificationTemplate.id == parse_ulid(template_id, "Template")
+        )
+    )
+    tpl = result.scalar_one_or_none()
+    if not tpl:
+        raise HTTPException(status_code=404, detail="Template not found")
+
+    form = await request.form()
+    apprise_url = str(form.get("apprise_url") or "").strip()
+    events = form.getlist("events")
+    title = str(form.get("title") or "").strip() or tpl.title
+    is_global_default = bool(form.get("is_global_default"))
+
+    async def _edit_error(error_msg: str) -> Response:
+        try:
+            decrypted_url = decrypt_apprise_url(tpl.apprise_url)
+        except (InvalidToken, ValueError):
+            decrypted_url = ""
+        watch_count = (
+            await session.scalar(select(func.count()).where(WatchNcRef.template_id == tpl.id)) or 0
+        )
+        domain_count = (
+            await session.scalar(select(func.count()).where(DomainNcRef.template_id == tpl.id)) or 0
+        )
+        resp = templates.TemplateResponse(
+            "partials/notification_template_edit_form.html",
+            {
+                "request": request,
+                "tpl": tpl,
+                "decrypted_url": decrypted_url,
+                "error": error_msg,
+                "watch_count": watch_count,
+                "domain_count": domain_count,
+            },
+        )
+        resp.headers["HX-Retarget"] = f"#tpl-{tpl.id}"
+        resp.headers["HX-Reswap"] = "outerHTML"
+        return resp
+
+    try:
+        validate_apprise_url(apprise_url)
+    except ValueError as exc:
+        return await _edit_error(str(exc))
+
+    try:
+        validate_event_list(events)
+    except ValueError as exc:
+        return await _edit_error(str(exc))
+
+    tpl.title = title
+    tpl.apprise_url = encrypt_apprise_url(apprise_url)
+    tpl.channel_hint = extract_channel_hint(apprise_url)
+    tpl.events = events
+    tpl.is_global_default = is_global_default
+    audit(
+        session,
+        EventType.NOTIFICATION_TEMPLATE_UPDATED,
+        template_id=str(tpl.id),
+        title=tpl.title,
+        channel_hint=tpl.channel_hint,
+        source="dashboard",
+    )
+    await session.commit()
+    result2 = await session.execute(
+        select(NotificationTemplate).order_by(NotificationTemplate.title)
+    )
+    notification_templates = result2.scalars().all()
+    response = templates.TemplateResponse(
+        "partials/notification_template_list.html",
+        {"request": request, "notification_templates": notification_templates},
+    )
+    response.headers["HX-Trigger"] = "refreshTemplates"
+    return response
+
+
+@router.post("/notifications/{template_id}/toggle")
+async def notification_template_toggle(
+    request: Request,
+    template_id: str,
+    session: AsyncSession = Depends(get_db_session),
+):
+    """Toggle is_active on a notification template. Returns refreshed list."""
+    if request.headers.get("HX-Request") != "true":
+        return RedirectResponse(url="/notifications", status_code=303)
+    result = await session.execute(
+        select(NotificationTemplate).where(
+            NotificationTemplate.id == parse_ulid(template_id, "Template")
+        )
+    )
+    tpl = result.scalar_one_or_none()
+    if not tpl:
+        raise HTTPException(status_code=404, detail="Template not found")
+    tpl.is_active = not tpl.is_active
+    audit(
+        session,
+        EventType.NOTIFICATION_TEMPLATE_UPDATED,
+        template_id=str(tpl.id),
+        title=tpl.title,
+        is_active=tpl.is_active,
+        source="dashboard",
+    )
+    await session.commit()
+    result2 = await session.execute(
+        select(NotificationTemplate).order_by(NotificationTemplate.title)
+    )
+    notification_templates = result2.scalars().all()
+    response = templates.TemplateResponse(
+        "partials/notification_template_list.html",
+        {"request": request, "notification_templates": notification_templates},
+    )
+    response.headers["HX-Trigger"] = "refreshTemplates"
+    return response
+
+
+@router.delete("/notifications/{template_id}/delete")
+async def notification_template_delete(
+    request: Request,
+    template_id: str,
+    session: AsyncSession = Depends(get_db_session),
+):
+    """Delete a notification template (reject if refs exist). Returns refreshed list."""
+    if request.headers.get("HX-Request") != "true":
+        return RedirectResponse(url="/notifications", status_code=303)
+    result = await session.execute(
+        select(NotificationTemplate).where(
+            NotificationTemplate.id == parse_ulid(template_id, "Template")
+        )
+    )
+    tpl = result.scalar_one_or_none()
+    if not tpl:
+        raise HTTPException(status_code=404, detail="Template not found")
+
+    watch_count = (
+        await session.scalar(select(func.count()).where(WatchNcRef.template_id == tpl.id)) or 0
+    )
+    domain_count = (
+        await session.scalar(select(func.count()).where(DomainNcRef.template_id == tpl.id)) or 0
+    )
+    if watch_count or domain_count:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"Template is still referenced by {watch_count} watch(es)"
+                f" and {domain_count} domain(s)."
+            ),
+        )
+
+    audit(
+        session,
+        EventType.NOTIFICATION_TEMPLATE_DELETED,
+        template_id=str(tpl.id),
+        title=tpl.title,
+        source="dashboard",
+    )
+    await session.delete(tpl)
+    await session.commit()
+    result2 = await session.execute(
+        select(NotificationTemplate).order_by(NotificationTemplate.title)
+    )
+    notification_templates = result2.scalars().all()
+    response = templates.TemplateResponse(
+        "partials/notification_template_list.html",
+        {"request": request, "notification_templates": notification_templates},
+    )
+    response.headers["HX-Trigger"] = "refreshTemplates"
+    return response
+
+
+@router.post("/notifications/{template_id}/test-result")
+async def notification_template_test_result(
+    request: Request,
+    template_id: str,
+    session: AsyncSession = Depends(get_db_session),
+):
+    """Send a test notification for a template and return an OOB flash."""
+    result = await session.execute(
+        select(NotificationTemplate).where(
+            NotificationTemplate.id == parse_ulid(template_id, "Template")
+        )
+    )
+    tpl = result.scalar_one_or_none()
+    if not tpl:
+        raise HTTPException(status_code=404, detail="Template not found")
+
+    event = WatchEvent(
+        event_type=WatchEventType.CHANGE_DETECTED,
+        watch_id="00000000000000000000000000",
+        watch_name="Test Notification",
+        watch_url="https://example.com",
+        occurred_at=datetime.now(UTC),
+        metadata={"test": True},
+    )
+    try:
+        outcome = await dispatch_event(event, tpl.apprise_url)
+    except Exception:
+        logger.exception("test notification error", extra={"template_id": template_id})
+        reason = "Internal error during dispatch"
+        success = False
+    else:
+        success = outcome.success
+        reason = outcome.reason
+
+    audit(
+        session,
+        EventType.NOTIFICATION_TEMPLATE_TESTED,
+        template_id=str(tpl.id),
+        title=tpl.title,
+        channel_hint=tpl.channel_hint,
+        success=success,
+        reason=reason,
+        source="dashboard",
+    )
+    await session.commit()
+    level = "success" if success else "error"
+    message = f"Test notification: {reason}"
+    return templates.TemplateResponse(
+        "partials/flash_oob.html",
+        {
+            "request": request,
+            "flash_oob_level": level,
+            "flash_oob_message": message,
+        },
+    )

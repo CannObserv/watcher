@@ -29,6 +29,10 @@ class EventType:
     NOTIFICATION_CONFIG_CREATED = "notification_config.created"
     NOTIFICATION_CONFIG_UPDATED = "notification_config.updated"
     NOTIFICATION_CONFIG_DELETED = "notification_config.deleted"
+    NOTIFICATION_TEMPLATE_CREATED = "notification_template.created"
+    NOTIFICATION_TEMPLATE_UPDATED = "notification_template.updated"
+    NOTIFICATION_TEMPLATE_DELETED = "notification_template.deleted"
+    NOTIFICATION_TEMPLATE_TESTED = "notification_template.tested"
     PROFILE_CREATED = "profile.created"
     PROFILE_UPDATED = "profile.updated"
     PROFILE_DELETED = "profile.deleted"
@@ -39,6 +43,10 @@ class EventType:
     DOMAIN_ARCHIVED = "domain.archived"
     DOMAIN_RESTORED = "domain.restored"
     DOMAIN_DELETED = "domain.deleted"
+    WATCH_NC_ASSIGNED = "watch_nc.assigned"
+    WATCH_NC_UNASSIGNED = "watch_nc.unassigned"
+    DOMAIN_NC_DEFAULT_ADDED = "domain_nc_default.added"
+    DOMAIN_NC_DEFAULT_REMOVED = "domain_nc_default.removed"
 
 
 class AuditLog(Base):

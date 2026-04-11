@@ -72,6 +72,19 @@
   </div>
 </section>
 
+{# Notification Defaults #}
+<section aria-labelledby="domain-nc-defaults-heading" class="mb-8">
+  <h3 id="domain-nc-defaults-heading" class="text-lg font-semibold text-gray-900 dark:text-white mb-4">Notification Defaults</h3>
+  <div
+    hx-get="/domains/{{ domain.name }}/nc-defaults"
+    hx-trigger="load"
+    hx-target="this"
+    hx-swap="innerHTML"
+    aria-live="polite">
+    <span class="text-sm text-gray-400 dark:text-gray-500">Loading…</span>
+  </div>
+</section>
+
 {# Metadata #}
 <p class="text-xs text-gray-400 dark:text-gray-500 mb-8">
   Metadata · ID: {{ domain.id }} · Created: {{ domain.created_at.strftime("%Y-%m-%d") }} · Updated: {{ domain.updated_at.strftime("%Y-%m-%d") }}

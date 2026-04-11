@@ -30,11 +30,20 @@ def make_event(event_type=WatchEventType.CHANGE_DETECTED, watch_id=None):
 
 
 class TestDispatchEventNotifications:
+    def _empty_result(self):
+        r = MagicMock()
+        r.scalars.return_value.all.return_value = []
+        return r
+
+    def _result_with(self, *items):
+        r = MagicMock()
+        r.scalars.return_value.all.return_value = list(items)
+        return r
+
     async def test_no_matching_configs_is_noop(self):
-        mock_result = MagicMock()
-        mock_result.scalars.return_value.all.return_value = []
+        empty = self._empty_result()
         session = AsyncMock(spec=AsyncSession)
-        session.execute = AsyncMock(return_value=mock_result)
+        session.execute = AsyncMock(side_effect=[empty, empty])
 
         event = make_event()
         await dispatch_event_notifications(session, event)
@@ -43,42 +52,44 @@ class TestDispatchEventNotifications:
 
     async def test_dispatches_to_matching_config(self):
         from src.core.crypto import encrypt_apprise_url
-        from src.core.models.notification_config import NotificationConfig
+        from src.core.models.notification_config import WatchNotificationConfig
+        from src.core.notifications.dispatcher import DispatchResult
 
         watch_ulid = ULID()
-        config = MagicMock(spec=NotificationConfig)
+        config = MagicMock(spec=WatchNotificationConfig)
         config.id = ULID()
         config.watch_id = watch_ulid
         config.apprise_url = encrypt_apprise_url("json://localhost/notify")
         config.events = ["change_detected"]
 
-        mock_result = MagicMock()
-        mock_result.scalars.return_value.all.return_value = [config]
         session = AsyncMock(spec=AsyncSession)
-        session.execute = AsyncMock(return_value=mock_result)
+        session.execute = AsyncMock(side_effect=[self._result_with(config), self._empty_result()])
 
         event = make_event(watch_id=str(watch_ulid))
 
-        with patch("src.workers.notify.dispatch_event", new_callable=AsyncMock, return_value=True):
+        dispatch_result = DispatchResult(success=True, reason="ok")
+        with patch(
+            "src.workers.notify.dispatch_event",
+            new_callable=AsyncMock,
+            return_value=dispatch_result,
+        ):
             await dispatch_event_notifications(session, event)
 
         session.add.assert_called_once()  # audit log entry added
 
     async def test_failure_does_not_raise(self):
         from src.core.crypto import encrypt_apprise_url
-        from src.core.models.notification_config import NotificationConfig
+        from src.core.models.notification_config import WatchNotificationConfig
 
         watch_ulid = ULID()
-        config = MagicMock(spec=NotificationConfig)
+        config = MagicMock(spec=WatchNotificationConfig)
         config.id = ULID()
         config.watch_id = watch_ulid
         config.apprise_url = encrypt_apprise_url("json://localhost/notify")
         config.events = ["change_detected"]
 
-        mock_result = MagicMock()
-        mock_result.scalars.return_value.all.return_value = [config]
         session = AsyncMock(spec=AsyncSession)
-        session.execute = AsyncMock(return_value=mock_result)
+        session.execute = AsyncMock(side_effect=[self._result_with(config), self._empty_result()])
 
         event = make_event(watch_id=str(watch_ulid))
 

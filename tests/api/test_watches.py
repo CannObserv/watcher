@@ -6,7 +6,7 @@ from ulid import ULID
 
 from src.core.models.audit_log import AuditLog, EventType
 from src.core.models.domain import Domain
-from src.core.models.notification_config import NotificationConfig
+from src.core.models.notification_config import WatchNotificationConfig
 from src.core.models.snapshot import Snapshot, SnapshotChunk
 from src.core.models.temporal_profile import TemporalProfile
 from src.core.models.watch import Watch
@@ -388,7 +388,7 @@ class TestDeleteWatch:
             profile_type="event",
             post_action="deactivate",
         )
-        config = NotificationConfig(
+        config = WatchNotificationConfig(
             watch_id=watch_ulid,
             apprise_url="https://hooks.example.com/abc",
             channel_hint="https",
@@ -437,7 +437,9 @@ class TestDeleteWatch:
         configs = (
             (
                 await db_session.execute(
-                    select(NotificationConfig).where(NotificationConfig.watch_id == watch_ulid)
+                    select(WatchNotificationConfig).where(
+                        WatchNotificationConfig.watch_id == watch_ulid
+                    )
                 )
             )
             .scalars()

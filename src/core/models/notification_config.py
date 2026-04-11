@@ -1,4 +1,4 @@
-"""NotificationConfig model — per-watch Apprise notification target."""
+"""WatchNotificationConfig model — per-watch Apprise notification target."""
 
 from sqlalchemy import Boolean, ForeignKey, String, Text
 from sqlalchemy.dialects.postgresql import ARRAY
@@ -8,7 +8,7 @@ from ulid import ULID
 from src.core.models.base import Base, TimestampMixin, ULIDType, generate_ulid
 
 
-class NotificationConfig(Base, TimestampMixin):
+class WatchNotificationConfig(Base, TimestampMixin):
     """A single Apprise notification target for a specific watch.
 
     apprise_url stores the Fernet-encrypted Apprise URL string (e.g. slack://T/A/T/#ops).
@@ -16,7 +16,7 @@ class NotificationConfig(Base, TimestampMixin):
     events is the list of WatchEventType codes this config opts into.
     """
 
-    __tablename__ = "notification_configs"
+    __tablename__ = "watch_notification_configs"
 
     id: Mapped[ULID] = mapped_column(ULIDType, primary_key=True, default=generate_ulid)
     watch_id: Mapped[ULID] = mapped_column(ULIDType, ForeignKey("watches.id", ondelete="CASCADE"))

@@ -49,9 +49,9 @@
             </td>
             <td>
               <div class="flex items-center gap-2 justify-end">
-                {# Edit in global template library #}
+                {# Edit in global template library — ?edit opens the row in edit mode #}
                 <a
-                  href="/notifications"
+                  href="/notifications?edit={{ tpl.id }}"
                   class="btn btn-secondary text-xs min-h-[44px]"
                   aria-label="Edit {{ tpl.title }} in the global template library">
                   Edit

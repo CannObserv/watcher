@@ -191,23 +191,6 @@
       </table>
     </div>
 
-    {# Add buttons #}
-    <div class="flex gap-2 mt-4">
-      <button
-        hx-get="/watches/{{ watch.id }}/notifications/add-row"
-        hx-target="#notifications-tbody"
-        hx-swap="afterbegin"
-        class="btn min-h-[44px]">
-        Add Local NC
-      </button>
-      <button
-        hx-get="/watches/{{ watch.id }}/notifications/assign-row"
-        hx-target="#notifications-tbody"
-        hx-swap="afterbegin"
-        class="btn min-h-[44px]">
-        Assign from Library
-      </button>
-    </div>
   </section>
 
 </div>

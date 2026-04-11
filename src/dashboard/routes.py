@@ -1337,15 +1337,7 @@ async def partial_watch_notifications(
     watch = await get_watch_detail(session, watch_id)
     if not watch:
         raise HTTPException(status_code=404, detail="Watch not found")
-    notifications = await get_watch_notifications(session, watch.id)
-    return templates.TemplateResponse(
-        "partials/watch_notifications.html",
-        {
-            "request": request,
-            "watch": watch,
-            "notifications": notifications,
-        },
-    )
+    return await _render_watch_notifications(request, watch, session)
 
 
 @router.get("/watches/{watch_id}/notifications/add-row")
@@ -1491,15 +1483,7 @@ async def watch_notification_create(
         channel_hint=config.channel_hint,
     )
     await session.commit()
-    notifications = await get_watch_notifications(session, watch.id)
-    return templates.TemplateResponse(
-        "partials/watch_notifications.html",
-        {
-            "request": request,
-            "watch": watch,
-            "notifications": notifications,
-        },
-    )
+    return await _render_watch_notifications(request, watch, session)
 
 
 @router.post("/watches/{watch_id}/notifications/{config_id}/toggle")
@@ -1519,15 +1503,7 @@ async def watch_notification_toggle(
     nc.is_active = not nc.is_active
     audit(session, EventType.NOTIFICATION_CONFIG_UPDATED, watch_id=watch.id, config_id=str(nc.id))
     await session.commit()
-    notifications = await get_watch_notifications(session, watch.id)
-    return templates.TemplateResponse(
-        "partials/watch_notifications.html",
-        {
-            "request": request,
-            "watch": watch,
-            "notifications": notifications,
-        },
-    )
+    return await _render_watch_notifications(request, watch, session)
 
 
 @router.get("/watches/{watch_id}/notifications/{config_id}/edit-form")
@@ -1636,15 +1612,194 @@ async def watch_notification_edit(
         channel_hint=nc.channel_hint,
     )
     await session.commit()
+    return await _render_watch_notifications(request, watch, session)
+
+
+async def _render_watch_notifications(
+    request: Request,
+    watch,
+    session: AsyncSession,
+):
+    """Fetch notifications + assigned templates and render watch_notifications partial."""
     notifications = await get_watch_notifications(session, watch.id)
+    assigned_result = await session.execute(
+        select(NotificationTemplate)
+        .join(WatchNcRef, WatchNcRef.template_id == NotificationTemplate.id)
+        .where(WatchNcRef.watch_id == watch.id)
+        .order_by(NotificationTemplate.title)
+    )
+    assigned_templates = assigned_result.scalars().all()
+    all_result = await session.execute(
+        select(NotificationTemplate)
+        .where(NotificationTemplate.is_active.is_(True))
+        .order_by(NotificationTemplate.title)
+    )
+    assigned_ids = {str(t.id) for t in assigned_templates}
+    unassigned_templates = [t for t in all_result.scalars().all() if str(t.id) not in assigned_ids]
     return templates.TemplateResponse(
         "partials/watch_notifications.html",
         {
             "request": request,
             "watch": watch,
             "notifications": notifications,
+            "assigned_templates": assigned_templates,
+            "unassigned_templates": unassigned_templates,
         },
     )
+
+
+@router.get("/watches/{watch_id}/notifications/assign-row")
+async def watch_nc_assign_row(
+    request: Request,
+    watch_id: str,
+    session: AsyncSession = Depends(get_db_session),
+):
+    """HTMX partial: inline assign-row form with picker of unassigned templates."""
+    watch = await get_watch_detail(session, watch_id)
+    if not watch:
+        raise HTTPException(status_code=404, detail="Watch not found")
+    assigned_result = await session.execute(
+        select(NotificationTemplate.id)
+        .join(WatchNcRef, WatchNcRef.template_id == NotificationTemplate.id)
+        .where(WatchNcRef.watch_id == watch.id)
+    )
+    assigned_ids = {str(row[0]) for row in assigned_result}
+    all_result = await session.execute(
+        select(NotificationTemplate)
+        .where(NotificationTemplate.is_active.is_(True))
+        .order_by(NotificationTemplate.title)
+    )
+    unassigned = [t for t in all_result.scalars().all() if str(t.id) not in assigned_ids]
+    return templates.TemplateResponse(
+        "partials/watch_nc_assign_row.html",
+        {
+            "request": request,
+            "watch": watch,
+            "unassigned_templates": unassigned,
+        },
+    )
+
+
+@router.post("/watches/{watch_id}/notifications/assign/{template_id}")
+async def watch_nc_assign(
+    request: Request,
+    watch_id: str,
+    template_id: str,
+    session: AsyncSession = Depends(get_db_session),
+):
+    """Assign a library template to a watch. Returns refreshed notifications partial."""
+    watch = await get_watch_detail(session, watch_id)
+    if not watch:
+        raise HTTPException(status_code=404, detail="Watch not found")
+    existing = await session.scalar(
+        select(WatchNcRef).where(
+            WatchNcRef.watch_id == watch.id,
+            WatchNcRef.template_id == template_id,  # type: ignore[arg-type]
+        )
+    )
+    if not existing:
+        session.add(WatchNcRef(watch_id=watch.id, template_id=template_id))  # type: ignore[arg-type]
+        audit(session, EventType.WATCH_NC_ASSIGNED, watch_id=str(watch.id), template_id=template_id)
+        await session.commit()
+    return await _render_watch_notifications(request, watch, session)
+
+
+@router.post("/watches/{watch_id}/notifications/unassign/{template_id}")
+async def watch_nc_unassign(
+    request: Request,
+    watch_id: str,
+    template_id: str,
+    session: AsyncSession = Depends(get_db_session),
+):
+    """Remove a library template assignment from a watch. Returns refreshed partial."""
+    watch = await get_watch_detail(session, watch_id)
+    if not watch:
+        raise HTTPException(status_code=404, detail="Watch not found")
+    ref = await session.scalar(
+        select(WatchNcRef).where(
+            WatchNcRef.watch_id == watch.id,
+            WatchNcRef.template_id == template_id,  # type: ignore[arg-type]
+        )
+    )
+    if ref:
+        await session.delete(ref)
+        audit(
+            session,
+            EventType.WATCH_NC_UNASSIGNED,
+            watch_id=str(watch.id),
+            template_id=template_id,
+        )
+        await session.commit()
+    return await _render_watch_notifications(request, watch, session)
+
+
+@router.post("/watches/{watch_id}/notifications/copy-template/{template_id}")
+async def watch_nc_copy_template(
+    request: Request,
+    watch_id: str,
+    template_id: str,
+    session: AsyncSession = Depends(get_db_session),
+):
+    """Copy a library template ref to a local WatchNotificationConfig, removing the ref."""
+    watch = await get_watch_detail(session, watch_id)
+    if not watch:
+        raise HTTPException(status_code=404, detail="Watch not found")
+    tpl = await session.scalar(
+        select(NotificationTemplate).where(NotificationTemplate.id == template_id)  # type: ignore[arg-type]
+    )
+    if not tpl:
+        raise HTTPException(status_code=404, detail="Template not found")
+    local = WatchNotificationConfig(
+        watch_id=watch.id,
+        title=tpl.title,
+        apprise_url=tpl.apprise_url,
+        channel_hint=tpl.channel_hint,
+        events=tpl.events,
+    )
+    session.add(local)
+    ref = await session.scalar(
+        select(WatchNcRef).where(
+            WatchNcRef.watch_id == watch.id,
+            WatchNcRef.template_id == template_id,  # type: ignore[arg-type]
+        )
+    )
+    if ref:
+        await session.delete(ref)
+    audit(session, EventType.NOTIFICATION_CONFIG_CREATED, watch_id=str(watch.id))
+    await session.commit()
+    return await _render_watch_notifications(request, watch, session)
+
+
+@router.post("/watches/{watch_id}/notifications/{config_id}/copy")
+async def watch_nc_copy_local(
+    request: Request,
+    watch_id: str,
+    config_id: str,
+    session: AsyncSession = Depends(get_db_session),
+):
+    """Duplicate a local WatchNotificationConfig on the same watch."""
+    watch = await get_watch_detail(session, watch_id)
+    if not watch:
+        raise HTTPException(status_code=404, detail="Watch not found")
+    orig = await session.scalar(
+        select(WatchNotificationConfig).where(
+            WatchNotificationConfig.id == config_id,  # type: ignore[arg-type]
+            WatchNotificationConfig.watch_id == watch.id,
+        )
+    )
+    if not orig:
+        raise HTTPException(status_code=404)
+    copy = WatchNotificationConfig(
+        watch_id=watch.id,
+        title=f"{orig.title} (copy)" if orig.title else None,
+        apprise_url=orig.apprise_url,
+        channel_hint=orig.channel_hint,
+        events=orig.events,
+    )
+    session.add(copy)
+    audit(session, EventType.NOTIFICATION_CONFIG_CREATED, watch_id=str(watch.id))
+    await session.commit()
+    return await _render_watch_notifications(request, watch, session)
 
 
 @router.post("/watches/{watch_id}/notifications/{config_id}/test-result")

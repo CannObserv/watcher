@@ -7,7 +7,6 @@
 <div id="watch-notifications-list" class="space-y-6" aria-live="polite" aria-atomic="false">
 
   {# ── Library section ─────────────────────────────────────────────────── #}
-  {% if assigned_templates %}
   <section>
     <h3 class="text-sm font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-2">
       <span aria-hidden="true">🔒</span> Library
@@ -18,12 +17,11 @@
           <tr>
             <th scope="col" class="w-full">Title</th>
             <th scope="col">Channel</th>
-            <th scope="col">Events</th>
-            <th scope="col">Active</th>
+            <th scope="col">Status</th>
             <th scope="col"><span class="sr-only">Actions</span></th>
           </tr>
         </thead>
-        <tbody>
+        <tbody id="library-tbody">
           {% for tpl in assigned_templates %}
           <tr class="bg-co-purple-50 dark:bg-co-purple-950/20" id="tpl-ref-{{ tpl.id }}">
             <td class="font-medium text-gray-900 dark:text-white">
@@ -31,11 +29,6 @@
             </td>
             <td>
               <span class="chip">{{ tpl.channel_hint }}</span>
-            </td>
-            <td>
-              <span class="chip-group">
-                {% for ev in tpl.events %}<span class="chip">{{ ev }}</span>{% endfor %}
-              </span>
             </td>
             <td>
               {% if tpl.is_active %}
@@ -46,34 +39,12 @@
             </td>
             <td>
               <div class="flex items-center gap-2 justify-end flex-wrap">
-                {# Unassign #}
-                <button
-                  hx-post="/watches/{{ watch.id }}/notifications/unassign/{{ tpl.id }}"
-                  hx-target="#watch-notifications"
-                  hx-swap="innerHTML"
-                  hx-confirm="Remove this template assignment from the watch?"
-                  class="btn btn-danger-outline text-xs min-h-[44px] htmx-request:opacity-60"
-                  aria-label="Unassign {{ tpl.title }} from this watch">
-                  Unassign
-                </button>
-
-                {# Copy to local #}
-                <button
-                  hx-post="/watches/{{ watch.id }}/notifications/copy-template/{{ tpl.id }}"
-                  hx-target="#watch-notifications"
-                  hx-swap="innerHTML"
-                  hx-confirm="Copy this template to a local notification config and unassign it?"
-                  class="btn btn-secondary text-xs min-h-[44px] htmx-request:opacity-60"
-                  aria-label="Copy {{ tpl.title }} to a local config">
-                  Copy to local
-                </button>
-
                 {# Edit in library #}
                 <a
-                  href="/notifications/{{ tpl.id }}/edit-form"
+                  href="/notifications"
                   class="btn btn-secondary text-xs min-h-[44px]"
                   aria-label="Edit {{ tpl.title }} in the template library">
-                  Edit in library
+                  Edit
                 </a>
 
                 {# Test — response is an OOB flash #}
@@ -84,15 +55,43 @@
                   aria-label="Send test notification for {{ tpl.channel_hint }}">
                   Test
                 </button>
+
+                {# Duplicate to local #}
+                <button
+                  hx-post="/watches/{{ watch.id }}/notifications/copy-template/{{ tpl.id }}"
+                  hx-target="#watch-notifications"
+                  hx-swap="innerHTML"
+                  hx-confirm="Copy this template to a local notification config and unassign it?"
+                  class="btn btn-secondary text-xs min-h-[44px] htmx-request:opacity-60"
+                  aria-label="Duplicate {{ tpl.title }} as a local config">
+                  Duplicate
+                </button>
+
+                {# Unassign #}
+                <button
+                  hx-post="/watches/{{ watch.id }}/notifications/unassign/{{ tpl.id }}"
+                  hx-target="#watch-notifications"
+                  hx-swap="innerHTML"
+                  hx-confirm="Remove this template assignment from the watch?"
+                  class="btn btn-danger-outline text-xs min-h-[44px] htmx-request:opacity-60"
+                  aria-label="Unassign {{ tpl.title }} from this watch">
+                  Unassign
+                </button>
               </div>
             </td>
           </tr>
           {% endfor %}
+          {% if not assigned_templates %}
+          <tr id="library-empty-state">
+            <td colspan="4" class="px-4 py-3 text-sm text-gray-500 dark:text-gray-400">
+              No library templates assigned.
+            </td>
+          </tr>
+          {% endif %}
         </tbody>
       </table>
     </div>
   </section>
-  {% endif %}
 
   {# ── Local section ───────────────────────────────────────────────────── #}
   <section>

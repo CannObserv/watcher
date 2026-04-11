@@ -1262,6 +1262,8 @@ async def domain_nc_default_add(
     session: AsyncSession = Depends(get_db_session),
 ):
     """Add a notification template as a default for a domain."""
+    if request.headers.get("HX-Request") != "true":
+        return RedirectResponse(url=f"/domains/{domain_name}", status_code=303)
     existing = await session.scalar(
         select(DomainNcRef).where(
             DomainNcRef.domain_name == domain_name,
@@ -1290,6 +1292,8 @@ async def domain_nc_default_remove(
     session: AsyncSession = Depends(get_db_session),
 ):
     """Remove a notification template default from a domain."""
+    if request.headers.get("HX-Request") != "true":
+        return RedirectResponse(url=f"/domains/{domain_name}", status_code=303)
     result = await session.execute(
         select(DomainNcRef).where(
             DomainNcRef.domain_name == domain_name,
@@ -1777,6 +1781,8 @@ async def watch_nc_assign(
     session: AsyncSession = Depends(get_db_session),
 ):
     """Assign a library template to a watch. Returns refreshed notifications partial."""
+    if request.headers.get("HX-Request") != "true":
+        return RedirectResponse(url=f"/watches/{watch_id}", status_code=303)
     watch = await get_watch_detail(session, watch_id)
     if not watch:
         raise HTTPException(status_code=404, detail="Watch not found")
@@ -1801,6 +1807,8 @@ async def watch_nc_unassign(
     session: AsyncSession = Depends(get_db_session),
 ):
     """Remove a library template assignment from a watch. Returns refreshed partial."""
+    if request.headers.get("HX-Request") != "true":
+        return RedirectResponse(url=f"/watches/{watch_id}", status_code=303)
     watch = await get_watch_detail(session, watch_id)
     if not watch:
         raise HTTPException(status_code=404, detail="Watch not found")
@@ -1830,6 +1838,8 @@ async def watch_nc_copy_template(
     session: AsyncSession = Depends(get_db_session),
 ):
     """Copy a library template ref to a local WatchNotificationConfig, removing the ref."""
+    if request.headers.get("HX-Request") != "true":
+        return RedirectResponse(url=f"/watches/{watch_id}", status_code=303)
     watch = await get_watch_detail(session, watch_id)
     if not watch:
         raise HTTPException(status_code=404, detail="Watch not found")
@@ -1867,6 +1877,8 @@ async def watch_nc_copy_local(
     session: AsyncSession = Depends(get_db_session),
 ):
     """Duplicate a local WatchNotificationConfig on the same watch."""
+    if request.headers.get("HX-Request") != "true":
+        return RedirectResponse(url=f"/watches/{watch_id}", status_code=303)
     watch = await get_watch_detail(session, watch_id)
     if not watch:
         raise HTTPException(status_code=404, detail="Watch not found")
@@ -2117,6 +2129,8 @@ async def notification_template_create(
     session: AsyncSession = Depends(get_db_session),
 ):
     """Create notification template from dashboard form. Returns refreshed list or error form."""
+    if request.headers.get("HX-Request") != "true":
+        return RedirectResponse(url="/notifications", status_code=303)
     form = await request.form()
     events = form.getlist("events")
     schema_val = form.get("plugin_schema") or ""
@@ -2260,6 +2274,8 @@ async def notification_template_edit(
     session: AsyncSession = Depends(get_db_session),
 ):
     """Save changes to a notification template. Returns refreshed list or retargeted error form."""
+    if request.headers.get("HX-Request") != "true":
+        return RedirectResponse(url="/notifications", status_code=303)
     result = await session.execute(
         select(NotificationTemplate).where(
             NotificationTemplate.id == parse_ulid(template_id, "Template")
@@ -2275,9 +2291,7 @@ async def notification_template_edit(
     title = str(form.get("title") or "").strip() or tpl.title
     is_global_default = bool(form.get("is_global_default"))
 
-    try:
-        validate_apprise_url(apprise_url)
-    except ValueError as exc:
+    async def _edit_error(error_msg: str) -> Response:
         try:
             decrypted_url = decrypt_apprise_url(tpl.apprise_url)
         except (InvalidToken, ValueError):
@@ -2288,48 +2302,30 @@ async def notification_template_edit(
         domain_count = (
             await session.scalar(select(func.count()).where(DomainNcRef.template_id == tpl.id)) or 0
         )
-        response = templates.TemplateResponse(
+        resp = templates.TemplateResponse(
             "partials/notification_template_edit_form.html",
             {
                 "request": request,
                 "tpl": tpl,
                 "decrypted_url": decrypted_url,
-                "error": str(exc),
+                "error": error_msg,
                 "watch_count": watch_count,
                 "domain_count": domain_count,
             },
         )
-        response.headers["HX-Retarget"] = f"#tpl-{tpl.id}"
-        response.headers["HX-Reswap"] = "outerHTML"
-        return response
+        resp.headers["HX-Retarget"] = f"#tpl-{tpl.id}"
+        resp.headers["HX-Reswap"] = "outerHTML"
+        return resp
+
+    try:
+        validate_apprise_url(apprise_url)
+    except ValueError as exc:
+        return await _edit_error(str(exc))
 
     try:
         validate_event_list(events)
     except ValueError as exc:
-        try:
-            decrypted_url = decrypt_apprise_url(tpl.apprise_url)
-        except (InvalidToken, ValueError):
-            decrypted_url = ""
-        watch_count = (
-            await session.scalar(select(func.count()).where(WatchNcRef.template_id == tpl.id)) or 0
-        )
-        domain_count = (
-            await session.scalar(select(func.count()).where(DomainNcRef.template_id == tpl.id)) or 0
-        )
-        response = templates.TemplateResponse(
-            "partials/notification_template_edit_form.html",
-            {
-                "request": request,
-                "tpl": tpl,
-                "decrypted_url": decrypted_url,
-                "error": str(exc),
-                "watch_count": watch_count,
-                "domain_count": domain_count,
-            },
-        )
-        response.headers["HX-Retarget"] = f"#tpl-{tpl.id}"
-        response.headers["HX-Reswap"] = "outerHTML"
-        return response
+        return await _edit_error(str(exc))
 
     tpl.title = title
     tpl.apprise_url = encrypt_apprise_url(apprise_url)
@@ -2364,6 +2360,8 @@ async def notification_template_toggle(
     session: AsyncSession = Depends(get_db_session),
 ):
     """Toggle is_active on a notification template. Returns refreshed list."""
+    if request.headers.get("HX-Request") != "true":
+        return RedirectResponse(url="/notifications", status_code=303)
     result = await session.execute(
         select(NotificationTemplate).where(
             NotificationTemplate.id == parse_ulid(template_id, "Template")
@@ -2401,6 +2399,8 @@ async def notification_template_delete(
     session: AsyncSession = Depends(get_db_session),
 ):
     """Delete a notification template (reject if refs exist). Returns refreshed list."""
+    if request.headers.get("HX-Request") != "true":
+        return RedirectResponse(url="/notifications", status_code=303)
     result = await session.execute(
         select(NotificationTemplate).where(
             NotificationTemplate.id == parse_ulid(template_id, "Template")

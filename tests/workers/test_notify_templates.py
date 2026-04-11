@@ -35,6 +35,7 @@ async def test_dispatch_includes_template_refs():
     mock_template.scalars.return_value.all.return_value = [fake_template]
 
     session = AsyncMock()
+    session.add = MagicMock()
     session.execute = AsyncMock(side_effect=[mock_local, mock_template])
 
     with patch("src.workers.notify.dispatch_event", new_callable=AsyncMock) as mock_dispatch:
@@ -64,6 +65,7 @@ async def test_dispatch_includes_both_local_and_template():
     mock_template.scalars.return_value.all.return_value = [fake_template]
 
     session = AsyncMock()
+    session.add = MagicMock()
     session.execute = AsyncMock(side_effect=[mock_local, mock_template])
 
     with patch("src.workers.notify.dispatch_event", new_callable=AsyncMock) as mock_dispatch:

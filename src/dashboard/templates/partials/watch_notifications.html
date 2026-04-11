@@ -78,7 +78,7 @@
 
                 {# Test — response is an OOB flash #}
                 <button
-                  hx-post="/watches/{{ watch.id }}/notifications/{{ tpl.id }}/test-result"
+                  hx-post="/notifications/{{ tpl.id }}/test-result"
                   hx-swap="none"
                   class="btn btn-secondary text-xs min-h-[44px] htmx-request:opacity-60"
                   aria-label="Send test notification for {{ tpl.channel_hint }}">

@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ulid import ULID
 
 from src.api.dependencies import get_db_session
+from src.api.routes.helpers import get_watch_or_404
 from src.api.schemas.notification_config import extract_channel_hint
 from src.api.schemas.notification_template import (
     NotificationTemplateCreate,
@@ -171,15 +172,15 @@ async def assign_template_to_watch(
 ) -> dict:
     """Assign a notification template to a watch (idempotent)."""
     tpl = await _get_template_or_404(template_id, session)
-    watch_ulid = ULID.from_str(watch_id)
+    watch = await get_watch_or_404(watch_id, session)
     existing = await session.scalar(
         select(WatchNcRef).where(
-            WatchNcRef.watch_id == watch_ulid,
+            WatchNcRef.watch_id == watch.id,
             WatchNcRef.template_id == tpl.id,
         )
     )
     if not existing:
-        session.add(WatchNcRef(watch_id=watch_ulid, template_id=tpl.id))
+        session.add(WatchNcRef(watch_id=watch.id, template_id=tpl.id))
         audit(session, EventType.WATCH_NC_ASSIGNED, watch_id=watch_id, template_id=template_id)
         await session.commit()
     return {"assigned": True}

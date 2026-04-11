@@ -4,7 +4,7 @@
   Expects: watch, nc (NotificationConfig), decrypted_url (str); error (str, optional); decryption_failed (bool, optional — triggers OOB flash). event_titles is a Jinja2 global.
 #}
 <tr id="nc-{{ nc.id }}">
-  <td colspan="3" class="p-4 bg-white dark:bg-gray-800">
+  <td colspan="4" class="p-4 bg-white dark:bg-gray-800">
     <form
       hx-post="/watches/{{ watch.id }}/notifications/{{ nc.id }}/edit"
       hx-target="#watch-notifications"

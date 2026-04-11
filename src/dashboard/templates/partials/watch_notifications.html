@@ -6,10 +6,10 @@
 
 <div id="watch-notifications-list" class="space-y-6" aria-live="polite" aria-atomic="false">
 
-  {# ── Library section ─────────────────────────────────────────────────── #}
+  {# ── Global section ──────────────────────────────────────────────────── #}
   <section>
     <h3 class="text-sm font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-2">
-      <span aria-hidden="true">🔒</span> Library
+      <span aria-hidden="true">🔒</span> Global
     </h3>
     <div class="rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden">
       <table class="data-table w-full">
@@ -43,7 +43,7 @@
                 <a
                   href="/notifications"
                   class="btn btn-secondary text-xs min-h-[44px]"
-                  aria-label="Edit {{ tpl.title }} in the template library">
+                  aria-label="Edit {{ tpl.title }} in the global template library">
                   Edit
                 </a>
 
@@ -84,7 +84,7 @@
           {% if not assigned_templates %}
           <tr id="library-empty-state">
             <td colspan="4" class="px-4 py-3 text-sm text-gray-500 dark:text-gray-400">
-              No library templates assigned.
+              No global templates assigned.
             </td>
           </tr>
           {% endif %}

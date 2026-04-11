@@ -37,7 +37,7 @@
             name="_channel_picker"
             class="form-input"
             hx-get="/partials/apprise-plugin-form"
-            hx-target="#tpl-plugin-token-form"
+            hx-target="#plugin-token-form"
             hx-swap="outerHTML"
             hx-vals='js:{schema: htmx.find("#tpl-channel-picker").value}'
             hx-trigger="change"
@@ -54,7 +54,7 @@
               <input type="radio" name="_url_mode_tpl" value="builder" checked
                 hx-get="/partials/apprise-plugin-form"
                 hx-vals='js:{schema: htmx.find("#tpl-channel-picker").value}'
-                hx-target="#tpl-plugin-token-form"
+                hx-target="#plugin-token-form"
                 hx-swap="outerHTML"
                 hx-trigger="click[htmx.find('#tpl-channel-picker').value !== '']">
               <span class="text-xs">Builder</span>
@@ -62,7 +62,7 @@
             <label class="segment">
               <input type="radio" name="_url_mode_tpl" value="manual"
                 hx-get="/partials/apprise-plugin-form?raw=1"
-                hx-target="#tpl-plugin-token-form"
+                hx-target="#plugin-token-form"
                 hx-swap="outerHTML">
               <span class="text-xs">Manual</span>
             </label>
@@ -71,7 +71,7 @@
       </div>
 
       {# Token fields (HTMX target) — empty until plugin selected #}
-      <div id="tpl-plugin-token-form"></div>
+      <div id="plugin-token-form"></div>
 
       {# Events #}
       <fieldset>

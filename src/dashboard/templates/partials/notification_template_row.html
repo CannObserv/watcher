@@ -13,7 +13,7 @@
   </td>
   <td>
     {% if tpl.is_global_default %}
-    <span class="badge badge-info">Global default</span>
+    <span class="badge badge-info">Global</span>
     {% else %}
     <span class="text-gray-400 dark:text-gray-600 text-sm">—</span>
     {% endif %}
@@ -44,6 +44,16 @@
         class="btn btn-secondary text-xs min-h-[44px] htmx-request:opacity-60"
         aria-label="Send test notification for {{ tpl.title }}">
         Test
+      </button>
+
+      {# Duplicate #}
+      <button
+        hx-post="/notifications/{{ tpl.id }}/duplicate"
+        hx-target="#templates-tbody"
+        hx-swap="innerHTML"
+        class="btn btn-secondary text-xs min-h-[44px] htmx-request:opacity-60"
+        aria-label="Duplicate {{ tpl.title }} notification template">
+        Duplicate
       </button>
 
       {# Toggle active/inactive #}

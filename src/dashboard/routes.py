@@ -2449,6 +2449,51 @@ async def notification_template_delete(
     return response
 
 
+@router.post("/notifications/{template_id}/duplicate")
+async def notification_template_duplicate(
+    request: Request,
+    template_id: str,
+    session: AsyncSession = Depends(get_db_session),
+):
+    """Duplicate a notification template. Returns refreshed list."""
+    if request.headers.get("HX-Request") != "true":
+        return RedirectResponse(url="/notifications", status_code=303)
+    result = await session.execute(
+        select(NotificationTemplate).where(
+            NotificationTemplate.id == parse_ulid(template_id, "Template")
+        )
+    )
+    tpl = result.scalar_one_or_none()
+    if not tpl:
+        raise HTTPException(status_code=404, detail="Template not found")
+    copy = NotificationTemplate(
+        title=f"{tpl.title} (copy)",
+        apprise_url=tpl.apprise_url,
+        channel_hint=tpl.channel_hint,
+        events=list(tpl.events),
+        is_global_default=False,
+    )
+    session.add(copy)
+    audit(
+        session,
+        EventType.NOTIFICATION_TEMPLATE_CREATED,
+        template_id="(duplicate)",
+        title=copy.title,
+        source="dashboard",
+    )
+    await session.commit()
+    result2 = await session.execute(
+        select(NotificationTemplate).order_by(NotificationTemplate.title)
+    )
+    notification_templates = result2.scalars().all()
+    response = templates.TemplateResponse(
+        "partials/notification_template_list.html",
+        {"request": request, "notification_templates": notification_templates},
+    )
+    response.headers["HX-Trigger"] = "refreshTemplates"
+    return response
+
+
 @router.post("/notifications/{template_id}/test-result")
 async def notification_template_test_result(
     request: Request,

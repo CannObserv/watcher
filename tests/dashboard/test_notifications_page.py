@@ -220,3 +220,30 @@ async def test_test_result_returns_flash_on_dispatch_failure(client: AsyncClient
         )
 
     assert resp.status_code == 200
+
+
+@pytest.mark.integration
+async def test_duplicate_creates_copy(client: AsyncClient, db_session):
+    """POST /{id}/duplicate creates a new template titled '<title> (copy)'."""
+    tpl = await _make_template(db_session, "Original")
+
+    resp = await client.post(f"/notifications/{tpl.id}/duplicate", headers={"HX-Request": "true"})
+    assert resp.status_code == 200
+
+    result = await db_session.execute(
+        select(NotificationTemplate).where(NotificationTemplate.title == "Original (copy)")
+    )
+    copy = result.scalar_one_or_none()
+    assert copy is not None
+    assert copy.channel_hint == tpl.channel_hint
+    assert copy.events == tpl.events
+    assert copy.is_global_default is False
+
+
+@pytest.mark.integration
+async def test_duplicate_404_for_unknown_id(client: AsyncClient):
+    """POST /{id}/duplicate returns 404 for a non-existent template."""
+    from ulid import ULID
+
+    resp = await client.post(f"/notifications/{ULID()}/duplicate", headers={"HX-Request": "true"})
+    assert resp.status_code == 404

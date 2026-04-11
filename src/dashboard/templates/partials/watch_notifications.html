@@ -138,6 +138,15 @@
                   Edit
                 </button>
 
+                {# Send test — response is an OOB flash, no local target needed #}
+                <button
+                  hx-post="/watches/{{ watch.id }}/notifications/{{ nc.id }}/test-result"
+                  hx-swap="none"
+                  class="btn btn-secondary text-xs min-h-[44px] htmx-request:opacity-60"
+                  aria-label="Send test notification for {{ nc.channel_hint }}">
+                  Test
+                </button>
+
                 {# Duplicate local config #}
                 <button
                   hx-post="/watches/{{ watch.id }}/notifications/{{ nc.id }}/copy"
@@ -146,15 +155,6 @@
                   class="btn btn-secondary text-xs min-h-[44px] htmx-request:opacity-60"
                   aria-label="Duplicate {{ nc.channel_hint }} notification config">
                   Duplicate
-                </button>
-
-                {# Send test — response is an OOB flash, no local target needed #}
-                <button
-                  hx-post="/watches/{{ watch.id }}/notifications/{{ nc.id }}/test-result"
-                  hx-swap="none"
-                  class="btn btn-secondary text-xs min-h-[44px] htmx-request:opacity-60"
-                  aria-label="Send test notification for {{ nc.channel_hint }}">
-                  Test
                 </button>
 
                 {# Toggle active / inactive #}

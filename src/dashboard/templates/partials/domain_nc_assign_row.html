@@ -1,0 +1,68 @@
+{# Inline assign-row form for domain NC defaults. Inserted as first tbody row via afterbegin. #}
+{# Expects: domain_name (str), unassigned (list[NotificationTemplate]). #}
+
+<tr id="nc-domain-assign-row">
+  <td colspan="4" class="p-4 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700">
+    {% if unassigned %}
+    <form id="domain-nc-assign-form" class="space-y-4">
+      <h4 class="text-sm font-semibold text-gray-900 dark:text-white">Add Template</h4>
+
+      <div>
+        <label for="domain-nc-assign-select-{{ domain_name }}" class="form-label">Template</label>
+        <select
+          id="domain-nc-assign-select-{{ domain_name }}"
+          name="template_id"
+          class="form-input mt-1"
+          aria-label="Select a notification template to add as domain default">
+          <option value="">— pick a template —</option>
+          {% for tpl in unassigned %}
+          <option value="{{ tpl.id }}">{{ tpl.title }} ({{ tpl.channel_hint }})</option>
+          {% endfor %}
+        </select>
+      </div>
+
+      <div class="flex items-center gap-3">
+        <button
+          type="button"
+          class="btn btn-primary min-h-[44px] htmx-request:opacity-60"
+          onclick="
+            var sel = document.getElementById('domain-nc-assign-select-{{ domain_name }}');
+            if (!sel.value) { return; }
+            htmx.ajax('POST', '/domains/{{ domain_name }}/nc-defaults/add/' + sel.value, {
+              target: '#domain-nc-defaults',
+              swap: 'outerHTML'
+            });
+          ">
+          Assign
+        </button>
+        <button
+          type="button"
+          hx-get="/domains/{{ domain_name }}/nc-defaults"
+          hx-target="#domain-nc-defaults"
+          hx-swap="outerHTML"
+          class="btn btn-secondary min-h-[44px] htmx-request:opacity-60">
+          Cancel
+        </button>
+      </div>
+    </form>
+    {% else %}
+    <div class="space-y-4">
+      <h4 class="text-sm font-semibold text-gray-900 dark:text-white">Add Template</h4>
+      <p class="text-sm text-gray-500 dark:text-gray-400">
+        No templates available to add.
+        <a href="/notifications" class="link">Create a template</a> first.
+      </p>
+      <div>
+        <button
+          type="button"
+          hx-get="/domains/{{ domain_name }}/nc-defaults"
+          hx-target="#domain-nc-defaults"
+          hx-swap="outerHTML"
+          class="btn btn-secondary min-h-[44px] htmx-request:opacity-60">
+          Cancel
+        </button>
+      </div>
+    </div>
+    {% endif %}
+  </td>
+</tr>

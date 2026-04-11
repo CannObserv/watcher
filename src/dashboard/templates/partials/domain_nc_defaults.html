@@ -1,81 +1,159 @@
-{# Notification defaults for a domain — assigned templates + picker. #}
-{# Expects: domain_name (str), assigned (list[NotificationTemplate]), unassigned (list[NotificationTemplate]). #}
+{# Notification defaults for a domain — global templates + domain-assigned templates. #}
+{# Expects: domain_name (str), assigned (list[NotificationTemplate]), #}
+{#          unassigned (list[NotificationTemplate]), global_templates (list[NotificationTemplate]). #}
 
-<div id="domain-nc-defaults" aria-live="polite">
-  {% if assigned %}
-  <table class="data-table mb-4">
-    <thead>
-      <tr>
-        <th>Template</th>
-        <th>Channel</th>
-        <th>Events</th>
-        <th><span class="sr-only">Actions</span></th>
-      </tr>
-    </thead>
-    <tbody>
-      {% for tpl in assigned %}
-      <tr>
-        <td class="font-medium">{{ tpl.title }}</td>
-        <td><span class="chip">{{ tpl.channel_hint }}</span></td>
-        <td>
-          <span class="chip-group">
-            {% for ev in tpl.events %}
-            <span class="chip">{{ ev }}</span>
-            {% endfor %}
-          </span>
-        </td>
-        <td>
-          <button
-            type="button"
-            hx-post="/domains/{{ domain_name }}/nc-defaults/remove/{{ tpl.id }}"
-            hx-target="#domain-nc-defaults"
-            hx-swap="outerHTML"
-            hx-confirm="Remove {{ tpl.title }} as a default for this domain?"
-            class="btn btn-danger-outline btn-sm min-h-[44px] htmx-request:opacity-60">
-            Remove
-          </button>
-        </td>
-      </tr>
-      {% endfor %}
-    </tbody>
-  </table>
-  {% else %}
-  <p class="text-sm text-gray-500 dark:text-gray-400 mb-4">No notification defaults set for this domain.</p>
-  {% endif %}
+<div id="domain-nc-defaults" class="space-y-6" aria-live="polite">
 
-  {% if unassigned %}
-  <div class="flex flex-wrap gap-3 items-end mt-2">
-    <div>
-      <label for="domain-nc-add-select-{{ domain_name }}" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-        Add default
-      </label>
-      <select
-        id="domain-nc-add-select-{{ domain_name }}"
-        class="form-input"
-        aria-label="Select a notification template to add as domain default">
-        <option value="">— choose template —</option>
-        {% for tpl in unassigned %}
-        <option value="{{ tpl.id }}">{{ tpl.title }} ({{ tpl.channel_hint }})</option>
-        {% endfor %}
-      </select>
+  {# ── Global section ──────────────────────────────────────────────────── #}
+  <section>
+    <div class="flex items-center justify-between mb-2">
+      <h4 class="text-sm font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide">
+        <span aria-hidden="true">🔒</span> Global
+      </h4>
+      <button
+        hx-get="/domains/{{ domain_name }}/nc-defaults/assign-row"
+        hx-target="#global-nc-tbody"
+        hx-swap="afterbegin"
+        hx-on::before-request="if(document.getElementById('nc-domain-assign-row')){event.preventDefault();}"
+        class="btn btn-secondary text-xs min-h-[44px] htmx-request:opacity-60">
+        + Assign
+      </button>
     </div>
-    <button
-      type="button"
-      class="btn min-h-[44px] htmx-request:opacity-60"
-      onclick="
-        var sel = document.getElementById('domain-nc-add-select-{{ domain_name }}');
-        if (!sel.value) { return; }
-        htmx.ajax('POST', '/domains/{{ domain_name }}/nc-defaults/add/' + sel.value, {
-          target: '#domain-nc-defaults',
-          swap: 'outerHTML'
-        });
-      ">
-      Add
-    </button>
-  </div>
-  {% endif %}
+    <div class="rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden">
+      <table class="data-table w-full">
+        <thead>
+          <tr>
+            <th scope="col" class="w-full">Title</th>
+            <th scope="col" class="w-28">Channel</th>
+            <th scope="col" class="w-24">Status</th>
+            <th scope="col"><span class="sr-only">Actions</span></th>
+          </tr>
+        </thead>
+        <tbody id="global-nc-tbody">
+          {% for tpl in global_templates %}
+          <tr class="bg-co-purple-50 dark:bg-co-purple-950/20">
+            <td class="font-medium text-gray-900 dark:text-white">
+              <span aria-hidden="true">🔒</span> {{ tpl.title }}
+            </td>
+            <td><span class="chip">{{ tpl.channel_hint }}</span></td>
+            <td>
+              {% if tpl.is_active %}
+              <span class="badge badge-active">Active</span>
+              {% else %}
+              <span class="badge badge-inactive">Inactive</span>
+              {% endif %}
+            </td>
+            <td>
+              <div class="flex items-center gap-2 justify-end">
+                <a
+                  href="/notifications?edit={{ tpl.id }}"
+                  class="btn btn-secondary text-xs min-h-[44px]"
+                  aria-label="Edit {{ tpl.title }} in the global template library">
+                  Edit
+                </a>
+                <button
+                  hx-post="/notifications/{{ tpl.id }}/test-result"
+                  hx-swap="none"
+                  class="btn btn-secondary text-xs min-h-[44px] htmx-request:opacity-60"
+                  aria-label="Send test notification for {{ tpl.channel_hint }}">
+                  Test
+                </button>
+              </div>
+            </td>
+          </tr>
+          {% endfor %}
+          {% if not global_templates %}
+          <tr id="global-nc-empty-state">
+            <td colspan="4" class="px-4 py-3 text-sm text-gray-500 dark:text-gray-400">
+              No global templates defined. <a href="/notifications" class="link">Create a template</a> and mark it as Global Default.
+            </td>
+          </tr>
+          {% endif %}
+        </tbody>
+      </table>
+    </div>
+  </section>
 
-  <p class="text-xs text-gray-400 dark:text-gray-500 mt-3">
-    Templates added here are automatically assigned to new watches created under this domain.
+  {# ── Domain section ──────────────────────────────────────────────────── #}
+  <section>
+    <div class="flex items-center justify-between mb-2">
+      <h4 class="text-sm font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide">
+        Domain
+      </h4>
+      <button
+        hx-get="/domains/{{ domain_name }}/nc-defaults/assign-row"
+        hx-target="#domain-nc-tbody"
+        hx-swap="afterbegin"
+        hx-on::before-request="if(document.getElementById('nc-domain-assign-row')){event.preventDefault();}"
+        class="btn btn-secondary text-xs min-h-[44px] htmx-request:opacity-60">
+        + Add
+      </button>
+    </div>
+    <div class="rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden">
+      <table class="data-table w-full">
+        <thead>
+          <tr>
+            <th scope="col" class="w-full">Title</th>
+            <th scope="col" class="w-28">Channel</th>
+            <th scope="col" class="w-24">Status</th>
+            <th scope="col"><span class="sr-only">Actions</span></th>
+          </tr>
+        </thead>
+        <tbody id="domain-nc-tbody">
+          {% for tpl in assigned %}
+          <tr>
+            <td class="font-medium text-gray-900 dark:text-white">{{ tpl.title }}</td>
+            <td><span class="chip">{{ tpl.channel_hint }}</span></td>
+            <td>
+              {% if tpl.is_active %}
+              <span class="badge badge-active">Active</span>
+              {% else %}
+              <span class="badge badge-inactive">Inactive</span>
+              {% endif %}
+            </td>
+            <td>
+              <div class="flex items-center gap-2 justify-end">
+                <a
+                  href="/notifications?edit={{ tpl.id }}"
+                  class="btn btn-secondary text-xs min-h-[44px]"
+                  aria-label="Edit {{ tpl.title }} in the global template library">
+                  Edit
+                </a>
+                <button
+                  hx-post="/notifications/{{ tpl.id }}/test-result"
+                  hx-swap="none"
+                  class="btn btn-secondary text-xs min-h-[44px] htmx-request:opacity-60"
+                  aria-label="Send test notification for {{ tpl.channel_hint }}">
+                  Test
+                </button>
+                <button
+                  type="button"
+                  hx-post="/domains/{{ domain_name }}/nc-defaults/remove/{{ tpl.id }}"
+                  hx-target="#domain-nc-defaults"
+                  hx-swap="outerHTML"
+                  hx-confirm="Remove {{ tpl.title }} as a default for this domain?"
+                  class="btn btn-danger-outline text-xs min-h-[44px] htmx-request:opacity-60"
+                  aria-label="Remove {{ tpl.title }} from domain defaults">
+                  Remove
+                </button>
+              </div>
+            </td>
+          </tr>
+          {% endfor %}
+          {% if not assigned %}
+          <tr id="domain-nc-empty-state">
+            <td colspan="4" class="px-4 py-3 text-sm text-gray-500 dark:text-gray-400">
+              No domain notification defaults set.
+            </td>
+          </tr>
+          {% endif %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <p class="text-xs text-gray-400 dark:text-gray-500">
+    Domain templates are automatically assigned to new watches created under this domain.
   </p>
+
 </div>

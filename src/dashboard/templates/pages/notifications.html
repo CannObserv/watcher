@@ -41,11 +41,15 @@
   document.addEventListener('DOMContentLoaded', function () {
     const editId = new URLSearchParams(window.location.search).get('edit');
     if (!editId) return;
-    const row = document.getElementById('tpl-' + editId);
-    if (!row) return;
-    row.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    const btn = row.querySelector('[hx-get$="/edit-form"]');
-    if (btn) btn.click();
+    if (!document.getElementById('tpl-' + editId)) return;
+    htmx.ajax('GET', '/notifications/' + editId + '/edit-form', {
+      target: '#tpl-' + editId,
+      swap: 'outerHTML'
+    });
+    setTimeout(function () {
+      const el = document.getElementById('tpl-' + editId);
+      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }, 150);
   });
 </script>
 {% endblock %}

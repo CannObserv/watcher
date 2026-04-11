@@ -1220,6 +1220,95 @@ async def domain_detail_page(
     return templates.TemplateResponse("pages/domain_detail.html", context)
 
 
+async def _render_domain_nc_defaults(request: Request, domain_name: str, session: AsyncSession):
+    """Render the domain_nc_defaults partial for *domain_name*."""
+    assigned_result = await session.execute(
+        select(NotificationTemplate)
+        .join(DomainNcRef, DomainNcRef.template_id == NotificationTemplate.id)
+        .where(DomainNcRef.domain_name == domain_name)
+        .order_by(NotificationTemplate.title)
+    )
+    assigned = assigned_result.scalars().all()
+    all_result = await session.execute(
+        select(NotificationTemplate)
+        .where(NotificationTemplate.is_active.is_(True))
+        .order_by(NotificationTemplate.title)
+    )
+    all_templates = all_result.scalars().all()
+    assigned_ids = {str(t.id) for t in assigned}
+    unassigned = [t for t in all_templates if str(t.id) not in assigned_ids]
+    return templates.TemplateResponse(
+        request,
+        "partials/domain_nc_defaults.html",
+        {"domain_name": domain_name, "assigned": assigned, "unassigned": unassigned},
+    )
+
+
+@router.get("/domains/{domain_name}/nc-defaults")
+async def domain_nc_defaults_partial(
+    request: Request,
+    domain_name: str,
+    session: AsyncSession = Depends(get_db_session),
+):
+    """HTMX partial: notification defaults assigned to a domain."""
+    return await _render_domain_nc_defaults(request, domain_name, session)
+
+
+@router.post("/domains/{domain_name}/nc-defaults/add/{template_id}")
+async def domain_nc_default_add(
+    request: Request,
+    domain_name: str,
+    template_id: str,
+    session: AsyncSession = Depends(get_db_session),
+):
+    """Add a notification template as a default for a domain."""
+    existing = await session.scalar(
+        select(DomainNcRef).where(
+            DomainNcRef.domain_name == domain_name,
+            DomainNcRef.template_id == template_id,  # type: ignore[arg-type]
+        )
+    )
+    if not existing:
+        session.add(
+            DomainNcRef(domain_name=domain_name, template_id=template_id)  # type: ignore[arg-type]
+        )
+        audit(
+            session,
+            EventType.DOMAIN_NC_DEFAULT_ADDED,
+            domain_name=domain_name,
+            template_id=template_id,
+        )
+        await session.commit()
+    return await _render_domain_nc_defaults(request, domain_name, session)
+
+
+@router.post("/domains/{domain_name}/nc-defaults/remove/{template_id}")
+async def domain_nc_default_remove(
+    request: Request,
+    domain_name: str,
+    template_id: str,
+    session: AsyncSession = Depends(get_db_session),
+):
+    """Remove a notification template default from a domain."""
+    result = await session.execute(
+        select(DomainNcRef).where(
+            DomainNcRef.domain_name == domain_name,
+            DomainNcRef.template_id == template_id,  # type: ignore[arg-type]
+        )
+    )
+    ref = result.scalar_one_or_none()
+    if ref:
+        await session.delete(ref)
+        audit(
+            session,
+            EventType.DOMAIN_NC_DEFAULT_REMOVED,
+            domain_name=domain_name,
+            template_id=template_id,
+        )
+        await session.commit()
+    return await _render_domain_nc_defaults(request, domain_name, session)
+
+
 @router.get("/partials/stats-cards")
 async def partial_stats_cards(
     request: Request,

@@ -1264,6 +1264,9 @@ async def domain_nc_default_add(
     """Add a notification template as a default for a domain."""
     if request.headers.get("HX-Request") != "true":
         return RedirectResponse(url=f"/domains/{domain_name}", status_code=303)
+    domain = await session.scalar(select(Domain).where(Domain.name == domain_name))
+    if not domain:
+        raise HTTPException(status_code=404, detail="Domain not found")
     existing = await session.scalar(
         select(DomainNcRef).where(
             DomainNcRef.domain_name == domain_name,
@@ -2464,7 +2467,7 @@ async def notification_template_test_result(
 
     event = WatchEvent(
         event_type=WatchEventType.CHANGE_DETECTED,
-        watch_id="test",
+        watch_id="00000000000000000000000000",
         watch_name="Test Notification",
         watch_url="https://example.com",
         occurred_at=datetime.now(UTC),

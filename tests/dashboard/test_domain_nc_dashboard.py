@@ -157,3 +157,24 @@ async def test_partial_shows_assigned_template_title(client: AsyncClient, db_ses
     )
     assert resp.status_code == 200
     assert b"MyAssignedTemplate" in resp.content
+
+
+async def test_add_unknown_domain_returns_404(client: AsyncClient, db_session):
+    """Adding a template default to a non-existent domain returns 404."""
+    from src.core.crypto import encrypt_apprise_url
+    from src.core.models.notification_template import NotificationTemplate
+
+    tpl = NotificationTemplate(
+        title="Orphan",
+        apprise_url=encrypt_apprise_url(VALID_URL),
+        channel_hint="json",
+        events=["change_detected"],
+    )
+    db_session.add(tpl)
+    await db_session.flush()
+
+    resp = await client.post(
+        f"/domains/no-such-domain.example.com/nc-defaults/add/{tpl.id}",
+        headers={"HX-Request": "true"},
+    )
+    assert resp.status_code == 404

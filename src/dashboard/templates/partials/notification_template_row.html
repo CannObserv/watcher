@@ -12,13 +12,6 @@
     <span class="chip">{{ tpl.channel_hint }}</span>
   </td>
   <td>
-    <div class="chip-group">
-      {% for ev in tpl.events %}
-      <span class="chip">{{ event_titles.get(ev, ev) }}</span>
-      {% endfor %}
-    </div>
-  </td>
-  <td>
     {% if tpl.is_global_default %}
     <span class="badge badge-info">Global default</span>
     {% else %}

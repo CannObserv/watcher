@@ -10,6 +10,15 @@ from httpx import ASGITransport, AsyncClient
 from ulid import ULID
 
 
+def _make_mock_session():
+    """Build a MagicMock session where execute() is an AsyncMock returning empty results."""
+    session = MagicMock()
+    execute_result = MagicMock()
+    execute_result.scalars.return_value.all.return_value = []
+    session.execute = AsyncMock(return_value=execute_result)
+    return session
+
+
 def _make_mock_watch(watch_id=None, name="Test Watch"):
     """Build a minimal Watch-like mock."""
     watch = MagicMock()
@@ -47,7 +56,7 @@ class TestWatchNotificationsPartialRoute:
 
         # Provide a dummy session — the route's context calls are patched
         async def override_session():
-            yield MagicMock()
+            yield _make_mock_session()
 
         app.dependency_overrides[get_db_session] = override_session
 
@@ -216,7 +225,7 @@ async def _post_dashboard(
     from src.api.dependencies import get_db_session
     from src.api.main import app
 
-    _session = mock_session or MagicMock()
+    _session = mock_session or _make_mock_session()
 
     async def override_session():
         yield _session
@@ -252,7 +261,7 @@ async def _get_dashboard(path: str, mock_watch=None, mock_session=None):
     from src.api.dependencies import get_db_session
     from src.api.main import app
 
-    _session = mock_session or MagicMock()
+    _session = mock_session or _make_mock_session()
 
     async def override_session():
         yield _session
@@ -278,7 +287,7 @@ class TestWatchNotificationToggleRoute:
         watch = _make_mock_watch()
         nc = _make_mock_nc(is_active=True)
         nc.watch_id = watch.id  # ownership check passes
-        session = MagicMock()
+        session = _make_mock_session()
         session.get = AsyncMock(return_value=nc)
         session.commit = AsyncMock()
         resp = await _post_dashboard(
@@ -300,7 +309,7 @@ class TestWatchNotificationToggleRoute:
         watch = _make_mock_watch()
         nc = _make_mock_nc()
         nc.watch_id = MagicMock()  # different ID — won't equal watch.id
-        session = MagicMock()
+        session = _make_mock_session()
         session.get = AsyncMock(return_value=nc)
         session.commit = AsyncMock()
         resp = await _post_dashboard(
@@ -316,7 +325,7 @@ class TestWatchNotificationCreateRoute:
 
     async def test_valid_url_returns_200_with_partial(self):
         watch = _make_mock_watch()
-        session = MagicMock()
+        session = _make_mock_session()
         session.add = MagicMock()
         session.commit = AsyncMock()
         with patch("src.dashboard.routes.encrypt_apprise_url", return_value="encrypted"):
@@ -332,7 +341,7 @@ class TestWatchNotificationCreateRoute:
     async def test_title_stored_on_create(self):
         """Title submitted in the add form is stored on the new NotificationConfig."""
         watch = _make_mock_watch()
-        session = MagicMock()
+        session = _make_mock_session()
         session.add = MagicMock()
         session.commit = AsyncMock()
         with patch("src.dashboard.routes.encrypt_apprise_url", return_value="encrypted"):
@@ -354,7 +363,7 @@ class TestWatchNotificationCreateRoute:
     async def test_blank_title_stored_as_null(self):
         """An empty title field is stored as None, not empty string."""
         watch = _make_mock_watch()
-        session = MagicMock()
+        session = _make_mock_session()
         session.add = MagicMock()
         session.commit = AsyncMock()
         with patch("src.dashboard.routes.encrypt_apprise_url", return_value="encrypted"):
@@ -431,7 +440,7 @@ class TestWatchNotificationTestResultRoute:
         watch = _make_mock_watch()
         nc = _make_mock_nc()
         nc.watch_id = watch.id
-        session = MagicMock()
+        session = _make_mock_session()
         session.get = AsyncMock(return_value=nc)
         session.commit = AsyncMock()
         result = self._mock_result(True, "Notification sent successfully")
@@ -452,7 +461,7 @@ class TestWatchNotificationTestResultRoute:
         watch = _make_mock_watch()
         nc = _make_mock_nc()
         nc.watch_id = watch.id
-        session = MagicMock()
+        session = _make_mock_session()
         session.get = AsyncMock(return_value=nc)
         session.commit = AsyncMock()
         result = self._mock_result(False, "Delivery failed")
@@ -491,7 +500,7 @@ class TestWatchNotificationCreateFromTokens:
         from src.api.dependencies import get_db_session
         from src.api.main import app
 
-        _session = MagicMock()
+        _session = _make_mock_session()
         _session.commit = AsyncMock()
 
         async def override_session():
@@ -578,7 +587,7 @@ class TestNotificationEditFormRoute:
         watch = _make_mock_watch()
         nc = _make_mock_nc(apprise_url="encrypted_blob")
         nc.watch_id = watch.id
-        session = MagicMock()
+        session = _make_mock_session()
         session.get = AsyncMock(return_value=nc)
         with patch("src.dashboard.routes.decrypt_apprise_url", return_value="discord://T/A/T"):
             resp = await _get_dashboard(
@@ -593,7 +602,7 @@ class TestNotificationEditFormRoute:
         watch = _make_mock_watch()
         nc = _make_mock_nc(events=["change_detected", "watch_error"])
         nc.watch_id = watch.id
-        session = MagicMock()
+        session = _make_mock_session()
         session.get = AsyncMock(return_value=nc)
         with patch("src.dashboard.routes.decrypt_apprise_url", return_value="json://x.com"):
             resp = await _get_dashboard(
@@ -615,7 +624,7 @@ class TestNotificationEditFormRoute:
         watch = _make_mock_watch()
         nc = _make_mock_nc()
         nc.watch_id = MagicMock()  # different — won't equal watch.id
-        session = MagicMock()
+        session = _make_mock_session()
         session.get = AsyncMock(return_value=nc)
         resp = await _get_dashboard(
             f"/watches/{watch.id}/notifications/{nc.id}/edit-form",
@@ -629,7 +638,7 @@ class TestNotificationEditFormRoute:
         watch = _make_mock_watch()
         nc = _make_mock_nc(apprise_url="blob", title="My Slack")
         nc.watch_id = watch.id
-        session = MagicMock()
+        session = _make_mock_session()
         session.get = AsyncMock(return_value=nc)
         with patch("src.dashboard.routes.decrypt_apprise_url", return_value="json://x.com"):
             resp = await _get_dashboard(
@@ -648,7 +657,7 @@ class TestNotificationEditFormRoute:
         watch = _make_mock_watch()
         nc = _make_mock_nc(apprise_url="bad_blob")
         nc.watch_id = watch.id
-        session = MagicMock()
+        session = _make_mock_session()
         session.get = AsyncMock(return_value=nc)
         with patch("src.dashboard.routes.decrypt_apprise_url", side_effect=InvalidToken):
             resp = await _get_dashboard(
@@ -670,7 +679,7 @@ class TestNotificationEditRoute:
         watch = _make_mock_watch()
         nc = _make_mock_nc()
         nc.watch_id = watch.id
-        session = MagicMock()
+        session = _make_mock_session()
         session.get = AsyncMock(return_value=nc)
         session.commit = AsyncMock()
         with patch("src.dashboard.routes.encrypt_apprise_url", return_value="new_encrypted"):
@@ -692,7 +701,7 @@ class TestNotificationEditRoute:
         watch = _make_mock_watch()
         nc = _make_mock_nc(events=["change_detected"])
         nc.watch_id = watch.id
-        session = MagicMock()
+        session = _make_mock_session()
         session.get = AsyncMock(return_value=nc)
         session.commit = AsyncMock()
         with patch("src.dashboard.routes.encrypt_apprise_url", return_value="enc"):
@@ -712,7 +721,7 @@ class TestNotificationEditRoute:
         watch = _make_mock_watch()
         nc = _make_mock_nc()
         nc.watch_id = watch.id
-        session = MagicMock()
+        session = _make_mock_session()
         session.get = AsyncMock(return_value=nc)
         with patch("src.dashboard.routes.decrypt_apprise_url", return_value="json://old.com"):
             resp = await _post_dashboard(
@@ -740,7 +749,7 @@ class TestNotificationEditRoute:
         watch = _make_mock_watch()
         nc = _make_mock_nc()
         nc.watch_id = MagicMock()  # different — won't equal watch.id
-        session = MagicMock()
+        session = _make_mock_session()
         session.get = AsyncMock(return_value=nc)
         resp = await _post_dashboard(
             f"/watches/{watch.id}/notifications/{nc.id}/edit",
@@ -754,7 +763,7 @@ class TestNotificationEditRoute:
         watch = _make_mock_watch()
         nc = _make_mock_nc()
         nc.watch_id = watch.id
-        session = MagicMock()
+        session = _make_mock_session()
         session.get = AsyncMock(return_value=nc)
         with patch("src.dashboard.routes.decrypt_apprise_url", return_value="json://old.com"):
             resp = await _post_dashboard(
@@ -774,7 +783,7 @@ class TestNotificationEditRoute:
         watch = _make_mock_watch()
         nc = _make_mock_nc(title=None)
         nc.watch_id = watch.id
-        session = MagicMock()
+        session = _make_mock_session()
         session.get = AsyncMock(return_value=nc)
         session.commit = AsyncMock()
         with patch("src.dashboard.routes.encrypt_apprise_url", return_value="enc"):
@@ -795,7 +804,7 @@ class TestNotificationEditRoute:
         watch = _make_mock_watch()
         nc = _make_mock_nc(events=["change_detected"])
         nc.watch_id = watch.id
-        session = MagicMock()
+        session = _make_mock_session()
         session.get = AsyncMock(return_value=nc)
         with patch("src.dashboard.routes.decrypt_apprise_url", return_value="json://old.com"):
             resp = await _post_dashboard(
@@ -813,7 +822,7 @@ class TestNotificationEditRoute:
         watch = _make_mock_watch()
         nc = _make_mock_nc()
         nc.watch_id = watch.id
-        session = MagicMock()
+        session = _make_mock_session()
         session.get = AsyncMock(return_value=nc)
         with patch("src.dashboard.routes.decrypt_apprise_url", return_value="json://old.com"):
             resp = await _post_dashboard(
@@ -930,7 +939,7 @@ class TestNotificationEditFormHtmxAttributes:
         watch = _make_mock_watch()
         nc = _make_mock_nc(apprise_url="blob")
         nc.watch_id = watch.id
-        session = MagicMock()
+        session = _make_mock_session()
         session.get = AsyncMock(return_value=nc)
         with patch("src.dashboard.routes.decrypt_apprise_url", return_value="json://x.com"):
             resp = await _get_dashboard(
@@ -947,7 +956,7 @@ class TestNotificationEditFormHtmxAttributes:
         watch = _make_mock_watch()
         nc = _make_mock_nc(apprise_url="blob")
         nc.watch_id = watch.id
-        session = MagicMock()
+        session = _make_mock_session()
         session.get = AsyncMock(return_value=nc)
         with patch("src.dashboard.routes.decrypt_apprise_url", return_value="json://x.com"):
             resp = await _get_dashboard(
@@ -967,7 +976,7 @@ class TestNotificationEditFormHtmxAttributes:
         from src.api.main import app
 
         async def override_session():
-            yield MagicMock()
+            yield _make_mock_session()
 
         app.dependency_overrides[get_db_session] = override_session
         try:

@@ -8,9 +8,19 @@
 
   {# ── Global section ──────────────────────────────────────────────────── #}
   <section>
-    <h3 class="text-sm font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-2">
-      <span aria-hidden="true">🔒</span> Global
-    </h3>
+    <div class="flex items-center justify-between mb-2">
+      <h3 class="text-sm font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide">
+        <span aria-hidden="true">🔒</span> Global
+      </h3>
+      <button
+        hx-get="/watches/{{ watch.id }}/notifications/assign-row"
+        hx-target="#global-tbody"
+        hx-swap="afterbegin"
+        hx-on::before-request="if(document.getElementById('nc-assign-row')){event.preventDefault();}"
+        class="btn btn-secondary text-xs min-h-[44px] htmx-request:opacity-60">
+        + Assign
+      </button>
+    </div>
     <div class="rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden">
       <table class="data-table w-full">
         <thead>
@@ -21,7 +31,7 @@
             <th scope="col"><span class="sr-only">Actions</span></th>
           </tr>
         </thead>
-        <tbody id="library-tbody">
+        <tbody id="global-tbody">
           {% for tpl in assigned_templates %}
           <tr class="bg-co-purple-50 dark:bg-co-purple-950/20" id="tpl-ref-{{ tpl.id }}">
             <td class="font-medium text-gray-900 dark:text-white">
@@ -39,7 +49,7 @@
             </td>
             <td>
               <div class="flex items-center gap-2 justify-end">
-                {# Edit in library #}
+                {# Edit in global template library #}
                 <a
                   href="/notifications"
                   class="btn btn-secondary text-xs min-h-[44px]"
@@ -82,7 +92,7 @@
           </tr>
           {% endfor %}
           {% if not assigned_templates %}
-          <tr id="library-empty-state">
+          <tr id="global-empty-state">
             <td colspan="4" class="px-4 py-3 text-sm text-gray-500 dark:text-gray-400">
               No global templates assigned.
             </td>
@@ -95,9 +105,20 @@
 
   {# ── Local section ───────────────────────────────────────────────────── #}
   <section>
-    <h3 class="text-sm font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-2">
-      Local
-    </h3>
+    <div class="flex items-center justify-between mb-2">
+      <h3 class="text-sm font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide">
+        Local
+      </h3>
+      <button
+        hx-get="/watches/{{ watch.id }}/notifications/add-row"
+        hx-target="#notifications-tbody"
+        hx-swap="afterbegin"
+        hx-on::before-request="if(document.getElementById('notification-add-row')){event.preventDefault();}"
+        hx-on::after-request="if(event.detail.successful){const e=document.getElementById('notifications-empty-state');if(e)e.remove();}"
+        class="btn btn-secondary text-xs min-h-[44px] htmx-request:opacity-60">
+        + Add
+      </button>
+    </div>
     <div class="rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden">
       <table class="data-table w-full">
         <thead>

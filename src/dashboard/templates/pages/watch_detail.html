@@ -144,28 +144,7 @@
 
 {# Notification Configs — interactive management #}
 <section class="mb-8">
-  <div class="flex items-center justify-between mb-4">
-    <h3 class="text-lg font-semibold text-gray-900 dark:text-white">Notifications</h3>
-    <div class="flex gap-2">
-      <button
-        hx-get="/watches/{{ watch.id }}/notifications/assign-row"
-        hx-target="#library-tbody"
-        hx-swap="afterbegin"
-        hx-on::before-request="if(document.getElementById('nc-assign-row')){event.preventDefault();}"
-        class="btn btn-secondary text-sm min-h-[44px] htmx-request:opacity-60">
-        + Assign
-      </button>
-      <button
-        hx-get="/watches/{{ watch.id }}/notifications/add-row"
-        hx-target="#notifications-tbody"
-        hx-swap="afterbegin"
-        hx-on::before-request="if(document.getElementById('notification-add-row')){event.preventDefault();}"
-        hx-on::after-request="if(event.detail.successful){const e=document.getElementById('notifications-empty-state');if(e)e.remove();}"
-        class="btn btn-secondary text-sm min-h-[44px] htmx-request:opacity-60">
-        + Add
-      </button>
-    </div>
-  </div>
+  <h3 class="text-lg font-semibold text-gray-900 dark:text-white mb-4">Notifications</h3>
   <div
     id="watch-notifications"
     hx-get="/partials/watch-notifications/{{ watch.id }}"

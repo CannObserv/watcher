@@ -9,7 +9,7 @@ from typing import Literal
 from cryptography.fernet import InvalidToken
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from ulid import ULID
 
@@ -26,6 +26,7 @@ from src.core.logging import get_logger
 from src.core.models.audit_log import EventType, audit
 from src.core.models.domain import Domain
 from src.core.models.notification_config import WatchNotificationConfig
+from src.core.models.notification_template import DomainNcRef, NotificationTemplate, WatchNcRef
 from src.core.models.snapshot import Snapshot
 from src.core.models.watch import ContentType, Watch
 from src.core.notifications.apprise_builder import (
@@ -1808,3 +1809,451 @@ async def system_page(
         "domains": domains,
     }
     return templates.TemplateResponse("pages/system.html", context)
+
+
+# ---------------------------------------------------------------------------
+# Notification Template Library — /notifications/*
+# ---------------------------------------------------------------------------
+
+
+@router.get("/partials/notification-templates-list")
+async def partial_notification_templates_list(
+    request: Request,
+    session: AsyncSession = Depends(get_db_session),
+):
+    """HTMX partial: notification template table rows (tbody content)."""
+    result = await session.execute(
+        select(NotificationTemplate).order_by(NotificationTemplate.title)
+    )
+    notification_templates = result.scalars().all()
+    return templates.TemplateResponse(
+        "partials/notification_template_list.html",
+        {"request": request, "notification_templates": notification_templates},
+    )
+
+
+@router.get("/notifications")
+async def notifications_page(
+    request: Request,
+    session: AsyncSession = Depends(get_db_session),
+):
+    """Notification template library page."""
+    result = await session.execute(
+        select(NotificationTemplate).order_by(NotificationTemplate.title)
+    )
+    notification_templates = result.scalars().all()
+    apprise_plugins = list_plugins()
+    return templates.TemplateResponse(
+        "pages/notifications.html",
+        {
+            "request": request,
+            "active_page": "notifications",
+            "notification_templates": notification_templates,
+            "apprise_plugins": apprise_plugins,
+        },
+    )
+
+
+@router.get("/notifications/add-row")
+async def notification_template_add_row(
+    request: Request,
+    session: AsyncSession = Depends(get_db_session),
+):
+    """HTMX: inline add-row form for a new notification template."""
+    apprise_plugins = list_plugins()
+    return templates.TemplateResponse(
+        "partials/notification_template_add_row.html",
+        {"request": request, "apprise_plugins": apprise_plugins},
+    )
+
+
+@router.post("/notifications/new")
+async def notification_template_create(
+    request: Request,
+    session: AsyncSession = Depends(get_db_session),
+):
+    """Create notification template from dashboard form. Returns refreshed list or error form."""
+    form = await request.form()
+    events = form.getlist("events")
+    schema_val = form.get("plugin_schema") or ""
+    title = str(form.get("title") or "").strip()
+    is_global_default = bool(form.get("is_global_default"))
+
+    if not title:
+        return templates.TemplateResponse(
+            "partials/notification_template_add_row.html",
+            {
+                "request": request,
+                "apprise_plugins": list_plugins(),
+                "error": "Title is required.",
+            },
+            headers={"HX-Retarget": "#template-add-row", "HX-Reswap": "outerHTML"},
+        )
+
+    # Determine Apprise URL: token builder or raw input
+    if schema_val:
+        tokens = {
+            key[4:]: str(value)
+            for key, value in form.items()
+            if key.startswith("tok_") and str(value).strip()
+        }
+        try:
+            variant_raw = form.get("variant")
+            variant_index = int(variant_raw) if variant_raw is not None else None
+            apprise_url = assemble_url(schema_val, tokens, variant_index=variant_index)
+        except ValueError as exc:
+            return templates.TemplateResponse(
+                "partials/notification_template_add_row.html",
+                {
+                    "request": request,
+                    "apprise_plugins": list_plugins(),
+                    "error": str(exc),
+                },
+                headers={"HX-Retarget": "#template-add-row", "HX-Reswap": "outerHTML"},
+            )
+    else:
+        apprise_url = str(form.get("apprise_url") or "")
+        try:
+            validate_apprise_url(apprise_url)
+        except ValueError as exc:
+            return templates.TemplateResponse(
+                "partials/notification_template_add_row.html",
+                {
+                    "request": request,
+                    "apprise_plugins": list_plugins(),
+                    "error": str(exc),
+                },
+                headers={"HX-Retarget": "#template-add-row", "HX-Reswap": "outerHTML"},
+            )
+
+    try:
+        validate_event_list(events)
+    except ValueError as exc:
+        return templates.TemplateResponse(
+            "partials/notification_template_add_row.html",
+            {
+                "request": request,
+                "apprise_plugins": list_plugins(),
+                "error": str(exc),
+            },
+            headers={"HX-Retarget": "#template-add-row", "HX-Reswap": "outerHTML"},
+        )
+
+    hint = get_service_name(schema_val) if schema_val else extract_channel_hint(apprise_url)
+    tpl = NotificationTemplate(
+        title=title,
+        apprise_url=encrypt_apprise_url(apprise_url),
+        channel_hint=hint,
+        events=events,
+        is_global_default=is_global_default,
+    )
+    session.add(tpl)
+    audit(
+        session,
+        EventType.NOTIFICATION_TEMPLATE_CREATED,
+        template_id=str(tpl.id),
+        title=title,
+        channel_hint=hint,
+        source="dashboard",
+    )
+    await session.commit()
+    result = await session.execute(
+        select(NotificationTemplate).order_by(NotificationTemplate.title)
+    )
+    notification_templates = result.scalars().all()
+    response = templates.TemplateResponse(
+        "partials/notification_template_list.html",
+        {"request": request, "notification_templates": notification_templates},
+    )
+    response.headers["HX-Trigger"] = "refreshTemplates"
+    return response
+
+
+@router.get("/notifications/{template_id}/edit-form")
+async def notification_template_edit_form(
+    request: Request,
+    template_id: str,
+    session: AsyncSession = Depends(get_db_session),
+):
+    """HTMX: edit form for an existing notification template (outerHTML swap on the row)."""
+    result = await session.execute(
+        select(NotificationTemplate).where(
+            NotificationTemplate.id == parse_ulid(template_id, "Template")
+        )
+    )
+    tpl = result.scalar_one_or_none()
+    if not tpl:
+        raise HTTPException(status_code=404, detail="Template not found")
+    decrypted_url = ""
+    decryption_failed = False
+    try:
+        decrypted_url = decrypt_apprise_url(tpl.apprise_url)
+    except (InvalidToken, ValueError):
+        decryption_failed = True
+    watch_count = (
+        await session.scalar(select(func.count()).where(WatchNcRef.template_id == tpl.id)) or 0
+    )
+    domain_count = (
+        await session.scalar(select(func.count()).where(DomainNcRef.template_id == tpl.id)) or 0
+    )
+    return templates.TemplateResponse(
+        "partials/notification_template_edit_form.html",
+        {
+            "request": request,
+            "tpl": tpl,
+            "decrypted_url": decrypted_url,
+            "decryption_failed": decryption_failed,
+            "watch_count": watch_count,
+            "domain_count": domain_count,
+        },
+    )
+
+
+@router.post("/notifications/{template_id}/edit")
+async def notification_template_edit(
+    request: Request,
+    template_id: str,
+    session: AsyncSession = Depends(get_db_session),
+):
+    """Save changes to a notification template. Returns refreshed list or retargeted error form."""
+    result = await session.execute(
+        select(NotificationTemplate).where(
+            NotificationTemplate.id == parse_ulid(template_id, "Template")
+        )
+    )
+    tpl = result.scalar_one_or_none()
+    if not tpl:
+        raise HTTPException(status_code=404, detail="Template not found")
+
+    form = await request.form()
+    apprise_url = str(form.get("apprise_url") or "").strip()
+    events = form.getlist("events")
+    title = str(form.get("title") or "").strip() or tpl.title
+    is_global_default = bool(form.get("is_global_default"))
+
+    try:
+        validate_apprise_url(apprise_url)
+    except ValueError as exc:
+        try:
+            decrypted_url = decrypt_apprise_url(tpl.apprise_url)
+        except (InvalidToken, ValueError):
+            decrypted_url = ""
+        watch_count = (
+            await session.scalar(select(func.count()).where(WatchNcRef.template_id == tpl.id)) or 0
+        )
+        domain_count = (
+            await session.scalar(select(func.count()).where(DomainNcRef.template_id == tpl.id)) or 0
+        )
+        response = templates.TemplateResponse(
+            "partials/notification_template_edit_form.html",
+            {
+                "request": request,
+                "tpl": tpl,
+                "decrypted_url": decrypted_url,
+                "error": str(exc),
+                "watch_count": watch_count,
+                "domain_count": domain_count,
+            },
+        )
+        response.headers["HX-Retarget"] = f"#tpl-{tpl.id}"
+        response.headers["HX-Reswap"] = "outerHTML"
+        return response
+
+    try:
+        validate_event_list(events)
+    except ValueError as exc:
+        try:
+            decrypted_url = decrypt_apprise_url(tpl.apprise_url)
+        except (InvalidToken, ValueError):
+            decrypted_url = ""
+        watch_count = (
+            await session.scalar(select(func.count()).where(WatchNcRef.template_id == tpl.id)) or 0
+        )
+        domain_count = (
+            await session.scalar(select(func.count()).where(DomainNcRef.template_id == tpl.id)) or 0
+        )
+        response = templates.TemplateResponse(
+            "partials/notification_template_edit_form.html",
+            {
+                "request": request,
+                "tpl": tpl,
+                "decrypted_url": decrypted_url,
+                "error": str(exc),
+                "watch_count": watch_count,
+                "domain_count": domain_count,
+            },
+        )
+        response.headers["HX-Retarget"] = f"#tpl-{tpl.id}"
+        response.headers["HX-Reswap"] = "outerHTML"
+        return response
+
+    tpl.title = title
+    tpl.apprise_url = encrypt_apprise_url(apprise_url)
+    tpl.channel_hint = extract_channel_hint(apprise_url)
+    tpl.events = events
+    tpl.is_global_default = is_global_default
+    audit(
+        session,
+        EventType.NOTIFICATION_TEMPLATE_UPDATED,
+        template_id=str(tpl.id),
+        title=tpl.title,
+        channel_hint=tpl.channel_hint,
+        source="dashboard",
+    )
+    await session.commit()
+    result2 = await session.execute(
+        select(NotificationTemplate).order_by(NotificationTemplate.title)
+    )
+    notification_templates = result2.scalars().all()
+    response = templates.TemplateResponse(
+        "partials/notification_template_list.html",
+        {"request": request, "notification_templates": notification_templates},
+    )
+    response.headers["HX-Trigger"] = "refreshTemplates"
+    return response
+
+
+@router.post("/notifications/{template_id}/toggle")
+async def notification_template_toggle(
+    request: Request,
+    template_id: str,
+    session: AsyncSession = Depends(get_db_session),
+):
+    """Toggle is_active on a notification template. Returns refreshed list."""
+    result = await session.execute(
+        select(NotificationTemplate).where(
+            NotificationTemplate.id == parse_ulid(template_id, "Template")
+        )
+    )
+    tpl = result.scalar_one_or_none()
+    if not tpl:
+        raise HTTPException(status_code=404, detail="Template not found")
+    tpl.is_active = not tpl.is_active
+    audit(
+        session,
+        EventType.NOTIFICATION_TEMPLATE_UPDATED,
+        template_id=str(tpl.id),
+        title=tpl.title,
+        is_active=tpl.is_active,
+        source="dashboard",
+    )
+    await session.commit()
+    result2 = await session.execute(
+        select(NotificationTemplate).order_by(NotificationTemplate.title)
+    )
+    notification_templates = result2.scalars().all()
+    response = templates.TemplateResponse(
+        "partials/notification_template_list.html",
+        {"request": request, "notification_templates": notification_templates},
+    )
+    response.headers["HX-Trigger"] = "refreshTemplates"
+    return response
+
+
+@router.delete("/notifications/{template_id}/delete")
+async def notification_template_delete(
+    request: Request,
+    template_id: str,
+    session: AsyncSession = Depends(get_db_session),
+):
+    """Delete a notification template (reject if refs exist). Returns refreshed list."""
+    result = await session.execute(
+        select(NotificationTemplate).where(
+            NotificationTemplate.id == parse_ulid(template_id, "Template")
+        )
+    )
+    tpl = result.scalar_one_or_none()
+    if not tpl:
+        raise HTTPException(status_code=404, detail="Template not found")
+
+    watch_count = (
+        await session.scalar(select(func.count()).where(WatchNcRef.template_id == tpl.id)) or 0
+    )
+    domain_count = (
+        await session.scalar(select(func.count()).where(DomainNcRef.template_id == tpl.id)) or 0
+    )
+    if watch_count or domain_count:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"Template is still referenced by {watch_count} watch(es)"
+                f" and {domain_count} domain(s)."
+            ),
+        )
+
+    audit(
+        session,
+        EventType.NOTIFICATION_TEMPLATE_DELETED,
+        template_id=str(tpl.id),
+        title=tpl.title,
+        source="dashboard",
+    )
+    await session.delete(tpl)
+    await session.commit()
+    result2 = await session.execute(
+        select(NotificationTemplate).order_by(NotificationTemplate.title)
+    )
+    notification_templates = result2.scalars().all()
+    response = templates.TemplateResponse(
+        "partials/notification_template_list.html",
+        {"request": request, "notification_templates": notification_templates},
+    )
+    response.headers["HX-Trigger"] = "refreshTemplates"
+    return response
+
+
+@router.post("/notifications/{template_id}/test-result")
+async def notification_template_test_result(
+    request: Request,
+    template_id: str,
+    session: AsyncSession = Depends(get_db_session),
+):
+    """Send a test notification for a template and return an OOB flash."""
+    result = await session.execute(
+        select(NotificationTemplate).where(
+            NotificationTemplate.id == parse_ulid(template_id, "Template")
+        )
+    )
+    tpl = result.scalar_one_or_none()
+    if not tpl:
+        raise HTTPException(status_code=404, detail="Template not found")
+
+    event = WatchEvent(
+        event_type=WatchEventType.CHANGE_DETECTED,
+        watch_id="test",
+        watch_name="Test Notification",
+        watch_url="https://example.com",
+        occurred_at=datetime.now(UTC),
+        metadata={"test": True},
+    )
+    try:
+        outcome = await dispatch_event(event, tpl.apprise_url)
+    except Exception:
+        logger.exception("test notification error", extra={"template_id": template_id})
+        reason = "Internal error during dispatch"
+        success = False
+    else:
+        success = outcome.success
+        reason = outcome.reason
+
+    audit(
+        session,
+        EventType.NOTIFICATION_TEMPLATE_TESTED,
+        template_id=str(tpl.id),
+        title=tpl.title,
+        channel_hint=tpl.channel_hint,
+        success=success,
+        reason=reason,
+        source="dashboard",
+    )
+    await session.commit()
+    level = "success" if success else "error"
+    message = f"Test notification: {reason}"
+    return templates.TemplateResponse(
+        "partials/flash_oob.html",
+        {
+            "request": request,
+            "flash_oob_level": level,
+            "flash_oob_message": message,
+        },
+    )

@@ -1,0 +1,78 @@
+{# Single row for a notification template in the library table. #}
+{# Expects: tpl (NotificationTemplate). #}
+
+<tr id="tpl-{{ tpl.id }}">
+  <td class="font-medium text-gray-900 dark:text-white">
+    {% if tpl.is_global_default %}
+    <span aria-hidden="true">🔒</span>
+    {% endif %}
+    {{ tpl.title }}
+  </td>
+  <td>
+    <span class="chip">{{ tpl.channel_hint }}</span>
+  </td>
+  <td>
+    <div class="chip-group">
+      {% for ev in tpl.events %}
+      <span class="chip">{{ event_titles.get(ev, ev) }}</span>
+      {% endfor %}
+    </div>
+  </td>
+  <td>
+    {% if tpl.is_global_default %}
+    <span class="badge badge-info">Global default</span>
+    {% else %}
+    <span class="text-gray-400 dark:text-gray-600 text-sm">—</span>
+    {% endif %}
+  </td>
+  <td>
+    {% if tpl.is_active %}
+    <span class="badge badge-active">Active</span>
+    {% else %}
+    <span class="badge badge-inactive">Inactive</span>
+    {% endif %}
+  </td>
+  <td>
+    <div class="flex items-center gap-2 justify-end">
+      {# Edit #}
+      <button
+        hx-get="/notifications/{{ tpl.id }}/edit-form"
+        hx-target="#tpl-{{ tpl.id }}"
+        hx-swap="outerHTML"
+        class="btn btn-secondary text-xs min-h-[44px] htmx-request:opacity-60"
+        aria-label="Edit {{ tpl.title }} notification template">
+        Edit
+      </button>
+
+      {# Test — OOB flash response, no local swap needed #}
+      <button
+        hx-post="/notifications/{{ tpl.id }}/test-result"
+        hx-swap="none"
+        class="btn btn-secondary text-xs min-h-[44px] htmx-request:opacity-60"
+        aria-label="Send test notification for {{ tpl.title }}">
+        Test
+      </button>
+
+      {# Toggle active/inactive #}
+      <button
+        hx-post="/notifications/{{ tpl.id }}/toggle"
+        hx-target="#templates-tbody"
+        hx-swap="innerHTML"
+        class="btn btn-secondary text-xs min-h-[44px] htmx-request:opacity-60"
+        aria-label="{{ 'Pause' if tpl.is_active else 'Activate' }} {{ tpl.title }}">
+        {{ "Pause" if tpl.is_active else "Activate" }}
+      </button>
+
+      {# Delete #}
+      <button
+        hx-delete="/notifications/{{ tpl.id }}/delete"
+        hx-confirm="Delete template &quot;{{ tpl.title }}&quot;? This cannot be undone."
+        hx-target="#templates-tbody"
+        hx-swap="innerHTML"
+        class="btn btn-danger-outline text-xs min-h-[44px] htmx-request:opacity-60"
+        aria-label="Delete {{ tpl.title }} notification template">
+        Delete
+      </button>
+    </div>
+  </td>
+</tr>

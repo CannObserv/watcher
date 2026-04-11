@@ -55,7 +55,10 @@ async def _assign_default_templates(session: AsyncSession, watch: Watch) -> None
             await session.flush()
 
     except Exception:
-        logger.warning("Failed to assign default NC templates to watch", watch_id=str(watch.id))
+        logger.warning(
+            "Failed to assign default NC templates to watch",
+            extra={"watch_id": str(watch.id)},
+        )
 
 
 @router.post("", status_code=201, response_model=WatchResponse)

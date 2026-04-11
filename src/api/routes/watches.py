@@ -31,11 +31,10 @@ async def _assign_default_templates(session: AsyncSession, watch: Watch) -> None
     try:
         template_ids: set = set()
 
-        # Global defaults
+        # Global defaults — assigned regardless of is_active; inactivity is temporary
         global_result = await session.execute(
             select(NotificationTemplate.id).where(
                 NotificationTemplate.is_global_default.is_(True),
-                NotificationTemplate.is_active.is_(True),
             )
         )
         template_ids.update(row[0] for row in global_result)

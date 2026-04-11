@@ -7,7 +7,6 @@ from datetime import UTC, datetime
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from ulid import ULID
 
 from src.api.dependencies import get_db_session
 from src.api.routes.helpers import get_watch_or_404
@@ -17,7 +16,7 @@ from src.api.schemas.notification_template import (
     NotificationTemplateResponse,
     NotificationTemplateUpdate,
 )
-from src.core.crypto import decrypt_apprise_url, encrypt_apprise_url
+from src.core.crypto import encrypt_apprise_url
 from src.core.logging import get_logger
 from src.core.models.audit_log import EventType, audit
 from src.core.models.notification_template import DomainNcRef, NotificationTemplate, WatchNcRef
@@ -193,10 +192,10 @@ async def unassign_template_from_watch(
     session: AsyncSession = Depends(get_db_session),
 ) -> None:
     """Unassign a notification template from a watch."""
-    watch_ulid = ULID.from_str(watch_id)
+    watch = await get_watch_or_404(watch_id, session)
     result = await session.execute(
         select(WatchNcRef).where(
-            WatchNcRef.watch_id == watch_ulid,
+            WatchNcRef.watch_id == watch.id,
             WatchNcRef.template_id == template_id,  # type: ignore[arg-type]
         )
     )
@@ -222,8 +221,7 @@ async def test_template(
         occurred_at=datetime.now(UTC),
     )
     try:
-        url = decrypt_apprise_url(tpl.apprise_url)
-        result = await dispatch_event(event, url)
+        result = await dispatch_event(event, tpl.apprise_url)
         audit(session, EventType.NOTIFICATION_TEMPLATE_TESTED, template_id=template_id)
         await session.commit()
         return {"success": result.success, "reason": result.reason}

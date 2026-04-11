@@ -48,8 +48,10 @@ async def test_watch_create_assigns_global_default_template(client: AsyncClient,
     assert str(refs[0].template_id) == str(tpl.id)
 
 
-async def test_watch_create_inactive_template_not_assigned(client: AsyncClient, db_session):
-    """Inactive global-default templates are not assigned."""
+async def test_watch_create_inactive_global_default_is_still_assigned(
+    client: AsyncClient, db_session
+):
+    """Inactive global-default templates are still assigned — inactivity is temporary."""
     tpl = NotificationTemplate(
         title="Inactive Template",
         apprise_url=encrypt_apprise_url(VALID_URL),
@@ -64,7 +66,7 @@ async def test_watch_create_inactive_template_not_assigned(client: AsyncClient, 
     resp = await client.post(
         "/api/v1/watches",
         json={
-            "name": "No-assign Test",
+            "name": "Inactive-assign Test",
             "url": "https://inactive-test.example.com",
             "content_type": "html",
         },
@@ -76,7 +78,8 @@ async def test_watch_create_inactive_template_not_assigned(client: AsyncClient, 
         select(WatchNcRef).where(WatchNcRef.watch_id == ULID.from_str(watch_id))
     )
     refs = result.scalars().all()
-    assert len(refs) == 0
+    assert len(refs) == 1
+    assert str(refs[0].template_id) == str(tpl.id)
 
 
 async def test_watch_create_assigns_domain_default_template(client: AsyncClient, db_session):

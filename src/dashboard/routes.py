@@ -1274,7 +1274,10 @@ async def domain_nc_defaults_assign_row(
 
     all_result = await session.execute(
         select(NotificationTemplate)
-        .where(NotificationTemplate.is_active.is_(True))
+        .where(
+            NotificationTemplate.is_active.is_(True),
+            NotificationTemplate.is_global_default.is_(False),
+        )
         .order_by(NotificationTemplate.title)
     )
     all_templates = all_result.scalars().all()
@@ -1290,8 +1293,12 @@ async def domain_nc_defaults_assign_row(
 async def domain_nc_defaults_add_template_row(
     request: Request,
     domain_name: str,
+    session: AsyncSession = Depends(get_db_session),
 ):
     """HTMX: inline create-and-link form for a new domain-scoped notification template."""
+    domain = await session.scalar(select(Domain).where(Domain.name == domain_name))
+    if not domain:
+        raise HTTPException(status_code=404, detail="Domain not found")
     apprise_plugins = list_plugins()
     return templates.TemplateResponse(
         request,
@@ -1914,11 +1921,7 @@ async def _render_watch_notifications(
         )
         .order_by(NotificationTemplate.title)
     )
-    unassigned_templates = [
-        t
-        for t in all_result.scalars().all()
-        if str(t.id) not in all_watch_ids and str(t.id) not in domain_ids
-    ]
+    unassigned_templates = [t for t in all_result.scalars().all() if str(t.id) not in all_watch_ids]
 
     return templates.TemplateResponse(
         "partials/watch_notifications.html",

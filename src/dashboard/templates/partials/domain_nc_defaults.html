@@ -10,14 +10,6 @@
       <h4 class="text-sm font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide">
         <span aria-hidden="true">🔒</span> Global
       </h4>
-      <button
-        hx-get="/domains/{{ domain_name }}/nc-defaults/assign-row"
-        hx-target="#global-nc-tbody"
-        hx-swap="afterbegin"
-        hx-on::before-request="if(document.getElementById('nc-domain-assign-row')){event.preventDefault();}"
-        class="btn btn-secondary text-xs min-h-[44px] htmx-request:opacity-60">
-        + Assign
-      </button>
     </div>
     <div class="rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden">
       <table class="data-table w-full">
@@ -126,7 +118,7 @@
                 <a
                   href="/notifications?edit={{ tpl.id }}"
                   class="btn btn-secondary text-xs min-h-[44px]"
-                  aria-label="Edit {{ tpl.title }} in the global template library">
+                  aria-label="Edit {{ tpl.title }} in the template library">
                   Edit
                 </a>
                 <button

@@ -1229,7 +1229,6 @@ async def _render_domain_nc_defaults(request: Request, domain_name: str, session
         .order_by(NotificationTemplate.title)
     )
     assigned = assigned_result.scalars().all()
-    assigned_ids = {str(t.id) for t in assigned}
 
     global_result = await session.execute(
         select(NotificationTemplate)
@@ -1238,20 +1237,12 @@ async def _render_domain_nc_defaults(request: Request, domain_name: str, session
     )
     global_templates = global_result.scalars().all()
 
-    all_result = await session.execute(
-        select(NotificationTemplate)
-        .where(NotificationTemplate.is_active.is_(True))
-        .order_by(NotificationTemplate.title)
-    )
-    all_templates = all_result.scalars().all()
-    unassigned = [t for t in all_templates if str(t.id) not in assigned_ids]
     return templates.TemplateResponse(
         request,
         "partials/domain_nc_defaults.html",
         {
             "domain_name": domain_name,
             "assigned": assigned,
-            "unassigned": unassigned,
             "global_templates": global_templates,
         },
     )

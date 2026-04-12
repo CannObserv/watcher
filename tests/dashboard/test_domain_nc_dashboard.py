@@ -300,3 +300,20 @@ class TestAssignRow:
         )
         assert resp.status_code == 200
         assert b"UnassignedForDomain" in resp.content
+
+    @pytest.mark.integration
+    async def test_assign_row_excludes_global_templates(self, client: AsyncClient, db_session):
+        """Global (is_global_default=True) templates must not appear in the domain picker.
+
+        Assigning a global template as a domain default would cause double-dispatch
+        (both the global and domain sources would fire for watches in that domain).
+        """
+        await _make_domain(db_session, "global-excl.example.com")
+        await _make_template(db_session, "GlobalShouldBeHidden", is_global_default=True)
+
+        resp = await client.get(
+            "/domains/global-excl.example.com/nc-defaults/assign-row",
+            headers={"HX-Request": "true"},
+        )
+        assert resp.status_code == 200
+        assert b"GlobalShouldBeHidden" not in resp.content

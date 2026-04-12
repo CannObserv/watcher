@@ -1,6 +1,6 @@
 {# Notification defaults for a domain — global templates + domain-assigned templates. #}
 {# Expects: domain_name (str), assigned (list[NotificationTemplate]), #}
-{#          global_templates (list[NotificationTemplate]). #}
+{#          global_templates (list[NotificationTemplate]), has_assignable (bool). #}
 
 <div id="domain-nc-defaults" class="space-y-6" aria-live="polite">
 
@@ -82,11 +82,14 @@
           + Create New
         </button>
         <button
+          {% if has_assignable %}
           hx-get="/domains/{{ domain_name }}/nc-defaults/assign-row"
           hx-target="#domain-nc-tbody"
           hx-swap="afterbegin"
           hx-on::before-request="if(document.getElementById('nc-domain-assign-row')){event.preventDefault();}"
-          class="btn btn-secondary text-xs min-h-[44px] htmx-request:opacity-60">
+          {% endif %}
+          class="btn btn-secondary text-xs min-h-[44px] htmx-request:opacity-60"
+          {% if not has_assignable %}disabled aria-disabled="true" title="No templates available to assign"{% endif %}>
           + Assign Existing
         </button>
       </div>

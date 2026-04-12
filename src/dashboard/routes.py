@@ -1229,6 +1229,7 @@ async def _render_domain_nc_defaults(request: Request, domain_name: str, session
         .order_by(NotificationTemplate.title)
     )
     assigned = assigned_result.scalars().all()
+    assigned_ids = {str(t.id) for t in assigned}
 
     global_result = await session.execute(
         select(NotificationTemplate)
@@ -1237,6 +1238,16 @@ async def _render_domain_nc_defaults(request: Request, domain_name: str, session
     )
     global_templates = global_result.scalars().all()
 
+    # Count assignable templates: active, non-global, not already assigned to this domain.
+    # Used to disable the + Assign Existing button when empty.
+    assignable_result = await session.execute(
+        select(NotificationTemplate).where(
+            NotificationTemplate.is_active.is_(True),
+            NotificationTemplate.is_global_default.is_(False),
+        )
+    )
+    has_assignable = any(str(t.id) not in assigned_ids for t in assignable_result.scalars().all())
+
     return templates.TemplateResponse(
         request,
         "partials/domain_nc_defaults.html",
@@ -1244,6 +1255,7 @@ async def _render_domain_nc_defaults(request: Request, domain_name: str, session
             "domain_name": domain_name,
             "assigned": assigned,
             "global_templates": global_templates,
+            "has_assignable": has_assignable,
         },
     )
 

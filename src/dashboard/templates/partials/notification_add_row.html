@@ -53,7 +53,8 @@
                 hx-vals='js:{schema: htmx.find("#channel-picker").value}'
                 hx-target="#plugin-token-form"
                 hx-swap="outerHTML"
-                hx-trigger="click[htmx.find('#channel-picker').value !== '']">
+                hx-trigger="click[htmx.find('#channel-picker').value !== '']"
+                onclick="if(!htmx.find('#channel-picker').value) htmx.find('#plugin-token-form').innerHTML=''">
               <span class="text-xs">Builder</span>
             </label>
             <label class="segment">

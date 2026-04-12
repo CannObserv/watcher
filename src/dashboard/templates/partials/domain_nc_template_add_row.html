@@ -37,7 +37,7 @@
             name="_channel_picker"
             class="form-input"
             hx-get="/partials/apprise-plugin-form"
-            hx-target="#domain-nc-plugin-token-form"
+            hx-target="#plugin-token-form"
             hx-swap="outerHTML"
             hx-vals='js:{schema: htmx.find("#domain-nc-tpl-channel-{{ domain_name }}").value}'
             hx-trigger="change"
@@ -54,15 +54,16 @@
               <input type="radio" name="_url_mode_domain_nc" value="builder" checked
                 hx-get="/partials/apprise-plugin-form"
                 hx-vals='js:{schema: htmx.find("#domain-nc-tpl-channel-{{ domain_name }}").value}'
-                hx-target="#domain-nc-plugin-token-form"
+                hx-target="#plugin-token-form"
                 hx-swap="outerHTML"
-                hx-trigger="click[htmx.find('#domain-nc-tpl-channel-{{ domain_name }}').value !== '']">
+                hx-trigger="click[htmx.find('#domain-nc-tpl-channel-{{ domain_name }}').value !== '']"
+                onclick="if(!htmx.find('#domain-nc-tpl-channel-{{ domain_name }}').value) htmx.find('#plugin-token-form').innerHTML=''">
               <span class="text-xs">Builder</span>
             </label>
             <label class="segment">
               <input type="radio" name="_url_mode_domain_nc" value="manual"
                 hx-get="/partials/apprise-plugin-form?raw=1"
-                hx-target="#domain-nc-plugin-token-form"
+                hx-target="#plugin-token-form"
                 hx-swap="outerHTML">
               <span class="text-xs">Manual</span>
             </label>
@@ -71,7 +72,7 @@
       </div>
 
       {# Token fields (HTMX target) #}
-      <div id="domain-nc-plugin-token-form"></div>
+      <div id="plugin-token-form"></div>
 
       {# Events #}
       <fieldset>

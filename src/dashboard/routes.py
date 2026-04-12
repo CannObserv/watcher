@@ -1286,6 +1286,110 @@ async def domain_nc_defaults_assign_row(
     )
 
 
+@router.get("/domains/{domain_name}/nc-defaults/add-template-row")
+async def domain_nc_defaults_add_template_row(
+    request: Request,
+    domain_name: str,
+):
+    """HTMX: inline create-and-link form for a new domain-scoped notification template."""
+    apprise_plugins = list_plugins()
+    return templates.TemplateResponse(
+        request,
+        "partials/domain_nc_template_add_row.html",
+        {"domain_name": domain_name, "apprise_plugins": apprise_plugins},
+    )
+
+
+@router.post("/domains/{domain_name}/nc-defaults/new")
+async def domain_nc_defaults_create_template(
+    request: Request,
+    domain_name: str,
+    session: AsyncSession = Depends(get_db_session),
+):
+    """Create a NotificationTemplate and link it to this domain via DomainNcRef."""
+    if request.headers.get("HX-Request") != "true":
+        return RedirectResponse(url=f"/domains/{domain_name}", status_code=303)
+
+    domain = await session.scalar(select(Domain).where(Domain.name == domain_name))
+    if not domain:
+        raise HTTPException(status_code=404, detail="Domain not found")
+
+    form = await request.form()
+    title = str(form.get("title") or "").strip()
+    events = form.getlist("events")
+    schema_val = form.get("plugin_schema") or ""
+    apprise_plugins = list_plugins()
+
+    def _error(msg: str):
+        return templates.TemplateResponse(
+            request,
+            "partials/domain_nc_template_add_row.html",
+            {
+                "domain_name": domain_name,
+                "apprise_plugins": apprise_plugins,
+                "error": msg,
+            },
+            headers={"HX-Retarget": "#domain-nc-add-row", "HX-Reswap": "outerHTML"},
+        )
+
+    if not title:
+        return _error("Title is required.")
+
+    if schema_val:
+        tokens = {
+            key[4:]: str(value)
+            for key, value in form.items()
+            if key.startswith("tok_") and str(value).strip()
+        }
+        try:
+            variant_raw = form.get("variant")
+            variant_index = int(variant_raw) if variant_raw is not None else None
+            apprise_url = assemble_url(schema_val, tokens, variant_index=variant_index)
+        except ValueError as exc:
+            return _error(str(exc))
+    else:
+        apprise_url = str(form.get("apprise_url") or "")
+        try:
+            validate_apprise_url(apprise_url)
+        except ValueError as exc:
+            return _error(str(exc))
+
+    try:
+        validate_event_list(events)
+    except ValueError as exc:
+        return _error(str(exc))
+
+    hint = get_service_name(schema_val) if schema_val else extract_channel_hint(apprise_url)
+    tpl = NotificationTemplate(
+        title=title,
+        apprise_url=encrypt_apprise_url(apprise_url),
+        channel_hint=hint,
+        events=events,
+        is_global_default=False,
+        is_active=True,
+    )
+    session.add(tpl)
+    await session.flush()
+    session.add(DomainNcRef(domain_name=domain_name, template_id=tpl.id))
+    audit(
+        session,
+        EventType.NOTIFICATION_TEMPLATE_CREATED,
+        template_id=str(tpl.id),
+        title=title,
+        channel_hint=hint,
+        source="domain_dashboard",
+        domain_name=domain_name,
+    )
+    audit(
+        session,
+        EventType.DOMAIN_NC_DEFAULT_ADDED,
+        domain_name=domain_name,
+        template_id=str(tpl.id),
+    )
+    await session.commit()
+    return await _render_domain_nc_defaults(request, domain_name, session)
+
+
 @router.get("/domains/{domain_name}/nc-defaults")
 async def domain_nc_defaults_partial(
     request: Request,
@@ -1758,29 +1862,73 @@ async def _render_watch_notifications(
     watch,
     session: AsyncSession,
 ):
-    """Fetch notifications + assigned templates and render watch_notifications partial."""
+    """Fetch notifications for all four sources and render watch_notifications partial.
+
+    Sources (in display order):
+      global_templates  — NotificationTemplate.is_global_default=True
+      domain_templates  — DomainNcRef for watch.effective_domain
+      watch_templates   — WatchNcRef for this watch, minus global/domain ids
+      notifications     — WatchNotificationConfig for this watch (local)
+    """
     notifications = await get_watch_notifications(session, watch.id)
-    assigned_result = await session.execute(
+
+    # 1. Global templates
+    global_result = await session.execute(
+        select(NotificationTemplate)
+        .where(NotificationTemplate.is_global_default.is_(True))
+        .order_by(NotificationTemplate.title)
+    )
+    global_templates = global_result.scalars().all()
+    global_ids = {str(t.id) for t in global_templates}
+
+    # 2. Domain templates
+    domain_templates = []
+    domain_ids: set[str] = set()
+    if watch.effective_domain:
+        domain_result = await session.execute(
+            select(NotificationTemplate)
+            .join(DomainNcRef, DomainNcRef.template_id == NotificationTemplate.id)
+            .where(DomainNcRef.domain_name == watch.effective_domain)
+            .order_by(NotificationTemplate.title)
+        )
+        domain_templates = domain_result.scalars().all()
+        domain_ids = {str(t.id) for t in domain_templates}
+
+    # 3. Watch-assigned templates — exclude any already shown as global/domain
+    auto_ids = global_ids | domain_ids
+    watch_tpl_result = await session.execute(
         select(NotificationTemplate)
         .join(WatchNcRef, WatchNcRef.template_id == NotificationTemplate.id)
         .where(WatchNcRef.watch_id == watch.id)
         .order_by(NotificationTemplate.title)
     )
-    assigned_templates = assigned_result.scalars().all()
+    watch_templates = [t for t in watch_tpl_result.scalars().all() if str(t.id) not in auto_ids]
+
+    # Unassigned picker: active templates not global, not domain, not already watch-assigned
+    all_watch_ids = auto_ids | {str(t.id) for t in watch_templates}
     all_result = await session.execute(
         select(NotificationTemplate)
-        .where(NotificationTemplate.is_active.is_(True))
+        .where(
+            NotificationTemplate.is_active.is_(True),
+            NotificationTemplate.is_global_default.is_(False),
+        )
         .order_by(NotificationTemplate.title)
     )
-    assigned_ids = {str(t.id) for t in assigned_templates}
-    unassigned_templates = [t for t in all_result.scalars().all() if str(t.id) not in assigned_ids]
+    unassigned_templates = [
+        t
+        for t in all_result.scalars().all()
+        if str(t.id) not in all_watch_ids and str(t.id) not in domain_ids
+    ]
+
     return templates.TemplateResponse(
         "partials/watch_notifications.html",
         {
             "request": request,
             "watch": watch,
             "notifications": notifications,
-            "assigned_templates": assigned_templates,
+            "global_templates": global_templates,
+            "domain_templates": domain_templates,
+            "watch_templates": watch_templates,
             "unassigned_templates": unassigned_templates,
         },
     )
@@ -1792,22 +1940,40 @@ async def watch_nc_assign_row(
     watch_id: str,
     session: AsyncSession = Depends(get_db_session),
 ):
-    """HTMX partial: inline assign-row form with picker of unassigned templates."""
+    """HTMX partial: inline assign-row form with picker of assignable templates.
+
+    Excludes: global defaults (auto-dispatched), domain defaults for this watch's
+    domain (auto-dispatched), and templates already assigned via WatchNcRef.
+    """
     watch = await get_watch_detail(session, watch_id)
     if not watch:
         raise HTTPException(status_code=404, detail="Watch not found")
+
+    # Already-assigned watch templates
     assigned_result = await session.execute(
         select(NotificationTemplate.id)
         .join(WatchNcRef, WatchNcRef.template_id == NotificationTemplate.id)
         .where(WatchNcRef.watch_id == watch.id)
     )
-    assigned_ids = {str(row[0]) for row in assigned_result}
+    excluded_ids = {str(row[0]) for row in assigned_result}
+
+    # Domain templates for this watch's domain (auto-dispatched, don't show in picker)
+    if watch.effective_domain:
+        domain_result = await session.execute(
+            select(DomainNcRef.template_id).where(DomainNcRef.domain_name == watch.effective_domain)
+        )
+        excluded_ids.update(str(row[0]) for row in domain_result)
+
+    # Active, non-global templates not already excluded
     all_result = await session.execute(
         select(NotificationTemplate)
-        .where(NotificationTemplate.is_active.is_(True))
+        .where(
+            NotificationTemplate.is_active.is_(True),
+            NotificationTemplate.is_global_default.is_(False),
+        )
         .order_by(NotificationTemplate.title)
     )
-    unassigned = [t for t in all_result.scalars().all() if str(t.id) not in assigned_ids]
+    unassigned = [t for t in all_result.scalars().all() if str(t.id) not in excluded_ids]
     return templates.TemplateResponse(
         "partials/watch_nc_assign_row.html",
         {

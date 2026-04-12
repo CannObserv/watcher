@@ -1,217 +1,242 @@
-{# Notification config table for a single watch. #}
-{# Expects: watch, notifications (list of WatchNotificationConfig); #}
-{#          assigned_templates (list of NotificationTemplate, may be empty); #}
-{#          unassigned_templates (list of NotificationTemplate, may be empty); #}
+{# Unified notification table for a single watch. #}
+{# Expects: watch, notifications (list[WatchNotificationConfig]), #}
+{#          global_templates (list[NotificationTemplate]), #}
+{#          domain_templates (list[NotificationTemplate]), #}
+{#          watch_templates (list[NotificationTemplate]), #}
+{#          unassigned_templates (list[NotificationTemplate]), #}
 {#          optional error (str). #}
 
-<div id="watch-notifications-list" class="space-y-6" aria-live="polite" aria-atomic="false">
+<div id="watch-notifications-list" class="space-y-4" aria-live="polite" aria-atomic="false">
 
-  {# ── Global section ──────────────────────────────────────────────────── #}
-  <section>
-    <div class="flex items-center justify-between mb-2">
-      <h3 class="text-sm font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide">
-        <span aria-hidden="true">🔒</span> Global
-      </h3>
-      <button
-        hx-get="/watches/{{ watch.id }}/notifications/assign-row"
-        hx-target="#global-tbody"
-        hx-swap="afterbegin"
-        hx-on::before-request="if(document.getElementById('nc-assign-row')){event.preventDefault();}"
-        class="btn btn-secondary text-xs min-h-[44px] htmx-request:opacity-60">
-        + Assign
-      </button>
-    </div>
-    <div class="rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden">
-      <table class="data-table w-full">
-        <thead>
-          <tr>
-            <th scope="col" class="w-full">Title</th>
-            <th scope="col" class="w-28">Channel</th>
-            <th scope="col" class="w-24">Status</th>
-            <th scope="col"><span class="sr-only">Actions</span></th>
-          </tr>
-        </thead>
-        <tbody id="global-tbody">
-          {% for tpl in assigned_templates %}
-          <tr class="bg-co-purple-50 dark:bg-co-purple-950/20" id="tpl-ref-{{ tpl.id }}">
-            <td class="font-medium text-gray-900 dark:text-white">
-              <span aria-hidden="true">🔒</span> {{ tpl.title }}
-            </td>
-            <td>
-              <span class="chip">{{ tpl.channel_hint }}</span>
-            </td>
-            <td>
-              {% if tpl.is_active %}
-              <span class="badge badge-active">Active</span>
-              {% else %}
-              <span class="badge badge-inactive">Inactive</span>
-              {% endif %}
-            </td>
-            <td>
-              <div class="flex items-center gap-2 justify-end">
-                {# Edit in global template library — ?edit opens the row in edit mode #}
-                <a
-                  href="/notifications?edit={{ tpl.id }}"
-                  class="btn btn-secondary text-xs min-h-[44px]"
-                  aria-label="Edit {{ tpl.title }} in the global template library">
-                  Edit
-                </a>
+  {# ── Action buttons ────────────────────────────────────────��────────────── #}
+  <div class="flex items-center gap-2 justify-end">
+    <button
+      hx-get="/watches/{{ watch.id }}/notifications/assign-row"
+      hx-target="#notifications-tbody"
+      hx-swap="afterbegin"
+      hx-on::before-request="if(document.getElementById('nc-assign-row')){event.preventDefault();}"
+      class="btn btn-secondary text-xs min-h-[44px] htmx-request:opacity-60">
+      + Assign Template
+    </button>
+    <button
+      hx-get="/watches/{{ watch.id }}/notifications/add-row"
+      hx-target="#notifications-tbody"
+      hx-swap="afterbegin"
+      hx-on::before-request="if(document.getElementById('notification-add-row')){event.preventDefault();}"
+      hx-on::after-request="if(event.detail.successful){const e=document.getElementById('notifications-empty-state');if(e)e.remove();}"
+      class="btn btn-secondary text-xs min-h-[44px] htmx-request:opacity-60">
+      + Add Local
+    </button>
+  </div>
 
-                {# Test — response is an OOB flash #}
-                <button
-                  hx-post="/notifications/{{ tpl.id }}/test-result"
-                  hx-swap="none"
-                  class="btn btn-secondary text-xs min-h-[44px] htmx-request:opacity-60"
-                  aria-label="Send test notification for {{ tpl.channel_hint }}">
-                  Test
-                </button>
+  {# ── Unified table ──────────────────────────────────────────────────────── #}
+  <div class="rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden">
+    <table class="data-table w-full">
+      <thead>
+        <tr>
+          <th scope="col" class="w-full">Title</th>
+          <th scope="col" class="w-28">Channel</th>
+          <th scope="col" class="w-24">Source</th>
+          <th scope="col" class="w-24">Status</th>
+          <th scope="col"><span class="sr-only">Actions</span></th>
+        </tr>
+      </thead>
+      <tbody id="notifications-tbody">
 
-                {# Duplicate to local #}
-                <button
-                  hx-post="/watches/{{ watch.id }}/notifications/copy-template/{{ tpl.id }}"
-                  hx-target="#watch-notifications"
-                  hx-swap="innerHTML"
-                  hx-confirm="Copy this template to a local notification config and unassign it?"
-                  class="btn btn-secondary text-xs min-h-[44px] htmx-request:opacity-60"
-                  aria-label="Duplicate {{ tpl.title }} as a local config">
-                  Duplicate
-                </button>
+        {# ── Global rows (read-only) ─────────────────────────────────────── #}
+        {% for tpl in global_templates %}
+        <tr class="bg-co-purple-50 dark:bg-co-purple-950/20" id="tpl-global-{{ tpl.id }}">
+          <td class="font-medium text-gray-900 dark:text-white">
+            <span aria-hidden="true">🔒</span> {{ tpl.title }}
+          </td>
+          <td><span class="chip">{{ tpl.channel_hint }}</span></td>
+          <td><span class="chip">Global</span></td>
+          <td>
+            {% if tpl.is_active %}
+            <span class="badge badge-active">Active</span>
+            {% else %}
+            <span class="badge badge-inactive">Inactive</span>
+            {% endif %}
+          </td>
+          <td>
+            <div class="flex items-center gap-2 justify-end">
+              <a
+                href="/notifications?edit={{ tpl.id }}"
+                class="btn btn-secondary text-xs min-h-[44px]"
+                aria-label="Edit {{ tpl.title }} in the global template library">
+                Edit
+              </a>
+              <button
+                hx-post="/notifications/{{ tpl.id }}/test-result"
+                hx-swap="none"
+                class="btn btn-secondary text-xs min-h-[44px] htmx-request:opacity-60"
+                aria-label="Send test notification for {{ tpl.channel_hint }}">
+                Test
+              </button>
+            </div>
+          </td>
+        </tr>
+        {% endfor %}
 
-                {# Unassign #}
-                <button
-                  hx-post="/watches/{{ watch.id }}/notifications/unassign/{{ tpl.id }}"
-                  hx-target="#watch-notifications"
-                  hx-swap="innerHTML"
-                  hx-confirm="Remove this template assignment from the watch?"
-                  class="btn btn-danger-outline text-xs min-h-[44px] htmx-request:opacity-60"
-                  aria-label="Unassign {{ tpl.title }} from this watch">
-                  Unassign
-                </button>
-              </div>
-            </td>
-          </tr>
-          {% endfor %}
-          {% if not assigned_templates %}
-          <tr id="global-empty-state">
-            <td colspan="4" class="px-4 py-3 text-sm text-gray-500 dark:text-gray-400">
-              No global templates assigned.
-            </td>
-          </tr>
-          {% endif %}
-        </tbody>
-      </table>
-    </div>
-  </section>
+        {# ── Domain rows (read-only) ─────────────────────────────────────── #}
+        {% for tpl in domain_templates %}
+        <tr class="bg-blue-50 dark:bg-blue-950/20" id="tpl-domain-{{ tpl.id }}">
+          <td class="font-medium text-gray-900 dark:text-white">
+            <span aria-hidden="true">🏢</span> {{ tpl.title }}
+          </td>
+          <td><span class="chip">{{ tpl.channel_hint }}</span></td>
+          <td><span class="chip">Domain</span></td>
+          <td>
+            {% if tpl.is_active %}
+            <span class="badge badge-active">Active</span>
+            {% else %}
+            <span class="badge badge-inactive">Inactive</span>
+            {% endif %}
+          </td>
+          <td>
+            <div class="flex items-center gap-2 justify-end">
+              <a
+                href="/notifications?edit={{ tpl.id }}"
+                class="btn btn-secondary text-xs min-h-[44px]"
+                aria-label="Edit {{ tpl.title }} in the template library">
+                Edit
+              </a>
+              <button
+                hx-post="/notifications/{{ tpl.id }}/test-result"
+                hx-swap="none"
+                class="btn btn-secondary text-xs min-h-[44px] htmx-request:opacity-60"
+                aria-label="Send test notification for {{ tpl.channel_hint }}">
+                Test
+              </button>
+            </div>
+          </td>
+        </tr>
+        {% endfor %}
 
-  {# ── Local section ───────────────────────────────────────────────────── #}
-  <section>
-    <div class="flex items-center justify-between mb-2">
-      <h3 class="text-sm font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide">
-        Local
-      </h3>
-      <button
-        hx-get="/watches/{{ watch.id }}/notifications/add-row"
-        hx-target="#notifications-tbody"
-        hx-swap="afterbegin"
-        hx-on::before-request="if(document.getElementById('notification-add-row')){event.preventDefault();}"
-        hx-on::after-request="if(event.detail.successful){const e=document.getElementById('notifications-empty-state');if(e)e.remove();}"
-        class="btn btn-secondary text-xs min-h-[44px] htmx-request:opacity-60">
-        + Add
-      </button>
-    </div>
-    <div class="rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden">
-      <table class="data-table w-full">
-        <thead>
-          <tr>
-            <th scope="col" class="w-full">Title</th>
-            <th scope="col" class="w-28">Channel</th>
-            <th scope="col" class="w-24">Status</th>
-            <th scope="col"><span class="sr-only">Actions</span></th>
-          </tr>
-        </thead>
-        <tbody id="notifications-tbody">
-          {% if notifications %}
-          {% for nc in notifications %}
-          <tr id="nc-{{ nc.id }}">
-            <td class="font-medium text-gray-900 dark:text-white">
-              {{ nc.title if nc.title else nc.channel_hint }}
-            </td>
-            <td>
-              <span class="chip">{{ nc.channel_hint }}</span>
-            </td>
-            <td>
-              {% if nc.is_active %}
-              <span class="badge badge-active">Active</span>
-              {% else %}
-              <span class="badge badge-inactive">Inactive</span>
-              {% endif %}
-            </td>
-            <td>
-              <div class="flex items-center gap-2 justify-end">
-                {# Edit URL and events #}
-                <button
-                  hx-get="/watches/{{ watch.id }}/notifications/{{ nc.id }}/edit-form"
-                  hx-target="#nc-{{ nc.id }}"
-                  hx-swap="outerHTML"
-                  class="btn btn-secondary text-xs min-h-[44px] htmx-request:opacity-60"
-                  aria-label="Edit {{ nc.channel_hint }} notification URL and events">
-                  Edit
-                </button>
+        {# ── Watch-assigned template rows ────────────────────────────────── #}
+        {% for tpl in watch_templates %}
+        <tr id="tpl-ref-{{ tpl.id }}">
+          <td class="font-medium text-gray-900 dark:text-white">{{ tpl.title }}</td>
+          <td><span class="chip">{{ tpl.channel_hint }}</span></td>
+          <td><span class="chip">Assigned</span></td>
+          <td>
+            {% if tpl.is_active %}
+            <span class="badge badge-active">Active</span>
+            {% else %}
+            <span class="badge badge-inactive">Inactive</span>
+            {% endif %}
+          </td>
+          <td>
+            <div class="flex items-center gap-2 justify-end">
+              <a
+                href="/notifications?edit={{ tpl.id }}"
+                class="btn btn-secondary text-xs min-h-[44px]"
+                aria-label="Edit {{ tpl.title }} in the template library">
+                Edit
+              </a>
+              <button
+                hx-post="/notifications/{{ tpl.id }}/test-result"
+                hx-swap="none"
+                class="btn btn-secondary text-xs min-h-[44px] htmx-request:opacity-60"
+                aria-label="Send test notification for {{ tpl.channel_hint }}">
+                Test
+              </button>
+              <button
+                hx-post="/watches/{{ watch.id }}/notifications/copy-template/{{ tpl.id }}"
+                hx-target="#watch-notifications"
+                hx-swap="innerHTML"
+                hx-confirm="Copy this template to a local notification config and unassign it?"
+                class="btn btn-secondary text-xs min-h-[44px] htmx-request:opacity-60"
+                aria-label="Duplicate {{ tpl.title }} as a local config">
+                Duplicate
+              </button>
+              <button
+                hx-post="/watches/{{ watch.id }}/notifications/unassign/{{ tpl.id }}"
+                hx-target="#watch-notifications"
+                hx-swap="innerHTML"
+                hx-confirm="Remove this template assignment from the watch?"
+                class="btn btn-danger-outline text-xs min-h-[44px] htmx-request:opacity-60"
+                aria-label="Unassign {{ tpl.title }} from this watch">
+                Unassign
+              </button>
+            </div>
+          </td>
+        </tr>
+        {% endfor %}
 
-                {# Send test — response is an OOB flash, no local target needed #}
-                <button
-                  hx-post="/watches/{{ watch.id }}/notifications/{{ nc.id }}/test-result"
-                  hx-swap="none"
-                  class="btn btn-secondary text-xs min-h-[44px] htmx-request:opacity-60"
-                  aria-label="Send test notification for {{ nc.channel_hint }}">
-                  Test
-                </button>
+        {# ── Local config rows ───────────────────────────────────────────── #}
+        {% for nc in notifications %}
+        <tr id="nc-{{ nc.id }}">
+          <td class="font-medium text-gray-900 dark:text-white">
+            {{ nc.title if nc.title else nc.channel_hint }}
+          </td>
+          <td><span class="chip">{{ nc.channel_hint }}</span></td>
+          <td><span class="chip">Local</span></td>
+          <td>
+            {% if nc.is_active %}
+            <span class="badge badge-active">Active</span>
+            {% else %}
+            <span class="badge badge-inactive">Inactive</span>
+            {% endif %}
+          </td>
+          <td>
+            <div class="flex items-center gap-2 justify-end">
+              <button
+                hx-get="/watches/{{ watch.id }}/notifications/{{ nc.id }}/edit-form"
+                hx-target="#nc-{{ nc.id }}"
+                hx-swap="outerHTML"
+                class="btn btn-secondary text-xs min-h-[44px] htmx-request:opacity-60"
+                aria-label="Edit {{ nc.channel_hint }} notification URL and events">
+                Edit
+              </button>
+              <button
+                hx-post="/watches/{{ watch.id }}/notifications/{{ nc.id }}/test-result"
+                hx-swap="none"
+                class="btn btn-secondary text-xs min-h-[44px] htmx-request:opacity-60"
+                aria-label="Send test notification for {{ nc.channel_hint }}">
+                Test
+              </button>
+              <button
+                hx-post="/watches/{{ watch.id }}/notifications/{{ nc.id }}/copy"
+                hx-target="#watch-notifications"
+                hx-swap="innerHTML"
+                class="btn btn-secondary text-xs min-h-[44px] htmx-request:opacity-60"
+                aria-label="Duplicate {{ nc.channel_hint }} notification config">
+                Duplicate
+              </button>
+              <button
+                hx-post="/watches/{{ watch.id }}/notifications/{{ nc.id }}/toggle"
+                hx-target="#watch-notifications"
+                hx-swap="innerHTML"
+                class="btn btn-secondary text-xs min-h-[44px] htmx-request:opacity-60"
+                aria-label="{{ 'Pause' if nc.is_active else 'Activate' }} {{ nc.channel_hint }} notification">
+                {{ "Pause" if nc.is_active else "Activate" }}
+              </button>
+              <button
+                hx-delete="/api/v1/watches/{{ watch.id }}/notifications/{{ nc.id }}"
+                hx-confirm="Delete this {{ nc.channel_hint }} notification config?"
+                hx-on::after-request="htmx.trigger(document.body, 'refreshNotifications')"
+                class="btn btn-danger-outline text-xs min-h-[44px] htmx-request:opacity-60"
+                aria-label="Delete {{ nc.channel_hint }} notification config">
+                Delete
+              </button>
+            </div>
+          </td>
+        </tr>
+        {% endfor %}
 
-                {# Duplicate local config #}
-                <button
-                  hx-post="/watches/{{ watch.id }}/notifications/{{ nc.id }}/copy"
-                  hx-target="#watch-notifications"
-                  hx-swap="innerHTML"
-                  class="btn btn-secondary text-xs min-h-[44px] htmx-request:opacity-60"
-                  aria-label="Duplicate {{ nc.channel_hint }} notification config">
-                  Duplicate
-                </button>
+        {# ── Empty state ─────────────────────────────────��───────────────── #}
+        {% if not global_templates and not domain_templates and not watch_templates and not notifications %}
+        <tr id="notifications-empty-state">
+          <td colspan="5" class="px-4 py-3 text-sm text-gray-500 dark:text-gray-400">
+            No notifications configured.
+          </td>
+        </tr>
+        {% endif %}
 
-                {# Toggle active / inactive #}
-                <button
-                  hx-post="/watches/{{ watch.id }}/notifications/{{ nc.id }}/toggle"
-                  hx-target="#watch-notifications"
-                  hx-swap="innerHTML"
-                  class="btn btn-secondary text-xs min-h-[44px] htmx-request:opacity-60"
-                  aria-label="{{ 'Pause' if nc.is_active else 'Activate' }} {{ nc.channel_hint }} notification">
-                  {{ "Pause" if nc.is_active else "Activate" }}
-                </button>
-
-                {# Delete — goes to REST API (no body needed); refresh fires via hx-on #}
-                <button
-                  hx-delete="/api/v1/watches/{{ watch.id }}/notifications/{{ nc.id }}"
-                  hx-confirm="Delete this {{ nc.channel_hint }} notification config?"
-                  hx-on::after-request="htmx.trigger(document.body, 'refreshNotifications')"
-                  class="btn btn-danger-outline text-xs min-h-[44px] htmx-request:opacity-60"
-                  aria-label="Delete {{ nc.channel_hint }} notification config">
-                  Delete
-                </button>
-              </div>
-            </td>
-          </tr>
-          {% endfor %}
-          {% else %}
-          <tr id="notifications-empty-state">
-            <td colspan="4" class="px-4 py-3 text-sm text-gray-500 dark:text-gray-400">
-              No local notification configs yet.
-            </td>
-          </tr>
-          {% endif %}
-        </tbody>
-      </table>
-    </div>
-
-  </section>
+      </tbody>
+    </table>
+  </div>
 
 </div>
 

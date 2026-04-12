@@ -1,4 +1,11 @@
-"""Integration tests for domain detail NC defaults section."""
+"""Integration tests for domain detail NC defaults section.
+
+Tests:
+ - Global sub-table shows is_global_default=True templates
+ - Domain sub-table shows DomainNcRef templates with CRUD
+ - Inline create-and-link (POST /domains/{name}/nc-defaults/new)
+ - Assign existing, remove, idempotency
+"""
 
 import pytest
 from httpx import AsyncClient
@@ -8,173 +15,288 @@ pytestmark = pytest.mark.integration
 VALID_URL = "json://hooks.example.com/notify"
 
 
-async def test_add_and_remove_domain_nc_default(client: AsyncClient, db_session):
-    from sqlalchemy import select
-
-    from src.core.crypto import encrypt_apprise_url
+async def _make_domain(db_session, name: str):
     from src.core.models import Domain
-    from src.core.models.notification_template import DomainNcRef, NotificationTemplate
 
-    domain = Domain(name="example.com")
+    domain = Domain(name=name)
     db_session.add(domain)
+    await db_session.flush()
+    return domain
+
+
+async def _make_template(
+    db_session,
+    title: str,
+    is_global_default: bool = False,
+    is_active: bool = True,
+):
+    from src.core.crypto import encrypt_apprise_url
+    from src.core.models.notification_template import NotificationTemplate
+
     tpl = NotificationTemplate(
-        title="D",
+        title=title,
         apprise_url=encrypt_apprise_url(VALID_URL),
         channel_hint="json",
         events=["change_detected"],
+        is_global_default=is_global_default,
+        is_active=is_active,
     )
     db_session.add(tpl)
     await db_session.flush()
+    return tpl
 
-    # Add domain default
-    resp = await client.post(
-        f"/domains/example.com/nc-defaults/add/{tpl.id}",
-        headers={"HX-Request": "true"},
-    )
-    assert resp.status_code == 200
 
-    ref = await db_session.scalar(
-        select(DomainNcRef).where(
-            DomainNcRef.domain_name == "example.com",
-            DomainNcRef.template_id == tpl.id,
+class TestGlobalSubTable:
+    """GET /domains/{name}/nc-defaults — global sub-table."""
+
+    @pytest.mark.integration
+    async def test_global_templates_appear_in_partial(self, client: AsyncClient, db_session):
+        """Global (is_global_default=True) templates appear without any DomainNcRef."""
+        await _make_domain(db_session, "global-show.example.com")
+        await _make_template(db_session, "GlobalVisibleTemplate", is_global_default=True)
+
+        resp = await client.get(
+            "/domains/global-show.example.com/nc-defaults",
+            headers={"HX-Request": "true"},
         )
-    )
-    assert ref is not None
+        assert resp.status_code == 200
+        assert b"GlobalVisibleTemplate" in resp.content
 
-    # Remove domain default
-    resp = await client.post(
-        f"/domains/example.com/nc-defaults/remove/{tpl.id}",
-        headers={"HX-Request": "true"},
-    )
-    assert resp.status_code == 200
+    @pytest.mark.integration
+    async def test_non_global_template_not_in_global_section(self, client: AsyncClient, db_session):
+        """Non-global templates don't appear in the global sub-table."""
+        await _make_domain(db_session, "non-global-check.example.com")
+        await _make_template(db_session, "NotGlobalTemplate", is_global_default=False)
 
-    ref = await db_session.scalar(
-        select(DomainNcRef).where(
-            DomainNcRef.domain_name == "example.com",
-            DomainNcRef.template_id == tpl.id,
+        resp = await client.get(
+            "/domains/non-global-check.example.com/nc-defaults",
+            headers={"HX-Request": "true"},
         )
-    )
-    assert ref is None
+        assert resp.status_code == 200
+        assert b"NotGlobalTemplate" not in resp.content
 
 
-async def test_domain_nc_defaults_partial_loads(client: AsyncClient, db_session):
-    from src.core.models import Domain
+class TestDomainSubTable:
+    """Domain NC CRUD via DomainNcRef."""
 
-    domain = Domain(name="test-domain.com")
-    db_session.add(domain)
-    await db_session.flush()
+    @pytest.mark.integration
+    async def test_add_and_remove(self, client: AsyncClient, db_session):
+        from sqlalchemy import select
 
-    resp = await client.get(
-        "/domains/test-domain.com/nc-defaults",
-        headers={"HX-Request": "true"},
-    )
-    assert resp.status_code == 200
+        from src.core.models.notification_template import DomainNcRef
 
+        await _make_domain(db_session, "example.com")
+        tpl = await _make_template(db_session, "D")
 
-async def test_add_idempotent(client: AsyncClient, db_session):
-    """Adding the same template twice does not create a duplicate DomainNcRef."""
-    from sqlalchemy import func, select
-
-    from src.core.crypto import encrypt_apprise_url
-    from src.core.models import Domain
-    from src.core.models.notification_template import DomainNcRef, NotificationTemplate
-
-    domain = Domain(name="idempotent-domain.com")
-    db_session.add(domain)
-    tpl = NotificationTemplate(
-        title="Idem",
-        apprise_url=encrypt_apprise_url(VALID_URL),
-        channel_hint="json",
-        events=["change_detected"],
-    )
-    db_session.add(tpl)
-    await db_session.flush()
-
-    for _ in range(2):
         resp = await client.post(
-            f"/domains/idempotent-domain.com/nc-defaults/add/{tpl.id}",
+            f"/domains/example.com/nc-defaults/add/{tpl.id}",
             headers={"HX-Request": "true"},
         )
         assert resp.status_code == 200
 
-    count = await db_session.scalar(
-        select(func.count())
-        .select_from(DomainNcRef)
-        .where(
-            DomainNcRef.domain_name == "idempotent-domain.com",
-            DomainNcRef.template_id == tpl.id,
+        ref = await db_session.scalar(
+            select(DomainNcRef).where(
+                DomainNcRef.domain_name == "example.com",
+                DomainNcRef.template_id == tpl.id,
+            )
         )
-    )
-    assert count == 1
+        assert ref is not None
+
+        resp = await client.post(
+            f"/domains/example.com/nc-defaults/remove/{tpl.id}",
+            headers={"HX-Request": "true"},
+        )
+        assert resp.status_code == 200
+        ref = await db_session.scalar(
+            select(DomainNcRef).where(
+                DomainNcRef.domain_name == "example.com",
+                DomainNcRef.template_id == tpl.id,
+            )
+        )
+        assert ref is None
+
+    @pytest.mark.integration
+    async def test_partial_loads(self, client: AsyncClient, db_session):
+        await _make_domain(db_session, "test-domain.com")
+        resp = await client.get(
+            "/domains/test-domain.com/nc-defaults",
+            headers={"HX-Request": "true"},
+        )
+        assert resp.status_code == 200
+
+    @pytest.mark.integration
+    async def test_add_idempotent(self, client: AsyncClient, db_session):
+        from sqlalchemy import func, select
+
+        from src.core.models.notification_template import DomainNcRef
+
+        await _make_domain(db_session, "idempotent-domain.com")
+        tpl = await _make_template(db_session, "Idem")
+
+        for _ in range(2):
+            resp = await client.post(
+                f"/domains/idempotent-domain.com/nc-defaults/add/{tpl.id}",
+                headers={"HX-Request": "true"},
+            )
+            assert resp.status_code == 200
+
+        count = await db_session.scalar(
+            select(func.count())
+            .select_from(DomainNcRef)
+            .where(
+                DomainNcRef.domain_name == "idempotent-domain.com",
+                DomainNcRef.template_id == tpl.id,
+            )
+        )
+        assert count == 1
+
+    @pytest.mark.integration
+    async def test_remove_nonexistent_returns_200(self, client: AsyncClient, db_session):
+        await _make_domain(db_session, "remove-missing.com")
+        tpl = await _make_template(db_session, "Missing")
+
+        resp = await client.post(
+            f"/domains/remove-missing.com/nc-defaults/remove/{tpl.id}",
+            headers={"HX-Request": "true"},
+        )
+        assert resp.status_code == 200
+
+    @pytest.mark.integration
+    async def test_partial_shows_assigned_template_title(self, client: AsyncClient, db_session):
+        from src.core.models.notification_template import DomainNcRef
+
+        await _make_domain(db_session, "show-assigned.com")
+        tpl = await _make_template(db_session, "MyAssignedTemplate")
+        db_session.add(DomainNcRef(domain_name="show-assigned.com", template_id=tpl.id))
+        await db_session.flush()
+
+        resp = await client.get(
+            "/domains/show-assigned.com/nc-defaults",
+            headers={"HX-Request": "true"},
+        )
+        assert resp.status_code == 200
+        assert b"MyAssignedTemplate" in resp.content
+
+    @pytest.mark.integration
+    async def test_add_unknown_domain_returns_404(self, client: AsyncClient, db_session):
+        tpl = await _make_template(db_session, "Orphan")
+        resp = await client.post(
+            f"/domains/no-such-domain.example.com/nc-defaults/add/{tpl.id}",
+            headers={"HX-Request": "true"},
+        )
+        assert resp.status_code == 404
 
 
-async def test_remove_nonexistent_returns_200(client: AsyncClient, db_session):
-    """Removing a template not assigned to domain returns 200 gracefully."""
-    from src.core.crypto import encrypt_apprise_url
-    from src.core.models import Domain
-    from src.core.models.notification_template import NotificationTemplate
+class TestCreateAndLinkTemplate:
+    """POST /domains/{name}/nc-defaults/new — create template and auto-link via DomainNcRef."""
 
-    domain = Domain(name="remove-missing.com")
-    db_session.add(domain)
-    tpl = NotificationTemplate(
-        title="Missing",
-        apprise_url=encrypt_apprise_url(VALID_URL),
-        channel_hint="json",
-        events=["change_detected"],
-    )
-    db_session.add(tpl)
-    await db_session.flush()
+    @pytest.mark.integration
+    async def test_create_new_template_links_to_domain(self, client: AsyncClient, db_session):
+        """Creating a new template via domain route creates NotificationTemplate + DomainNcRef."""
+        from sqlalchemy import select
 
-    resp = await client.post(
-        f"/domains/remove-missing.com/nc-defaults/remove/{tpl.id}",
-        headers={"HX-Request": "true"},
-    )
-    assert resp.status_code == 200
+        from src.core.models.notification_template import DomainNcRef, NotificationTemplate
+
+        await _make_domain(db_session, "create-link.example.com")
+
+        resp = await client.post(
+            "/domains/create-link.example.com/nc-defaults/new",
+            data={
+                "title": "NewDomainTemplate",
+                "apprise_url": VALID_URL,
+                "channel_hint": "json",
+                "events": ["change_detected"],
+            },
+            headers={"HX-Request": "true"},
+        )
+        assert resp.status_code == 200
+
+        tpl = await db_session.scalar(
+            select(NotificationTemplate).where(NotificationTemplate.title == "NewDomainTemplate")
+        )
+        assert tpl is not None
+        assert tpl.is_global_default is False
+
+        ref = await db_session.scalar(
+            select(DomainNcRef).where(
+                DomainNcRef.domain_name == "create-link.example.com",
+                DomainNcRef.template_id == tpl.id,
+            )
+        )
+        assert ref is not None
+
+    @pytest.mark.integration
+    async def test_create_new_template_returns_refreshed_partial(
+        self, client: AsyncClient, db_session
+    ):
+        """Response after create is the refreshed nc-defaults partial."""
+        await _make_domain(db_session, "create-refresh.example.com")
+
+        resp = await client.post(
+            "/domains/create-refresh.example.com/nc-defaults/new",
+            data={
+                "title": "RefreshedTemplate",
+                "apprise_url": VALID_URL,
+                "channel_hint": "json",
+                "events": ["change_detected"],
+            },
+            headers={"HX-Request": "true"},
+        )
+        assert resp.status_code == 200
+        assert b"RefreshedTemplate" in resp.content
+
+    @pytest.mark.integration
+    async def test_create_requires_title(self, client: AsyncClient, db_session):
+        """Missing title returns an error response (not 500)."""
+        await _make_domain(db_session, "create-error.example.com")
+
+        resp = await client.post(
+            "/domains/create-error.example.com/nc-defaults/new",
+            data={
+                "title": "",
+                "apprise_url": VALID_URL,
+                "channel_hint": "json",
+                "events": ["change_detected"],
+            },
+            headers={"HX-Request": "true"},
+        )
+        assert resp.status_code in (200, 422)
+
+    @pytest.mark.integration
+    async def test_create_unknown_domain_returns_404(self, client: AsyncClient, db_session):
+        resp = await client.post(
+            "/domains/no-such.example.com/nc-defaults/new",
+            data={
+                "title": "ShouldFail",
+                "apprise_url": VALID_URL,
+                "channel_hint": "json",
+                "events": ["change_detected"],
+            },
+            headers={"HX-Request": "true"},
+        )
+        assert resp.status_code == 404
 
 
-async def test_partial_shows_assigned_template_title(client: AsyncClient, db_session):
-    """Partial lists assigned template by title."""
-    from src.core.crypto import encrypt_apprise_url
-    from src.core.models import Domain
-    from src.core.models.notification_template import DomainNcRef, NotificationTemplate
+class TestAssignRow:
+    """GET /domains/{name}/nc-defaults/assign-row — picker excludes already-assigned."""
 
-    domain = Domain(name="show-assigned.com")
-    db_session.add(domain)
-    tpl = NotificationTemplate(
-        title="MyAssignedTemplate",
-        apprise_url=encrypt_apprise_url(VALID_URL),
-        channel_hint="json",
-        events=["change_detected"],
-    )
-    db_session.add(tpl)
-    await db_session.flush()
-    db_session.add(DomainNcRef(domain_name="show-assigned.com", template_id=tpl.id))
-    await db_session.flush()
+    @pytest.mark.integration
+    async def test_assign_row_returns_200(self, client: AsyncClient, db_session):
+        await _make_domain(db_session, "assign-row-ok.example.com")
+        resp = await client.get(
+            "/domains/assign-row-ok.example.com/nc-defaults/assign-row",
+            headers={"HX-Request": "true"},
+        )
+        assert resp.status_code == 200
 
-    resp = await client.get(
-        "/domains/show-assigned.com/nc-defaults",
-        headers={"HX-Request": "true"},
-    )
-    assert resp.status_code == 200
-    assert b"MyAssignedTemplate" in resp.content
+    @pytest.mark.integration
+    async def test_assign_row_shows_unassigned(self, client: AsyncClient, db_session):
+        await _make_domain(db_session, "assign-row-show.example.com")
+        await _make_template(db_session, "UnassignedForDomain")
 
-
-async def test_add_unknown_domain_returns_404(client: AsyncClient, db_session):
-    """Adding a template default to a non-existent domain returns 404."""
-    from src.core.crypto import encrypt_apprise_url
-    from src.core.models.notification_template import NotificationTemplate
-
-    tpl = NotificationTemplate(
-        title="Orphan",
-        apprise_url=encrypt_apprise_url(VALID_URL),
-        channel_hint="json",
-        events=["change_detected"],
-    )
-    db_session.add(tpl)
-    await db_session.flush()
-
-    resp = await client.post(
-        f"/domains/no-such-domain.example.com/nc-defaults/add/{tpl.id}",
-        headers={"HX-Request": "true"},
-    )
-    assert resp.status_code == 404
+        resp = await client.get(
+            "/domains/assign-row-show.example.com/nc-defaults/assign-row",
+            headers={"HX-Request": "true"},
+        )
+        assert resp.status_code == 200
+        assert b"UnassignedForDomain" in resp.content

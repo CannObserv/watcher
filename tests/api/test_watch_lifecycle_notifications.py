@@ -101,59 +101,6 @@ class TestWatchPausedResumedNotifications:
         mock_dispatch.assert_not_awaited()
 
 
-class TestWatchArchivedNotification:
-    async def _create_watch(self, client):
-        resp = await client.post(
-            "/api/v1/watches",
-            json={"name": "Archive Watch", "url": "https://example.com/a", "content_type": "html"},
-        )
-        assert resp.status_code == 201
-        return resp.json()["id"]
-
-    async def test_archive_watch_dispatches_watch_archived_event(self, client):
-        watch_id = await self._create_watch(client)
-        with patch(_PATCH, new_callable=AsyncMock) as mock_dispatch:
-            response = await client.patch(
-                f"/api/v1/watches/{watch_id}",
-                json={"is_archived": True},
-            )
-        assert response.status_code == 200
-        mock_dispatch.assert_awaited_once()
-        _, kwargs = mock_dispatch.call_args
-        assert kwargs["event"].event_type == WatchEventType.WATCH_ARCHIVED
-        assert kwargs["event"].watch_id == watch_id
-
-    async def test_archive_event_includes_name_and_url(self, client):
-        watch_id = await self._create_watch(client)
-        with patch(_PATCH, new_callable=AsyncMock) as mock_dispatch:
-            await client.patch(f"/api/v1/watches/{watch_id}", json={"is_archived": True})
-        _, kwargs = mock_dispatch.call_args
-        event = kwargs["event"]
-        assert event.watch_name == "Archive Watch"
-        assert event.watch_url == "https://example.com/a"
-
-    async def test_set_archived_true_when_already_archived_does_not_dispatch(self, client):
-        watch_id = await self._create_watch(client)
-        await client.patch(f"/api/v1/watches/{watch_id}", json={"is_archived": True})
-        with patch(_PATCH, new_callable=AsyncMock) as mock_dispatch:
-            response = await client.patch(
-                f"/api/v1/watches/{watch_id}",
-                json={"is_archived": True},
-            )
-        assert response.status_code == 200
-        mock_dispatch.assert_not_awaited()
-
-    async def test_update_non_archived_field_does_not_dispatch(self, client):
-        watch_id = await self._create_watch(client)
-        with patch(_PATCH, new_callable=AsyncMock) as mock_dispatch:
-            response = await client.patch(
-                f"/api/v1/watches/{watch_id}",
-                json={"name": "Renamed"},
-            )
-        assert response.status_code == 200
-        mock_dispatch.assert_not_awaited()
-
-
 class TestWatchDeletedNotification:
     async def _create_archived_watch(self, client):
         resp = await client.post(
@@ -162,7 +109,7 @@ class TestWatchDeletedNotification:
         )
         assert resp.status_code == 201
         watch_id = resp.json()["id"]
-        await client.patch(f"/api/v1/watches/{watch_id}", json={"is_archived": True})
+        await client.post(f"/watches/{watch_id}/archive")
         return watch_id
 
     async def test_delete_watch_dispatches_watch_deleted_event(self, client):

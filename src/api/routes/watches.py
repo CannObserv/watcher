@@ -138,7 +138,6 @@ async def update_watch(
 
     updates = data.model_dump(exclude_unset=True)
     previous_active = watch.is_active
-    previous_archived = watch.is_archived
 
     if updates.get("is_active") is True and watch.effective_domain:
         domain_result = await session.execute(
@@ -183,17 +182,6 @@ async def update_watch(
                     occurred_at=datetime.now(UTC),
                 ),
             )
-    if not previous_archived and watch.is_archived:
-        await dispatch_event_notifications(
-            session=session,
-            event=WatchEvent(
-                event_type=WatchEventType.WATCH_ARCHIVED,
-                watch_id=str(watch.id),
-                watch_name=watch.name,
-                watch_url=watch.url,
-                occurred_at=datetime.now(UTC),
-            ),
-        )
     await session.commit()
     await session.refresh(watch)
     return watch

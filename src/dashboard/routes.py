@@ -778,6 +778,9 @@ async def watch_archive(
     if not watch:
         return templates.TemplateResponse(request, "pages/404.html", status_code=404)
 
+    if watch.is_archived:
+        return RedirectResponse(url=f"/watches/{watch_id}", status_code=303)
+
     watch.is_archived = True
     watch.is_active = False
     audit(session, EventType.WATCH_ARCHIVED, watch_id=watch.id, name=watch.name, source="dashboard")

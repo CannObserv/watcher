@@ -4,7 +4,7 @@ from datetime import UTC, datetime
 
 import pytest
 
-from src.core.notifications.events import WatchEvent, WatchEventType
+from src.core.notifications.events import _BODY_TEMPLATES, WatchEvent, WatchEventType
 
 OCCURRED_AT = datetime(2026, 4, 4, 12, 0, 0, tzinfo=UTC)
 
@@ -29,6 +29,8 @@ class TestWatchEventType:
         assert "watch_created" in codes
         assert "watch_paused" in codes
         assert "watch_resumed" in codes
+        assert "watch_archived" in codes
+        assert "watch_deleted" in codes
 
     def test_is_str_enum(self):
         assert WatchEventType.CHANGE_DETECTED == "change_detected"
@@ -79,6 +81,20 @@ class TestWatchEventBody:
         event = make_event(WatchEventType.WATCH_RECOVERED)
         assert "responding normally" in event.body
 
+    def test_watch_archived_body(self):
+        event = make_event(WatchEventType.WATCH_ARCHIVED)
+        assert "archived" in event.body
+
+    def test_watch_deleted_body(self):
+        event = make_event(WatchEventType.WATCH_DELETED)
+        assert "deleted" in event.body
+
+    def test_all_event_types_have_body_coverage(self):
+        """Every WatchEventType must have a _BODY_TEMPLATES entry or be a known special case."""
+        special_cases = {WatchEventType.CHANGE_DETECTED, WatchEventType.WATCH_ERROR}
+        missing = {e for e in WatchEventType if e not in _BODY_TEMPLATES and e not in special_cases}
+        assert not missing, f"Event types missing body entries: {missing}"
+
 
 class TestAppriseNotifyType:
     def test_change_detected_is_info(self):
@@ -92,3 +108,11 @@ class TestAppriseNotifyType:
     def test_watch_recovered_is_success(self):
         event = make_event(WatchEventType.WATCH_RECOVERED)
         assert event.apprise_notify_type == "success"
+
+    def test_watch_archived_is_warning(self):
+        event = make_event(WatchEventType.WATCH_ARCHIVED)
+        assert event.apprise_notify_type == "warning"
+
+    def test_watch_deleted_is_warning(self):
+        event = make_event(WatchEventType.WATCH_DELETED)
+        assert event.apprise_notify_type == "warning"

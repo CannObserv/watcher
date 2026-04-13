@@ -62,6 +62,42 @@ class TestWatchList:
         response = await client.get("/partials/watch-table?is_active=true")
         assert response.status_code == 200
 
+    async def test_health_badge_ok(self, client, db_session):
+        from src.core.models.watch import WatchHealthStatus
+
+        db_session.add(
+            Watch(
+                name="W",
+                url="https://a.com",
+                content_type="html",
+                health_status=WatchHealthStatus.OK,
+            )
+        )
+        await db_session.flush()
+        response = await client.get("/watches")
+        assert b"Healthy" in response.content
+
+    async def test_health_badge_error(self, client, db_session):
+        from src.core.models.watch import WatchHealthStatus
+
+        db_session.add(
+            Watch(
+                name="W",
+                url="https://a.com",
+                content_type="html",
+                health_status=WatchHealthStatus.ERROR,
+            )
+        )
+        await db_session.flush()
+        response = await client.get("/watches")
+        assert b"Error" in response.content
+
+    async def test_health_badge_unknown(self, client, db_session):
+        db_session.add(Watch(name="W", url="https://a.com", content_type="html"))
+        await db_session.flush()
+        response = await client.get("/watches")
+        assert b"Unknown" in response.content
+
 
 class TestWatchDetail:
     async def test_detail_page_returns_200(self, client):

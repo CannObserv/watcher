@@ -16,6 +16,8 @@ class WatchEventType(enum.StrEnum):
     WATCH_CREATED = "watch_created"
     WATCH_PAUSED = "watch_paused"
     WATCH_RESUMED = "watch_resumed"
+    WATCH_ARCHIVED = "watch_archived"
+    WATCH_DELETED = "watch_deleted"
 
 
 _TITLES: dict[WatchEventType, str] = {
@@ -25,6 +27,8 @@ _TITLES: dict[WatchEventType, str] = {
     WatchEventType.WATCH_CREATED: "Watch Created",
     WatchEventType.WATCH_PAUSED: "Watch Paused",
     WatchEventType.WATCH_RESUMED: "Watch Resumed",
+    WatchEventType.WATCH_ARCHIVED: "Watch Archived",
+    WatchEventType.WATCH_DELETED: "Watch Deleted",
 }
 
 EVENT_TITLES: dict[str, str] = {e.value: t for e, t in _TITLES.items()}
@@ -37,6 +41,8 @@ _APPRISE_TYPES: dict[WatchEventType, str] = {
     WatchEventType.WATCH_CREATED: "info",
     WatchEventType.WATCH_PAUSED: "warning",
     WatchEventType.WATCH_RESUMED: "info",
+    WatchEventType.WATCH_ARCHIVED: "warning",
+    WatchEventType.WATCH_DELETED: "warning",
 }
 
 
@@ -78,6 +84,10 @@ class WatchEvent:
             return f"Watch paused: {self.watch_url}"
         if self.event_type == WatchEventType.WATCH_RESUMED:
             return f"Watch resumed: {self.watch_url}"
+        if self.event_type == WatchEventType.WATCH_ARCHIVED:
+            return f"Watch archived: {self.watch_url}"
+        if self.event_type == WatchEventType.WATCH_DELETED:
+            return f"Watch deleted: {self.watch_url}"
         return self.watch_url
 
     @property

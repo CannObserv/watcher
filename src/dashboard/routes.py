@@ -86,7 +86,7 @@ async def dashboard_home(
         "queue": queue,
         "domains": domains,
     }
-    return templates.TemplateResponse("pages/dashboard.html", context)
+    return templates.TemplateResponse(request, "pages/dashboard.html", context)
 
 
 async def _build_watch_health(session: AsyncSession, watches: list[Watch]) -> dict:
@@ -117,13 +117,14 @@ async def watches_page(
         "is_active": is_active,
         "health_map": health_map,
     }
-    return templates.TemplateResponse("pages/watches.html", context)
+    return templates.TemplateResponse(request, "pages/watches.html", context)
 
 
 @router.get("/watches/new")
 async def watch_create_form(request: Request):
     """Watch creation form."""
     return templates.TemplateResponse(
+        request,
         "pages/watch_form.html",
         {
             "request": request,
@@ -154,6 +155,7 @@ async def watch_create_submit(
     if errors:
         flash = {"type": "error", "message": ". ".join(errors)}
         return templates.TemplateResponse(
+            request,
             "pages/watch_form.html",
             {
                 "request": request,
@@ -196,7 +198,9 @@ async def watch_detail_page(
     """Watch detail page with profiles, notifications, and change history."""
     watch = await get_watch_detail(session, watch_id)
     if not watch:
-        return templates.TemplateResponse("pages/404.html", {"request": request}, status_code=404)
+        return templates.TemplateResponse(
+            request, "pages/404.html", {"request": request}, status_code=404
+        )
     profiles = await get_watch_profiles(session, watch.id)
     notifications = await get_watch_notifications(session, watch.id)
     latest_snapshot = await get_latest_snapshot(session, watch.id)
@@ -263,7 +267,7 @@ async def watch_detail_page(
         "base_url": f"/partials/watch-timeline/{watch_id}",
         "extra_params": {},
     }
-    return templates.TemplateResponse("pages/watch_detail.html", context)
+    return templates.TemplateResponse(request, "pages/watch_detail.html", context)
 
 
 @router.get("/watches/{watch_id}/screenshot")
@@ -411,7 +415,9 @@ async def watch_delete(
     """
     watch = await get_watch_detail(session, watch_id)
     if not watch:
-        return templates.TemplateResponse("pages/404.html", {"request": request}, status_code=404)
+        return templates.TemplateResponse(
+            request, "pages/404.html", {"request": request}, status_code=404
+        )
     if not watch.is_archived:
         msg = '<p class="text-red-600 text-sm mt-2">Archive the watch before deleting it.</p>'
         return HTMLResponse(status_code=409, content=msg)
@@ -679,7 +685,7 @@ async def watch_field_partial(
         return RedirectResponse(url=f"/watches/{watch_id}", status_code=303)
 
     ctx = _watch_field_context(request, watch, field_name, mode=mode)
-    return templates.TemplateResponse("partials/watch_field.html", ctx)
+    return templates.TemplateResponse(request, "partials/watch_field.html", ctx)
 
 
 @router.post("/watches/{watch_id}/field/{field_name}")
@@ -718,7 +724,7 @@ async def watch_field_update(
 
     if request.headers.get("HX-Request") == "true":
         ctx = _watch_field_context(request, watch, field_name, mode="view")
-        return templates.TemplateResponse("partials/watch_field.html", ctx)
+        return templates.TemplateResponse(request, "partials/watch_field.html", ctx)
     return RedirectResponse(url=f"/watches/{watch_id}", status_code=303)
 
 
@@ -763,6 +769,7 @@ async def watch_toggle_active(
 
     if request.headers.get("HX-Request") == "true":
         return templates.TemplateResponse(
+            request,
             "partials/watch_status_toggle.html",
             {"request": request, "watch": watch, "domain_inactive": domain_inactive},
         )
@@ -778,7 +785,9 @@ async def watch_archive(
     """Archive a watch — sets is_archived=True and is_active=False."""
     watch = await get_watch_detail(session, watch_id)
     if not watch:
-        return templates.TemplateResponse("pages/404.html", {"request": request}, status_code=404)
+        return templates.TemplateResponse(
+            request, "pages/404.html", {"request": request}, status_code=404
+        )
 
     watch.is_archived = True
     watch.is_active = False
@@ -797,7 +806,9 @@ async def watch_restore(
     """Restore an archived watch — clears is_archived, stays inactive."""
     watch = await get_watch_detail(session, watch_id)
     if not watch:
-        return templates.TemplateResponse("pages/404.html", {"request": request}, status_code=404)
+        return templates.TemplateResponse(
+            request, "pages/404.html", {"request": request}, status_code=404
+        )
 
     watch.is_archived = False
     # Watch stays inactive after restore — user re-activates via toggle
@@ -837,7 +848,7 @@ async def domains_page(
         "base_url": "/partials/domains-table",
         "extra_params": {k: v for k, v in {"q": q, "status": status}.items() if v},
     }
-    return templates.TemplateResponse("pages/domains.html", context)
+    return templates.TemplateResponse(request, "pages/domains.html", context)
 
 
 @router.get("/partials/domains-table")
@@ -859,6 +870,7 @@ async def partial_domains_table(
     )
     total_count = await get_domains_total_count(session, search=q, status=status)
     return templates.TemplateResponse(
+        request,
         "partials/domains_table.html",
         {
             "request": request,
@@ -876,6 +888,7 @@ async def partial_domains_table(
 async def domain_create_form(request: Request):
     """Domain creation form."""
     return templates.TemplateResponse(
+        request,
         "pages/domain_form.html",
         {"request": request, "active_page": "domains", "flash": None, "url": ""},
     )
@@ -892,6 +905,7 @@ async def domain_create_submit(
     if not url.strip():
         flash = {"type": "error", "message": "URL is required"}
         return templates.TemplateResponse(
+            request,
             "pages/domain_form.html",
             {"request": request, "active_page": "domains", "flash": flash, "url": url},
         )
@@ -904,6 +918,7 @@ async def domain_create_submit(
             "message": "Could not reach URL. Check the address and try again.",
         }
         return templates.TemplateResponse(
+            request,
             "pages/domain_form.html",
             {"request": request, "active_page": "domains", "flash": flash, "url": url},
         )
@@ -912,6 +927,7 @@ async def domain_create_submit(
     if not domain_name:
         flash = {"type": "error", "message": "Could not extract domain from URL."}
         return templates.TemplateResponse(
+            request,
             "pages/domain_form.html",
             {"request": request, "active_page": "domains", "flash": flash, "url": url},
         )
@@ -938,7 +954,9 @@ async def domain_archive(
     result = await session.execute(select(Domain).where(Domain.name == name))
     domain = result.scalar_one_or_none()
     if not domain:
-        return templates.TemplateResponse("pages/404.html", {"request": request}, status_code=404)
+        return templates.TemplateResponse(
+            request, "pages/404.html", {"request": request}, status_code=404
+        )
 
     if domain.archived_at is None:
         domain.archived_at = datetime.now(UTC)
@@ -958,7 +976,9 @@ async def domain_restore(
     result = await session.execute(select(Domain).where(Domain.name == name))
     domain = result.scalar_one_or_none()
     if not domain:
-        return templates.TemplateResponse("pages/404.html", {"request": request}, status_code=404)
+        return templates.TemplateResponse(
+            request, "pages/404.html", {"request": request}, status_code=404
+        )
 
     domain.archived_at = None
     audit(session, EventType.DOMAIN_RESTORED, domain_name=name, source="dashboard")
@@ -1022,6 +1042,7 @@ async def domain_toggle_active(
     if request.headers.get("HX-Request") == "true":
         watches = await get_domain_watches(session, name)
         return templates.TemplateResponse(
+            request,
             "partials/domain_toggle_oob.html",
             {"request": request, "domain": domain, "watches": watches},
         )
@@ -1038,7 +1059,9 @@ async def domain_delete(
     result = await session.execute(select(Domain).where(Domain.name == name))
     domain = result.scalar_one_or_none()
     if not domain:
-        return templates.TemplateResponse("pages/404.html", {"request": request}, status_code=404)
+        return templates.TemplateResponse(
+            request, "pages/404.html", {"request": request}, status_code=404
+        )
 
     if domain.archived_at is None:
         raise HTTPException(status_code=409, detail="Archive the domain before deleting it")
@@ -1144,7 +1167,7 @@ async def domain_field_partial(
         return RedirectResponse(url=f"/domains/{name}", status_code=303)
 
     ctx = _field_context(request, domain, field_name, mode=mode)
-    return templates.TemplateResponse("partials/domain_field.html", ctx)
+    return templates.TemplateResponse(request, "partials/domain_field.html", ctx)
 
 
 @router.post("/domains/{name}")
@@ -1177,7 +1200,7 @@ async def domain_inline_update(
 
     if request.headers.get("HX-Request") == "true":
         ctx = _field_context(request, domain, field, mode="view")
-        return templates.TemplateResponse("partials/domain_field.html", ctx)
+        return templates.TemplateResponse(request, "partials/domain_field.html", ctx)
     return RedirectResponse(url=f"/domains/{name}", status_code=303)
 
 
@@ -1193,7 +1216,9 @@ async def domain_detail_page(
     result = await session.execute(select(Domain).where(Domain.name == name))
     domain = result.scalar_one_or_none()
     if not domain:
-        return templates.TemplateResponse("pages/404.html", {"request": request}, status_code=404)
+        return templates.TemplateResponse(
+            request, "pages/404.html", {"request": request}, status_code=404
+        )
 
     is_active = None
     if watch_status == "active":
@@ -1217,7 +1242,7 @@ async def domain_detail_page(
         "flash": None,
         "field_contexts": field_contexts,
     }
-    return templates.TemplateResponse("pages/domain_detail.html", context)
+    return templates.TemplateResponse(request, "pages/domain_detail.html", context)
 
 
 async def _render_domain_nc_defaults(request: Request, domain_name: str, session: AsyncSession):
@@ -1480,7 +1505,7 @@ async def partial_stats_cards(
     """HTMX partial: stats cards only."""
     stats = await get_dashboard_stats(session)
     return templates.TemplateResponse(
-        "partials/stats_cards.html", {"request": request, "stats": stats}
+        request, "partials/stats_cards.html", {"request": request, "stats": stats}
     )
 
 
@@ -1492,7 +1517,7 @@ async def partial_recent_changes(
     """HTMX partial: recent changes table."""
     changes = await get_recent_changes(session, limit=20)
     return templates.TemplateResponse(
-        "partials/recent_changes.html", {"request": request, "changes": changes}
+        request, "partials/recent_changes.html", {"request": request, "changes": changes}
     )
 
 
@@ -1505,6 +1530,7 @@ async def partial_system_health(
     queue = await get_queue_health(session)
     domains = await get_domains_with_watch_counts(session)
     return templates.TemplateResponse(
+        request,
         "partials/system_health.html",
         {"request": request, "queue": queue, "domains": domains},
     )
@@ -1520,6 +1546,7 @@ async def partial_watch_table(
     watches = await get_watch_list(session, is_active=is_active)
     health_map = await _build_watch_health(session, watches)
     return templates.TemplateResponse(
+        request,
         "partials/watch_table.html",
         {"request": request, "watches": watches, "health_map": health_map},
     )
@@ -1534,7 +1561,7 @@ async def partial_watch_changes(
     """HTMX partial: change history for a watch (legacy endpoint)."""
     changes = await get_watch_changes(session, watch_id)
     return templates.TemplateResponse(
-        "partials/watch_changes.html", {"request": request, "changes": changes}
+        request, "partials/watch_changes.html", {"request": request, "changes": changes}
     )
 
 
@@ -1561,6 +1588,7 @@ async def partial_watch_timeline(
         timeline = [e for e in timeline if e["category"] == category]
 
     return templates.TemplateResponse(
+        request,
         "partials/watch_timeline.html",
         {
             "request": request,
@@ -1603,6 +1631,7 @@ async def watch_notification_add_row(
     if not watch:
         raise HTTPException(status_code=404, detail="Watch not found")
     return templates.TemplateResponse(
+        request,
         "partials/notification_add_row.html",
         {
             "request": request,
@@ -1622,7 +1651,7 @@ async def partial_apprise_plugin_form(
     """HTMX partial: token form for a selected Apprise plugin, or raw URL input."""
     if raw or schema is None:
         return templates.TemplateResponse(
-            "partials/apprise_raw_url_form.html", {"request": request}
+            request, "partials/apprise_raw_url_form.html", {"request": request}
         )
     detail = get_plugin_detail(schema)
     if detail is None:
@@ -1643,6 +1672,7 @@ async def partial_apprise_plugin_form(
         detail["tokens"] = {k: v for k, v in detail["tokens"].items() if k not in exclude}
 
     return templates.TemplateResponse(
+        request,
         "partials/apprise_plugin_form.html",
         {"request": request, "plugin": detail, "variant": variant},
     )
@@ -1678,6 +1708,7 @@ async def watch_notification_create(
             apprise_url = assemble_url(schema_val, tokens, variant_index=variant_index)
         except ValueError as exc:
             return templates.TemplateResponse(
+                request,
                 "partials/notification_add_row.html",
                 {
                     "request": request,
@@ -1694,6 +1725,7 @@ async def watch_notification_create(
             validate_apprise_url(apprise_url)
         except ValueError as exc:
             return templates.TemplateResponse(
+                request,
                 "partials/notification_add_row.html",
                 {
                     "request": request,
@@ -1708,6 +1740,7 @@ async def watch_notification_create(
         validate_event_list(events)
     except ValueError as exc:
         return templates.TemplateResponse(
+            request,
             "partials/notification_add_row.html",
             {
                 "request": request,
@@ -1779,6 +1812,7 @@ async def watch_notification_edit_form(
         decrypted_url = ""
         decryption_failed = True
     return templates.TemplateResponse(
+        request,
         "partials/notification_edit_form.html",
         {
             "request": request,
@@ -1818,6 +1852,7 @@ async def watch_notification_edit(
         except (InvalidToken, ValueError):
             decrypted_url = ""
         response = templates.TemplateResponse(
+            request,
             "partials/notification_edit_form.html",
             {
                 "request": request,
@@ -1839,6 +1874,7 @@ async def watch_notification_edit(
         except (InvalidToken, ValueError):
             decrypted_url = ""
         response = templates.TemplateResponse(
+            request,
             "partials/notification_edit_form.html",
             {
                 "request": request,
@@ -1927,6 +1963,7 @@ async def _render_watch_notifications(
     unassigned_templates = [t for t in all_result.scalars().all() if str(t.id) not in all_watch_ids]
 
     return templates.TemplateResponse(
+        request,
         "partials/watch_notifications.html",
         {
             "request": request,
@@ -1981,6 +2018,7 @@ async def watch_nc_assign_row(
     )
     unassigned = [t for t in all_result.scalars().all() if str(t.id) not in excluded_ids]
     return templates.TemplateResponse(
+        request,
         "partials/watch_nc_assign_row.html",
         {
             "request": request,
@@ -2164,6 +2202,7 @@ async def watch_notification_test_result(
     level = "success" if success else "error"
     message = f"Test notification: {reason}"
     return templates.TemplateResponse(
+        request,
         "partials/flash_oob.html",
         {
             "request": request,
@@ -2196,7 +2235,9 @@ async def change_detail_page(
     """Change detail page with metadata, chunks, and diff."""
     detail = await get_change_detail(session, change_id)
     if not detail:
-        return templates.TemplateResponse("pages/404.html", {"request": request}, status_code=404)
+        return templates.TemplateResponse(
+            request, "pages/404.html", {"request": request}, status_code=404
+        )
 
     storage = LocalStorage(base_dir=STORAGE_BASE_DIR)
     path_attr = "storage_path" if mode == "raw" else "text_path"
@@ -2210,7 +2251,7 @@ async def change_detail_page(
         **detail,
         "diff": diff,
     }
-    return templates.TemplateResponse("pages/change_detail.html", context)
+    return templates.TemplateResponse(request, "pages/change_detail.html", context)
 
 
 @router.get("/partials/diff/{change_id}")
@@ -2223,14 +2264,18 @@ async def partial_diff(
     """HTMX partial: diff view (extracted text or raw content)."""
     detail = await get_change_detail(session, change_id)
     if not detail:
-        return templates.TemplateResponse("pages/404.html", {"request": request}, status_code=404)
+        return templates.TemplateResponse(
+            request, "pages/404.html", {"request": request}, status_code=404
+        )
 
     storage = LocalStorage(base_dir=STORAGE_BASE_DIR)
     path_attr = "storage_path" if mode == "raw" else "text_path"
     prev_text = _load_snapshot_text(storage, detail["previous_snapshot"], path_attr)
     curr_text = _load_snapshot_text(storage, detail["current_snapshot"], path_attr)
     diff = generate_diff(prev_text, curr_text)
-    return templates.TemplateResponse("partials/diff_view.html", {"request": request, "diff": diff})
+    return templates.TemplateResponse(
+        request, "partials/diff_view.html", {"request": request, "diff": diff}
+    )
 
 
 @router.get("/audit")
@@ -2249,7 +2294,7 @@ async def audit_log_page(
         "entries": entries,
         "event_type": event_type,
     }
-    return templates.TemplateResponse("pages/audit_log.html", context)
+    return templates.TemplateResponse(request, "pages/audit_log.html", context)
 
 
 @router.get("/partials/audit-table")
@@ -2263,7 +2308,7 @@ async def partial_audit_table(
     event_type = event_type or None
     entries = await get_audit_entries(session, event_type=event_type, watch_id=watch_id)
     return templates.TemplateResponse(
-        "partials/audit_table.html", {"request": request, "entries": entries}
+        request, "partials/audit_table.html", {"request": request, "entries": entries}
     )
 
 
@@ -2281,7 +2326,7 @@ async def system_page(
         "queue": queue,
         "domains": domains,
     }
-    return templates.TemplateResponse("pages/system.html", context)
+    return templates.TemplateResponse(request, "pages/system.html", context)
 
 
 # ---------------------------------------------------------------------------
@@ -2300,6 +2345,7 @@ async def partial_notification_templates_list(
     )
     notification_templates = result.scalars().all()
     return templates.TemplateResponse(
+        request,
         "partials/notification_template_list.html",
         {"request": request, "notification_templates": notification_templates},
     )
@@ -2317,6 +2363,7 @@ async def notifications_page(
     notification_templates = result.scalars().all()
     apprise_plugins = list_plugins()
     return templates.TemplateResponse(
+        request,
         "pages/notifications.html",
         {
             "request": request,
@@ -2335,6 +2382,7 @@ async def notification_template_add_row(
     """HTMX: inline add-row form for a new notification template."""
     apprise_plugins = list_plugins()
     return templates.TemplateResponse(
+        request,
         "partials/notification_template_add_row.html",
         {"request": request, "apprise_plugins": apprise_plugins},
     )
@@ -2356,6 +2404,7 @@ async def notification_template_create(
 
     if not title:
         return templates.TemplateResponse(
+            request,
             "partials/notification_template_add_row.html",
             {
                 "request": request,
@@ -2378,6 +2427,7 @@ async def notification_template_create(
             apprise_url = assemble_url(schema_val, tokens, variant_index=variant_index)
         except ValueError as exc:
             return templates.TemplateResponse(
+                request,
                 "partials/notification_template_add_row.html",
                 {
                     "request": request,
@@ -2392,6 +2442,7 @@ async def notification_template_create(
             validate_apprise_url(apprise_url)
         except ValueError as exc:
             return templates.TemplateResponse(
+                request,
                 "partials/notification_template_add_row.html",
                 {
                     "request": request,
@@ -2405,6 +2456,7 @@ async def notification_template_create(
         validate_event_list(events)
     except ValueError as exc:
         return templates.TemplateResponse(
+            request,
             "partials/notification_template_add_row.html",
             {
                 "request": request,
@@ -2437,6 +2489,7 @@ async def notification_template_create(
     )
     notification_templates = result.scalars().all()
     response = templates.TemplateResponse(
+        request,
         "partials/notification_template_list.html",
         {"request": request, "notification_templates": notification_templates},
     )
@@ -2472,6 +2525,7 @@ async def notification_template_edit_form(
         await session.scalar(select(func.count()).where(DomainNcRef.template_id == tpl.id)) or 0
     )
     return templates.TemplateResponse(
+        request,
         "partials/notification_template_edit_form.html",
         {
             "request": request,
@@ -2520,6 +2574,7 @@ async def notification_template_edit(
             await session.scalar(select(func.count()).where(DomainNcRef.template_id == tpl.id)) or 0
         )
         resp = templates.TemplateResponse(
+            request,
             "partials/notification_template_edit_form.html",
             {
                 "request": request,
@@ -2563,6 +2618,7 @@ async def notification_template_edit(
     )
     notification_templates = result2.scalars().all()
     response = templates.TemplateResponse(
+        request,
         "partials/notification_template_list.html",
         {"request": request, "notification_templates": notification_templates},
     )
@@ -2602,6 +2658,7 @@ async def notification_template_toggle(
     )
     notification_templates = result2.scalars().all()
     response = templates.TemplateResponse(
+        request,
         "partials/notification_template_list.html",
         {"request": request, "notification_templates": notification_templates},
     )
@@ -2656,6 +2713,7 @@ async def notification_template_delete(
     )
     notification_templates = result2.scalars().all()
     response = templates.TemplateResponse(
+        request,
         "partials/notification_template_list.html",
         {"request": request, "notification_templates": notification_templates},
     )
@@ -2701,6 +2759,7 @@ async def notification_template_duplicate(
     )
     notification_templates = result2.scalars().all()
     response = templates.TemplateResponse(
+        request,
         "partials/notification_template_list.html",
         {"request": request, "notification_templates": notification_templates},
     )
@@ -2756,6 +2815,7 @@ async def notification_template_test_result(
     level = "success" if success else "error"
     message = f"Test notification: {reason}"
     return templates.TemplateResponse(
+        request,
         "partials/flash_oob.html",
         {
             "request": request,

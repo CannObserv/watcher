@@ -2257,22 +2257,6 @@ async def partial_audit_table(
     return templates.TemplateResponse(request, "partials/audit_table.html", {"entries": entries})
 
 
-@router.get("/system")
-async def system_page(
-    request: Request,
-    session: AsyncSession = Depends(get_db_session),
-):
-    """System monitoring page -- queue health and rate limiter state."""
-    queue = await get_queue_health(session)
-    domains = await get_domains_with_watch_counts(session)
-    context = {
-        "active_page": "system",
-        "queue": queue,
-        "domains": domains,
-    }
-    return templates.TemplateResponse(request, "pages/system.html", context)
-
-
 # ---------------------------------------------------------------------------
 # Notification Template Library — /notifications/*
 # ---------------------------------------------------------------------------

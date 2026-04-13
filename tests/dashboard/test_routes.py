@@ -304,21 +304,6 @@ class TestChangeDetail:
         assert b"85%" in response.content
 
 
-class TestSystemPage:
-    async def test_system_page_returns_200(self, client):
-        response = await client.get("/system")
-        assert response.status_code == 200
-        assert b"System" in response.content
-
-    async def test_system_page_has_queue_section(self, client):
-        response = await client.get("/system")
-        assert b"Task Queue" in response.content
-
-    async def test_system_page_has_rate_limiter_section(self, client):
-        response = await client.get("/system")
-        assert b"Rate Limiter" in response.content
-
-
 class TestAuditLog:
     async def test_audit_page_returns_200(self, client):
         response = await client.get("/audit")

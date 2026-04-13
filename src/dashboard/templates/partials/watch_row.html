@@ -24,10 +24,8 @@
   </td>
   <td>
     {% set health = health_map.get(watch.id, "unknown") %}
-    {% if health == "healthy" %}
+    {% if health == "ok" %}
       <span class="badge badge-active">Healthy</span>
-    {% elif health == "warning" %}
-      <span class="badge badge-warning">Warning</span>
     {% elif health == "error" %}
       <span class="badge badge-error">Error</span>
     {% else %}

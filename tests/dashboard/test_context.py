@@ -1,6 +1,6 @@
 """Integration tests for dashboard context queries."""
 
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 
 import pytest
 
@@ -10,7 +10,6 @@ from src.core.models.domain import Domain
 from src.core.models.snapshot import Snapshot, SnapshotChunk
 from src.core.models.watch import ContentType, Watch
 from src.dashboard.context import (
-    compute_watch_health,
     generate_diff,
     get_change_detail,
     get_dashboard_stats,
@@ -20,7 +19,6 @@ from src.dashboard.context import (
     get_recent_changes,
     get_watch_changes,
     get_watch_detail,
-    get_watch_health_map,
     get_watch_list,
     get_watch_timeline,
     summarize_change_metadata,
@@ -510,139 +508,6 @@ class TestGetDomainsFiltered:
         await db_session.flush()
         result = await get_domains_with_watch_counts(db_session)
         assert result[0]["notes"] == "important"
-
-
-class TestComputeWatchHealth:
-    """Unit tests for compute_watch_health pure function."""
-
-    def _make_watch(self, interval="1h", last_checked_at=None):
-        return Watch(
-            name="W",
-            url="https://example.com",
-            content_type="html",
-            schedule_config={"interval": interval} if interval else {},
-            last_checked_at=last_checked_at,
-        )
-
-    def test_unknown_when_never_checked(self):
-        watch = self._make_watch(last_checked_at=None)
-        now = datetime.now(UTC)
-        assert compute_watch_health(watch, None, now) == "unknown"
-
-    def test_error_when_latest_event_is_fetch_failed(self):
-        now = datetime.now(UTC)
-        watch = self._make_watch(last_checked_at=now - timedelta(minutes=30))
-        assert compute_watch_health(watch, EventType.CHECK_FETCH_FAILED, now) == "error"
-
-    def test_healthy_when_checked_within_interval(self):
-        now = datetime.now(UTC)
-        # interval=1h, checked 30m ago → well within 2× (2h)
-        watch = self._make_watch(interval="1h", last_checked_at=now - timedelta(minutes=30))
-        assert compute_watch_health(watch, EventType.CHECK_NO_CHANGE, now) == "healthy"
-
-    def test_healthy_when_snapshot_created(self):
-        now = datetime.now(UTC)
-        watch = self._make_watch(interval="1h", last_checked_at=now - timedelta(minutes=30))
-        assert compute_watch_health(watch, EventType.CHECK_SNAPSHOT_CREATED, now) == "healthy"
-
-    def test_warning_when_stale_beyond_2x_interval(self):
-        now = datetime.now(UTC)
-        # interval=1h, checked 3h ago → 3h > 2×1h
-        watch = self._make_watch(interval="1h", last_checked_at=now - timedelta(hours=3))
-        assert compute_watch_health(watch, EventType.CHECK_NO_CHANGE, now) == "warning"
-
-    def test_healthy_at_exactly_2x_boundary(self):
-        now = datetime.now(UTC)
-        # checked exactly 2h ago with 1h interval → at boundary → healthy (not strictly >)
-        watch = self._make_watch(interval="1h", last_checked_at=now - timedelta(hours=2))
-        assert compute_watch_health(watch, EventType.CHECK_NO_CHANGE, now) == "healthy"
-
-    def test_warning_just_past_2x_boundary(self):
-        now = datetime.now(UTC)
-        watch = self._make_watch(interval="1h", last_checked_at=now - timedelta(hours=2, seconds=1))
-        assert compute_watch_health(watch, EventType.CHECK_NO_CHANGE, now) == "warning"
-
-    def test_no_interval_uses_default_1d(self):
-        now = datetime.now(UTC)
-        # No interval configured → default 1d; checked 1h ago → healthy
-        watch = self._make_watch(interval=None, last_checked_at=now - timedelta(hours=1))
-        assert compute_watch_health(watch, EventType.CHECK_NO_CHANGE, now) == "healthy"
-
-    def test_unknown_when_last_event_is_none_but_checked_at_set(self):
-        # last_checked_at is set but no audit event in DB (edge case) → treat as unknown
-        now = datetime.now(UTC)
-        watch = self._make_watch(interval="1h", last_checked_at=now - timedelta(minutes=10))
-        # If no check event found at all, return unknown
-        assert compute_watch_health(watch, None, now) == "unknown"
-
-
-@pytest.mark.integration
-class TestGetWatchHealthMap:
-    """Integration tests for get_watch_health_map."""
-
-    async def test_empty_returns_empty_dict(self, db_session):
-        result = await get_watch_health_map(db_session, [])
-        assert result == {}
-
-    async def test_unknown_for_watch_with_no_audit_events(self, db_session):
-        watch = Watch(name="W", url="https://a.com", content_type="html")
-        db_session.add(watch)
-        await db_session.flush()
-
-        result = await get_watch_health_map(db_session, [watch.id])
-        assert result[watch.id] is None
-
-    async def test_returns_latest_check_event_type(self, db_session):
-        watch = Watch(name="W", url="https://a.com", content_type="html")
-        db_session.add(watch)
-        await db_session.flush()
-
-        older = AuditLog(
-            event_type=EventType.CHECK_FETCH_FAILED,
-            watch_id=watch.id,
-            created_at=datetime(2026, 1, 1, 10, 0, 0, tzinfo=UTC),
-        )
-        newer = AuditLog(
-            event_type=EventType.CHECK_NO_CHANGE,
-            watch_id=watch.id,
-            created_at=datetime(2026, 1, 1, 12, 0, 0, tzinfo=UTC),
-        )
-        db_session.add_all([older, newer])
-        await db_session.flush()
-
-        result = await get_watch_health_map(db_session, [watch.id])
-        assert result[watch.id] == EventType.CHECK_NO_CHANGE
-
-    async def test_ignores_non_check_events(self, db_session):
-        watch = Watch(name="W", url="https://a.com", content_type="html")
-        db_session.add(watch)
-        await db_session.flush()
-
-        # Only a non-check event; should still return None for check events
-        db_session.add(
-            AuditLog(
-                event_type=EventType.WATCH_UPDATED,
-                watch_id=watch.id,
-            )
-        )
-        await db_session.flush()
-
-        result = await get_watch_health_map(db_session, [watch.id])
-        assert result[watch.id] is None
-
-    async def test_handles_multiple_watches(self, db_session):
-        w1 = Watch(name="W1", url="https://a.com", content_type="html")
-        w2 = Watch(name="W2", url="https://b.com", content_type="html")
-        db_session.add_all([w1, w2])
-        await db_session.flush()
-
-        db_session.add(AuditLog(event_type=EventType.CHECK_FETCH_FAILED, watch_id=w1.id))
-        db_session.add(AuditLog(event_type=EventType.CHECK_SNAPSHOT_CREATED, watch_id=w2.id))
-        await db_session.flush()
-
-        result = await get_watch_health_map(db_session, [w1.id, w2.id])
-        assert result[w1.id] == EventType.CHECK_FETCH_FAILED
-        assert result[w2.id] == EventType.CHECK_SNAPSHOT_CREATED
 
 
 @pytest.mark.integration

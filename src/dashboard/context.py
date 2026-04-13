@@ -2,7 +2,6 @@
 
 import difflib
 from datetime import UTC, datetime
-from typing import Any
 
 from sqlalchemy import func, select, text
 from sqlalchemy.exc import ProgrammingError
@@ -16,14 +15,6 @@ from src.core.models.notification_config import WatchNotificationConfig
 from src.core.models.snapshot import Snapshot, SnapshotChunk
 from src.core.models.temporal_profile import TemporalProfile
 from src.core.models.watch import Watch
-from src.core.scheduler import parse_interval
-
-#: Check-related event types used for health derivation.
-_CHECK_EVENT_TYPES = (
-    EventType.CHECK_SNAPSHOT_CREATED,
-    EventType.CHECK_NO_CHANGE,
-    EventType.CHECK_FETCH_FAILED,
-)
 
 
 def summarize_change_metadata(metadata: dict) -> str:
@@ -63,71 +54,6 @@ async def get_watch_list(
         stmt = stmt.where(Watch.is_archived.is_(False))
     result = await session.execute(stmt)
     return list(result.scalars().all())
-
-
-def compute_watch_health(
-    watch: Watch,
-    latest_event_type: EventType | None,
-    now: datetime,
-) -> str:
-    """Derive health state for a watch from its last check metadata.
-
-    States (in priority order):
-    - ``"unknown"`` — never checked or no check event recorded.
-    - ``"error"`` — latest check event was a fetch failure.
-    - ``"warning"`` — last check was more than 2× the configured interval ago.
-    - ``"healthy"`` — last check succeeded within 2× the interval.
-    """
-    if watch.last_checked_at is None or latest_event_type is None:
-        return "unknown"
-    if latest_event_type == EventType.CHECK_FETCH_FAILED:
-        return "error"
-    interval = parse_interval((watch.schedule_config or {}).get("interval"))
-    age = now - watch.last_checked_at
-    if age > 2 * interval:
-        return "warning"
-    return "healthy"
-
-
-async def get_watch_health_map(
-    session: AsyncSession,
-    watch_ids: list[Any],
-) -> dict[Any, EventType | None]:
-    """Return a mapping of watch_id → latest check event_type (or None).
-
-    Queries the audit log for the most recent check-related event per watch.
-    Watches with no check events map to ``None``.
-    """
-    if not watch_ids:
-        return {}
-
-    # Use a scalar subquery approach: for each watch_id, find max created_at among
-    # check events, then fetch the corresponding event_type.
-    subq = (
-        select(
-            AuditLog.watch_id,
-            AuditLog.event_type,
-            func.row_number()
-            .over(
-                partition_by=AuditLog.watch_id,
-                order_by=AuditLog.created_at.desc(),
-            )
-            .label("rn"),
-        )
-        .where(
-            AuditLog.watch_id.in_(watch_ids),
-            AuditLog.event_type.in_(_CHECK_EVENT_TYPES),
-        )
-        .subquery()
-    )
-
-    stmt = select(subq.c.watch_id, subq.c.event_type).where(subq.c.rn == 1)
-    result = await session.execute(stmt)
-    rows = result.all()
-
-    found = {row.watch_id: row.event_type for row in rows}
-    # Ensure every requested watch_id is in the result (None if not found)
-    return {wid: found.get(wid) for wid in watch_ids}
 
 
 async def get_dashboard_stats(session: AsyncSession) -> dict:

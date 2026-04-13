@@ -50,6 +50,9 @@ asyncio_default_test_loop_scope = "session"
 markers = [
     "integration: marks tests that hit live external services; excluded by default (run with -m integration)",
 ]
+filterwarnings = [
+    "error::DeprecationWarning",
+]
 
 [tool.ruff]
 line-length = 100

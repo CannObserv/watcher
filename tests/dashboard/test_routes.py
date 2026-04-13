@@ -1,12 +1,14 @@
 """Integration tests for dashboard routes."""
 
 import re
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
 from src.core.models.change import Change
 from src.core.models.snapshot import Snapshot
 from src.core.models.watch import ContentType, Watch
+from src.core.notifications.events import WatchEventType
 
 pytestmark = pytest.mark.integration
 
@@ -311,6 +313,38 @@ class Test404Template:
         response = await client.get("/watches/not-a-ulid")
         assert response.status_code == 404
         assert b"/watches" in response.content
+
+
+_NOTIFY_PATCH = "src.dashboard.routes.dispatch_event_notifications"
+
+
+class TestWatchArchive:
+    async def _create_watch(self, client):
+        resp = await client.post(
+            "/api/v1/watches",
+            json={"name": "Archive Me", "url": "https://example.com/arc", "content_type": "html"},
+        )
+        assert resp.status_code == 201
+        return resp.json()["id"]
+
+    async def test_archive_dispatches_watch_archived_event(self, client):
+        watch_id = await self._create_watch(client)
+        with patch(_NOTIFY_PATCH, new_callable=AsyncMock) as mock_dispatch:
+            response = await client.post(f"/watches/{watch_id}/archive")
+        assert response.status_code in (200, 303)
+        mock_dispatch.assert_awaited_once()
+        _, kwargs = mock_dispatch.call_args
+        assert kwargs["event"].event_type == WatchEventType.WATCH_ARCHIVED
+        assert kwargs["event"].watch_id == watch_id
+
+    async def test_archive_event_includes_name_and_url(self, client):
+        watch_id = await self._create_watch(client)
+        with patch(_NOTIFY_PATCH, new_callable=AsyncMock) as mock_dispatch:
+            await client.post(f"/watches/{watch_id}/archive")
+        _, kwargs = mock_dispatch.call_args
+        event = kwargs["event"]
+        assert event.watch_name == "Archive Me"
+        assert event.watch_url == "https://example.com/arc"
 
 
 class TestWatchDelete:

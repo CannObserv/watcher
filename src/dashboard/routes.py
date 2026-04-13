@@ -37,6 +37,7 @@ from src.core.notifications.apprise_builder import (
 )
 from src.core.notifications.dispatcher import dispatch_event
 from src.core.notifications.events import WatchEvent, WatchEventType
+from src.core.notifications.notify import dispatch_event_notifications
 from src.core.probe import ProbeResult
 from src.core.screenshot import capture_screenshot
 from src.core.storage import STORAGE_BASE_DIR, LocalStorage
@@ -780,6 +781,16 @@ async def watch_archive(
     watch.is_archived = True
     watch.is_active = False
     audit(session, EventType.WATCH_ARCHIVED, watch_id=watch.id, name=watch.name, source="dashboard")
+    await dispatch_event_notifications(
+        session=session,
+        event=WatchEvent(
+            event_type=WatchEventType.WATCH_ARCHIVED,
+            watch_id=str(watch.id),
+            watch_name=watch.name,
+            watch_url=watch.url,
+            occurred_at=datetime.now(UTC),
+        ),
+    )
     await session.commit()
 
     return RedirectResponse(url=f"/watches/{watch_id}", status_code=303)

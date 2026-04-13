@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ulid import ULID
 
 from src.core.notifications.events import WatchEvent, WatchEventType
-from src.workers.notify import dispatch_event_notifications
+from src.core.notifications.notify import dispatch_event_notifications
 
 
 @pytest.fixture(autouse=True)
@@ -104,7 +104,9 @@ class TestGlobalDispatch:
         )
 
         with patch(
-            "src.workers.notify.dispatch_event", new_callable=AsyncMock, return_value=_ok_result()
+            "src.core.notifications.notify.dispatch_event",
+            new_callable=AsyncMock,
+            return_value=_ok_result(),
         ):
             await dispatch_event_notifications(session, make_event())
 
@@ -124,7 +126,9 @@ class TestGlobalDispatch:
         )
 
         with patch(
-            "src.workers.notify.dispatch_event", new_callable=AsyncMock, return_value=_ok_result()
+            "src.core.notifications.notify.dispatch_event",
+            new_callable=AsyncMock,
+            return_value=_ok_result(),
         ):
             await dispatch_event_notifications(session, make_event())
 
@@ -148,7 +152,9 @@ class TestDomainDispatch:
         )
 
         with patch(
-            "src.workers.notify.dispatch_event", new_callable=AsyncMock, return_value=_ok_result()
+            "src.core.notifications.notify.dispatch_event",
+            new_callable=AsyncMock,
+            return_value=_ok_result(),
         ):
             await dispatch_event_notifications(session, make_event())
 
@@ -183,7 +189,9 @@ class TestDomainDispatch:
         )
 
         with patch(
-            "src.workers.notify.dispatch_event", new_callable=AsyncMock, return_value=_ok_result()
+            "src.core.notifications.notify.dispatch_event",
+            new_callable=AsyncMock,
+            return_value=_ok_result(),
         ):
             await dispatch_event_notifications(session, make_event())
 
@@ -206,7 +214,9 @@ class TestWatchTemplateDispatch:
         )
 
         with patch(
-            "src.workers.notify.dispatch_event", new_callable=AsyncMock, return_value=_ok_result()
+            "src.core.notifications.notify.dispatch_event",
+            new_callable=AsyncMock,
+            return_value=_ok_result(),
         ):
             await dispatch_event_notifications(session, make_event())
 
@@ -225,7 +235,9 @@ class TestWatchTemplateDispatch:
         )
 
         with patch(
-            "src.workers.notify.dispatch_event", new_callable=AsyncMock, return_value=_ok_result()
+            "src.core.notifications.notify.dispatch_event",
+            new_callable=AsyncMock,
+            return_value=_ok_result(),
         ):
             await dispatch_event_notifications(session, make_event())
 
@@ -247,7 +259,9 @@ class TestLocalDispatch:
         )
 
         with patch(
-            "src.workers.notify.dispatch_event", new_callable=AsyncMock, return_value=_ok_result()
+            "src.core.notifications.notify.dispatch_event",
+            new_callable=AsyncMock,
+            return_value=_ok_result(),
         ):
             await dispatch_event_notifications(session, make_event())
 
@@ -266,7 +280,9 @@ class TestLocalDispatch:
         )
 
         with patch(
-            "src.workers.notify.dispatch_event", new_callable=AsyncMock, return_value=_ok_result()
+            "src.core.notifications.notify.dispatch_event",
+            new_callable=AsyncMock,
+            return_value=_ok_result(),
         ):
             await dispatch_event_notifications(session, make_event())
 
@@ -292,7 +308,9 @@ class TestDeduplication:
         )
 
         with patch(
-            "src.workers.notify.dispatch_event", new_callable=AsyncMock, return_value=_ok_result()
+            "src.core.notifications.notify.dispatch_event",
+            new_callable=AsyncMock,
+            return_value=_ok_result(),
         ) as mock_dispatch:
             await dispatch_event_notifications(session, make_event())
 
@@ -316,7 +334,9 @@ class TestDeduplication:
         )
 
         with patch(
-            "src.workers.notify.dispatch_event", new_callable=AsyncMock, return_value=_ok_result()
+            "src.core.notifications.notify.dispatch_event",
+            new_callable=AsyncMock,
+            return_value=_ok_result(),
         ) as mock_dispatch:
             await dispatch_event_notifications(session, make_event())
 
@@ -341,7 +361,9 @@ class TestDeduplication:
         )
 
         with patch(
-            "src.workers.notify.dispatch_event", new_callable=AsyncMock, return_value=_ok_result()
+            "src.core.notifications.notify.dispatch_event",
+            new_callable=AsyncMock,
+            return_value=_ok_result(),
         ) as mock_dispatch:
             await dispatch_event_notifications(session, make_event())
 
@@ -362,7 +384,7 @@ class TestErrorHandling:
         )
 
         with patch(
-            "src.workers.notify.dispatch_event",
+            "src.core.notifications.notify.dispatch_event",
             new_callable=AsyncMock,
             side_effect=Exception("boom"),
         ):

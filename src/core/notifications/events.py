@@ -34,6 +34,15 @@ _TITLES: dict[WatchEventType, str] = {
 EVENT_TITLES: dict[str, str] = {e.value: t for e, t in _TITLES.items()}
 """Public mapping of event type value strings to human-readable titles."""
 
+_BODY_TEMPLATES: dict[WatchEventType, str] = {
+    WatchEventType.WATCH_RECOVERED: "{watch_url} is responding normally again",
+    WatchEventType.WATCH_CREATED: "Now monitoring {watch_url}",
+    WatchEventType.WATCH_PAUSED: "Watch paused: {watch_url}",
+    WatchEventType.WATCH_RESUMED: "Watch resumed: {watch_url}",
+    WatchEventType.WATCH_ARCHIVED: "Watch archived: {watch_url}",
+    WatchEventType.WATCH_DELETED: "Watch deleted: {watch_url}",
+}
+
 _APPRISE_TYPES: dict[WatchEventType, str] = {
     WatchEventType.CHANGE_DETECTED: "info",
     WatchEventType.WATCH_ERROR: "failure",
@@ -76,18 +85,9 @@ class WatchEvent:
         if self.event_type == WatchEventType.WATCH_ERROR:
             status = self.metadata.get("status_code", "unknown")
             return f"{self.watch_url} returned HTTP {status}"
-        if self.event_type == WatchEventType.WATCH_RECOVERED:
-            return f"{self.watch_url} is responding normally again"
-        if self.event_type == WatchEventType.WATCH_CREATED:
-            return f"Now monitoring {self.watch_url}"
-        if self.event_type == WatchEventType.WATCH_PAUSED:
-            return f"Watch paused: {self.watch_url}"
-        if self.event_type == WatchEventType.WATCH_RESUMED:
-            return f"Watch resumed: {self.watch_url}"
-        if self.event_type == WatchEventType.WATCH_ARCHIVED:
-            return f"Watch archived: {self.watch_url}"
-        if self.event_type == WatchEventType.WATCH_DELETED:
-            return f"Watch deleted: {self.watch_url}"
+        template = _BODY_TEMPLATES.get(self.event_type)
+        if template:
+            return template.format(watch_url=self.watch_url)
         return self.watch_url
 
     @property

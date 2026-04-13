@@ -18,7 +18,7 @@ from src.core.models.audit_log import EventType, audit
 from src.core.models.domain import DEFAULT_MAX_CONCURRENCY, DEFAULT_MIN_INTERVAL, Domain
 from src.core.models.watch import Watch
 from src.core.notifications.events import WatchEvent, WatchEventType
-from src.workers.notify import dispatch_event_notifications
+from src.core.notifications.notify import dispatch_event_notifications
 
 logger = get_logger(__name__)
 

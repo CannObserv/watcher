@@ -79,7 +79,6 @@ async def dashboard_home(
     domains = await get_domains_with_watch_counts(session)
 
     context = {
-        "request": request,
         "active_page": "dashboard",
         "stats": stats,
         "changes": changes,
@@ -111,7 +110,6 @@ async def watches_page(
     watches = await get_watch_list(session, is_active=is_active)
     health_map = await _build_watch_health(session, watches)
     context = {
-        "request": request,
         "active_page": "watches",
         "watches": watches,
         "is_active": is_active,
@@ -127,7 +125,6 @@ async def watch_create_form(request: Request):
         request,
         "pages/watch_form.html",
         {
-            "request": request,
             "active_page": "watches",
             "watch": None,
             "flash": None,
@@ -158,7 +155,6 @@ async def watch_create_submit(
             request,
             "pages/watch_form.html",
             {
-                "request": request,
                 "active_page": "watches",
                 "watch": None,
                 "flash": flash,
@@ -245,7 +241,6 @@ async def watch_detail_page(
     timeline_total = await get_watch_timeline_count(session, watch_id)
 
     context = {
-        "request": request,
         "active_page": "watches",
         "watch": watch,
         "profiles": profiles,
@@ -619,7 +614,6 @@ def _watch_field_context(
     """Build template context for a single watch field partial."""
     meta = WATCH_FIELD_META[field_name]
     ctx = {
-        "request": request,
         "watch": watch,
         "field_name": field_name,
         "field_label": meta["label"],
@@ -767,7 +761,7 @@ async def watch_toggle_active(
         return templates.TemplateResponse(
             request,
             "partials/watch_status_toggle.html",
-            {"request": request, "watch": watch, "domain_inactive": domain_inactive},
+            {"watch": watch, "domain_inactive": domain_inactive},
         )
     return RedirectResponse(url=f"/watches/{watch_id}", status_code=303)
 
@@ -829,7 +823,6 @@ async def domains_page(
     )
     total_count = await get_domains_total_count(session, search=q, status=status)
     context = {
-        "request": request,
         "active_page": "domains",
         "domains": domains,
         "search": q,
@@ -865,7 +858,6 @@ async def partial_domains_table(
         request,
         "partials/domains_table.html",
         {
-            "request": request,
             "domains": domains,
             "page": page,
             "page_size": page_size,
@@ -882,7 +874,7 @@ async def domain_create_form(request: Request):
     return templates.TemplateResponse(
         request,
         "pages/domain_form.html",
-        {"request": request, "active_page": "domains", "flash": None, "url": ""},
+        {"active_page": "domains", "flash": None, "url": ""},
     )
 
 
@@ -899,7 +891,7 @@ async def domain_create_submit(
         return templates.TemplateResponse(
             request,
             "pages/domain_form.html",
-            {"request": request, "active_page": "domains", "flash": flash, "url": url},
+            {"active_page": "domains", "flash": flash, "url": url},
         )
 
     try:
@@ -912,7 +904,7 @@ async def domain_create_submit(
         return templates.TemplateResponse(
             request,
             "pages/domain_form.html",
-            {"request": request, "active_page": "domains", "flash": flash, "url": url},
+            {"active_page": "domains", "flash": flash, "url": url},
         )
 
     domain_name = result.effective_domain
@@ -921,7 +913,7 @@ async def domain_create_submit(
         return templates.TemplateResponse(
             request,
             "pages/domain_form.html",
-            {"request": request, "active_page": "domains", "flash": flash, "url": url},
+            {"active_page": "domains", "flash": flash, "url": url},
         )
 
     # Check if domain already exists
@@ -1032,7 +1024,7 @@ async def domain_toggle_active(
         return templates.TemplateResponse(
             request,
             "partials/domain_toggle_oob.html",
-            {"request": request, "domain": domain, "watches": watches},
+            {"domain": domain, "watches": watches},
         )
     return RedirectResponse(url=f"/domains/{name}", status_code=303)
 
@@ -1117,7 +1109,6 @@ def _field_context(request: Request, domain: Domain, field_name: str, mode: str 
     """Build template context for a single domain field partial."""
     meta = DOMAIN_FIELD_META[field_name]
     return {
-        "request": request,
         "domain": domain,
         "field_name": field_name,
         "field_label": meta["label"],
@@ -1217,7 +1208,6 @@ async def domain_detail_page(
     }
 
     context = {
-        "request": request,
         "active_page": "domains",
         "domain": domain,
         "watches": watches,
@@ -1488,9 +1478,7 @@ async def partial_stats_cards(
 ):
     """HTMX partial: stats cards only."""
     stats = await get_dashboard_stats(session)
-    return templates.TemplateResponse(
-        request, "partials/stats_cards.html", {"request": request, "stats": stats}
-    )
+    return templates.TemplateResponse(request, "partials/stats_cards.html", {"stats": stats})
 
 
 @router.get("/partials/recent-changes")
@@ -1500,9 +1488,7 @@ async def partial_recent_changes(
 ):
     """HTMX partial: recent changes table."""
     changes = await get_recent_changes(session, limit=20)
-    return templates.TemplateResponse(
-        request, "partials/recent_changes.html", {"request": request, "changes": changes}
-    )
+    return templates.TemplateResponse(request, "partials/recent_changes.html", {"changes": changes})
 
 
 @router.get("/partials/system-health")
@@ -1516,7 +1502,7 @@ async def partial_system_health(
     return templates.TemplateResponse(
         request,
         "partials/system_health.html",
-        {"request": request, "queue": queue, "domains": domains},
+        {"queue": queue, "domains": domains},
     )
 
 
@@ -1532,7 +1518,7 @@ async def partial_watch_table(
     return templates.TemplateResponse(
         request,
         "partials/watch_table.html",
-        {"request": request, "watches": watches, "health_map": health_map},
+        {"watches": watches, "health_map": health_map},
     )
 
 
@@ -1544,9 +1530,7 @@ async def partial_watch_changes(
 ):
     """HTMX partial: change history for a watch (legacy endpoint)."""
     changes = await get_watch_changes(session, watch_id)
-    return templates.TemplateResponse(
-        request, "partials/watch_changes.html", {"request": request, "changes": changes}
-    )
+    return templates.TemplateResponse(request, "partials/watch_changes.html", {"changes": changes})
 
 
 @router.get("/partials/watch-timeline/{watch_id}")
@@ -1575,7 +1559,6 @@ async def partial_watch_timeline(
         request,
         "partials/watch_timeline.html",
         {
-            "request": request,
             "watch": watch,
             "timeline": timeline,
             "timeline_total": timeline_total,
@@ -1618,7 +1601,6 @@ async def watch_notification_add_row(
         request,
         "partials/notification_add_row.html",
         {
-            "request": request,
             "watch": watch,
             "apprise_plugins": list_plugins(),
         },
@@ -1634,9 +1616,7 @@ async def partial_apprise_plugin_form(
 ):
     """HTMX partial: token form for a selected Apprise plugin, or raw URL input."""
     if raw or schema is None:
-        return templates.TemplateResponse(
-            request, "partials/apprise_raw_url_form.html", {"request": request}
-        )
+        return templates.TemplateResponse(request, "partials/apprise_raw_url_form.html")
     detail = get_plugin_detail(schema)
     if detail is None:
         raise HTTPException(status_code=404, detail=f"Unknown Apprise plugin: {schema!r}")
@@ -1658,7 +1638,7 @@ async def partial_apprise_plugin_form(
     return templates.TemplateResponse(
         request,
         "partials/apprise_plugin_form.html",
-        {"request": request, "plugin": detail, "variant": variant},
+        {"plugin": detail, "variant": variant},
     )
 
 
@@ -1695,7 +1675,6 @@ async def watch_notification_create(
                 request,
                 "partials/notification_add_row.html",
                 {
-                    "request": request,
                     "watch": watch,
                     "apprise_plugins": list_plugins(),
                     "error": str(exc),
@@ -1712,7 +1691,6 @@ async def watch_notification_create(
                 request,
                 "partials/notification_add_row.html",
                 {
-                    "request": request,
                     "watch": watch,
                     "apprise_plugins": list_plugins(),
                     "error": str(exc),
@@ -1727,7 +1705,6 @@ async def watch_notification_create(
             request,
             "partials/notification_add_row.html",
             {
-                "request": request,
                 "watch": watch,
                 "apprise_plugins": list_plugins(),
                 "error": str(exc),
@@ -1799,7 +1776,6 @@ async def watch_notification_edit_form(
         request,
         "partials/notification_edit_form.html",
         {
-            "request": request,
             "watch": watch,
             "nc": nc,
             "decrypted_url": decrypted_url,
@@ -1839,7 +1815,6 @@ async def watch_notification_edit(
             request,
             "partials/notification_edit_form.html",
             {
-                "request": request,
                 "watch": watch,
                 "nc": nc,
                 "decrypted_url": decrypted_url,
@@ -1861,7 +1836,6 @@ async def watch_notification_edit(
             request,
             "partials/notification_edit_form.html",
             {
-                "request": request,
                 "watch": watch,
                 "nc": nc,
                 "decrypted_url": decrypted_url,
@@ -1950,7 +1924,6 @@ async def _render_watch_notifications(
         request,
         "partials/watch_notifications.html",
         {
-            "request": request,
             "watch": watch,
             "notifications": notifications,
             "global_templates": global_templates,
@@ -2005,7 +1978,6 @@ async def watch_nc_assign_row(
         request,
         "partials/watch_nc_assign_row.html",
         {
-            "request": request,
             "watch": watch,
             "unassigned_templates": unassigned,
         },
@@ -2189,7 +2161,6 @@ async def watch_notification_test_result(
         request,
         "partials/flash_oob.html",
         {
-            "request": request,
             "flash_oob_level": level,
             "flash_oob_message": message,
         },
@@ -2228,7 +2199,6 @@ async def change_detail_page(
     diff = generate_diff(prev_text, curr_text)
 
     context = {
-        "request": request,
         "active_page": "watches",
         **detail,
         "diff": diff,
@@ -2253,9 +2223,7 @@ async def partial_diff(
     prev_text = _load_snapshot_text(storage, detail["previous_snapshot"], path_attr)
     curr_text = _load_snapshot_text(storage, detail["current_snapshot"], path_attr)
     diff = generate_diff(prev_text, curr_text)
-    return templates.TemplateResponse(
-        request, "partials/diff_view.html", {"request": request, "diff": diff}
-    )
+    return templates.TemplateResponse(request, "partials/diff_view.html", {"diff": diff})
 
 
 @router.get("/audit")
@@ -2269,7 +2237,6 @@ async def audit_log_page(
     event_type = event_type or None
     entries = await get_audit_entries(session, event_type=event_type, watch_id=watch_id)
     context = {
-        "request": request,
         "active_page": "audit",
         "entries": entries,
         "event_type": event_type,
@@ -2287,9 +2254,7 @@ async def partial_audit_table(
     """HTMX partial: filtered audit log table."""
     event_type = event_type or None
     entries = await get_audit_entries(session, event_type=event_type, watch_id=watch_id)
-    return templates.TemplateResponse(
-        request, "partials/audit_table.html", {"request": request, "entries": entries}
-    )
+    return templates.TemplateResponse(request, "partials/audit_table.html", {"entries": entries})
 
 
 @router.get("/system")
@@ -2301,7 +2266,6 @@ async def system_page(
     queue = await get_queue_health(session)
     domains = await get_domains_with_watch_counts(session)
     context = {
-        "request": request,
         "active_page": "system",
         "queue": queue,
         "domains": domains,
@@ -2327,7 +2291,7 @@ async def partial_notification_templates_list(
     return templates.TemplateResponse(
         request,
         "partials/notification_template_list.html",
-        {"request": request, "notification_templates": notification_templates},
+        {"notification_templates": notification_templates},
     )
 
 
@@ -2346,7 +2310,6 @@ async def notifications_page(
         request,
         "pages/notifications.html",
         {
-            "request": request,
             "active_page": "notifications",
             "notification_templates": notification_templates,
             "apprise_plugins": apprise_plugins,
@@ -2364,7 +2327,7 @@ async def notification_template_add_row(
     return templates.TemplateResponse(
         request,
         "partials/notification_template_add_row.html",
-        {"request": request, "apprise_plugins": apprise_plugins},
+        {"apprise_plugins": apprise_plugins},
     )
 
 
@@ -2387,7 +2350,6 @@ async def notification_template_create(
             request,
             "partials/notification_template_add_row.html",
             {
-                "request": request,
                 "apprise_plugins": list_plugins(),
                 "error": "Title is required.",
             },
@@ -2410,7 +2372,6 @@ async def notification_template_create(
                 request,
                 "partials/notification_template_add_row.html",
                 {
-                    "request": request,
                     "apprise_plugins": list_plugins(),
                     "error": str(exc),
                 },
@@ -2425,7 +2386,6 @@ async def notification_template_create(
                 request,
                 "partials/notification_template_add_row.html",
                 {
-                    "request": request,
                     "apprise_plugins": list_plugins(),
                     "error": str(exc),
                 },
@@ -2439,7 +2399,6 @@ async def notification_template_create(
             request,
             "partials/notification_template_add_row.html",
             {
-                "request": request,
                 "apprise_plugins": list_plugins(),
                 "error": str(exc),
             },
@@ -2471,7 +2430,7 @@ async def notification_template_create(
     response = templates.TemplateResponse(
         request,
         "partials/notification_template_list.html",
-        {"request": request, "notification_templates": notification_templates},
+        {"notification_templates": notification_templates},
     )
     response.headers["HX-Trigger"] = "refreshTemplates"
     return response
@@ -2508,7 +2467,6 @@ async def notification_template_edit_form(
         request,
         "partials/notification_template_edit_form.html",
         {
-            "request": request,
             "tpl": tpl,
             "decrypted_url": decrypted_url,
             "decryption_failed": decryption_failed,
@@ -2557,7 +2515,6 @@ async def notification_template_edit(
             request,
             "partials/notification_template_edit_form.html",
             {
-                "request": request,
                 "tpl": tpl,
                 "decrypted_url": decrypted_url,
                 "error": error_msg,
@@ -2600,7 +2557,7 @@ async def notification_template_edit(
     response = templates.TemplateResponse(
         request,
         "partials/notification_template_list.html",
-        {"request": request, "notification_templates": notification_templates},
+        {"notification_templates": notification_templates},
     )
     response.headers["HX-Trigger"] = "refreshTemplates"
     return response
@@ -2640,7 +2597,7 @@ async def notification_template_toggle(
     response = templates.TemplateResponse(
         request,
         "partials/notification_template_list.html",
-        {"request": request, "notification_templates": notification_templates},
+        {"notification_templates": notification_templates},
     )
     response.headers["HX-Trigger"] = "refreshTemplates"
     return response
@@ -2695,7 +2652,7 @@ async def notification_template_delete(
     response = templates.TemplateResponse(
         request,
         "partials/notification_template_list.html",
-        {"request": request, "notification_templates": notification_templates},
+        {"notification_templates": notification_templates},
     )
     response.headers["HX-Trigger"] = "refreshTemplates"
     return response
@@ -2741,7 +2698,7 @@ async def notification_template_duplicate(
     response = templates.TemplateResponse(
         request,
         "partials/notification_template_list.html",
-        {"request": request, "notification_templates": notification_templates},
+        {"notification_templates": notification_templates},
     )
     response.headers["HX-Trigger"] = "refreshTemplates"
     return response
@@ -2798,7 +2755,6 @@ async def notification_template_test_result(
         request,
         "partials/flash_oob.html",
         {
-            "request": request,
             "flash_oob_level": level,
             "flash_oob_message": message,
         },

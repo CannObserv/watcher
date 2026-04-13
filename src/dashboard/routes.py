@@ -198,9 +198,7 @@ async def watch_detail_page(
     """Watch detail page with profiles, notifications, and change history."""
     watch = await get_watch_detail(session, watch_id)
     if not watch:
-        return templates.TemplateResponse(
-            request, "pages/404.html", {"request": request}, status_code=404
-        )
+        return templates.TemplateResponse(request, "pages/404.html", status_code=404)
     profiles = await get_watch_profiles(session, watch.id)
     notifications = await get_watch_notifications(session, watch.id)
     latest_snapshot = await get_latest_snapshot(session, watch.id)
@@ -415,9 +413,7 @@ async def watch_delete(
     """
     watch = await get_watch_detail(session, watch_id)
     if not watch:
-        return templates.TemplateResponse(
-            request, "pages/404.html", {"request": request}, status_code=404
-        )
+        return templates.TemplateResponse(request, "pages/404.html", status_code=404)
     if not watch.is_archived:
         msg = '<p class="text-red-600 text-sm mt-2">Archive the watch before deleting it.</p>'
         return HTMLResponse(status_code=409, content=msg)
@@ -785,9 +781,7 @@ async def watch_archive(
     """Archive a watch — sets is_archived=True and is_active=False."""
     watch = await get_watch_detail(session, watch_id)
     if not watch:
-        return templates.TemplateResponse(
-            request, "pages/404.html", {"request": request}, status_code=404
-        )
+        return templates.TemplateResponse(request, "pages/404.html", status_code=404)
 
     watch.is_archived = True
     watch.is_active = False
@@ -806,9 +800,7 @@ async def watch_restore(
     """Restore an archived watch — clears is_archived, stays inactive."""
     watch = await get_watch_detail(session, watch_id)
     if not watch:
-        return templates.TemplateResponse(
-            request, "pages/404.html", {"request": request}, status_code=404
-        )
+        return templates.TemplateResponse(request, "pages/404.html", status_code=404)
 
     watch.is_archived = False
     # Watch stays inactive after restore — user re-activates via toggle
@@ -954,9 +946,7 @@ async def domain_archive(
     result = await session.execute(select(Domain).where(Domain.name == name))
     domain = result.scalar_one_or_none()
     if not domain:
-        return templates.TemplateResponse(
-            request, "pages/404.html", {"request": request}, status_code=404
-        )
+        return templates.TemplateResponse(request, "pages/404.html", status_code=404)
 
     if domain.archived_at is None:
         domain.archived_at = datetime.now(UTC)
@@ -976,9 +966,7 @@ async def domain_restore(
     result = await session.execute(select(Domain).where(Domain.name == name))
     domain = result.scalar_one_or_none()
     if not domain:
-        return templates.TemplateResponse(
-            request, "pages/404.html", {"request": request}, status_code=404
-        )
+        return templates.TemplateResponse(request, "pages/404.html", status_code=404)
 
     domain.archived_at = None
     audit(session, EventType.DOMAIN_RESTORED, domain_name=name, source="dashboard")
@@ -1059,9 +1047,7 @@ async def domain_delete(
     result = await session.execute(select(Domain).where(Domain.name == name))
     domain = result.scalar_one_or_none()
     if not domain:
-        return templates.TemplateResponse(
-            request, "pages/404.html", {"request": request}, status_code=404
-        )
+        return templates.TemplateResponse(request, "pages/404.html", status_code=404)
 
     if domain.archived_at is None:
         raise HTTPException(status_code=409, detail="Archive the domain before deleting it")
@@ -1216,9 +1202,7 @@ async def domain_detail_page(
     result = await session.execute(select(Domain).where(Domain.name == name))
     domain = result.scalar_one_or_none()
     if not domain:
-        return templates.TemplateResponse(
-            request, "pages/404.html", {"request": request}, status_code=404
-        )
+        return templates.TemplateResponse(request, "pages/404.html", status_code=404)
 
     is_active = None
     if watch_status == "active":
@@ -2235,9 +2219,7 @@ async def change_detail_page(
     """Change detail page with metadata, chunks, and diff."""
     detail = await get_change_detail(session, change_id)
     if not detail:
-        return templates.TemplateResponse(
-            request, "pages/404.html", {"request": request}, status_code=404
-        )
+        return templates.TemplateResponse(request, "pages/404.html", status_code=404)
 
     storage = LocalStorage(base_dir=STORAGE_BASE_DIR)
     path_attr = "storage_path" if mode == "raw" else "text_path"
@@ -2264,9 +2246,7 @@ async def partial_diff(
     """HTMX partial: diff view (extracted text or raw content)."""
     detail = await get_change_detail(session, change_id)
     if not detail:
-        return templates.TemplateResponse(
-            request, "pages/404.html", {"request": request}, status_code=404
-        )
+        return templates.TemplateResponse(request, "pages/404.html", status_code=404)
 
     storage = LocalStorage(base_dir=STORAGE_BASE_DIR)
     path_attr = "storage_path" if mode == "raw" else "text_path"

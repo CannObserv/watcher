@@ -1,5 +1,7 @@
 """Tests for the Apprise-based notification dispatcher."""
 
+import asyncio
+import logging
 from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -148,3 +150,77 @@ class TestDispatchEvent:
         call_kwargs = instance.async_notify.call_args.kwargs
         assert "Test Watch" in call_kwargs["title"]
         assert "example.com" in call_kwargs["body"]
+
+    async def test_failure_reason_includes_apprise_log_detail(self):
+        """WARNING emitted by apprise logger during async_notify appears in reason."""
+        event = make_event()
+        encrypted = make_encrypted_url("json://localhost/notify")
+        apprise_logger = logging.getLogger("apprise")
+
+        async def fake_notify(**kwargs):
+            apprise_logger.warning("not_in_channel: {'ok': False, 'error': 'not_in_channel'}")
+            return False
+
+        with patch("src.core.notifications.dispatcher.apprise.Apprise") as MockApprise:
+            instance = MagicMock()
+            instance.add.return_value = True
+            instance.async_notify = AsyncMock(side_effect=fake_notify)
+            MockApprise.return_value = instance
+
+            result = await dispatch_event(event, encrypted)
+
+        assert result.success is False
+        assert "not_in_channel" in result.reason
+
+    async def test_success_does_not_include_captured_logs(self):
+        """Warnings emitted during a successful dispatch do not leak into reason."""
+        event = make_event()
+        encrypted = make_encrypted_url("json://localhost/notify")
+        apprise_logger = logging.getLogger("apprise")
+
+        async def fake_notify(**kwargs):
+            apprise_logger.warning("some harmless warning")
+            return True
+
+        with patch("src.core.notifications.dispatcher.apprise.Apprise") as MockApprise:
+            instance = MagicMock()
+            instance.add.return_value = True
+            instance.async_notify = AsyncMock(side_effect=fake_notify)
+            MockApprise.return_value = instance
+
+            result = await dispatch_event(event, encrypted)
+
+        assert result.success is True
+        assert "harmless warning" not in result.reason
+
+    async def test_concurrent_dispatch_logs_not_cross_contaminated(self):
+        """Concurrent dispatch_event calls capture only their own apprise log lines."""
+        apprise_logger = logging.getLogger("apprise")
+        event = make_event()
+        encrypted = make_encrypted_url("json://localhost/notify")
+
+        def make_notifier(msg: str):
+            async def fake_notify(**kwargs):
+                await asyncio.sleep(0)  # yield to allow interleaving
+                apprise_logger.warning(msg)
+                return False
+
+            return fake_notify
+
+        with patch("src.core.notifications.dispatcher.apprise.Apprise") as MockApprise:
+            inst1, inst2 = MagicMock(), MagicMock()
+            inst1.add.return_value = True
+            inst2.add.return_value = True
+            inst1.async_notify = AsyncMock(side_effect=make_notifier("error_for_call_1"))
+            inst2.async_notify = AsyncMock(side_effect=make_notifier("error_for_call_2"))
+            MockApprise.side_effect = [inst1, inst2]
+
+            r1, r2 = await asyncio.gather(
+                dispatch_event(event, encrypted),
+                dispatch_event(event, encrypted),
+            )
+
+        assert "error_for_call_1" in r1.reason
+        assert "error_for_call_1" not in r2.reason
+        assert "error_for_call_2" in r2.reason
+        assert "error_for_call_2" not in r1.reason

@@ -74,6 +74,8 @@ def _parse_content_config_from_form(form) -> dict | None:
         _lines = max(1, min(100, int(_lines_raw)))
     except (ValueError, TypeError):
         _lines = 10
+    title_template = form.get("content_config__title_template", "").strip() or None
+    body_template = form.get("content_config__body_template", "").strip() or None
     opts = ContentOptions(
         include_diff_snippet="content_config__include_diff_snippet" in form,
         include_diff_full="content_config__include_diff_full" in form,
@@ -85,9 +87,10 @@ def _parse_content_config_from_form(form) -> dict | None:
         include_change_dashboard_url="content_config__include_change_dashboard_url" in form,
         include_tags="content_config__include_tags" in form,
         include_description="content_config__include_description" in form,
+        title_template=title_template,
+        body_template=body_template,
     )
-    # Only store if at least one toggle is enabled. diff_snippet_lines alone is not
-    # meaningful without a diff toggle, so don't persist a config just for that.
+    # Only store if at least one toggle is enabled or a template string is provided.
     any_enabled = (
         opts.include_diff_snippet
         or opts.include_diff_full
@@ -98,6 +101,8 @@ def _parse_content_config_from_form(form) -> dict | None:
         or opts.include_change_dashboard_url
         or opts.include_tags
         or opts.include_description
+        or opts.title_template
+        or opts.body_template
     )
     if not any_enabled:
         return None

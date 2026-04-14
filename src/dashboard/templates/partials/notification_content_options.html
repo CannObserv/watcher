@@ -87,5 +87,27 @@
       Description
     </label>
 
+    {# Custom title template (Jinja2) #}
+    <div class="mt-2 space-y-1">
+      <label for="title_template" class="text-sm font-medium text-gray-700 dark:text-gray-300">
+        Title template <span class="text-xs text-gray-500 dark:text-gray-500">(Jinja2 — leave blank to use default)</span>
+      </label>
+      <textarea id="title_template" name="content_config__title_template" rows="2"
+        class="form-input w-full text-sm font-mono"
+        placeholder="{{ event_type }}: {{ watch_name }}"
+        >{{ content_config.default.title_template if content_config and content_config.default.title_template else '' }}</textarea>
+    </div>
+
+    {# Custom body template (Jinja2) #}
+    <div class="mt-2 space-y-1">
+      <label for="body_template" class="text-sm font-medium text-gray-700 dark:text-gray-300">
+        Body template <span class="text-xs text-gray-500 dark:text-gray-500">(Jinja2 — leave blank for auto-generated body)</span>
+      </label>
+      <textarea id="body_template" name="content_config__body_template" rows="4"
+        class="form-input w-full text-sm font-mono"
+        placeholder="{{ watch_url }} changed — significance {{ significance | default('n/a') }}"
+        >{{ content_config.default.body_template if content_config and content_config.default.body_template else '' }}</textarea>
+    </div>
+
   </div>
 </details>

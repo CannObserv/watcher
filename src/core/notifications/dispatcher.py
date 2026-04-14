@@ -9,11 +9,10 @@ from apprise import AppriseAsset
 
 from src.core.crypto import decrypt_apprise_url
 from src.core.logging import get_logger
+from src.core.notifications.constants import APP_URL
 from src.core.notifications.events import WatchEvent
 
 logger = get_logger(__name__)
-
-APP_URL = "https://watcher.exe.xyz"
 
 # Watcher brand identity for all outbound notifications.
 # image_url_mask/logo suppressed (empty) so plugins don't pull Apprise CDN icons.
@@ -61,6 +60,7 @@ async def dispatch_event(
     apprise_url_encrypted: str,
     *,
     body: str | None = None,
+    title: str | None = None,
 ) -> DispatchResult:
     """Dispatch a WatchEvent to a single Apprise target.
 
@@ -73,6 +73,8 @@ async def dispatch_event(
     body — if provided, overrides event.body for this dispatch. Use this to
     send per-config customised content while preserving the event title and
     notify_type.
+    title — if provided, overrides event.title for this dispatch. Use this to
+    send a per-config customised title (e.g. from a title_template).
     """
     url = decrypt_apprise_url(apprise_url_encrypted)
     ap = apprise.Apprise(asset=_ASSET)
@@ -88,7 +90,7 @@ async def dispatch_event(
     try:
         result = await ap.async_notify(
             body=body if body is not None else event.body,
-            title=event.title,
+            title=title if title is not None else event.title,
             notify_type=event.apprise_notify_type,
         )
     finally:

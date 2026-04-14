@@ -40,6 +40,14 @@ class ContentOptions(BaseModel):
     include_description: bool = False
     """Include the watch's description in the body."""
 
+    title_template: str | None = None
+    """Jinja2 template string for the notification title. Overrides the default title when set.
+    Context: watch_id, watch_name, watch_url, event_type, occurred_at, plus all metadata keys."""
+
+    body_template: str | None = None
+    """Jinja2 template string for the notification body. Overrides build_body() output when set.
+    Context: same as title_template."""
+
 
 class ContentConfig(BaseModel):
     """Per-config content customisation: default options with optional per-event overrides."""

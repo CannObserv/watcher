@@ -390,7 +390,7 @@ class TestContentConfig:
 
         dispatched_bodies = []
 
-        async def fake_dispatch(ev, url, *, body=None):
+        async def fake_dispatch(ev, url, *, body=None, title=None):
             dispatched_bodies.append(body)
             return MagicMock(success=True, reason="ok")
 
@@ -422,7 +422,7 @@ class TestContentConfig:
 
         dispatched_bodies = []
 
-        async def fake_dispatch(ev, url, *, body=None):
+        async def fake_dispatch(ev, url, *, body=None, title=None):
             dispatched_bodies.append(body)
             return MagicMock(success=True, reason="ok")
 

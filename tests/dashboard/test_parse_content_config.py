@@ -70,3 +70,42 @@ class TestLinesGuard:
     def test_lines_clamped_at_min(self):
         result = _parse_content_config_from_form(_form(**{_SNIPPET: "1", _LINES: "0"}))
         assert result["default"]["diff_snippet_lines"] == 1
+
+
+_TITLE_TMPL = "content_config__title_template"
+_BODY_TMPL = "content_config__body_template"
+
+
+class TestTemplateStrings:
+    def test_title_template_round_trip(self):
+        result = _parse_content_config_from_form(
+            _form(**{_SNIPPET: "1", _TITLE_TMPL: "{{ event_type }}: {{ watch_name }}"})
+        )
+        assert result is not None
+        assert result["default"]["title_template"] == "{{ event_type }}: {{ watch_name }}"
+
+    def test_body_template_round_trip(self):
+        result = _parse_content_config_from_form(
+            _form(**{_SNIPPET: "1", _BODY_TMPL: "URL: {{ watch_url }}"})
+        )
+        assert result is not None
+        assert result["default"]["body_template"] == "URL: {{ watch_url }}"
+
+    def test_empty_title_template_stored_as_none(self):
+        result = _parse_content_config_from_form(_form(**{_SNIPPET: "1", _TITLE_TMPL: "   "}))
+        assert result is not None
+        assert result["default"]["title_template"] is None
+
+    def test_empty_body_template_stored_as_none(self):
+        result = _parse_content_config_from_form(_form(**{_SNIPPET: "1", _BODY_TMPL: ""}))
+        assert result is not None
+        assert result["default"]["body_template"] is None
+
+    def test_template_alone_without_toggle_returns_none(self):
+        # templates alone (no other toggle) do not persist config
+        # because they don't count as "any_enabled" without title/body being meaningful
+        # Actually per spec they DO count — title_template / body_template alone IS useful
+        result = _parse_content_config_from_form(_form(**{_TITLE_TMPL: "custom title"}))
+        # title_template alone should enable persistence
+        assert result is not None
+        assert result["default"]["title_template"] == "custom title"

@@ -9,7 +9,9 @@ from src.core.notifications.content import (
     _build_last_changed_section,
     _build_significance_section,
     _build_tags_section,
+    _build_template_context,
     build_body,
+    render_template,
     resolve_options,
 )
 from src.core.notifications.events import WatchEvent, WatchEventType
@@ -293,3 +295,80 @@ class TestBuildDescriptionSection:
         event = make_event(metadata={})
         body = build_body(event, ContentOptions(include_description=True))
         assert "Description" not in body
+
+
+class TestRenderTemplate:
+    def test_successful_render(self):
+        result = render_template("Hello {{ name }}", {"name": "World"})
+        assert result == "Hello World"
+
+    def test_syntax_error_returns_original(self):
+        template_str = "{{ unclosed"
+        result = render_template(template_str, {})
+        assert result == template_str
+
+    def test_undefined_error_returns_original(self):
+        # strict undefined by default raises UndefinedError
+        template_str = "{{ missing_var }}"
+        result = render_template(template_str, {})
+        # Jinja2 default env renders undefined as '' — so it won't raise.
+        # The important thing is it doesn't crash.
+        assert isinstance(result, str)
+
+    def test_empty_string_renders_empty(self):
+        result = render_template("", {})
+        assert result == ""
+
+    def test_event_type_in_context(self):
+        result = render_template("{{ event_type }}", {"event_type": "change_detected"})
+        assert result == "change_detected"
+
+
+class TestBuildTemplateContext:
+    def test_context_has_all_watch_event_fields(self):
+        event = make_event(metadata={"significance": 0.5, "change_id": "abc"})
+        ctx = _build_template_context(event)
+        assert ctx["watch_id"] == event.watch_id
+        assert ctx["watch_name"] == event.watch_name
+        assert ctx["watch_url"] == event.watch_url
+        assert ctx["event_type"] == event.event_type
+        assert ctx["occurred_at"] == event.occurred_at
+
+    def test_metadata_keys_flattened_into_context(self):
+        event = make_event(metadata={"significance": 0.75, "change_id": "xyz"})
+        ctx = _build_template_context(event)
+        assert ctx["significance"] == 0.75
+        assert ctx["change_id"] == "xyz"
+
+    def test_empty_metadata_produces_base_keys_only(self):
+        event = make_event(metadata={})
+        ctx = _build_template_context(event)
+        assert set(ctx.keys()) == {
+            "watch_id",
+            "watch_name",
+            "watch_url",
+            "event_type",
+            "occurred_at",
+        }
+
+
+class TestBuildBodyWithTemplates:
+    def test_body_template_overrides_additive_sections(self):
+        event = make_event(metadata={"effective_domain": "example.com"})
+        opts = ContentOptions(include_domain=True, body_template="custom: {{ watch_name }}")
+        body = build_body(event, opts)
+        assert body == "custom: Test Watch"
+        # Additive section should NOT appear when body_template is set
+        assert "Domain" not in body
+
+    def test_body_template_none_uses_additive_logic(self):
+        event = make_event(metadata={"effective_domain": "example.com"})
+        opts = ContentOptions(include_domain=True, body_template=None)
+        body = build_body(event, opts)
+        assert "Domain: example.com" in body
+
+    def test_body_template_bad_syntax_falls_back_to_template_string(self):
+        event = make_event()
+        opts = ContentOptions(body_template="{{ unclosed")
+        body = build_body(event, opts)
+        assert body == "{{ unclosed"

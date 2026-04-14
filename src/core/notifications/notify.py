@@ -12,7 +12,12 @@ from src.core.models.audit_log import EventType, audit
 from src.core.models.notification_config import WatchNotificationConfig
 from src.core.models.notification_template import DomainNcRef, NotificationTemplate, WatchNcRef
 from src.core.models.watch import Watch
-from src.core.notifications.content import build_body, resolve_options
+from src.core.notifications.content import (
+    _build_template_context,
+    build_body,
+    render_template,
+    resolve_options,
+)
 from src.core.notifications.dispatcher import dispatch_event
 from src.core.notifications.events import WatchEvent
 
@@ -144,7 +149,14 @@ async def dispatch_event_notifications(
             )
             options = resolve_options(cfg, event_value)
             custom_body = build_body(event, options) if cfg is not None else None
-            result = await dispatch_event(event, candidate.apprise_url, body=custom_body)
+            custom_title: str | None = None
+            if options.title_template:
+                custom_title = render_template(
+                    options.title_template, _build_template_context(event)
+                )
+            result = await dispatch_event(
+                event, candidate.apprise_url, body=custom_body, title=custom_title
+            )
             results.append(
                 {
                     "source": candidate.source,

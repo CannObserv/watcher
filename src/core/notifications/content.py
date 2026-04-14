@@ -1,8 +1,39 @@
 """Notification body builder — resolves ContentOptions and composes custom bodies."""
 
+from jinja2 import Environment, TemplateSyntaxError, UndefinedError
+
 from src.api.schemas.content_config import ContentConfig, ContentOptions
-from src.core.notifications.dispatcher import APP_URL
+from src.core.notifications.constants import APP_URL
 from src.core.notifications.events import WatchEvent
+
+_jinja_env = Environment(autoescape=False)
+
+
+def render_template(template_str: str, context: dict) -> str:
+    """Render a Jinja2 template string with the given context.
+
+    Returns the rendered string on success, or the original template_str
+    (unchanged) if rendering fails due to syntax or undefined variable errors.
+    This ensures notification dispatch is never silently broken by a bad template.
+    """
+    try:
+        tmpl = _jinja_env.from_string(template_str)
+        return tmpl.render(context)
+    except (TemplateSyntaxError, UndefinedError, Exception):
+        return template_str
+
+
+def _build_template_context(event: WatchEvent) -> dict:
+    """Build Jinja2 template context from a WatchEvent."""
+    ctx = {
+        "watch_id": event.watch_id,
+        "watch_name": event.watch_name,
+        "watch_url": event.watch_url,
+        "event_type": event.event_type,
+        "occurred_at": event.occurred_at,
+    }
+    ctx.update(event.metadata)
+    return ctx
 
 
 def resolve_options(config: ContentConfig | None, event_type: str) -> ContentOptions:
@@ -19,10 +50,14 @@ def resolve_options(config: ContentConfig | None, event_type: str) -> ContentOpt
 def build_body(event: WatchEvent, options: ContentOptions) -> str:
     """Compose a notification body from the event and resolved options.
 
-    The existing event.body is always the first section. Extra sections are
-    appended based on options and available metadata keys. Sections are
-    joined with a blank line.
+    If options.body_template is set, render it as a Jinja2 template and return
+    immediately (no additive sections). Otherwise, the existing event.body is
+    always the first section with extra sections appended based on options.
+    Sections are joined with a blank line.
     """
+    if options.body_template:
+        return render_template(options.body_template, _build_template_context(event))
+
     parts = [event.body]
 
     diff_section = _build_diff_section(event.metadata, options)

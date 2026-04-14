@@ -13,12 +13,14 @@ from src.core.notifications.events import WatchEvent
 
 logger = get_logger(__name__)
 
+APP_URL = "https://watcher.exe.xyz"
+
 # Watcher brand identity for all outbound notifications.
 # image_url_mask/logo suppressed (empty) so plugins don't pull Apprise CDN icons.
 _ASSET = AppriseAsset(
     app_id="CO Watcher",
     app_desc="Cannabis Observer Watcher",
-    app_url="https://watcher.exe.xyz",
+    app_url=APP_URL,
     image_url_mask="",
     image_url_logo="",
 )

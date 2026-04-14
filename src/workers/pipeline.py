@@ -315,6 +315,7 @@ async def _run_check_pipeline(
             session.add(change)
             await session.flush()
             change_id = change.id
+            metadata["change_id"] = str(change.id)
 
     # 10. Audit log
     audit(

@@ -275,6 +275,33 @@ class TestRunCheckPipeline:
         sig = result2["change_metadata"]["significance"]
         assert 0.0 <= sig <= 1.0
 
+    async def test_change_metadata_includes_change_id(self, db_session, tmp_path):
+        """change_metadata returned by pipeline includes change_id key matching change_id result."""
+        watch = Watch(name="ChgIdMeta", url="https://example.com", content_type=ContentType.HTML)
+        db_session.add(watch)
+        await db_session.flush()
+
+        storage = LocalStorage(base_dir=tmp_path)
+        await _run_check_pipeline(
+            watch=watch,
+            raw_content=b"<html><body><p>V1</p></body></html>",
+            fetcher_used="http",
+            fetch_duration_ms=100,
+            storage=storage,
+            session=db_session,
+        )
+        result2 = await _run_check_pipeline(
+            watch=watch,
+            raw_content=b"<html><body><p>V2 changed</p></body></html>",
+            fetcher_used="http",
+            fetch_duration_ms=100,
+            storage=storage,
+            session=db_session,
+        )
+        assert result2["change_id"] is not None
+        assert "change_id" in result2["change_metadata"]
+        assert result2["change_metadata"]["change_id"] == result2["change_id"]
+
 
 def _make_chunk(text: str, index: int = 0) -> Chunk:
     """Helper to build a Chunk with given text."""

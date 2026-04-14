@@ -4,6 +4,7 @@ from datetime import UTC, datetime
 
 from src.api.schemas.content_config import ContentConfig, ContentOptions
 from src.core.notifications.content import (
+    _build_change_url_section,
     _build_last_changed_section,
     _build_significance_section,
     build_body,
@@ -208,3 +209,31 @@ class TestBuildSignificanceSection:
         event = make_event(metadata={})
         body = build_body(event, ContentOptions(include_significance=True))
         assert "Significance" not in body
+
+
+class TestBuildChangeUrlSection:
+    WATCH_ID = "01HV0000000000000000000001"
+    CHANGE_ID = "01HV0000000000000000000099"
+
+    def test_returns_correct_url(self):
+        result = _build_change_url_section(self.WATCH_ID, {"change_id": self.CHANGE_ID})
+        assert f"/watches/{self.WATCH_ID}/changes/{self.CHANGE_ID}" in result
+        assert result.startswith("View change: ")
+
+    def test_returns_empty_when_change_id_absent(self):
+        assert _build_change_url_section(self.WATCH_ID, {}) == ""
+
+    def test_build_body_includes_url_when_enabled(self):
+        event = make_event(metadata={"change_id": self.CHANGE_ID})
+        body = build_body(event, ContentOptions(include_change_dashboard_url=True))
+        assert f"/watches/{event.watch_id}/changes/{self.CHANGE_ID}" in body
+
+    def test_build_body_omits_url_when_disabled(self):
+        event = make_event(metadata={"change_id": self.CHANGE_ID})
+        body = build_body(event, ContentOptions(include_change_dashboard_url=False))
+        assert "View change" not in body
+
+    def test_build_body_omits_url_when_change_id_missing(self):
+        event = make_event(metadata={})
+        body = build_body(event, ContentOptions(include_change_dashboard_url=True))
+        assert "View change" not in body

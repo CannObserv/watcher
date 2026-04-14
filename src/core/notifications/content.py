@@ -1,6 +1,7 @@
 """Notification body builder — resolves ContentOptions and composes custom bodies."""
 
 from src.api.schemas.content_config import ContentConfig, ContentOptions
+from src.core.notifications.dispatcher import APP_URL
 from src.core.notifications.events import WatchEvent
 
 
@@ -47,6 +48,11 @@ def build_body(event: WatchEvent, options: ContentOptions) -> str:
         sig = _build_significance_section(event.metadata)
         if sig:
             parts.append(sig)
+
+    if options.include_change_dashboard_url:
+        url_section = _build_change_url_section(event.watch_id, event.metadata)
+        if url_section:
+            parts.append(url_section)
 
     return "\n\n".join(parts)
 
@@ -109,3 +115,11 @@ def _build_significance_section(metadata: dict) -> str:
     if sig is None:
         return ""
     return f"Significance: {int(sig * 100)}%"
+
+
+def _build_change_url_section(watch_id: str, metadata: dict) -> str:
+    """Format dashboard URL for a change. Returns empty string if change_id absent."""
+    change_id = metadata.get("change_id")
+    if not change_id:
+        return ""
+    return f"View change: {APP_URL}/watches/{watch_id}/changes/{change_id}"

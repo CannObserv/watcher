@@ -36,6 +36,9 @@ class ContentOptions(BaseModel):
     include_significance: bool = False
     """Include the change significance score as a percentage in the body."""
 
+    include_change_dashboard_url: bool = False
+    """Include a direct link to the change detail page in the dashboard."""
+
 
 class ContentConfig(BaseModel):
     """Per-config content customisation: default options with optional per-event overrides."""

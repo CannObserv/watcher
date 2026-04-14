@@ -1,7 +1,7 @@
 """WatchNotificationConfig model — per-watch Apprise notification target."""
 
 from sqlalchemy import Boolean, ForeignKey, String, Text
-from sqlalchemy.dialects.postgresql import ARRAY
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 from ulid import ULID
 
@@ -30,6 +30,7 @@ class WatchNotificationConfig(Base, TimestampMixin):
         server_default="{change_detected}",
     )
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
+    content_config: Mapped[dict | None] = mapped_column(JSONB, nullable=True, default=None)
 
     def __init__(self, **kwargs):
         """Set Python-side defaults."""

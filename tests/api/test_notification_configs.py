@@ -336,6 +336,23 @@ class TestCreateNotificationConfigFromTokens:
         assert resp.status_code == 422
 
 
+@pytest.mark.integration
+async def test_notification_config_has_content_config_column(db_session, make_watch):
+    """ORM model exposes content_config field (fails until migration + model are updated)."""
+    from src.core.models.notification_config import WatchNotificationConfig
+
+    watch = await make_watch()
+    config = WatchNotificationConfig(
+        watch_id=watch.id,
+        apprise_url="encrypted",
+        channel_hint="slack",
+        events=["change_detected"],
+    )
+    db_session.add(config)
+    await db_session.flush()
+    assert config.content_config is None  # default null
+
+
 class TestTestNotificationConfig:
     async def _make_config(self, client, watch_id):
         resp = await client.post(

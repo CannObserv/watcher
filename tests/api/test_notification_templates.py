@@ -193,6 +193,23 @@ async def test_test_endpoint_returns_success(client: AsyncClient):
 
 
 @pytest.mark.integration
+async def test_notification_template_has_content_config_column(db_session):
+    """ORM model exposes content_config field (fails until migration + model are updated)."""
+    from src.core.crypto import encrypt_apprise_url
+    from src.core.models.notification_template import NotificationTemplate
+
+    tpl = NotificationTemplate(
+        title="Test Template",
+        apprise_url=encrypt_apprise_url("slack://T/A/B"),
+        channel_hint="slack",
+        events=["change_detected"],
+    )
+    db_session.add(tpl)
+    await db_session.flush()
+    assert tpl.content_config is None  # default null
+
+
+@pytest.mark.integration
 async def test_test_endpoint_returns_failure_on_dispatch_error(client: AsyncClient):
     """POST /test returns failure dict when dispatch raises, never 5xx."""
     tpl_resp = await client.post(

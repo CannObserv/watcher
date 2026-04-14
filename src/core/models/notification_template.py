@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 
 from sqlalchemy import Boolean, DateTime, ForeignKey, String, Text, func, text
-from sqlalchemy.dialects.postgresql import ARRAY
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 from ulid import ULID
 
@@ -28,6 +28,7 @@ class NotificationTemplate(TimestampMixin, Base):
     )
     is_global_default: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="true")
+    content_config: Mapped[dict | None] = mapped_column(JSONB, nullable=True, default=None)
 
 
 class WatchNcRef(Base):

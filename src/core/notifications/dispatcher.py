@@ -54,7 +54,12 @@ class DispatchResult:
     reason: str
 
 
-async def dispatch_event(event: WatchEvent, apprise_url_encrypted: str) -> DispatchResult:
+async def dispatch_event(
+    event: WatchEvent,
+    apprise_url_encrypted: str,
+    *,
+    body: str | None = None,
+) -> DispatchResult:
     """Dispatch a WatchEvent to a single Apprise target.
 
     Decrypts the stored URL, hands it to Apprise, and awaits async_notify.
@@ -62,6 +67,10 @@ async def dispatch_event(event: WatchEvent, apprise_url_encrypted: str) -> Dispa
     Apprise WARNING log messages emitted during the call are captured and
     included in the reason on failure, surfacing actionable error detail
     (e.g. Slack's not_in_channel, HTTP 401 bodies).
+
+    body — if provided, overrides event.body for this dispatch. Use this to
+    send per-config customised content while preserving the event title and
+    notify_type.
     """
     url = decrypt_apprise_url(apprise_url_encrypted)
     ap = apprise.Apprise(asset=_ASSET)
@@ -76,7 +85,7 @@ async def dispatch_event(event: WatchEvent, apprise_url_encrypted: str) -> Dispa
     token = _capture_ctx.set(messages)
     try:
         result = await ap.async_notify(
-            body=event.body,
+            body=body if body is not None else event.body,
             title=event.title,
             notify_type=event.apprise_notify_type,
         )

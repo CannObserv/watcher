@@ -224,3 +224,46 @@ class TestDispatchEvent:
         assert "error_for_call_1" not in r2.reason
         assert "error_for_call_2" in r2.reason
         assert "error_for_call_2" not in r1.reason
+
+    async def test_dispatch_event_uses_custom_body_when_provided(self):
+        """body param overrides event.body when provided."""
+        event = make_event()
+        encrypted = make_encrypted_url("slack://T/A/B")
+
+        captured_body = {}
+
+        async def fake_notify(**kwargs):
+            captured_body["body"] = kwargs.get("body")
+            return True
+
+        with patch("src.core.notifications.dispatcher.apprise.Apprise") as MockApprise:
+            instance = MagicMock()
+            instance.add.return_value = True
+            instance.async_notify = AsyncMock(side_effect=fake_notify)
+            MockApprise.return_value = instance
+
+            result = await dispatch_event(event, encrypted, body="Custom body text")
+
+        assert result.success is True
+        assert captured_body["body"] == "Custom body text"
+
+    async def test_dispatch_event_uses_event_body_when_no_override(self):
+        """Without body param, falls back to event.body."""
+        event = make_event()
+        encrypted = make_encrypted_url("slack://T/A/B")
+
+        captured_body = {}
+
+        async def fake_notify(**kwargs):
+            captured_body["body"] = kwargs.get("body")
+            return True
+
+        with patch("src.core.notifications.dispatcher.apprise.Apprise") as MockApprise:
+            instance = MagicMock()
+            instance.add.return_value = True
+            instance.async_notify = AsyncMock(side_effect=fake_notify)
+            MockApprise.return_value = instance
+
+            await dispatch_event(event, encrypted)
+
+        assert captured_body["body"] == event.body

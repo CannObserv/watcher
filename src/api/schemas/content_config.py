@@ -1,4 +1,9 @@
-"""Pydantic schemas for notification content configuration."""
+"""Pydantic schemas for notification content configuration.
+
+Phase 1 fields: diff snippet/full, temporal context, domain.
+include_tags and include_description from the design doc were deferred — Watch does not
+have tags or description fields yet. Add them here when those Watch fields exist.
+"""
 
 from pydantic import BaseModel, Field, field_validator
 

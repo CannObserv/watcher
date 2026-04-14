@@ -69,16 +69,27 @@ logger = get_logger(__name__)
 
 def _parse_content_config_from_form(form) -> dict | None:
     """Extract content_config fields from a flat form POST dict."""
+    _lines_raw = form.get("content_config__diff_snippet_lines", "10")
+    try:
+        _lines = max(1, min(100, int(_lines_raw)))
+    except (ValueError, TypeError):
+        _lines = 10
     opts = ContentOptions(
         include_diff_snippet="content_config__include_diff_snippet" in form,
         include_diff_full="content_config__include_diff_full" in form,
         include_temporal_context="content_config__include_temporal_context" in form,
         include_domain="content_config__include_domain" in form,
-        diff_snippet_lines=int(form.get("content_config__diff_snippet_lines", 10)),
+        diff_snippet_lines=_lines,
     )
-    # Only store if any option differs from default (avoid writing null-equivalent dicts)
-    default = ContentOptions()
-    if opts == default:
+    # Only store if at least one toggle is enabled. diff_snippet_lines alone is not
+    # meaningful without a diff toggle, so don't persist a config just for that.
+    any_enabled = (
+        opts.include_diff_snippet
+        or opts.include_diff_full
+        or opts.include_temporal_context
+        or opts.include_domain
+    )
+    if not any_enabled:
         return None
     return ContentConfig(default=opts).model_dump()
 
@@ -1689,6 +1700,7 @@ async def watch_notification_create(
             variant_index = int(variant_raw) if variant_raw is not None else None
             apprise_url = assemble_url(schema_val, tokens, variant_index=variant_index)
         except ValueError as exc:
+            _cc = _parse_content_config_from_form(form)
             return templates.TemplateResponse(
                 request,
                 "partials/notification_add_row.html",
@@ -1696,6 +1708,7 @@ async def watch_notification_create(
                     "watch": watch,
                     "apprise_plugins": list_plugins(),
                     "error": str(exc),
+                    "content_config": ContentConfig.model_validate(_cc) if _cc else None,
                 },
                 headers={"HX-Retarget": "#notification-add-row", "HX-Reswap": "outerHTML"},
             )
@@ -1705,6 +1718,7 @@ async def watch_notification_create(
         try:
             validate_apprise_url(apprise_url)
         except ValueError as exc:
+            _cc = _parse_content_config_from_form(form)
             return templates.TemplateResponse(
                 request,
                 "partials/notification_add_row.html",
@@ -1712,6 +1726,7 @@ async def watch_notification_create(
                     "watch": watch,
                     "apprise_plugins": list_plugins(),
                     "error": str(exc),
+                    "content_config": ContentConfig.model_validate(_cc) if _cc else None,
                 },
                 headers={"HX-Retarget": "#notification-add-row", "HX-Reswap": "outerHTML"},
             )
@@ -1719,6 +1734,7 @@ async def watch_notification_create(
     try:
         validate_event_list(events)
     except ValueError as exc:
+        _cc = _parse_content_config_from_form(form)
         return templates.TemplateResponse(
             request,
             "partials/notification_add_row.html",
@@ -1726,6 +1742,7 @@ async def watch_notification_create(
                 "watch": watch,
                 "apprise_plugins": list_plugins(),
                 "error": str(exc),
+                "content_config": ContentConfig.model_validate(_cc) if _cc else None,
             },
             headers={"HX-Retarget": "#notification-add-row", "HX-Reswap": "outerHTML"},
         )
@@ -2358,12 +2375,14 @@ async def notification_template_create(
     is_global_default = bool(form.get("is_global_default"))
 
     if not title:
+        _cc = _parse_content_config_from_form(form)
         return templates.TemplateResponse(
             request,
             "partials/notification_template_add_row.html",
             {
                 "apprise_plugins": list_plugins(),
                 "error": "Title is required.",
+                "content_config": ContentConfig.model_validate(_cc) if _cc else None,
             },
             headers={"HX-Retarget": "#template-add-row", "HX-Reswap": "outerHTML"},
         )
@@ -2380,12 +2399,14 @@ async def notification_template_create(
             variant_index = int(variant_raw) if variant_raw is not None else None
             apprise_url = assemble_url(schema_val, tokens, variant_index=variant_index)
         except ValueError as exc:
+            _cc = _parse_content_config_from_form(form)
             return templates.TemplateResponse(
                 request,
                 "partials/notification_template_add_row.html",
                 {
                     "apprise_plugins": list_plugins(),
                     "error": str(exc),
+                    "content_config": ContentConfig.model_validate(_cc) if _cc else None,
                 },
                 headers={"HX-Retarget": "#template-add-row", "HX-Reswap": "outerHTML"},
             )
@@ -2394,12 +2415,14 @@ async def notification_template_create(
         try:
             validate_apprise_url(apprise_url)
         except ValueError as exc:
+            _cc = _parse_content_config_from_form(form)
             return templates.TemplateResponse(
                 request,
                 "partials/notification_template_add_row.html",
                 {
                     "apprise_plugins": list_plugins(),
                     "error": str(exc),
+                    "content_config": ContentConfig.model_validate(_cc) if _cc else None,
                 },
                 headers={"HX-Retarget": "#template-add-row", "HX-Reswap": "outerHTML"},
             )
@@ -2407,12 +2430,14 @@ async def notification_template_create(
     try:
         validate_event_list(events)
     except ValueError as exc:
+        _cc = _parse_content_config_from_form(form)
         return templates.TemplateResponse(
             request,
             "partials/notification_template_add_row.html",
             {
                 "apprise_plugins": list_plugins(),
                 "error": str(exc),
+                "content_config": ContentConfig.model_validate(_cc) if _cc else None,
             },
             headers={"HX-Retarget": "#template-add-row", "HX-Reswap": "outerHTML"},
         )

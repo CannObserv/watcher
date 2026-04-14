@@ -14,7 +14,16 @@ from src.api.schemas.change import (
     SnapshotResponse,
     SnapshotWithChunksResponse,
 )
-from src.api.schemas.notification_config import validate_event_list
+from src.api.schemas.content_config import ContentConfig, ContentOptions
+from src.api.schemas.notification_config import (
+    WatchNotificationConfigCreate,
+    WatchNotificationConfigResponse,
+    validate_event_list,
+)
+from src.api.schemas.notification_template import (
+    NotificationTemplateCreate,
+    NotificationTemplateResponse,
+)
 from src.api.schemas.types import HttpUrlStr
 from src.api.schemas.watch import WatchCreate, WatchResponse, WatchUpdate
 from src.core.models.audit_log import EventType
@@ -498,3 +507,123 @@ class TestValidateEventList:
     def test_error_message_names_invalid_events(self):
         with pytest.raises(ValueError, match=r"\['bad_event'\]"):
             validate_event_list(["bad_event"])
+
+
+class TestWatchNotificationConfigCreate:
+    def test_content_config_accepted(self):
+        """WatchNotificationConfigCreate accepts content_config and it's accessible."""
+        schema = WatchNotificationConfigCreate(
+            apprise_url="slack://T/A/B/#chan",
+            content_config=ContentConfig(default=ContentOptions(include_domain=True)),
+        )
+        assert schema.content_config is not None
+        assert schema.content_config.default.include_domain is True
+
+    def test_content_config_optional(self):
+        """content_config defaults to None."""
+        schema = WatchNotificationConfigCreate(
+            apprise_url="slack://T/A/B/#chan",
+        )
+        assert schema.content_config is None
+
+
+class TestWatchNotificationConfigResponse:
+    def test_content_config_deserializes_from_dict(self):
+        """WatchNotificationConfigResponse deserialises content_config from dict (ORM output)."""
+        resp = WatchNotificationConfigResponse.model_validate(
+            {
+                "id": "01HV0000000000000000000001",
+                "watch_id": "01HV0000000000000000000002",
+                "title": None,
+                "channel_hint": "slack",
+                "events": ["change_detected"],
+                "is_active": True,
+                "created_at": datetime.now(UTC),
+                "updated_at": datetime.now(UTC),
+                "content_config": {"default": {"include_domain": True}, "overrides": {}},
+            }
+        )
+        assert resp.content_config is not None
+        assert resp.content_config.default.include_domain is True
+
+    def test_content_config_null(self):
+        """content_config can be null in response."""
+        resp = WatchNotificationConfigResponse.model_validate(
+            {
+                "id": "01HV0000000000000000000001",
+                "watch_id": "01HV0000000000000000000002",
+                "title": None,
+                "channel_hint": "slack",
+                "events": ["change_detected"],
+                "is_active": True,
+                "created_at": datetime.now(UTC),
+                "updated_at": datetime.now(UTC),
+                "content_config": None,
+            }
+        )
+        assert resp.content_config is None
+
+
+class TestNotificationTemplateCreate:
+    def test_content_config_accepted(self):
+        """NotificationTemplateCreate accepts content_config."""
+        schema = NotificationTemplateCreate(
+            title="My Template",
+            apprise_url="slack://T/A/B/#chan",
+            content_config=ContentConfig(default=ContentOptions(include_diff_snippet=True)),
+        )
+        assert schema.content_config is not None
+        assert schema.content_config.default.include_diff_snippet is True
+
+    def test_content_config_optional(self):
+        """content_config defaults to None."""
+        schema = NotificationTemplateCreate(
+            title="My Template",
+            apprise_url="slack://T/A/B/#chan",
+        )
+        assert schema.content_config is None
+
+
+class TestNotificationTemplateResponse:
+    def test_content_config_deserializes_from_dict(self):
+        """NotificationTemplateResponse deserialises content_config from dict."""
+        resp = NotificationTemplateResponse.model_validate(
+            {
+                "id": "01HV0000000000000000000001",
+                "title": "Template",
+                "channel_hint": "slack",
+                "events": ["change_detected"],
+                "is_global_default": False,
+                "is_active": True,
+                "created_at": datetime.now(UTC),
+                "updated_at": datetime.now(UTC),
+                "watch_ref_count": 0,
+                "domain_ref_count": 0,
+                "content_config": {
+                    "default": {"include_diff_snippet": True, "diff_snippet_lines": 5},
+                    "overrides": {},
+                },
+            }
+        )
+        assert resp.content_config is not None
+        assert resp.content_config.default.include_diff_snippet is True
+        assert resp.content_config.default.diff_snippet_lines == 5
+
+    def test_content_config_null(self):
+        """content_config can be null in response."""
+        resp = NotificationTemplateResponse.model_validate(
+            {
+                "id": "01HV0000000000000000000001",
+                "title": "Template",
+                "channel_hint": "slack",
+                "events": ["change_detected"],
+                "is_global_default": False,
+                "is_active": True,
+                "created_at": datetime.now(UTC),
+                "updated_at": datetime.now(UTC),
+                "watch_ref_count": 0,
+                "domain_ref_count": 0,
+                "content_config": None,
+            }
+        )
+        assert resp.content_config is None

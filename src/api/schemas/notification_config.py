@@ -5,6 +5,7 @@ from datetime import datetime
 import apprise
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from src.api.schemas.content_config import ContentConfig
 from src.api.schemas.types import ULIDStr
 from src.core.notifications.apprise_builder import assemble_url
 from src.core.notifications.events import WatchEventType
@@ -54,6 +55,7 @@ class WatchNotificationConfigCreate(BaseModel):
     tokens: dict[str, str] | None = None
     title: str | None = Field(default=None, max_length=100)
     events: list[str] = Field(default_factory=lambda: ["change_detected"])
+    content_config: ContentConfig | None = None
 
     @model_validator(mode="after")
     def resolve_apprise_url(self) -> "WatchNotificationConfigCreate":
@@ -86,6 +88,7 @@ class WatchNotificationConfigUpdate(BaseModel):
     # from "explicitly set to null" (clears the title). Default None means an
     # absent key won't end up in model_fields_set, so skipping the field is safe.
     title: str | None = Field(default=None, max_length=100)
+    content_config: ContentConfig | None = None
 
     @field_validator("events")
     @classmethod
@@ -115,3 +118,11 @@ class WatchNotificationConfigResponse(BaseModel):
     is_active: bool
     created_at: datetime
     updated_at: datetime
+    content_config: ContentConfig | None = None
+
+    @field_validator("content_config", mode="before")
+    @classmethod
+    def parse_content_config(cls, v: dict | None) -> ContentConfig | None:
+        if v is None:
+            return None
+        return ContentConfig.model_validate(v)

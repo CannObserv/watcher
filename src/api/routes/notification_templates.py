@@ -67,6 +67,7 @@ async def create_template(
         channel_hint=extract_channel_hint(data.apprise_url),
         events=data.events,
         is_global_default=data.is_global_default,
+        content_config=data.content_config.model_dump() if data.content_config else None,
     )
     session.add(tpl)
     await session.flush()
@@ -134,6 +135,8 @@ async def update_template(
         tpl.is_active = data.is_active
     if "title" in data.model_fields_set and data.title is not None:
         tpl.title = data.title
+    if "content_config" in data.model_fields_set:
+        tpl.content_config = data.content_config.model_dump() if data.content_config else None
     audit(session, EventType.NOTIFICATION_TEMPLATE_UPDATED, template_id=str(tpl.id))
     await session.commit()
     watch_count, domain_count = await _ref_counts(tpl, session)

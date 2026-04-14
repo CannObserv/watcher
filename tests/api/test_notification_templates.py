@@ -227,3 +227,45 @@ async def test_test_endpoint_returns_failure_on_dispatch_error(client: AsyncClie
 
     assert resp.status_code == 200
     assert resp.json()["success"] is False
+
+
+@pytest.mark.integration
+async def test_create_template_with_content_config(client: AsyncClient):
+    """content_config round-trips through template create → response."""
+    resp = await client.post(
+        "/api/v1/notifications/templates",
+        json={
+            "title": "Content Config Test",
+            "apprise_url": VALID_URL,
+            "events": ["change_detected"],
+            "content_config": {
+                "default": {"include_diff_snippet": True, "diff_snippet_lines": 7},
+            },
+        },
+    )
+    assert resp.status_code == 201
+    data = resp.json()
+    assert data["content_config"]["default"]["include_diff_snippet"] is True
+    assert data["content_config"]["default"]["diff_snippet_lines"] == 7
+
+
+@pytest.mark.integration
+async def test_patch_template_updates_content_config(client: AsyncClient):
+    """PATCH /{template_id} with content_config updates the stored value."""
+    tpl_resp = await client.post(
+        "/api/v1/notifications/templates",
+        json={"title": "Patch CC Test", "apprise_url": VALID_URL, "events": ["change_detected"]},
+    )
+    template_id = tpl_resp.json()["id"]
+
+    resp = await client.patch(
+        f"/api/v1/notifications/templates/{template_id}",
+        json={
+            "content_config": {
+                "default": {"include_diff_full": True},
+            },
+        },
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["content_config"]["default"]["include_diff_full"] is True

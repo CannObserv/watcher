@@ -433,3 +433,46 @@ class TestTestNotificationConfig:
         data = resp.json()
         assert data["success"] is False
         assert "reason" in data
+
+
+@pytest.mark.integration
+async def test_create_config_with_content_config(client):
+    """content_config round-trips through create → response."""
+    watch_id = await _make_watch(client)
+    resp = await client.post(
+        f"/api/v1/watches/{watch_id}/notifications",
+        json={
+            "apprise_url": VALID_URL,
+            "content_config": {
+                "default": {"include_diff_snippet": True, "diff_snippet_lines": 5},
+            },
+        },
+    )
+    assert resp.status_code == 201
+    data = resp.json()
+    assert data["content_config"]["default"]["include_diff_snippet"] is True
+    assert data["content_config"]["default"]["diff_snippet_lines"] == 5
+
+
+@pytest.mark.integration
+async def test_patch_config_updates_content_config(client):
+    """PATCH with content_config updates the stored value."""
+    watch_id = await _make_watch(client)
+    create_resp = await client.post(
+        f"/api/v1/watches/{watch_id}/notifications",
+        json={"apprise_url": VALID_URL},
+    )
+    assert create_resp.status_code == 201
+    config_id = create_resp.json()["id"]
+
+    resp = await client.patch(
+        f"/api/v1/watches/{watch_id}/notifications/{config_id}",
+        json={
+            "content_config": {
+                "default": {"include_diff_full": True},
+            },
+        },
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["content_config"]["default"]["include_diff_full"] is True

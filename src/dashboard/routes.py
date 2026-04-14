@@ -2091,6 +2091,7 @@ async def watch_nc_copy_template(
         apprise_url=tpl.apprise_url,
         channel_hint=tpl.channel_hint,
         events=tpl.events,
+        content_config=tpl.content_config,
     )
     session.add(local)
     ref = await session.scalar(
@@ -2133,6 +2134,7 @@ async def watch_nc_copy_local(
         apprise_url=orig.apprise_url,
         channel_hint=orig.channel_hint,
         events=orig.events,
+        content_config=orig.content_config,
     )
     session.add(copy)
     audit(session, EventType.NOTIFICATION_CONFIG_CREATED, watch_id=str(watch.id))
@@ -2703,6 +2705,7 @@ async def notification_template_duplicate(
         channel_hint=tpl.channel_hint,
         events=list(tpl.events),
         is_global_default=False,
+        content_config=tpl.content_config,
     )
     session.add(copy)
     audit(

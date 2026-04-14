@@ -1,0 +1,49 @@
+{# Collapsed "Content Options" section for notification add/edit forms.
+   Expects: content_config (ContentConfig | None) for pre-filling on edit.
+   All inputs use name="content_config__*" flattened for form POST parsing. #}
+<details class="mt-4">
+  <summary class="cursor-pointer text-sm font-medium text-gray-700 dark:text-gray-300 select-none">
+    Content Options
+  </summary>
+  <div class="mt-3 space-y-3 ps-1">
+
+    {# Diff snippet #}
+    <label class="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
+      <input type="checkbox" name="content_config__include_diff_snippet" value="1"
+        class="rounded border-gray-300 dark:border-gray-600"
+        {% if content_config and content_config.default.include_diff_snippet %}checked{% endif %}>
+      Include diff snippet
+    </label>
+    <div class="flex items-center gap-2 ps-6 text-sm text-gray-600 dark:text-gray-400">
+      <label for="snippet_lines">Lines:</label>
+      <input type="number" id="snippet_lines" name="content_config__diff_snippet_lines"
+        min="1" max="100" value="{{ content_config.default.diff_snippet_lines if content_config else 10 }}"
+        class="form-input w-20 text-sm">
+    </div>
+
+    {# Full diff #}
+    <label class="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
+      <input type="checkbox" name="content_config__include_diff_full" value="1"
+        class="rounded border-gray-300 dark:border-gray-600"
+        {% if content_config and content_config.default.include_diff_full %}checked{% endif %}>
+      Include full diff <span class="text-xs text-gray-500 dark:text-gray-500">(verbose — email)</span>
+    </label>
+
+    {# Temporal context #}
+    <label class="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
+      <input type="checkbox" name="content_config__include_temporal_context" value="1"
+        class="rounded border-gray-300 dark:border-gray-600"
+        {% if content_config and content_config.default.include_temporal_context %}checked{% endif %}>
+      Temporal context <span class="text-xs text-gray-500 dark:text-gray-500">(check interval)</span>
+    </label>
+
+    {# Domain #}
+    <label class="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
+      <input type="checkbox" name="content_config__include_domain" value="1"
+        class="rounded border-gray-300 dark:border-gray-600"
+        {% if content_config and content_config.default.include_domain %}checked{% endif %}>
+      Domain
+    </label>
+
+  </div>
+</details>

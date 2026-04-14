@@ -16,6 +16,7 @@ from ulid import ULID
 from src.api.dependencies import get_db_session, get_probe_fn
 from src.api.routes.helpers import parse_ulid
 from src.api.routes.watches import delete_watch as api_delete_watch
+from src.api.schemas.content_config import ContentConfig, ContentOptions
 from src.api.schemas.notification_config import (
     extract_channel_hint,
     validate_apprise_url,
@@ -64,6 +65,22 @@ from src.dashboard.context import (
 
 router = APIRouter(tags=["dashboard"])
 logger = get_logger(__name__)
+
+
+def _parse_content_config_from_form(form) -> dict | None:
+    """Extract content_config fields from a flat form POST dict."""
+    opts = ContentOptions(
+        include_diff_snippet="content_config__include_diff_snippet" in form,
+        include_diff_full="content_config__include_diff_full" in form,
+        include_temporal_context="content_config__include_temporal_context" in form,
+        include_domain="content_config__include_domain" in form,
+        diff_snippet_lines=int(form.get("content_config__diff_snippet_lines", 10)),
+    )
+    # Only store if any option differs from default (avoid writing null-equivalent dicts)
+    default = ContentOptions()
+    if opts == default:
+        return None
+    return ContentConfig(default=opts).model_dump()
 
 
 @router.get("/")
@@ -1603,6 +1620,7 @@ async def watch_notification_add_row(
         {
             "watch": watch,
             "apprise_plugins": list_plugins(),
+            "content_config": None,
         },
     )
 
@@ -1719,6 +1737,7 @@ async def watch_notification_create(
         apprise_url=encrypt_apprise_url(apprise_url),
         channel_hint=hint,
         events=events,
+        content_config=_parse_content_config_from_form(form),
     )
     session.add(config)
     audit(
@@ -1772,6 +1791,7 @@ async def watch_notification_edit_form(
     except (InvalidToken, ValueError):
         decrypted_url = ""
         decryption_failed = True
+    content_config = ContentConfig.model_validate(nc.content_config) if nc.content_config else None
     return templates.TemplateResponse(
         request,
         "partials/notification_edit_form.html",
@@ -1780,6 +1800,7 @@ async def watch_notification_edit_form(
             "nc": nc,
             "decrypted_url": decrypted_url,
             "decryption_failed": decryption_failed,
+            "content_config": content_config,
         },
     )
 
@@ -1811,6 +1832,7 @@ async def watch_notification_edit(
             decrypted_url = decrypt_apprise_url(nc.apprise_url)
         except (InvalidToken, ValueError):
             decrypted_url = ""
+        _cc = _parse_content_config_from_form(form)
         response = templates.TemplateResponse(
             request,
             "partials/notification_edit_form.html",
@@ -1819,6 +1841,7 @@ async def watch_notification_edit(
                 "nc": nc,
                 "decrypted_url": decrypted_url,
                 "error": str(exc),
+                "content_config": ContentConfig.model_validate(_cc) if _cc else None,
             },
         )
         response.headers["HX-Retarget"] = f"#nc-{nc.id}"
@@ -1832,6 +1855,7 @@ async def watch_notification_edit(
             decrypted_url = decrypt_apprise_url(nc.apprise_url)
         except (InvalidToken, ValueError):
             decrypted_url = ""
+        _cc = _parse_content_config_from_form(form)
         response = templates.TemplateResponse(
             request,
             "partials/notification_edit_form.html",
@@ -1840,6 +1864,7 @@ async def watch_notification_edit(
                 "nc": nc,
                 "decrypted_url": decrypted_url,
                 "error": str(exc),
+                "content_config": ContentConfig.model_validate(_cc) if _cc else None,
             },
         )
         response.headers["HX-Retarget"] = f"#nc-{nc.id}"
@@ -1850,6 +1875,7 @@ async def watch_notification_edit(
     nc.channel_hint = extract_channel_hint(apprise_url)
     nc.events = events
     nc.title = title
+    nc.content_config = _parse_content_config_from_form(form)
     audit(
         session,
         EventType.NOTIFICATION_CONFIG_UPDATED,
@@ -2311,7 +2337,7 @@ async def notification_template_add_row(
     return templates.TemplateResponse(
         request,
         "partials/notification_template_add_row.html",
-        {"apprise_plugins": apprise_plugins},
+        {"apprise_plugins": apprise_plugins, "content_config": None},
     )
 
 
@@ -2396,6 +2422,7 @@ async def notification_template_create(
         channel_hint=hint,
         events=events,
         is_global_default=is_global_default,
+        content_config=_parse_content_config_from_form(form),
     )
     session.add(tpl)
     audit(
@@ -2447,6 +2474,9 @@ async def notification_template_edit_form(
     domain_count = (
         await session.scalar(select(func.count()).where(DomainNcRef.template_id == tpl.id)) or 0
     )
+    content_config = (
+        ContentConfig.model_validate(tpl.content_config) if tpl.content_config else None
+    )
     return templates.TemplateResponse(
         request,
         "partials/notification_template_edit_form.html",
@@ -2456,6 +2486,7 @@ async def notification_template_edit_form(
             "decryption_failed": decryption_failed,
             "watch_count": watch_count,
             "domain_count": domain_count,
+            "content_config": content_config,
         },
     )
 
@@ -2495,6 +2526,11 @@ async def notification_template_edit(
         domain_count = (
             await session.scalar(select(func.count()).where(DomainNcRef.template_id == tpl.id)) or 0
         )
+        # Re-derive content_config from submitted form so checkboxes stay checked on error
+        _content_config_err = _parse_content_config_from_form(form)
+        content_config_err = (
+            ContentConfig.model_validate(_content_config_err) if _content_config_err else None
+        )
         resp = templates.TemplateResponse(
             request,
             "partials/notification_template_edit_form.html",
@@ -2504,6 +2540,7 @@ async def notification_template_edit(
                 "error": error_msg,
                 "watch_count": watch_count,
                 "domain_count": domain_count,
+                "content_config": content_config_err,
             },
         )
         resp.headers["HX-Retarget"] = f"#tpl-{tpl.id}"
@@ -2525,6 +2562,7 @@ async def notification_template_edit(
     tpl.channel_hint = extract_channel_hint(apprise_url)
     tpl.events = events
     tpl.is_global_default = is_global_default
+    tpl.content_config = _parse_content_config_from_form(form)
     audit(
         session,
         EventType.NOTIFICATION_TEMPLATE_UPDATED,

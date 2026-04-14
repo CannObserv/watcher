@@ -111,6 +111,8 @@
         </div>
       </fieldset>
 
+      {% include "partials/notification_content_options.html" %}
+
       {# Error display #}
       {% if error %}
       <div class="text-sm text-red-600 dark:text-red-400" role="alert">{{ error }}</div>

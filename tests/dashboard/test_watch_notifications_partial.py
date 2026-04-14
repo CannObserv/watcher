@@ -43,6 +43,7 @@ def _make_mock_nc(
     nc.is_active = is_active
     nc.apprise_url = apprise_url
     nc.title = title
+    nc.content_config = None
     return nc
 
 

@@ -38,6 +38,11 @@ def build_body(event: WatchEvent, options: ContentOptions) -> str:
         if domain:
             parts.append(domain)
 
+    if options.include_last_changed_at:
+        last_changed = _build_last_changed_section(event.metadata)
+        if last_changed:
+            parts.append(last_changed)
+
     return "\n\n".join(parts)
 
 
@@ -83,3 +88,11 @@ def _build_domain_section(metadata: dict) -> str:
     if not domain:
         return ""
     return f"Domain: {domain}"
+
+
+def _build_last_changed_section(metadata: dict) -> str:
+    """Format last changed date. Returns empty string if not in metadata."""
+    date = metadata.get("last_changed_at")
+    if not date:
+        return ""
+    return f"Last changed: {date}"

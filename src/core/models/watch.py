@@ -46,6 +46,11 @@ class Watch(Base, TimestampMixin):
         nullable=True,
         default=None,
     )
+    last_changed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        default=None,
+    )
     effective_url: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
     effective_domain: Mapped[str | None] = mapped_column(String(253), nullable=True, default=None)
     health_status: Mapped[WatchHealthStatus] = mapped_column(

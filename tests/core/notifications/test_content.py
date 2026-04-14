@@ -3,7 +3,7 @@
 from datetime import UTC, datetime
 
 from src.api.schemas.content_config import ContentConfig, ContentOptions
-from src.core.notifications.content import build_body, resolve_options
+from src.core.notifications.content import _build_last_changed_section, build_body, resolve_options
 from src.core.notifications.events import WatchEvent, WatchEventType
 
 OCCURRED_AT = datetime(2026, 4, 14, 12, 0, 0, tzinfo=UTC)
@@ -147,3 +147,27 @@ class TestBuildBodyOrdering:
         # Base body comes first, then extra sections
         assert body.startswith(event.body)
         assert "\n\n" in body
+
+
+class TestBuildLastChangedSection:
+    def test_returns_formatted_date(self):
+        result = _build_last_changed_section({"last_changed_at": "2026-04-09"})
+        assert result == "Last changed: 2026-04-09"
+
+    def test_returns_empty_when_key_absent(self):
+        assert _build_last_changed_section({}) == ""
+
+    def test_build_body_includes_section_when_enabled(self):
+        event = make_event(metadata={"last_changed_at": "2026-04-09"})
+        body = build_body(event, ContentOptions(include_last_changed_at=True))
+        assert "Last changed: 2026-04-09" in body
+
+    def test_build_body_omits_section_when_disabled(self):
+        event = make_event(metadata={"last_changed_at": "2026-04-09"})
+        body = build_body(event, ContentOptions(include_last_changed_at=False))
+        assert "Last changed" not in body
+
+    def test_build_body_omits_section_when_metadata_missing(self):
+        event = make_event(metadata={})
+        body = build_body(event, ContentOptions(include_last_changed_at=True))
+        assert "Last changed" not in body

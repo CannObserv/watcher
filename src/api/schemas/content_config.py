@@ -30,6 +30,9 @@ class ContentOptions(BaseModel):
     include_domain: bool = False
     """Include the effective domain in the body."""
 
+    include_last_changed_at: bool = False
+    """Include the date the watch last detected a change in the body."""
+
 
 class ContentConfig(BaseModel):
     """Per-config content customisation: default options with optional per-event overrides."""

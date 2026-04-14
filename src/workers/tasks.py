@@ -33,6 +33,8 @@ def _watch_base_metadata(watch: Watch) -> dict:
     interval = (watch.schedule_config or {}).get("interval")
     if interval:
         meta["check_interval"] = interval
+    if watch.last_changed_at:
+        meta["last_changed_at"] = watch.last_changed_at.strftime("%Y-%m-%d")
     return meta
 
 

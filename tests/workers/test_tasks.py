@@ -23,9 +23,44 @@ from src.core.rate_limiter import DomainRateLimiter
 from src.core.registry import ServiceRegistry
 from src.core.storage import LocalStorage
 from src.workers.pipeline import _maybe_decay_backoff
-from src.workers.tasks import _persist_backoff, _run_check_pipeline, check_watch, schedule_tick
+from src.workers.tasks import (
+    _persist_backoff,
+    _run_check_pipeline,
+    _watch_base_metadata,
+    check_watch,
+    schedule_tick,
+)
 
 pytestmark = pytest.mark.integration
+
+
+class TestWatchBaseMetadata:
+    """Unit tests for _watch_base_metadata helper (no DB required)."""
+
+    def _make_watch(self, **kwargs):
+        return Watch(
+            name="Test", url="https://example.com", content_type=ContentType.HTML, **kwargs
+        )
+
+    def test_includes_last_changed_at_when_set(self):
+        watch = self._make_watch(last_changed_at=datetime(2026, 4, 9, 0, 0, 0, tzinfo=UTC))
+        meta = _watch_base_metadata(watch)
+        assert meta["last_changed_at"] == "2026-04-09"
+
+    def test_omits_last_changed_at_when_none(self):
+        watch = self._make_watch(last_changed_at=None)
+        meta = _watch_base_metadata(watch)
+        assert "last_changed_at" not in meta
+
+    def test_includes_effective_domain_when_set(self):
+        watch = self._make_watch(effective_domain="example.com")
+        meta = _watch_base_metadata(watch)
+        assert meta["effective_domain"] == "example.com"
+
+    def test_includes_check_interval_when_set(self):
+        watch = self._make_watch(schedule_config={"interval": "1h"})
+        meta = _watch_base_metadata(watch)
+        assert meta["check_interval"] == "1h"
 
 
 @pytest.fixture(autouse=True)

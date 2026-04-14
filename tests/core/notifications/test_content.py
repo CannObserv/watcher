@@ -1,0 +1,149 @@
+"""Tests for the notification content builder."""
+
+from datetime import UTC, datetime
+
+from src.api.schemas.content_config import ContentConfig, ContentOptions
+from src.core.notifications.content import build_body, resolve_options
+from src.core.notifications.events import WatchEvent, WatchEventType
+
+OCCURRED_AT = datetime(2026, 4, 14, 12, 0, 0, tzinfo=UTC)
+
+
+def make_event(event_type=WatchEventType.CHANGE_DETECTED, metadata=None):
+    return WatchEvent(
+        event_type=event_type,
+        watch_id="01HV0000000000000000000001",
+        watch_name="Test Watch",
+        watch_url="https://example.com",
+        occurred_at=OCCURRED_AT,
+        metadata=metadata or {},
+    )
+
+
+CHANGE_META = {
+    "added": ["Licenses"],
+    "removed": ["Hours"],
+    "modified": [{"label": "Contact Info", "similarity": 0.85}],
+}
+
+
+class TestResolveOptions:
+    def test_none_config_returns_defaults(self):
+        opts = resolve_options(None, "change_detected")
+        assert opts == ContentOptions()
+
+    def test_default_used_when_no_override(self):
+        cfg = ContentConfig(default=ContentOptions(include_domain=True))
+        opts = resolve_options(cfg, "change_detected")
+        assert opts.include_domain is True
+
+    def test_override_takes_precedence(self):
+        cfg = ContentConfig(
+            default=ContentOptions(include_domain=True),
+            overrides={"change_detected": ContentOptions(include_domain=False)},
+        )
+        opts = resolve_options(cfg, "change_detected")
+        assert opts.include_domain is False
+
+    def test_non_overridden_event_falls_back_to_default(self):
+        cfg = ContentConfig(
+            default=ContentOptions(include_domain=True),
+            overrides={"watch_error": ContentOptions(include_domain=False)},
+        )
+        opts = resolve_options(cfg, "change_detected")
+        assert opts.include_domain is True
+
+
+class TestBuildBodyBase:
+    def test_base_body_always_present(self):
+        event = make_event()
+        body = build_body(event, ContentOptions())
+        assert event.body in body
+
+    def test_no_extra_sections_by_default(self):
+        event = make_event(metadata=CHANGE_META)
+        body = build_body(event, ContentOptions())
+        assert "Changed sections" not in body
+        assert "Domain" not in body
+        assert "Check interval" not in body
+
+
+class TestBuildBodyDiffSnippet:
+    def test_snippet_appended(self):
+        event = make_event(metadata=CHANGE_META)
+        body = build_body(event, ContentOptions(include_diff_snippet=True))
+        assert "Changed sections" in body
+        assert "+ Licenses" in body
+        assert "- Hours" in body
+        assert "~ Contact Info" in body
+
+    def test_snippet_respects_limit(self):
+        meta = {
+            "added": ["A", "B", "C"],
+            "removed": [],
+            "modified": [],
+        }
+        event = make_event(metadata=meta)
+        body = build_body(event, ContentOptions(include_diff_snippet=True, diff_snippet_lines=2))
+        assert "+ A" in body
+        assert "+ B" in body
+        assert "+ C" not in body
+
+    def test_full_supersedes_snippet(self):
+        meta = {"added": ["A", "B", "C"], "removed": [], "modified": []}
+        event = make_event(metadata=meta)
+        # With full=True, snippet limit is ignored
+        body = build_body(
+            event,
+            ContentOptions(include_diff_full=True, include_diff_snippet=True, diff_snippet_lines=1),
+        )
+        assert "+ A" in body
+        assert "+ B" in body
+        assert "+ C" in body
+
+    def test_no_diff_section_when_metadata_empty(self):
+        event = make_event(metadata={})
+        body = build_body(event, ContentOptions(include_diff_snippet=True))
+        assert "Changed sections" not in body
+
+    def test_similarity_shown_for_modified(self):
+        event = make_event(metadata=CHANGE_META)
+        body = build_body(event, ContentOptions(include_diff_full=True))
+        assert "85%" in body
+
+
+class TestBuildBodyTemporalContext:
+    def test_check_interval_shown(self):
+        event = make_event(metadata={"check_interval": "1h"})
+        body = build_body(event, ContentOptions(include_temporal_context=True))
+        assert "Check interval" in body
+        assert "1h" in body
+
+    def test_no_section_when_metadata_missing(self):
+        event = make_event(metadata={})
+        body = build_body(event, ContentOptions(include_temporal_context=True))
+        assert "Check interval" not in body
+
+
+class TestBuildBodyDomain:
+    def test_domain_shown(self):
+        event = make_event(metadata={"effective_domain": "example.com"})
+        body = build_body(event, ContentOptions(include_domain=True))
+        assert "Domain: example.com" in body
+
+    def test_no_section_when_missing(self):
+        event = make_event(metadata={})
+        body = build_body(event, ContentOptions(include_domain=True))
+        assert "Domain" not in body
+
+
+class TestBuildBodyOrdering:
+    def test_sections_joined_with_double_newline(self):
+        event = make_event(metadata={"effective_domain": "ex.com", **CHANGE_META})
+        body = build_body(
+            event,
+            ContentOptions(include_diff_snippet=True, include_domain=True),
+        )
+        # Base body comes first, then extra sections
+        assert body.startswith(event.body)
+        assert "\n\n" in body

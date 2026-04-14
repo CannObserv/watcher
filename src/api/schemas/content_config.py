@@ -33,6 +33,9 @@ class ContentOptions(BaseModel):
     include_last_changed_at: bool = False
     """Include the date the watch last detected a change in the body."""
 
+    include_significance: bool = False
+    """Include the change significance score as a percentage in the body."""
+
 
 class ContentConfig(BaseModel):
     """Per-config content customisation: default options with optional per-event overrides."""

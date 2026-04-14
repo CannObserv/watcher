@@ -303,6 +303,7 @@ async def _run_check_pipeline(
                     for c in changes
                     if c.status == ChangeStatus.MODIFIED
                 ],
+                "significance": significance,
             }
             change = Change(
                 watch_id=watch.id,

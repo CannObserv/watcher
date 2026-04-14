@@ -43,6 +43,11 @@ def build_body(event: WatchEvent, options: ContentOptions) -> str:
         if last_changed:
             parts.append(last_changed)
 
+    if options.include_significance:
+        sig = _build_significance_section(event.metadata)
+        if sig:
+            parts.append(sig)
+
     return "\n\n".join(parts)
 
 
@@ -96,3 +101,11 @@ def _build_last_changed_section(metadata: dict) -> str:
     if not date:
         return ""
     return f"Last changed: {date}"
+
+
+def _build_significance_section(metadata: dict) -> str:
+    """Format change significance percentage. Returns empty string if not in metadata."""
+    sig = metadata.get("significance")
+    if sig is None:
+        return ""
+    return f"Significance: {int(sig * 100)}%"

@@ -247,6 +247,34 @@ class TestRunCheckPipeline:
         assert change.significance is not None
         assert 0.0 <= change.significance <= 1.0
 
+    async def test_change_metadata_includes_significance(self, db_session, tmp_path):
+        """change_metadata returned by pipeline includes significance key."""
+        watch = Watch(name="SigMeta", url="https://example.com", content_type=ContentType.HTML)
+        db_session.add(watch)
+        await db_session.flush()
+
+        storage = LocalStorage(base_dir=tmp_path)
+        await _run_check_pipeline(
+            watch=watch,
+            raw_content=b"<html><body><p>V1</p></body></html>",
+            fetcher_used="http",
+            fetch_duration_ms=100,
+            storage=storage,
+            session=db_session,
+        )
+        result2 = await _run_check_pipeline(
+            watch=watch,
+            raw_content=b"<html><body><p>V2 changed</p></body></html>",
+            fetcher_used="http",
+            fetch_duration_ms=100,
+            storage=storage,
+            session=db_session,
+        )
+        assert result2["change_id"] is not None
+        assert "significance" in result2["change_metadata"]
+        sig = result2["change_metadata"]["significance"]
+        assert 0.0 <= sig <= 1.0
+
 
 def _make_chunk(text: str, index: int = 0) -> Chunk:
     """Helper to build a Chunk with given text."""

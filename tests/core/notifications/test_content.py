@@ -3,7 +3,12 @@
 from datetime import UTC, datetime
 
 from src.api.schemas.content_config import ContentConfig, ContentOptions
-from src.core.notifications.content import _build_last_changed_section, build_body, resolve_options
+from src.core.notifications.content import (
+    _build_last_changed_section,
+    _build_significance_section,
+    build_body,
+    resolve_options,
+)
 from src.core.notifications.events import WatchEvent, WatchEventType
 
 OCCURRED_AT = datetime(2026, 4, 14, 12, 0, 0, tzinfo=UTC)
@@ -171,3 +176,35 @@ class TestBuildLastChangedSection:
         event = make_event(metadata={})
         body = build_body(event, ContentOptions(include_last_changed_at=True))
         assert "Last changed" not in body
+
+
+class TestBuildSignificanceSection:
+    def test_returns_percentage(self):
+        result = _build_significance_section({"significance": 0.73})
+        assert result == "Significance: 73%"
+
+    def test_zero_significance(self):
+        result = _build_significance_section({"significance": 0.0})
+        assert result == "Significance: 0%"
+
+    def test_full_significance(self):
+        result = _build_significance_section({"significance": 1.0})
+        assert result == "Significance: 100%"
+
+    def test_returns_empty_when_key_absent(self):
+        assert _build_significance_section({}) == ""
+
+    def test_build_body_includes_section_when_enabled(self):
+        event = make_event(metadata={"significance": 0.5})
+        body = build_body(event, ContentOptions(include_significance=True))
+        assert "Significance: 50%" in body
+
+    def test_build_body_omits_section_when_disabled(self):
+        event = make_event(metadata={"significance": 0.5})
+        body = build_body(event, ContentOptions(include_significance=False))
+        assert "Significance" not in body
+
+    def test_build_body_omits_section_when_metadata_missing(self):
+        event = make_event(metadata={})
+        body = build_body(event, ContentOptions(include_significance=True))
+        assert "Significance" not in body

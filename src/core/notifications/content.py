@@ -54,6 +54,16 @@ def build_body(event: WatchEvent, options: ContentOptions) -> str:
         if url_section:
             parts.append(url_section)
 
+    if options.include_tags:
+        tags_section = _build_tags_section(event.metadata)
+        if tags_section:
+            parts.append(tags_section)
+
+    if options.include_description:
+        desc_section = _build_description_section(event.metadata)
+        if desc_section:
+            parts.append(desc_section)
+
     return "\n\n".join(parts)
 
 
@@ -123,3 +133,19 @@ def _build_change_url_section(watch_id: str, metadata: dict) -> str:
     if not change_id:
         return ""
     return f"View change: {APP_URL}/watches/{watch_id}/changes/{change_id}"
+
+
+def _build_tags_section(metadata: dict) -> str:
+    """Format tags list. Returns empty string if not in metadata or empty."""
+    tags = metadata.get("tags")
+    if not tags:
+        return ""
+    return "Tags: " + ", ".join(tags)
+
+
+def _build_description_section(metadata: dict) -> str:
+    """Format watch description. Returns empty string if not in metadata."""
+    description = metadata.get("description")
+    if not description:
+        return ""
+    return f"Description: {description}"

@@ -62,6 +62,31 @@ class TestWatchBaseMetadata:
         meta = _watch_base_metadata(watch)
         assert meta["check_interval"] == "1h"
 
+    def test_includes_tags_when_set(self):
+        watch = self._make_watch(tags=["cannabis", "license"])
+        meta = _watch_base_metadata(watch)
+        assert meta["tags"] == ["cannabis", "license"]
+
+    def test_omits_tags_when_none(self):
+        watch = self._make_watch(tags=None)
+        meta = _watch_base_metadata(watch)
+        assert "tags" not in meta
+
+    def test_omits_tags_when_empty_list(self):
+        watch = self._make_watch(tags=[])
+        meta = _watch_base_metadata(watch)
+        assert "tags" not in meta
+
+    def test_includes_description_when_set(self):
+        watch = self._make_watch(description="Monitor for license renewals")
+        meta = _watch_base_metadata(watch)
+        assert meta["description"] == "Monitor for license renewals"
+
+    def test_omits_description_when_none(self):
+        watch = self._make_watch(description=None)
+        meta = _watch_base_metadata(watch)
+        assert "description" not in meta
+
 
 @pytest.fixture(autouse=True)
 def set_test_key(monkeypatch):

@@ -5,8 +5,10 @@ from datetime import UTC, datetime
 from src.api.schemas.content_config import ContentConfig, ContentOptions
 from src.core.notifications.content import (
     _build_change_url_section,
+    _build_description_section,
     _build_last_changed_section,
     _build_significance_section,
+    _build_tags_section,
     build_body,
     resolve_options,
 )
@@ -237,3 +239,57 @@ class TestBuildChangeUrlSection:
         event = make_event(metadata={})
         body = build_body(event, ContentOptions(include_change_dashboard_url=True))
         assert "View change" not in body
+
+
+class TestBuildTagsSection:
+    def test_returns_formatted_tags(self):
+        result = _build_tags_section({"tags": ["foo", "bar"]})
+        assert result == "Tags: foo, bar"
+
+    def test_returns_empty_when_key_absent(self):
+        assert _build_tags_section({}) == ""
+
+    def test_returns_empty_when_tags_empty_list(self):
+        assert _build_tags_section({"tags": []}) == ""
+
+    def test_build_body_includes_tags_when_enabled(self):
+        event = make_event(metadata={"tags": ["cannabis", "license"]})
+        body = build_body(event, ContentOptions(include_tags=True))
+        assert "Tags: cannabis, license" in body
+
+    def test_build_body_omits_tags_when_disabled(self):
+        event = make_event(metadata={"tags": ["cannabis"]})
+        body = build_body(event, ContentOptions(include_tags=False))
+        assert "Tags" not in body
+
+    def test_build_body_omits_tags_when_metadata_missing(self):
+        event = make_event(metadata={})
+        body = build_body(event, ContentOptions(include_tags=True))
+        assert "Tags" not in body
+
+
+class TestBuildDescriptionSection:
+    def test_returns_formatted_description(self):
+        result = _build_description_section({"description": "some text"})
+        assert result == "Description: some text"
+
+    def test_returns_empty_when_key_absent(self):
+        assert _build_description_section({}) == ""
+
+    def test_returns_empty_when_description_empty_string(self):
+        assert _build_description_section({"description": ""}) == ""
+
+    def test_build_body_includes_description_when_enabled(self):
+        event = make_event(metadata={"description": "Watch for license renewals"})
+        body = build_body(event, ContentOptions(include_description=True))
+        assert "Description: Watch for license renewals" in body
+
+    def test_build_body_omits_description_when_disabled(self):
+        event = make_event(metadata={"description": "Watch for license renewals"})
+        body = build_body(event, ContentOptions(include_description=False))
+        assert "Description" not in body
+
+    def test_build_body_omits_description_when_metadata_missing(self):
+        event = make_event(metadata={})
+        body = build_body(event, ContentOptions(include_description=True))
+        assert "Description" not in body

@@ -71,5 +71,21 @@
       Dashboard link <span class="text-xs text-gray-500 dark:text-gray-500">(change URL)</span>
     </label>
 
+    {# Tags #}
+    <label class="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
+      <input type="checkbox" name="content_config__include_tags" value="1"
+        class="rounded border-gray-300 dark:border-gray-600"
+        {% if content_config and content_config.default.include_tags %}checked{% endif %}>
+      Tags
+    </label>
+
+    {# Description #}
+    <label class="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
+      <input type="checkbox" name="content_config__include_description" value="1"
+        class="rounded border-gray-300 dark:border-gray-600"
+        {% if content_config and content_config.default.include_description %}checked{% endif %}>
+      Description
+    </label>
+
   </div>
 </details>

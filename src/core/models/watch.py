@@ -4,7 +4,7 @@ import enum
 from datetime import datetime
 
 from sqlalchemy import Boolean, DateTime, String, Text
-from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.orm import Mapped, mapped_column, validates
 from ulid import ULID
 
@@ -53,6 +53,12 @@ class Watch(Base, TimestampMixin):
     )
     effective_url: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
     effective_domain: Mapped[str | None] = mapped_column(String(253), nullable=True, default=None)
+    tags: Mapped[list[str] | None] = mapped_column(
+        ARRAY(String),
+        nullable=True,
+        default=None,
+    )
+    description: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
     health_status: Mapped[WatchHealthStatus] = mapped_column(
         String(10),
         default=WatchHealthStatus.UNKNOWN,

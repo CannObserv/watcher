@@ -52,6 +52,7 @@ def _fake_template(tid=None):
     t = MagicMock()
     t.id = tid or str(ULID())
     t.apprise_url = "json://hooks.example.com/notify"
+    t.content_config = None
     return t
 
 
@@ -63,6 +64,7 @@ def _fake_local(cid=None):
     c.id = cid or ULID()
     c.apprise_url = encrypt_apprise_url("json://local.example.com/notify")
     c.events = ["change_detected"]
+    c.content_config = None
     return c
 
 
@@ -368,6 +370,77 @@ class TestDeduplication:
             await dispatch_event_notifications(session, make_event())
 
         assert mock_dispatch.call_count == 4
+
+
+class TestContentConfig:
+    @pytest.mark.asyncio
+    async def test_content_config_body_used_in_dispatch(self, set_test_key):
+        """When a config has content_config, build_body is called and the result forwarded."""
+        from src.api.schemas.content_config import ContentConfig, ContentOptions
+        from src.core.notifications.notify import dispatch_event_notifications
+
+        event = make_event(WatchEventType.CHANGE_DETECTED)
+
+        content_cfg = ContentConfig(default=ContentOptions(include_domain=True))
+        content_cfg_dict = content_cfg.model_dump()
+
+        mock_config = MagicMock()
+        mock_config.apprise_url = "encrypted_url"
+        mock_config.content_config = content_cfg_dict
+
+        dispatched_bodies = []
+
+        async def fake_dispatch(ev, url, *, body=None):
+            dispatched_bodies.append(body)
+            return MagicMock(success=True, reason="ok")
+
+        session = AsyncMock(spec=AsyncSession)
+        session.execute = AsyncMock(
+            side_effect=[
+                _scalar_result(None),  # domain lookup → None (no domain query)
+                _empty_result(),  # global templates
+                _empty_result(),  # watch templates
+                _result_with(mock_config),  # local configs
+            ]
+        )
+
+        with patch("src.core.notifications.notify.dispatch_event", fake_dispatch):
+            await dispatch_event_notifications(session, event)
+
+        assert len(dispatched_bodies) == 1
+        # body should equal event.body (include_domain=True but no effective_domain in metadata)
+        assert dispatched_bodies[0] == event.body
+
+    @pytest.mark.asyncio
+    async def test_null_content_config_passes_none_body(self, set_test_key):
+        """content_config=None — dispatch_event called with body=None (dispatcher falls back)."""
+        event = make_event(WatchEventType.CHANGE_DETECTED)
+
+        mock_config = MagicMock()
+        mock_config.apprise_url = "encrypted_url"
+        mock_config.content_config = None
+
+        dispatched_bodies = []
+
+        async def fake_dispatch(ev, url, *, body=None):
+            dispatched_bodies.append(body)
+            return MagicMock(success=True, reason="ok")
+
+        session = AsyncMock(spec=AsyncSession)
+        session.execute = AsyncMock(
+            side_effect=[
+                _scalar_result(None),  # domain lookup → None (no domain query)
+                _empty_result(),  # global templates
+                _empty_result(),  # watch templates
+                _result_with(mock_config),  # local configs
+            ]
+        )
+
+        with patch("src.core.notifications.notify.dispatch_event", fake_dispatch):
+            await dispatch_event_notifications(session, event)
+
+        assert len(dispatched_bodies) == 1
+        assert dispatched_bodies[0] is None  # no override — dispatcher falls back to event.body
 
 
 class TestErrorHandling:

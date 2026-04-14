@@ -6,11 +6,13 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from ulid import ULID
 
+from src.api.schemas.content_config import ContentConfig
 from src.core.logging import get_logger
 from src.core.models.audit_log import EventType, audit
 from src.core.models.notification_config import WatchNotificationConfig
 from src.core.models.notification_template import DomainNcRef, NotificationTemplate, WatchNcRef
 from src.core.models.watch import Watch
+from src.core.notifications.content import build_body, resolve_options
 from src.core.notifications.dispatcher import dispatch_event
 from src.core.notifications.events import WatchEvent
 
@@ -24,6 +26,7 @@ class DispatchCandidate:
     apprise_url: str
     source: str  # "global" | "domain" | "watch_template" | "local"
     source_id: str
+    content_config: dict | None = None
 
 
 async def dispatch_event_notifications(
@@ -114,6 +117,7 @@ async def dispatch_event_notifications(
                         apprise_url=tpl.apprise_url,
                         source=source,
                         source_id=tpl_id,
+                        content_config=tpl.content_config,
                     )
                 )
 
@@ -123,6 +127,7 @@ async def dispatch_event_notifications(
                 apprise_url=c.apprise_url,
                 source="local",
                 source_id=str(c.id),
+                content_config=c.content_config,
             )
         )
 
@@ -132,7 +137,14 @@ async def dispatch_event_notifications(
     results = []
     for candidate in candidates:
         try:
-            result = await dispatch_event(event, candidate.apprise_url)
+            cfg = (
+                ContentConfig.model_validate(candidate.content_config)
+                if candidate.content_config
+                else None
+            )
+            options = resolve_options(cfg, event_value)
+            custom_body = build_body(event, options) if cfg is not None else None
+            result = await dispatch_event(event, candidate.apprise_url, body=custom_body)
             results.append(
                 {
                     "source": candidate.source,

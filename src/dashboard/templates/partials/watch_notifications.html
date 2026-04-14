@@ -8,27 +8,6 @@
 
 <div id="watch-notifications-list" class="space-y-4" aria-live="polite" aria-atomic="false">
 
-  {# ── Action buttons ────────────────────────────────────────��────────────── #}
-  <div class="flex items-center gap-2 justify-end">
-    <button
-      hx-get="/watches/{{ watch.id }}/notifications/assign-row"
-      hx-target="#notifications-tbody"
-      hx-swap="afterbegin"
-      hx-on::before-request="if(document.getElementById('nc-assign-row')){event.preventDefault();}"
-      class="btn btn-secondary text-xs min-h-[44px] htmx-request:opacity-60">
-      + Assign Template
-    </button>
-    <button
-      hx-get="/watches/{{ watch.id }}/notifications/add-row"
-      hx-target="#notifications-tbody"
-      hx-swap="afterbegin"
-      hx-on::before-request="if(document.getElementById('notification-add-row')){event.preventDefault();}"
-      hx-on::after-request="if(event.detail.successful){const e=document.getElementById('notifications-empty-state');if(e)e.remove();}"
-      class="btn btn-secondary text-xs min-h-[44px] htmx-request:opacity-60">
-      + Add Local
-    </button>
-  </div>
-
   {# ── Unified table ──────────────────────────────────────────────────────── #}
   <div class="rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden">
     <table class="data-table w-full">

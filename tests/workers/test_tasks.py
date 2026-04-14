@@ -822,3 +822,60 @@ class TestCheckWatchHealthTransitions:
         await db_session.refresh(watch)
         assert watch.health_status == WatchHealthStatus.OK
         assert any(e.event_type == WatchEventType.WATCH_RECOVERED for e in dispatched_events)
+
+    @pytest.mark.integration
+    async def test_change_detected_metadata_includes_domain_and_interval(
+        self, db_session, tmp_path, monkeypatch
+    ):
+        """check_watch enriches change_detected metadata with effective_domain + check_interval."""
+        import src.workers.tasks as tasks_mod
+
+        watch = Watch(
+            name="Enrichment Test",
+            url="https://example.com/enrich",
+            content_type=ContentType.HTML,
+            effective_domain="example.com",
+            schedule_config={"interval": "1h"},
+        )
+        db_session.add(watch)
+        await db_session.flush()
+
+        storage = LocalStorage(base_dir=tmp_path)
+        await _run_check_pipeline(
+            watch=watch,
+            raw_content=b"<html><body><p>V1</p></body></html>",
+            fetcher_used="http",
+            fetch_duration_ms=50,
+            storage=storage,
+            session=db_session,
+        )
+        await db_session.commit()
+
+        mock_response = httpx.Response(
+            200,
+            content=b"<html><body><p>V2 changed</p></body></html>",
+            request=httpx.Request("GET", "https://example.com/enrich"),
+        )
+        mock_client = httpx.AsyncClient(transport=httpx.MockTransport(lambda req: mock_response))
+        fast_limiter = DomainRateLimiter(min_interval=0.0)
+        mock_registry = ServiceRegistry(fetcher=HttpFetcher(client=mock_client))
+        monkeypatch.setattr(tasks_mod, "get_registry", lambda: mock_registry)
+        monkeypatch.setattr(tasks_mod, "get_rate_limiter", lambda: fast_limiter)
+        monkeypatch.setattr(tasks_mod, "STORAGE_BASE_DIR", tmp_path)
+        monkeypatch.setattr(
+            tasks_mod, "get_session_factory", lambda: _mock_session_factory(db_session)
+        )
+
+        captured_events = []
+
+        async def fake_dispatch(session, event):
+            captured_events.append(event)
+
+        monkeypatch.setattr(tasks_mod, "dispatch_event_notifications", fake_dispatch)
+
+        await check_watch(str(watch.id))
+
+        change_events = [e for e in captured_events if e.event_type.value == "change_detected"]
+        assert len(change_events) == 1
+        assert change_events[0].metadata["effective_domain"] == "example.com"
+        assert change_events[0].metadata["check_interval"] == "1h"

@@ -25,6 +25,17 @@ from src.workers.pipeline import _maybe_decay_backoff, _persist_backoff, _run_ch
 logger = get_logger(__name__)
 
 
+def _watch_base_metadata(watch: Watch) -> dict:
+    """Common metadata fields added to all WatchEvents for content-builder use."""
+    meta: dict = {}
+    if watch.effective_domain:
+        meta["effective_domain"] = watch.effective_domain
+    interval = (watch.schedule_config or {}).get("interval")
+    if interval:
+        meta["check_interval"] = interval
+    return meta
+
+
 # --- Procrastinate task wrappers ---
 
 
@@ -102,7 +113,10 @@ async def check_watch(watch_id: str, registry: ServiceRegistry | None = None) ->
                     watch_name=watch.name,
                     watch_url=watch.url,
                     occurred_at=datetime.now(UTC),
-                    metadata={"status_code": fetch_result.status_code},
+                    metadata={
+                        "status_code": fetch_result.status_code,
+                        **_watch_base_metadata(watch),
+                    },
                 )
                 await dispatch_event_notifications(session=session, event=error_event)
                 await session.commit()
@@ -140,7 +154,7 @@ async def check_watch(watch_id: str, registry: ServiceRegistry | None = None) ->
                 watch_name=watch.name,
                 watch_url=watch.url,
                 occurred_at=datetime.now(UTC),
-                metadata={},
+                metadata=_watch_base_metadata(watch),
             )
             await dispatch_event_notifications(session=session, event=recovery_event)
             await session.commit()
@@ -153,7 +167,7 @@ async def check_watch(watch_id: str, registry: ServiceRegistry | None = None) ->
                 watch_name=watch.name,
                 watch_url=watch.url,
                 occurred_at=datetime.now(UTC),
-                metadata=result.get("change_metadata", {}),
+                metadata={**result.get("change_metadata", {}), **_watch_base_metadata(watch)},
             )
             await dispatch_event_notifications(session=session, event=change_event)
             await session.commit()

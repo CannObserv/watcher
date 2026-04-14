@@ -10,13 +10,12 @@
     {# Diff snippet #}
     <label class="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
       <input type="checkbox" name="content_config__include_diff_snippet" value="1"
-        id="content_config__include_diff_snippet"
         class="rounded border-gray-300 dark:border-gray-600"
         {% if content_config and content_config.default.include_diff_snippet %}checked{% endif %}
-        onchange="document.getElementById('snippet_lines_group').style.opacity=this.checked?'1':'0.4'">
+        onchange="this.closest('label').nextElementSibling.style.opacity=this.checked?'1':'0.4'">
       Include diff snippet
     </label>
-    <div id="snippet_lines_group" class="flex items-center gap-2 ps-6 text-sm text-gray-600 dark:text-gray-400"
+    <div class="flex items-center gap-2 ps-6 text-sm text-gray-600 dark:text-gray-400"
       style="opacity:{{ '1' if content_config and content_config.default.include_diff_snippet else '0.4' }}">
       <label for="snippet_lines">Lines:</label>
       <input type="number" id="snippet_lines" name="content_config__diff_snippet_lines"

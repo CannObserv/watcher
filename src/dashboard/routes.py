@@ -80,6 +80,11 @@ def _parse_content_config_from_form(form) -> dict | None:
         include_temporal_context="content_config__include_temporal_context" in form,
         include_domain="content_config__include_domain" in form,
         diff_snippet_lines=_lines,
+        include_last_changed_at="content_config__include_last_changed_at" in form,
+        include_significance="content_config__include_significance" in form,
+        include_change_dashboard_url="content_config__include_change_dashboard_url" in form,
+        include_tags="content_config__include_tags" in form,
+        include_description="content_config__include_description" in form,
     )
     # Only store if at least one toggle is enabled. diff_snippet_lines alone is not
     # meaningful without a diff toggle, so don't persist a config just for that.
@@ -88,6 +93,11 @@ def _parse_content_config_from_form(form) -> dict | None:
         or opts.include_diff_full
         or opts.include_temporal_context
         or opts.include_domain
+        or opts.include_last_changed_at
+        or opts.include_significance
+        or opts.include_change_dashboard_url
+        or opts.include_tags
+        or opts.include_description
     )
     if not any_enabled:
         return None

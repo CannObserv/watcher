@@ -109,3 +109,70 @@ class TestTemplateStrings:
         # title_template alone should enable persistence
         assert result is not None
         assert result["default"]["title_template"] == "custom title"
+
+
+class TestPerEventOverrides:
+    def test_per_event_override_round_trip(self):
+        form = _form(
+            **{
+                _SNIPPET: "1",
+                "content_config__override__change_detected__include_diff_snippet": "1",
+            }
+        )
+        result = _parse_content_config_from_form(form)
+        assert result is not None
+        assert "change_detected" in result["overrides"]
+        assert result["overrides"]["change_detected"]["include_diff_snippet"] is True
+
+    def test_multiple_overrides_parsed(self):
+        form = _form(
+            **{
+                _SNIPPET: "1",
+                "content_config__override__change_detected__include_diff_snippet": "1",
+                "content_config__override__watch_error__include_domain": "1",
+            }
+        )
+        result = _parse_content_config_from_form(form)
+        assert result is not None
+        assert "change_detected" in result["overrides"]
+        assert "watch_error" in result["overrides"]
+        assert result["overrides"]["watch_error"]["include_domain"] is True
+
+    def test_no_overrides_when_no_per_event_toggles(self):
+        result = _parse_content_config_from_form(_form(**{_SNIPPET: "1"}))
+        assert result is not None
+        assert result["overrides"] == {}
+
+    def test_event_type_not_added_when_no_toggles_checked(self):
+        # All override keys unchecked for change_detected → not in overrides
+        form = _form(**{_SNIPPET: "1"})
+        result = _parse_content_config_from_form(form)
+        assert "change_detected" not in result["overrides"]
+
+    def test_override_all_fields_parsed(self):
+        et = "watch_recovered"
+        form = _form(
+            **{
+                _SNIPPET: "1",
+                f"content_config__override__{et}__include_diff_snippet": "1",
+                f"content_config__override__{et}__include_diff_full": "1",
+                f"content_config__override__{et}__include_temporal_context": "1",
+                f"content_config__override__{et}__include_domain": "1",
+                f"content_config__override__{et}__include_last_changed_at": "1",
+                f"content_config__override__{et}__include_significance": "1",
+                f"content_config__override__{et}__include_change_dashboard_url": "1",
+                f"content_config__override__{et}__include_tags": "1",
+                f"content_config__override__{et}__include_description": "1",
+            }
+        )
+        result = _parse_content_config_from_form(form)
+        ov = result["overrides"][et]
+        assert ov["include_diff_snippet"] is True
+        assert ov["include_diff_full"] is True
+        assert ov["include_temporal_context"] is True
+        assert ov["include_domain"] is True
+        assert ov["include_last_changed_at"] is True
+        assert ov["include_significance"] is True
+        assert ov["include_change_dashboard_url"] is True
+        assert ov["include_tags"] is True
+        assert ov["include_description"] is True

@@ -104,9 +104,39 @@ def _parse_content_config_from_form(form) -> dict | None:
         or opts.title_template
         or opts.body_template
     )
-    if not any_enabled:
+    # Parse per-event overrides
+    overrides: dict[str, ContentOptions] = {}
+    for et_value in [e.value for e in WatchEventType]:
+        prefix = f"content_config__override__{et_value}__"
+        et_opts = ContentOptions(
+            include_diff_snippet=f"{prefix}include_diff_snippet" in form,
+            include_diff_full=f"{prefix}include_diff_full" in form,
+            include_temporal_context=f"{prefix}include_temporal_context" in form,
+            include_domain=f"{prefix}include_domain" in form,
+            include_last_changed_at=f"{prefix}include_last_changed_at" in form,
+            include_significance=f"{prefix}include_significance" in form,
+            include_change_dashboard_url=f"{prefix}include_change_dashboard_url" in form,
+            include_tags=f"{prefix}include_tags" in form,
+            include_description=f"{prefix}include_description" in form,
+        )
+        if any(
+            [
+                et_opts.include_diff_snippet,
+                et_opts.include_diff_full,
+                et_opts.include_temporal_context,
+                et_opts.include_domain,
+                et_opts.include_last_changed_at,
+                et_opts.include_significance,
+                et_opts.include_change_dashboard_url,
+                et_opts.include_tags,
+                et_opts.include_description,
+            ]
+        ):
+            overrides[et_value] = et_opts
+
+    if not any_enabled and not overrides:
         return None
-    return ContentConfig(default=opts).model_dump()
+    return ContentConfig(default=opts, overrides=overrides).model_dump()
 
 
 @router.get("/")

@@ -122,7 +122,7 @@ def _parse_content_config_from_form(form) -> dict | None:
             include_description=f"{prefix}include_description" in form,
         )
         if any(
-            [
+            (
                 et_opts.include_diff_snippet,
                 et_opts.include_diff_full,
                 et_opts.include_temporal_context,
@@ -132,7 +132,7 @@ def _parse_content_config_from_form(form) -> dict | None:
                 et_opts.include_change_dashboard_url,
                 et_opts.include_tags,
                 et_opts.include_description,
-            ]
+            )
         ):
             overrides[et_value] = et_opts
 

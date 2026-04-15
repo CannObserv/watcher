@@ -6,7 +6,7 @@ from urllib.parse import urlparse
 
 import pytest
 from httpx import ASGITransport, AsyncClient
-from sqlalchemy import event
+from sqlalchemy import event, text
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 
 from src.api.dependencies import get_db_session, get_probe_fn
@@ -50,6 +50,28 @@ async def test_engine():
     engine = create_async_engine(TEST_DATABASE_URL)
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        # DB triggers are not part of the ORM model; recreate them here to mirror migrations.
+        await conn.execute(
+            text("""
+            CREATE OR REPLACE FUNCTION trg_fn_watches_last_changed_at()
+            RETURNS TRIGGER AS $$
+            BEGIN
+                UPDATE watches
+                   SET last_changed_at = NEW.detected_at
+                 WHERE id = NEW.watch_id;
+                RETURN NEW;
+            END;
+            $$ LANGUAGE plpgsql;
+        """)
+        )
+        await conn.execute(
+            text("""
+            CREATE OR REPLACE TRIGGER trg_changes_update_last_changed_at
+            AFTER INSERT ON changes
+            FOR EACH ROW
+            EXECUTE FUNCTION trg_fn_watches_last_changed_at();
+        """)
+        )
     yield engine
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.drop_all)

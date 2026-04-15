@@ -302,6 +302,64 @@ class TestRunCheckPipeline:
         assert "change_id" in result2["change_metadata"]
         assert result2["change_metadata"]["change_id"] == result2["change_id"]
 
+    async def test_change_insert_updates_last_changed_at(self, db_session, tmp_path):
+        """DB trigger stamps watches.last_changed_at when a Change row is inserted."""
+        watch = Watch(name="Trigger", url="https://example.com", content_type=ContentType.HTML)
+        db_session.add(watch)
+        await db_session.flush()
+        assert watch.last_changed_at is None
+
+        storage = LocalStorage(base_dir=tmp_path)
+        await _run_check_pipeline(
+            watch=watch,
+            raw_content=b"<html><body><p>V1</p></body></html>",
+            fetcher_used="http",
+            fetch_duration_ms=100,
+            storage=storage,
+            session=db_session,
+        )
+        result2 = await _run_check_pipeline(
+            watch=watch,
+            raw_content=b"<html><body><p>V2 changed</p></body></html>",
+            fetcher_used="http",
+            fetch_duration_ms=100,
+            storage=storage,
+            session=db_session,
+        )
+        assert result2["change_id"] is not None
+
+        # The trigger fires AFTER INSERT on changes; expire the watch to force a DB re-read.
+        await db_session.refresh(watch)
+        assert watch.last_changed_at is not None
+
+    async def test_no_change_leaves_last_changed_at_unchanged(self, db_session, tmp_path):
+        """last_changed_at is not touched when content is identical (no Change row inserted)."""
+        watch = Watch(name="Stable2", url="https://example.com", content_type=ContentType.HTML)
+        db_session.add(watch)
+        await db_session.flush()
+
+        storage = LocalStorage(base_dir=tmp_path)
+        content = b"<html><body><p>Same</p></body></html>"
+
+        await _run_check_pipeline(
+            watch=watch,
+            raw_content=content,
+            fetcher_used="http",
+            fetch_duration_ms=100,
+            storage=storage,
+            session=db_session,
+        )
+        await _run_check_pipeline(
+            watch=watch,
+            raw_content=content,
+            fetcher_used="http",
+            fetch_duration_ms=100,
+            storage=storage,
+            session=db_session,
+        )
+        await db_session.refresh(watch)
+        assert watch.last_changed_at is None
+
 
 def _make_chunk(text: str, index: int = 0) -> Chunk:
     """Helper to build a Chunk with given text."""

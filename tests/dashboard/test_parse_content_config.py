@@ -102,11 +102,8 @@ class TestTemplateStrings:
         assert result["default"]["body_template"] is None
 
     def test_title_template_alone_persists_config(self):
-        # templates alone (no other toggle) do not persist config
-        # because they don't count as "any_enabled" without title/body being meaningful
-        # Actually per spec they DO count — title_template / body_template alone IS useful
+        # title_template alone (no boolean toggles) is enough to persist config.
         result = _parse_content_config_from_form(_form(**{_TITLE_TMPL: "custom title"}))
-        # title_template alone should enable persistence
         assert result is not None
         assert result["default"]["title_template"] == "custom title"
 

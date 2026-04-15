@@ -241,6 +241,20 @@ class TestDomainArchive:
         response = await client.post("/domains/nope.com/archive")
         assert response.status_code == 404
 
+    async def test_archive_button_has_htmx_body_target(self, client, db_session):
+        """Archive button must carry hx-target=body so HTMX swaps the full page.
+
+        Regression: missing hx-target caused the 303-redirect response to be
+        injected as innerHTML of the button element (inside the Danger Zone).
+        """
+        db_session.add(Domain(name="htmx-arc-target.com"))
+        await db_session.flush()
+        response = await client.get("/domains/htmx-arc-target.com")
+        assert response.status_code == 200
+        content = response.content.decode()
+        archive_section = content[content.find("Archive this domain") :]
+        assert 'hx-target="body"' in archive_section
+
 
 class TestDomainRestore:
     async def test_restore_domain(self, client, db_session):
@@ -249,13 +263,34 @@ class TestDomainRestore:
         response = await client.post("/domains/to-restore.com/restore", follow_redirects=False)
         assert response.status_code == 303
 
+    async def test_restore_button_has_htmx_body_target(self, client, db_session):
+        """Restore button must carry hx-target=body so HTMX swaps the full page.
+
+        Regression: missing hx-target caused the 303-redirect response to be
+        injected as innerHTML of the button element (inside the Danger Zone).
+        """
+        db_session.add(Domain(name="htmx-rst-target.com", archived_at=datetime.now(UTC)))
+        await db_session.flush()
+        response = await client.get("/domains/htmx-rst-target.com")
+        assert response.status_code == 200
+        content = response.content.decode()
+        restore_section = content[content.find("Restore this domain") :]
+        assert 'hx-target="body"' in restore_section
+
 
 class TestDomainDelete:
     async def test_delete_archived_domain(self, client, db_session):
+        """Successful delete returns 200 + HX-Redirect, not a bare 303.
+
+        HX-Redirect allows HTMX to navigate the full page correctly; a plain 303
+        would be followed by XHR and the page HTML would be swapped into the
+        #danger-zone-error target element instead of replacing the page.
+        """
         db_session.add(Domain(name="to-delete.com", archived_at=datetime.now(UTC)))
         await db_session.flush()
         response = await client.post("/domains/to-delete.com/delete", follow_redirects=False)
-        assert response.status_code == 303
+        assert response.status_code == 200
+        assert response.headers.get("hx-redirect") == "/domains"
 
     async def test_delete_active_domain_returns_409(self, client, db_session):
         db_session.add(Domain(name="no-delete.com"))

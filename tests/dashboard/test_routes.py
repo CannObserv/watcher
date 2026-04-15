@@ -439,6 +439,44 @@ class TestWatchArchive:
         assert 'hx-target="body"' in archive_section
 
 
+class TestWatchDeactivate:
+    async def _create_active_watch(self, client):
+        resp = await client.post(
+            "/api/v1/watches",
+            json={"name": "Deactivate Me", "url": "https://example.com", "content_type": "html"},
+        )
+        assert resp.status_code == 201
+        return resp.json()["id"]
+
+    async def test_deactivate_sets_watch_inactive(self, client, db_session):
+        """POST /watches/{id}/deactivate must set is_active=False.
+
+        Regression: the template called /deactivate but no route handler existed,
+        so the button silently 404'd in production.
+        """
+        watch_id = await self._create_active_watch(client)
+        response = await client.post(f"/watches/{watch_id}/deactivate")
+        assert response.status_code in (200, 303)
+        watch = await db_session.get(Watch, watch_id)
+        await db_session.refresh(watch)
+        assert watch.is_active is False
+
+    async def test_deactivate_htmx_returns_updated_row(self, client):
+        watch_id = await self._create_active_watch(client)
+        response = await client.post(
+            f"/watches/{watch_id}/deactivate",
+            headers={"HX-Request": "true"},
+        )
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert f'id="watch-{watch_id}"' in content
+        assert "Inactive" in content
+
+    async def test_deactivate_missing_watch_returns_404(self, client):
+        response = await client.post("/watches/not-a-ulid/deactivate")
+        assert response.status_code == 404
+
+
 class TestWatchDelete:
     async def _create_and_archive(self, client):
         resp = await client.post(

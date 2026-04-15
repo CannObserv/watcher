@@ -106,6 +106,8 @@
       <button type="submit"
         hx-post="/domains/{{ domain.name }}/archive"
         hx-confirm="Archive {{ domain.name }}? It will be excluded from rate limiting."
+        hx-target="body"
+        hx-push-url="true"
         class="btn btn-danger-outline min-h-[44px]">
         Archive
       </button>
@@ -121,6 +123,8 @@
       <form method="post" action="/domains/{{ domain.name }}/restore">
         <button type="submit"
           hx-post="/domains/{{ domain.name }}/restore"
+          hx-target="body"
+          hx-push-url="true"
           class="btn btn-secondary min-h-[44px]">
           Restore
         </button>

@@ -840,6 +840,44 @@ async def watch_toggle_active(
     return RedirectResponse(url=f"/watches/{watch_id}", status_code=303)
 
 
+@router.post("/watches/{watch_id}/deactivate")
+async def watch_deactivate(
+    request: Request,
+    watch_id: str,
+    session: AsyncSession = Depends(get_db_session),
+):
+    """Deactivate a watch from the watch-list table row.
+
+    Dedicated endpoint for the inline Deactivate button in watch_row.html.
+    Returns the updated table row partial for HTMX outerHTML swap; falls back
+    to a 303 redirect for non-HTMX (native form) requests.
+    """
+    watch = await get_watch_detail(session, watch_id)
+    if not watch:
+        raise HTTPException(status_code=404, detail="Watch not found")
+
+    if not watch.is_archived and watch.is_active:
+        watch.is_active = False
+        audit(
+            session,
+            EventType.WATCH_DEACTIVATED,
+            watch_id=watch.id,
+            name=watch.name,
+            source="dashboard",
+        )
+        await session.commit()
+        await session.refresh(watch)
+
+    if request.headers.get("HX-Request") == "true":
+        health_map = {watch.id: watch.health_status}
+        return templates.TemplateResponse(
+            request,
+            "partials/watch_row.html",
+            {"watch": watch, "health_map": health_map},
+        )
+    return RedirectResponse(url="/watches", status_code=303)
+
+
 async def _dispatch_archive_notification(
     watch_id: str,
     watch_name: str,
@@ -1148,29 +1186,36 @@ async def domain_delete(
     name: str,
     session: AsyncSession = Depends(get_db_session),
 ):
-    """Hard-delete an archived domain with no watches."""
+    """Hard-delete an archived domain with no watches.
+
+    Returns 200 + HX-Redirect on success so HTMX navigates the full page rather
+    than swapping the redirect response into the #danger-zone-error element.
+    Error cases return HTML fragments suitable for innerHTML swap into that target.
+    """
     result = await session.execute(select(Domain).where(Domain.name == name))
     domain = result.scalar_one_or_none()
     if not domain:
         return templates.TemplateResponse(request, "pages/404.html", status_code=404)
 
     if domain.archived_at is None:
-        raise HTTPException(status_code=409, detail="Archive the domain before deleting it")
+        msg = '<p class="text-red-600 text-sm mt-2">Archive the domain before deleting it.</p>'
+        return HTMLResponse(status_code=409, content=msg)
 
     watch_result = await session.execute(
         select(Watch).where(Watch.effective_domain == name).limit(1)
     )
     if watch_result.scalar_one_or_none():
-        raise HTTPException(
-            status_code=409,
-            detail=f"Cannot delete: watches still reference domain '{name}'",
+        msg = (
+            f'<p class="text-red-600 text-sm mt-2">'
+            f"Cannot delete: watches still reference domain '{name}'.</p>"
         )
+        return HTMLResponse(status_code=409, content=msg)
 
     audit(session, EventType.DOMAIN_DELETED, domain_name=name, source="dashboard")
     await session.delete(domain)
     await session.commit()
 
-    return RedirectResponse(url="/domains", status_code=303)
+    return HTMLResponse(status_code=200, content="", headers={"HX-Redirect": "/domains"})
 
 
 DOMAIN_FIELD_META: dict[str, dict] = {

@@ -8,7 +8,7 @@ from typing import Literal
 
 import httpx
 from cryptography.fernet import InvalidToken
-from fastapi import APIRouter, Depends, Form, HTTPException, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -24,6 +24,7 @@ from src.api.schemas.notification_config import (
     validate_event_list,
 )
 from src.core.crypto import decrypt_apprise_url, encrypt_apprise_url
+from src.core.database import get_session_factory
 from src.core.logging import get_logger
 from src.core.models.audit_log import EventType, audit
 from src.core.models.domain import Domain
@@ -839,10 +840,38 @@ async def watch_toggle_active(
     return RedirectResponse(url=f"/watches/{watch_id}", status_code=303)
 
 
+async def _dispatch_archive_notification(
+    watch_id: str,
+    watch_name: str,
+    watch_url: str,
+    occurred_at: datetime,
+) -> None:
+    """Dispatch WATCH_ARCHIVED notification in a background task with its own session.
+
+    Best-effort: exceptions are logged and swallowed so notification failure never
+    blocks or rolls back the archive action.
+    """
+    try:
+        async with get_session_factory()() as session:
+            await dispatch_event_notifications(
+                session=session,
+                event=WatchEvent(
+                    event_type=WatchEventType.WATCH_ARCHIVED,
+                    watch_id=watch_id,
+                    watch_name=watch_name,
+                    watch_url=watch_url,
+                    occurred_at=occurred_at,
+                ),
+            )
+    except Exception:
+        logger.exception("failed to dispatch archive notification for watch %s", watch_id)
+
+
 @router.post("/watches/{watch_id}/archive")
 async def watch_archive(
     request: Request,
     watch_id: str,
+    background_tasks: BackgroundTasks,
     session: AsyncSession = Depends(get_db_session),
 ):
     """Archive a watch — sets is_archived=True and is_active=False."""
@@ -856,17 +885,15 @@ async def watch_archive(
     watch.is_archived = True
     watch.is_active = False
     audit(session, EventType.WATCH_ARCHIVED, watch_id=watch.id, name=watch.name, source="dashboard")
-    await dispatch_event_notifications(
-        session=session,
-        event=WatchEvent(
-            event_type=WatchEventType.WATCH_ARCHIVED,
-            watch_id=str(watch.id),
-            watch_name=watch.name,
-            watch_url=watch.url,
-            occurred_at=datetime.now(UTC),
-        ),
-    )
     await session.commit()
+
+    background_tasks.add_task(
+        _dispatch_archive_notification,
+        watch_id=str(watch.id),
+        watch_name=watch.name,
+        watch_url=watch.url,
+        occurred_at=datetime.now(UTC),
+    )
 
     return RedirectResponse(url=f"/watches/{watch_id}", status_code=303)
 

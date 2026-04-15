@@ -407,6 +407,37 @@ class TestWatchArchive:
         assert event.watch_name == "Archive Me"
         assert event.watch_url == "https://example.com/arc"
 
+    async def test_archive_commits_even_if_notification_raises(self, client, db_session):
+        """Commit must not be gated on notification success.
+
+        Regression: dispatch was called before session.commit(), so a network
+        failure in Apprise would prevent the archive from ever being persisted.
+        """
+        watch_id = await self._create_watch(client)
+        with patch(_NOTIFY_PATCH, side_effect=Exception("notification failed")):
+            response = await client.post(f"/watches/{watch_id}/archive")
+        assert response.status_code in (200, 303)
+        watch = await db_session.get(Watch, watch_id)
+        await db_session.refresh(watch)
+        assert watch.is_archived is True
+
+    async def test_archive_button_targets_body(self, client, db_session):
+        """Archive button must carry hx-target=body so HTMX swaps the full page.
+
+        Regression: missing hx-target caused the 303-redirect response to be
+        injected as innerHTML of the button element (inside the Danger Zone
+        section), resulting in the entire page rendering nested inside that div.
+        """
+        watch = Watch(name="Target Test", url="https://example.com", content_type=ContentType.HTML)
+        db_session.add(watch)
+        await db_session.flush()
+        response = await client.get(f"/watches/{watch.id}")
+        assert response.status_code == 200
+        content = response.content.decode()
+        # The archive form/button must specify hx-target="body"
+        archive_section = content[content.find("Archive this watch") :]
+        assert 'hx-target="body"' in archive_section
+
 
 class TestWatchDelete:
     async def _create_and_archive(self, client):

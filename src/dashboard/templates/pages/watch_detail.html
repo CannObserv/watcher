@@ -212,6 +212,8 @@
       <button type="submit"
         hx-post="/watches/{{ watch.id }}/archive"
         hx-confirm="Archive {{ watch.name }}? It will be deactivated."
+        hx-target="body"
+        hx-push-url="true"
         class="btn btn-danger-outline min-h-[44px]">
         Archive
       </button>

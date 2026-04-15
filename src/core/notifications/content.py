@@ -1,6 +1,6 @@
 """Notification body builder — resolves ContentOptions and composes custom bodies."""
 
-from jinja2 import Environment, TemplateSyntaxError, UndefinedError
+from jinja2 import Environment, TemplateError
 
 from src.api.schemas.content_config import ContentConfig, ContentOptions
 from src.core.notifications.constants import APP_URL
@@ -13,17 +13,17 @@ def render_template(template_str: str, context: dict) -> str:
     """Render a Jinja2 template string with the given context.
 
     Returns the rendered string on success, or the original template_str
-    (unchanged) if rendering fails due to syntax or undefined variable errors.
-    This ensures notification dispatch is never silently broken by a bad template.
+    (unchanged) if any Jinja2 error occurs. This ensures notification dispatch
+    is never silently broken by a bad template.
     """
     try:
         tmpl = _jinja_env.from_string(template_str)
         return tmpl.render(context)
-    except (TemplateSyntaxError, UndefinedError, Exception):
+    except TemplateError:
         return template_str
 
 
-def _build_template_context(event: WatchEvent) -> dict:
+def build_template_context(event: WatchEvent) -> dict:
     """Build Jinja2 template context from a WatchEvent."""
     ctx = {
         "watch_id": event.watch_id,
@@ -56,7 +56,7 @@ def build_body(event: WatchEvent, options: ContentOptions) -> str:
     Sections are joined with a blank line.
     """
     if options.body_template:
-        return render_template(options.body_template, _build_template_context(event))
+        return render_template(options.body_template, build_template_context(event))
 
     parts = [event.body]
 

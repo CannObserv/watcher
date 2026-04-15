@@ -101,7 +101,7 @@ class TestTemplateStrings:
         assert result is not None
         assert result["default"]["body_template"] is None
 
-    def test_template_alone_without_toggle_returns_none(self):
+    def test_title_template_alone_persists_config(self):
         # templates alone (no other toggle) do not persist config
         # because they don't count as "any_enabled" without title/body being meaningful
         # Actually per spec they DO count — title_template / body_template alone IS useful

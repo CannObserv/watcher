@@ -315,6 +315,8 @@ async def _run_check_pipeline(
             session.add(change)
             await session.flush()
             change_id = change.id
+            # Stored in metadata so it flows into WatchEvent for the
+            # include_change_dashboard_url content option's URL construction.
             metadata["change_id"] = str(change.id)
 
     # 10. Audit log

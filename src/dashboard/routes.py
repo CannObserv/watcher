@@ -66,6 +66,8 @@ from src.dashboard.context import (
 router = APIRouter(tags=["dashboard"])
 logger = get_logger(__name__)
 
+_ALL_EVENT_TYPE_VALUES: list[str] = [e.value for e in WatchEventType]
+
 
 def _parse_content_config_from_form(form) -> dict | None:
     """Extract content_config fields from a flat form POST dict."""
@@ -106,7 +108,7 @@ def _parse_content_config_from_form(form) -> dict | None:
     )
     # Parse per-event overrides
     overrides: dict[str, ContentOptions] = {}
-    for et_value in [e.value for e in WatchEventType]:
+    for et_value in _ALL_EVENT_TYPE_VALUES:
         prefix = f"content_config__override__{et_value}__"
         et_opts = ContentOptions(
             include_diff_snippet=f"{prefix}include_diff_snippet" in form,

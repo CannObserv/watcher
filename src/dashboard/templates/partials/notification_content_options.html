@@ -114,7 +114,13 @@
       <label class="flex items-center gap-2 text-sm font-medium text-gray-700 dark:text-gray-300 cursor-pointer">
         <input type="checkbox" id="per_event_toggle"
           class="rounded border-gray-300 dark:border-gray-600"
-          onchange="document.getElementById('per-event-overrides').style.display=this.checked?'block':'none'"
+          onchange="(function(toggle){
+            var form = toggle.closest('form');
+            var active = form ? Array.from(form.querySelectorAll('[name=events]:checked')).map(function(e){return e.value;}) : [];
+            var rows = document.querySelectorAll('#per-event-overrides [data-event-type]');
+            rows.forEach(function(el){ el.style.display = (!active.length || active.includes(el.dataset.eventType)) ? '' : 'none'; });
+            document.getElementById('per-event-overrides').style.display = toggle.checked ? 'block' : 'none';
+          })(this)"
           {% if content_config and content_config.overrides %}checked{% endif %}>
         Customize per event type
       </label>
@@ -132,7 +138,8 @@
         ] %}
         {% for et_value, et_label in event_types %}
         {% set ov = content_config.overrides.get(et_value) if content_config and content_config.overrides else none %}
-        <details class="border border-gray-200 dark:border-gray-700 rounded-md" {% if ov %}open{% endif %}>
+        <details class="border border-gray-200 dark:border-gray-700 rounded-md" {% if ov %}open{% endif %}
+          data-event-type="{{ et_value }}">
           <summary class="cursor-pointer px-3 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 select-none">
             {{ et_label }}
           </summary>

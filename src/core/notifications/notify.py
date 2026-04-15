@@ -13,8 +13,8 @@ from src.core.models.notification_config import WatchNotificationConfig
 from src.core.models.notification_template import DomainNcRef, NotificationTemplate, WatchNcRef
 from src.core.models.watch import Watch
 from src.core.notifications.content import (
-    _build_template_context,
     build_body,
+    build_template_context,
     render_template,
     resolve_options,
 )
@@ -152,7 +152,7 @@ async def dispatch_event_notifications(
             custom_title: str | None = None
             if options.title_template:
                 custom_title = render_template(
-                    options.title_template, _build_template_context(event)
+                    options.title_template, build_template_context(event)
                 )
             result = await dispatch_event(
                 event, candidate.apprise_url, body=custom_body, title=custom_title

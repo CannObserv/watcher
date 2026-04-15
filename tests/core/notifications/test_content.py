@@ -9,8 +9,8 @@ from src.core.notifications.content import (
     _build_last_changed_section,
     _build_significance_section,
     _build_tags_section,
-    _build_template_context,
     build_body,
+    build_template_context,
     render_template,
     resolve_options,
 )
@@ -327,7 +327,7 @@ class TestRenderTemplate:
 class TestBuildTemplateContext:
     def test_context_has_all_watch_event_fields(self):
         event = make_event(metadata={"significance": 0.5, "change_id": "abc"})
-        ctx = _build_template_context(event)
+        ctx = build_template_context(event)
         assert ctx["watch_id"] == event.watch_id
         assert ctx["watch_name"] == event.watch_name
         assert ctx["watch_url"] == event.watch_url
@@ -336,13 +336,13 @@ class TestBuildTemplateContext:
 
     def test_metadata_keys_flattened_into_context(self):
         event = make_event(metadata={"significance": 0.75, "change_id": "xyz"})
-        ctx = _build_template_context(event)
+        ctx = build_template_context(event)
         assert ctx["significance"] == 0.75
         assert ctx["change_id"] == "xyz"
 
     def test_empty_metadata_produces_base_keys_only(self):
         event = make_event(metadata={})
-        ctx = _build_template_context(event)
+        ctx = build_template_context(event)
         assert set(ctx.keys()) == {
             "watch_id",
             "watch_name",

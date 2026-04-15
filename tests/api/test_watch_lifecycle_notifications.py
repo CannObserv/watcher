@@ -9,11 +9,12 @@ from src.core.notifications.events import WatchEventType
 pytestmark = pytest.mark.integration
 
 _PATCH = "src.api.routes.watches.dispatch_event_notifications"
+_PATCH_CORE = "src.core.watches.dispatch_event_notifications"
 
 
 class TestWatchCreatedNotification:
     async def test_create_watch_dispatches_watch_created_event(self, client):
-        with patch(_PATCH, new_callable=AsyncMock) as mock_dispatch:
+        with patch(_PATCH_CORE, new_callable=AsyncMock) as mock_dispatch:
             response = await client.post(
                 "/api/v1/watches",
                 json={
@@ -29,7 +30,7 @@ class TestWatchCreatedNotification:
         assert kwargs["event"].watch_id == response.json()["id"]
 
     async def test_create_watch_event_includes_name_and_url(self, client):
-        with patch(_PATCH, new_callable=AsyncMock) as mock_dispatch:
+        with patch(_PATCH_CORE, new_callable=AsyncMock) as mock_dispatch:
             await client.post(
                 "/api/v1/watches",
                 json={

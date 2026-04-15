@@ -6,6 +6,7 @@ from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from typing import Literal
 
+import httpx
 from cryptography.fernet import InvalidToken
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
@@ -42,6 +43,7 @@ from src.core.notifications.notify import dispatch_event_notifications
 from src.core.probe import ProbeResult
 from src.core.screenshot import capture_screenshot
 from src.core.storage import STORAGE_BASE_DIR, LocalStorage
+from src.core.watches import create_watch as _create_watch
 from src.dashboard import templates
 from src.dashboard.context import (
     generate_diff,
@@ -203,6 +205,7 @@ async def watch_create_submit(
     url: str = Form(""),
     content_type: str = Form("html"),
     interval: str = Form(""),
+    probe_fn: Callable[[str], Awaitable[ProbeResult]] = Depends(get_probe_fn),
     session: AsyncSession = Depends(get_db_session),
 ):
     """Handle watch creation form submission."""
@@ -229,22 +232,29 @@ async def watch_create_submit(
     if interval.strip():
         schedule_config["interval"] = interval.strip()
 
-    watch = Watch(
-        name=name.strip(),
-        url=url.strip(),
-        content_type=content_type,
-        schedule_config=schedule_config,
-    )
-    session.add(watch)
-    audit(
-        session,
-        EventType.WATCH_CREATED,
-        watch_id=watch.id,
-        name=name,
-        url=url,
-        source="dashboard",
-    )
-    await session.commit()
+    try:
+        watch = await _create_watch(
+            session=session,
+            probe_fn=probe_fn,
+            name=name.strip(),
+            url=url.strip(),
+            content_type=content_type,
+            schedule_config=schedule_config,
+            fetch_config={},
+        )
+    except httpx.HTTPError as exc:
+        flash = {"type": "error", "message": f"URL unreachable: {exc}"}
+        return templates.TemplateResponse(
+            request,
+            "pages/watch_form.html",
+            {
+                "active_page": "watches",
+                "watch": None,
+                "flash": flash,
+                "content_types": list(ContentType),
+            },
+        )
+
     return RedirectResponse(url=f"/watches/{watch.id}", status_code=303)
 
 

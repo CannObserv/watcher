@@ -122,7 +122,8 @@ def _parse_content_config_from_form(form) -> dict | None:
             include_description=f"{prefix}include_description" in form,
         )
         if any(
-            (
+            x
+            for x in (
                 et_opts.include_diff_snippet,
                 et_opts.include_diff_full,
                 et_opts.include_temporal_context,

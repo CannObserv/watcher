@@ -179,6 +179,11 @@ Entry points only: call `configure_logging()` once.
 - Explicit imports only
 - Small, focused functions
 
+**DB Triggers:**
+- Triggers live in Alembic migrations (use `CREATE OR REPLACE FUNCTION` + `CREATE OR REPLACE TRIGGER`; downgrade with `DROP TRIGGER IF EXISTS … ON table; DROP FUNCTION IF EXISTS …`).
+- Integration tests use `Base.metadata.create_all` (not migrations), so triggers are NOT applied automatically. Any trigger added in a migration must also be recreated in `tests/conftest.py` inside the `test_engine` session fixture, after the `create_all` call.
+- Current triggers: `trg_changes_update_last_changed_at` (AFTER INSERT ON changes → sets `watches.last_changed_at = NEW.detected_at`).
+
 ## Style & UI Conventions
 
 Authoritative reference: `docs/STYLE.md`

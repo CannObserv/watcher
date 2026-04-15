@@ -333,7 +333,12 @@ class TestRunCheckPipeline:
         assert watch.last_changed_at is not None
 
     async def test_no_change_leaves_last_changed_at_unchanged(self, db_session, tmp_path):
-        """last_changed_at is not touched when content is identical (no Change row inserted)."""
+        """last_changed_at stays None when no Change row is ever inserted.
+
+        First pipeline run: establishes baseline snapshot but has no previous to diff against,
+        so no Change is created and the trigger never fires.
+        Second pipeline run: identical content → fast-path hash match → no new snapshot or Change.
+        """
         watch = Watch(name="Stable2", url="https://example.com", content_type=ContentType.HTML)
         db_session.add(watch)
         await db_session.flush()

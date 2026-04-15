@@ -31,7 +31,7 @@ def upgrade() -> None:
         $$ LANGUAGE plpgsql;
     """)
     op.execute("""
-        CREATE TRIGGER trg_changes_update_last_changed_at
+        CREATE OR REPLACE TRIGGER trg_changes_update_last_changed_at
         AFTER INSERT ON changes
         FOR EACH ROW
         EXECUTE FUNCTION trg_fn_watches_last_changed_at();

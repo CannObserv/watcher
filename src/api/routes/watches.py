@@ -18,6 +18,7 @@ from src.core.models.domain import Domain
 from src.core.models.watch import Watch
 from src.core.notifications.events import WatchEvent, WatchEventType
 from src.core.notifications.notify import dispatch_event_notifications
+from src.core.probe import ProbeResult
 from src.core.watches import create_watch as _create_watch
 
 logger = get_logger(__name__)
@@ -28,7 +29,7 @@ router = APIRouter(prefix="/watches", tags=["watches"])
 @router.post("", status_code=201, response_model=WatchResponse)
 async def create_watch(
     data: WatchCreate,
-    probe_fn: Annotated[Callable[[str], Awaitable], Depends(get_probe_fn)],
+    probe_fn: Annotated[Callable[[str], Awaitable[ProbeResult]], Depends(get_probe_fn)],
     session: AsyncSession = Depends(get_db_session),
 ):
     """Create a new watch. Probes the URL to resolve effective domain.

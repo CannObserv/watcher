@@ -3,9 +3,12 @@
 import re
 from unittest.mock import AsyncMock, patch
 
+import httpx
 import pytest
+from sqlalchemy import select
 
 from src.core.models.change import Change
+from src.core.models.domain import Domain
 from src.core.models.snapshot import Snapshot
 from src.core.models.watch import ContentType, Watch
 from src.core.notifications.events import WatchEventType
@@ -154,6 +157,43 @@ class TestWatchCreate:
         )
         assert response.status_code == 200
         assert b"required" in response.content.lower() or b"error" in response.content.lower()
+
+    async def test_create_watch_sets_effective_domain_and_creates_domain_record(
+        self, client, db_session
+    ):
+        response = await client.post(
+            "/watches/new",
+            data={
+                "name": "Domain Test Watch",
+                "url": "https://lcb.wa.gov/page",
+                "content_type": "html",
+            },
+            follow_redirects=False,
+        )
+        assert response.status_code == 303
+        watch_id = response.headers["location"].rstrip("/").split("/")[-1]
+        result = await db_session.execute(select(Watch).where(Watch.id == watch_id))
+        watch = result.scalar_one()
+        assert watch.effective_url == "https://lcb.wa.gov/page"
+        assert watch.effective_domain == "lcb.wa.gov"
+        domain_result = await db_session.execute(select(Domain).where(Domain.name == "lcb.wa.gov"))
+        assert domain_result.scalar_one_or_none() is not None
+
+    async def test_create_watch_unreachable_url_shows_error(self, client):
+        with patch(
+            "src.dashboard.routes._create_watch",
+            side_effect=httpx.ConnectError("unreachable"),
+        ):
+            response = await client.post(
+                "/watches/new",
+                data={
+                    "name": "Bad Watch",
+                    "url": "https://broken.example",
+                    "content_type": "html",
+                },
+            )
+        assert response.status_code == 200
+        assert b"unreachable" in response.content.lower()
 
 
 class TestWatchRowDomainInactiveBadge:

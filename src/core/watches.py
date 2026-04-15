@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.core.logging import get_logger
 from src.core.models.audit_log import EventType, audit
 from src.core.models.domain import DEFAULT_MAX_CONCURRENCY, DEFAULT_MIN_INTERVAL, Domain
-from src.core.models.watch import Watch
+from src.core.models.watch import ContentType, Watch
 from src.core.notifications.events import WatchEvent, WatchEventType
 from src.core.notifications.notify import dispatch_event_notifications
 from src.core.probe import ProbeResult
@@ -23,7 +23,7 @@ async def create_watch(
     probe_fn: Callable[[str], Awaitable[ProbeResult]],
     name: str,
     url: str,
-    content_type: str,
+    content_type: str | ContentType,
     schedule_config: dict,
     fetch_config: dict,
 ) -> Watch:

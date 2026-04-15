@@ -455,8 +455,8 @@ class TestWatchDeactivate:
         so the button silently 404'd in production.
         """
         watch_id = await self._create_active_watch(client)
-        response = await client.post(f"/watches/{watch_id}/deactivate")
-        assert response.status_code in (200, 303)
+        response = await client.post(f"/watches/{watch_id}/deactivate", follow_redirects=False)
+        assert response.status_code == 303
         watch = await db_session.get(Watch, watch_id)
         await db_session.refresh(watch)
         assert watch.is_active is False
@@ -471,6 +471,29 @@ class TestWatchDeactivate:
         content = response.content.decode()
         assert f'id="watch-{watch_id}"' in content
         assert "Inactive" in content
+
+    async def test_deactivate_already_inactive_is_idempotent(self, client, db_session):
+        """Deactivating an already-inactive watch returns 303 without error."""
+        watch_id = await self._create_active_watch(client)
+        # First deactivate
+        await client.post(f"/watches/{watch_id}/deactivate", follow_redirects=False)
+        # Second deactivate — must not raise or error
+        response = await client.post(f"/watches/{watch_id}/deactivate", follow_redirects=False)
+        assert response.status_code == 303
+        watch = await db_session.get(Watch, watch_id)
+        await db_session.refresh(watch)
+        assert watch.is_active is False
+
+    async def test_deactivate_archived_watch_returns_409(self, client):
+        """Deactivating an archived watch returns 409, consistent with toggle-active."""
+        resp = await client.post(
+            "/api/v1/watches",
+            json={"name": "Arc Watch", "url": "https://example.com", "content_type": "html"},
+        )
+        watch_id = resp.json()["id"]
+        await client.post(f"/watches/{watch_id}/archive")
+        response = await client.post(f"/watches/{watch_id}/deactivate")
+        assert response.status_code == 409
 
     async def test_deactivate_missing_watch_returns_404(self, client):
         response = await client.post("/watches/not-a-ulid/deactivate")

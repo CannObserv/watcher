@@ -11,7 +11,7 @@ from cryptography.fernet import InvalidToken
 from fastapi import APIRouter, BackgroundTasks, Depends, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from sqlalchemy import func, select
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from ulid import ULID
 
 from src.api.dependencies import get_db_session, get_probe_fn
@@ -840,57 +840,25 @@ async def watch_toggle_active(
     return RedirectResponse(url=f"/watches/{watch_id}", status_code=303)
 
 
-@router.post("/watches/{watch_id}/deactivate")
-async def watch_deactivate(
-    request: Request,
-    watch_id: str,
-    session: AsyncSession = Depends(get_db_session),
-):
-    """Deactivate a watch from the watch-list table row.
-
-    Dedicated endpoint for the inline Deactivate button in watch_row.html.
-    Returns the updated table row partial for HTMX outerHTML swap; falls back
-    to a 303 redirect for non-HTMX (native form) requests.
-    """
-    watch = await get_watch_detail(session, watch_id)
-    if not watch:
-        raise HTTPException(status_code=404, detail="Watch not found")
-
-    if not watch.is_archived and watch.is_active:
-        watch.is_active = False
-        audit(
-            session,
-            EventType.WATCH_DEACTIVATED,
-            watch_id=watch.id,
-            name=watch.name,
-            source="dashboard",
-        )
-        await session.commit()
-        await session.refresh(watch)
-
-    if request.headers.get("HX-Request") == "true":
-        health_map = {watch.id: watch.health_status}
-        return templates.TemplateResponse(
-            request,
-            "partials/watch_row.html",
-            {"watch": watch, "health_map": health_map},
-        )
-    return RedirectResponse(url="/watches", status_code=303)
-
-
 async def _dispatch_archive_notification(
     watch_id: str,
     watch_name: str,
     watch_url: str,
     occurred_at: datetime,
+    *,
+    session_factory: async_sessionmaker[AsyncSession] | None = None,
 ) -> None:
     """Dispatch WATCH_ARCHIVED notification in a background task with its own session.
 
     Best-effort: exceptions are logged and swallowed so notification failure never
     blocks or rolls back the archive action.
+
+    ``session_factory`` is injected explicitly so tests can supply a factory
+    scoped to the test database rather than the global production factory.
     """
+    factory = session_factory if session_factory is not None else get_session_factory()
     try:
-        async with get_session_factory()() as session:
+        async with factory() as session:
             await dispatch_event_notifications(
                 session=session,
                 event=WatchEvent(
@@ -931,6 +899,7 @@ async def watch_archive(
         watch_name=watch.name,
         watch_url=watch.url,
         occurred_at=datetime.now(UTC),
+        session_factory=get_session_factory(),
     )
 
     return RedirectResponse(url=f"/watches/{watch_id}", status_code=303)
@@ -953,6 +922,47 @@ async def watch_restore(
     await session.commit()
 
     return RedirectResponse(url=f"/watches/{watch_id}", status_code=303)
+
+
+@router.post("/watches/{watch_id}/deactivate")
+async def watch_deactivate(
+    request: Request,
+    watch_id: str,
+    session: AsyncSession = Depends(get_db_session),
+):
+    """Deactivate a watch from the watch-list table row.
+
+    Dedicated endpoint for the inline Deactivate button in watch_row.html.
+    Returns the updated table row partial for HTMX outerHTML swap; falls back
+    to a 303 redirect for non-HTMX (native form) requests.
+    """
+    watch = await get_watch_detail(session, watch_id)
+    if not watch:
+        raise HTTPException(status_code=404, detail="Watch not found")
+
+    if watch.is_archived:
+        raise HTTPException(status_code=409, detail="Cannot deactivate archived watch")
+
+    if watch.is_active:
+        watch.is_active = False
+        audit(
+            session,
+            EventType.WATCH_DEACTIVATED,
+            watch_id=watch.id,
+            name=watch.name,
+            source="dashboard",
+        )
+        await session.commit()
+        await session.refresh(watch)
+
+    if request.headers.get("HX-Request") == "true":
+        health_map = {watch.id: watch.health_status}
+        return templates.TemplateResponse(
+            request,
+            "partials/watch_row.html",
+            {"watch": watch, "health_map": health_map},
+        )
+    return RedirectResponse(url="/watches", status_code=303)
 
 
 @router.get("/domains")
@@ -1207,7 +1217,7 @@ async def domain_delete(
     if watch_result.scalar_one_or_none():
         msg = (
             f'<p class="text-red-600 text-sm mt-2">'
-            f"Cannot delete: watches still reference domain '{name}'.</p>"
+            f"Cannot delete: watches still reference domain '{html_lib.escape(name)}'.</p>"
         )
         return HTMLResponse(status_code=409, content=msg)
 

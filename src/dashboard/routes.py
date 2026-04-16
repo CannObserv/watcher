@@ -65,8 +65,9 @@ from src.dashboard.context import (
     get_watch_timeline,
     get_watch_timeline_count,
 )
+from src.dashboard.deps import get_dashboard_user
 
-router = APIRouter(tags=["dashboard"])
+router = APIRouter(tags=["dashboard"], dependencies=[Depends(get_dashboard_user)])
 logger = get_logger(__name__)
 
 _ALL_EVENT_TYPE_VALUES: list[str] = [e.value for e in WatchEventType]

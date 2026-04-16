@@ -9,6 +9,15 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from httpx import ASGITransport, AsyncClient
 from ulid import ULID
 
+from src.api.deps import require_api_key
+from src.core.models.app_user import AppUser
+from src.dashboard.deps import get_dashboard_user
+
+_AUTH_OVERRIDES = {
+    get_dashboard_user: lambda: AppUser(id="test-user-id", email="test@example.com"),
+    require_api_key: lambda: "test-user-id",
+}
+
 
 def _make_mock_session():
     """Build a MagicMock session where execute() is an AsyncMock returning empty results."""
@@ -60,6 +69,7 @@ class TestWatchNotificationsPartialRoute:
             yield _make_mock_session()
 
         app.dependency_overrides[get_db_session] = override_session
+        app.dependency_overrides.update(_AUTH_OVERRIDES)
 
         try:
             with (
@@ -78,7 +88,9 @@ class TestWatchNotificationsPartialRoute:
                 async with AsyncClient(transport=transport, base_url="http://test") as client:
                     return await client.get(f"/partials/watch-notifications/{watch_id}")
         finally:
-            app.dependency_overrides.clear()
+            app.dependency_overrides.pop(get_db_session, None)
+            app.dependency_overrides.pop(get_dashboard_user, None)
+            app.dependency_overrides.pop(require_api_key, None)
 
     async def test_returns_200_for_valid_watch(self):
         watch = _make_mock_watch()
@@ -232,6 +244,7 @@ async def _post_dashboard(
         yield _session
 
     app.dependency_overrides[get_db_session] = override_session
+    app.dependency_overrides.update(_AUTH_OVERRIDES)
     try:
         with (
             patch(
@@ -249,7 +262,9 @@ async def _post_dashboard(
             async with AsyncClient(transport=transport, base_url="http://test") as client:
                 return await client.post(path, data=form_data or {})
     finally:
-        app.dependency_overrides.clear()
+        app.dependency_overrides.pop(get_db_session, None)
+        app.dependency_overrides.pop(get_dashboard_user, None)
+        app.dependency_overrides.pop(require_api_key, None)
 
 
 async def _get_dashboard(path: str, mock_watch=None, mock_session=None):
@@ -268,6 +283,7 @@ async def _get_dashboard(path: str, mock_watch=None, mock_session=None):
         yield _session
 
     app.dependency_overrides[get_db_session] = override_session
+    app.dependency_overrides.update(_AUTH_OVERRIDES)
     try:
         with patch(
             "src.dashboard.routes.get_watch_detail",
@@ -278,7 +294,9 @@ async def _get_dashboard(path: str, mock_watch=None, mock_session=None):
             async with AsyncClient(transport=transport, base_url="http://test") as client:
                 return await client.get(path)
     finally:
-        app.dependency_overrides.clear()
+        app.dependency_overrides.pop(get_db_session, None)
+        app.dependency_overrides.pop(get_dashboard_user, None)
+        app.dependency_overrides.pop(require_api_key, None)
 
 
 class TestWatchNotificationToggleRoute:
@@ -508,6 +526,7 @@ class TestWatchNotificationCreateFromTokens:
             yield _session
 
         app.dependency_overrides[get_db_session] = override_session
+        app.dependency_overrides.update(_AUTH_OVERRIDES)
         try:
             with (
                 patch(
@@ -532,7 +551,9 @@ class TestWatchNotificationCreateFromTokens:
                         data=form_data,
                     )
         finally:
-            app.dependency_overrides.clear()
+            app.dependency_overrides.pop(get_db_session, None)
+            app.dependency_overrides.pop(get_dashboard_user, None)
+            app.dependency_overrides.pop(require_api_key, None)
 
     async def test_token_form_submission_returns_200(self):
         watch = _make_mock_watch()
@@ -553,6 +574,7 @@ class TestWatchNotificationCreateFromTokens:
             yield MagicMock()
 
         app.dependency_overrides[get_db_session] = override_session
+        app.dependency_overrides.update(_AUTH_OVERRIDES)
         try:
             with (
                 patch(
@@ -578,7 +600,9 @@ class TestWatchNotificationCreateFromTokens:
                     )
             assert "Unknown" in resp.text
         finally:
-            app.dependency_overrides.clear()
+            app.dependency_overrides.pop(get_db_session, None)
+            app.dependency_overrides.pop(get_dashboard_user, None)
+            app.dependency_overrides.pop(require_api_key, None)
 
 
 class TestNotificationEditFormRoute:
@@ -851,6 +875,7 @@ class TestWatchNotificationAddRowRoute:
             yield MagicMock()
 
         app.dependency_overrides[get_db_session] = override_session
+        app.dependency_overrides.update(_AUTH_OVERRIDES)
         try:
             with patch(
                 "src.dashboard.routes.get_watch_detail",
@@ -861,7 +886,9 @@ class TestWatchNotificationAddRowRoute:
                 async with AsyncClient(transport=transport, base_url="http://test") as client:
                     return await client.get(f"/watches/{watch_id}/notifications/add-row")
         finally:
-            app.dependency_overrides.clear()
+            app.dependency_overrides.pop(get_db_session, None)
+            app.dependency_overrides.pop(get_dashboard_user, None)
+            app.dependency_overrides.pop(require_api_key, None)
 
     async def test_returns_200_for_valid_watch(self):
         watch = _make_mock_watch()
@@ -980,6 +1007,7 @@ class TestNotificationEditFormHtmxAttributes:
             yield _make_mock_session()
 
         app.dependency_overrides[get_db_session] = override_session
+        app.dependency_overrides.update(_AUTH_OVERRIDES)
         try:
             with (
                 patch(
@@ -999,7 +1027,9 @@ class TestNotificationEditFormHtmxAttributes:
                 async with AsyncClient(transport=transport, base_url="http://test") as client:
                     resp = await client.get(f"/partials/watch-notifications/{watch.id}")
         finally:
-            app.dependency_overrides.clear()
+            app.dependency_overrides.pop(get_db_session, None)
+            app.dependency_overrides.pop(get_dashboard_user, None)
+            app.dependency_overrides.pop(require_api_key, None)
 
         assert resp.status_code == 200
         # The refresh trigger div must target the outer container, not the list div

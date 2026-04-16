@@ -1,0 +1,23 @@
+<tr id="api-key-row-{{ key.id }}">
+  <td class="px-4 py-3 font-medium text-gray-900 dark:text-white">{{ key.label }}</td>
+  <td class="px-4 py-3 font-mono text-sm text-gray-500 dark:text-gray-400">{{ key.key_prefix }}…</td>
+  <td class="px-4 py-3 text-sm text-gray-500 dark:text-gray-400">
+    {{ key.created_at.strftime("%Y-%m-%d") if key.created_at else "—" }}
+  </td>
+  <td class="px-4 py-3 text-sm text-gray-500 dark:text-gray-400">
+    {{ key.last_used_at.strftime("%Y-%m-%d") if key.last_used_at else "Never" }}
+  </td>
+  <td class="px-4 py-3 text-end">
+    <div class="flex justify-end gap-2">
+      <button class="btn btn-secondary text-sm"
+              hx-get="/settings/api-keys/{{ key.id }}/edit-row"
+              hx-target="#api-key-row-{{ key.id }}"
+              hx-swap="outerHTML">Edit</button>
+      <button class="btn btn-danger text-sm"
+              hx-delete="/settings/api-keys/{{ key.id }}"
+              hx-target="#api-key-row-{{ key.id }}"
+              hx-swap="outerHTML"
+              hx-confirm="Delete key '{{ key.label }}'? This cannot be undone.">Delete</button>
+    </div>
+  </td>
+</tr>

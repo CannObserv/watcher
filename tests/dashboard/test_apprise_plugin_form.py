@@ -4,6 +4,10 @@ from unittest.mock import MagicMock
 
 from httpx import ASGITransport, AsyncClient
 
+from src.api.deps import require_api_key
+from src.core.models.app_user import AppUser
+from src.dashboard.deps import get_dashboard_user
+
 
 async def _get(schema: str | None = None, raw: bool = False, variant: int = 0):
     from src.api.dependencies import get_db_session
@@ -13,6 +17,10 @@ async def _get(schema: str | None = None, raw: bool = False, variant: int = 0):
         yield MagicMock()
 
     app.dependency_overrides[get_db_session] = override_session
+    app.dependency_overrides[get_dashboard_user] = lambda: AppUser(
+        id="test-user-id", email="test@example.com"
+    )
+    app.dependency_overrides[require_api_key] = lambda: "test-user-id"
     try:
         params = {}
         if schema:
@@ -25,7 +33,9 @@ async def _get(schema: str | None = None, raw: bool = False, variant: int = 0):
         async with AsyncClient(transport=transport, base_url="http://test") as client:
             return await client.get("/partials/apprise-plugin-form", params=params)
     finally:
-        app.dependency_overrides.clear()
+        app.dependency_overrides.pop(get_db_session, None)
+        app.dependency_overrides.pop(get_dashboard_user, None)
+        app.dependency_overrides.pop(require_api_key, None)
 
 
 class TestApprisePluginFormPartial:

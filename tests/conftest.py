@@ -10,11 +10,14 @@ from sqlalchemy import event, text
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 
 from src.api.dependencies import get_db_session, get_probe_fn
+from src.api.deps import require_api_key
 from src.core.models import Base
+from src.core.models.app_user import AppUser
 from src.core.models.change import Change
 from src.core.models.snapshot import Snapshot
 from src.core.models.watch import Watch
 from src.core.probe import ProbeResult
+from src.dashboard.deps import get_dashboard_user
 
 TEST_DATABASE_URL = os.environ.get("TEST_DATABASE_URL")
 if not TEST_DATABASE_URL:
@@ -154,8 +157,22 @@ async def client(test_engine, db_session) -> AsyncGenerator[AsyncClient]:
     async def override_probe_fn():
         return _make_mock_probe()
 
+    async def override_dashboard_user():
+        from sqlalchemy.dialects.postgresql import insert as pg_insert
+
+        stmt = (
+            pg_insert(AppUser)
+            .values(id="test-user-id", email="test@example.com")
+            .on_conflict_do_update(index_elements=["id"], set_={"email": "test@example.com"})
+            .returning(AppUser)
+        )
+        result = await db_session.execute(stmt)
+        return result.scalar_one()
+
     app.dependency_overrides[get_db_session] = override_session
     app.dependency_overrides[get_probe_fn] = override_probe_fn
+    app.dependency_overrides[get_dashboard_user] = override_dashboard_user
+    app.dependency_overrides[require_api_key] = lambda: "test-user-id"
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as c:
         yield c

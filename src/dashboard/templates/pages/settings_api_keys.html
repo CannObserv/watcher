@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+{% block title %}API Keys — Settings — Watcher{% endblock %}
+
+{% block content %}
+<div class="max-w-5xl mx-auto px-4 py-6 space-y-6"
+     aria-live="polite" aria-relevant="additions removals">
+
+  <div class="flex items-center justify-between">
+    <div>
+      <a href="/settings" class="link text-sm">← Settings</a>
+      <h1 class="text-2xl font-bold text-gray-900 dark:text-white mt-1">API Keys</h1>
+      <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">
+        Keys authenticate requests to <code class="font-mono text-xs bg-gray-100 dark:bg-gray-700 px-1 rounded">/api/v1/</code>
+        via the <code class="font-mono text-xs bg-gray-100 dark:bg-gray-700 px-1 rounded">X-API-Key</code> header.
+      </p>
+    </div>
+    <button class="btn btn-primary"
+            hx-get="/settings/api-keys/new-row"
+            hx-target="#api-keys-tbody"
+            hx-swap="afterbegin"
+            aria-label="Add new API key">
+      + Generate new key
+    </button>
+  </div>
+
+  {# Modal injection point #}
+  <div id="api-keys-modal-container"></div>
+
+  <div id="api-keys-table" class="overflow-hidden rounded-lg border border-gray-200 dark:border-gray-700">
+    <table class="data-table w-full">
+      <thead>
+        <tr>
+          <th scope="col" class="px-4 py-3 text-start">Label</th>
+          <th scope="col" class="px-4 py-3 text-start">Prefix</th>
+          <th scope="col" class="px-4 py-3 text-start">Created</th>
+          <th scope="col" class="px-4 py-3 text-start">Last used</th>
+          <th scope="col" class="px-4 py-3 text-end">Actions</th>
+        </tr>
+      </thead>
+      <tbody id="api-keys-tbody">
+        {% for key in keys %}
+          {% include "partials/api_key_row.html" %}
+        {% else %}
+          <tr id="api-keys-empty-row">
+            <td colspan="5" class="px-4 py-8 text-center text-sm text-gray-500 dark:text-gray-400">
+              No API keys yet. Generate one to get started.
+            </td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <div class="danger-zone rounded-lg border border-red-200 dark:border-red-800 p-4">
+    <h2 class="text-sm font-semibold text-red-700 dark:text-red-400">Security reminder</h2>
+    <p class="text-sm text-gray-600 dark:text-gray-400 mt-1">
+      Keys grant full read/write access to the watcher API. Treat them like passwords.
+      Delete keys you no longer use.
+    </p>
+  </div>
+</div>
+{% endblock %}

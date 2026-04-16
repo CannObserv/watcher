@@ -23,5 +23,7 @@ def register_dashboard(app: FastAPI) -> None:
         app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
     from src.dashboard.routes import router
+    from src.dashboard.settings import router as settings_router
 
     app.include_router(router)
+    app.include_router(settings_router)

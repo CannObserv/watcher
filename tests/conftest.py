@@ -11,10 +11,12 @@ from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 
 from src.api.dependencies import get_db_session, get_probe_fn
 from src.core.models import Base
+from src.core.models.app_user import AppUser
 from src.core.models.change import Change
 from src.core.models.snapshot import Snapshot
 from src.core.models.watch import Watch
 from src.core.probe import ProbeResult
+from src.dashboard.deps import get_dashboard_user
 
 TEST_DATABASE_URL = os.environ.get("TEST_DATABASE_URL")
 if not TEST_DATABASE_URL:
@@ -154,8 +156,12 @@ async def client(test_engine, db_session) -> AsyncGenerator[AsyncClient]:
     async def override_probe_fn():
         return _make_mock_probe()
 
+    async def override_dashboard_user():
+        return AppUser(id="test-user-id", email="test@example.com")
+
     app.dependency_overrides[get_db_session] = override_session
     app.dependency_overrides[get_probe_fn] = override_probe_fn
+    app.dependency_overrides[get_dashboard_user] = override_dashboard_user
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as c:
         yield c

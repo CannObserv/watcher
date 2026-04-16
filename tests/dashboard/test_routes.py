@@ -438,6 +438,26 @@ class TestWatchArchive:
         archive_section = content[content.find("Archive this watch") :]
         assert 'hx-target="body"' in archive_section
 
+    async def test_restore_button_targets_body(self, client, db_session):
+        """Restore button must carry hx-target=body so HTMX swaps the full page.
+
+        Regression: missing hx-target would cause the 303-redirect response to
+        be injected as innerHTML of the button element (inside the Danger Zone).
+        """
+        watch = Watch(
+            name="Restore Target",
+            url="https://example.com",
+            content_type=ContentType.HTML,
+            is_archived=True,
+        )
+        db_session.add(watch)
+        await db_session.flush()
+        response = await client.get(f"/watches/{watch.id}")
+        assert response.status_code == 200
+        content = response.content.decode()
+        restore_section = content[content.find("Restore this watch") :]
+        assert 'hx-target="body"' in restore_section
+
 
 class TestWatchDeactivate:
     async def _create_active_watch(self, client):
@@ -494,6 +514,25 @@ class TestWatchDeactivate:
         await client.post(f"/watches/{watch_id}/archive")
         response = await client.post(f"/watches/{watch_id}/deactivate")
         assert response.status_code == 409
+
+    async def test_deactivate_already_inactive_htmx_returns_valid_row(self, client):
+        """HTMX deactivate on an already-inactive watch must return the updated row.
+
+        Idempotency: the route skips the commit when is_active is already False
+        but must still render the row partial so HTMX can do the outerHTML swap.
+        """
+        watch_id = await self._create_active_watch(client)
+        # First deactivate (non-HTMX) to make the watch inactive
+        await client.post(f"/watches/{watch_id}/deactivate", follow_redirects=False)
+        # Second deactivate via HTMX — must render the row, not 303-redirect
+        response = await client.post(
+            f"/watches/{watch_id}/deactivate",
+            headers={"HX-Request": "true"},
+        )
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert f'id="watch-{watch_id}"' in content
+        assert "Inactive" in content
 
     async def test_deactivate_missing_watch_returns_404(self, client):
         response = await client.post("/watches/not-a-ulid/deactivate")

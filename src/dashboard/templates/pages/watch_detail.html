@@ -230,6 +230,7 @@
         <button type="submit"
           hx-post="/watches/{{ watch.id }}/restore"
           hx-target="body"
+          hx-push-url="true"
           class="btn btn-secondary min-h-[44px]">
           Restore
         </button>

@@ -10,6 +10,7 @@ from sqlalchemy import event, text
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 
 from src.api.dependencies import get_db_session, get_probe_fn
+from src.api.deps import require_api_key
 from src.core.models import Base
 from src.core.models.app_user import AppUser
 from src.core.models.change import Change
@@ -162,6 +163,7 @@ async def client(test_engine, db_session) -> AsyncGenerator[AsyncClient]:
     app.dependency_overrides[get_db_session] = override_session
     app.dependency_overrides[get_probe_fn] = override_probe_fn
     app.dependency_overrides[get_dashboard_user] = override_dashboard_user
+    app.dependency_overrides[require_api_key] = lambda: "test-user-id"
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as c:
         yield c

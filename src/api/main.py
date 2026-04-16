@@ -3,9 +3,10 @@
 import asyncio
 from contextlib import asynccontextmanager
 
-from fastapi import APIRouter, FastAPI
+from fastapi import APIRouter, Depends, FastAPI
 from sqlalchemy import select
 
+from src.api.deps import require_api_key
 from src.api.routes.apprise_plugins import router as apprise_plugins_router
 from src.api.routes.audit_log import router as audit_router
 from src.api.routes.changes import router as changes_router
@@ -64,7 +65,7 @@ async def lifespan(application: FastAPI):
 
 app = FastAPI(title="watcher", version="0.1.0", lifespan=lifespan)
 
-v1_router = APIRouter(prefix="/api/v1")
+v1_router = APIRouter(prefix="/api/v1", dependencies=[Depends(require_api_key)])
 v1_router.include_router(watches_router)
 v1_router.include_router(changes_router)
 v1_router.include_router(profiles_router)

@@ -42,27 +42,33 @@ class TestRequireApiKey:
         from src.api.main import app
 
         app.dependency_overrides.pop(require_api_key, None)
-        r = await client.get("/api/v1/watches", headers={"X-API-Key": raw_api_key})
-        assert r.status_code == 200
-        app.dependency_overrides[require_api_key] = lambda: "test-user-id"
+        try:
+            r = await client.get("/api/v1/watches", headers={"X-API-Key": raw_api_key})
+            assert r.status_code == 200
+        finally:
+            app.dependency_overrides[require_api_key] = lambda: "test-user-id"
 
     async def test_missing_key_returns_403(self, client):
         from src.api.deps import require_api_key
         from src.api.main import app
 
         app.dependency_overrides.pop(require_api_key, None)
-        r = await client.get("/api/v1/watches")
-        assert r.status_code == 403
-        app.dependency_overrides[require_api_key] = lambda: "test-user-id"
+        try:
+            r = await client.get("/api/v1/watches")
+            assert r.status_code == 403
+        finally:
+            app.dependency_overrides[require_api_key] = lambda: "test-user-id"
 
     async def test_invalid_key_returns_401(self, client):
         from src.api.deps import require_api_key
         from src.api.main import app
 
         app.dependency_overrides.pop(require_api_key, None)
-        r = await client.get("/api/v1/watches", headers={"X-API-Key": "co_notvalid"})
-        assert r.status_code == 401
-        app.dependency_overrides[require_api_key] = lambda: "test-user-id"
+        try:
+            r = await client.get("/api/v1/watches", headers={"X-API-Key": "co_notvalid"})
+            assert r.status_code == 401
+        finally:
+            app.dependency_overrides[require_api_key] = lambda: "test-user-id"
 
     async def test_valid_key_updates_last_used_at(self, client, raw_api_key, db_session):
         from sqlalchemy import select
@@ -71,9 +77,11 @@ class TestRequireApiKey:
         from src.api.main import app
 
         app.dependency_overrides.pop(require_api_key, None)
-        await client.get("/api/v1/watches", headers={"X-API-Key": raw_api_key})
-        key_hash = hashlib.sha256(raw_api_key.encode()).hexdigest()
-        result = await db_session.execute(select(ApiKey).where(ApiKey.key_hash == key_hash))
-        key = result.scalar_one()
-        assert key.last_used_at is not None
-        app.dependency_overrides[require_api_key] = lambda: "test-user-id"
+        try:
+            await client.get("/api/v1/watches", headers={"X-API-Key": raw_api_key})
+            key_hash = hashlib.sha256(raw_api_key.encode()).hexdigest()
+            result = await db_session.execute(select(ApiKey).where(ApiKey.key_hash == key_hash))
+            key = result.scalar_one()
+            assert key.last_used_at is not None
+        finally:
+            app.dependency_overrides[require_api_key] = lambda: "test-user-id"

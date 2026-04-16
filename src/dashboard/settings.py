@@ -14,7 +14,11 @@ from src.core.models.app_user import AppUser
 from src.dashboard import templates
 from src.dashboard.deps import generate_api_key, get_dashboard_user
 
-router = APIRouter(prefix="/settings", tags=["settings"])
+router = APIRouter(
+    prefix="/settings",
+    tags=["settings"],
+    dependencies=[Depends(get_dashboard_user)],
+)
 
 
 def _is_htmx(request: Request) -> bool:
@@ -62,10 +66,7 @@ async def api_keys_list(
 
 
 @router.get("/api-keys/new-row")
-async def api_key_new_row(
-    request: Request,
-    user: AppUser = Depends(get_dashboard_user),
-):
+async def api_key_new_row(request: Request):
     """Return inline add-row form for creating a new API key."""
     return templates.TemplateResponse(
         request,

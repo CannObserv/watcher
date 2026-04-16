@@ -7,6 +7,7 @@ from urllib.parse import urlparse
 import pytest
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import event, text
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 
 from src.api.dependencies import get_db_session, get_probe_fn
@@ -158,8 +159,6 @@ async def client(test_engine, db_session) -> AsyncGenerator[AsyncClient]:
         return _make_mock_probe()
 
     async def override_dashboard_user():
-        from sqlalchemy.dialects.postgresql import insert as pg_insert
-
         stmt = (
             pg_insert(AppUser)
             .values(id="test-user-id", email="test@example.com")

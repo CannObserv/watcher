@@ -158,7 +158,16 @@ async def client(test_engine, db_session) -> AsyncGenerator[AsyncClient]:
         return _make_mock_probe()
 
     async def override_dashboard_user():
-        return AppUser(id="test-user-id", email="test@example.com")
+        from sqlalchemy.dialects.postgresql import insert as pg_insert
+
+        stmt = (
+            pg_insert(AppUser)
+            .values(id="test-user-id", email="test@example.com")
+            .on_conflict_do_update(index_elements=["id"], set_={"email": "test@example.com"})
+            .returning(AppUser)
+        )
+        result = await db_session.execute(stmt)
+        return result.scalar_one()
 
     app.dependency_overrides[get_db_session] = override_session
     app.dependency_overrides[get_probe_fn] = override_probe_fn

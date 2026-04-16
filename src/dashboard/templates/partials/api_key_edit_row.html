@@ -1,0 +1,38 @@
+{% set is_new = key is none %}
+<tr id="{{ 'api-key-new-row' if is_new else 'api-key-row-' ~ key.id }}">
+  <td colspan="5" class="px-4 py-3">
+    <form class="flex items-center gap-3"
+          {% if is_new %}
+          hx-post="/settings/api-keys"
+          hx-target="#api-keys-modal-container"
+          hx-swap="innerHTML"
+          {% else %}
+          hx-post="/settings/api-keys/{{ key.id }}/edit-row"
+          hx-target="#api-key-row-{{ key.id }}"
+          hx-swap="outerHTML"
+          {% endif %}
+          aria-label="{{ 'Add new API key' if is_new else 'Edit API key label' }}">
+      <input type="text"
+             name="label"
+             class="form-input flex-1"
+             placeholder="Key label (e.g. Scripts, CI)"
+             value="{{ key.label if key else '' }}"
+             maxlength="100"
+             required
+             aria-label="Key label">
+      <button type="submit" class="btn btn-primary text-sm">
+        {{ "Generate" if is_new else "Save" }}
+      </button>
+      {% if is_new %}
+      <button type="button" class="btn btn-secondary text-sm"
+              onclick="this.closest('tr').remove()"
+              aria-label="Cancel">Cancel</button>
+      {% else %}
+      <button type="button" class="btn btn-secondary text-sm"
+              hx-get="/settings/api-keys/{{ key.id }}/read-row"
+              hx-target="#api-key-row-{{ key.id }}"
+              hx-swap="outerHTML">Cancel</button>
+      {% endif %}
+    </form>
+  </td>
+</tr>

@@ -1,0 +1,29 @@
+{# One-time key display — swap into #api-keys-modal-container; auto-shown via inline script #}
+<div id="api-key-modal" role="dialog" aria-modal="true" aria-label="New API key generated"
+     class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+  <div class="bg-white dark:bg-gray-800 rounded-lg shadow-xl w-full max-w-lg p-6 space-y-4">
+    <h2 class="text-lg font-semibold text-gray-900 dark:text-white">API key generated</h2>
+    <p class="text-sm text-gray-500 dark:text-gray-400">
+      <strong class="text-gray-900 dark:text-white">{{ label }}</strong> —
+      copy this key now. <span class="text-red-600 dark:text-red-400 font-medium">It will not be shown again.</span>
+    </p>
+    <div class="flex gap-2">
+      <input id="new-api-key-value"
+             type="text"
+             class="form-input flex-1 font-mono text-sm"
+             value="{{ raw_key }}"
+             readonly
+             aria-label="New API key value">
+      <button type="button"
+              class="btn btn-secondary text-sm"
+              onclick="navigator.clipboard.writeText(document.getElementById('new-api-key-value').value).then(()=>this.textContent='Copied!').catch(()=>{})"
+              aria-label="Copy key to clipboard">Copy</button>
+    </div>
+    <div class="flex justify-end pt-2">
+      <button type="button"
+              class="btn btn-primary"
+              onclick="location.reload();"
+              aria-label="Close modal and refresh key list">Done</button>
+    </div>
+  </div>
+</div>

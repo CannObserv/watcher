@@ -1032,7 +1032,7 @@ async def api_key_delete(
     if not key:
         raise HTTPException(status_code=404)
     label_val = key.label
-    await session.delete(key)
+    session.delete(key)
     await session.commit()
     return HTMLResponse(
         content="",
@@ -1195,7 +1195,7 @@ Reference the existing `src/dashboard/templates/pages/notifications.html` and `s
     <div class="flex justify-end pt-2">
       <button type="button"
               class="btn btn-primary"
-              onclick="(function(){var m=document.getElementById('api-key-modal');if(m)m.remove();})();location.reload();"
+              onclick="location.reload();"
               aria-label="Close modal and refresh key list">Done</button>
     </div>
   </div>

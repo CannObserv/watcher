@@ -44,6 +44,7 @@ _WATCH_SORT_COLS: dict[str, Any] = {
     "health": Watch.health_status,
     "last_checked_at": Watch.last_checked_at,
     "last_changed_at": Watch.last_changed_at,
+    "created_at": Watch.created_at,
 }
 
 
@@ -56,7 +57,10 @@ async def get_watch_list(
     sort: str = "last_checked_at",
     order: str = "desc",
 ) -> list[Watch]:
-    """Fetch watches for list display with optional filtering and sorting."""
+    """Fetch watches for list display with optional filtering and sorting.
+
+    Default sort is ``last_checked_at desc`` (changed from ``created_at`` in #101).
+    """
     col = _WATCH_SORT_COLS.get(sort, Watch.last_checked_at)
     order_expr = col.asc() if order == "asc" else col.desc()
     stmt = select(Watch).order_by(order_expr)
@@ -68,8 +72,8 @@ async def get_watch_list(
         escaped = search.replace("%", "\\%").replace("_", "\\_")
         stmt = stmt.where(Watch.name.ilike(f"%{escaped}%"))
     if domain:
-        escaped_d = domain.replace("%", "\\%").replace("_", "\\_")
-        stmt = stmt.where(Watch.effective_domain.ilike(f"%{escaped_d}%"))
+        escaped = domain.replace("%", "\\%").replace("_", "\\_")
+        stmt = stmt.where(Watch.effective_domain.ilike(f"%{escaped}%"))
     result = await session.execute(stmt)
     return list(result.scalars().all())
 

@@ -175,6 +175,79 @@ class TestGetWatchList:
         assert "Normal" in names
         assert "Archived" in names
 
+    async def test_search_filters_by_name(self, db_session):
+        db_session.add(Watch(name="Alpha Watch", url="https://a.com", content_type="html"))
+        db_session.add(Watch(name="Beta Watch", url="https://b.com", content_type="html"))
+        await db_session.flush()
+        result = await get_watch_list(db_session, search="alpha")
+        assert len(result) == 1
+        assert result[0].name == "Alpha Watch"
+
+    async def test_domain_filters_by_effective_domain(self, db_session):
+        db_session.add(
+            Watch(name="W1", url="https://a.com", content_type="html", effective_domain="a.com")
+        )
+        db_session.add(
+            Watch(name="W2", url="https://b.com", content_type="html", effective_domain="b.com")
+        )
+        await db_session.flush()
+        result = await get_watch_list(db_session, domain="a.com")
+        assert len(result) == 1
+        assert result[0].name == "W1"
+
+    async def test_domain_filter_is_partial_match(self, db_session):
+        db_session.add(
+            Watch(
+                name="Sub",
+                url="https://sub.example.com",
+                content_type="html",
+                effective_domain="sub.example.com",
+            )
+        )
+        db_session.add(
+            Watch(
+                name="Root",
+                url="https://example.com",
+                content_type="html",
+                effective_domain="example.com",
+            )
+        )
+        db_session.add(
+            Watch(
+                name="Other",
+                url="https://other.com",
+                content_type="html",
+                effective_domain="other.com",
+            )
+        )
+        await db_session.flush()
+        result = await get_watch_list(db_session, domain="example")
+        names = {w.name for w in result}
+        assert "Sub" in names
+        assert "Root" in names
+        assert "Other" not in names
+
+    async def test_sort_by_name_asc(self, db_session):
+        db_session.add(Watch(name="Zebra", url="https://a.com", content_type="html"))
+        db_session.add(Watch(name="Apple", url="https://b.com", content_type="html"))
+        await db_session.flush()
+        result = await get_watch_list(db_session, sort="name", order="asc")
+        assert result[0].name == "Apple"
+        assert result[1].name == "Zebra"
+
+    async def test_sort_by_name_desc(self, db_session):
+        db_session.add(Watch(name="Zebra", url="https://a.com", content_type="html"))
+        db_session.add(Watch(name="Apple", url="https://b.com", content_type="html"))
+        await db_session.flush()
+        result = await get_watch_list(db_session, sort="name", order="desc")
+        assert result[0].name == "Zebra"
+
+    async def test_unknown_sort_key_falls_back_to_last_checked(self, db_session):
+        db_session.add(Watch(name="W", url="https://a.com", content_type="html"))
+        await db_session.flush()
+        result = await get_watch_list(db_session, sort="INVALID", order="asc")
+        assert len(result) == 1
+
 
 @pytest.mark.integration
 class TestGetWatchDetail:

@@ -779,8 +779,6 @@ class TestGetDomainWatches:
         assert result[0].name == "Apple"
 
     async def test_sort_by_last_changed_desc(self, db_session):
-        from datetime import UTC, datetime
-
         w1 = Watch(
             name="Old",
             url="https://ex.com/old",

@@ -50,5 +50,5 @@
   </table>
 </div>
 {% else %}
-<p class="text-gray-500 dark:text-gray-400 text-sm">No watches found.</p>
+<p class="text-gray-500 dark:text-gray-400 text-sm">No watches{% if q or status or domain %} matching filters{% endif %}.</p>
 {% endif %}

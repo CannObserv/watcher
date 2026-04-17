@@ -16,6 +16,7 @@
         {% set cols = [
           ("name", "Name"),
           ("status", "Status"),
+          ("health", "Health"),
           ("last_checked_at", "Last Checked"),
           ("last_changed_at", "Last Changed"),
         ] %}
@@ -55,11 +56,21 @@
             <span class="badge badge-inactive">Inactive</span>
           {% endif %}
         </td>
-        <td class="text-gray-500 dark:text-gray-400">
-          {{ watch.last_checked_at.strftime("%Y-%m-%d %H:%M") if watch.last_checked_at else "—" }}
+        <td>
+          {% set health = health_map.get(watch.id, "unknown") %}
+          {% if health == "ok" %}
+            <span class="badge badge-active">Healthy</span>
+          {% elif health == "error" %}
+            <span class="badge badge-error">Error</span>
+          {% else %}
+            <span class="badge badge-inactive">Unknown</span>
+          {% endif %}
         </td>
         <td class="text-gray-500 dark:text-gray-400">
-          {{ watch.last_changed_at.strftime("%Y-%m-%d %H:%M") if watch.last_changed_at else "—" }}
+          {{ watch.last_checked_at.strftime("%Y-%m-%d %H:%M UTC") if watch.last_checked_at else "—" }}
+        </td>
+        <td class="text-gray-500 dark:text-gray-400">
+          {{ watch.last_changed_at.strftime("%Y-%m-%d %H:%M UTC") if watch.last_changed_at else "—" }}
         </td>
       </tr>
       {% endfor %}

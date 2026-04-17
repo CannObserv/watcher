@@ -1390,6 +1390,7 @@ async def domain_detail_page(
     watches = await get_domain_watches(
         session, name, search=q, is_active=is_active, sort=sort, order=order
     )
+    health_map = {w.id: w.health_status for w in watches}
 
     field_contexts = {
         fname: _field_context(request, domain, fname, mode="view") for fname in DOMAIN_FIELD_META
@@ -1399,6 +1400,7 @@ async def domain_detail_page(
         "active_page": "domains",
         "domain": domain,
         "watches": watches,
+        "health_map": health_map,
         "q": q or "",
         "status": status or "",
         "sort": sort,
@@ -1746,12 +1748,14 @@ async def partial_domain_watches(
     watches = await get_domain_watches(
         session, name, search=q, is_active=is_active, sort=sort, order=order
     )
+    health_map = {w.id: w.health_status for w in watches}
     return templates.TemplateResponse(
         request,
         "partials/domain_watches_table.html",
         {
             "domain": domain,
             "watches": watches,
+            "health_map": health_map,
             "q": q or "",
             "status": status or "",
             "sort": sort,

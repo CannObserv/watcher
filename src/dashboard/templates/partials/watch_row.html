@@ -22,7 +22,7 @@
     {% endif %}
   </td>
   <td class="text-gray-500 dark:text-gray-400">
-    {% if watch.last_checked_at %}{{ watch.last_checked_at.strftime('%Y-%m-%d %H:%M UTC') }}{% else %}Never{% endif %}
+    {% if watch.last_checked_at %}{{ watch.last_checked_at.strftime('%Y-%m-%d %H:%M UTC') }}{% else %}—{% endif %}
   </td>
   <td class="text-gray-500 dark:text-gray-400">
     {% if watch.last_changed_at %}{{ watch.last_changed_at.strftime('%Y-%m-%d %H:%M UTC') }}{% else %}—{% endif %}

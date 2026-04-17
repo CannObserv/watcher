@@ -799,3 +799,42 @@ class TestGetDomainWatches:
             db_session, "ex.com", sort="last_changed_at", order="desc"
         )
         assert result[0].name == "New"
+
+    async def test_search_filters_by_name(self, db_session):
+        db_session.add(
+            Watch(
+                name="Alpha", url="https://ex.com/a", content_type="html", effective_domain="ex.com"
+            )
+        )
+        db_session.add(
+            Watch(
+                name="Beta", url="https://ex.com/b", content_type="html", effective_domain="ex.com"
+            )
+        )
+        await db_session.flush()
+        result = await get_domain_watches(db_session, "ex.com", search="alp")
+        assert len(result) == 1
+        assert result[0].name == "Alpha"
+
+    async def test_filter_by_is_active(self, db_session):
+        db_session.add(
+            Watch(
+                name="Active",
+                url="https://ex.com/a",
+                content_type="html",
+                effective_domain="ex.com",
+            )
+        )
+        db_session.add(
+            Watch(
+                name="Inactive",
+                url="https://ex.com/b",
+                content_type="html",
+                effective_domain="ex.com",
+                is_active=False,
+            )
+        )
+        await db_session.flush()
+        result = await get_domain_watches(db_session, "ex.com", is_active=True)
+        assert len(result) == 1
+        assert result[0].name == "Active"

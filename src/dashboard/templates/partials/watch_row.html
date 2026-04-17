@@ -3,17 +3,6 @@
     <a href="/watches/{{ watch.id }}" class="link font-medium">{{ watch.name }}</a>
   </td>
   <td>
-    <span class="truncate max-w-[300px] inline-block text-gray-500 dark:text-gray-400">{{ watch.url }}</span>
-  </td>
-  <td>
-    <span class="badge
-      {% if watch.content_type == 'html' %}badge-info
-      {% elif watch.content_type == 'pdf' %}badge-error
-      {% else %}badge-active{% endif %}">
-      {{ watch.content_type }}
-    </span>
-  </td>
-  <td>
     {% if watch.is_active %}
       <span class="badge badge-active">Active</span>
     {% elif watch.domain_suspended %}
@@ -35,17 +24,7 @@
   <td class="text-gray-500 dark:text-gray-400">
     {% if watch.last_checked_at %}{{ watch.last_checked_at.strftime('%Y-%m-%d %H:%M UTC') }}{% else %}Never{% endif %}
   </td>
-  <td>
-    {% if watch.is_active %}
-    <button
-      hx-post="/watches/{{ watch.id }}/deactivate"
-      hx-target="#watch-{{ watch.id }}"
-      hx-swap="outerHTML"
-      hx-confirm="Deactivate {{ watch.name }}?"
-      aria-label="Deactivate {{ watch.name }}"
-      class="text-xs text-red-600 dark:text-red-400 hover:text-red-800 dark:hover:text-red-300 min-h-[44px]">
-      Deactivate
-    </button>
-    {% endif %}
+  <td class="text-gray-500 dark:text-gray-400">
+    {% if watch.last_changed_at %}{{ watch.last_changed_at.strftime('%Y-%m-%d %H:%M UTC') }}{% else %}—{% endif %}
   </td>
 </tr>

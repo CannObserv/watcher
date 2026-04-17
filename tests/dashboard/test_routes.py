@@ -10,7 +10,7 @@ from sqlalchemy import select
 from src.core.models.change import Change
 from src.core.models.domain import Domain
 from src.core.models.snapshot import Snapshot
-from src.core.models.watch import ContentType, Watch
+from src.core.models.watch import ContentType, Watch, WatchHealthStatus
 from src.core.notifications.events import WatchEventType
 
 pytestmark = pytest.mark.integration
@@ -680,6 +680,27 @@ class TestDomainDetailFilters:
         name = await self._create_domain_with_watch(client, "Sort Watch")
         response = await client.get(f"/partials/domain-watches/{name}?sort=name&order=asc")
         assert response.status_code == 200
+
+    async def test_domain_watches_partial_health_badge(self, client, db_session):
+        resp = await client.post(
+            "/domains",
+            data={"url": "https://example.com/page"},
+            follow_redirects=False,
+        )
+        name = resp.headers["location"].rstrip("/").split("/")[-1]
+        db_session.add(
+            Watch(
+                name="Healthy Watch",
+                url=f"https://{name}/page",
+                content_type="html",
+                effective_domain=name,
+                health_status=WatchHealthStatus.OK,
+            )
+        )
+        await db_session.flush()
+        response = await client.get(f"/partials/domain-watches/{name}")
+        assert response.status_code == 200
+        assert b"Healthy" in response.content
 
 
 class TestAuditLogFilters:

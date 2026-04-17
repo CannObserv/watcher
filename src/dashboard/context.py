@@ -622,14 +622,17 @@ async def get_domain_watches(
     *,
     search: str | None = None,
     is_active: bool | None = None,
+    sort: str = "name",
+    order: str = "asc",
 ) -> list[Watch]:
-    """Fetch watches for a domain with optional name search and status filter."""
-    stmt = select(Watch).where(Watch.effective_domain == domain_name)
+    """Fetch watches for a domain with optional name search, status filter, and sorting."""
+    col = _WATCH_SORT_COLS.get(sort, Watch.name)
+    order_expr = col.asc() if order == "asc" else col.desc()
+    stmt = select(Watch).where(Watch.effective_domain == domain_name).order_by(order_expr)
     if search:
         escaped = search.replace("%", "\\%").replace("_", "\\_")
         stmt = stmt.where(Watch.name.ilike(f"%{escaped}%"))
     if is_active is not None:
         stmt = stmt.where(Watch.is_active == is_active)
-    stmt = stmt.order_by(Watch.name)
     result = await session.execute(stmt)
     return list(result.scalars().all())

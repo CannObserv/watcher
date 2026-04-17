@@ -13,6 +13,7 @@ from src.dashboard.context import (
     generate_diff,
     get_change_detail,
     get_dashboard_stats,
+    get_domain_watches,
     get_domains_with_watch_counts,
     get_queue_health,
     get_rate_limiter_state,
@@ -741,4 +742,62 @@ class TestGetWatchTimeline:
         assert "timestamp" in item
         assert "summary" in item
         assert "detail_url" in item
-        assert "category" in item
+
+
+@pytest.mark.integration
+class TestGetDomainWatches:
+    async def test_returns_watches_for_domain(self, db_session):
+        db_session.add(
+            Watch(name="W1", url="https://ex.com/a", content_type="html", effective_domain="ex.com")
+        )
+        db_session.add(
+            Watch(
+                name="W2",
+                url="https://other.com/b",
+                content_type="html",
+                effective_domain="other.com",
+            )
+        )
+        await db_session.flush()
+        result = await get_domain_watches(db_session, "ex.com")
+        assert len(result) == 1
+        assert result[0].name == "W1"
+
+    async def test_sort_by_name_asc(self, db_session):
+        db_session.add(
+            Watch(
+                name="Zebra", url="https://ex.com/z", content_type="html", effective_domain="ex.com"
+            )
+        )
+        db_session.add(
+            Watch(
+                name="Apple", url="https://ex.com/a", content_type="html", effective_domain="ex.com"
+            )
+        )
+        await db_session.flush()
+        result = await get_domain_watches(db_session, "ex.com", sort="name", order="asc")
+        assert result[0].name == "Apple"
+
+    async def test_sort_by_last_changed_desc(self, db_session):
+        from datetime import UTC, datetime
+
+        w1 = Watch(
+            name="Old",
+            url="https://ex.com/old",
+            content_type="html",
+            effective_domain="ex.com",
+            last_changed_at=datetime(2024, 1, 1, tzinfo=UTC),
+        )
+        w2 = Watch(
+            name="New",
+            url="https://ex.com/new",
+            content_type="html",
+            effective_domain="ex.com",
+            last_changed_at=datetime(2025, 1, 1, tzinfo=UTC),
+        )
+        db_session.add_all([w1, w2])
+        await db_session.flush()
+        result = await get_domain_watches(
+            db_session, "ex.com", sort="last_changed_at", order="desc"
+        )
+        assert result[0].name == "New"

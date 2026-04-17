@@ -6,24 +6,7 @@
   <a href="/watches/new" class="btn btn-primary">New Watch</a>
 </div>
 
-<form method="get" action="/watches" class="mb-4">
-  <fieldset class="segment-group" role="radiogroup" aria-label="Filter by status">
-    {% for value, label in [("", "All"), ("active", "Active"), ("inactive", "Inactive")] %}
-    <label class="segment">
-      <input type="radio" name="status" value="{{ value }}"
-        {% if status == value or (not status and value == '') %}checked{% endif %}
-        hx-get="/partials/watch-table"
-        hx-target="#watch-table"
-        hx-swap="innerHTML"
-        hx-trigger="change">
-      <span>{{ label }}</span>
-    </label>
-    {% endfor %}
-  </fieldset>
-  <noscript><button type="submit" class="btn btn-secondary">Apply</button></noscript>
-</form>
-
-<div id="watch-table" aria-live="polite" aria-atomic="false">
+<div id="watches-container" aria-live="polite" aria-atomic="false">
   {% include "partials/watch_table.html" %}
 </div>
 {% endblock %}

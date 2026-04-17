@@ -73,6 +73,15 @@ logger = get_logger(__name__)
 _ALL_EVENT_TYPE_VALUES: list[str] = [e.value for e in WatchEventType]
 
 
+def _status_to_is_active(status: str | None) -> bool | None:
+    """Convert status string param to is_active bool for DB queries."""
+    if status == "active":
+        return True
+    if status == "inactive":
+        return False
+    return None
+
+
 def _parse_content_config_from_form(form) -> dict | None:
     """Extract content_config fields from a flat form POST dict."""
     _lines_raw = form.get("content_config__diff_snippet_lines", "10")
@@ -170,16 +179,27 @@ async def dashboard_home(
 @router.get("/watches")
 async def watches_page(
     request: Request,
-    is_active: bool | None = None,
+    q: str | None = None,
+    status: str | None = None,
+    domain: str | None = None,
+    sort: str = "last_checked_at",
+    order: str = "desc",
     session: AsyncSession = Depends(get_db_session),
 ):
     """Watch list page."""
-    watches = await get_watch_list(session, is_active=is_active)
+    is_active = _status_to_is_active(status)
+    watches = await get_watch_list(
+        session, is_active=is_active, search=q, domain=domain, sort=sort, order=order
+    )
     health_map = {w.id: w.health_status for w in watches}
     context = {
         "active_page": "watches",
         "watches": watches,
-        "is_active": is_active,
+        "q": q or "",
+        "status": status or "",
+        "domain": domain or "",
+        "sort": sort,
+        "order": order,
         "health_map": health_map,
     }
     return templates.TemplateResponse(request, "pages/watches.html", context)
@@ -1354,8 +1374,10 @@ async def domain_inline_update(
 async def domain_detail_page(
     request: Request,
     name: str,
-    watch_q: str | None = None,
-    watch_status: str | None = None,
+    q: str | None = None,
+    status: str | None = None,
+    sort: str = "name",
+    order: str = "asc",
     session: AsyncSession = Depends(get_db_session),
 ):
     """Domain detail page with config, watches, and danger zone."""
@@ -1364,13 +1386,10 @@ async def domain_detail_page(
     if not domain:
         return templates.TemplateResponse(request, "pages/404.html", status_code=404)
 
-    is_active = None
-    if watch_status == "active":
-        is_active = True
-    elif watch_status == "inactive":
-        is_active = False
-
-    watches = await get_domain_watches(session, name, search=watch_q, is_active=is_active)
+    is_active = _status_to_is_active(status)
+    watches = await get_domain_watches(
+        session, name, search=q, is_active=is_active, sort=sort, order=order
+    )
 
     field_contexts = {
         fname: _field_context(request, domain, fname, mode="view") for fname in DOMAIN_FIELD_META
@@ -1380,8 +1399,10 @@ async def domain_detail_page(
         "active_page": "domains",
         "domain": domain,
         "watches": watches,
-        "watch_q": watch_q,
-        "watch_status": watch_status,
+        "q": q or "",
+        "status": status or "",
+        "sort": sort,
+        "order": order,
         "flash": None,
         "field_contexts": field_contexts,
     }
@@ -1678,16 +1699,64 @@ async def partial_system_health(
 @router.get("/partials/watch-table")
 async def partial_watch_table(
     request: Request,
-    is_active: bool | None = None,
+    q: str | None = None,
+    status: str | None = None,
+    domain: str | None = None,
+    sort: str = "last_checked_at",
+    order: str = "desc",
     session: AsyncSession = Depends(get_db_session),
 ):
-    """HTMX partial: watch table with optional filter."""
-    watches = await get_watch_list(session, is_active=is_active)
+    """HTMX partial: watch table with filter, search, and sort."""
+    is_active = _status_to_is_active(status)
+    watches = await get_watch_list(
+        session, is_active=is_active, search=q, domain=domain, sort=sort, order=order
+    )
     health_map = {w.id: w.health_status for w in watches}
     return templates.TemplateResponse(
         request,
         "partials/watch_table.html",
-        {"watches": watches, "health_map": health_map},
+        {
+            "watches": watches,
+            "health_map": health_map,
+            "q": q or "",
+            "status": status or "",
+            "domain": domain or "",
+            "sort": sort,
+            "order": order,
+        },
+    )
+
+
+@router.get("/partials/domain-watches/{name}")
+async def partial_domain_watches(
+    request: Request,
+    name: str,
+    q: str | None = None,
+    status: str | None = None,
+    sort: str = "name",
+    order: str = "asc",
+    session: AsyncSession = Depends(get_db_session),
+):
+    """HTMX partial: domain watch table with filter, search, and sort."""
+    result = await session.execute(select(Domain).where(Domain.name == name))
+    domain = result.scalar_one_or_none()
+    if not domain:
+        raise HTTPException(status_code=404)
+    is_active = _status_to_is_active(status)
+    watches = await get_domain_watches(
+        session, name, search=q, is_active=is_active, sort=sort, order=order
+    )
+    return templates.TemplateResponse(
+        request,
+        "partials/domain_watches_table.html",
+        {
+            "domain": domain,
+            "watches": watches,
+            "q": q or "",
+            "status": status or "",
+            "sort": sort,
+            "order": order,
+        },
     )
 
 

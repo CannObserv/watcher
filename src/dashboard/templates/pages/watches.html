@@ -8,10 +8,10 @@
 
 <form method="get" action="/watches" class="mb-4">
   <fieldset class="segment-group" role="radiogroup" aria-label="Filter by status">
-    {% for value, label in [("", "All"), ("true", "Active"), ("false", "Inactive")] %}
+    {% for value, label in [("", "All"), ("active", "Active"), ("inactive", "Inactive")] %}
     <label class="segment">
-      <input type="radio" name="is_active" value="{{ value }}"
-        {% if (is_active is true and value == 'true') or (is_active is false and value == 'false') or (is_active is none and value == '') %}checked{% endif %}
+      <input type="radio" name="status" value="{{ value }}"
+        {% if status == value or (not status and value == '') %}checked{% endif %}
         hx-get="/partials/watch-table"
         hx-target="#watch-table"
         hx-swap="innerHTML"

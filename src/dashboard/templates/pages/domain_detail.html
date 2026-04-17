@@ -43,35 +43,35 @@
     Watches ({{ watches|length }})
   </h3>
 
-  {% if watches or watch_q or watch_status %}
+  {% if watches or q or status %}
   <div class="flex flex-wrap gap-3 items-end mb-4">
     <div class="flex-1 min-w-[200px]">
       <label for="watch-search" class="sr-only">Search watches</label>
-      <input type="search" id="watch-search" name="watch_q"
+      <input type="search" id="watch-search" name="q"
         placeholder="Search watches…"
-        value="{{ watch_q or '' }}"
+        value="{{ q or '' }}"
         class="form-input text-sm"
         hx-get="/domains/{{ domain.name }}"
         hx-target="#domain-watches"
         hx-select="#domain-watches"
         hx-swap="outerHTML"
         hx-trigger="input changed delay:300ms, search"
-        hx-include="[name='watch_status']"
+        hx-include="[name='status']"
         aria-label="Search watches by name">
     </div>
     <form method="get" action="/domains/{{ domain.name }}" class="flex gap-1">
-      <input type="hidden" name="watch_q" value="{{ watch_q or '' }}">
+      <input type="hidden" name="q" value="{{ q or '' }}">
       <fieldset class="segment-group" role="radiogroup" aria-label="Filter watches by status">
         {% for value, label in [("", "All"), ("active", "Active"), ("inactive", "Inactive")] %}
         <label class="segment">
-          <input type="radio" name="watch_status" value="{{ value }}"
-            {% if watch_status == value or (not watch_status and value == '') %}checked{% endif %}
+          <input type="radio" name="status" value="{{ value }}"
+            {% if status == value or (not status and value == '') %}checked{% endif %}
             hx-get="/domains/{{ domain.name }}"
             hx-target="#domain-watches"
             hx-select="#domain-watches"
             hx-swap="outerHTML"
             hx-trigger="change"
-            hx-include="[name='watch_q']">
+            hx-include="[name='q']">
           <span>{{ label }}</span>
         </label>
         {% endfor %}

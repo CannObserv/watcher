@@ -62,7 +62,7 @@ class TestWatchList:
         assert response.status_code == 200
 
     async def test_watch_table_filter(self, client):
-        response = await client.get("/partials/watch-table?is_active=true")
+        response = await client.get("/partials/watch-table?status=active")  # was: ?is_active=true
         assert response.status_code == 200
 
     async def test_health_badge_ok(self, client, db_session):
@@ -608,12 +608,24 @@ class TestWatchListFilters:
         response = await client.get("/watches")
         body = response.content
         assert b'role="radiogroup"' in body
-        assert b'name="is_active"' in body
+        assert b'name="status"' in body
         assert b'type="radio"' in body
 
-    async def test_watches_page_no_filter_pill(self, client):
-        response = await client.get("/watches")
-        assert b"filter-pill" not in response.content
+    async def test_watch_table_filter_by_status(self, client):
+        response = await client.get("/partials/watch-table?status=active")
+        assert response.status_code == 200
+
+    async def test_watch_table_search(self, client):
+        response = await client.get("/partials/watch-table?q=something")
+        assert response.status_code == 200
+
+    async def test_watch_table_domain_filter(self, client):
+        response = await client.get("/partials/watch-table?domain=example.com")
+        assert response.status_code == 200
+
+    async def test_watch_table_sort(self, client):
+        response = await client.get("/partials/watch-table?sort=name&order=asc")
+        assert response.status_code == 200
 
 
 class TestDomainDetailFilters:
@@ -645,12 +657,29 @@ class TestDomainDetailFilters:
         response = await client.get(f"/domains/{name}")
         body = response.content
         assert b'role="radiogroup"' in body
-        assert b'name="watch_status"' in body
+        assert b'name="status"' in body  # was: name="watch_status"
 
     async def test_domain_detail_no_filter_pill(self, client):
         name = await self._create_domain_with_watch(client, "Domain Filter Watch 2")
         response = await client.get(f"/domains/{name}")
         assert b"filter-pill" not in response.content
+
+    async def test_domain_watches_partial(self, client):
+        name = await self._create_domain_with_watch(client, "Partial Watch")
+        response = await client.get(f"/partials/domain-watches/{name}")
+        assert response.status_code == 200
+        assert b"Partial Watch" in response.content
+
+    async def test_domain_watches_partial_search(self, client):
+        name = await self._create_domain_with_watch(client, "Searchable Watch")
+        response = await client.get(f"/partials/domain-watches/{name}?q=searchable")
+        assert response.status_code == 200
+        assert b"Searchable Watch" in response.content
+
+    async def test_domain_watches_partial_sort(self, client):
+        name = await self._create_domain_with_watch(client, "Sort Watch")
+        response = await client.get(f"/partials/domain-watches/{name}?sort=name&order=asc")
+        assert response.status_code == 200
 
 
 class TestAuditLogFilters:

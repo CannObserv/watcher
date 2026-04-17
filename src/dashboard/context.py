@@ -62,7 +62,7 @@ async def get_watch_list(
     Default sort is ``last_checked_at desc`` (changed from ``created_at`` in #101).
     """
     col = _WATCH_SORT_COLS.get(sort, Watch.last_checked_at)
-    order_expr = col.asc() if order == "asc" else col.desc()
+    order_expr = col.asc().nulls_first() if order == "asc" else col.desc().nulls_last()
     stmt = select(Watch).order_by(order_expr)
     if is_active is not None:
         stmt = stmt.where(Watch.is_active == is_active)
@@ -627,7 +627,7 @@ async def get_domain_watches(
 ) -> list[Watch]:
     """Fetch watches for a domain with optional name search, status filter, and sorting."""
     col = _WATCH_SORT_COLS.get(sort, Watch.name)
-    order_expr = col.asc() if order == "asc" else col.desc()
+    order_expr = col.asc().nulls_first() if order == "asc" else col.desc().nulls_last()
     stmt = select(Watch).where(Watch.effective_domain == domain_name).order_by(order_expr)
     if search:
         escaped = search.replace("%", "\\%").replace("_", "\\_")

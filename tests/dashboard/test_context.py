@@ -249,6 +249,34 @@ class TestGetWatchList:
         result = await get_watch_list(db_session, sort="INVALID", order="asc")
         assert len(result) == 1
 
+    async def test_null_last_changed_at_first_when_asc(self, db_session):
+        db_session.add(
+            Watch(
+                name="Changed",
+                url="https://a.com",
+                content_type="html",
+                last_changed_at=datetime(2024, 1, 1, tzinfo=UTC),
+            )
+        )
+        db_session.add(Watch(name="NeverChanged", url="https://b.com", content_type="html"))
+        await db_session.flush()
+        result = await get_watch_list(db_session, sort="last_changed_at", order="asc")
+        assert result[0].name == "NeverChanged"
+
+    async def test_null_last_changed_at_last_when_desc(self, db_session):
+        db_session.add(
+            Watch(
+                name="Changed",
+                url="https://a.com",
+                content_type="html",
+                last_changed_at=datetime(2024, 1, 1, tzinfo=UTC),
+            )
+        )
+        db_session.add(Watch(name="NeverChanged", url="https://b.com", content_type="html"))
+        await db_session.flush()
+        result = await get_watch_list(db_session, sort="last_changed_at", order="desc")
+        assert result[-1].name == "NeverChanged"
+
 
 @pytest.mark.integration
 class TestGetWatchDetail:
@@ -799,6 +827,52 @@ class TestGetDomainWatches:
             db_session, "ex.com", sort="last_changed_at", order="desc"
         )
         assert result[0].name == "New"
+
+    async def test_null_last_changed_at_first_when_asc(self, db_session):
+        db_session.add(
+            Watch(
+                name="Changed",
+                url="https://ex.com/c",
+                content_type="html",
+                effective_domain="ex.com",
+                last_changed_at=datetime(2024, 1, 1, tzinfo=UTC),
+            )
+        )
+        db_session.add(
+            Watch(
+                name="NeverChanged",
+                url="https://ex.com/n",
+                content_type="html",
+                effective_domain="ex.com",
+            )
+        )
+        await db_session.flush()
+        result = await get_domain_watches(db_session, "ex.com", sort="last_changed_at", order="asc")
+        assert result[0].name == "NeverChanged"
+
+    async def test_null_last_changed_at_last_when_desc(self, db_session):
+        db_session.add(
+            Watch(
+                name="Changed",
+                url="https://ex.com/c",
+                content_type="html",
+                effective_domain="ex.com",
+                last_changed_at=datetime(2024, 1, 1, tzinfo=UTC),
+            )
+        )
+        db_session.add(
+            Watch(
+                name="NeverChanged",
+                url="https://ex.com/n",
+                content_type="html",
+                effective_domain="ex.com",
+            )
+        )
+        await db_session.flush()
+        result = await get_domain_watches(
+            db_session, "ex.com", sort="last_changed_at", order="desc"
+        )
+        assert result[-1].name == "NeverChanged"
 
     async def test_search_filters_by_name(self, db_session):
         db_session.add(

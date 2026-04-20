@@ -1,0 +1,91 @@
+{#
+  Full notification form body — two-column on desktop (form + sticky preview),
+  stacked on narrow contexts. Caller provides the outer <form>.
+
+  Expects:
+    form_id:              str — unique DOM id prefix
+    title:                str — Title input value
+    apprise_url:          str — Apprise URL input value
+    events:               list[str] — currently-subscribed event type values
+    content_config:       ContentConfig | None
+    show_global_default:  bool — render Global default toggle (templates only)
+    is_global_default:    bool
+    show_preview:         bool — render right-column sticky preview
+  Uses Jinja globals: event_titles, template_variables.
+#}
+{% set subscribed_events = events or [] %}
+
+<div class="notification-form-layout {% if show_preview %}lg:grid lg:grid-cols-[minmax(0,1fr)_24rem] lg:gap-6{% endif %}"
+     data-form-id="{{ form_id }}">
+
+  <div class="space-y-4 min-w-0">
+
+    {# ───────────── Basics card ───────────── #}
+    <section class="rounded-md border border-gray-200 dark:border-gray-700 p-4 bg-white dark:bg-gray-800"
+             aria-labelledby="basics-h-{{ form_id }}">
+      <h4 id="basics-h-{{ form_id }}" class="text-sm font-semibold mb-3 text-gray-900 dark:text-white">Basics</h4>
+      <div class="space-y-3">
+        <div>
+          <label for="nf-title-{{ form_id }}" class="form-label">
+            Title <span class="text-red-500" aria-hidden="true">*</span>
+          </label>
+          <input type="text" id="nf-title-{{ form_id }}" name="title"
+                 value="{{ title or '' }}" maxlength="100" required aria-required="true"
+                 class="form-input mt-1">
+        </div>
+
+        <div>
+          <label for="nf-url-{{ form_id }}" class="form-label">
+            Apprise URL <span class="text-red-500" aria-hidden="true">*</span>
+          </label>
+          <input type="text" id="nf-url-{{ form_id }}" name="apprise_url"
+                 value="{{ apprise_url or '' }}" required aria-required="true"
+                 class="form-input mt-1">
+        </div>
+
+        {% if show_global_default %}
+        <label class="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300 cursor-pointer min-h-[44px]">
+          <input type="checkbox" name="is_global_default" value="1"
+                 {% if is_global_default %}checked{% endif %}
+                 class="rounded border-gray-300 dark:border-gray-600">
+          Mark as global default
+        </label>
+        {% endif %}
+      </div>
+    </section>
+
+    {# ───────────── Subscribe card ───────────── #}
+    <section class="rounded-md border border-gray-200 dark:border-gray-700 p-4 bg-white dark:bg-gray-800"
+             aria-labelledby="subscribe-h-{{ form_id }}">
+      <h4 id="subscribe-h-{{ form_id }}" class="text-sm font-semibold mb-3 text-gray-900 dark:text-white">Subscribe</h4>
+      <p class="text-xs text-gray-500 dark:text-gray-400 mb-3">
+        Which event types trigger a notification.
+      </p>
+      <fieldset>
+        <legend class="sr-only">Events</legend>
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+          {% for et_value, et_label in event_titles.items() %}
+          <label class="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300 cursor-pointer min-h-[44px]">
+            <input type="checkbox" name="events" value="{{ et_value }}"
+                   {% if et_value in subscribed_events %}checked{% endif %}
+                   class="rounded border-gray-300 dark:border-gray-600">
+            {{ et_label }}
+          </label>
+          {% endfor %}
+        </div>
+      </fieldset>
+    </section>
+
+    {% include "partials/notification_form_content_card.html" %}
+    {% include "partials/notification_form_overrides_card.html" %}
+  </div>
+
+  {% if show_preview %}
+  <aside class="mt-6 lg:mt-0 min-w-0">
+    <div class="lg:sticky lg:top-4">
+      {% include "partials/notification_form_preview_card.html" %}
+    </div>
+  </aside>
+  {% endif %}
+
+</div>

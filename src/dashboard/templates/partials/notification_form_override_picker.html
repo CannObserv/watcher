@@ -1,0 +1,47 @@
+{#
+  Inline picker for adding an override to an event.
+  Shows a <select> of subscribed-but-not-overridden events; on change,
+  POSTs to add the card and replaces itself.
+
+  Expects:
+    form_id:     str
+    pickable:    list[(event_value, event_label)]
+  Uses Jinja global: event_titles.
+#}
+<div class="rounded-md border border-dashed border-gray-300 dark:border-gray-600 p-3 bg-gray-50 dark:bg-gray-800/60"
+     id="override-picker-{{ form_id }}">
+  {% if not pickable %}
+  <p class="text-sm text-gray-600 dark:text-gray-400">
+    Subscribe to events first, or all subscribed events already have overrides.
+  </p>
+  <button type="button" class="btn btn-secondary text-xs mt-2 min-h-[32px] py-1"
+          onclick="document.getElementById('override-picker-{{ form_id }}').remove()">
+    Cancel
+  </button>
+  {% else %}
+  <label for="override-picker-select-{{ form_id }}" class="form-label text-xs">
+    Which event should have its own content?
+  </label>
+  <div class="flex items-center gap-2 mt-1">
+    <select id="override-picker-select-{{ form_id }}"
+            name="_pick_override_event"
+            class="form-input text-sm">
+      {% for value, label in pickable %}
+      <option value="{{ value }}">{{ label }}</option>
+      {% endfor %}
+    </select>
+    <button type="button" class="btn btn-primary text-xs min-h-[32px] py-1"
+            hx-get="/notifications/overrides/card"
+            hx-include="closest form"
+            hx-target="#override-picker-{{ form_id }}"
+            hx-swap="outerHTML"
+            hx-vals='js:{event_type: document.getElementById("override-picker-select-{{ form_id }}").value, form_id: "{{ form_id }}"}'>
+      Add
+    </button>
+    <button type="button" class="btn btn-secondary text-xs min-h-[32px] py-1"
+            onclick="document.getElementById('override-picker-{{ form_id }}').remove()">
+      Cancel
+    </button>
+  </div>
+  {% endif %}
+</div>

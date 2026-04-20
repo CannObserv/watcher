@@ -1,135 +1,46 @@
 {#
   Edit form for an existing notification template.
   Replaces the <tr> row via outerHTML swap.
-  Expects: tpl (NotificationTemplate), decrypted_url (str), watch_count (int), domain_count (int);
-           error (str, optional); decryption_failed (bool, optional).
-  event_titles is a Jinja2 global.
+  Expects: tpl (NotificationTemplate), decrypted_url (str), watch_count (int),
+           domain_count (int); error (str, optional); decryption_failed (bool, optional).
 #}
 <tr id="tpl-{{ tpl.id }}">
-  <td colspan="5" class="p-4 bg-white dark:bg-gray-800">
+  <td colspan="5" class="p-4 bg-gray-50 dark:bg-gray-900">
     <form
       hx-post="/notifications/{{ tpl.id }}/edit"
       hx-target="#templates-tbody"
-      hx-swap="innerHTML"
-      class="space-y-4">
+      hx-swap="innerHTML">
 
-      <h4 class="text-sm font-semibold text-gray-900 dark:text-white">
-        Edit template: {{ tpl.title }}
-      </h4>
-
-      {% if watch_count or domain_count %}
-      <p class="text-xs text-gray-500 dark:text-gray-400">
-        Used by {{ watch_count }} watch{{ "es" if watch_count != 1 else "" }}
-        and {{ domain_count }} domain{{ "s" if domain_count != 1 else "" }}.
-      </p>
-      {% endif %}
-
-      {# Title input #}
-      <div>
-        <label for="edit-tpl-title-{{ tpl.id }}" class="form-label">
-          Title <span class="text-red-500" aria-hidden="true">*</span>
-        </label>
-        <input
-          type="text"
-          id="edit-tpl-title-{{ tpl.id }}"
-          name="title"
-          value="{{ tpl.title }}"
-          maxlength="100"
-          required
-          aria-required="true"
-          class="form-input mt-1">
+      <div class="flex items-center justify-between mb-4">
+        <h4 class="text-base font-semibold text-gray-900 dark:text-white">
+          Edit template: {{ tpl.title }}
+        </h4>
+        {% if watch_count or domain_count %}
+        <p class="text-xs text-gray-500 dark:text-gray-400">
+          Used by {{ watch_count }} watch{{ "es" if watch_count != 1 else "" }}
+          and {{ domain_count }} domain{{ "s" if domain_count != 1 else "" }}.
+        </p>
+        {% endif %}
       </div>
 
-      {# Apprise URL input #}
-      <div>
-        <label for="edit-tpl-url-{{ tpl.id }}" class="form-label">
-          Apprise URL
-        </label>
-        <input
-          type="text"
-          id="edit-tpl-url-{{ tpl.id }}"
-          name="apprise_url"
-          value="{{ decrypted_url }}"
-          class="form-input mt-1"
-          required
-          aria-required="true">
-      </div>
+      {% with
+        form_id="tpl-" ~ (tpl.id|string),
+        title=tpl.title,
+        apprise_url=decrypted_url,
+        events=tpl.events,
+        show_global_default=True,
+        is_global_default=tpl.is_global_default,
+        show_preview=True
+      %}
+      {% include "partials/notification_form.html" %}
+      {% endwith %}
 
-      {# Event checkboxes #}
-      <fieldset>
-        <legend class="form-label mb-2">Events</legend>
-        <div class="flex flex-wrap gap-4">
-          <label class="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300 cursor-pointer min-h-[44px]">
-            <input type="checkbox" name="events" value="watch_created"
-                   {% if "watch_created" in tpl.events %}checked{% endif %}
-                   class="rounded border-gray-300 dark:border-gray-600">
-            {{ event_titles.get("watch_created", "Watch Created") }}
-          </label>
-          <label class="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300 cursor-pointer min-h-[44px]">
-            <input type="checkbox" name="events" value="change_detected"
-                   {% if "change_detected" in tpl.events %}checked{% endif %}
-                   class="rounded border-gray-300 dark:border-gray-600">
-            {{ event_titles.get("change_detected", "Change Detected") }}
-          </label>
-          <label class="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300 cursor-pointer min-h-[44px]">
-            <input type="checkbox" name="events" value="watch_error"
-                   {% if "watch_error" in tpl.events %}checked{% endif %}
-                   class="rounded border-gray-300 dark:border-gray-600">
-            {{ event_titles.get("watch_error", "Watch Error") }}
-          </label>
-          <label class="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300 cursor-pointer min-h-[44px]">
-            <input type="checkbox" name="events" value="watch_recovered"
-                   {% if "watch_recovered" in tpl.events %}checked{% endif %}
-                   class="rounded border-gray-300 dark:border-gray-600">
-            {{ event_titles.get("watch_recovered", "Watch Recovered") }}
-          </label>
-          <label class="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300 cursor-pointer min-h-[44px]">
-            <input type="checkbox" name="events" value="watch_paused"
-                   {% if "watch_paused" in tpl.events %}checked{% endif %}
-                   class="rounded border-gray-300 dark:border-gray-600">
-            {{ event_titles.get("watch_paused", "Watch Paused") }}
-          </label>
-          <label class="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300 cursor-pointer min-h-[44px]">
-            <input type="checkbox" name="events" value="watch_resumed"
-                   {% if "watch_resumed" in tpl.events %}checked{% endif %}
-                   class="rounded border-gray-300 dark:border-gray-600">
-            {{ event_titles.get("watch_resumed", "Watch Resumed") }}
-          </label>
-          <label class="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300 cursor-pointer min-h-[44px]">
-            <input type="checkbox" name="events" value="watch_archived"
-                   {% if "watch_archived" in tpl.events %}checked{% endif %}
-                   class="rounded border-gray-300 dark:border-gray-600">
-            {{ event_titles.get("watch_archived", "Watch Archived") }}
-          </label>
-          <label class="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300 cursor-pointer min-h-[44px]">
-            <input type="checkbox" name="events" value="watch_deleted"
-                   {% if "watch_deleted" in tpl.events %}checked{% endif %}
-                   class="rounded border-gray-300 dark:border-gray-600">
-            {{ event_titles.get("watch_deleted", "Watch Deleted") }}
-          </label>
-        </div>
-      </fieldset>
-
-      {# Global default toggle #}
-      <div class="flex items-center gap-3 min-h-[44px]">
-        <label class="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300 cursor-pointer">
-          <input type="checkbox" name="is_global_default" value="1"
-                 {% if tpl.is_global_default %}checked{% endif %}
-                 class="rounded border-gray-300 dark:border-gray-600">
-          Mark as global default
-        </label>
-      </div>
-
-      {% include "partials/notification_content_options.html" %}
-
-      {# Error display #}
       {% if error %}
-      <div class="text-sm text-red-600 dark:text-red-400" role="alert">{{ error }}</div>
+      <div class="mt-4 text-sm text-red-600 dark:text-red-400" role="alert">{{ error }}</div>
       {% endif %}
 
-      <div class="flex items-center gap-2">
-        <button type="submit"
-                class="btn btn-primary text-xs min-h-[44px] htmx-request:opacity-60">
+      <div class="flex items-center gap-2 mt-4">
+        <button type="submit" class="btn btn-primary text-xs min-h-[44px] htmx-request:opacity-60">
           Save
         </button>
         <button type="button"
@@ -144,7 +55,6 @@
   </td>
 </tr>
 
-{# OOB flash when decryption fails #}
 {% if decryption_failed %}
 {% set flash_oob_level = "warning" %}
 {% set flash_oob_message = "Could not decrypt the stored URL — the field has been left blank. Enter the full Apprise URL to update it." %}

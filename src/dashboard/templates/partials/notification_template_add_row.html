@@ -123,7 +123,11 @@
         <span class="text-xs text-gray-500 dark:text-gray-400">(auto-applied to all new watches)</span>
       </div>
 
-      {% include "partials/notification_content_options.html" %}
+      {% with form_id="tpl-new", content_config=None %}
+      {% include "partials/notification_form_content_card.html" %}
+      {% include "partials/notification_form_overrides_card.html" %}
+      {% include "partials/notification_form_preview_card.html" %}
+      {% endwith %}
 
       {# Error display #}
       {% if error %}

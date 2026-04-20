@@ -2546,6 +2546,70 @@ async def partial_notification_templates_list(
     )
 
 
+@router.get("/notifications/overrides/add-picker")
+async def notifications_override_add_picker(request: Request):
+    """Return the override picker (a <select> of subscribed-but-not-overridden events).
+
+    Called via HTMX from the [+ Add override] button; reads current form state
+    to figure out which events are subscribed and which already have overrides.
+    """
+    params = request.query_params
+    form_id = params.get("form_id") or "new"
+    subscribed = set(params.getlist("events"))
+    # Events already overridden — infer from presence of any
+    # content_config__override__<et>__* key in the form state.
+    overridden = set()
+    for key in params.keys():
+        if key.startswith("content_config__override__"):
+            # content_config__override__<et>__<field>
+            rest = key[len("content_config__override__") :]
+            if "__" in rest:
+                et_value = rest.split("__", 1)[0]
+                overridden.add(et_value)
+    pickable = [
+        (v, EVENT_TITLES[v])
+        for v in _ALL_EVENT_TYPE_VALUES
+        if v in subscribed and v not in overridden
+    ]
+    return templates.TemplateResponse(
+        request,
+        "partials/notification_form_override_picker.html",
+        {"form_id": form_id, "pickable": pickable},
+    )
+
+
+@router.get("/notifications/overrides/card")
+async def notifications_override_card(request: Request):
+    """Return a new override card, pre-populated by copying current default state.
+
+    Called via HTMX after the user picks an event in the add-picker. Reads the
+    current form's default `content_config__*` fields to seed the override's
+    options; user then tweaks.
+    """
+    params = request.query_params
+    form_id = params.get("form_id") or "new"
+    event_type = params.get("event_type") or ""
+    try:
+        WatchEventType(event_type)
+    except ValueError:
+        raise HTTPException(status_code=400, detail=f"Invalid event_type: {event_type}")
+    # Parse current defaults; treat result as the starting options for the new override.
+    cc_dict = _parse_content_config_from_form(params)
+    config = ContentConfig.model_validate(cc_dict) if cc_dict else None
+    seed_opts = config.default if config else ContentOptions()
+    return templates.TemplateResponse(
+        request,
+        "partials/notification_form_override_card.html",
+        {
+            "form_id": form_id,
+            "event_type": event_type,
+            "prefix": f"content_config__override__{event_type}__",
+            "opts": seed_opts,
+            "scope": f"override-{event_type}",
+        },
+    )
+
+
 @router.get("/notifications/compose-title-prefill")
 async def notifications_compose_title_prefill(request: Request):
     """Return the default title Jinja template for the current preview_event.

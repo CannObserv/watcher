@@ -14,8 +14,7 @@ from src.core.models.notification_template import DomainNcRef, NotificationTempl
 from src.core.models.watch import Watch
 from src.core.notifications.content import (
     build_body,
-    build_template_context,
-    render_template,
+    build_title,
     resolve_options,
 )
 from src.core.notifications.dispatcher import dispatch_event
@@ -148,14 +147,10 @@ async def dispatch_event_notifications(
                 else None
             )
             options = resolve_options(cfg, event_value)
-            custom_body = build_body(event, options) if cfg is not None else None
-            custom_title: str | None = None
-            if options.title_template:
-                custom_title = render_template(
-                    options.title_template, build_template_context(event)
-                )
+            rendered_title = build_title(event, options)
+            rendered_body = build_body(event, options)
             result = await dispatch_event(
-                event, candidate.apprise_url, body=custom_body, title=custom_title
+                event, candidate.apprise_url, body=rendered_body, title=rendered_title
             )
             results.append(
                 {

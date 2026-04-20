@@ -4,7 +4,11 @@ from jinja2 import Environment, TemplateError
 
 from src.api.schemas.content_config import ContentConfig, ContentOptions
 from src.core.notifications.constants import APP_URL
-from src.core.notifications.events import WatchEvent
+from src.core.notifications.default_templates import (
+    DEFAULT_BODY_TEMPLATES,
+    DEFAULT_TITLE_TEMPLATES,
+)
+from src.core.notifications.events import EVENT_TITLES, WatchEvent, WatchEventType
 
 _jinja_env = Environment(autoescape=False)
 
@@ -23,17 +27,60 @@ def render_template(template_str: str, context: dict) -> str:
         return template_str
 
 
+def render_template_strict(template_str: str, context: dict) -> str:
+    """Render a Jinja2 template string, raising on error.
+
+    Use only in contexts where the user expects to see template errors —
+    e.g. the preview endpoint. Dispatch uses `render_template` so a bad
+    template never breaks a real notification.
+    """
+    tmpl = _jinja_env.from_string(template_str)
+    return tmpl.render(context)
+
+
+def _compute_change_summary(event: WatchEvent) -> str:
+    """Return '<N added, M modified, K removed>' for change_detected events.
+
+    Empty string for other event types; 'details pending' for change_detected
+    with no item metadata.
+    """
+    if event.event_type != WatchEventType.CHANGE_DETECTED:
+        return ""
+    parts: list[str] = []
+    for label in ("added", "modified", "removed"):
+        items = event.metadata.get(label, [])
+        if items:
+            parts.append(f"{len(items)} {label}")
+    return ", ".join(parts) if parts else "details pending"
+
+
 def build_template_context(event: WatchEvent) -> dict:
-    """Build Jinja2 template context from a WatchEvent."""
+    """Build Jinja2 template context from a WatchEvent.
+
+    Includes metadata keys flattened in, plus derived fields (`event_label`,
+    `change_summary`) that the default templates rely on.
+    """
     ctx = {
         "watch_id": event.watch_id,
         "watch_name": event.watch_name,
         "watch_url": event.watch_url,
         "event_type": event.event_type,
         "occurred_at": event.occurred_at,
+        "event_label": EVENT_TITLES[event.event_type.value],
+        "change_summary": _compute_change_summary(event),
     }
     ctx.update(event.metadata)
     return ctx
+
+
+def build_title(event: WatchEvent, options: ContentOptions) -> str:
+    """Render the notification title for this event.
+
+    Uses `options.title_template` if set; otherwise the per-event-type default
+    from `DEFAULT_TITLE_TEMPLATES`.
+    """
+    tmpl = options.title_template or DEFAULT_TITLE_TEMPLATES[event.event_type.value]
+    return render_template(tmpl, build_template_context(event))
 
 
 def resolve_options(config: ContentConfig | None, event_type: str) -> ContentOptions:
@@ -51,14 +98,17 @@ def build_body(event: WatchEvent, options: ContentOptions) -> str:
     """Compose a notification body from the event and resolved options.
 
     If options.body_template is set, render it as a Jinja2 template and return
-    immediately (no additive sections). Otherwise, the existing event.body is
-    always the first section with extra sections appended based on options.
-    Sections are joined with a blank line.
+    immediately (no additive sections). Otherwise, the default body for this
+    event type is rendered from DEFAULT_BODY_TEMPLATES and extra sections are
+    appended based on toggle options. Sections are joined with a blank line.
     """
     if options.body_template:
         return render_template(options.body_template, build_template_context(event))
 
-    parts = [event.body]
+    default_body = render_template(
+        DEFAULT_BODY_TEMPLATES[event.event_type.value], build_template_context(event)
+    )
+    parts = [default_body]
 
     diff_section = _build_diff_section(event.metadata, options)
     if diff_section:

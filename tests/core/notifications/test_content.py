@@ -65,10 +65,12 @@ class TestResolveOptions:
 
 
 class TestBuildBodyBase:
-    def test_base_body_always_present(self):
-        event = make_event()
+    def test_default_body_rendered_from_template(self):
+        event = make_event(metadata=CHANGE_META)
         body = build_body(event, ContentOptions())
-        assert event.body in body
+        # change_detected default template: "{{ watch_url }} — {{ change_summary }}"
+        assert "https://example.com" in body
+        assert "1 added, 1 modified, 1 removed" in body
 
     def test_no_extra_sections_by_default(self):
         event = make_event(metadata=CHANGE_META)
@@ -154,9 +156,11 @@ class TestBuildBodyOrdering:
             event,
             ContentOptions(include_diff_snippet=True, include_domain=True),
         )
-        # Base body comes first, then extra sections
-        assert body.startswith(event.body)
+        # Default-template body comes first, then extra sections
+        assert body.startswith("https://example.com")
         assert "\n\n" in body
+        # Domain section should appear after the base
+        assert body.index("https://example.com") < body.index("Domain: ex.com")
 
 
 class TestBuildLastChangedSection:
@@ -349,7 +353,37 @@ class TestBuildTemplateContext:
             "watch_url",
             "event_type",
             "occurred_at",
+            "event_label",
+            "change_summary",
         }
+
+    def test_event_label_matches_event_titles(self):
+        from src.core.notifications.events import EVENT_TITLES
+
+        for et in WatchEventType:
+            event = make_event(event_type=et)
+            ctx = build_template_context(event)
+            assert ctx["event_label"] == EVENT_TITLES[et.value]
+
+    def test_change_summary_counts_changes(self):
+        event = make_event(
+            metadata={"added": ["a", "b"], "modified": [{}], "removed": []},
+        )
+        ctx = build_template_context(event)
+        assert ctx["change_summary"] == "2 added, 1 modified"
+
+    def test_change_summary_details_pending_when_empty(self):
+        event = make_event(
+            event_type=WatchEventType.CHANGE_DETECTED,
+            metadata={},
+        )
+        ctx = build_template_context(event)
+        assert ctx["change_summary"] == "details pending"
+
+    def test_change_summary_empty_for_non_change_events(self):
+        event = make_event(event_type=WatchEventType.WATCH_PAUSED, metadata={})
+        ctx = build_template_context(event)
+        assert ctx["change_summary"] == ""
 
 
 class TestBuildBodyWithTemplates:

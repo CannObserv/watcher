@@ -2,6 +2,9 @@
 
 from datetime import UTC, datetime
 
+import pytest
+from jinja2 import TemplateSyntaxError
+
 from src.api.schemas.content_config import ContentConfig, ContentOptions
 from src.core.notifications.content import (
     _build_change_url_section,
@@ -11,10 +14,12 @@ from src.core.notifications.content import (
     _build_tags_section,
     build_body,
     build_template_context,
+    build_title,
     render_template,
+    render_template_strict,
     resolve_options,
 )
-from src.core.notifications.events import WatchEvent, WatchEventType
+from src.core.notifications.events import EVENT_TITLES, WatchEvent, WatchEventType
 
 OCCURRED_AT = datetime(2026, 4, 14, 12, 0, 0, tzinfo=UTC)
 
@@ -358,8 +363,6 @@ class TestBuildTemplateContext:
         }
 
     def test_event_label_matches_event_titles(self):
-        from src.core.notifications.events import EVENT_TITLES
-
         for et in WatchEventType:
             event = make_event(event_type=et)
             ctx = build_template_context(event)
@@ -406,3 +409,41 @@ class TestBuildBodyWithTemplates:
         opts = ContentOptions(body_template="{{ unclosed")
         body = build_body(event, opts)
         assert body == "{{ unclosed"
+
+
+class TestBuildTitle:
+    def test_uses_default_template_for_event_type(self):
+        event = make_event(event_type=WatchEventType.CHANGE_DETECTED)
+        title = build_title(event, ContentOptions())
+        # Default title template: "{{ event_label }}: {{ watch_name }}"
+        assert title == "Change Detected: Test Watch"
+
+    def test_user_title_template_overrides_default(self):
+        event = make_event(event_type=WatchEventType.CHANGE_DETECTED)
+        opts = ContentOptions(title_template="[{{ watch_name }}] custom")
+        title = build_title(event, opts)
+        assert title == "[Test Watch] custom"
+
+    def test_renders_event_label_for_every_event_type(self):
+        for et in WatchEventType:
+            event = make_event(event_type=et)
+            title = build_title(event, ContentOptions())
+            assert title.startswith(EVENT_TITLES[et.value])
+            assert "Test Watch" in title
+
+    def test_bad_user_template_falls_back_to_raw_string(self):
+        """Preserves dispatch-never-breaks guarantee inherited from render_template."""
+        event = make_event()
+        opts = ContentOptions(title_template="{{ unclosed")
+        title = build_title(event, opts)
+        assert title == "{{ unclosed"
+
+
+class TestRenderTemplateStrict:
+    def test_renders_successfully(self):
+        result = render_template_strict("Hello {{ name }}", {"name": "World"})
+        assert result == "Hello World"
+
+    def test_raises_on_syntax_error(self):
+        with pytest.raises(TemplateSyntaxError):
+            render_template_strict("{{ unclosed", {})

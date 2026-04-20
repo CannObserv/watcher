@@ -59,6 +59,10 @@ def build_template_context(event: WatchEvent) -> dict:
 
     Includes metadata keys flattened in, plus derived fields (`event_label`,
     `change_summary`) that the default templates rely on.
+
+    `change_summary` is populated for `change_detected` events only; empty
+    string otherwise. User body templates referencing it on other event types
+    will render blank.
     """
     ctx = {
         "watch_id": event.watch_id,

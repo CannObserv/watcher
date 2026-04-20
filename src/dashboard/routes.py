@@ -10,6 +10,7 @@ import httpx
 from cryptography.fernet import InvalidToken
 from fastapi import APIRouter, BackgroundTasks, Depends, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
+from jinja2 import TemplateError
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from ulid import ULID
@@ -38,9 +39,11 @@ from src.core.notifications.apprise_builder import (
     get_service_name,
     list_plugins,
 )
+from src.core.notifications.content import build_body, build_title, resolve_options
 from src.core.notifications.dispatcher import dispatch_event
-from src.core.notifications.events import WatchEvent, WatchEventType
+from src.core.notifications.events import EVENT_TITLES, WatchEvent, WatchEventType
 from src.core.notifications.notify import dispatch_event_notifications
+from src.core.notifications.preview_fixtures import build_preview_event
 from src.core.probe import ProbeResult
 from src.core.screenshot import capture_screenshot
 from src.core.storage import STORAGE_BASE_DIR, LocalStorage
@@ -2536,6 +2539,62 @@ async def partial_notification_templates_list(
         request,
         "partials/notification_template_list.html",
         {"notification_templates": notification_templates},
+    )
+
+
+@router.post("/notifications/preview")
+async def notifications_preview(request: Request):
+    """Stateless live preview of a notification body + title.
+
+    Consumes the full notification form via `hx-include="closest form"` plus a
+    `preview_event` field selecting which WatchEventType to simulate. Renders
+    title and body through the same pipeline as the dispatcher, but under
+    strict-Jinja mode so template errors surface.
+
+    Returns the `partials/notification_preview.html` fragment with either a
+    rendered preview or an error card on template failure.
+    """
+    form = await request.form()
+    preview_event_raw = form.get("preview_event") or "change_detected"
+    try:
+        et = WatchEventType(preview_event_raw)
+    except ValueError:
+        et = WatchEventType.CHANGE_DETECTED
+
+    cc_dict = _parse_content_config_from_form(form)
+    config = ContentConfig.model_validate(cc_dict) if cc_dict else None
+    options = resolve_options(config, et.value)
+
+    event = build_preview_event(et.value)
+
+    try:
+        title = build_title(event, options, strict=True)
+    except TemplateError as exc:
+        return templates.TemplateResponse(
+            request,
+            "partials/notification_preview.html",
+            {"error": {"where": "title template", "message": str(exc)}},
+        )
+
+    try:
+        body = build_body(event, options, strict=True)
+    except TemplateError as exc:
+        return templates.TemplateResponse(
+            request,
+            "partials/notification_preview.html",
+            {"error": {"where": "body template", "message": str(exc)}},
+        )
+
+    return templates.TemplateResponse(
+        request,
+        "partials/notification_preview.html",
+        {
+            "preview": {
+                "title": title,
+                "body": body,
+                "event_label": EVENT_TITLES[et.value],
+            }
+        },
     )
 
 

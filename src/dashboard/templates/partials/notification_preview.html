@@ -1,0 +1,26 @@
+{# Live notification preview — returned by POST /notifications/preview.
+   Expects one of:
+     preview: {title, body, event_label}  — successful render
+     error:   {message, where}            — render failure (title, body, or both)
+#}
+<div class="rounded-md border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-4 text-sm">
+  {% if error %}
+  <div class="flex items-start gap-2 text-red-700 dark:text-red-400" role="alert">
+    <span aria-hidden="true">⚠️</span>
+    <div class="flex-1 min-w-0">
+      <p class="font-semibold">Template error in {{ error.where }}</p>
+      <pre class="mt-1 whitespace-pre-wrap font-mono text-xs">{{ error.message }}</pre>
+    </div>
+  </div>
+  {% else %}
+  <div class="space-y-2">
+    <div class="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wide">
+      Preview · {{ preview.event_label }}
+    </div>
+    <div class="font-semibold text-gray-900 dark:text-gray-100">
+      {{ preview.title }}
+    </div>
+    <pre class="whitespace-pre-wrap font-mono text-xs text-gray-700 dark:text-gray-300 border-t border-gray-100 dark:border-gray-700 pt-2">{{ preview.body }}</pre>
+  </div>
+  {% endif %}
+</div>

@@ -83,14 +83,17 @@ def build_template_context(event: WatchEvent) -> dict:
     return ctx
 
 
-def build_title(event: WatchEvent, options: ContentOptions) -> str:
+def build_title(event: WatchEvent, options: ContentOptions, *, strict: bool = False) -> str:
     """Render the notification title for this event.
 
     Uses `options.title_template` if set; otherwise the per-event-type default
-    from `DEFAULT_TITLE_TEMPLATES`.
+    from `DEFAULT_TITLE_TEMPLATES`. When `strict=True`, template errors
+    (syntax or undefined variable) propagate — use only for the preview
+    endpoint; the dispatcher path must call with the default `strict=False`.
     """
     tmpl = options.title_template or DEFAULT_TITLE_TEMPLATES[event.event_type.value]
-    return render_template(tmpl, build_template_context(event))
+    render = render_template_strict if strict else render_template
+    return render(tmpl, build_template_context(event))
 
 
 def resolve_options(config: ContentConfig | None, event_type: str) -> ContentOptions:
@@ -104,18 +107,22 @@ def resolve_options(config: ContentConfig | None, event_type: str) -> ContentOpt
     return config.overrides.get(event_type) or config.default
 
 
-def build_body(event: WatchEvent, options: ContentOptions) -> str:
+def build_body(event: WatchEvent, options: ContentOptions, *, strict: bool = False) -> str:
     """Compose a notification body from the event and resolved options.
 
     If options.body_template is set, render it as a Jinja2 template and return
     immediately (no additive sections). Otherwise, the default body for this
     event type is rendered from DEFAULT_BODY_TEMPLATES and extra sections are
     appended based on toggle options. Sections are joined with a blank line.
-    """
-    if options.body_template:
-        return render_template(options.body_template, build_template_context(event))
 
-    default_body = render_template(
+    When `strict=True`, template errors propagate — use only for the preview
+    endpoint; the dispatcher path must call with the default `strict=False`.
+    """
+    render = render_template_strict if strict else render_template
+    if options.body_template:
+        return render(options.body_template, build_template_context(event))
+
+    default_body = render(
         DEFAULT_BODY_TEMPLATES[event.event_type.value], build_template_context(event)
     )
     parts = [default_body]

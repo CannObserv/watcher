@@ -439,6 +439,36 @@ class TestBuildTitle:
         assert title == "{{ unclosed"
 
 
+class TestBuildTitleStrict:
+    def test_strict_raises_on_bad_user_title_template(self):
+        """build_title(..., strict=True) surfaces user template errors."""
+        event = make_event()
+        opts = ContentOptions(title_template="{{ unknown_var }}")
+        with pytest.raises(UndefinedError):
+            build_title(event, opts, strict=True)
+
+    def test_strict_still_renders_valid_default(self):
+        event = make_event()
+        title = build_title(event, ContentOptions(), strict=True)
+        assert title == "Change Detected: Test Watch"
+
+
+class TestBuildBodyStrict:
+    def test_strict_raises_on_bad_user_body_template(self):
+        """build_body(..., strict=True) surfaces user template errors."""
+        event = make_event()
+        opts = ContentOptions(body_template="{{ undefined_thing }}")
+        with pytest.raises(UndefinedError):
+            build_body(event, opts, strict=True)
+
+    def test_strict_renders_default_body_with_additive_sections(self):
+        """Default templates + additive sections should work under strict too."""
+        event = make_event(metadata={"effective_domain": "example.com", **CHANGE_META})
+        body = build_body(event, ContentOptions(include_domain=True), strict=True)
+        assert "https://example.com" in body
+        assert "Domain: example.com" in body
+
+
 class TestRenderTemplateStrict:
     def test_renders_successfully(self):
         result = render_template_strict("Hello {{ name }}", {"name": "World"})

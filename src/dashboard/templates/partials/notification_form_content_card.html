@@ -1,0 +1,18 @@
+{#
+  Content card (additive toggles + Default title + Default body blocks).
+  Usable both from the all-in-one notification_form.html and from legacy
+  forms that keep their own Basics/Subscribe structure.
+
+  Expects (via {% with %} or top-level):
+    form_id: str
+    content_config: ContentConfig | None
+#}
+{% set _default_opts = content_config.default if content_config else none %}
+
+<section class="rounded-md border border-gray-200 dark:border-gray-700 p-4 bg-white dark:bg-gray-800"
+         aria-labelledby="content-h-{{ form_id }}">
+  <h4 id="content-h-{{ form_id }}" class="text-sm font-semibold mb-3 text-gray-900 dark:text-white">Content</h4>
+  {% with prefix="content_config__", opts=_default_opts, form_id=form_id, scope="default" %}
+  {% include "partials/notification_form_content_body.html" %}
+  {% endwith %}
+</section>

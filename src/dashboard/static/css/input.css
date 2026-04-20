@@ -110,6 +110,11 @@
   .chip input:focus-visible + span {
     @apply outline-2 outline-offset-2 outline-co-purple-600 dark:outline-co-purple-400;
   }
+  /* Small button-style chip — no input wrapper. Used for variable-insertion
+     pills above Jinja textareas. */
+  button.chip-xs {
+    @apply inline-flex items-center px-2 py-0.5 rounded text-xs border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:bg-co-purple-100 dark:hover:bg-co-purple-800 hover:border-co-purple-600 dark:hover:border-co-purple-400 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-co-purple-600 dark:focus-visible:outline-co-purple-400 transition-colors cursor-pointer;
+  }
 
   /* -- Badge -- */
   .badge {

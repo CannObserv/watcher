@@ -1,0 +1,24 @@
+{#
+  A per-event override card. Reuses notification_form_content_body.html scoped
+  with an override__<event_type>__ prefix.
+
+  Expects (via {% with %}):
+    prefix, opts, form_id, scope, event_type
+  Uses Jinja global: event_titles.
+#}
+<div class="rounded-md border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-800/60 p-3"
+     data-override-event="{{ event_type }}"
+     id="override-card-{{ form_id }}-{{ event_type }}">
+  <div class="flex items-center justify-between mb-3">
+    <h5 class="text-sm font-semibold text-gray-900 dark:text-white">
+      {{ event_titles.get(event_type, event_type) }}
+    </h5>
+    <button type="button"
+            class="btn btn-secondary text-xs min-h-[32px] py-1"
+            onclick="document.getElementById('override-card-{{ form_id }}-{{ event_type }}').remove()"
+            aria-label="Remove override for {{ event_titles.get(event_type, event_type) }}">
+      × Remove
+    </button>
+  </div>
+  {% include "partials/notification_form_content_body.html" %}
+</div>

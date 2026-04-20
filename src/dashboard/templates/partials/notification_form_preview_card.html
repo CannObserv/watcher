@@ -1,0 +1,43 @@
+{#
+  Sticky preview pane — renders live via HTMX POST to /notifications/preview
+  on form change (debounced).
+
+  Expects:
+    form_id: str
+    content_config: ContentConfig | None (used to mark overridden events in selector)
+  Uses Jinja global: event_titles.
+#}
+{% set _overrides_map = content_config.overrides if content_config else {} %}
+
+<section class="rounded-md border border-gray-200 dark:border-gray-700 p-4 bg-white dark:bg-gray-800"
+         aria-labelledby="preview-h-{{ form_id }}">
+  <div class="flex items-center justify-between mb-3 gap-2">
+    <h4 id="preview-h-{{ form_id }}" class="text-sm font-semibold text-gray-900 dark:text-white">Preview</h4>
+    <label class="text-xs text-gray-500 dark:text-gray-400 flex items-center gap-1">
+      Event:
+      <select name="preview_event"
+              class="form-input text-xs py-1"
+              hx-post="/notifications/preview"
+              hx-trigger="change"
+              hx-include="closest form"
+              hx-target="#nf-preview-pane-{{ form_id }}"
+              hx-swap="innerHTML">
+        {% for et_value, et_label in event_titles.items() %}
+        <option value="{{ et_value }}" {% if et_value == "change_detected" %}selected{% endif %}>
+          {{ et_label }}{% if et_value in _overrides_map %} •{% endif %}
+        </option>
+        {% endfor %}
+      </select>
+    </label>
+  </div>
+
+  <div id="nf-preview-pane-{{ form_id }}"
+       class="min-h-[8rem]"
+       aria-live="polite"
+       hx-post="/notifications/preview"
+       hx-trigger="change delay:300ms from:closest form, keyup delay:500ms from:closest form, load delay:100ms"
+       hx-include="closest form"
+       hx-swap="innerHTML">
+    <p class="text-sm text-gray-500 dark:text-gray-400">Loading preview…</p>
+  </div>
+</section>

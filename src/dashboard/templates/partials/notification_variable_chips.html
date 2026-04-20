@@ -1,0 +1,69 @@
+{#
+  Variable chip row + expandable reference drawer.
+  Rendered above an expanded Jinja textarea (title or body editor).
+  Clicking a chip inserts `{{ name }}` at the textarea cursor via the
+  `insertVar(targetId, varName)` helper in notifications.js.
+
+  Expects:
+    target_id: str — DOM id of the textarea to insert variables into
+    scope:     "title" | "body" — controls which primary chips to show
+
+  Uses Jinja globals: template_variables (list[TemplateVariable])
+#}
+{% set _primary_body = ["watch_name", "watch_url", "event_label", "change_summary", "significance", "effective_domain"] %}
+{% set _primary_title = ["watch_name", "watch_url", "event_label", "event_type"] %}
+{% set _primary = _primary_body if scope == "body" else _primary_title %}
+{% set drawer_id = target_id ~ "-var-drawer" %}
+
+<div class="mt-1" data-variable-chips>
+  <div class="flex flex-wrap items-center gap-1 text-xs">
+    <span class="text-gray-500 dark:text-gray-400 me-1">Variables:</span>
+    {% for var in template_variables if var.name in _primary %}
+    <button type="button"
+            class="chip chip-xs font-mono"
+            onclick="insertVar('{{ target_id }}', '{{ var.name }}')"
+            aria-describedby="{{ drawer_id }}-desc-{{ var.name }}">
+      {{ var.name }}
+    </button>
+    <span id="{{ drawer_id }}-desc-{{ var.name }}" hidden>
+      {{ var.description }} — {{ var.type }}
+    </span>
+    {% endfor %}
+    <button type="button"
+            class="text-xs link ms-2"
+            aria-expanded="false"
+            aria-controls="{{ drawer_id }}"
+            onclick="toggleVarDrawer('{{ drawer_id }}', this)">
+      See all variables
+    </button>
+  </div>
+
+  <div id="{{ drawer_id }}"
+       class="mt-2 p-3 rounded-md border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 text-xs"
+       hidden>
+    {% for scope_key, scope_label in [
+      ("always", "Always available"),
+      ("change_detected", "change_detected only"),
+      ("watch_error", "watch_error only"),
+      ("contextual", "Contextual (when set on the watch)"),
+    ] %}
+    <div class="mb-3 last:mb-0">
+      <div class="font-semibold text-gray-700 dark:text-gray-300 mb-1">{{ scope_label }}</div>
+      <dl class="grid grid-cols-[max-content_1fr] gap-x-3 gap-y-1">
+        {% for var in template_variables if var.scope == scope_key %}
+        <dt>
+          <button type="button"
+                  class="chip chip-xs font-mono"
+                  onclick="insertVar('{{ target_id }}', '{{ var.name }}')">
+            {{ var.name }}
+          </button>
+        </dt>
+        <dd class="text-gray-600 dark:text-gray-400">
+          <span class="text-gray-500 me-1">{{ var.type }}</span> {{ var.description }}
+        </dd>
+        {% endfor %}
+      </dl>
+    </div>
+    {% endfor %}
+  </div>
+</div>

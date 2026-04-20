@@ -1,0 +1,39 @@
+{#
+  Per-event overrides card (empty state + populated-state cards + [+ Add override]).
+
+  Expects:
+    form_id: str
+    content_config: ContentConfig | None
+  Uses Jinja global: event_titles.
+#}
+{% set _overrides_map = content_config.overrides if content_config else {} %}
+
+<section class="rounded-md border border-gray-200 dark:border-gray-700 p-4 bg-white dark:bg-gray-800"
+         aria-labelledby="overrides-h-{{ form_id }}">
+  <h4 id="overrides-h-{{ form_id }}" class="text-sm font-semibold mb-1 text-gray-900 dark:text-white">
+    Per-event overrides
+  </h4>
+  <p class="text-xs text-gray-500 dark:text-gray-400 mb-3">
+    Most templates don't need these. Add one to customize how a specific event renders.
+  </p>
+
+  <div id="nf-overrides-{{ form_id }}" class="space-y-3">
+    {% for et_value, override_opts in _overrides_map.items() %}
+    {% with prefix="content_config__override__" ~ et_value ~ "__",
+            opts=override_opts, form_id=form_id,
+            scope="override-" ~ et_value, event_type=et_value %}
+    {% include "partials/notification_form_override_card.html" %}
+    {% endwith %}
+    {% endfor %}
+  </div>
+
+  <button type="button"
+          class="btn btn-secondary text-xs mt-3 min-h-[44px]"
+          hx-get="/notifications/overrides/add-picker"
+          hx-include="closest form"
+          hx-target="#nf-overrides-{{ form_id }}"
+          hx-swap="beforeend"
+          hx-vals='{"form_id": "{{ form_id }}"}'>
+    + Add override
+  </button>
+</section>

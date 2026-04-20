@@ -3,7 +3,7 @@
 from datetime import UTC, datetime
 
 import pytest
-from jinja2 import TemplateSyntaxError
+from jinja2 import TemplateError, UndefinedError
 
 from src.api.schemas.content_config import ContentConfig, ContentOptions
 from src.core.notifications.content import (
@@ -445,5 +445,11 @@ class TestRenderTemplateStrict:
         assert result == "Hello World"
 
     def test_raises_on_syntax_error(self):
-        with pytest.raises(TemplateSyntaxError):
+        with pytest.raises(TemplateError):
             render_template_strict("{{ unclosed", {})
+
+    def test_raises_on_undefined_variable(self):
+        """Undefined references raise UndefinedError — lenient render_template
+        silently renders empty; strict must not, so preview can surface typos."""
+        with pytest.raises(UndefinedError):
+            render_template_strict("{{ unknown_var }}", {})

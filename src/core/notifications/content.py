@@ -1,6 +1,6 @@
 """Notification body builder — resolves ContentOptions and composes custom bodies."""
 
-from jinja2 import Environment, TemplateError
+from jinja2 import Environment, StrictUndefined, TemplateError
 
 from src.api.schemas.content_config import ContentConfig, ContentOptions
 from src.core.notifications.constants import APP_URL
@@ -11,6 +11,7 @@ from src.core.notifications.default_templates import (
 from src.core.notifications.events import EVENT_TITLES, WatchEvent, WatchEventType
 
 _jinja_env = Environment(autoescape=False)
+_jinja_env_strict = Environment(autoescape=False, undefined=StrictUndefined)
 
 
 def render_template(template_str: str, context: dict) -> str:
@@ -28,13 +29,18 @@ def render_template(template_str: str, context: dict) -> str:
 
 
 def render_template_strict(template_str: str, context: dict) -> str:
-    """Render a Jinja2 template string, raising on error.
+    """Render a Jinja2 template string, raising on any template error.
 
-    Use only in contexts where the user expects to see template errors —
-    e.g. the preview endpoint. Dispatch uses `render_template` so a bad
-    template never breaks a real notification.
+    Uses a separate Jinja2 environment with StrictUndefined so that undefined
+    variable references (typos like ``{{ unnkown }}``) raise UndefinedError
+    instead of silently rendering as the empty string. Syntax errors and
+    other TemplateError subclasses propagate too.
+
+    Use only where the user expects to see template errors — e.g. the preview
+    endpoint. Dispatch uses `render_template` so a bad template never breaks
+    a real notification.
     """
-    tmpl = _jinja_env.from_string(template_str)
+    tmpl = _jinja_env_strict.from_string(template_str)
     return tmpl.render(context)
 
 

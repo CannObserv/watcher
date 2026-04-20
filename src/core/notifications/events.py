@@ -20,28 +20,19 @@ class WatchEventType(enum.StrEnum):
     WATCH_DELETED = "watch_deleted"
 
 
-_TITLES: dict[WatchEventType, str] = {
-    WatchEventType.CHANGE_DETECTED: "Change Detected",
-    WatchEventType.WATCH_ERROR: "Watch Error",
-    WatchEventType.WATCH_RECOVERED: "Watch Recovered",
-    WatchEventType.WATCH_CREATED: "Watch Created",
-    WatchEventType.WATCH_PAUSED: "Watch Paused",
-    WatchEventType.WATCH_RESUMED: "Watch Resumed",
-    WatchEventType.WATCH_ARCHIVED: "Watch Archived",
-    WatchEventType.WATCH_DELETED: "Watch Deleted",
+EVENT_TITLES: dict[str, str] = {
+    WatchEventType.CHANGE_DETECTED.value: "Change Detected",
+    WatchEventType.WATCH_ERROR.value: "Watch Error",
+    WatchEventType.WATCH_RECOVERED.value: "Watch Recovered",
+    WatchEventType.WATCH_CREATED.value: "Watch Created",
+    WatchEventType.WATCH_PAUSED.value: "Watch Paused",
+    WatchEventType.WATCH_RESUMED.value: "Watch Resumed",
+    WatchEventType.WATCH_ARCHIVED.value: "Watch Archived",
+    WatchEventType.WATCH_DELETED.value: "Watch Deleted",
 }
+"""Public mapping of event type value strings to human-readable titles.
+Used as a Jinja global in the dashboard and as the `event_label` template context field."""
 
-EVENT_TITLES: dict[str, str] = {e.value: t for e, t in _TITLES.items()}
-"""Public mapping of event type value strings to human-readable titles."""
-
-_BODY_TEMPLATES: dict[WatchEventType, str] = {
-    WatchEventType.WATCH_RECOVERED: "{watch_url} is responding normally again",
-    WatchEventType.WATCH_CREATED: "Now monitoring {watch_url}",
-    WatchEventType.WATCH_PAUSED: "Watch paused: {watch_url}",
-    WatchEventType.WATCH_RESUMED: "Watch resumed: {watch_url}",
-    WatchEventType.WATCH_ARCHIVED: "Watch archived: {watch_url}",
-    WatchEventType.WATCH_DELETED: "Watch deleted: {watch_url}",
-}
 
 _APPRISE_TYPES: dict[WatchEventType, str] = {
     WatchEventType.CHANGE_DETECTED: "info",
@@ -57,7 +48,11 @@ _APPRISE_TYPES: dict[WatchEventType, str] = {
 
 @dataclass(frozen=True)
 class WatchEvent:
-    """Immutable value object describing a watch lifecycle event."""
+    """Immutable value object describing a watch lifecycle event.
+
+    Titles and bodies are rendered by the dispatcher from Jinja templates
+    (see `default_templates.py`); they are not properties on this class.
+    """
 
     event_type: WatchEventType
     watch_id: str
@@ -65,30 +60,6 @@ class WatchEvent:
     watch_url: str
     occurred_at: datetime
     metadata: dict = field(default_factory=dict)
-
-    @property
-    def title(self) -> str:
-        """Short notification title including watch name."""
-        return f"{_TITLES[self.event_type]}: {self.watch_name}"
-
-    @property
-    def body(self) -> str:
-        """Human-readable notification body."""
-        if self.event_type == WatchEventType.CHANGE_DETECTED:
-            parts: list[str] = []
-            for label in ("added", "modified", "removed"):
-                items = self.metadata.get(label, [])
-                if items:
-                    parts.append(f"{len(items)} {label}")
-            detail = ", ".join(parts) if parts else "details pending"
-            return f"{self.watch_url} — {detail}"
-        if self.event_type == WatchEventType.WATCH_ERROR:
-            status = self.metadata.get("status_code", "unknown")
-            return f"{self.watch_url} returned HTTP {status}"
-        template = _BODY_TEMPLATES.get(self.event_type)
-        if template:
-            return template.format(watch_url=self.watch_url)
-        return self.watch_url
 
     @property
     def apprise_notify_type(self) -> str:

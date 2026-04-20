@@ -59,8 +59,8 @@ async def dispatch_event(
     event: WatchEvent,
     apprise_url_encrypted: str,
     *,
-    body: str | None = None,
-    title: str | None = None,
+    body: str,
+    title: str,
 ) -> DispatchResult:
     """Dispatch a WatchEvent to a single Apprise target.
 
@@ -70,11 +70,10 @@ async def dispatch_event(
     included in the reason on failure, surfacing actionable error detail
     (e.g. Slack's not_in_channel, HTTP 401 bodies).
 
-    body — if provided, overrides event.body for this dispatch. Use this to
-    send per-config customised content while preserving the event title and
-    notify_type.
-    title — if provided, overrides event.title for this dispatch. Use this to
-    send a per-config customised title (e.g. from a title_template).
+    title and body are required: callers must render them (typically via
+    `content.build_title` / `content.build_body`) before dispatching. The
+    dispatcher does not know about default templates — that's
+    `notify.dispatch_event_notifications`' responsibility.
     """
     url = decrypt_apprise_url(apprise_url_encrypted)
     ap = apprise.Apprise(asset=_ASSET)
@@ -89,8 +88,8 @@ async def dispatch_event(
     token = _capture_ctx.set(messages)
     try:
         result = await ap.async_notify(
-            body=body if body is not None else event.body,
-            title=title if title is not None else event.title,
+            body=body,
+            title=title,
             notify_type=event.apprise_notify_type,
         )
     finally:

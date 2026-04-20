@@ -2,6 +2,9 @@
 
 from datetime import UTC, datetime
 
+import pytest
+from jinja2 import TemplateError, UndefinedError
+
 from src.api.schemas.content_config import ContentConfig, ContentOptions
 from src.core.notifications.content import (
     _build_change_url_section,
@@ -11,10 +14,12 @@ from src.core.notifications.content import (
     _build_tags_section,
     build_body,
     build_template_context,
+    build_title,
     render_template,
+    render_template_strict,
     resolve_options,
 )
-from src.core.notifications.events import WatchEvent, WatchEventType
+from src.core.notifications.events import EVENT_TITLES, WatchEvent, WatchEventType
 
 OCCURRED_AT = datetime(2026, 4, 14, 12, 0, 0, tzinfo=UTC)
 
@@ -65,10 +70,12 @@ class TestResolveOptions:
 
 
 class TestBuildBodyBase:
-    def test_base_body_always_present(self):
-        event = make_event()
+    def test_default_body_rendered_from_template(self):
+        event = make_event(metadata=CHANGE_META)
         body = build_body(event, ContentOptions())
-        assert event.body in body
+        # change_detected default template: "{{ watch_url }} — {{ change_summary }}"
+        assert "https://example.com" in body
+        assert "1 added, 1 modified, 1 removed" in body
 
     def test_no_extra_sections_by_default(self):
         event = make_event(metadata=CHANGE_META)
@@ -154,9 +161,11 @@ class TestBuildBodyOrdering:
             event,
             ContentOptions(include_diff_snippet=True, include_domain=True),
         )
-        # Base body comes first, then extra sections
-        assert body.startswith(event.body)
+        # Default-template body comes first, then extra sections
+        assert body.startswith("https://example.com")
         assert "\n\n" in body
+        # Domain section should appear after the base
+        assert body.index("https://example.com") < body.index("Domain: ex.com")
 
 
 class TestBuildLastChangedSection:
@@ -349,7 +358,35 @@ class TestBuildTemplateContext:
             "watch_url",
             "event_type",
             "occurred_at",
+            "event_label",
+            "change_summary",
         }
+
+    def test_event_label_matches_event_titles(self):
+        for et in WatchEventType:
+            event = make_event(event_type=et)
+            ctx = build_template_context(event)
+            assert ctx["event_label"] == EVENT_TITLES[et.value]
+
+    def test_change_summary_counts_changes(self):
+        event = make_event(
+            metadata={"added": ["a", "b"], "modified": [{}], "removed": []},
+        )
+        ctx = build_template_context(event)
+        assert ctx["change_summary"] == "2 added, 1 modified"
+
+    def test_change_summary_details_pending_when_empty(self):
+        event = make_event(
+            event_type=WatchEventType.CHANGE_DETECTED,
+            metadata={},
+        )
+        ctx = build_template_context(event)
+        assert ctx["change_summary"] == "details pending"
+
+    def test_change_summary_empty_for_non_change_events(self):
+        event = make_event(event_type=WatchEventType.WATCH_PAUSED, metadata={})
+        ctx = build_template_context(event)
+        assert ctx["change_summary"] == ""
 
 
 class TestBuildBodyWithTemplates:
@@ -372,3 +409,47 @@ class TestBuildBodyWithTemplates:
         opts = ContentOptions(body_template="{{ unclosed")
         body = build_body(event, opts)
         assert body == "{{ unclosed"
+
+
+class TestBuildTitle:
+    def test_uses_default_template_for_event_type(self):
+        event = make_event(event_type=WatchEventType.CHANGE_DETECTED)
+        title = build_title(event, ContentOptions())
+        # Default title template: "{{ event_label }}: {{ watch_name }}"
+        assert title == "Change Detected: Test Watch"
+
+    def test_user_title_template_overrides_default(self):
+        event = make_event(event_type=WatchEventType.CHANGE_DETECTED)
+        opts = ContentOptions(title_template="[{{ watch_name }}] custom")
+        title = build_title(event, opts)
+        assert title == "[Test Watch] custom"
+
+    def test_renders_event_label_for_every_event_type(self):
+        for et in WatchEventType:
+            event = make_event(event_type=et)
+            title = build_title(event, ContentOptions())
+            assert title.startswith(EVENT_TITLES[et.value])
+            assert "Test Watch" in title
+
+    def test_bad_user_template_falls_back_to_raw_string(self):
+        """Preserves dispatch-never-breaks guarantee inherited from render_template."""
+        event = make_event()
+        opts = ContentOptions(title_template="{{ unclosed")
+        title = build_title(event, opts)
+        assert title == "{{ unclosed"
+
+
+class TestRenderTemplateStrict:
+    def test_renders_successfully(self):
+        result = render_template_strict("Hello {{ name }}", {"name": "World"})
+        assert result == "Hello World"
+
+    def test_raises_on_syntax_error(self):
+        with pytest.raises(TemplateError):
+            render_template_strict("{{ unclosed", {})
+
+    def test_raises_on_undefined_variable(self):
+        """Undefined references raise UndefinedError — lenient render_template
+        silently renders empty; strict must not, so preview can surface typos."""
+        with pytest.raises(UndefinedError):
+            render_template_strict("{{ unknown_var }}", {})

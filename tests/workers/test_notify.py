@@ -390,7 +390,7 @@ class TestContentConfig:
 
         dispatched_bodies = []
 
-        async def fake_dispatch(ev, url, *, body=None, title=None):
+        async def fake_dispatch(ev, url, *, body, title):
             dispatched_bodies.append(body)
             return MagicMock(success=True, reason="ok")
 
@@ -408,12 +408,14 @@ class TestContentConfig:
             await dispatch_event_notifications(session, event)
 
         assert len(dispatched_bodies) == 1
-        # body should equal event.body (include_domain=True but no effective_domain in metadata)
-        assert dispatched_bodies[0] == event.body
+        # include_domain=True but no effective_domain in metadata → no domain section added
+        # body should match the default change_detected body (just url + summary)
+        assert "example.com" in dispatched_bodies[0]
+        assert "Domain:" not in dispatched_bodies[0]
 
     @pytest.mark.asyncio
-    async def test_null_content_config_passes_none_body(self, set_test_key):
-        """content_config=None — dispatch_event called with body=None (dispatcher falls back)."""
+    async def test_null_content_config_renders_default_body(self, set_test_key):
+        """content_config=None — dispatch_event called with the default-template body."""
         event = make_event(WatchEventType.CHANGE_DETECTED)
 
         mock_config = MagicMock()
@@ -422,7 +424,7 @@ class TestContentConfig:
 
         dispatched_bodies = []
 
-        async def fake_dispatch(ev, url, *, body=None, title=None):
+        async def fake_dispatch(ev, url, *, body, title):
             dispatched_bodies.append(body)
             return MagicMock(success=True, reason="ok")
 
@@ -440,7 +442,9 @@ class TestContentConfig:
             await dispatch_event_notifications(session, event)
 
         assert len(dispatched_bodies) == 1
-        assert dispatched_bodies[0] is None  # no override — dispatcher falls back to event.body
+        # Default change_detected body: "{{ watch_url }} — {{ change_summary }}"
+        assert dispatched_bodies[0] is not None
+        assert "example.com" in dispatched_bodies[0]
 
 
 class TestErrorHandling:

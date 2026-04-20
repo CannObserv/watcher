@@ -55,7 +55,7 @@ class TestDispatchEvent:
             instance.async_notify = AsyncMock(return_value=True)
             MockApprise.return_value = instance
 
-            await dispatch_event(event, encrypted)
+            await dispatch_event(event, encrypted, body="test body", title="test title")
 
         MockApprise.assert_called_once_with(asset=_ASSET)
 
@@ -69,7 +69,7 @@ class TestDispatchEvent:
             instance.async_notify = AsyncMock(return_value=True)
             MockApprise.return_value = instance
 
-            result = await dispatch_event(event, encrypted)
+            result = await dispatch_event(event, encrypted, body="test body", title="test title")
 
         assert result.success is True
         assert result.reason
@@ -85,7 +85,7 @@ class TestDispatchEvent:
             instance.async_notify = AsyncMock(return_value=False)
             MockApprise.return_value = instance
 
-            result = await dispatch_event(event, encrypted)
+            result = await dispatch_event(event, encrypted, body="test body", title="test title")
 
         assert result.success is False
         assert "rejected" in result.reason.lower() or "delivery" in result.reason.lower()
@@ -101,7 +101,7 @@ class TestDispatchEvent:
             instance.async_notify = AsyncMock(return_value=None)
             MockApprise.return_value = instance
 
-            result = await dispatch_event(event, encrypted)
+            result = await dispatch_event(event, encrypted, body="test body", title="test title")
 
         assert result.success is False
 
@@ -115,7 +115,7 @@ class TestDispatchEvent:
             instance.add.return_value = False
             MockApprise.return_value = instance
 
-            result = await dispatch_event(event, encrypted)
+            result = await dispatch_event(event, encrypted, body="test body", title="test title")
 
         assert result.success is False
         assert "invalid" in result.reason.lower()
@@ -130,7 +130,7 @@ class TestDispatchEvent:
             instance.async_notify = AsyncMock(return_value=True)
             MockApprise.return_value = instance
 
-            await dispatch_event(event, encrypted)
+            await dispatch_event(event, encrypted, body="test body", title="test title")
 
         call_kwargs = instance.async_notify.call_args.kwargs
         assert call_kwargs["notify_type"] == "failure"
@@ -145,11 +145,11 @@ class TestDispatchEvent:
             instance.async_notify = AsyncMock(return_value=True)
             MockApprise.return_value = instance
 
-            await dispatch_event(event, encrypted)
+            await dispatch_event(event, encrypted, body="rendered body", title="rendered title")
 
         call_kwargs = instance.async_notify.call_args.kwargs
-        assert "Test Watch" in call_kwargs["title"]
-        assert "example.com" in call_kwargs["body"]
+        assert call_kwargs["title"] == "rendered title"
+        assert call_kwargs["body"] == "rendered body"
 
     async def test_failure_reason_includes_apprise_log_detail(self):
         """WARNING emitted by apprise logger during async_notify appears in reason."""
@@ -167,7 +167,7 @@ class TestDispatchEvent:
             instance.async_notify = AsyncMock(side_effect=fake_notify)
             MockApprise.return_value = instance
 
-            result = await dispatch_event(event, encrypted)
+            result = await dispatch_event(event, encrypted, body="test body", title="test title")
 
         assert result.success is False
         assert "not_in_channel" in result.reason
@@ -188,7 +188,7 @@ class TestDispatchEvent:
             instance.async_notify = AsyncMock(side_effect=fake_notify)
             MockApprise.return_value = instance
 
-            result = await dispatch_event(event, encrypted)
+            result = await dispatch_event(event, encrypted, body="test body", title="test title")
 
         assert result.success is True
         assert "harmless warning" not in result.reason
@@ -216,8 +216,8 @@ class TestDispatchEvent:
             MockApprise.side_effect = [inst1, inst2]
 
             r1, r2 = await asyncio.gather(
-                dispatch_event(event, encrypted),
-                dispatch_event(event, encrypted),
+                dispatch_event(event, encrypted, body="b1", title="t1"),
+                dispatch_event(event, encrypted, body="b2", title="t2"),
             )
 
         assert "error_for_call_1" in r1.reason
@@ -225,15 +225,16 @@ class TestDispatchEvent:
         assert "error_for_call_2" in r2.reason
         assert "error_for_call_2" not in r1.reason
 
-    async def test_dispatch_event_uses_custom_body_when_provided(self):
-        """body param overrides event.body when provided."""
+    async def test_dispatch_event_passes_body_and_title_verbatim(self):
+        """body and title are required kwargs and forwarded to Apprise unchanged."""
         event = make_event()
         encrypted = make_encrypted_url("slack://T/A/B")
 
-        captured_body = {}
+        captured = {}
 
         async def fake_notify(**kwargs):
-            captured_body["body"] = kwargs.get("body")
+            captured["body"] = kwargs.get("body")
+            captured["title"] = kwargs.get("title")
             return True
 
         with patch("src.core.notifications.dispatcher.apprise.Apprise") as MockApprise:
@@ -242,28 +243,10 @@ class TestDispatchEvent:
             instance.async_notify = AsyncMock(side_effect=fake_notify)
             MockApprise.return_value = instance
 
-            result = await dispatch_event(event, encrypted, body="Custom body text")
+            result = await dispatch_event(
+                event, encrypted, body="Custom body text", title="Custom title"
+            )
 
         assert result.success is True
-        assert captured_body["body"] == "Custom body text"
-
-    async def test_dispatch_event_uses_event_body_when_no_override(self):
-        """Without body param, falls back to event.body."""
-        event = make_event()
-        encrypted = make_encrypted_url("slack://T/A/B")
-
-        captured_body = {}
-
-        async def fake_notify(**kwargs):
-            captured_body["body"] = kwargs.get("body")
-            return True
-
-        with patch("src.core.notifications.dispatcher.apprise.Apprise") as MockApprise:
-            instance = MagicMock()
-            instance.add.return_value = True
-            instance.async_notify = AsyncMock(side_effect=fake_notify)
-            MockApprise.return_value = instance
-
-            await dispatch_event(event, encrypted)
-
-        assert captured_body["body"] == event.body
+        assert captured["body"] == "Custom body text"
+        assert captured["title"] == "Custom title"

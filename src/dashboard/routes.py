@@ -40,6 +40,10 @@ from src.core.notifications.apprise_builder import (
     list_plugins,
 )
 from src.core.notifications.content import build_body, build_title, resolve_options
+from src.core.notifications.default_templates import (
+    compose_body_prefill,
+    compose_title_prefill,
+)
 from src.core.notifications.dispatcher import dispatch_event
 from src.core.notifications.events import EVENT_TITLES, WatchEvent, WatchEventType
 from src.core.notifications.notify import dispatch_event_notifications
@@ -2540,6 +2544,44 @@ async def partial_notification_templates_list(
         "partials/notification_template_list.html",
         {"notification_templates": notification_templates},
     )
+
+
+@router.get("/notifications/compose-title-prefill")
+async def notifications_compose_title_prefill(request: Request):
+    """Return the default title Jinja template for the current preview_event.
+
+    Used by the [Edit template] control on the Default title block to pre-fill
+    the textarea with runnable Jinja the user can tweak.
+    """
+    preview_event_raw = request.query_params.get("preview_event") or "change_detected"
+    try:
+        et = WatchEventType(preview_event_raw)
+    except ValueError:
+        et = WatchEventType.CHANGE_DETECTED
+    prefill = compose_title_prefill(et.value)
+    return HTMLResponse(prefill)
+
+
+@router.get("/notifications/compose-body-prefill")
+async def notifications_compose_body_prefill(request: Request):
+    """Return the composed body Jinja for current toggles + preview_event.
+
+    Stitches the default body template with a snippet per currently-enabled
+    additive toggle (from ADDITIVE_BODY_SNIPPETS). Used by the [Edit template]
+    control on the Default body block so the user sees their toggles baked into
+    a starting Jinja template.
+    """
+    params = request.query_params
+    preview_event_raw = params.get("preview_event") or "change_detected"
+    try:
+        et = WatchEventType(preview_event_raw)
+    except ValueError:
+        et = WatchEventType.CHANGE_DETECTED
+    cc_dict = _parse_content_config_from_form(params)
+    config = ContentConfig.model_validate(cc_dict) if cc_dict else None
+    options = resolve_options(config, et.value)
+    prefill = compose_body_prefill(et.value, options)
+    return HTMLResponse(prefill)
 
 
 @router.post("/notifications/preview")

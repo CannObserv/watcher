@@ -14,7 +14,7 @@ from datetime import UTC, datetime
 
 from src.core.notifications.events import WatchEvent, WatchEventType
 
-_PREVIEW_WATCH_ID = "01HV0000PREVIEW0000000000AB"
+_PREVIEW_WATCH_ID = "01KPPFATBNYQGBB38SQ06DN9HY"
 _PREVIEW_WATCH_NAME = "Example Watch"
 _PREVIEW_WATCH_URL = "https://example.com/regulatory-page"
 _PREVIEW_OCCURRED_AT = datetime(2026, 4, 15, 12, 0, 0, tzinfo=UTC)
@@ -36,7 +36,7 @@ MOCK_EVENT_FIXTURES: dict[str, dict] = {
         "modified": [{"label": "Contact information", "similarity": 0.72}],
         "removed": ["Deprecated hours section"],
         "significance": 0.65,
-        "change_id": "01HV0000PREVIEW0000CHANGE01",
+        "change_id": "01KPPFATBNYQGBB38SQ06DN9HZ",
     },
     WatchEventType.WATCH_ERROR.value: {
         **_SHARED_CONTEXT,

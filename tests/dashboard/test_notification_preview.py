@@ -70,7 +70,7 @@ class TestPreviewEndpoint:
         )
         assert resp.status_code == 200
         assert "Template error" in resp.text
-        assert "title" in resp.text.lower()
+        assert "title template" in resp.text
 
     async def test_bad_body_template_renders_error_card(self, client: AsyncClient):
         resp = await client.post(
@@ -82,7 +82,7 @@ class TestPreviewEndpoint:
         )
         assert resp.status_code == 200
         assert "Template error" in resp.text
-        assert "body" in resp.text.lower()
+        assert "body template" in resp.text
 
     async def test_invalid_preview_event_falls_back_to_change_detected(self, client: AsyncClient):
         resp = await client.post(

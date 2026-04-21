@@ -105,7 +105,7 @@
         </div>
       </fieldset>
 
-      {% with form_id="wnc-" ~ (nc.id|string) %}
+      {% with form_id="wnc-" ~ nc.id %}
       {% include "partials/notification_form_content_card.html" %}
       {% include "partials/notification_form_overrides_card.html" %}
       {% include "partials/notification_form_preview_card.html" %}

@@ -57,14 +57,19 @@ class TestWatchNcAddRowMigrated:
         assert 'id="preview-h-wnc-new-' in resp.text
 
     async def test_no_legacy_content_options_details(self, client: AsyncClient, db_session):
-        """The new form should not re-render the old `<details>Content Options</details>`."""
+        """The old notification_content_options.html used a single
+        <summary>Content Options</summary> top-level disclosure — ensure no
+        accidental duplicate include leaves it behind."""
         watch = await _make_watch(db_session)
         resp = await client.get(
             f"/watches/{watch.id}/notifications/add-row", headers={"HX-Request": "true"}
         )
         assert resp.status_code == 200
-        # Old partial's top-level summary text
-        assert "Content Options" not in resp.text
+        # Match the old partial's exact summary signature, discriminating from
+        # any future use of the phrase "Content Options" in generic prose.
+        assert not re.search(r"<summary[^>]*>\s*Content Options\s*</summary>", resp.text), (
+            "legacy notification_content_options.html summary is still present"
+        )
 
     async def test_variable_chips_present(self, client: AsyncClient, db_session):
         watch = await _make_watch(db_session)
@@ -137,3 +142,69 @@ class TestWatchNcEditFormMigrated:
         )
         assert resp.status_code == 200
         assert f"override-card-wnc-{nc.id}-watch_error" in resp.text
+
+
+@pytest.mark.integration
+class TestErrorPathPreservesContentConfig:
+    """Routes must re-render the form with the user's content_config intact on
+    validation errors — otherwise toggles/templates are silently dropped."""
+
+    async def test_create_error_preserves_toggle_state(self, client: AsyncClient, db_session):
+        watch = await _make_watch(db_session)
+        resp = await client.post(
+            f"/watches/{watch.id}/notifications/new",
+            data={
+                "apprise_url": "not-a-valid-scheme",
+                "events": ["change_detected"],
+                "content_config__include_domain": "1",
+                "content_config__include_significance": "1",
+            },
+            headers={"HX-Request": "true"},
+        )
+        assert resp.status_code == 200
+        # Error message shown (confirms we're on the error-rerender path).
+        # And content_config toggles survive the re-render.
+        assert re.search(
+            r'name="content_config__include_domain"[^>]*\bvalue="1"[^>]*\bchecked',
+            resp.text,
+        ), "include_domain should stay checked on error re-render"
+        assert re.search(
+            r'name="content_config__include_significance"[^>]*\bvalue="1"[^>]*\bchecked',
+            resp.text,
+        ), "include_significance should stay checked on error re-render"
+
+    async def test_create_error_preserves_body_template(self, client: AsyncClient, db_session):
+        watch = await _make_watch(db_session)
+        resp = await client.post(
+            f"/watches/{watch.id}/notifications/new",
+            data={
+                "apprise_url": "not-a-valid-scheme",
+                "events": ["change_detected"],
+                "content_config__body_template": "Custom: {{ watch_url }}",
+            },
+            headers={"HX-Request": "true"},
+        )
+        assert resp.status_code == 200
+        body_textarea = re.compile(
+            r'<textarea[^>]*name="content_config__body_template"[^>]*>'
+            r"[^<]*Custom: \{\{ watch_url \}\}"
+        )
+        assert body_textarea.search(resp.text), "body_template must survive error re-render"
+
+    async def test_edit_error_preserves_toggle_state(self, client: AsyncClient, db_session):
+        watch = await _make_watch(db_session)
+        nc = await _make_nc(db_session, watch)
+        resp = await client.post(
+            f"/watches/{watch.id}/notifications/{nc.id}/edit",
+            data={
+                "apprise_url": "not-a-valid-scheme",
+                "events": ["change_detected"],
+                "content_config__include_tags": "1",
+            },
+            headers={"HX-Request": "true"},
+        )
+        assert resp.status_code == 200
+        assert re.search(
+            r'name="content_config__include_tags"[^>]*\bvalue="1"[^>]*\bchecked',
+            resp.text,
+        ), "include_tags should stay checked on edit error re-render"

@@ -79,6 +79,23 @@ class TestWatchNcAddRowMigrated:
         assert resp.status_code == 200
         assert "See all variables" in resp.text
 
+    async def test_preview_pane_has_explicit_self_target(self, client: AsyncClient, db_session):
+        """Regression: without hx-target='this' on the preview pane, HTMX
+        inherits the outer form's hx-target="#watch-notifications" and the
+        preview auto-load response wipes the notifications table."""
+        watch = await _make_watch(db_session)
+        resp = await client.get(
+            f"/watches/{watch.id}/notifications/add-row", headers={"HX-Request": "true"}
+        )
+        assert resp.status_code == 200
+        pane_tag = re.compile(
+            rf'<div[^>]*id="nf-preview-pane-wnc-new-{watch.id}"[^>]*\bhx-target="this"',
+            re.DOTALL,
+        )
+        assert pane_tag.search(resp.text), (
+            "preview pane missing hx-target='this' on watch-NC add-row"
+        )
+
 
 @pytest.mark.integration
 class TestWatchNcEditFormMigrated:

@@ -51,6 +51,19 @@ class TestTemplateAddRowShape:
         assert "watch_name" in resp.text
         assert "See all variables" in resp.text
 
+    async def test_preview_pane_has_explicit_self_target(self, client: AsyncClient):
+        """Regression: the preview pane MUST set hx-target="this" explicitly.
+        Without it, HTMX walks up to the outer <form> and inherits its
+        hx-target="#templates-tbody", so the preview response wipes the
+        whole notification templates table on auto-load."""
+        resp = await client.get("/notifications/add-row", headers={"HX-Request": "true"})
+        assert resp.status_code == 200
+        pane_tag = re.compile(
+            r'<div[^>]*id="nf-preview-pane-tpl-new"[^>]*\bhx-target="this"',
+            re.DOTALL,
+        )
+        assert pane_tag.search(resp.text), "preview pane is missing explicit hx-target='this'"
+
 
 @pytest.mark.integration
 class TestTemplateEditFormShape:

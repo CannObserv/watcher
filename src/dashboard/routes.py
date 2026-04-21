@@ -2046,6 +2046,41 @@ async def watch_notification_toggle(
     return await _render_watch_notifications(request, watch, session)
 
 
+@router.get("/watches/{watch_id}/notifications/{config_id}/edit")
+async def watch_notification_edit_page(
+    request: Request,
+    watch_id: str,
+    config_id: str,
+    session: AsyncSession = Depends(get_db_session),
+):
+    """Full page: edit an existing watch notification config."""
+    watch = await get_watch_detail(session, watch_id)
+    if not watch:
+        raise HTTPException(status_code=404, detail="Watch not found")
+    nc = await session.get(WatchNotificationConfig, parse_ulid(config_id, "Config"))
+    if not nc or nc.watch_id != watch.id:
+        raise HTTPException(status_code=404, detail="Config not found")
+    decryption_failed = False
+    try:
+        decrypted_url = decrypt_apprise_url(nc.apprise_url)
+    except (InvalidToken, ValueError):
+        decrypted_url = ""
+        decryption_failed = True
+    content_config = ContentConfig.model_validate(nc.content_config) if nc.content_config else None
+    return templates.TemplateResponse(
+        request,
+        "pages/watch_notification_edit.html",
+        {
+            "watch": watch,
+            "nc": nc,
+            "decrypted_url": decrypted_url,
+            "decryption_failed": decryption_failed,
+            "content_config": content_config,
+            "error": None,
+        },
+    )
+
+
 @router.get("/watches/{watch_id}/notifications/{config_id}/edit-form")
 async def watch_notification_edit_form(
     request: Request,
@@ -2103,48 +2138,36 @@ async def watch_notification_edit(
     try:
         validate_apprise_url(apprise_url)
     except ValueError as exc:
-        try:
-            decrypted_url = decrypt_apprise_url(nc.apprise_url)
-        except (InvalidToken, ValueError):
-            decrypted_url = ""
         _cc = _parse_content_config_from_form(form)
-        response = templates.TemplateResponse(
+        return templates.TemplateResponse(
             request,
-            "partials/notification_edit_form.html",
+            "pages/watch_notification_edit.html",
             {
                 "watch": watch,
                 "nc": nc,
-                "decrypted_url": decrypted_url,
-                "error": str(exc),
+                "decrypted_url": apprise_url,
+                "decryption_failed": False,
                 "content_config": ContentConfig.model_validate(_cc) if _cc else None,
+                "error": str(exc),
             },
         )
-        response.headers["HX-Retarget"] = f"#nc-{nc.id}"
-        response.headers["HX-Reswap"] = "outerHTML"
-        return response
 
     try:
         validate_event_list(events)
     except ValueError as exc:
-        try:
-            decrypted_url = decrypt_apprise_url(nc.apprise_url)
-        except (InvalidToken, ValueError):
-            decrypted_url = ""
         _cc = _parse_content_config_from_form(form)
-        response = templates.TemplateResponse(
+        return templates.TemplateResponse(
             request,
-            "partials/notification_edit_form.html",
+            "pages/watch_notification_edit.html",
             {
                 "watch": watch,
                 "nc": nc,
-                "decrypted_url": decrypted_url,
-                "error": str(exc),
+                "decrypted_url": apprise_url,
+                "decryption_failed": False,
                 "content_config": ContentConfig.model_validate(_cc) if _cc else None,
+                "error": str(exc),
             },
         )
-        response.headers["HX-Retarget"] = f"#nc-{nc.id}"
-        response.headers["HX-Reswap"] = "outerHTML"
-        return response
 
     nc.apprise_url = encrypt_apprise_url(apprise_url)
     nc.channel_hint = extract_channel_hint(apprise_url)
@@ -2159,7 +2182,7 @@ async def watch_notification_edit(
         channel_hint=nc.channel_hint,
     )
     await session.commit()
-    return await _render_watch_notifications(request, watch, session)
+    return RedirectResponse(url=f"/watches/{watch_id}#watch-notifications", status_code=303)
 
 
 async def _render_watch_notifications(

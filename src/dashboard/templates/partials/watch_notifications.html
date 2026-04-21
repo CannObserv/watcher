@@ -160,14 +160,12 @@
           </td>
           <td>
             <div class="flex items-center gap-2 justify-end">
-              <button
-                hx-get="/watches/{{ watch.id }}/notifications/{{ nc.id }}/edit-form"
-                hx-target="#nc-{{ nc.id }}"
-                hx-swap="outerHTML"
-                class="btn btn-secondary text-xs min-h-[44px] htmx-request:opacity-60"
+              <a
+                href="/watches/{{ watch.id }}/notifications/{{ nc.id }}/edit"
+                class="btn btn-secondary text-xs min-h-[44px]"
                 aria-label="Edit {{ nc.channel_hint }} notification URL and events">
                 Edit
-              </button>
+              </a>
               <button
                 hx-post="/watches/{{ watch.id }}/notifications/{{ nc.id }}/test-result"
                 hx-swap="none"

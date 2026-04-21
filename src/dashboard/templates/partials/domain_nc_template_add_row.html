@@ -1,6 +1,7 @@
 {# Inline create-and-link form for a domain-scoped notification template. #}
 {# Inserted as first tbody row in the domain NC defaults table via afterbegin. #}
-{# Expects: domain_name (str), apprise_plugins (list); error (str, optional). #}
+{# Expects: domain_name (str), apprise_plugins (list), content_config
+   (ContentConfig | None); error (str, optional). #}
 
 <tr id="domain-nc-add-row">
   <td colspan="4" class="p-4 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700">
@@ -104,6 +105,12 @@
           </label>
         </div>
       </fieldset>
+
+      {% with form_id="dom-nc-" ~ domain_name|replace('.', '-') %}
+      {% include "partials/notification_form_content_card.html" %}
+      {% include "partials/notification_form_overrides_card.html" %}
+      {% include "partials/notification_form_preview_card.html" %}
+      {% endwith %}
 
       {# Error display #}
       {% if error %}

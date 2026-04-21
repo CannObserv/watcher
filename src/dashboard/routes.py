@@ -1505,7 +1505,11 @@ async def domain_nc_defaults_add_template_row(
     return templates.TemplateResponse(
         request,
         "partials/domain_nc_template_add_row.html",
-        {"domain_name": domain_name, "apprise_plugins": apprise_plugins},
+        {
+            "domain_name": domain_name,
+            "apprise_plugins": apprise_plugins,
+            "content_config": None,
+        },
     )
 
 
@@ -1529,6 +1533,9 @@ async def domain_nc_defaults_create_template(
     schema_val = form.get("plugin_schema") or ""
     apprise_plugins = list_plugins()
 
+    _cc = _parse_content_config_from_form(form)
+    _parsed_config = ContentConfig.model_validate(_cc) if _cc else None
+
     def _error(msg: str):
         return templates.TemplateResponse(
             request,
@@ -1537,6 +1544,7 @@ async def domain_nc_defaults_create_template(
                 "domain_name": domain_name,
                 "apprise_plugins": apprise_plugins,
                 "error": msg,
+                "content_config": _parsed_config,
             },
             headers={"HX-Retarget": "#domain-nc-add-row", "HX-Reswap": "outerHTML"},
         )
@@ -1576,6 +1584,7 @@ async def domain_nc_defaults_create_template(
         events=events,
         is_global_default=False,
         is_active=True,
+        content_config=_cc,
     )
     session.add(tpl)
     await session.flush()

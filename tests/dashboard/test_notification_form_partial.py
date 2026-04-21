@@ -3,6 +3,8 @@ structure + preview pane render on template edit + add flows, and that
 override add/remove HTMX routes work.
 """
 
+import re
+
 import pytest
 from httpx import AsyncClient
 
@@ -86,10 +88,24 @@ class TestTemplateEditFormShape:
             f"/notifications/{tpl.id}/edit-form", headers={"HX-Request": "true"}
         )
         assert resp.status_code == 200
-        # Domain checkbox should be checked
-        assert 'name="content_config__include_domain" value="1"' in resp.text
-        # Title template should be in the textarea
-        assert "My Custom:" in resp.text
+        # Domain checkbox must actually be `checked` — not just present in the DOM.
+        assert re.search(
+            r'name="content_config__include_domain"[^>]*\bvalue="1"[^>]*\bchecked',
+            resp.text,
+        ), "include_domain checkbox is not rendered as checked"
+        # An unrelated checkbox must NOT be checked (proves the `checked` test discriminates).
+        assert not re.search(
+            r'name="content_config__include_significance"[^>]*\bvalue="1"[^>]*\bchecked',
+            resp.text,
+        ), "include_significance should not be checked"
+        # Title template must be rendered inside the textarea's inner text.
+        title_textarea = re.compile(
+            r'<textarea[^>]*name="content_config__title_template"[^>]*>'
+            r"[^<]*My Custom: \{\{ watch_name \}\}"
+        )
+        assert title_textarea.search(resp.text), (
+            "title_template value is not rendered in the textarea body"
+        )
 
     async def test_edit_form_renders_existing_override_card(self, client: AsyncClient, db_session):
         tpl = await _make_template(

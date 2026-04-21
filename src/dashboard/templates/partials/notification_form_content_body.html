@@ -10,7 +10,6 @@
     form_id:  str — parent form-id for building unique DOM ids
     scope:    str — unique per-card scope suffix ("default" or "override-<event>")
 #}
-{% set o = opts %}
 {% set scope_id = form_id ~ "-" ~ scope %}
 {% set title_edit_id = "edit-title-" ~ scope_id %}
 {% set body_edit_id = "edit-body-" ~ scope_id %}
@@ -29,7 +28,7 @@
         <div class="space-y-2">
           <label class="flex items-center gap-2 text-gray-700 dark:text-gray-300 cursor-pointer">
             <input type="checkbox" name="{{ prefix }}include_diff_snippet" value="1"
-                   {% if o and o.include_diff_snippet %}checked{% endif %}
+                   {% if opts and opts.include_diff_snippet %}checked{% endif %}
                    class="rounded border-gray-300 dark:border-gray-600">
             Diff snippet
           </label>
@@ -37,18 +36,18 @@
             <label for="{{ scope_id }}-snippet-lines">Lines:</label>
             <input type="number" id="{{ scope_id }}-snippet-lines"
                    name="{{ prefix }}diff_snippet_lines" min="1" max="100"
-                   value="{{ (o.diff_snippet_lines if o else 10) }}"
+                   value="{{ (opts.diff_snippet_lines if opts else 10) }}"
                    class="form-input w-20 text-xs">
           </div>
           <label class="flex items-center gap-2 text-gray-700 dark:text-gray-300 cursor-pointer">
             <input type="checkbox" name="{{ prefix }}include_diff_full" value="1"
-                   {% if o and o.include_diff_full %}checked{% endif %}
+                   {% if opts and opts.include_diff_full %}checked{% endif %}
                    class="rounded border-gray-300 dark:border-gray-600">
             Full diff <span class="text-xs text-gray-500">(verbose)</span>
           </label>
           <label class="flex items-center gap-2 text-gray-700 dark:text-gray-300 cursor-pointer">
             <input type="checkbox" name="{{ prefix }}include_significance" value="1"
-                   {% if o and o.include_significance %}checked{% endif %}
+                   {% if opts and opts.include_significance %}checked{% endif %}
                    class="rounded border-gray-300 dark:border-gray-600">
             Significance score
           </label>
@@ -60,31 +59,31 @@
         <div class="space-y-2">
           <label class="flex items-center gap-2 text-gray-700 dark:text-gray-300 cursor-pointer">
             <input type="checkbox" name="{{ prefix }}include_temporal_context" value="1"
-                   {% if o and o.include_temporal_context %}checked{% endif %}
+                   {% if opts and opts.include_temporal_context %}checked{% endif %}
                    class="rounded border-gray-300 dark:border-gray-600">
             Check interval
           </label>
           <label class="flex items-center gap-2 text-gray-700 dark:text-gray-300 cursor-pointer">
             <input type="checkbox" name="{{ prefix }}include_domain" value="1"
-                   {% if o and o.include_domain %}checked{% endif %}
+                   {% if opts and opts.include_domain %}checked{% endif %}
                    class="rounded border-gray-300 dark:border-gray-600">
             Domain
           </label>
           <label class="flex items-center gap-2 text-gray-700 dark:text-gray-300 cursor-pointer">
             <input type="checkbox" name="{{ prefix }}include_last_changed_at" value="1"
-                   {% if o and o.include_last_changed_at %}checked{% endif %}
+                   {% if opts and opts.include_last_changed_at %}checked{% endif %}
                    class="rounded border-gray-300 dark:border-gray-600">
             Last changed date
           </label>
           <label class="flex items-center gap-2 text-gray-700 dark:text-gray-300 cursor-pointer">
             <input type="checkbox" name="{{ prefix }}include_tags" value="1"
-                   {% if o and o.include_tags %}checked{% endif %}
+                   {% if opts and opts.include_tags %}checked{% endif %}
                    class="rounded border-gray-300 dark:border-gray-600">
             Tags
           </label>
           <label class="flex items-center gap-2 text-gray-700 dark:text-gray-300 cursor-pointer">
             <input type="checkbox" name="{{ prefix }}include_description" value="1"
-                   {% if o and o.include_description %}checked{% endif %}
+                   {% if opts and opts.include_description %}checked{% endif %}
                    class="rounded border-gray-300 dark:border-gray-600">
             Description
           </label>
@@ -95,7 +94,7 @@
         <h5 class="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400 mb-2">Link</h5>
         <label class="flex items-center gap-2 text-gray-700 dark:text-gray-300 cursor-pointer">
           <input type="checkbox" name="{{ prefix }}include_change_dashboard_url" value="1"
-                 {% if o and o.include_change_dashboard_url %}checked{% endif %}
+                 {% if opts and opts.include_change_dashboard_url %}checked{% endif %}
                  class="rounded border-gray-300 dark:border-gray-600">
           Dashboard link (change URL)
         </label>
@@ -105,18 +104,18 @@
   </fieldset>
 
   {# ────── Default title block ────── #}
-  <details class="rounded-md border border-gray-200 dark:border-gray-700" {% if o and o.title_template %}open{% endif %}>
+  <details class="rounded-md border border-gray-200 dark:border-gray-700" {% if opts and opts.title_template %}open{% endif %}>
     <summary class="cursor-pointer px-3 py-2 flex items-center justify-between select-none">
       <span class="text-sm font-medium text-gray-700 dark:text-gray-300">
         Custom title template
-        {% if o and o.title_template %}<span class="ms-2 text-xs text-co-purple-700 dark:text-co-purple-400">(custom)</span>{% endif %}
+        {% if opts and opts.title_template %}<span class="ms-2 text-xs text-co-purple-700 dark:text-co-purple-400">(custom)</span>{% endif %}
       </span>
       <span class="text-xs text-gray-500">(leave blank to use default)</span>
     </summary>
     <div class="px-3 pb-3 pt-1">
       <textarea id="{{ title_area_id }}" name="{{ prefix }}title_template" rows="2"
                 class="form-input w-full text-sm font-mono"
-                placeholder="{{ '{{ event_label }}: {{ watch_name }}' }}">{{ (o.title_template if o else '') or '' }}</textarea>
+                placeholder="{{ '{{ event_label }}: {{ watch_name }}' }}">{{ (opts.title_template if opts else '') or '' }}</textarea>
       {% with target_id=title_area_id, scope="title" %}
       {% include "partials/notification_variable_chips.html" %}
       {% endwith %}
@@ -124,23 +123,30 @@
   </details>
 
   {# ────── Default body block ────── #}
-  <details class="rounded-md border border-gray-200 dark:border-gray-700" {% if o and o.body_template %}open{% endif %}>
+  <details class="rounded-md border border-gray-200 dark:border-gray-700" {% if opts and opts.body_template %}open{% endif %}>
     <summary class="cursor-pointer px-3 py-2 flex items-center justify-between select-none">
       <span class="text-sm font-medium text-gray-700 dark:text-gray-300">
         Custom body template
-        {% if o and o.body_template %}<span class="ms-2 text-xs text-co-purple-700 dark:text-co-purple-400">(custom)</span>{% endif %}
+        {% if opts and opts.body_template %}<span class="ms-2 text-xs text-co-purple-700 dark:text-co-purple-400">(custom)</span>{% endif %}
       </span>
       <span class="text-xs text-gray-500">(leave blank for toggle-composed body)</span>
     </summary>
     <div class="px-3 pb-3 pt-1 space-y-2">
       <div class="flex items-center gap-2">
+        {# Choose the event whose default body template seeds this textarea.
+           Override cards supply event_type via {% with %}; the default card
+           follows the live preview selector, falling back to change_detected. #}
         <button type="button"
                 class="btn btn-secondary text-xs min-h-[32px] py-1"
                 hx-get="/notifications/compose-body-prefill"
                 hx-include="closest form"
                 hx-target="#{{ body_area_id }}"
                 hx-swap="innerHTML"
-                hx-vals='{"preview_event": "change_detected"}'>
+                {% if event_type is defined %}
+                hx-vals='{"preview_event": "{{ event_type }}"}'
+                {% else %}
+                hx-vals='js:{preview_event: document.querySelector("select[name=preview_event]")?.value || "change_detected"}'
+                {% endif %}>
           Seed from toggles
         </button>
         <span class="text-xs text-gray-500 dark:text-gray-400">
@@ -149,7 +155,7 @@
       </div>
       <textarea id="{{ body_area_id }}" name="{{ prefix }}body_template" rows="6"
                 class="form-input w-full text-sm font-mono"
-                placeholder="{{ '{{ watch_url }} — {{ change_summary }}' }}">{{ (o.body_template if o else '') or '' }}</textarea>
+                placeholder="{{ '{{ watch_url }} — {{ change_summary }}' }}">{{ (opts.body_template if opts else '') or '' }}</textarea>
       {% with target_id=body_area_id, scope="body" %}
       {% include "partials/notification_variable_chips.html" %}
       {% endwith %}

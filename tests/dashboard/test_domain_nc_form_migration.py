@@ -11,6 +11,7 @@ from sqlalchemy import select
 
 from src.core.models.domain import Domain
 from src.core.models.notification_template import NotificationTemplate
+from src.core.notifications.events import WatchEventType
 
 
 async def _ensure_domain(db_session, name: str) -> Domain:
@@ -42,6 +43,21 @@ class TestDomainNcAddRowMigrated:
         )
         assert resp.status_code == 200
         assert not re.search(r"<summary[^>]*>\s*Content Options\s*</summary>", resp.text)
+
+    async def test_all_eight_event_types_offered(self, client: AsyncClient, db_session):
+        """Regression: the domain form must offer every WatchEventType as a
+        subscribe checkbox, otherwise the override picker silently hides
+        entire event classes from domain templates."""
+        await _ensure_domain(db_session, "example.com")
+        resp = await client.get(
+            "/domains/example.com/nc-defaults/add-template-row",
+            headers={"HX-Request": "true"},
+        )
+        assert resp.status_code == 200
+        for et in WatchEventType:
+            assert f'value="{et.value}"' in resp.text, (
+                f"domain form missing event checkbox for {et.value}"
+            )
 
     async def test_preview_pane_has_explicit_self_target(self, client: AsyncClient, db_session):
         """Regression against the hotfix — domain-default form must also set
@@ -85,6 +101,28 @@ class TestDomainNcCreatePersistsContentConfig:
         assert tpl.content_config is not None
         assert tpl.content_config["default"]["include_domain"] is True
         assert tpl.content_config["default"]["body_template"] == "Custom: {{ watch_url }}"
+
+    async def test_create_without_toggles_stores_null_content_config(
+        self, client: AsyncClient, db_session
+    ):
+        """`_parse_content_config_from_form` returns None when no toggles or
+        templates are set; NotificationTemplate.content_config stays null."""
+        await _ensure_domain(db_session, "example.com")
+        resp = await client.post(
+            "/domains/example.com/nc-defaults/new",
+            data={
+                "title": "Plain Domain Alert",
+                "apprise_url": "json://hooks.example.com/notify",
+                "events": ["change_detected"],
+            },
+            headers={"HX-Request": "true"},
+        )
+        assert resp.status_code == 200
+        tpl = await db_session.scalar(
+            select(NotificationTemplate).where(NotificationTemplate.title == "Plain Domain Alert")
+        )
+        assert tpl is not None
+        assert tpl.content_config is None
 
 
 @pytest.mark.integration

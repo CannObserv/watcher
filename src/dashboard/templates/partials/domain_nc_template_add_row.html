@@ -103,6 +103,14 @@
             <input type="checkbox" name="events" value="watch_resumed" class="rounded border-gray-300 dark:border-gray-600">
             {{ event_titles.get("watch_resumed", "Watch Resumed") }}
           </label>
+          <label class="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300 cursor-pointer min-h-[44px]">
+            <input type="checkbox" name="events" value="watch_archived" class="rounded border-gray-300 dark:border-gray-600">
+            {{ event_titles.get("watch_archived", "Watch Archived") }}
+          </label>
+          <label class="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300 cursor-pointer min-h-[44px]">
+            <input type="checkbox" name="events" value="watch_deleted" class="rounded border-gray-300 dark:border-gray-600">
+            {{ event_titles.get("watch_deleted", "Watch Deleted") }}
+          </label>
         </div>
       </fieldset>
 

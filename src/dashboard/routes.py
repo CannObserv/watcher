@@ -2122,7 +2122,7 @@ async def watch_notification_edit(
     config_id: str,
     session: AsyncSession = Depends(get_db_session),
 ):
-    """Update apprise_url and/or events for a notification config. Returns refreshed partial."""
+    """Update apprise_url and/or events for a notification config."""
     watch = await get_watch_detail(session, watch_id)
     if not watch:
         raise HTTPException(status_code=404, detail="Watch not found")

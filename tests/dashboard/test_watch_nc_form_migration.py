@@ -275,7 +275,7 @@ class TestWatchNcEditPage:
             follow_redirects=False,
         )
         assert resp.status_code == 303
-        assert f"/watches/{watch.id}" in resp.headers["location"]
+        assert f"/watches/{watch.id}#watch-notifications" in resp.headers["location"]
 
     async def test_edit_rerenders_page_on_error(self, client: AsyncClient, db_session):
         watch = await _make_watch(db_session)

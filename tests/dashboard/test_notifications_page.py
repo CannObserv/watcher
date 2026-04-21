@@ -34,13 +34,15 @@ async def test_notifications_page_loads(client: AsyncClient):
 
 
 @pytest.mark.integration
-async def test_notifications_add_row_returns_form(client: AsyncClient):
-    resp = await client.get("/notifications/add-row", headers={"HX-Request": "true"})
+async def test_notification_new_page_loads(client: AsyncClient):
+    resp = await client.get("/notifications/new")
     assert resp.status_code == 200
+    assert b"New Notification Template" in resp.content
+    assert b"plugin_schema" in resp.content  # channel picker present
 
 
 @pytest.mark.integration
-async def test_create_template_via_dashboard_form(client: AsyncClient, db_session):
+async def test_create_template_redirects_on_success(client: AsyncClient, db_session):
     resp = await client.post(
         "/notifications/new",
         data={
@@ -48,14 +50,22 @@ async def test_create_template_via_dashboard_form(client: AsyncClient, db_sessio
             "apprise_url": VALID_URL,
             "events": ["change_detected"],
         },
-        headers={"HX-Request": "true"},
+        follow_redirects=False,
+    )
+    assert resp.status_code == 303
+    assert resp.headers["location"] == "/notifications"
+
+
+@pytest.mark.integration
+async def test_create_template_rerenders_page_on_title_error(client: AsyncClient):
+    resp = await client.post(
+        "/notifications/new",
+        data={"title": "", "apprise_url": VALID_URL, "events": ["change_detected"]},
+        follow_redirects=False,
     )
     assert resp.status_code == 200
-
-    result = await db_session.execute(
-        select(NotificationTemplate).where(NotificationTemplate.title == "Ops Alert")
-    )
-    assert result.scalar_one_or_none() is not None
+    assert b"Title is required" in resp.content
+    assert b"New Notification Template" in resp.content
 
 
 @pytest.mark.integration

@@ -1,0 +1,112 @@
+{% extends "base.html" %}
+{% block title %}New Notification Template — Watcher{% endblock %}
+{% block content %}
+<nav aria-label="Breadcrumb" class="mb-1">
+  <ol class="flex items-center gap-1 text-sm text-gray-500 dark:text-gray-400">
+    <li><a href="/notifications" class="link">Notification Templates</a></li>
+    <li aria-hidden="true">/</li>
+    <li aria-current="page">New</li>
+  </ol>
+</nav>
+<h2 class="text-2xl font-bold text-gray-900 dark:text-white mb-6">New Notification Template</h2>
+
+<form method="post" action="/notifications/new" class="space-y-4 max-w-3xl">
+
+  {# Title #}
+  <div>
+    <label for="nf-title-tpl-new" class="form-label">
+      Title <span class="text-red-500" aria-hidden="true">*</span>
+    </label>
+    <input type="text" id="nf-title-tpl-new" name="title"
+           value="{{ title or '' }}" maxlength="100" required aria-required="true"
+           class="form-input mt-1" placeholder="e.g. Ops Slack Channel">
+  </div>
+
+  {# Channel picker (plugin builder + manual toggle) #}
+  <div>
+    <label for="tpl-new-channel-picker" class="form-label">Notification channel</label>
+    <div class="flex items-center gap-3 mt-1">
+      <select
+        id="tpl-new-channel-picker"
+        name="_channel_picker"
+        class="form-input"
+        hx-get="/partials/apprise-plugin-form"
+        hx-target="#tpl-new-plugin-token-form"
+        hx-swap="outerHTML"
+        hx-vals='js:{schema: htmx.find("#tpl-new-channel-picker").value}'
+        hx-trigger="change"
+        onchange="document.querySelector('input[name=_url_mode_tpl_new][value=builder]').checked = true"
+        aria-label="Select notification plugin">
+        <option value="">— pick a channel —</option>
+        {% for plugin in apprise_plugins %}
+        <option value="{{ plugin.plugin_schema }}">{{ plugin.service_name }}</option>
+        {% endfor %}
+      </select>
+      <fieldset class="segment-group shrink-0" aria-label="URL entry mode">
+        <legend class="sr-only">URL entry mode</legend>
+        <label class="segment">
+          <input type="radio" name="_url_mode_tpl_new" value="builder" checked
+            hx-get="/partials/apprise-plugin-form"
+            hx-vals='js:{schema: htmx.find("#tpl-new-channel-picker").value}'
+            hx-target="#tpl-new-plugin-token-form"
+            hx-swap="outerHTML"
+            hx-trigger="click[htmx.find('#tpl-new-channel-picker').value !== '']"
+            onclick="if(!htmx.find('#tpl-new-channel-picker').value) htmx.find('#tpl-new-plugin-token-form').innerHTML=''">
+          <span class="text-xs">Builder</span>
+        </label>
+        <label class="segment">
+          <input type="radio" name="_url_mode_tpl_new" value="manual"
+            hx-get="/partials/apprise-plugin-form?raw=1"
+            hx-target="#tpl-new-plugin-token-form"
+            hx-swap="outerHTML">
+          <span class="text-xs">Manual</span>
+        </label>
+      </fieldset>
+    </div>
+  </div>
+  <input type="hidden" name="plugin_schema" id="tpl-new-plugin-schema" value="">
+  <div id="tpl-new-plugin-token-form"></div>
+
+  {# Events — all event types enabled #}
+  <fieldset>
+    <legend class="form-label mb-2">Events</legend>
+    <div class="flex flex-wrap gap-4">
+      {% for et_value, et_label in event_titles.items() %}
+      <label class="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300 cursor-pointer min-h-[44px]">
+        <input type="checkbox" name="events" value="{{ et_value }}"
+               {% if events and et_value in events %}checked{% elif not events and et_value == "change_detected" %}checked{% endif %}
+               class="rounded border-gray-300 dark:border-gray-600">
+        {{ et_label }}
+      </label>
+      {% endfor %}
+    </div>
+  </fieldset>
+
+  {# Global default toggle #}
+  <div class="flex items-center gap-3 min-h-[44px]">
+    <label class="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300 cursor-pointer">
+      <input type="checkbox" name="is_global_default" value="1"
+             {% if is_global_default %}checked{% endif %}
+             class="rounded border-gray-300 dark:border-gray-600">
+      Mark as global default
+    </label>
+    <span class="text-xs text-gray-500 dark:text-gray-400">(auto-applied to all new watches)</span>
+  </div>
+
+  {% with form_id="tpl-new", content_config=content_config %}
+  {% include "partials/notification_form_content_card.html" %}
+  {% include "partials/notification_form_overrides_card.html" %}
+  {% include "partials/notification_form_preview_card.html" %}
+  {% endwith %}
+
+  {% if error %}
+  <div role="alert" class="text-sm text-red-600 dark:text-red-400">{{ error }}</div>
+  {% endif %}
+
+  <div class="flex items-center gap-2 pt-2">
+    <button type="submit" class="btn btn-primary min-h-[44px]">Create</button>
+    <a href="/notifications" class="btn btn-secondary min-h-[44px]">Cancel</a>
+  </div>
+
+</form>
+{% endblock %}

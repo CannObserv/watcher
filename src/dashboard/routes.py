@@ -2735,6 +2735,27 @@ async def notifications_page(
     )
 
 
+@router.get("/notifications/new")
+async def notification_template_new_page(
+    request: Request,
+):
+    """Full page: create a new notification template."""
+    apprise_plugins = list_plugins()
+    return templates.TemplateResponse(
+        request,
+        "pages/notification_new.html",
+        {
+            "active_page": "notifications",
+            "apprise_plugins": apprise_plugins,
+            "title": None,
+            "events": None,
+            "is_global_default": False,
+            "content_config": None,
+            "error": None,
+        },
+    )
+
+
 @router.get("/notifications/add-row")
 async def notification_template_add_row(
     request: Request,
@@ -2754,27 +2775,34 @@ async def notification_template_create(
     request: Request,
     session: AsyncSession = Depends(get_db_session),
 ):
-    """Create notification template from dashboard form. Returns refreshed list or error form."""
-    if request.headers.get("HX-Request") != "true":
-        return RedirectResponse(url="/notifications", status_code=303)
+    """Create notification template from dashboard form.
+
+    Redirects on success, rerenders page on error.
+    """
     form = await request.form()
     events = form.getlist("events")
     schema_val = form.get("plugin_schema") or ""
     title = str(form.get("title") or "").strip()
     is_global_default = bool(form.get("is_global_default"))
 
-    if not title:
+    def _page_error(error_msg: str):
         _cc = _parse_content_config_from_form(form)
         return templates.TemplateResponse(
             request,
-            "partials/notification_template_add_row.html",
+            "pages/notification_new.html",
             {
+                "active_page": "notifications",
                 "apprise_plugins": list_plugins(),
-                "error": "Title is required.",
+                "title": str(form.get("title") or ""),
+                "events": form.getlist("events"),
+                "is_global_default": bool(form.get("is_global_default")),
                 "content_config": ContentConfig.model_validate(_cc) if _cc else None,
+                "error": error_msg,
             },
-            headers={"HX-Retarget": "#template-add-row", "HX-Reswap": "outerHTML"},
         )
+
+    if not title:
+        return _page_error("Title is required.")
 
     # Determine Apprise URL: token builder or raw input
     if schema_val:
@@ -2788,48 +2816,18 @@ async def notification_template_create(
             variant_index = int(variant_raw) if variant_raw is not None else None
             apprise_url = assemble_url(schema_val, tokens, variant_index=variant_index)
         except ValueError as exc:
-            _cc = _parse_content_config_from_form(form)
-            return templates.TemplateResponse(
-                request,
-                "partials/notification_template_add_row.html",
-                {
-                    "apprise_plugins": list_plugins(),
-                    "error": str(exc),
-                    "content_config": ContentConfig.model_validate(_cc) if _cc else None,
-                },
-                headers={"HX-Retarget": "#template-add-row", "HX-Reswap": "outerHTML"},
-            )
+            return _page_error(str(exc))
     else:
         apprise_url = str(form.get("apprise_url") or "")
         try:
             validate_apprise_url(apprise_url)
         except ValueError as exc:
-            _cc = _parse_content_config_from_form(form)
-            return templates.TemplateResponse(
-                request,
-                "partials/notification_template_add_row.html",
-                {
-                    "apprise_plugins": list_plugins(),
-                    "error": str(exc),
-                    "content_config": ContentConfig.model_validate(_cc) if _cc else None,
-                },
-                headers={"HX-Retarget": "#template-add-row", "HX-Reswap": "outerHTML"},
-            )
+            return _page_error(str(exc))
 
     try:
         validate_event_list(events)
     except ValueError as exc:
-        _cc = _parse_content_config_from_form(form)
-        return templates.TemplateResponse(
-            request,
-            "partials/notification_template_add_row.html",
-            {
-                "apprise_plugins": list_plugins(),
-                "error": str(exc),
-                "content_config": ContentConfig.model_validate(_cc) if _cc else None,
-            },
-            headers={"HX-Retarget": "#template-add-row", "HX-Reswap": "outerHTML"},
-        )
+        return _page_error(str(exc))
 
     hint = get_service_name(schema_val) if schema_val else extract_channel_hint(apprise_url)
     tpl = NotificationTemplate(
@@ -2850,17 +2848,7 @@ async def notification_template_create(
         source="dashboard",
     )
     await session.commit()
-    result = await session.execute(
-        select(NotificationTemplate).order_by(NotificationTemplate.title)
-    )
-    notification_templates = result.scalars().all()
-    response = templates.TemplateResponse(
-        request,
-        "partials/notification_template_list.html",
-        {"notification_templates": notification_templates},
-    )
-    response.headers["HX-Trigger"] = "refreshTemplates"
-    return response
+    return RedirectResponse(url="/notifications", status_code=303)
 
 
 @router.get("/notifications/{template_id}/edit-form")

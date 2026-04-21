@@ -225,3 +225,33 @@ class TestErrorPathPreservesContentConfig:
             r'name="content_config__include_tags"[^>]*\bvalue="1"[^>]*\bchecked',
             resp.text,
         ), "include_tags should stay checked on edit error re-render"
+
+
+@pytest.mark.integration
+class TestWatchNcNewPage:
+    async def test_new_page_loads(self, client: AsyncClient, db_session):
+        watch = await _make_watch(db_session)
+        resp = await client.get(f"/watches/{watch.id}/notifications/new")
+        assert resp.status_code == 200
+        assert b"plugin_schema" in resp.content
+        assert b"watch_created" in resp.content  # disabled checkbox still present
+
+    async def test_create_redirects_on_success(self, client: AsyncClient, db_session):
+        watch = await _make_watch(db_session)
+        resp = await client.post(
+            f"/watches/{watch.id}/notifications/new",
+            data={"apprise_url": VALID_URL, "events": ["change_detected"]},
+            follow_redirects=False,
+        )
+        assert resp.status_code == 303
+        assert f"/watches/{watch.id}" in resp.headers["location"]
+
+    async def test_create_rerenders_page_on_error(self, client: AsyncClient, db_session):
+        watch = await _make_watch(db_session)
+        resp = await client.post(
+            f"/watches/{watch.id}/notifications/new",
+            data={"apprise_url": "bad-url", "events": ["change_detected"]},
+            follow_redirects=False,
+        )
+        assert resp.status_code == 200
+        assert b"plugin_schema" in resp.content

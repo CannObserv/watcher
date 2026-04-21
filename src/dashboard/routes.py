@@ -1846,6 +1846,30 @@ async def partial_watch_notifications(
     return await _render_watch_notifications(request, watch, session)
 
 
+@router.get("/watches/{watch_id}/notifications/new")
+async def watch_notification_new_page(
+    request: Request,
+    watch_id: str,
+    session: AsyncSession = Depends(get_db_session),
+):
+    """Full page: add a new local notification config for a watch."""
+    watch = await get_watch_detail(session, watch_id)
+    if not watch:
+        raise HTTPException(status_code=404, detail="Watch not found")
+    return templates.TemplateResponse(
+        request,
+        "pages/watch_notification_new.html",
+        {
+            "watch": watch,
+            "apprise_plugins": list_plugins(),
+            "title": None,
+            "events": None,
+            "content_config": None,
+            "error": None,
+        },
+    )
+
+
 @router.get("/watches/{watch_id}/notifications/add-row")
 async def watch_notification_add_row(
     request: Request,
@@ -1934,14 +1958,15 @@ async def watch_notification_create(
             _cc = _parse_content_config_from_form(form)
             return templates.TemplateResponse(
                 request,
-                "partials/notification_add_row.html",
+                "pages/watch_notification_new.html",
                 {
                     "watch": watch,
                     "apprise_plugins": list_plugins(),
-                    "error": str(exc),
+                    "title": str(form.get("title") or ""),
+                    "events": form.getlist("events"),
                     "content_config": ContentConfig.model_validate(_cc) if _cc else None,
+                    "error": str(exc),
                 },
-                headers={"HX-Retarget": "#notification-add-row", "HX-Reswap": "outerHTML"},
             )
     else:
         # Raw URL submission (legacy path)
@@ -1952,14 +1977,15 @@ async def watch_notification_create(
             _cc = _parse_content_config_from_form(form)
             return templates.TemplateResponse(
                 request,
-                "partials/notification_add_row.html",
+                "pages/watch_notification_new.html",
                 {
                     "watch": watch,
                     "apprise_plugins": list_plugins(),
-                    "error": str(exc),
+                    "title": str(form.get("title") or ""),
+                    "events": form.getlist("events"),
                     "content_config": ContentConfig.model_validate(_cc) if _cc else None,
+                    "error": str(exc),
                 },
-                headers={"HX-Retarget": "#notification-add-row", "HX-Reswap": "outerHTML"},
             )
 
     try:
@@ -1968,14 +1994,15 @@ async def watch_notification_create(
         _cc = _parse_content_config_from_form(form)
         return templates.TemplateResponse(
             request,
-            "partials/notification_add_row.html",
+            "pages/watch_notification_new.html",
             {
                 "watch": watch,
                 "apprise_plugins": list_plugins(),
-                "error": str(exc),
+                "title": str(form.get("title") or ""),
+                "events": form.getlist("events"),
                 "content_config": ContentConfig.model_validate(_cc) if _cc else None,
+                "error": str(exc),
             },
-            headers={"HX-Retarget": "#notification-add-row", "HX-Reswap": "outerHTML"},
         )
 
     hint = get_service_name(schema_val) if schema_val else extract_channel_hint(apprise_url)
@@ -1996,7 +2023,7 @@ async def watch_notification_create(
         channel_hint=config.channel_hint,
     )
     await session.commit()
-    return await _render_watch_notifications(request, watch, session)
+    return RedirectResponse(url=f"/watches/{watch_id}#notifications", status_code=303)
 
 
 @router.post("/watches/{watch_id}/notifications/{config_id}/toggle")

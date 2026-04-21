@@ -1,0 +1,109 @@
+{% extends "base.html" %}
+{% block title %}Add Notification — {{ watch.name }} — Watcher{% endblock %}
+{% block content %}
+<nav aria-label="Breadcrumb" class="mb-1">
+  <ol class="flex items-center gap-1 text-sm text-gray-500 dark:text-gray-400">
+    <li><a href="/watches/{{ watch.id }}" class="link">{{ watch.name }}</a></li>
+    <li aria-hidden="true">/</li>
+    <li aria-current="page">Add Notification</li>
+  </ol>
+</nav>
+<h2 class="text-2xl font-bold text-gray-900 dark:text-white mb-6">Add Notification</h2>
+
+<form method="post" action="/watches/{{ watch.id }}/notifications/new" class="space-y-4 max-w-3xl">
+
+  {# Title — optional for watch NCs #}
+  <div>
+    <label for="wnc-new-title" class="form-label">
+      Title <span class="text-gray-400 dark:text-gray-500 font-normal">(optional)</span>
+    </label>
+    <input type="text" id="wnc-new-title" name="title"
+           value="{{ title or '' }}" maxlength="100"
+           class="form-input mt-1" placeholder="e.g. Slack ops channel">
+  </div>
+
+  {# Channel picker #}
+  <div>
+    <label for="wnc-new-channel-picker" class="form-label">Notification channel</label>
+    <div class="flex items-center gap-3 mt-1">
+      <select
+        id="wnc-new-channel-picker"
+        name="_channel_picker"
+        class="form-input"
+        hx-get="/partials/apprise-plugin-form"
+        hx-target="#wnc-new-plugin-token-form"
+        hx-swap="outerHTML"
+        hx-vals='js:{schema: htmx.find("#wnc-new-channel-picker").value}'
+        hx-trigger="change"
+        onchange="document.querySelector('input[name=_url_mode_wnc_new][value=builder]').checked = true"
+        aria-label="Select notification plugin">
+        <option value="">— pick a channel —</option>
+        {% for plugin in apprise_plugins %}
+        <option value="{{ plugin.plugin_schema }}">{{ plugin.service_name }}</option>
+        {% endfor %}
+      </select>
+      <fieldset class="segment-group shrink-0" aria-label="URL entry mode">
+        <legend class="sr-only">URL entry mode</legend>
+        <label class="segment">
+          <input type="radio" name="_url_mode_wnc_new" value="builder" checked
+            hx-get="/partials/apprise-plugin-form"
+            hx-vals='js:{schema: htmx.find("#wnc-new-channel-picker").value}'
+            hx-target="#wnc-new-plugin-token-form"
+            hx-swap="outerHTML"
+            hx-trigger="click[htmx.find('#wnc-new-channel-picker').value !== '']"
+            onclick="if(!htmx.find('#wnc-new-channel-picker').value) htmx.find('#wnc-new-plugin-token-form').innerHTML=''">
+          <span class="text-xs">Builder</span>
+        </label>
+        <label class="segment">
+          <input type="radio" name="_url_mode_wnc_new" value="manual"
+            hx-get="/partials/apprise-plugin-form?raw=1"
+            hx-target="#wnc-new-plugin-token-form"
+            hx-swap="outerHTML">
+          <span class="text-xs">Manual</span>
+        </label>
+      </fieldset>
+    </div>
+  </div>
+  <input type="hidden" name="plugin_schema" id="wnc-new-plugin-schema" value="">
+  <div id="wnc-new-plugin-token-form"></div>
+
+  {# Events — watch_created disabled (watch already exists) #}
+  <fieldset>
+    <legend class="form-label mb-2">Events</legend>
+    <div class="flex flex-wrap gap-4">
+      <label class="flex items-center gap-2 text-sm text-gray-500 dark:text-gray-500 min-h-[44px]"
+             aria-label="Watch Created (not applicable — watch already exists)">
+        <input type="checkbox" name="events" value="watch_created"
+               disabled class="rounded border-gray-300 dark:border-gray-600 opacity-50 cursor-not-allowed">
+        {{ event_titles.get("watch_created", "Watch Created") }}
+      </label>
+      {% for et_value, et_label in event_titles.items() %}
+      {% if et_value != "watch_created" %}
+      <label class="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300 cursor-pointer min-h-[44px]">
+        <input type="checkbox" name="events" value="{{ et_value }}"
+               {% if events and et_value in events %}checked{% elif not events and et_value == "change_detected" %}checked{% endif %}
+               class="rounded border-gray-300 dark:border-gray-600">
+        {{ et_label }}
+      </label>
+      {% endif %}
+      {% endfor %}
+    </div>
+  </fieldset>
+
+  {% with form_id="wnc-new-" ~ (watch.id|string), content_config=content_config %}
+  {% include "partials/notification_form_content_card.html" %}
+  {% include "partials/notification_form_overrides_card.html" %}
+  {% include "partials/notification_form_preview_card.html" %}
+  {% endwith %}
+
+  {% if error %}
+  <div role="alert" class="text-sm text-red-600 dark:text-red-400">{{ error }}</div>
+  {% endif %}
+
+  <div class="flex items-center gap-2 pt-2">
+    <button type="submit" class="btn btn-primary min-h-[44px]">Add</button>
+    <a href="/watches/{{ watch.id }}#notifications" class="btn btn-secondary min-h-[44px]">Cancel</a>
+  </div>
+
+</form>
+{% endblock %}

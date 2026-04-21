@@ -155,15 +155,10 @@
         class="btn btn-secondary text-xs min-h-[44px] htmx-request:opacity-60">
         + Assign Template
       </button>
-      <button
-        hx-get="/watches/{{ watch.id }}/notifications/add-row"
-        hx-target="#notifications-tbody"
-        hx-swap="afterbegin"
-        hx-on::before-request="if(document.getElementById('notification-add-row')){event.preventDefault();}"
-        hx-on::after-request="if(event.detail.successful){const e=document.getElementById('notifications-empty-state');if(e)e.remove();}"
-        class="btn btn-secondary text-xs min-h-[44px] htmx-request:opacity-60">
+      <a href="/watches/{{ watch.id }}/notifications/new"
+         class="btn btn-secondary text-xs min-h-[44px]">
         + Add Local
-      </button>
+      </a>
     </div>
   </div>
   <div

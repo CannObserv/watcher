@@ -28,14 +28,11 @@
   <td>
     <div class="flex items-center gap-2 justify-end">
       {# Edit #}
-      <button
-        hx-get="/notifications/{{ tpl.id }}/edit-form"
-        hx-target="#tpl-{{ tpl.id }}"
-        hx-swap="outerHTML"
-        class="btn btn-secondary text-xs min-h-[44px] htmx-request:opacity-60"
-        aria-label="Edit {{ tpl.title }} notification template">
+      <a href="/notifications/{{ tpl.id }}/edit"
+         class="btn btn-secondary text-xs min-h-[44px]"
+         aria-label="Edit {{ tpl.title }} notification template">
         Edit
-      </button>
+      </a>
 
       {# Test — OOB flash response, no local swap needed #}
       <button

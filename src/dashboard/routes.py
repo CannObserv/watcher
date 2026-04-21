@@ -2851,6 +2851,53 @@ async def notification_template_create(
     return RedirectResponse(url="/notifications", status_code=303)
 
 
+@router.get("/notifications/{template_id}/edit")
+async def notification_template_edit_page(
+    request: Request,
+    template_id: str,
+    session: AsyncSession = Depends(get_db_session),
+):
+    """Full page: edit an existing notification template."""
+    result = await session.execute(
+        select(NotificationTemplate).where(
+            NotificationTemplate.id == parse_ulid(template_id, "Template")
+        )
+    )
+    tpl = result.scalar_one_or_none()
+    if not tpl:
+        raise HTTPException(status_code=404, detail="Template not found")
+    decrypted_url = ""
+    decryption_failed = False
+    try:
+        decrypted_url = decrypt_apprise_url(tpl.apprise_url)
+    except (InvalidToken, ValueError):
+        decryption_failed = True
+    watch_count = (
+        await session.scalar(select(func.count()).where(WatchNcRef.template_id == tpl.id)) or 0
+    )
+    domain_count = (
+        await session.scalar(select(func.count()).where(DomainNcRef.template_id == tpl.id)) or 0
+    )
+    content_config = (
+        ContentConfig.model_validate(tpl.content_config) if tpl.content_config else None
+    )
+    return templates.TemplateResponse(
+        request,
+        "pages/notification_edit.html",
+        {
+            "active_page": "notifications",
+            "tpl": tpl,
+            "submitted_title": tpl.title,
+            "decrypted_url": decrypted_url,
+            "decryption_failed": decryption_failed,
+            "watch_count": watch_count,
+            "domain_count": domain_count,
+            "content_config": content_config,
+            "error": None,
+        },
+    )
+
+
 @router.get("/notifications/{template_id}/edit-form")
 async def notification_template_edit_form(
     request: Request,
@@ -2901,9 +2948,7 @@ async def notification_template_edit(
     template_id: str,
     session: AsyncSession = Depends(get_db_session),
 ):
-    """Save changes to a notification template. Returns refreshed list or retargeted error form."""
-    if request.headers.get("HX-Request") != "true":
-        return RedirectResponse(url="/notifications", status_code=303)
+    """Save changes to a notification template. Redirects on success, rerenders page on error."""
     result = await session.execute(
         select(NotificationTemplate).where(
             NotificationTemplate.id == parse_ulid(template_id, "Template")
@@ -2920,10 +2965,6 @@ async def notification_template_edit(
     is_global_default = bool(form.get("is_global_default"))
 
     async def _edit_error(error_msg: str) -> Response:
-        try:
-            decrypted_url = decrypt_apprise_url(tpl.apprise_url)
-        except (InvalidToken, ValueError):
-            decrypted_url = ""
         watch_count = (
             await session.scalar(select(func.count()).where(WatchNcRef.template_id == tpl.id)) or 0
         )
@@ -2935,21 +2976,21 @@ async def notification_template_edit(
         content_config_err = (
             ContentConfig.model_validate(_content_config_err) if _content_config_err else None
         )
-        resp = templates.TemplateResponse(
+        return templates.TemplateResponse(
             request,
-            "partials/notification_template_edit_form.html",
+            "pages/notification_edit.html",
             {
+                "active_page": "notifications",
                 "tpl": tpl,
-                "decrypted_url": decrypted_url,
-                "error": error_msg,
+                "submitted_title": title,
+                "decrypted_url": apprise_url,  # show what was submitted
+                "decryption_failed": False,
                 "watch_count": watch_count,
                 "domain_count": domain_count,
                 "content_config": content_config_err,
+                "error": error_msg,
             },
         )
-        resp.headers["HX-Retarget"] = f"#tpl-{tpl.id}"
-        resp.headers["HX-Reswap"] = "outerHTML"
-        return resp
 
     try:
         validate_apprise_url(apprise_url)
@@ -2976,17 +3017,7 @@ async def notification_template_edit(
         source="dashboard",
     )
     await session.commit()
-    result2 = await session.execute(
-        select(NotificationTemplate).order_by(NotificationTemplate.title)
-    )
-    notification_templates = result2.scalars().all()
-    response = templates.TemplateResponse(
-        request,
-        "partials/notification_template_list.html",
-        {"notification_templates": notification_templates},
-    )
-    response.headers["HX-Trigger"] = "refreshTemplates"
-    return response
+    return RedirectResponse(url="/notifications", status_code=303)
 
 
 @router.post("/notifications/{template_id}/toggle")

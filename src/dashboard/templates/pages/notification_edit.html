@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+{% block title %}Edit {{ tpl.title }} — Watcher{% endblock %}
+{% block content %}
+<nav aria-label="Breadcrumb" class="mb-1">
+  <ol class="flex items-center gap-1 text-sm text-gray-500 dark:text-gray-400">
+    <li><a href="/notifications" class="link">Notification Templates</a></li>
+    <li aria-hidden="true">/</li>
+    <li aria-current="page">{{ tpl.title }}</li>
+  </ol>
+</nav>
+<div class="flex items-center justify-between mb-6">
+  <h2 class="text-2xl font-bold text-gray-900 dark:text-white">Edit Notification Template</h2>
+  {% if watch_count or domain_count %}
+  <p class="text-xs text-gray-500 dark:text-gray-400">
+    Used by {{ watch_count }} watch{{ "es" if watch_count != 1 else "" }}
+    and {{ domain_count }} domain{{ "s" if domain_count != 1 else "" }}.
+  </p>
+  {% endif %}
+</div>
+
+<form method="post" action="/notifications/{{ tpl.id }}/edit" class="max-w-3xl">
+
+  {% if decryption_failed %}
+  <div role="alert" class="mb-4 text-sm text-amber-600 dark:text-amber-400">
+    Could not decrypt the stored URL — the field has been left blank. Enter the full Apprise URL to update it.
+  </div>
+  {% endif %}
+
+  {% if error %}
+  <div role="alert" class="mb-4 text-sm text-red-600 dark:text-red-400">{{ error }}</div>
+  {% endif %}
+
+  {% with
+    form_id="tpl-" ~ (tpl.id|string),
+    title=submitted_title,
+    apprise_url=decrypted_url,
+    events=tpl.events,
+    show_global_default=True,
+    is_global_default=tpl.is_global_default,
+    show_preview=True,
+    content_config=content_config
+  %}
+  {% include "partials/notification_form.html" %}
+  {% endwith %}
+
+  <div class="flex items-center gap-2 mt-4">
+    <button type="submit" class="btn btn-primary min-h-[44px]">Save</button>
+    <a href="/notifications" class="btn btn-secondary min-h-[44px]">Cancel</a>
+  </div>
+
+</form>
+{% endblock %}

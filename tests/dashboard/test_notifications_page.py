@@ -102,8 +102,8 @@ async def test_edit_form_404_for_unknown_id(client: AsyncClient):
 
 
 @pytest.mark.integration
-async def test_edit_saves_title_and_returns_list(client: AsyncClient, db_session):
-    """POST /{id}/edit with valid data updates the template and returns the refreshed list."""
+async def test_edit_saves_title_and_redirects(client: AsyncClient, db_session):
+    """POST /{id}/edit with valid data updates the template and redirects to /notifications."""
     tpl = await _make_template(db_session, "OldTitle")
 
     resp = await client.post(
@@ -113,18 +113,18 @@ async def test_edit_saves_title_and_returns_list(client: AsyncClient, db_session
             "apprise_url": VALID_URL,
             "events": ["change_detected"],
         },
-        headers={"HX-Request": "true"},
+        follow_redirects=False,
     )
-    assert resp.status_code == 200
-    assert b"NewTitle" in resp.content
+    assert resp.status_code == 303
+    assert resp.headers["location"] == "/notifications"
 
     await db_session.refresh(tpl)
     assert tpl.title == "NewTitle"
 
 
 @pytest.mark.integration
-async def test_edit_invalid_url_returns_form_with_error(client: AsyncClient, db_session):
-    """POST /{id}/edit with an invalid Apprise URL retargets the edit form with an error."""
+async def test_edit_invalid_url_returns_page_with_error(client: AsyncClient, db_session):
+    """POST /{id}/edit with an invalid Apprise URL rerenders the edit page with an error."""
     tpl = await _make_template(db_session, "ValidTitle")
 
     resp = await client.post(
@@ -134,11 +134,10 @@ async def test_edit_invalid_url_returns_form_with_error(client: AsyncClient, db_
             "apprise_url": "not-valid",
             "events": ["change_detected"],
         },
-        headers={"HX-Request": "true"},
     )
     assert resp.status_code == 200
     assert b"error" in resp.content.lower() or b"invalid" in resp.content.lower()
-    assert resp.headers.get("HX-Retarget") is not None
+    assert b"Edit" in resp.content
 
 
 @pytest.mark.integration
@@ -257,3 +256,39 @@ async def test_duplicate_404_for_unknown_id(client: AsyncClient):
 
     resp = await client.post(f"/notifications/{ULID()}/duplicate", headers={"HX-Request": "true"})
     assert resp.status_code == 404
+
+
+@pytest.mark.integration
+async def test_notification_edit_page_loads(client: AsyncClient, db_session):
+    tpl = await _make_template(db_session, title="Edit Me")
+    await db_session.commit()
+    resp = await client.get(f"/notifications/{tpl.id}/edit")
+    assert resp.status_code == 200
+    assert b"Edit Me" in resp.content
+    assert b"apprise_url" in resp.content
+
+
+@pytest.mark.integration
+async def test_edit_template_redirects_on_success(client: AsyncClient, db_session):
+    tpl = await _make_template(db_session)
+    await db_session.commit()
+    resp = await client.post(
+        f"/notifications/{tpl.id}/edit",
+        data={"title": "Updated", "apprise_url": VALID_URL, "events": ["change_detected"]},
+        follow_redirects=False,
+    )
+    assert resp.status_code == 303
+    assert resp.headers["location"] == "/notifications"
+
+
+@pytest.mark.integration
+async def test_edit_template_rerenders_page_on_error(client: AsyncClient, db_session):
+    tpl = await _make_template(db_session)
+    await db_session.commit()
+    resp = await client.post(
+        f"/notifications/{tpl.id}/edit",
+        data={"title": "X", "apprise_url": "not-a-valid-url", "events": ["change_detected"]},
+        follow_redirects=False,
+    )
+    assert resp.status_code == 200
+    assert b"Edit" in resp.content

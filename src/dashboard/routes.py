@@ -1491,6 +1491,122 @@ async def domain_nc_defaults_assign_row(
     )
 
 
+@router.get("/domains/{domain_name}/notifications/new")
+async def domain_notification_new_page(
+    request: Request,
+    domain_name: str,
+    session: AsyncSession = Depends(get_db_session),
+):
+    """Full page: create a new notification template for a domain."""
+    domain = await session.scalar(select(Domain).where(Domain.name == domain_name))
+    if not domain:
+        raise HTTPException(status_code=404, detail="Domain not found")
+    return templates.TemplateResponse(
+        request,
+        "pages/domain_notification_new.html",
+        {
+            "domain_name": domain_name,
+            "apprise_plugins": list_plugins(),
+            "title": None,
+            "events": None,
+            "content_config": None,
+            "error": None,
+        },
+    )
+
+
+@router.post("/domains/{domain_name}/notifications/new")
+async def domain_notification_create(
+    request: Request,
+    domain_name: str,
+    session: AsyncSession = Depends(get_db_session),
+):
+    """Create a NotificationTemplate and link to domain. Redirects on success."""
+    domain = await session.scalar(select(Domain).where(Domain.name == domain_name))
+    if not domain:
+        raise HTTPException(status_code=404, detail="Domain not found")
+
+    form = await request.form()
+    title = str(form.get("title") or "").strip()
+    events = form.getlist("events")
+    schema_val = form.get("plugin_schema") or ""
+
+    _cc = _parse_content_config_from_form(form)
+    _parsed_config = ContentConfig.model_validate(_cc) if _cc else None
+
+    def _page_error(msg: str):
+        return templates.TemplateResponse(
+            request,
+            "pages/domain_notification_new.html",
+            {
+                "domain_name": domain_name,
+                "apprise_plugins": list_plugins(),
+                "title": title,
+                "events": events,
+                "content_config": _parsed_config,
+                "error": msg,
+            },
+        )
+
+    if not title:
+        return _page_error("Title is required.")
+
+    if schema_val:
+        tokens = {
+            key[4:]: str(value)
+            for key, value in form.items()
+            if key.startswith("tok_") and str(value).strip()
+        }
+        try:
+            variant_raw = form.get("variant")
+            variant_index = int(variant_raw) if variant_raw is not None else None
+            apprise_url = assemble_url(schema_val, tokens, variant_index=variant_index)
+        except ValueError as exc:
+            return _page_error(str(exc))
+    else:
+        apprise_url = str(form.get("apprise_url") or "")
+        try:
+            validate_apprise_url(apprise_url)
+        except ValueError as exc:
+            return _page_error(str(exc))
+
+    try:
+        validate_event_list(events)
+    except ValueError as exc:
+        return _page_error(str(exc))
+
+    hint = get_service_name(schema_val) if schema_val else extract_channel_hint(apprise_url)
+    tpl = NotificationTemplate(
+        title=title,
+        apprise_url=encrypt_apprise_url(apprise_url),
+        channel_hint=hint,
+        events=events,
+        is_global_default=False,
+        is_active=True,
+        content_config=_cc,
+    )
+    session.add(tpl)
+    await session.flush()
+    session.add(DomainNcRef(domain_name=domain_name, template_id=tpl.id))
+    audit(
+        session,
+        EventType.NOTIFICATION_TEMPLATE_CREATED,
+        template_id=str(tpl.id),
+        title=title,
+        channel_hint=hint,
+        source="domain_dashboard",
+        domain_name=domain_name,
+    )
+    audit(
+        session,
+        EventType.DOMAIN_NC_DEFAULT_ADDED,
+        domain_name=domain_name,
+        template_id=str(tpl.id),
+    )
+    await session.commit()
+    return RedirectResponse(url=f"/domains/{domain_name}", status_code=303)
+
+
 @router.get("/domains/{domain_name}/nc-defaults/add-template-row")
 async def domain_nc_defaults_add_template_row(
     request: Request,

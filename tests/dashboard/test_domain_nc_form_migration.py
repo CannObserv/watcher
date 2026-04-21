@@ -144,3 +144,37 @@ class TestDomainNcCreateErrorPathPreservesContentConfig:
             r'name="content_config__include_significance"[^>]*\bvalue="1"[^>]*\bchecked',
             resp.text,
         ), "include_significance should persist through the error re-render"
+
+
+@pytest.mark.integration
+class TestDomainNcNewPage:
+    async def test_new_page_loads(self, client: AsyncClient, db_session):
+        await _ensure_domain(db_session, "example.com")
+        resp = await client.get("/domains/example.com/notifications/new")
+        assert resp.status_code == 200
+        assert b"plugin_schema" in resp.content
+        assert b"example.com" in resp.content
+
+    async def test_create_redirects_on_success(self, client: AsyncClient, db_session):
+        await _ensure_domain(db_session, "example.com")
+        resp = await client.post(
+            "/domains/example.com/notifications/new",
+            data={
+                "title": "Domain Alert",
+                "apprise_url": "json://hooks.example.com/notify",
+                "events": ["change_detected"],
+            },
+            follow_redirects=False,
+        )
+        assert resp.status_code == 303
+        assert "/domains/example.com" in resp.headers["location"]
+
+    async def test_create_rerenders_page_on_error(self, client: AsyncClient, db_session):
+        await _ensure_domain(db_session, "example.com")
+        resp = await client.post(
+            "/domains/example.com/notifications/new",
+            data={"title": "", "apprise_url": "json://x", "events": ["change_detected"]},
+            follow_redirects=False,
+        )
+        assert resp.status_code == 200
+        assert b"Title is required" in resp.content

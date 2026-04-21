@@ -73,14 +73,10 @@
         Domain
       </h4>
       <div class="flex items-center gap-2">
-        <button
-          hx-get="/domains/{{ domain_name }}/nc-defaults/add-template-row"
-          hx-target="#domain-nc-tbody"
-          hx-swap="afterbegin"
-          hx-on::before-request="if(document.getElementById('domain-nc-add-row')){event.preventDefault();}"
-          class="btn btn-secondary text-xs min-h-[44px] htmx-request:opacity-60">
+        <a href="/domains/{{ domain_name }}/notifications/new"
+           class="btn btn-secondary text-xs min-h-[44px]">
           + Create New
-        </button>
+        </a>
         <button
           {% if has_assignable %}
           hx-get="/domains/{{ domain_name }}/nc-defaults/assign-row"

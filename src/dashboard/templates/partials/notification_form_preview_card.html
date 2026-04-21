@@ -28,12 +28,16 @@
     </label>
   </div>
 
+  {# hx-target="this" is REQUIRED — without it, HTMX walks up to the parent
+     <form> which has hx-target="#templates-tbody" (or similar) for its
+     Save submit, and the preview response would wipe the outer list. #}
   <div id="nf-preview-pane-{{ form_id }}"
        class="min-h-[8rem]"
        aria-live="polite"
        hx-post="/notifications/preview"
        hx-trigger="change delay:300ms from:closest form, keyup delay:500ms from:closest form, load delay:100ms"
        hx-include="closest form"
+       hx-target="this"
        hx-swap="innerHTML">
     <p class="text-sm text-gray-500 dark:text-gray-400">Loading preview…</p>
   </div>

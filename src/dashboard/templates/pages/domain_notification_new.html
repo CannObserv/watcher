@@ -85,7 +85,7 @@
     </div>
   </fieldset>
 
-  {% with form_id="dn-new-" ~ domain_name, content_config=content_config %}
+  {% with form_id="dn-new-" ~ (domain_name|replace('.', '-')), content_config=content_config %}
   {% include "partials/notification_form_content_card.html" %}
   {% include "partials/notification_form_overrides_card.html" %}
   {% include "partials/notification_form_preview_card.html" %}

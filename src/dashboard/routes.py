@@ -2023,7 +2023,7 @@ async def watch_notification_create(
         channel_hint=config.channel_hint,
     )
     await session.commit()
-    return RedirectResponse(url=f"/watches/{watch_id}#notifications", status_code=303)
+    return RedirectResponse(url=f"/watches/{watch_id}#watch-notifications", status_code=303)
 
 
 @router.post("/watches/{watch_id}/notifications/{config_id}/toggle")

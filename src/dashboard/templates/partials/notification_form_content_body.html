@@ -142,10 +142,10 @@
                 hx-include="closest form"
                 hx-target="#{{ body_area_id }}"
                 hx-swap="innerHTML"
-                {% if event_type is defined %}
+                {% if event_type is defined and event_type %}
                 hx-vals='{"preview_event": "{{ event_type }}"}'
                 {% else %}
-                hx-vals='js:{preview_event: document.querySelector("select[name=preview_event]")?.value || "change_detected"}'
+                hx-vals='js:{preview_event: this.form?.querySelector("select[name=preview_event]")?.value || "change_detected"}'
                 {% endif %}>
           Seed from toggles
         </button>

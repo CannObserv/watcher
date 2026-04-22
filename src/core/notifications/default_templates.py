@@ -58,6 +58,18 @@ TEMPLATE_VARIABLES: list[TemplateVariable] = [
         "change_detected",
     ),
     TemplateVariable("removed", "list[str]", "Labels of removed sections", "change_detected"),
+    TemplateVariable(
+        "diff_snippet",
+        "str",
+        "Pre-rendered diff lines (capped at ~10 entries)",
+        "change_detected",
+    ),
+    TemplateVariable(
+        "diff_full",
+        "str",
+        "Pre-rendered diff lines (all entries)",
+        "change_detected",
+    ),
     TemplateVariable("change_id", "str", "ULID of the change for URLs", "change_detected"),
     TemplateVariable(
         "change_url", "str", "Direct dashboard URL for this change", "change_detected"

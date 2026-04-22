@@ -13,6 +13,12 @@ from src.core.notifications.events import EVENT_TITLES, WatchEvent, WatchEventTy
 _jinja_env = Environment(autoescape=False)
 _jinja_env_strict = Environment(autoescape=False, undefined=StrictUndefined)
 
+# Default cap for the `diff_snippet` template variable. Mirrors the default of
+# `ContentOptions.diff_snippet_lines` — when a custom user template references
+# `{{ diff_snippet }}`, they get a sensibly-bounded slice rather than a wall of
+# entries. Use `{{ diff_full }}` for the unbounded version.
+_DEFAULT_DIFF_SNIPPET_CAP = 10
+
 
 def render_template(template_str: str, context: dict) -> str:
     """Render a Jinja2 template string with the given context.
@@ -81,6 +87,8 @@ def build_template_context(event: WatchEvent) -> dict:
         "event_label": EVENT_TITLES[event.event_type.value],
         "change_summary": _compute_change_summary(event),
         "change_url": change_url,
+        "diff_snippet": _render_diff_lines(event.metadata, max_entries=_DEFAULT_DIFF_SNIPPET_CAP),
+        "diff_full": _render_diff_lines(event.metadata, max_entries=None),
     }
     ctx.update(event.metadata)
     return ctx
@@ -175,11 +183,14 @@ def build_body(event: WatchEvent, options: ContentOptions, *, strict: bool = Fal
     return "\n\n".join(parts)
 
 
-def _build_diff_section(metadata: dict, options: ContentOptions) -> str:
-    """Format chunk-level change summary. Returns empty string if no diff data."""
-    if not (options.include_diff_snippet or options.include_diff_full):
-        return ""
+def _render_diff_lines(metadata: dict, *, max_entries: int | None) -> str:
+    """Format chunk-level change summary. Returns empty string if no diff data.
 
+    `max_entries=None` means no cap (include every entry). A positive int caps
+    the total number of lines to include. Used by both `_build_diff_section`
+    (with options.diff_snippet_lines) and `build_template_context` (to expose
+    the rendered text as `diff_snippet` / `diff_full` template variables).
+    """
     added = metadata.get("added", [])
     removed = metadata.get("removed", [])
     modified = metadata.get("modified", [])
@@ -193,14 +204,27 @@ def _build_diff_section(metadata: dict, options: ContentOptions) -> str:
     for label in removed:
         entries.append(f"  - {label}")
     for item in modified:
-        pct = int(item["similarity"] * 100)
-        entries.append(f"  ~ {item['label']} ({pct}% similar)")
+        label = item.get("label")
+        if not label:
+            continue
+        similarity = item.get("similarity")
+        if similarity is None:
+            entries.append(f"  ~ {label}")
+        else:
+            entries.append(f"  ~ {label} ({int(similarity * 100)}% similar)")
 
-    # Snippet mode: limit total entries; full mode: no limit (include_diff_full supersedes)
-    if not options.include_diff_full:
-        entries = entries[: options.diff_snippet_lines]
+    if max_entries is not None:
+        entries = entries[:max_entries]
 
     return "Changed sections:\n" + "\n".join(entries)
+
+
+def _build_diff_section(metadata: dict, options: ContentOptions) -> str:
+    """Format chunk-level change summary for the toggle-driven body builder."""
+    if not (options.include_diff_snippet or options.include_diff_full):
+        return ""
+    cap = None if options.include_diff_full else options.diff_snippet_lines
+    return _render_diff_lines(metadata, max_entries=cap)
 
 
 def _build_temporal_section(metadata: dict) -> str:

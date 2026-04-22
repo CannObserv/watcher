@@ -380,6 +380,8 @@ class TestBuildTemplateContext:
             "event_label",
             "change_summary",
             "change_url",
+            "diff_snippet",
+            "diff_full",
         }
 
     def test_event_label_matches_event_titles(self):
@@ -420,6 +422,38 @@ class TestBuildTemplateContext:
         event = make_event(metadata={})
         ctx = build_template_context(event)
         assert ctx["change_url"] == ""
+
+    def test_diff_snippet_populated_when_diff_present(self):
+        event = make_event(metadata=CHANGE_META)
+        ctx = build_template_context(event)
+        assert ctx["diff_snippet"].startswith("Changed sections:")
+        assert "+ Licenses" in ctx["diff_snippet"]
+        assert "- Hours" in ctx["diff_snippet"]
+        assert "~ Contact Info (85% similar)" in ctx["diff_snippet"]
+
+    def test_diff_full_populated_when_diff_present(self):
+        event = make_event(metadata=CHANGE_META)
+        ctx = build_template_context(event)
+        assert ctx["diff_full"].startswith("Changed sections:")
+        assert "+ Licenses" in ctx["diff_full"]
+
+    def test_diff_snippet_capped_at_default(self):
+        # 12 added entries: snippet caps at 10, full keeps all 12.
+        meta = {"added": [f"item-{i}" for i in range(12)], "removed": [], "modified": []}
+        event = make_event(metadata=meta)
+        ctx = build_template_context(event)
+        assert "+ item-0" in ctx["diff_snippet"]
+        assert "+ item-9" in ctx["diff_snippet"]
+        assert "+ item-10" not in ctx["diff_snippet"]
+        # full version contains all
+        assert "+ item-10" in ctx["diff_full"]
+        assert "+ item-11" in ctx["diff_full"]
+
+    def test_diff_snippet_empty_when_no_diff_data(self):
+        event = make_event(metadata={})
+        ctx = build_template_context(event)
+        assert ctx["diff_snippet"] == ""
+        assert ctx["diff_full"] == ""
 
 
 class TestBuildBodyWithTemplates:

@@ -59,6 +59,9 @@ TEMPLATE_VARIABLES: list[TemplateVariable] = [
     ),
     TemplateVariable("removed", "list[str]", "Labels of removed sections", "change_detected"),
     TemplateVariable("change_id", "str", "ULID of the change for URLs", "change_detected"),
+    TemplateVariable(
+        "change_url", "str", "Direct dashboard URL for this change", "change_detected"
+    ),
     TemplateVariable("significance", "float", "Change magnitude 0.0–1.0", "change_detected"),
     # watch_error-only
     TemplateVariable("status_code", "int", "HTTP status code returned", "watch_error"),
@@ -138,6 +141,7 @@ ADDITIVE_BODY_SNIPPETS: dict[str, str] = {
         "/watches/{{ watch_id }}/changes/{{ change_id }}"
         "{%- endif %}"
     ),
+    "watch_url": f"Watch URL: {APP_URL}/watches/{{{{ watch_id }}}}",
     "tags": "{%- if tags %}Tags: {{ tags | join(', ') }}{%- endif %}",
     "description": ("{%- if description %}Description: {{ description }}{%- endif %}"),
 }
@@ -170,6 +174,7 @@ def compose_body_prefill(event_type: str, options: ContentOptions) -> str:
         "last_changed_at",
         "significance",
         "change_dashboard_url",
+        "watch_url",
         "tags",
         "description",
     ):

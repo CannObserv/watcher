@@ -43,6 +43,25 @@ async def test_notification_new_page_loads(client: AsyncClient):
 
 
 @pytest.mark.integration
+async def test_notification_new_page_has_links_section_with_watch_url_toggle(
+    client: AsyncClient,
+):
+    """The Content card's Links section exposes Watch URL + Change URL toggles."""
+    resp = await client.get("/notifications/new")
+    assert resp.status_code == 200
+    body = resp.content.decode()
+    # Section heading renamed Link -> Links
+    assert ">Links<" in body
+    # New Watch URL toggle present
+    assert "content_config__include_watch_url" in body
+    assert ">\n            Watch URL\n          </label>" in body or "Watch URL" in body
+    # Existing toggle relabelled to "Change URL"
+    assert ">\n            Change URL\n          </label>" in body or "Change URL" in body
+    # Legacy label gone
+    assert "Dashboard link (change URL)" not in body
+
+
+@pytest.mark.integration
 async def test_create_template_redirects_on_success(client: AsyncClient, db_session):
     resp = await client.post(
         "/notifications/new",

@@ -91,13 +91,21 @@
       </div>
 
       <div class="sm:col-span-2">
-        <h5 class="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400 mb-2">Link</h5>
-        <label class="flex items-center gap-2 text-gray-700 dark:text-gray-300 cursor-pointer">
-          <input type="checkbox" name="{{ prefix }}include_change_dashboard_url" value="1"
-                 {% if opts and opts.include_change_dashboard_url %}checked{% endif %}
-                 class="rounded border-gray-300 dark:border-gray-600">
-          Dashboard link (change URL)
-        </label>
+        <h5 class="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400 mb-2">Links</h5>
+        <div class="space-y-2">
+          <label class="flex items-center gap-2 text-gray-700 dark:text-gray-300 cursor-pointer">
+            <input type="checkbox" name="{{ prefix }}include_watch_url" value="1"
+                   {% if opts and opts.include_watch_url %}checked{% endif %}
+                   class="rounded border-gray-300 dark:border-gray-600">
+            Watch URL
+          </label>
+          <label class="flex items-center gap-2 text-gray-700 dark:text-gray-300 cursor-pointer">
+            <input type="checkbox" name="{{ prefix }}include_change_dashboard_url" value="1"
+                   {% if opts and opts.include_change_dashboard_url %}checked{% endif %}
+                   class="rounded border-gray-300 dark:border-gray-600">
+            Change URL
+          </label>
+        </div>
       </div>
 
     </div>

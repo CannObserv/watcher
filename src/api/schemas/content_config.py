@@ -34,6 +34,9 @@ class ContentOptions(BaseModel):
     include_change_dashboard_url: bool = False
     """Include a direct link to the change detail page in the dashboard."""
 
+    include_watch_url: bool = False
+    """Include the watch URL as a dedicated link line in the body."""
+
     include_tags: bool = False
     """Include the watch's tags list in the body."""
 

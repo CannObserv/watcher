@@ -158,6 +158,7 @@ class TestPerEventOverrides:
                 f"content_config__override__{et}__include_last_changed_at": "1",
                 f"content_config__override__{et}__include_significance": "1",
                 f"content_config__override__{et}__include_change_dashboard_url": "1",
+                f"content_config__override__{et}__include_watch_url": "1",
                 f"content_config__override__{et}__include_tags": "1",
                 f"content_config__override__{et}__include_description": "1",
             }
@@ -171,5 +172,19 @@ class TestPerEventOverrides:
         assert ov["include_last_changed_at"] is True
         assert ov["include_significance"] is True
         assert ov["include_change_dashboard_url"] is True
+        assert ov["include_watch_url"] is True
         assert ov["include_tags"] is True
         assert ov["include_description"] is True
+
+
+class TestWatchUrlToggle:
+    def test_watch_url_toggle_returns_config(self):
+        result = _parse_content_config_from_form(
+            _form(**{"content_config__include_watch_url": "1"})
+        )
+        assert result is not None
+        assert result["default"]["include_watch_url"] is True
+
+    def test_default_watch_url_is_false(self):
+        result = _parse_content_config_from_form(_form(**{_SNIPPET: "1"}))
+        assert result["default"]["include_watch_url"] is False

@@ -70,6 +70,8 @@ def build_template_context(event: WatchEvent) -> dict:
     string otherwise. User body templates referencing it on other event types
     will render blank.
     """
+    change_id = event.metadata.get("change_id")
+    change_url = f"{APP_URL}/watches/{event.watch_id}/changes/{change_id}" if change_id else ""
     ctx = {
         "watch_id": event.watch_id,
         "watch_name": event.watch_name,
@@ -78,6 +80,7 @@ def build_template_context(event: WatchEvent) -> dict:
         "occurred_at": event.occurred_at,
         "event_label": EVENT_TITLES[event.event_type.value],
         "change_summary": _compute_change_summary(event),
+        "change_url": change_url,
     }
     ctx.update(event.metadata)
     return ctx
@@ -130,6 +133,9 @@ def build_body(event: WatchEvent, options: ContentOptions, *, strict: bool = Fal
     diff_section = _build_diff_section(event.metadata, options)
     if diff_section:
         parts.append(diff_section)
+
+    if options.include_watch_url:
+        parts.append(_build_watch_url_section(event.watch_id))
 
     if options.include_temporal_context:
         temporal = _build_temporal_section(event.metadata)
@@ -235,6 +241,11 @@ def _build_change_url_section(watch_id: str, metadata: dict) -> str:
     if not change_id:
         return ""
     return f"View change: {APP_URL}/watches/{watch_id}/changes/{change_id}"
+
+
+def _build_watch_url_section(watch_id: str) -> str:
+    """Format the dedicated watch URL line."""
+    return f"Watch URL: {APP_URL}/watches/{watch_id}"
 
 
 def _build_tags_section(metadata: dict) -> str:

@@ -13,11 +13,11 @@ from src.core.notifications.events import EVENT_TITLES, WatchEvent, WatchEventTy
 _jinja_env = Environment(autoescape=False)
 _jinja_env_strict = Environment(autoescape=False, undefined=StrictUndefined)
 
-# Default cap for the `diff_snippet` template variable. Mirrors the default of
-# `ContentOptions.diff_snippet_lines` — when a custom user template references
-# `{{ diff_snippet }}`, they get a sensibly-bounded slice rather than a wall of
-# entries. Use `{{ diff_full }}` for the unbounded version.
-_DEFAULT_DIFF_SNIPPET_CAP = 10
+# Default cap for the `diff_snippet` template variable. Lifted from the
+# Pydantic field default so the two stay in lockstep — when a custom user
+# template references `{{ diff_snippet }}`, they get a sensibly-bounded slice
+# rather than a wall of entries. Use `{{ diff_full }}` for the unbounded version.
+_DEFAULT_DIFF_SNIPPET_CAP: int = ContentOptions.model_fields["diff_snippet_lines"].default
 
 
 def render_template(template_str: str, context: dict) -> str:
@@ -76,8 +76,7 @@ def build_template_context(event: WatchEvent) -> dict:
     string otherwise. User body templates referencing it on other event types
     will render blank.
     """
-    change_id = event.metadata.get("change_id")
-    change_url = f"{APP_URL}/watches/{event.watch_id}/changes/{change_id}" if change_id else ""
+    change_url = _format_change_url(event.watch_id, event.metadata.get("change_id"))
     ctx = {
         "watch_id": event.watch_id,
         "watch_name": event.watch_name,
@@ -259,12 +258,24 @@ def _build_significance_section(metadata: dict) -> str:
     return f"Significance: {int(sig * 100)}%"
 
 
-def _build_change_url_section(watch_id: str, metadata: dict) -> str:
-    """Format dashboard URL for a change. Returns empty string if change_id absent."""
-    change_id = metadata.get("change_id")
+def _format_change_url(watch_id: str, change_id: str | None) -> str:
+    """Build the dashboard URL for a specific change, or empty string if no change_id.
+
+    Single source of truth shared by `build_template_context` (exposes the URL
+    as the `change_url` template variable) and `_build_change_url_section`
+    (which prefixes "View change: " for the toggle-driven body builder).
+    """
     if not change_id:
         return ""
-    return f"View change: {APP_URL}/watches/{watch_id}/changes/{change_id}"
+    return f"{APP_URL}/watches/{watch_id}/changes/{change_id}"
+
+
+def _build_change_url_section(watch_id: str, metadata: dict) -> str:
+    """Format the "View change: …" line. Returns empty string if change_id absent."""
+    url = _format_change_url(watch_id, metadata.get("change_id"))
+    if not url:
+        return ""
+    return f"View change: {url}"
 
 
 def _build_watch_url_section(watch_id: str) -> str:

@@ -147,13 +147,8 @@ ADDITIVE_BODY_SNIPPETS: dict[str, str] = {
         "Significance: {{ (significance * 100) | int }}%"
         "{%- endif %}"
     ),
-    "change_dashboard_url": (
-        "{%- if change_id %}"
-        f"View change: {APP_URL}"
-        "/watches/{{ watch_id }}/changes/{{ change_id }}"
-        "{%- endif %}"
-    ),
-    "watch_url": f"Watch URL: {APP_URL}/watches/{{{{ watch_id }}}}",
+    "change_dashboard_url": "{%- if change_url %}View change: {{ change_url }}{%- endif %}",
+    "watch_url": f"Watch URL: {APP_URL}" + "/watches/{{ watch_id }}",
     "tags": "{%- if tags %}Tags: {{ tags | join(', ') }}{%- endif %}",
     "description": ("{%- if description %}Description: {{ description }}{%- endif %}"),
 }
@@ -177,7 +172,9 @@ def compose_body_prefill(event_type: str, options: ContentOptions) -> str:
     Jinja template the user can edit.
     """
     parts: list[str] = [DEFAULT_BODY_TEMPLATES[event_type]]
-    # Iterate in a stable order matching the form layout.
+    # Iterate in a stable order matching the form layout. The Links section
+    # in notification_form_content_body.html lists Watch URL first, Change
+    # URL second — keep prefill output in the same order.
     for name in (
         "diff_snippet",
         "diff_full",
@@ -185,8 +182,8 @@ def compose_body_prefill(event_type: str, options: ContentOptions) -> str:
         "domain",
         "last_changed_at",
         "significance",
-        "change_dashboard_url",
         "watch_url",
+        "change_dashboard_url",
         "tags",
         "description",
     ):

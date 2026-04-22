@@ -174,15 +174,17 @@ class TestPreviewEventSelectorFiltering:
         assert options == ["watch_error", "watch_archived"]
         assert _extract_preview_selected(resp.text) == "watch_error"
 
-    async def test_new_template_page_preview_select_falls_back_to_all_events(
+    async def test_new_template_page_preview_select_falls_back_to_change_detected_only(
         self, client: AsyncClient
     ):
-        """GET /notifications/new (events=None) — selector lists all 8 events."""
+        """GET /notifications/new (events=None) — selector lists only change_detected.
+
+        Matches the form's default-checked state: when no events are submitted,
+        notification_new.html checks change_detected only. Initial preview
+        selector should be consistent with that, not list all 8 events.
+        """
         resp = await client.get("/notifications/new")
         assert resp.status_code == 200
         options = _extract_preview_select_options(resp.text)
-        # Fallback: all known event_titles.keys() — at least change_detected present.
-        assert "change_detected" in options
-        # Sanity: more than one option (multiple event types).
-        assert len(options) > 1
+        assert options == ["change_detected"]
         assert _extract_preview_selected(resp.text) == "change_detected"

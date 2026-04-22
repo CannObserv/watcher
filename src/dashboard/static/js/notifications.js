@@ -43,13 +43,9 @@
    * `input[name=events]` and adds/removes <option>s in any
    * `select[data-preview-event-select]` inside the same <form>.
    *
-   * Falls back to listing all known event values when nothing is
-   * subscribed (so the selector always has at least one option).
-   * The full canonical (value, label, eventTitle) list is captured
-   * once at page load from whatever options are present in the
-   * initial <select>, plus any subscribe checkboxes the user can
-   * toggle on. This keeps the partial self-contained — no need to
-   * inject a JSON blob.
+   * When nothing is subscribed, falls back to a single `change_detected`
+   * option — matches the server-render fallback in
+   * notification_form_preview_card.html and the *_new.html form default.
    */
   function syncPreviewEventSelect(form) {
     var selects = form.querySelectorAll("select[data-preview-event-select]");
@@ -67,9 +63,15 @@
       allEvents.push({ value: cb.value, label: label });
       if (cb.checked && !cb.disabled) subscribed.push(cb.value);
     });
-    var pool = subscribed.length
-      ? allEvents.filter(function (e) { return subscribed.indexOf(e.value) !== -1; })
-      : allEvents;
+    var pool;
+    if (subscribed.length) {
+      pool = allEvents.filter(function (e) { return subscribed.indexOf(e.value) !== -1; });
+    } else {
+      // Empty-set fallback: just change_detected, matching the server-side
+      // template fallback and the *_new.html form default.
+      pool = allEvents.filter(function (e) { return e.value === "change_detected"; });
+      if (!pool.length && allEvents.length) pool = [allEvents[0]];
+    }
     selects.forEach(function (sel) {
       // Preserve the user's current selection if still in the pool;
       // otherwise default to change_detected if present, else first.

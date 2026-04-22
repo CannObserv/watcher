@@ -52,11 +52,9 @@ async def test_notification_new_page_has_links_section_with_watch_url_toggle(
     body = resp.content.decode()
     # Section heading renamed Link -> Links
     assert ">Links<" in body
-    # New Watch URL toggle present
-    assert "content_config__include_watch_url" in body
-    assert ">\n            Watch URL\n          </label>" in body or "Watch URL" in body
-    # Existing toggle relabelled to "Change URL"
-    assert ">\n            Change URL\n          </label>" in body or "Change URL" in body
+    # Both toggle inputs present (asserts the actual checkbox, not just text).
+    assert 'name="content_config__include_watch_url"' in body
+    assert 'name="content_config__include_change_dashboard_url"' in body
     # Legacy label gone
     assert "Dashboard link (change URL)" not in body
 

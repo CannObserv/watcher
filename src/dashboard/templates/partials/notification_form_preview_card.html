@@ -10,8 +10,9 @@
 
   Issue #109 — the <select name="preview_event"> is filtered to only
   the subscribed events (so the user can't preview an event the config would
-  never fire on). Fallback to all events when nothing is subscribed (e.g. on
-  a fresh "new" page) so the selector always has at least one option.
+  never fire on). When no events are subscribed yet (fresh "new" page), fall
+  back to a single `change_detected` option to match the *_new.html pages,
+  which default that checkbox to checked.
 
   `subscribed_events` is set by notification_form.html; on the standalone
   *_new.html pages (which include this card directly) we fall back to the
@@ -25,12 +26,10 @@
 {% for et_value, et_label in event_titles.items() %}
   {% if et_value in _subscribed %}{{ _filtered_events.append((et_value, et_label)) or "" }}{% endif %}
 {% endfor %}
-{# Fallback: if no events subscribed, list all (fresh add) so the selector
-   always has at least one option. #}
+{# Empty-set fallback: just change_detected. Matches the form's default-
+   checked state on *_new.html pages so the initial render is consistent. #}
 {% if not _filtered_events %}
-  {% for et_value, et_label in event_titles.items() %}
-    {{ _filtered_events.append((et_value, et_label)) or "" }}
-  {% endfor %}
+  {{ _filtered_events.append(("change_detected", event_titles["change_detected"])) or "" }}
 {% endif %}
 {# Default-selected option: change_detected if subscribed, else first. #}
 {% set _default_selected = "change_detected" if "change_detected" in _filtered_events|map(attribute=0)|list else _filtered_events[0][0] %}

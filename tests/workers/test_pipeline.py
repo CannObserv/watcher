@@ -302,6 +302,63 @@ class TestRunCheckPipeline:
         assert "change_id" in result2["change_metadata"]
         assert result2["change_metadata"]["change_id"] == result2["change_id"]
 
+    async def test_modified_metadata_items_have_label_and_similarity(self, db_session, tmp_path):
+        """Producer-side invariant: every `modified` item in change_metadata has both
+        `label` (truthy str) and `similarity` (numeric 0.0–1.0).
+
+        The notification body builder relies on this shape — defensive guards in
+        `_render_diff_lines` exist only to tolerate minimal-shape test data; real
+        production output should not need them.
+        """
+        watch = Watch(name="ModInvariant", url="https://example.com", content_type=ContentType.HTML)
+        db_session.add(watch)
+        await db_session.flush()
+
+        storage = LocalStorage(base_dir=tmp_path)
+        # V1 with two distinct paragraphs to anchor chunks.
+        await _run_check_pipeline(
+            watch=watch,
+            raw_content=(
+                b"<html><body>"
+                b"<p>The quick brown fox jumps over the lazy dog</p>"
+                b"<p>Pack my box with five dozen liquor jugs</p>"
+                b"</body></html>"
+            ),
+            fetcher_used="http",
+            fetch_duration_ms=100,
+            storage=storage,
+            session=db_session,
+        )
+        # V2: tweak one paragraph slightly so the differ classifies it MODIFIED
+        # (similar enough to match, not identical).
+        result2 = await _run_check_pipeline(
+            watch=watch,
+            raw_content=(
+                b"<html><body>"
+                b"<p>The quick brown fox jumps over the lazy dog</p>"
+                b"<p>Pack my box with five dozen liquor jars</p>"
+                b"</body></html>"
+            ),
+            fetcher_used="http",
+            fetch_duration_ms=100,
+            storage=storage,
+            session=db_session,
+        )
+        modified = result2["change_metadata"].get("modified", [])
+        assert modified, "Test scenario must produce at least one MODIFIED chunk"
+        for item in modified:
+            assert isinstance(item, dict)
+            assert isinstance(item.get("label"), str) and item["label"], (
+                f"modified item missing/empty label: {item!r}"
+            )
+            similarity = item.get("similarity")
+            assert isinstance(similarity, int | float), (
+                f"modified item missing similarity: {item!r}"
+            )
+            assert 0.0 <= float(similarity) <= 1.0, (
+                f"modified item similarity out of range: {item!r}"
+            )
+
     async def test_change_insert_updates_last_changed_at(self, db_session, tmp_path):
         """DB trigger stamps watches.last_changed_at when a Change row is inserted."""
         watch = Watch(name="Trigger", url="https://example.com", content_type=ContentType.HTML)

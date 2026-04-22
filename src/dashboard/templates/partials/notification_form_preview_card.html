@@ -5,9 +5,35 @@
   Expects:
     form_id: str
     content_config: ContentConfig | None (used to mark overridden events in selector)
+    events:  list[str] | None (subscribed event values; from outer form context)
   Uses Jinja global: event_titles.
+
+  Issue #109 — the <select name="preview_event"> is filtered to only
+  the subscribed events (so the user can't preview an event the config would
+  never fire on). Fallback to all events when nothing is subscribed (e.g. on
+  a fresh "new" page) so the selector always has at least one option.
+
+  `subscribed_events` is set by notification_form.html; on the standalone
+  *_new.html pages (which include this card directly) we fall back to the
+  outer-context `events` variable.
 #}
 {% set _overrides_map = content_config.overrides if content_config else {} %}
+{% set _subscribed = (subscribed_events if subscribed_events is defined else events) or [] %}
+{# Filter event_titles to only subscribed events, preserving the canonical
+   ordering from EVENT_TITLES. #}
+{% set _filtered_events = [] %}
+{% for et_value, et_label in event_titles.items() %}
+  {% if et_value in _subscribed %}{{ _filtered_events.append((et_value, et_label)) or "" }}{% endif %}
+{% endfor %}
+{# Fallback: if no events subscribed, list all (fresh add) so the selector
+   always has at least one option. #}
+{% if not _filtered_events %}
+  {% for et_value, et_label in event_titles.items() %}
+    {{ _filtered_events.append((et_value, et_label)) or "" }}
+  {% endfor %}
+{% endif %}
+{# Default-selected option: change_detected if subscribed, else first. #}
+{% set _default_selected = "change_detected" if "change_detected" in _filtered_events|map(attribute=0)|list else _filtered_events[0][0] %}
 
 <section class="rounded-md border border-gray-200 dark:border-gray-700 p-4 bg-white dark:bg-gray-800"
          aria-labelledby="preview-h-{{ form_id }}">
@@ -18,9 +44,9 @@
       {# No hx-* attrs on the select itself — the outer #nf-preview-pane div's
          `change from:closest form` trigger already picks up selector changes,
          debounced at 300ms. Avoids firing two overlapping preview POSTs. #}
-      <select name="preview_event" class="form-input text-xs py-1">
-        {% for et_value, et_label in event_titles.items() %}
-        <option value="{{ et_value }}" {% if et_value == "change_detected" %}selected{% endif %}>
+      <select name="preview_event" class="form-input text-xs py-1" data-preview-event-select>
+        {% for et_value, et_label in _filtered_events %}
+        <option value="{{ et_value }}" {% if et_value == _default_selected %}selected{% endif %}>
           {{ et_label }}{% if et_value in _overrides_map %} •{% endif %}
         </option>
         {% endfor %}

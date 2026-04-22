@@ -1,5 +1,6 @@
 """Integration tests for the /notifications dashboard page (template library CRUD UI)."""
 
+import re
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -126,8 +127,6 @@ async def test_edit_invalid_url_returns_page_with_error(client: AsyncClient, db_
 @pytest.mark.integration
 async def test_edit_error_preserves_events(client: AsyncClient, db_session):
     """POST /{id}/edit with invalid URL rerenders edit page with submitted events intact."""
-    import re
-
     # Template stored with only change_detected; submit watch_error as well
     tpl = await _make_template(db_session, "EventTest")
 

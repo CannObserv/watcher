@@ -8,12 +8,16 @@ from datetime import datetime
 
 
 class WatchEventType(enum.StrEnum):
-    """Notification event type codes. Values mirror the notification_event_types DB table."""
+    """Notification event type codes. Values mirror the notification_event_types DB table.
 
+    Declaration order is roughly temporal (lifecycle order); drives UI presentation
+    via EVENT_TITLES iteration. StrEnum values are stable and persisted in the DB.
+    """
+
+    WATCH_CREATED = "watch_created"
     CHANGE_DETECTED = "change_detected"
     WATCH_ERROR = "watch_error"
     WATCH_RECOVERED = "watch_recovered"
-    WATCH_CREATED = "watch_created"
     WATCH_PAUSED = "watch_paused"
     WATCH_RESUMED = "watch_resumed"
     WATCH_ARCHIVED = "watch_archived"
@@ -21,24 +25,26 @@ class WatchEventType(enum.StrEnum):
 
 
 EVENT_TITLES: dict[str, str] = {
+    WatchEventType.WATCH_CREATED.value: "Watch Created",
     WatchEventType.CHANGE_DETECTED.value: "Change Detected",
     WatchEventType.WATCH_ERROR.value: "Watch Error",
     WatchEventType.WATCH_RECOVERED.value: "Watch Recovered",
-    WatchEventType.WATCH_CREATED.value: "Watch Created",
     WatchEventType.WATCH_PAUSED.value: "Watch Paused",
     WatchEventType.WATCH_RESUMED.value: "Watch Resumed",
     WatchEventType.WATCH_ARCHIVED.value: "Watch Archived",
     WatchEventType.WATCH_DELETED.value: "Watch Deleted",
 }
 """Public mapping of event type value strings to human-readable titles.
-Used as a Jinja global in the dashboard and as the `event_label` template context field."""
+Iteration order is roughly temporal (watch lifecycle); drives the Subscribe
+checkbox order in the notification form. Used as a Jinja global in the dashboard
+and as the `event_label` template context field."""
 
 
 _APPRISE_TYPES: dict[WatchEventType, str] = {
+    WatchEventType.WATCH_CREATED: "info",
     WatchEventType.CHANGE_DETECTED: "info",
     WatchEventType.WATCH_ERROR: "failure",
     WatchEventType.WATCH_RECOVERED: "success",
-    WatchEventType.WATCH_CREATED: "info",
     WatchEventType.WATCH_PAUSED: "warning",
     WatchEventType.WATCH_RESUMED: "info",
     WatchEventType.WATCH_ARCHIVED: "warning",

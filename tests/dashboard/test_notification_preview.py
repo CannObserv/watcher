@@ -116,3 +116,23 @@ class TestPreviewEndpoint:
         # Fragment should not contain <html> or <body> tags
         assert "<html" not in resp.text.lower()
         assert "<!doctype" not in resp.text.lower()
+
+    async def test_preview_body_and_title_have_break_all_for_long_urls(self, client: AsyncClient):
+        """Issue #106 — long URLs in title/body must wrap inside the preview card.
+
+        whitespace-pre-wrap preserves newlines but will not break unspaced URLs.
+        The body <pre> and the title <div> must include `break-all` so a long
+        URL wraps instead of overflowing the card width.
+        """
+        resp = await client.post(
+            "/notifications/preview",
+            data={"preview_event": "change_detected"},
+        )
+        assert resp.status_code == 200
+        body = resp.text
+        # Body <pre> tag must include break-all alongside whitespace-pre-wrap.
+        assert "whitespace-pre-wrap" in body
+        assert "break-all" in body
+        # And specifically: the body <pre> still has whitespace-pre-wrap so
+        # newlines are preserved.
+        assert 'class="whitespace-pre-wrap' in body or "whitespace-pre-wrap " in body

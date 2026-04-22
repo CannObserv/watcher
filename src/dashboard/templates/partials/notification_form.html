@@ -15,7 +15,7 @@
 #}
 {% set subscribed_events = events or [] %}
 
-<div class="notification-form-layout {% if show_preview %}lg:grid lg:grid-cols-[minmax(0,1fr)_24rem] lg:gap-6{% endif %}"
+<div class="notification-form-layout {% if show_preview %}lg:grid lg:grid-cols-[minmax(0,3fr)_minmax(20rem,2fr)] lg:gap-8{% endif %}"
      data-form-id="{{ form_id }}">
 
   <div class="space-y-4 min-w-0">

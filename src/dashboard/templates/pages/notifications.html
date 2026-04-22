@@ -3,13 +3,7 @@
 {% block content %}
 <div class="flex justify-between items-center mb-6">
   <h2 class="text-2xl font-bold text-gray-900 dark:text-white">Notification Templates</h2>
-  <button
-    hx-get="/notifications/add-row"
-    hx-target="#templates-tbody"
-    hx-swap="afterbegin"
-    class="btn btn-primary">
-    New Template
-  </button>
+  <a href="/notifications/new" class="btn btn-primary">New Template</a>
 </div>
 
 <p class="text-sm text-gray-600 dark:text-gray-400 mb-6">
@@ -36,20 +30,4 @@
     </tbody>
   </table>
 </div>
-
-<script>
-  document.addEventListener('DOMContentLoaded', function () {
-    const editId = new URLSearchParams(window.location.search).get('edit');
-    if (!editId) return;
-    if (!document.getElementById('tpl-' + editId)) return;
-    htmx.ajax('GET', '/notifications/' + editId + '/edit-form', {
-      target: '#tpl-' + editId,
-      swap: 'outerHTML'
-    });
-    setTimeout(function () {
-      const el = document.getElementById('tpl-' + editId);
-      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    }, 150);
-  });
-</script>
 {% endblock %}

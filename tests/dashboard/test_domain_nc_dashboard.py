@@ -188,7 +188,7 @@ class TestDomainSubTable:
 
 
 class TestCreateAndLinkTemplate:
-    """POST /domains/{name}/nc-defaults/new — create template and auto-link via DomainNcRef."""
+    """POST /domains/{name}/notifications/new — create template and auto-link via DomainNcRef."""
 
     @pytest.mark.integration
     async def test_create_new_template_links_to_domain(self, client: AsyncClient, db_session):
@@ -200,16 +200,16 @@ class TestCreateAndLinkTemplate:
         await _make_domain(db_session, "create-link.example.com")
 
         resp = await client.post(
-            "/domains/create-link.example.com/nc-defaults/new",
+            "/domains/create-link.example.com/notifications/new",
             data={
                 "title": "NewDomainTemplate",
                 "apprise_url": VALID_URL,
                 "channel_hint": "json",
                 "events": ["change_detected"],
             },
-            headers={"HX-Request": "true"},
+            follow_redirects=False,
         )
-        assert resp.status_code == 200
+        assert resp.status_code == 303
 
         tpl = await db_session.scalar(
             select(NotificationTemplate).where(NotificationTemplate.title == "NewDomainTemplate")
@@ -229,21 +229,21 @@ class TestCreateAndLinkTemplate:
     async def test_create_new_template_returns_refreshed_partial(
         self, client: AsyncClient, db_session
     ):
-        """Response after create is the refreshed nc-defaults partial."""
+        """Response after create redirects to the domain page."""
         await _make_domain(db_session, "create-refresh.example.com")
 
         resp = await client.post(
-            "/domains/create-refresh.example.com/nc-defaults/new",
+            "/domains/create-refresh.example.com/notifications/new",
             data={
                 "title": "RefreshedTemplate",
                 "apprise_url": VALID_URL,
                 "channel_hint": "json",
                 "events": ["change_detected"],
             },
-            headers={"HX-Request": "true"},
+            follow_redirects=False,
         )
-        assert resp.status_code == 200
-        assert b"RefreshedTemplate" in resp.content
+        assert resp.status_code == 303
+        assert "create-refresh.example.com" in resp.headers["location"]
 
     @pytest.mark.integration
     async def test_create_requires_title(self, client: AsyncClient, db_session):
@@ -251,28 +251,28 @@ class TestCreateAndLinkTemplate:
         await _make_domain(db_session, "create-error.example.com")
 
         resp = await client.post(
-            "/domains/create-error.example.com/nc-defaults/new",
+            "/domains/create-error.example.com/notifications/new",
             data={
                 "title": "",
                 "apprise_url": VALID_URL,
                 "channel_hint": "json",
                 "events": ["change_detected"],
             },
-            headers={"HX-Request": "true"},
+            follow_redirects=False,
         )
         assert resp.status_code in (200, 422)
 
     @pytest.mark.integration
     async def test_create_unknown_domain_returns_404(self, client: AsyncClient, db_session):
         resp = await client.post(
-            "/domains/no-such.example.com/nc-defaults/new",
+            "/domains/no-such.example.com/notifications/new",
             data={
                 "title": "ShouldFail",
                 "apprise_url": VALID_URL,
                 "channel_hint": "json",
                 "events": ["change_detected"],
             },
-            headers={"HX-Request": "true"},
+            follow_redirects=False,
         )
         assert resp.status_code == 404
 

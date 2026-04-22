@@ -85,23 +85,6 @@ async def test_create_template_invalid_url_returns_form_with_error(client: Async
 
 
 @pytest.mark.integration
-async def test_edit_form_returns_200_with_title(client: AsyncClient, db_session):
-    """GET /{id}/edit-form returns the edit form pre-filled with template title."""
-    tpl = await _make_template(db_session, "EditMe")
-    resp = await client.get(f"/notifications/{tpl.id}/edit-form", headers={"HX-Request": "true"})
-    assert resp.status_code == 200
-    assert b"EditMe" in resp.content
-
-
-@pytest.mark.integration
-async def test_edit_form_404_for_unknown_id(client: AsyncClient):
-    from ulid import ULID
-
-    resp = await client.get(f"/notifications/{ULID()}/edit-form", headers={"HX-Request": "true"})
-    assert resp.status_code == 404
-
-
-@pytest.mark.integration
 async def test_edit_saves_title_and_redirects(client: AsyncClient, db_session):
     """POST /{id}/edit with valid data updates the template and redirects to /notifications."""
     tpl = await _make_template(db_session, "OldTitle")

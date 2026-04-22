@@ -1607,123 +1607,6 @@ async def domain_notification_create(
     return RedirectResponse(url=f"/domains/{domain_name}", status_code=303)
 
 
-@router.get("/domains/{domain_name}/nc-defaults/add-template-row")
-async def domain_nc_defaults_add_template_row(
-    request: Request,
-    domain_name: str,
-    session: AsyncSession = Depends(get_db_session),
-):
-    """HTMX: inline create-and-link form for a new domain-scoped notification template."""
-    domain = await session.scalar(select(Domain).where(Domain.name == domain_name))
-    if not domain:
-        raise HTTPException(status_code=404, detail="Domain not found")
-    apprise_plugins = list_plugins()
-    return templates.TemplateResponse(
-        request,
-        "partials/domain_nc_template_add_row.html",
-        {
-            "domain_name": domain_name,
-            "apprise_plugins": apprise_plugins,
-            "content_config": None,
-        },
-    )
-
-
-@router.post("/domains/{domain_name}/nc-defaults/new")
-async def domain_nc_defaults_create_template(
-    request: Request,
-    domain_name: str,
-    session: AsyncSession = Depends(get_db_session),
-):
-    """Create a NotificationTemplate and link it to this domain via DomainNcRef."""
-    if request.headers.get("HX-Request") != "true":
-        return RedirectResponse(url=f"/domains/{domain_name}", status_code=303)
-
-    domain = await session.scalar(select(Domain).where(Domain.name == domain_name))
-    if not domain:
-        raise HTTPException(status_code=404, detail="Domain not found")
-
-    form = await request.form()
-    title = str(form.get("title") or "").strip()
-    events = form.getlist("events")
-    schema_val = form.get("plugin_schema") or ""
-    apprise_plugins = list_plugins()
-
-    _cc = _parse_content_config_from_form(form)
-    _parsed_config = ContentConfig.model_validate(_cc) if _cc else None
-
-    def _error(msg: str):
-        return templates.TemplateResponse(
-            request,
-            "partials/domain_nc_template_add_row.html",
-            {
-                "domain_name": domain_name,
-                "apprise_plugins": apprise_plugins,
-                "error": msg,
-                "content_config": _parsed_config,
-            },
-            headers={"HX-Retarget": "#domain-nc-add-row", "HX-Reswap": "outerHTML"},
-        )
-
-    if not title:
-        return _error("Title is required.")
-
-    if schema_val:
-        tokens = {
-            key[4:]: str(value)
-            for key, value in form.items()
-            if key.startswith("tok_") and str(value).strip()
-        }
-        try:
-            variant_raw = form.get("variant")
-            variant_index = int(variant_raw) if variant_raw is not None else None
-            apprise_url = assemble_url(schema_val, tokens, variant_index=variant_index)
-        except ValueError as exc:
-            return _error(str(exc))
-    else:
-        apprise_url = str(form.get("apprise_url") or "")
-        try:
-            validate_apprise_url(apprise_url)
-        except ValueError as exc:
-            return _error(str(exc))
-
-    try:
-        validate_event_list(events)
-    except ValueError as exc:
-        return _error(str(exc))
-
-    hint = get_service_name(schema_val) if schema_val else extract_channel_hint(apprise_url)
-    tpl = NotificationTemplate(
-        title=title,
-        apprise_url=encrypt_apprise_url(apprise_url),
-        channel_hint=hint,
-        events=events,
-        is_global_default=False,
-        is_active=True,
-        content_config=_cc,
-    )
-    session.add(tpl)
-    await session.flush()
-    session.add(DomainNcRef(domain_name=domain_name, template_id=tpl.id))
-    audit(
-        session,
-        EventType.NOTIFICATION_TEMPLATE_CREATED,
-        template_id=str(tpl.id),
-        title=title,
-        channel_hint=hint,
-        source="domain_dashboard",
-        domain_name=domain_name,
-    )
-    audit(
-        session,
-        EventType.DOMAIN_NC_DEFAULT_ADDED,
-        domain_name=domain_name,
-        template_id=str(tpl.id),
-    )
-    await session.commit()
-    return await _render_domain_nc_defaults(request, domain_name, session)
-
-
 @router.get("/domains/{domain_name}/nc-defaults")
 async def domain_nc_defaults_partial(
     request: Request,
@@ -1986,27 +1869,6 @@ async def watch_notification_new_page(
     )
 
 
-@router.get("/watches/{watch_id}/notifications/add-row")
-async def watch_notification_add_row(
-    request: Request,
-    watch_id: str,
-    session: AsyncSession = Depends(get_db_session),
-):
-    """HTMX partial: inline add-row form for the notifications table."""
-    watch = await get_watch_detail(session, watch_id)
-    if not watch:
-        raise HTTPException(status_code=404, detail="Watch not found")
-    return templates.TemplateResponse(
-        request,
-        "partials/notification_add_row.html",
-        {
-            "watch": watch,
-            "apprise_plugins": list_plugins(),
-            "content_config": None,
-        },
-    )
-
-
 @router.get("/partials/apprise-plugin-form")
 async def partial_apprise_plugin_form(
     request: Request,
@@ -2193,40 +2055,6 @@ async def watch_notification_edit_page(
             "decryption_failed": decryption_failed,
             "content_config": content_config,
             "error": None,
-        },
-    )
-
-
-@router.get("/watches/{watch_id}/notifications/{config_id}/edit-form")
-async def watch_notification_edit_form(
-    request: Request,
-    watch_id: str,
-    config_id: str,
-    session: AsyncSession = Depends(get_db_session),
-):
-    """HTMX partial: edit form for an existing notification config."""
-    watch = await get_watch_detail(session, watch_id)
-    if not watch:
-        raise HTTPException(status_code=404, detail="Watch not found")
-    nc = await session.get(WatchNotificationConfig, parse_ulid(config_id, "Config"))
-    if not nc or nc.watch_id != watch.id:
-        raise HTTPException(status_code=404, detail="Config not found")
-    decryption_failed = False
-    try:
-        decrypted_url = decrypt_apprise_url(nc.apprise_url)
-    except (InvalidToken, ValueError):
-        decrypted_url = ""
-        decryption_failed = True
-    content_config = ContentConfig.model_validate(nc.content_config) if nc.content_config else None
-    return templates.TemplateResponse(
-        request,
-        "partials/notification_edit_form.html",
-        {
-            "watch": watch,
-            "nc": nc,
-            "decrypted_url": decrypted_url,
-            "decryption_failed": decryption_failed,
-            "content_config": content_config,
         },
     )
 
@@ -2889,14 +2717,12 @@ async def notifications_page(
         select(NotificationTemplate).order_by(NotificationTemplate.title)
     )
     notification_templates = result.scalars().all()
-    apprise_plugins = list_plugins()
     return templates.TemplateResponse(
         request,
         "pages/notifications.html",
         {
             "active_page": "notifications",
             "notification_templates": notification_templates,
-            "apprise_plugins": apprise_plugins,
         },
     )
 
@@ -2919,20 +2745,6 @@ async def notification_template_new_page(
             "content_config": None,
             "error": None,
         },
-    )
-
-
-@router.get("/notifications/add-row")
-async def notification_template_add_row(
-    request: Request,
-    session: AsyncSession = Depends(get_db_session),
-):
-    """HTMX: inline add-row form for a new notification template."""
-    apprise_plugins = list_plugins()
-    return templates.TemplateResponse(
-        request,
-        "partials/notification_template_add_row.html",
-        {"apprise_plugins": apprise_plugins, "content_config": None},
     )
 
 
@@ -3060,50 +2872,6 @@ async def notification_template_edit_page(
             "domain_count": domain_count,
             "content_config": content_config,
             "error": None,
-        },
-    )
-
-
-@router.get("/notifications/{template_id}/edit-form")
-async def notification_template_edit_form(
-    request: Request,
-    template_id: str,
-    session: AsyncSession = Depends(get_db_session),
-):
-    """HTMX: edit form for an existing notification template (outerHTML swap on the row)."""
-    result = await session.execute(
-        select(NotificationTemplate).where(
-            NotificationTemplate.id == parse_ulid(template_id, "Template")
-        )
-    )
-    tpl = result.scalar_one_or_none()
-    if not tpl:
-        raise HTTPException(status_code=404, detail="Template not found")
-    decrypted_url = ""
-    decryption_failed = False
-    try:
-        decrypted_url = decrypt_apprise_url(tpl.apprise_url)
-    except (InvalidToken, ValueError):
-        decryption_failed = True
-    watch_count = (
-        await session.scalar(select(func.count()).where(WatchNcRef.template_id == tpl.id)) or 0
-    )
-    domain_count = (
-        await session.scalar(select(func.count()).where(DomainNcRef.template_id == tpl.id)) or 0
-    )
-    content_config = (
-        ContentConfig.model_validate(tpl.content_config) if tpl.content_config else None
-    )
-    return templates.TemplateResponse(
-        request,
-        "partials/notification_template_edit_form.html",
-        {
-            "tpl": tpl,
-            "decrypted_url": decrypted_url,
-            "decryption_failed": decryption_failed,
-            "watch_count": watch_count,
-            "domain_count": domain_count,
-            "content_config": content_config,
         },
     )
 

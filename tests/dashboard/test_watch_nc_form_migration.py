@@ -106,6 +106,24 @@ class TestErrorPathPreservesContentConfig:
             resp.text,
         ), "include_tags should stay checked on edit error re-render"
 
+    async def test_edit_error_preserves_events(self, client: AsyncClient, db_session):
+        watch = await _make_watch(db_session)
+        # NC stored with only change_detected; submit watch_error as well
+        nc = await _make_nc(db_session, watch)
+        resp = await client.post(
+            f"/watches/{watch.id}/notifications/{nc.id}/edit",
+            data={
+                "apprise_url": "not-a-valid-scheme",
+                "events": ["change_detected", "watch_error"],
+            },
+            headers={"HX-Request": "true"},
+        )
+        assert resp.status_code == 200
+        assert re.search(
+            r'name="events"[^>]*value="watch_error"[^>]*checked',
+            resp.text,
+        ), "watch_error should stay checked on edit error re-render"
+
 
 @pytest.mark.integration
 class TestWatchNcNewPage:

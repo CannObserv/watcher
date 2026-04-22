@@ -25,9 +25,9 @@
 
   {% with
     form_id="wnc-" ~ (nc.id|string),
-    title=nc.title,
+    title=submitted_title if submitted_title is defined else nc.title,
     apprise_url=decrypted_url,
-    events=nc.events,
+    events=submitted_events if submitted_events is defined else nc.events,
     show_global_default=False,
     is_global_default=False,
     show_preview=True,

@@ -2089,6 +2089,8 @@ async def watch_notification_edit(
             {
                 "watch": watch,
                 "nc": nc,
+                "submitted_title": title,
+                "submitted_events": events,
                 "decrypted_url": apprise_url,
                 "decryption_failed": False,
                 "content_config": ContentConfig.model_validate(_cc) if _cc else None,
@@ -2106,6 +2108,8 @@ async def watch_notification_edit(
             {
                 "watch": watch,
                 "nc": nc,
+                "submitted_title": title,
+                "submitted_events": events,
                 "decrypted_url": apprise_url,
                 "decryption_failed": False,
                 "content_config": ContentConfig.model_validate(_cc) if _cc else None,
@@ -2917,6 +2921,7 @@ async def notification_template_edit(
                 "active_page": "notifications",
                 "tpl": tpl,
                 "submitted_title": title,
+                "submitted_events": events,
                 "decrypted_url": apprise_url,  # show what was submitted
                 "decryption_failed": False,
                 "watch_count": watch_count,

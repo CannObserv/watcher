@@ -34,7 +34,7 @@
     form_id="tpl-" ~ (tpl.id|string),
     title=submitted_title,
     apprise_url=decrypted_url,
-    events=tpl.events,
+    events=submitted_events if submitted_events is defined else tpl.events,
     show_global_default=True,
     is_global_default=tpl.is_global_default,
     show_preview=True,

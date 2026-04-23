@@ -43,18 +43,19 @@ async def test_notification_new_page_loads(client: AsyncClient):
 
 
 @pytest.mark.integration
-async def test_notification_new_page_has_links_section_with_watch_url_toggle(
+async def test_notification_new_page_link_section_has_change_url_toggle(
     client: AsyncClient,
 ):
-    """The Content card's Links section exposes Watch URL + Change URL toggles."""
+    """The Content card's Link section exposes the Change URL toggle. The
+    Watch URL appears unconditionally in the default body — there is no
+    toggle for it, so the section is singular."""
     resp = await client.get("/notifications/new")
     assert resp.status_code == 200
     body = resp.content.decode()
-    # Section heading renamed Link -> Links
-    assert ">Links<" in body
-    # Both toggle inputs present (asserts the actual checkbox, not just text).
-    assert 'name="content_config__include_watch_url"' in body
+    assert ">Link<" in body
     assert 'name="content_config__include_change_dashboard_url"' in body
+    # No Watch URL toggle — the dashboard link is part of the rich default body.
+    assert 'name="content_config__include_watch_url"' not in body
     # Legacy label gone
     assert "Dashboard link (change URL)" not in body
 

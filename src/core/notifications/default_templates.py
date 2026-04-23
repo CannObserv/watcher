@@ -1,15 +1,19 @@
 """Default Jinja2 templates for notification titles and bodies.
 
-Single source of truth for the built-in, per-event-type defaults. The dispatcher
-renders these directly; user-supplied `title_template` / `body_template` values
-from ContentOptions override them. Keeping defaults here (not as Python code on
-WatchEvent) means the UI can display and pre-fill them exactly as they'll render.
+Single source of truth for the built-in, per-event-type defaults.
+User-supplied `title_template` / `body_template` values from ContentOptions
+override them. Keeping defaults here (not as Python code on WatchEvent)
+means the UI can display and pre-fill them exactly as they'll render.
 
-`ADDITIVE_BODY_SNIPPETS` + `compose_body_prefill()` power the "toggles seed the
-pre-fill" flow: when a user clicks [Edit template] on the body block, the
-textarea is pre-populated with the default body template plus a Jinja snippet
-for every currently-enabled additive toggle — giving the user a complete,
-runnable starting template rather than a blank textarea.
+For most events the dispatcher renders `DEFAULT_BODY_TEMPLATES[event_type]`
+directly through Jinja. The `change_detected` body is the exception:
+`src.core.notifications.content.build_body` composes it line-by-line in
+Python from the shared `CHANGE_DETECTED_HEADER_LINES` and
+`CHANGE_DETECTED_BODY_BLOCK_LINES` tuples (single source of truth) and
+interleaves optional toggle-driven sections (DOMAIN, CHANGE, diff, INTERVAL,
+LAST CHANGED, SIGNIFICANCE, DESCRIPTION, TAGS) at the issue-#104 positions.
+`DEFAULT_BODY_TEMPLATES['change_detected']` is derived from the same tuples
+and serves only as the UI seed (`compose_body_prefill`).
 
 Template context (shared with user templates) is built by
 `src.core.notifications.content.build_template_context`.
@@ -17,7 +21,6 @@ Template context (shared with user templates) is built by
 
 from dataclasses import dataclass
 
-from src.api.schemas.content_config import ContentOptions
 from src.core.notifications.constants import APP_URL
 from src.core.notifications.events import WatchEventType
 
@@ -43,6 +46,12 @@ TEMPLATE_VARIABLES: list[TemplateVariable] = [
     TemplateVariable("event_type", "str", 'Event code (e.g. "change_detected")', "always"),
     TemplateVariable("event_label", "str", 'Human label (e.g. "Change Detected")', "always"),
     TemplateVariable("occurred_at", "datetime", "When the event occurred (UTC)", "always"),
+    TemplateVariable(
+        "occurred_at_iso",
+        "str",
+        "ISO 8601 UTC timestamp (e.g. `2026-04-23T00:38:33Z`)",
+        "always",
+    ),
     # change_detected-only
     TemplateVariable(
         "change_summary",
@@ -91,7 +100,7 @@ expandable [See all variables] reference drawer. Keep in sync with
 `src.core.notifications.content.build_template_context`.
 """
 
-_TITLE = "{{ event_label }}: {{ watch_name }}"
+_TITLE = "[Observo] {{ event_label }}: {{ watch_name }}"
 
 
 DEFAULT_TITLE_TEMPLATES: dict[str, str] = {
@@ -106,8 +115,35 @@ DEFAULT_TITLE_TEMPLATES: dict[str, str] = {
 }
 
 
+# Canonical skeleton for the change_detected default body. Both the seed
+# template (DEFAULT_BODY_TEMPLATES['change_detected']) and the dispatch-time
+# composer (`content.build_body`) consume these tuples — single source of
+# truth for the always-present lines. Toggle-driven sections (DOMAIN, CHANGE,
+# diff, etc.) are interleaved by the composer at the issue #104 positions;
+# the WATCH dashboard link is part of the unconditional skeleton.
+#
+# Composer insertion anchors (see `_build_change_detected_body`):
+#   - DOMAIN inserts into HEADER at index 1 (immediately after watch_name)
+#   - CHANGE appends to HEADER (immediately after WATCH)
+# Reorder these tuples and the composer's index/append calls must follow.
+CHANGE_DETECTED_HEADER_LINES: tuple[str, ...] = (
+    "{{ watch_name }}",
+    "URL: {{ watch_url }}",
+    "TIMESTAMP: {{ occurred_at_iso }}",
+    f"WATCH: {APP_URL}" + "/watches/{{ watch_id }}",
+)
+CHANGE_DETECTED_BODY_BLOCK_LINES: tuple[str, ...] = (
+    "{{ event_label }}",
+    "{{ change_summary }}",
+)
+
+_CHANGE_DETECTED_BODY = (
+    "\n".join(CHANGE_DETECTED_HEADER_LINES) + "\n\n" + "\n".join(CHANGE_DETECTED_BODY_BLOCK_LINES)
+)
+
+
 DEFAULT_BODY_TEMPLATES: dict[str, str] = {
-    WatchEventType.CHANGE_DETECTED.value: "{{ watch_url }} — {{ change_summary }}",
+    WatchEventType.CHANGE_DETECTED.value: _CHANGE_DETECTED_BODY,
     WatchEventType.WATCH_ERROR.value: (
         "{{ watch_url }} returned HTTP {{ status_code | default('unknown') }}"
     ),
@@ -120,73 +156,20 @@ DEFAULT_BODY_TEMPLATES: dict[str, str] = {
 }
 
 
-# Jinja snippets corresponding to ContentOptions `include_<name>` toggles.
-# Each snippet guards on the relevant metadata key so rendering is safe even
-# when the field is absent. Keys match the toggle name (sans `include_`).
-_DIFF_SNIPPET_JINJA = (
-    "{%- if added or removed or modified %}"
-    "\nChanged sections:"
-    "{%- for label in added %}\n  + {{ label }}{%- endfor %}"
-    "{%- for label in removed %}\n  - {{ label }}{%- endfor %}"
-    "{%- for item in modified %}\n  ~ {{ item.label }} "
-    "({{ (item.similarity * 100) | int }}% similar){%- endfor %}"
-    "{%- endif %}"
-)
-
-
-ADDITIVE_BODY_SNIPPETS: dict[str, str] = {
-    "diff_snippet": _DIFF_SNIPPET_JINJA,
-    "diff_full": _DIFF_SNIPPET_JINJA,
-    "temporal_context": (
-        "{%- if check_interval %}Check interval: {{ check_interval }}{%- endif %}"
-    ),
-    "domain": "{%- if effective_domain %}Domain: {{ effective_domain }}{%- endif %}",
-    "last_changed_at": ("{%- if last_changed_at %}Last changed: {{ last_changed_at }}{%- endif %}"),
-    "significance": (
-        "{%- if significance is not none %}"
-        "Significance: {{ (significance * 100) | int }}%"
-        "{%- endif %}"
-    ),
-    "change_dashboard_url": "{%- if change_url %}View change: {{ change_url }}{%- endif %}",
-    "watch_url": f"Watch URL: {APP_URL}" + "/watches/{{ watch_id }}",
-    "tags": "{%- if tags %}Tags: {{ tags | join(', ') }}{%- endif %}",
-    "description": ("{%- if description %}Description: {{ description }}{%- endif %}"),
-}
-
-
 def compose_title_prefill(event_type: str) -> str:
     """Return the default title Jinja template for this event type.
 
     Used to pre-fill the title textarea when a user first clicks [Edit template].
-    There are no additive toggles for titles, so this is just the default.
     """
     return DEFAULT_TITLE_TEMPLATES[event_type]
 
 
-def compose_body_prefill(event_type: str, options: ContentOptions) -> str:
-    """Return the default body Jinja plus enabled additive snippets, joined.
+def compose_body_prefill(event_type: str) -> str:
+    """Return the default body Jinja template for this event type.
 
-    Each currently-enabled `include_<name>` toggle contributes its Jinja snippet
-    from `ADDITIVE_BODY_SNIPPETS`; sections are joined with blank lines, matching
-    the format `build_body` produces at dispatch time. The output is a runnable
-    Jinja template the user can edit.
+    Used by the dashboard "Show default template" UX so the user can copy the
+    skeleton into a custom body_template and edit from there. Toggle state has
+    no effect — toggles drive Python-side interleaving in `build_body`, not
+    the seed template.
     """
-    parts: list[str] = [DEFAULT_BODY_TEMPLATES[event_type]]
-    # Iterate in a stable order matching the form layout. The Links section
-    # in notification_form_content_body.html lists Watch URL first, Change
-    # URL second — keep prefill output in the same order.
-    for name in (
-        "diff_snippet",
-        "diff_full",
-        "temporal_context",
-        "domain",
-        "last_changed_at",
-        "significance",
-        "watch_url",
-        "change_dashboard_url",
-        "tags",
-        "description",
-    ):
-        if getattr(options, f"include_{name}"):
-            parts.append(ADDITIVE_BODY_SNIPPETS[name])
-    return "\n\n".join(parts)
+    return DEFAULT_BODY_TEMPLATES[event_type]

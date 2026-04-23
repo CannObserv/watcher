@@ -47,7 +47,7 @@
    * option — matches the server-render fallback in
    * notification_form_preview_card.html and the *_new.html form default.
    */
-  function syncPreviewEventSelect(form) {
+  function syncPreviewEventSelect(form, hasOverride) {
     var selects = form.querySelectorAll("select[data-preview-event-select]");
     if (!selects.length) return;
     // Build the canonical (value -> label) map from the subscribe
@@ -80,7 +80,9 @@
       var newOptions = pool.map(function (e) {
         var opt = document.createElement("option");
         opt.value = e.value;
-        opt.textContent = e.label;
+        // Restore the override marker (•) that the server renders but that
+        // the checkbox label text doesn't include (issue #113).
+        opt.textContent = e.label + (hasOverride && hasOverride.has(e.value) ? " •" : "");
         return opt;
       });
       var inPool = pool.some(function (e) { return e.value === prev; });
@@ -107,16 +109,25 @@
    * Wire up subscribe-checkbox listeners on every form that contains a
    * preview event selector. Runs at DOMContentLoaded and again after
    * any HTMX swap (to cover late-rendered forms).
+   *
+   * Snapshots the data-has-override set from the server-rendered options
+   * at wire-time so syncPreviewEventSelect can restore the • marker when
+   * it rebuilds options dynamically (issue #113).
    */
   function wirePreviewEventSync(root) {
     (root || document).querySelectorAll("select[data-preview-event-select]").forEach(function (sel) {
       var form = sel.closest("form");
       if (!form || form.dataset.previewSyncWired === "1") return;
       form.dataset.previewSyncWired = "1";
+      // Snapshot which events have overrides from the server-rendered options.
+      var hasOverride = new Set();
+      sel.querySelectorAll("option[data-has-override]").forEach(function (o) {
+        hasOverride.add(o.value);
+      });
       form.addEventListener("change", function (ev) {
         var t = ev.target;
         if (t && t.matches && t.matches('input[type=checkbox][name=events]')) {
-          syncPreviewEventSelect(form);
+          syncPreviewEventSelect(form, hasOverride);
         }
       });
     });

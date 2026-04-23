@@ -45,7 +45,8 @@
          debounced at 300ms. Avoids firing two overlapping preview POSTs. #}
       <select name="preview_event" class="form-input text-xs py-1" data-preview-event-select>
         {% for et_value, et_label in _filtered_events %}
-        <option value="{{ et_value }}" {% if et_value == _default_selected %}selected{% endif %}>
+        <option value="{{ et_value }}" {% if et_value == _default_selected %}selected{% endif %}
+                {% if et_value in _overrides_map %}data-has-override="1"{% endif %}>
           {{ et_label }}{% if et_value in _overrides_map %} •{% endif %}
         </option>
         {% endfor %}

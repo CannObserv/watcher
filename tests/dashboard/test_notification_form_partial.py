@@ -28,6 +28,21 @@ def _extract_preview_select_options(html: str) -> list[str]:
     return re.findall(r'<option[^>]*\bvalue="([^"]+)"', sel_match.group(1))
 
 
+def _extract_preview_override_values(html: str) -> list[str]:
+    """Return option values that have data-has-override inside select[name=preview_event]."""
+    sel_match = re.search(
+        r'<select[^>]*\bname="preview_event"[^>]*>(.*?)</select>',
+        html,
+        flags=re.DOTALL,
+    )
+    if not sel_match:
+        return []
+    return re.findall(
+        r'<option[^>]*\bvalue="([^"]+)"[^>]*\bdata-has-override\b',
+        sel_match.group(1),
+    )
+
+
 def _extract_preview_selected(html: str) -> str | None:
     """Return the value of the selected `<option>` inside `select[name=preview_event]`."""
     sel_match = re.search(
@@ -188,3 +203,45 @@ class TestPreviewEventSelectorFiltering:
         options = _extract_preview_select_options(resp.text)
         assert options == ["change_detected"]
         assert _extract_preview_selected(resp.text) == "change_detected"
+
+
+@pytest.mark.integration
+class TestPreviewEventSelectorOverrideMarker:
+    """Issue #113 — preview <select> options carry data-has-override for JS re-filter.
+
+    When JS rebuilds options on subscribe-toggle, it reads data-has-override from
+    the server-rendered options to decide whether to append the • marker.
+    """
+
+    async def test_overridden_event_option_has_data_attribute(
+        self, client: AsyncClient, db_session
+    ):
+        """An option for an event with an override has data-has-override; others don't."""
+        tpl = await _make_template(
+            db_session,
+            "OverrideMark",
+            events=["change_detected", "watch_error"],
+            content_config={
+                "default": {},
+                "overrides": {
+                    "change_detected": {"include_domain": True},
+                },
+            },
+        )
+        resp = await client.get(f"/notifications/{tpl.id}/edit")
+        assert resp.status_code == 200
+        marked = _extract_preview_override_values(resp.text)
+        assert "change_detected" in marked
+        assert "watch_error" not in marked
+
+    async def test_no_overrides_means_no_data_attribute(self, client: AsyncClient, db_session):
+        """A template with no per-event overrides produces no data-has-override attributes."""
+        tpl = await _make_template(
+            db_session,
+            "NoOverrides",
+            events=["change_detected", "watch_error"],
+        )
+        resp = await client.get(f"/notifications/{tpl.id}/edit")
+        assert resp.status_code == 200
+        marked = _extract_preview_override_values(resp.text)
+        assert marked == []

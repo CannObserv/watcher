@@ -159,6 +159,21 @@ class TestChangeDetectedDefaultBody:
         # Toggle is on but metadata absent → DOMAIN slot skipped.
         assert "DOMAIN" not in body
 
+    def test_seed_template_matches_dispatcher_output_with_default_options(self):
+        """Single-source-of-truth invariant for the change_detected skeleton:
+        rendering DEFAULT_BODY_TEMPLATES['change_detected'] (the UI seed)
+        with default options must equal what build_body produces at dispatch
+        time. Catches drift between the seed shown to the user and the body
+        actually delivered."""
+        from src.core.notifications.default_templates import DEFAULT_BODY_TEMPLATES
+
+        event = make_event(metadata={})  # no optional sections in either path
+        seed_rendered = render_template(
+            DEFAULT_BODY_TEMPLATES["change_detected"], build_template_context(event)
+        )
+        dispatch_output = build_body(event, ContentOptions())
+        assert seed_rendered == dispatch_output
+
 
 class TestDomainSlot:
     def test_renders_between_name_and_url_when_toggle_on_and_metadata_present(self):
@@ -572,6 +587,21 @@ class TestBuildBodyWithTemplates:
         opts = ContentOptions(body_template="{{ unclosed")
         body = build_body(event, opts)
         assert body == "{{ unclosed"
+
+    def test_diff_snippet_in_custom_template_uses_user_cap(self):
+        """User-set diff_snippet_lines must take effect even on the
+        body_template path. build_template_context applies the module
+        default; build_body overrides it with options.diff_snippet_lines so
+        a custom template referencing {{ diff_snippet }} honors the
+        preference."""
+        meta = {"added": [f"item-{i}" for i in range(20)], "removed": [], "modified": []}
+        event = make_event(metadata=meta)
+        opts = ContentOptions(body_template="{{ diff_snippet }}", diff_snippet_lines=3)
+        body = build_body(event, opts)
+        assert "+ item-0" in body
+        assert "+ item-1" in body
+        assert "+ item-2" in body
+        assert "+ item-3" not in body
 
 
 class TestBuildTitle:

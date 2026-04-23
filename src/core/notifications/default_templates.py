@@ -1,18 +1,19 @@
 """Default Jinja2 templates for notification titles and bodies.
 
-Single source of truth for the built-in, per-event-type defaults. The dispatcher
-renders these directly; user-supplied `title_template` / `body_template` values
-from ContentOptions override them. Keeping defaults here (not as Python code on
-WatchEvent) means the UI can display and pre-fill them exactly as they'll render.
+Single source of truth for the built-in, per-event-type defaults.
+User-supplied `title_template` / `body_template` values from ContentOptions
+override them. Keeping defaults here (not as Python code on WatchEvent)
+means the UI can display and pre-fill them exactly as they'll render.
 
-The change_detected default body contains only the always-present skeleton —
-header (watch_name, URL, TIMESTAMP, WATCH dashboard link) and body block
-(event_label, change_summary). Optional toggle-driven sections (DOMAIN, CHANGE,
-diff, INTERVAL, LAST CHANGED, SIGNIFICANCE, DESCRIPTION, TAGS) are interleaved
-in `src.core.notifications.content.build_body` at the issue-#104 positions.
-
-`compose_body_prefill()` returns this skeleton verbatim; the "Show default
-template" UX exposes it as the seed for users editing a custom body_template.
+For most events the dispatcher renders `DEFAULT_BODY_TEMPLATES[event_type]`
+directly through Jinja. The `change_detected` body is the exception:
+`src.core.notifications.content.build_body` composes it line-by-line in
+Python from the shared `CHANGE_DETECTED_HEADER_LINES` and
+`CHANGE_DETECTED_BODY_BLOCK_LINES` tuples (single source of truth) and
+interleaves optional toggle-driven sections (DOMAIN, CHANGE, diff, INTERVAL,
+LAST CHANGED, SIGNIFICANCE, DESCRIPTION, TAGS) at the issue-#104 positions.
+`DEFAULT_BODY_TEMPLATES['change_detected']` is derived from the same tuples
+and serves only as the UI seed (`compose_body_prefill`).
 
 Template context (shared with user templates) is built by
 `src.core.notifications.content.build_template_context`.
@@ -114,20 +115,30 @@ DEFAULT_TITLE_TEMPLATES: dict[str, str] = {
 }
 
 
-# Always-present skeleton for change_detected. Toggle-driven sections (DOMAIN,
-# CHANGE, diff, INTERVAL, LAST CHANGED, SIGNIFICANCE, DESCRIPTION, TAGS) are
-# interleaved by `build_body` in Python at the positions specified by the
-# issue #104 layout. The WATCH: dashboard link is part of the unconditional
-# default — there is no `include_watch_url` toggle.
+# Canonical skeleton for the change_detected default body. Both the seed
+# template (DEFAULT_BODY_TEMPLATES['change_detected']) and the dispatch-time
+# composer (`content.build_body`) consume these tuples — single source of
+# truth for the always-present lines. Toggle-driven sections (DOMAIN, CHANGE,
+# diff, etc.) are interleaved by the composer at the issue #104 positions;
+# the WATCH dashboard link is part of the unconditional skeleton.
+#
+# Composer insertion anchors (see `_build_change_detected_body`):
+#   - DOMAIN inserts into HEADER at index 1 (immediately after watch_name)
+#   - CHANGE appends to HEADER (immediately after WATCH)
+# Reorder these tuples and the composer's index/append calls must follow.
+CHANGE_DETECTED_HEADER_LINES: tuple[str, ...] = (
+    "{{ watch_name }}",
+    "URL: {{ watch_url }}",
+    "TIMESTAMP: {{ occurred_at_iso }}",
+    f"WATCH: {APP_URL}" + "/watches/{{ watch_id }}",
+)
+CHANGE_DETECTED_BODY_BLOCK_LINES: tuple[str, ...] = (
+    "{{ event_label }}",
+    "{{ change_summary }}",
+)
+
 _CHANGE_DETECTED_BODY = (
-    "{{ watch_name }}\n"
-    "URL: {{ watch_url }}\n"
-    "TIMESTAMP: {{ occurred_at_iso }}\n"
-    f"WATCH: {APP_URL}"
-    "/watches/{{ watch_id }}\n"
-    "\n"
-    "{{ event_label }}\n"
-    "{{ change_summary }}"
+    "\n".join(CHANGE_DETECTED_HEADER_LINES) + "\n\n" + "\n".join(CHANGE_DETECTED_BODY_BLOCK_LINES)
 )
 
 

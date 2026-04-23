@@ -7,6 +7,8 @@ from jinja2 import Environment, StrictUndefined, TemplateError
 from src.api.schemas.content_config import ContentConfig, ContentOptions
 from src.core.notifications.constants import APP_URL
 from src.core.notifications.default_templates import (
+    CHANGE_DETECTED_BODY_BLOCK_LINES,
+    CHANGE_DETECTED_HEADER_LINES,
     DEFAULT_BODY_TEMPLATES,
     DEFAULT_TITLE_TEMPLATES,
 )
@@ -145,54 +147,68 @@ def resolve_options(config: ContentConfig | None, event_type: str) -> ContentOpt
 def build_body(event: WatchEvent, options: ContentOptions, *, strict: bool = False) -> str:
     """Compose a notification body from the event and resolved options.
 
-    If `options.body_template` is set, render it as a Jinja2 template and
-    return immediately — toggles do not apply to user-authored templates.
+    Three code paths:
+      1. `options.body_template` set → render the user template (toggles do
+         not apply). The user's `diff_snippet_lines` cap is applied so a
+         template referencing `{{ diff_snippet }}` honors the preference.
+      2. event_type is change_detected → `_build_change_detected_body`
+         composes the body in Python from the shared
+         `CHANGE_DETECTED_HEADER_LINES` / `CHANGE_DETECTED_BODY_BLOCK_LINES`
+         tuples and interleaves toggle-driven sections at the issue #104
+         positions.
+      3. any other event_type → render the entry from `DEFAULT_BODY_TEMPLATES`
+         (a single Jinja line; toggles do not apply).
 
-    Otherwise, the default body is the event's entry from
-    `DEFAULT_BODY_TEMPLATES`. For `change_detected` events specifically, the
-    default skeleton is augmented with toggle-driven sections interleaved at
-    the issue #104 layout positions: DOMAIN after watch_name; CHANGE after
-    WATCH; diff after change_summary; INTERVAL/LAST CHANGED/SIGNIFICANCE
-    grouped together; DESCRIPTION and TAGS last.
-
-    When `strict=True`, template errors propagate — use only for the preview
-    endpoint; the dispatcher path must call with the default `strict=False`.
+    `strict=True` selects the StrictUndefined Jinja env so template errors
+    propagate. Use only for the preview endpoint; the dispatcher path must
+    call with the default `strict=False`. The change_detected default path
+    uses pure Python so `strict` has no effect there.
     """
     render = render_template_strict if strict else render_template
     if options.body_template:
-        return render(options.body_template, build_template_context(event))
+        ctx = build_template_context(event)
+        # User's diff_snippet_lines cap takes precedence over the module
+        # default that build_template_context applies — otherwise the
+        # preference would be silently ignored on the body_template path.
+        ctx["diff_snippet"] = _render_diff_lines(
+            event.metadata, max_entries=options.diff_snippet_lines
+        )
+        return render(options.body_template, ctx)
 
     if event.event_type == WatchEventType.CHANGE_DETECTED:
-        return _build_change_detected_body(event, options, render)
+        return _build_change_detected_body(event, options)
     return render(DEFAULT_BODY_TEMPLATES[event.event_type.value], build_template_context(event))
 
 
-def _build_change_detected_body(event: WatchEvent, options: ContentOptions, render) -> str:
-    """Compose the change_detected body with toggle-driven sections interleaved.
+def _build_change_detected_body(event: WatchEvent, options: ContentOptions) -> str:
+    """Compose the change_detected body following the issue #104 layout.
 
-    Section ordering matches the issue #104 spec: DOMAIN sits between
-    watch_name and the URL line; CHANGE sits between WATCH and the body
-    block; diff sits after change_summary; INTERVAL/LAST CHANGED/SIGNIFICANCE
-    form a stats group; DESCRIPTION and TAGS each get their own paragraph.
+    Header and body-block lines come from the canonical
+    `CHANGE_DETECTED_HEADER_LINES` / `CHANGE_DETECTED_BODY_BLOCK_LINES`
+    tuples in default_templates.py — same source of truth as the seed
+    template returned by `compose_body_prefill`.
+
+    Toggle-driven section anchors:
+      - DOMAIN: header.insert(1, …)  (after watch_name)
+      - CHANGE: header.append(…)     (after WATCH, the last header line)
+      - diff: own paragraph after the body block
+      - INTERVAL / LAST CHANGED / SIGNIFICANCE: grouped in one stats paragraph
+      - DESCRIPTION / TAGS: each its own paragraph, in that order
+
+    Reordering the canonical tuples requires updating the insert/append
+    indices here.
     """
     ctx = build_template_context(event)
     metadata = event.metadata
 
-    # Header block.
-    header = [ctx["watch_name"]]
+    header = [render_template(line, ctx) for line in CHANGE_DETECTED_HEADER_LINES]
     if options.include_domain and metadata.get("effective_domain"):
-        header.append(f"DOMAIN: {metadata['effective_domain']}")
-    header.append(f"URL: {ctx['watch_url']}")
-    header.append(f"TIMESTAMP: {ctx['occurred_at_iso']}")
-    header.append(f"WATCH: {APP_URL}/watches/{ctx['watch_id']}")
+        header.insert(1, f"DOMAIN: {metadata['effective_domain']}")
     if options.include_change_dashboard_url and metadata.get("change_id"):
         header.append(f"CHANGE: {ctx['change_url']}")
 
-    # Body block (always present).
-    body_block = [ctx["event_label"], ctx["change_summary"]]
+    body_block = [render_template(line, ctx) for line in CHANGE_DETECTED_BODY_BLOCK_LINES]
 
-    # Each subsequent paragraph is a list of lines; empty paragraphs are
-    # dropped before joining with blank-line separators.
     paragraphs: list[list[str]] = [header, body_block]
 
     diff_text = _build_diff_text(metadata, options)
@@ -214,10 +230,6 @@ def _build_change_detected_body(event: WatchEvent, options: ContentOptions, rend
     if options.include_tags and metadata.get("tags"):
         paragraphs.append([f"TAGS: {', '.join(metadata['tags'])}"])
 
-    # `render` is unused on the default path — composition is pure Python.
-    # Kept in the signature so the caller doesn't need to special-case it
-    # if a future event type wants a Jinja-only default body.
-    del render
     return "\n\n".join("\n".join(p) for p in paragraphs)
 
 

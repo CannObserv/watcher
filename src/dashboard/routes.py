@@ -107,6 +107,7 @@ def _parse_content_config_from_form(form) -> dict | None:
         include_last_changed_at="content_config__include_last_changed_at" in form,
         include_significance="content_config__include_significance" in form,
         include_change_dashboard_url="content_config__include_change_dashboard_url" in form,
+        include_watch_url="content_config__include_watch_url" in form,
         include_tags="content_config__include_tags" in form,
         include_description="content_config__include_description" in form,
         title_template=title_template,
@@ -121,6 +122,7 @@ def _parse_content_config_from_form(form) -> dict | None:
         or opts.include_last_changed_at
         or opts.include_significance
         or opts.include_change_dashboard_url
+        or opts.include_watch_url
         or opts.include_tags
         or opts.include_description
         or opts.title_template
@@ -138,6 +140,7 @@ def _parse_content_config_from_form(form) -> dict | None:
             include_last_changed_at=f"{prefix}include_last_changed_at" in form,
             include_significance=f"{prefix}include_significance" in form,
             include_change_dashboard_url=f"{prefix}include_change_dashboard_url" in form,
+            include_watch_url=f"{prefix}include_watch_url" in form,
             include_tags=f"{prefix}include_tags" in form,
             include_description=f"{prefix}include_description" in form,
         )
@@ -151,6 +154,7 @@ def _parse_content_config_from_form(form) -> dict | None:
                 et_opts.include_last_changed_at,
                 et_opts.include_significance,
                 et_opts.include_change_dashboard_url,
+                et_opts.include_watch_url,
                 et_opts.include_tags,
                 et_opts.include_description,
             )

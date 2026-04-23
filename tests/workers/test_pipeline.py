@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 from sqlalchemy import select
 
+from src.core.differ import ChangeStatus, ChunkFingerprint, diff_chunks
 from src.core.extractors.base import Chunk
 from src.core.models.change import Change
 from src.core.models.snapshot import Snapshot
@@ -369,6 +370,56 @@ class TestRunCheckPipeline:
 def _make_chunk(text: str, index: int = 0) -> Chunk:
     """Helper to build a Chunk with given text."""
     return Chunk(index=index, chunk_type="text", label=f"chunk-{index}", text=text)
+
+
+class TestModifiedMetadataInvariant:
+    """Producer-side invariant: every `modified` item built from differ output
+    has truthy `label` (str) and numeric `similarity` ∈ [0, 1].
+
+    The notification body builder relies on this shape — defensive guards in
+    `_render_diff_lines` exist only to tolerate minimal-shape test fixtures;
+    real producer output should always satisfy the contract.
+
+    Tests at the differ + producer-mapping boundary (decoupled from extractor,
+    storage, and DB) so future pipeline edits don't have to set up a full
+    end-to-end scenario to catch a shape regression.
+    """
+
+    def test_modified_items_have_label_and_similarity(self):
+        # Two fingerprints sharing index 1 with different content_hash values
+        # guarantee diff_chunks classifies index 1 as MODIFIED (status decided
+        # purely by hash equality — no similarity threshold).
+        previous = [
+            ChunkFingerprint(index=0, label="Stable", content_hash="hA", simhash=0xAAAA),
+            ChunkFingerprint(index=1, label="Drift", content_hash="hB", simhash=0xBBBB),
+        ]
+        current = [
+            ChunkFingerprint(index=0, label="Stable", content_hash="hA", simhash=0xAAAA),
+            ChunkFingerprint(index=1, label="Drift", content_hash="hC", simhash=0xBBBC),
+        ]
+        changes = diff_chunks(previous, current)
+
+        # Mirror the exact mapping used in workers/pipeline.py to assemble
+        # change_metadata["modified"]. If that mapping ever diverges, this
+        # test should be updated alongside it.
+        modified = [
+            {"label": c.chunk_label, "similarity": c.similarity}
+            for c in changes
+            if c.status == ChangeStatus.MODIFIED
+        ]
+
+        assert modified, "Synthetic input must produce at least one MODIFIED chunk"
+        for item in modified:
+            assert isinstance(item["label"], str) and item["label"], (
+                f"modified item missing/empty label: {item!r}"
+            )
+            similarity = item["similarity"]
+            assert isinstance(similarity, int | float), (
+                f"modified item missing similarity: {item!r}"
+            )
+            assert 0.0 <= float(similarity) <= 1.0, (
+                f"modified item similarity out of range: {item!r}"
+            )
 
 
 class TestApplyIgnorePatterns:

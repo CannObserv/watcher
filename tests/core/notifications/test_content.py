@@ -12,6 +12,7 @@ from src.core.notifications.content import (
     _build_last_changed_section,
     _build_significance_section,
     _build_tags_section,
+    _build_watch_url_section,
     build_body,
     build_template_context,
     build_title,
@@ -252,6 +253,24 @@ class TestBuildChangeUrlSection:
         assert "View change" not in body
 
 
+class TestBuildWatchUrlSection:
+    WATCH_ID = "01HV0000000000000000000001"
+
+    def test_returns_correct_url(self):
+        result = _build_watch_url_section(self.WATCH_ID)
+        assert result == f"Watch URL: https://watcher.exe.xyz/watches/{self.WATCH_ID}"
+
+    def test_build_body_includes_watch_url_when_enabled(self):
+        event = make_event()
+        body = build_body(event, ContentOptions(include_watch_url=True))
+        assert f"Watch URL: https://watcher.exe.xyz/watches/{event.watch_id}" in body
+
+    def test_build_body_omits_watch_url_when_disabled(self):
+        event = make_event()
+        body = build_body(event, ContentOptions(include_watch_url=False))
+        assert "Watch URL" not in body
+
+
 class TestBuildTagsSection:
     def test_returns_formatted_tags(self):
         result = _build_tags_section({"tags": ["foo", "bar"]})
@@ -360,6 +379,9 @@ class TestBuildTemplateContext:
             "occurred_at",
             "event_label",
             "change_summary",
+            "change_url",
+            "diff_snippet",
+            "diff_full",
         }
 
     def test_event_label_matches_event_titles(self):
@@ -387,6 +409,75 @@ class TestBuildTemplateContext:
         event = make_event(event_type=WatchEventType.WATCH_PAUSED, metadata={})
         ctx = build_template_context(event)
         assert ctx["change_summary"] == ""
+
+    def test_change_url_populated_when_change_id_present(self):
+        event = make_event(metadata={"change_id": "01HV0000000000000000000099"})
+        ctx = build_template_context(event)
+        assert (
+            ctx["change_url"]
+            == f"https://watcher.exe.xyz/watches/{event.watch_id}/changes/01HV0000000000000000000099"
+        )
+
+    def test_change_url_empty_when_change_id_absent(self):
+        event = make_event(metadata={})
+        ctx = build_template_context(event)
+        assert ctx["change_url"] == ""
+
+    def test_diff_snippet_populated_when_diff_present(self):
+        event = make_event(metadata=CHANGE_META)
+        ctx = build_template_context(event)
+        assert ctx["diff_snippet"].startswith("Changed sections:")
+        assert "+ Licenses" in ctx["diff_snippet"]
+        assert "- Hours" in ctx["diff_snippet"]
+        assert "~ Contact Info (85% similar)" in ctx["diff_snippet"]
+
+    def test_diff_full_populated_when_diff_present(self):
+        event = make_event(metadata=CHANGE_META)
+        ctx = build_template_context(event)
+        assert ctx["diff_full"].startswith("Changed sections:")
+        assert "+ Licenses" in ctx["diff_full"]
+
+    def test_diff_snippet_capped_at_default(self):
+        # 12 added entries: snippet caps at 10, full keeps all 12.
+        meta = {"added": [f"item-{i}" for i in range(12)], "removed": [], "modified": []}
+        event = make_event(metadata=meta)
+        ctx = build_template_context(event)
+        assert "+ item-0" in ctx["diff_snippet"]
+        assert "+ item-9" in ctx["diff_snippet"]
+        assert "+ item-10" not in ctx["diff_snippet"]
+        # full version contains all
+        assert "+ item-10" in ctx["diff_full"]
+        assert "+ item-11" in ctx["diff_full"]
+
+    def test_diff_snippet_empty_when_no_diff_data(self):
+        event = make_event(metadata={})
+        ctx = build_template_context(event)
+        assert ctx["diff_snippet"] == ""
+        assert ctx["diff_full"] == ""
+
+    def test_derived_fields_take_precedence_over_metadata(self):
+        """Metadata keys that collide with derived field names (event_label,
+        change_summary, change_url, diff_snippet, diff_full) must not clobber
+        the values the template builder computed."""
+        event = make_event(
+            metadata={
+                "change_id": "01HV0000000000000000000099",
+                # Hostile metadata keys colliding with every derived field:
+                "event_label": "BOGUS",
+                "change_summary": "BOGUS",
+                "change_url": "BOGUS",
+                "diff_snippet": "BOGUS",
+                "diff_full": "BOGUS",
+            }
+        )
+        ctx = build_template_context(event)
+        assert ctx["event_label"] == EVENT_TITLES[event.event_type.value]
+        assert ctx["change_summary"] == "details pending"
+        assert ctx["change_url"] == (
+            f"https://watcher.exe.xyz/watches/{event.watch_id}/changes/01HV0000000000000000000099"
+        )
+        assert ctx["diff_snippet"] == ""
+        assert ctx["diff_full"] == ""
 
 
 class TestBuildBodyWithTemplates:

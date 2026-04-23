@@ -58,7 +58,22 @@ TEMPLATE_VARIABLES: list[TemplateVariable] = [
         "change_detected",
     ),
     TemplateVariable("removed", "list[str]", "Labels of removed sections", "change_detected"),
+    TemplateVariable(
+        "diff_snippet",
+        "str",
+        "Pre-rendered diff lines (capped at ~10 entries)",
+        "change_detected",
+    ),
+    TemplateVariable(
+        "diff_full",
+        "str",
+        "Pre-rendered diff lines (all entries)",
+        "change_detected",
+    ),
     TemplateVariable("change_id", "str", "ULID of the change for URLs", "change_detected"),
+    TemplateVariable(
+        "change_url", "str", "Direct dashboard URL for this change", "change_detected"
+    ),
     TemplateVariable("significance", "float", "Change magnitude 0.0–1.0", "change_detected"),
     # watch_error-only
     TemplateVariable("status_code", "int", "HTTP status code returned", "watch_error"),
@@ -132,12 +147,8 @@ ADDITIVE_BODY_SNIPPETS: dict[str, str] = {
         "Significance: {{ (significance * 100) | int }}%"
         "{%- endif %}"
     ),
-    "change_dashboard_url": (
-        "{%- if change_id %}"
-        f"View change: {APP_URL}"
-        "/watches/{{ watch_id }}/changes/{{ change_id }}"
-        "{%- endif %}"
-    ),
+    "change_dashboard_url": "{%- if change_url %}View change: {{ change_url }}{%- endif %}",
+    "watch_url": f"Watch URL: {APP_URL}" + "/watches/{{ watch_id }}",
     "tags": "{%- if tags %}Tags: {{ tags | join(', ') }}{%- endif %}",
     "description": ("{%- if description %}Description: {{ description }}{%- endif %}"),
 }
@@ -161,7 +172,9 @@ def compose_body_prefill(event_type: str, options: ContentOptions) -> str:
     Jinja template the user can edit.
     """
     parts: list[str] = [DEFAULT_BODY_TEMPLATES[event_type]]
-    # Iterate in a stable order matching the form layout.
+    # Iterate in a stable order matching the form layout. The Links section
+    # in notification_form_content_body.html lists Watch URL first, Change
+    # URL second — keep prefill output in the same order.
     for name in (
         "diff_snippet",
         "diff_full",
@@ -169,6 +182,7 @@ def compose_body_prefill(event_type: str, options: ContentOptions) -> str:
         "domain",
         "last_changed_at",
         "significance",
+        "watch_url",
         "change_dashboard_url",
         "tags",
         "description",

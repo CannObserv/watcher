@@ -13,6 +13,12 @@ from src.core.notifications.events import EVENT_TITLES, WatchEvent, WatchEventTy
 _jinja_env = Environment(autoescape=False)
 _jinja_env_strict = Environment(autoescape=False, undefined=StrictUndefined)
 
+# Default cap for the `diff_snippet` template variable. Lifted from the
+# Pydantic field default so the two stay in lockstep — when a custom user
+# template references `{{ diff_snippet }}`, they get a sensibly-bounded slice
+# rather than a wall of entries. Use `{{ diff_full }}` for the unbounded version.
+_DEFAULT_DIFF_SNIPPET_CAP: int = ContentOptions.model_fields["diff_snippet_lines"].default
+
 
 def render_template(template_str: str, context: dict) -> str:
     """Render a Jinja2 template string with the given context.
@@ -63,12 +69,21 @@ def _compute_change_summary(event: WatchEvent) -> str:
 def build_template_context(event: WatchEvent) -> dict:
     """Build Jinja2 template context from a WatchEvent.
 
-    Includes metadata keys flattened in, plus derived fields (`event_label`,
-    `change_summary`) that the default templates rely on.
+    Includes metadata keys flattened in, plus derived fields that the default
+    templates rely on:
+      - `event_label` — human-readable event title (always set)
+      - `change_summary` — counts string for change_detected; empty otherwise
+      - `change_url` — dashboard URL when `change_id` is in metadata; empty otherwise
+      - `diff_snippet` — pre-rendered diff lines capped at the same default as
+        `ContentOptions.diff_snippet_lines`; empty when no diff data
+      - `diff_full` — pre-rendered diff lines, uncapped; empty when no diff data
 
-    `change_summary` is populated for `change_detected` events only; empty
-    string otherwise. User body templates referencing it on other event types
+    User templates referencing any of these on events that don't populate them
     will render blank.
+
+    Derived fields are written *after* `metadata.update()` so that an event
+    metadata dict that happens to share a key (e.g., `change_url`) cannot
+    clobber the value the template builder computed.
     """
     ctx = {
         "watch_id": event.watch_id,
@@ -76,10 +91,14 @@ def build_template_context(event: WatchEvent) -> dict:
         "watch_url": event.watch_url,
         "event_type": event.event_type,
         "occurred_at": event.occurred_at,
-        "event_label": EVENT_TITLES[event.event_type.value],
-        "change_summary": _compute_change_summary(event),
     }
     ctx.update(event.metadata)
+    # Derived fields take precedence over any same-named metadata keys.
+    ctx["event_label"] = EVENT_TITLES[event.event_type.value]
+    ctx["change_summary"] = _compute_change_summary(event)
+    ctx["change_url"] = _format_change_url(event.watch_id, event.metadata.get("change_id"))
+    ctx["diff_snippet"] = _render_diff_lines(event.metadata, max_entries=_DEFAULT_DIFF_SNIPPET_CAP)
+    ctx["diff_full"] = _render_diff_lines(event.metadata, max_entries=None)
     return ctx
 
 
@@ -131,6 +150,9 @@ def build_body(event: WatchEvent, options: ContentOptions, *, strict: bool = Fal
     if diff_section:
         parts.append(diff_section)
 
+    if options.include_watch_url:
+        parts.append(_build_watch_url_section(event.watch_id))
+
     if options.include_temporal_context:
         temporal = _build_temporal_section(event.metadata)
         if temporal:
@@ -169,11 +191,14 @@ def build_body(event: WatchEvent, options: ContentOptions, *, strict: bool = Fal
     return "\n\n".join(parts)
 
 
-def _build_diff_section(metadata: dict, options: ContentOptions) -> str:
-    """Format chunk-level change summary. Returns empty string if no diff data."""
-    if not (options.include_diff_snippet or options.include_diff_full):
-        return ""
+def _render_diff_lines(metadata: dict, *, max_entries: int | None) -> str:
+    """Format chunk-level change summary. Returns empty string if no diff data.
 
+    `max_entries=None` means no cap (include every entry). A positive int caps
+    the total number of lines to include. Used by both `_build_diff_section`
+    (with options.diff_snippet_lines) and `build_template_context` (to expose
+    the rendered text as `diff_snippet` / `diff_full` template variables).
+    """
     added = metadata.get("added", [])
     removed = metadata.get("removed", [])
     modified = metadata.get("modified", [])
@@ -187,14 +212,27 @@ def _build_diff_section(metadata: dict, options: ContentOptions) -> str:
     for label in removed:
         entries.append(f"  - {label}")
     for item in modified:
-        pct = int(item["similarity"] * 100)
-        entries.append(f"  ~ {item['label']} ({pct}% similar)")
+        label = item.get("label")
+        if not label:
+            continue
+        similarity = item.get("similarity")
+        if similarity is None:
+            entries.append(f"  ~ {label}")
+        else:
+            entries.append(f"  ~ {label} ({int(similarity * 100)}% similar)")
 
-    # Snippet mode: limit total entries; full mode: no limit (include_diff_full supersedes)
-    if not options.include_diff_full:
-        entries = entries[: options.diff_snippet_lines]
+    if max_entries is not None:
+        entries = entries[:max_entries]
 
     return "Changed sections:\n" + "\n".join(entries)
+
+
+def _build_diff_section(metadata: dict, options: ContentOptions) -> str:
+    """Format chunk-level change summary for the toggle-driven body builder."""
+    if not (options.include_diff_snippet or options.include_diff_full):
+        return ""
+    cap = None if options.include_diff_full else options.diff_snippet_lines
+    return _render_diff_lines(metadata, max_entries=cap)
 
 
 def _build_temporal_section(metadata: dict) -> str:
@@ -229,12 +267,29 @@ def _build_significance_section(metadata: dict) -> str:
     return f"Significance: {int(sig * 100)}%"
 
 
-def _build_change_url_section(watch_id: str, metadata: dict) -> str:
-    """Format dashboard URL for a change. Returns empty string if change_id absent."""
-    change_id = metadata.get("change_id")
+def _format_change_url(watch_id: str, change_id: str | None) -> str:
+    """Build the dashboard URL for a specific change, or empty string if no change_id.
+
+    Single source of truth shared by `build_template_context` (exposes the URL
+    as the `change_url` template variable) and `_build_change_url_section`
+    (which prefixes "View change: " for the toggle-driven body builder).
+    """
     if not change_id:
         return ""
-    return f"View change: {APP_URL}/watches/{watch_id}/changes/{change_id}"
+    return f"{APP_URL}/watches/{watch_id}/changes/{change_id}"
+
+
+def _build_change_url_section(watch_id: str, metadata: dict) -> str:
+    """Format the "View change: …" line. Returns empty string if change_id absent."""
+    url = _format_change_url(watch_id, metadata.get("change_id"))
+    if not url:
+        return ""
+    return f"View change: {url}"
+
+
+def _build_watch_url_section(watch_id: str) -> str:
+    """Format the dedicated watch URL line."""
+    return f"Watch URL: {APP_URL}/watches/{watch_id}"
 
 
 def _build_tags_section(metadata: dict) -> str:

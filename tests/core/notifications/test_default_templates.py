@@ -102,6 +102,15 @@ class TestComposeBodyPrefill:
         for snippet in ADDITIVE_BODY_SNIPPETS.values():
             assert snippet not in result
 
+    def test_lists_watch_url_before_change_dashboard_url(self):
+        """Links-section order (Watch URL then Change URL) must match the form layout
+        in notification_form_content_body.html."""
+        opts = ContentOptions(include_watch_url=True, include_change_dashboard_url=True)
+        result = compose_body_prefill("change_detected", opts)
+        watch_idx = result.index(ADDITIVE_BODY_SNIPPETS["watch_url"])
+        change_idx = result.index(ADDITIVE_BODY_SNIPPETS["change_dashboard_url"])
+        assert watch_idx < change_idx
+
 
 class TestTemplateVariables:
     def test_every_variable_is_a_template_variable_dataclass(self):

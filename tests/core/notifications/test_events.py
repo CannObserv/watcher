@@ -50,6 +50,27 @@ class TestEventTitles:
         assert EVENT_TITLES["change_detected"] == "Change Detected"
         assert EVENT_TITLES["watch_error"] == "Watch Error"
 
+    def test_iteration_order_is_temporal(self):
+        """EVENT_TITLES iterates in roughly temporal lifecycle order.
+
+        Drives the Subscribe checkbox order in the notification form
+        (templates iterate `event_titles.items()`).
+        """
+        assert list(EVENT_TITLES.keys()) == [
+            "watch_created",
+            "change_detected",
+            "watch_error",
+            "watch_recovered",
+            "watch_paused",
+            "watch_resumed",
+            "watch_archived",
+            "watch_deleted",
+        ]
+
+    def test_watch_event_type_iteration_order_matches(self):
+        """WatchEventType declaration order matches EVENT_TITLES order."""
+        assert [et.value for et in WatchEventType] == list(EVENT_TITLES.keys())
+
 
 class TestWatchEventImmutable:
     def test_frozen(self):

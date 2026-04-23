@@ -8,11 +8,11 @@
     events:  list[str] | None (subscribed event values; from outer form context)
   Uses Jinja global: event_titles.
 
-  Issue #109 — the <select name="preview_event"> is filtered to only
-  the subscribed events (so the user can't preview an event the config would
-  never fire on). When no events are subscribed yet (fresh "new" page), fall
-  back to a single `change_detected` option to match the *_new.html pages,
-  which default that checkbox to checked.
+  The <select name="preview_event"> is filtered to only the subscribed events
+  (so the user can't preview an event the config would never fire on). When no
+  events are subscribed yet (fresh "new" page), fall back to a single
+  `change_detected` option to match the *_new.html pages, which default that
+  checkbox to checked.
 
   `subscribed_events` is set by notification_form.html; on the standalone
   *_new.html pages (which include this card directly) we fall back to the

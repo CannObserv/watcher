@@ -38,16 +38,16 @@
   }
 
   /**
-   * Issue #109 — keep the preview event <select> in sync with the
-   * subscribed-events checkboxes. Listens for change events on
-   * `input[name=events]` and adds/removes <option>s in any
-   * `select[data-preview-event-select]` inside the same <form>.
+   * Keep the preview event <select> in sync with the subscribed-events
+   * checkboxes. Listens for change events on `input[name=events]` and
+   * adds/removes <option>s in any `select[data-preview-event-select]`
+   * inside the same <form>.
    *
    * When nothing is subscribed, falls back to a single `change_detected`
    * option — matches the server-render fallback in
    * notification_form_preview_card.html and the *_new.html form default.
    */
-  function syncPreviewEventSelect(form, hasOverride) {
+  function syncPreviewEventSelect(form) {
     var selects = form.querySelectorAll("select[data-preview-event-select]");
     if (!selects.length) return;
     // Build the canonical (value -> label) map from the subscribe
@@ -74,15 +74,25 @@
       pool = allEvents.filter(function (e) { return e.value === "change_detected"; });
     }
     selects.forEach(function (sel) {
+      // Re-read override state from the current options before replacing them.
+      // Writing data-has-override back onto rebuilt options keeps it alive
+      // across subsequent toggles without a full server re-render.
+      var hasOverride = new Set();
+      sel.querySelectorAll("option[data-has-override]").forEach(function (o) {
+        hasOverride.add(o.value);
+      });
       // Preserve the user's current selection if still in the pool;
       // otherwise default to change_detected if present, else first.
       var prev = sel.value;
       var newOptions = pool.map(function (e) {
         var opt = document.createElement("option");
         opt.value = e.value;
-        // Restore the override marker (•) that the server renders but that
-        // the checkbox label text doesn't include (issue #113).
-        opt.textContent = e.label + (hasOverride && hasOverride.has(e.value) ? " •" : "");
+        if (hasOverride.has(e.value)) {
+          opt.dataset.hasOverride = "1";
+          opt.textContent = e.label + " •";
+        } else {
+          opt.textContent = e.label;
+        }
         return opt;
       });
       var inPool = pool.some(function (e) { return e.value === prev; });
@@ -110,24 +120,16 @@
    * preview event selector. Runs at DOMContentLoaded and again after
    * any HTMX swap (to cover late-rendered forms).
    *
-   * Snapshots the data-has-override set from the server-rendered options
-   * at wire-time so syncPreviewEventSelect can restore the • marker when
-   * it rebuilds options dynamically (issue #113).
    */
   function wirePreviewEventSync(root) {
     (root || document).querySelectorAll("select[data-preview-event-select]").forEach(function (sel) {
       var form = sel.closest("form");
       if (!form || form.dataset.previewSyncWired === "1") return;
       form.dataset.previewSyncWired = "1";
-      // Snapshot which events have overrides from the server-rendered options.
-      var hasOverride = new Set();
-      sel.querySelectorAll("option[data-has-override]").forEach(function (o) {
-        hasOverride.add(o.value);
-      });
       form.addEventListener("change", function (ev) {
         var t = ev.target;
         if (t && t.matches && t.matches('input[type=checkbox][name=events]')) {
-          syncPreviewEventSelect(form, hasOverride);
+          syncPreviewEventSelect(form);
         }
       });
     });

@@ -455,6 +455,30 @@ class TestBuildTemplateContext:
         assert ctx["diff_snippet"] == ""
         assert ctx["diff_full"] == ""
 
+    def test_derived_fields_take_precedence_over_metadata(self):
+        """Metadata keys that collide with derived field names (event_label,
+        change_summary, change_url, diff_snippet, diff_full) must not clobber
+        the values the template builder computed."""
+        event = make_event(
+            metadata={
+                "change_id": "01HV0000000000000000000099",
+                # Hostile metadata keys colliding with every derived field:
+                "event_label": "BOGUS",
+                "change_summary": "BOGUS",
+                "change_url": "BOGUS",
+                "diff_snippet": "BOGUS",
+                "diff_full": "BOGUS",
+            }
+        )
+        ctx = build_template_context(event)
+        assert ctx["event_label"] == EVENT_TITLES[event.event_type.value]
+        assert ctx["change_summary"] == "details pending"
+        assert ctx["change_url"] == (
+            f"https://watcher.exe.xyz/watches/{event.watch_id}/changes/01HV0000000000000000000099"
+        )
+        assert ctx["diff_snippet"] == ""
+        assert ctx["diff_full"] == ""
+
 
 class TestBuildBodyWithTemplates:
     def test_body_template_overrides_additive_sections(self):

@@ -74,27 +74,31 @@ def build_template_context(event: WatchEvent) -> dict:
       - `event_label` — human-readable event title (always set)
       - `change_summary` — counts string for change_detected; empty otherwise
       - `change_url` — dashboard URL when `change_id` is in metadata; empty otherwise
-      - `diff_snippet` — pre-rendered diff lines capped at
-        `_DEFAULT_DIFF_SNIPPET_CAP`; empty when no diff data
+      - `diff_snippet` — pre-rendered diff lines capped at the same default as
+        `ContentOptions.diff_snippet_lines`; empty when no diff data
       - `diff_full` — pre-rendered diff lines, uncapped; empty when no diff data
 
     User templates referencing any of these on events that don't populate them
     will render blank.
+
+    Derived fields are written *after* `metadata.update()` so that an event
+    metadata dict that happens to share a key (e.g., `change_url`) cannot
+    clobber the value the template builder computed.
     """
-    change_url = _format_change_url(event.watch_id, event.metadata.get("change_id"))
     ctx = {
         "watch_id": event.watch_id,
         "watch_name": event.watch_name,
         "watch_url": event.watch_url,
         "event_type": event.event_type,
         "occurred_at": event.occurred_at,
-        "event_label": EVENT_TITLES[event.event_type.value],
-        "change_summary": _compute_change_summary(event),
-        "change_url": change_url,
-        "diff_snippet": _render_diff_lines(event.metadata, max_entries=_DEFAULT_DIFF_SNIPPET_CAP),
-        "diff_full": _render_diff_lines(event.metadata, max_entries=None),
     }
     ctx.update(event.metadata)
+    # Derived fields take precedence over any same-named metadata keys.
+    ctx["event_label"] = EVENT_TITLES[event.event_type.value]
+    ctx["change_summary"] = _compute_change_summary(event)
+    ctx["change_url"] = _format_change_url(event.watch_id, event.metadata.get("change_id"))
+    ctx["diff_snippet"] = _render_diff_lines(event.metadata, max_entries=_DEFAULT_DIFF_SNIPPET_CAP)
+    ctx["diff_full"] = _render_diff_lines(event.metadata, max_entries=None)
     return ctx
 
 

@@ -6,6 +6,7 @@ from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from apprise.common import NotifyFormat
 from cryptography.fernet import Fernet
 
 from src.core.notifications.dispatcher import _ASSET, dispatch_event
@@ -224,6 +225,22 @@ class TestDispatchEvent:
         assert "error_for_call_1" not in r2.reason
         assert "error_for_call_2" in r2.reason
         assert "error_for_call_2" not in r1.reason
+
+    async def test_passes_body_format_text_so_html_providers_convert_newlines(self):
+        """body_format=TEXT always passed; Apprise converts newlines to <br/> for HTML providers."""
+        event = make_event()
+        encrypted = make_encrypted_url("json://localhost/notify")
+
+        with patch("src.core.notifications.dispatcher.apprise.Apprise") as MockApprise:
+            instance = MagicMock()
+            instance.add.return_value = True
+            instance.async_notify = AsyncMock(return_value=True)
+            MockApprise.return_value = instance
+
+            await dispatch_event(event, encrypted, body="line one\nline two", title="test title")
+
+        call_kwargs = instance.async_notify.call_args.kwargs
+        assert call_kwargs["body_format"] == NotifyFormat.TEXT
 
     async def test_dispatch_event_passes_body_and_title_verbatim(self):
         """body and title are required kwargs and forwarded to Apprise unchanged."""

@@ -6,6 +6,7 @@ from dataclasses import dataclass
 
 import apprise
 from apprise import AppriseAsset
+from apprise.common import NotifyFormat
 
 from src.core.crypto import decrypt_apprise_url
 from src.core.logging import get_logger
@@ -91,6 +92,7 @@ async def dispatch_event(
             body=body,
             title=title,
             notify_type=event.apprise_notify_type,
+            body_format=NotifyFormat.TEXT,
         )
     finally:
         _capture_ctx.reset(token)

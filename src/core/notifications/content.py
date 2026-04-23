@@ -82,7 +82,9 @@ def _format_occurred_at_iso(dt: datetime) -> str:
     return dt.astimezone(UTC).isoformat().replace("+00:00", "Z")
 
 
-def build_template_context(event: WatchEvent) -> dict:
+def build_template_context(
+    event: WatchEvent, *, diff_snippet_cap: int = _DEFAULT_DIFF_SNIPPET_CAP
+) -> dict:
     """Build Jinja2 template context from a WatchEvent.
 
     Includes metadata keys flattened in, plus derived fields that the default
@@ -91,8 +93,10 @@ def build_template_context(event: WatchEvent) -> dict:
       - `occurred_at_iso` — ISO 8601 UTC timestamp (`...Z`), AGENTS.md format
       - `change_summary` — counts string for change_detected; empty otherwise
       - `change_url` — dashboard URL when `change_id` is in metadata; empty otherwise
-      - `diff_snippet` — pre-rendered diff lines capped at the same default as
-        `ContentOptions.diff_snippet_lines`; empty when no diff data
+      - `diff_snippet` — pre-rendered diff lines capped at `diff_snippet_cap`
+        (module default matches `ContentOptions.diff_snippet_lines` default);
+        empty when no diff data. `build_body` passes `options.diff_snippet_lines`
+        on the body_template path so custom templates honor the user preference.
       - `diff_full` — pre-rendered diff lines, uncapped; empty when no diff data
 
     User templates referencing any of these on events that don't populate them
@@ -115,7 +119,7 @@ def build_template_context(event: WatchEvent) -> dict:
     ctx["occurred_at_iso"] = _format_occurred_at_iso(event.occurred_at)
     ctx["change_summary"] = _compute_change_summary(event)
     ctx["change_url"] = _format_change_url(event.watch_id, event.metadata.get("change_id"))
-    ctx["diff_snippet"] = _render_diff_lines(event.metadata, max_entries=_DEFAULT_DIFF_SNIPPET_CAP)
+    ctx["diff_snippet"] = _render_diff_lines(event.metadata, max_entries=diff_snippet_cap)
     ctx["diff_full"] = _render_diff_lines(event.metadata, max_entries=None)
     return ctx
 
@@ -166,13 +170,10 @@ def build_body(event: WatchEvent, options: ContentOptions, *, strict: bool = Fal
     """
     render = render_template_strict if strict else render_template
     if options.body_template:
-        ctx = build_template_context(event)
-        # User's diff_snippet_lines cap takes precedence over the module
-        # default that build_template_context applies — otherwise the
-        # preference would be silently ignored on the body_template path.
-        ctx["diff_snippet"] = _render_diff_lines(
-            event.metadata, max_entries=options.diff_snippet_lines
-        )
+        # Pass the user's diff_snippet_lines cap through so a custom template
+        # referencing {{ diff_snippet }} honors the preference rather than
+        # silently using the module default.
+        ctx = build_template_context(event, diff_snippet_cap=options.diff_snippet_lines)
         return render(options.body_template, ctx)
 
     if event.event_type == WatchEventType.CHANGE_DETECTED:

@@ -1,5 +1,7 @@
 """Notification body builder — resolves ContentOptions and composes custom bodies."""
 
+from datetime import UTC, datetime
+
 from jinja2 import Environment, StrictUndefined, TemplateError
 
 from src.api.schemas.content_config import ContentConfig, ContentOptions
@@ -66,12 +68,25 @@ def _compute_change_summary(event: WatchEvent) -> str:
     return ", ".join(parts) if parts else "details pending"
 
 
+def _format_occurred_at_iso(dt: datetime) -> str:
+    """Format an event timestamp as ISO 8601 with `Z` suffix (AGENTS.md format).
+
+    Coerces to UTC (treating naive datetimes as UTC) so the output always
+    carries a `Z` suffix and accurately reflects UTC, even if a producer
+    accidentally passed a non-UTC tz-aware datetime.
+    """
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=UTC)
+    return dt.astimezone(UTC).isoformat().replace("+00:00", "Z")
+
+
 def build_template_context(event: WatchEvent) -> dict:
     """Build Jinja2 template context from a WatchEvent.
 
     Includes metadata keys flattened in, plus derived fields that the default
     templates rely on:
       - `event_label` — human-readable event title (always set)
+      - `occurred_at_iso` — ISO 8601 UTC timestamp (`...Z`), AGENTS.md format
       - `change_summary` — counts string for change_detected; empty otherwise
       - `change_url` — dashboard URL when `change_id` is in metadata; empty otherwise
       - `diff_snippet` — pre-rendered diff lines capped at the same default as
@@ -95,6 +110,7 @@ def build_template_context(event: WatchEvent) -> dict:
     ctx.update(event.metadata)
     # Derived fields take precedence over any same-named metadata keys.
     ctx["event_label"] = EVENT_TITLES[event.event_type.value]
+    ctx["occurred_at_iso"] = _format_occurred_at_iso(event.occurred_at)
     ctx["change_summary"] = _compute_change_summary(event)
     ctx["change_url"] = _format_change_url(event.watch_id, event.metadata.get("change_id"))
     ctx["diff_snippet"] = _render_diff_lines(event.metadata, max_entries=_DEFAULT_DIFF_SNIPPET_CAP)
@@ -129,10 +145,15 @@ def resolve_options(config: ContentConfig | None, event_type: str) -> ContentOpt
 def build_body(event: WatchEvent, options: ContentOptions, *, strict: bool = False) -> str:
     """Compose a notification body from the event and resolved options.
 
-    If options.body_template is set, render it as a Jinja2 template and return
-    immediately (no additive sections). Otherwise, the default body for this
-    event type is rendered from DEFAULT_BODY_TEMPLATES and extra sections are
-    appended based on toggle options. Sections are joined with a blank line.
+    If `options.body_template` is set, render it as a Jinja2 template and
+    return immediately — toggles do not apply to user-authored templates.
+
+    Otherwise, the default body is the event's entry from
+    `DEFAULT_BODY_TEMPLATES`. For `change_detected` events specifically, the
+    default skeleton is augmented with toggle-driven sections interleaved at
+    the issue #104 layout positions: DOMAIN after watch_name; CHANGE after
+    WATCH; diff after change_summary; INTERVAL/LAST CHANGED/SIGNIFICANCE
+    grouped together; DESCRIPTION and TAGS last.
 
     When `strict=True`, template errors propagate — use only for the preview
     endpoint; the dispatcher path must call with the default `strict=False`.
@@ -141,63 +162,84 @@ def build_body(event: WatchEvent, options: ContentOptions, *, strict: bool = Fal
     if options.body_template:
         return render(options.body_template, build_template_context(event))
 
-    default_body = render(
-        DEFAULT_BODY_TEMPLATES[event.event_type.value], build_template_context(event)
-    )
-    parts = [default_body]
+    if event.event_type == WatchEventType.CHANGE_DETECTED:
+        return _build_change_detected_body(event, options, render)
+    return render(DEFAULT_BODY_TEMPLATES[event.event_type.value], build_template_context(event))
 
-    diff_section = _build_diff_section(event.metadata, options)
-    if diff_section:
-        parts.append(diff_section)
 
-    if options.include_watch_url:
-        parts.append(_build_watch_url_section(event.watch_id))
+def _build_change_detected_body(event: WatchEvent, options: ContentOptions, render) -> str:
+    """Compose the change_detected body with toggle-driven sections interleaved.
 
-    if options.include_temporal_context:
-        temporal = _build_temporal_section(event.metadata)
-        if temporal:
-            parts.append(temporal)
+    Section ordering matches the issue #104 spec: DOMAIN sits between
+    watch_name and the URL line; CHANGE sits between WATCH and the body
+    block; diff sits after change_summary; INTERVAL/LAST CHANGED/SIGNIFICANCE
+    form a stats group; DESCRIPTION and TAGS each get their own paragraph.
+    """
+    ctx = build_template_context(event)
+    metadata = event.metadata
 
-    if options.include_domain:
-        domain = _build_domain_section(event.metadata)
-        if domain:
-            parts.append(domain)
+    # Header block.
+    header = [ctx["watch_name"]]
+    if options.include_domain and metadata.get("effective_domain"):
+        header.append(f"DOMAIN: {metadata['effective_domain']}")
+    header.append(f"URL: {ctx['watch_url']}")
+    header.append(f"TIMESTAMP: {ctx['occurred_at_iso']}")
+    header.append(f"WATCH: {APP_URL}/watches/{ctx['watch_id']}")
+    if options.include_change_dashboard_url and metadata.get("change_id"):
+        header.append(f"CHANGE: {ctx['change_url']}")
 
-    if options.include_last_changed_at:
-        last_changed = _build_last_changed_section(event.metadata)
-        if last_changed:
-            parts.append(last_changed)
+    # Body block (always present).
+    body_block = [ctx["event_label"], ctx["change_summary"]]
 
-    if options.include_significance:
-        sig = _build_significance_section(event.metadata)
-        if sig:
-            parts.append(sig)
+    # Each subsequent paragraph is a list of lines; empty paragraphs are
+    # dropped before joining with blank-line separators.
+    paragraphs: list[list[str]] = [header, body_block]
 
-    if options.include_change_dashboard_url:
-        url_section = _build_change_url_section(event.watch_id, event.metadata)
-        if url_section:
-            parts.append(url_section)
+    diff_text = _build_diff_text(metadata, options)
+    if diff_text:
+        paragraphs.append(diff_text.splitlines())
 
-    if options.include_tags:
-        tags_section = _build_tags_section(event.metadata)
-        if tags_section:
-            parts.append(tags_section)
+    stats: list[str] = []
+    if options.include_temporal_context and metadata.get("check_interval"):
+        stats.append(f"INTERVAL: {metadata['check_interval']}")
+    if options.include_last_changed_at and metadata.get("last_changed_at"):
+        stats.append(f"LAST CHANGED: {metadata['last_changed_at']}")
+    if options.include_significance and metadata.get("significance") is not None:
+        stats.append(f"SIGNIFICANCE: {int(metadata['significance'] * 100)}%")
+    if stats:
+        paragraphs.append(stats)
 
-    if options.include_description:
-        desc_section = _build_description_section(event.metadata)
-        if desc_section:
-            parts.append(desc_section)
+    if options.include_description and metadata.get("description"):
+        paragraphs.append([f"DESCRIPTION: {metadata['description']}"])
+    if options.include_tags and metadata.get("tags"):
+        paragraphs.append([f"TAGS: {', '.join(metadata['tags'])}"])
 
-    return "\n\n".join(parts)
+    # `render` is unused on the default path — composition is pure Python.
+    # Kept in the signature so the caller doesn't need to special-case it
+    # if a future event type wants a Jinja-only default body.
+    del render
+    return "\n\n".join("\n".join(p) for p in paragraphs)
+
+
+def _build_diff_text(metadata: dict, options: ContentOptions) -> str:
+    """Render the diff block respecting the snippet/full toggles.
+
+    Returns empty string when both diff toggles are off or when there is no
+    diff data at all.
+    """
+    if not (options.include_diff_snippet or options.include_diff_full):
+        return ""
+    cap = None if options.include_diff_full else options.diff_snippet_lines
+    return _render_diff_lines(metadata, max_entries=cap)
 
 
 def _render_diff_lines(metadata: dict, *, max_entries: int | None) -> str:
     """Format chunk-level change summary. Returns empty string if no diff data.
 
     `max_entries=None` means no cap (include every entry). A positive int caps
-    the total number of lines to include. Used by both `_build_diff_section`
-    (with options.diff_snippet_lines) and `build_template_context` (to expose
-    the rendered text as `diff_snippet` / `diff_full` template variables).
+    the total number of lines to include. Used by `_build_diff_text` (with
+    options.diff_snippet_lines) and `build_template_context` (to expose the
+    rendered text as `diff_snippet` / `diff_full` template variables).
     """
     added = metadata.get("added", [])
     removed = metadata.get("removed", [])
@@ -227,82 +269,12 @@ def _render_diff_lines(metadata: dict, *, max_entries: int | None) -> str:
     return "Changed sections:\n" + "\n".join(entries)
 
 
-def _build_diff_section(metadata: dict, options: ContentOptions) -> str:
-    """Format chunk-level change summary for the toggle-driven body builder."""
-    if not (options.include_diff_snippet or options.include_diff_full):
-        return ""
-    cap = None if options.include_diff_full else options.diff_snippet_lines
-    return _render_diff_lines(metadata, max_entries=cap)
-
-
-def _build_temporal_section(metadata: dict) -> str:
-    """Format check interval. Returns empty string if not in metadata."""
-    interval = metadata.get("check_interval")
-    if not interval:
-        return ""
-    return f"Check interval: {interval}"
-
-
-def _build_domain_section(metadata: dict) -> str:
-    """Format effective domain. Returns empty string if not in metadata."""
-    domain = metadata.get("effective_domain")
-    if not domain:
-        return ""
-    return f"Domain: {domain}"
-
-
-def _build_last_changed_section(metadata: dict) -> str:
-    """Format last changed date. Returns empty string if not in metadata."""
-    date = metadata.get("last_changed_at")
-    if not date:
-        return ""
-    return f"Last changed: {date}"
-
-
-def _build_significance_section(metadata: dict) -> str:
-    """Format change significance percentage. Returns empty string if not in metadata."""
-    sig = metadata.get("significance")
-    if sig is None:
-        return ""
-    return f"Significance: {int(sig * 100)}%"
-
-
 def _format_change_url(watch_id: str, change_id: str | None) -> str:
     """Build the dashboard URL for a specific change, or empty string if no change_id.
 
-    Single source of truth shared by `build_template_context` (exposes the URL
-    as the `change_url` template variable) and `_build_change_url_section`
-    (which prefixes "View change: " for the toggle-driven body builder).
+    Used by `build_template_context` to expose the URL as the `change_url`
+    template variable, and by `_build_change_detected_body` for the CHANGE: line.
     """
     if not change_id:
         return ""
     return f"{APP_URL}/watches/{watch_id}/changes/{change_id}"
-
-
-def _build_change_url_section(watch_id: str, metadata: dict) -> str:
-    """Format the "View change: …" line. Returns empty string if change_id absent."""
-    url = _format_change_url(watch_id, metadata.get("change_id"))
-    if not url:
-        return ""
-    return f"View change: {url}"
-
-
-def _build_watch_url_section(watch_id: str) -> str:
-    """Format the dedicated watch URL line."""
-    return f"Watch URL: {APP_URL}/watches/{watch_id}"
-
-
-def _build_tags_section(metadata: dict) -> str:
-    """Format tags list. Returns empty string if not in metadata or empty."""
-    tags = metadata.get("tags")
-    if not tags:
-        return ""
-    return "Tags: " + ", ".join(tags)
-
-
-def _build_description_section(metadata: dict) -> str:
-    """Format watch description. Returns empty string if not in metadata."""
-    description = metadata.get("description")
-    if not description:
-        return ""
-    return f"Description: {description}"

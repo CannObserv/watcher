@@ -107,7 +107,6 @@ def _parse_content_config_from_form(form) -> dict | None:
         include_last_changed_at="content_config__include_last_changed_at" in form,
         include_significance="content_config__include_significance" in form,
         include_change_dashboard_url="content_config__include_change_dashboard_url" in form,
-        include_watch_url="content_config__include_watch_url" in form,
         include_tags="content_config__include_tags" in form,
         include_description="content_config__include_description" in form,
         title_template=title_template,
@@ -122,7 +121,6 @@ def _parse_content_config_from_form(form) -> dict | None:
         or opts.include_last_changed_at
         or opts.include_significance
         or opts.include_change_dashboard_url
-        or opts.include_watch_url
         or opts.include_tags
         or opts.include_description
         or opts.title_template
@@ -140,7 +138,6 @@ def _parse_content_config_from_form(form) -> dict | None:
             include_last_changed_at=f"{prefix}include_last_changed_at" in form,
             include_significance=f"{prefix}include_significance" in form,
             include_change_dashboard_url=f"{prefix}include_change_dashboard_url" in form,
-            include_watch_url=f"{prefix}include_watch_url" in form,
             include_tags=f"{prefix}include_tags" in form,
             include_description=f"{prefix}include_description" in form,
         )
@@ -154,7 +151,6 @@ def _parse_content_config_from_form(form) -> dict | None:
                 et_opts.include_last_changed_at,
                 et_opts.include_significance,
                 et_opts.include_change_dashboard_url,
-                et_opts.include_watch_url,
                 et_opts.include_tags,
                 et_opts.include_description,
             )
@@ -2639,24 +2635,19 @@ async def notifications_compose_title_prefill(request: Request):
 
 @router.get("/notifications/compose-body-prefill")
 async def notifications_compose_body_prefill(request: Request):
-    """Return the composed body Jinja for current toggles + preview_event.
+    """Return the default body Jinja template for the selected preview_event.
 
-    Stitches the default body template with a snippet per currently-enabled
-    additive toggle (from ADDITIVE_BODY_SNIPPETS). Used by the [Edit template]
-    control on the Default body block so the user sees their toggles baked into
-    a starting Jinja template.
+    Used by the "Show default template" control on the Default body block so the
+    user can copy the skeleton into a custom body_template and edit from there.
+    Toggles are not applied to the seed — they drive Python-side interleaving
+    in `build_body`, not the template the user customises.
     """
-    params = request.query_params
-    preview_event_raw = params.get("preview_event") or "change_detected"
+    preview_event_raw = request.query_params.get("preview_event") or "change_detected"
     try:
         et = WatchEventType(preview_event_raw)
     except ValueError:
         et = WatchEventType.CHANGE_DETECTED
-    cc_dict = _parse_content_config_from_form(params)
-    config = ContentConfig.model_validate(cc_dict) if cc_dict else None
-    options = resolve_options(config, et.value)
-    prefill = compose_body_prefill(et.value, options)
-    return HTMLResponse(prefill)
+    return HTMLResponse(compose_body_prefill(et.value))
 
 
 @router.post("/notifications/preview")

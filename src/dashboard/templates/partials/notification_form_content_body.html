@@ -93,12 +93,7 @@
       <div class="sm:col-span-2">
         <h5 class="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400 mb-2">Links</h5>
         <div class="space-y-2">
-          <label class="flex items-center gap-2 text-gray-700 dark:text-gray-300 cursor-pointer">
-            <input type="checkbox" name="{{ prefix }}include_watch_url" value="1"
-                   {% if opts and opts.include_watch_url %}checked{% endif %}
-                   class="rounded border-gray-300 dark:border-gray-600">
-            Watch URL
-          </label>
+          {# Watch URL appears unconditionally in the default body — no toggle. #}
           <label class="flex items-center gap-2 text-gray-700 dark:text-gray-300 cursor-pointer">
             <input type="checkbox" name="{{ prefix }}include_change_dashboard_url" value="1"
                    {% if opts and opts.include_change_dashboard_url %}checked{% endif %}
@@ -123,7 +118,7 @@
     <div class="px-3 pb-3 pt-1">
       <textarea id="{{ title_area_id }}" name="{{ prefix }}title_template" rows="2"
                 class="form-input w-full text-sm font-mono"
-                placeholder="{{ '{{ event_label }}: {{ watch_name }}' }}">{{ (opts.title_template if opts else '') or '' }}</textarea>
+                placeholder="{{ '[Observo] {{ event_label }}: {{ watch_name }}' }}">{{ (opts.title_template if opts else '') or '' }}</textarea>
       {% with target_id=title_area_id, scope="title" %}
       {% include "partials/notification_variable_chips.html" %}
       {% endwith %}
@@ -137,7 +132,7 @@
         Custom body template
         {% if opts and opts.body_template %}<span class="ms-2 text-xs text-co-purple-700 dark:text-co-purple-400">(custom)</span>{% endif %}
       </span>
-      <span class="text-xs text-gray-500">(leave blank for toggle-composed body)</span>
+      <span class="text-xs text-gray-500">(leave blank to use the default body)</span>
     </summary>
     <div class="px-3 pb-3 pt-1 space-y-2">
       <div class="flex items-center gap-2">
@@ -147,7 +142,6 @@
         <button type="button"
                 class="btn btn-secondary text-xs min-h-[32px] py-1"
                 hx-get="/notifications/compose-body-prefill"
-                hx-include="closest form"
                 hx-target="#{{ body_area_id }}"
                 hx-swap="innerHTML"
                 {% if event_type is defined and event_type %}
@@ -155,20 +149,20 @@
                 {% else %}
                 hx-vals='js:{preview_event: this.form?.querySelector("select[name=preview_event]")?.value || "change_detected"}'
                 {% endif %}>
-          Seed from toggles
+          Show default template
         </button>
         <span class="text-xs text-gray-500 dark:text-gray-400">
-          Replaces this field with a Jinja template built from your current toggles.
+          Replaces this field with the default body template — edit to customise.
         </span>
       </div>
       <textarea id="{{ body_area_id }}" name="{{ prefix }}body_template" rows="6"
                 class="form-input w-full text-sm font-mono"
-                placeholder="{{ '{{ watch_url }} — {{ change_summary }}' }}">{{ (opts.body_template if opts else '') or '' }}</textarea>
+                placeholder="(leave blank to use the default body)">{{ (opts.body_template if opts else '') or '' }}</textarea>
       {% with target_id=body_area_id, scope="body" %}
       {% include "partials/notification_variable_chips.html" %}
       {% endwith %}
       <p class="text-xs text-gray-500 dark:text-gray-400">
-        Note: a custom body template replaces all toggle-driven output above.
+        Note: a custom body template replaces the default body and ignores the toggles above.
       </p>
     </div>
   </details>

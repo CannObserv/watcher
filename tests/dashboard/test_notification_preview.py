@@ -27,7 +27,7 @@ class TestPreviewEndpoint:
         # Mock fixture has 1 added, 1 modified, 1 removed
         assert "1 added, 1 modified, 1 removed" in resp.text
 
-    async def test_includes_additive_section_when_toggle_on(self, client: AsyncClient):
+    async def test_includes_toggle_driven_slot_when_toggle_on(self, client: AsyncClient):
         resp = await client.post(
             "/notifications/preview",
             data={
@@ -36,7 +36,7 @@ class TestPreviewEndpoint:
             },
         )
         assert resp.status_code == 200
-        assert "Domain: example.com" in resp.text
+        assert "DOMAIN: example.com" in resp.text
 
     async def test_user_body_template_renders(self, client: AsyncClient):
         resp = await client.post(
@@ -104,7 +104,7 @@ class TestPreviewEndpoint:
         )
         assert resp.status_code == 200
         # Mock significance is 0.65 → 65%
-        assert "Significance: 65%" in resp.text
+        assert "SIGNIFICANCE: 65%" in resp.text
 
     async def test_returns_html_fragment_not_full_page(self, client: AsyncClient):
         resp = await client.post(

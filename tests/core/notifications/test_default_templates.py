@@ -1,8 +1,6 @@
 """Tests for the default notification template registry."""
 
-from src.api.schemas.content_config import ContentOptions
 from src.core.notifications.default_templates import (
-    ADDITIVE_BODY_SNIPPETS,
     DEFAULT_BODY_TEMPLATES,
     DEFAULT_TITLE_TEMPLATES,
     TEMPLATE_VARIABLES,
@@ -26,11 +24,15 @@ class TestDefaultTitleTemplates:
             assert "{{" in value  # at least one variable
 
     def test_references_event_label_and_watch_name(self):
-        # Every default title should reference the event label and watch name —
-        # this is the minimum useful title across all event types.
         for et, tmpl in DEFAULT_TITLE_TEMPLATES.items():
             assert "event_label" in tmpl, f"{et} default title missing event_label"
             assert "watch_name" in tmpl, f"{et} default title missing watch_name"
+
+    def test_all_titles_prefixed_observo(self):
+        """The [Observo] prefix lets users filter cross-service notifications
+        by subject (issue #104)."""
+        for et, tmpl in DEFAULT_TITLE_TEMPLATES.items():
+            assert tmpl.startswith("[Observo] "), f"{et} missing [Observo] prefix"
 
 
 class TestDefaultBodyTemplates:
@@ -40,37 +42,34 @@ class TestDefaultBodyTemplates:
                 f"DEFAULT_BODY_TEMPLATES missing entry for {et.value}"
             )
 
-    def test_values_are_jinja_strings(self):
+    def test_values_are_nonempty_strings(self):
         for value in DEFAULT_BODY_TEMPLATES.values():
             assert isinstance(value, str)
-            assert value  # non-empty
+            assert value
 
-    def test_change_detected_references_change_summary(self):
+    def test_change_detected_references_always_present_skeleton(self):
+        """The change_detected default body is the always-present skeleton
+        (header + body block). Toggle-driven sections are interleaved in
+        Python by `build_body`, not in the Jinja template."""
         tmpl = DEFAULT_BODY_TEMPLATES["change_detected"]
-        assert "change_summary" in tmpl
-        assert "watch_url" in tmpl
+        assert "{{ watch_name }}" in tmpl
+        assert "URL: {{ watch_url }}" in tmpl
+        assert "TIMESTAMP: {{ occurred_at_iso }}" in tmpl
+        assert "WATCH: https://watcher.exe.xyz/watches/{{ watch_id }}" in tmpl
+        assert "{{ event_label }}" in tmpl
+        assert "{{ change_summary }}" in tmpl
+
+    def test_change_detected_has_no_include_conditionals(self):
+        """Toggle-driven sections live in Python composition, not in the
+        default template — keeps custom body_template users from tripping
+        over undefined `include_*` variables in the seed."""
+        tmpl = DEFAULT_BODY_TEMPLATES["change_detected"]
+        assert "include_" not in tmpl
 
     def test_watch_error_references_status_code(self):
         tmpl = DEFAULT_BODY_TEMPLATES["watch_error"]
         assert "status_code" in tmpl
         assert "watch_url" in tmpl
-
-
-class TestAdditiveBodySnippets:
-    def test_keys_match_contentoptions_toggle_fields(self):
-        """Every `include_<name>` field on ContentOptions should have a snippet,
-        and every snippet key should correspond to a toggle field."""
-        toggle_names = {
-            name.removeprefix("include_")
-            for name in ContentOptions.model_fields
-            if name.startswith("include_")
-        }
-        assert set(ADDITIVE_BODY_SNIPPETS.keys()) == toggle_names
-
-    def test_all_snippets_are_nonempty_strings(self):
-        for key, snippet in ADDITIVE_BODY_SNIPPETS.items():
-            assert isinstance(snippet, str), f"{key} snippet not a string"
-            assert snippet, f"{key} snippet empty"
 
 
 class TestComposeTitlePrefill:
@@ -80,36 +79,15 @@ class TestComposeTitlePrefill:
 
 
 class TestComposeBodyPrefill:
-    def test_default_only_returns_event_default_body(self):
-        result = compose_body_prefill("change_detected", ContentOptions())
+    def test_returns_default_body_for_event_type(self):
+        """Seed button returns the default body skeleton verbatim — no
+        toggle-driven composition."""
+        result = compose_body_prefill("change_detected")
         assert result == DEFAULT_BODY_TEMPLATES["change_detected"]
 
-    def test_appends_snippet_for_each_enabled_toggle(self):
-        opts = ContentOptions(include_domain=True, include_significance=True)
-        result = compose_body_prefill("change_detected", opts)
-        # starts with event default body, then blank-line-separated snippets
-        assert result.startswith(DEFAULT_BODY_TEMPLATES["change_detected"])
-        assert ADDITIVE_BODY_SNIPPETS["domain"] in result
-        assert ADDITIVE_BODY_SNIPPETS["significance"] in result
-
-    def test_snippets_separated_by_blank_line(self):
-        opts = ContentOptions(include_domain=True)
-        result = compose_body_prefill("change_detected", opts)
-        assert "\n\n" in result
-
-    def test_no_toggles_no_snippets_in_output(self):
-        result = compose_body_prefill("change_detected", ContentOptions())
-        for snippet in ADDITIVE_BODY_SNIPPETS.values():
-            assert snippet not in result
-
-    def test_lists_watch_url_before_change_dashboard_url(self):
-        """Links-section order (Watch URL then Change URL) must match the form layout
-        in notification_form_content_body.html."""
-        opts = ContentOptions(include_watch_url=True, include_change_dashboard_url=True)
-        result = compose_body_prefill("change_detected", opts)
-        watch_idx = result.index(ADDITIVE_BODY_SNIPPETS["watch_url"])
-        change_idx = result.index(ADDITIVE_BODY_SNIPPETS["change_dashboard_url"])
-        assert watch_idx < change_idx
+    def test_returns_default_body_for_watch_error(self):
+        result = compose_body_prefill("watch_error")
+        assert result == DEFAULT_BODY_TEMPLATES["watch_error"]
 
 
 class TestTemplateVariables:
@@ -119,7 +97,14 @@ class TestTemplateVariables:
 
     def test_core_variables_present(self):
         names = {v.name for v in TEMPLATE_VARIABLES}
-        for required in ("watch_id", "watch_name", "watch_url", "event_type", "event_label"):
+        for required in (
+            "watch_id",
+            "watch_name",
+            "watch_url",
+            "event_type",
+            "event_label",
+            "occurred_at_iso",
+        ):
             assert required in names
 
     def test_scopes_are_valid(self):

@@ -7,12 +7,6 @@ from jinja2 import TemplateError, UndefinedError
 
 from src.api.schemas.content_config import ContentConfig, ContentOptions
 from src.core.notifications.content import (
-    _build_change_url_section,
-    _build_description_section,
-    _build_last_changed_section,
-    _build_significance_section,
-    _build_tags_section,
-    _build_watch_url_section,
     build_body,
     build_template_context,
     build_title,
@@ -23,12 +17,13 @@ from src.core.notifications.content import (
 from src.core.notifications.events import EVENT_TITLES, WatchEvent, WatchEventType
 
 OCCURRED_AT = datetime(2026, 4, 14, 12, 0, 0, tzinfo=UTC)
+WATCH_ID = "01HV0000000000000000000001"
 
 
 def make_event(event_type=WatchEventType.CHANGE_DETECTED, metadata=None):
     return WatchEvent(
         event_type=event_type,
-        watch_id="01HV0000000000000000000001",
+        watch_id=WATCH_ID,
         watch_name="Test Watch",
         watch_url="https://example.com",
         occurred_at=OCCURRED_AT,
@@ -70,47 +65,170 @@ class TestResolveOptions:
         assert opts.include_domain is True
 
 
-class TestBuildBodyBase:
-    def test_default_body_rendered_from_template(self):
+class TestChangeDetectedDefaultBody:
+    """The change_detected default body is composed in Python (build_body) by
+    interleaving toggle-driven sections into an always-present skeleton at
+    the issue #104 layout positions."""
+
+    def test_default_skeleton_with_no_toggles(self):
+        """With every toggle off and no extra metadata, the body is the rich
+        skeleton: header (URL, TIMESTAMP, WATCH) + body block (label,
+        change_summary). No optional slots render."""
         event = make_event(metadata=CHANGE_META)
         body = build_body(event, ContentOptions())
-        # change_detected default template: "{{ watch_url }} — {{ change_summary }}"
-        assert "https://example.com" in body
-        assert "1 added, 1 modified, 1 removed" in body
+        expected = (
+            "Test Watch\n"
+            "URL: https://example.com\n"
+            "TIMESTAMP: 2026-04-14T12:00:00Z\n"
+            f"WATCH: https://watcher.exe.xyz/watches/{WATCH_ID}"
+            "\n\n"
+            "Change Detected\n"
+            "1 added, 1 modified, 1 removed"
+        )
+        assert body == expected
 
-    def test_no_extra_sections_by_default(self):
-        event = make_event(metadata=CHANGE_META)
+    def test_watch_link_unconditional(self):
+        """WATCH dashboard link is part of the always-present skeleton — there
+        is no toggle to suppress it (issue #104, see also Q4 of the design
+        interview)."""
+        event = make_event(metadata={})
         body = build_body(event, ContentOptions())
-        assert "Changed sections" not in body
-        assert "Domain" not in body
-        assert "Check interval" not in body
+        assert f"WATCH: https://watcher.exe.xyz/watches/{WATCH_ID}" in body
+
+    def test_full_layout_with_every_toggle_on_matches_issue_format(self):
+        """With every toggle on and full metadata, the body matches the issue
+        #104 layout exactly: DOMAIN between watch_name and URL; CHANGE
+        between WATCH and the body block; diff after change_summary;
+        INTERVAL/LAST CHANGED/SIGNIFICANCE grouped; DESCRIPTION + TAGS last."""
+        event = make_event(
+            metadata={
+                **CHANGE_META,
+                "change_id": "01HV0000000000000000000099",
+                "effective_domain": "example.com",
+                "check_interval": "1h",
+                "last_changed_at": "2026-04-09",
+                "significance": 0.5,
+                "description": "Watch for license renewals",
+                "tags": ["cannabis", "license"],
+            }
+        )
+        opts = ContentOptions(
+            include_diff_full=True,
+            include_temporal_context=True,
+            include_domain=True,
+            include_last_changed_at=True,
+            include_significance=True,
+            include_change_dashboard_url=True,
+            include_description=True,
+            include_tags=True,
+        )
+        body = build_body(event, opts)
+        expected = (
+            "Test Watch\n"
+            "DOMAIN: example.com\n"
+            "URL: https://example.com\n"
+            "TIMESTAMP: 2026-04-14T12:00:00Z\n"
+            f"WATCH: https://watcher.exe.xyz/watches/{WATCH_ID}\n"
+            f"CHANGE: https://watcher.exe.xyz/watches/{WATCH_ID}/changes/01HV0000000000000000000099"
+            "\n\n"
+            "Change Detected\n"
+            "1 added, 1 modified, 1 removed"
+            "\n\n"
+            "Changed sections:\n"
+            "  + Licenses\n"
+            "  - Hours\n"
+            "  ~ Contact Info (85% similar)"
+            "\n\n"
+            "INTERVAL: 1h\n"
+            "LAST CHANGED: 2026-04-09\n"
+            "SIGNIFICANCE: 50%"
+            "\n\n"
+            "DESCRIPTION: Watch for license renewals"
+            "\n\n"
+            "TAGS: cannabis, license"
+        )
+        assert body == expected
+
+    def test_minimal_metadata_renders_under_strict(self):
+        """Strict mode (preview endpoint) must not raise on missing metadata.
+        Pure-Python composition has no Jinja in the default-body path so
+        StrictUndefined never sees the toggle-gated branches."""
+        event = make_event(metadata={})
+        body = build_body(event, ContentOptions(include_domain=True), strict=True)
+        assert "Test Watch" in body
+        # Toggle is on but metadata absent → DOMAIN slot skipped.
+        assert "DOMAIN" not in body
 
 
-class TestBuildBodyDiffSnippet:
-    def test_snippet_appended(self):
+class TestDomainSlot:
+    def test_renders_between_name_and_url_when_toggle_on_and_metadata_present(self):
+        event = make_event(metadata={"effective_domain": "example.com"})
+        body = build_body(event, ContentOptions(include_domain=True))
+        # DOMAIN appears between watch_name (line 0) and URL (line 2).
+        lines = body.split("\n")
+        assert lines[0] == "Test Watch"
+        assert lines[1] == "DOMAIN: example.com"
+        assert lines[2].startswith("URL:")
+
+    def test_omitted_when_toggle_off(self):
+        event = make_event(metadata={"effective_domain": "example.com"})
+        body = build_body(event, ContentOptions(include_domain=False))
+        assert "DOMAIN" not in body
+
+    def test_omitted_when_metadata_missing(self):
+        event = make_event(metadata={})
+        body = build_body(event, ContentOptions(include_domain=True))
+        assert "DOMAIN" not in body
+
+
+class TestChangeUrlSlot:
+    CHANGE_ID = "01HV0000000000000000000099"
+
+    def test_renders_after_watch_when_toggle_on_and_change_id_present(self):
+        event = make_event(metadata={"change_id": self.CHANGE_ID})
+        body = build_body(event, ContentOptions(include_change_dashboard_url=True))
+        # CHANGE appears immediately after WATCH (issue layout).
+        watch_idx = body.index("WATCH:")
+        change_idx = body.index("CHANGE:")
+        assert change_idx > watch_idx
+        assert (
+            f"CHANGE: https://watcher.exe.xyz/watches/{WATCH_ID}/changes/{self.CHANGE_ID}" in body
+        )
+
+    def test_omitted_when_toggle_off(self):
+        event = make_event(metadata={"change_id": self.CHANGE_ID})
+        body = build_body(event, ContentOptions(include_change_dashboard_url=False))
+        assert "CHANGE:" not in body
+
+    def test_omitted_when_change_id_missing(self):
+        event = make_event(metadata={})
+        body = build_body(event, ContentOptions(include_change_dashboard_url=True))
+        assert "CHANGE:" not in body
+
+
+class TestDiffSlot:
+    def test_snippet_renders_after_change_summary(self):
         event = make_event(metadata=CHANGE_META)
         body = build_body(event, ContentOptions(include_diff_snippet=True))
-        assert "Changed sections" in body
+        # Diff sits after the body block (change_summary).
+        summary_idx = body.index("1 added, 1 modified, 1 removed")
+        diff_idx = body.index("Changed sections:")
+        assert diff_idx > summary_idx
         assert "+ Licenses" in body
         assert "- Hours" in body
-        assert "~ Contact Info" in body
+        assert "~ Contact Info (85% similar)" in body
 
-    def test_snippet_respects_limit(self):
-        meta = {
-            "added": ["A", "B", "C"],
-            "removed": [],
-            "modified": [],
-        }
+    def test_snippet_respects_diff_snippet_lines_cap(self):
+        meta = {"added": ["A", "B", "C"], "removed": [], "modified": []}
         event = make_event(metadata=meta)
         body = build_body(event, ContentOptions(include_diff_snippet=True, diff_snippet_lines=2))
         assert "+ A" in body
         assert "+ B" in body
         assert "+ C" not in body
 
-    def test_full_supersedes_snippet(self):
+    def test_full_supersedes_snippet_cap(self):
         meta = {"added": ["A", "B", "C"], "removed": [], "modified": []}
         event = make_event(metadata=meta)
-        # With full=True, snippet limit is ignored
         body = build_body(
             event,
             ContentOptions(include_diff_full=True, include_diff_snippet=True, diff_snippet_lines=1),
@@ -119,210 +237,141 @@ class TestBuildBodyDiffSnippet:
         assert "+ B" in body
         assert "+ C" in body
 
-    def test_no_diff_section_when_metadata_empty(self):
+    def test_omitted_when_both_toggles_off(self):
+        event = make_event(metadata=CHANGE_META)
+        body = build_body(event, ContentOptions())
+        assert "Changed sections" not in body
+
+    def test_omitted_when_no_diff_data(self):
         event = make_event(metadata={})
         body = build_body(event, ContentOptions(include_diff_snippet=True))
         assert "Changed sections" not in body
 
-    def test_similarity_shown_for_modified(self):
-        event = make_event(metadata=CHANGE_META)
-        body = build_body(event, ContentOptions(include_diff_full=True))
-        assert "85%" in body
 
-
-class TestBuildBodyTemporalContext:
-    def test_check_interval_shown(self):
+class TestStatsSlots:
+    def test_interval_renders_with_label_when_toggle_on(self):
         event = make_event(metadata={"check_interval": "1h"})
         body = build_body(event, ContentOptions(include_temporal_context=True))
-        assert "Check interval" in body
-        assert "1h" in body
+        assert "INTERVAL: 1h" in body
 
-    def test_no_section_when_metadata_missing(self):
-        event = make_event(metadata={})
-        body = build_body(event, ContentOptions(include_temporal_context=True))
-        assert "Check interval" not in body
+    def test_last_changed_renders_with_label_when_toggle_on(self):
+        event = make_event(metadata={"last_changed_at": "2026-04-09"})
+        body = build_body(event, ContentOptions(include_last_changed_at=True))
+        assert "LAST CHANGED: 2026-04-09" in body
 
+    def test_significance_rendered_as_int_percent(self):
+        event = make_event(metadata={"significance": 0.73})
+        body = build_body(event, ContentOptions(include_significance=True))
+        assert "SIGNIFICANCE: 73%" in body
 
-class TestBuildBodyDomain:
-    def test_domain_shown(self):
-        event = make_event(metadata={"effective_domain": "example.com"})
-        body = build_body(event, ContentOptions(include_domain=True))
-        assert "Domain: example.com" in body
+    def test_zero_significance_renders(self):
+        event = make_event(metadata={"significance": 0.0})
+        body = build_body(event, ContentOptions(include_significance=True))
+        assert "SIGNIFICANCE: 0%" in body
 
-    def test_no_section_when_missing(self):
-        event = make_event(metadata={})
-        body = build_body(event, ContentOptions(include_domain=True))
-        assert "Domain" not in body
+    def test_full_significance_renders(self):
+        event = make_event(metadata={"significance": 1.0})
+        body = build_body(event, ContentOptions(include_significance=True))
+        assert "SIGNIFICANCE: 100%" in body
 
-
-class TestBuildBodyOrdering:
-    def test_sections_joined_with_double_newline(self):
-        event = make_event(metadata={"effective_domain": "ex.com", **CHANGE_META})
+    def test_stats_grouped_in_one_paragraph(self):
+        """INTERVAL / LAST CHANGED / SIGNIFICANCE share a single paragraph
+        per the issue layout — no blank lines between them."""
+        event = make_event(
+            metadata={"check_interval": "1h", "last_changed_at": "2026-04-09", "significance": 0.5}
+        )
         body = build_body(
             event,
-            ContentOptions(include_diff_snippet=True, include_domain=True),
+            ContentOptions(
+                include_temporal_context=True,
+                include_last_changed_at=True,
+                include_significance=True,
+            ),
         )
-        # Default-template body comes first, then extra sections
-        assert body.startswith("https://example.com")
-        assert "\n\n" in body
-        # Domain section should appear after the base
-        assert body.index("https://example.com") < body.index("Domain: ex.com")
+        # The three lines should appear consecutively without intervening blanks.
+        assert "INTERVAL: 1h\nLAST CHANGED: 2026-04-09\nSIGNIFICANCE: 50%" in body
 
+    def test_stats_omitted_when_toggles_off(self):
+        event = make_event(
+            metadata={"check_interval": "1h", "last_changed_at": "2026-04-09", "significance": 0.5}
+        )
+        body = build_body(event, ContentOptions())
+        assert "INTERVAL" not in body
+        assert "LAST CHANGED" not in body
+        assert "SIGNIFICANCE" not in body
 
-class TestBuildLastChangedSection:
-    def test_returns_formatted_date(self):
-        result = _build_last_changed_section({"last_changed_at": "2026-04-09"})
-        assert result == "Last changed: 2026-04-09"
-
-    def test_returns_empty_when_key_absent(self):
-        assert _build_last_changed_section({}) == ""
-
-    def test_build_body_includes_section_when_enabled(self):
-        event = make_event(metadata={"last_changed_at": "2026-04-09"})
-        body = build_body(event, ContentOptions(include_last_changed_at=True))
-        assert "Last changed: 2026-04-09" in body
-
-    def test_build_body_omits_section_when_disabled(self):
-        event = make_event(metadata={"last_changed_at": "2026-04-09"})
-        body = build_body(event, ContentOptions(include_last_changed_at=False))
-        assert "Last changed" not in body
-
-    def test_build_body_omits_section_when_metadata_missing(self):
+    def test_stats_omitted_when_metadata_missing(self):
         event = make_event(metadata={})
-        body = build_body(event, ContentOptions(include_last_changed_at=True))
-        assert "Last changed" not in body
+        body = build_body(
+            event,
+            ContentOptions(
+                include_temporal_context=True,
+                include_last_changed_at=True,
+                include_significance=True,
+            ),
+        )
+        assert "INTERVAL" not in body
+        assert "LAST CHANGED" not in body
+        assert "SIGNIFICANCE" not in body
 
 
-class TestBuildSignificanceSection:
-    def test_returns_percentage(self):
-        result = _build_significance_section({"significance": 0.73})
-        assert result == "Significance: 73%"
+class TestDescriptionSlot:
+    def test_renders_with_label_when_toggle_on(self):
+        event = make_event(metadata={"description": "Watch for license renewals"})
+        body = build_body(event, ContentOptions(include_description=True))
+        assert "DESCRIPTION: Watch for license renewals" in body
 
-    def test_zero_significance(self):
-        result = _build_significance_section({"significance": 0.0})
-        assert result == "Significance: 0%"
+    def test_omitted_when_toggle_off(self):
+        event = make_event(metadata={"description": "x"})
+        body = build_body(event, ContentOptions(include_description=False))
+        assert "DESCRIPTION" not in body
 
-    def test_full_significance(self):
-        result = _build_significance_section({"significance": 1.0})
-        assert result == "Significance: 100%"
-
-    def test_returns_empty_when_key_absent(self):
-        assert _build_significance_section({}) == ""
-
-    def test_build_body_includes_section_when_enabled(self):
-        event = make_event(metadata={"significance": 0.5})
-        body = build_body(event, ContentOptions(include_significance=True))
-        assert "Significance: 50%" in body
-
-    def test_build_body_omits_section_when_disabled(self):
-        event = make_event(metadata={"significance": 0.5})
-        body = build_body(event, ContentOptions(include_significance=False))
-        assert "Significance" not in body
-
-    def test_build_body_omits_section_when_metadata_missing(self):
+    def test_omitted_when_metadata_missing(self):
         event = make_event(metadata={})
-        body = build_body(event, ContentOptions(include_significance=True))
-        assert "Significance" not in body
+        body = build_body(event, ContentOptions(include_description=True))
+        assert "DESCRIPTION" not in body
+
+    def test_omitted_when_description_empty_string(self):
+        event = make_event(metadata={"description": ""})
+        body = build_body(event, ContentOptions(include_description=True))
+        assert "DESCRIPTION" not in body
 
 
-class TestBuildChangeUrlSection:
-    WATCH_ID = "01HV0000000000000000000001"
-    CHANGE_ID = "01HV0000000000000000000099"
-
-    def test_returns_correct_url(self):
-        result = _build_change_url_section(self.WATCH_ID, {"change_id": self.CHANGE_ID})
-        assert f"/watches/{self.WATCH_ID}/changes/{self.CHANGE_ID}" in result
-        assert result.startswith("View change: ")
-
-    def test_returns_empty_when_change_id_absent(self):
-        assert _build_change_url_section(self.WATCH_ID, {}) == ""
-
-    def test_build_body_includes_url_when_enabled(self):
-        event = make_event(metadata={"change_id": self.CHANGE_ID})
-        body = build_body(event, ContentOptions(include_change_dashboard_url=True))
-        assert f"/watches/{event.watch_id}/changes/{self.CHANGE_ID}" in body
-
-    def test_build_body_omits_url_when_disabled(self):
-        event = make_event(metadata={"change_id": self.CHANGE_ID})
-        body = build_body(event, ContentOptions(include_change_dashboard_url=False))
-        assert "View change" not in body
-
-    def test_build_body_omits_url_when_change_id_missing(self):
-        event = make_event(metadata={})
-        body = build_body(event, ContentOptions(include_change_dashboard_url=True))
-        assert "View change" not in body
-
-
-class TestBuildWatchUrlSection:
-    WATCH_ID = "01HV0000000000000000000001"
-
-    def test_returns_correct_url(self):
-        result = _build_watch_url_section(self.WATCH_ID)
-        assert result == f"Watch URL: https://watcher.exe.xyz/watches/{self.WATCH_ID}"
-
-    def test_build_body_includes_watch_url_when_enabled(self):
-        event = make_event()
-        body = build_body(event, ContentOptions(include_watch_url=True))
-        assert f"Watch URL: https://watcher.exe.xyz/watches/{event.watch_id}" in body
-
-    def test_build_body_omits_watch_url_when_disabled(self):
-        event = make_event()
-        body = build_body(event, ContentOptions(include_watch_url=False))
-        assert "Watch URL" not in body
-
-
-class TestBuildTagsSection:
-    def test_returns_formatted_tags(self):
-        result = _build_tags_section({"tags": ["foo", "bar"]})
-        assert result == "Tags: foo, bar"
-
-    def test_returns_empty_when_key_absent(self):
-        assert _build_tags_section({}) == ""
-
-    def test_returns_empty_when_tags_empty_list(self):
-        assert _build_tags_section({"tags": []}) == ""
-
-    def test_build_body_includes_tags_when_enabled(self):
+class TestTagsSlot:
+    def test_renders_comma_joined_when_toggle_on(self):
         event = make_event(metadata={"tags": ["cannabis", "license"]})
         body = build_body(event, ContentOptions(include_tags=True))
-        assert "Tags: cannabis, license" in body
+        assert "TAGS: cannabis, license" in body
 
-    def test_build_body_omits_tags_when_disabled(self):
-        event = make_event(metadata={"tags": ["cannabis"]})
+    def test_omitted_when_toggle_off(self):
+        event = make_event(metadata={"tags": ["x"]})
         body = build_body(event, ContentOptions(include_tags=False))
-        assert "Tags" not in body
+        assert "TAGS" not in body
 
-    def test_build_body_omits_tags_when_metadata_missing(self):
+    def test_omitted_when_metadata_missing(self):
         event = make_event(metadata={})
         body = build_body(event, ContentOptions(include_tags=True))
-        assert "Tags" not in body
+        assert "TAGS" not in body
+
+    def test_omitted_when_tags_empty_list(self):
+        event = make_event(metadata={"tags": []})
+        body = build_body(event, ContentOptions(include_tags=True))
+        assert "TAGS" not in body
 
 
-class TestBuildDescriptionSection:
-    def test_returns_formatted_description(self):
-        result = _build_description_section({"description": "some text"})
-        assert result == "Description: some text"
+class TestNonChangeDetectedDefaultBody:
+    """Non-change_detected events render straight from DEFAULT_BODY_TEMPLATES.
+    Toggles do not apply — the default body is a single Jinja line."""
 
-    def test_returns_empty_when_key_absent(self):
-        assert _build_description_section({}) == ""
+    def test_watch_error_renders_default_template(self):
+        event = make_event(event_type=WatchEventType.WATCH_ERROR, metadata={"status_code": 500})
+        body = build_body(event, ContentOptions(include_domain=True))
+        assert body == "https://example.com returned HTTP 500"
 
-    def test_returns_empty_when_description_empty_string(self):
-        assert _build_description_section({"description": ""}) == ""
-
-    def test_build_body_includes_description_when_enabled(self):
-        event = make_event(metadata={"description": "Watch for license renewals"})
-        body = build_body(event, ContentOptions(include_description=True))
-        assert "Description: Watch for license renewals" in body
-
-    def test_build_body_omits_description_when_disabled(self):
-        event = make_event(metadata={"description": "Watch for license renewals"})
-        body = build_body(event, ContentOptions(include_description=False))
-        assert "Description" not in body
-
-    def test_build_body_omits_description_when_metadata_missing(self):
-        event = make_event(metadata={})
-        body = build_body(event, ContentOptions(include_description=True))
-        assert "Description" not in body
+    def test_watch_paused_renders_default_template(self):
+        event = make_event(event_type=WatchEventType.WATCH_PAUSED, metadata={})
+        body = build_body(event, ContentOptions())
+        assert body == "Watch paused: https://example.com"
 
 
 class TestRenderTemplate:
@@ -335,21 +384,14 @@ class TestRenderTemplate:
         result = render_template(template_str, {})
         assert result == template_str
 
-    def test_undefined_error_returns_original(self):
-        # strict undefined by default raises UndefinedError
-        template_str = "{{ missing_var }}"
-        result = render_template(template_str, {})
-        # Jinja2 default env renders undefined as '' — so it won't raise.
-        # The important thing is it doesn't crash.
+    def test_undefined_renders_empty_in_lenient_mode(self):
+        # Default Jinja env renders undefined as '' — never raises.
+        result = render_template("{{ missing_var }}", {})
         assert isinstance(result, str)
 
     def test_empty_string_renders_empty(self):
         result = render_template("", {})
         assert result == ""
-
-    def test_event_type_in_context(self):
-        result = render_template("{{ event_type }}", {"event_type": "change_detected"})
-        assert result == "change_detected"
 
 
 class TestBuildTemplateContext:
@@ -377,6 +419,7 @@ class TestBuildTemplateContext:
             "watch_url",
             "event_type",
             "occurred_at",
+            "occurred_at_iso",
             "event_label",
             "change_summary",
             "change_url",
@@ -390,18 +433,47 @@ class TestBuildTemplateContext:
             ctx = build_template_context(event)
             assert ctx["event_label"] == EVENT_TITLES[et.value]
 
-    def test_change_summary_counts_changes(self):
-        event = make_event(
-            metadata={"added": ["a", "b"], "modified": [{}], "removed": []},
+    def test_occurred_at_iso_uses_z_suffix_for_utc(self):
+        event = make_event()
+        ctx = build_template_context(event)
+        assert ctx["occurred_at_iso"] == "2026-04-14T12:00:00Z"
+
+    def test_occurred_at_iso_preserves_microseconds(self):
+        event = make_event()
+        event = WatchEvent(
+            event_type=event.event_type,
+            watch_id=event.watch_id,
+            watch_name=event.watch_name,
+            watch_url=event.watch_url,
+            occurred_at=datetime(2026, 4, 23, 0, 38, 33, 123456, tzinfo=UTC),
+            metadata=event.metadata,
         )
+        ctx = build_template_context(event)
+        assert ctx["occurred_at_iso"] == "2026-04-23T00:38:33.123456Z"
+
+    def test_occurred_at_iso_normalises_naive_to_utc(self):
+        """Defensive: if a producer ever emits a naive datetime, treat it as
+        UTC so the output still carries `Z` rather than silently dropping the
+        timezone indicator."""
+        event = make_event()
+        event = WatchEvent(
+            event_type=event.event_type,
+            watch_id=event.watch_id,
+            watch_name=event.watch_name,
+            watch_url=event.watch_url,
+            occurred_at=datetime(2026, 4, 14, 12, 0, 0),  # naive
+            metadata=event.metadata,
+        )
+        ctx = build_template_context(event)
+        assert ctx["occurred_at_iso"] == "2026-04-14T12:00:00Z"
+
+    def test_change_summary_counts_changes(self):
+        event = make_event(metadata={"added": ["a", "b"], "modified": [{}], "removed": []})
         ctx = build_template_context(event)
         assert ctx["change_summary"] == "2 added, 1 modified"
 
     def test_change_summary_details_pending_when_empty(self):
-        event = make_event(
-            event_type=WatchEventType.CHANGE_DETECTED,
-            metadata={},
-        )
+        event = make_event(event_type=WatchEventType.CHANGE_DETECTED, metadata={})
         ctx = build_template_context(event)
         assert ctx["change_summary"] == "details pending"
 
@@ -456,14 +528,12 @@ class TestBuildTemplateContext:
         assert ctx["diff_full"] == ""
 
     def test_derived_fields_take_precedence_over_metadata(self):
-        """Metadata keys that collide with derived field names (event_label,
-        change_summary, change_url, diff_snippet, diff_full) must not clobber
-        the values the template builder computed."""
+        """Hostile metadata keys must not clobber derived fields."""
         event = make_event(
             metadata={
                 "change_id": "01HV0000000000000000000099",
-                # Hostile metadata keys colliding with every derived field:
                 "event_label": "BOGUS",
+                "occurred_at_iso": "BOGUS",
                 "change_summary": "BOGUS",
                 "change_url": "BOGUS",
                 "diff_snippet": "BOGUS",
@@ -472,6 +542,7 @@ class TestBuildTemplateContext:
         )
         ctx = build_template_context(event)
         assert ctx["event_label"] == EVENT_TITLES[event.event_type.value]
+        assert ctx["occurred_at_iso"] == "2026-04-14T12:00:00Z"
         assert ctx["change_summary"] == "details pending"
         assert ctx["change_url"] == (
             f"https://watcher.exe.xyz/watches/{event.watch_id}/changes/01HV0000000000000000000099"
@@ -481,19 +552,20 @@ class TestBuildTemplateContext:
 
 
 class TestBuildBodyWithTemplates:
-    def test_body_template_overrides_additive_sections(self):
+    def test_body_template_overrides_default_body_and_toggles(self):
+        """Custom body_template replaces the entire default body — toggles
+        are not applied. This is the power-user escape hatch."""
         event = make_event(metadata={"effective_domain": "example.com"})
         opts = ContentOptions(include_domain=True, body_template="custom: {{ watch_name }}")
         body = build_body(event, opts)
         assert body == "custom: Test Watch"
-        # Additive section should NOT appear when body_template is set
-        assert "Domain" not in body
+        assert "DOMAIN" not in body
 
-    def test_body_template_none_uses_additive_logic(self):
+    def test_body_template_none_uses_default_body(self):
         event = make_event(metadata={"effective_domain": "example.com"})
         opts = ContentOptions(include_domain=True, body_template=None)
         body = build_body(event, opts)
-        assert "Domain: example.com" in body
+        assert "DOMAIN: example.com" in body
 
     def test_body_template_bad_syntax_falls_back_to_template_string(self):
         event = make_event()
@@ -506,8 +578,8 @@ class TestBuildTitle:
     def test_uses_default_template_for_event_type(self):
         event = make_event(event_type=WatchEventType.CHANGE_DETECTED)
         title = build_title(event, ContentOptions())
-        # Default title template: "{{ event_label }}: {{ watch_name }}"
-        assert title == "Change Detected: Test Watch"
+        # Default title carries the [Observo] prefix for cross-service filtering.
+        assert title == "[Observo] Change Detected: Test Watch"
 
     def test_user_title_template_overrides_default(self):
         event = make_event(event_type=WatchEventType.CHANGE_DETECTED)
@@ -519,8 +591,7 @@ class TestBuildTitle:
         for et in WatchEventType:
             event = make_event(event_type=et)
             title = build_title(event, ContentOptions())
-            assert title.startswith(EVENT_TITLES[et.value])
-            assert "Test Watch" in title
+            assert title == f"[Observo] {EVENT_TITLES[et.value]}: Test Watch"
 
     def test_bad_user_template_falls_back_to_raw_string(self):
         """Preserves dispatch-never-breaks guarantee inherited from render_template."""
@@ -532,7 +603,6 @@ class TestBuildTitle:
 
 class TestBuildTitleStrict:
     def test_strict_raises_on_bad_user_title_template(self):
-        """build_title(..., strict=True) surfaces user template errors."""
         event = make_event()
         opts = ContentOptions(title_template="{{ unknown_var }}")
         with pytest.raises(UndefinedError):
@@ -541,23 +611,23 @@ class TestBuildTitleStrict:
     def test_strict_still_renders_valid_default(self):
         event = make_event()
         title = build_title(event, ContentOptions(), strict=True)
-        assert title == "Change Detected: Test Watch"
+        assert title == "[Observo] Change Detected: Test Watch"
 
 
 class TestBuildBodyStrict:
     def test_strict_raises_on_bad_user_body_template(self):
-        """build_body(..., strict=True) surfaces user template errors."""
         event = make_event()
         opts = ContentOptions(body_template="{{ undefined_thing }}")
         with pytest.raises(UndefinedError):
             build_body(event, opts, strict=True)
 
-    def test_strict_renders_default_body_with_additive_sections(self):
-        """Default templates + additive sections should work under strict too."""
+    def test_strict_renders_default_body(self):
+        """change_detected default body is composed in pure Python — strict
+        mode is irrelevant on this code path but must not regress."""
         event = make_event(metadata={"effective_domain": "example.com", **CHANGE_META})
         body = build_body(event, ContentOptions(include_domain=True), strict=True)
-        assert "https://example.com" in body
-        assert "Domain: example.com" in body
+        assert "URL: https://example.com" in body
+        assert "DOMAIN: example.com" in body
 
 
 class TestRenderTemplateStrict:
@@ -570,7 +640,5 @@ class TestRenderTemplateStrict:
             render_template_strict("{{ unclosed", {})
 
     def test_raises_on_undefined_variable(self):
-        """Undefined references raise UndefinedError — lenient render_template
-        silently renders empty; strict must not, so preview can surface typos."""
         with pytest.raises(UndefinedError):
             render_template_strict("{{ unknown_var }}", {})

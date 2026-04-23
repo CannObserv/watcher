@@ -69,11 +69,16 @@ def _compute_change_summary(event: WatchEvent) -> str:
 def build_template_context(event: WatchEvent) -> dict:
     """Build Jinja2 template context from a WatchEvent.
 
-    Includes metadata keys flattened in, plus derived fields (`event_label`,
-    `change_summary`) that the default templates rely on.
+    Includes metadata keys flattened in, plus derived fields that the default
+    templates rely on:
+      - `event_label` — human-readable event title (always set)
+      - `change_summary` — counts string for change_detected; empty otherwise
+      - `change_url` — dashboard URL when `change_id` is in metadata; empty otherwise
+      - `diff_snippet` — pre-rendered diff lines capped at
+        `_DEFAULT_DIFF_SNIPPET_CAP`; empty when no diff data
+      - `diff_full` — pre-rendered diff lines, uncapped; empty when no diff data
 
-    `change_summary` is populated for `change_detected` events only; empty
-    string otherwise. User body templates referencing it on other event types
+    User templates referencing any of these on events that don't populate them
     will render blank.
     """
     change_url = _format_change_url(event.watch_id, event.metadata.get("change_id"))

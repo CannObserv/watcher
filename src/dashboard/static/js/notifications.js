@@ -68,9 +68,10 @@
       pool = allEvents.filter(function (e) { return subscribed.indexOf(e.value) !== -1; });
     } else {
       // Empty-set fallback: just change_detected, matching the server-side
-      // template fallback and the *_new.html form default.
+      // template fallback and the *_new.html form default. (change_detected
+      // is always in the form's checkboxes — it's a canonical enum member —
+      // so no further fallback is needed.)
       pool = allEvents.filter(function (e) { return e.value === "change_detected"; });
-      if (!pool.length && allEvents.length) pool = [allEvents[0]];
     }
     selects.forEach(function (sel) {
       // Preserve the user's current selection if still in the pool;

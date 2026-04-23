@@ -119,7 +119,6 @@
    * Wire up subscribe-checkbox listeners on every form that contains a
    * preview event selector. Runs at DOMContentLoaded and again after
    * any HTMX swap (to cover late-rendered forms).
-   *
    */
   function wirePreviewEventSync(root) {
     (root || document).querySelectorAll("select[data-preview-event-select]").forEach(function (sel) {

@@ -5,8 +5,7 @@ import logging
 from dataclasses import dataclass
 
 import apprise
-from apprise import AppriseAsset
-from apprise.common import NotifyFormat
+from apprise import AppriseAsset, NotifyFormat
 
 from src.core.crypto import decrypt_apprise_url
 from src.core.logging import get_logger

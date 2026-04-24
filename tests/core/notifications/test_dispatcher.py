@@ -6,7 +6,7 @@ from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from apprise.common import NotifyFormat
+from apprise import NotifyFormat
 from cryptography.fernet import Fernet
 
 from src.core.notifications.dispatcher import _ASSET, dispatch_event

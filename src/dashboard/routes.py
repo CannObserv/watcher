@@ -26,6 +26,7 @@ from src.api.schemas.notification_config import (
 )
 from src.core.crypto import decrypt_apprise_url, encrypt_apprise_url
 from src.core.database import get_session_factory
+from src.core.diff import compute_unified_diff
 from src.core.logging import get_logger
 from src.core.models.audit_log import EventType, audit
 from src.core.models.domain import Domain
@@ -54,7 +55,6 @@ from src.core.storage import STORAGE_BASE_DIR, LocalStorage
 from src.core.watches import create_watch as _create_watch
 from src.dashboard import templates
 from src.dashboard.context import (
-    generate_diff,
     get_audit_entries,
     get_change_detail,
     get_dashboard_stats,
@@ -2470,7 +2470,7 @@ async def change_detail_page(
     path_attr = "storage_path" if mode == "raw" else "text_path"
     prev_text = _load_snapshot_text(storage, detail["previous_snapshot"], path_attr)
     curr_text = _load_snapshot_text(storage, detail["current_snapshot"], path_attr)
-    diff = generate_diff(prev_text, curr_text)
+    diff = compute_unified_diff(prev_text, curr_text)
 
     context = {
         "active_page": "watches",
@@ -2496,7 +2496,7 @@ async def partial_diff(
     path_attr = "storage_path" if mode == "raw" else "text_path"
     prev_text = _load_snapshot_text(storage, detail["previous_snapshot"], path_attr)
     curr_text = _load_snapshot_text(storage, detail["current_snapshot"], path_attr)
-    diff = generate_diff(prev_text, curr_text)
+    diff = compute_unified_diff(prev_text, curr_text)
     return templates.TemplateResponse(request, "partials/diff_view.html", {"diff": diff})
 
 

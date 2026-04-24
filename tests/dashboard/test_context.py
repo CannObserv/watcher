@@ -10,7 +10,6 @@ from src.core.models.domain import Domain
 from src.core.models.snapshot import Snapshot, SnapshotChunk
 from src.core.models.watch import ContentType, Watch
 from src.dashboard.context import (
-    generate_diff,
     get_change_detail,
     get_dashboard_stats,
     get_domain_watches,
@@ -460,25 +459,6 @@ class TestSummarizeChangeMetadata:
 
     def test_missing_keys(self):
         assert summarize_change_metadata({"added": ["x"], "removed": []}) == "1 added"
-
-
-class TestGenerateDiff:
-    def test_identical_text(self):
-        result = generate_diff("hello\nworld", "hello\nworld")
-        assert result["has_changes"] is False
-
-    def test_modified_text(self):
-        result = generate_diff("hello\nworld", "hello\nplanet")
-        assert result["has_changes"] is True
-        assert len(result["lines"]) > 0
-
-    def test_empty_previous(self):
-        result = generate_diff("", "new content")
-        assert result["has_changes"] is True
-
-    def test_empty_both(self):
-        result = generate_diff("", "")
-        assert result["has_changes"] is False
 
 
 @pytest.mark.integration

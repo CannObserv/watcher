@@ -1,5 +1,12 @@
 {% extends "base.html" %}
 {% block title %}Change — {{ watch_name }} — Watcher{% endblock %}
+{% block extra_head %}
+<link rel="stylesheet" href="/static/css/vendor/diff2html.min.css?v={{ build_id }}">
+{% endblock %}
+{% block extra_scripts %}
+<script src="/static/js/vendor/diff2html-ui.min.js?v={{ build_id }}" defer></script>
+<script src="/static/js/diff-viewer.js?v={{ build_id }}" defer></script>
+{% endblock %}
 {% block content %}
 <div class="mb-6">
   <h2 class="text-2xl font-bold text-gray-900 dark:text-white">Change Detail</h2>
@@ -132,6 +139,12 @@
             hx-trigger="change">
           <span>Raw Content</span>
         </label>
+        <label class="segment segment-disabled" aria-disabled="true">
+          <input type="radio" name="mode" value="structure" disabled
+            aria-describedby="structure-coming-soon-hint">
+          <span>Structure</span>
+        </label>
+        <span id="structure-coming-soon-hint" class="sr-only">Structural diff coming in Phase B (issue #115)</span>
       </fieldset>
       <noscript><button type="submit" class="btn btn-secondary">Apply</button></noscript>
     </form>

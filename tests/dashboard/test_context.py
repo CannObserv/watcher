@@ -335,6 +335,17 @@ class TestGetChangeDetail:
         assert result["previous_snapshot"].screenshot_path == "screenshots/w/prev.png"
         assert result["current_snapshot"].screenshot_path == "screenshots/w/curr.png"
 
+    async def test_include_chunk_false_skips_chunk_creation(
+        self, db_session, make_change_with_snapshots
+    ):
+        """include_chunk=False yields a change with no SnapshotChunks and chunk_count=0."""
+        change = await make_change_with_snapshots(include_chunk=False)
+        result = await get_change_detail(db_session, str(change.id))
+        assert result is not None
+        assert result["current_chunks"] == []
+        assert result["current_snapshot"].chunk_count == 0
+        assert result["previous_snapshot"].chunk_count == 0
+
 
 @pytest.mark.integration
 class TestGetWatchChanges:

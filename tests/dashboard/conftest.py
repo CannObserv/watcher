@@ -11,9 +11,22 @@ from src.core.models.watch import Watch
 async def make_change_with_snapshots(db_session, tmp_path):
     """Build a Watch + two Snapshots + optional SnapshotChunk + a Change.
 
+    When to reach for this fixture vs. the global builders in ``tests/conftest.py``:
+
+    - ``tests/conftest.py::make_change`` takes **pre-built** Watch/Snapshot
+      objects (plus ``make_watch`` / ``make_snapshot`` fixtures) — reach for
+      it when a test needs fine-grained control over individual snapshot
+      fields, or wants to share one Watch across multiple Changes.
+    - This fixture builds the **entire** Watch→Snapshots→(SnapshotChunk)→Change
+      chain in one call — reach for it for end-to-end route tests or for
+      ``get_change_detail``-style queries where the test only cares about
+      the final ``Change`` row and common default shape.
+
     The async factory returned exposes these keyword-only knobs:
 
     - ``prev_text``, ``curr_text``: string content for the two snapshots.
+      Defaults differ (``"prev"`` / ``"curr"``) so the default output is an
+      interesting (non-empty) diff — the common case for route tests.
     - ``write_files``: when True, writes prev_text/curr_text into ``tmp_path``
       and uses absolute paths for ``text_path``/``storage_path``. Because
       ``Path(base_dir) / Path(abs_path)`` is ``abs_path`` in pathlib,
@@ -22,7 +35,9 @@ async def make_change_with_snapshots(db_session, tmp_path):
       tests that exercise ``_load_snapshot_text``. When False, uses
       placeholder paths ``/tmp/s`` / ``/tmp/t`` (DB-only tests).
     - ``include_chunk``: when True (default), seeds a single SnapshotChunk
-      on the current snapshot so the change_detail page has chunks to render.
+      on the current snapshot (``chunk_count=1``). When False, no chunk is
+      inserted and ``chunk_count=0`` — use for DB-only tests that don't
+      need chunk rendering.
     - ``screenshot_paths``: optional ``(prev, curr)`` tuple that sets
       ``screenshot_path`` on each snapshot.
     - Any remaining kwargs are forwarded to the ``Change`` constructor
@@ -55,13 +70,16 @@ async def make_change_with_snapshots(db_session, tmp_path):
         db_session.add(watch)
         await db_session.flush()
 
+        # This fixture only seeds chunks on curr_snap (when include_chunk=True);
+        # prev_snap has no chunks, so prev chunk_count is always 0 to match reality.
+        curr_chunk_count = 1 if include_chunk else 0
         prev_snap = Snapshot(
             watch_id=watch.id,
             content_hash="a" * 64,
             simhash=0,
             storage_path=prev_storage,
             text_path=prev_storage,
-            chunk_count=1,
+            chunk_count=0,
             text_bytes=len(prev_text.encode()),
             fetch_duration_ms=50,
             fetcher_used="http",
@@ -73,7 +91,7 @@ async def make_change_with_snapshots(db_session, tmp_path):
             simhash=0,
             storage_path=curr_storage,
             text_path=curr_storage,
-            chunk_count=1,
+            chunk_count=curr_chunk_count,
             text_bytes=len(curr_text.encode()),
             fetch_duration_ms=50,
             fetcher_used="http",

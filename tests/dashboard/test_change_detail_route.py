@@ -2,6 +2,8 @@
 diff-mount rendering, identical-snapshot fallback, mode param validation, and the
 Structure segment stub."""
 
+import re
+
 import pytest
 
 pytestmark = pytest.mark.integration
@@ -52,8 +54,9 @@ class TestChangeDetailRoute:
         resp = await client.get(f"/changes/{change.id}")
         assert resp.status_code == 200
         body = resp.content
-        assert b'value="structure"' in body
-        assert b"disabled" in body
+        # The `disabled` attribute must be on the Structure radio input itself,
+        # not just on the surrounding `segment-disabled` class / `aria-disabled`.
+        assert re.search(rb'<input[^>]+value="structure"[^>]*\bdisabled\b', body) is not None
         assert b'id="structure-coming-soon-hint"' in body
         assert b"Structural diff coming soon" in body
 

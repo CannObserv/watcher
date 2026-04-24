@@ -13,9 +13,10 @@
     var diffText = el.dataset.unifiedDiff || "";
     if (!diffText) return;
     // Graceful degradation: if the vendor bundle failed to load (404, blocked,
-    // offline), show a readable error instead of an empty bordered frame.
+    // offline), show a styled message instead of an empty bordered frame.
     if (typeof Diff2HtmlUI === "undefined") {
-      el.textContent = "Diff viewer failed to load.";
+      el.innerHTML =
+        '<p class="p-4 text-sm text-gray-500 dark:text-gray-400">Diff viewer failed to load.</p>';
       return;
     }
     // Clear previous render so re-draws don't stack content.

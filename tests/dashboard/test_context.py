@@ -7,7 +7,7 @@ import pytest
 from src.core.models.audit_log import AuditLog, EventType
 from src.core.models.change import Change
 from src.core.models.domain import Domain
-from src.core.models.snapshot import Snapshot, SnapshotChunk
+from src.core.models.snapshot import Snapshot
 from src.core.models.watch import ContentType, Watch
 from src.dashboard.context import (
     get_change_detail,
@@ -299,48 +299,10 @@ class TestGetWatchDetail:
 
 @pytest.mark.integration
 class TestGetChangeDetail:
-    async def test_returns_change_with_snapshots(self, db_session):
-        watch = Watch(name="W", url="https://example.com", content_type="html")
-        db_session.add(watch)
-        await db_session.flush()
-
-        snap_kwargs = dict(
-            watch_id=watch.id,
-            content_hash="a" * 64,
-            simhash=0,
-            storage_path="/tmp/s",
-            text_path="/tmp/t",
-            chunk_count=1,
-            text_bytes=100,
-            fetch_duration_ms=50,
-            fetcher_used="http",
-        )
-        prev_snap = Snapshot(**snap_kwargs)
-        curr_snap = Snapshot(**snap_kwargs)
-        db_session.add_all([prev_snap, curr_snap])
-        await db_session.flush()
-
-        chunk = SnapshotChunk(
-            snapshot_id=curr_snap.id,
-            chunk_index=0,
-            chunk_type="section",
-            chunk_label="Main",
-            content_hash="b" * 64,
-            simhash=0,
-            char_count=100,
-            excerpt="Hello world",
-        )
-        db_session.add(chunk)
-
-        change = Change(
-            watch_id=watch.id,
-            previous_snapshot_id=prev_snap.id,
-            current_snapshot_id=curr_snap.id,
+    async def test_returns_change_with_snapshots(self, db_session, make_change_with_snapshots):
+        change = await make_change_with_snapshots(
             change_metadata={"added": ["Section A"], "modified": [], "removed": []},
         )
-        db_session.add(change)
-        await db_session.flush()
-
         result = await get_change_detail(db_session, str(change.id))
         assert result is not None
         assert result["change"] is not None
@@ -356,69 +318,18 @@ class TestGetChangeDetail:
         result = await get_change_detail(db_session, "bad")
         assert result is None
 
-    async def test_returns_visual_change_score_when_set(self, db_session):
-        watch = Watch(name="W2", url="https://example.com", content_type="html")
-        db_session.add(watch)
-        await db_session.flush()
-
-        snap_kwargs = dict(
-            watch_id=watch.id,
-            content_hash="a" * 64,
-            simhash=0,
-            storage_path="/tmp/s",
-            text_path="/tmp/t",
-            chunk_count=1,
-            text_bytes=100,
-            fetch_duration_ms=50,
-            fetcher_used="http",
-        )
-        prev_snap = Snapshot(**snap_kwargs)
-        curr_snap = Snapshot(**snap_kwargs)
-        db_session.add_all([prev_snap, curr_snap])
-        await db_session.flush()
-
-        change = Change(
-            watch_id=watch.id,
-            previous_snapshot_id=prev_snap.id,
-            current_snapshot_id=curr_snap.id,
-            visual_change_score=0.75,
-        )
-        db_session.add(change)
-        await db_session.flush()
-
+    async def test_returns_visual_change_score_when_set(
+        self, db_session, make_change_with_snapshots
+    ):
+        change = await make_change_with_snapshots(visual_change_score=0.75)
         result = await get_change_detail(db_session, str(change.id))
         assert result is not None
         assert result["change"].visual_change_score == pytest.approx(0.75)
 
-    async def test_snapshots_expose_screenshot_path(self, db_session):
-        watch = Watch(name="W3", url="https://example.com", content_type="html")
-        db_session.add(watch)
-        await db_session.flush()
-
-        snap_kwargs = dict(
-            watch_id=watch.id,
-            content_hash="a" * 64,
-            simhash=0,
-            storage_path="/tmp/s",
-            text_path="/tmp/t",
-            chunk_count=1,
-            text_bytes=100,
-            fetch_duration_ms=50,
-            fetcher_used="http",
+    async def test_snapshots_expose_screenshot_path(self, db_session, make_change_with_snapshots):
+        change = await make_change_with_snapshots(
+            screenshot_paths=("screenshots/w/prev.png", "screenshots/w/curr.png"),
         )
-        prev_snap = Snapshot(**snap_kwargs, screenshot_path="screenshots/w/prev.png")
-        curr_snap = Snapshot(**snap_kwargs, screenshot_path="screenshots/w/curr.png")
-        db_session.add_all([prev_snap, curr_snap])
-        await db_session.flush()
-
-        change = Change(
-            watch_id=watch.id,
-            previous_snapshot_id=prev_snap.id,
-            current_snapshot_id=curr_snap.id,
-        )
-        db_session.add(change)
-        await db_session.flush()
-
         result = await get_change_detail(db_session, str(change.id))
         assert result is not None
         assert result["previous_snapshot"].screenshot_path == "screenshots/w/prev.png"

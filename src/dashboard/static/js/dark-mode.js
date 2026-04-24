@@ -24,6 +24,7 @@
     var nowDark = html.classList.toggle("dark");
     localStorage.setItem(KEY, nowDark ? "dark" : "light");
     update();
+    document.dispatchEvent(new CustomEvent("watcher:theme-changed", { detail: { theme: nowDark ? "dark" : "light" } }));
   });
 
   update();

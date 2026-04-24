@@ -31,10 +31,14 @@ class TestComputeUnifiedDiff:
         assert r.added == 0
         assert r.removed == 1
 
-    def test_header_labels_are_stable(self):
-        """Unified diff uses fixed 'previous' / 'current' labels (not filenames)."""
+    def test_header_uses_identical_filename(self):
+        """Both sides use the same filename label 'content'.
+
+        Identical from/to filenames prevent diff2html from rendering a
+        spurious 'RENAMED' badge in the file header.
+        """
         r = compute_unified_diff("a\n", "b\n")
-        assert r.unified_diff.startswith("--- previous\n+++ current\n")
+        assert r.unified_diff.startswith("--- content\n+++ content\n")
 
     def test_whitespace_only_change_is_normalized_away(self):
         """Trailing whitespace differences should not show as changes."""

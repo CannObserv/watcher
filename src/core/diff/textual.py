@@ -28,8 +28,8 @@ def compute_unified_diff(
     hunks = difflib.unified_diff(
         prev_lines,
         curr_lines,
-        fromfile="previous",
-        tofile="current",
+        fromfile="content",
+        tofile="content",
         n=context,
         lineterm="",
     )

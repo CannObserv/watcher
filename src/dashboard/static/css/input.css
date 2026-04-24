@@ -252,6 +252,13 @@
     cursor: wait;
     pointer-events: none;
   }
+
+  /* diff2html: its .d2h-code-side-linenumber uses position:absolute but the
+     vendored CSS omits a positioned ancestor, so line numbers drift to the
+     viewport. Anchor them to their row. */
+  .diff-mount .d2h-diff-tbody tr {
+    position: relative;
+  }
 }
 
 /* -- Reduced motion -- */

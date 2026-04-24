@@ -255,9 +255,17 @@
 
   /* diff2html: its .d2h-code-side-linenumber uses position:absolute but the
      vendored CSS omits a positioned ancestor, so line numbers drift to the
-     viewport. Anchor them to their row. */
+     viewport. Anchor them to their row. !important because diff2html.min.css
+     is unlayered and beats any rule we emit from @layer components. */
   .diff-mount .d2h-diff-tbody tr {
-    position: relative;
+    position: relative !important;
+  }
+
+  /* Every diff we render is by definition a change; the "CHANGED" banner
+     diff2html prints in the file header is redundant noise. Same layer caveat
+     as above — !important defeats diff2html's unlayered default. */
+  .diff-mount .d2h-tag {
+    display: none !important;
   }
 }
 

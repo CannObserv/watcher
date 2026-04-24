@@ -881,7 +881,7 @@ Mission-critical UI change — type checking is not enough. Per AGENTS.md, run t
 
 - **Why stdlib `difflib.unified_diff` (not `diff-match-patch`)?** diff2html-ui does word/char-level highlighting natively via `matching: 'words'` + JsDiff. Adding `diff-match-patch` in Phase A duplicates that work. Revisit for notifications (#116) where we render HTML server-side and may want finer control.
 - **Why vendor diff2html-ui instead of CDN?** AGENTS.md: "Pre-built Tailwind (no CDN)." Same principle applies to JS — no runtime dependency on a third-party CDN for production assets.
-- **Why not load diff2html in base.html?** It's ~200KB gzipped. Only the change-detail page needs it. The four other dashboard pages shouldn't pay that cost.
+- **Why not load diff2html in base.html?** The UI bundle ships as ~1 MB unminified-over-the-wire (~300 KB gzipped — includes diff2html core + highlight.js). Only the change-detail page needs it; other dashboard pages shouldn't pay that cost. Asset loading is page-scoped via `{% block extra_head %}` / `{% block extra_scripts %}` in `base.html` and overridden by `pages/change_detail.html`.
 - **Why a disabled Structure segment now?** Signals forthcoming capability to users and to ourselves; prevents template rework when Phase B lands.
 - **Why normalize whitespace in `compute_unified_diff`?** Raw HTML/text often has trailing whitespace or CRLF noise that produces false positives. Signal over noise is the whole point of this issue.
 - **Why freeze `DiffResult`?** Immutability + `slots=True` is cheap and avoids accidental template mutation issues.
@@ -890,7 +890,7 @@ Mission-critical UI change — type checking is not enough. Per AGENTS.md, run t
 
 - `src/core/notifications/*` — issue #116.
 - `src/core/diff/render.py` — not needed; rendering is client-side via diff2html-ui in Phase A. May be added in #116 for server-side HTML notification rendering.
-- `pyproject.toml` — no new Python dependencies in Phase A. diff-match-patch deferred to #116 (if needed). xmldiff/lxml (already present) used in Phase B.
+- `pyproject.toml` — no new Python dependencies in Phase A. `diff-match-patch` was considered and rejected: diff2html-ui provides word-level highlighting natively via `matching: 'words'`, so adding it would duplicate that capability with no benefit. If #116 later needs server-side HTML diff highlighting for HTML-capable Apprise channels, revisit then — otherwise stay stdlib. `xmldiff`/`lxml` (`lxml` already present) are reserved for Phase B.
 - `alembic/` — no schema changes.
 
 ## Appendix C: Rollback

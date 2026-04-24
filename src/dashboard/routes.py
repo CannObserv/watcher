@@ -2458,7 +2458,7 @@ def _load_snapshot_text(storage: LocalStorage, snapshot, path_attr: str) -> str:
 async def change_detail_page(
     request: Request,
     change_id: str,
-    mode: str = "extracted",
+    mode: Literal["extracted", "raw"] = "extracted",
     session: AsyncSession = Depends(get_db_session),
 ):
     """Change detail page with metadata, chunks, and diff."""
@@ -2484,7 +2484,7 @@ async def change_detail_page(
 async def partial_diff(
     request: Request,
     change_id: str,
-    mode: str = "extracted",
+    mode: Literal["extracted", "raw"] = "extracted",
     session: AsyncSession = Depends(get_db_session),
 ):
     """HTMX partial: diff view (extracted text or raw content)."""

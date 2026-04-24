@@ -12,10 +12,14 @@
     if (!el) return;
     var diffText = el.dataset.unifiedDiff || "";
     if (!diffText) return;
+    // Graceful degradation: if the vendor bundle failed to load (404, blocked,
+    // offline), show a readable error instead of an empty bordered frame.
+    if (typeof Diff2HtmlUI === "undefined") {
+      el.textContent = "Diff viewer failed to load.";
+      return;
+    }
     // Clear previous render so re-draws don't stack content.
     el.innerHTML = "";
-    delete el.dataset.rendered;
-    // diff2html-ui is exposed as global `Diff2HtmlUI`.
     // eslint-disable-next-line no-undef
     var ui = new Diff2HtmlUI(el, diffText, {
       outputFormat: el.dataset.outputFormat || "side-by-side",
@@ -28,7 +32,6 @@
     });
     ui.draw();
     ui.highlightCode();
-    el.dataset.rendered = "1";
   }
 
   function renderAll(root) {

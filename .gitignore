@@ -33,3 +33,6 @@ gunicorn.ctl
 # Tailwind
 src/dashboard/static/css/output.css
 scripts/tailwindcss
+
+# Generated vendor-layer wrappers (built from vendor/*.min.css; see docs/STYLE.md §14)
+src/dashboard/static/css/vendor/*.layered.css

@@ -582,3 +582,27 @@ Use this pattern instead of OOB flash for validation errors that are specific to
 - **System font stack**: No custom fonts loaded. Tailwind default font stack.
 - **Explicit image dimensions**: All `<img>` tags include `width` and `height` attributes to prevent layout shift.
 - **Pre-built Tailwind**: Compile CSS before deploy. Source: `src/dashboard/static/css/input.css` → Output: `src/dashboard/static/css/output.css`.
+
+---
+
+## 14. Overriding Vendored CSS
+
+Tailwind v4 emits author rules inside cascade layers (`theme`, `base`, `components`, `utilities`). Per the CSS spec, **unlayered rules beat layered rules of any specificity**, so a third-party stylesheet loaded as raw `<link>` will override anything we write in `@layer components` regardless of how specific our selector is. Adding `!important` works but is a smell that compounds with each new vendor library.
+
+**Pattern: place vendor CSS in a low-priority `vendor` layer.**
+
+1. **Layer order is established by `input.css`.** The first directive is `@layer vendor;`, declared *before* `@import "tailwindcss";`. CSS layer order follows first-appearance, so `vendor` becomes the lowest-priority layer; Tailwind's own layers (and our `@layer components` overrides) all sort above it.
+
+2. **`scripts/build-css.sh` wraps each vendor file in `@layer vendor { … }`.** For every `src/dashboard/static/css/vendor/*.min.css`, the build emits a `*.layered.css` sibling with the contents wrapped in a `vendor` layer block. Any leading `@charset` / `@import` directives are hoisted above the wrapper (CSS spec requires them at the top of the file); `@import` directives get a `layer(vendor)` suffix so the imported sheet sorts in the vendor layer. The wrapping is regenerated on every build — never edit the `*.layered.css` files by hand. **Note:** `--watch` mode only runs the wrap step once at startup; rerun `bash scripts/build-css.sh` after updating a vendor file mid-watch.
+
+3. **Page templates load the `*.layered.css` variant**, not `*.min.css`. Example: `change_detail.html` loads `vendor/diff2html.layered.css`. The original minified file stays in `vendor/` as the source of truth and is checked into git as-is.
+
+4. **Override rules go in `@layer components`** in `input.css`, with normal specificity and no `!important`. Example:
+
+   ```css
+   @layer components {
+     .diff-mount .d2h-tag { display: none; }
+   }
+   ```
+
+This pattern preserves page-scoped loading of vendor CSS (no global bundle bloat) and scales to any future vendored UI (Monaco, additional widgets) — drop the `*.min.css` into `vendor/`, link the `*.layered.css` from the page that needs it, write overrides in `@layer components` without `!important`.

@@ -1,4 +1,4 @@
-"""Tests for structural HTML diff (Phase B stub in Phase A)."""
+"""Tests for structural HTML diff (Phase B.2 stub — Phase A scaffold)."""
 
 import pytest
 

@@ -2455,13 +2455,23 @@ def _load_snapshot_text(storage: LocalStorage, snapshot, path_attr: str) -> str:
         return ""
 
 
-def _maybe_prettify_html(text: str, *, mode: str, content_type) -> str:
+def _maybe_prettify_html(text: str, *, mode: str, content_type: ContentType | str | None) -> str:
     """For Raw Content mode on HTML watches, pretty-print before diffing so
     long single-line markup wraps readably (issue #118). Other modes / types
     pass through untouched — Extracted Text is already line-oriented; PDF/file
-    content isn't HTML."""
+    content isn't HTML.
+
+    html5lib is lenient but not invincible — exotic encodings, deeply nested
+    DOMs, or lxml memory failures could throw. On any error, log and fall back
+    to the unprettified text so the change-detail page degrades gracefully
+    instead of 500ing.
+    """
     if mode == "raw" and content_type == "html":
-        return normalize_html(text)
+        try:
+            return normalize_html(text)
+        except Exception:
+            logger.exception("normalize_html failed; falling back to raw text")
+            return text
     return text
 
 

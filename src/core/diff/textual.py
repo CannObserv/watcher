@@ -15,6 +15,15 @@ def compute_unified_diff(
 
     Normalizes both sides (CRLF→LF, trailing whitespace) before diffing so
     that whitespace-only differences collapse to has_changes=False.
+
+    Note on redundant normalisation when the caller has already prettified
+    HTML via ``normalize_html`` (e.g. the dashboard Raw-mode route): the
+    pretty-printed output already uses LF newlines and has no per-line
+    trailing whitespace, so ``normalize_text`` is effectively a no-op on it
+    — but it still scans every byte twice. Future micro-optimisation would
+    be a ``normalize=Callable[[str], str] | None`` keyword (default to
+    ``normalize_text``; pass ``None`` to skip). Defer until profiling
+    flags this as hot — current cost is a tiny constant per request.
     """
     prev_norm = normalize_text(previous)
     curr_norm = normalize_text(current)

@@ -121,7 +121,12 @@ class TestPartialDiffRoute:
         resp = await client.get(f"/partials/diff/{change.id}?mode=raw")
         assert resp.status_code == 200
         body = resp.content
-        # The text should appear as-is, not wrapped in <html><body>...
-        assert b"<html>" not in body
+        # The diff sits in the data-unified-diff attribute, which Jinja
+        # autoescapes — so a leaked HTML wrapper would appear as the
+        # entity-encoded form, never as raw `<html>`. Check the entity form.
+        assert b"&lt;html&gt;" not in body
+        assert b"&lt;body&gt;" not in body
+        # Positive: plain text appears verbatim in the diff (no scaffold).
+        assert b"line one" in body
         assert b"line two" in body
         assert b"line THREE" in body

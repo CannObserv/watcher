@@ -4,7 +4,7 @@
 - normalize_html: pretty-print HTML via html5lib (lenient parse) + lxml.html
   serialisation. Block-level elements get one per line; inline content stays
   put. Strips HTML comments (frequent noise). See #118 for motivation; #115
-  Phase B reserves the structural-tree-diff path on top of this same parse.
+  Phase B.2 reserves the structural-tree-diff path on top of this same parse.
 """
 
 import html5lib
@@ -63,11 +63,14 @@ def normalize_html(html: str) -> str:
     inflate "no content" snapshots into bare ``<html><body></body></html>``
     skeletons that would falsely appear identical to one another.
 
-    The pipeline runs twice: lxml's ``pretty_print`` introduces structural
-    whitespace that on a re-parse can shift, so a second pass stabilises
-    output to a fixed point. Result is idempotent — calling on already
-    pretty-printed input produces the same output. Whitespace inside
-    ``<pre>``, ``<textarea>``, ``<script>``, ``<style>`` is preserved.
+    The pipeline can run up to twice: lxml's ``pretty_print`` introduces
+    structural whitespace that on a re-parse can shift, so a second pass
+    stabilises output to a fixed point. The fast path skips the second pass
+    when the first pass is already a fixed point — common on already-pretty
+    input — avoiding a redundant parse + serialise. Result is idempotent;
+    calling on already pretty-printed input produces the same output.
+    Whitespace inside ``<pre>``, ``<textarea>``, ``<script>``, ``<style>``
+    is preserved.
     """
     if not html or not html.strip():
         return html
@@ -79,4 +82,11 @@ def normalize_html(html: str) -> str:
         _strip_structural_whitespace(tree)
         return lxml_html.tostring(tree, pretty_print=True, encoding="unicode")
 
-    return _pass(_pass(html))
+    first = _pass(html)
+    # Fast path: if the input was already a fixed point of _pass (input matches
+    # output), the second pass would be redundant — skip it. Saves a full
+    # parse + serialise on already-pretty inputs (common in practice).
+    if first == html:
+        return first
+    second = _pass(first)
+    return second

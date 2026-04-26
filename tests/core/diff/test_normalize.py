@@ -82,3 +82,18 @@ class TestNormalizeHtml:
         src = "<div>\r\n<p>x</p>\r\n</div>"
         out = normalize_html(src)
         assert "\r" not in out
+
+    def test_preserves_whitespace_inside_pre(self):
+        """Whitespace inside <pre> is significant per HTML spec — guard the
+        _WS_PRESERVE_TAGS / _has_preserve_ancestor logic so a future
+        'simplification' that drops it gets caught."""
+        src = "<pre>  indented\n    nested code\n</pre>"
+        out = normalize_html(src)
+        # Internal whitespace and newlines inside <pre> survive verbatim.
+        assert "  indented\n    nested code" in out
+
+    def test_preserves_whitespace_inside_script(self):
+        """Same guarantee for <script>: indentation in JS body is preserved."""
+        src = "<script>\n  var x = 1;\n  var y = 2;\n</script>"
+        out = normalize_html(src)
+        assert "  var x = 1;\n  var y = 2;" in out

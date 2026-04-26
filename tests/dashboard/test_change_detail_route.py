@@ -1,6 +1,6 @@
 """Integration tests for GET /changes/{change_id} and /partials/diff/{change_id}:
-diff-mount rendering, identical-snapshot fallback, mode param validation, and the
-Structure segment stub."""
+diff-mount rendering, identical-snapshot fallback, mode param validation, the
+Structure segment stub, and Raw-mode HTML pretty-print (#118)."""
 
 import re
 
@@ -82,3 +82,46 @@ class TestPartialDiffRoute:
         )
         resp = await client.get(f"/partials/diff/{change.id}?mode=bogus")
         assert resp.status_code == 422
+
+    async def test_raw_mode_prettifies_html_for_html_watches(
+        self, client, make_change_with_snapshots
+    ):
+        """Issue #118: Raw mode on an HTML watch must pretty-print so a single-line
+        page renders as multi-line in the diff (each block element on its own line)."""
+        # Single-line HTML where the change is buried near the end — the bug case.
+        prev = (
+            "<html><body><div><p>Header</p>"
+            "<p>Body intro</p><p>Final word: red</p></div></body></html>"
+        )
+        curr = (
+            "<html><body><div><p>Header</p>"
+            "<p>Body intro</p><p>Final word: blue</p></div></body></html>"
+        )
+        change = await make_change_with_snapshots(prev_text=prev, curr_text=curr, write_files=True)
+        resp = await client.get(f"/partials/diff/{change.id}?mode=raw")
+        assert resp.status_code == 200
+        body = resp.content.decode()
+        # The unified diff is in data-unified-diff. With normalization, the
+        # change line is short (just the changed <p>), not the whole document.
+        # Verify by checking that the changed <p> appears as a self-contained
+        # `+` line, not embedded in a multi-thousand-char single line.
+        match = re.search(r"\+\s*&lt;p&gt;Final word: blue&lt;/p&gt;", body)
+        assert match is not None, (
+            "Raw HTML diff didn't isolate the changed line — pretty-print not applied?"
+        )
+
+    async def test_raw_mode_does_not_prettify_non_html(self, client, make_change_with_snapshots):
+        """Plain-text watches must not get HTML pretty-print (would wrap in <html><body>)."""
+        change = await make_change_with_snapshots(
+            prev_text="line one\nline two\n",
+            curr_text="line one\nline THREE\n",
+            write_files=True,
+            watch_content_type="file",
+        )
+        resp = await client.get(f"/partials/diff/{change.id}?mode=raw")
+        assert resp.status_code == 200
+        body = resp.content
+        # The text should appear as-is, not wrapped in <html><body>...
+        assert b"<html>" not in body
+        assert b"line two" in body
+        assert b"line THREE" in body

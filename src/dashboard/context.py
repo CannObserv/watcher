@@ -227,6 +227,7 @@ async def get_change_detail(session: AsyncSession, change_id: str) -> dict | Non
         "change": change,
         "watch_name": watch_name,
         "watch_id": str(change.watch_id),
+        "watch_content_type": watch.content_type if watch else None,
         "current_snapshot": curr_snap,
         "previous_snapshot": prev_snap,
         "current_chunks": curr_chunks,

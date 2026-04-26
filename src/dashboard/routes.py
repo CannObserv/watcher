@@ -27,6 +27,7 @@ from src.api.schemas.notification_config import (
 from src.core.crypto import decrypt_apprise_url, encrypt_apprise_url
 from src.core.database import get_session_factory
 from src.core.diff import compute_unified_diff
+from src.core.diff.normalize import normalize_html
 from src.core.logging import get_logger
 from src.core.models.audit_log import EventType, audit
 from src.core.models.domain import Domain
@@ -2454,6 +2455,16 @@ def _load_snapshot_text(storage: LocalStorage, snapshot, path_attr: str) -> str:
         return ""
 
 
+def _maybe_prettify_html(text: str, *, mode: str, content_type) -> str:
+    """For Raw Content mode on HTML watches, pretty-print before diffing so
+    long single-line markup wraps readably (issue #118). Other modes / types
+    pass through untouched — Extracted Text is already line-oriented; PDF/file
+    content isn't HTML."""
+    if mode == "raw" and content_type == "html":
+        return normalize_html(text)
+    return text
+
+
 @router.get("/changes/{change_id}")
 async def change_detail_page(
     request: Request,
@@ -2470,6 +2481,9 @@ async def change_detail_page(
     path_attr = "storage_path" if mode == "raw" else "text_path"
     prev_text = _load_snapshot_text(storage, detail["previous_snapshot"], path_attr)
     curr_text = _load_snapshot_text(storage, detail["current_snapshot"], path_attr)
+    content_type = detail.get("watch_content_type")
+    prev_text = _maybe_prettify_html(prev_text, mode=mode, content_type=content_type)
+    curr_text = _maybe_prettify_html(curr_text, mode=mode, content_type=content_type)
     diff = compute_unified_diff(prev_text, curr_text)
 
     context = {
@@ -2496,6 +2510,9 @@ async def partial_diff(
     path_attr = "storage_path" if mode == "raw" else "text_path"
     prev_text = _load_snapshot_text(storage, detail["previous_snapshot"], path_attr)
     curr_text = _load_snapshot_text(storage, detail["current_snapshot"], path_attr)
+    content_type = detail.get("watch_content_type")
+    prev_text = _maybe_prettify_html(prev_text, mode=mode, content_type=content_type)
+    curr_text = _maybe_prettify_html(curr_text, mode=mode, content_type=content_type)
     diff = compute_unified_diff(prev_text, curr_text)
     return templates.TemplateResponse(request, "partials/diff_view.html", {"diff": diff})
 

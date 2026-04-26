@@ -51,6 +51,7 @@ async def make_change_with_snapshots(db_session, tmp_path):
         write_files: bool = False,
         watch_name: str = "W",
         watch_url: str = "https://example.com",
+        watch_content_type: str = "html",
         include_chunk: bool = True,
         screenshot_paths: tuple[str, str] | None = None,
         **change_kwargs,
@@ -66,7 +67,7 @@ async def make_change_with_snapshots(db_session, tmp_path):
             prev_storage = "/tmp/s"
             curr_storage = "/tmp/t"
 
-        watch = Watch(name=watch_name, url=watch_url, content_type="html")
+        watch = Watch(name=watch_name, url=watch_url, content_type=watch_content_type)
         db_session.add(watch)
         await db_session.flush()
 

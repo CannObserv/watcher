@@ -269,6 +269,36 @@
   .diff-mount .d2h-tag {
     display: none;
   }
+
+  /* Re-assert padding/border that Tailwind preflight (`* { padding: 0;
+     border: 0 solid }`, in @layer base) strips off the diff2html line
+     cells. The vendor stylesheet sits in @layer vendor (below base), so
+     without these overrides the absolutely-positioned line-number column
+     paints over the start of every content row. Issue #120. Values
+     mirror diff2html.layered.css. */
+  .diff-mount .d2h-code-line {
+    padding: 0 8em;
+  }
+  .diff-mount .d2h-code-side-line {
+    padding: 0 4.5em;
+  }
+  .diff-mount .d2h-code-linenumber {
+    border-inline: 1px solid var(--d2h-line-border-color);
+  }
+  .diff-mount .d2h-code-side-linenumber {
+    padding: 0 0.5em;
+    border-inline: 1px solid var(--d2h-line-border-color);
+  }
+  .diff-mount.dark .d2h-code-linenumber,
+  .dark .diff-mount .d2h-code-linenumber,
+  .diff-mount.dark .d2h-code-side-linenumber,
+  .dark .diff-mount .d2h-code-side-linenumber {
+    border-inline-color: var(--d2h-dark-line-border-color);
+  }
+  .diff-mount .line-num1,
+  .diff-mount .line-num2 {
+    padding: 0 0.5em;
+  }
 }
 
 /* -- Reduced motion -- */

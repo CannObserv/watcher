@@ -110,6 +110,30 @@ class TestPartialDiffRoute:
             "Raw HTML diff didn't isolate the changed line — pretty-print not applied?"
         )
 
+    async def test_raw_mode_falls_back_when_normalize_html_raises(
+        self, client, make_change_with_snapshots, monkeypatch
+    ):
+        """If normalize_html crashes (e.g. lxml memory failure on a pathological
+        page), the route logs and degrades to unprettified text rather than 500.
+        Guards CR item 21's graceful fallback against accidental removal."""
+        from src.dashboard import routes as routes_mod
+
+        def _boom(_text):
+            raise RuntimeError("simulated lxml/html5lib failure")
+
+        monkeypatch.setattr(routes_mod, "normalize_html", _boom)
+        change = await make_change_with_snapshots(
+            prev_text="<p>hello world</p>",
+            curr_text="<p>hello planet</p>",
+            write_files=True,
+        )
+        resp = await client.get(f"/partials/diff/{change.id}?mode=raw")
+        assert resp.status_code == 200
+        # Raw text appears in the (entity-encoded) diff because we fell back —
+        # the route did NOT 500 and DID NOT skip rendering the change.
+        assert b"hello planet" in resp.content
+        assert b"hello world" in resp.content
+
     async def test_raw_mode_does_not_prettify_non_html(self, client, make_change_with_snapshots):
         """Plain-text watches must not get HTML pretty-print (would wrap in <html><body>)."""
         change = await make_change_with_snapshots(

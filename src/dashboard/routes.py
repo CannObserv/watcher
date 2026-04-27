@@ -2470,7 +2470,10 @@ def _maybe_prettify_html(text: str, *, mode: str, content_type: ContentType | st
         try:
             return normalize_html(text)
         except Exception:
-            logger.exception("normalize_html failed; falling back to raw text")
+            logger.exception(
+                "normalize_html failed; falling back to raw text",
+                extra={"input_len": len(text), "content_type": str(content_type)},
+            )
             return text
     return text
 

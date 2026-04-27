@@ -83,10 +83,10 @@ def normalize_html(html: str) -> str:
         return lxml_html.tostring(tree, pretty_print=True, encoding="unicode")
 
     first = _pass(html)
-    # Fast path: if the input was already a fixed point of _pass (input matches
-    # output), the second pass would be redundant — skip it. Saves a full
-    # parse + serialise on already-pretty inputs (common in practice).
+    # Fast path: input was already a fixed point of _pass (already pretty), so
+    # the second pass would be redundant. `first == html` here, so returning
+    # `first` keeps the contract identical while saving a parse + serialise.
     if first == html:
-        return first
+        return first  # == html, fixed point
     second = _pass(first)
     return second

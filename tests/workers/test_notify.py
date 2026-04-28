@@ -39,13 +39,11 @@ def _watch_meta_result(value, *, content_type=None):
     `select(Watch.effective_domain, Watch.content_type)` lookup.
 
     `value` is the effective_domain (str or None). `content_type` is the
-    Watch.content_type (defaults to None → non-HTML branch). Sets both
-    `.scalar_one_or_none()` (returns the domain) and `.one_or_none()`
-    (returns the 2-tuple `(domain, content_type)`) so legacy callers
-    using positional-only domain values keep working unchanged.
+    Watch.content_type (defaults to None → non-HTML branch). Returns a
+    MagicMock whose `.one_or_none()` yields either `None` (no row) or
+    the 2-tuple `(domain, content_type)`.
     """
     r = MagicMock()
-    r.scalar_one_or_none.return_value = value
     r.one_or_none.return_value = None if value is None else (value, content_type)
     return r
 
@@ -849,12 +847,10 @@ class TestUnifiedDiffLazyLoad:
 
     @pytest.mark.asyncio
     async def test_dispatcher_threads_content_type_to_load(self, set_test_key):
-        """The dispatcher's `select(effective_domain, content_type)` row must
-        be unpacked and the content_type passed as a kwarg to
-        `_load_event_unified_diff` so the inner function skips a redundant
-        Watch fetch (CR #18)."""
+        """The dispatcher must unpack content_type from the watch_meta row
+        and pass it through to `_load_event_unified_diff` so the inner
+        function takes the perf shortcut and skips a redundant Watch fetch."""
         event = make_event(WatchEventType.CHANGE_DETECTED)
-        event.metadata["change_id"] = str(ULID())
 
         cfg = ContentConfig(default=ContentOptions(include_diff_snippet=True)).model_dump()
         c = MagicMock()

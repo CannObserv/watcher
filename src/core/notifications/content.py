@@ -20,7 +20,8 @@ _jinja_env_strict = Environment(autoescape=False, undefined=StrictUndefined)
 # Default cap for the `diff_snippet` template variable. Lifted from the
 # Pydantic field default so the two stay in lockstep — when a custom user
 # template references `{{ diff_snippet }}`, they get a sensibly-bounded slice
-# rather than a wall of entries. Use `{{ diff_full }}` for the unbounded version.
+# rather than a wall of unified-diff lines. Use `{{ diff_full }}` for the
+# unbounded version.
 _DEFAULT_DIFF_SNIPPET_CAP: int = ContentOptions.model_fields["diff_snippet_lines"].default
 
 
@@ -83,7 +84,10 @@ def _format_occurred_at_iso(dt: datetime) -> str:
 
 
 def build_template_context(
-    event: WatchEvent, *, diff_snippet_cap: int = _DEFAULT_DIFF_SNIPPET_CAP
+    event: WatchEvent,
+    *,
+    diff_snippet_cap: int = _DEFAULT_DIFF_SNIPPET_CAP,
+    unified_diff: str | None = None,
 ) -> dict:
     """Build Jinja2 template context from a WatchEvent.
 
@@ -93,18 +97,23 @@ def build_template_context(
       - `occurred_at_iso` — ISO 8601 UTC timestamp (`...Z`), AGENTS.md format
       - `change_summary` — counts string for change_detected; empty otherwise
       - `change_url` — dashboard URL when `change_id` is in metadata; empty otherwise
-      - `diff_snippet` — pre-rendered diff lines capped at `diff_snippet_cap`
-        (module default matches `ContentOptions.diff_snippet_lines` default);
-        empty when no diff data. `build_body` passes `options.diff_snippet_lines`
-        on the body_template path so custom templates honor the user preference.
-      - `diff_full` — pre-rendered diff lines, uncapped; empty when no diff data
+      - `diff_snippet` — Markdown ```diff fenced unified diff, capped at
+        `diff_snippet_cap` lines (hunk-boundary aware); empty when no
+        `unified_diff` is provided.
+      - `diff_full` — Markdown ```diff fenced unified diff, uncapped; empty
+        when no `unified_diff` is provided.
+      - `chunks_changed` — structured list of chunk-level changes:
+        `[{"status": "added"|"removed"|"modified", "label": str,
+        "similarity": float|None}, ...]`. Empty list when no chunk metadata.
 
-    User templates referencing any of these on events that don't populate them
-    will render blank.
+    The dispatcher passes `unified_diff` after lazy-loading prev/curr extracted
+    text from the Change row; the preview path computes it from canned text
+    (see `preview_fixtures.compute_preview_unified_diff`). Both paths leave
+    `diff_snippet`/`diff_full` empty when no diff is available.
 
     Derived fields are written *after* `metadata.update()` so that an event
-    metadata dict that happens to share a key (e.g., `change_url`) cannot
-    clobber the value the template builder computed.
+    metadata dict that happens to share a key cannot clobber the value the
+    template builder computed.
     """
     ctx = {
         "watch_id": event.watch_id,
@@ -119,8 +128,9 @@ def build_template_context(
     ctx["occurred_at_iso"] = _format_occurred_at_iso(event.occurred_at)
     ctx["change_summary"] = _compute_change_summary(event)
     ctx["change_url"] = _format_change_url(event.watch_id, event.metadata.get("change_id"))
-    ctx["diff_snippet"] = _render_diff_lines(event.metadata, max_entries=diff_snippet_cap)
-    ctx["diff_full"] = _render_diff_lines(event.metadata, max_entries=None)
+    ctx["diff_snippet"] = _render_unified_diff_block(unified_diff, max_lines=diff_snippet_cap)
+    ctx["diff_full"] = _render_unified_diff_block(unified_diff, max_lines=None)
+    ctx["chunks_changed"] = _format_chunks_changed(event.metadata)
     return ctx
 
 
@@ -148,7 +158,13 @@ def resolve_options(config: ContentConfig | None, event_type: str) -> ContentOpt
     return config.overrides.get(event_type) or config.default
 
 
-def build_body(event: WatchEvent, options: ContentOptions, *, strict: bool = False) -> str:
+def build_body(
+    event: WatchEvent,
+    options: ContentOptions,
+    *,
+    strict: bool = False,
+    unified_diff: str | None = None,
+) -> str:
     """Compose a notification body from the event and resolved options.
 
     Three code paths:
@@ -163,6 +179,11 @@ def build_body(event: WatchEvent, options: ContentOptions, *, strict: bool = Fal
       3. any other event_type → render the entry from `DEFAULT_BODY_TEMPLATES`
          (a single Jinja line; toggles do not apply).
 
+    `unified_diff` is the precomputed unified-diff text for this event (loaded
+    by the dispatcher, computed from canned text by the preview path). Pass
+    `None` when there is no diff data — `diff_snippet`/`diff_full` will be
+    empty and the change_detected body's diff section will be omitted.
+
     `strict=True` selects the StrictUndefined Jinja env so template errors
     propagate. Use only for the preview endpoint; the dispatcher path must
     call with the default `strict=False`. The change_detected default path
@@ -173,15 +194,24 @@ def build_body(event: WatchEvent, options: ContentOptions, *, strict: bool = Fal
         # Pass the user's diff_snippet_lines cap through so a custom template
         # referencing {{ diff_snippet }} honors the preference rather than
         # silently using the module default.
-        ctx = build_template_context(event, diff_snippet_cap=options.diff_snippet_lines)
+        ctx = build_template_context(
+            event,
+            diff_snippet_cap=options.diff_snippet_lines,
+            unified_diff=unified_diff,
+        )
         return render(options.body_template, ctx)
 
     if event.event_type == WatchEventType.CHANGE_DETECTED:
-        return _build_change_detected_body(event, options)
-    return render(DEFAULT_BODY_TEMPLATES[event.event_type.value], build_template_context(event))
+        return _build_change_detected_body(event, options, unified_diff=unified_diff)
+    return render(
+        DEFAULT_BODY_TEMPLATES[event.event_type.value],
+        build_template_context(event, unified_diff=unified_diff),
+    )
 
 
-def _build_change_detected_body(event: WatchEvent, options: ContentOptions) -> str:
+def _build_change_detected_body(
+    event: WatchEvent, options: ContentOptions, *, unified_diff: str | None
+) -> str:
     """Compose the change_detected body following the issue #104 layout.
 
     Header and body-block lines come from the canonical
@@ -199,7 +229,7 @@ def _build_change_detected_body(event: WatchEvent, options: ContentOptions) -> s
     Reordering the canonical tuples requires updating the insert/append
     indices here.
     """
-    ctx = build_template_context(event)
+    ctx = build_template_context(event, unified_diff=unified_diff)
     metadata = event.metadata
 
     header = [render_template(line, ctx) for line in CHANGE_DETECTED_HEADER_LINES]
@@ -212,7 +242,7 @@ def _build_change_detected_body(event: WatchEvent, options: ContentOptions) -> s
 
     paragraphs: list[list[str]] = [header, body_block]
 
-    diff_text = _build_diff_text(metadata, options)
+    diff_text = _build_diff_text(unified_diff, options)
     if diff_text:
         paragraphs.append(diff_text.splitlines())
 
@@ -234,52 +264,130 @@ def _build_change_detected_body(event: WatchEvent, options: ContentOptions) -> s
     return "\n\n".join("\n".join(p) for p in paragraphs)
 
 
-def _build_diff_text(metadata: dict, options: ContentOptions) -> str:
+def _build_diff_text(unified_diff: str | None, options: ContentOptions) -> str:
     """Render the diff block respecting the snippet/full toggles.
 
-    Returns empty string when both diff toggles are off or when there is no
-    diff data at all.
+    Returns empty string when both diff toggles are off, when `unified_diff`
+    is missing, or when it has no content.
     """
     if not (options.include_diff_snippet or options.include_diff_full):
         return ""
-    cap = None if options.include_diff_full else options.diff_snippet_lines
-    return _render_diff_lines(metadata, max_entries=cap)
-
-
-def _render_diff_lines(metadata: dict, *, max_entries: int | None) -> str:
-    """Format chunk-level change summary. Returns empty string if no diff data.
-
-    `max_entries=None` means no cap (include every entry). A positive int caps
-    the total number of lines to include. Used by `_build_diff_text` (with
-    options.diff_snippet_lines) and `build_template_context` (to expose the
-    rendered text as `diff_snippet` / `diff_full` template variables).
-    """
-    added = metadata.get("added", [])
-    removed = metadata.get("removed", [])
-    modified = metadata.get("modified", [])
-
-    if not added and not removed and not modified:
+    if not unified_diff:
         return ""
+    cap = None if options.include_diff_full else options.diff_snippet_lines
+    return _render_unified_diff_block(unified_diff, max_lines=cap)
 
-    entries: list[str] = []
-    for label in added:
-        entries.append(f"  + {label}")
-    for label in removed:
-        entries.append(f"  - {label}")
-    for item in modified:
+
+def _normalize_unified_diff_lines(unified_diff: str) -> list[str]:
+    """Split unified-diff text into non-empty lines.
+
+    `compute_unified_diff` emits content lines with both their input `\n` and
+    the joining `\n`, producing blank lines between every content line.
+    Real unified-diff output has no empty lines (content lines always carry
+    a leading ` `, `+`, or `-` prefix), so dropping empty lines is safe and
+    yields the canonical diff layout users expect inside the Markdown fence.
+    """
+    return [line for line in unified_diff.split("\n") if line]
+
+
+def _render_unified_diff_block(unified_diff: str | None, *, max_lines: int | None) -> str:
+    """Wrap a unified-diff text in a Markdown ```diff fenced block.
+
+    `max_lines=None` means no cap; the entire diff is rendered.
+    A positive int caps the number of diff lines included; truncation is
+    hunk-boundary aware (`@@ ...` lines mark hunk starts), and a `...
+    (N more lines)` footer is appended inside the fence when truncated.
+
+    Returns empty string when `unified_diff` is None or empty.
+    """
+    if not unified_diff:
+        return ""
+    lines = _normalize_unified_diff_lines(unified_diff)
+    if not lines:
+        return ""
+    if max_lines is None:
+        kept, omitted = lines, 0
+    else:
+        kept, omitted = _truncate_unified_diff_lines(lines, max_lines)
+    body = "\n".join(kept)
+    fenced = "```diff\n" + body + "\n"
+    if omitted > 0:
+        fenced += f"... ({omitted} more line{'s' if omitted != 1 else ''})\n"
+    fenced += "```"
+    return fenced
+
+
+def _truncate_unified_diff_lines(lines: list[str], max_lines: int) -> tuple[list[str], int]:
+    """Truncate diff lines to at most `max_lines` on a hunk boundary.
+
+    The two file-header lines (`---` / `+++`) are always preserved when
+    present. Each hunk is included whole or not at all — never truncated
+    mid-hunk — except when even the first hunk doesn't fit, in which case
+    only the file header + the first `@@` header line is included so the
+    user can at least see where the diff begins.
+
+    Returns `(kept_lines, omitted_line_count)`. `omitted_line_count == 0`
+    means no truncation occurred.
+    """
+    if len(lines) <= max_lines:
+        return lines, 0
+
+    header_end = 0
+    if len(lines) >= 2 and lines[0].startswith("---") and lines[1].startswith("+++"):
+        header_end = 2
+
+    hunk_starts = [i for i, line in enumerate(lines) if line.startswith("@@") and i >= header_end]
+    if not hunk_starts:
+        # No hunks; just truncate at line boundary, reserving room for footer.
+        end = max(0, max_lines - 1)
+        return lines[:end], len(lines) - end
+
+    hunk_starts.append(len(lines))  # sentinel
+    budget = max_lines - 1  # reserve one line for the footer
+    end = header_end
+    for i in range(len(hunk_starts) - 1):
+        next_end = hunk_starts[i + 1]
+        if next_end <= budget:
+            end = next_end
+        else:
+            break
+    if end <= header_end:
+        # Even the first hunk doesn't fit; include header + the first @@
+        # header line so the user at least sees where the diff starts.
+        end = min(hunk_starts[0] + 1, budget)
+        end = max(end, header_end)
+    return lines[:end], len(lines) - end
+
+
+def _format_chunks_changed(metadata: dict) -> list[dict]:
+    """Return structured chunk-level changes.
+
+    Each entry is a dict with keys:
+      - status: "added" | "removed" | "modified"
+      - label: chunk label (str)
+      - similarity: float | None  (only meaningful for modified)
+
+    Returns an empty list when no chunk metadata is present. This is the
+    structured replacement for the old chunk-label summary string — custom
+    templates that want a textual rendering can iterate over it.
+    """
+    out: list[dict] = []
+    for label in metadata.get("added", []) or []:
+        out.append({"status": "added", "label": label, "similarity": None})
+    for label in metadata.get("removed", []) or []:
+        out.append({"status": "removed", "label": label, "similarity": None})
+    for item in metadata.get("modified", []) or []:
         label = item.get("label")
         if not label:
             continue
-        similarity = item.get("similarity")
-        if similarity is None:
-            entries.append(f"  ~ {label}")
-        else:
-            entries.append(f"  ~ {label} ({int(similarity * 100)}% similar)")
-
-    if max_entries is not None:
-        entries = entries[:max_entries]
-
-    return "Changed sections:\n" + "\n".join(entries)
+        out.append(
+            {
+                "status": "modified",
+                "label": label,
+                "similarity": item.get("similarity"),
+            }
+        )
+    return out
 
 
 def _format_change_url(watch_id: str, change_id: str | None) -> str:

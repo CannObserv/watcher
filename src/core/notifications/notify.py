@@ -7,10 +7,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ulid import ULID
 
 from src.api.schemas.content_config import ContentConfig
+from src.core.diff.textual import compute_unified_diff
 from src.core.logging import get_logger
 from src.core.models.audit_log import EventType, audit
+from src.core.models.change import Change
 from src.core.models.notification_config import WatchNotificationConfig
 from src.core.models.notification_template import DomainNcRef, NotificationTemplate, WatchNcRef
+from src.core.models.snapshot import Snapshot
 from src.core.models.watch import Watch
 from src.core.notifications.content import (
     build_body,
@@ -18,7 +21,8 @@ from src.core.notifications.content import (
     resolve_options,
 )
 from src.core.notifications.dispatcher import dispatch_event
-from src.core.notifications.events import WatchEvent
+from src.core.notifications.events import WatchEvent, WatchEventType
+from src.core.storage import STORAGE_BASE_DIR, LocalStorage, StorageBackend
 
 logger = get_logger(__name__)
 
@@ -31,6 +35,76 @@ class DispatchCandidate:
     source: str  # "global" | "domain" | "watch_template" | "local"
     source_id: str
     content_config: dict | None = None
+
+
+def _candidate_needs_unified_diff(candidate: DispatchCandidate, event_value: str) -> bool:
+    """True if rendering this candidate's body would consume `unified_diff`.
+
+    Two paths to needing the diff:
+      - resolved options have `include_diff_snippet` or `include_diff_full` on
+      - a custom `body_template` references `diff_snippet` or `diff_full`
+    """
+    cfg_dict = candidate.content_config
+    if not cfg_dict:
+        return False
+    try:
+        cc = ContentConfig.model_validate(cfg_dict)
+    except Exception:
+        return False
+    opts = resolve_options(cc, event_value)
+    if opts.include_diff_snippet or opts.include_diff_full:
+        return True
+    tmpl = opts.body_template or ""
+    if "diff_snippet" in tmpl or "diff_full" in tmpl:
+        return True
+    return False
+
+
+async def _load_event_unified_diff(
+    session: AsyncSession,
+    event: WatchEvent,
+    *,
+    storage: StorageBackend | None = None,
+) -> str:
+    """Lazily compute the unified diff for a change_detected event.
+
+    Resolves the Change row by `change_id` from event metadata, then loads
+    `text_path` from each side's snapshot via the storage backend and runs
+    `compute_unified_diff`. Returns "" on any missing piece (no change_id,
+    no Change row, missing snapshot, missing/unreadable text artifact).
+
+    Storage failures are non-fatal — we degrade to empty diff rather than
+    blocking notification dispatch.
+    """
+    change_id = event.metadata.get("change_id")
+    if not change_id:
+        return ""
+    try:
+        change_ulid = ULID.from_str(str(change_id))
+    except (TypeError, ValueError):
+        return ""
+
+    change = await session.get(Change, change_ulid)
+    if not change:
+        return ""
+
+    prev = await session.get(Snapshot, change.previous_snapshot_id)
+    curr = await session.get(Snapshot, change.current_snapshot_id)
+    if not prev or not curr or not prev.text_path or not curr.text_path:
+        return ""
+
+    storage = storage or LocalStorage(base_dir=STORAGE_BASE_DIR)
+    try:
+        prev_text = storage.load(prev.text_path).decode(errors="replace")
+        curr_text = storage.load(curr.text_path).decode(errors="replace")
+    except (FileNotFoundError, OSError):
+        logger.warning(
+            "snapshot text load failed; skipping unified diff",
+            extra={"watch_id": event.watch_id, "change_id": str(change_id)},
+        )
+        return ""
+
+    return compute_unified_diff(prev_text, curr_text).unified_diff
 
 
 async def dispatch_event_notifications(
@@ -49,6 +123,11 @@ async def dispatch_event_notifications(
     multiple sources (e.g. global AND manually assigned via WatchNcRef) fires once.
     Failures are logged but never raise. Writes a single audit log entry. Does not
     commit; caller is responsible.
+
+    For change_detected events, the prev/curr extracted text is lazily loaded
+    via `_load_event_unified_diff` once per event when at least one candidate
+    needs it (toggle on or `body_template` references `diff_snippet`/`diff_full`),
+    then reused across every candidate's body render.
     """
     watch_ulid = ULID.from_str(event.watch_id)
     event_value = event.event_type.value
@@ -138,6 +217,14 @@ async def dispatch_event_notifications(
     if not candidates:
         return
 
+    # Lazy-load the unified diff once per event when at least one candidate
+    # needs it. Reused across every candidate's body render — never recomputed.
+    unified_diff: str = ""
+    if event.event_type == WatchEventType.CHANGE_DETECTED and any(
+        _candidate_needs_unified_diff(c, event_value) for c in candidates
+    ):
+        unified_diff = await _load_event_unified_diff(session, event)
+
     results = []
     for candidate in candidates:
         try:
@@ -148,7 +235,7 @@ async def dispatch_event_notifications(
             )
             options = resolve_options(cfg, event_value)
             rendered_title = build_title(event, options)
-            rendered_body = build_body(event, options)
+            rendered_body = build_body(event, options, unified_diff=unified_diff)
             result = await dispatch_event(
                 event, candidate.apprise_url, body=rendered_body, title=rendered_title
             )

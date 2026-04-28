@@ -107,6 +107,13 @@ class TestTemplateVariables:
         ):
             assert required in names
 
+    def test_chunks_changed_is_change_detected_scoped(self):
+        """chunks_changed (#116) is the structured replacement for the old
+        chunk-label summary and only meaningful for change_detected events."""
+        var = next((v for v in TEMPLATE_VARIABLES if v.name == "chunks_changed"), None)
+        assert var is not None, "TEMPLATE_VARIABLES missing chunks_changed"
+        assert var.scope == "change_detected"
+
     def test_scopes_are_valid(self):
         allowed = {"always", "change_detected", "watch_error", "contextual"}
         for v in TEMPLATE_VARIABLES:

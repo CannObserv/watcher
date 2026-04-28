@@ -14,7 +14,10 @@ class TestContentOptions:
         assert opts.include_diff_full is False
         assert opts.include_temporal_context is False
         assert opts.include_domain is False
-        assert opts.diff_snippet_lines == 10
+        # Bumped from 10 → 25 in #116: unified diffs need more headroom than
+        # the old chunk-label summary (each hunk header + ~3 context lines
+        # ≈ 7 lines, so 10 was barely one hunk).
+        assert opts.diff_snippet_lines == 25
 
     def test_explicit_values(self):
         opts = ContentOptions(include_diff_snippet=True, diff_snippet_lines=5)
@@ -27,15 +30,15 @@ class TestContentOptions:
 
     def test_diff_snippet_lines_max(self):
         with pytest.raises(ValidationError):
-            ContentOptions(diff_snippet_lines=101)
+            ContentOptions(diff_snippet_lines=201)
 
     def test_diff_snippet_lines_boundary_values(self):
         # Verify min and max boundary values are accepted
         opts_min = ContentOptions(diff_snippet_lines=1)
         assert opts_min.diff_snippet_lines == 1
 
-        opts_max = ContentOptions(diff_snippet_lines=100)
-        assert opts_max.diff_snippet_lines == 100
+        opts_max = ContentOptions(diff_snippet_lines=200)
+        assert opts_max.diff_snippet_lines == 200
 
 
 class TestContentConfig:

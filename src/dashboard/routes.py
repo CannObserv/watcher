@@ -49,7 +49,10 @@ from src.core.notifications.default_templates import (
 from src.core.notifications.dispatcher import dispatch_event
 from src.core.notifications.events import EVENT_TITLES, WatchEvent, WatchEventType
 from src.core.notifications.notify import dispatch_event_notifications
-from src.core.notifications.preview_fixtures import build_preview_event
+from src.core.notifications.preview_fixtures import (
+    build_preview_event,
+    compute_preview_unified_diff,
+)
 from src.core.probe import ProbeResult
 from src.core.screenshot import capture_screenshot
 from src.core.storage import STORAGE_BASE_DIR, LocalStorage
@@ -92,11 +95,11 @@ def _status_to_is_active(status: str | None) -> bool | None:
 
 def _parse_content_config_from_form(form) -> dict | None:
     """Extract content_config fields from a flat form POST dict."""
-    _lines_raw = form.get("content_config__diff_snippet_lines", "10")
+    _lines_raw = form.get("content_config__diff_snippet_lines", "25")
     try:
-        _lines = max(1, min(100, int(_lines_raw)))
+        _lines = max(1, min(200, int(_lines_raw)))
     except (ValueError, TypeError):
-        _lines = 10
+        _lines = 25
     title_template = form.get("content_config__title_template", "").strip() or None
     body_template = form.get("content_config__body_template", "").strip() or None
     opts = ContentOptions(
@@ -2704,6 +2707,7 @@ async def notifications_preview(request: Request):
     options = resolve_options(config, et.value)
 
     event = build_preview_event(et.value)
+    preview_diff = compute_preview_unified_diff(et.value)
 
     try:
         title = build_title(event, options, strict=True)
@@ -2715,7 +2719,7 @@ async def notifications_preview(request: Request):
         )
 
     try:
-        body = build_body(event, options, strict=True)
+        body = build_body(event, options, strict=True, unified_diff=preview_diff)
     except TemplateError as exc:
         return templates.TemplateResponse(
             request,

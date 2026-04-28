@@ -467,3 +467,175 @@ class TestErrorHandling:
         ):
             await dispatch_event_notifications(session, make_event())
         # Did not raise
+
+
+class TestUnifiedDiffLazyLoad:
+    """The dispatcher loads prev/curr extracted text lazily — only when at
+    least one candidate's body actually consumes the unified diff. The result
+    is memoized across all candidates for the same event (issue #116)."""
+
+    @pytest.mark.asyncio
+    async def test_no_diff_load_when_no_candidate_needs_it(self, set_test_key):
+        """Default ContentOptions (toggles off, no body_template) → no
+        snapshot text load. The dispatcher must not call _load_event_unified_diff."""
+        event = make_event(WatchEventType.CHANGE_DETECTED)
+        event.metadata["change_id"] = str(ULID())
+
+        mock_config = MagicMock()
+        mock_config.apprise_url = "encrypted_url"
+        mock_config.content_config = None  # all defaults — no diff needed
+
+        session = AsyncMock(spec=AsyncSession)
+        session.execute = AsyncMock(
+            side_effect=[
+                _scalar_result(None),  # domain lookup
+                _empty_result(),  # global templates
+                _empty_result(),  # watch templates (domain templates query skipped: no domain)
+                _result_with(mock_config),  # local configs
+            ]
+        )
+
+        async def fake_dispatch(ev, url, *, body, title):
+            return MagicMock(success=True, reason="ok")
+
+        with (
+            patch("src.core.notifications.notify.dispatch_event", fake_dispatch),
+            patch(
+                "src.core.notifications.notify._load_event_unified_diff",
+                new_callable=AsyncMock,
+            ) as load_mock,
+        ):
+            await dispatch_event_notifications(session, event)
+
+        load_mock.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_diff_load_once_when_toggle_on(self, set_test_key):
+        """include_diff_snippet=True → diff is loaded exactly once and shared
+        across N candidates. Memoization is essential — N configs must not
+        cause N storage round-trips."""
+        from src.api.schemas.content_config import ContentConfig, ContentOptions
+
+        event = make_event(WatchEventType.CHANGE_DETECTED)
+        event.metadata["change_id"] = str(ULID())
+
+        cfg = ContentConfig(default=ContentOptions(include_diff_snippet=True)).model_dump()
+        configs = []
+        for _ in range(3):
+            c = MagicMock()
+            c.apprise_url = "encrypted_url"
+            c.content_config = cfg
+            configs.append(c)
+
+        session = AsyncMock(spec=AsyncSession)
+        session.execute = AsyncMock(
+            side_effect=[
+                _scalar_result(None),
+                _empty_result(),
+                _empty_result(),
+                _result_with(*configs),
+            ]
+        )
+
+        captured_bodies = []
+
+        async def fake_dispatch(ev, url, *, body, title):
+            captured_bodies.append(body)
+            return MagicMock(success=True, reason="ok")
+
+        with (
+            patch("src.core.notifications.notify.dispatch_event", fake_dispatch),
+            patch(
+                "src.core.notifications.notify._load_event_unified_diff",
+                new_callable=AsyncMock,
+                return_value="--- content\n+++ content\n@@ -1,1 +1,1 @@\n-old\n+new\n",
+            ) as load_mock,
+        ):
+            await dispatch_event_notifications(session, event)
+
+        load_mock.assert_called_once()
+        assert len(captured_bodies) == 3
+        # All three bodies share the same fenced diff block.
+        for body in captured_bodies:
+            assert "```diff" in body
+            assert "+new" in body
+
+    @pytest.mark.asyncio
+    async def test_diff_load_when_body_template_references_diff_snippet(self, set_test_key):
+        """body_template referencing {{ diff_snippet }} also triggers the load
+        even when the include_diff_* toggles are off, since toggles are
+        bypassed on the body_template code path."""
+        from src.api.schemas.content_config import ContentConfig, ContentOptions
+
+        event = make_event(WatchEventType.CHANGE_DETECTED)
+        event.metadata["change_id"] = str(ULID())
+
+        cfg = ContentConfig(
+            default=ContentOptions(body_template="diff: {{ diff_snippet }}")
+        ).model_dump()
+        c = MagicMock()
+        c.apprise_url = "encrypted_url"
+        c.content_config = cfg
+
+        session = AsyncMock(spec=AsyncSession)
+        session.execute = AsyncMock(
+            side_effect=[
+                _scalar_result(None),
+                _empty_result(),
+                _empty_result(),
+                _result_with(c),
+            ]
+        )
+
+        async def fake_dispatch(ev, url, *, body, title):
+            return MagicMock(success=True, reason="ok")
+
+        with (
+            patch("src.core.notifications.notify.dispatch_event", fake_dispatch),
+            patch(
+                "src.core.notifications.notify._load_event_unified_diff",
+                new_callable=AsyncMock,
+                return_value="--- content\n+++ content\n@@ -1,1 +1,1 @@\n-x\n+y\n",
+            ) as load_mock,
+        ):
+            await dispatch_event_notifications(session, event)
+
+        load_mock.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_no_diff_load_for_non_change_event(self, set_test_key):
+        """watch_error and other non-change events never trigger the diff load
+        even if the resolved options have diff toggles on."""
+        from src.api.schemas.content_config import ContentConfig, ContentOptions
+
+        event = make_event(WatchEventType.WATCH_ERROR)
+
+        cfg = ContentConfig(default=ContentOptions(include_diff_snippet=True)).model_dump()
+        c = MagicMock()
+        c.apprise_url = "encrypted_url"
+        c.content_config = cfg
+        c.events = ["watch_error"]
+
+        session = AsyncMock(spec=AsyncSession)
+        session.execute = AsyncMock(
+            side_effect=[
+                _scalar_result(None),
+                _empty_result(),
+                _empty_result(),
+                _result_with(c),
+            ]
+        )
+
+        async def fake_dispatch(ev, url, *, body, title):
+            return MagicMock(success=True, reason="ok")
+
+        with (
+            patch("src.core.notifications.notify.dispatch_event", fake_dispatch),
+            patch(
+                "src.core.notifications.notify._load_event_unified_diff",
+                new_callable=AsyncMock,
+            ) as load_mock,
+        ):
+            await dispatch_event_notifications(session, event)
+
+        load_mock.assert_not_called()

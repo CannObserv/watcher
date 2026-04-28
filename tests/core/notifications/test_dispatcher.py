@@ -226,8 +226,11 @@ class TestDispatchEvent:
         assert "error_for_call_2" in r2.reason
         assert "error_for_call_2" not in r1.reason
 
-    async def test_passes_body_format_text_so_html_providers_convert_newlines(self):
-        """body_format=TEXT always passed; Apprise converts newlines to <br/> for HTML providers."""
+    async def test_passes_body_format_markdown_for_apprise_downconversion(self):
+        """body_format=MARKDOWN always passed; Apprise downconverts the body
+        for HTML and plaintext channels (issue #116). Markdown gives us a
+        single canonical body — fenced ```diff blocks render cleanly on
+        Discord/Slack/email and degrade readably on plaintext channels."""
         event = make_event()
         encrypted = make_encrypted_url("json://localhost/notify")
 
@@ -240,7 +243,7 @@ class TestDispatchEvent:
             await dispatch_event(event, encrypted, body="line one\nline two", title="test title")
 
         call_kwargs = instance.async_notify.call_args.kwargs
-        assert call_kwargs["body_format"] == NotifyFormat.TEXT
+        assert call_kwargs["body_format"] == NotifyFormat.MARKDOWN
 
     async def test_dispatch_event_passes_body_and_title_verbatim(self):
         """body and title are required kwargs and forwarded to Apprise unchanged."""

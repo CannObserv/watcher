@@ -2,23 +2,25 @@
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT_DIR="$(dirname "$SCRIPT_DIR")"
-TAILWIND="$SCRIPT_DIR/tailwindcss"
 INPUT="$ROOT_DIR/src/dashboard/static/css/input.css"
 OUTPUT="$ROOT_DIR/src/dashboard/static/css/output.css"
 VENDOR_DIR="$ROOT_DIR/src/dashboard/static/css/vendor"
 
-if [ ! -f "$TAILWIND" ]; then
-  echo "⚠ Tailwind CLI not found — skipping CSS check"
-  exit 0
+if ! command -v tailwindcss &>/dev/null; then
+  echo "Error: tailwindcss not found. Run: sudo npm install -g @tailwindcss/cli"
+  exit 1
 fi
 if [ ! -f "$INPUT" ]; then
   exit 0
 fi
 
+# See build-css.sh for why NODE_PATH is set here.
+export NODE_PATH="$(npm root -g)/@tailwindcss/cli/node_modules${NODE_PATH:+:$NODE_PATH}"
+
 TMPFILE=$(mktemp)
 TMPDIR_LAYERED=$(mktemp -d)
 trap 'rm -f "$TMPFILE"; rm -rf "$TMPDIR_LAYERED"' EXIT
-"$TAILWIND" -i "$INPUT" -o "$TMPFILE" --minify 2>/dev/null
+tailwindcss -i "$INPUT" -o "$TMPFILE" --minify 2>/dev/null
 
 if [ ! -f "$OUTPUT" ]; then
   echo "❌ output.css missing. Run: bash scripts/build-css.sh"

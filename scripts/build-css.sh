@@ -2,15 +2,19 @@
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT_DIR="$(dirname "$SCRIPT_DIR")"
-TAILWIND="$SCRIPT_DIR/tailwindcss"
 INPUT="$ROOT_DIR/src/dashboard/static/css/input.css"
 OUTPUT="$ROOT_DIR/src/dashboard/static/css/output.css"
 VENDOR_DIR="$ROOT_DIR/src/dashboard/static/css/vendor"
 
-if [ ! -f "$TAILWIND" ]; then
-  echo "Error: Tailwind CLI not found at $TAILWIND"
+if ! command -v tailwindcss &>/dev/null; then
+  echo "Error: tailwindcss not found. Run: sudo npm install -g @tailwindcss/cli"
   exit 1
 fi
+
+# Tailwind v4's @import "tailwindcss" resolves via Node module resolution from
+# the CSS file's directory. With a global CLI install the tailwindcss CSS package
+# lives inside the CLI's own node_modules, so we expose it via NODE_PATH.
+export NODE_PATH="$(npm root -g)/@tailwindcss/cli/node_modules${NODE_PATH:+:$NODE_PATH}"
 
 # Wrap each vendored *.min.css in @layer vendor { ... } so input.css's
 # @layer components rules can override them without !important. Idempotent —
@@ -26,7 +30,7 @@ done
 shopt -u nullglob
 
 if [ "${1:-}" = "--watch" ]; then
-  "$TAILWIND" -i "$INPUT" -o "$OUTPUT" --watch
+  tailwindcss -i "$INPUT" -o "$OUTPUT" --watch
 else
-  "$TAILWIND" -i "$INPUT" -o "$OUTPUT" --minify
+  tailwindcss -i "$INPUT" -o "$OUTPUT" --minify
 fi

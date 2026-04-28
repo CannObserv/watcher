@@ -25,7 +25,7 @@ from src.core.notifications.content import (
 )
 from src.core.notifications.dispatcher import dispatch_event
 from src.core.notifications.events import WatchEvent, WatchEventType
-from src.core.storage import STORAGE_BASE_DIR, LocalStorage, StorageBackend
+from src.core.storage import StorageBackend, default_storage
 
 logger = get_logger(__name__)
 
@@ -142,7 +142,7 @@ async def _load_event_unified_diff(
         content_type = watch.content_type if watch is not None else None
 
     log_extra = {"watch_id": event.watch_id, "change_id": str(change_id)}
-    storage = storage or LocalStorage(base_dir=STORAGE_BASE_DIR)
+    storage = storage or default_storage
 
     # HTML branch: diff the prettified raw HTML, mirroring the dashboard.
     # Falls through to the text_path branch when watch is missing or non-HTML.

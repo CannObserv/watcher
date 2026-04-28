@@ -55,7 +55,7 @@ from src.core.notifications.preview_fixtures import (
 )
 from src.core.probe import ProbeResult
 from src.core.screenshot import capture_screenshot
-from src.core.storage import STORAGE_BASE_DIR, LocalStorage
+from src.core.storage import LocalStorage, default_storage
 from src.core.watches import create_watch as _create_watch
 from src.dashboard import templates
 from src.dashboard.context import (
@@ -312,7 +312,7 @@ async def watch_detail_page(
     }
 
     # Build snapshot metadata whenever a snapshot exists; screenshot fields are conditional.
-    storage = LocalStorage(STORAGE_BASE_DIR)
+    storage = default_storage
     snapshot_meta = None
     if latest_snapshot is not None:
         raw_bytes = None
@@ -392,7 +392,7 @@ async def watch_screenshot(
     else:
         snapshot = await get_latest_snapshot(session, watch.id)
 
-    storage = LocalStorage(STORAGE_BASE_DIR)
+    storage = default_storage
     if (
         snapshot is None
         or snapshot.screenshot_path is None
@@ -431,7 +431,7 @@ async def watch_screenshot_recapture(
             content={"status": "unavailable", "detail": "Playwright not installed"},
         )
 
-    storage = LocalStorage(STORAGE_BASE_DIR)
+    storage = default_storage
     screenshot_path = storage.snapshot_path(str(watch.id), str(snapshot.id), "png")
     storage.save(screenshot_path, result.png_bytes)
 
@@ -472,7 +472,7 @@ async def watch_snapshot_content(
     if snapshot is None:
         raise HTTPException(status_code=404, detail="Snapshot not found")
 
-    storage = LocalStorage(STORAGE_BASE_DIR)
+    storage = default_storage
 
     # Prefer extracted text; fall back to raw storage
     content_path: str | None = None
@@ -2493,7 +2493,7 @@ async def change_detail_page(
     if not detail:
         return templates.TemplateResponse(request, "pages/404.html", status_code=404)
 
-    storage = LocalStorage(base_dir=STORAGE_BASE_DIR)
+    storage = default_storage
     path_attr = "storage_path" if mode == "raw" else "text_path"
     prev_text = _load_snapshot_text(storage, detail["previous_snapshot"], path_attr)
     curr_text = _load_snapshot_text(storage, detail["current_snapshot"], path_attr)
@@ -2522,7 +2522,7 @@ async def partial_diff(
     if not detail:
         return templates.TemplateResponse(request, "pages/404.html", status_code=404)
 
-    storage = LocalStorage(base_dir=STORAGE_BASE_DIR)
+    storage = default_storage
     path_attr = "storage_path" if mode == "raw" else "text_path"
     prev_text = _load_snapshot_text(storage, detail["previous_snapshot"], path_attr)
     curr_text = _load_snapshot_text(storage, detail["current_snapshot"], path_attr)

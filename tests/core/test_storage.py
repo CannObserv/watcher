@@ -65,6 +65,24 @@ class TestLocalStorage:
         assert path == "snapshots/watch123/snap456.pdf"
 
 
+class TestDefaultStorage:
+    @pytest.fixture(autouse=True)
+    def _reload_teardown(self):
+        yield
+        importlib.reload(storage_mod)
+
+    def test_is_local_storage_instance(self):
+        assert isinstance(storage_mod.default_storage, LocalStorage)
+
+    def test_base_dir_matches_storage_base_dir(self):
+        assert storage_mod.default_storage.base_dir == storage_mod.STORAGE_BASE_DIR
+
+    def test_respects_env_var(self, monkeypatch, tmp_path):
+        monkeypatch.setenv("WATCHER_DATA_DIR", str(tmp_path))
+        importlib.reload(storage_mod)
+        assert storage_mod.default_storage.base_dir == tmp_path
+
+
 class TestStorageBaseDir:
     @pytest.fixture(autouse=True)
     def _reload_teardown(self):

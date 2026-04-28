@@ -17,7 +17,7 @@ from src.core.notifications.events import WatchEvent, WatchEventType
 from src.core.rate_limiter import get_rate_limiter
 from src.core.registry import ServiceRegistry, get_registry
 from src.core.scheduler import compute_next_check, evaluate_post_actions
-from src.core.storage import STORAGE_BASE_DIR, LocalStorage
+from src.core.storage import default_storage
 from src.core.utils import format_utc_iso
 from src.workers import bp
 from src.workers.notify import dispatch_event_notifications
@@ -130,7 +130,7 @@ async def check_watch(watch_id: str, registry: ServiceRegistry | None = None) ->
             return {"error": f"HTTP {fetch_result.status_code}"}
 
         # Run pipeline
-        storage = LocalStorage(base_dir=STORAGE_BASE_DIR)
+        storage = default_storage
         result = await _run_check_pipeline(
             watch=watch,
             raw_content=fetch_result.content,

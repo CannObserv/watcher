@@ -45,3 +45,6 @@ class LocalStorage:
     def snapshot_path(self, watch_id: str, snapshot_id: str, extension: str) -> str:
         """Build the conventional storage path for a snapshot."""
         return f"snapshots/{watch_id}/{snapshot_id}.{extension}"
+
+
+default_storage: LocalStorage = LocalStorage(base_dir=STORAGE_BASE_DIR)

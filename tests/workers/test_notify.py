@@ -34,18 +34,19 @@ def make_event(event_type=WatchEventType.CHANGE_DETECTED, watch_id=None):
     )
 
 
-def _scalar_result(value):
-    """Mock a row/scalar result for the watch-meta lookup.
+def _watch_meta_result(value, *, content_type=None):
+    """Mock the row result for the dispatcher's
+    `select(Watch.effective_domain, Watch.content_type)` lookup.
 
-    Production code now selects (effective_domain, content_type) and calls
-    `.one_or_none()`; legacy tests pass `_scalar_result("example.com")` or
-    `_scalar_result(None)` expecting a domain scalar. Bridge by setting
-    both APIs: scalar_one_or_none returns the value directly; one_or_none
-    returns a 2-tuple `(value, None)` (None content_type → non-HTML branch).
+    `value` is the effective_domain (str or None). `content_type` is the
+    Watch.content_type (defaults to None → non-HTML branch). Sets both
+    `.scalar_one_or_none()` (returns the domain) and `.one_or_none()`
+    (returns the 2-tuple `(domain, content_type)`) so legacy callers
+    using positional-only domain values keep working unchanged.
     """
     r = MagicMock()
     r.scalar_one_or_none.return_value = value
-    r.one_or_none.return_value = None if value is None else (value, None)
+    r.one_or_none.return_value = None if value is None else (value, content_type)
     return r
 
 
@@ -94,7 +95,7 @@ class TestNoDispatch:
         # domain lookup + global + domain + watch + local = 5 calls (domain is None so 4)
         session.execute = AsyncMock(
             side_effect=[
-                _scalar_result(None),  # domain lookup → None (no domain query)
+                _watch_meta_result(None),  # domain lookup → None (no domain query)
                 _empty_result(),  # global
                 _empty_result(),  # watch templates
                 _empty_result(),  # local
@@ -111,7 +112,7 @@ class TestGlobalDispatch:
         session = AsyncMock(spec=AsyncSession)
         session.execute = AsyncMock(
             side_effect=[
-                _scalar_result(None),  # no domain
+                _watch_meta_result(None),  # no domain
                 _result_with(tpl),  # global templates
                 _empty_result(),  # watch templates
                 _empty_result(),  # local
@@ -133,7 +134,7 @@ class TestGlobalDispatch:
         session = AsyncMock(spec=AsyncSession)
         session.execute = AsyncMock(
             side_effect=[
-                _scalar_result(None),
+                _watch_meta_result(None),
                 _result_with(tpl),
                 _empty_result(),
                 _empty_result(),
@@ -158,7 +159,7 @@ class TestDomainDispatch:
         session = AsyncMock(spec=AsyncSession)
         session.execute = AsyncMock(
             side_effect=[
-                _scalar_result("example.com"),  # domain lookup
+                _watch_meta_result("example.com"),  # domain lookup
                 _empty_result(),  # global
                 _result_with(tpl),  # domain templates
                 _empty_result(),  # watch templates
@@ -180,7 +181,7 @@ class TestDomainDispatch:
         session = AsyncMock(spec=AsyncSession)
         session.execute = AsyncMock(
             side_effect=[
-                _scalar_result(None),  # no domain → skip domain query
+                _watch_meta_result(None),  # no domain → skip domain query
                 _empty_result(),  # global
                 _empty_result(),  # watch templates
                 _empty_result(),  # local
@@ -195,7 +196,7 @@ class TestDomainDispatch:
         session = AsyncMock(spec=AsyncSession)
         session.execute = AsyncMock(
             side_effect=[
-                _scalar_result("example.com"),
+                _watch_meta_result("example.com"),
                 _empty_result(),
                 _result_with(tpl),
                 _empty_result(),
@@ -221,7 +222,7 @@ class TestWatchTemplateDispatch:
         session = AsyncMock(spec=AsyncSession)
         session.execute = AsyncMock(
             side_effect=[
-                _scalar_result(None),
+                _watch_meta_result(None),
                 _empty_result(),  # global
                 _result_with(tpl),  # watch templates
                 _empty_result(),  # local
@@ -242,7 +243,7 @@ class TestWatchTemplateDispatch:
         session = AsyncMock(spec=AsyncSession)
         session.execute = AsyncMock(
             side_effect=[
-                _scalar_result(None),
+                _watch_meta_result(None),
                 _empty_result(),
                 _result_with(tpl),
                 _empty_result(),
@@ -266,7 +267,7 @@ class TestLocalDispatch:
         session = AsyncMock(spec=AsyncSession)
         session.execute = AsyncMock(
             side_effect=[
-                _scalar_result(None),
+                _watch_meta_result(None),
                 _empty_result(),
                 _empty_result(),
                 _result_with(local),
@@ -287,7 +288,7 @@ class TestLocalDispatch:
         session = AsyncMock(spec=AsyncSession)
         session.execute = AsyncMock(
             side_effect=[
-                _scalar_result(None),
+                _watch_meta_result(None),
                 _empty_result(),
                 _empty_result(),
                 _result_with(local),
@@ -315,7 +316,7 @@ class TestDeduplication:
         session = AsyncMock(spec=AsyncSession)
         session.execute = AsyncMock(
             side_effect=[
-                _scalar_result(None),
+                _watch_meta_result(None),
                 _result_with(tpl_global),  # global
                 _result_with(tpl_watch),  # watch templates (same id)
                 _empty_result(),  # local
@@ -340,7 +341,7 @@ class TestDeduplication:
         session = AsyncMock(spec=AsyncSession)
         session.execute = AsyncMock(
             side_effect=[
-                _scalar_result("example.com"),
+                _watch_meta_result("example.com"),
                 _empty_result(),  # global
                 _result_with(tpl_domain),  # domain
                 _result_with(tpl_watch),  # watch (same id)
@@ -367,7 +368,7 @@ class TestDeduplication:
         session = AsyncMock(spec=AsyncSession)
         session.execute = AsyncMock(
             side_effect=[
-                _scalar_result("example.com"),
+                _watch_meta_result("example.com"),
                 _result_with(tpl_global),
                 _result_with(tpl_domain),
                 _result_with(tpl_watch),
@@ -407,7 +408,7 @@ class TestContentConfig:
         session = AsyncMock(spec=AsyncSession)
         session.execute = AsyncMock(
             side_effect=[
-                _scalar_result(None),  # domain lookup → None (no domain query)
+                _watch_meta_result(None),  # domain lookup → None (no domain query)
                 _empty_result(),  # global templates
                 _empty_result(),  # watch templates
                 _result_with(mock_config),  # local configs
@@ -441,7 +442,7 @@ class TestContentConfig:
         session = AsyncMock(spec=AsyncSession)
         session.execute = AsyncMock(
             side_effect=[
-                _scalar_result(None),  # domain lookup → None (no domain query)
+                _watch_meta_result(None),  # domain lookup → None (no domain query)
                 _empty_result(),  # global templates
                 _empty_result(),  # watch templates
                 _result_with(mock_config),  # local configs
@@ -463,7 +464,7 @@ class TestErrorHandling:
         session = AsyncMock(spec=AsyncSession)
         session.execute = AsyncMock(
             side_effect=[
-                _scalar_result(None),
+                _watch_meta_result(None),
                 _result_with(tpl),
                 _empty_result(),
                 _empty_result(),
@@ -776,7 +777,7 @@ class TestUnifiedDiffLazyLoad:
         session = AsyncMock(spec=AsyncSession)
         session.execute = AsyncMock(
             side_effect=[
-                _scalar_result(None),  # domain lookup
+                _watch_meta_result(None),  # domain lookup
                 _empty_result(),  # global templates
                 _empty_result(),  # watch templates (domain templates query skipped: no domain)
                 _result_with(mock_config),  # local configs
@@ -816,7 +817,7 @@ class TestUnifiedDiffLazyLoad:
         session = AsyncMock(spec=AsyncSession)
         session.execute = AsyncMock(
             side_effect=[
-                _scalar_result(None),
+                _watch_meta_result(None),
                 _empty_result(),
                 _empty_result(),
                 _result_with(*configs),
@@ -847,6 +848,50 @@ class TestUnifiedDiffLazyLoad:
             assert "+new" in body
 
     @pytest.mark.asyncio
+    async def test_dispatcher_threads_content_type_to_load(self, set_test_key):
+        """The dispatcher's `select(effective_domain, content_type)` row must
+        be unpacked and the content_type passed as a kwarg to
+        `_load_event_unified_diff` so the inner function skips a redundant
+        Watch fetch (CR #18)."""
+        event = make_event(WatchEventType.CHANGE_DETECTED)
+        event.metadata["change_id"] = str(ULID())
+
+        cfg = ContentConfig(default=ContentOptions(include_diff_snippet=True)).model_dump()
+        c = MagicMock()
+        c.apprise_url = "encrypted_url"
+        c.content_config = cfg
+
+        session = AsyncMock(spec=AsyncSession)
+        session.execute = AsyncMock(
+            side_effect=[
+                _watch_meta_result("example.com", content_type=ContentType.HTML),
+                _empty_result(),
+                _empty_result(),
+                _empty_result(),
+                _result_with(c),
+            ]
+        )
+
+        async def fake_dispatch(ev, url, *, body, title):
+            return MagicMock(success=True, reason="ok")
+
+        with (
+            patch("src.core.notifications.notify.dispatch_event", fake_dispatch),
+            patch(
+                "src.core.notifications.notify._load_event_unified_diff",
+                new_callable=AsyncMock,
+                return_value="--- content\n+++ content\n@@ -1,1 +1,1 @@\n-old\n+new\n",
+            ) as load_mock,
+        ):
+            await dispatch_event_notifications(session, event)
+
+        load_mock.assert_called_once()
+        # The kwarg must carry the dispatcher's row-unpacked content_type so
+        # the inner function takes the perf shortcut. A regression that drops
+        # `content_type=` would leave it absent or default-None here.
+        assert load_mock.call_args.kwargs.get("content_type") == ContentType.HTML
+
+    @pytest.mark.asyncio
     async def test_diff_load_when_body_template_references_diff_snippet(self, set_test_key):
         """body_template referencing {{ diff_snippet }} also triggers the load
         even when the include_diff_* toggles are off, since toggles are
@@ -864,7 +909,7 @@ class TestUnifiedDiffLazyLoad:
         session = AsyncMock(spec=AsyncSession)
         session.execute = AsyncMock(
             side_effect=[
-                _scalar_result(None),
+                _watch_meta_result(None),
                 _empty_result(),
                 _empty_result(),
                 _result_with(c),
@@ -906,7 +951,7 @@ class TestUnifiedDiffLazyLoad:
         session = AsyncMock(spec=AsyncSession)
         session.execute = AsyncMock(
             side_effect=[
-                _scalar_result(None),
+                _watch_meta_result(None),
                 _empty_result(),
                 _empty_result(),
                 _result_with(c),
@@ -942,7 +987,7 @@ class TestUnifiedDiffLazyLoad:
         session = AsyncMock(spec=AsyncSession)
         session.execute = AsyncMock(
             side_effect=[
-                _scalar_result(None),
+                _watch_meta_result(None),
                 _empty_result(),
                 _empty_result(),
                 _result_with(c),

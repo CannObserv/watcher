@@ -34,7 +34,7 @@ def _watch_base_metadata(watch: Watch) -> dict:
     if interval:
         meta["check_interval"] = interval
     if watch.last_changed_at:
-        meta["last_changed_at"] = watch.last_changed_at.strftime("%Y-%m-%d")
+        meta["last_changed_at"] = watch.last_changed_at.strftime("%Y-%m-%dT%H:%M:%SZ")
     if watch.tags:
         meta["tags"] = watch.tags
     if watch.description:

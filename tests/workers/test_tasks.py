@@ -43,9 +43,9 @@ class TestWatchBaseMetadata:
         )
 
     def test_includes_last_changed_at_when_set(self):
-        watch = self._make_watch(last_changed_at=datetime(2026, 4, 9, 0, 0, 0, tzinfo=UTC))
+        watch = self._make_watch(last_changed_at=datetime(2026, 4, 9, 14, 22, 37, tzinfo=UTC))
         meta = _watch_base_metadata(watch)
-        assert meta["last_changed_at"] == "2026-04-09"
+        assert meta["last_changed_at"] == "2026-04-09T14:22:37Z"
 
     def test_omits_last_changed_at_when_none(self):
         watch = self._make_watch(last_changed_at=None)

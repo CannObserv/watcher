@@ -95,7 +95,9 @@ TEMPLATE_VARIABLES: list[TemplateVariable] = [
     # Contextual — populated when relevant metadata exists on the watch
     TemplateVariable("effective_domain", "str", "Resolved domain of the watch URL", "contextual"),
     TemplateVariable("check_interval", "str", 'Check cadence (e.g. "1h")', "contextual"),
-    TemplateVariable("last_changed_at", "str", "Date of last detected change", "contextual"),
+    TemplateVariable(
+        "last_changed_at", "str", "UTC timestamp of last detected change", "contextual"
+    ),
     TemplateVariable("tags", "list[str]", "Watch tags", "contextual"),
     TemplateVariable("description", "str", "Watch description", "contextual"),
 ]

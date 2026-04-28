@@ -15,7 +15,8 @@ if [ ! -f "$INPUT" ]; then
 fi
 
 # See build-css.sh for why NODE_PATH is set here.
-export NODE_PATH="$(npm root -g)/@tailwindcss/cli/node_modules${NODE_PATH:+:$NODE_PATH}"
+_npm_global="$(npm root -g)" || { echo "Error: 'npm root -g' failed. Is npm installed?"; exit 1; }
+export NODE_PATH="$_npm_global/@tailwindcss/cli/node_modules${NODE_PATH:+:$NODE_PATH}"
 
 TMPFILE=$(mktemp)
 TMPDIR_LAYERED=$(mktemp -d)

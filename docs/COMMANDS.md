@@ -139,6 +139,9 @@ uv run procrastinate --app=src.workers.app worker
 ## Tailwind CSS
 
 ```bash
+# One-time VM setup (tailwindcss CLI — global npm)
+sudo npm install -g @tailwindcss/cli
+
 # Build Tailwind CSS
 bash scripts/build-css.sh
 

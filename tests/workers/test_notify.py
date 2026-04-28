@@ -35,9 +35,17 @@ def make_event(event_type=WatchEventType.CHANGE_DETECTED, watch_id=None):
 
 
 def _scalar_result(value):
-    """Mock a scalar result (for domain lookup)."""
+    """Mock a row/scalar result for the watch-meta lookup.
+
+    Production code now selects (effective_domain, content_type) and calls
+    `.one_or_none()`; legacy tests pass `_scalar_result("example.com")` or
+    `_scalar_result(None)` expecting a domain scalar. Bridge by setting
+    both APIs: scalar_one_or_none returns the value directly; one_or_none
+    returns a 2-tuple `(value, None)` (None content_type → non-HTML branch).
+    """
     r = MagicMock()
     r.scalar_one_or_none.return_value = value
+    r.one_or_none.return_value = None if value is None else (value, None)
     return r
 
 
@@ -620,9 +628,10 @@ class TestLoadEventUnifiedDiff:
         watch = MagicMock(content_type=ContentType.HTML)
         session = AsyncMock(spec=AsyncSession)
         session.get = AsyncMock(side_effect=[change, prev, curr, watch])
-        # Single-line HTML → should be pretty-printed across multiple lines
-        # before diffing, so the diff output reflects structural changes
-        # rather than one giant +/- line.
+        # Single-line HTML → must be pretty-printed across multiple lines
+        # before diffing. We verify both the content of the changed line
+        # and the multi-line shape of the diff so a regression that drops
+        # prettification (e.g. switching to raw HTML) would fail this test.
         prev_html = b"<html><body><p>alpha</p><p>beta</p></body></html>"
         curr_html = b"<html><body><p>alpha</p><p>beta-changed</p></body></html>"
         storage = _FakeStorage(
@@ -633,29 +642,97 @@ class TestLoadEventUnifiedDiff:
         )
         result = await _load_event_unified_diff(session, event, storage=storage)
         assert result.startswith("--- content")
-        # The diff should contain the changed paragraph as a discrete line,
-        # not buried in a single-line dump of the entire HTML.
-        assert "-<p>beta</p>" in result or "<p>beta</p>" in result
-        assert "+<p>beta-changed</p>" in result or "<p>beta-changed</p>" in result
+        # Prettified diff has the changed paragraph as a discrete `-`/`+`
+        # line, not embedded in a one-line raw-HTML dump.
+        diff_lines = result.splitlines()
+        assert any(line.startswith("-") and "<p>beta</p>" in line for line in diff_lines)
+        assert any(line.startswith("+") and "<p>beta-changed</p>" in line for line in diff_lines)
+        # Lower bound on line count proves prettification expanded the input
+        # (raw single-line HTML diff would be ~4 lines: 2 headers + @@ + content).
+        assert len(diff_lines) >= 8
         # Loaded storage_path (raw HTML), not text_path
         assert storage.load_calls == ["snapshots/w/prev.html", "snapshots/w/curr.html"]
 
     @pytest.mark.asyncio
-    async def test_html_watch_with_missing_storage_path_returns_empty(self):
-        """HTML watch missing storage_path → no fallback (text_path is the
-        chunk-joined extracted text, which is exactly what we're trying
-        to avoid)."""
+    async def test_html_watch_normalize_html_failure_falls_back_to_raw(self, monkeypatch):
+        """When `normalize_html` raises, the function falls back to diffing
+        the un-prettified raw HTML rather than returning empty (matches the
+        dashboard's `_maybe_prettify_html` graceful-degrade)."""
         event = _change_event_with_id(ULID())
         change = MagicMock()
         change.previous_snapshot_id = ULID()
         change.current_snapshot_id = ULID()
-        prev = MagicMock(text_path="snapshots/w/prev.txt", storage_path="")
+        prev = MagicMock(text_path="snapshots/w/prev.txt", storage_path="snapshots/w/prev.html")
         curr = MagicMock(text_path="snapshots/w/curr.txt", storage_path="snapshots/w/curr.html")
+        watch = MagicMock(content_type=ContentType.HTML)
+        session = AsyncMock(spec=AsyncSession)
+        session.get = AsyncMock(side_effect=[change, prev, curr, watch])
+        storage = _FakeStorage(
+            files={
+                "snapshots/w/prev.html": b"<html><body>alpha</body></html>",
+                "snapshots/w/curr.html": b"<html><body>beta</body></html>",
+            }
+        )
+
+        def boom(_text):
+            raise RuntimeError("html parse exploded")
+
+        monkeypatch.setattr("src.core.notifications.notify.normalize_html", boom)
+
+        result = await _load_event_unified_diff(session, event, storage=storage)
+        # Fallback path: raw-HTML diff is non-empty and contains the change.
+        assert result.startswith("--- content")
+        assert "-<html><body>alpha</body></html>" in result
+        assert "+<html><body>beta</body></html>" in result
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "prev_storage_path,curr_storage_path",
+        [("", "snapshots/w/curr.html"), ("snapshots/w/prev.html", "")],
+    )
+    async def test_html_watch_with_missing_storage_path_returns_empty(
+        self, prev_storage_path, curr_storage_path
+    ):
+        """HTML watch missing either side's storage_path → no fallback
+        (text_path is the chunk-joined extracted text, which is exactly
+        what we're trying to avoid)."""
+        event = _change_event_with_id(ULID())
+        change = MagicMock()
+        change.previous_snapshot_id = ULID()
+        change.current_snapshot_id = ULID()
+        prev = MagicMock(text_path="snapshots/w/prev.txt", storage_path=prev_storage_path)
+        curr = MagicMock(text_path="snapshots/w/curr.txt", storage_path=curr_storage_path)
         watch = MagicMock(content_type=ContentType.HTML)
         session = AsyncMock(spec=AsyncSession)
         session.get = AsyncMock(side_effect=[change, prev, curr, watch])
         result = await _load_event_unified_diff(session, event)
         assert result == ""
+
+    @pytest.mark.asyncio
+    async def test_content_type_kwarg_skips_watch_fetch(self):
+        """When `content_type` is passed, the function must not fetch the
+        Watch row — `dispatch_event_notifications` already loaded it
+        alongside `effective_domain`."""
+        event = _change_event_with_id(ULID())
+        change = MagicMock()
+        change.previous_snapshot_id = ULID()
+        change.current_snapshot_id = ULID()
+        prev = MagicMock(text_path="snapshots/w/prev.txt", storage_path="snapshots/w/prev.html")
+        curr = MagicMock(text_path="snapshots/w/curr.txt", storage_path="snapshots/w/curr.html")
+        session = AsyncMock(spec=AsyncSession)
+        # Only 3 gets — Change, prev Snapshot, curr Snapshot. No Watch fetch.
+        session.get = AsyncMock(side_effect=[change, prev, curr])
+        storage = _FakeStorage(
+            files={
+                "snapshots/w/prev.html": b"<html><body>x</body></html>",
+                "snapshots/w/curr.html": b"<html><body>y</body></html>",
+            }
+        )
+        result = await _load_event_unified_diff(
+            session, event, storage=storage, content_type=ContentType.HTML
+        )
+        assert result.startswith("--- content")
+        assert session.get.call_count == 3  # no Watch fetch
 
     @pytest.mark.asyncio
     async def test_missing_watch_falls_back_to_text_path(self):

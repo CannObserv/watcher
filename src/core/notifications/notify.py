@@ -66,18 +66,50 @@ def _candidate_needs_unified_diff(candidate: DispatchCandidate, event_value: str
     return bool(_DIFF_VAR_RE.search(tmpl))
 
 
+def _load_text_pair(
+    storage: StorageBackend,
+    prev_path: str,
+    curr_path: str,
+    *,
+    log_extra: dict,
+    log_label: str,
+) -> tuple[str, str] | None:
+    """Load and UTF-8-decode two artifacts, returning None on storage failure.
+
+    Broad catch — StorageBackend doesn't constrain exception types.
+    """
+    try:
+        prev_text = storage.load(prev_path).decode(errors="replace")
+        curr_text = storage.load(curr_path).decode(errors="replace")
+    except Exception:
+        logger.warning(
+            f"snapshot {log_label} load failed; skipping unified diff",
+            extra=log_extra,
+            exc_info=True,
+        )
+        return None
+    return prev_text, curr_text
+
+
 async def _load_event_unified_diff(
     session: AsyncSession,
     event: WatchEvent,
     *,
     storage: StorageBackend | None = None,
+    content_type: ContentType | None = None,
 ) -> str:
     """Lazily compute the unified diff for a change_detected event.
 
     For HTML watches, loads each side's `storage_path` (raw HTML) and runs
     `normalize_html` (html5lib pretty-print) so notification output mirrors
-    the dashboard's Raw-mode diff (#118) — no long unwrapped lines.
+    the dashboard's Raw-mode diff (#118) — no long unwrapped lines. If
+    `normalize_html` fails, falls back to the un-prettified raw HTML
+    (matches the dashboard's `_maybe_prettify_html` graceful-degrade).
     For non-HTML watches, loads `text_path` (the chunk-joined extracted text).
+
+    `content_type` may be passed by the caller to skip the Watch lookup —
+    `dispatch_event_notifications` already fetched it earlier in the same
+    transaction. Pass `None` and the function will fetch the Watch itself.
 
     Returns "" on any missing piece (no change_id, no Change row, missing
     snapshot, missing required path, unreadable artifact). Storage failures
@@ -100,57 +132,50 @@ async def _load_event_unified_diff(
     if not prev or not curr:
         return ""
 
-    try:
-        watch_ulid = ULID.from_str(event.watch_id)
-    except (TypeError, ValueError):
-        return ""
-    watch = await session.get(Watch, watch_ulid)
+    if content_type is None:
+        try:
+            watch_ulid = ULID.from_str(event.watch_id)
+        except (TypeError, ValueError):
+            return ""
+        watch = await session.get(Watch, watch_ulid)
+        content_type = watch.content_type if watch is not None else None
+
+    log_extra = {"watch_id": event.watch_id, "change_id": str(change_id)}
+    storage = storage or LocalStorage(base_dir=STORAGE_BASE_DIR)
 
     # HTML branch: diff the prettified raw HTML, mirroring the dashboard.
-    # If watch is missing or non-HTML, fall through to the text_path path.
-    if watch is not None and watch.content_type == ContentType.HTML:
+    # Falls through to the text_path branch when watch is missing or non-HTML.
+    if content_type == ContentType.HTML:
         if not prev.storage_path or not curr.storage_path:
             return ""
-        storage = storage or LocalStorage(base_dir=STORAGE_BASE_DIR)
+        pair = _load_text_pair(
+            storage, prev.storage_path, curr.storage_path, log_extra=log_extra, log_label="raw"
+        )
+        if pair is None:
+            return ""
+        prev_raw, curr_raw = pair
         try:
-            prev_raw = storage.load(prev.storage_path).decode(errors="replace")
-            curr_raw = storage.load(curr.storage_path).decode(errors="replace")
+            prev_src, curr_src = normalize_html(prev_raw), normalize_html(curr_raw)
         except Exception:
-            # Broad catch — StorageBackend doesn't constrain exception types.
+            # normalize_html failure: degrade to un-prettified raw HTML so the
+            # user still gets a diff (matches dashboard `_maybe_prettify_html`).
             logger.warning(
-                "snapshot raw load failed; skipping unified diff",
-                extra={"watch_id": event.watch_id, "change_id": str(change_id)},
+                "normalize_html failed; falling back to un-prettified raw HTML",
+                extra=log_extra,
                 exc_info=True,
             )
-            return ""
-        try:
-            prev_pretty = normalize_html(prev_raw)
-            curr_pretty = normalize_html(curr_raw)
-        except Exception:
-            logger.warning(
-                "normalize_html failed; skipping unified diff",
-                extra={"watch_id": event.watch_id, "change_id": str(change_id)},
-                exc_info=True,
-            )
-            return ""
-        return compute_unified_diff(prev_pretty, curr_pretty).unified_diff
+            prev_src, curr_src = prev_raw, curr_raw
+        return compute_unified_diff(prev_src, curr_src).unified_diff
 
     # Non-HTML branch: diff the stored extracted text.
     if not prev.text_path or not curr.text_path:
         return ""
-    storage = storage or LocalStorage(base_dir=STORAGE_BASE_DIR)
-    try:
-        prev_text = storage.load(prev.text_path).decode(errors="replace")
-        curr_text = storage.load(curr.text_path).decode(errors="replace")
-    except Exception:
-        # Broad catch — StorageBackend doesn't constrain exception types.
-        logger.warning(
-            "snapshot text load failed; skipping unified diff",
-            extra={"watch_id": event.watch_id, "change_id": str(change_id)},
-            exc_info=True,
-        )
+    pair = _load_text_pair(
+        storage, prev.text_path, curr.text_path, log_extra=log_extra, log_label="text"
+    )
+    if pair is None:
         return ""
-
+    prev_text, curr_text = pair
     return compute_unified_diff(prev_text, curr_text).unified_diff
 
 
@@ -179,9 +204,18 @@ async def dispatch_event_notifications(
     watch_ulid = ULID.from_str(event.watch_id)
     event_value = event.event_type.value
 
-    # Resolve effective_domain for this watch
-    domain_row = await session.execute(select(Watch.effective_domain).where(Watch.id == watch_ulid))
-    effective_domain: str | None = domain_row.scalar_one_or_none()
+    # Resolve effective_domain + content_type for this watch in one query.
+    # content_type is reused below by `_load_event_unified_diff` for HTML
+    # watches, avoiding a second Watch fetch on change_detected dispatch.
+    watch_row = await session.execute(
+        select(Watch.effective_domain, Watch.content_type).where(Watch.id == watch_ulid)
+    )
+    watch_meta = watch_row.one_or_none()
+    if watch_meta is None:
+        effective_domain: str | None = None
+        content_type: ContentType | None = None
+    else:
+        effective_domain, content_type = watch_meta
 
     # 1. Global templates
     global_result = await session.execute(
@@ -270,7 +304,7 @@ async def dispatch_event_notifications(
     if event.event_type == WatchEventType.CHANGE_DETECTED and any(
         _candidate_needs_unified_diff(c, event_value) for c in candidates
     ):
-        unified_diff = await _load_event_unified_diff(session, event)
+        unified_diff = await _load_event_unified_diff(session, event, content_type=content_type)
 
     results = []
     for candidate in candidates:

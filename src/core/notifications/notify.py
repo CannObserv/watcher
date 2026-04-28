@@ -2,6 +2,7 @@
 
 import re
 from dataclasses import dataclass
+from typing import Literal
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -72,7 +73,7 @@ def _load_text_pair(
     curr_path: str,
     *,
     log_extra: dict,
-    log_label: str,
+    log_label: Literal["raw", "text"],
 ) -> tuple[str, str] | None:
     """Load and UTF-8-decode two artifacts, returning None on storage failure.
 
@@ -211,9 +212,10 @@ async def dispatch_event_notifications(
         select(Watch.effective_domain, Watch.content_type).where(Watch.id == watch_ulid)
     )
     watch_meta = watch_row.one_or_none()
+    effective_domain: str | None
+    content_type: ContentType | None
     if watch_meta is None:
-        effective_domain: str | None = None
-        content_type: ContentType | None = None
+        effective_domain, content_type = None, None
     else:
         effective_domain, content_type = watch_meta
 

@@ -17,13 +17,13 @@ df -h /
 echo ""
 
 echo "--- Top-10 disk consumers ---"
-du -sh /* /home/exedev/* 2>/dev/null | sort -rh | head -10 || true
+du -sh /* "$HOME"/* 2>/dev/null | sort -rh | head -10 || true
 echo ""
 
 # VS Code server LRU: remove server installs not accessed in 30+ days
 if [ -d "$HOME/.vscode-server/cli/servers" ]; then
     echo "--- VS Code server LRU (>30 days) ---"
-    find "$HOME/.vscode-server/cli/servers" -mindepth 1 -maxdepth 1 -mtime +30 -exec rm -rf {} +
+    find "$HOME/.vscode-server/cli/servers" -mindepth 1 -maxdepth 1 -atime +30 -exec rm -rf {} +
     echo "done"
     echo ""
 fi

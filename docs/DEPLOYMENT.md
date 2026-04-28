@@ -119,7 +119,7 @@ sudo journalctl -u watcher-cleanup.service -f
 
 # View logs
 ls -lt /var/log/watcher/cleanup-*.log
-cat /var/log/watcher/cleanup-$(ls -t /var/log/watcher/cleanup-*.log | head -1 | xargs basename)
+cat "$(ls -t /var/log/watcher/cleanup-*.log | head -1)"
 
 # Reload after editing the timer
 sudo systemctl daemon-reload && sudo systemctl restart watcher-cleanup.timer

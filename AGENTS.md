@@ -60,7 +60,7 @@ src/core/registry.py     — ServiceRegistry: swappable fetcher and extractor im
 tests/                 — Mirrors src/ structure
 deploy/                — Systemd unit and deployment config
 docs/                  — Reference docs (COMMANDS, SKILLS, DEPLOYMENT)
-scripts/                 — Build scripts: Tailwind compile (build-css.sh, check-css.sh) + vendor CSS layer-wrapping (wrap-vendor-css.py — see docs/STYLE.md §14)
+scripts/                 — Build scripts: Tailwind compile (build-css.sh, check-css.sh) + vendor CSS layer-wrapping (wrap-vendor-css.py — see docs/STYLE.md §14); cleanup.sh (weekly disk cleanup — see deploy/watcher-cleanup.*)
 ```
 
 **Environment files** (not in the repo tree):

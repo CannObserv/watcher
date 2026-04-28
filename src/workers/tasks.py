@@ -18,6 +18,7 @@ from src.core.rate_limiter import get_rate_limiter
 from src.core.registry import ServiceRegistry, get_registry
 from src.core.scheduler import compute_next_check, evaluate_post_actions
 from src.core.storage import STORAGE_BASE_DIR, LocalStorage
+from src.core.utils import format_utc_iso
 from src.workers import bp
 from src.workers.notify import dispatch_event_notifications
 from src.workers.pipeline import _maybe_decay_backoff, _persist_backoff, _run_check_pipeline
@@ -34,7 +35,7 @@ def _watch_base_metadata(watch: Watch) -> dict:
     if interval:
         meta["check_interval"] = interval
     if watch.last_changed_at:
-        meta["last_changed_at"] = watch.last_changed_at.strftime("%Y-%m-%dT%H:%M:%SZ")
+        meta["last_changed_at"] = format_utc_iso(watch.last_changed_at)
     if watch.tags:
         meta["tags"] = watch.tags
     if watch.description:

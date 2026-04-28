@@ -1,7 +1,5 @@
 """Notification body builder — resolves ContentOptions and composes custom bodies."""
 
-from datetime import UTC, datetime
-
 from jinja2 import Environment, StrictUndefined, TemplateError
 
 from src.api.schemas.content_config import ContentConfig, ContentOptions
@@ -13,6 +11,7 @@ from src.core.notifications.default_templates import (
     DEFAULT_TITLE_TEMPLATES,
 )
 from src.core.notifications.events import EVENT_TITLES, WatchEvent, WatchEventType
+from src.core.utils import format_utc_iso
 
 _jinja_env = Environment(autoescape=False)
 _jinja_env_strict = Environment(autoescape=False, undefined=StrictUndefined)
@@ -71,18 +70,6 @@ def _compute_change_summary(event: WatchEvent) -> str:
     return ", ".join(parts) if parts else "details pending"
 
 
-def _format_occurred_at_iso(dt: datetime) -> str:
-    """Format an event timestamp as ISO 8601 with `Z` suffix (AGENTS.md format).
-
-    Coerces to UTC (treating naive datetimes as UTC) so the output always
-    carries a `Z` suffix and accurately reflects UTC, even if a producer
-    accidentally passed a non-UTC tz-aware datetime.
-    """
-    if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=UTC)
-    return dt.astimezone(UTC).isoformat().replace("+00:00", "Z")
-
-
 def build_template_context(
     event: WatchEvent,
     *,
@@ -125,7 +112,7 @@ def build_template_context(
     ctx.update(event.metadata)
     # Derived fields take precedence over any same-named metadata keys.
     ctx["event_label"] = EVENT_TITLES[event.event_type.value]
-    ctx["occurred_at_iso"] = _format_occurred_at_iso(event.occurred_at)
+    ctx["occurred_at_iso"] = format_utc_iso(event.occurred_at)
     ctx["change_summary"] = _compute_change_summary(event)
     ctx["change_url"] = _format_change_url(event.watch_id, event.metadata.get("change_id"))
     ctx["diff_snippet"] = _render_unified_diff_block(unified_diff, max_lines=diff_snippet_cap)

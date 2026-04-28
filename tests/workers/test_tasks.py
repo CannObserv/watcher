@@ -265,7 +265,7 @@ class TestCheckWatchTask:
         mock_registry = ServiceRegistry(fetcher=HttpFetcher(client=mock_client))
         monkeypatch.setattr(tasks_mod, "get_registry", lambda: mock_registry)
         monkeypatch.setattr(tasks_mod, "get_rate_limiter", lambda: fast_limiter)
-        monkeypatch.setattr(tasks_mod, "STORAGE_BASE_DIR", tmp_path)
+        monkeypatch.setattr(tasks_mod, "default_storage", LocalStorage(base_dir=tmp_path))
         monkeypatch.setattr(
             tasks_mod, "get_session_factory", lambda: _mock_session_factory(db_session)
         )
@@ -286,7 +286,7 @@ class TestCheckWatchTask:
         db_session.add(watch)
         await db_session.flush()
 
-        monkeypatch.setattr(tasks_mod, "STORAGE_BASE_DIR", tmp_path)
+        monkeypatch.setattr(tasks_mod, "default_storage", LocalStorage(base_dir=tmp_path))
         monkeypatch.setattr(
             tasks_mod, "get_session_factory", lambda: _mock_session_factory(db_session)
         )
@@ -317,7 +317,7 @@ class TestCheckWatchTask:
         mock_registry = ServiceRegistry(fetcher=HttpFetcher(client=mock_client))
         monkeypatch.setattr(tasks_mod, "get_registry", lambda: mock_registry)
         monkeypatch.setattr(tasks_mod, "get_rate_limiter", lambda: fast_limiter)
-        monkeypatch.setattr(tasks_mod, "STORAGE_BASE_DIR", tmp_path)
+        monkeypatch.setattr(tasks_mod, "default_storage", LocalStorage(base_dir=tmp_path))
         monkeypatch.setattr(
             tasks_mod, "get_session_factory", lambda: _mock_session_factory(db_session)
         )
@@ -386,7 +386,7 @@ class TestCheckWatchSavepointBoundary:
         mock_registry = ServiceRegistry(fetcher=HttpFetcher(client=mock_client))
         monkeypatch.setattr(tasks_mod, "get_registry", lambda: mock_registry)
         monkeypatch.setattr(tasks_mod, "get_rate_limiter", lambda: fast_limiter)
-        monkeypatch.setattr(tasks_mod, "STORAGE_BASE_DIR", tmp_path)
+        monkeypatch.setattr(tasks_mod, "default_storage", LocalStorage(base_dir=tmp_path))
         monkeypatch.setattr(
             tasks_mod, "get_session_factory", lambda: _mock_session_factory(db_session)
         )
@@ -756,7 +756,7 @@ class TestCheckWatchInactiveDomain:
         db_session.add(watch)
         await db_session.commit()
 
-        monkeypatch.setattr(tasks_mod, "STORAGE_BASE_DIR", tmp_path)
+        monkeypatch.setattr(tasks_mod, "default_storage", LocalStorage(base_dir=tmp_path))
         monkeypatch.setattr(
             tasks_mod, "get_session_factory", lambda: _mock_session_factory(db_session)
         )
@@ -874,7 +874,7 @@ class TestCheckWatchHealthTransitions:
         mock_storage.snapshot_path = MagicMock(return_value=str(tmp_path / "snap.html"))
         mock_storage.save = MagicMock()
         mock_storage.exists = MagicMock(return_value=False)
-        monkeypatch.setattr(tasks_mod, "LocalStorage", lambda **kw: mock_storage)
+        monkeypatch.setattr(tasks_mod, "default_storage", mock_storage)
 
         reg = ServiceRegistry(fetcher=mock_fetcher)
         await check_watch(str(watch.id), registry=reg)
@@ -921,7 +921,7 @@ class TestCheckWatchHealthTransitions:
         mock_registry = ServiceRegistry(fetcher=HttpFetcher(client=mock_client))
         monkeypatch.setattr(tasks_mod, "get_registry", lambda: mock_registry)
         monkeypatch.setattr(tasks_mod, "get_rate_limiter", lambda: fast_limiter)
-        monkeypatch.setattr(tasks_mod, "STORAGE_BASE_DIR", tmp_path)
+        monkeypatch.setattr(tasks_mod, "default_storage", LocalStorage(base_dir=tmp_path))
         monkeypatch.setattr(
             tasks_mod, "get_session_factory", lambda: _mock_session_factory(db_session)
         )

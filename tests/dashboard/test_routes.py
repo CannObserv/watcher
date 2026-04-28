@@ -12,6 +12,7 @@ from src.core.models.domain import Domain
 from src.core.models.snapshot import Snapshot
 from src.core.models.watch import ContentType, Watch, WatchHealthStatus
 from src.core.notifications.events import WatchEventType
+from src.core.storage import LocalStorage
 
 pytestmark = pytest.mark.integration
 
@@ -830,7 +831,7 @@ class TestScreenshotRecapture:
             "capture_screenshot",
             lambda *a, **kw: _async_result(fake_result),
         )
-        monkeypatch.setattr(routes_mod, "STORAGE_BASE_DIR", tmp_path)
+        monkeypatch.setattr(routes_mod, "default_storage", LocalStorage(base_dir=tmp_path))
 
         response = await client.post(f"/watches/{watch.id}/screenshot")
         assert response.status_code == 200
@@ -919,7 +920,7 @@ class TestSnapshotContentViewer:
 
         import src.dashboard.routes as routes_mod
 
-        monkeypatch.setattr(routes_mod, "STORAGE_BASE_DIR", tmp_path)
+        monkeypatch.setattr(routes_mod, "default_storage", LocalStorage(base_dir=tmp_path))
 
         response = await client.get(f"/watches/{watch.id}/snapshots/{snap.id}/content")
         assert response.status_code == 200
@@ -955,7 +956,7 @@ class TestSnapshotContentViewer:
 
         import src.dashboard.routes as routes_mod
 
-        monkeypatch.setattr(routes_mod, "STORAGE_BASE_DIR", tmp_path)
+        monkeypatch.setattr(routes_mod, "default_storage", LocalStorage(base_dir=tmp_path))
 
         response = await client.get(f"/watches/{watch.id}/snapshots/{snap.id}/content")
         assert response.status_code == 200

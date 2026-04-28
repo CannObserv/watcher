@@ -55,7 +55,7 @@ from src.core.notifications.preview_fixtures import (
 )
 from src.core.probe import ProbeResult
 from src.core.screenshot import capture_screenshot
-from src.core.storage import LocalStorage, default_storage
+from src.core.storage import StorageBackend, default_storage
 from src.core.watches import create_watch as _create_watch
 from src.dashboard import templates
 from src.dashboard.context import (
@@ -2445,7 +2445,7 @@ async def watch_notification_test_result(
     )
 
 
-def _load_snapshot_text(storage: LocalStorage, snapshot, path_attr: str) -> str:
+def _load_snapshot_text(storage: StorageBackend, snapshot, path_attr: str) -> str:
     """Load text content from a snapshot's storage path. Returns empty string on failure."""
     if not snapshot:
         return ""

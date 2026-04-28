@@ -37,7 +37,7 @@ src/core/differ.py     — Chunk-level change detection with SimHash similarity
 src/core/diff/         — Dashboard/notification diff service: normalize → compute → render (models.py: frozen+slots DiffResult [unified_diff, has_changes, added, removed]; normalize.py: normalize_text [CRLF/CR→LF + per-line rstrip], normalize_html [#118: html5lib parse + lxml.html.tostring(pretty_print=True), strips comments, preserves whitespace inside `<pre>`/`<textarea>`/`<script>`/`<style>`, idempotent via two-pass fixed-point (fast-path skips pass 2 when input is already a fixed point)]; textual.py: compute_unified_diff(prev, curr, *, context=3) via stdlib difflib; uses identical fromfile/tofile label "content" so diff2html doesn't emit a RENAMED badge)
 src/core/simhash.py    — 64-bit SimHash fingerprinting
 src/core/screenshot.py — Playwright screenshot capture (optional [browser] extra); ScreenshotResult + capture_screenshot; guards on PLAYWRIGHT_AVAILABLE
-src/core/storage.py    — StorageBackend protocol + LocalStorage (save, load, exists, size, snapshot_path)
+src/core/storage.py    — StorageBackend protocol + LocalStorage (save, load, exists, size, snapshot_path) + default_storage singleton (module-level LocalStorage(base_dir=STORAGE_BASE_DIR); use this instead of constructing LocalStorage inline; injectable via monkeypatch in tests)
 src/core/scheduler.py  — Watch scheduling logic (interval parsing, due computation, temporal profile resolution)
 src/core/rate_limiter.py — Per-domain async rate limiting
 src/core/config_poller.py  — Background polling: sync domain configs from DB into rate limiter

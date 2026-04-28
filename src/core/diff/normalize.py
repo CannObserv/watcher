@@ -3,8 +3,7 @@
 - normalize_text: canonicalise line endings + strip trailing whitespace per line.
 - normalize_html: pretty-print HTML via html5lib (lenient parse) + lxml.html
   serialisation. Block-level elements get one per line; inline content stays
-  put. Strips HTML comments (frequent noise). See #118 for motivation; #115
-  Phase B.2 reserves the structural-tree-diff path on top of this same parse.
+  put. Strips HTML comments (frequent noise). See #118 for motivation.
 """
 
 import html5lib

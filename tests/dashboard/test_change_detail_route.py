@@ -1,6 +1,6 @@
 """Integration tests for GET /changes/{change_id} and /partials/diff/{change_id}:
-diff-mount rendering, identical-snapshot fallback, mode param validation, the
-Structure segment stub, and Raw-mode HTML pretty-print (#118)."""
+diff-mount rendering, identical-snapshot fallback, mode param validation, and
+Raw-mode HTML pretty-print (#118)."""
 
 import re
 
@@ -46,19 +46,18 @@ class TestChangeDetailRoute:
         resp = await client.get(f"/changes/{change.id}?mode=bogus")
         assert resp.status_code == 422
 
-    async def test_structure_segment_is_disabled(self, client, make_change_with_snapshots):
-        """The Structure tab stub ships disabled with an sr-only hint until Phase B."""
+    async def test_structure_segment_no_longer_rendered(self, client, make_change_with_snapshots):
+        """#115 Phase B.2 (xmldiff structural diff) was descoped; the Structure
+        tab stub and its sr-only hint are gone. This guards against accidental
+        re-introduction without a real backing implementation."""
         change = await make_change_with_snapshots(
             prev_text="a\n", curr_text="b\n", write_files=True
         )
         resp = await client.get(f"/changes/{change.id}")
         assert resp.status_code == 200
         body = resp.content
-        # The `disabled` attribute must be on the Structure radio input itself,
-        # not just on the surrounding `segment-disabled` class / `aria-disabled`.
-        assert re.search(rb'<input[^>]+value="structure"[^>]*\bdisabled\b', body) is not None
-        assert b'id="structure-coming-soon-hint"' in body
-        assert b"Structural diff coming soon" in body
+        assert b'value="structure"' not in body
+        assert b"structure-coming-soon-hint" not in body
 
 
 class TestPartialDiffRoute:

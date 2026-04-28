@@ -90,12 +90,6 @@
   .segment input:focus-visible + span {
     @apply outline-2 outline-offset-2 outline-co-purple-600 dark:outline-co-purple-400;
   }
-  .segment-disabled {
-    @apply opacity-50 cursor-not-allowed;
-  }
-  .segment-disabled:hover span {
-    @apply bg-transparent dark:bg-transparent;
-  }
 
   /* -- Chip group (multi-select checkbox group) -- */
   .chip-group {

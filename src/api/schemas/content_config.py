@@ -11,13 +11,14 @@ class ContentOptions(BaseModel):
     """Field toggles controlling what extra information appears in a notification body."""
 
     include_diff_snippet: bool = False
-    """Include the first `diff_snippet_lines` changed sections in the body."""
+    """Include the first `diff_snippet_lines` lines of the unified diff in the body."""
 
-    diff_snippet_lines: int = Field(default=10, ge=1, le=100)
-    """Max number of changed-section entries to include in snippet mode."""
+    diff_snippet_lines: int = Field(default=25, ge=1, le=200)
+    """Max number of unified-diff lines to include in snippet mode.
+    Truncation is hunk-boundary aware — never mid-hunk."""
 
     include_diff_full: bool = False
-    """Include all changed sections. Supersedes include_diff_snippet if both set."""
+    """Include the full unified diff. Supersedes include_diff_snippet if both set."""
 
     include_temporal_context: bool = False
     """Include check interval in the body."""

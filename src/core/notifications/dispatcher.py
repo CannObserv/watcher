@@ -91,7 +91,7 @@ async def dispatch_event(
             body=body,
             title=title,
             notify_type=event.apprise_notify_type,
-            body_format=NotifyFormat.TEXT,
+            body_format=NotifyFormat.MARKDOWN,
         )
     finally:
         _capture_ctx.reset(token)

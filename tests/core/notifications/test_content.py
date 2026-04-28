@@ -37,6 +37,18 @@ CHANGE_META = {
     "modified": [{"label": "Contact Info", "similarity": 0.85}],
 }
 
+# Canonical canned diff used across diff/snippet tests. Real unified-diff output
+# from compute_unified_diff so the rendering pipeline (fence + truncation) gets
+# realistic input.
+SAMPLE_PREV = "alpha\nbeta\ngamma\ndelta\nepsilon\n"
+SAMPLE_CURR = "alpha\nbeta-changed\ngamma\ndelta\nepsilon\nzeta\n"
+
+
+def _sample_unified_diff() -> str:
+    from src.core.diff.textual import compute_unified_diff
+
+    return compute_unified_diff(SAMPLE_PREV, SAMPLE_CURR).unified_diff
+
 
 class TestResolveOptions:
     def test_none_config_returns_defaults(self):
@@ -122,7 +134,7 @@ class TestChangeDetectedDefaultBody:
             include_description=True,
             include_tags=True,
         )
-        body = build_body(event, opts)
+        body = build_body(event, opts, unified_diff=_sample_unified_diff())
         expected = (
             "Test Watch\n"
             "DOMAIN: example.com\n"
@@ -134,10 +146,18 @@ class TestChangeDetectedDefaultBody:
             "Change Detected\n"
             "1 added, 1 modified, 1 removed"
             "\n\n"
-            "Changed sections:\n"
-            "  + Licenses\n"
-            "  - Hours\n"
-            "  ~ Contact Info (85% similar)"
+            "```diff\n"
+            "--- content\n"
+            "+++ content\n"
+            "@@ -1,5 +1,6 @@\n"
+            " alpha\n"
+            "-beta\n"
+            "+beta-changed\n"
+            " gamma\n"
+            " delta\n"
+            " epsilon\n"
+            "+zeta\n"
+            "```"
             "\n\n"
             "INTERVAL: 1h\n"
             "LAST CHANGED: 2026-04-09\n"
@@ -222,45 +242,69 @@ class TestChangeUrlSlot:
 
 
 class TestDiffSlot:
+    """The diff slot renders the unified-diff text fed in via `unified_diff=`,
+    wrapped in a Markdown ```diff fenced block — this replaces the old
+    chunk-label summary."""
+
     def test_snippet_renders_after_change_summary(self):
         event = make_event(metadata=CHANGE_META)
-        body = build_body(event, ContentOptions(include_diff_snippet=True))
+        body = build_body(
+            event, ContentOptions(include_diff_snippet=True), unified_diff=_sample_unified_diff()
+        )
         # Diff sits after the body block (change_summary).
         summary_idx = body.index("1 added, 1 modified, 1 removed")
-        diff_idx = body.index("Changed sections:")
+        diff_idx = body.index("```diff")
         assert diff_idx > summary_idx
-        assert "+ Licenses" in body
-        assert "- Hours" in body
-        assert "~ Contact Info (85% similar)" in body
+        assert "-beta" in body
+        assert "+beta-changed" in body
+        assert "+zeta" in body
 
-    def test_snippet_respects_diff_snippet_lines_cap(self):
-        meta = {"added": ["A", "B", "C"], "removed": [], "modified": []}
-        event = make_event(metadata=meta)
-        body = build_body(event, ContentOptions(include_diff_snippet=True, diff_snippet_lines=2))
-        assert "+ A" in body
-        assert "+ B" in body
-        assert "+ C" not in body
+    def test_snippet_respects_diff_snippet_lines_cap_at_hunk_boundary(self):
+        """diff_snippet_lines caps lines but never truncates mid-hunk —
+        when set below the first hunk's full size, only file headers + the
+        @@ line are emitted, with the truncation footer."""
+        # Build a diff with two hunks so we can verify hunk-boundary behavior.
+        prev = "a\nb\nc\nd\ne\nf\ng\nh\ni\nj\nk\nl\nm\nn\no\np\nq\nr\ns\nt\nu\n"
+        curr = "a\nB\nc\nd\ne\nf\ng\nh\ni\nj\nk\nl\nm\nn\nO\np\nq\nr\ns\nt\nu\n"
+        from src.core.diff.textual import compute_unified_diff
+
+        diff = compute_unified_diff(prev, curr).unified_diff
+        event = make_event(metadata=CHANGE_META)
+        # Cap below first hunk size — only headers + @@ should fit.
+        body = build_body(
+            event,
+            ContentOptions(include_diff_snippet=True, diff_snippet_lines=4),
+            unified_diff=diff,
+        )
+        assert "```diff" in body
+        assert "more line" in body  # truncation footer
 
     def test_full_supersedes_snippet_cap(self):
-        meta = {"added": ["A", "B", "C"], "removed": [], "modified": []}
-        event = make_event(metadata=meta)
+        event = make_event(metadata=CHANGE_META)
         body = build_body(
             event,
             ContentOptions(include_diff_full=True, include_diff_snippet=True, diff_snippet_lines=1),
+            unified_diff=_sample_unified_diff(),
         )
-        assert "+ A" in body
-        assert "+ B" in body
-        assert "+ C" in body
+        # Full diff includes every change line — no truncation footer.
+        assert "+beta-changed" in body
+        assert "+zeta" in body
+        assert "more line" not in body
 
     def test_omitted_when_both_toggles_off(self):
         event = make_event(metadata=CHANGE_META)
-        body = build_body(event, ContentOptions())
-        assert "Changed sections" not in body
+        body = build_body(event, ContentOptions(), unified_diff=_sample_unified_diff())
+        assert "```diff" not in body
 
-    def test_omitted_when_no_diff_data(self):
-        event = make_event(metadata={})
-        body = build_body(event, ContentOptions(include_diff_snippet=True))
-        assert "Changed sections" not in body
+    def test_omitted_when_unified_diff_missing(self):
+        event = make_event(metadata=CHANGE_META)
+        body = build_body(event, ContentOptions(include_diff_snippet=True), unified_diff=None)
+        assert "```diff" not in body
+
+    def test_omitted_when_unified_diff_empty(self):
+        event = make_event(metadata=CHANGE_META)
+        body = build_body(event, ContentOptions(include_diff_snippet=True), unified_diff="")
+        assert "```diff" not in body
 
 
 class TestStatsSlots:
@@ -440,6 +484,7 @@ class TestBuildTemplateContext:
             "change_url",
             "diff_snippet",
             "diff_full",
+            "chunks_changed",
         }
 
     def test_event_label_matches_event_titles(self):
@@ -510,37 +555,72 @@ class TestBuildTemplateContext:
         ctx = build_template_context(event)
         assert ctx["change_url"] == ""
 
-    def test_diff_snippet_populated_when_diff_present(self):
+    def test_diff_snippet_populated_when_unified_diff_present(self):
         event = make_event(metadata=CHANGE_META)
-        ctx = build_template_context(event)
-        assert ctx["diff_snippet"].startswith("Changed sections:")
-        assert "+ Licenses" in ctx["diff_snippet"]
-        assert "- Hours" in ctx["diff_snippet"]
-        assert "~ Contact Info (85% similar)" in ctx["diff_snippet"]
+        ctx = build_template_context(event, unified_diff=_sample_unified_diff())
+        assert ctx["diff_snippet"].startswith("```diff\n")
+        assert ctx["diff_snippet"].rstrip("\n").endswith("```")
+        assert "-beta" in ctx["diff_snippet"]
+        assert "+beta-changed" in ctx["diff_snippet"]
 
-    def test_diff_full_populated_when_diff_present(self):
+    def test_diff_full_populated_when_unified_diff_present(self):
         event = make_event(metadata=CHANGE_META)
-        ctx = build_template_context(event)
-        assert ctx["diff_full"].startswith("Changed sections:")
-        assert "+ Licenses" in ctx["diff_full"]
+        ctx = build_template_context(event, unified_diff=_sample_unified_diff())
+        assert ctx["diff_full"].startswith("```diff\n")
+        # Full version contains the second-hunk change (the appended `zeta`).
+        assert "+zeta" in ctx["diff_full"]
 
     def test_diff_snippet_capped_at_default(self):
-        # 12 added entries: snippet caps at 10, full keeps all 12.
-        meta = {"added": [f"item-{i}" for i in range(12)], "removed": [], "modified": []}
-        event = make_event(metadata=meta)
-        ctx = build_template_context(event)
-        assert "+ item-0" in ctx["diff_snippet"]
-        assert "+ item-9" in ctx["diff_snippet"]
-        assert "+ item-10" not in ctx["diff_snippet"]
-        # full version contains all
-        assert "+ item-10" in ctx["diff_full"]
-        assert "+ item-11" in ctx["diff_full"]
+        """Default snippet cap (25 lines) caps long diffs; diff_full keeps all."""
+        # Build a long synthetic diff: 50 line changes
+        prev_lines = [f"line-{i}" for i in range(50)]
+        curr_lines = [f"changed-{i}" if i % 2 == 0 else f"line-{i}" for i in range(50)]
+        from src.core.diff.textual import compute_unified_diff
 
-    def test_diff_snippet_empty_when_no_diff_data(self):
-        event = make_event(metadata={})
-        ctx = build_template_context(event)
+        long_diff = compute_unified_diff(
+            "\n".join(prev_lines) + "\n", "\n".join(curr_lines) + "\n"
+        ).unified_diff
+        event = make_event(metadata=CHANGE_META)
+        ctx = build_template_context(event, unified_diff=long_diff)
+        snippet_lines = ctx["diff_snippet"].count("\n") + 1
+        full_lines = ctx["diff_full"].count("\n") + 1
+        # Snippet has the truncation footer; cap+fence overhead means a few more
+        # than 25 lines total, but it's strictly smaller than the full diff.
+        assert snippet_lines < full_lines
+        assert "more line" in ctx["diff_snippet"]
+        assert "more line" not in ctx["diff_full"]
+
+    def test_diff_snippet_empty_when_no_unified_diff(self):
+        event = make_event(metadata=CHANGE_META)
+        ctx = build_template_context(event, unified_diff=None)
         assert ctx["diff_snippet"] == ""
         assert ctx["diff_full"] == ""
+
+    def test_diff_snippet_empty_when_unified_diff_blank(self):
+        event = make_event(metadata=CHANGE_META)
+        ctx = build_template_context(event, unified_diff="")
+        assert ctx["diff_snippet"] == ""
+        assert ctx["diff_full"] == ""
+
+    def test_chunks_changed_structured(self):
+        """chunks_changed is a list of {status, label, similarity} dicts."""
+        event = make_event(metadata=CHANGE_META)
+        ctx = build_template_context(event)
+        assert ctx["chunks_changed"] == [
+            {"status": "added", "label": "Licenses", "similarity": None},
+            {"status": "removed", "label": "Hours", "similarity": None},
+            {"status": "modified", "label": "Contact Info", "similarity": 0.85},
+        ]
+
+    def test_chunks_changed_empty_when_no_chunk_metadata(self):
+        event = make_event(metadata={})
+        ctx = build_template_context(event)
+        assert ctx["chunks_changed"] == []
+
+    def test_chunks_changed_skips_modified_without_label(self):
+        event = make_event(metadata={"modified": [{"similarity": 0.9}]})
+        ctx = build_template_context(event)
+        assert ctx["chunks_changed"] == []
 
     def test_derived_fields_take_precedence_over_metadata(self):
         """Hostile metadata keys must not clobber derived fields."""
@@ -553,6 +633,7 @@ class TestBuildTemplateContext:
                 "change_url": "BOGUS",
                 "diff_snippet": "BOGUS",
                 "diff_full": "BOGUS",
+                "chunks_changed": "BOGUS",
             }
         )
         ctx = build_template_context(event)
@@ -564,6 +645,7 @@ class TestBuildTemplateContext:
         )
         assert ctx["diff_snippet"] == ""
         assert ctx["diff_full"] == ""
+        assert ctx["chunks_changed"] == []
 
 
 class TestBuildBodyWithTemplates:
@@ -594,14 +676,25 @@ class TestBuildBodyWithTemplates:
         default; build_body overrides it with options.diff_snippet_lines so
         a custom template referencing {{ diff_snippet }} honors the
         preference."""
-        meta = {"added": [f"item-{i}" for i in range(20)], "removed": [], "modified": []}
-        event = make_event(metadata=meta)
-        opts = ContentOptions(body_template="{{ diff_snippet }}", diff_snippet_lines=3)
-        body = build_body(event, opts)
-        assert "+ item-0" in body
-        assert "+ item-1" in body
-        assert "+ item-2" in body
-        assert "+ item-3" not in body
+        # Multi-hunk diff so the cap actually matters.
+        prev_lines = [f"line-{i}" for i in range(50)]
+        curr_lines = [f"changed-{i}" if i % 5 == 0 else f"line-{i}" for i in range(50)]
+        from src.core.diff.textual import compute_unified_diff
+
+        long_diff = compute_unified_diff(
+            "\n".join(prev_lines) + "\n", "\n".join(curr_lines) + "\n"
+        ).unified_diff
+
+        event = make_event(metadata=CHANGE_META)
+        opts = ContentOptions(body_template="{{ diff_snippet }}", diff_snippet_lines=4)
+        body = build_body(event, opts, unified_diff=long_diff)
+        # User cap honored: tight cap → truncation footer present.
+        assert "more line" in body
+
+        # And without a cap override, full diff fits without truncation.
+        opts_full = ContentOptions(body_template="{{ diff_full }}")
+        body_full = build_body(event, opts_full, unified_diff=long_diff)
+        assert "more line" not in body_full
 
 
 class TestBuildTitle:

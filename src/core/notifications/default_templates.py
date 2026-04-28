@@ -70,13 +70,19 @@ TEMPLATE_VARIABLES: list[TemplateVariable] = [
     TemplateVariable(
         "diff_snippet",
         "str",
-        "Pre-rendered diff lines (capped at ~10 entries)",
+        "Unified diff in a Markdown ```diff block, capped (hunk-boundary aware)",
         "change_detected",
     ),
     TemplateVariable(
         "diff_full",
         "str",
-        "Pre-rendered diff lines (all entries)",
+        "Unified diff in a Markdown ```diff block, no cap",
+        "change_detected",
+    ),
+    TemplateVariable(
+        "chunks_changed",
+        "list[{status, label, similarity}]",
+        "Structured list of chunk-level changes (status: added/removed/modified)",
         "change_detected",
     ),
     TemplateVariable("change_id", "str", "ULID of the change for URLs", "change_detected"),

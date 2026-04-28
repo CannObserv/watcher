@@ -6,6 +6,7 @@ import pytest
 from jinja2 import TemplateError, UndefinedError
 
 from src.api.schemas.content_config import ContentConfig, ContentOptions
+from src.core.diff.textual import compute_unified_diff
 from src.core.notifications.content import (
     build_body,
     build_template_context,
@@ -45,8 +46,6 @@ SAMPLE_CURR = "alpha\nbeta-changed\ngamma\ndelta\nepsilon\nzeta\n"
 
 
 def _sample_unified_diff() -> str:
-    from src.core.diff.textual import compute_unified_diff
-
     return compute_unified_diff(SAMPLE_PREV, SAMPLE_CURR).unified_diff
 
 
@@ -266,8 +265,6 @@ class TestDiffSlot:
         # Build a diff with two hunks so we can verify hunk-boundary behavior.
         prev = "a\nb\nc\nd\ne\nf\ng\nh\ni\nj\nk\nl\nm\nn\no\np\nq\nr\ns\nt\nu\n"
         curr = "a\nB\nc\nd\ne\nf\ng\nh\ni\nj\nk\nl\nm\nn\nO\np\nq\nr\ns\nt\nu\n"
-        from src.core.diff.textual import compute_unified_diff
-
         diff = compute_unified_diff(prev, curr).unified_diff
         event = make_event(metadata=CHANGE_META)
         # Cap below first hunk size — only headers + @@ should fit.
@@ -575,8 +572,6 @@ class TestBuildTemplateContext:
         # Build a long synthetic diff: 50 line changes
         prev_lines = [f"line-{i}" for i in range(50)]
         curr_lines = [f"changed-{i}" if i % 2 == 0 else f"line-{i}" for i in range(50)]
-        from src.core.diff.textual import compute_unified_diff
-
         long_diff = compute_unified_diff(
             "\n".join(prev_lines) + "\n", "\n".join(curr_lines) + "\n"
         ).unified_diff
@@ -679,8 +674,6 @@ class TestBuildBodyWithTemplates:
         # Multi-hunk diff so the cap actually matters.
         prev_lines = [f"line-{i}" for i in range(50)]
         curr_lines = [f"changed-{i}" if i % 5 == 0 else f"line-{i}" for i in range(50)]
-        from src.core.diff.textual import compute_unified_diff
-
         long_diff = compute_unified_diff(
             "\n".join(prev_lines) + "\n", "\n".join(curr_lines) + "\n"
         ).unified_diff

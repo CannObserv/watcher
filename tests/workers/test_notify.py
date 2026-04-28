@@ -8,8 +8,12 @@ from cryptography.fernet import Fernet
 from sqlalchemy.ext.asyncio import AsyncSession
 from ulid import ULID
 
+from src.api.schemas.content_config import ContentConfig, ContentOptions
 from src.core.notifications.events import WatchEvent, WatchEventType
-from src.core.notifications.notify import dispatch_event_notifications
+from src.core.notifications.notify import (
+    _load_event_unified_diff,
+    dispatch_event_notifications,
+)
 
 
 @pytest.fixture(autouse=True)
@@ -376,7 +380,6 @@ class TestContentConfig:
     @pytest.mark.asyncio
     async def test_content_config_body_used_in_dispatch(self, set_test_key):
         """When a config has content_config, build_body is called and the result forwarded."""
-        from src.api.schemas.content_config import ContentConfig, ContentOptions
         from src.core.notifications.notify import dispatch_event_notifications
 
         event = make_event(WatchEventType.CHANGE_DETECTED)
@@ -514,7 +517,6 @@ class TestUnifiedDiffLazyLoad:
         """include_diff_snippet=True → diff is loaded exactly once and shared
         across N candidates. Memoization is essential — N configs must not
         cause N storage round-trips."""
-        from src.api.schemas.content_config import ContentConfig, ContentOptions
 
         event = make_event(WatchEventType.CHANGE_DETECTED)
         event.metadata["change_id"] = str(ULID())
@@ -565,7 +567,6 @@ class TestUnifiedDiffLazyLoad:
         """body_template referencing {{ diff_snippet }} also triggers the load
         even when the include_diff_* toggles are off, since toggles are
         bypassed on the body_template code path."""
-        from src.api.schemas.content_config import ContentConfig, ContentOptions
 
         event = make_event(WatchEventType.CHANGE_DETECTED)
         event.metadata["change_id"] = str(ULID())
@@ -603,10 +604,50 @@ class TestUnifiedDiffLazyLoad:
         load_mock.assert_called_once()
 
     @pytest.mark.asyncio
+    async def test_no_diff_load_when_template_mentions_var_outside_jinja_delimiters(
+        self, set_test_key
+    ):
+        """A body_template that mentions "diff_snippet" only as literal text
+        (not inside {{ ... }} or {% ... %}) must not trigger the lazy-load.
+        Verifies the Jinja-aware regex in _DIFF_VAR_RE (CR #4)."""
+        event = make_event(WatchEventType.CHANGE_DETECTED)
+        event.metadata["change_id"] = str(ULID())
+
+        cfg = ContentConfig(
+            default=ContentOptions(body_template="See diff_snippet docs at example.com")
+        ).model_dump()
+        c = MagicMock()
+        c.apprise_url = "encrypted_url"
+        c.content_config = cfg
+
+        session = AsyncMock(spec=AsyncSession)
+        session.execute = AsyncMock(
+            side_effect=[
+                _scalar_result(None),
+                _empty_result(),
+                _empty_result(),
+                _result_with(c),
+            ]
+        )
+
+        async def fake_dispatch(ev, url, *, body, title):
+            return MagicMock(success=True, reason="ok")
+
+        with (
+            patch("src.core.notifications.notify.dispatch_event", fake_dispatch),
+            patch(
+                "src.core.notifications.notify._load_event_unified_diff",
+                new_callable=AsyncMock,
+            ) as load_mock,
+        ):
+            await dispatch_event_notifications(session, event)
+
+        load_mock.assert_not_called()
+
+    @pytest.mark.asyncio
     async def test_no_diff_load_for_non_change_event(self, set_test_key):
         """watch_error and other non-change events never trigger the diff load
         even if the resolved options have diff toggles on."""
-        from src.api.schemas.content_config import ContentConfig, ContentOptions
 
         event = make_event(WatchEventType.WATCH_ERROR)
 
@@ -639,3 +680,134 @@ class TestUnifiedDiffLazyLoad:
             await dispatch_event_notifications(session, event)
 
         load_mock.assert_not_called()
+
+
+class _FakeStorage:
+    """Minimal in-memory StorageBackend for _load_event_unified_diff tests."""
+
+    def __init__(
+        self,
+        files: dict[str, bytes] | None = None,
+        raise_on_load: Exception | None = None,
+    ):
+        self.files = files or {}
+        self.raise_on_load = raise_on_load
+        self.load_calls: list[str] = []
+
+    def save(self, path, content):  # pragma: no cover — unused
+        self.files[path] = content
+
+    def load(self, path):
+        self.load_calls.append(path)
+        if self.raise_on_load is not None:
+            raise self.raise_on_load
+        return self.files[path]
+
+    def exists(self, path):  # pragma: no cover — unused
+        return path in self.files
+
+    def size(self, path):  # pragma: no cover — unused
+        return len(self.files[path])
+
+    def snapshot_path(self, watch_id, snapshot_id, extension):  # pragma: no cover — unused
+        return f"snapshots/{watch_id}/{snapshot_id}.{extension}"
+
+
+def _change_event_with_id(change_id):
+    event = make_event(WatchEventType.CHANGE_DETECTED)
+    event.metadata["change_id"] = str(change_id)
+    return event
+
+
+class TestLoadEventUnifiedDiff:
+    """Direct unit tests for _load_event_unified_diff covering each early-return
+    branch and the storage-error fallback. The dispatcher invokes this function
+    unguarded — every failure mode must return "" rather than raise."""
+
+    @pytest.mark.asyncio
+    async def test_no_change_id_returns_empty(self):
+        event = make_event(WatchEventType.CHANGE_DETECTED)
+        event.metadata.pop("change_id", None)
+        session = AsyncMock(spec=AsyncSession)
+        result = await _load_event_unified_diff(session, event)
+        assert result == ""
+        session.get.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_invalid_change_id_returns_empty(self):
+        event = make_event(WatchEventType.CHANGE_DETECTED)
+        event.metadata["change_id"] = "not-a-ulid"
+        session = AsyncMock(spec=AsyncSession)
+        result = await _load_event_unified_diff(session, event)
+        assert result == ""
+        session.get.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_missing_change_row_returns_empty(self):
+        event = _change_event_with_id(ULID())
+        session = AsyncMock(spec=AsyncSession)
+        session.get = AsyncMock(return_value=None)
+        result = await _load_event_unified_diff(session, event)
+        assert result == ""
+
+    @pytest.mark.asyncio
+    async def test_missing_snapshot_returns_empty(self):
+        event = _change_event_with_id(ULID())
+        change = MagicMock()
+        change.previous_snapshot_id = ULID()
+        change.current_snapshot_id = ULID()
+        session = AsyncMock(spec=AsyncSession)
+        session.get = AsyncMock(side_effect=[change, None, MagicMock()])
+        result = await _load_event_unified_diff(session, event)
+        assert result == ""
+
+    @pytest.mark.asyncio
+    async def test_missing_text_path_returns_empty(self):
+        event = _change_event_with_id(ULID())
+        change = MagicMock()
+        change.previous_snapshot_id = ULID()
+        change.current_snapshot_id = ULID()
+        prev = MagicMock()
+        prev.text_path = ""
+        curr = MagicMock()
+        curr.text_path = "some/path"
+        session = AsyncMock(spec=AsyncSession)
+        session.get = AsyncMock(side_effect=[change, prev, curr])
+        result = await _load_event_unified_diff(session, event)
+        assert result == ""
+
+    @pytest.mark.asyncio
+    async def test_storage_error_returns_empty_does_not_raise(self):
+        """RuntimeError (a non-OSError) must be caught — verifies CR #2 broadened catch."""
+        event = _change_event_with_id(ULID())
+        change = MagicMock()
+        change.previous_snapshot_id = ULID()
+        change.current_snapshot_id = ULID()
+        prev = MagicMock(text_path="snapshots/w/prev.txt")
+        curr = MagicMock(text_path="snapshots/w/curr.txt")
+        session = AsyncMock(spec=AsyncSession)
+        session.get = AsyncMock(side_effect=[change, prev, curr])
+        storage = _FakeStorage(raise_on_load=RuntimeError("backend exploded"))
+        result = await _load_event_unified_diff(session, event, storage=storage)
+        assert result == ""
+
+    @pytest.mark.asyncio
+    async def test_happy_path_returns_unified_diff(self):
+        event = _change_event_with_id(ULID())
+        change = MagicMock()
+        change.previous_snapshot_id = ULID()
+        change.current_snapshot_id = ULID()
+        prev = MagicMock(text_path="snapshots/w/prev.txt")
+        curr = MagicMock(text_path="snapshots/w/curr.txt")
+        session = AsyncMock(spec=AsyncSession)
+        session.get = AsyncMock(side_effect=[change, prev, curr])
+        storage = _FakeStorage(
+            files={
+                "snapshots/w/prev.txt": b"alpha\nbeta\n",
+                "snapshots/w/curr.txt": b"alpha\nbeta-changed\n",
+            }
+        )
+        result = await _load_event_unified_diff(session, event, storage=storage)
+        assert result.startswith("--- content")
+        assert "+beta-changed" in result
+        assert storage.load_calls == ["snapshots/w/prev.txt", "snapshots/w/curr.txt"]

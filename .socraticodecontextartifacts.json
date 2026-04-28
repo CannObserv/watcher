@@ -1,0 +1,49 @@
+{
+  "artifacts": [
+    {
+      "name": "agents-guide",
+      "path": "./AGENTS.md",
+      "description": "Authoritative project guide for agents and contributors. Project overview, full src/ layout (every module's purpose), env vars, server lifecycle (port 8000=systemd, 8001=dev), commit conventions, DB trigger rules, and pointers to STYLE.md."
+    },
+    {
+      "name": "readme",
+      "path": "./README.md",
+      "description": "Top-level project README. Brief project description and setup instructions for the watcher web service that monitors cannabis industry activity (licenses, regulatory filings, compliance events)."
+    },
+    {
+      "name": "style-guide",
+      "path": "./docs/STYLE.md",
+      "description": "UI/CSS/accessibility style guide. Brand colors (Cannabis Observer / co-purple-600), Tailwind v4 component classes (.btn, .badge, .stat-card, .data-table, .form-input, .link, .segment-group, .chip-group, .detail-grid, .toggle), badge variants, dark mode rules, WCAG 2.1 AA accessibility patterns, HTMX OOB flash conventions, vendor CSS @layer pattern."
+    },
+    {
+      "name": "commands-reference",
+      "path": "./docs/COMMANDS.md",
+      "description": "Reference for common development commands: uv sync, pytest invocations, ruff, alembic migrations, FastAPI dev server, env loading."
+    },
+    {
+      "name": "deployment-doc",
+      "path": "./docs/DEPLOYMENT.md",
+      "description": "Production deployment guide. Systemd unit (watcher.service), port allocation (8000 live, 8001 dev), exe.dev proxy, restart procedure, env file layout (/etc/watcher/.env + repo .env)."
+    },
+    {
+      "name": "skills-doc",
+      "path": "./docs/SKILLS.md",
+      "description": "Agent skills index. Catalogues the skills available under skills/ (agentskills.io) and .claude/skills/ (Claude Code) directories."
+    },
+    {
+      "name": "design-and-plans",
+      "path": "./docs/plans/",
+      "description": "Archive of 51 design and implementation plan documents (2026-03-20 onward). Captures the 'why' behind every feature: phase plans (foundation, content pipeline, fetching/scheduling, temporal profiles, changes API, notifications, dashboard), system designs (rate limiter, screenshot pipeline, notification template library, content options, watch creation service, API key management, diff viewer), and execution plans. Some are superseded but still encode rationale and trade-offs."
+    },
+    {
+      "name": "alembic-migrations",
+      "path": "./alembic/versions/",
+      "description": "Database schema history as Alembic migrations (28 files, no separate schema.sql exists — this is the canonical source of truth for schema). Tells the migration narrative: watches/audit_log creation, snapshots+chunks, temporal_profiles, notification_configs, domains+effective_domain, notification_template_library, encryption rollouts, content-type column changes, screenshot_browser, visual_change_score, last_changed_at trigger (trg_changes_update_last_changed_at), is_archived, decay_window, and more."
+    },
+    {
+      "name": "systemd-unit",
+      "path": "./deploy/watcher.service",
+      "description": "Production systemd service unit for the watcher API. Defines how the live service on port 8000 is launched, restarted, and which env files it loads."
+    }
+  ]
+}

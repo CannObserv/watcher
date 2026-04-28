@@ -75,3 +75,64 @@ echo 'BUILD_ID=abc1234' >> .env
 ### Fallback
 
 When `BUILD_ID` is not set (e.g., running locally without the systemd unit), the application defaults to `"dev"`.
+
+## Disk Cleanup Timer
+
+A weekly cleanup timer removes stale caches and rotates journal logs to keep the 19 GB VM disk healthy.
+
+Files:
+- `deploy/watcher-cleanup.service` — oneshot service, runs as `exedev`
+- `deploy/watcher-cleanup.timer` — fires Sun 03:00 UTC ± 30 min
+- `deploy/watcher-cleanup.sudoers` — two targeted NOPASSWD rules (`apt-get clean`, `journalctl --vacuum-time=14d`)
+- `scripts/cleanup.sh` — the cleanup script; logs to `/var/log/watcher/cleanup-<timestamp>.log` (keeps 10)
+
+### Installation
+
+```bash
+# Sudoers rules
+sudo cp deploy/watcher-cleanup.sudoers /etc/sudoers.d/watcher-cleanup
+sudo chmod 440 /etc/sudoers.d/watcher-cleanup
+sudo chown root:root /etc/sudoers.d/watcher-cleanup
+sudo visudo -c  # verify no syntax errors
+
+# Make the script executable
+chmod +x scripts/cleanup.sh
+
+# Install and enable the systemd units
+sudo cp deploy/watcher-cleanup.service /etc/systemd/system/watcher-cleanup.service
+sudo cp deploy/watcher-cleanup.timer   /etc/systemd/system/watcher-cleanup.timer
+sudo systemctl daemon-reload
+sudo systemctl enable --now watcher-cleanup.timer
+```
+
+### Managing the Timer
+
+```bash
+# Confirm it is scheduled
+systemctl list-timers watcher-cleanup.timer
+
+# Manual run (for testing)
+sudo systemctl start watcher-cleanup.service
+
+# Follow output
+sudo journalctl -u watcher-cleanup.service -f
+
+# View logs
+ls -lt /var/log/watcher/cleanup-*.log
+cat /var/log/watcher/cleanup-$(ls -t /var/log/watcher/cleanup-*.log | head -1 | xargs basename)
+
+# Reload after editing the timer
+sudo systemctl daemon-reload && sudo systemctl restart watcher-cleanup.timer
+```
+
+### What it cleans
+
+| Target | Action |
+|---|---|
+| VS Code server installs >30 days old | `rm -rf` |
+| `~/.npm/_npx`, `~/.npm/_cacache` | `rm -rf` |
+| uv build cache | `uv cache prune` |
+| APT package cache | `apt-get clean` |
+| Docker dangling images | `docker image prune -f` |
+| Journal logs >14 days | `journalctl --vacuum-time=14d` |
+| Playwright cache | audit only — logs size, warns if >2 GB, never deletes |

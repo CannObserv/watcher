@@ -90,6 +90,8 @@ The exe.dev proxy transparently forwards ports 3000–9999. Dev server on 8001 i
 | After editing `deploy/watcher.service` | `sudo systemctl daemon-reload && sudo systemctl restart watcher` |
 | After Tailwind or vendor CSS changes | `bash scripts/build-css.sh` then restart |
 | After DB model changes | `uv run alembic upgrade head` then restart |
+| After editing `deploy/watcher-cleanup.timer` | `sudo systemctl daemon-reload && sudo systemctl restart watcher-cleanup.timer` |
+| Disk cleanup (weekly Sun 03:00 UTC) | manual run: `sudo systemctl start watcher-cleanup.service`; logs: `/var/log/watcher/` |
 
 **Dev server workflow:** Run on port 8001 so the live service stays up. Load env first:
 

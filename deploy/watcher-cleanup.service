@@ -1,0 +1,9 @@
+[Unit]
+Description=Watcher weekly disk cleanup
+
+[Service]
+Type=oneshot
+User=exedev
+WorkingDirectory=/home/exedev/watcher
+ExecStartPre=+/bin/bash -c 'mkdir -p /var/log/watcher && chown exedev:exedev /var/log/watcher'
+ExecStart=/home/exedev/watcher/scripts/cleanup.sh

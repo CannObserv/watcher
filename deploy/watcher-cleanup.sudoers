@@ -1,0 +1,4 @@
+# Watcher cleanup service: targeted root commands for watcher-cleanup.service
+# Install to /etc/sudoers.d/watcher-cleanup (mode 440, owner root:root)
+exedev ALL=(root) NOPASSWD: /bin/apt-get clean
+exedev ALL=(root) NOPASSWD: /bin/journalctl --vacuum-time=14d

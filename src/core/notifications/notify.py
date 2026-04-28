@@ -31,7 +31,7 @@ logger = get_logger(__name__)
 # (`{{ ... }}` or `{% ... %}`). Used by `_candidate_needs_unified_diff` so a
 # template that mentions "diff_snippet" only in a comment or literal string
 # doesn't trigger an unnecessary storage round-trip.
-_DIFF_VAR_RE = re.compile(r"\{[{%][^{}]*?\b(?:diff_snippet|diff_full)\b[^{}]*?[}%]\}")
+_DIFF_VAR_RE = re.compile(r"\{[{%][^{}]*\b(?:diff_snippet|diff_full)\b[^{}]*[}%]\}")
 
 
 @dataclass
@@ -103,10 +103,7 @@ async def _load_event_unified_diff(
         prev_text = storage.load(prev.text_path).decode(errors="replace")
         curr_text = storage.load(curr.text_path).decode(errors="replace")
     except Exception:
-        # The StorageBackend protocol doesn't constrain exception types — any
-        # backend (LocalStorage today, remote backends tomorrow) can raise
-        # provider-specific errors. Catching broadly preserves the dispatcher's
-        # "never raise" contract; we degrade to empty diff and keep dispatching.
+        # Broad catch — StorageBackend doesn't constrain exception types.
         logger.warning(
             "snapshot text load failed; skipping unified diff",
             extra={"watch_id": event.watch_id, "change_id": str(change_id)},

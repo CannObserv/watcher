@@ -372,11 +372,11 @@ def _format_chunks_changed(metadata: dict) -> list[dict]:
     templates that want a textual rendering can iterate over it.
     """
     out: list[dict] = []
-    for label in metadata.get("added", []) or []:
+    for label in metadata.get("added", []):
         out.append({"status": "added", "label": label, "similarity": None})
-    for label in metadata.get("removed", []) or []:
+    for label in metadata.get("removed", []):
         out.append({"status": "removed", "label": label, "similarity": None})
-    for item in metadata.get("modified", []) or []:
+    for item in metadata.get("modified", []):
         label = item.get("label")
         if not label:
             continue

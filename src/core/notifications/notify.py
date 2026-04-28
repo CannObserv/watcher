@@ -1,5 +1,6 @@
 """Notification dispatch for watch lifecycle events."""
 
+import re
 from dataclasses import dataclass
 
 from sqlalchemy import select
@@ -25,6 +26,12 @@ from src.core.notifications.events import WatchEvent, WatchEventType
 from src.core.storage import STORAGE_BASE_DIR, LocalStorage, StorageBackend
 
 logger = get_logger(__name__)
+
+# Match `diff_snippet` or `diff_full` referenced inside a Jinja delimiter pair
+# (`{{ ... }}` or `{% ... %}`). Used by `_candidate_needs_unified_diff` so a
+# template that mentions "diff_snippet" only in a comment or literal string
+# doesn't trigger an unnecessary storage round-trip.
+_DIFF_VAR_RE = re.compile(r"\{[{%][^{}]*?\b(?:diff_snippet|diff_full)\b[^{}]*?[}%]\}")
 
 
 @dataclass
@@ -55,9 +62,7 @@ def _candidate_needs_unified_diff(candidate: DispatchCandidate, event_value: str
     if opts.include_diff_snippet or opts.include_diff_full:
         return True
     tmpl = opts.body_template or ""
-    if "diff_snippet" in tmpl or "diff_full" in tmpl:
-        return True
-    return False
+    return bool(_DIFF_VAR_RE.search(tmpl))
 
 
 async def _load_event_unified_diff(
@@ -97,10 +102,15 @@ async def _load_event_unified_diff(
     try:
         prev_text = storage.load(prev.text_path).decode(errors="replace")
         curr_text = storage.load(curr.text_path).decode(errors="replace")
-    except (FileNotFoundError, OSError):
+    except Exception:
+        # The StorageBackend protocol doesn't constrain exception types — any
+        # backend (LocalStorage today, remote backends tomorrow) can raise
+        # provider-specific errors. Catching broadly preserves the dispatcher's
+        # "never raise" contract; we degrade to empty diff and keep dispatching.
         logger.warning(
             "snapshot text load failed; skipping unified diff",
             extra={"watch_id": event.watch_id, "change_id": str(change_id)},
+            exc_info=True,
         )
         return ""
 

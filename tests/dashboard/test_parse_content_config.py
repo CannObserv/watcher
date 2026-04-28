@@ -11,7 +11,7 @@ _LINES = "content_config__diff_snippet_lines"
 
 def _form(**kwargs):
     """Build a minimal form dict with sensible defaults for unset fields."""
-    base = {_LINES: "10"}
+    base = {_LINES: "25"}
     base.update(kwargs)
     return base
 
@@ -55,17 +55,17 @@ class TestTogglesEnabled:
 
 
 class TestLinesGuard:
-    def test_non_numeric_lines_falls_back_to_10(self):
+    def test_non_numeric_lines_falls_back_to_default(self):
         result = _parse_content_config_from_form(_form(**{_SNIPPET: "1", _LINES: "abc"}))
-        assert result["default"]["diff_snippet_lines"] == 10
+        assert result["default"]["diff_snippet_lines"] == 25
 
-    def test_empty_lines_falls_back_to_10(self):
+    def test_empty_lines_falls_back_to_default(self):
         result = _parse_content_config_from_form(_form(**{_SNIPPET: "1", _LINES: ""}))
-        assert result["default"]["diff_snippet_lines"] == 10
+        assert result["default"]["diff_snippet_lines"] == 25
 
     def test_lines_clamped_at_max(self):
         result = _parse_content_config_from_form(_form(**{_SNIPPET: "1", _LINES: "999"}))
-        assert result["default"]["diff_snippet_lines"] == 100
+        assert result["default"]["diff_snippet_lines"] == 200
 
     def test_lines_clamped_at_min(self):
         result = _parse_content_config_from_form(_form(**{_SNIPPET: "1", _LINES: "0"}))

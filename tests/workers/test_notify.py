@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ulid import ULID
 
 from src.api.schemas.content_config import ContentConfig, ContentOptions
+from src.core.models.watch import ContentType
 from src.core.notifications.events import WatchEvent, WatchEventType
 from src.core.notifications.notify import (
     _load_event_unified_diff,
@@ -545,22 +546,23 @@ class TestLoadEventUnifiedDiff:
         change.previous_snapshot_id = ULID()
         change.current_snapshot_id = ULID()
         session = AsyncMock(spec=AsyncSession)
+        # gets: Change, prev Snapshot (None), curr Snapshot — Watch fetch never reached
         session.get = AsyncMock(side_effect=[change, None, MagicMock()])
         result = await _load_event_unified_diff(session, event)
         assert result == ""
 
     @pytest.mark.asyncio
-    async def test_missing_text_path_returns_empty(self):
+    async def test_missing_text_path_returns_empty_for_non_html(self):
+        """Non-HTML watch with empty text_path → bail (no fallback to raw)."""
         event = _change_event_with_id(ULID())
         change = MagicMock()
         change.previous_snapshot_id = ULID()
         change.current_snapshot_id = ULID()
-        prev = MagicMock()
-        prev.text_path = ""
-        curr = MagicMock()
-        curr.text_path = "some/path"
+        prev = MagicMock(text_path="", storage_path="snapshots/w/prev.pdf")
+        curr = MagicMock(text_path="some/path", storage_path="snapshots/w/curr.pdf")
+        watch = MagicMock(content_type=ContentType.PDF)
         session = AsyncMock(spec=AsyncSession)
-        session.get = AsyncMock(side_effect=[change, prev, curr])
+        session.get = AsyncMock(side_effect=[change, prev, curr, watch])
         result = await _load_event_unified_diff(session, event)
         assert result == ""
 
@@ -571,24 +573,27 @@ class TestLoadEventUnifiedDiff:
         change = MagicMock()
         change.previous_snapshot_id = ULID()
         change.current_snapshot_id = ULID()
-        prev = MagicMock(text_path="snapshots/w/prev.txt")
-        curr = MagicMock(text_path="snapshots/w/curr.txt")
+        prev = MagicMock(text_path="snapshots/w/prev.txt", storage_path="snapshots/w/prev.txt")
+        curr = MagicMock(text_path="snapshots/w/curr.txt", storage_path="snapshots/w/curr.txt")
+        watch = MagicMock(content_type=ContentType.PDF)
         session = AsyncMock(spec=AsyncSession)
-        session.get = AsyncMock(side_effect=[change, prev, curr])
+        session.get = AsyncMock(side_effect=[change, prev, curr, watch])
         storage = _FakeStorage(raise_on_load=RuntimeError("backend exploded"))
         result = await _load_event_unified_diff(session, event, storage=storage)
         assert result == ""
 
     @pytest.mark.asyncio
-    async def test_happy_path_returns_unified_diff(self):
+    async def test_happy_path_non_html_uses_text_path(self):
+        """PDF/file watches: diff the stored extracted text via `text_path`."""
         event = _change_event_with_id(ULID())
         change = MagicMock()
         change.previous_snapshot_id = ULID()
         change.current_snapshot_id = ULID()
-        prev = MagicMock(text_path="snapshots/w/prev.txt")
-        curr = MagicMock(text_path="snapshots/w/curr.txt")
+        prev = MagicMock(text_path="snapshots/w/prev.txt", storage_path="snapshots/w/prev.pdf")
+        curr = MagicMock(text_path="snapshots/w/curr.txt", storage_path="snapshots/w/curr.pdf")
+        watch = MagicMock(content_type=ContentType.PDF)
         session = AsyncMock(spec=AsyncSession)
-        session.get = AsyncMock(side_effect=[change, prev, curr])
+        session.get = AsyncMock(side_effect=[change, prev, curr, watch])
         storage = _FakeStorage(
             files={
                 "snapshots/w/prev.txt": b"alpha\nbeta\n",
@@ -597,6 +602,80 @@ class TestLoadEventUnifiedDiff:
         )
         result = await _load_event_unified_diff(session, event, storage=storage)
         assert result.startswith("--- content")
+        assert "+beta-changed" in result
+        # Loaded text_path, not storage_path
+        assert storage.load_calls == ["snapshots/w/prev.txt", "snapshots/w/curr.txt"]
+
+    @pytest.mark.asyncio
+    async def test_html_watch_diffs_prettified_raw_html(self):
+        """HTML watches diff `storage_path` (raw HTML) prettified via
+        `normalize_html` so notification output mirrors the dashboard's
+        Raw-mode diff (#118) — no long unwrapped lines."""
+        event = _change_event_with_id(ULID())
+        change = MagicMock()
+        change.previous_snapshot_id = ULID()
+        change.current_snapshot_id = ULID()
+        prev = MagicMock(text_path="snapshots/w/prev.txt", storage_path="snapshots/w/prev.html")
+        curr = MagicMock(text_path="snapshots/w/curr.txt", storage_path="snapshots/w/curr.html")
+        watch = MagicMock(content_type=ContentType.HTML)
+        session = AsyncMock(spec=AsyncSession)
+        session.get = AsyncMock(side_effect=[change, prev, curr, watch])
+        # Single-line HTML → should be pretty-printed across multiple lines
+        # before diffing, so the diff output reflects structural changes
+        # rather than one giant +/- line.
+        prev_html = b"<html><body><p>alpha</p><p>beta</p></body></html>"
+        curr_html = b"<html><body><p>alpha</p><p>beta-changed</p></body></html>"
+        storage = _FakeStorage(
+            files={
+                "snapshots/w/prev.html": prev_html,
+                "snapshots/w/curr.html": curr_html,
+            }
+        )
+        result = await _load_event_unified_diff(session, event, storage=storage)
+        assert result.startswith("--- content")
+        # The diff should contain the changed paragraph as a discrete line,
+        # not buried in a single-line dump of the entire HTML.
+        assert "-<p>beta</p>" in result or "<p>beta</p>" in result
+        assert "+<p>beta-changed</p>" in result or "<p>beta-changed</p>" in result
+        # Loaded storage_path (raw HTML), not text_path
+        assert storage.load_calls == ["snapshots/w/prev.html", "snapshots/w/curr.html"]
+
+    @pytest.mark.asyncio
+    async def test_html_watch_with_missing_storage_path_returns_empty(self):
+        """HTML watch missing storage_path → no fallback (text_path is the
+        chunk-joined extracted text, which is exactly what we're trying
+        to avoid)."""
+        event = _change_event_with_id(ULID())
+        change = MagicMock()
+        change.previous_snapshot_id = ULID()
+        change.current_snapshot_id = ULID()
+        prev = MagicMock(text_path="snapshots/w/prev.txt", storage_path="")
+        curr = MagicMock(text_path="snapshots/w/curr.txt", storage_path="snapshots/w/curr.html")
+        watch = MagicMock(content_type=ContentType.HTML)
+        session = AsyncMock(spec=AsyncSession)
+        session.get = AsyncMock(side_effect=[change, prev, curr, watch])
+        result = await _load_event_unified_diff(session, event)
+        assert result == ""
+
+    @pytest.mark.asyncio
+    async def test_missing_watch_falls_back_to_text_path(self):
+        """If the Watch row vanished (deleted between event and dispatch),
+        skip the HTML branch and use the safe text_path path."""
+        event = _change_event_with_id(ULID())
+        change = MagicMock()
+        change.previous_snapshot_id = ULID()
+        change.current_snapshot_id = ULID()
+        prev = MagicMock(text_path="snapshots/w/prev.txt", storage_path="snapshots/w/prev.html")
+        curr = MagicMock(text_path="snapshots/w/curr.txt", storage_path="snapshots/w/curr.html")
+        session = AsyncMock(spec=AsyncSession)
+        session.get = AsyncMock(side_effect=[change, prev, curr, None])  # watch missing
+        storage = _FakeStorage(
+            files={
+                "snapshots/w/prev.txt": b"alpha\nbeta\n",
+                "snapshots/w/curr.txt": b"alpha\nbeta-changed\n",
+            }
+        )
+        result = await _load_event_unified_diff(session, event, storage=storage)
         assert "+beta-changed" in result
         assert storage.load_calls == ["snapshots/w/prev.txt", "snapshots/w/curr.txt"]
 

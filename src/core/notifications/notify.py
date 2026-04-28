@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ulid import ULID
 
 from src.api.schemas.content_config import ContentConfig
+from src.core.diff.normalize import normalize_html
 from src.core.diff.textual import compute_unified_diff
 from src.core.logging import get_logger
 from src.core.models.audit_log import EventType, audit
@@ -15,7 +16,7 @@ from src.core.models.change import Change
 from src.core.models.notification_config import WatchNotificationConfig
 from src.core.models.notification_template import DomainNcRef, NotificationTemplate, WatchNcRef
 from src.core.models.snapshot import Snapshot
-from src.core.models.watch import Watch
+from src.core.models.watch import ContentType, Watch
 from src.core.notifications.content import (
     build_body,
     build_title,
@@ -73,13 +74,14 @@ async def _load_event_unified_diff(
 ) -> str:
     """Lazily compute the unified diff for a change_detected event.
 
-    Resolves the Change row by `change_id` from event metadata, then loads
-    `text_path` from each side's snapshot via the storage backend and runs
-    `compute_unified_diff`. Returns "" on any missing piece (no change_id,
-    no Change row, missing snapshot, missing/unreadable text artifact).
+    For HTML watches, loads each side's `storage_path` (raw HTML) and runs
+    `normalize_html` (html5lib pretty-print) so notification output mirrors
+    the dashboard's Raw-mode diff (#118) — no long unwrapped lines.
+    For non-HTML watches, loads `text_path` (the chunk-joined extracted text).
 
-    Storage failures are non-fatal — we degrade to empty diff rather than
-    blocking notification dispatch.
+    Returns "" on any missing piece (no change_id, no Change row, missing
+    snapshot, missing required path, unreadable artifact). Storage failures
+    are non-fatal — we degrade to empty diff rather than blocking dispatch.
     """
     change_id = event.metadata.get("change_id")
     if not change_id:
@@ -95,9 +97,47 @@ async def _load_event_unified_diff(
 
     prev = await session.get(Snapshot, change.previous_snapshot_id)
     curr = await session.get(Snapshot, change.current_snapshot_id)
-    if not prev or not curr or not prev.text_path or not curr.text_path:
+    if not prev or not curr:
         return ""
 
+    try:
+        watch_ulid = ULID.from_str(event.watch_id)
+    except (TypeError, ValueError):
+        return ""
+    watch = await session.get(Watch, watch_ulid)
+
+    # HTML branch: diff the prettified raw HTML, mirroring the dashboard.
+    # If watch is missing or non-HTML, fall through to the text_path path.
+    if watch is not None and watch.content_type == ContentType.HTML:
+        if not prev.storage_path or not curr.storage_path:
+            return ""
+        storage = storage or LocalStorage(base_dir=STORAGE_BASE_DIR)
+        try:
+            prev_raw = storage.load(prev.storage_path).decode(errors="replace")
+            curr_raw = storage.load(curr.storage_path).decode(errors="replace")
+        except Exception:
+            # Broad catch — StorageBackend doesn't constrain exception types.
+            logger.warning(
+                "snapshot raw load failed; skipping unified diff",
+                extra={"watch_id": event.watch_id, "change_id": str(change_id)},
+                exc_info=True,
+            )
+            return ""
+        try:
+            prev_pretty = normalize_html(prev_raw)
+            curr_pretty = normalize_html(curr_raw)
+        except Exception:
+            logger.warning(
+                "normalize_html failed; skipping unified diff",
+                extra={"watch_id": event.watch_id, "change_id": str(change_id)},
+                exc_info=True,
+            )
+            return ""
+        return compute_unified_diff(prev_pretty, curr_pretty).unified_diff
+
+    # Non-HTML branch: diff the stored extracted text.
+    if not prev.text_path or not curr.text_path:
+        return ""
     storage = storage or LocalStorage(base_dir=STORAGE_BASE_DIR)
     try:
         prev_text = storage.load(prev.text_path).decode(errors="replace")

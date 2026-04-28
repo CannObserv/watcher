@@ -1,6 +1,6 @@
 """Tests for src.core.utils shared utilities."""
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta, timezone
 
 from src.core.utils import format_utc_iso
 
@@ -15,8 +15,9 @@ class TestFormatUtcIso:
         assert format_utc_iso(dt) == "2026-04-09T14:22:37Z"
 
     def test_non_utc_aware_datetime_coerced_to_utc(self):
-        eastern = UTC  # use a fixed offset for determinism
-        dt = datetime(2026, 4, 9, 14, 22, 37, tzinfo=eastern)
+        # UTC−5; 09:22:37−05:00 == 14:22:37Z
+        eastern = timezone(timedelta(hours=-5))
+        dt = datetime(2026, 4, 9, 9, 22, 37, tzinfo=eastern)
         assert format_utc_iso(dt) == "2026-04-09T14:22:37Z"
 
     def test_microseconds_preserved(self):

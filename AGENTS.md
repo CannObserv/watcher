@@ -55,6 +55,7 @@ src/workers/pipeline.py  — Core check pipeline: hash, extract, diff, store sna
 src/core/notifications/notify.py — Notification dispatch: dispatch_event_notifications(session, event) — queries 4 live sources in priority order: global templates (is_global_default=True), domain templates (DomainNcRef for watch.effective_domain), watch-assigned templates (WatchNcRef), local configs (WatchNotificationConfig); deduplicates by template_id; source field is "global"|"domain"|"watch_template"|"local"
 src/workers/notify.py    — Backwards-compat re-export shim for dispatch_event_notifications; new code imports from src.core.notifications.notify directly
 src/core/crypto.py       — Fernet encryption for Apprise URLs (encrypt_apprise_url, decrypt_apprise_url); requires APPRISE_SECRET_KEY env var
+src/core/utils.py        — Shared utilities: format_utc_iso(dt) → ISO 8601 UTC timestamp string with Z suffix (coerces naive/non-UTC datetimes to UTC)
 src/core/registry.py     — ServiceRegistry: swappable fetcher and extractor implementations
 tests/                 — Mirrors src/ structure
 deploy/                — Systemd unit and deployment config

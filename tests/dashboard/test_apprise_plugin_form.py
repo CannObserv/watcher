@@ -10,7 +10,7 @@ from src.dashboard.deps import get_dashboard_user
 
 
 async def _get(schema: str | None = None, raw: bool = False, variant: int = 0):
-    from src.api.dependencies import get_db_session
+    from src.api.deps import get_db_session
     from src.api.main import app
 
     async def override_session():

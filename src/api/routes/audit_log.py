@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.api.dependencies import get_db_session
+from src.api.deps import get_db_session
 from src.api.routes.helpers import parse_ulid
 from src.api.schemas.audit_log import AuditLogResponse
 from src.core.models.audit_log import AuditLog

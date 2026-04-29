@@ -8,7 +8,7 @@ from markupsafe import escape
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.api.dependencies import get_db_session
+from src.api.deps import get_db_session
 from src.core.models.api_key import ApiKey
 from src.core.models.app_user import AppUser
 from src.dashboard import templates

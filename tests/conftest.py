@@ -10,8 +10,7 @@ from sqlalchemy import event, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 
-from src.api.dependencies import get_db_session, get_probe_fn
-from src.api.deps import require_api_key
+from src.api.deps import get_db_session, get_probe_fn, require_api_key
 from src.core.models import Base
 from src.core.models.app_user import AppUser
 from src.core.models.change import Change

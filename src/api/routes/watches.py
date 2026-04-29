@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.api.dependencies import get_db_session, get_probe_fn
+from src.api.deps import get_db_session, get_probe_fn
 from src.api.routes.helpers import get_watch_or_404
 from src.api.schemas.watch import WatchCreate, WatchResponse, WatchUpdate
 from src.core.logging import get_logger

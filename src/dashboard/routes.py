@@ -15,7 +15,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from ulid import ULID
 
-from src.api.dependencies import get_db_session, get_probe_fn
+from src.api.deps import get_db_session, get_probe_fn
 from src.api.routes.helpers import parse_ulid
 from src.api.routes.watches import delete_watch as api_delete_watch
 from src.api.schemas.content_config import ContentConfig, ContentOptions

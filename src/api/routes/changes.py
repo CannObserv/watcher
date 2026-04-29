@@ -5,7 +5,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from ulid import ULID
 
-from src.api.dependencies import get_db_session
+from src.api.deps import get_db_session
 from src.api.routes.helpers import parse_ulid
 from src.api.schemas.change import (
     ChangeDetailResponse,

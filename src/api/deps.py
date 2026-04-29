@@ -1,6 +1,7 @@
-"""API authentication dependencies."""
+"""FastAPI dependencies — database session, probe, and authentication."""
 
 import hashlib
+from collections.abc import AsyncGenerator, Awaitable, Callable
 from datetime import UTC, datetime
 
 from fastapi import Depends, HTTPException
@@ -8,8 +9,21 @@ from fastapi.security import APIKeyHeader
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.api.dependencies import get_db_session
+from src.core.database import get_session_factory
 from src.core.models.api_key import ApiKey
+from src.core.probe import ProbeResult, probe_url
+
+
+async def get_db_session() -> AsyncGenerator[AsyncSession]:
+    """Yield an async database session."""
+    async with get_session_factory()() as session:
+        yield session
+
+
+async def get_probe_fn() -> Callable[[str], Awaitable[ProbeResult]]:
+    """Return the URL probe function. Override in tests to avoid real HTTP calls."""
+    return probe_url
+
 
 api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
 

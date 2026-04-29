@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.api.dependencies import get_db_session
+from src.api.deps import get_db_session
 from src.api.routes.helpers import get_watch_or_404
 from src.api.schemas.notification_config import extract_channel_hint
 from src.api.schemas.notification_template import (

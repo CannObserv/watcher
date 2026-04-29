@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.api.dependencies import get_db_session
+from src.api.deps import get_db_session
 from src.api.routes.helpers import get_watch_or_404, parse_ulid
 from src.api.schemas.temporal_profile import ProfileCreate, ProfileResponse, ProfileUpdate
 from src.core.models.audit_log import EventType, audit

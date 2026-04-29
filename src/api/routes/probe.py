@@ -7,7 +7,7 @@ import httpx
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
-from src.api.dependencies import get_probe_fn
+from src.api.deps import get_probe_fn
 from src.core.probe import ProbeResult
 
 router = APIRouter(prefix="/probe", tags=["probe"])

@@ -61,7 +61,7 @@ class TestWatchNotificationsPartialRoute:
 
     async def _get(self, watch_id: str, mock_watch=None, mock_notifications=None):
         """Make request to the partial endpoint with mocked dependencies."""
-        from src.api.dependencies import get_db_session
+        from src.api.deps import get_db_session
         from src.api.main import app
 
         # Provide a dummy session — the route's context calls are patched
@@ -233,7 +233,7 @@ class TestWatchNotificationsPartialRoute:
 async def _post_dashboard(
     path: str, form_data=None, mock_watch=None, mock_notifications=None, mock_session=None
 ):
-    from src.api.dependencies import get_db_session
+    from src.api.deps import get_db_session
     from src.api.main import app
 
     _session = mock_session or _make_mock_session()
@@ -272,7 +272,7 @@ async def _get_dashboard(path: str, mock_watch=None, mock_session=None):
     the DB dependency override (session.get, session.commit etc. are all set
     on the mock before calling this helper).
     """
-    from src.api.dependencies import get_db_session
+    from src.api.deps import get_db_session
     from src.api.main import app
 
     _session = mock_session or _make_mock_session()
@@ -432,7 +432,7 @@ class TestWatchNotificationCreateFromTokens:
         mock_watch=None,
         events=None,
     ):
-        from src.api.dependencies import get_db_session
+        from src.api.deps import get_db_session
         from src.api.main import app
 
         _session = _make_mock_session()
@@ -483,7 +483,7 @@ class TestWatchNotificationCreateFromTokens:
 
     async def test_unknown_schema_shows_error(self):
         watch = _make_mock_watch()
-        from src.api.dependencies import get_db_session
+        from src.api.deps import get_db_session
         from src.api.main import app
 
         async def override_session():
@@ -528,7 +528,7 @@ class TestNotificationHtmxPartial:
         """The refreshNotifications trigger div must target #watch-notifications."""
         watch = _make_mock_watch()
 
-        from src.api.dependencies import get_db_session
+        from src.api.deps import get_db_session
         from src.api.main import app
 
         async def override_session():

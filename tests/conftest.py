@@ -1,4 +1,7 @@
-"""Shared test fixtures — async database session and FastAPI TestClient."""
+"""Shared test fixtures — async database session and FastAPI TestClient.
+
+tests/fixtures/ holds static sample files used by extractor tests (e.g. sample.html).
+"""
 
 import os
 from collections.abc import AsyncGenerator

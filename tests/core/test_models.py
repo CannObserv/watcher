@@ -198,6 +198,16 @@ class TestEventType:
         values = [v for k, v in vars(EventType).items() if not k.startswith("_")]
         assert len(values) == len(set(values)), "EventType constants must be unique"
 
+    def test_notification_template_event_types_exist(self):
+        assert hasattr(EventType, "NOTIFICATION_TEMPLATE_CREATED")
+        assert hasattr(EventType, "NOTIFICATION_TEMPLATE_UPDATED")
+        assert hasattr(EventType, "NOTIFICATION_TEMPLATE_DELETED")
+        assert hasattr(EventType, "NOTIFICATION_TEMPLATE_TESTED")
+        assert hasattr(EventType, "WATCH_NC_ASSIGNED")
+        assert hasattr(EventType, "WATCH_NC_UNASSIGNED")
+        assert hasattr(EventType, "DOMAIN_NC_DEFAULT_ADDED")
+        assert hasattr(EventType, "DOMAIN_NC_DEFAULT_REMOVED")
+
 
 class TestAuditLogModel:
     def test_create_audit_log_entry(self):

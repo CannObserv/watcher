@@ -5,9 +5,11 @@ database. `MOCK_EVENT_FIXTURES` holds one fixture per event type, keyed by the
 string `WatchEventType` value. `build_preview_event()` wraps the fixture in a
 `WatchEvent` suitable for passing through `build_title` / `build_body`.
 
-For change_detected, the fixture also exposes canned ``previous_text`` /
-``current_text`` strings so the preview can render a real unified diff via
-`compute_preview_unified_diff()` without touching storage.
+For change_detected, the fixture exposes ``previous_text`` / ``current_text``
+as HTML strings. `compute_preview_unified_diff()` passes them through
+`normalize_html` (html5lib + lxml pretty-print) before diffing, mirroring the
+dispatcher's HTML-watch path so preview line counts and structure match
+production output (#125).
 
 Preview is fixture-only for v1. A future extension could source a fixture from
 a real recent watch event for a given user — tracked in the design doc under
@@ -16,6 +18,7 @@ a real recent watch event for a given user — tracked in the design doc under
 
 from datetime import UTC, datetime
 
+from src.core.diff.normalize import normalize_html
 from src.core.diff.textual import compute_unified_diff
 from src.core.notifications.events import WatchEvent, WatchEventType
 
@@ -35,40 +38,58 @@ _SHARED_CONTEXT = {
 
 
 _PREVIEW_PREVIOUS_TEXT = """\
-Cannabis Observer — Regulatory Filings
-
-Last updated: 2026-04-10
-
-Hours
-Mon-Fri: 9:00 - 17:00
-
-Contact
-contact@example.com
-
-Recent filings
-- Application 2026-04-08
-- Renewal 2026-04-09
-
-Footer
+<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Cannabis Observer — Regulatory Filings</title></head>
+<body>
+<h1>Cannabis Observer — Regulatory Filings</h1>
+<p>Last updated: 2026-04-10</p>
+<section id="hours">
+  <h2>Hours</h2>
+  <p>Mon-Fri: 9:00 - 17:00</p>
+</section>
+<section id="contact">
+  <h2>Contact</h2>
+  <p><a href="mailto:contact@example.com">contact@example.com</a></p>
+</section>
+<section id="filings">
+  <h2>Recent filings</h2>
+  <ul>
+    <li>Application 2026-04-08</li>
+    <li>Renewal 2026-04-09</li>
+  </ul>
+</section>
+<footer>Footer</footer>
+</body>
+</html>
 """
 
 _PREVIEW_CURRENT_TEXT = """\
-Cannabis Observer — Regulatory Filings
-
-Last updated: 2026-04-15
-
-New licensing program
-Apply for a license at https://example.com/apply
-
-Contact
-support@example.com
-
-Recent filings
-- Application 2026-04-08
-- Renewal 2026-04-12
-- Renewal 2026-04-15
-
-Footer
+<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Cannabis Observer — Regulatory Filings</title></head>
+<body>
+<h1>Cannabis Observer — Regulatory Filings</h1>
+<p>Last updated: 2026-04-15</p>
+<section id="licensing">
+  <h2>New licensing program</h2>
+  <p>Apply for a license at <a href="https://example.com/apply">https://example.com/apply</a></p>
+</section>
+<section id="contact">
+  <h2>Contact</h2>
+  <p><a href="mailto:support@example.com">support@example.com</a></p>
+</section>
+<section id="filings">
+  <h2>Recent filings</h2>
+  <ul>
+    <li>Application 2026-04-08</li>
+    <li>Renewal 2026-04-12</li>
+    <li>Renewal 2026-04-15</li>
+  </ul>
+</section>
+<footer>Footer</footer>
+</body>
+</html>
 """
 
 
@@ -124,4 +145,8 @@ def compute_preview_unified_diff(event_type: str) -> str:
     curr = metadata.get("current_text")
     if not prev or not curr:
         return ""
+    try:
+        prev, curr = normalize_html(prev), normalize_html(curr)
+    except Exception:
+        pass  # fixture HTML is well-formed; failure here is unexpected but non-fatal
     return compute_unified_diff(prev, curr).unified_diff

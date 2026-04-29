@@ -65,6 +65,24 @@ class TestComputePreviewUnifiedDiff:
         assert "+++ content" in diff
         assert "@@" in diff
 
+    def test_diff_reflects_html_normalization(self):
+        """Diff must go through normalize_html so structure matches the dispatcher (#125).
+
+        Asserts the output differs from a raw (un-normalized) diff — if normalize_html
+        is skipped the two diffs would be identical.
+        """
+        from src.core.diff.textual import compute_unified_diff
+        from src.core.notifications.preview_fixtures import (
+            _PREVIEW_CURRENT_TEXT,
+            _PREVIEW_PREVIOUS_TEXT,
+        )
+
+        raw_diff = compute_unified_diff(_PREVIEW_PREVIOUS_TEXT, _PREVIEW_CURRENT_TEXT).unified_diff
+        normalized_diff = compute_preview_unified_diff("change_detected")
+        assert normalized_diff != raw_diff, (
+            "normalize_html should restructure the diff vs raw input"
+        )
+
     def test_non_diff_events_return_empty_string(self):
         """Events without canned previous_text/current_text return empty."""
         for et in WatchEventType:

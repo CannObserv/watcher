@@ -198,15 +198,15 @@ class TestEventType:
         values = [v for k, v in vars(EventType).items() if not k.startswith("_")]
         assert len(values) == len(set(values)), "EventType constants must be unique"
 
-    def test_notification_template_event_types_exist(self):
-        assert hasattr(EventType, "NOTIFICATION_TEMPLATE_CREATED")
-        assert hasattr(EventType, "NOTIFICATION_TEMPLATE_UPDATED")
-        assert hasattr(EventType, "NOTIFICATION_TEMPLATE_DELETED")
-        assert hasattr(EventType, "NOTIFICATION_TEMPLATE_TESTED")
-        assert hasattr(EventType, "WATCH_NC_ASSIGNED")
-        assert hasattr(EventType, "WATCH_NC_UNASSIGNED")
-        assert hasattr(EventType, "DOMAIN_NC_DEFAULT_ADDED")
-        assert hasattr(EventType, "DOMAIN_NC_DEFAULT_REMOVED")
+    def test_notification_template_constants_have_expected_values(self):
+        assert EventType.NOTIFICATION_TEMPLATE_CREATED == "notification_template.created"
+        assert EventType.NOTIFICATION_TEMPLATE_UPDATED == "notification_template.updated"
+        assert EventType.NOTIFICATION_TEMPLATE_DELETED == "notification_template.deleted"
+        assert EventType.NOTIFICATION_TEMPLATE_TESTED == "notification_template.tested"
+        assert EventType.WATCH_NC_ASSIGNED == "watch_nc.assigned"
+        assert EventType.WATCH_NC_UNASSIGNED == "watch_nc.unassigned"
+        assert EventType.DOMAIN_NC_DEFAULT_ADDED == "domain_nc_default.added"
+        assert EventType.DOMAIN_NC_DEFAULT_REMOVED == "domain_nc_default.removed"
 
 
 class TestAuditLogModel:

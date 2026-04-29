@@ -61,6 +61,9 @@ tests/                 — Mirrors src/ structure
 deploy/                — Systemd unit and deployment config
 docs/                  — Reference docs (COMMANDS, SKILLS, DEPLOYMENT)
 scripts/                 — Build scripts: Tailwind compile (build-css.sh, check-css.sh) + vendor CSS layer-wrapping (wrap-vendor-css.py — see docs/STYLE.md §14); cleanup.sh (weekly disk cleanup — see deploy/watcher-cleanup.*)
+skills/                  — Agent skills: committed local overrides (directories) + symlinks → skills-vendor/
+skills-vendor/           — Git submodules for external skill repos (gregoryfoster-skills, obra-superpowers); see docs/SKILLS.md
+.claude/skills/          — Claude Code skill discovery: symlinks → ../../skills/<name> (two-level chain; local overrides shadow vendor automatically)
 ```
 
 **Environment files** (not in the repo tree):

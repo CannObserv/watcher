@@ -156,5 +156,5 @@ bash scripts/build-css.sh --watch
 git submodule update --init --recursive
 
 # Force-refresh vendor skills
-git submodule update --remote --merge vendor/gregoryfoster-skills vendor/obra-superpowers
+git submodule update --remote --merge skills-vendor/gregoryfoster-skills skills-vendor/obra-superpowers
 ```

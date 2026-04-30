@@ -30,6 +30,9 @@ gunicorn.ctl
 .worktrees/
 .claude/worktrees/
 
+# Claude Code per-instance overrides (env, permissions, hooks)
+.claude/settings.local.json
+
 # Tailwind
 src/dashboard/static/css/output.css
 

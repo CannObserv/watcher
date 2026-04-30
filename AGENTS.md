@@ -107,7 +107,7 @@ Skills live in `skills/` (agentskills.io) and `.claude/skills/` (Claude Code). L
 | `managing-skills-claude` | add skill repo, manage external skills |
 | `socraticode` (codebase MCP) | search before reading; `codebase_search`, `codebase_graph_query`, `codebase_impact` before opening files |
 
-Full skill reference + SocratiCode tool-selection table: `docs/SKILLS.md`.
+Full skill reference + SocratiCode tool-selection table: `docs/SKILLS.md`. Cross-project search to the sister `notifier` index requires a per-instance `.claude/settings.local.json` (gitignored) — see "Linked Projects" in `docs/SKILLS.md`.
 
 ## Conventions
 

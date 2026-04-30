@@ -90,15 +90,7 @@ This project is indexed with SocratiCode. Always use its MCP tools to explore th
 
 ### Linked Projects
 
-Cross-project search is configured via `.socraticode.json` at the repo root. Watcher links to the sister `notifier` index:
-
-```json
-{
-  "linkedProjects": ["../notifier"]
-}
-```
-
-Notifier links back to watcher symmetrically. Pass `includeLinked: true` on `codebase_search` to fan out across both indexes; results carry a `[watcher]` / `[notifier]` label. The `SOCRATICODE_LINKED_PROJECTS` env var works only when exported into the MCP server's process — the repo `.env` is not auto-loaded, so prefer the JSON config.
+Cross-project search to the sister `notifier` index is enabled via `SOCRATICODE_LINKED_PROJECTS=/home/exedev/notifier` in `.claude/settings.local.json` (gitignored — per-instance config, not a project commitment). The value may be relative (resolved from the project root) or absolute; absolute is recommended since the MCP server's CWD isn't guaranteed across hosts. Pass `includeLinked: true` on `codebase_search` to fan out across both indexes; results carry a `[watcher]` / `[notifier]` label.
 
 Upstream reference: [giancarloerra/socraticode#agent-instructions](https://github.com/giancarloerra/socraticode#agent-instructions)
 

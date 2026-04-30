@@ -12,6 +12,30 @@ The service loads env files in this order (later values override earlier):
 
 `/etc/watcher/.env` is owned by `root:exedev` (mode 640) and survives repo resets, worktree switches, and redeployments.
 
+For shell commands that need secrets:
+
+```bash
+export $(cat /etc/watcher/.env .env 2>/dev/null | xargs)
+```
+
+## Environment Variables
+
+| Variable | Location | Required | Purpose |
+|---|---|---|---|
+| `DATABASE_URL` | `/etc/watcher/.env` | **yes** | PostgreSQL connection string |
+| `APPRISE_SECRET_KEY` | `/etc/watcher/.env` | **yes** | Fernet key for encrypting Apprise URLs at rest (raises at startup if missing) |
+| `PROCRASTINATE_DATABASE_URL` | `/etc/watcher/.env` | no | libpq-style DSN for procrastinate; falls back to `DATABASE_URL` with driver prefix stripped |
+| `GH_TOKEN` | `.env` | no | GitHub personal access token |
+| `TEST_DATABASE_URL` | `.env` | no | PostgreSQL connection string for test database |
+| `WATCHER_DATA_DIR` | env | no | Absolute path for snapshot/content storage (default `/var/lib/watcher/data`) |
+| `BUILD_ID` | env | no | Git SHA for static asset cache-busting (default `"dev"`) |
+
+Generate `APPRISE_SECRET_KEY`:
+
+```bash
+python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+```
+
 ## Systemd Service
 
 A systemd unit file is provided at `deploy/watcher.service`.

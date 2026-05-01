@@ -27,7 +27,7 @@ SocratiCode is indexed on this repo (`.socraticodecontextartifacts.json` present
 | Blast radius of changing/deleting a file or function | `codebase_impact` |
 | What does an entry point actually do? | `codebase_flow` |
 | Callers and callees of a function | `codebase_symbol` |
-| List all symbols in a file | `codebase_symbols` |
+| List symbols in a file or search by name across the project | `codebase_symbols` |
 | Imports/dependents of a file | `codebase_graph_query` |
 | Spot circular deps or structural issues | `codebase_graph_circular`, `codebase_graph_stats` |
 | Visualise module structure | `codebase_graph_visualize` |
@@ -131,7 +131,7 @@ Skills live in `skills/` (agentskills.io) and `.claude/skills/` (Claude Code). L
 | `managing-skills-claude` | add skill repo, manage external skills |
 | `socraticode` (codebase MCP) | see **Code Exploration Policy** above |
 
-Full skill reference + SocratiCode tool-selection table: `docs/SKILLS.md`. Cross-project search to the sister `notifier` index requires a per-instance `.claude/settings.local.json` (gitignored) — see "Linked Projects" in `docs/SKILLS.md`.
+Full skill reference: `docs/SKILLS.md`. Cross-project search to the sister `notifier` index requires a per-instance `.claude/settings.local.json` (gitignored) — see "Linked Projects" in `docs/SKILLS.md`.
 
 ## Conventions
 

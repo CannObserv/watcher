@@ -14,6 +14,30 @@ TDD required. Red → Green → Refactor. No production code without a failing t
 
 Python ≥3.12, uv, pytest, ruff; Node.js + npm (for Tailwind CLI — `sudo npm install -g @tailwindcss/cli`, one-time VM setup).
 
+## Code Exploration Policy
+
+SocratiCode is indexed on this repo (`.socraticodecontextartifacts.json` present). Its MCP tools are **deferred** — schemas load only after a `ToolSearch` prefetch. The SessionStart hook prints the prefetch query; run it before exploring.
+
+**Negative rule.** For broad semantic questions ("where is X", "how does Y work", "what depends on Z"), use SocratiCode MCP tools first. Reach for `grep`/`ripgrep` only on exact strings (error messages, log lines, known symbols). Reserve the Explore subagent for path-pattern walks (e.g. "all `*.py` under `src/api/routes/`"), not semantic search.
+
+| Goal | Tool |
+|------|------|
+| Where is X defined / how does Y work / what files touch Z | `codebase_search` |
+| Exact string/regex match (errors, log lines, known symbols) | `grep` / `rg` |
+| Blast radius of changing/deleting a file or function | `codebase_impact` |
+| What does an entry point actually do? | `codebase_flow` |
+| Callers and callees of a function | `codebase_symbol` |
+| List all symbols in a file | `codebase_symbols` |
+| Imports/dependents of a file | `codebase_graph_query` |
+| Spot circular deps or structural issues | `codebase_graph_circular`, `codebase_graph_stats` |
+| Visualise module structure | `codebase_graph_visualize` |
+| Verify index is up to date | `codebase_status` |
+| DB schemas, deployment topology, runbook context | `codebase_context` / `codebase_context_search` |
+
+Prefetch query (run via `ToolSearch` once per session if the SessionStart reminder isn't loaded):
+
+`select:mcp__plugin_socraticode_socraticode__codebase_search,mcp__plugin_socraticode_socraticode__codebase_symbol,mcp__plugin_socraticode_socraticode__codebase_symbols,mcp__plugin_socraticode_socraticode__codebase_flow,mcp__plugin_socraticode_socraticode__codebase_impact,mcp__plugin_socraticode_socraticode__codebase_graph_query,mcp__plugin_socraticode_socraticode__codebase_graph_circular,mcp__plugin_socraticode_socraticode__codebase_graph_stats,mcp__plugin_socraticode_socraticode__codebase_graph_visualize,mcp__plugin_socraticode_socraticode__codebase_status,mcp__plugin_socraticode_socraticode__codebase_context,mcp__plugin_socraticode_socraticode__codebase_context_search`
+
 ## Project Layout
 
 Top-level directories. Read the code for per-file detail.
@@ -105,7 +129,7 @@ Skills live in `skills/` (agentskills.io) and `.claude/skills/` (Claude Code). L
 | `dispatching-parallel-agents` | 2+ independent tasks in parallel |
 | `using-git-worktrees` | feature work needing isolation |
 | `managing-skills-claude` | add skill repo, manage external skills |
-| `socraticode` (codebase MCP) | search before reading; `codebase_search`, `codebase_graph_query`, `codebase_impact` before opening files |
+| `socraticode` (codebase MCP) | see **Code Exploration Policy** above |
 
 Full skill reference + SocratiCode tool-selection table: `docs/SKILLS.md`. Cross-project search to the sister `notifier` index requires a per-instance `.claude/settings.local.json` (gitignored) — see "Linked Projects" in `docs/SKILLS.md`.
 

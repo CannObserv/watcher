@@ -83,6 +83,16 @@ def _mock_notifier_client(dispatch_return=None, dispatch_side_effect=None):
     return client
 
 
+def _make_audit_capture():
+    """Return (side_effect_fn, results_list) for patching audit in failure-mode tests."""
+    captured = []
+
+    def _capture(session, event_type, **kwargs):
+        captured.extend(kwargs.get("results", []))
+
+    return _capture, captured
+
+
 class TestRemoteDispatchPath:
     async def test_uses_notifier_when_flag_on_and_channel_migrated(self, monkeypatch):
         """With USE_REMOTE_NOTIFY=1 and remote_channel_id set, calls notifier API."""
@@ -212,10 +222,7 @@ class TestRemoteDispatchPath:
             )
         )
 
-        results_captured = []
-
-        def capture_audit(session, event_type, **kwargs):
-            results_captured.extend(kwargs.get("results", []))
+        capture_audit, results_captured = _make_audit_capture()
 
         with (
             patch("src.core.notifications.notify.get_notifier_client", return_value=mock_client),
@@ -287,10 +294,7 @@ class TestRemoteDispatchPath:
 
         mock_client = _mock_notifier_client(dispatch_return=failed_out)
 
-        results_captured = []
-
-        def capture_audit(session, event_type, **kwargs):
-            results_captured.extend(kwargs.get("results", []))
+        capture_audit, results_captured = _make_audit_capture()
 
         with (
             patch("src.core.notifications.notify.get_notifier_client", return_value=mock_client),
@@ -312,8 +316,46 @@ class TestRemoteDispatchPath:
         local_cfg = _fake_local_config(remote_channel_id=remote_id)
         event = _make_event()
 
+        session = AsyncMock()
+        session.execute = AsyncMock(
+            side_effect=[
+                _watch_meta_result(None),
+                _empty_result(),
+                _empty_result(),
+                _result_with(local_cfg),
+            ]
+        )
+
+        mock_client = _mock_notifier_client(dispatch_return=_make_dispatch_out("failed"))
+
+        capture_audit, results_captured = _make_audit_capture()
+
+        with (
+            patch("src.core.notifications.notify.get_notifier_client", return_value=mock_client),
+            patch("src.core.notifications.notify.audit", side_effect=capture_audit),
+        ):
+            await dispatch_event_notifications(session=session, event=event)
+
+        assert len(results_captured) == 1
+        assert results_captured[0]["success"] is False
+        assert results_captured[0]["reason"] == "Delivery failed via notifier"
+
+    async def test_notifier_failed_status_uses_default_reason_when_attempt_reason_is_none(
+        self, monkeypatch
+    ):
+        """attempt.reason=None falls back to the default via `or reason`."""
+        monkeypatch.setenv("USE_REMOTE_NOTIFY", "1")
+        monkeypatch.setenv("NOTIFIER_BASE_URL", "http://localhost:9000")
+        monkeypatch.setenv("NOTIFIER_API_KEY", "nk_test")
+
+        remote_id = str(ULID())
+        local_cfg = _fake_local_config(remote_channel_id=remote_id)
+        event = _make_event()
+
         failed_out = _make_dispatch_out("failed")
-        failed_out.attempts = []
+        attempt = MagicMock()
+        attempt.reason = None
+        failed_out.attempts = [attempt]
 
         session = AsyncMock()
         session.execute = AsyncMock(
@@ -327,10 +369,7 @@ class TestRemoteDispatchPath:
 
         mock_client = _mock_notifier_client(dispatch_return=failed_out)
 
-        results_captured = []
-
-        def capture_audit(session, event_type, **kwargs):
-            results_captured.extend(kwargs.get("results", []))
+        capture_audit, results_captured = _make_audit_capture()
 
         with (
             patch("src.core.notifications.notify.get_notifier_client", return_value=mock_client),

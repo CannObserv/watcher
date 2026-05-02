@@ -381,7 +381,7 @@ class TestWatchNotificationTestResultRoute:
         result = self._mock_result(True, "Notification sent successfully")
         with patch(
             "src.dashboard.routes.dispatch_event", new_callable=AsyncMock, return_value=result
-        ):
+        ) as mock_dispatch:
             resp = await _post_dashboard(
                 f"/watches/{watch.id}/notifications/{nc.id}/test-result",
                 mock_watch=watch,
@@ -391,6 +391,10 @@ class TestWatchNotificationTestResultRoute:
         assert b"flash-region" in resp.content
         assert b"flash-success" in resp.content
         assert b"Notification sent successfully" in resp.content
+        mock_dispatch.assert_called_once()
+        _, kwargs = mock_dispatch.call_args
+        assert "title" in kwargs and kwargs["title"]
+        assert "body" in kwargs and kwargs["body"]
 
     async def test_failure_returns_flash_with_reason(self):
         watch = _make_mock_watch()

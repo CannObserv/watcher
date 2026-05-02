@@ -228,13 +228,17 @@ async def test_test_result_returns_flash_on_success(client: AsyncClient, db_sess
         "src.dashboard.routes.dispatch_event",
         new_callable=AsyncMock,
         return_value=dispatch_result,
-    ):
+    ) as mock_dispatch:
         resp = await client.post(
             f"/notifications/{tpl.id}/test-result", headers={"HX-Request": "true"}
         )
 
     assert resp.status_code == 200
     assert b"flash" in resp.content.lower() or b"sent" in resp.content.lower()
+    mock_dispatch.assert_called_once()
+    _, kwargs = mock_dispatch.call_args
+    assert "title" in kwargs and kwargs["title"]
+    assert "body" in kwargs and kwargs["body"]
 
 
 @pytest.mark.integration

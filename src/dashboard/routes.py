@@ -2414,8 +2414,15 @@ async def watch_notification_test_result(
         occurred_at=datetime.now(UTC),
         metadata={"test": True},
     )
+    _cc = ContentConfig.model_validate(nc.content_config) if nc.content_config else None
+    opts = resolve_options(_cc, WatchEventType.CHANGE_DETECTED.value)
     try:
-        outcome = await dispatch_event(event, nc.apprise_url)
+        outcome = await dispatch_event(
+            event,
+            nc.apprise_url,
+            title=build_title(event, opts),
+            body=build_body(event, opts),
+        )
     except Exception:
         logger.exception("test notification error", extra={"config_id": config_id})
         reason = "Internal error during dispatch"
@@ -3154,8 +3161,15 @@ async def notification_template_test_result(
         occurred_at=datetime.now(UTC),
         metadata={"test": True},
     )
+    _cc = ContentConfig.model_validate(tpl.content_config) if tpl.content_config else None
+    opts = resolve_options(_cc, WatchEventType.CHANGE_DETECTED.value)
     try:
-        outcome = await dispatch_event(event, tpl.apprise_url)
+        outcome = await dispatch_event(
+            event,
+            tpl.apprise_url,
+            title=build_title(event, opts),
+            body=build_body(event, opts),
+        )
     except Exception:
         logger.exception("test notification error", extra={"template_id": template_id})
         reason = "Internal error during dispatch"

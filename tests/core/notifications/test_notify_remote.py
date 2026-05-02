@@ -5,10 +5,14 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from cryptography.fernet import Fernet
+from notifier_client.errors import NotifierError
+from notifier_client.generated.models.dispatch_out_status import DispatchOutStatus
 from ulid import ULID
 
+from src.core.crypto import encrypt_apprise_url
 from src.core.notifications.dispatcher import DispatchResult
 from src.core.notifications.events import WatchEvent, WatchEventType
+from src.core.notifications.notify import dispatch_event_notifications
 
 
 @pytest.fixture(autouse=True)
@@ -50,8 +54,6 @@ def _result_with(*items):
 
 
 def _fake_local_config(remote_channel_id=None):
-    from src.core.crypto import encrypt_apprise_url
-
     c = MagicMock()
     c.id = ULID()
     c.apprise_url = encrypt_apprise_url("json://local.example.com/notify")
@@ -62,13 +64,23 @@ def _fake_local_config(remote_channel_id=None):
 
 
 def _make_dispatch_out(status="succeeded"):
-    from notifier_client.generated.models.dispatch_out_status import DispatchOutStatus
-
     out = MagicMock()
     out.id = str(ULID())
     out.status = DispatchOutStatus.SUCCEEDED if status == "succeeded" else DispatchOutStatus.FAILED
     out.attempts = []
     return out
+
+
+def _mock_notifier_client(dispatch_return=None, dispatch_side_effect=None):
+    """Return an AsyncMock that satisfies `async with get_notifier_client() as client:`."""
+    client = AsyncMock()
+    client.__aenter__ = AsyncMock(return_value=client)
+    client.__aexit__ = AsyncMock(return_value=False)
+    if dispatch_side_effect is not None:
+        client.dispatch = AsyncMock(side_effect=dispatch_side_effect)
+    else:
+        client.dispatch = AsyncMock(return_value=dispatch_return or _make_dispatch_out())
+    return client
 
 
 class TestRemoteDispatchPath:
@@ -92,17 +104,12 @@ class TestRemoteDispatchPath:
             ]
         )
 
-        mock_client = AsyncMock()
-        mock_client.dispatch = AsyncMock(return_value=_make_dispatch_out("succeeded"))
-        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client.__aexit__ = AsyncMock(return_value=False)
+        mock_client = _mock_notifier_client(dispatch_return=_make_dispatch_out("succeeded"))
 
         with (
             patch("src.core.notifications.notify.get_notifier_client", return_value=mock_client),
             patch("src.core.notifications.notify.audit"),
         ):
-            from src.core.notifications.notify import dispatch_event_notifications
-
             await dispatch_event_notifications(session=session, event=event)
 
         mock_client.dispatch.assert_called_once()
@@ -129,8 +136,7 @@ class TestRemoteDispatchPath:
             ]
         )
 
-        mock_client = AsyncMock()
-        mock_client.dispatch = AsyncMock(return_value=_make_dispatch_out())
+        mock_client = _mock_notifier_client()
 
         with (
             patch("src.core.notifications.notify.get_notifier_client", return_value=mock_client),
@@ -141,8 +147,6 @@ class TestRemoteDispatchPath:
             ) as mock_local,
             patch("src.core.notifications.notify.audit"),
         ):
-            from src.core.notifications.notify import dispatch_event_notifications
-
             await dispatch_event_notifications(session=session, event=event)
 
         mock_client.dispatch.assert_not_called()
@@ -166,8 +170,7 @@ class TestRemoteDispatchPath:
             ]
         )
 
-        mock_client = AsyncMock()
-        mock_client.dispatch = AsyncMock(return_value=_make_dispatch_out())
+        mock_client = _mock_notifier_client()
 
         with (
             patch("src.core.notifications.notify.get_notifier_client", return_value=mock_client),
@@ -178,8 +181,6 @@ class TestRemoteDispatchPath:
             ) as mock_local,
             patch("src.core.notifications.notify.audit"),
         ):
-            from src.core.notifications.notify import dispatch_event_notifications
-
             await dispatch_event_notifications(session=session, event=event)
 
         mock_client.dispatch.assert_not_called()
@@ -190,8 +191,6 @@ class TestRemoteDispatchPath:
         monkeypatch.setenv("USE_REMOTE_NOTIFY", "1")
         monkeypatch.setenv("NOTIFIER_BASE_URL", "http://localhost:9000")
         monkeypatch.setenv("NOTIFIER_API_KEY", "nk_test")
-
-        from notifier_client.errors import NotifierError
 
         remote_id = str(ULID())
         local_cfg = _fake_local_config(remote_channel_id=remote_id)
@@ -207,9 +206,10 @@ class TestRemoteDispatchPath:
             ]
         )
 
-        mock_client = AsyncMock()
-        mock_client.dispatch = AsyncMock(
-            side_effect=NotifierError("server error", status_code=500, response=MagicMock())
+        mock_client = _mock_notifier_client(
+            dispatch_side_effect=NotifierError(
+                "server error", status_code=500, response=MagicMock()
+            )
         )
 
         results_captured = []
@@ -221,8 +221,6 @@ class TestRemoteDispatchPath:
             patch("src.core.notifications.notify.get_notifier_client", return_value=mock_client),
             patch("src.core.notifications.notify.audit", side_effect=capture_audit),
         ):
-            from src.core.notifications.notify import dispatch_event_notifications
-
             await dispatch_event_notifications(session=session, event=event)
 
         assert len(results_captured) == 1
@@ -249,15 +247,12 @@ class TestRemoteDispatchPath:
             ]
         )
 
-        mock_client = AsyncMock()
-        mock_client.dispatch = AsyncMock(return_value=_make_dispatch_out("succeeded"))
+        mock_client = _mock_notifier_client(dispatch_return=_make_dispatch_out("succeeded"))
 
         with (
             patch("src.core.notifications.notify.get_notifier_client", return_value=mock_client),
             patch("src.core.notifications.notify.audit"),
         ):
-            from src.core.notifications.notify import dispatch_event_notifications
-
             await dispatch_event_notifications(session=session, event=event)
 
         call_kwargs = mock_client.dispatch.call_args.kwargs

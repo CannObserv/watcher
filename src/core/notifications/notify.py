@@ -2,9 +2,11 @@
 
 import os
 import re
+from contextlib import nullcontext
 from dataclasses import dataclass
 from typing import Literal
 
+from notifier_client import NotifierClient
 from notifier_client.errors import NotifierError
 from notifier_client.types import DispatchOutStatus
 from sqlalchemy import select
@@ -186,6 +188,7 @@ async def _load_event_unified_diff(
 
 
 async def _dispatch_via_notifier(
+    client: NotifierClient,
     candidate: DispatchCandidate,
     event: WatchEvent,
     rendered_title: str,
@@ -196,8 +199,9 @@ async def _dispatch_via_notifier(
     Passes the already-rendered title/body as inline templates with empty variables
     so notifier stores the final text and handles delivery + attempt logging.
     Returns a DispatchResult mirroring the notifier attempt outcome.
+
+    `client` is owned by the caller; this function neither opens nor closes it.
     """
-    client = get_notifier_client()
     idem_key = build_idempotency_key(event, candidate.source_id)
     try:
         out = await client.dispatch(
@@ -215,6 +219,8 @@ async def _dispatch_via_notifier(
         )
         if out.status == DispatchOutStatus.SUCCEEDED:
             return DispatchResult(success=True, reason=f"notifier:{out.id}")
+        # PARTIAL is unreachable here: watcher passes a single channel_id per
+        # candidate, so notifier either fully succeeds or fully fails.
         reason = "Delivery failed via notifier"
         if out.attempts:
             reason = out.attempts[0].reason or reason
@@ -364,61 +370,62 @@ async def dispatch_event_notifications(
     use_remote = os.getenv("USE_REMOTE_NOTIFY", "0") == "1"
 
     results = []
-    for candidate in candidates:
-        try:
-            cfg = (
-                ContentConfig.model_validate(candidate.content_config)
-                if candidate.content_config
-                else None
-            )
-            options = resolve_options(cfg, event_value)
-            rendered_title = build_title(event, options)
-            rendered_body = build_body(event, options, unified_diff=unified_diff)
-            if use_remote and candidate.remote_channel_id:
-                result = await _dispatch_via_notifier(
-                    candidate, event, rendered_title, rendered_body
+    async with get_notifier_client() if use_remote else nullcontext() as notifier_client:
+        for candidate in candidates:
+            try:
+                cfg = (
+                    ContentConfig.model_validate(candidate.content_config)
+                    if candidate.content_config
+                    else None
                 )
-            else:
-                if use_remote and not candidate.remote_channel_id:
-                    logger.warning(
-                        "notifier flag enabled but remote_channel_id not set;"
-                        " falling back to local",
-                        extra={"source": candidate.source, "source_id": candidate.source_id},
+                options = resolve_options(cfg, event_value)
+                rendered_title = build_title(event, options)
+                rendered_body = build_body(event, options, unified_diff=unified_diff)
+                if use_remote and candidate.remote_channel_id:
+                    result = await _dispatch_via_notifier(
+                        notifier_client, candidate, event, rendered_title, rendered_body
                     )
-                result = await dispatch_event(
-                    event, candidate.apprise_url, body=rendered_body, title=rendered_title
+                else:
+                    if use_remote and not candidate.remote_channel_id:
+                        logger.warning(
+                            "notifier flag enabled but remote_channel_id not set;"
+                            " falling back to local",
+                            extra={"source": candidate.source, "source_id": candidate.source_id},
+                        )
+                    result = await dispatch_event(
+                        event, candidate.apprise_url, body=rendered_body, title=rendered_title
+                    )
+                results.append(
+                    {
+                        "source": candidate.source,
+                        "source_id": candidate.source_id,
+                        "success": result.success,
+                        "reason": result.reason,
+                    }
                 )
-            results.append(
-                {
+                extra = {
                     "source": candidate.source,
                     "source_id": candidate.source_id,
-                    "success": result.success,
-                    "reason": result.reason,
+                    "watch_id": event.watch_id,
+                    "event_type": event.event_type,
                 }
-            )
-            extra = {
-                "source": candidate.source,
-                "source_id": candidate.source_id,
-                "watch_id": event.watch_id,
-                "event_type": event.event_type,
-            }
-            if result.success:
-                logger.info("notification sent", extra=extra)
-            else:
-                logger.warning("notification failed", extra=extra)
-        except Exception:
-            logger.exception(
-                "notification dispatch error",
-                extra={"source": candidate.source, "source_id": candidate.source_id},
-            )
-            results.append(
-                {
-                    "source": candidate.source,
-                    "source_id": candidate.source_id,
-                    "success": False,
-                    "reason": "exception",
-                }
-            )
+                if result.success:
+                    logger.info("notification sent", extra=extra)
+                else:
+                    logger.warning("notification failed", extra=extra)
+            except Exception:
+                logger.exception(
+                    "notification dispatch error",
+                    extra={"source": candidate.source, "source_id": candidate.source_id},
+                )
+                results.append(
+                    {
+                        "source": candidate.source,
+                        "source_id": candidate.source_id,
+                        "success": False,
+                        "reason": "exception",
+                    }
+                )
 
     audit(
         session,

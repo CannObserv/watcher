@@ -29,6 +29,9 @@ export $(cat /etc/watcher/.env .env 2>/dev/null | xargs)
 | `TEST_DATABASE_URL` | `.env` | no | PostgreSQL connection string for test database |
 | `WATCHER_DATA_DIR` | env | no | Absolute path for snapshot/content storage (default `/var/lib/watcher/data`) |
 | `BUILD_ID` | env | no | Git SHA for static asset cache-busting (default `"dev"`) |
+| `NOTIFIER_BASE_URL` | `/etc/watcher/.env` | Phase 4+ | Base URL of the notifier service (e.g. `http://localhost:9000`) |
+| `NOTIFIER_API_KEY` | `/etc/watcher/.env` | Phase 4+ | Watcher tenant API key issued by `scripts/seed_tenant.py` in the notifier repo |
+| `USE_REMOTE_NOTIFY` | `/etc/watcher/.env` | Phase 4+ | Set to `"1"` to route notifications through notifier; default `"0"` (local Apprise) |
 
 Generate `APPRISE_SECRET_KEY`:
 

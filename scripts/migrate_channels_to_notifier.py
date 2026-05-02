@@ -22,7 +22,9 @@ Options:
 
 import argparse
 import asyncio
+import os
 import sys
+from collections.abc import Callable
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
@@ -37,48 +39,64 @@ from src.core.notifier_client import get_notifier_client
 logger = get_logger(__name__)
 
 
+async def _migrate_rows(
+    session: AsyncSession,
+    rows: list,
+    channel_name_fn: Callable,
+    label_fn: Callable,
+    dry_run: bool,
+) -> tuple[int, int]:
+    """Migrate a list of model rows to notifier channels. Returns (migrated, skipped)."""
+    async with get_notifier_client() as client:
+        migrated = skipped = 0
+
+        for row in rows:
+            label = label_fn(row)
+            try:
+                plaintext_url = decrypt_apprise_url(row.apprise_url)
+            except Exception as exc:
+                logger.warning(f"{label}: decrypt failed, skipping — {exc}")
+                skipped += 1
+                continue
+
+            channel_name = channel_name_fn(row)
+            if dry_run:
+                logger.info(f"[dry-run] would create channel '{channel_name}' for {label}")
+                migrated += 1
+                continue
+
+            try:
+                channel = await client.channels.create(
+                    name=channel_name,
+                    apprise_url=plaintext_url,
+                    channel_hint=row.channel_hint or None,
+                )
+                row.remote_channel_id = channel.id
+                migrated += 1
+                logger.info(f"{label}: created remote channel {channel.id}")
+            except Exception as exc:
+                logger.warning(f"{label}: notifier channel creation failed, skipping — {exc}")
+                skipped += 1
+
+    if not dry_run:
+        await session.commit()
+
+    return migrated, skipped
+
+
 async def _migrate_local_configs(session: AsyncSession, dry_run: bool) -> tuple[int, int]:
     """Migrate WatchNotificationConfig rows. Returns (migrated, skipped)."""
     result = await session.execute(
         select(WatchNotificationConfig).where(WatchNotificationConfig.remote_channel_id.is_(None))
     )
     rows = list(result.scalars().all())
-
-    client = get_notifier_client()
-    migrated = skipped = 0
-
-    for row in rows:
-        label = f"WatchNotificationConfig id={row.id}"
-        try:
-            plaintext_url = decrypt_apprise_url(row.apprise_url)
-        except Exception as exc:
-            logger.warning(f"{label}: decrypt failed, skipping — {exc}")
-            skipped += 1
-            continue
-
-        channel_name = f"watcher-local-{row.id}"
-        if dry_run:
-            logger.info(f"[dry-run] would create channel '{channel_name}' for {label}")
-            migrated += 1
-            continue
-
-        try:
-            channel = await client.channels.create(
-                name=channel_name,
-                apprise_url=plaintext_url,
-                channel_hint=row.channel_hint or None,
-            )
-            row.remote_channel_id = channel.id
-            migrated += 1
-            logger.info(f"{label}: created remote channel {channel.id}")
-        except Exception as exc:
-            logger.warning(f"{label}: notifier channel creation failed, skipping — {exc}")
-            skipped += 1
-
-    if not dry_run:
-        await session.commit()
-
-    return migrated, skipped
+    return await _migrate_rows(
+        session,
+        rows,
+        channel_name_fn=lambda r: f"watcher-local-{r.id}",
+        label_fn=lambda r: f"WatchNotificationConfig id={r.id}",
+        dry_run=dry_run,
+    )
 
 
 async def _migrate_templates(session: AsyncSession, dry_run: bool) -> tuple[int, int]:
@@ -87,47 +105,16 @@ async def _migrate_templates(session: AsyncSession, dry_run: bool) -> tuple[int,
         select(NotificationTemplate).where(NotificationTemplate.remote_channel_id.is_(None))
     )
     rows = list(result.scalars().all())
-
-    client = get_notifier_client()
-    migrated = skipped = 0
-
-    for row in rows:
-        label = f"NotificationTemplate id={row.id} title={row.title!r}"
-        try:
-            plaintext_url = decrypt_apprise_url(row.apprise_url)
-        except Exception as exc:
-            logger.warning(f"{label}: decrypt failed, skipping — {exc}")
-            skipped += 1
-            continue
-
-        channel_name = f"watcher-template-{row.id}"
-        if dry_run:
-            logger.info(f"[dry-run] would create channel '{channel_name}' for {label}")
-            migrated += 1
-            continue
-
-        try:
-            channel = await client.channels.create(
-                name=channel_name,
-                apprise_url=plaintext_url,
-                channel_hint=row.channel_hint or None,
-            )
-            row.remote_channel_id = channel.id
-            migrated += 1
-            logger.info(f"{label}: created remote channel {channel.id}")
-        except Exception as exc:
-            logger.warning(f"{label}: notifier channel creation failed, skipping — {exc}")
-            skipped += 1
-
-    if not dry_run:
-        await session.commit()
-
-    return migrated, skipped
+    return await _migrate_rows(
+        session,
+        rows,
+        channel_name_fn=lambda r: f"watcher-template-{r.id}",
+        label_fn=lambda r: f"NotificationTemplate id={r.id} title={r.title!r}",
+        dry_run=dry_run,
+    )
 
 
 async def main(dry_run: bool) -> None:
-    import os
-
     database_url = os.environ.get("DATABASE_URL")
     if not database_url:
         logger.error("DATABASE_URL is not set")

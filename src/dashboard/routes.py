@@ -2414,8 +2414,8 @@ async def watch_notification_test_result(
         occurred_at=datetime.now(UTC),
         metadata={"test": True},
     )
-    _cc = ContentConfig.model_validate(nc.content_config) if nc.content_config else None
-    opts = resolve_options(_cc, WatchEventType.CHANGE_DETECTED.value)
+    cc = ContentConfig.model_validate(nc.content_config) if nc.content_config else None
+    opts = resolve_options(cc, WatchEventType.CHANGE_DETECTED.value)
     try:
         outcome = await dispatch_event(
             event,

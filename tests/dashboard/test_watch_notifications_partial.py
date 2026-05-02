@@ -396,6 +396,26 @@ class TestWatchNotificationTestResultRoute:
         assert "title" in kwargs and kwargs["title"]
         assert "body" in kwargs and kwargs["body"]
 
+    async def test_custom_content_config_applied_to_title(self):
+        watch = _make_mock_watch()
+        nc = _make_mock_nc()
+        nc.watch_id = watch.id
+        nc.content_config = {"default": {"title_template": "Custom: {{ watch_name }}"}}
+        session = _make_mock_session()
+        session.get = AsyncMock(return_value=nc)
+        session.commit = AsyncMock()
+        result = self._mock_result(True, "ok")
+        with patch(
+            "src.dashboard.routes.dispatch_event", new_callable=AsyncMock, return_value=result
+        ) as mock_dispatch:
+            await _post_dashboard(
+                f"/watches/{watch.id}/notifications/{nc.id}/test-result",
+                mock_watch=watch,
+                mock_session=session,
+            )
+        _, kwargs = mock_dispatch.call_args
+        assert kwargs["title"] == "Custom: Test Watch"
+
     async def test_failure_returns_flash_with_reason(self):
         watch = _make_mock_watch()
         nc = _make_mock_nc()

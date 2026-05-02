@@ -242,6 +242,26 @@ async def test_test_result_returns_flash_on_success(client: AsyncClient, db_sess
 
 
 @pytest.mark.integration
+async def test_test_result_uses_template_content_config(client: AsyncClient, db_session):
+    """POST /{id}/test-result renders title via the template's content_config."""
+    tpl = await _make_template(
+        db_session,
+        "ConfigTest",
+        content_config={"default": {"title_template": "Custom: {{ watch_name }}"}},
+    )
+    dispatch_result = DispatchResult(success=True, reason="sent")
+    with patch(
+        "src.dashboard.routes.dispatch_event",
+        new_callable=AsyncMock,
+        return_value=dispatch_result,
+    ) as mock_dispatch:
+        await client.post(f"/notifications/{tpl.id}/test-result", headers={"HX-Request": "true"})
+
+    _, kwargs = mock_dispatch.call_args
+    assert kwargs["title"] == "Custom: Test Notification"
+
+
+@pytest.mark.integration
 async def test_test_result_returns_flash_on_dispatch_failure(client: AsyncClient, db_session):
     """POST /{id}/test-result handles dispatch exceptions without 5xx."""
     tpl = await _make_template(db_session, "FailMe")

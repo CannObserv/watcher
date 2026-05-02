@@ -29,6 +29,7 @@ class NotificationTemplate(TimestampMixin, Base):
     is_global_default: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="true")
     content_config: Mapped[dict | None] = mapped_column(JSONB, nullable=True, default=None)
+    remote_channel_id: Mapped[str | None] = mapped_column(String(26), nullable=True, default=None)
 
 
 class WatchNcRef(Base):

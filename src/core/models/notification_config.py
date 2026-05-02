@@ -31,6 +31,7 @@ class WatchNotificationConfig(Base, TimestampMixin):
     )
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
     content_config: Mapped[dict | None] = mapped_column(JSONB, nullable=True, default=None)
+    remote_channel_id: Mapped[str | None] = mapped_column(String(26), nullable=True, default=None)
 
     def __init__(self, **kwargs):
         """Set Python-side defaults."""

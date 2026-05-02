@@ -834,6 +834,17 @@ wheels = [
 ]
 
 [[package]]
+name = "notifier-client"
+version = "0.2.1"
+source = { git = "ssh://git@github-notifier/CannObserv/notifier.git?subdirectory=clients%2Fpython&rev=v0.2.1#c6b36b249cc6a70652c8e16fc7e4d4e4c661bd1e" }
+dependencies = [
+    { name = "attrs" },
+    { name = "httpx" },
+    { name = "python-dateutil" },
+    { name = "python-ulid" },
+]
+
+[[package]]
 name = "oauthlib"
 version = "3.3.1"
 source = { registry = "https://pypi.org/simple" }
@@ -1449,6 +1460,7 @@ dependencies = [
     { name = "httpx" },
     { name = "jinja2" },
     { name = "lxml" },
+    { name = "notifier-client" },
     { name = "openpyxl" },
     { name = "procrastinate" },
     { name = "pypdf" },
@@ -1488,6 +1500,7 @@ requires-dist = [
     { name = "httpx", specifier = ">=0.28.0,<1" },
     { name = "jinja2", specifier = ">=3.1.6,<4" },
     { name = "lxml", specifier = ">=5.0,<7" },
+    { name = "notifier-client", git = "ssh://git@github-notifier/CannObserv/notifier.git?subdirectory=clients%2Fpython&rev=v0.2.1" },
     { name = "openpyxl", specifier = ">=3.1.0,<4" },
     { name = "playwright", marker = "extra == 'browser'", specifier = ">=1.40.0,<2" },
     { name = "procrastinate", extras = ["psycopg"], specifier = ">=3.0,<4" },

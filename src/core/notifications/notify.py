@@ -1,9 +1,12 @@
 """Notification dispatch for watch lifecycle events."""
 
+import os
 import re
 from dataclasses import dataclass
 from typing import Literal
 
+from notifier_client.errors import NotifierError
+from notifier_client.types import DispatchOutStatus
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from ulid import ULID
@@ -23,8 +26,9 @@ from src.core.notifications.content import (
     build_title,
     resolve_options,
 )
-from src.core.notifications.dispatcher import dispatch_event
+from src.core.notifications.dispatcher import DispatchResult, dispatch_event
 from src.core.notifications.events import WatchEvent, WatchEventType
+from src.core.notifier_client import build_idempotency_key, get_notifier_client
 from src.core.storage import StorageBackend, default_storage
 
 logger = get_logger(__name__)
@@ -44,6 +48,7 @@ class DispatchCandidate:
     source: str  # "global" | "domain" | "watch_template" | "local"
     source_id: str
     content_config: dict | None = None
+    remote_channel_id: str | None = None
 
 
 def _candidate_needs_unified_diff(candidate: DispatchCandidate, event_value: str) -> bool:
@@ -180,6 +185,52 @@ async def _load_event_unified_diff(
     return compute_unified_diff(prev_text, curr_text).unified_diff
 
 
+async def _dispatch_via_notifier(
+    candidate: DispatchCandidate,
+    event: WatchEvent,
+    rendered_title: str,
+    rendered_body: str,
+) -> DispatchResult:
+    """Call the notifier service to record and deliver a pre-rendered notification.
+
+    Passes the already-rendered title/body as inline templates with empty variables
+    so notifier stores the final text and handles delivery + attempt logging.
+    Returns a DispatchResult mirroring the notifier attempt outcome.
+    """
+    client = get_notifier_client()
+    idem_key = build_idempotency_key(event, candidate.source_id)
+    try:
+        out = await client.dispatch(
+            title_template=rendered_title,
+            body_template=rendered_body,
+            variables={},
+            channel_ids=[candidate.remote_channel_id],
+            idempotency_key=idem_key,
+            metadata={
+                "event_type": event.event_type.value,
+                "watch_id": event.watch_id,
+                "source": candidate.source,
+                "source_id": candidate.source_id,
+            },
+        )
+        if out.status == DispatchOutStatus.SUCCEEDED:
+            return DispatchResult(success=True, reason=f"notifier:{out.id}")
+        reason = "Delivery failed via notifier"
+        if out.attempts:
+            reason = out.attempts[0].reason or reason
+        return DispatchResult(success=False, reason=reason)
+    except NotifierError as exc:
+        logger.warning(
+            "notifier API error during dispatch",
+            extra={
+                "source": candidate.source,
+                "source_id": candidate.source_id,
+                "watch_id": event.watch_id,
+            },
+        )
+        return DispatchResult(success=False, reason=f"notifier error: {exc}")
+
+
 async def dispatch_event_notifications(
     session: AsyncSession,
     event: WatchEvent,
@@ -284,6 +335,7 @@ async def dispatch_event_notifications(
                         source=source,
                         source_id=tpl_id,
                         content_config=tpl.content_config,
+                        remote_channel_id=tpl.remote_channel_id,
                     )
                 )
 
@@ -294,6 +346,7 @@ async def dispatch_event_notifications(
                 source="local",
                 source_id=str(c.id),
                 content_config=c.content_config,
+                remote_channel_id=c.remote_channel_id,
             )
         )
 
@@ -308,6 +361,8 @@ async def dispatch_event_notifications(
     ):
         unified_diff = await _load_event_unified_diff(session, event, content_type=content_type)
 
+    use_remote = os.getenv("USE_REMOTE_NOTIFY", "0") == "1"
+
     results = []
     for candidate in candidates:
         try:
@@ -319,9 +374,20 @@ async def dispatch_event_notifications(
             options = resolve_options(cfg, event_value)
             rendered_title = build_title(event, options)
             rendered_body = build_body(event, options, unified_diff=unified_diff)
-            result = await dispatch_event(
-                event, candidate.apprise_url, body=rendered_body, title=rendered_title
-            )
+            if use_remote and candidate.remote_channel_id:
+                result = await _dispatch_via_notifier(
+                    candidate, event, rendered_title, rendered_body
+                )
+            else:
+                if use_remote and not candidate.remote_channel_id:
+                    logger.warning(
+                        "notifier flag enabled but remote_channel_id not set;"
+                        " falling back to local",
+                        extra={"source": candidate.source, "source_id": candidate.source_id},
+                    )
+                result = await dispatch_event(
+                    event, candidate.apprise_url, body=rendered_body, title=rendered_title
+                )
             results.append(
                 {
                     "source": candidate.source,

@@ -23,6 +23,11 @@ def set_test_key(monkeypatch):
     monkeypatch.setenv("APPRISE_SECRET_KEY", key)
 
 
+@pytest.fixture(autouse=True)
+def no_remote_notify(monkeypatch):
+    monkeypatch.delenv("USE_REMOTE_NOTIFY", raising=False)
+
+
 def make_event(event_type=WatchEventType.CHANGE_DETECTED, watch_id=None):
     return WatchEvent(
         event_type=event_type,
@@ -65,6 +70,7 @@ def _fake_template(tid=None):
     t.id = tid or str(ULID())
     t.apprise_url = "json://hooks.example.com/notify"
     t.content_config = None
+    t.remote_channel_id = None
     return t
 
 
@@ -77,6 +83,7 @@ def _fake_local(cid=None):
     c.apprise_url = encrypt_apprise_url("json://local.example.com/notify")
     c.events = ["change_detected"]
     c.content_config = None
+    c.remote_channel_id = None
     return c
 
 

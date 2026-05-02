@@ -49,7 +49,7 @@ src/dashboard/   Server-rendered UI (Jinja2 + HTMX + Tailwind)
 src/workers/     Procrastinate task queue (check_watch, schedule_tick, pipeline)
 tests/           Mirrors src/ structure
 deploy/          Systemd units and deployment config
-docs/            Reference docs (COMMANDS, DEPLOYMENT, SKILLS, STYLE)
+docs/            Reference docs (COMMANDS, DEPLOYMENT, SKILLS, STYLE) + plans/
 scripts/         Build scripts (Tailwind, vendor CSS, cleanup)
 skills/          Agent skills (committed overrides + symlinks → skills-vendor/)
 skills-vendor/   Git submodules for external skill repos

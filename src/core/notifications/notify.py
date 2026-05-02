@@ -233,6 +233,7 @@ async def _dispatch_via_notifier(
                 "source_id": candidate.source_id,
                 "watch_id": event.watch_id,
             },
+            exc_info=True,
         )
         return DispatchResult(success=False, reason=f"notifier error: {exc}")
 

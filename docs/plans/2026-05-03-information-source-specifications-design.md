@@ -212,6 +212,7 @@ The Information service starts with empty tables: `info_items`, `info_specs`.
 - Add `scripts/dump_openapi.py` to the Information service.
 - Scaffold `clients/python/` with `regen.sh`, mirroring `/home/exedev/notifier/clients/python/`.
 - Generate `information_client` SDK; hand-write ergonomic wrappers + TTL cache (primary only).
+- Define module-level constants for InfoSpec `target.fetch` defaults that consumers apply when fields are absent (e.g. `DEFAULT_FETCH_RENDER = False`, `DEFAULT_FETCH_TIMEOUT_SECONDS = 30`). The Phase 1 v1 JSON Schema deliberately omits `default:` keys since `Draft202012Validator` does not inject them; the consumer is the right place to pin defaults.
 - Watcher adopts `information_client` via path dependency. Watch creation flow takes an `info_item_id`.
 - Implement concrete `ChangePublisher` (Redis Streams, no Protocol).
 - Add Redis to deployment (systemd, env vars).

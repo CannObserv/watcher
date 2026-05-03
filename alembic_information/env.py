@@ -49,10 +49,17 @@ def render_item(type_, obj, autogen_context):
 
 
 def get_url() -> str:
-    return os.environ.get(
-        "INFORMATION_DATABASE_URL",
-        os.environ.get("DATABASE_URL", config.get_main_option("sqlalchemy.url", "")),
+    url = (
+        os.environ.get("INFORMATION_DATABASE_URL")
+        or os.environ.get("DATABASE_URL")
+        or config.get_main_option("sqlalchemy.url", "")
     )
+    if not url:
+        raise RuntimeError(
+            "Set INFORMATION_DATABASE_URL or DATABASE_URL before running alembic. "
+            "Load env: export $(cat /etc/watcher/.env .env 2>/dev/null | xargs)"
+        )
+    return url
 
 
 def _common_configure_kwargs() -> dict:

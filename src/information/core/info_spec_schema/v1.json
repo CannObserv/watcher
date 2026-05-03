@@ -17,8 +17,8 @@
           "type": "object",
           "additionalProperties": false,
           "properties": {
-            "render": {"type": "boolean", "default": false},
-            "timeout_seconds": {"type": "integer", "minimum": 1, "maximum": 300, "default": 30}
+            "render": {"type": "boolean"},
+            "timeout_seconds": {"type": "integer", "minimum": 1, "maximum": 300}
           }
         }
       }

@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.information.api.deps import get_db_session
 from src.information.api.schemas.info_item import InfoItemCreate, InfoItemOut
+from src.information.api.schemas.types import ULIDStr
 from src.information.core.models import InfoItem
 
 router = APIRouter(prefix="/info-items", tags=["info-items"])
@@ -43,7 +44,7 @@ async def list_info_items(
 
 @router.get("/{info_item_id}", response_model=InfoItemOut)
 async def get_info_item(
-    info_item_id: str, session: AsyncSession = Depends(get_db_session)
+    info_item_id: ULIDStr, session: AsyncSession = Depends(get_db_session)
 ) -> InfoItemOut:
     result = await session.execute(select(InfoItem).where(InfoItem.info_item_id == info_item_id))
     item = result.scalar_one_or_none()

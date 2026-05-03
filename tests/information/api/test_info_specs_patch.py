@@ -81,6 +81,47 @@ async def test_patch_unknown_returns_404(client):
 
 
 @pytest.mark.asyncio
+async def test_reactivate_at_conflicting_priority_shifts_existing(client):
+    """Regression: reactivating an inactive spec at a priority occupied by another
+    active spec must shift the conflicting spec out, not produce a 500.
+    """
+    item_id = await _create_item(client)
+    a = await _create_spec(client, item_id)  # priority=1 (active)
+    b = await _create_spec(client, item_id)  # priority=2 (active)
+
+    # Deactivate A (now A: inactive priority=1; B: active priority=2).
+    await client.patch(
+        f"/api/v1/info-items/{item_id}/info-specs/{a['info_spec_id']}",
+        headers=HEADERS,
+        json={"active": False},
+    )
+    # Promote B to priority=1 (now A: inactive priority=1; B: active priority=1).
+    await client.patch(
+        f"/api/v1/info-items/{item_id}/info-specs/{b['info_spec_id']}",
+        headers=HEADERS,
+        json={"priority": 1},
+    )
+    # Reactivate A at priority=1 — its stored priority is still 1 from before
+    # deactivation, and B is now active at priority=1. The shift must run even
+    # though target_priority == spec.priority, because spec is going from
+    # inactive to active.
+    r = await client.patch(
+        f"/api/v1/info-items/{item_id}/info-specs/{a['info_spec_id']}",
+        headers=HEADERS,
+        json={"active": True, "priority": 1},
+    )
+    assert r.status_code == 200
+    assert r.json()["priority"] == 1
+    assert r.json()["active"] is True
+
+    # B should have been demoted to priority=2.
+    listed = (await client.get(f"/api/v1/info-items/{item_id}/info-specs", headers=HEADERS)).json()
+    by_id = {s["info_spec_id"]: s["priority"] for s in listed}
+    assert by_id[a["info_spec_id"]] == 1
+    assert by_id[b["info_spec_id"]] == 2
+
+
+@pytest.mark.asyncio
 async def test_reactivate_with_default_priority_appends(client):
     item_id = await _create_item(client)
     first = await _create_spec(client, item_id)

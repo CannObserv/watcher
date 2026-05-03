@@ -47,6 +47,7 @@ src/api/         FastAPI app (ASGI routes, schemas, deps)
 src/core/        Shared domain logic (models, probe, watches, notifications, diff, extractors, fetchers, scheduler, storage, crypto)
 src/dashboard/   Server-rendered UI (Jinja2 + HTMX + Tailwind)
 src/workers/     Procrastinate task queue (check_watch, schedule_tick, pipeline)
+src/information/ Information service — sibling FastAPI app on port 8020; InfoItem + InfoSpec registry (own alembic root: alembic_information/)
 tests/           Mirrors src/ structure
 deploy/          Systemd units and deployment config
 docs/            Reference docs (COMMANDS, DEPLOYMENT, SKILLS, STYLE) + plans/

@@ -64,6 +64,7 @@ skills-vendor/   Git submodules for external skill repos
 |---|---|---|
 | API (live) | 8000 | `systemctl` (`watcher.service`) |
 | API (dev) | 8001 | manual uvicorn |
+| Information service | 8020 | `systemctl` (`information.service`) |
 
 The exe.dev proxy forwards 3000–9999. Dev server reachable at `https://watcher.exe.xyz:8001/`.
 
@@ -79,6 +80,8 @@ Dev server (port 8001, leaves prod alone):
 export $(cat /etc/watcher/.env .env 2>/dev/null | xargs)
 uv run uvicorn src.api.main:app --host 0.0.0.0 --port 8001 --reload
 ```
+
+**Information service.** Owns the canonical Information Item + InfoSpec registry. Lives at `src/information/`. Runs as `information.service` on port 8020 once installed. Migrations: `uv run alembic -c alembic_information.ini upgrade head`. Dev server: `uv run uvicorn src.information.api.main:app --host 0.0.0.0 --port 8021 --reload`.
 
 Full lifecycle reference + cleanup timer: `docs/DEPLOYMENT.md`.
 

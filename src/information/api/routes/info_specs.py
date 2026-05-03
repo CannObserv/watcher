@@ -112,3 +112,25 @@ async def list_info_specs(
         .order_by(InfoSpec.priority.asc())
     )
     return [_to_out(s) for s in result.scalars().all()]
+
+
+@router.get("/primary-info-spec", response_model=InfoSpecOut)
+async def get_primary_info_spec(
+    info_item_id: str,
+    session: AsyncSession = Depends(get_db_session),
+) -> InfoSpecOut:
+    """Return the lowest-priority active InfoSpec for the InfoItem.
+
+    Hot path for consumer services (Watcher, Archive).
+    """
+    await _ensure_item_exists(session, info_item_id)
+    result = await session.execute(
+        select(InfoSpec)
+        .where(InfoSpec.info_item_id == info_item_id, InfoSpec.active.is_(True))
+        .order_by(InfoSpec.priority.asc())
+        .limit(1)
+    )
+    spec = result.scalar_one_or_none()
+    if spec is None:
+        raise HTTPException(status_code=404, detail="No active InfoSpec for InfoItem")
+    return _to_out(spec)

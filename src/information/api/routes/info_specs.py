@@ -8,6 +8,7 @@ from src.information.api.deps import get_db_session
 from src.information.api.schemas.info_spec import (
     InfoSpecCreate,
     InfoSpecOut,
+    InfoSpecPatch,
 )
 from src.information.core.info_spec_schema import (
     InfoSpecValidationError,
@@ -133,4 +134,74 @@ async def get_primary_info_spec(
     spec = result.scalar_one_or_none()
     if spec is None:
         raise HTTPException(status_code=404, detail="No active InfoSpec for InfoItem")
+    return _to_out(spec)
+
+
+@router.patch("/info-specs/{info_spec_id}", response_model=InfoSpecOut)
+async def patch_info_spec(
+    info_item_id: str,
+    info_spec_id: str,
+    body: InfoSpecPatch,
+    session: AsyncSession = Depends(get_db_session),
+) -> InfoSpecOut:
+    """Mutate placement metadata (priority, active). Document body is immutable."""
+    await _ensure_item_exists(session, info_item_id)
+
+    result = await session.execute(
+        select(InfoSpec).where(
+            InfoSpec.info_spec_id == info_spec_id,
+            InfoSpec.info_item_id == info_item_id,
+        )
+    )
+    spec = result.scalar_one_or_none()
+    if spec is None:
+        raise HTTPException(status_code=404, detail="InfoSpec not found")
+
+    target_active = body.active if body.active is not None else spec.active
+    target_priority = body.priority
+
+    if target_active and target_priority is None and not spec.active:
+        # Reactivating without explicit priority: append at end.
+        max_p = await session.scalar(
+            select(func.coalesce(func.max(InfoSpec.priority), 0)).where(
+                InfoSpec.info_item_id == info_item_id, InfoSpec.active.is_(True)
+            )
+        )
+        target_priority = max_p + 1
+
+    if target_active and target_priority is not None and target_priority != spec.priority:
+        # Park the spec at priority=0 so its current slot doesn't block the
+        # shift of other rows (the partial unique index covers active rows only,
+        # but two active rows can't share a priority value even transiently).
+        spec.priority = 0
+        await session.flush()
+
+        # Shift active rows at >= target_priority (excluding self) by +1.
+        # Descending order — see comment in create_info_spec for why.
+        rows = (
+            (
+                await session.execute(
+                    select(InfoSpec)
+                    .where(
+                        InfoSpec.info_item_id == info_item_id,
+                        InfoSpec.active.is_(True),
+                        InfoSpec.priority >= target_priority,
+                        InfoSpec.info_spec_id != info_spec_id,
+                    )
+                    .order_by(InfoSpec.priority.desc())
+                )
+            )
+            .scalars()
+            .all()
+        )
+        for row in rows:
+            row.priority = row.priority + 1
+        await session.flush()
+
+    spec.active = target_active
+    if target_priority is not None:
+        spec.priority = target_priority
+
+    await session.commit()
+    await session.refresh(spec)
     return _to_out(spec)

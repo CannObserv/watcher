@@ -41,10 +41,17 @@ async def test_engine():
 
 @pytest.fixture
 async def session(test_engine) -> AsyncGenerator[AsyncSession]:
-    factory = async_sessionmaker(test_engine, expire_on_commit=False)
-    async with factory() as s:
-        yield s
-        await s.rollback()
+    # Use a nested (SAVEPOINT) transaction so that handler-level commits are
+    # contained and the whole test rolls back on teardown.
+    async with test_engine.connect() as conn:
+        await conn.begin()
+        await conn.begin_nested()  # SAVEPOINT
+        factory = async_sessionmaker(
+            bind=conn, expire_on_commit=False, join_transaction_mode="create_savepoint"
+        )
+        async with factory() as s:
+            yield s
+        await conn.rollback()
 
 
 @pytest.fixture

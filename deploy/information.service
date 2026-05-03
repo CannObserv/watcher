@@ -1,0 +1,27 @@
+[Unit]
+Description=Information service — Cannabis Observer information registry
+After=network.target postgresql.service
+
+[Service]
+Type=simple
+User=exedev
+WorkingDirectory=/home/exedev/watcher
+
+# Create runtime dir (runs as root before User= takes effect with + prefix)
+ExecStartPre=+/bin/bash -c 'mkdir -p /run/information && chown exedev:exedev /run/information'
+
+# Write current git SHA to a runtime env file before starting
+ExecStartPre=/bin/bash -c 'echo BUILD_ID=$(git rev-parse --short HEAD) > /run/information/build-id'
+
+# Load BUILD_ID, then optional service-specific secrets, then system secrets, then optional repo-local overrides
+EnvironmentFile=-/run/information/build-id
+EnvironmentFile=-/etc/information/.env
+EnvironmentFile=/etc/watcher/.env
+EnvironmentFile=-/home/exedev/watcher/.env
+
+ExecStart=/usr/local/bin/uv run uvicorn src.information.api.main:app --host 0.0.0.0 --port 8020
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

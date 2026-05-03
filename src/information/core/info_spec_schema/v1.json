@@ -1,0 +1,51 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://watcher.exe.xyz/schemas/info-spec/v1.json",
+  "title": "Information Source Specification v1",
+  "type": "object",
+  "required": ["schema_version", "target", "extraction", "fingerprint"],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {"const": 1},
+    "target": {
+      "type": "object",
+      "required": ["url"],
+      "additionalProperties": false,
+      "properties": {
+        "url": {"type": "string", "format": "uri"},
+        "fetch": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "render": {"type": "boolean"},
+            "timeout_seconds": {"type": "integer", "minimum": 1, "maximum": 300}
+          }
+        }
+      }
+    },
+    "extraction": {
+      "type": "object",
+      "required": ["algorithm"],
+      "additionalProperties": false,
+      "properties": {
+        "algorithm": {"enum": ["css", "xpath", "jsonpath", "regex", "full_page"]},
+        "selector": {"type": "string"}
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"algorithm": {"const": "full_page"}}},
+          "then": {"not": {"required": ["selector"]}},
+          "else": {"required": ["selector"]}
+        }
+      ]
+    },
+    "fingerprint": {
+      "type": "object",
+      "required": ["algorithm"],
+      "additionalProperties": false,
+      "properties": {
+        "algorithm": {"enum": ["sha256", "simhash"]}
+      }
+    }
+  }
+}

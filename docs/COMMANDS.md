@@ -112,15 +112,15 @@ sudo -u postgres psql -c "CREATE USER watcher WITH PASSWORD 'watcher';"
 sudo -u postgres psql -c "CREATE DATABASE watcher OWNER watcher;"
 sudo -u postgres psql -c "CREATE DATABASE watcher_test OWNER watcher;"
 
-# Apply migrations (requires DATABASE_URL in env)
+# Watcher migrations (requires DATABASE_URL in env)
 export $(cat /etc/watcher/.env .env 2>/dev/null | xargs)
 uv run alembic upgrade head
-
-# Generate a new migration after model changes
 uv run alembic revision --autogenerate -m "description of change"
-
-# Check current migration state
 uv run alembic current
+
+# Information service migrations (requires INFORMATION_DATABASE_URL in env)
+uv run alembic -c alembic_information.ini upgrade head
+uv run alembic -c alembic_information.ini revision --autogenerate -m "description of change"
 ```
 
 ## Task Queue (Procrastinate)

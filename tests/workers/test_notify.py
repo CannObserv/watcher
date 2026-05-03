@@ -403,6 +403,7 @@ class TestContentConfig:
         mock_config = MagicMock()
         mock_config.apprise_url = "encrypted_url"
         mock_config.content_config = content_cfg_dict
+        mock_config.remote_channel_id = None
 
         dispatched_bodies = []
 
@@ -437,6 +438,7 @@ class TestContentConfig:
         mock_config = MagicMock()
         mock_config.apprise_url = "encrypted_url"
         mock_config.content_config = None
+        mock_config.remote_channel_id = None
 
         dispatched_bodies = []
 
@@ -778,6 +780,7 @@ class TestUnifiedDiffLazyLoad:
         mock_config = MagicMock()
         mock_config.apprise_url = "encrypted_url"
         mock_config.content_config = None  # all defaults — no diff needed
+        mock_config.remote_channel_id = None
 
         session = AsyncMock(spec=AsyncSession)
         session.execute = AsyncMock(
@@ -817,6 +820,7 @@ class TestUnifiedDiffLazyLoad:
             c = MagicMock()
             c.apprise_url = "encrypted_url"
             c.content_config = cfg
+            c.remote_channel_id = None
             configs.append(c)
 
         session = AsyncMock(spec=AsyncSession)
@@ -863,6 +867,7 @@ class TestUnifiedDiffLazyLoad:
         c = MagicMock()
         c.apprise_url = "encrypted_url"
         c.content_config = cfg
+        c.remote_channel_id = None
 
         session = AsyncMock(spec=AsyncSession)
         session.execute = AsyncMock(
@@ -908,6 +913,7 @@ class TestUnifiedDiffLazyLoad:
         c = MagicMock()
         c.apprise_url = "encrypted_url"
         c.content_config = cfg
+        c.remote_channel_id = None
 
         session = AsyncMock(spec=AsyncSession)
         session.execute = AsyncMock(
@@ -950,6 +956,7 @@ class TestUnifiedDiffLazyLoad:
         c = MagicMock()
         c.apprise_url = "encrypted_url"
         c.content_config = cfg
+        c.remote_channel_id = None
 
         session = AsyncMock(spec=AsyncSession)
         session.execute = AsyncMock(
@@ -985,6 +992,7 @@ class TestUnifiedDiffLazyLoad:
         c = MagicMock()
         c.apprise_url = "encrypted_url"
         c.content_config = cfg
+        c.remote_channel_id = None
         c.events = ["watch_error"]
 
         session = AsyncMock(spec=AsyncSession)

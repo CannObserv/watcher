@@ -53,7 +53,8 @@ async def drain_changes_outbox(*, batch_size: int = 100) -> dict:
     """Publish up to ``batch_size`` unpublished Changes; return counts.
 
     Idempotent — only processes rows where ``published_to_bus_at IS NULL``.
-    Errors on individual rows abort the rest of the batch (next run picks them up).
+    Per-row errors are caught and counted in ``failed``; the rest of the batch
+    continues. Failed rows remain unpublished and the next drain picks them up.
     """
     publisher = ChangePublisher()
     published = 0

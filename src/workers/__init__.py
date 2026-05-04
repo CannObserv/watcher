@@ -38,8 +38,9 @@ def get_app() -> procrastinate.App:
     """Return the procrastinate App, creating it on first call."""
     global _app
     if _app is None:
-        # Import tasks module so decorators register on the blueprint
+        # Import task modules so decorators register on the blueprint
         # before we copy tasks into the App.
+        import src.workers.changes_drain  # noqa: F401
         import src.workers.tasks  # noqa: F401
 
         _app = procrastinate.App(

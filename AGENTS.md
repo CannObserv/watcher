@@ -90,14 +90,19 @@ Full lifecycle reference + cleanup timer: `docs/DEPLOYMENT.md`.
 
 Two env files load in order (later overrides earlier):
 
-1. `/etc/watcher/.env` — production secrets (`DATABASE_URL`, `APPRISE_SECRET_KEY`). Persistent, managed manually on the VM.
-2. `.env` (repo root, git-ignored) — dev/agent secrets (`GH_TOKEN`, `TEST_DATABASE_URL`). Never commit.
+1. `/etc/watcher/.env` — production secrets (`DATABASE_URL`, `APPRISE_SECRET_KEY`, `REDIS_URL`). Persistent, managed manually on the VM.
+2. `.env` (repo root, git-ignored) — dev/agent secrets (`GH_TOKEN`, `TEST_DATABASE_URL`, `REDIS_URL`). Never commit.
 
 Load both for shell commands:
 
 ```bash
 export $(cat /etc/watcher/.env .env 2>/dev/null | xargs)
 ```
+
+**Key variables:**
+- `DATABASE_URL` — PostgreSQL connection (watcher + information service)
+- `APPRISE_SECRET_KEY` — HMAC signing key for Apprise webhook validation
+- `REDIS_URL` — Redis connection URL (default: `redis://localhost:6379/0`). Used by `ChangePublisher` and `tools/info_changes_consumer.py`. Override for testing or remote Redis.
 
 Full variable reference: `docs/DEPLOYMENT.md`.
 

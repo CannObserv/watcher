@@ -32,8 +32,16 @@ def _redact_url(url: str) -> str:
     if parts.username is None and parts.password is None:
         return url
     host = parts.hostname or ""
+    if ":" in host:  # IPv6 literal — re-bracket so urlunsplit produces a valid URL
+        host = f"[{host}]"
     netloc = f"{host}:{parts.port}" if parts.port is not None else host
     return urlunsplit(parts._replace(netloc=netloc))
+
+
+def _safe_exc_message(e: BaseException) -> str:
+    """Render an exception without trusting its repr — defense against creds in args."""
+    args0 = e.args[0] if e.args else ""
+    return f"{type(e).__name__}: {args0}"
 
 
 async def _ensure_group(client: redis.Redis, topic: str, group: str) -> None:
@@ -62,7 +70,7 @@ async def consume(
     except (redis.ConnectionError, redis.TimeoutError) as e:
         await client.aclose()
         raise SystemExit(
-            f"Redis unreachable at {safe_url}: {e}. "
+            f"Redis unreachable at {safe_url}: {_safe_exc_message(e)}. "
             "Is redis-server running? (sudo systemctl status redis-server)"
         ) from e
     processed = 0
@@ -82,7 +90,7 @@ async def consume(
                     )
                 except (redis.ConnectionError, redis.TimeoutError) as e:
                     raise SystemExit(
-                        f"Redis connection lost at {safe_url}: {e}. "
+                        f"Redis connection lost at {safe_url}: {_safe_exc_message(e)}. "
                         "Is redis-server running? (sudo systemctl status redis-server)"
                     ) from e
                 if not response:
@@ -92,7 +100,13 @@ async def consume(
                         record = _format(msg_id, fields)
                         fp.write(json.dumps(record) + "\n")
                         fp.flush()
-                        await client.xack(topic, group, msg_id)
+                        try:
+                            await client.xack(topic, group, msg_id)
+                        except (redis.ConnectionError, redis.TimeoutError) as e:
+                            raise SystemExit(
+                                f"Redis connection lost at {safe_url}: {_safe_exc_message(e)}. "
+                                "Is redis-server running? (sudo systemctl status redis-server)"
+                            ) from e
                         processed += 1
                         if max_messages is not None and processed >= max_messages:
                             break

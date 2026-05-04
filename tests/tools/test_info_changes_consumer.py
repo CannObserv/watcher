@@ -229,6 +229,56 @@ def test_redact_url_user_only():
     )
 
 
+def test_redact_url_preserves_ipv6_brackets():
+    assert consumer._redact_url("redis://alice:s3cret@[::1]:6379/0") == "redis://[::1]:6379/0"
+
+
+def test_redact_url_preserves_ipv6_brackets_no_port():
+    assert consumer._redact_url("redis://alice:s3cret@[2001:db8::1]/0") == "redis://[2001:db8::1]/0"
+
+
+def test_safe_exc_message_strips_repr():
+    e = consumer.redis.ConnectionError("Error connecting to host:6379")
+    assert consumer._safe_exc_message(e) == "ConnectionError: Error connecting to host:6379"
+
+
+def test_safe_exc_message_handles_no_args():
+    e = consumer.redis.ConnectionError()
+    assert consumer._safe_exc_message(e) == "ConnectionError: "
+
+
+@pytest.mark.asyncio
+async def test_consume_systemexit_on_xack_connection_error(
+    fake_redis, patch_redis_from_url, tmp_path, monkeypatch
+):
+    """ConnectionError during xack → friendly SystemExit (not raw traceback)."""
+    await _pre_create_group(fake_redis, "info.changes", "g-ack-down")
+    await fake_redis.xadd("info.changes", {"key": "X", "payload": b'{"a": 1}'})
+
+    real_from_url = consumer.redis.from_url
+
+    def factory(*args, **kwargs):
+        client = real_from_url(*args, **kwargs)
+
+        async def boom(*_a, **_kw):
+            raise consumer.redis.ConnectionError("connection lost during ack")
+
+        client.xack = boom
+        return client
+
+    monkeypatch.setattr(consumer.redis, "from_url", factory)
+    out_file = tmp_path / "noop.jsonl"
+    with pytest.raises(SystemExit, match="Redis connection lost"):
+        await consumer.consume(
+            topic="info.changes",
+            group="g-ack-down",
+            consumer_name="t1",
+            output=out_file,
+            block_ms=10,
+            max_messages=1,
+        )
+
+
 @pytest.mark.asyncio
 async def test_consume_extracts_headers(fake_redis, patch_redis_from_url, tmp_path):
     await _pre_create_group(fake_redis, "info.changes", "g-hdr")

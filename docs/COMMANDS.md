@@ -123,6 +123,24 @@ uv run alembic -c alembic_information.ini upgrade head
 uv run alembic -c alembic_information.ini revision --autogenerate -m "description of change"
 ```
 
+## Change bus (Redis Streams)
+
+Phase 2b infrastructure: Watcher publishes `info.changes` events to Redis Streams via `ChangePublisher`. The drain worker reads unpublished rows from the `changes` table outbox columns and forwards them to Redis.
+
+```bash
+# Run the reference consumer (requires Redis running on REDIS_URL):
+uv run python tools/info_changes_consumer.py --group archive-ref --output /tmp/info-changes.jsonl
+
+# Inspect a stream's contents quickly:
+redis-cli XLEN info.changes
+redis-cli XRANGE info.changes - +
+
+# Drain unpublished Changes manually (Procrastinate task):
+uv run python -c "import asyncio; from src.workers.changes_drain import drain_changes_outbox; print(asyncio.run(drain_changes_outbox.func()))"
+```
+
+Note: `drain_changes_outbox.func()` calls the underlying async function directly, bypassing Procrastinate's queue dispatch — useful for manual one-shot runs.
+
 ## Task Queue (Procrastinate)
 
 ```bash

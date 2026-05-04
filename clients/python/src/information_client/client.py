@@ -212,7 +212,10 @@ def _unwrap(response):
     """Return parsed body on 2xx; raise typed error otherwise.
 
     ``response`` is a generated ``Response[T]``; ``response.parsed`` is the
-    typed body produced by the openapi-python-client output.
+    typed body produced by the openapi-python-client output. Return type is
+    intentionally untyped at this boundary — callers' annotations carry the
+    static type, since the parsed body's runtime type is determined by which
+    generated endpoint produced ``response``.
     """
     if 200 <= response.status_code < 300:
         return response.parsed

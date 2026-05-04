@@ -108,6 +108,128 @@ async def test_consume_acks_messages(fake_redis, patch_redis_from_url, tmp_path)
 
 
 @pytest.mark.asyncio
+async def test_consume_systemexit_on_startup_connection_error(
+    fake_redis, patch_redis_from_url, tmp_path, monkeypatch
+):
+    """ConnectionError during initial group setup → friendly SystemExit."""
+
+    async def boom(*_args, **_kwargs):
+        raise consumer.redis.ConnectionError("connection refused")
+
+    monkeypatch.setattr(consumer, "_ensure_group", boom)
+    out_file = tmp_path / "noop.jsonl"
+    with pytest.raises(SystemExit, match="Redis unreachable"):
+        await consumer.consume(
+            topic="info.changes",
+            group="g-down",
+            consumer_name="t1",
+            output=out_file,
+            block_ms=10,
+            max_messages=1,
+        )
+
+
+@pytest.mark.asyncio
+async def test_consume_systemexit_on_startup_timeout(
+    fake_redis, patch_redis_from_url, tmp_path, monkeypatch
+):
+    """TimeoutError during initial group setup → friendly SystemExit."""
+
+    async def boom(*_args, **_kwargs):
+        raise consumer.redis.TimeoutError("timeout")
+
+    monkeypatch.setattr(consumer, "_ensure_group", boom)
+    out_file = tmp_path / "noop.jsonl"
+    with pytest.raises(SystemExit, match="Redis unreachable"):
+        await consumer.consume(
+            topic="info.changes",
+            group="g-down",
+            consumer_name="t1",
+            output=out_file,
+            block_ms=10,
+            max_messages=1,
+        )
+
+
+@pytest.mark.asyncio
+async def test_consume_systemexit_on_loop_connection_error(
+    fake_redis, patch_redis_from_url, tmp_path, monkeypatch
+):
+    """ConnectionError mid-loop → friendly SystemExit (not raw traceback)."""
+    await _pre_create_group(fake_redis, "info.changes", "g-mid")
+
+    real_from_url = consumer.redis.from_url
+
+    def factory(*args, **kwargs):
+        client = real_from_url(*args, **kwargs)
+
+        async def boom(*_a, **_kw):
+            raise consumer.redis.ConnectionError("connection lost mid-stream")
+
+        client.xreadgroup = boom
+        return client
+
+    monkeypatch.setattr(consumer.redis, "from_url", factory)
+    out_file = tmp_path / "noop.jsonl"
+    with pytest.raises(SystemExit, match="Redis connection lost"):
+        await consumer.consume(
+            topic="info.changes",
+            group="g-mid",
+            consumer_name="t1",
+            output=out_file,
+            block_ms=10,
+            max_messages=1,
+        )
+
+
+@pytest.mark.asyncio
+async def test_consume_redacts_credentials_in_error(
+    fake_redis, patch_redis_from_url, tmp_path, monkeypatch
+):
+    """Password in REDIS_URL must not appear in SystemExit message."""
+    monkeypatch.setattr(
+        consumer, "get_redis_url", lambda: "redis://alice:s3cret@redis.example.com:6379/0"
+    )
+
+    async def boom(*_args, **_kwargs):
+        raise consumer.redis.ConnectionError("nope")
+
+    monkeypatch.setattr(consumer, "_ensure_group", boom)
+    out_file = tmp_path / "noop.jsonl"
+    with pytest.raises(SystemExit) as excinfo:
+        await consumer.consume(
+            topic="info.changes",
+            group="g-redact",
+            consumer_name="t1",
+            output=out_file,
+            block_ms=10,
+            max_messages=1,
+        )
+    msg = str(excinfo.value)
+    assert "s3cret" not in msg
+    assert "alice" not in msg
+    assert "redis.example.com" in msg
+
+
+def test_redact_url_strips_userinfo():
+    assert (
+        consumer._redact_url("redis://alice:s3cret@redis.example.com:6379/0")
+        == "redis://redis.example.com:6379/0"
+    )
+
+
+def test_redact_url_no_userinfo_unchanged():
+    assert consumer._redact_url("redis://localhost:6379/0") == "redis://localhost:6379/0"
+
+
+def test_redact_url_user_only():
+    assert (
+        consumer._redact_url("redis://alice@redis.example.com:6379/0")
+        == "redis://redis.example.com:6379/0"
+    )
+
+
+@pytest.mark.asyncio
 async def test_consume_extracts_headers(fake_redis, patch_redis_from_url, tmp_path):
     await _pre_create_group(fake_redis, "info.changes", "g-hdr")
     await fake_redis.xadd(

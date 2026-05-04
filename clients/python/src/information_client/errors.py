@@ -30,10 +30,9 @@ class ServerError(InformationError):
     """5xx from the Information service."""
 
 
-def error_from_response(status: int, body: bytes | str) -> InformationError:
+def error_from_response(status: int, body: bytes) -> InformationError:
     """Map an HTTP status + body to the appropriate InformationError subclass."""
-    body_text = body.decode("utf-8", errors="replace") if isinstance(body, bytes) else body
-    body_text = body_text[:2000]  # truncate noisy bodies
+    body_text = body.decode("utf-8", errors="replace")[:2000]  # truncate noisy bodies
     msg = f"Information service returned {status}: {body_text[:200]}"
     if status in (401, 403):
         return AuthError(msg, status_code=status, body=body_text)

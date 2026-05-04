@@ -16,6 +16,7 @@ import asyncio
 import json
 import sys
 from pathlib import Path
+from urllib.parse import urlsplit, urlunsplit
 
 import redis.asyncio as redis
 
@@ -23,6 +24,16 @@ from src.core.changes.redis_url import get_redis_url
 
 DEFAULT_TOPIC = "info.changes"
 DEFAULT_GROUP = "reference-consumer"
+
+
+def _redact_url(url: str) -> str:
+    """Strip userinfo from a URL so credentials don't leak into error output."""
+    parts = urlsplit(url)
+    if parts.username is None and parts.password is None:
+        return url
+    host = parts.hostname or ""
+    netloc = f"{host}:{parts.port}" if parts.port is not None else host
+    return urlunsplit(parts._replace(netloc=netloc))
 
 
 async def _ensure_group(client: redis.Redis, topic: str, group: str) -> None:
@@ -44,13 +55,14 @@ async def consume(
 ) -> int:
     """Run the consume loop. Returns count of messages processed."""
     redis_url = get_redis_url()
+    safe_url = _redact_url(redis_url)
     client = redis.from_url(redis_url)
     try:
         await _ensure_group(client, topic, group)
     except (redis.ConnectionError, redis.TimeoutError) as e:
         await client.aclose()
         raise SystemExit(
-            f"Redis unreachable at {redis_url}: {e}. "
+            f"Redis unreachable at {safe_url}: {e}. "
             "Is redis-server running? (sudo systemctl status redis-server)"
         ) from e
     processed = 0
@@ -60,13 +72,19 @@ async def consume(
             while True:
                 if max_messages is not None and processed >= max_messages:
                     break
-                response = await client.xreadgroup(
-                    groupname=group,
-                    consumername=consumer_name,
-                    streams={topic: ">"},
-                    count=10,
-                    block=block_ms,
-                )
+                try:
+                    response = await client.xreadgroup(
+                        groupname=group,
+                        consumername=consumer_name,
+                        streams={topic: ">"},
+                        count=10,
+                        block=block_ms,
+                    )
+                except (redis.ConnectionError, redis.TimeoutError) as e:
+                    raise SystemExit(
+                        f"Redis connection lost at {safe_url}: {e}. "
+                        "Is redis-server running? (sudo systemctl status redis-server)"
+                    ) from e
                 if not response:
                     continue
                 for _stream, entries in response:

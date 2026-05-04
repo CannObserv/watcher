@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import httpx
-
 
 class InformationError(Exception):
     """Base error for the Information SDK."""
@@ -32,17 +30,17 @@ class ServerError(InformationError):
     """5xx from the Information service."""
 
 
-def error_from_response(response: httpx.Response) -> InformationError:
-    """Map an HTTP response to the appropriate InformationError subclass."""
-    status = response.status_code
-    body = response.text[:2000]  # truncate noisy bodies
-    msg = f"Information service returned {status}: {body[:200]}"
+def error_from_response(status: int, body: bytes | str) -> InformationError:
+    """Map an HTTP status + body to the appropriate InformationError subclass."""
+    body_text = body.decode("utf-8", errors="replace") if isinstance(body, bytes) else body
+    body_text = body_text[:2000]  # truncate noisy bodies
+    msg = f"Information service returned {status}: {body_text[:200]}"
     if status in (401, 403):
-        return AuthError(msg, status_code=status, body=body)
+        return AuthError(msg, status_code=status, body=body_text)
     if status == 404:
-        return NotFound(msg, status_code=status, body=body)
+        return NotFound(msg, status_code=status, body=body_text)
     if status == 422:
-        return ValidationError(msg, status_code=status, body=body)
+        return ValidationError(msg, status_code=status, body=body_text)
     if 500 <= status < 600:
-        return ServerError(msg, status_code=status, body=body)
-    return InformationError(msg, status_code=status, body=body)
+        return ServerError(msg, status_code=status, body=body_text)
+    return InformationError(msg, status_code=status, body=body_text)

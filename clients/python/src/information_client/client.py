@@ -90,8 +90,8 @@ class InformationClient:
         await self._gen_client.__aexit__(exc_type, exc, tb)
 
     async def aclose(self) -> None:
-        """Close the underlying async HTTP client."""
-        await self._gen_client.get_async_httpx_client().aclose()
+        """Close the underlying generated client (mirrors ``async with`` exit)."""
+        await self._gen_client.__aexit__(None, None, None)
 
     # --- InfoItem endpoints ---
 
@@ -103,21 +103,21 @@ class InformationClient:
         response = await create_info_item_api_v1_info_items_post.asyncio_detailed(
             client=self._gen_client, body=body
         )
-        return _unwrap(response, InfoItemOut)
+        return _unwrap(response)
 
     async def list_info_items(self) -> list[InfoItemOut]:
         """List all InfoItems."""
         response = await list_info_items_api_v1_info_items_get.asyncio_detailed(
             client=self._gen_client
         )
-        return _unwrap(response, list)
+        return _unwrap(response)
 
     async def get_info_item(self, info_item_id: str) -> InfoItemOut:
         """Fetch a single InfoItem by ID."""
         response = await get_info_item_api_v1_info_items_info_item_id_get.asyncio_detailed(
             client=self._gen_client, info_item_id=info_item_id
         )
-        return _unwrap(response, InfoItemOut)
+        return _unwrap(response)
 
     # --- InfoSpec endpoints ---
 
@@ -144,7 +144,7 @@ class InformationClient:
         response = await _get_primary_spec.asyncio_detailed(
             client=self._gen_client, info_item_id=info_item_id
         )
-        result = _unwrap(response, InfoSpecOut)
+        result = _unwrap(response)
         self._primary_cache[info_item_id] = (result, time.monotonic() + self._cache_ttl_seconds)
         return result
 
@@ -169,7 +169,7 @@ class InformationClient:
                 client=self._gen_client, info_item_id=info_item_id
             )
         )
-        return _unwrap(response, list)
+        return _unwrap(response)
 
     async def create_info_spec(
         self, info_item_id: str, *, document: dict, priority: int | None = None
@@ -184,7 +184,7 @@ class InformationClient:
                 client=self._gen_client, info_item_id=info_item_id, body=body
             )
         )
-        return _unwrap(response, InfoSpecOut)
+        return _unwrap(response)
 
     async def patch_info_spec(
         self,
@@ -205,22 +205,15 @@ class InformationClient:
             info_spec_id=info_spec_id,
             body=body,
         )
-        return _unwrap(response, InfoSpecOut)
+        return _unwrap(response)
 
 
-def _unwrap(response, expected_type):
+def _unwrap(response):
     """Return parsed body on 2xx; raise typed error otherwise.
 
-    ``response`` is a generated ``Response[T]``. The generated parser already
-    converted ``response.parsed`` to either the success type, an error model,
-    or None. We only return the success type here.
+    ``response`` is a generated ``Response[T]``; ``response.parsed`` is the
+    typed body produced by the openapi-python-client output.
     """
     if 200 <= response.status_code < 300:
-        # response.parsed is the typed body (or None for 204).
-        if response.parsed is None and expected_type is not None:
-            # Defensive: 200 with None body shouldn't happen for the routes we wrap.
-            return None
         return response.parsed
-    raise error_from_response(
-        httpx.Response(status_code=int(response.status_code), content=response.content)
-    )
+    raise error_from_response(int(response.status_code), response.content)

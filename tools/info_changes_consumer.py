@@ -43,8 +43,16 @@ async def consume(
     max_messages: int | None = None,
 ) -> int:
     """Run the consume loop. Returns count of messages processed."""
-    client = redis.from_url(get_redis_url())
-    await _ensure_group(client, topic, group)
+    redis_url = get_redis_url()
+    client = redis.from_url(redis_url)
+    try:
+        await _ensure_group(client, topic, group)
+    except (redis.ConnectionError, redis.TimeoutError) as e:
+        await client.aclose()
+        raise SystemExit(
+            f"Redis unreachable at {redis_url}: {e}. "
+            "Is redis-server running? (sudo systemctl status redis-server)"
+        ) from e
     processed = 0
     output.parent.mkdir(parents=True, exist_ok=True)
     try:

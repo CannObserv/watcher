@@ -13,13 +13,10 @@ Consumers should ignore unknown `hdr.*` fields — header set is open-ended.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+import redis.asyncio as redis_asyncio
 
 from src.core.changes.redis_url import get_redis_url
 from src.core.logging import get_logger
-
-if TYPE_CHECKING:
-    import redis.asyncio as redis
 
 logger = get_logger(__name__)
 
@@ -31,15 +28,13 @@ class ChangePublisher:
     fakeredis), or with no args to lazily build one from `REDIS_URL`.
     """
 
-    def __init__(self, *, redis_client: redis.Redis | None = None) -> None:
+    def __init__(self, *, redis_client: redis_asyncio.Redis | None = None) -> None:
         self._client = redis_client
         self._owns_client = redis_client is None
 
-    async def _get_client(self) -> redis.Redis:
+    async def _get_client(self) -> redis_asyncio.Redis:
         if self._client is None:
-            import redis.asyncio as redis
-
-            self._client = redis.from_url(get_redis_url())
+            self._client = redis_asyncio.from_url(get_redis_url())
         return self._client
 
     async def publish_change(

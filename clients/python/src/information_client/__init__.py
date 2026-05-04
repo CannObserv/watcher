@@ -4,6 +4,12 @@ Pinned 1:1 with Information service version. See README for usage.
 """
 
 from information_client.client import InformationClient
+from information_client.defaults import (
+    DEFAULT_FETCH_RENDER,
+    DEFAULT_FETCH_TIMEOUT_SECONDS,
+    fetch_render,
+    fetch_timeout_seconds,
+)
 from information_client.errors import (
     AuthError,
     InformationError,
@@ -18,6 +24,8 @@ __version__ = "0.1.0"
 
 __all__ = [
     "AuthError",
+    "DEFAULT_FETCH_RENDER",
+    "DEFAULT_FETCH_TIMEOUT_SECONDS",
     "InfoItemOut",
     "InfoSpecOut",
     "InformationClient",
@@ -25,4 +33,6 @@ __all__ = [
     "NotFound",
     "ServerError",
     "ValidationError",
+    "fetch_render",
+    "fetch_timeout_seconds",
 ]

@@ -13,6 +13,7 @@ Async-only. No sync facade.
 
 from __future__ import annotations
 
+import time
 from types import TracebackType
 
 import httpx
@@ -57,10 +58,13 @@ class InformationClient:
         base_url: str,
         api_key: str,
         timeout: float = 10.0,
+        cache_ttl_seconds: float = 60.0,
     ) -> None:
         self._base_url = base_url.rstrip("/")
         self._api_key = api_key
         self._mask = (api_key[:3] + "***") if api_key else "***"
+        self._cache_ttl_seconds = cache_ttl_seconds
+        self._primary_cache: dict[str, tuple[InfoSpecOut, float]] = {}
         self._gen_client = AuthenticatedClient(
             base_url=self._base_url,
             token=api_key,
@@ -117,16 +121,43 @@ class InformationClient:
 
     # --- InfoSpec endpoints ---
 
-    async def get_primary_info_spec(self, info_item_id: str) -> InfoSpecOut:
+    async def get_primary_info_spec(
+        self, info_item_id: str, *, force_refresh: bool = False
+    ) -> InfoSpecOut:
         """Resolve the primary (lowest active priority) InfoSpec for an InfoItem.
 
         Hot path for consumer services (Watcher, Archive). Raises NotFound
         if the InfoItem doesn't exist or has no active InfoSpec.
+
+        Results are cached per ``info_item_id`` for ``cache_ttl_seconds``
+        (default 60 s). Pass ``force_refresh=True`` to bypass the cache and
+        re-fetch from the service. Errors are never cached. Use
+        ``invalidate_primary_cache()`` to evict entries on demand.
         """
+        if not force_refresh:
+            cached = self._primary_cache.get(info_item_id)
+            if cached is not None:
+                spec, expiry = cached
+                if time.monotonic() < expiry:
+                    return spec
+
         response = await _get_primary_spec.asyncio_detailed(
             client=self._gen_client, info_item_id=info_item_id
         )
-        return _unwrap(response, InfoSpecOut)
+        result = _unwrap(response, InfoSpecOut)
+        self._primary_cache[info_item_id] = (result, time.monotonic() + self._cache_ttl_seconds)
+        return result
+
+    def invalidate_primary_cache(self, info_item_id: str | None = None) -> None:
+        """Evict cached primary InfoSpec entries.
+
+        If ``info_item_id`` is given, evict only that entry.
+        If ``info_item_id`` is None, clear the entire cache.
+        """
+        if info_item_id is None:
+            self._primary_cache.clear()
+        else:
+            self._primary_cache.pop(info_item_id, None)
 
     async def list_active_info_specs(self, info_item_id: str) -> list[InfoSpecOut]:
         """Return all active InfoSpecs for an InfoItem, ordered by priority asc.

@@ -5,7 +5,8 @@ import pytest
 from src.core.models.base import generate_ulid
 from src.core.models.change import Change
 from src.core.models.snapshot import Snapshot, SnapshotChunk
-from src.core.models.watch import ContentType, Watch
+from src.core.models.watch import ContentType
+from tests.conftest import make_watch
 
 pytestmark = pytest.mark.integration
 
@@ -13,13 +14,12 @@ pytestmark = pytest.mark.integration
 @pytest.fixture
 async def watch_with_changes(db_session):
     """Create a Watch with two Snapshots, chunks on snap2, and a Change."""
-    watch = Watch(
+    watch = await make_watch(
+        db_session,
         name="Change Test Watch",
         url="https://example.com/changes",
         content_type=ContentType.HTML,
     )
-    db_session.add(watch)
-    await db_session.flush()
 
     snap1 = Snapshot(
         id=generate_ulid(),

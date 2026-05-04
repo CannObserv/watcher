@@ -10,6 +10,7 @@ from src.core.models.notification_config import WatchNotificationConfig
 from src.core.models.snapshot import Snapshot, SnapshotChunk
 from src.core.models.temporal_profile import TemporalProfile
 from src.core.models.watch import Watch
+from tests.conftest import make_watch
 
 pytestmark = pytest.mark.integration
 
@@ -160,15 +161,14 @@ class TestUpdateWatch:
 
     async def test_update_activate_blocked_when_domain_inactive(self, client, db_session):
         db_session.add(Domain(name="blocked-api.com", is_active=False))
-        watch = Watch(
+        watch = await make_watch(
+            db_session,
             name="Suspended",
             url="https://blocked-api.com/p",
             content_type="html",
             effective_domain="blocked-api.com",
             is_active=False,
         )
-        db_session.add(watch)
-        await db_session.flush()
         response = await client.patch(
             f"/api/v1/watches/{watch.id}",
             json={"is_active": True},
@@ -451,14 +451,14 @@ class TestDeleteWatch:
 class TestListWatchesArchivedFilter:
     async def test_list_watches_no_filter_includes_archived(self, client, db_session):
         """No ?is_archived param returns all watches, including archived ones."""
-        archived = Watch(
+        archived = await make_watch(
+            db_session,
             name="Archived Watch",
             url="https://example.com/archived",
             content_type="html",
             is_active=False,
             is_archived=True,
         )
-        db_session.add(archived)
         await db_session.commit()
 
         response = await client.get("/api/v1/watches")
@@ -467,21 +467,22 @@ class TestListWatchesArchivedFilter:
 
     async def test_list_watches_is_archived_true_returns_archived_only(self, client, db_session):
         """?is_archived=true returns only archived watches."""
-        archived = Watch(
+        archived = await make_watch(
+            db_session,
             name="Archived Only",
             url="https://example.com/arch-only",
             content_type="html",
             is_active=False,
             is_archived=True,
         )
-        active = Watch(
+        active = await make_watch(
+            db_session,
             name="Active Only",
             url="https://example.com/active-only",
             content_type="html",
             is_active=True,
             is_archived=False,
         )
-        db_session.add_all([archived, active])
         await db_session.commit()
 
         response = await client.get("/api/v1/watches?is_archived=true")
@@ -492,14 +493,14 @@ class TestListWatchesArchivedFilter:
 
     async def test_list_watches_is_archived_false_excludes_archived(self, client, db_session):
         """?is_archived=false explicitly excludes archived watches."""
-        archived = Watch(
+        archived = await make_watch(
+            db_session,
             name="Arch False Test",
             url="https://example.com/arch-false",
             content_type="html",
             is_active=False,
             is_archived=True,
         )
-        db_session.add(archived)
         await db_session.commit()
 
         response = await client.get("/api/v1/watches?is_archived=false")

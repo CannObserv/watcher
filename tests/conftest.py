@@ -1,6 +1,22 @@
 """Shared test fixtures — async database session and FastAPI TestClient.
 
 tests/fixtures/ holds static sample files used by extractor tests (e.g. sample.html).
+
+Phase 2c migration shim
+-----------------------
+The module-level async helpers ``make_watch``, ``make_snapshot``, ``make_info_item``,
+and ``make_info_spec`` are NOT pytest fixtures — they are awaitable factory
+functions test code can call directly. The legacy pytest-fixture variants are
+preserved as ``default_watch_fixture`` / ``default_snapshot_fixture`` /
+``default_change_fixture`` so any test that still uses the fixture form keeps
+working during the migration.
+
+The ``make_watch`` factory uses ``hasattr(Watch, ...)`` guards so the same
+helper supports three model states across Tasks 0 / 3 / 4:
+
+- Task 0 (now): Watch has ``url`` only — kwargs include ``url=``.
+- Task 3:       Watch has both ``url`` and ``info_item_id`` — both included.
+- Task 4:       Watch has ``info_item_id`` only — ``url`` dropped.
 """
 
 import os
@@ -18,9 +34,12 @@ from src.core.models import Base
 from src.core.models.app_user import AppUser
 from src.core.models.change import Change
 from src.core.models.snapshot import Snapshot
-from src.core.models.watch import Watch
+from src.core.models.watch import ContentType, Watch
 from src.core.probe import ProbeResult
 from src.dashboard.deps import get_dashboard_user
+from src.information.core.models.base import Base as InformationBase
+from src.information.core.models.info_item import InfoItem  # noqa: F401  registers mapper
+from src.information.core.models.info_spec import InfoSpec  # noqa: F401  registers mapper
 
 TEST_DATABASE_URL = os.environ.get("TEST_DATABASE_URL")
 if not TEST_DATABASE_URL:
@@ -55,6 +74,11 @@ def anyio_backend():
 async def test_engine():
     engine = create_async_engine(TEST_DATABASE_URL)
     async with engine.begin() as conn:
+        # Information service owns its own DeclarativeBase + ``information`` schema.
+        # Both must exist before tests run; mirror what alembic_information.ini
+        # would create in production.
+        await conn.execute(text("CREATE SCHEMA IF NOT EXISTS information"))
+        await conn.run_sync(InformationBase.metadata.create_all)
         await conn.run_sync(Base.metadata.create_all)
         # DB triggers are not part of the ORM model; recreate them here to mirror migrations.
         await conn.execute(
@@ -81,6 +105,8 @@ async def test_engine():
     yield engine
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.drop_all)
+        await conn.run_sync(InformationBase.metadata.drop_all)
+        await conn.execute(text("DROP SCHEMA IF EXISTS information CASCADE"))
     await engine.dispose()
 
 
@@ -106,9 +132,111 @@ async def db_session(test_engine) -> AsyncGenerator[AsyncSession]:
         await txn.rollback()
 
 
+# ---------------------------------------------------------------------------
+# Module-level async factories (NOT pytest fixtures).
+#
+# Tests call these directly:  ``watch = await make_watch(db_session, name="X")``
+# ---------------------------------------------------------------------------
+
+
+async def make_info_item(session, *, name="Test Item", description=None):
+    """Create and flush an InfoItem row."""
+    item = InfoItem(name=name, description=description)
+    session.add(item)
+    await session.flush()
+    return item
+
+
+async def make_info_spec(
+    session,
+    info_item,
+    *,
+    url="https://example.com",
+    selector=None,
+    fingerprint_algorithm="simhash",
+    priority=1,
+    active=True,
+):
+    """Create and flush an InfoSpec row attached to *info_item*."""
+    extraction = (
+        {"algorithm": "css", "selector": selector} if selector else {"algorithm": "full_page"}
+    )
+    document = {
+        "schema_version": 1,
+        "target": {"url": url},
+        "extraction": extraction,
+        "fingerprint": {"algorithm": fingerprint_algorithm},
+    }
+    spec = InfoSpec(
+        info_item_id=info_item.info_item_id,
+        schema_version=1,
+        document=document,
+        priority=priority,
+        active=active,
+    )
+    session.add(spec)
+    await session.flush()
+    return spec
+
+
+async def make_watch(
+    session,
+    *,
+    name="Test Watch",
+    info_item_id=None,
+    content_type=None,
+    url=None,
+    selector=None,
+    **kwargs,
+):
+    """Construct a Watch with auto-created InfoItem + primary InfoSpec.
+
+    Migration shim — handles three model states (Task 0 / 3 / 4) via
+    ``hasattr`` guards on the Watch class.
+    """
+    if info_item_id is None:
+        info_item = await make_info_item(session, name=name)
+        await make_info_spec(
+            session,
+            info_item,
+            url=url or "https://example.com",
+            selector=selector,
+        )
+        info_item_id = info_item.info_item_id
+
+    watch_kwargs = {"name": name, **kwargs}
+    watch_kwargs.setdefault("content_type", content_type or ContentType.HTML)
+
+    if hasattr(Watch, "info_item_id"):
+        watch_kwargs["info_item_id"] = info_item_id
+
+    if hasattr(Watch, "url") and "url" not in watch_kwargs:
+        watch_kwargs["url"] = url or "https://example.com"
+
+    watch = Watch(**watch_kwargs)
+    session.add(watch)
+    await session.flush()
+    return watch
+
+
+async def make_snapshot(session, watch, *, fetcher_used="http", **kwargs):
+    """Create and flush a Snapshot attached to *watch*."""
+    snapshot = Snapshot(watch_id=watch.id, fetcher_used=fetcher_used, **kwargs)
+    session.add(snapshot)
+    await session.flush()
+    return snapshot
+
+
+# ---------------------------------------------------------------------------
+# Legacy pytest-fixture variants (renamed to avoid name collision with the
+# module-level helpers above). Tests that consume them as fixtures keep
+# working: ``def test_x(default_watch_fixture)``.
+# ---------------------------------------------------------------------------
+
+
 @pytest.fixture
-def make_watch(db_session):
-    """Factory fixture: create and flush a Watch row."""
+def default_watch_fixture(db_session):
+    """Factory fixture: create and flush a Watch row (legacy form)."""
 
     async def _make(name="Test Watch", url="https://example.com", content_type="html", **kwargs):
         watch = Watch(name=name, url=url, content_type=content_type, **kwargs)
@@ -120,8 +248,8 @@ def make_watch(db_session):
 
 
 @pytest.fixture
-def make_snapshot(db_session):
-    """Factory fixture: create and flush a Snapshot row attached to *watch*."""
+def default_snapshot_fixture(db_session):
+    """Factory fixture: create and flush a Snapshot row attached to *watch* (legacy form)."""
 
     async def _make(watch, fetcher_used="http", **kwargs):
         snapshot = Snapshot(watch_id=watch.id, fetcher_used=fetcher_used, **kwargs)

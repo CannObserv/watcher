@@ -2,7 +2,7 @@
 
 from datetime import UTC, datetime
 
-from sqlalchemy import DateTime, Float, ForeignKey, func
+from sqlalchemy import DateTime, Float, ForeignKey, String, func
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 from ulid import ULID
@@ -31,6 +31,10 @@ class Change(Base):
         default=lambda: datetime.now(UTC),
         server_default=func.now(),
     )
+    published_to_bus_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    bus_message_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
 
     def __init__(self, **kwargs: object) -> None:
         """Set Python-side defaults for fields not provided."""

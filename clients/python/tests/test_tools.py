@@ -3,6 +3,7 @@
 import httpx
 import pytest
 import respx
+from information_client.generated.types import UNSET
 
 BASE_URL = "http://information.test"
 
@@ -279,7 +280,7 @@ async def test_propose_selectors_passes_top_k(client):
 
 @pytest.mark.asyncio
 async def test_create_info_item_without_initial_spec_uses_legacy_path(client):
-    """Backwards-compat: omitting initial_info_spec routes through generated client."""
+    """Omitting initial_info_spec returns the typed model with info_spec_id UNSET."""
     with respx.mock:
         respx.post(f"{BASE_URL}/api/v1/info-items").mock(
             return_value=httpx.Response(
@@ -295,6 +296,8 @@ async def test_create_info_item_without_initial_spec_uses_legacy_path(client):
             )
         )
         result = await client.create_info_item(name="X")
-    # Returned object is the generated InfoItemOut (no info_spec_id attr).
+    # Post-regen: response_model is InfoItemWithSpecOut, so info_spec_id is a
+    # field on the typed model; when the server returns null/absent, the
+    # generated client carries UNSET. Operators check via `is not UNSET`.
     assert result.name == "X"
-    assert not hasattr(result, "info_spec_id")
+    assert result.info_spec_id is UNSET

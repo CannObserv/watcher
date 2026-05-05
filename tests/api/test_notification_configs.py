@@ -3,6 +3,8 @@
 import pytest
 from cryptography.fernet import Fernet
 
+from tests.conftest import make_watch
+
 pytestmark = pytest.mark.integration
 
 # A real Apprise URL that parses correctly (json:// is always available)
@@ -337,11 +339,11 @@ class TestCreateNotificationConfigFromTokens:
 
 
 @pytest.mark.integration
-async def test_notification_config_has_content_config_column(db_session, make_watch):
+async def test_notification_config_has_content_config_column(db_session):
     """ORM model exposes content_config field (fails until migration + model are updated)."""
     from src.core.models.notification_config import WatchNotificationConfig
 
-    watch = await make_watch()
+    watch = await make_watch(db_session)
     config = WatchNotificationConfig(
         watch_id=watch.id,
         apprise_url="encrypted",

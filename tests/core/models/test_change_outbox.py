@@ -6,6 +6,7 @@ import pytest
 from sqlalchemy import select
 
 from src.core.models.change import Change
+from tests.conftest import make_snapshot, make_watch
 
 pytestmark = pytest.mark.integration
 
@@ -21,11 +22,11 @@ _SNAP_DEFAULTS = {
 
 
 @pytest.mark.asyncio
-async def test_outbox_columns_default_null(db_session, make_watch, make_snapshot, make_change):
+async def test_outbox_columns_default_null(db_session, make_change):
     """Freshly-inserted Change has published_to_bus_at=None and bus_message_id=None."""
-    watch = await make_watch()
-    snap1 = await make_snapshot(watch, **_SNAP_DEFAULTS)
-    snap2 = await make_snapshot(watch, **_SNAP_DEFAULTS)
+    watch = await make_watch(db_session)
+    snap1 = await make_snapshot(db_session, watch, **_SNAP_DEFAULTS)
+    snap2 = await make_snapshot(db_session, watch, **_SNAP_DEFAULTS)
     change = await make_change(watch, snap2, previous_snapshot=snap1)
     await db_session.commit()
 
@@ -35,11 +36,11 @@ async def test_outbox_columns_default_null(db_session, make_watch, make_snapshot
 
 
 @pytest.mark.asyncio
-async def test_outbox_columns_round_trip(db_session, make_watch, make_snapshot, make_change):
+async def test_outbox_columns_round_trip(db_session, make_change):
     """Explicitly-set outbox fields persist and read back correctly."""
-    watch = await make_watch()
-    snap1 = await make_snapshot(watch, **_SNAP_DEFAULTS)
-    snap2 = await make_snapshot(watch, **_SNAP_DEFAULTS)
+    watch = await make_watch(db_session)
+    snap1 = await make_snapshot(db_session, watch, **_SNAP_DEFAULTS)
+    snap2 = await make_snapshot(db_session, watch, **_SNAP_DEFAULTS)
     change = await make_change(
         watch,
         snap2,

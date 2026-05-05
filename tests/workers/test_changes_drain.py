@@ -9,6 +9,7 @@ from fakeredis import aioredis as fakeredis_aio
 
 from src.core.changes.publisher import ChangePublisher
 from src.workers.changes_drain import drain_changes_outbox
+from tests.conftest import make_snapshot, make_watch
 
 pytestmark = pytest.mark.integration
 
@@ -57,11 +58,11 @@ def drain_with_test_session(db_session, fake_redis):
 
 @pytest.mark.asyncio
 async def test_drain_publishes_unpublished(
-    db_session, make_watch, make_snapshot, make_change, fake_redis, drain_with_test_session
+    db_session, make_change, fake_redis, drain_with_test_session
 ):
-    watch = await make_watch()
-    s1 = await make_snapshot(watch=watch, **_snapshot_kwargs("hash1"))
-    s2 = await make_snapshot(watch=watch, **_snapshot_kwargs("hash2"))
+    watch = await make_watch(db_session)
+    s1 = await make_snapshot(db_session, watch, **_snapshot_kwargs("hash1"))
+    s2 = await make_snapshot(db_session, watch, **_snapshot_kwargs("hash2"))
     c1 = await make_change(watch=watch, current_snapshot=s2, previous_snapshot=s1)
     c2 = await make_change(watch=watch, current_snapshot=s2, previous_snapshot=s1)
     await db_session.commit()
@@ -78,11 +79,11 @@ async def test_drain_publishes_unpublished(
 
 @pytest.mark.asyncio
 async def test_drain_marks_rows_published(
-    db_session, make_watch, make_snapshot, make_change, fake_redis, drain_with_test_session
+    db_session, make_change, fake_redis, drain_with_test_session
 ):
-    watch = await make_watch()
-    s1 = await make_snapshot(watch=watch, **_snapshot_kwargs("hash1"))
-    s2 = await make_snapshot(watch=watch, **_snapshot_kwargs("hash2"))
+    watch = await make_watch(db_session)
+    s1 = await make_snapshot(db_session, watch, **_snapshot_kwargs("hash1"))
+    s2 = await make_snapshot(db_session, watch, **_snapshot_kwargs("hash2"))
     c = await make_change(watch=watch, current_snapshot=s2, previous_snapshot=s1)
     await db_session.commit()
 
@@ -95,11 +96,11 @@ async def test_drain_marks_rows_published(
 
 @pytest.mark.asyncio
 async def test_drain_skips_already_published(
-    db_session, make_watch, make_snapshot, make_change, fake_redis, drain_with_test_session
+    db_session, make_change, fake_redis, drain_with_test_session
 ):
-    watch = await make_watch()
-    s1 = await make_snapshot(watch=watch, **_snapshot_kwargs("hash1"))
-    s2 = await make_snapshot(watch=watch, **_snapshot_kwargs("hash2"))
+    watch = await make_watch(db_session)
+    s1 = await make_snapshot(db_session, watch, **_snapshot_kwargs("hash1"))
+    s2 = await make_snapshot(db_session, watch, **_snapshot_kwargs("hash2"))
     await make_change(watch=watch, current_snapshot=s2, previous_snapshot=s1)
     await db_session.commit()
 

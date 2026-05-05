@@ -21,6 +21,7 @@ from src.workers.pipeline import (
     _run_check_pipeline,
     _to_signed64,
 )
+from tests.conftest import make_watch
 
 
 class TestToSigned64:
@@ -79,9 +80,9 @@ class TestExtractContent:
 @pytest.mark.integration
 class TestRunCheckPipeline:
     async def test_first_check_creates_snapshot(self, db_session, tmp_path):
-        watch = Watch(name="Test", url="https://example.com", content_type=ContentType.HTML)
-        db_session.add(watch)
-        await db_session.flush()
+        watch = await make_watch(
+            db_session, name="Test", url="https://example.com", content_type=ContentType.HTML
+        )
 
         storage = LocalStorage(base_dir=tmp_path)
         content = b"<html><body><p>Hello world</p></body></html>"
@@ -99,9 +100,9 @@ class TestRunCheckPipeline:
         assert result["chunk_count"] >= 1
 
     async def test_identical_content_no_change(self, db_session, tmp_path):
-        watch = Watch(name="Stable", url="https://example.com", content_type=ContentType.HTML)
-        db_session.add(watch)
-        await db_session.flush()
+        watch = await make_watch(
+            db_session, name="Stable", url="https://example.com", content_type=ContentType.HTML
+        )
 
         storage = LocalStorage(base_dir=tmp_path)
         content = b"<html><body><p>Same content</p></body></html>"
@@ -125,9 +126,9 @@ class TestRunCheckPipeline:
         assert result["is_changed"] is False
 
     async def test_different_content_detects_change(self, db_session, tmp_path):
-        watch = Watch(name="Changing", url="https://example.com", content_type=ContentType.HTML)
-        db_session.add(watch)
-        await db_session.flush()
+        watch = await make_watch(
+            db_session, name="Changing", url="https://example.com", content_type=ContentType.HTML
+        )
 
         storage = LocalStorage(base_dir=tmp_path)
 
@@ -151,9 +152,9 @@ class TestRunCheckPipeline:
         assert result["change_id"] is not None
 
     async def test_stores_raw_content(self, db_session, tmp_path):
-        watch = Watch(name="Storage", url="https://example.com", content_type=ContentType.HTML)
-        db_session.add(watch)
-        await db_session.flush()
+        watch = await make_watch(
+            db_session, name="Storage", url="https://example.com", content_type=ContentType.HTML
+        )
 
         storage = LocalStorage(base_dir=tmp_path)
         content = b"<html><body><p>Stored</p></body></html>"
@@ -171,14 +172,13 @@ class TestRunCheckPipeline:
 
     async def test_ignore_patterns_filter_chunks_in_pipeline(self, db_session, tmp_path):
         """Chunks matching ignore_patterns are excluded from diff and snapshot."""
-        watch = Watch(
+        watch = await make_watch(
+            db_session,
             name="Filtered",
             url="https://example.com",
             content_type=ContentType.HTML,
             fetch_config={"ignore_patterns": [r"Noise.*"]},
         )
-        db_session.add(watch)
-        await db_session.flush()
 
         storage = LocalStorage(base_dir=tmp_path)
         # First run: establishes baseline
@@ -219,9 +219,9 @@ class TestRunCheckPipeline:
 
     async def test_significance_stored_on_change_record(self, db_session, tmp_path):
         """Persisted Change record has correct significance value."""
-        watch = Watch(name="Sig", url="https://example.com", content_type=ContentType.HTML)
-        db_session.add(watch)
-        await db_session.flush()
+        watch = await make_watch(
+            db_session, name="Sig", url="https://example.com", content_type=ContentType.HTML
+        )
 
         storage = LocalStorage(base_dir=tmp_path)
         await _run_check_pipeline(
@@ -250,9 +250,9 @@ class TestRunCheckPipeline:
 
     async def test_change_metadata_includes_significance(self, db_session, tmp_path):
         """change_metadata returned by pipeline includes significance key."""
-        watch = Watch(name="SigMeta", url="https://example.com", content_type=ContentType.HTML)
-        db_session.add(watch)
-        await db_session.flush()
+        watch = await make_watch(
+            db_session, name="SigMeta", url="https://example.com", content_type=ContentType.HTML
+        )
 
         storage = LocalStorage(base_dir=tmp_path)
         await _run_check_pipeline(
@@ -278,9 +278,9 @@ class TestRunCheckPipeline:
 
     async def test_change_metadata_includes_change_id(self, db_session, tmp_path):
         """change_metadata returned by pipeline includes change_id key matching change_id result."""
-        watch = Watch(name="ChgIdMeta", url="https://example.com", content_type=ContentType.HTML)
-        db_session.add(watch)
-        await db_session.flush()
+        watch = await make_watch(
+            db_session, name="ChgIdMeta", url="https://example.com", content_type=ContentType.HTML
+        )
 
         storage = LocalStorage(base_dir=tmp_path)
         await _run_check_pipeline(
@@ -305,9 +305,9 @@ class TestRunCheckPipeline:
 
     async def test_change_insert_updates_last_changed_at(self, db_session, tmp_path):
         """DB trigger stamps watches.last_changed_at when a Change row is inserted."""
-        watch = Watch(name="Trigger", url="https://example.com", content_type=ContentType.HTML)
-        db_session.add(watch)
-        await db_session.flush()
+        watch = await make_watch(
+            db_session, name="Trigger", url="https://example.com", content_type=ContentType.HTML
+        )
         assert watch.last_changed_at is None
 
         storage = LocalStorage(base_dir=tmp_path)
@@ -340,9 +340,9 @@ class TestRunCheckPipeline:
         so no Change is created and the trigger never fires.
         Second pipeline run: identical content → fast-path hash match → no new snapshot or Change.
         """
-        watch = Watch(name="Stable2", url="https://example.com", content_type=ContentType.HTML)
-        db_session.add(watch)
-        await db_session.flush()
+        watch = await make_watch(
+            db_session, name="Stable2", url="https://example.com", content_type=ContentType.HTML
+        )
 
         storage = LocalStorage(base_dir=tmp_path)
         content = b"<html><body><p>Same</p></body></html>"
@@ -483,9 +483,9 @@ class TestComputeSignificance:
 class TestRunCheckPipelineScreenshot:
     async def test_screenshot_saved_when_capture_succeeds(self, db_session, tmp_path):
         """Pipeline sets screenshot_path on snapshot when capture returns bytes."""
-        watch = Watch(name="Shot", url="https://example.com", content_type=ContentType.HTML)
-        db_session.add(watch)
-        await db_session.flush()
+        watch = await make_watch(
+            db_session, name="Shot", url="https://example.com", content_type=ContentType.HTML
+        )
 
         fake_png = b"\x89PNG\r\nfake"
         fake_result = ScreenshotResult(png_bytes=fake_png, browser="Chromium 130.0.0")
@@ -519,9 +519,9 @@ class TestRunCheckPipelineScreenshot:
 
     async def test_screenshot_path_none_when_capture_fails(self, db_session, tmp_path):
         """Pipeline leaves screenshot_path null when capture returns None."""
-        watch = Watch(name="NoShot", url="https://example.com", content_type=ContentType.HTML)
-        db_session.add(watch)
-        await db_session.flush()
+        watch = await make_watch(
+            db_session, name="NoShot", url="https://example.com", content_type=ContentType.HTML
+        )
 
         storage = LocalStorage(base_dir=tmp_path)
 
@@ -543,9 +543,9 @@ class TestRunCheckPipelineScreenshot:
 
     async def test_pipeline_succeeds_when_screenshot_raises(self, db_session, tmp_path):
         """Screenshot failure never propagates — pipeline still returns a snapshot."""
-        watch = Watch(name="CrashShot", url="https://example.com", content_type=ContentType.HTML)
-        db_session.add(watch)
-        await db_session.flush()
+        watch = await make_watch(
+            db_session, name="CrashShot", url="https://example.com", content_type=ContentType.HTML
+        )
 
         storage = LocalStorage(base_dir=tmp_path)
 
@@ -593,14 +593,13 @@ class TestRunCheckPipelineScreenshot:
             )
             fetch_config = None
 
-        watch = Watch(
+        watch = await make_watch(
+            db_session,
             name="NonHTML",
             url="https://example.com/file",
             content_type=content_type,
             fetch_config=fetch_config,
         )
-        db_session.add(watch)
-        await db_session.flush()
 
         storage = LocalStorage(base_dir=tmp_path)
         mock_capture = AsyncMock(return_value=ScreenshotResult(png_bytes=b"fakepng", browser="x"))

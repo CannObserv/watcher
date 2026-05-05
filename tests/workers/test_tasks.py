@@ -30,6 +30,7 @@ from src.workers.tasks import (
     check_watch,
     schedule_tick,
 )
+from tests.conftest import make_watch
 
 pytestmark = pytest.mark.integration
 
@@ -142,9 +143,9 @@ class TestCheckPipeline:
 
     async def test_first_check_creates_snapshot(self, db_session, tmp_path):
         """First check should create a snapshot and report is_changed=True."""
-        watch = Watch(name="Test", url="https://example.com", content_type=ContentType.HTML)
-        db_session.add(watch)
-        await db_session.flush()
+        watch = await make_watch(
+            db_session, name="Test", url="https://example.com", content_type=ContentType.HTML
+        )
 
         storage = LocalStorage(base_dir=tmp_path)
         content = b"<html><body><p>Hello world</p></body></html>"
@@ -163,9 +164,9 @@ class TestCheckPipeline:
 
     async def test_identical_content_no_change(self, db_session, tmp_path):
         """Second check with identical content should report is_changed=False."""
-        watch = Watch(name="Stable", url="https://example.com", content_type=ContentType.HTML)
-        db_session.add(watch)
-        await db_session.flush()
+        watch = await make_watch(
+            db_session, name="Stable", url="https://example.com", content_type=ContentType.HTML
+        )
 
         storage = LocalStorage(base_dir=tmp_path)
         content = b"<html><body><p>Same content</p></body></html>"
@@ -190,9 +191,9 @@ class TestCheckPipeline:
 
     async def test_different_content_detects_change(self, db_session, tmp_path):
         """Different content on second check should detect a change."""
-        watch = Watch(name="Changing", url="https://example.com", content_type=ContentType.HTML)
-        db_session.add(watch)
-        await db_session.flush()
+        watch = await make_watch(
+            db_session, name="Changing", url="https://example.com", content_type=ContentType.HTML
+        )
 
         storage = LocalStorage(base_dir=tmp_path)
 
@@ -217,9 +218,9 @@ class TestCheckPipeline:
 
     async def test_stores_raw_content(self, db_session, tmp_path):
         """Pipeline should store raw content retrievable via storage backend."""
-        watch = Watch(name="Storage", url="https://example.com", content_type=ContentType.HTML)
-        db_session.add(watch)
-        await db_session.flush()
+        watch = await make_watch(
+            db_session, name="Storage", url="https://example.com", content_type=ContentType.HTML
+        )
 
         storage = LocalStorage(base_dir=tmp_path)
         content = b"<html><body><p>Stored</p></body></html>"
@@ -246,13 +247,12 @@ class TestCheckWatchTask:
         """A 429 response should report rate limiting and raise ConnectionError."""
         import src.workers.tasks as tasks_mod
 
-        watch = Watch(
+        watch = await make_watch(
+            db_session,
             name="Rate Limited",
             url="https://example.com/limited",
             content_type=ContentType.HTML,
         )
-        db_session.add(watch)
-        await db_session.flush()
 
         mock_response = httpx.Response(
             429,
@@ -277,14 +277,13 @@ class TestCheckWatchTask:
         """Inactive watches should be skipped without fetching."""
         import src.workers.tasks as tasks_mod
 
-        watch = Watch(
+        watch = await make_watch(
+            db_session,
             name="Inactive",
             url="https://example.com/inactive",
             content_type=ContentType.HTML,
             is_active=False,
         )
-        db_session.add(watch)
-        await db_session.flush()
 
         monkeypatch.setattr(tasks_mod, "default_storage", LocalStorage(base_dir=tmp_path))
         monkeypatch.setattr(
@@ -298,13 +297,12 @@ class TestCheckWatchTask:
         """Non-success HTTP status should log audit and return error."""
         import src.workers.tasks as tasks_mod
 
-        watch = Watch(
+        watch = await make_watch(
+            db_session,
             name="Server Error",
             url="https://example.com/error",
             content_type=ContentType.HTML,
         )
-        db_session.add(watch)
-        await db_session.flush()
 
         mock_response = httpx.Response(
             500,
@@ -343,13 +341,12 @@ class TestCheckWatchSavepointBoundary:
         and before dispatch_notifications(), ensuring pipeline results survive a
         notification failure.
         """
-        watch = Watch(
+        watch = await make_watch(
+            db_session,
             name="Savepoint Test",
             url="https://example.com/savepoint",
             content_type=ContentType.HTML,
         )
-        db_session.add(watch)
-        await db_session.flush()
 
         # Add an active notification config so dispatch is triggered
         nc = WatchNotificationConfig(
@@ -426,15 +423,14 @@ class TestScheduleTickWithProfiles:
 
         # Watch with 1-day base interval, last checked 2 hours ago
         now = datetime(2026, 4, 10, 12, 0, 0, tzinfo=UTC)
-        watch = Watch(
+        watch = await make_watch(
+            db_session,
             name="Profiled",
             url="https://example.com/agenda",
             content_type=ContentType.HTML,
             schedule_config={"interval": "1d"},
             last_checked_at=now - timedelta(hours=2),
         )
-        db_session.add(watch)
-        await db_session.flush()
 
         # Event profile: 7 days before April 15 → 1h interval
         profile = TemporalProfile(
@@ -475,15 +471,14 @@ class TestScheduleTickWithProfiles:
 
         # Event was April 5, today is April 10 → past
         now = datetime(2026, 4, 10, 12, 0, 0, tzinfo=UTC)
-        watch = Watch(
+        watch = await make_watch(
+            db_session,
             name="Expired Event",
             url="https://example.com/past-event",
             content_type=ContentType.HTML,
             schedule_config={"interval": "1d"},
             last_checked_at=now - timedelta(hours=25),
         )
-        db_session.add(watch)
-        await db_session.flush()
 
         profile = TemporalProfile(
             watch_id=watch.id,
@@ -520,15 +515,14 @@ class TestScheduleTickWithProfiles:
     async def test_post_action_archive_sets_is_archived(self, db_session, monkeypatch):
         """Archive post-action sets both is_active=False and is_archived=True."""
         now = datetime(2026, 4, 10, 12, 0, 0, tzinfo=UTC)
-        watch = Watch(
+        watch = await make_watch(
+            db_session,
             name="Archive Event",
             url="https://example.com/archive-event",
             content_type=ContentType.HTML,
             schedule_config={"interval": "1d"},
             last_checked_at=now - timedelta(hours=25),
         )
-        db_session.add(watch)
-        await db_session.flush()
 
         profile = TemporalProfile(
             watch_id=watch.id,
@@ -561,15 +555,14 @@ class TestScheduleTickWithProfiles:
     async def test_post_action_deactivate_does_not_set_is_archived(self, db_session, monkeypatch):
         """Deactivate post-action sets is_active=False but leaves is_archived=False."""
         now = datetime(2026, 4, 10, 12, 0, 0, tzinfo=UTC)
-        watch = Watch(
+        watch = await make_watch(
+            db_session,
             name="Deactivate Event",
             url="https://example.com/deact-event",
             content_type=ContentType.HTML,
             schedule_config={"interval": "1d"},
             last_checked_at=now - timedelta(hours=25),
         )
-        db_session.add(watch)
-        await db_session.flush()
 
         profile = TemporalProfile(
             watch_id=watch.id,
@@ -681,14 +674,14 @@ class TestScheduleTickInactiveDomain:
 
         domain = Domain(name="paused.com", is_active=False)
         db_session.add(domain)
-        watch = Watch(
+        await make_watch(
+            db_session,
             name="On Paused Domain",
             url="https://paused.com/p",
             content_type=ContentType.HTML,
             effective_domain="paused.com",
             is_active=True,
         )
-        db_session.add(watch)
         await db_session.commit()
 
         monkeypatch.setattr(
@@ -711,14 +704,14 @@ class TestScheduleTickInactiveDomain:
 
         domain = Domain(name="active-ctrl.com", is_active=True)
         db_session.add(domain)
-        watch = Watch(
+        watch = await make_watch(
+            db_session,
             name="On Active Domain",
             url="https://active-ctrl.com/p",
             content_type=ContentType.HTML,
             effective_domain="active-ctrl.com",
             is_active=True,
         )
-        db_session.add(watch)
         await db_session.commit()
 
         monkeypatch.setattr(
@@ -746,14 +739,14 @@ class TestCheckWatchInactiveDomain:
 
         domain = Domain(name="skipped.com", is_active=False)
         db_session.add(domain)
-        watch = Watch(
+        watch = await make_watch(
+            db_session,
             name="Domain Inactive Watch",
             url="https://skipped.com/p",
             content_type=ContentType.HTML,
             effective_domain="skipped.com",
             is_active=True,
         )
-        db_session.add(watch)
         await db_session.commit()
 
         monkeypatch.setattr(tasks_mod, "default_storage", LocalStorage(base_dir=tmp_path))
@@ -772,13 +765,13 @@ class TestCheckWatchHealthTransitions:
         self, db_session, monkeypatch
     ):
         """First fetch failure transitions health_status to ERROR and notifies."""
-        watch = Watch(
+        watch = await make_watch(
+            db_session,
             name="Health Test",
             url="https://example.com",
             content_type=ContentType.HTML,
             health_status=WatchHealthStatus.OK,
         )
-        db_session.add(watch)
         await db_session.commit()
         await db_session.refresh(watch)
 
@@ -807,13 +800,13 @@ class TestCheckWatchHealthTransitions:
 
     async def test_repeated_failure_does_not_emit_watch_error_again(self, db_session, monkeypatch):
         """Repeated failures after first do NOT re-emit watch_error."""
-        watch = Watch(
+        watch = await make_watch(
+            db_session,
             name="Already Error",
             url="https://example.com",
             content_type=ContentType.HTML,
             health_status=WatchHealthStatus.ERROR,
         )
-        db_session.add(watch)
         await db_session.commit()
         await db_session.refresh(watch)
 
@@ -840,13 +833,13 @@ class TestCheckWatchHealthTransitions:
 
     async def test_recovery_emits_watch_recovered(self, db_session, monkeypatch, tmp_path):
         """Successful fetch after ERROR state emits watch_recovered."""
-        watch = Watch(
+        watch = await make_watch(
+            db_session,
             name="Recovering",
             url="https://example.com",
             content_type=ContentType.HTML,
             health_status=WatchHealthStatus.ERROR,
         )
-        db_session.add(watch)
         await db_session.commit()
         await db_session.refresh(watch)
 
@@ -890,15 +883,14 @@ class TestCheckWatchHealthTransitions:
         """check_watch enriches change_detected metadata with effective_domain + check_interval."""
         import src.workers.tasks as tasks_mod
 
-        watch = Watch(
+        watch = await make_watch(
+            db_session,
             name="Enrichment Test",
             url="https://example.com/enrich",
             content_type=ContentType.HTML,
             effective_domain="example.com",
             schedule_config={"interval": "1h"},
         )
-        db_session.add(watch)
-        await db_session.flush()
 
         storage = LocalStorage(base_dir=tmp_path)
         await _run_check_pipeline(

@@ -6,22 +6,46 @@ import pytest
 from sqlalchemy import select
 
 from src.core.differ import ChangeStatus, ChunkFingerprint, diff_chunks
-from src.core.extractors.base import Chunk
+from src.core.info_resolver import ResolvedInfoSpec
 from src.core.models.change import Change
 from src.core.models.snapshot import Snapshot
-from src.core.models.watch import ContentType, Watch
+from src.core.models.watch import ContentType
 from src.core.screenshot import ScreenshotResult
 from src.core.storage import LocalStorage
 from src.workers.pipeline import (
     _EXT_MAP,
-    _EXTRACTOR_MAP,
-    _apply_ignore_patterns,
     _compute_significance,
-    _extract_content,
+    _extract_with_spec,
+    _extraction_config_from_spec,
     _run_check_pipeline,
     _to_signed64,
 )
 from tests.conftest import make_watch
+
+
+def _resolved(
+    *,
+    info_item_id: str = "01TESTITEM00000000000000XX",
+    info_spec_id: str = "01TESTSPEC00000000000000XX",
+    url: str = "https://example.com",
+    algorithm: str = "full_page",
+    selector: str | None = None,
+) -> ResolvedInfoSpec:
+    """Build a ResolvedInfoSpec stand-in for tests that drive _run_check_pipeline directly."""
+    extraction: dict = {"algorithm": algorithm}
+    if selector is not None:
+        extraction["selector"] = selector
+    document = {
+        "schema_version": 1,
+        "target": {"url": url},
+        "extraction": extraction,
+        "fingerprint": {"algorithm": "simhash"},
+    }
+    return ResolvedInfoSpec(
+        info_item_id=info_item_id,
+        info_spec_id=info_spec_id,
+        document=document,
+    )
 
 
 class TestToSigned64:
@@ -41,43 +65,43 @@ class TestToSigned64:
 
 
 class TestExtractorMap:
-    def test_ext_map_has_known_keys(self):
-        assert "html" in _EXT_MAP
-        assert "pdf" in _EXT_MAP
-        assert "file" in _EXT_MAP
-
-    def test_extractor_map_matches_ext_map_keys(self):
-        assert set(_EXTRACTOR_MAP.keys()) == set(_EXT_MAP.keys())
+    def test_ext_map_has_html_only_in_phase2c(self):
+        """Phase 2c: only HTML survives the InfoSpec cutover."""
+        assert _EXT_MAP == {"html": "html"}
 
 
-@pytest.mark.skip(
-    reason="Phase 2c — _extract_content rewires onto InfoSpec extraction in Task 7 (#138)."
-)
-class TestExtractContent:
-    async def test_extracts_html_content(self):
-        watch = Watch(name="Test", url="https://example.com", content_type=ContentType.HTML)
-        result = await _extract_content(watch, b"<html><body><p>Hello</p></body></html>")
+class TestExtractionConfigFromSpec:
+    def test_full_page_yields_empty_selectors(self):
+        config = _extraction_config_from_spec({"extraction": {"algorithm": "full_page"}})
+        assert config == {"selectors": []}
+
+    def test_css_selector_yields_single_selector_list(self):
+        config = _extraction_config_from_spec(
+            {"extraction": {"algorithm": "css", "selector": ".target"}}
+        )
+        assert config == {"selectors": [".target"]}
+
+    def test_missing_extraction_block_defaults_to_full_page(self):
+        config = _extraction_config_from_spec({})
+        assert config == {"selectors": []}
+
+
+class TestExtractWithSpec:
+    async def test_extracts_html_with_full_page_algorithm(self):
+        document = {"extraction": {"algorithm": "full_page"}}
+        result = await _extract_with_spec(b"<html><body><p>Hello</p></body></html>", document)
         assert len(result.chunks) >= 1
         assert any("Hello" in c.text for c in result.chunks)
 
-    async def test_extracts_file_content(self):
-        import csv
-        import io
-
-        buf = io.StringIO()
-        writer = csv.writer(buf)
-        writer.writerow(["name", "value"])
-        writer.writerow(["foo", "1"])
-        csv_bytes = buf.getvalue().encode()
-
-        watch = Watch(
-            name="CSV",
-            url="https://example.com/data.csv",
-            content_type=ContentType.FILE,
-            fetch_config={"file_format": "csv"},
+    async def test_css_selector_filters_to_matching_section(self):
+        document = {"extraction": {"algorithm": "css", "selector": ".target"}}
+        result = await _extract_with_spec(
+            b"<html><body><div class='target'>kept</div><div>dropped</div></body></html>",
+            document,
         )
-        result = await _extract_content(watch, csv_bytes)
-        assert len(result.chunks) >= 1
+        joined = " ".join(c.text for c in result.chunks)
+        assert "kept" in joined
+        assert "dropped" not in joined
 
 
 @pytest.mark.integration
@@ -97,6 +121,7 @@ class TestRunCheckPipeline:
             fetch_duration_ms=100,
             storage=storage,
             session=db_session,
+            resolved=_resolved(),
         )
         assert result["snapshot_id"] is not None
         assert result["is_changed"] is True
@@ -117,6 +142,7 @@ class TestRunCheckPipeline:
             fetch_duration_ms=100,
             storage=storage,
             session=db_session,
+            resolved=_resolved(),
         )
         result = await _run_check_pipeline(
             watch=watch,
@@ -125,6 +151,7 @@ class TestRunCheckPipeline:
             fetch_duration_ms=100,
             storage=storage,
             session=db_session,
+            resolved=_resolved(),
         )
         assert result["is_changed"] is False
 
@@ -142,6 +169,7 @@ class TestRunCheckPipeline:
             fetch_duration_ms=100,
             storage=storage,
             session=db_session,
+            resolved=_resolved(),
         )
         result = await _run_check_pipeline(
             watch=watch,
@@ -150,6 +178,7 @@ class TestRunCheckPipeline:
             fetch_duration_ms=100,
             storage=storage,
             session=db_session,
+            resolved=_resolved(),
         )
         assert result["is_changed"] is True
         assert result["change_id"] is not None
@@ -169,56 +198,10 @@ class TestRunCheckPipeline:
             fetch_duration_ms=100,
             storage=storage,
             session=db_session,
+            resolved=_resolved(),
         )
         stored = storage.load(result["storage_path"])
         assert stored == content
-
-    async def test_ignore_patterns_filter_chunks_in_pipeline(self, db_session, tmp_path):
-        """Chunks matching ignore_patterns are excluded from diff and snapshot."""
-        watch = await make_watch(
-            db_session,
-            name="Filtered",
-            url="https://example.com",
-            content_type=ContentType.HTML,
-            fetch_config={"ignore_patterns": [r"Noise.*"]},
-        )
-
-        storage = LocalStorage(base_dir=tmp_path)
-        # First run: establishes baseline
-        # Use <section> tags so the HTML extractor produces separate chunks
-        # (without them, the body text becomes a single chunk and fullmatch fails).
-        content_v1 = (
-            b"<html><body><section>Signal</section><section>Noise: ignored</section></body></html>"
-        )
-        result1 = await _run_check_pipeline(
-            watch=watch,
-            raw_content=content_v1,
-            fetcher_used="http",
-            fetch_duration_ms=100,
-            storage=storage,
-            session=db_session,
-        )
-        # chunk_count reflects filtered chunks only
-        assert result1["chunk_count"] >= 1
-
-        # Second run: only the noisy chunk changes; signal is stable
-        content_v2 = (
-            b"<html><body>"
-            b"<section>Signal</section>"
-            b"<section>Noise: also ignored</section>"
-            b"</body></html>"
-        )
-        result2 = await _run_check_pipeline(
-            watch=watch,
-            raw_content=content_v2,
-            fetcher_used="http",
-            fetch_duration_ms=100,
-            storage=storage,
-            session=db_session,
-        )
-        # Both runs produce a new snapshot (different raw hash), but since the
-        # matching chunk is filtered, no Change record should be created.
-        assert result2["change_id"] is None
 
     async def test_significance_stored_on_change_record(self, db_session, tmp_path):
         """Persisted Change record has correct significance value."""
@@ -234,6 +217,7 @@ class TestRunCheckPipeline:
             fetch_duration_ms=100,
             storage=storage,
             session=db_session,
+            resolved=_resolved(),
         )
         result2 = await _run_check_pipeline(
             watch=watch,
@@ -242,6 +226,7 @@ class TestRunCheckPipeline:
             fetch_duration_ms=100,
             storage=storage,
             session=db_session,
+            resolved=_resolved(),
         )
         assert result2["change_id"] is not None
 
@@ -250,6 +235,41 @@ class TestRunCheckPipeline:
         assert change is not None
         assert change.significance is not None
         assert 0.0 <= change.significance <= 1.0
+
+    async def test_change_persists_info_item_id_and_fingerprints(self, db_session, tmp_path):
+        """Change rows carry info_item_id, info_spec_id, and previous/current fingerprints."""
+        watch = await make_watch(
+            db_session, name="Fp", url="https://example.com", content_type=ContentType.HTML
+        )
+
+        storage = LocalStorage(base_dir=tmp_path)
+        spec = _resolved(info_item_id=str(watch.info_item_id))
+        await _run_check_pipeline(
+            watch=watch,
+            raw_content=b"<html><body><p>V1</p></body></html>",
+            fetcher_used="http",
+            fetch_duration_ms=100,
+            storage=storage,
+            session=db_session,
+            resolved=spec,
+        )
+        result2 = await _run_check_pipeline(
+            watch=watch,
+            raw_content=b"<html><body><p>V2 changed</p></body></html>",
+            fetcher_used="http",
+            fetch_duration_ms=100,
+            storage=storage,
+            session=db_session,
+            resolved=spec,
+        )
+        assert result2["change_id"] is not None
+        change = (
+            await db_session.execute(select(Change).where(Change.watch_id == watch.id))
+        ).scalar_one()
+        assert str(change.info_item_id) == str(watch.info_item_id)
+        assert str(change.info_spec_id) == spec.info_spec_id
+        assert change.previous_fingerprint is not None
+        assert change.current_fingerprint is not None
 
     async def test_change_metadata_includes_significance(self, db_session, tmp_path):
         """change_metadata returned by pipeline includes significance key."""
@@ -265,6 +285,7 @@ class TestRunCheckPipeline:
             fetch_duration_ms=100,
             storage=storage,
             session=db_session,
+            resolved=_resolved(),
         )
         result2 = await _run_check_pipeline(
             watch=watch,
@@ -273,6 +294,7 @@ class TestRunCheckPipeline:
             fetch_duration_ms=100,
             storage=storage,
             session=db_session,
+            resolved=_resolved(),
         )
         assert result2["change_id"] is not None
         assert "significance" in result2["change_metadata"]
@@ -293,6 +315,7 @@ class TestRunCheckPipeline:
             fetch_duration_ms=100,
             storage=storage,
             session=db_session,
+            resolved=_resolved(),
         )
         result2 = await _run_check_pipeline(
             watch=watch,
@@ -301,6 +324,7 @@ class TestRunCheckPipeline:
             fetch_duration_ms=100,
             storage=storage,
             session=db_session,
+            resolved=_resolved(),
         )
         assert result2["change_id"] is not None
         assert "change_id" in result2["change_metadata"]
@@ -321,6 +345,7 @@ class TestRunCheckPipeline:
             fetch_duration_ms=100,
             storage=storage,
             session=db_session,
+            resolved=_resolved(),
         )
         result2 = await _run_check_pipeline(
             watch=watch,
@@ -329,6 +354,7 @@ class TestRunCheckPipeline:
             fetch_duration_ms=100,
             storage=storage,
             session=db_session,
+            resolved=_resolved(),
         )
         assert result2["change_id"] is not None
 
@@ -357,6 +383,7 @@ class TestRunCheckPipeline:
             fetch_duration_ms=100,
             storage=storage,
             session=db_session,
+            resolved=_resolved(),
         )
         await _run_check_pipeline(
             watch=watch,
@@ -365,14 +392,10 @@ class TestRunCheckPipeline:
             fetch_duration_ms=100,
             storage=storage,
             session=db_session,
+            resolved=_resolved(),
         )
         await db_session.refresh(watch)
         assert watch.last_changed_at is None
-
-
-def _make_chunk(text: str, index: int = 0) -> Chunk:
-    """Helper to build a Chunk with given text."""
-    return Chunk(index=index, chunk_type="text", label=f"chunk-{index}", text=text)
 
 
 class TestModifiedMetadataInvariant:
@@ -425,37 +448,6 @@ class TestModifiedMetadataInvariant:
             )
 
 
-class TestApplyIgnorePatterns:
-    def test_matching_pattern_excludes_chunk(self):
-        chunks = [_make_chunk("foo bar"), _make_chunk("keep me", index=1)]
-        result = _apply_ignore_patterns(chunks, [r"foo bar"])
-        assert len(result) == 1
-        assert result[0].text == "keep me"
-
-    def test_non_matching_pattern_preserves_chunk(self):
-        chunks = [_make_chunk("hello world")]
-        result = _apply_ignore_patterns(chunks, [r"something else"])
-        assert len(result) == 1
-        assert result[0].text == "hello world"
-
-    def test_empty_patterns_returns_all_chunks(self):
-        chunks = [_make_chunk("a"), _make_chunk("b", index=1)]
-        result = _apply_ignore_patterns(chunks, [])
-        assert result == chunks
-
-    def test_partial_match_does_not_exclude(self):
-        """fullmatch required — partial regex hit must not drop the chunk."""
-        chunks = [_make_chunk("foo bar baz")]
-        result = _apply_ignore_patterns(chunks, [r"foo bar"])
-        assert len(result) == 1
-
-    def test_regex_pattern_matches(self):
-        chunks = [_make_chunk("2024-01-15"), _make_chunk("keep", index=1)]
-        result = _apply_ignore_patterns(chunks, [r"\d{4}-\d{2}-\d{2}"])
-        assert len(result) == 1
-        assert result[0].text == "keep"
-
-
 class TestComputeSignificance:
     def test_all_new_chunks_significance_zero(self):
         """No previous snapshot → all curr chunks are 'added' → 0.0."""
@@ -505,6 +497,7 @@ class TestRunCheckPipelineScreenshot:
                 fetch_duration_ms=100,
                 storage=storage,
                 session=db_session,
+                resolved=_resolved(url="https://example.com/screenshot"),
             )
 
         assert result["screenshot_path"] is not None
@@ -519,6 +512,32 @@ class TestRunCheckPipelineScreenshot:
         ).scalar_one()
         assert snap.screenshot_path == result["screenshot_path"]
         assert snap.screenshot_browser == "Chromium 130.0.0"
+
+    async def test_screenshot_uses_resolved_url(self, db_session, tmp_path):
+        """capture_screenshot is invoked with the InfoSpec target URL, not watch.url."""
+        watch = await make_watch(
+            db_session,
+            name="UrlSrc",
+            url="https://watch-row.example.com",
+            content_type=ContentType.HTML,
+        )
+
+        storage = LocalStorage(base_dir=tmp_path)
+        capture = AsyncMock(return_value=ScreenshotResult(png_bytes=b"png", browser="x"))
+        with patch("src.workers.pipeline.capture_screenshot", new=capture):
+            await _run_check_pipeline(
+                watch=watch,
+                raw_content=b"<html><body><p>Hi</p></body></html>",
+                fetcher_used="http",
+                fetch_duration_ms=100,
+                storage=storage,
+                session=db_session,
+                resolved=_resolved(url="https://from-spec.example.com"),
+            )
+
+        capture.assert_awaited_once()
+        args, _ = capture.call_args
+        assert args[0] == "https://from-spec.example.com"
 
     async def test_screenshot_path_none_when_capture_fails(self, db_session, tmp_path):
         """Pipeline leaves screenshot_path null when capture returns None."""
@@ -536,6 +555,7 @@ class TestRunCheckPipelineScreenshot:
                 fetch_duration_ms=100,
                 storage=storage,
                 session=db_session,
+                resolved=_resolved(),
             )
 
         assert result["screenshot_path"] is None
@@ -563,59 +583,8 @@ class TestRunCheckPipelineScreenshot:
                 fetch_duration_ms=100,
                 storage=storage,
                 session=db_session,
+                resolved=_resolved(),
             )
 
         # The pipeline result should still have a snapshot_id
         assert result["snapshot_id"] is not None
-
-    @pytest.mark.parametrize("content_type", [ContentType.PDF, ContentType.FILE])
-    async def test_screenshot_skipped_for_non_html(self, db_session, tmp_path, content_type):
-        """Screenshot step is skipped entirely for non-HTML content types."""
-        import csv
-        import io
-
-        if content_type == ContentType.FILE:
-            buf = io.StringIO()
-            csv.writer(buf).writerows([["col"], ["val"]])
-            raw = buf.getvalue().encode()
-            fetch_config = {"file_format": "csv"}
-        else:
-            # Minimal valid single-page PDF
-            raw = (
-                b"%PDF-1.4\n"
-                b"1 0 obj\n<</Type /Catalog /Pages 2 0 R>>\nendobj\n"
-                b"2 0 obj\n<</Type /Pages /Kids [3 0 R] /Count 1>>\nendobj\n"
-                b"3 0 obj\n<</Type /Page /Parent 2 0 R /MediaBox [0 0 612 792]>>\nendobj\n"
-                b"xref\n0 4\n"
-                b"0000000000 65535 f \n"
-                b"0000000009 00000 n \n"
-                b"0000000058 00000 n \n"
-                b"0000000115 00000 n \n"
-                b"trailer\n<</Size 4 /Root 1 0 R>>\n"
-                b"startxref\n190\n%%EOF\n"
-            )
-            fetch_config = None
-
-        watch = await make_watch(
-            db_session,
-            name="NonHTML",
-            url="https://example.com/file",
-            content_type=content_type,
-            fetch_config=fetch_config,
-        )
-
-        storage = LocalStorage(base_dir=tmp_path)
-        mock_capture = AsyncMock(return_value=ScreenshotResult(png_bytes=b"fakepng", browser="x"))
-
-        with patch("src.workers.pipeline.capture_screenshot", new=mock_capture):
-            result = await _run_check_pipeline(
-                watch=watch,
-                raw_content=raw,
-                fetcher_used="http",
-                fetch_duration_ms=100,
-                storage=storage,
-                session=db_session,
-            )
-
-        mock_capture.assert_not_called()
-        assert result["screenshot_path"] is None

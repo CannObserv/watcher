@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import httpx
 import pytest
 from cryptography.fernet import Fernet
+from information_client.errors import NotFound
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -136,6 +137,32 @@ def _mock_session_factory(db_session: AsyncSession):
     return factory
 
 
+def _mock_info_client(url: str = "https://example.com"):
+    """Build a MagicMock InformationClient that returns a stable primary InfoSpec.
+
+    For legacy tests that don't care about spec contents — the resolver will
+    return a full_page InfoSpec with a fixed URL the fetcher mock then ignores
+    (those tests intercept the fetcher with httpx MockTransport).
+    """
+    fake_doc = MagicMock()
+    fake_doc.to_dict = MagicMock(
+        return_value={
+            "schema_version": 1,
+            "target": {"url": url},
+            "extraction": {"algorithm": "full_page"},
+            "fingerprint": {"algorithm": "simhash"},
+        }
+    )
+    fake_spec = MagicMock()
+    fake_spec.info_item_id = "01TESTITEM00000000000000XX"
+    fake_spec.info_spec_id = "01TESTSPEC00000000000000XX"
+    fake_spec.document = fake_doc
+
+    fake_client = MagicMock()
+    fake_client.get_primary_info_spec = AsyncMock(return_value=fake_spec)
+    return fake_client
+
+
 class TestCheckPipeline:
     """Integration tests for _run_check_pipeline."""
 
@@ -260,7 +287,10 @@ class TestCheckWatchTask:
         mock_client = httpx.AsyncClient(transport=httpx.MockTransport(lambda req: mock_response))
 
         fast_limiter = DomainRateLimiter(min_interval=0.0)
-        mock_registry = ServiceRegistry(fetcher=HttpFetcher(client=mock_client))
+        mock_registry = ServiceRegistry(
+            fetcher=HttpFetcher(client=mock_client),
+            information_client=_mock_info_client(),
+        )
         monkeypatch.setattr(tasks_mod, "get_registry", lambda: mock_registry)
         monkeypatch.setattr(tasks_mod, "get_rate_limiter", lambda: fast_limiter)
         monkeypatch.setattr(tasks_mod, "default_storage", LocalStorage(base_dir=tmp_path))
@@ -310,7 +340,10 @@ class TestCheckWatchTask:
         mock_client = httpx.AsyncClient(transport=httpx.MockTransport(lambda req: mock_response))
 
         fast_limiter = DomainRateLimiter(min_interval=0.0)
-        mock_registry = ServiceRegistry(fetcher=HttpFetcher(client=mock_client))
+        mock_registry = ServiceRegistry(
+            fetcher=HttpFetcher(client=mock_client),
+            information_client=_mock_info_client(),
+        )
         monkeypatch.setattr(tasks_mod, "get_registry", lambda: mock_registry)
         monkeypatch.setattr(tasks_mod, "get_rate_limiter", lambda: fast_limiter)
         monkeypatch.setattr(tasks_mod, "default_storage", LocalStorage(base_dir=tmp_path))
@@ -378,7 +411,10 @@ class TestCheckWatchSavepointBoundary:
         mock_client = httpx.AsyncClient(transport=httpx.MockTransport(lambda req: mock_response))
 
         fast_limiter = DomainRateLimiter(min_interval=0.0)
-        mock_registry = ServiceRegistry(fetcher=HttpFetcher(client=mock_client))
+        mock_registry = ServiceRegistry(
+            fetcher=HttpFetcher(client=mock_client),
+            information_client=_mock_info_client(),
+        )
         monkeypatch.setattr(tasks_mod, "get_registry", lambda: mock_registry)
         monkeypatch.setattr(tasks_mod, "get_rate_limiter", lambda: fast_limiter)
         monkeypatch.setattr(tasks_mod, "default_storage", LocalStorage(base_dir=tmp_path))
@@ -789,7 +825,7 @@ class TestCheckWatchHealthTransitions:
             tasks_mod, "get_session_factory", lambda: _mock_session_factory(db_session)
         )
 
-        reg = ServiceRegistry(fetcher=mock_fetcher)
+        reg = ServiceRegistry(fetcher=mock_fetcher, information_client=_mock_info_client())
         await check_watch(str(watch.id), registry=reg)
 
         await db_session.refresh(watch)
@@ -824,7 +860,7 @@ class TestCheckWatchHealthTransitions:
             tasks_mod, "get_session_factory", lambda: _mock_session_factory(db_session)
         )
 
-        reg = ServiceRegistry(fetcher=mock_fetcher)
+        reg = ServiceRegistry(fetcher=mock_fetcher, information_client=_mock_info_client())
         await check_watch(str(watch.id), registry=reg)
 
         assert not any(e.event_type == WatchEventType.WATCH_ERROR for e in dispatched_events)
@@ -867,7 +903,7 @@ class TestCheckWatchHealthTransitions:
         mock_storage.exists = MagicMock(return_value=False)
         monkeypatch.setattr(tasks_mod, "default_storage", mock_storage)
 
-        reg = ServiceRegistry(fetcher=mock_fetcher)
+        reg = ServiceRegistry(fetcher=mock_fetcher, information_client=_mock_info_client())
         await check_watch(str(watch.id), registry=reg)
 
         await db_session.refresh(watch)
@@ -908,7 +944,10 @@ class TestCheckWatchHealthTransitions:
         )
         mock_client = httpx.AsyncClient(transport=httpx.MockTransport(lambda req: mock_response))
         fast_limiter = DomainRateLimiter(min_interval=0.0)
-        mock_registry = ServiceRegistry(fetcher=HttpFetcher(client=mock_client))
+        mock_registry = ServiceRegistry(
+            fetcher=HttpFetcher(client=mock_client),
+            information_client=_mock_info_client(),
+        )
         monkeypatch.setattr(tasks_mod, "get_registry", lambda: mock_registry)
         monkeypatch.setattr(tasks_mod, "get_rate_limiter", lambda: fast_limiter)
         monkeypatch.setattr(tasks_mod, "default_storage", LocalStorage(base_dir=tmp_path))
@@ -929,3 +968,190 @@ class TestCheckWatchHealthTransitions:
         assert len(change_events) == 1
         assert change_events[0].metadata["effective_domain"] == "example.com"
         assert change_events[0].metadata["check_interval"] == "1h"
+
+
+def _make_fake_spec(
+    *,
+    info_item_id: str,
+    info_spec_id: str = "01TESTSPEC0000000000000000",
+    url: str = "https://from-spec.example.com",
+    timeout_seconds: int | None = None,
+    render: bool | None = None,
+    extraction_algorithm: str = "full_page",
+    selector: str | None = None,
+):
+    """Build a MagicMock matching information_client.InfoSpecOut shape."""
+    fetch_block: dict = {}
+    if timeout_seconds is not None:
+        fetch_block["timeout_seconds"] = timeout_seconds
+    if render is not None:
+        fetch_block["render"] = render
+    target = {"url": url}
+    if fetch_block:
+        target["fetch"] = fetch_block
+    extraction: dict = {"algorithm": extraction_algorithm}
+    if selector is not None:
+        extraction["selector"] = selector
+    document = {
+        "schema_version": 1,
+        "target": target,
+        "extraction": extraction,
+        "fingerprint": {"algorithm": "simhash"},
+    }
+    fake_doc = MagicMock()
+    fake_doc.to_dict = MagicMock(return_value=document)
+    fake_spec = MagicMock()
+    fake_spec.info_item_id = info_item_id
+    fake_spec.info_spec_id = info_spec_id
+    fake_spec.document = fake_doc
+    return fake_spec
+
+
+def _fake_fetch_result(
+    *,
+    content: bytes = b"<html><body><p>hi</p></body></html>",
+    status_code: int = 200,
+    fetcher_used: str = "http",
+    duration_ms: int = 10,
+):
+    """Build a MagicMock matching FetchResult shape."""
+    result = MagicMock()
+    result.content = content
+    result.status_code = status_code
+    result.is_success = 200 <= status_code < 400
+    result.fetcher_used = fetcher_used
+    result.duration_ms = duration_ms
+    result.headers = {}
+    return result
+
+
+class TestCheckWatchResolvesUrlViaSdk:
+    """check_watch must resolve URL/fetch defaults from the InfoSpec, not the Watch row."""
+
+    async def test_check_watch_resolves_url_via_sdk(self, db_session, tmp_path, monkeypatch):
+        """check_watch fetches the URL from the primary InfoSpec, not from the Watch row."""
+        watch = await make_watch(db_session, name="SdkUrl", url="https://from-spec.example.com")
+
+        fetch_mock = AsyncMock(return_value=_fake_fetch_result())
+        mock_fetcher = MagicMock()
+        mock_fetcher.fetch = fetch_mock
+
+        fake_spec = _make_fake_spec(
+            info_item_id=str(watch.info_item_id),
+            url="https://from-spec.example.com",
+            timeout_seconds=45,
+        )
+        fake_client = MagicMock()
+        fake_client.get_primary_info_spec = AsyncMock(return_value=fake_spec)
+
+        reg = ServiceRegistry(fetcher=mock_fetcher, information_client=fake_client)
+        monkeypatch.setattr(tasks_mod, "default_storage", LocalStorage(base_dir=tmp_path))
+        monkeypatch.setattr(
+            tasks_mod, "get_session_factory", lambda: _mock_session_factory(db_session)
+        )
+
+        await check_watch(str(watch.id), registry=reg)
+
+        fetch_mock.assert_awaited_once()
+        args, kwargs = fetch_mock.call_args
+        # First positional arg or a `url=` kwarg should be the spec URL.
+        passed_url = args[0] if args else kwargs.get("url")
+        assert passed_url == "https://from-spec.example.com"
+        config = kwargs.get("config") or {}
+        assert config.get("timeout") == 45
+
+    async def test_check_watch_skips_when_info_item_missing(
+        self, db_session, tmp_path, monkeypatch
+    ):
+        """If the SDK 404s on info_item lookup, the watch is skipped (not retried)."""
+        watch = await make_watch(db_session, name="Missing")
+
+        mock_fetcher = MagicMock()
+        mock_fetcher.fetch = AsyncMock()
+
+        fake_client = MagicMock()
+        fake_client.get_primary_info_spec = AsyncMock(
+            side_effect=NotFound("info_item not found", status_code=404, body="")
+        )
+
+        reg = ServiceRegistry(fetcher=mock_fetcher, information_client=fake_client)
+        monkeypatch.setattr(tasks_mod, "default_storage", LocalStorage(base_dir=tmp_path))
+        monkeypatch.setattr(
+            tasks_mod, "get_session_factory", lambda: _mock_session_factory(db_session)
+        )
+
+        result = await check_watch(str(watch.id), registry=reg)
+
+        assert result == {"skipped": True, "reason": "info_item_missing"}
+        mock_fetcher.fetch.assert_not_called()
+
+    async def test_check_watch_propagates_connection_error(self, db_session, tmp_path, monkeypatch):
+        """ConnectionError from the SDK propagates so Procrastinate retries."""
+        watch = await make_watch(db_session, name="ConnErr")
+
+        mock_fetcher = MagicMock()
+        mock_fetcher.fetch = AsyncMock()
+
+        fake_client = MagicMock()
+        fake_client.get_primary_info_spec = AsyncMock(
+            side_effect=httpx.ConnectError("Information service down")
+        )
+
+        reg = ServiceRegistry(fetcher=mock_fetcher, information_client=fake_client)
+        monkeypatch.setattr(tasks_mod, "default_storage", LocalStorage(base_dir=tmp_path))
+        monkeypatch.setattr(
+            tasks_mod, "get_session_factory", lambda: _mock_session_factory(db_session)
+        )
+
+        with pytest.raises(httpx.ConnectError):
+            await check_watch(str(watch.id), registry=reg)
+
+    async def test_check_watch_force_refreshes_on_extraction_failure(
+        self, db_session, tmp_path, monkeypatch
+    ):
+        """Empty extraction triggers a force_refresh + one retry of extraction (not fetch).
+
+        First SDK call returns a stale spec whose CSS selector matches no chunks,
+        the second (with force_refresh=True) returns a fresh full_page spec that
+        matches. SDK called twice; fetcher called only once.
+        """
+        watch = await make_watch(db_session, name="Refresh")
+
+        # Content with no matching `.target` selector — first extraction returns 0 chunks.
+        content = b"<html><body><section>real</section></body></html>"
+        fetch_mock = AsyncMock(return_value=_fake_fetch_result(content=content))
+        mock_fetcher = MagicMock()
+        mock_fetcher.fetch = fetch_mock
+
+        # Stale spec with a selector that matches nothing.
+        stale_spec = _make_fake_spec(
+            info_item_id=str(watch.info_item_id),
+            url="https://example.com/refresh",
+            extraction_algorithm="css",
+            selector=".does-not-exist",
+        )
+        # Fresh spec with full_page extraction.
+        fresh_spec = _make_fake_spec(
+            info_item_id=str(watch.info_item_id),
+            url="https://example.com/refresh",
+            extraction_algorithm="full_page",
+        )
+
+        fake_client = MagicMock()
+        primary_mock = AsyncMock(side_effect=[stale_spec, fresh_spec])
+        fake_client.get_primary_info_spec = primary_mock
+
+        reg = ServiceRegistry(fetcher=mock_fetcher, information_client=fake_client)
+        monkeypatch.setattr(tasks_mod, "default_storage", LocalStorage(base_dir=tmp_path))
+        monkeypatch.setattr(
+            tasks_mod, "get_session_factory", lambda: _mock_session_factory(db_session)
+        )
+
+        await check_watch(str(watch.id), registry=reg)
+
+        # Fetcher called only once (no re-fetch).
+        assert fetch_mock.await_count == 1
+        # SDK called twice; second call must use force_refresh=True.
+        assert primary_mock.await_count == 2
+        second_call_kwargs = primary_mock.call_args_list[1].kwargs
+        assert second_call_kwargs.get("force_refresh") is True

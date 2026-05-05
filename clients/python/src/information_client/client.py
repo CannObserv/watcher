@@ -97,9 +97,28 @@ class InformationClient:
     # --- InfoItem endpoints ---
 
     async def create_info_item(
-        self, *, name: str, description: str | None = None, owner: str | None = None
-    ) -> InfoItemOut:
-        """Create a new InfoItem."""
+        self,
+        *,
+        name: str,
+        description: str | None = None,
+        owner: str | None = None,
+        initial_info_spec: dict | None = None,
+    ) -> InfoItemOut | _tools.InfoItemWithSpecResult:
+        """Create a new InfoItem.
+
+        When ``initial_info_spec`` is supplied, validates and atomically creates
+        a primary InfoSpec alongside the InfoItem (priority=1, active=True) and
+        returns ``InfoItemWithSpecResult`` carrying both IDs. Without it, returns
+        the existing ``InfoItemOut`` shape unchanged.
+        """
+        if initial_info_spec is not None:
+            return await _tools.create_info_item_atomic(
+                self,
+                name=name,
+                description=description,
+                owner=owner,
+                initial_info_spec=initial_info_spec,
+            )
         body = InfoItemCreate(name=name, description=description, owner=owner)
         response = await create_info_item_api_v1_info_items_post.asyncio_detailed(
             client=self._gen_client, body=body

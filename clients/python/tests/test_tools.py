@@ -108,3 +108,77 @@ async def test_find_info_item_empty_result(client):
         )
         results = await client.find_info_item("nothing")
     assert results == []
+
+
+@pytest.mark.asyncio
+async def test_create_info_item_atomic_returns_with_spec_result(client):
+    with respx.mock:
+        respx.post(f"{BASE_URL}/api/v1/info-items").mock(
+            return_value=httpx.Response(
+                201,
+                json={
+                    "info_item_id": "01HZZ00000000000000000000A",
+                    "info_spec_id": "01HZZ00000000000000000000B",
+                    "name": "X",
+                    "description": "desc",
+                    "owner": None,
+                    "created_at": "2026-05-04T00:00:00Z",
+                    "updated_at": "2026-05-04T00:00:00Z",
+                },
+            )
+        )
+        result = await client.create_info_item(
+            name="X",
+            description="desc",
+            initial_info_spec=VALID_DOC,
+        )
+    assert result.info_item_id == "01HZZ00000000000000000000A"
+    assert result.info_spec_id == "01HZZ00000000000000000000B"
+    assert result.name == "X"
+    assert result.description == "desc"
+
+
+@pytest.mark.asyncio
+async def test_create_info_item_atomic_sends_initial_info_spec(client):
+    with respx.mock:
+        route = respx.post(f"{BASE_URL}/api/v1/info-items").mock(
+            return_value=httpx.Response(
+                201,
+                json={
+                    "info_item_id": "01HZZ00000000000000000000A",
+                    "info_spec_id": "01HZZ00000000000000000000B",
+                    "name": "X",
+                    "description": None,
+                    "owner": None,
+                    "created_at": "2026-05-04T00:00:00Z",
+                    "updated_at": "2026-05-04T00:00:00Z",
+                },
+            )
+        )
+        await client.create_info_item(name="X", initial_info_spec=VALID_DOC)
+    sent_body = route.calls[0].request.read()
+    assert b'"initial_info_spec"' in sent_body
+    assert b'"schema_version"' in sent_body
+
+
+@pytest.mark.asyncio
+async def test_create_info_item_without_initial_spec_uses_legacy_path(client):
+    """Backwards-compat: omitting initial_info_spec routes through generated client."""
+    with respx.mock:
+        respx.post(f"{BASE_URL}/api/v1/info-items").mock(
+            return_value=httpx.Response(
+                201,
+                json={
+                    "info_item_id": "01HZZ00000000000000000000A",
+                    "name": "X",
+                    "description": None,
+                    "owner": None,
+                    "created_at": "2026-05-04T00:00:00Z",
+                    "updated_at": "2026-05-04T00:00:00Z",
+                },
+            )
+        )
+        result = await client.create_info_item(name="X")
+    # Returned object is the generated InfoItemOut (no info_spec_id attr).
+    assert result.name == "X"
+    assert not hasattr(result, "info_spec_id")

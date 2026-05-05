@@ -48,6 +48,8 @@ A systemd unit file is provided at `deploy/watcher.service`.
 
 ### Installation
 
+> **Install the Information service first** — see [§ Information Service](#information-service) below. `watcher.service` pre-warms an `InformationClient` in its lifespan and will crash-loop on missing `INFORMATION_API_KEY` until the Information service section is complete.
+
 ```bash
 # Create system env directory
 sudo mkdir -p /etc/watcher

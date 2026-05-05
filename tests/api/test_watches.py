@@ -93,7 +93,6 @@ class TestCreateWatch:
         assert response.status_code == 422
 
     async def test_create_watch_unknown_info_item_id_returns_422(self, client, info_client):
-        info_client.get_info_item.side_effect = NotFound("not found")
         response = await client.post(
             "/api/v1/watches",
             json={

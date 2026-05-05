@@ -278,28 +278,16 @@ def info_client(db_session, request):
 
     Routes pull the SDK via ``get_registry().get_information_client()``.
     This fixture swaps the registry singleton's cached client for an
-    AsyncMock whose ``get_info_item`` / ``get_primary_info_spec`` methods
+    AsyncMock whose ``list_info_items`` / ``get_primary_info_spec`` methods
     look up live rows in ``db_session`` so tests can seed an InfoItem +
     InfoSpec via ``make_info_item`` / ``make_info_spec`` and have routes
     behave exactly as they would against the real Information service.
 
     Tests that need to exercise SDK error paths can stub individual methods
-    on the returned mock (e.g. ``info_client.get_info_item.side_effect = NotFound``).
+    on the returned mock
+    (e.g. ``info_client.get_primary_info_spec.side_effect = NotFound``).
     """
     fake_client = MagicMock(spec=InformationClient)
-
-    async def _get_info_item(info_item_id: str):
-        item = await db_session.get(InfoItem, info_item_id)
-        if item is None:
-            raise NotFound(f"info_item {info_item_id} not found")
-        out = MagicMock()
-        out.info_item_id = str(item.info_item_id)
-        out.name = item.name
-        out.description = item.description
-        out.owner = None
-        out.created_at = item.created_at or datetime.now(UTC)
-        out.updated_at = item.updated_at or datetime.now(UTC)
-        return out
 
     async def _list_info_items():
         result = await db_session.execute(select(InfoItem))
@@ -333,7 +321,6 @@ def info_client(db_session, request):
         out.document = doc
         return out
 
-    fake_client.get_info_item = AsyncMock(side_effect=_get_info_item)
     fake_client.list_info_items = AsyncMock(side_effect=_list_info_items)
     fake_client.get_primary_info_spec = AsyncMock(side_effect=_get_primary_info_spec)
 

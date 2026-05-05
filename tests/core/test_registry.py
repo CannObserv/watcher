@@ -7,7 +7,7 @@ from information_client import InformationClient
 
 from src.core.extractors import CsvExcelExtractor, HtmlExtractor, PdfExtractor
 from src.core.fetchers.http import HttpFetcher
-from src.core.registry import ServiceRegistry
+from src.core.registry import ServiceRegistry, get_registry, set_registry_for_testing
 
 
 class TestServiceRegistryDefaults:
@@ -112,3 +112,26 @@ class TestServiceRegistryInformationClient:
         # Should not raise even if no client was ever built.
         await reg.aclose_information_client()
         assert reg._information_client is None
+
+
+class TestSetRegistryForTesting:
+    def test_set_registry_replaces_singleton(self):
+        custom = ServiceRegistry()
+        try:
+            set_registry_for_testing(custom)
+            assert get_registry() is custom
+        finally:
+            set_registry_for_testing(None)
+
+    def test_set_registry_none_resets_to_fresh_default(self):
+        sentinel = ServiceRegistry()
+        set_registry_for_testing(sentinel)
+        try:
+            assert get_registry() is sentinel
+        finally:
+            set_registry_for_testing(None)
+        rebuilt = get_registry()
+        assert rebuilt is not sentinel
+        assert isinstance(rebuilt, ServiceRegistry)
+        # Cleanup so other tests start from a fresh default.
+        set_registry_for_testing(None)

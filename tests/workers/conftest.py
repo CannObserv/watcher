@@ -1,4 +1,4 @@
-"""Shared fixtures and factories for tests/workers/."""
+"""Shared factories for tests/workers/."""
 
 from src.core.info_resolver import ResolvedInfoSpec
 

@@ -3,6 +3,7 @@
 import hashlib
 from datetime import UTC, datetime
 
+from information_client import InformationClient
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from ulid import ULID
@@ -164,7 +165,7 @@ async def _run_check_pipeline(
     session: AsyncSession,
     *,
     resolved: ResolvedInfoSpec,
-    info_client: object | None = None,
+    info_client: InformationClient | None = None,
 ) -> dict:
     """Core check pipeline: hash, extract, diff, store.
 
@@ -172,7 +173,9 @@ async def _run_check_pipeline(
 
     ``resolved`` carries the primary InfoSpec the caller already fetched (always
     supplied in production by ``check_watch``). ``info_client`` is optional; when
-    provided, it's used to force a spec re-fetch on zero-chunk extraction.
+    provided, it's used to force a spec re-fetch on zero-chunk extraction. When
+    ``info_client`` is omitted and extraction yields zero chunks, the empty
+    result is accepted as-is and proceeds to diff.
     """
     # 1. Compute content hash and doc-level simhash
     content_hash = hashlib.sha256(raw_content).hexdigest()

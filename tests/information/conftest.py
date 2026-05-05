@@ -34,7 +34,11 @@ async def test_engine():
         await conn.run_sync(Base.metadata.create_all)
     yield engine
     async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.drop_all)
+        # The Watcher test conftest may have created ``public.watches`` with
+        # an FK to ``information.info_items``; ``DROP SCHEMA ... CASCADE``
+        # drops the FK constraint along with the InfoItem tables. Skip
+        # ``Base.metadata.drop_all`` since CASCADE handles the InformationBase
+        # tables directly.
         await conn.execute(text("DROP SCHEMA IF EXISTS information CASCADE"))
     await engine.dispose()
 

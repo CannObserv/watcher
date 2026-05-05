@@ -79,7 +79,11 @@ async def test_engine():
         # would create in production.
         await conn.execute(text("CREATE SCHEMA IF NOT EXISTS information"))
         await conn.run_sync(InformationBase.metadata.create_all)
-        await conn.run_sync(Base.metadata.create_all)
+        # ``Base.metadata`` carries a stub ``information.info_items`` table
+        # (see ``src/core/models/watch.py``). Restrict ``create_all`` to
+        # public-schema tables so we don't redefine InformationBase's table.
+        watcher_tables = [t for t in Base.metadata.sorted_tables if t.schema in (None, "public")]
+        await conn.run_sync(Base.metadata.create_all, tables=watcher_tables)
         # DB triggers are not part of the ORM model; recreate them here to mirror migrations.
         await conn.execute(
             text("""
@@ -104,7 +108,13 @@ async def test_engine():
         )
     yield engine
     async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.drop_all)
+        # ``Base.metadata`` carries a stub ``information.info_items`` table
+        # (see ``src/core/models/watch.py``) so the cross-schema FK on
+        # ``watches.info_item_id`` resolves at import time. Drop only
+        # public-schema tables here; the Information service owns
+        # ``information.*`` and is dropped separately below.
+        watcher_tables = [t for t in Base.metadata.sorted_tables if t.schema in (None, "public")]
+        await conn.run_sync(Base.metadata.drop_all, tables=watcher_tables)
         await conn.run_sync(InformationBase.metadata.drop_all)
         await conn.execute(text("DROP SCHEMA IF EXISTS information CASCADE"))
     await engine.dispose()

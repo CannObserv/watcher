@@ -3,12 +3,29 @@
 import enum
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, String, Text
+from sqlalchemy import Boolean, Column, DateTime, ForeignKey, String, Table, Text
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.orm import Mapped, mapped_column, validates
 from ulid import ULID
 
 from src.core.models.base import Base, TimestampMixin, ULIDType, generate_ulid
+
+# Cross-schema FK resolution stub.
+#
+# ``watches.info_item_id`` references ``information.info_items.info_item_id``.
+# The Information service owns ``info_items`` on its own DeclarativeBase, so
+# Watcher's ``Base.metadata`` cannot resolve the FK target on its own.
+# Register a stub Table here exposing only the referenced primary key column.
+# Watcher never creates or drops this table — production DDL lives in the
+# Information service's Alembic root, and ``alembic/env.py`` filters
+# non-public schemas out of autogenerate. The stub exists purely so
+# SQLAlchemy can compile the cross-schema FK at import time.
+Table(
+    "info_items",
+    Base.metadata,
+    Column("info_item_id", ULIDType, primary_key=True),
+    schema="information",
+)
 
 
 class ContentType(enum.StrEnum):
@@ -33,6 +50,13 @@ class Watch(Base, TimestampMixin):
     __tablename__ = "watches"
 
     id: Mapped[ULID] = mapped_column(ULIDType, primary_key=True, default=generate_ulid)
+    info_item_id: Mapped[ULID | None] = mapped_column(
+        ULIDType,
+        ForeignKey("information.info_items.info_item_id", ondelete="RESTRICT"),
+        nullable=True,
+        index=True,
+        default=None,
+    )
     name: Mapped[str] = mapped_column(String(255))
     url: Mapped[str] = mapped_column(Text)
     content_type: Mapped[ContentType] = mapped_column(String(20))

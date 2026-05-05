@@ -412,6 +412,37 @@ class TestWatchArchive:
         await db_session.refresh(watch)
         assert watch.is_archived is True
 
+    async def test_archive_completes_when_resolve_watch_url_raises(self, client, db_session):
+        """SDK failure resolving the URL must NOT roll back the archive.
+
+        Regression: ``resolve_watch_url`` was called AFTER ``session.commit()``
+        but its exception escaped as a 500, leaking a partial-success state to
+        the operator (archive persisted but UI reports failure). The handler
+        must log + dispatch with a sentinel URL (or skip dispatch) and still
+        return the redirect.
+        """
+        watch = await make_watch(
+            db_session,
+            name="Resolve Fails",
+            url="https://example.com/resolve-fails",
+            content_type=ContentType.HTML,
+        )
+        await db_session.commit()
+        with patch(
+            "src.dashboard.routes.resolve_watch_url",
+            new_callable=AsyncMock,
+            side_effect=RuntimeError("information service unreachable"),
+        ):
+            response = await client.post(f"/watches/{watch.id}/archive")
+        assert response.status_code in (200, 303), (
+            f"archive must complete despite SDK failure; got {response.status_code}"
+        )
+        # archive must be persisted regardless
+        db_watch = await db_session.get(Watch, watch.id)
+        await db_session.refresh(db_watch)
+        assert db_watch.is_archived is True
+        assert db_watch.is_active is False
+
     async def test_archive_button_targets_body(self, client, db_session):
         """Archive button must carry hx-target=body so HTMX swaps the full page.
 

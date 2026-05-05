@@ -10,6 +10,7 @@ from src.core.models.notification_config import WatchNotificationConfig
 from src.core.models.snapshot import Snapshot, SnapshotChunk
 from src.core.models.temporal_profile import TemporalProfile
 from src.core.models.watch import Watch
+from src.core.notifications.events import WatchEventType
 from tests.conftest import make_watch
 
 pytestmark = pytest.mark.integration
@@ -446,6 +447,132 @@ class TestDeleteWatch:
             .all()
         )
         assert len(configs) == 0
+
+
+class TestSDKFailureHandling:
+    """SDK-failure paths in PATCH/DELETE handlers must not 5xx the user request.
+
+    Pattern mirrors ``src/workers/tasks.py``: catch ``NotFound`` from the SDK
+    when resolving ``watch_url`` and degrade gracefully (sentinel URL or skip
+    the notification dispatch) so an orphaned InfoSpec doesn't block operator
+    actions on the watch row.
+    """
+
+    async def test_pause_dispatches_event_when_resolve_url_raises_notfound(
+        self, client, db_session
+    ):
+        """PATCH ``is_active=false`` must still dispatch a WATCH_PAUSED event with a
+        sentinel URL when the SDK raises NotFound (orphaned InfoItem).
+
+        Pre-fix: ``resolve_watch_url`` propagated NotFound and the handler 5xx'd
+        before the dispatch ever ran. We assert dispatch was called; response
+        serialization is a separate Task 11 concern (Watch model has no `url`
+        column, so WatchResponse can't currently round-trip).
+        """
+        from unittest.mock import AsyncMock, patch
+
+        from information_client import NotFound
+
+        watch = await make_watch(
+            db_session,
+            name="Active Watch",
+            url="https://example.com",
+            is_active=True,
+        )
+        await db_session.commit()
+
+        notify_patch = "src.api.routes.watches.dispatch_event_notifications"
+        with (
+            patch(
+                "src.api.routes.watches.resolve_watch_url",
+                new_callable=AsyncMock,
+                side_effect=NotFound("info_item missing"),
+            ),
+            patch(notify_patch, new_callable=AsyncMock) as mock_dispatch,
+        ):
+            try:
+                await client.patch(
+                    f"/api/v1/watches/{watch.id}",
+                    json={"is_active": False},
+                )
+            except Exception:
+                # Pre-existing Task 11 issue: PATCH response validation fails
+                # because Watch model lacks ``url``/``fetch_config`` columns.
+                # We only care that the handler reached dispatch despite the
+                # NotFound from resolve_watch_url.
+                pass
+        mock_dispatch.assert_awaited_once()
+        _, kwargs = mock_dispatch.call_args
+        event = kwargs["event"]
+        assert event.event_type == WatchEventType.WATCH_PAUSED
+        assert event.watch_url == f"watch:{watch.id}"
+
+    async def test_resume_dispatches_event_when_resolve_url_raises_notfound(
+        self, client, db_session
+    ):
+        """PATCH ``is_active=true`` must still dispatch WATCH_RESUMED with a sentinel URL."""
+        from unittest.mock import AsyncMock, patch
+
+        from information_client import NotFound
+
+        watch = await make_watch(
+            db_session,
+            name="Paused Watch",
+            url="https://example.com",
+            is_active=False,
+        )
+        await db_session.commit()
+
+        notify_patch = "src.api.routes.watches.dispatch_event_notifications"
+        with (
+            patch(
+                "src.api.routes.watches.resolve_watch_url",
+                new_callable=AsyncMock,
+                side_effect=NotFound("info_item missing"),
+            ),
+            patch(notify_patch, new_callable=AsyncMock) as mock_dispatch,
+        ):
+            try:
+                await client.patch(
+                    f"/api/v1/watches/{watch.id}",
+                    json={"is_active": True},
+                )
+            except Exception:
+                # See test_pause: response validation is a Task 11 issue.
+                pass
+        mock_dispatch.assert_awaited_once()
+        _, kwargs = mock_dispatch.call_args
+        event = kwargs["event"]
+        assert event.event_type == WatchEventType.WATCH_RESUMED
+        assert event.watch_url == f"watch:{watch.id}"
+
+    async def test_delete_completes_when_resolve_url_raises_notfound(self, client, db_session):
+        """DELETE on archived watch must succeed even if InfoItem is gone."""
+        from unittest.mock import AsyncMock, patch
+
+        from information_client import NotFound
+
+        watch = await make_watch(
+            db_session,
+            name="Archived Watch",
+            url="https://example.com",
+            is_active=False,
+            is_archived=True,
+        )
+        await db_session.commit()
+
+        with patch(
+            "src.api.routes.watches.resolve_watch_url",
+            new_callable=AsyncMock,
+            side_effect=NotFound("info_item missing"),
+        ):
+            response = await client.delete(f"/api/v1/watches/{watch.id}")
+        assert response.status_code == 204, (
+            f"DELETE must complete despite NotFound; got {response.status_code} {response.text}"
+        )
+        # Watch must actually be gone
+        get_resp = await client.get(f"/api/v1/watches/{watch.id}")
+        assert get_resp.status_code == 404
 
 
 class TestListWatchesArchivedFilter:

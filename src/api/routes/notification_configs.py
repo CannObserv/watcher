@@ -145,25 +145,34 @@ async def test_notification_config(
     nc = await session.get(WatchNotificationConfig, parse_ulid(config_id, "Config"))
     if not nc or nc.watch_id != watch.id:
         raise HTTPException(status_code=404, detail="Config not found")
-    info_client = get_registry().get_information_client()
-    resolved_url = await resolve_watch_url(watch, info_client)
-    event = WatchEvent(
-        event_type=WatchEventType.CHANGE_DETECTED,
-        watch_id=str(watch.id),
-        watch_name=watch.name,
-        watch_url=resolved_url,
-        occurred_at=datetime.now(UTC),
-        metadata={"test": True},
-    )
+    success = False
+    reason = "Internal error during dispatch"
     try:
-        outcome = await dispatch_event(event, nc.apprise_url)
+        info_client = get_registry().get_information_client()
+        try:
+            resolved_url = await resolve_watch_url(watch, info_client)
+        except Exception as exc:
+            # Resolve failure is operator-fixable (orphaned InfoSpec, SDK
+            # outage). Surface a clear reason and skip dispatch — never 5xx.
+            logger.exception(
+                "failed to resolve watch URL for test notification",
+                extra={"config_id": config_id, "watch_id": str(watch.id)},
+            )
+            reason = f"Failed to resolve watch URL: {exc}"
+        else:
+            event = WatchEvent(
+                event_type=WatchEventType.CHANGE_DETECTED,
+                watch_id=str(watch.id),
+                watch_name=watch.name,
+                watch_url=resolved_url,
+                occurred_at=datetime.now(UTC),
+                metadata={"test": True},
+            )
+            outcome = await dispatch_event(event, nc.apprise_url)
+            success = outcome.success
+            reason = outcome.reason
     except Exception:
         logger.exception("test notification error", extra={"config_id": config_id})
-        reason = "Internal error during dispatch"
-        success = False
-    else:
-        success = outcome.success
-        reason = outcome.reason
     audit(
         session,
         EventType.NOTIFICATION_TEST,

@@ -436,6 +436,41 @@ class TestTestNotificationConfig:
         assert data["success"] is False
         assert "reason" in data
 
+    async def test_test_returns_success_false_on_resolve_failure(self, client, db_session):
+        """SDK failure resolving watch URL must NOT 5xx — endpoint promises {success, reason}.
+
+        Regression: ``resolve_watch_url`` was called BEFORE the existing dispatch
+        try/except, so any SDK error (NotFound, ServerError, etc.) escaped as 500.
+        """
+        from unittest.mock import AsyncMock, patch
+
+        from src.core.crypto import encrypt_apprise_url
+        from src.core.models.notification_config import WatchNotificationConfig
+
+        watch = await make_watch(db_session, name="WithSpec", url="https://example.com")
+        nc = WatchNotificationConfig(
+            watch_id=watch.id,
+            apprise_url=encrypt_apprise_url(VALID_URL),
+            channel_hint="json",
+            events=["change_detected"],
+        )
+        db_session.add(nc)
+        await db_session.commit()
+
+        with patch(
+            "src.api.routes.notification_configs.resolve_watch_url",
+            new_callable=AsyncMock,
+            side_effect=RuntimeError("information service unreachable"),
+        ):
+            resp = await client.post(f"/api/v1/watches/{watch.id}/notifications/{nc.id}/test")
+        assert resp.status_code == 200, (
+            f"endpoint must never 5xx; got {resp.status_code} {resp.text}"
+        )
+        data = resp.json()
+        assert data["success"] is False
+        assert "reason" in data
+        assert "resolve" in data["reason"].lower() or "watch url" in data["reason"].lower()
+
 
 @pytest.mark.integration
 async def test_create_config_with_content_config(client):

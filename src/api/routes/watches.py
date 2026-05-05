@@ -6,6 +6,7 @@ from typing import Annotated
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException
+from information_client import NotFound
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -118,7 +119,17 @@ async def update_watch(
     )
     if "is_active" in updates:
         info_client = get_registry().get_information_client()
-        resolved_url = await resolve_watch_url(watch, info_client)
+        try:
+            resolved_url = await resolve_watch_url(watch, info_client)
+        except NotFound:
+            # Mirrors src/workers/tasks.py: an InfoItem deleted out from under
+            # the watch should not block operator-requested pause/resume.
+            # Fall back to a sentinel URL so the notification still fires.
+            logger.error(
+                "info_item missing for watch — emitting lifecycle event with sentinel URL",
+                extra={"watch_id": str(watch.id)},
+            )
+            resolved_url = f"watch:{watch.id}"
         if previous_active and not watch.is_active:
             await dispatch_event_notifications(
                 session=session,
@@ -158,7 +169,17 @@ async def delete_watch(
         raise HTTPException(status_code=409, detail="Archive watch before deleting")
 
     info_client = get_registry().get_information_client()
-    resolved_url = await resolve_watch_url(watch, info_client)
+    try:
+        resolved_url = await resolve_watch_url(watch, info_client)
+    except NotFound:
+        # Mirrors src/workers/tasks.py: an InfoItem deleted out from under the
+        # watch should not block operator-requested deletion. Fall back to a
+        # sentinel URL so audit + notification still record the event.
+        logger.error(
+            "info_item missing for watch — deleting with sentinel URL",
+            extra={"watch_id": str(watch.id)},
+        )
+        resolved_url = f"watch:{watch.id}"
     audit(
         session,
         EventType.WATCH_DELETED,

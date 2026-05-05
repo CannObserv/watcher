@@ -29,14 +29,13 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 
 from src.api.deps import get_db_session, get_probe_fn, require_api_key
-from src.core import registry as _registry_module
 from src.core.models import Base
 from src.core.models.app_user import AppUser
 from src.core.models.change import Change
 from src.core.models.snapshot import Snapshot
 from src.core.models.watch import ContentType, Watch
 from src.core.probe import ProbeResult
-from src.core.registry import ServiceRegistry
+from src.core.registry import ServiceRegistry, set_registry_for_testing
 from src.dashboard.deps import get_dashboard_user
 from src.information.core.models.base import Base as InformationBase
 from src.information.core.models.info_item import InfoItem  # noqa: F401  registers mapper
@@ -274,7 +273,7 @@ def make_change(db_session):
 
 
 @pytest.fixture
-def info_client(db_session, monkeypatch):
+def info_client(db_session, request):
     """Mock InformationClient backed by the test DB's ``information.*`` tables.
 
     Routes pull the SDK via ``get_registry().get_information_client()``.
@@ -338,10 +337,13 @@ def info_client(db_session, monkeypatch):
     fake_client.list_info_items = AsyncMock(side_effect=_list_info_items)
     fake_client.get_primary_info_spec = AsyncMock(side_effect=_get_primary_info_spec)
 
-    # Swap the registry's cached SDK so ``get_registry().get_information_client()``
-    # everywhere returns this fake. Restore on teardown.
+    # Swap the registry singleton via the test seam so
+    # ``get_registry().get_information_client()`` returns this fake everywhere.
+    # ``set_registry_for_testing(None)`` on teardown lets the next call rebuild
+    # a fresh default — no leakage between tests.
     new_reg = ServiceRegistry(information_client=fake_client)
-    monkeypatch.setattr(_registry_module, "_default_registry", new_reg)
+    set_registry_for_testing(new_reg)
+    request.addfinalizer(lambda: set_registry_for_testing(None))
     return fake_client
 
 

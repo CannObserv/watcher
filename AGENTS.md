@@ -116,7 +116,7 @@ Watches are InfoItem-native: a Watch references an `info_item_id` and resolves U
 
 Change bus envelope is `schema_version: 2`. Stream entries are partitioned by `info_item_id` (Phase 2b's v1 partitioned by `watch_id`) and carry `info_item_id`, `info_spec_id`, plus `previous_fingerprint`/`current_fingerprint`. The `drain_changes_outbox` task is registered as `@bp.periodic(cron="* * * * *")`, so the embedded worker drains every minute. A PostgreSQL transaction-scoped advisory lock (`DRAIN_ADVISORY_LOCK_ID`) keeps concurrent drains from double-publishing.
 
-Operator note: `deploy/information.service` must be installed at `/etc/systemd/system/` before production smoke (`scripts/smoke_phase2c.sh`). Until then the dev server (`uv run uvicorn src.information.api.main:app --host 0.0.0.0 --port 8020 --reload &`) is acceptable.
+Fresh hosts need `sudo cp deploy/information.service /etc/systemd/system/` before `watcher.service` will boot — see `docs/DEPLOYMENT.md` for the full install (key generation + env-var registration). On hosts where the unit isn't installed, the dev server `uv run uvicorn src.information.api.main:app --host 0.0.0.0 --port 8021 --reload &` is acceptable for development.
 
 ## Common Commands
 

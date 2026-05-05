@@ -32,6 +32,9 @@ export $(cat /etc/watcher/.env .env 2>/dev/null | xargs)
 | `NOTIFIER_BASE_URL` | `/etc/watcher/.env` | Phase 4+ | Base URL of the notifier service (e.g. `http://localhost:9000`) |
 | `NOTIFIER_API_KEY` | `/etc/watcher/.env` | Phase 4+ | Watcher tenant API key issued by `scripts/seed_tenant.py` in the notifier repo |
 | `USE_REMOTE_NOTIFY` | `/etc/watcher/.env` | Phase 4+ | Set to `"1"` to route notifications through notifier; default `"0"` (local Apprise) |
+| `INFORMATION_BASE_URL` | `/etc/watcher/.env` | no | Information service base URL (default `http://localhost:8020`) |
+| `INFORMATION_API_KEY` | `/etc/watcher/.env` | **yes** | API key for the InformationClient SDK; missing key crashes the API on boot via the lifespan pre-warm |
+| `REDIS_URL` | `/etc/watcher/.env` | no | Redis connection URL for the change bus (default `redis://localhost:6379/0`) |
 
 Generate `APPRISE_SECRET_KEY`:
 
@@ -79,6 +82,55 @@ sudo journalctl -u watcher -f
 
 # Reload after editing deploy/watcher.service
 sudo systemctl daemon-reload && sudo systemctl restart watcher
+```
+
+## Information Service
+
+The Information service is a sibling FastAPI app (`src/information/`) that owns the canonical InfoItem + InfoSpec registry. Watcher's lifespan pre-warms an `InformationClient` SDK against it; without `INFORMATION_API_KEY` and a reachable service, `watcher.service` will refuse to boot.
+
+A systemd unit file is provided at `deploy/information.service`.
+
+### Installation
+
+```bash
+# Generate a strong API key (used by both the service and consumers)
+KEY=$(python -c "import secrets; print(secrets.token_urlsafe(32))")
+
+# Add to /etc/watcher/.env (shared by both services — both load EnvironmentFile=/etc/watcher/.env)
+echo "INFORMATION_BASE_URL=http://localhost:8020" | sudo tee -a /etc/watcher/.env
+echo "INFORMATION_API_KEY=$KEY"                   | sudo tee -a /etc/watcher/.env
+sudo chmod 640 /etc/watcher/.env  # group read required so the service user can load it
+
+# Apply Information service migrations (separate alembic root)
+export $(cat /etc/watcher/.env .env 2>/dev/null | xargs)
+uv run alembic -c alembic_information.ini upgrade head
+
+# Install + enable + start
+sudo cp deploy/information.service /etc/systemd/system/information.service
+sudo systemctl daemon-reload
+sudo systemctl enable --now information.service
+
+# Verify
+curl -s -H "X-API-Key: $INFORMATION_API_KEY" http://localhost:8020/api/v1/info-items
+```
+
+### Managing the Service
+
+```bash
+# Restart after code changes
+sudo systemctl restart information
+
+# Check status
+sudo systemctl status information
+
+# Follow logs
+sudo journalctl -u information -f
+```
+
+After installing `information.service`, restart `watcher.service` so its lifespan pre-warm picks up the now-reachable SDK target:
+
+```bash
+sudo systemctl restart watcher
 ```
 
 ## BUILD_ID

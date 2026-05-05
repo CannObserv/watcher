@@ -59,20 +59,17 @@ async def create_watch(
     """
     schedule_config = schedule_config if schedule_config is not None else {}
 
-    # 1. Validate the InfoItem exists. NotFound / ServerError / AuthError /
-    #    httpx.* propagate to the route handler.
-    await info_client.get_info_item(info_item_id)
-
-    # 2. Resolve the primary InfoSpec to get the target URL (single source
-    #    of truth for `url` post-Phase-2c).
+    # 1. Resolve the primary InfoSpec — also serves as InfoItem-existence check.
+    #    NotFound covers both "InfoItem absent" and "InfoItem has no active spec";
+    #    ServerError / AuthError / httpx.* propagate to the route handler.
     resolved = await resolve_primary(info_client, info_item_id)
     url = resolved.document["target"]["url"]
 
-    # 3. Probe the URL — establishes effective_url / effective_domain and
+    # 2. Probe the URL — establishes effective_url / effective_domain and
     #    fails fast on connection errors. httpx.HTTPError propagates.
     probe_result = await probe_fn(url)
 
-    # 4. Upsert domain — insert with defaults if new, leave config intact if
+    # 3. Upsert domain — insert with defaults if new, leave config intact if
     #    existing. Guard against TOCTOU race: concurrent inserts may both
     #    pass the scalar_one_or_none() check and hit the unique constraint.
     domain_stmt = select(Domain).where(Domain.name == probe_result.effective_domain)

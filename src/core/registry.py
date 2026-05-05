@@ -1,4 +1,4 @@
-"""Lightweight registry for swappable protocol implementations."""
+"""Lightweight registry for swappable protocol implementations and shared SDK clients."""
 
 import os
 
@@ -88,3 +88,14 @@ def get_registry() -> "ServiceRegistry":
     if _default_registry is None:
         _default_registry = ServiceRegistry()
     return _default_registry
+
+
+def set_registry_for_testing(registry: "ServiceRegistry | None") -> None:
+    """Replace the process-level ServiceRegistry singleton (test seam).
+
+    Pass ``None`` to reset; the next ``get_registry()`` call will rebuild a
+    fresh default. Tests use this to inject a registry containing a fake
+    ``InformationClient`` without poking the private global directly.
+    """
+    global _default_registry
+    _default_registry = registry

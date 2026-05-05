@@ -106,7 +106,7 @@ class TestCreateWatch:
         assert "info_item_id" in response.text
 
     async def test_create_watch_sdk_connection_error_returns_503(self, client, info_client):
-        info_client.get_info_item.side_effect = httpx.ConnectError("unreachable")
+        info_client.get_primary_info_spec.side_effect = httpx.ConnectError("unreachable")
         response = await client.post(
             "/api/v1/watches",
             json={
@@ -119,7 +119,7 @@ class TestCreateWatch:
         assert response.headers.get("Retry-After") == "30"
 
     async def test_create_watch_sdk_auth_error_returns_500(self, client, info_client):
-        info_client.get_info_item.side_effect = AuthError("forbidden")
+        info_client.get_primary_info_spec.side_effect = AuthError("forbidden")
         response = await client.post(
             "/api/v1/watches",
             json={
@@ -709,7 +709,7 @@ class TestCreateWatchProbe:
 
     async def test_create_watch_sdk_server_error_returns_503(self, client, info_client):
         """ServerError from the SDK during create maps to 503 with Retry-After."""
-        info_client.get_info_item.side_effect = ServerError("boom", status_code=500)
+        info_client.get_primary_info_spec.side_effect = ServerError("boom", status_code=500)
         response = await client.post(
             "/api/v1/watches",
             json={

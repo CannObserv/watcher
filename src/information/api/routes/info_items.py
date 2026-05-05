@@ -11,6 +11,7 @@ from src.information.api.schemas.info_item import (
     InfoItemWithSpecOut,
 )
 from src.information.api.schemas.types import ULIDStr
+from src.information.api.serializers import info_item_to_out
 from src.information.core.info_spec_schema import (
     InfoSpecValidationError,
     validate_info_spec,
@@ -18,17 +19,6 @@ from src.information.core.info_spec_schema import (
 from src.information.core.models import InfoItem, InfoSpec
 
 router = APIRouter(prefix="/info-items", tags=["info-items"])
-
-
-def _to_out(item: InfoItem) -> InfoItemOut:
-    return InfoItemOut(
-        info_item_id=str(item.info_item_id),
-        name=item.name,
-        description=item.description,
-        owner=item.owner,
-        created_at=item.created_at,
-        updated_at=item.updated_at,
-    )
 
 
 @router.post("", response_model=InfoItemWithSpecOut, status_code=201)
@@ -66,7 +56,7 @@ async def create_info_item(
 
     await session.commit()
     await session.refresh(item)
-    base = _to_out(item)
+    base = info_item_to_out(item)
     return InfoItemWithSpecOut(**base.model_dump(), info_spec_id=info_spec_id)
 
 
@@ -75,7 +65,7 @@ async def list_info_items(
     session: AsyncSession = Depends(get_db_session),
 ) -> list[InfoItemOut]:
     result = await session.execute(select(InfoItem).order_by(InfoItem.created_at))
-    return [_to_out(item) for item in result.scalars().all()]
+    return [info_item_to_out(item) for item in result.scalars().all()]
 
 
 @router.get("/{info_item_id}", response_model=InfoItemOut)
@@ -86,4 +76,4 @@ async def get_info_item(
     item = result.scalar_one_or_none()
     if item is None:
         raise HTTPException(status_code=404, detail="InfoItem not found")
-    return _to_out(item)
+    return info_item_to_out(item)

@@ -63,10 +63,11 @@ async def test_propose_selectors_returns_ranked_candidates(client):
 
 @pytest.mark.asyncio
 async def test_propose_selectors_penalises_volatile_classes(client):
+    """Volatile-class candidates score strictly lower than stable-class peers."""
     html = b"""
     <html><body>
         <h1 class="page-title">Active Cannabis Licenses</h1>
-        <div class="hash-abc12345xyz">Active Cannabis Licenses</div>
+        <div class="hash-abcd1234">Active Cannabis Licenses</div>
     </body></html>
     """
     app.dependency_overrides[get_http_fetcher] = lambda: _stub_fetcher(html)
@@ -76,12 +77,16 @@ async def test_propose_selectors_penalises_volatile_classes(client):
         json={"url": "https://example.com", "description": "Active Cannabis Licenses"},
     )
     candidates = response.json()
-    # Find the candidate whose selector references the volatile class and the one
-    # that uses the stable .page-title; the stable one should outrank the
-    # volatile one.
-    by_volatility = sorted(candidates, key=lambda c: c["stability_score"], reverse=True)
-    top = by_volatility[0]["selector"]
-    assert "page-title" in top or top.startswith("h1")
+    by_selector = {c["selector"]: c for c in candidates}
+    stable = next(v for k, v in by_selector.items() if "page-title" in k or k.startswith("h1."))
+    # Volatile class falls back to the bare tag name in _build_selector since
+    # every class is filtered out.
+    volatile = next(v for k, v in by_selector.items() if k == "div")
+    assert stable["stability_score"] > volatile["stability_score"], (
+        f"stable={stable['stability_score']} should outrank volatile={volatile['stability_score']}"
+    )
+    # And the top-ranked candidate is the stable one.
+    assert candidates[0]["selector"] == stable["selector"]
 
 
 @pytest.mark.asyncio

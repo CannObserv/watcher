@@ -20,7 +20,18 @@ def _load_v1_schema() -> dict[str, Any]:
 
 
 class InfoSpecValidationError(ValueError):
-    """Raised when a document fails InfoSpec schema validation."""
+    """Raised when a document fails InfoSpec schema validation.
+
+    Carries the structured ``issues`` list so callers that need per-field
+    detail (e.g. the validate_info_spec / preview_extraction routes) can
+    render structured 422 responses without re-running the validator.
+    """
+
+    def __init__(
+        self, message: str, *, issues: list["InfoSpecValidationIssue"] | None = None
+    ) -> None:
+        super().__init__(message)
+        self.issues = issues or []
 
 
 @dataclass(frozen=True)
@@ -58,9 +69,12 @@ def validate_info_spec_with_errors(document: dict[str, Any]) -> list[InfoSpecVal
 def validate_info_spec(document: dict[str, Any]) -> None:
     """Raise InfoSpecValidationError if document is invalid against the declared schema_version.
 
-    Currently supports schema_version=1 only.
+    Currently supports schema_version=1 only. The raised exception carries
+    ``issues`` (the structured per-field error list) so callers translating
+    to HTTP 422 can render the same shape as ``validate_info_spec_with_errors``
+    without re-running the validator.
     """
     issues = validate_info_spec_with_errors(document)
     if issues:
         details = "; ".join(f"{issue.path}: {issue.message}" for issue in issues)
-        raise InfoSpecValidationError(f"InfoSpec invalid: {details}")
+        raise InfoSpecValidationError(f"InfoSpec invalid: {details}", issues=issues)

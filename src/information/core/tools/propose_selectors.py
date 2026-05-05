@@ -22,7 +22,17 @@ from bs4 import BeautifulSoup, Tag
 from src.core.fetchers.base import FetchResult
 from src.information.core.tools.fetch_and_render import HttpFetcherProtocol
 
-_VOLATILE_TOKEN = re.compile(r"^(hash[-_])?[0-9a-f]{8,}$|^[0-9]{6,}$", re.IGNORECASE)
+_VOLATILE_TOKEN = re.compile(
+    # Any class beginning with hash- / hash_ — these are typically deploy-scoped.
+    r"^hash[-_].+$"
+    # Bare hex tokens of 8+ chars (build hashes).
+    r"|^[0-9a-f]{8,}$"
+    # Digit-only tokens of 6+ chars.
+    r"|^[0-9]{6,}$"
+    # Embedded 8+-char hex blob anywhere in the class name (CSS-modules, webpack).
+    r"|.*[-_][0-9a-f]{8,}.*",
+    re.IGNORECASE,
+)
 _SAMPLE_MAX_LEN = 200
 
 
@@ -114,6 +124,11 @@ async def propose_selectors(
             continue
         # Skip ancestors whose selected text is dominated by descendants we
         # already considered — we want the tightest containing element.
+        # The dedup is intentionally SHALLOW (recursive=False): only direct
+        # children are checked. Deeper match paths (e.g. <section><div><h1>)
+        # may produce both grandparent + leaf candidates; the text-length-
+        # proximity term in _stability_score keeps the leaf ranked higher,
+        # and operators verify with preview_extraction before persisting.
         if any(
             child.get_text(" ", strip=True) and needle in child.get_text(" ", strip=True).lower()
             for child in tag.find_all(True, recursive=False)

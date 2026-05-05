@@ -12,10 +12,13 @@ generated bindings; until then, we work with plain dicts.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from information_client.errors import error_from_response
 from information_client.generated.models.info_item_out import InfoItemOut
+
+if TYPE_CHECKING:
+    from information_client.client import InformationClient
 
 
 @dataclass(frozen=True)
@@ -34,7 +37,9 @@ class ValidationResult:
     errors: list[ValidationIssue]
 
 
-async def _post_json(client_facade, path: str, body: dict[str, Any]) -> dict[str, Any]:
+async def _post_json(
+    client_facade: InformationClient, path: str, body: dict[str, Any]
+) -> dict[str, Any]:
     """Send a JSON POST through the generated client's httpx instance.
 
     Returns the parsed JSON body on 2xx; raises a typed ``InformationClientError``
@@ -47,7 +52,9 @@ async def _post_json(client_facade, path: str, body: dict[str, Any]) -> dict[str
     raise error_from_response(int(response.status_code), response.content)
 
 
-async def _get_json(client_facade, path: str, params: dict[str, Any] | None = None) -> Any:
+async def _get_json(
+    client_facade: InformationClient, path: str, params: dict[str, Any] | None = None
+) -> Any:
     """GET counterpart of ``_post_json``."""
     httpx_client = client_facade._gen_client.get_async_httpx_client()
     response = await httpx_client.get(path, params=params or {})
@@ -70,7 +77,7 @@ class FetchAndRenderResult:
 
 
 async def fetch_and_render(
-    client_facade, url: str, *, render: bool = False
+    client_facade: InformationClient, url: str, *, render: bool = False
 ) -> FetchAndRenderResult:
     """Fetch ``url`` and return body + headers.
 
@@ -104,7 +111,7 @@ class SelectorCandidate:
 
 
 async def propose_selectors(
-    client_facade,
+    client_facade: InformationClient,
     url: str,
     description: str,
     *,
@@ -153,7 +160,7 @@ class PreviewExtractionResult:
 
 
 async def preview_extraction(
-    client_facade,
+    client_facade: InformationClient,
     url: str,
     document: dict[str, Any],
 ) -> PreviewExtractionResult:
@@ -202,7 +209,7 @@ class InfoItemWithSpecResult:
 
 
 async def create_info_item_atomic(
-    client_facade,
+    client_facade: InformationClient,
     *,
     name: str,
     description: str | None = None,
@@ -231,7 +238,9 @@ async def create_info_item_atomic(
     )
 
 
-async def find_info_item(client_facade, query: str, *, limit: int = 20) -> list[Any]:
+async def find_info_item(
+    client_facade: InformationClient, query: str, *, limit: int = 20
+) -> list[InfoItemOut]:
     """Search Information Items by name + description (case-insensitive substring).
 
     Returns a list of ``InfoItemOut`` instances (the generated model) so callers
@@ -246,7 +255,9 @@ async def find_info_item(client_facade, query: str, *, limit: int = 20) -> list[
     return [InfoItemOut.from_dict(item) for item in body]
 
 
-async def validate_info_spec(client_facade, document: dict[str, Any]) -> ValidationResult:
+async def validate_info_spec(
+    client_facade: InformationClient, document: dict[str, Any]
+) -> ValidationResult:
     """Validate an InfoSpec document against the v1 JSON Schema.
 
     Always returns a result; ``valid=False`` carries per-field issues. Use this

@@ -9,7 +9,6 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.information.api.deps import get_db_session, get_http_fetcher
-from src.information.api.routes.info_items import _to_out as _info_item_to_out
 from src.information.api.schemas.info_item import InfoItemOut
 from src.information.api.schemas.tools import (
     ChunkPreviewOut,
@@ -23,6 +22,7 @@ from src.information.api.schemas.tools import (
     ValidateInfoSpecResult,
     ValidationIssueOut,
 )
+from src.information.api.serializers import info_item_to_out
 from src.information.core.info_spec_schema import (
     InfoSpecValidationError,
     validate_info_spec_with_errors,
@@ -72,7 +72,7 @@ async def find_info_items_route(
     Information Item. Returns up to ``limit`` matches, newest first.
     """
     items = await find_info_item(session, q, limit=limit)
-    return [_info_item_to_out(item) for item in items]
+    return [info_item_to_out(item) for item in items]
 
 
 @router.post("/fetch-and-render", response_model=FetchAndRenderResult)
@@ -120,15 +120,15 @@ async def preview_extraction_route(
     try:
         result = await preview_extraction(fetcher, str(body.url), body.document)
     except InfoSpecValidationError as e:
-        # Re-validate to produce the structured per-field error list — the
-        # raise-based path concatenates into a single string, but the route
-        # contract returns a list of {path, message} entries.
-        issues = validate_info_spec_with_errors(body.document)
+        # The exception carries the structured per-field issue list directly,
+        # so we render the route's contract (list of {path, message}) without
+        # re-running the validator.
         raise HTTPException(
             status_code=422,
             detail={
                 "error": "validation_failed",
-                "errors": [{"path": i.path, "message": i.message} for i in issues] or [str(e)],
+                "errors": [{"path": i.path, "message": i.message} for i in e.issues]
+                or [{"path": [], "message": str(e)}],
             },
         ) from e
     except TargetUnreachableError as e:
@@ -160,6 +160,10 @@ async def propose_selectors_route(
     fetcher: HttpFetcherProtocol = Depends(get_http_fetcher),
 ) -> list[SelectorCandidateOut]:
     """Suggest CSS selector candidates for content matching ``description``.
+
+    v1 returns CSS selectors only — pair with ``extraction.algorithm: "css"``
+    in the resulting InfoSpec. XPath / JSONPath / regex / full_page proposers
+    are on the roadmap; track via #148.
 
     Heuristic v1: substring match + specificity + text-length proximity +
     volatility penalty (hash-looking class names get demoted). Empty match

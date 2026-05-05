@@ -5,12 +5,15 @@ InfoItem + primary InfoSpec and produces a Watch row that adapts to the
 current model shape via ``hasattr`` guards.
 """
 
+import pytest
 from sqlalchemy import select
 
 from src.core.models.watch import ContentType, Watch
 from src.information.core.models.info_item import InfoItem
 from src.information.core.models.info_spec import InfoSpec
 from tests.conftest import make_info_item, make_info_spec, make_snapshot, make_watch
+
+pytestmark = pytest.mark.integration
 
 
 async def test_make_info_item_persists(db_session):

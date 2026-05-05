@@ -21,9 +21,13 @@ def get_http_fetcher(request: Request) -> HttpFetcherProtocol:
 
     The fetcher is constructed once at app startup (see ``main.lifespan``) so
     its ``httpx.AsyncClient`` connection pool is shared across requests and
-    closed cleanly on shutdown. Tests override this dependency with
-    ``app.dependency_overrides[get_http_fetcher] = lambda: stub`` to inject
-    a stub fetcher per test.
+    closed cleanly on shutdown.
+
+    Tests override this dependency with a no-arg callable, e.g.
+    ``app.dependency_overrides[get_http_fetcher] = lambda: stub``. FastAPI
+    invokes the override directly without re-resolving sub-deps, so the
+    ``request: Request`` parameter is intentionally absent from the override
+    signature — that's expected, not a mistake.
     """
     return request.app.state.http_fetcher
 

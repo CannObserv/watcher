@@ -33,12 +33,6 @@ def _override_with_response(response: httpx.Response) -> None:
     app.dependency_overrides[get_http_fetcher] = lambda: _StubFetcher()
 
 
-@pytest.fixture(autouse=True)
-def _clear_overrides():
-    yield
-    app.dependency_overrides.pop(get_http_fetcher, None)
-
-
 @pytest.mark.asyncio
 async def test_fetch_and_render_returns_body_and_headers(client):
     _override_with_response(

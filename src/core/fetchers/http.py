@@ -50,3 +50,14 @@ class HttpFetcher:
             duration_ms=duration_ms,
             fetcher_used="http",
         )
+
+    async def aclose(self) -> None:
+        """Close the underlying ``httpx.AsyncClient`` if one was lazily built.
+
+        Idempotent: safe to call when no fetch has happened yet (``_client``
+        is still None) or when already closed. Mirrors the registry's
+        ``aclose_information_client`` pattern.
+        """
+        if self._client is not None:
+            await self._client.aclose()
+            self._client = None

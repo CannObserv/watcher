@@ -28,12 +28,6 @@ def _stub_fetcher(content: bytes):
     return _Stub()
 
 
-@pytest.fixture(autouse=True)
-def _clear_overrides():
-    yield
-    app.dependency_overrides.pop(get_http_fetcher, None)
-
-
 @pytest.mark.asyncio
 async def test_propose_selectors_returns_ranked_candidates(client):
     html = b"""

@@ -49,12 +49,6 @@ def _stub_fetcher(content: bytes = HTML_FIXTURE, *, raise_exc: Exception | None 
     return _Stub()
 
 
-@pytest.fixture(autouse=True)
-def _clear_overrides():
-    yield
-    app.dependency_overrides.pop(get_http_fetcher, None)
-
-
 @pytest.mark.asyncio
 async def test_preview_extraction_full_page_returns_chunks_and_simhash(client):
     app.dependency_overrides[get_http_fetcher] = lambda: _stub_fetcher()

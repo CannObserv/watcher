@@ -29,9 +29,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     try:
         yield
     finally:
-        client = app.state.http_fetcher._client
-        if client is not None:
-            await client.aclose()
+        await app.state.http_fetcher.aclose()
 
 
 app = FastAPI(title="information", version="0.1.0", lifespan=lifespan)

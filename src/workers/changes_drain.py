@@ -74,8 +74,9 @@ def _build_envelope(change) -> bytes:
     ).encode("utf-8")
 
 
+@bp.periodic(cron="* * * * *", periodic_id="drain_changes_outbox")
 @bp.task(name="drain_changes_outbox", queue="default")
-async def drain_changes_outbox(*, batch_size: int = 100) -> dict:
+async def drain_changes_outbox(*, batch_size: int = 100, **periodic_kwargs) -> dict:
     """Publish up to ``batch_size`` unpublished Changes; return counts.
 
     Idempotent — only processes rows where ``published_to_bus_at IS NULL``.

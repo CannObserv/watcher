@@ -17,10 +17,13 @@ renamed or scoped onto a different mapper.
 
 import os
 from collections.abc import AsyncGenerator
+from datetime import UTC, datetime
+from unittest.mock import AsyncMock, MagicMock
 from urllib.parse import urlparse
 
 import pytest
 from httpx import ASGITransport, AsyncClient
+from information_client import InformationClient, NotFound
 from sqlalchemy import event, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
@@ -32,6 +35,7 @@ from src.core.models.change import Change
 from src.core.models.snapshot import Snapshot
 from src.core.models.watch import ContentType, Watch
 from src.core.probe import ProbeResult
+from src.core.registry import ServiceRegistry
 from src.dashboard.deps import get_dashboard_user
 from src.information.core.models.base import Base as InformationBase
 from src.information.core.models.info_item import InfoItem  # noqa: F401  registers mapper
@@ -269,7 +273,85 @@ def make_change(db_session):
 
 
 @pytest.fixture
-async def client(test_engine, db_session) -> AsyncGenerator[AsyncClient]:
+def info_client(db_session, monkeypatch):
+    """Mock InformationClient backed by the test DB's ``information.*`` tables.
+
+    Routes pull the SDK via ``get_registry().get_information_client()``.
+    This fixture swaps the registry singleton's cached client for an
+    AsyncMock whose ``get_info_item`` / ``get_primary_info_spec`` methods
+    look up live rows in ``db_session`` so tests can seed an InfoItem +
+    InfoSpec via ``make_info_item`` / ``make_info_spec`` and have routes
+    behave exactly as they would against the real Information service.
+
+    Tests that need to exercise SDK error paths can stub individual methods
+    on the returned mock (e.g. ``info_client.get_info_item.side_effect = NotFound``).
+    """
+    fake_client = MagicMock(spec=InformationClient)
+
+    async def _get_info_item(info_item_id: str):
+        item = await db_session.get(InfoItem, info_item_id)
+        if item is None:
+            raise NotFound(f"info_item {info_item_id} not found")
+        out = MagicMock()
+        out.info_item_id = str(item.info_item_id)
+        out.name = item.name
+        out.description = item.description
+        out.owner = None
+        out.created_at = item.created_at or datetime.now(UTC)
+        out.updated_at = item.updated_at or datetime.now(UTC)
+        return out
+
+    async def _list_info_items():
+        from sqlalchemy import select as _select
+
+        result = await db_session.execute(_select(InfoItem))
+        items = result.scalars().all()
+        out = []
+        for item in items:
+            entry = MagicMock()
+            entry.info_item_id = str(item.info_item_id)
+            entry.name = item.name
+            entry.description = item.description
+            entry.owner = None
+            entry.created_at = item.created_at or datetime.now(UTC)
+            entry.updated_at = item.updated_at or datetime.now(UTC)
+            out.append(entry)
+        return out
+
+    async def _get_primary_info_spec(info_item_id: str, *, force_refresh: bool = False):
+        from sqlalchemy import select as _select
+
+        result = await db_session.execute(
+            _select(InfoSpec)
+            .where(InfoSpec.info_item_id == info_item_id, InfoSpec.active.is_(True))
+            .order_by(InfoSpec.priority.asc())
+        )
+        spec = result.scalars().first()
+        if spec is None:
+            raise NotFound(f"no active spec for info_item {info_item_id}")
+        out = MagicMock()
+        out.info_item_id = str(spec.info_item_id)
+        out.info_spec_id = str(spec.info_spec_id)
+        doc = MagicMock()
+        doc.to_dict = MagicMock(return_value=dict(spec.document))
+        out.document = doc
+        return out
+
+    fake_client.get_info_item = AsyncMock(side_effect=_get_info_item)
+    fake_client.list_info_items = AsyncMock(side_effect=_list_info_items)
+    fake_client.get_primary_info_spec = AsyncMock(side_effect=_get_primary_info_spec)
+
+    # Swap the registry's cached SDK so ``get_registry().get_information_client()``
+    # everywhere returns this fake. Restore on teardown.
+    from src.core import registry as _registry
+
+    new_reg = ServiceRegistry(information_client=fake_client)
+    monkeypatch.setattr(_registry, "_default_registry", new_reg)
+    return fake_client
+
+
+@pytest.fixture
+async def client(test_engine, db_session, info_client) -> AsyncGenerator[AsyncClient]:
     from src.api.main import app
 
     async def override_session() -> AsyncGenerator[AsyncSession]:

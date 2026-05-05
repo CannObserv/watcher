@@ -15,11 +15,7 @@
   </div>
 
   <div>
-    <label for="url" class="form-label">URL</label>
-    <input type="url" name="url" id="url" required
-      value=""
-      class="form-input mt-1">
-    <p id="url-error" class="mt-1 text-xs text-red-600 dark:text-red-400" hidden></p>
+    {% include "partials/info_item_picker.html" %}
   </div>
 
   <div>
@@ -41,6 +37,13 @@
       class="form-input mt-1">
     <p id="interval-hint" class="mt-1 text-xs text-gray-500 dark:text-gray-400">Format: 30s, 15m, 6h, 1d</p>
     <p id="interval-error" class="mt-1 text-xs text-red-600 dark:text-red-400" hidden></p>
+  </div>
+
+  <div>
+    <label for="description" class="form-label">Description</label>
+    <textarea name="description" id="description" rows="2"
+      class="form-input mt-1"></textarea>
+    <p id="description-error" class="mt-1 text-xs text-red-600 dark:text-red-400" hidden></p>
   </div>
 
   <div class="flex gap-3">

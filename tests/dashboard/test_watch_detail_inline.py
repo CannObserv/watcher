@@ -41,36 +41,22 @@ class TestWatchDetailPage:
         assert b"PDF" in response.content
         assert b"Content Type" in response.content
 
-    async def test_detail_page_shows_html_specific_fields(self, client, db_session):
+    async def test_detail_page_no_fetch_config_fields(self, client, db_session):
+        """Phase 2c: fetch_config keys live on the InfoSpec; the watch detail
+        page no longer renders CSS selectors / chunk-row-size / etc."""
         watch = await make_watch(
-            db_session, name="HTML Fields", url="https://example.com", content_type=ContentType.HTML
+            db_session,
+            name="No Fetch Config",
+            url="https://example.com",
+            content_type=ContentType.HTML,
         )
         response = await client.get(f"/watches/{watch.id}")
         content = response.content.decode()
-        assert "CSS Selectors" in content
-        assert "Strip Boilerplate" in content
-        # PDF/File-only fields should NOT appear
+        assert "CSS Selectors" not in content
+        assert "Strip Boilerplate" not in content
         assert "Skip Empty Pages" not in content
         assert "File Format" not in content
-
-    async def test_detail_page_shows_pdf_specific_fields(self, client, db_session):
-        watch = await make_watch(
-            db_session, name="PDF Fields", url="https://example.com", content_type=ContentType.PDF
-        )
-        response = await client.get(f"/watches/{watch.id}")
-        content = response.content.decode()
-        assert "Skip Empty Pages" in content
-        assert "CSS Selectors" not in content
-
-    async def test_detail_page_shows_file_specific_fields(self, client, db_session):
-        watch = await make_watch(
-            db_session, name="File Fields", url="https://example.com", content_type=ContentType.FILE
-        )
-        response = await client.get(f"/watches/{watch.id}")
-        content = response.content.decode()
-        assert "File Format" in content
-        assert "Chunk Row Size" in content
-        assert "CSS Selectors" not in content
+        assert "Chunk Row Size" not in content
 
     async def test_detail_page_has_danger_zone(self, client, db_session):
         watch = await make_watch(
@@ -170,18 +156,6 @@ class TestWatchFieldUpdate:
         assert b"New Name" in response.content
         assert b"<input" not in response.content
 
-    async def test_update_url(self, client, db_session):
-        watch = await make_watch(
-            db_session, name="URL Test", url="https://old.com", content_type=ContentType.HTML
-        )
-        response = await client.post(
-            f"/watches/{watch.id}/field/url",
-            data={"value": "https://new.com"},
-            headers={"HX-Request": "true"},
-        )
-        assert response.status_code == 200
-        assert b"https://new.com" in response.content
-
     async def test_update_interval(self, client, db_session):
         watch = await make_watch(
             db_session, name="Interval", url="https://example.com", content_type=ContentType.HTML
@@ -194,40 +168,32 @@ class TestWatchFieldUpdate:
         assert response.status_code == 200
         assert b"6h" in response.content
 
-    async def test_update_timeout_fetch_config(self, client, db_session):
+    async def test_update_url_field_returns_400(self, client, db_session):
+        """Phase 2c: ``url`` is no longer an editable column; the dispatcher rejects."""
         watch = await make_watch(
-            db_session, name="Timeout", url="https://example.com", content_type=ContentType.HTML
+            db_session, name="No URL", url="https://example.com", content_type=ContentType.HTML
+        )
+        response = await client.post(
+            f"/watches/{watch.id}/field/url",
+            data={"value": "https://new.com"},
+            headers={"HX-Request": "true"},
+        )
+        assert response.status_code == 400
+
+    async def test_update_fetch_config_field_returns_400(self, client, db_session):
+        """Phase 2c: fetch_config keys live on the InfoSpec, not on the Watch."""
+        watch = await make_watch(
+            db_session,
+            name="No fetch_config",
+            url="https://example.com",
+            content_type=ContentType.HTML,
         )
         response = await client.post(
             f"/watches/{watch.id}/field/timeout",
             data={"value": "60"},
             headers={"HX-Request": "true"},
         )
-        assert response.status_code == 200
-        assert b"60" in response.content
-
-    async def test_update_ignore_patterns(self, client, db_session):
-        watch = await make_watch(
-            db_session, name="Patterns", url="https://example.com", content_type=ContentType.HTML
-        )
-        response = await client.post(
-            f"/watches/{watch.id}/field/ignore_patterns",
-            data={"value": "Noise.*\nAd block.*"},
-            headers={"HX-Request": "true"},
-        )
-        assert response.status_code == 200
-        assert b"Noise.*" in response.content
-
-    async def test_update_toggle_field(self, client, db_session):
-        watch = await make_watch(
-            db_session, name="Toggle", url="https://example.com", content_type=ContentType.HTML
-        )
-        response = await client.post(
-            f"/watches/{watch.id}/field/strip_boilerplate",
-            data={"value": "false"},
-            headers={"HX-Request": "true"},
-        )
-        assert response.status_code == 200
+        assert response.status_code == 400
 
     async def test_update_invalid_field_returns_400(self, client, db_session):
         watch = await make_watch(

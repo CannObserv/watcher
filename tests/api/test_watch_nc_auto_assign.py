@@ -11,6 +11,7 @@ from ulid import ULID
 
 from src.core.crypto import encrypt_apprise_url
 from src.core.models.notification_template import DomainNcRef, NotificationTemplate, WatchNcRef
+from tests.conftest import make_watch
 
 pytestmark = pytest.mark.integration
 
@@ -33,16 +34,11 @@ async def test_watch_create_does_not_seed_global_default_template(client: AsyncC
     db_session.add(tpl)
     await db_session.commit()
 
-    resp = await client.post(
-        "/api/v1/watches",
-        json={
-            "name": "No-Seed Test",
-            "url": "https://example.com",
-            "content_type": "html",
-        },
+    watch = await make_watch(
+        db_session, name="No-Seed Test", url="https://example.com", content_type="html"
     )
-    assert resp.status_code == 201
-    watch_id = resp.json()["id"]
+    await db_session.commit()
+    watch_id = str(watch.id)
 
     result = await db_session.execute(
         select(WatchNcRef).where(WatchNcRef.watch_id == ULID.from_str(watch_id))
@@ -81,16 +77,15 @@ async def test_watch_create_does_not_seed_domain_default_template(client: AsyncC
     db_session.add(DomainNcRef(domain_name=domain_name, template_id=tpl.id))
     await db_session.commit()
 
-    resp = await client.post(
-        "/api/v1/watches",
-        json={
-            "name": "Domain No-Seed Test",
-            "url": f"https://{domain_name}/page",
-            "content_type": "html",
-        },
+    watch = await make_watch(
+        db_session,
+        name="Domain No-Seed Test",
+        url=f"https://{domain_name}/page",
+        content_type="html",
+        effective_domain=domain_name,
     )
-    assert resp.status_code == 201
-    watch_id = resp.json()["id"]
+    await db_session.commit()
+    watch_id = str(watch.id)
 
     result = await db_session.execute(
         select(WatchNcRef).where(WatchNcRef.watch_id == ULID.from_str(watch_id))

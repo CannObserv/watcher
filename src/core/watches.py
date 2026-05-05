@@ -7,6 +7,7 @@ from information_client import InformationClient
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
+from ulid import ULID
 
 from src.core.info_resolver import resolve_primary
 from src.core.logging import get_logger
@@ -34,28 +35,46 @@ async def resolve_watch_url(watch: Watch, client: InformationClient) -> str:
 async def create_watch(
     session: AsyncSession,
     probe_fn: Callable[[str], Awaitable[ProbeResult]],
+    info_client: InformationClient,
+    *,
     name: str,
-    url: str,
+    info_item_id: str,
     content_type: str | ContentType,
-    schedule_config: dict,
-    fetch_config: dict,
+    schedule_config: dict | None = None,
+    description: str | None = None,
+    tags: list[str] | None = None,
 ) -> Watch:
-    """Create a new Watch with full probe + domain upsert + audit + notification flow.
+    """Create a new Watch bound to *info_item_id*.
 
-    Probes *url* to resolve the effective URL and domain. Raises ``httpx.HTTPError``
-    on connection failure — callers should convert this to the appropriate HTTP
-    error response or form flash message.
+    Resolves the URL from the InfoItem's primary InfoSpec via the SDK, probes
+    it to populate ``effective_url`` / ``effective_domain``, upserts the
+    Domain row, and persists the Watch.
 
-    Domain is upserted (inserted with defaults if new, left intact if existing).
-    The audit entry is written after ``flush()`` so ``watch.id`` is guaranteed
-    non-null. A ``WATCH_CREATED`` notification is dispatched before commit.
+    Raises whatever the SDK raises (``NotFound``, ``httpx.ConnectError``,
+    ``ServerError``, ``AuthError``, ``ValidationError``) — translation to
+    HTTP status codes is the route layer's concern.
+
+    Probe failures (``httpx.HTTPError``) propagate to the caller — no watch
+    or domain is created.
     """
-    # httpx.HTTPError propagates to the caller — no watch or domain created.
+    schedule_config = schedule_config if schedule_config is not None else {}
+
+    # 1. Validate the InfoItem exists. NotFound / ServerError / AuthError /
+    #    httpx.* propagate to the route handler.
+    await info_client.get_info_item(info_item_id)
+
+    # 2. Resolve the primary InfoSpec to get the target URL (single source
+    #    of truth for `url` post-Phase-2c).
+    resolved = await resolve_primary(info_client, info_item_id)
+    url = resolved.document["target"]["url"]
+
+    # 3. Probe the URL — establishes effective_url / effective_domain and
+    #    fails fast on connection errors. httpx.HTTPError propagates.
     probe_result = await probe_fn(url)
 
-    # Upsert domain — insert with defaults if new, leave config intact if existing.
-    # Guard against TOCTOU race: concurrent inserts may both pass the
-    # scalar_one_or_none() check and hit the unique constraint simultaneously.
+    # 4. Upsert domain — insert with defaults if new, leave config intact if
+    #    existing. Guard against TOCTOU race: concurrent inserts may both
+    #    pass the scalar_one_or_none() check and hit the unique constraint.
     domain_stmt = select(Domain).where(Domain.name == probe_result.effective_domain)
     domain_result = await session.execute(domain_stmt)
     if not domain_result.scalar_one_or_none():
@@ -74,12 +93,13 @@ async def create_watch(
 
     watch = Watch(
         name=name,
-        url=url,
+        info_item_id=ULID.from_str(info_item_id),
         content_type=content_type,
-        fetch_config=fetch_config,
         schedule_config=schedule_config,
         effective_url=probe_result.effective_url,
         effective_domain=probe_result.effective_domain,
+        description=description,
+        tags=tags,
     )
     session.add(watch)
     await session.flush()  # populate watch.id before audit
@@ -89,6 +109,7 @@ async def create_watch(
         EventType.WATCH_CREATED,
         watch_id=watch.id,
         name=name,
+        info_item_id=info_item_id,
         url=url,
         content_type=str(content_type),
         effective_url=probe_result.effective_url,
@@ -100,10 +121,7 @@ async def create_watch(
             event_type=WatchEventType.WATCH_CREATED,
             watch_id=str(watch.id),
             watch_name=watch.name,
-            # At create-time the operator-supplied URL *is* the new spec's URL.
-            # Use the input parameter directly — no SDK round-trip needed and
-            # no dependency on a primary InfoSpec that doesn't exist yet
-            # (Task 11 wires CRUD to upsert the InfoItem + spec).
+            # At create-time the resolved-spec URL *is* the new watch's URL.
             watch_url=url,
             occurred_at=datetime.now(UTC),
         ),

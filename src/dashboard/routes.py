@@ -10,6 +10,7 @@ import httpx
 from cryptography.fernet import InvalidToken
 from fastapi import APIRouter, BackgroundTasks, Depends, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
+from information_client import AuthError, NotFound, ServerError
 from jinja2 import TemplateError
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -221,6 +222,12 @@ async def watches_page(
 @router.get("/watches/new")
 async def watch_create_form(request: Request):
     """Watch creation form."""
+    info_client = get_registry().get_information_client()
+    try:
+        info_items = await info_client.list_info_items()
+    except (ServerError, httpx.ConnectError, httpx.TimeoutException) as exc:
+        logger.warning("Information service unreachable for create form: %s", exc)
+        info_items = []
     return templates.TemplateResponse(
         request,
         "pages/watch_form.html",
@@ -229,6 +236,7 @@ async def watch_create_form(request: Request):
             "watch": None,
             "flash": None,
             "content_types": list(ContentType),
+            "info_items": info_items,
         },
     )
 
@@ -237,33 +245,42 @@ async def watch_create_form(request: Request):
 async def watch_create_submit(
     request: Request,
     name: str = Form(""),
-    url: str = Form(""),
+    info_item_id: str = Form(""),
     content_type: str = Form("html"),
     interval: str = Form(""),
+    description: str = Form(""),
     probe_fn: Callable[[str], Awaitable[ProbeResult]] = Depends(get_probe_fn),
     session: AsyncSession = Depends(get_db_session),
 ):
     """Handle watch creation form submission."""
+    info_client = get_registry().get_information_client()
     errors = []
     if not name.strip():
         errors.append("Name is required")
-    if not url.strip():
-        errors.append("URL is required")
+    if not info_item_id.strip():
+        errors.append("Information Item is required")
 
-    if errors:
-        flash = {"type": "error", "message": ". ".join(errors)}
+    async def _render_with_flash(flash_message: str):
+        try:
+            info_items = await info_client.list_info_items()
+        except (ServerError, httpx.ConnectError, httpx.TimeoutException):
+            info_items = []
         return templates.TemplateResponse(
             request,
             "pages/watch_form.html",
             {
                 "active_page": "watches",
                 "watch": None,
-                "flash": flash,
+                "flash": {"type": "error", "message": flash_message},
                 "content_types": list(ContentType),
+                "info_items": info_items,
             },
         )
 
-    schedule_config = {}
+    if errors:
+        return await _render_with_flash(". ".join(errors))
+
+    schedule_config: dict = {}
     if interval.strip():
         schedule_config["interval"] = interval.strip()
 
@@ -271,24 +288,22 @@ async def watch_create_submit(
         watch = await _create_watch(
             session=session,
             probe_fn=probe_fn,
+            info_client=info_client,
             name=name.strip(),
-            url=url.strip(),
+            info_item_id=info_item_id.strip(),
             content_type=content_type,
             schedule_config=schedule_config,
-            fetch_config={},
+            description=description.strip() or None,
         )
+    except NotFound:
+        return await _render_with_flash(f"Information Item {info_item_id} does not exist")
+    except AuthError:
+        logger.exception("InformationClient auth failure during dashboard create")
+        return await _render_with_flash("Information service auth failed")
+    except (ServerError, httpx.ConnectError, httpx.TimeoutException) as exc:
+        return await _render_with_flash(f"Information service unavailable: {exc}")
     except httpx.HTTPError as exc:
-        flash = {"type": "error", "message": f"URL unreachable: {exc}"}
-        return templates.TemplateResponse(
-            request,
-            "pages/watch_form.html",
-            {
-                "active_page": "watches",
-                "watch": None,
-                "flash": flash,
-                "content_types": list(ContentType),
-            },
-        )
+        return await _render_with_flash(f"URL unreachable: {exc}")
 
     return RedirectResponse(url=f"/watches/{watch.id}", status_code=303)
 
@@ -538,24 +553,11 @@ async def watch_delete(
 # --- Watch inline field editing ---
 
 
-def _split_lines(text: str) -> list[str]:
-    """Split text into non-empty lines."""
-    return [line.strip() for line in text.splitlines() if line.strip()]
-
-
-def _parse_json_dict(text: str) -> dict:
-    """Parse JSON text as a dict, or return empty dict for empty input."""
-    text = text.strip()
-    if not text:
-        return {}
-    result = json.loads(text)
-    if not isinstance(result, dict):
-        raise ValueError("Expected a JSON object")
-    return result
-
-
 WATCH_FIELD_META: dict[str, dict] = {
-    # -- Details section (column fields) --
+    # Phase 2c — fetch_config / url no longer live on the Watch row; the
+    # InfoSpec is the canonical source. WATCH_FIELD_META now exposes only
+    # column-backed fields plus the per-watch schedule override.
+    # -- Details section --
     "name": {
         "label": "Name",
         "hint": None,
@@ -565,13 +567,13 @@ WATCH_FIELD_META: dict[str, dict] = {
         "format": lambda w: w.name,
         "content_types": None,
     },
-    "url": {
-        "label": "URL",
-        "hint": None,
-        "type": "url",
+    "description": {
+        "label": "Description",
+        "hint": "Optional notes shown on the watch detail page",
+        "type": "textarea",
         "source": "column",
-        "cast": lambda v: v.strip(),
-        "format": lambda w: w.url,
+        "cast": lambda v: v.strip() or None,
+        "format": lambda w: w.description or "",
         "content_types": None,
     },
     # -- Schedule section --
@@ -583,129 +585,6 @@ WATCH_FIELD_META: dict[str, dict] = {
         "cast": lambda v: v.strip(),
         "format": lambda w: (w.schedule_config or {}).get("interval", "1d"),
         "content_types": None,
-    },
-    # -- Fetch config: shared --
-    "timeout": {
-        "label": "Timeout",
-        "hint": "Request timeout in seconds",
-        "type": "number",
-        "step": "1",
-        "min": "1",
-        "unit": "seconds",
-        "source": "fetch_config",
-        "cast": float,
-        "format": lambda w: str((w.fetch_config or {}).get("timeout", 30)),
-        "content_types": None,
-    },
-    "headers": {
-        "label": "Headers",
-        "hint": 'JSON object, e.g. {"Authorization": "Bearer ..."}',
-        "type": "textarea",
-        "source": "fetch_config",
-        "cast": _parse_json_dict,
-        "format": lambda w: (
-            json.dumps((w.fetch_config or {}).get("headers", {}), indent=2)
-            if (w.fetch_config or {}).get("headers")
-            else ""
-        ),
-        "content_types": None,
-    },
-    "ignore_patterns": {
-        "label": "Ignore Patterns",
-        "hint": "One regex per line (fullmatch against chunk text)",
-        "type": "textarea",
-        "source": "fetch_config",
-        "cast": _split_lines,
-        "format": lambda w: "\n".join((w.fetch_config or {}).get("ignore_patterns", [])),
-        "content_types": None,
-    },
-    # -- Fetch config: HTML-specific --
-    "selectors": {
-        "label": "CSS Selectors",
-        "hint": "One CSS selector per line (empty = whole body)",
-        "type": "textarea",
-        "source": "fetch_config",
-        "cast": _split_lines,
-        "format": lambda w: "\n".join((w.fetch_config or {}).get("selectors", [])),
-        "content_types": ["html"],
-    },
-    "exclude_selectors": {
-        "label": "Exclude Selectors",
-        "hint": "CSS selectors to remove from included content",
-        "type": "textarea",
-        "source": "fetch_config",
-        "cast": _split_lines,
-        "format": lambda w: "\n".join((w.fetch_config or {}).get("exclude_selectors", [])),
-        "content_types": ["html"],
-    },
-    "dynamic_id_patterns": {
-        "label": "Dynamic ID Patterns",
-        "hint": "HTML attribute names to strip (e.g. data-block-id)",
-        "type": "textarea",
-        "source": "fetch_config",
-        "cast": _split_lines,
-        "format": lambda w: "\n".join((w.fetch_config or {}).get("dynamic_id_patterns", [])),
-        "content_types": ["html"],
-    },
-    "strip_boilerplate": {
-        "label": "Strip Boilerplate",
-        "hint": "Remove nav, footer, header, script, style elements",
-        "type": "toggle",
-        "source": "fetch_config",
-        "cast": lambda v: v == "true",
-        "format": lambda w: (w.fetch_config or {}).get("strip_boilerplate", True),
-        "content_types": ["html"],
-    },
-    # -- Fetch config: PDF-specific --
-    "skip_empty_pages": {
-        "label": "Skip Empty Pages",
-        "hint": "Omit pages with no text content",
-        "type": "toggle",
-        "source": "fetch_config",
-        "cast": lambda v: v == "true",
-        "format": lambda w: (w.fetch_config or {}).get("skip_empty_pages", False),
-        "content_types": ["pdf"],
-    },
-    # -- Fetch config: File-specific --
-    "file_format": {
-        "label": "File Format",
-        "hint": None,
-        "type": "select",
-        "options": [("csv", "CSV"), ("xlsx", "Excel")],
-        "source": "fetch_config",
-        "cast": lambda v: v.strip(),
-        "format": lambda w: (w.fetch_config or {}).get("file_format", "csv"),
-        "content_types": ["file"],
-    },
-    "chunk_row_size": {
-        "label": "Chunk Row Size",
-        "hint": "Number of rows per chunk",
-        "type": "number",
-        "step": "1",
-        "min": "1",
-        "unit": "rows",
-        "source": "fetch_config",
-        "cast": int,
-        "format": lambda w: str((w.fetch_config or {}).get("chunk_row_size", 100)),
-        "content_types": ["file"],
-    },
-    "sort_columns": {
-        "label": "Sort Columns",
-        "hint": "Column names to sort by before chunking (one per line)",
-        "type": "textarea",
-        "source": "fetch_config",
-        "cast": _split_lines,
-        "format": lambda w: "\n".join((w.fetch_config or {}).get("sort_columns", [])),
-        "content_types": ["file"],
-    },
-    "sheet_name": {
-        "label": "Sheet Name",
-        "hint": "Excel sheet name (empty = active sheet)",
-        "type": "text",
-        "source": "fetch_config",
-        "cast": lambda v: v.strip(),
-        "format": lambda w: (w.fetch_config or {}).get("sheet_name", ""),
-        "content_types": ["file"],
     },
 }
 EDITABLE_WATCH_FIELDS = set(WATCH_FIELD_META.keys())
@@ -758,14 +637,6 @@ def _apply_watch_field_update(watch: Watch, field_name: str, raw_value: str) -> 
         else:
             config.pop(field_name, None)
         watch.schedule_config = config
-    elif source == "fetch_config":
-        config = dict(watch.fetch_config or {})
-        # Only store non-default values; remove key if empty/default
-        if typed_value in (None, "", [], {}):
-            config.pop(field_name, None)
-        else:
-            config[field_name] = typed_value
-        watch.fetch_config = config
 
 
 @router.get("/watches/{watch_id}/field/{field_name}")
@@ -807,7 +678,7 @@ async def watch_field_update(
     if not watch:
         raise HTTPException(status_code=404, detail="Watch not found")
 
-    if field_name in ("name", "url") and not value.strip():
+    if field_name == "name" and not value.strip():
         raise HTTPException(status_code=400, detail=f"{field_name.title()} cannot be empty")
 
     try:

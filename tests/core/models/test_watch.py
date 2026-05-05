@@ -2,6 +2,7 @@
 
 import pytest
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 
 from src.core.models.watch import ContentType, Watch
 from tests.conftest import make_info_item
@@ -31,8 +32,6 @@ async def test_watch_accepts_info_item_id(db_session):
 @pytest.mark.asyncio
 async def test_watch_info_item_id_required(db_session):
     """Watch.info_item_id is now NOT NULL — inserting without it raises IntegrityError."""
-    from sqlalchemy.exc import IntegrityError
-
     watch = Watch(name="Test", content_type=ContentType.HTML)
     db_session.add(watch)
     with pytest.raises(IntegrityError):

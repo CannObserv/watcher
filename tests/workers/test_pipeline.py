@@ -6,7 +6,6 @@ import pytest
 from sqlalchemy import select
 
 from src.core.differ import ChangeStatus, ChunkFingerprint, diff_chunks
-from src.core.info_resolver import ResolvedInfoSpec
 from src.core.models.change import Change
 from src.core.models.snapshot import Snapshot
 from src.core.models.watch import ContentType
@@ -21,31 +20,7 @@ from src.workers.pipeline import (
     _to_signed64,
 )
 from tests.conftest import make_watch
-
-
-def _resolved(
-    *,
-    info_item_id: str = "01TESTITEM00000000000000XX",
-    info_spec_id: str = "01TESTSPEC00000000000000XX",
-    url: str = "https://example.com",
-    algorithm: str = "full_page",
-    selector: str | None = None,
-) -> ResolvedInfoSpec:
-    """Build a ResolvedInfoSpec stand-in for tests that drive _run_check_pipeline directly."""
-    extraction: dict = {"algorithm": algorithm}
-    if selector is not None:
-        extraction["selector"] = selector
-    document = {
-        "schema_version": 1,
-        "target": {"url": url},
-        "extraction": extraction,
-        "fingerprint": {"algorithm": "simhash"},
-    }
-    return ResolvedInfoSpec(
-        info_item_id=info_item_id,
-        info_spec_id=info_spec_id,
-        document=document,
-    )
+from tests.workers.conftest import make_resolved
 
 
 class TestToSigned64:
@@ -121,7 +96,7 @@ class TestRunCheckPipeline:
             fetch_duration_ms=100,
             storage=storage,
             session=db_session,
-            resolved=_resolved(),
+            resolved=make_resolved(),
         )
         assert result["snapshot_id"] is not None
         assert result["is_changed"] is True
@@ -142,7 +117,7 @@ class TestRunCheckPipeline:
             fetch_duration_ms=100,
             storage=storage,
             session=db_session,
-            resolved=_resolved(),
+            resolved=make_resolved(),
         )
         result = await _run_check_pipeline(
             watch=watch,
@@ -151,7 +126,7 @@ class TestRunCheckPipeline:
             fetch_duration_ms=100,
             storage=storage,
             session=db_session,
-            resolved=_resolved(),
+            resolved=make_resolved(),
         )
         assert result["is_changed"] is False
 
@@ -169,7 +144,7 @@ class TestRunCheckPipeline:
             fetch_duration_ms=100,
             storage=storage,
             session=db_session,
-            resolved=_resolved(),
+            resolved=make_resolved(),
         )
         result = await _run_check_pipeline(
             watch=watch,
@@ -178,7 +153,7 @@ class TestRunCheckPipeline:
             fetch_duration_ms=100,
             storage=storage,
             session=db_session,
-            resolved=_resolved(),
+            resolved=make_resolved(),
         )
         assert result["is_changed"] is True
         assert result["change_id"] is not None
@@ -198,7 +173,7 @@ class TestRunCheckPipeline:
             fetch_duration_ms=100,
             storage=storage,
             session=db_session,
-            resolved=_resolved(),
+            resolved=make_resolved(),
         )
         stored = storage.load(result["storage_path"])
         assert stored == content
@@ -217,7 +192,7 @@ class TestRunCheckPipeline:
             fetch_duration_ms=100,
             storage=storage,
             session=db_session,
-            resolved=_resolved(),
+            resolved=make_resolved(),
         )
         result2 = await _run_check_pipeline(
             watch=watch,
@@ -226,7 +201,7 @@ class TestRunCheckPipeline:
             fetch_duration_ms=100,
             storage=storage,
             session=db_session,
-            resolved=_resolved(),
+            resolved=make_resolved(),
         )
         assert result2["change_id"] is not None
 
@@ -243,7 +218,7 @@ class TestRunCheckPipeline:
         )
 
         storage = LocalStorage(base_dir=tmp_path)
-        spec = _resolved(info_item_id=str(watch.info_item_id))
+        spec = make_resolved(info_item_id=str(watch.info_item_id))
         await _run_check_pipeline(
             watch=watch,
             raw_content=b"<html><body><p>V1</p></body></html>",
@@ -285,7 +260,7 @@ class TestRunCheckPipeline:
             fetch_duration_ms=100,
             storage=storage,
             session=db_session,
-            resolved=_resolved(),
+            resolved=make_resolved(),
         )
         result2 = await _run_check_pipeline(
             watch=watch,
@@ -294,7 +269,7 @@ class TestRunCheckPipeline:
             fetch_duration_ms=100,
             storage=storage,
             session=db_session,
-            resolved=_resolved(),
+            resolved=make_resolved(),
         )
         assert result2["change_id"] is not None
         assert "significance" in result2["change_metadata"]
@@ -315,7 +290,7 @@ class TestRunCheckPipeline:
             fetch_duration_ms=100,
             storage=storage,
             session=db_session,
-            resolved=_resolved(),
+            resolved=make_resolved(),
         )
         result2 = await _run_check_pipeline(
             watch=watch,
@@ -324,7 +299,7 @@ class TestRunCheckPipeline:
             fetch_duration_ms=100,
             storage=storage,
             session=db_session,
-            resolved=_resolved(),
+            resolved=make_resolved(),
         )
         assert result2["change_id"] is not None
         assert "change_id" in result2["change_metadata"]
@@ -345,7 +320,7 @@ class TestRunCheckPipeline:
             fetch_duration_ms=100,
             storage=storage,
             session=db_session,
-            resolved=_resolved(),
+            resolved=make_resolved(),
         )
         result2 = await _run_check_pipeline(
             watch=watch,
@@ -354,7 +329,7 @@ class TestRunCheckPipeline:
             fetch_duration_ms=100,
             storage=storage,
             session=db_session,
-            resolved=_resolved(),
+            resolved=make_resolved(),
         )
         assert result2["change_id"] is not None
 
@@ -383,7 +358,7 @@ class TestRunCheckPipeline:
             fetch_duration_ms=100,
             storage=storage,
             session=db_session,
-            resolved=_resolved(),
+            resolved=make_resolved(),
         )
         await _run_check_pipeline(
             watch=watch,
@@ -392,7 +367,7 @@ class TestRunCheckPipeline:
             fetch_duration_ms=100,
             storage=storage,
             session=db_session,
-            resolved=_resolved(),
+            resolved=make_resolved(),
         )
         await db_session.refresh(watch)
         assert watch.last_changed_at is None
@@ -497,7 +472,7 @@ class TestRunCheckPipelineScreenshot:
                 fetch_duration_ms=100,
                 storage=storage,
                 session=db_session,
-                resolved=_resolved(url="https://example.com/screenshot"),
+                resolved=make_resolved(url="https://example.com/screenshot"),
             )
 
         assert result["screenshot_path"] is not None
@@ -532,7 +507,7 @@ class TestRunCheckPipelineScreenshot:
                 fetch_duration_ms=100,
                 storage=storage,
                 session=db_session,
-                resolved=_resolved(url="https://from-spec.example.com"),
+                resolved=make_resolved(url="https://from-spec.example.com"),
             )
 
         capture.assert_awaited_once()
@@ -555,7 +530,7 @@ class TestRunCheckPipelineScreenshot:
                 fetch_duration_ms=100,
                 storage=storage,
                 session=db_session,
-                resolved=_resolved(),
+                resolved=make_resolved(),
             )
 
         assert result["screenshot_path"] is None
@@ -583,7 +558,7 @@ class TestRunCheckPipelineScreenshot:
                 fetch_duration_ms=100,
                 storage=storage,
                 session=db_session,
-                resolved=_resolved(),
+                resolved=make_resolved(),
             )
 
         # The pipeline result should still have a snapshot_id

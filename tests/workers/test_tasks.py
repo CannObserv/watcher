@@ -32,6 +32,7 @@ from src.workers.tasks import (
     schedule_tick,
 )
 from tests.conftest import make_watch
+from tests.workers.conftest import make_resolved
 
 pytestmark = pytest.mark.integration
 
@@ -182,6 +183,7 @@ class TestCheckPipeline:
             fetch_duration_ms=100,
             storage=storage,
             session=db_session,
+            resolved=make_resolved(),
         )
         assert result["snapshot_id"] is not None
         assert result["is_changed"] is True
@@ -203,6 +205,7 @@ class TestCheckPipeline:
             fetch_duration_ms=100,
             storage=storage,
             session=db_session,
+            resolved=make_resolved(),
         )
         result = await _run_check_pipeline(
             watch=watch,
@@ -211,6 +214,7 @@ class TestCheckPipeline:
             fetch_duration_ms=100,
             storage=storage,
             session=db_session,
+            resolved=make_resolved(),
         )
         assert result["is_changed"] is False
 
@@ -229,6 +233,7 @@ class TestCheckPipeline:
             fetch_duration_ms=100,
             storage=storage,
             session=db_session,
+            resolved=make_resolved(),
         )
         result = await _run_check_pipeline(
             watch=watch,
@@ -237,6 +242,7 @@ class TestCheckPipeline:
             fetch_duration_ms=100,
             storage=storage,
             session=db_session,
+            resolved=make_resolved(),
         )
         assert result["is_changed"] is True
         assert result["change_id"] is not None
@@ -257,6 +263,7 @@ class TestCheckPipeline:
             fetch_duration_ms=100,
             storage=storage,
             session=db_session,
+            resolved=make_resolved(),
         )
         stored = storage.load(result["storage_path"])
         assert stored == content
@@ -399,6 +406,7 @@ class TestCheckWatchSavepointBoundary:
             fetch_duration_ms=50,
             storage=storage,
             session=db_session,
+            resolved=make_resolved(),
         )
         await db_session.commit()
 
@@ -934,6 +942,7 @@ class TestCheckWatchHealthTransitions:
             fetch_duration_ms=50,
             storage=storage,
             session=db_session,
+            resolved=make_resolved(),
         )
         await db_session.commit()
 

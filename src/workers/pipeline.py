@@ -162,17 +162,17 @@ async def _run_check_pipeline(
     fetch_duration_ms: int,
     storage: StorageBackend,
     session: AsyncSession,
-    resolved: ResolvedInfoSpec | None = None,
+    *,
+    resolved: ResolvedInfoSpec,
     info_client: object | None = None,
 ) -> dict:
     """Core check pipeline: hash, extract, diff, store.
 
     Returns dict with snapshot_id, is_changed, change_id, chunk_count, storage_path.
 
-    ``resolved`` carries the primary InfoSpec the caller already fetched; when
-    omitted (legacy test paths), the pipeline falls back to a minimal
-    full_page extraction with no selectors. ``info_client`` is used to force
-    a spec re-fetch when extraction returns zero chunks.
+    ``resolved`` carries the primary InfoSpec the caller already fetched (always
+    supplied in production by ``check_watch``). ``info_client`` is optional; when
+    provided, it's used to force a spec re-fetch on zero-chunk extraction.
     """
     # 1. Compute content hash and doc-level simhash
     content_hash = hashlib.sha256(raw_content).hexdigest()
@@ -196,18 +196,13 @@ async def _run_check_pipeline(
         }
 
     # 4. Extract content using the resolved InfoSpec.
-    if resolved is None:
-        # Legacy fallback (no spec) — used by tests that exercise pipeline
-        # internals without going through check_watch.
-        document: dict = {"extraction": {"algorithm": "full_page"}}
-    else:
-        document = resolved.document
+    document = resolved.document
     extraction = await _extract_with_spec(raw_content, document)
 
     # 4a. Force-refresh + retry path: when extraction returns zero chunks,
     # the spec selector may be stale. Refresh the spec and re-run extraction
     # against the same content (no re-fetch).
-    if not extraction.chunks and resolved is not None and info_client is not None:
+    if not extraction.chunks and info_client is not None:
         logger.info(
             "extraction returned zero chunks — force-refreshing primary InfoSpec",
             extra={

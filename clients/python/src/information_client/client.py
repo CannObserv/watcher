@@ -245,6 +245,16 @@ class InformationClient:
         """
         return await _tools.find_info_item(self, query, limit=limit)
 
+    async def fetch_and_render(
+        self, url: str, *, render: bool = False
+    ) -> _tools.FetchAndRenderResult:
+        """Fetch a URL and return its body + headers.
+
+        ``render=True`` raises (501) until the Playwright fetcher lands.
+        Body bytes are truncated at 5 MiB; ``truncated`` flags the case.
+        """
+        return await _tools.fetch_and_render(self, url, render=render)
+
 
 def _unwrap(response):
     """Return parsed body on 2xx; raise typed error otherwise.

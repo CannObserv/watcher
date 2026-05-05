@@ -162,6 +162,53 @@ async def test_create_info_item_atomic_sends_initial_info_spec(client):
 
 
 @pytest.mark.asyncio
+async def test_fetch_and_render_returns_typed_result(client):
+    with respx.mock:
+        respx.post(f"{BASE_URL}/api/v1/tools/fetch-and-render").mock(
+            return_value=httpx.Response(
+                200,
+                json={
+                    "url": "https://example.com/",
+                    "status_code": 200,
+                    "headers": {"content-type": "text/html"},
+                    "body": "<html>hi</html>",
+                    "body_bytes_total": 16,
+                    "truncated": False,
+                    "screenshot_url": None,
+                },
+            )
+        )
+        result = await client.fetch_and_render("https://example.com")
+    assert result.status_code == 200
+    assert result.body == "<html>hi</html>"
+    assert result.truncated is False
+    assert result.screenshot_url is None
+    assert result.headers["content-type"] == "text/html"
+
+
+@pytest.mark.asyncio
+async def test_fetch_and_render_passes_render_flag(client):
+    with respx.mock:
+        route = respx.post(f"{BASE_URL}/api/v1/tools/fetch-and-render").mock(
+            return_value=httpx.Response(
+                200,
+                json={
+                    "url": "https://example.com/",
+                    "status_code": 200,
+                    "headers": {},
+                    "body": "",
+                    "body_bytes_total": 0,
+                    "truncated": False,
+                    "screenshot_url": None,
+                },
+            )
+        )
+        await client.fetch_and_render("https://example.com", render=False)
+    sent_body = route.calls[0].request.read()
+    assert b'"render": false' in sent_body or b'"render":false' in sent_body
+
+
+@pytest.mark.asyncio
 async def test_create_info_item_without_initial_spec_uses_legacy_path(client):
     """Backwards-compat: omitting initial_info_spec routes through generated client."""
     with respx.mock:

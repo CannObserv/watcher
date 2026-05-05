@@ -7,12 +7,24 @@ from fastapi import Depends, HTTPException
 from fastapi.security import APIKeyHeader
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.core.fetchers.http import HttpFetcher
 from src.information.core.database import get_session_factory
+from src.information.core.tools.fetch_and_render import HttpFetcherProtocol
 
 
 async def get_db_session() -> AsyncGenerator[AsyncSession]:
     async with get_session_factory()() as session:
         yield session
+
+
+def get_http_fetcher() -> HttpFetcherProtocol:
+    """Provide an HttpFetcher for tool routes.
+
+    Tests override this dependency to inject a stub fetcher. Production uses a
+    fresh ``HttpFetcher`` per request — connection pooling is internal to httpx
+    once the underlying ``AsyncClient`` is built.
+    """
+    return HttpFetcher()
 
 
 api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)

@@ -57,6 +57,44 @@ async def _get_json(client_facade, path: str, params: dict[str, Any] | None = No
 
 
 @dataclass(frozen=True)
+class FetchAndRenderResult:
+    """Outcome of a ``fetch_and_render`` call."""
+
+    url: str
+    status_code: int
+    headers: dict[str, str]
+    body: str
+    body_bytes_total: int
+    truncated: bool
+    screenshot_url: str | None
+
+
+async def fetch_and_render(
+    client_facade, url: str, *, render: bool = False
+) -> FetchAndRenderResult:
+    """Fetch ``url`` and return body + headers.
+
+    ``render=True`` raises ``InformationClientError`` (501) until #3 lands.
+    Body bytes larger than 5 MiB are truncated server-side; check
+    ``truncated`` and ``body_bytes_total`` to detect.
+    """
+    body = await _post_json(
+        client_facade,
+        "/api/v1/tools/fetch-and-render",
+        {"url": url, "render": render},
+    )
+    return FetchAndRenderResult(
+        url=str(body["url"]),
+        status_code=int(body["status_code"]),
+        headers=dict(body.get("headers") or {}),
+        body=str(body["body"]),
+        body_bytes_total=int(body["body_bytes_total"]),
+        truncated=bool(body["truncated"]),
+        screenshot_url=body.get("screenshot_url"),
+    )
+
+
+@dataclass(frozen=True)
 class InfoItemWithSpecResult:
     """``create_info_item`` response when ``initial_info_spec`` was supplied.
 

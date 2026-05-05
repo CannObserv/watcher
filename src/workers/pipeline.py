@@ -23,6 +23,9 @@ from src.core.rate_limiter import DomainRateLimiter
 from src.core.screenshot import capture_screenshot
 from src.core.simhash import simhash
 from src.core.storage import StorageBackend
+from src.information.core.tools.extraction_config import (
+    extraction_config_from_spec as _extraction_config_from_spec,
+)
 
 logger = get_logger(__name__)
 
@@ -132,17 +135,6 @@ async def _get_snapshot_chunks(
     )
     result = await session.execute(stmt)
     return list(result.scalars().all())
-
-
-def _extraction_config_from_spec(document: dict) -> dict:
-    """Translate an InfoSpec document's `extraction` block into HtmlExtractor config."""
-    extraction = document.get("extraction") or {}
-    algorithm = extraction.get("algorithm", "full_page")
-    if algorithm == "css":
-        selector = extraction.get("selector", "")
-        return {"selectors": [selector]} if selector else {"selectors": []}
-    # full_page (or any other algorithm) → no selector filtering
-    return {"selectors": []}
 
 
 async def _extract_with_spec(raw_content: bytes, document: dict) -> ExtractionResult:

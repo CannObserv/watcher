@@ -10,6 +10,7 @@ from src.core.crypto import encrypt_apprise_url
 from src.core.models.notification_config import WatchNotificationConfig
 from src.core.models.notification_template import DomainNcRef, NotificationTemplate, WatchNcRef
 from src.core.models.watch import ContentType, Watch
+from tests.conftest import make_watch
 
 pytestmark = pytest.mark.integration
 
@@ -17,15 +18,13 @@ VALID_URL = "json://hooks.example.com/notify"
 
 
 async def _make_watch(db_session, name: str = "W", domain: str | None = None) -> Watch:
-    watch = Watch(
+    return await make_watch(
+        db_session,
         name=name,
         url="https://example.com",
         content_type=ContentType.HTML,
         effective_domain=domain,
     )
-    db_session.add(watch)
-    await db_session.flush()
-    return watch
 
 
 async def _make_template(

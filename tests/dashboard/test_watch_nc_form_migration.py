@@ -10,21 +10,20 @@ from httpx import AsyncClient
 from src.core.crypto import encrypt_apprise_url
 from src.core.models.notification_config import WatchNotificationConfig
 from src.core.models.watch import Watch
+from tests.conftest import make_watch
 
 VALID_URL = "json://hooks.example.com/notify"
 
 
 async def _make_watch(db_session, url="https://example.com", **kwargs) -> Watch:
-    watch = Watch(
+    return await make_watch(
+        db_session,
         url=url,
         name=kwargs.pop("name", "Test Watch"),
         is_active=True,
         content_type="html",
         **kwargs,
     )
-    db_session.add(watch)
-    await db_session.flush()
-    return watch
 
 
 async def _make_nc(db_session, watch, **kwargs) -> WatchNotificationConfig:

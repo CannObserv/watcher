@@ -13,6 +13,7 @@ from src.core.models.snapshot import Snapshot
 from src.core.models.watch import ContentType, Watch, WatchHealthStatus
 from src.core.notifications.events import WatchEventType
 from src.core.storage import LocalStorage
+from tests.conftest import make_watch
 
 pytestmark = pytest.mark.integration
 
@@ -67,38 +68,29 @@ class TestWatchList:
         assert response.status_code == 200
 
     async def test_health_badge_ok(self, client, db_session):
-        from src.core.models.watch import WatchHealthStatus
-
-        db_session.add(
-            Watch(
-                name="W",
-                url="https://a.com",
-                content_type="html",
-                health_status=WatchHealthStatus.OK,
-            )
+        await make_watch(
+            db_session,
+            name="W",
+            url="https://a.com",
+            content_type="html",
+            health_status=WatchHealthStatus.OK,
         )
-        await db_session.flush()
         response = await client.get("/watches")
         assert b"Healthy" in response.content
 
     async def test_health_badge_error(self, client, db_session):
-        from src.core.models.watch import WatchHealthStatus
-
-        db_session.add(
-            Watch(
-                name="W",
-                url="https://a.com",
-                content_type="html",
-                health_status=WatchHealthStatus.ERROR,
-            )
+        await make_watch(
+            db_session,
+            name="W",
+            url="https://a.com",
+            content_type="html",
+            health_status=WatchHealthStatus.ERROR,
         )
-        await db_session.flush()
         response = await client.get("/watches")
         assert b"Error" in response.content
 
     async def test_health_badge_unknown(self, client, db_session):
-        db_session.add(Watch(name="W", url="https://a.com", content_type="html"))
-        await db_session.flush()
+        await make_watch(db_session, name="W", url="https://a.com", content_type="html")
         response = await client.get("/watches")
         assert b"Unknown" in response.content
 
@@ -199,7 +191,8 @@ class TestWatchCreate:
 
 class TestWatchRowDomainInactiveBadge:
     async def test_domain_suspended_watch_shows_domain_inactive_badge(self, client, db_session):
-        watch = Watch(
+        await make_watch(
+            db_session,
             name="Suspended Watch",
             url="https://ds-badge.com/p",
             content_type=ContentType.HTML,
@@ -207,8 +200,6 @@ class TestWatchRowDomainInactiveBadge:
             is_active=False,
             domain_suspended=True,
         )
-        db_session.add(watch)
-        await db_session.flush()
         response = await client.get("/partials/watch-table")
         assert response.status_code == 200
         assert b"Domain Inactive" in response.content
@@ -216,7 +207,8 @@ class TestWatchRowDomainInactiveBadge:
     async def test_manually_inactive_watch_shows_inactive_not_domain_inactive(
         self, client, db_session
     ):
-        watch = Watch(
+        await make_watch(
+            db_session,
             name="Manual Inactive",
             url="https://mi-badge.com/p",
             content_type=ContentType.HTML,
@@ -224,8 +216,6 @@ class TestWatchRowDomainInactiveBadge:
             is_active=False,
             domain_suspended=False,
         )
-        db_session.add(watch)
-        await db_session.flush()
         response = await client.get("/partials/watch-table")
         assert response.status_code == 200
         assert b"Domain Inactive" not in response.content
@@ -241,9 +231,9 @@ class TestChangeDetail:
         assert response.status_code == 404
 
     async def test_change_detail_shows_screenshot_thumbnails(self, client, db_session):
-        watch = Watch(name="Screenshotter", url="https://example.com", content_type="html")
-        db_session.add(watch)
-        await db_session.flush()
+        watch = await make_watch(
+            db_session, name="Screenshotter", url="https://example.com", content_type="html"
+        )
 
         snap_defaults = dict(
             watch_id=watch.id,
@@ -277,9 +267,9 @@ class TestChangeDetail:
         assert b"screenshot" in response.content.lower()
 
     async def test_change_detail_no_screenshot_section_without_paths(self, client, db_session):
-        watch = Watch(name="No Screenshot", url="https://example.com", content_type="html")
-        db_session.add(watch)
-        await db_session.flush()
+        watch = await make_watch(
+            db_session, name="No Screenshot", url="https://example.com", content_type="html"
+        )
 
         snap_defaults = dict(
             watch_id=watch.id,
@@ -311,9 +301,9 @@ class TestChangeDetail:
         assert b"Visual Comparison" not in response.content
 
     async def test_change_list_shows_visual_change_score_badge(self, client, db_session):
-        watch = Watch(name="Visual Score Watch", url="https://example.com", content_type="html")
-        db_session.add(watch)
-        await db_session.flush()
+        watch = await make_watch(
+            db_session, name="Visual Score Watch", url="https://example.com", content_type="html"
+        )
 
         snap_defaults = dict(
             watch_id=watch.id,
@@ -429,9 +419,9 @@ class TestWatchArchive:
         injected as innerHTML of the button element (inside the Danger Zone
         section), resulting in the entire page rendering nested inside that div.
         """
-        watch = Watch(name="Target Test", url="https://example.com", content_type=ContentType.HTML)
-        db_session.add(watch)
-        await db_session.flush()
+        watch = await make_watch(
+            db_session, name="Target Test", url="https://example.com", content_type=ContentType.HTML
+        )
         response = await client.get(f"/watches/{watch.id}")
         assert response.status_code == 200
         content = response.content.decode()
@@ -445,14 +435,13 @@ class TestWatchArchive:
         Regression: missing hx-target would cause the 303-redirect response to
         be injected as innerHTML of the button element (inside the Danger Zone).
         """
-        watch = Watch(
+        watch = await make_watch(
+            db_session,
             name="Restore Target",
             url="https://example.com",
             content_type=ContentType.HTML,
             is_archived=True,
         )
-        db_session.add(watch)
-        await db_session.flush()
         response = await client.get(f"/watches/{watch.id}")
         assert response.status_code == 200
         content = response.content.decode()
@@ -689,16 +678,14 @@ class TestDomainDetailFilters:
             follow_redirects=False,
         )
         name = resp.headers["location"].rstrip("/").split("/")[-1]
-        db_session.add(
-            Watch(
-                name="Healthy Watch",
-                url=f"https://{name}/page",
-                content_type="html",
-                effective_domain=name,
-                health_status=WatchHealthStatus.OK,
-            )
+        await make_watch(
+            db_session,
+            name="Healthy Watch",
+            url=f"https://{name}/page",
+            content_type="html",
+            effective_domain=name,
+            health_status=WatchHealthStatus.OK,
         )
-        await db_session.flush()
         response = await client.get(f"/partials/domain-watches/{name}")
         assert response.status_code == 200
         assert b"Healthy" in response.content
@@ -774,9 +761,9 @@ class TestScreenshotRecapture:
     async def test_recapture_playwright_unavailable_returns_200_unavailable(
         self, client, db_session, monkeypatch
     ):
-        watch = Watch(name="No PW Watch", url="https://example.com", content_type=ContentType.HTML)
-        db_session.add(watch)
-        await db_session.flush()
+        watch = await make_watch(
+            db_session, name="No PW Watch", url="https://example.com", content_type=ContentType.HTML
+        )
 
         snap = Snapshot(
             watch_id=watch.id,
@@ -803,9 +790,9 @@ class TestScreenshotRecapture:
     async def test_recapture_success_returns_200_ok(
         self, client, db_session, monkeypatch, tmp_path
     ):
-        watch = Watch(name="PW Watch", url="https://example.com", content_type=ContentType.HTML)
-        db_session.add(watch)
-        await db_session.flush()
+        watch = await make_watch(
+            db_session, name="PW Watch", url="https://example.com", content_type=ContentType.HTML
+        )
 
         snap = Snapshot(
             watch_id=watch.id,
@@ -869,11 +856,12 @@ class TestSnapshotContentViewer:
         assert response.status_code == 404
 
     async def test_content_no_storage_path_returns_404(self, client, db_session):
-        watch = Watch(
-            name="No Path Watch", url="https://example.com", content_type=ContentType.HTML
+        watch = await make_watch(
+            db_session,
+            name="No Path Watch",
+            url="https://example.com",
+            content_type=ContentType.HTML,
         )
-        db_session.add(watch)
-        await db_session.flush()
 
         snap = Snapshot(
             watch_id=watch.id,
@@ -893,11 +881,12 @@ class TestSnapshotContentViewer:
         assert response.status_code == 404
 
     async def test_content_serves_text_path(self, client, db_session, monkeypatch, tmp_path):
-        watch = Watch(
-            name="Text Path Watch", url="https://example.com", content_type=ContentType.HTML
+        watch = await make_watch(
+            db_session,
+            name="Text Path Watch",
+            url="https://example.com",
+            content_type=ContentType.HTML,
         )
-        db_session.add(watch)
-        await db_session.flush()
 
         text_path = "snapshots/w/snap.txt"
         full_path = tmp_path / text_path
@@ -929,11 +918,12 @@ class TestSnapshotContentViewer:
     async def test_content_falls_back_to_storage_path(
         self, client, db_session, monkeypatch, tmp_path
     ):
-        watch = Watch(
-            name="Fallback Watch", url="https://example.com", content_type=ContentType.HTML
+        watch = await make_watch(
+            db_session,
+            name="Fallback Watch",
+            url="https://example.com",
+            content_type=ContentType.HTML,
         )
-        db_session.add(watch)
-        await db_session.flush()
 
         storage_path = "snapshots/w/snap_raw.html"
         full_path = tmp_path / storage_path

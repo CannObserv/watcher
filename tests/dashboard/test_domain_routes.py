@@ -6,7 +6,7 @@ import pytest
 from sqlalchemy import select
 
 from src.core.models.domain import Domain
-from src.core.models.watch import Watch
+from tests.conftest import make_watch
 
 pytestmark = pytest.mark.integration
 
@@ -117,18 +117,15 @@ class TestDomainDetail:
         assert b"Important note" in response.content
 
     async def test_detail_page_shows_watches_section(self, client, db_session):
-        from src.core.models.watch import Watch
 
         db_session.add(Domain(name="watched.com"))
-        db_session.add(
-            Watch(
-                name="My Watch",
-                url="https://watched.com/page",
-                content_type="html",
-                effective_domain="watched.com",
-            )
+        await make_watch(
+            db_session,
+            name="My Watch",
+            url="https://watched.com/page",
+            content_type="html",
+            effective_domain="watched.com",
         )
-        await db_session.flush()
         response = await client.get("/domains/watched.com")
         assert b"Watches" in response.content
         assert b"My Watch" in response.content
@@ -150,33 +147,29 @@ class TestDomainDetail:
 class TestDomainWatchesTableDomainInactiveBadge:
     async def test_suspended_watch_shows_domain_inactive_badge(self, client, db_session):
         db_session.add(Domain(name="ds-tbl.com", is_active=False))
-        db_session.add(
-            Watch(
-                name="Suspended",
-                url="https://ds-tbl.com/p",
-                content_type="html",
-                effective_domain="ds-tbl.com",
-                is_active=False,
-                domain_suspended=True,
-            )
+        await make_watch(
+            db_session,
+            name="Suspended",
+            url="https://ds-tbl.com/p",
+            content_type="html",
+            effective_domain="ds-tbl.com",
+            is_active=False,
+            domain_suspended=True,
         )
-        await db_session.flush()
         response = await client.get("/domains/ds-tbl.com")
         assert b"Domain Inactive" in response.content
 
     async def test_manually_inactive_watch_does_not_show_domain_inactive(self, client, db_session):
         db_session.add(Domain(name="mi-tbl.com"))
-        db_session.add(
-            Watch(
-                name="Manual Off",
-                url="https://mi-tbl.com/p",
-                content_type="html",
-                effective_domain="mi-tbl.com",
-                is_active=False,
-                domain_suspended=False,
-            )
+        await make_watch(
+            db_session,
+            name="Manual Off",
+            url="https://mi-tbl.com/p",
+            content_type="html",
+            effective_domain="mi-tbl.com",
+            is_active=False,
+            domain_suspended=False,
         )
-        await db_session.flush()
         response = await client.get("/domains/mi-tbl.com")
         assert b"Domain Inactive" not in response.content
 
@@ -299,18 +292,15 @@ class TestDomainDelete:
         assert response.status_code == 409
 
     async def test_delete_domain_with_watches_returns_409(self, client, db_session):
-        from src.core.models.watch import Watch
 
         db_session.add(Domain(name="busy-del.com", archived_at=datetime.now(UTC)))
-        db_session.add(
-            Watch(
-                name="W",
-                url="https://busy-del.com/p",
-                content_type="html",
-                effective_domain="busy-del.com",
-            )
+        await make_watch(
+            db_session,
+            name="W",
+            url="https://busy-del.com/p",
+            content_type="html",
+            effective_domain="busy-del.com",
         )
-        await db_session.flush()
         response = await client.post("/domains/busy-del.com/delete")
         assert response.status_code == 409
 
@@ -348,15 +338,14 @@ class TestDomainToggleActive:
 
     async def test_toggle_inactive_suspends_active_watches(self, client, db_session):
         db_session.add(Domain(name="suspend.com"))
-        watch = Watch(
+        watch = await make_watch(
+            db_session,
             name="Active Watch",
             url="https://suspend.com/p",
             content_type="html",
             effective_domain="suspend.com",
             is_active=True,
         )
-        db_session.add(watch)
-        await db_session.flush()
 
         await client.post("/domains/suspend.com/toggle-active", data={"active": "false"})
 
@@ -366,15 +355,14 @@ class TestDomainToggleActive:
 
     async def test_toggle_inactive_skips_already_inactive_watches(self, client, db_session):
         db_session.add(Domain(name="skip-inactive.com"))
-        watch = Watch(
+        watch = await make_watch(
+            db_session,
             name="Already Inactive",
             url="https://skip-inactive.com/p",
             content_type="html",
             effective_domain="skip-inactive.com",
             is_active=False,
         )
-        db_session.add(watch)
-        await db_session.flush()
 
         await client.post("/domains/skip-inactive.com/toggle-active", data={"active": "false"})
 
@@ -383,7 +371,8 @@ class TestDomainToggleActive:
 
     async def test_toggle_inactive_skips_archived_watches(self, client, db_session):
         db_session.add(Domain(name="skip-archived.com"))
-        watch = Watch(
+        watch = await make_watch(
+            db_session,
             name="Archived Watch",
             url="https://skip-archived.com/p",
             content_type="html",
@@ -391,8 +380,6 @@ class TestDomainToggleActive:
             is_active=False,
             is_archived=True,
         )
-        db_session.add(watch)
-        await db_session.flush()
 
         await client.post("/domains/skip-archived.com/toggle-active", data={"active": "false"})
 
@@ -401,7 +388,8 @@ class TestDomainToggleActive:
 
     async def test_toggle_active_restores_suspended_watches(self, client, db_session):
         db_session.add(Domain(name="restore.com", is_active=False))
-        watch = Watch(
+        watch = await make_watch(
+            db_session,
             name="Suspended Watch",
             url="https://restore.com/p",
             content_type="html",
@@ -409,8 +397,6 @@ class TestDomainToggleActive:
             is_active=False,
             domain_suspended=True,
         )
-        db_session.add(watch)
-        await db_session.flush()
 
         await client.post("/domains/restore.com/toggle-active", data={"active": "true"})
 
@@ -422,7 +408,8 @@ class TestDomainToggleActive:
         self, client, db_session
     ):
         db_session.add(Domain(name="manual.com", is_active=False))
-        watch = Watch(
+        watch = await make_watch(
+            db_session,
             name="Manual Inactive",
             url="https://manual.com/p",
             content_type="html",
@@ -430,8 +417,6 @@ class TestDomainToggleActive:
             is_active=False,
             domain_suspended=False,
         )
-        db_session.add(watch)
-        await db_session.flush()
 
         await client.post("/domains/manual.com/toggle-active", data={"active": "true"})
 
@@ -455,14 +440,13 @@ class TestDomainToggleActive:
     async def test_toggle_htmx_response_includes_watches_oob(self, client, db_session):
         """HTMX toggle response must include OOB swap for watches table."""
         db_session.add(Domain(name="htmx-oob.com"))
-        db_session.add(
-            Watch(
-                name="OOB Watch",
-                url="https://htmx-oob.com/p",
-                content_type="html",
-                effective_domain="htmx-oob.com",
-                is_active=True,
-            )
+        await make_watch(
+            db_session,
+            name="OOB Watch",
+            url="https://htmx-oob.com/p",
+            content_type="html",
+            effective_domain="htmx-oob.com",
+            is_active=True,
         )
         await db_session.commit()
         response = await client.post(
@@ -478,14 +462,13 @@ class TestDomainToggleActive:
     ):
         """Watches table in OOB response shows Domain Inactive badge after deactivation."""
         db_session.add(Domain(name="htmx-badge.com"))
-        db_session.add(
-            Watch(
-                name="Badge Watch",
-                url="https://htmx-badge.com/p",
-                content_type="html",
-                effective_domain="htmx-badge.com",
-                is_active=True,
-            )
+        await make_watch(
+            db_session,
+            name="Badge Watch",
+            url="https://htmx-badge.com/p",
+            content_type="html",
+            effective_domain="htmx-badge.com",
+            is_active=True,
         )
         await db_session.commit()
         response = await client.post(

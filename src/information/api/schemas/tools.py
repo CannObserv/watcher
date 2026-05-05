@@ -109,3 +109,42 @@ class PreviewExtractionResult(BaseModel):
             "sha256 → 64-char hex; simhash → decimal int as a string."
         )
     )
+
+
+class ProposeSelectorsRequest(BaseModel):
+    """Request body for POST /api/v1/tools/propose-selectors."""
+
+    url: HttpUrl = Field(description="Target URL to fetch and search.")
+    description: str = Field(
+        min_length=1,
+        max_length=500,
+        description=(
+            "Plain-language description of the content the operator wants to "
+            "extract. Matched against element text via case-insensitive "
+            "substring search."
+        ),
+    )
+    top_k: int = Field(
+        default=5,
+        ge=1,
+        le=25,
+        description="Maximum candidates to return; ranked by stability score (highest first).",
+    )
+
+
+class SelectorCandidateOut(BaseModel):
+    """One ranked selector candidate."""
+
+    selector: str = Field(description="CSS selector for the proposed element.")
+    sample_text: str = Field(
+        description="Visible text from the matched element (truncated to 200 chars)."
+    )
+    stability_score: float = Field(
+        ge=0.0,
+        le=1.0,
+        description=(
+            "Heuristic score in [0, 1]: higher == more stable. Combines id/class "
+            "structure, text-length proximity to the description, and a volatility "
+            "penalty for hash-looking class names."
+        ),
+    )

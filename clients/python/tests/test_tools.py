@@ -240,6 +240,44 @@ async def test_preview_extraction_returns_typed_result(client):
 
 
 @pytest.mark.asyncio
+async def test_propose_selectors_returns_typed_candidates(client):
+    with respx.mock:
+        respx.post(f"{BASE_URL}/api/v1/tools/propose-selectors").mock(
+            return_value=httpx.Response(
+                200,
+                json=[
+                    {
+                        "selector": "h1.page-title",
+                        "sample_text": "Active Cannabis Licenses",
+                        "stability_score": 0.85,
+                    },
+                    {
+                        "selector": "div.hash-abc12345xyz",
+                        "sample_text": "Active Cannabis Licenses",
+                        "stability_score": 0.2,
+                    },
+                ],
+            )
+        )
+        results = await client.propose_selectors("https://example.com", "Active Cannabis Licenses")
+    assert len(results) == 2
+    assert results[0].selector == "h1.page-title"
+    assert results[0].stability_score == 0.85
+    assert results[1].stability_score == 0.2
+
+
+@pytest.mark.asyncio
+async def test_propose_selectors_passes_top_k(client):
+    with respx.mock:
+        route = respx.post(f"{BASE_URL}/api/v1/tools/propose-selectors").mock(
+            return_value=httpx.Response(200, json=[])
+        )
+        await client.propose_selectors("https://example.com", "x", top_k=3)
+    sent_body = route.calls[0].request.read()
+    assert b'"top_k": 3' in sent_body or b'"top_k":3' in sent_body
+
+
+@pytest.mark.asyncio
 async def test_create_info_item_without_initial_spec_uses_legacy_path(client):
     """Backwards-compat: omitting initial_info_spec routes through generated client."""
     with respx.mock:

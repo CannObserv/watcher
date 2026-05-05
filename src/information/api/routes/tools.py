@@ -17,6 +17,8 @@ from src.information.api.schemas.tools import (
     FetchAndRenderResult,
     PreviewExtractionRequest,
     PreviewExtractionResult,
+    ProposeSelectorsRequest,
+    SelectorCandidateOut,
     ValidateInfoSpecRequest,
     ValidateInfoSpecResult,
     ValidationIssueOut,
@@ -34,6 +36,7 @@ from src.information.core.tools.preview_extraction import (
     TargetUnreachableError,
     preview_extraction,
 )
+from src.information.core.tools.propose_selectors import propose_selectors
 
 router = APIRouter(prefix="/tools", tags=["tools"])
 
@@ -149,3 +152,26 @@ async def preview_extraction_route(
         fingerprint_algorithm=result.fingerprint_algorithm,
         computed_fingerprint=result.computed_fingerprint,
     )
+
+
+@router.post("/propose-selectors", response_model=list[SelectorCandidateOut])
+async def propose_selectors_route(
+    body: ProposeSelectorsRequest,
+    fetcher: HttpFetcherProtocol = Depends(get_http_fetcher),
+) -> list[SelectorCandidateOut]:
+    """Suggest CSS selector candidates for content matching ``description``.
+
+    Heuristic v1: substring match + specificity + text-length proximity +
+    volatility penalty (hash-looking class names get demoted). Empty match
+    set returns ``[]``. Operators always verify the chosen selector via
+    ``preview_extraction`` before persisting an InfoSpec.
+    """
+    candidates = await propose_selectors(fetcher, str(body.url), body.description, top_k=body.top_k)
+    return [
+        SelectorCandidateOut(
+            selector=c.selector,
+            sample_text=c.sample_text,
+            stability_score=c.stability_score,
+        )
+        for c in candidates
+    ]

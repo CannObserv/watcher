@@ -264,6 +264,17 @@ class InformationClient:
         """
         return await _tools.preview_extraction(self, url, document)
 
+    async def propose_selectors(
+        self, url: str, description: str, *, top_k: int = 5
+    ) -> list[_tools.SelectorCandidate]:
+        """Suggest ranked CSS selector candidates for matching content.
+
+        Empty match set returns ``[]``. The ranker is heuristic; always pair
+        with ``preview_extraction`` to verify the chosen selector before
+        persisting via ``create_info_spec``.
+        """
+        return await _tools.propose_selectors(self, url, description, top_k=top_k)
+
 
 def _unwrap(response):
     """Return parsed body on 2xx; raise typed error otherwise.

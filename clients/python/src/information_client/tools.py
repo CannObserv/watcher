@@ -95,6 +95,43 @@ async def fetch_and_render(
 
 
 @dataclass(frozen=True)
+class SelectorCandidate:
+    """One ranked selector candidate from ``propose_selectors``."""
+
+    selector: str
+    sample_text: str
+    stability_score: float
+
+
+async def propose_selectors(
+    client_facade,
+    url: str,
+    description: str,
+    *,
+    top_k: int = 5,
+) -> list[SelectorCandidate]:
+    """Return ranked selector candidates for ``description`` on ``url``.
+
+    Empty match set returns ``[]``. Always pair with ``preview_extraction``
+    against the chosen candidate before persisting an InfoSpec — the ranker
+    is heuristic and meant to narrow the search space, not to finalise.
+    """
+    body = await _post_json(
+        client_facade,
+        "/api/v1/tools/propose-selectors",
+        {"url": url, "description": description, "top_k": top_k},
+    )
+    return [
+        SelectorCandidate(
+            selector=str(c["selector"]),
+            sample_text=str(c["sample_text"]),
+            stability_score=float(c["stability_score"]),
+        )
+        for c in body
+    ]
+
+
+@dataclass(frozen=True)
 class ChunkPreview:
     """Per-chunk preview entry from ``preview_extraction``."""
 

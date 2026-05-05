@@ -54,9 +54,11 @@ from src.core.notifications.preview_fixtures import (
     compute_preview_unified_diff,
 )
 from src.core.probe import ProbeResult
+from src.core.registry import get_registry
 from src.core.screenshot import capture_screenshot
 from src.core.storage import StorageBackend, default_storage
 from src.core.watches import create_watch as _create_watch
+from src.core.watches import resolve_watch_url
 from src.dashboard import templates
 from src.dashboard.context import (
     get_audit_entries,
@@ -301,6 +303,8 @@ async def watch_detail_page(
     watch = await get_watch_detail(session, watch_id)
     if not watch:
         return templates.TemplateResponse(request, "pages/404.html", status_code=404)
+    info_client = get_registry().get_information_client()
+    resolved_url = await resolve_watch_url(watch, info_client)
     profiles = await get_watch_profiles(session, watch.id)
     notifications = await get_watch_notifications(session, watch.id)
     latest_snapshot = await get_latest_snapshot(session, watch.id)
@@ -349,6 +353,7 @@ async def watch_detail_page(
     context = {
         "active_page": "watches",
         "watch": watch,
+        "resolved_url": resolved_url,
         "profiles": profiles,
         "notifications": notifications,
         "field_contexts": field_contexts,
@@ -424,7 +429,9 @@ async def watch_screenshot_recapture(
     if snapshot is None:
         raise HTTPException(status_code=404, detail="No snapshot available for this watch")
 
-    result = await capture_screenshot(watch.url)
+    info_client = get_registry().get_information_client()
+    resolved_url = await resolve_watch_url(watch, info_client)
+    result = await capture_screenshot(resolved_url)
     if result is None:
         return JSONResponse(
             status_code=200,
@@ -925,11 +932,13 @@ async def watch_archive(
     audit(session, EventType.WATCH_ARCHIVED, watch_id=watch.id, name=watch.name, source="dashboard")
     await session.commit()
 
+    info_client = get_registry().get_information_client()
+    resolved_url = await resolve_watch_url(watch, info_client)
     background_tasks.add_task(
         _dispatch_archive_notification,
         watch_id=str(watch.id),
         watch_name=watch.name,
-        watch_url=watch.url,
+        watch_url=resolved_url,
         occurred_at=datetime.now(UTC),
         session_factory=get_session_factory(),
     )
@@ -2406,11 +2415,13 @@ async def watch_notification_test_result(
     nc = await session.get(WatchNotificationConfig, parse_ulid(config_id, "Config"))
     if not nc or nc.watch_id != watch.id:
         raise HTTPException(status_code=404, detail="Config not found")
+    info_client = get_registry().get_information_client()
+    resolved_url = await resolve_watch_url(watch, info_client)
     event = WatchEvent(
         event_type=WatchEventType.CHANGE_DETECTED,
         watch_id=str(watch.id),
         watch_name=watch.name,
-        watch_url=watch.url,
+        watch_url=resolved_url,
         occurred_at=datetime.now(UTC),
         metadata={"test": True},
     )

@@ -1,6 +1,6 @@
 """Integration tests for the create_watch service function."""
 
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 from urllib.parse import urlparse
 
 import httpx
@@ -11,7 +11,8 @@ from src.core.models.audit_log import AuditLog, EventType
 from src.core.models.domain import Domain
 from src.core.models.watch import Watch
 from src.core.probe import ProbeResult
-from src.core.watches import create_watch
+from src.core.watches import create_watch, resolve_watch_url
+from tests.conftest import make_watch
 
 pytestmark = pytest.mark.integration
 
@@ -185,3 +186,25 @@ class TestCreateWatch:
         assert watch.content_type == "pdf"
         assert watch.schedule_config == {"interval": "6h"}
         assert watch.fetch_config == {"timeout": 30}
+
+
+class TestResolveWatchUrl:
+    """resolve_watch_url returns the URL from the watch's primary InfoSpec."""
+
+    async def test_returns_target_url_from_primary_info_spec(self, db_session):
+        """The resolved URL comes from the spec's `target.url`, not any Watch column."""
+        watch = await make_watch(db_session, url="https://stale-or-missing.example.com")
+
+        fake_client = MagicMock()
+        fake_spec = MagicMock()
+        fake_spec.info_item_id = str(watch.info_item_id)
+        fake_spec.info_spec_id = "01XYZ"
+        fake_spec.document = {"target": {"url": "https://from-spec.example.com"}}
+        fake_client.get_primary_info_spec = AsyncMock(return_value=fake_spec)
+
+        resolved_url = await resolve_watch_url(watch, fake_client)
+
+        assert resolved_url == "https://from-spec.example.com"
+        fake_client.get_primary_info_spec.assert_awaited_once_with(
+            str(watch.info_item_id), force_refresh=False
+        )

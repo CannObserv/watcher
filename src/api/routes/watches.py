@@ -19,7 +19,9 @@ from src.core.models.watch import Watch
 from src.core.notifications.events import WatchEvent, WatchEventType
 from src.core.notifications.notify import dispatch_event_notifications
 from src.core.probe import ProbeResult
+from src.core.registry import get_registry
 from src.core.watches import create_watch as _create_watch
+from src.core.watches import resolve_watch_url
 
 logger = get_logger(__name__)
 
@@ -115,6 +117,8 @@ async def update_watch(
         updated_fields=list(updates.keys()),
     )
     if "is_active" in updates:
+        info_client = get_registry().get_information_client()
+        resolved_url = await resolve_watch_url(watch, info_client)
         if previous_active and not watch.is_active:
             await dispatch_event_notifications(
                 session=session,
@@ -122,7 +126,7 @@ async def update_watch(
                     event_type=WatchEventType.WATCH_PAUSED,
                     watch_id=str(watch.id),
                     watch_name=watch.name,
-                    watch_url=watch.url,
+                    watch_url=resolved_url,
                     occurred_at=datetime.now(UTC),
                 ),
             )
@@ -133,7 +137,7 @@ async def update_watch(
                     event_type=WatchEventType.WATCH_RESUMED,
                     watch_id=str(watch.id),
                     watch_name=watch.name,
-                    watch_url=watch.url,
+                    watch_url=resolved_url,
                     occurred_at=datetime.now(UTC),
                 ),
             )
@@ -153,12 +157,14 @@ async def delete_watch(
     if not watch.is_archived:
         raise HTTPException(status_code=409, detail="Archive watch before deleting")
 
+    info_client = get_registry().get_information_client()
+    resolved_url = await resolve_watch_url(watch, info_client)
     audit(
         session,
         EventType.WATCH_DELETED,
         watch_id=watch.id,
         name=watch.name,
-        url=watch.url,
+        url=resolved_url,
     )
     await dispatch_event_notifications(
         session=session,
@@ -166,7 +172,7 @@ async def delete_watch(
             event_type=WatchEventType.WATCH_DELETED,
             watch_id=str(watch.id),
             watch_name=watch.name,
-            watch_url=watch.url,
+            watch_url=resolved_url,
             occurred_at=datetime.now(UTC),
         ),
     )

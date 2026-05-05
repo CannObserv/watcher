@@ -3,10 +3,12 @@
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 
+from information_client import InformationClient
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.core.info_resolver import resolve_primary
 from src.core.logging import get_logger
 from src.core.models.audit_log import EventType, audit
 from src.core.models.domain import DEFAULT_MAX_CONCURRENCY, DEFAULT_MIN_INTERVAL, Domain
@@ -16,6 +18,17 @@ from src.core.notifications.notify import dispatch_event_notifications
 from src.core.probe import ProbeResult
 
 logger = get_logger(__name__)
+
+
+async def resolve_watch_url(watch: Watch, client: InformationClient) -> str:
+    """Resolve a watch's current target URL from the primary InfoSpec.
+
+    Used at notification/event-emission time so ``watch_url`` reflects the
+    operator's current spec, not a stale value. Caller passes the SDK client
+    explicitly to keep the registry lookup at the request boundary.
+    """
+    resolved = await resolve_primary(client, str(watch.info_item_id))
+    return resolved.document["target"]["url"]
 
 
 async def create_watch(
@@ -87,7 +100,11 @@ async def create_watch(
             event_type=WatchEventType.WATCH_CREATED,
             watch_id=str(watch.id),
             watch_name=watch.name,
-            watch_url=watch.url,
+            # At create-time the operator-supplied URL *is* the new spec's URL.
+            # Use the input parameter directly — no SDK round-trip needed and
+            # no dependency on a primary InfoSpec that doesn't exist yet
+            # (Task 11 wires CRUD to upsert the InfoItem + spec).
+            watch_url=url,
             occurred_at=datetime.now(UTC),
         ),
     )

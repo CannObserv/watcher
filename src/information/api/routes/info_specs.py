@@ -11,6 +11,7 @@ from src.information.api.schemas.info_spec import (
     InfoSpecPatch,
 )
 from src.information.api.schemas.types import ULIDStr
+from src.information.api.serializers import info_spec_to_out
 from src.information.core.info_spec_schema import (
     InfoSpecValidationError,
     validate_info_spec,
@@ -18,18 +19,6 @@ from src.information.core.info_spec_schema import (
 from src.information.core.models import InfoItem, InfoSpec
 
 router = APIRouter(prefix="/info-items/{info_item_id}", tags=["info-specs"])
-
-
-def _to_out(spec: InfoSpec) -> InfoSpecOut:
-    return InfoSpecOut(
-        info_spec_id=str(spec.info_spec_id),
-        info_item_id=str(spec.info_item_id),
-        schema_version=spec.schema_version,
-        document=spec.document,
-        priority=spec.priority,
-        active=spec.active,
-        created_at=spec.created_at,
-    )
 
 
 async def _ensure_item_exists(session: AsyncSession, info_item_id: str) -> None:
@@ -105,7 +94,7 @@ async def create_info_spec(
     session.add(spec)
     await session.commit()
     await session.refresh(spec)
-    return _to_out(spec)
+    return info_spec_to_out(spec)
 
 
 @router.get("/info-specs", response_model=list[InfoSpecOut])
@@ -119,7 +108,7 @@ async def list_info_specs(
         .where(InfoSpec.info_item_id == info_item_id, InfoSpec.active.is_(True))
         .order_by(InfoSpec.priority.asc())
     )
-    return [_to_out(s) for s in result.scalars().all()]
+    return [info_spec_to_out(s) for s in result.scalars().all()]
 
 
 @router.get("/primary-info-spec", response_model=InfoSpecOut)
@@ -141,7 +130,7 @@ async def get_primary_info_spec(
     spec = result.scalar_one_or_none()
     if spec is None:
         raise HTTPException(status_code=404, detail="No active InfoSpec for InfoItem")
-    return _to_out(spec)
+    return info_spec_to_out(spec)
 
 
 @router.patch("/info-specs/{info_spec_id}", response_model=InfoSpecOut)
@@ -200,4 +189,4 @@ async def patch_info_spec(
 
     await session.commit()
     await session.refresh(spec)
-    return _to_out(spec)
+    return info_spec_to_out(spec)

@@ -6,20 +6,20 @@ import httpx
 from ... import errors
 from ...client import AuthenticatedClient, Client
 from ...models.http_validation_error import HTTPValidationError
-from ...models.info_item_create import InfoItemCreate
-from ...models.info_item_with_spec_out import InfoItemWithSpecOut
+from ...models.validate_info_spec_request import ValidateInfoSpecRequest
+from ...models.validate_info_spec_result import ValidateInfoSpecResult
 from ...types import Response
 
 
 def _get_kwargs(
     *,
-    body: InfoItemCreate,
+    body: ValidateInfoSpecRequest,
 ) -> dict[str, Any]:
     headers: dict[str, Any] = {}
 
     _kwargs: dict[str, Any] = {
         "method": "post",
-        "url": "/api/v1/info-items",
+        "url": "/api/v1/tools/validate-info-spec",
     }
 
     _kwargs["json"] = body.to_dict()
@@ -32,11 +32,11 @@ def _get_kwargs(
 
 def _parse_response(
     *, client: AuthenticatedClient | Client, response: httpx.Response
-) -> HTTPValidationError | InfoItemWithSpecOut | None:
-    if response.status_code == 201:
-        response_201 = InfoItemWithSpecOut.from_dict(response.json())
+) -> HTTPValidationError | ValidateInfoSpecResult | None:
+    if response.status_code == 200:
+        response_200 = ValidateInfoSpecResult.from_dict(response.json())
 
-        return response_201
+        return response_200
 
     if response.status_code == 422:
         response_422 = HTTPValidationError.from_dict(response.json())
@@ -51,7 +51,7 @@ def _parse_response(
 
 def _build_response(
     *, client: AuthenticatedClient | Client, response: httpx.Response
-) -> Response[HTTPValidationError | InfoItemWithSpecOut]:
+) -> Response[HTTPValidationError | ValidateInfoSpecResult]:
     return Response(
         status_code=HTTPStatus(response.status_code),
         content=response.content,
@@ -63,25 +63,26 @@ def _build_response(
 def sync_detailed(
     *,
     client: AuthenticatedClient,
-    body: InfoItemCreate,
-) -> Response[HTTPValidationError | InfoItemWithSpecOut]:
-    """Create Info Item
+    body: ValidateInfoSpecRequest,
+) -> Response[HTTPValidationError | ValidateInfoSpecResult]:
+    """Validate Info Spec Route
 
-     Create an InfoItem.
+     Validate an InfoSpec document against the v1 JSON Schema.
 
-    When ``initial_info_spec`` is supplied, validate it first; on success,
-    create both the InfoItem and a primary (priority=1, active=True) InfoSpec
-    in a single transaction. On validation failure, neither row is written.
+    Always returns 200 — the response body's ``valid`` flag carries the
+    validation outcome, and ``errors`` carries field-level issues. This
+    differs from create/patch routes (which return 422 on invalid input);
+    here, validation IS the purpose, so the result is the response.
 
     Args:
-        body (InfoItemCreate):
+        body (ValidateInfoSpecRequest): Request body for POST /api/v1/tools/validate-info-spec.
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[HTTPValidationError | InfoItemWithSpecOut]
+        Response[HTTPValidationError | ValidateInfoSpecResult]
     """
 
     kwargs = _get_kwargs(
@@ -98,25 +99,26 @@ def sync_detailed(
 def sync(
     *,
     client: AuthenticatedClient,
-    body: InfoItemCreate,
-) -> HTTPValidationError | InfoItemWithSpecOut | None:
-    """Create Info Item
+    body: ValidateInfoSpecRequest,
+) -> HTTPValidationError | ValidateInfoSpecResult | None:
+    """Validate Info Spec Route
 
-     Create an InfoItem.
+     Validate an InfoSpec document against the v1 JSON Schema.
 
-    When ``initial_info_spec`` is supplied, validate it first; on success,
-    create both the InfoItem and a primary (priority=1, active=True) InfoSpec
-    in a single transaction. On validation failure, neither row is written.
+    Always returns 200 — the response body's ``valid`` flag carries the
+    validation outcome, and ``errors`` carries field-level issues. This
+    differs from create/patch routes (which return 422 on invalid input);
+    here, validation IS the purpose, so the result is the response.
 
     Args:
-        body (InfoItemCreate):
+        body (ValidateInfoSpecRequest): Request body for POST /api/v1/tools/validate-info-spec.
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        HTTPValidationError | InfoItemWithSpecOut
+        HTTPValidationError | ValidateInfoSpecResult
     """
 
     return sync_detailed(
@@ -128,25 +130,26 @@ def sync(
 async def asyncio_detailed(
     *,
     client: AuthenticatedClient,
-    body: InfoItemCreate,
-) -> Response[HTTPValidationError | InfoItemWithSpecOut]:
-    """Create Info Item
+    body: ValidateInfoSpecRequest,
+) -> Response[HTTPValidationError | ValidateInfoSpecResult]:
+    """Validate Info Spec Route
 
-     Create an InfoItem.
+     Validate an InfoSpec document against the v1 JSON Schema.
 
-    When ``initial_info_spec`` is supplied, validate it first; on success,
-    create both the InfoItem and a primary (priority=1, active=True) InfoSpec
-    in a single transaction. On validation failure, neither row is written.
+    Always returns 200 — the response body's ``valid`` flag carries the
+    validation outcome, and ``errors`` carries field-level issues. This
+    differs from create/patch routes (which return 422 on invalid input);
+    here, validation IS the purpose, so the result is the response.
 
     Args:
-        body (InfoItemCreate):
+        body (ValidateInfoSpecRequest): Request body for POST /api/v1/tools/validate-info-spec.
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[HTTPValidationError | InfoItemWithSpecOut]
+        Response[HTTPValidationError | ValidateInfoSpecResult]
     """
 
     kwargs = _get_kwargs(
@@ -161,25 +164,26 @@ async def asyncio_detailed(
 async def asyncio(
     *,
     client: AuthenticatedClient,
-    body: InfoItemCreate,
-) -> HTTPValidationError | InfoItemWithSpecOut | None:
-    """Create Info Item
+    body: ValidateInfoSpecRequest,
+) -> HTTPValidationError | ValidateInfoSpecResult | None:
+    """Validate Info Spec Route
 
-     Create an InfoItem.
+     Validate an InfoSpec document against the v1 JSON Schema.
 
-    When ``initial_info_spec`` is supplied, validate it first; on success,
-    create both the InfoItem and a primary (priority=1, active=True) InfoSpec
-    in a single transaction. On validation failure, neither row is written.
+    Always returns 200 — the response body's ``valid`` flag carries the
+    validation outcome, and ``errors`` carries field-level issues. This
+    differs from create/patch routes (which return 422 on invalid input);
+    here, validation IS the purpose, so the result is the response.
 
     Args:
-        body (InfoItemCreate):
+        body (ValidateInfoSpecRequest): Request body for POST /api/v1/tools/validate-info-spec.
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        HTTPValidationError | InfoItemWithSpecOut
+        HTTPValidationError | ValidateInfoSpecResult
     """
 
     return (

@@ -18,6 +18,7 @@ from types import TracebackType
 
 import httpx
 
+from information_client import tools as _tools
 from information_client.errors import error_from_response
 from information_client.generated.api.info_items import (
     create_info_item_api_v1_info_items_post,
@@ -96,9 +97,28 @@ class InformationClient:
     # --- InfoItem endpoints ---
 
     async def create_info_item(
-        self, *, name: str, description: str | None = None, owner: str | None = None
-    ) -> InfoItemOut:
-        """Create a new InfoItem."""
+        self,
+        *,
+        name: str,
+        description: str | None = None,
+        owner: str | None = None,
+        initial_info_spec: dict | None = None,
+    ) -> InfoItemOut | _tools.InfoItemWithSpecResult:
+        """Create a new InfoItem.
+
+        When ``initial_info_spec`` is supplied, validates and atomically creates
+        a primary InfoSpec alongside the InfoItem (priority=1, active=True) and
+        returns ``InfoItemWithSpecResult`` carrying both IDs. Without it, returns
+        the existing ``InfoItemOut`` shape unchanged.
+        """
+        if initial_info_spec is not None:
+            return await _tools.create_info_item_atomic(
+                self,
+                name=name,
+                description=description,
+                owner=owner,
+                initial_info_spec=initial_info_spec,
+            )
         body = InfoItemCreate(name=name, description=description, owner=owner)
         response = await create_info_item_api_v1_info_items_post.asyncio_detailed(
             client=self._gen_client, body=body
@@ -206,6 +226,54 @@ class InformationClient:
             body=body,
         )
         return _unwrap(response)
+
+    # --- Authoring tools (/api/v1/tools/*) ---
+
+    async def validate_info_spec(self, document: dict) -> _tools.ValidationResult:
+        """Validate an InfoSpec document against the v1 JSON Schema.
+
+        Always returns a result. ``valid=False`` carries per-field issues; use
+        this during authoring to surface schema problems without committing.
+        """
+        return await _tools.validate_info_spec(self, document)
+
+    async def find_info_item(self, query: str, *, limit: int = 20) -> list[InfoItemOut]:
+        """Search Information Items by name + description (case-insensitive).
+
+        Returns up to ``limit`` matches, newest first. Use before
+        ``create_info_item`` to avoid duplicating an existing item.
+        """
+        return await _tools.find_info_item(self, query, limit=limit)
+
+    async def fetch_and_render(
+        self, url: str, *, render: bool = False
+    ) -> _tools.FetchAndRenderResult:
+        """Fetch a URL and return its body + headers.
+
+        ``render=True`` raises (501) until the Playwright fetcher lands.
+        Body bytes are truncated at 5 MiB; ``truncated`` flags the case.
+        """
+        return await _tools.fetch_and_render(self, url, render=render)
+
+    async def preview_extraction(self, url: str, document: dict) -> _tools.PreviewExtractionResult:
+        """Validate, fetch, extract, and fingerprint with a candidate InfoSpec.
+
+        Use after authoring the InfoSpec document (and optionally validating
+        via ``validate_info_spec``) to verify the extracted chunks match the
+        operator's expectation before calling ``create_info_spec``.
+        """
+        return await _tools.preview_extraction(self, url, document)
+
+    async def propose_selectors(
+        self, url: str, description: str, *, top_k: int = 5
+    ) -> list[_tools.SelectorCandidate]:
+        """Suggest ranked CSS selector candidates for matching content.
+
+        Empty match set returns ``[]``. The ranker is heuristic; always pair
+        with ``preview_extraction`` to verify the chosen selector before
+        persisting via ``create_info_spec``.
+        """
+        return await _tools.propose_selectors(self, url, description, top_k=top_k)
 
 
 def _unwrap(response):

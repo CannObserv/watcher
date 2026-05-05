@@ -118,6 +118,21 @@ Change bus envelope is `schema_version: 2`. Stream entries are partitioned by `i
 
 Fresh hosts need `sudo cp deploy/information.service /etc/systemd/system/` before `watcher.service` will boot — see `docs/DEPLOYMENT.md` for the full install (key generation + env-var registration). On hosts where the unit isn't installed, the dev server `uv run uvicorn src.information.api.main:app --host 0.0.0.0 --port 8021 --reload &` is acceptable for development; set `INFORMATION_BASE_URL=http://localhost:8021` so consumers (Watcher dev server, smoke scripts) hit it instead of the systemd port.
 
+## Information service authoring tools (Phase 3a)
+
+The Information service exposes authoring helpers under `/api/v1/tools/*`. Non-mutating except where noted; same `X-API-Key` auth as the CRUD surface. Each route has an ergonomic SDK wrapper on `InformationClient`.
+
+| Tool | HTTP | SDK method | Use when |
+|---|---|---|---|
+| `validate_info_spec` | `POST /tools/validate-info-spec` | `validate_info_spec(doc)` | Surface schema problems on a candidate doc before `create_info_spec`. |
+| `find_info_item` | `GET /tools/find-info-items?q=…` | `find_info_item(query, limit=20)` | Dedupe before creating a new InfoItem. Substring + case-insensitive over name + description. |
+| `fetch_and_render` | `POST /tools/fetch-and-render` | `fetch_and_render(url)` | Inspect what the extractor will see. v1 is HTTP-only; `render=True` returns 501 until #3 (Playwright). 5 MiB body cap. |
+| `preview_extraction` | `POST /tools/preview-extraction` | `preview_extraction(url, doc)` | Dry-run validate + fetch + extract + fingerprint. 422 with structured `validation_failed` / `target_unreachable` codes. |
+| `propose_selectors` | `POST /tools/propose-selectors` | `propose_selectors(url, description, top_k=5)` | Rank CSS selector candidates; heuristic v1 (#146 tracks learned ranker). |
+| `create_info_item` (atomic) | `POST /info-items` w/ `initial_info_spec` | `create_info_item(..., initial_info_spec=doc)` | Mutating. Atomically create the InfoItem + primary InfoSpec in one transaction. |
+
+Smoke: `bash scripts/smoke_phase3a.sh` exercises the full authoring loop end-to-end against the live service.
+
 ## Common Commands
 
 ```bash

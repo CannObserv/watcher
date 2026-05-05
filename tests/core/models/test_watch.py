@@ -16,7 +16,6 @@ async def test_watch_accepts_info_item_id(db_session):
 
     watch = Watch(
         name="Test",
-        url="https://example.com",
         content_type=ContentType.HTML,
         info_item_id=info_item.info_item_id,
     )
@@ -30,15 +29,11 @@ async def test_watch_accepts_info_item_id(db_session):
 
 
 @pytest.mark.asyncio
-async def test_watch_info_item_id_defaults_null(db_session):
-    """Freshly inserted Watch has info_item_id null when unspecified."""
-    watch = Watch(
-        name="Test",
-        url="https://example.com",
-        content_type=ContentType.HTML,
-    )
-    db_session.add(watch)
-    await db_session.flush()
+async def test_watch_info_item_id_required(db_session):
+    """Watch.info_item_id is now NOT NULL — inserting without it raises IntegrityError."""
+    from sqlalchemy.exc import IntegrityError
 
-    fetched = (await db_session.execute(select(Watch).where(Watch.id == watch.id))).scalar_one()
-    assert fetched.info_item_id is None
+    watch = Watch(name="Test", content_type=ContentType.HTML)
+    db_session.add(watch)
+    with pytest.raises(IntegrityError):
+        await db_session.flush()

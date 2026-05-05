@@ -39,9 +39,7 @@ class TestWatchBaseMetadata:
     """Unit tests for _watch_base_metadata helper (no DB required)."""
 
     def _make_watch(self, **kwargs):
-        return Watch(
-            name="Test", url="https://example.com", content_type=ContentType.HTML, **kwargs
-        )
+        return Watch(name="Test", content_type=ContentType.HTML, **kwargs)
 
     def test_includes_last_changed_at_when_set(self):
         watch = self._make_watch(last_changed_at=datetime(2026, 4, 9, 14, 22, 37, tzinfo=UTC))

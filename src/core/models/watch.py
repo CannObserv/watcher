@@ -1,4 +1,4 @@
-"""Watch model — a URL to monitor for changes."""
+"""Watch model — links an InfoItem to per-watch scheduling and notification metadata."""
 
 import enum
 from datetime import datetime
@@ -50,17 +50,14 @@ class Watch(Base, TimestampMixin):
     __tablename__ = "watches"
 
     id: Mapped[ULID] = mapped_column(ULIDType, primary_key=True, default=generate_ulid)
-    info_item_id: Mapped[ULID | None] = mapped_column(
+    info_item_id: Mapped[ULID] = mapped_column(
         ULIDType,
         ForeignKey("information.info_items.info_item_id", ondelete="RESTRICT"),
-        nullable=True,
+        nullable=False,
         index=True,
-        default=None,
     )
     name: Mapped[str] = mapped_column(String(255))
-    url: Mapped[str] = mapped_column(Text)
     content_type: Mapped[ContentType] = mapped_column(String(20))
-    fetch_config: Mapped[dict] = mapped_column(JSONB, default=dict, server_default="{}")
     schedule_config: Mapped[dict] = mapped_column(JSONB, default=dict, server_default="{}")
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
     is_archived: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
@@ -91,7 +88,6 @@ class Watch(Base, TimestampMixin):
 
     def __init__(self, **kwargs: object) -> None:
         """Set Python-side defaults for fields not provided."""
-        kwargs.setdefault("fetch_config", {})
         kwargs.setdefault("schedule_config", {})
         kwargs.setdefault("is_active", True)
         kwargs.setdefault("is_archived", False)

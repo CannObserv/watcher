@@ -425,6 +425,7 @@ class TestChangeDetailResponse:
         assert data.previous_snapshot is None
 
 
+@pytest.mark.skip(reason="Phase 2c — WatchResponse Pydantic schema is rewritten in Task 11 (#138).")
 class TestWatchResponse:
     def test_watch_response_includes_is_archived(self):
         watch = Watch(

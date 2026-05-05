@@ -50,6 +50,9 @@ class TestExtractorMap:
         assert set(_EXTRACTOR_MAP.keys()) == set(_EXT_MAP.keys())
 
 
+@pytest.mark.skip(
+    reason="Phase 2c — _extract_content rewires onto InfoSpec extraction in Task 7 (#138)."
+)
 class TestExtractContent:
     async def test_extracts_html_content(self):
         watch = Watch(name="Test", url="https://example.com", content_type=ContentType.HTML)

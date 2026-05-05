@@ -6,17 +6,13 @@ Phase 2c migration shim
 -----------------------
 The module-level async helpers ``make_watch``, ``make_snapshot``, ``make_info_item``,
 and ``make_info_spec`` are NOT pytest fixtures — they are awaitable factory
-functions test code can call directly. The legacy pytest-fixture variants are
-preserved as ``default_watch_fixture`` / ``default_snapshot_fixture`` /
-``default_change_fixture`` so any test that still uses the fixture form keeps
-working during the migration.
+functions test code can call directly. ``default_snapshot_fixture`` and
+``make_change`` remain as pytest fixtures for the handful of tests that still
+consume them in fixture form.
 
-The ``make_watch`` factory uses ``hasattr(Watch, ...)`` guards so the same
-helper supports three model states across Tasks 0 / 3 / 4:
-
-- Task 0 (now): Watch has ``url`` only — kwargs include ``url=``.
-- Task 3:       Watch has both ``url`` and ``info_item_id`` — both included.
-- Task 4:       Watch has ``info_item_id`` only — ``url`` dropped.
+The ``make_watch`` factory keeps a ``hasattr(Watch, "info_item_id")`` guard so
+the helper does not silently re-introduce model coupling if the column is ever
+renamed or scoped onto a different mapper.
 """
 
 import os
@@ -220,9 +216,6 @@ async def make_watch(
     if hasattr(Watch, "info_item_id"):
         watch_kwargs["info_item_id"] = info_item_id
 
-    if hasattr(Watch, "url") and "url" not in watch_kwargs:
-        watch_kwargs["url"] = url or "https://example.com"
-
     watch = Watch(**watch_kwargs)
     session.add(watch)
     await session.flush()
@@ -242,19 +235,6 @@ async def make_snapshot(session, watch, *, fetcher_used="http", **kwargs):
 # module-level helpers above). Tests that consume them as fixtures keep
 # working: ``def test_x(default_watch_fixture)``.
 # ---------------------------------------------------------------------------
-
-
-@pytest.fixture
-def default_watch_fixture(db_session):
-    """Factory fixture: create and flush a Watch row (legacy form)."""
-
-    async def _make(name="Test Watch", url="https://example.com", content_type="html", **kwargs):
-        watch = Watch(name=name, url=url, content_type=content_type, **kwargs)
-        db_session.add(watch)
-        await db_session.flush()
-        return watch
-
-    return _make
 
 
 @pytest.fixture

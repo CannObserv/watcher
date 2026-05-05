@@ -6,7 +6,7 @@ timeout, ServerError) in addition to Python builtins. Operator-fixable errors
 """
 
 import httpx
-from information_client.errors import ServerError
+from information_client.errors import AuthError, NotFound, ServerError, ValidationError
 
 from src.workers.tasks import check_watch
 
@@ -23,8 +23,6 @@ def test_check_watch_retry_strategy_includes_sdk_errors() -> None:
 
 def test_check_watch_retry_strategy_excludes_operator_errors() -> None:
     """Auth/NotFound/Validation must NOT be retried — operator-fixable, propagate loud."""
-    from information_client.errors import AuthError, NotFound, ValidationError
-
     retry_exceptions = check_watch.retry_strategy.retry_exceptions
     assert AuthError not in retry_exceptions
     assert NotFound not in retry_exceptions

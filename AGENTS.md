@@ -105,6 +105,8 @@ export $(cat /etc/watcher/.env .env 2>/dev/null | xargs)
 - `DATABASE_URL` — PostgreSQL connection (watcher + information service)
 - `APPRISE_SECRET_KEY` — HMAC signing key for Apprise webhook validation
 - `REDIS_URL` — Redis connection URL (default: `redis://localhost:6379/0`). Used by `ChangePublisher` and `tools/info_changes_consumer.py`. Override for testing or remote Redis.
+- `INFORMATION_BASE_URL` — Information service URL for the `InformationClient` SDK (default: `http://localhost:8020`).
+- `INFORMATION_API_KEY` — Required. API key for the `InformationClient` SDK; missing key crashes the API on boot (pre-warm in lifespan).
 
 Full variable reference: `docs/DEPLOYMENT.md`.
 

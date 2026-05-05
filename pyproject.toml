@@ -28,6 +28,7 @@ dependencies = [
     "cryptography>=46.0.6",
     "html5lib>=1.1",
     "notifier-client",
+    "information-client",
 ]
 
 [project.optional-dependencies]
@@ -87,3 +88,4 @@ packages = ["src"]
 
 [tool.uv.sources]
 notifier-client = { git = "ssh://git@github-notifier/CannObserv/notifier.git", subdirectory = "clients/python", rev = "v0.2.1" }
+information-client = { path = "clients/python", editable = true }

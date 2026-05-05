@@ -3,7 +3,9 @@
 from datetime import UTC, datetime
 from urllib.parse import urlparse
 
+import httpx
 import procrastinate
+from information_client.errors import ServerError
 from sqlalchemy import or_, select
 from ulid import ULID
 
@@ -52,7 +54,19 @@ def _watch_base_metadata(watch: Watch) -> dict:
     retry=procrastinate.RetryStrategy(
         max_attempts=3,
         exponential_wait=5,
-        retry_exceptions={ConnectionError, TimeoutError},
+        # Builtins cover fetcher errors; httpx + ServerError cover the
+        # InformationClient SDK (none of which subclass the Python builtins,
+        # so they would otherwise fail the task on first attempt).
+        # AuthError, NotFound, and ValidationError are NOT retried —
+        # those are operator-fixable; they propagate loud or are handled
+        # explicitly downstream.
+        retry_exceptions={
+            ConnectionError,
+            TimeoutError,
+            httpx.ConnectError,
+            httpx.TimeoutException,
+            ServerError,
+        },
     ),
 )
 async def check_watch(watch_id: str, registry: ServiceRegistry | None = None) -> dict:

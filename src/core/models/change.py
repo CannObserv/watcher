@@ -2,7 +2,7 @@
 
 from datetime import UTC, datetime
 
-from sqlalchemy import DateTime, Float, ForeignKey, String, func
+from sqlalchemy import BigInteger, DateTime, Float, ForeignKey, String, func
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 from ulid import ULID
@@ -35,6 +35,27 @@ class Change(Base):
         DateTime(timezone=True), nullable=True
     )
     bus_message_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    info_item_id: Mapped[ULID | None] = mapped_column(
+        ULIDType,
+        nullable=True,
+        index=True,
+        default=None,
+    )
+    info_spec_id: Mapped[ULID | None] = mapped_column(
+        ULIDType,
+        nullable=True,
+        default=None,
+    )
+    previous_fingerprint: Mapped[int | None] = mapped_column(
+        BigInteger,
+        nullable=True,
+        default=None,
+    )
+    current_fingerprint: Mapped[int | None] = mapped_column(
+        BigInteger,
+        nullable=True,
+        default=None,
+    )
 
     def __init__(self, **kwargs: object) -> None:
         """Set Python-side defaults for fields not provided."""

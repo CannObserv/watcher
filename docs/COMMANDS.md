@@ -125,7 +125,11 @@ uv run alembic -c alembic_information.ini revision --autogenerate -m "descriptio
 
 ## Change bus (Redis Streams)
 
-Phase 2b infrastructure: Watcher publishes `info.changes` events to Redis Streams via `ChangePublisher`. The drain worker reads unpublished rows from the `changes` table outbox columns and forwards them to Redis.
+Watcher publishes `info.changes` events to Redis Streams via `ChangePublisher`. The drain worker reads unpublished rows from the `changes` table outbox columns and forwards them to Redis.
+
+Envelope shape is `schema_version: 2` (Phase 2c). Each entry is partitioned by `info_item_id` (was `watch_id` in Phase 2b's v1 shape) and carries `info_item_id`, `info_spec_id`, and `previous_fingerprint`/`current_fingerprint` so consumers can route or dedupe by Information Item without hitting Watcher.
+
+The `drain_changes_outbox` task is registered via `@bp.periodic(cron="* * * * *")`, so the embedded Procrastinate worker fires it every minute. Manual invocation is still available for one-shot runs:
 
 ```bash
 # Run the reference consumer (requires Redis running on REDIS_URL):
@@ -139,7 +143,7 @@ redis-cli XRANGE info.changes - +
 uv run python -c "import asyncio; from src.workers.changes_drain import drain_changes_outbox; print(asyncio.run(drain_changes_outbox.func()))"
 ```
 
-Note: `drain_changes_outbox.func()` calls the underlying async function directly, bypassing Procrastinate's queue dispatch — useful for manual one-shot runs.
+Note: `drain_changes_outbox.func()` calls the underlying async function directly, bypassing Procrastinate's queue dispatch — useful for manual one-shot runs. A PostgreSQL transaction-scoped advisory lock (`DRAIN_ADVISORY_LOCK_ID`) keeps the periodic drain and a manual run from double-publishing.
 
 ## Task Queue (Procrastinate)
 

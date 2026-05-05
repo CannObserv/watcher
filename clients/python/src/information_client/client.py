@@ -18,6 +18,7 @@ from types import TracebackType
 
 import httpx
 
+from information_client import tools as _tools
 from information_client.errors import error_from_response
 from information_client.generated.api.info_items import (
     create_info_item_api_v1_info_items_post,
@@ -206,6 +207,16 @@ class InformationClient:
             body=body,
         )
         return _unwrap(response)
+
+    # --- Authoring tools (/api/v1/tools/*) ---
+
+    async def validate_info_spec(self, document: dict) -> _tools.ValidationResult:
+        """Validate an InfoSpec document against the v1 JSON Schema.
+
+        Always returns a result. ``valid=False`` carries per-field issues; use
+        this during authoring to surface schema problems without committing.
+        """
+        return await _tools.validate_info_spec(self, document)
 
 
 def _unwrap(response):

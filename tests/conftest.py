@@ -24,11 +24,12 @@ from urllib.parse import urlparse
 import pytest
 from httpx import ASGITransport, AsyncClient
 from information_client import InformationClient, NotFound
-from sqlalchemy import event, text
+from sqlalchemy import event, select, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 
 from src.api.deps import get_db_session, get_probe_fn, require_api_key
+from src.core import registry as _registry_module
 from src.core.models import Base
 from src.core.models.app_user import AppUser
 from src.core.models.change import Change
@@ -302,9 +303,7 @@ def info_client(db_session, monkeypatch):
         return out
 
     async def _list_info_items():
-        from sqlalchemy import select as _select
-
-        result = await db_session.execute(_select(InfoItem))
+        result = await db_session.execute(select(InfoItem))
         items = result.scalars().all()
         out = []
         for item in items:
@@ -319,10 +318,8 @@ def info_client(db_session, monkeypatch):
         return out
 
     async def _get_primary_info_spec(info_item_id: str, *, force_refresh: bool = False):
-        from sqlalchemy import select as _select
-
         result = await db_session.execute(
-            _select(InfoSpec)
+            select(InfoSpec)
             .where(InfoSpec.info_item_id == info_item_id, InfoSpec.active.is_(True))
             .order_by(InfoSpec.priority.asc())
         )
@@ -343,10 +340,8 @@ def info_client(db_session, monkeypatch):
 
     # Swap the registry's cached SDK so ``get_registry().get_information_client()``
     # everywhere returns this fake. Restore on teardown.
-    from src.core import registry as _registry
-
     new_reg = ServiceRegistry(information_client=fake_client)
-    monkeypatch.setattr(_registry, "_default_registry", new_reg)
+    monkeypatch.setattr(_registry_module, "_default_registry", new_reg)
     return fake_client
 
 

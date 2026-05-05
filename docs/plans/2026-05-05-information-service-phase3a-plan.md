@@ -67,6 +67,22 @@
 
 **Shared fetcher + extractor across services.** Watcher and the Information service live in the same uv project (`pyproject.toml` lists both as packages) and share the same Python interpreter at runtime. Importing `from src.core.fetchers.http import HttpFetcher` and `from src.core.extractors import HtmlExtractor` into `src/information/core/tools/` is a clean dependency direction (Information service depends on `src/core/`; Watcher's API and worker code depend on `src/core/` plus `src/api/` plus `src/workers/`; no cycle). When Information service eventually relocates off-VM (design § "Later"), the relevant `src/core/*` modules go with it as a shared lib package — out of scope for 3a but worth recording the direction.
 
+**Overlap surface (today + post-3a).** Cataloguing the actual cross-service surface so future-us knows exactly what to lift if/when we extract a shared package:
+
+| Module | Today | Post-3a | Notes |
+|---|---|---|---|
+| `src/core/logging.py` | shared (Information has thin adapter at `src/information/core/logging.py`) | unchanged | Adapter docstring already says "When the Information service extracts to its own repo, this module becomes its own logging configuration." |
+| `src/core/fetchers/http.py` | Watcher-only | imported by `src/information/core/tools/fetch_and_render.py`, `propose_selectors.py`, `preview_extraction.py` | Pure HTTP client wrapper; no DB, no ORM, no Watcher-specific assumptions. |
+| `src/core/extractors/` (`HtmlExtractor`, base `Extractor`, `Chunk`, `ExtractionResult`) | Watcher-only | imported by `src/information/core/tools/preview_extraction.py` | Pure transform: bytes → chunks. PDF/CSV extractors stay Watcher-only until Phase 3+ schema extension. |
+| `src/core/simhash.py` | Watcher-only | imported by `src/information/core/tools/preview_extraction.py` for fingerprint computation | Single function, stdlib + a constant table. |
+| `src/core/screenshot.py` | Watcher-only | unchanged in 3a (screenshot deferred to post-#3) | Will be shared in 3a.1 once Playwright lands. |
+
+Modules that stay Watcher-specific and **must not** be imported from `src/information/`: `src/core/info_resolver.py` (consumes the SDK that Information owns — a cycle), `src/core/diff/`, `src/core/notifications/`, `src/core/probe.py`, `src/core/registry.py`, `src/core/storage/`, `src/core/scheduler/`, `src/core/rate_limiter.py`, `src/core/watches.py`, `src/core/crypto.py`, all of `src/core/models/` (Watcher's ORM tree).
+
+The shared concerns are coherent — "URL → bytes → chunks → fingerprint" is the content-pipeline primitive. **Recommendation: do not extract a separate package in 3a.** The marginal value is low while the same uv project + same VM hosts both services; the right trigger for extraction is one of (a) Information service relocates off-VM, (b) Archive (3b) becomes the third importer of the same primitives, (c) we add a third consumer outside this repo. Tracked as a follow-up rather than a 3a deliverable; see "Open follow-ups" below.
+
+**Claude tool surface — packaging via MCP.** The REST API + Python SDK are the source of truth, but Claude (in Claude Code, Claude Desktop, or via the API directly) discovers tools via MCP. Phase 3a ships an MCP server (`tools/information_mcp_server.py`) that imports the SDK and exposes each authoring tool as an MCP-discoverable tool with structured input schemas, "when to use" descriptions, and read-only / mutating annotations. This is the canonical Claude integration path going forward — shipping the API without an MCP wrapper would force every consumer to re-derive Claude tool descriptors locally. See Task 11 below.
+
 **Atomic `create_info_item + initial_info_spec`.** A single SQLAlchemy session, one `commit()`. If validation fails, the InfoItem isn't created (pre-validation guard before any session.add). If the InfoSpec insert fails after the InfoItem add, the session rollback cleans both. The InfoSpec is always written at `priority=1, active=True` since it's the first one. The endpoint returns `InfoItemWithSpecOut` (carries both `info_item_id` and the new `info_spec_id`) so the caller can immediately reference the spec without a second round-trip.
 
 **`validate_info_spec_with_errors` returns a list, not raises.** Routes need structured 422 bodies. The existing raise-based variant stays for callers that don't need the error list; we don't remove it.
@@ -159,7 +175,21 @@
 - [ ] `docs/DEPLOYMENT.md` — "Tools surface" subsection under Information Service.
 - [ ] `clients/python/README.md` (if exists) — extended SDK examples.
 
-### Task 11: Final verification
+### Task 11: MCP server for Claude tool discovery
+
+**Why it's part of 3a, not deferred.** Claude (in Claude Code and Claude Desktop) discovers tools via the Model Context Protocol. Without an MCP server, every Claude consumer has to hand-derive tool descriptors from the OpenAPI spec — losing the "when to use" hints, safety annotations, and concrete examples that make tool selection reliable. Shipping the MCP wrapper alongside the API is the difference between a tool surface that's *usable by Claude* and one that's *theoretically callable*. Best practices encoded here are drawn from MCP server conventions and Anthropic's tool-use guidance.
+
+- [ ] **Scaffold**: `tools/information_mcp_server.py`. Uses the `mcp` Python SDK (add to `[project.optional-dependencies] mcp = ["mcp>=…"]` in `pyproject.toml`). Stdio transport (the default for `claude mcp add`).
+- [ ] **One MCP tool per SDK method.** Each tool wraps a `InformationClient` call. Tools to expose: `validate_info_spec`, `find_info_item`, `fetch_and_render`, `preview_extraction`, `propose_selectors`, `create_info_item` (with optional `initial_info_spec`), `create_info_spec`, `get_info_item`, `list_info_items`, `get_primary_info_spec`, `list_active_info_specs`, `patch_info_spec`. Read-only CRUD (get/list) is included so Claude can introspect existing items without round-tripping through the API directly.
+- [ ] **Descriptions answer "when to use", not "what it does".** Each MCP tool descriptor's `description` field explains: the *intent* the tool serves, *when* in an authoring flow to call it, and *what comes next*. Example for `propose_selectors`: "Use after `fetch_and_render` returns the page HTML and you've described the target content in plain language. Returns ranked CSS selector candidates with stability scores. Always verify the chosen candidate via `preview_extraction` before persisting via `create_info_spec`."
+- [ ] **Concrete examples** in each tool's description (`Args.example` per the MCP SDK). One canonical input/output pair per tool. Examples are linked to fixture URLs from the smoke test so they stay current.
+- [ ] **Safety annotations.** Tag each tool's metadata with `read_only: bool` and (where applicable) `requires_confirmation: bool`. Read-only set: `validate_info_spec`, `find_info_item`, `fetch_and_render`, `preview_extraction`, `propose_selectors`, `get_info_item`, `list_info_items`, `get_primary_info_spec`, `list_active_info_specs`. Mutating set: `create_info_item`, `create_info_spec`, `patch_info_spec`. The MCP host (Claude Code) uses these to decide whether to prompt the user before invocation.
+- [ ] **Structured errors.** Each tool returns either a successful result or `{"error": "<code>", "details": {...}}` — never free-text 500s. Error codes: `validation_failed`, `target_unreachable`, `not_found`, `auth_error`, `server_error`. This lets Claude self-recover (e.g. on `validation_failed`, fetch the validator's error list and retry with a corrected doc).
+- [ ] **Configuration.** MCP server reads `INFORMATION_BASE_URL` and `INFORMATION_API_KEY` from env. No additional secrets. Document the `claude mcp add information --command "uv run python tools/information_mcp_server.py"` invocation in `docs/DEPLOYMENT.md`.
+- [ ] **Tests.** `tests/tools/test_information_mcp_server.py` — start the server in-process, list tools via MCP introspection, invoke each tool against a stubbed SDK, assert the descriptors carry descriptions + examples + safety annotations.
+- [ ] **Smoke.** Add an MCP-side check to `scripts/smoke_phase3a.sh`: connect, list tools, call `validate_info_spec` end-to-end. Bails on any missing tool or wrong descriptor shape.
+
+### Task 12: Final verification
 
 - [ ] Full pytest suite green (unit + integration). Coverage non-regressive.
 - [ ] Ruff lint + format clean.
@@ -172,19 +202,22 @@
 
 ## Wrap-up
 
-After Task 11:
+After Task 12:
 - Information service exposes five new tool endpoints under `/api/v1/tools/*`, all backed by structured Pydantic schemas and the existing `X-API-Key` auth.
 - `POST /api/v1/info-items` accepts an optional `initial_info_spec` for atomic two-row creation.
 - The `information_client` SDK exposes ergonomic wrappers for every tool; the autogenerated client section is regenerated against the live spec.
 - Watcher's `_extraction_config_from_spec` is now a re-export from `src/information/core/tools/extraction_config.py`; both services use the same translation logic.
-- A reference smoke script proves the full author-an-InfoItem-then-monitor-it loop end-to-end.
+- An MCP server (`tools/information_mcp_server.py`) exposes every tool to Claude with "when to use" descriptions, concrete examples, and read-only / mutating safety annotations. `claude mcp add information …` lights it up locally.
+- A reference smoke script proves the full author-an-InfoItem-then-monitor-it loop end-to-end, including an MCP introspection round-trip.
 
 **Open follow-ups (deferred):**
 - Screenshot in `fetch_and_render` — wire once #3 (Playwright) lands.
 - Selector stability via render-then-replay (currently heuristic only).
+- Replace the heuristic `propose_selectors` ranker with a learned model — research issue #146.
 - `pg_trgm` for `find_info_item` once dataset size or false-positive rate justifies it.
 - Tool surface on Watcher (`create_watch`, `test_watch`) — the symmetric piece on the monitoring side; lives in a Watcher-side plan if/when scheduled.
 - Phase 3b — Archive service stand-up (port 8030, consumes `info.changes`, archives origin payloads).
+- **Shared "content-pipeline" lib extraction.** Lift `src/core/fetchers/`, `src/core/extractors/`, `src/core/simhash.py`, `src/core/screenshot.py`, `src/core/logging.py` into a standalone Python package consumed by Watcher, Information service, and (future) Archive. Triggers: Information relocates off-VM, Archive (3b) becomes the third importer, or a fourth consumer materialises outside this repo. Until any of those, the in-repo same-uv-project layout pulls its weight without packaging overhead.
 
 **Risk register:**
 - **Cross-package import direction.** `src/information/` imports from `src/core/`. As long as the reverse direction is enforced via lint or convention, no cycle. Off-VM extraction later will need a shared lib refactor; out of scope.

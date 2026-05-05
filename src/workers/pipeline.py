@@ -1,15 +1,16 @@
 """Check-watch pipeline: content extraction, diffing, and snapshot persistence."""
 
 import hashlib
-import re
 from datetime import UTC, datetime
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from ulid import ULID
 
 from src.core.differ import ChangeStatus, ChunkFingerprint, diff_chunks
-from src.core.extractors import CsvExcelExtractor, HtmlExtractor, PdfExtractor
-from src.core.extractors.base import Chunk, ExtractionResult
+from src.core.extractors import HtmlExtractor
+from src.core.extractors.base import ExtractionResult
+from src.core.info_resolver import ResolvedInfoSpec, resolve_primary
 from src.core.logging import get_logger
 from src.core.models.audit_log import EventType, audit
 from src.core.models.base import generate_ulid
@@ -27,19 +28,6 @@ logger = get_logger(__name__)
 _INT64_MAX = (1 << 63) - 1
 
 
-def _apply_ignore_patterns(chunks: list[Chunk], ignore_patterns: list[str]) -> list[Chunk]:
-    """Filter out chunks whose text fully matches any ignore pattern."""
-    if not ignore_patterns:
-        return chunks
-    compiled = []
-    for p in ignore_patterns:
-        try:
-            compiled.append(re.compile(p))
-        except re.error:
-            logger.warning("invalid ignore_pattern skipped", extra={"pattern": p})
-    return [c for c in chunks if not any(r.fullmatch(c.text) for r in compiled)]
-
-
 def _compute_significance(*, added: int, removed: int, modified: int, total_curr: int) -> float:
     """Compute change significance as fraction of unchanged chunks.
 
@@ -54,16 +42,10 @@ def _compute_significance(*, added: int, removed: int, modified: int, total_curr
     return max(0.0, min(1.0, sig))
 
 
+# Phase 2c: only HTML survives the InfoSpec cutover. Migration aborts on
+# non-HTML content_type; PDF + FILE pipelines return in Phase 3+.
 _EXT_MAP = {
     "html": "html",
-    "pdf": "pdf",
-    "file": "csv",
-}
-
-_EXTRACTOR_MAP = {
-    "html": HtmlExtractor,
-    "pdf": PdfExtractor,
-    "file": CsvExcelExtractor,
 }
 
 
@@ -151,26 +133,25 @@ async def _get_snapshot_chunks(
     return list(result.scalars().all())
 
 
-async def _extract_content(watch: Watch, raw_content: bytes) -> ExtractionResult:
-    """Run the appropriate extractor based on watch content_type.
+def _extraction_config_from_spec(document: dict) -> dict:
+    """Translate an InfoSpec document's `extraction` block into HtmlExtractor config."""
+    extraction = document.get("extraction") or {}
+    algorithm = extraction.get("algorithm", "full_page")
+    if algorithm == "css":
+        selector = extraction.get("selector", "")
+        return {"selectors": [selector]} if selector else {"selectors": []}
+    # full_page (or any other algorithm) → no selector filtering
+    return {"selectors": []}
 
-    For FILE watches, passes fetch_config extraction settings (e.g., content_type,
-    chunk_row_size, sort_columns) through to CsvExcelExtractor.
+
+async def _extract_with_spec(raw_content: bytes, document: dict) -> ExtractionResult:
+    """Run the HTML extractor with config derived from the InfoSpec document.
+
+    Phase 2c only supports HTML. PDF + FILE return in Phase 3+ once the
+    InfoSpec schema gains the corresponding extraction algorithms.
     """
-    ct = str(watch.content_type).lower()
-    extractor_cls = _EXTRACTOR_MAP[ct]
-    extractor = extractor_cls()
-    config: dict | None = None
-    if ct == "file":
-        fetch_cfg = watch.fetch_config or {}
-        config = {
-            "content_type": fetch_cfg.get("file_format", "csv"),
-            **{
-                k: v
-                for k, v in fetch_cfg.items()
-                if k in ("chunk_row_size", "sort_columns", "sheet_name")
-            },
-        }
+    extractor = HtmlExtractor()
+    config = _extraction_config_from_spec(document)
     return await extractor.extract(raw_content, config=config)
 
 
@@ -181,10 +162,17 @@ async def _run_check_pipeline(
     fetch_duration_ms: int,
     storage: StorageBackend,
     session: AsyncSession,
+    resolved: ResolvedInfoSpec | None = None,
+    info_client: object | None = None,
 ) -> dict:
     """Core check pipeline: hash, extract, diff, store.
 
     Returns dict with snapshot_id, is_changed, change_id, chunk_count, storage_path.
+
+    ``resolved`` carries the primary InfoSpec the caller already fetched; when
+    omitted (legacy test paths), the pipeline falls back to a minimal
+    full_page extraction with no selectors. ``info_client`` is used to force
+    a spec re-fetch when extraction returns zero chunks.
     """
     # 1. Compute content hash and doc-level simhash
     content_hash = hashlib.sha256(raw_content).hexdigest()
@@ -207,21 +195,49 @@ async def _run_check_pipeline(
             "change_metadata": {},
         }
 
-    # 4. Extract content
-    extraction = await _extract_content(watch, raw_content)
+    # 4. Extract content using the resolved InfoSpec.
+    if resolved is None:
+        # Legacy fallback (no spec) — used by tests that exercise pipeline
+        # internals without going through check_watch.
+        document: dict = {"extraction": {"algorithm": "full_page"}}
+    else:
+        document = resolved.document
+    extraction = await _extract_with_spec(raw_content, document)
 
-    # 4a. Apply ignore patterns — filter before diffing and persisting
-    fetch_cfg = watch.fetch_config or {}
-    ignore_patterns: list[str] = fetch_cfg.get("ignore_patterns", [])
-    filtered_chunks = _apply_ignore_patterns(extraction.chunks, ignore_patterns)
+    # 4a. Force-refresh + retry path: when extraction returns zero chunks,
+    # the spec selector may be stale. Refresh the spec and re-run extraction
+    # against the same content (no re-fetch).
+    if not extraction.chunks and resolved is not None and info_client is not None:
+        logger.info(
+            "extraction returned zero chunks — force-refreshing primary InfoSpec",
+            extra={
+                "watch_id": str(watch.id),
+                "info_item_id": resolved.info_item_id,
+                "info_spec_id": resolved.info_spec_id,
+            },
+        )
+        resolved = await resolve_primary(info_client, resolved.info_item_id, force_refresh=True)
+        document = resolved.document
+        extraction = await _extract_with_spec(raw_content, document)
+        if not extraction.chunks:
+            logger.warning(
+                "extraction still returned zero chunks after force_refresh",
+                extra={
+                    "watch_id": str(watch.id),
+                    "info_item_id": resolved.info_item_id,
+                    "info_spec_id": resolved.info_spec_id,
+                },
+            )
+
+    chunks = extraction.chunks
 
     # 5. Store raw + extracted text
     snapshot_id = generate_ulid()
-    ext = _EXT_MAP[str(watch.content_type).lower()]
+    ext = _EXT_MAP.get(str(watch.content_type).lower(), "html")
     raw_path = storage.snapshot_path(str(watch.id), str(snapshot_id), ext)
     text_path = storage.snapshot_path(str(watch.id), str(snapshot_id), "txt")
     storage.save(raw_path, raw_content)
-    full_text = "\n".join(c.text for c in filtered_chunks)
+    full_text = "\n".join(c.text for c in chunks)
     storage.save(text_path, full_text.encode())
 
     # 6. Create Snapshot record
@@ -233,7 +249,7 @@ async def _run_check_pipeline(
         storage_path=raw_path,
         text_path=text_path,
         storage_backend="local",
-        chunk_count=len(filtered_chunks),
+        chunk_count=len(chunks),
         text_bytes=len(full_text.encode()),
         fetch_duration_ms=fetch_duration_ms,
         fetcher_used=fetcher_used,
@@ -242,7 +258,7 @@ async def _run_check_pipeline(
     await session.flush()
 
     # 7. Create SnapshotChunk records
-    for chunk in filtered_chunks:
+    for chunk in chunks:
         session.add(
             SnapshotChunk(
                 snapshot_id=snapshot_id,
@@ -278,7 +294,7 @@ async def _run_check_pipeline(
                 content_hash=c.content_hash,
                 simhash=c.simhash,
             )
-            for c in filtered_chunks
+            for c in chunks
         ]
         changes = diff_chunks(prev_fingerprints, curr_fingerprints)
         has_real_changes = any(
@@ -293,7 +309,7 @@ async def _run_check_pipeline(
                 added=n_added,
                 removed=n_removed,
                 modified=n_modified,
-                total_curr=len(filtered_chunks),
+                total_curr=len(chunks),
             )
             metadata = {
                 "added": [c.chunk_label for c in changes if c.status == ChangeStatus.ADDED],
@@ -305,13 +321,19 @@ async def _run_check_pipeline(
                 ],
                 "significance": significance,
             }
-            change = Change(
-                watch_id=watch.id,
-                previous_snapshot_id=prev_snapshot.id,
-                current_snapshot_id=snapshot_id,
-                change_metadata=metadata,
-                significance=significance,
-            )
+            change_kwargs: dict = {
+                "watch_id": watch.id,
+                "previous_snapshot_id": prev_snapshot.id,
+                "current_snapshot_id": snapshot_id,
+                "change_metadata": metadata,
+                "significance": significance,
+                "info_item_id": watch.info_item_id,
+                "previous_fingerprint": prev_snapshot.simhash,
+                "current_fingerprint": doc_simhash,
+            }
+            if resolved is not None:
+                change_kwargs["info_spec_id"] = ULID.from_str(resolved.info_spec_id)
+            change = Change(**change_kwargs)
             session.add(change)
             await session.flush()
             change_id = change.id
@@ -326,7 +348,7 @@ async def _run_check_pipeline(
         watch_id=watch.id,
         snapshot_id=str(snapshot_id),
         content_hash=content_hash,
-        chunk_count=len(filtered_chunks),
+        chunk_count=len(chunks),
         is_changed=change_id is not None or prev_snapshot is None,
     )
     await session.flush()
@@ -334,28 +356,27 @@ async def _run_check_pipeline(
     # 11. Screenshot (optional — HTML only; non-fatal if Playwright not installed or capture fails)
     screenshot_path: str | None = None
     if watch.content_type == ContentType.HTML:
-        try:
-            viewport_kwargs: dict = {}
-            if fetch_cfg.get("viewport_width") is not None:
-                viewport_kwargs["viewport_width"] = fetch_cfg["viewport_width"]
-            if fetch_cfg.get("viewport_height") is not None:
-                viewport_kwargs["viewport_height"] = fetch_cfg["viewport_height"]
-            screenshot_result = await capture_screenshot(watch.url, **viewport_kwargs)
-            if screenshot_result is not None:
-                screenshot_path = storage.snapshot_path(str(watch.id), str(snapshot_id), "png")
-                storage.save(screenshot_path, screenshot_result.png_bytes)
-                snapshot.screenshot_path = screenshot_path
-                snapshot.screenshot_browser = screenshot_result.browser
-                await session.flush()
-        except Exception as exc:
-            logger.warning("screenshot step failed for watch %s: %s", str(watch.id), exc)
+        screenshot_url = (
+            resolved.document.get("target", {}).get("url") if resolved is not None else None
+        )
+        if screenshot_url:
+            try:
+                screenshot_result = await capture_screenshot(screenshot_url)
+                if screenshot_result is not None:
+                    screenshot_path = storage.snapshot_path(str(watch.id), str(snapshot_id), "png")
+                    storage.save(screenshot_path, screenshot_result.png_bytes)
+                    snapshot.screenshot_path = screenshot_path
+                    snapshot.screenshot_browser = screenshot_result.browser
+                    await session.flush()
+            except Exception as exc:
+                logger.warning("screenshot step failed for watch %s: %s", str(watch.id), exc)
 
     # 12. Return result
     return {
         "snapshot_id": str(snapshot_id),
         "is_changed": change_id is not None or prev_snapshot is None,
         "change_id": str(change_id) if change_id else None,
-        "chunk_count": len(filtered_chunks),
+        "chunk_count": len(chunks),
         "storage_path": raw_path,
         "screenshot_path": screenshot_path,
         "change_metadata": metadata if change_id else {},

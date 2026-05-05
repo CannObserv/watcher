@@ -6,6 +6,7 @@ from typing import Annotated
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException
+from information_client import AuthError, NotFound, ServerError
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -19,7 +20,9 @@ from src.core.models.watch import Watch
 from src.core.notifications.events import WatchEvent, WatchEventType
 from src.core.notifications.notify import dispatch_event_notifications
 from src.core.probe import ProbeResult
+from src.core.registry import get_registry
 from src.core.watches import create_watch as _create_watch
+from src.core.watches import resolve_watch_url
 
 logger = get_logger(__name__)
 
@@ -32,23 +35,50 @@ async def create_watch(
     probe_fn: Annotated[Callable[[str], Awaitable[ProbeResult]], Depends(get_probe_fn)],
     session: AsyncSession = Depends(get_db_session),
 ):
-    """Create a new watch. Probes the URL to resolve effective domain.
+    """Create a new watch bound to an existing InfoItem.
 
-    The probe fails fast on connection errors (httpx.HTTPError). Non-2xx HTTP
-    responses (e.g. 404, 500) are treated as reachable — the watch is still
-    created so monitoring can begin and detect when the URL becomes healthy.
+    The handler validates ``info_item_id`` via the InformationClient SDK,
+    probes the resolved URL to populate ``effective_*`` fields, upserts the
+    Domain row, and persists the Watch.
+
+    Error mapping:
+    - SDK ``NotFound`` (unknown ``info_item_id``) → 422.
+    - SDK ``AuthError`` → 500 (operator misconfiguration).
+    - SDK ``ServerError`` / ``httpx.ConnectError`` / ``httpx.TimeoutException``
+      → 503 with ``Retry-After: 30`` header.
+    - URL probe ``httpx.HTTPError`` → 422 (target unreachable).
     """
+    info_client = get_registry().get_information_client()
     try:
         return await _create_watch(
             session=session,
             probe_fn=probe_fn,
+            info_client=info_client,
             name=data.name,
-            url=data.url,
+            info_item_id=data.info_item_id,
             content_type=data.content_type,
             schedule_config=data.schedule_config,
-            fetch_config=data.fetch_config,
+            description=data.description,
+            tags=data.tags,
         )
+    except NotFound as exc:
+        raise HTTPException(
+            status_code=422,
+            detail=f"info_item_id {data.info_item_id} does not exist",
+        ) from exc
+    except AuthError:
+        # Loud — operator-fixable misconfiguration of INFORMATION_API_KEY.
+        logger.exception("InformationClient auth failure during watch create")
+        raise HTTPException(status_code=500, detail="Information service auth failed") from None
+    except (ServerError, httpx.ConnectError, httpx.TimeoutException) as exc:
+        logger.warning("Information service unreachable during watch create: %s", exc)
+        raise HTTPException(
+            status_code=503,
+            detail="Information service unavailable; retry shortly",
+            headers={"Retry-After": "30"},
+        ) from exc
     except httpx.HTTPError as exc:
+        # URL probe failure — the InfoSpec URL is unreachable.
         raise HTTPException(status_code=422, detail=f"URL unreachable: {exc}") from exc
 
 
@@ -115,6 +145,18 @@ async def update_watch(
         updated_fields=list(updates.keys()),
     )
     if "is_active" in updates:
+        info_client = get_registry().get_information_client()
+        try:
+            resolved_url = await resolve_watch_url(watch, info_client)
+        except NotFound:
+            # Mirrors src/workers/tasks.py: an InfoItem deleted out from under
+            # the watch should not block operator-requested pause/resume.
+            # Fall back to a sentinel URL so the notification still fires.
+            logger.error(
+                "info_item missing for watch — emitting lifecycle event with sentinel URL",
+                extra={"watch_id": str(watch.id)},
+            )
+            resolved_url = f"watch:{watch.id}"
         if previous_active and not watch.is_active:
             await dispatch_event_notifications(
                 session=session,
@@ -122,7 +164,7 @@ async def update_watch(
                     event_type=WatchEventType.WATCH_PAUSED,
                     watch_id=str(watch.id),
                     watch_name=watch.name,
-                    watch_url=watch.url,
+                    watch_url=resolved_url,
                     occurred_at=datetime.now(UTC),
                 ),
             )
@@ -133,7 +175,7 @@ async def update_watch(
                     event_type=WatchEventType.WATCH_RESUMED,
                     watch_id=str(watch.id),
                     watch_name=watch.name,
-                    watch_url=watch.url,
+                    watch_url=resolved_url,
                     occurred_at=datetime.now(UTC),
                 ),
             )
@@ -153,12 +195,24 @@ async def delete_watch(
     if not watch.is_archived:
         raise HTTPException(status_code=409, detail="Archive watch before deleting")
 
+    info_client = get_registry().get_information_client()
+    try:
+        resolved_url = await resolve_watch_url(watch, info_client)
+    except NotFound:
+        # Mirrors src/workers/tasks.py: an InfoItem deleted out from under the
+        # watch should not block operator-requested deletion. Fall back to a
+        # sentinel URL so audit + notification still record the event.
+        logger.error(
+            "info_item missing for watch — deleting with sentinel URL",
+            extra={"watch_id": str(watch.id)},
+        )
+        resolved_url = f"watch:{watch.id}"
     audit(
         session,
         EventType.WATCH_DELETED,
         watch_id=watch.id,
         name=watch.name,
-        url=watch.url,
+        url=resolved_url,
     )
     await dispatch_event_notifications(
         session=session,
@@ -166,7 +220,7 @@ async def delete_watch(
             event_type=WatchEventType.WATCH_DELETED,
             watch_id=str(watch.id),
             watch_name=watch.name,
-            watch_url=watch.url,
+            watch_url=resolved_url,
             occurred_at=datetime.now(UTC),
         ),
     )

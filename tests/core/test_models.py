@@ -47,28 +47,22 @@ class TestWatchModel:
     def test_create_watch_with_defaults(self):
         watch = Watch(
             name="Test Watch",
-            url="https://example.com/agenda",
             content_type=ContentType.HTML,
         )
         assert watch.name == "Test Watch"
-        assert watch.url == "https://example.com/agenda"
         assert watch.content_type == ContentType.HTML
         assert watch.is_active is True
-        assert watch.fetch_config == {}
         assert watch.schedule_config == {}
         assert watch.last_checked_at is None
 
     def test_create_watch_with_all_fields(self):
         watch = Watch(
             name="PDF Watch",
-            url="https://example.com/report.pdf",
             content_type=ContentType.PDF,
-            fetch_config={"selectors": ["#content"]},
             schedule_config={"interval": "6h"},
             is_active=False,
         )
         assert watch.content_type == ContentType.PDF
-        assert watch.fetch_config == {"selectors": ["#content"]}
         assert watch.schedule_config == {"interval": "6h"}
         assert watch.is_active is False
 
@@ -80,7 +74,6 @@ class TestWatchModel:
     def test_content_type_coerces_string(self):
         watch = Watch(
             name="Coerce Test",
-            url="https://example.com",
             content_type="pdf",
         )
         assert watch.content_type is ContentType.PDF
@@ -89,14 +82,12 @@ class TestWatchModel:
         with pytest.raises(ValueError, match="Invalid content_type"):
             Watch(
                 name="Bad Type",
-                url="https://example.com",
                 content_type="invalid",
             )
 
     def test_watch_effective_fields_default_none(self):
         watch = Watch(
             name="Test",
-            url="https://example.com",
             content_type=ContentType.HTML,
         )
         assert watch.effective_url is None
@@ -105,7 +96,6 @@ class TestWatchModel:
     def test_watch_is_archived_defaults_false(self):
         watch = Watch(
             name="Test",
-            url="https://example.com",
             content_type=ContentType.HTML,
         )
         assert watch.is_archived is False
@@ -113,20 +103,18 @@ class TestWatchModel:
     def test_watch_can_set_is_archived_true(self):
         watch = Watch(
             name="Archived",
-            url="https://example.com",
             content_type=ContentType.HTML,
             is_archived=True,
         )
         assert watch.is_archived is True
 
     def test_health_status_default_is_unknown(self):
-        w = Watch(name="T", url="https://example.com", content_type=ContentType.HTML)
+        w = Watch(name="T", content_type=ContentType.HTML)
         assert w.health_status == WatchHealthStatus.UNKNOWN
 
     def test_health_status_coercion_from_string(self):
         w = Watch(
             name="T",
-            url="https://example.com",
             content_type=ContentType.HTML,
             health_status="ok",
         )
@@ -136,7 +124,6 @@ class TestWatchModel:
         with pytest.raises(ValueError, match="Invalid health_status"):
             Watch(
                 name="T",
-                url="https://example.com",
                 content_type=ContentType.HTML,
                 health_status="bad",
             )

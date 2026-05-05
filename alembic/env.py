@@ -25,6 +25,18 @@ def render_item(type_, obj, autogen_context):
     return False
 
 
+def _include_object(object, name, type_, reflected, compare_to):
+    """Restrict autogenerate to the public schema (Watcher's tables).
+
+    The Information service owns its own schema (``information``) under a
+    separate Alembic root (``alembic_information.ini``). Without this filter,
+    autogenerate would emit spurious drops of ``information.*`` tables.
+    """
+    if hasattr(object, "schema") and object.schema not in (None, "public"):
+        return False
+    return True
+
+
 def get_url() -> str:
     """Read database URL from environment or alembic.ini."""
     return os.environ.get(
@@ -41,6 +53,8 @@ def run_migrations_offline() -> None:
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
         render_item=render_item,
+        include_object=_include_object,
+        include_schemas=True,
     )
     with context.begin_transaction():
         context.run_migrations()
@@ -49,7 +63,11 @@ def run_migrations_offline() -> None:
 def do_run_migrations(connection) -> None:
     """Run migrations using a sync connection."""
     context.configure(
-        connection=connection, target_metadata=target_metadata, render_item=render_item
+        connection=connection,
+        target_metadata=target_metadata,
+        render_item=render_item,
+        include_object=_include_object,
+        include_schemas=True,
     )
     with context.begin_transaction():
         context.run_migrations()

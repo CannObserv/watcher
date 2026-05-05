@@ -3,11 +3,16 @@
 from datetime import UTC, datetime
 from urllib.parse import urlparse
 
+import httpx
 import procrastinate
+from information_client import NotFound
+from information_client.defaults import fetch_render, fetch_timeout_seconds
+from information_client.errors import ServerError
 from sqlalchemy import or_, select
 from ulid import ULID
 
 from src.core.database import get_session_factory
+from src.core.info_resolver import resolve_primary
 from src.core.logging import get_logger
 from src.core.models.audit_log import EventType, audit
 from src.core.models.domain import Domain
@@ -52,7 +57,19 @@ def _watch_base_metadata(watch: Watch) -> dict:
     retry=procrastinate.RetryStrategy(
         max_attempts=3,
         exponential_wait=5,
-        retry_exceptions={ConnectionError, TimeoutError},
+        # Builtins cover fetcher errors; httpx + ServerError cover the
+        # InformationClient SDK (none of which subclass the Python builtins,
+        # so they would otherwise fail the task on first attempt).
+        # AuthError, NotFound, and ValidationError are NOT retried —
+        # those are operator-fixable; they propagate loud or are handled
+        # explicitly downstream.
+        retry_exceptions={
+            ConnectionError,
+            TimeoutError,
+            httpx.ConnectError,
+            httpx.TimeoutException,
+            ServerError,
+        },
     ),
 )
 async def check_watch(watch_id: str, registry: ServiceRegistry | None = None) -> dict:
@@ -82,15 +99,36 @@ async def check_watch(watch_id: str, registry: ServiceRegistry | None = None) ->
             )
             return {"skipped": True}
 
-        # Fetch with rate limiting — only pass fetcher-relevant config keys
-        fetch_config = {
-            k: v for k, v in (watch.fetch_config or {}).items() if k in ("headers", "timeout")
-        }
-        # Use effective_domain if resolved; fall back to URL parsing for old watches
-        rate_limit_domain = watch.effective_domain or urlparse(watch.url).hostname or watch.url
+        # Resolve the primary InfoSpec once; URL + fetch defaults come from the
+        # spec, not the Watch row.
+        info_client = reg.get_information_client()
+        try:
+            resolved = await resolve_primary(info_client, str(watch.info_item_id))
+        except NotFound:
+            # Operator-fixable: the InfoItem was deleted out from under the
+            # watch. Skip until operator action; do not retry.
+            logger.error(
+                "info_item missing for watch — skipping until operator action",
+                extra={"watch_id": watch_id, "info_item_id": str(watch.info_item_id)},
+            )
+            return {"skipped": True, "reason": "info_item_missing"}
+        # Other SDK errors (httpx.ConnectError, httpx.TimeoutException,
+        # ServerError) propagate to Procrastinate's RetryStrategy. AuthError
+        # and ValidationError propagate loud (operator-fixable).
+
+        url = resolved.document["target"]["url"]
+        # NB: fetch_render is resolved but the current HttpFetcher does not
+        # accept a `render` flag — JS rendering is Phase 3 work. Pass only
+        # `timeout` to stay within the existing fetcher contract.
+        # TODO Phase 3: render flag plumbing into fetcher.
+        _render = fetch_render(resolved.document)  # noqa: F841 — reserved for Phase 3
+        fetch_timeout = fetch_timeout_seconds(resolved.document)
+        fetch_config = {"timeout": fetch_timeout}
+
+        rate_limit_domain = watch.effective_domain or urlparse(url).hostname or url
 
         async with get_rate_limiter().acquire_for_domain(rate_limit_domain):
-            fetch_result = await reg.get_fetcher().fetch(watch.url, config=fetch_config)
+            fetch_result = await reg.get_fetcher().fetch(url, config=fetch_config)
 
         if fetch_result.status_code == 429:
             new_interval = get_rate_limiter().report_rate_limited_for_domain(rate_limit_domain)
@@ -118,7 +156,7 @@ async def check_watch(watch_id: str, registry: ServiceRegistry | None = None) ->
                     event_type=WatchEventType.WATCH_ERROR,
                     watch_id=str(watch.id),
                     watch_name=watch.name,
-                    watch_url=watch.url,
+                    watch_url=url,
                     occurred_at=datetime.now(UTC),
                     metadata={
                         "status_code": fetch_result.status_code,
@@ -138,6 +176,8 @@ async def check_watch(watch_id: str, registry: ServiceRegistry | None = None) ->
             fetch_duration_ms=fetch_result.duration_ms,
             storage=storage,
             session=session,
+            resolved=resolved,
+            info_client=info_client,
         )
 
         # Update health + timestamp; commit pipeline + health together.
@@ -159,7 +199,7 @@ async def check_watch(watch_id: str, registry: ServiceRegistry | None = None) ->
                 event_type=WatchEventType.WATCH_RECOVERED,
                 watch_id=str(watch.id),
                 watch_name=watch.name,
-                watch_url=watch.url,
+                watch_url=url,
                 occurred_at=datetime.now(UTC),
                 metadata=_watch_base_metadata(watch),
             )
@@ -172,7 +212,7 @@ async def check_watch(watch_id: str, registry: ServiceRegistry | None = None) ->
                 event_type=WatchEventType.CHANGE_DETECTED,
                 watch_id=str(watch.id),
                 watch_name=watch.name,
-                watch_url=watch.url,
+                watch_url=url,
                 occurred_at=datetime.now(UTC),
                 metadata={**result.get("change_metadata", {}), **_watch_base_metadata(watch)},
             )

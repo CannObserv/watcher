@@ -13,6 +13,16 @@ from src.core.models.snapshot import Snapshot
 from src.core.models.watch import ContentType, Watch, WatchHealthStatus
 from src.core.notifications.events import WatchEventType
 from src.core.storage import LocalStorage
+from tests.conftest import make_info_item, make_info_spec, make_watch
+
+
+async def _seed_info_item(db_session, *, name="Test InfoItem", url="https://example.com"):
+    """Create + commit an InfoItem and primary InfoSpec; return its id (str)."""
+    item = await make_info_item(db_session, name=name)
+    await make_info_spec(db_session, item, url=url)
+    await db_session.commit()
+    return str(item.info_item_id)
+
 
 pytestmark = pytest.mark.integration
 
@@ -67,49 +77,41 @@ class TestWatchList:
         assert response.status_code == 200
 
     async def test_health_badge_ok(self, client, db_session):
-        from src.core.models.watch import WatchHealthStatus
-
-        db_session.add(
-            Watch(
-                name="W",
-                url="https://a.com",
-                content_type="html",
-                health_status=WatchHealthStatus.OK,
-            )
+        await make_watch(
+            db_session,
+            name="W",
+            url="https://a.com",
+            content_type="html",
+            health_status=WatchHealthStatus.OK,
         )
-        await db_session.flush()
         response = await client.get("/watches")
         assert b"Healthy" in response.content
 
     async def test_health_badge_error(self, client, db_session):
-        from src.core.models.watch import WatchHealthStatus
-
-        db_session.add(
-            Watch(
-                name="W",
-                url="https://a.com",
-                content_type="html",
-                health_status=WatchHealthStatus.ERROR,
-            )
+        await make_watch(
+            db_session,
+            name="W",
+            url="https://a.com",
+            content_type="html",
+            health_status=WatchHealthStatus.ERROR,
         )
-        await db_session.flush()
         response = await client.get("/watches")
         assert b"Error" in response.content
 
     async def test_health_badge_unknown(self, client, db_session):
-        db_session.add(Watch(name="W", url="https://a.com", content_type="html"))
-        await db_session.flush()
+        await make_watch(db_session, name="W", url="https://a.com", content_type="html")
         response = await client.get("/watches")
         assert b"Unknown" in response.content
 
 
 class TestWatchDetail:
-    async def test_detail_page_returns_200(self, client):
+    async def test_detail_page_returns_200(self, client, db_session):
+        info_item_id = await _seed_info_item(db_session, name="Detail Watch")
         resp = await client.post(
             "/api/v1/watches",
             json={
                 "name": "Detail Watch",
-                "url": "https://example.com",
+                "info_item_id": info_item_id,
                 "content_type": "html",
             },
         )
@@ -122,6 +124,19 @@ class TestWatchDetail:
         response = await client.get("/watches/not-a-ulid")
         assert response.status_code == 404
 
+    async def test_detail_page_shows_resolved_url_no_inline_edit(self, client, db_session):
+        """Detail page renders ``resolved_url`` plainly — no Edit handle on it."""
+        watch = await make_watch(
+            db_session, name="No URL Edit", url="https://example.com/x", content_type="html"
+        )
+        await db_session.commit()
+        response = await client.get(f"/watches/{watch.id}")
+        assert response.status_code == 200
+        # The URL row no longer renders the Edit-mode field partial.
+        assert b"https://example.com/x" in response.content
+        # No GET endpoint for ``url`` field anymore.
+        assert b"/field/url" not in response.content
+
 
 class TestWatchCreate:
     async def test_create_form_returns_200(self, client):
@@ -129,30 +144,39 @@ class TestWatchCreate:
         assert response.status_code == 200
         assert b"New Watch" in response.content
 
-    async def test_create_form_has_fields(self, client):
+    async def test_create_form_has_info_item_picker(self, client, db_session):
+        """The new create form renders an InfoItem <select>, not URL/fetch fields."""
+        # Seed two InfoItems so the picker has options to render.
+        await make_info_item(db_session, name="Picker A")
+        await make_info_item(db_session, name="Picker B")
+        await db_session.commit()
         response = await client.get("/watches/new")
         assert b'name="name"' in response.content
-        assert b'name="url"' in response.content
+        assert b'name="info_item_id"' in response.content
         assert b'name="content_type"' in response.content
+        # URL and fetch_config form fields are gone.
+        assert b'name="url"' not in response.content
 
-    async def test_create_watch_redirects(self, client):
+    async def test_create_watch_redirects(self, client, db_session):
+        info_item_id = await _seed_info_item(db_session, name="Created Watch")
         response = await client.post(
             "/watches/new",
             data={
                 "name": "Created Watch",
-                "url": "https://example.com",
+                "info_item_id": info_item_id,
                 "content_type": "html",
             },
             follow_redirects=False,
         )
         assert response.status_code == 303
 
-    async def test_create_watch_missing_name_shows_error(self, client):
+    async def test_create_watch_missing_name_shows_error(self, client, db_session):
+        info_item_id = await _seed_info_item(db_session, name="X")
         response = await client.post(
             "/watches/new",
             data={
                 "name": "",
-                "url": "https://example.com",
+                "info_item_id": info_item_id,
                 "content_type": "html",
             },
         )
@@ -162,11 +186,14 @@ class TestWatchCreate:
     async def test_create_watch_sets_effective_domain_and_creates_domain_record(
         self, client, db_session
     ):
+        info_item_id = await _seed_info_item(
+            db_session, name="Domain Test Watch", url="https://lcb.wa.gov/page"
+        )
         response = await client.post(
             "/watches/new",
             data={
                 "name": "Domain Test Watch",
-                "url": "https://lcb.wa.gov/page",
+                "info_item_id": info_item_id,
                 "content_type": "html",
             },
             follow_redirects=False,
@@ -180,16 +207,18 @@ class TestWatchCreate:
         domain_result = await db_session.execute(select(Domain).where(Domain.name == "lcb.wa.gov"))
         assert domain_result.scalar_one_or_none() is not None
 
-    async def test_create_watch_unreachable_url_shows_error(self, client):
+    async def test_create_watch_unreachable_url_shows_error(self, client, db_session):
+        info_item_id = await _seed_info_item(db_session, name="Bad Watch")
         with patch(
             "src.dashboard.routes._create_watch",
+            new_callable=AsyncMock,
             side_effect=httpx.ConnectError("unreachable"),
         ):
             response = await client.post(
                 "/watches/new",
                 data={
                     "name": "Bad Watch",
-                    "url": "https://broken.example",
+                    "info_item_id": info_item_id,
                     "content_type": "html",
                 },
             )
@@ -197,9 +226,51 @@ class TestWatchCreate:
         assert b"unreachable" in response.content.lower()
 
 
+class TestWatchInlineEditUrlGone:
+    """The inline-edit endpoint for the dropped ``url`` field must not exist."""
+
+    async def test_get_url_field_inline_edit_returns_4xx(self, client, db_session):
+        watch = await make_watch(
+            db_session, name="No URL Edit", url="https://example.com", content_type="html"
+        )
+        await db_session.commit()
+        response = await client.get(
+            f"/watches/{watch.id}/field/url",
+            headers={"HX-Request": "true"},
+        )
+        # Either 400 (dispatcher rejects) or 404 (route gone). Anything but 200.
+        assert response.status_code in (400, 404, 405)
+
+    async def test_post_url_field_inline_edit_returns_4xx(self, client, db_session):
+        watch = await make_watch(
+            db_session, name="No URL Edit", url="https://example.com", content_type="html"
+        )
+        await db_session.commit()
+        response = await client.post(
+            f"/watches/{watch.id}/field/url",
+            data={"value": "https://other.example"},
+            headers={"HX-Request": "true"},
+        )
+        assert response.status_code in (400, 404, 405)
+
+    async def test_post_timeout_field_inline_edit_returns_4xx(self, client, db_session):
+        """fetch_config keys are gone too — ``timeout`` was the canonical example."""
+        watch = await make_watch(
+            db_session, name="No timeout edit", url="https://example.com", content_type="html"
+        )
+        await db_session.commit()
+        response = await client.post(
+            f"/watches/{watch.id}/field/timeout",
+            data={"value": "60"},
+            headers={"HX-Request": "true"},
+        )
+        assert response.status_code in (400, 404, 405)
+
+
 class TestWatchRowDomainInactiveBadge:
     async def test_domain_suspended_watch_shows_domain_inactive_badge(self, client, db_session):
-        watch = Watch(
+        await make_watch(
+            db_session,
             name="Suspended Watch",
             url="https://ds-badge.com/p",
             content_type=ContentType.HTML,
@@ -207,8 +278,6 @@ class TestWatchRowDomainInactiveBadge:
             is_active=False,
             domain_suspended=True,
         )
-        db_session.add(watch)
-        await db_session.flush()
         response = await client.get("/partials/watch-table")
         assert response.status_code == 200
         assert b"Domain Inactive" in response.content
@@ -216,7 +285,8 @@ class TestWatchRowDomainInactiveBadge:
     async def test_manually_inactive_watch_shows_inactive_not_domain_inactive(
         self, client, db_session
     ):
-        watch = Watch(
+        await make_watch(
+            db_session,
             name="Manual Inactive",
             url="https://mi-badge.com/p",
             content_type=ContentType.HTML,
@@ -224,8 +294,6 @@ class TestWatchRowDomainInactiveBadge:
             is_active=False,
             domain_suspended=False,
         )
-        db_session.add(watch)
-        await db_session.flush()
         response = await client.get("/partials/watch-table")
         assert response.status_code == 200
         assert b"Domain Inactive" not in response.content
@@ -241,9 +309,9 @@ class TestChangeDetail:
         assert response.status_code == 404
 
     async def test_change_detail_shows_screenshot_thumbnails(self, client, db_session):
-        watch = Watch(name="Screenshotter", url="https://example.com", content_type="html")
-        db_session.add(watch)
-        await db_session.flush()
+        watch = await make_watch(
+            db_session, name="Screenshotter", url="https://example.com", content_type="html"
+        )
 
         snap_defaults = dict(
             watch_id=watch.id,
@@ -277,9 +345,9 @@ class TestChangeDetail:
         assert b"screenshot" in response.content.lower()
 
     async def test_change_detail_no_screenshot_section_without_paths(self, client, db_session):
-        watch = Watch(name="No Screenshot", url="https://example.com", content_type="html")
-        db_session.add(watch)
-        await db_session.flush()
+        watch = await make_watch(
+            db_session, name="No Screenshot", url="https://example.com", content_type="html"
+        )
 
         snap_defaults = dict(
             watch_id=watch.id,
@@ -311,9 +379,9 @@ class TestChangeDetail:
         assert b"Visual Comparison" not in response.content
 
     async def test_change_list_shows_visual_change_score_badge(self, client, db_session):
-        watch = Watch(name="Visual Score Watch", url="https://example.com", content_type="html")
-        db_session.add(watch)
-        await db_session.flush()
+        watch = await make_watch(
+            db_session, name="Visual Score Watch", url="https://example.com", content_type="html"
+        )
 
         snap_defaults = dict(
             watch_id=watch.id,
@@ -381,16 +449,23 @@ _NOTIFY_PATCH = "src.dashboard.routes.dispatch_event_notifications"
 
 
 class TestWatchArchive:
-    async def _create_watch(self, client):
+    async def _create_watch(self, client, db_session):
+        info_item_id = await _seed_info_item(
+            db_session, name="Archive Me", url="https://example.com/arc"
+        )
         resp = await client.post(
             "/api/v1/watches",
-            json={"name": "Archive Me", "url": "https://example.com/arc", "content_type": "html"},
+            json={
+                "name": "Archive Me",
+                "info_item_id": info_item_id,
+                "content_type": "html",
+            },
         )
-        assert resp.status_code == 201
+        assert resp.status_code == 201, resp.text
         return resp.json()["id"]
 
-    async def test_archive_dispatches_watch_archived_event(self, client):
-        watch_id = await self._create_watch(client)
+    async def test_archive_dispatches_watch_archived_event(self, client, db_session):
+        watch_id = await self._create_watch(client, db_session)
         with patch(_NOTIFY_PATCH, new_callable=AsyncMock) as mock_dispatch:
             response = await client.post(f"/watches/{watch_id}/archive")
         assert response.status_code in (200, 303)
@@ -399,8 +474,8 @@ class TestWatchArchive:
         assert kwargs["event"].event_type == WatchEventType.WATCH_ARCHIVED
         assert kwargs["event"].watch_id == watch_id
 
-    async def test_archive_event_includes_name_and_url(self, client):
-        watch_id = await self._create_watch(client)
+    async def test_archive_event_includes_name_and_url(self, client, db_session):
+        watch_id = await self._create_watch(client, db_session)
         with patch(_NOTIFY_PATCH, new_callable=AsyncMock) as mock_dispatch:
             await client.post(f"/watches/{watch_id}/archive")
         _, kwargs = mock_dispatch.call_args
@@ -414,13 +489,44 @@ class TestWatchArchive:
         Regression: dispatch was called before session.commit(), so a network
         failure in Apprise would prevent the archive from ever being persisted.
         """
-        watch_id = await self._create_watch(client)
+        watch_id = await self._create_watch(client, db_session)
         with patch(_NOTIFY_PATCH, side_effect=Exception("notification failed")):
             response = await client.post(f"/watches/{watch_id}/archive")
         assert response.status_code in (200, 303)
         watch = await db_session.get(Watch, watch_id)
         await db_session.refresh(watch)
         assert watch.is_archived is True
+
+    async def test_archive_completes_when_resolve_watch_url_raises(self, client, db_session):
+        """SDK failure resolving the URL must NOT roll back the archive.
+
+        Regression: ``resolve_watch_url`` was called AFTER ``session.commit()``
+        but its exception escaped as a 500, leaking a partial-success state to
+        the operator (archive persisted but UI reports failure). The handler
+        must log + dispatch with a sentinel URL (or skip dispatch) and still
+        return the redirect.
+        """
+        watch = await make_watch(
+            db_session,
+            name="Resolve Fails",
+            url="https://example.com/resolve-fails",
+            content_type=ContentType.HTML,
+        )
+        await db_session.commit()
+        with patch(
+            "src.dashboard.routes.resolve_watch_url",
+            new_callable=AsyncMock,
+            side_effect=RuntimeError("information service unreachable"),
+        ):
+            response = await client.post(f"/watches/{watch.id}/archive")
+        assert response.status_code in (200, 303), (
+            f"archive must complete despite SDK failure; got {response.status_code}"
+        )
+        # archive must be persisted regardless
+        db_watch = await db_session.get(Watch, watch.id)
+        await db_session.refresh(db_watch)
+        assert db_watch.is_archived is True
+        assert db_watch.is_active is False
 
     async def test_archive_button_targets_body(self, client, db_session):
         """Archive button must carry hx-target=body so HTMX swaps the full page.
@@ -429,9 +535,9 @@ class TestWatchArchive:
         injected as innerHTML of the button element (inside the Danger Zone
         section), resulting in the entire page rendering nested inside that div.
         """
-        watch = Watch(name="Target Test", url="https://example.com", content_type=ContentType.HTML)
-        db_session.add(watch)
-        await db_session.flush()
+        watch = await make_watch(
+            db_session, name="Target Test", url="https://example.com", content_type=ContentType.HTML
+        )
         response = await client.get(f"/watches/{watch.id}")
         assert response.status_code == 200
         content = response.content.decode()
@@ -445,14 +551,13 @@ class TestWatchArchive:
         Regression: missing hx-target would cause the 303-redirect response to
         be injected as innerHTML of the button element (inside the Danger Zone).
         """
-        watch = Watch(
+        watch = await make_watch(
+            db_session,
             name="Restore Target",
             url="https://example.com",
             content_type=ContentType.HTML,
             is_archived=True,
         )
-        db_session.add(watch)
-        await db_session.flush()
         response = await client.get(f"/watches/{watch.id}")
         assert response.status_code == 200
         content = response.content.decode()
@@ -461,12 +566,19 @@ class TestWatchArchive:
 
 
 class TestWatchDeactivate:
-    async def _create_active_watch(self, client):
+    async def _create_active_watch(self, client, db_session):
+        info_item_id = await _seed_info_item(
+            db_session, name="Deactivate Me", url="https://example.com"
+        )
         resp = await client.post(
             "/api/v1/watches",
-            json={"name": "Deactivate Me", "url": "https://example.com", "content_type": "html"},
+            json={
+                "name": "Deactivate Me",
+                "info_item_id": info_item_id,
+                "content_type": "html",
+            },
         )
-        assert resp.status_code == 201
+        assert resp.status_code == 201, resp.text
         return resp.json()["id"]
 
     async def test_deactivate_sets_watch_inactive(self, client, db_session):
@@ -475,15 +587,15 @@ class TestWatchDeactivate:
         Regression: the template called /deactivate but no route handler existed,
         so the button silently 404'd in production.
         """
-        watch_id = await self._create_active_watch(client)
+        watch_id = await self._create_active_watch(client, db_session)
         response = await client.post(f"/watches/{watch_id}/deactivate", follow_redirects=False)
         assert response.status_code == 303
         watch = await db_session.get(Watch, watch_id)
         await db_session.refresh(watch)
         assert watch.is_active is False
 
-    async def test_deactivate_htmx_returns_updated_row(self, client):
-        watch_id = await self._create_active_watch(client)
+    async def test_deactivate_htmx_returns_updated_row(self, client, db_session):
+        watch_id = await self._create_active_watch(client, db_session)
         response = await client.post(
             f"/watches/{watch_id}/deactivate",
             headers={"HX-Request": "true"},
@@ -495,7 +607,7 @@ class TestWatchDeactivate:
 
     async def test_deactivate_already_inactive_is_idempotent(self, client, db_session):
         """Deactivating an already-inactive watch returns 303 without error."""
-        watch_id = await self._create_active_watch(client)
+        watch_id = await self._create_active_watch(client, db_session)
         # First deactivate
         await client.post(f"/watches/{watch_id}/deactivate", follow_redirects=False)
         # Second deactivate — must not raise or error
@@ -505,24 +617,29 @@ class TestWatchDeactivate:
         await db_session.refresh(watch)
         assert watch.is_active is False
 
-    async def test_deactivate_archived_watch_returns_409(self, client):
+    async def test_deactivate_archived_watch_returns_409(self, client, db_session):
         """Deactivating an archived watch returns 409, consistent with toggle-active."""
+        info_item_id = await _seed_info_item(db_session, name="Arc Watch")
         resp = await client.post(
             "/api/v1/watches",
-            json={"name": "Arc Watch", "url": "https://example.com", "content_type": "html"},
+            json={
+                "name": "Arc Watch",
+                "info_item_id": info_item_id,
+                "content_type": "html",
+            },
         )
         watch_id = resp.json()["id"]
         await client.post(f"/watches/{watch_id}/archive")
         response = await client.post(f"/watches/{watch_id}/deactivate")
         assert response.status_code == 409
 
-    async def test_deactivate_already_inactive_htmx_returns_valid_row(self, client):
+    async def test_deactivate_already_inactive_htmx_returns_valid_row(self, client, db_session):
         """HTMX deactivate on an already-inactive watch must return the updated row.
 
         Idempotency: the route skips the commit when is_active is already False
         but must still render the row partial so HTMX can do the outerHTML swap.
         """
-        watch_id = await self._create_active_watch(client)
+        watch_id = await self._create_active_watch(client, db_session)
         # First deactivate (non-HTMX) to make the watch inactive
         await client.post(f"/watches/{watch_id}/deactivate", follow_redirects=False)
         # Second deactivate via HTMX — must render the row, not 303-redirect
@@ -541,12 +658,13 @@ class TestWatchDeactivate:
 
 
 class TestWatchDelete:
-    async def _create_and_archive(self, client):
+    async def _create_and_archive(self, client, db_session):
+        info_item_id = await _seed_info_item(db_session, name="Delete Me")
         resp = await client.post(
             "/api/v1/watches",
             json={
                 "name": "Delete Me",
-                "url": "https://example.com",
+                "info_item_id": info_item_id,
                 "content_type": "html",
             },
         )
@@ -554,18 +672,19 @@ class TestWatchDelete:
         await client.post(f"/watches/{watch_id}/archive")
         return watch_id
 
-    async def test_delete_archived_watch_redirects(self, client):
-        watch_id = await self._create_and_archive(client)
+    async def test_delete_archived_watch_redirects(self, client, db_session):
+        watch_id = await self._create_and_archive(client, db_session)
         response = await client.delete(f"/watches/{watch_id}")
         assert response.status_code == 200
         assert response.headers.get("hx-redirect") == "/watches"
 
-    async def test_delete_non_archived_watch_returns_409(self, client):
+    async def test_delete_non_archived_watch_returns_409(self, client, db_session):
+        info_item_id = await _seed_info_item(db_session, name="Cannot Delete Active")
         resp = await client.post(
             "/api/v1/watches",
             json={
                 "name": "Cannot Delete Active",
-                "url": "https://example.com",
+                "info_item_id": info_item_id,
                 "content_type": "html",
             },
         )
@@ -630,7 +749,7 @@ class TestWatchListFilters:
 
 
 class TestDomainDetailFilters:
-    async def _create_domain_with_watch(self, client, watch_name="Filter Watch"):
+    async def _create_domain_with_watch(self, client, db_session, watch_name="Filter Watch"):
         """Create a domain and a watch whose effective_domain matches it.
 
         The mock probe extracts hostname from URL, so the watch URL must
@@ -643,42 +762,45 @@ class TestDomainDetailFilters:
             follow_redirects=False,
         )
         name = resp.headers["location"].rstrip("/").split("/")[-1]
+        info_item_id = await _seed_info_item(
+            db_session, name=watch_name, url=f"https://{name}/page"
+        )
         await client.post(
             "/api/v1/watches",
             json={
                 "name": watch_name,
-                "url": f"https://{name}/page",
+                "info_item_id": info_item_id,
                 "content_type": "html",
             },
         )
         return name
 
-    async def test_domain_detail_has_segment_control(self, client):
-        name = await self._create_domain_with_watch(client, "Domain Filter Watch")
+    async def test_domain_detail_has_segment_control(self, client, db_session):
+        name = await self._create_domain_with_watch(client, db_session, "Domain Filter Watch")
         response = await client.get(f"/domains/{name}")
         body = response.content
         assert b'role="radiogroup"' in body
         assert b'name="status"' in body  # was: name="watch_status"
 
-    async def test_domain_detail_no_filter_pill(self, client):
-        name = await self._create_domain_with_watch(client, "Domain Filter Watch 2")
+    async def test_domain_detail_no_filter_pill(self, client, db_session):
+        name = await self._create_domain_with_watch(client, db_session, "Domain Filter Watch 2")
         response = await client.get(f"/domains/{name}")
         assert b"filter-pill" not in response.content
 
-    async def test_domain_watches_partial(self, client):
-        name = await self._create_domain_with_watch(client, "Partial Watch")
+    async def test_domain_watches_partial(self, client, db_session):
+        name = await self._create_domain_with_watch(client, db_session, "Partial Watch")
         response = await client.get(f"/partials/domain-watches/{name}")
         assert response.status_code == 200
         assert b"Partial Watch" in response.content
 
-    async def test_domain_watches_partial_search(self, client):
-        name = await self._create_domain_with_watch(client, "Searchable Watch")
+    async def test_domain_watches_partial_search(self, client, db_session):
+        name = await self._create_domain_with_watch(client, db_session, "Searchable Watch")
         response = await client.get(f"/partials/domain-watches/{name}?q=searchable")
         assert response.status_code == 200
         assert b"Searchable Watch" in response.content
 
-    async def test_domain_watches_partial_sort(self, client):
-        name = await self._create_domain_with_watch(client, "Sort Watch")
+    async def test_domain_watches_partial_sort(self, client, db_session):
+        name = await self._create_domain_with_watch(client, db_session, "Sort Watch")
         response = await client.get(f"/partials/domain-watches/{name}?sort=name&order=asc")
         assert response.status_code == 200
 
@@ -689,16 +811,14 @@ class TestDomainDetailFilters:
             follow_redirects=False,
         )
         name = resp.headers["location"].rstrip("/").split("/")[-1]
-        db_session.add(
-            Watch(
-                name="Healthy Watch",
-                url=f"https://{name}/page",
-                content_type="html",
-                effective_domain=name,
-                health_status=WatchHealthStatus.OK,
-            )
+        await make_watch(
+            db_session,
+            name="Healthy Watch",
+            url=f"https://{name}/page",
+            content_type="html",
+            effective_domain=name,
+            health_status=WatchHealthStatus.OK,
         )
-        await db_session.flush()
         response = await client.get(f"/partials/domain-watches/{name}")
         assert response.status_code == 200
         assert b"Healthy" in response.content
@@ -718,15 +838,20 @@ class TestAuditLogFilters:
 
 
 class TestWatchTimeline:
-    async def _create_watch(self, client):
+    async def _create_watch(self, client, db_session):
+        info_item_id = await _seed_info_item(db_session, name="Timeline Watch")
         resp = await client.post(
             "/api/v1/watches",
-            json={"name": "Timeline Watch", "url": "https://example.com", "content_type": "html"},
+            json={
+                "name": "Timeline Watch",
+                "info_item_id": info_item_id,
+                "content_type": "html",
+            },
         )
         return resp.json()["id"]
 
-    async def test_timeline_partial_returns_200(self, client):
-        watch_id = await self._create_watch(client)
+    async def test_timeline_partial_returns_200(self, client, db_session):
+        watch_id = await self._create_watch(client, db_session)
         response = await client.get(f"/partials/watch-timeline/{watch_id}")
         assert response.status_code == 200
 
@@ -734,36 +859,41 @@ class TestWatchTimeline:
         response = await client.get("/partials/watch-timeline/not-a-ulid")
         assert response.status_code == 404
 
-    async def test_detail_page_shows_timeline_section(self, client):
-        watch_id = await self._create_watch(client)
+    async def test_detail_page_shows_timeline_section(self, client, db_session):
+        watch_id = await self._create_watch(client, db_session)
         response = await client.get(f"/watches/{watch_id}")
         assert response.status_code == 200
         # Should show "Event Timeline" heading, not old "Change History"
         assert b"Event Timeline" in response.content
 
-    async def test_detail_page_no_change_history_heading(self, client):
-        watch_id = await self._create_watch(client)
+    async def test_detail_page_no_change_history_heading(self, client, db_session):
+        watch_id = await self._create_watch(client, db_session)
         response = await client.get(f"/watches/{watch_id}")
         # Old section heading should be gone
         assert b"Change History" not in response.content
 
-    async def test_timeline_partial_filter_param(self, client):
-        watch_id = await self._create_watch(client)
+    async def test_timeline_partial_filter_param(self, client, db_session):
+        watch_id = await self._create_watch(client, db_session)
         for category in ("all", "changes", "errors", "config"):
             response = await client.get(f"/partials/watch-timeline/{watch_id}?category={category}")
             assert response.status_code == 200
 
 
 class TestScreenshotRecapture:
-    async def _create_watch(self, client):
+    async def _create_watch(self, client, db_session):
+        info_item_id = await _seed_info_item(db_session, name="Recapture Watch")
         resp = await client.post(
             "/api/v1/watches",
-            json={"name": "Recapture Watch", "url": "https://example.com", "content_type": "html"},
+            json={
+                "name": "Recapture Watch",
+                "info_item_id": info_item_id,
+                "content_type": "html",
+            },
         )
         return resp.json()["id"]
 
-    async def test_recapture_no_snapshot_returns_404(self, client):
-        watch_id = await self._create_watch(client)
+    async def test_recapture_no_snapshot_returns_404(self, client, db_session):
+        watch_id = await self._create_watch(client, db_session)
         response = await client.post(f"/watches/{watch_id}/screenshot")
         assert response.status_code == 404
 
@@ -774,9 +904,9 @@ class TestScreenshotRecapture:
     async def test_recapture_playwright_unavailable_returns_200_unavailable(
         self, client, db_session, monkeypatch
     ):
-        watch = Watch(name="No PW Watch", url="https://example.com", content_type=ContentType.HTML)
-        db_session.add(watch)
-        await db_session.flush()
+        watch = await make_watch(
+            db_session, name="No PW Watch", url="https://example.com", content_type=ContentType.HTML
+        )
 
         snap = Snapshot(
             watch_id=watch.id,
@@ -803,9 +933,9 @@ class TestScreenshotRecapture:
     async def test_recapture_success_returns_200_ok(
         self, client, db_session, monkeypatch, tmp_path
     ):
-        watch = Watch(name="PW Watch", url="https://example.com", content_type=ContentType.HTML)
-        db_session.add(watch)
-        await db_session.flush()
+        watch = await make_watch(
+            db_session, name="PW Watch", url="https://example.com", content_type=ContentType.HTML
+        )
 
         snap = Snapshot(
             watch_id=watch.id,
@@ -849,10 +979,15 @@ async def _async_result(value):
 
 
 class TestSnapshotContentViewer:
-    async def _create_watch(self, client):
+    async def _create_watch(self, client, db_session):
+        info_item_id = await _seed_info_item(db_session, name="Content Watch")
         resp = await client.post(
             "/api/v1/watches",
-            json={"name": "Content Watch", "url": "https://example.com", "content_type": "html"},
+            json={
+                "name": "Content Watch",
+                "info_item_id": info_item_id,
+                "content_type": "html",
+            },
         )
         return resp.json()["id"]
 
@@ -861,19 +996,20 @@ class TestSnapshotContentViewer:
         response = await client.get(url)
         assert response.status_code == 404
 
-    async def test_content_missing_snapshot_returns_404(self, client):
-        watch_id = await self._create_watch(client)
+    async def test_content_missing_snapshot_returns_404(self, client, db_session):
+        watch_id = await self._create_watch(client, db_session)
         response = await client.get(
             f"/watches/{watch_id}/snapshots/01JNZZZZZZZZZZZZZZZZZZZZZZ/content"
         )
         assert response.status_code == 404
 
     async def test_content_no_storage_path_returns_404(self, client, db_session):
-        watch = Watch(
-            name="No Path Watch", url="https://example.com", content_type=ContentType.HTML
+        watch = await make_watch(
+            db_session,
+            name="No Path Watch",
+            url="https://example.com",
+            content_type=ContentType.HTML,
         )
-        db_session.add(watch)
-        await db_session.flush()
 
         snap = Snapshot(
             watch_id=watch.id,
@@ -893,11 +1029,12 @@ class TestSnapshotContentViewer:
         assert response.status_code == 404
 
     async def test_content_serves_text_path(self, client, db_session, monkeypatch, tmp_path):
-        watch = Watch(
-            name="Text Path Watch", url="https://example.com", content_type=ContentType.HTML
+        watch = await make_watch(
+            db_session,
+            name="Text Path Watch",
+            url="https://example.com",
+            content_type=ContentType.HTML,
         )
-        db_session.add(watch)
-        await db_session.flush()
 
         text_path = "snapshots/w/snap.txt"
         full_path = tmp_path / text_path
@@ -929,11 +1066,12 @@ class TestSnapshotContentViewer:
     async def test_content_falls_back_to_storage_path(
         self, client, db_session, monkeypatch, tmp_path
     ):
-        watch = Watch(
-            name="Fallback Watch", url="https://example.com", content_type=ContentType.HTML
+        watch = await make_watch(
+            db_session,
+            name="Fallback Watch",
+            url="https://example.com",
+            content_type=ContentType.HTML,
         )
-        db_session.add(watch)
-        await db_session.flush()
 
         storage_path = "snapshots/w/snap_raw.html"
         full_path = tmp_path / storage_path

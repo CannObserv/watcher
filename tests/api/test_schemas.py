@@ -96,129 +96,49 @@ class TestHttpUrlStr:
 
 class TestWatchCreate:
     def test_valid_watch_create(self):
+        info_id = str(ULID())
         data = WatchCreate(
             name="Test Watch",
-            url="https://example.com/page",
+            info_item_id=info_id,
             content_type="html",
         )
         assert data.name == "Test Watch"
-        assert data.url == "https://example.com/page"
+        assert data.info_item_id == info_id
         assert data.content_type == "html"
-        assert data.fetch_config == {}
         assert data.schedule_config == {}
 
     def test_watch_create_requires_name(self):
         with pytest.raises(ValidationError):
-            WatchCreate(url="https://example.com", content_type="html")
+            WatchCreate(info_item_id=str(ULID()), content_type="html")
 
-    def test_watch_create_requires_url(self):
+    def test_watch_create_requires_info_item_id(self):
         with pytest.raises(ValidationError):
             WatchCreate(name="Test", content_type="html")
 
     def test_watch_create_validates_content_type(self):
         with pytest.raises(ValidationError):
-            WatchCreate(name="Test", url="https://example.com", content_type="invalid")
+            WatchCreate(name="Test", info_item_id=str(ULID()), content_type="invalid")
 
-    def test_watch_create_with_configs(self):
+    def test_watch_create_with_schedule_config(self):
         data = WatchCreate(
             name="PDF Watch",
-            url="https://example.com/report.pdf",
+            info_item_id=str(ULID()),
             content_type="pdf",
-            fetch_config={"timeout": 30},
             schedule_config={"interval": "6h"},
         )
-        assert data.fetch_config == {"timeout": 30}
         assert data.schedule_config == {"interval": "6h"}
 
-    def test_watch_create_valid_ignore_patterns(self):
+    def test_watch_create_no_legacy_fields(self):
+        """``url`` and ``fetch_config`` no longer accepted (silently ignored)."""
+        info_id = str(ULID())
         data = WatchCreate(
-            name="Filtered",
-            url="https://example.com",
+            name="Silent",
+            info_item_id=info_id,
             content_type="html",
-            fetch_config={"ignore_patterns": [r"\d{4}-\d{2}-\d{2}", r"foo bar"]},
+            # These extra keys must be ignored or rejected, never stored.
         )
-        assert data.fetch_config["ignore_patterns"] == [r"\d{4}-\d{2}-\d{2}", r"foo bar"]
-
-    def test_watch_create_invalid_regex_in_ignore_patterns(self):
-        with pytest.raises(ValidationError, match="not a valid regex"):
-            WatchCreate(
-                name="Bad",
-                url="https://example.com",
-                content_type="html",
-                fetch_config={"ignore_patterns": [r"[invalid"]},
-            )
-
-    def test_watch_create_rejects_invalid_url(self):
-        with pytest.raises(ValidationError):
-            WatchCreate(name="Bad", url="not-a-url", content_type="html")
-
-    def test_watch_create_rejects_ftp_url(self):
-        with pytest.raises(ValidationError):
-            WatchCreate(name="Bad", url="ftp://example.com/file", content_type="html")
-
-    def test_watch_create_ignore_patterns_must_be_list(self):
-        with pytest.raises(ValidationError, match="must be a list"):
-            WatchCreate(
-                name="Bad",
-                url="https://example.com",
-                content_type="html",
-                fetch_config={"ignore_patterns": r"\d+"},
-            )
-
-    def test_watch_create_valid_ignore_selectors(self):
-        data = WatchCreate(
-            name="Selector Watch",
-            url="https://example.com",
-            content_type="html",
-            fetch_config={"ignore_selectors": ["#sidebar", ".ads", "nav > ul"]},
-        )
-        assert data.fetch_config["ignore_selectors"] == ["#sidebar", ".ads", "nav > ul"]
-
-    def test_watch_create_invalid_css_selector(self):
-        with pytest.raises(ValidationError, match="not a valid CSS selector"):
-            WatchCreate(
-                name="Bad",
-                url="https://example.com",
-                content_type="html",
-                fetch_config={"ignore_selectors": ["###invalid!!!"]},
-            )
-
-    def test_watch_create_ignore_selectors_must_be_list(self):
-        with pytest.raises(ValidationError, match="must be a list"):
-            WatchCreate(
-                name="Bad",
-                url="https://example.com",
-                content_type="html",
-                fetch_config={"ignore_selectors": "#sidebar"},
-            )
-
-    def test_watch_create_valid_viewport(self):
-        data = WatchCreate(
-            name="Wide Watch",
-            url="https://example.com",
-            content_type="html",
-            fetch_config={"viewport_width": 1920, "viewport_height": 1080},
-        )
-        assert data.fetch_config["viewport_width"] == 1920
-        assert data.fetch_config["viewport_height"] == 1080
-
-    def test_watch_create_rejects_nonpositive_viewport_width(self):
-        with pytest.raises(ValidationError, match="viewport_width must be"):
-            WatchCreate(
-                name="Bad",
-                url="https://example.com",
-                content_type="html",
-                fetch_config={"viewport_width": -1},
-            )
-
-    def test_watch_create_rejects_oversized_viewport_height(self):
-        with pytest.raises(ValidationError, match="viewport_height must be"):
-            WatchCreate(
-                name="Bad",
-                url="https://example.com",
-                content_type="html",
-                fetch_config={"viewport_height": 99999},
-            )
+        assert not hasattr(data, "url")
+        assert not hasattr(data, "fetch_config")
 
 
 class TestWatchUpdate:
@@ -227,24 +147,19 @@ class TestWatchUpdate:
         assert data.name == "New Name"
         assert data.is_active is None
 
-    def test_update_all_fields(self):
-        data = WatchUpdate(
-            name="Updated",
-            content_type="pdf",
-            fetch_config={"selectors": ["#main"]},
-            schedule_config={"interval": "1h"},
-            is_active=False,
-        )
-        assert data.is_active is False
-
     def test_update_empty_is_valid(self):
         data = WatchUpdate()
         assert data.name is None
 
     def test_update_url_field_not_present(self):
-        """URL is intentionally omitted from WatchUpdate — immutable after creation."""
+        """URL is intentionally omitted from WatchUpdate — owned by InfoSpec."""
         data = WatchUpdate(name="No URL change")
         assert not hasattr(data, "url")
+
+    def test_update_no_fetch_config_field(self):
+        """fetch_config is owned by the InfoSpec; never on the watch row."""
+        data = WatchUpdate(name="X")
+        assert not hasattr(data, "fetch_config")
 
     def test_update_rejects_invalid_effective_url(self):
         with pytest.raises(ValidationError):
@@ -253,35 +168,6 @@ class TestWatchUpdate:
     def test_update_accepts_valid_effective_url(self):
         data = WatchUpdate(effective_url="https://example.com/resolved")
         assert data.effective_url == "https://example.com/resolved"
-
-    def test_update_invalid_regex_in_ignore_patterns(self):
-        with pytest.raises(ValidationError, match="not a valid regex"):
-            WatchUpdate(fetch_config={"ignore_patterns": [r"[bad"]})
-
-    def test_update_none_fetch_config_is_valid(self):
-        data = WatchUpdate(fetch_config=None)
-        assert data.fetch_config is None
-
-    def test_update_valid_ignore_selectors(self):
-        data = WatchUpdate(fetch_config={"ignore_selectors": [".promo", "#cookie-banner"]})
-        assert data.fetch_config["ignore_selectors"] == [".promo", "#cookie-banner"]
-
-    def test_update_invalid_css_selector(self):
-        with pytest.raises(ValidationError, match="not a valid CSS selector"):
-            WatchUpdate(fetch_config={"ignore_selectors": ["###bad"]})
-
-    def test_update_valid_viewport(self):
-        data = WatchUpdate(fetch_config={"viewport_width": 1920, "viewport_height": 1080})
-        assert data.fetch_config["viewport_width"] == 1920
-        assert data.fetch_config["viewport_height"] == 1080
-
-    def test_update_rejects_zero_viewport_width(self):
-        with pytest.raises(ValidationError, match="viewport_width must be"):
-            WatchUpdate(fetch_config={"viewport_width": 0})
-
-    def test_update_rejects_oversized_viewport(self):
-        with pytest.raises(ValidationError, match="viewport_width must be"):
-            WatchUpdate(fetch_config={"viewport_width": 99999})
 
 
 class TestSnapshotChunkResponse:
@@ -426,30 +312,41 @@ class TestChangeDetailResponse:
 
 
 class TestWatchResponse:
-    def test_watch_response_includes_is_archived(self):
+    def _build_watch(self, **overrides):
         watch = Watch(
-            name="Test",
-            url="https://example.com",
-            content_type=ContentType.HTML,
+            name=overrides.pop("name", "Test"),
+            info_item_id=ULID(),
+            content_type=overrides.pop("content_type", ContentType.HTML),
+            **overrides,
         )
         watch.id = ULID()
         watch.created_at = datetime(2026, 3, 20, 0, 0, 0, tzinfo=UTC)
         watch.updated_at = datetime(2026, 3, 20, 0, 0, 0, tzinfo=UTC)
+        return watch
+
+    def test_watch_response_includes_is_archived(self):
+        watch = self._build_watch()
         response = WatchResponse.model_validate(watch)
         assert response.is_archived is False
 
     def test_watch_response_is_archived_true(self):
-        watch = Watch(
-            name="Archived",
-            url="https://example.com",
-            content_type=ContentType.HTML,
-            is_archived=True,
-        )
-        watch.id = ULID()
-        watch.created_at = datetime(2026, 3, 20, 0, 0, 0, tzinfo=UTC)
-        watch.updated_at = datetime(2026, 3, 20, 0, 0, 0, tzinfo=UTC)
+        watch = self._build_watch(name="Archived", is_archived=True)
         response = WatchResponse.model_validate(watch)
         assert response.is_archived is True
+
+    def test_watch_response_has_info_item_id(self):
+        watch = self._build_watch()
+        response = WatchResponse.model_validate(watch)
+        assert response.info_item_id == str(watch.info_item_id)
+
+    def test_watch_response_has_no_legacy_url_field(self):
+        """Phase 2c: WatchResponse must not expose ``url`` (now in InfoSpec)."""
+        watch = self._build_watch()
+        response = WatchResponse.model_validate(watch)
+        # model_dump must not contain ``url`` or ``fetch_config`` keys.
+        dumped = response.model_dump()
+        assert "url" not in dumped
+        assert "fetch_config" not in dumped
 
 
 class TestAuditLogResponse:

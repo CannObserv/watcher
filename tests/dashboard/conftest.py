@@ -4,7 +4,7 @@ import pytest
 
 from src.core.models.change import Change
 from src.core.models.snapshot import Snapshot, SnapshotChunk
-from src.core.models.watch import Watch
+from tests.conftest import make_watch
 
 
 @pytest.fixture
@@ -67,9 +67,12 @@ async def make_change_with_snapshots(db_session, tmp_path):
             prev_storage = "/tmp/s"
             curr_storage = "/tmp/t"
 
-        watch = Watch(name=watch_name, url=watch_url, content_type=watch_content_type)
-        db_session.add(watch)
-        await db_session.flush()
+        watch = await make_watch(
+            db_session,
+            name=watch_name,
+            url=watch_url,
+            content_type=watch_content_type,
+        )
 
         # This fixture only seeds chunks on curr_snap (when include_chunk=True);
         # prev_snap has no chunks, so prev chunk_count is always 0 to match reality.

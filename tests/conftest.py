@@ -1,26 +1,46 @@
 """Shared test fixtures — async database session and FastAPI TestClient.
 
 tests/fixtures/ holds static sample files used by extractor tests (e.g. sample.html).
+
+Phase 2c migration shim
+-----------------------
+The module-level async helpers ``make_watch``, ``make_snapshot``, ``make_info_item``,
+and ``make_info_spec`` are NOT pytest fixtures — they are awaitable factory
+functions test code can call directly. ``default_snapshot_fixture`` and
+``make_change`` remain as pytest fixtures for the handful of tests that still
+consume them in fixture form.
+
+The ``make_watch`` factory keeps a ``hasattr(Watch, "info_item_id")`` guard so
+the helper does not silently re-introduce model coupling if the column is ever
+renamed or scoped onto a different mapper.
 """
 
 import os
 from collections.abc import AsyncGenerator
+from datetime import UTC, datetime
+from unittest.mock import AsyncMock, MagicMock
 from urllib.parse import urlparse
 
 import pytest
 from httpx import ASGITransport, AsyncClient
-from sqlalchemy import event, text
+from information_client import InformationClient, NotFound
+from sqlalchemy import event, select, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 
 from src.api.deps import get_db_session, get_probe_fn, require_api_key
+from src.core import registry as _registry_module
 from src.core.models import Base
 from src.core.models.app_user import AppUser
 from src.core.models.change import Change
 from src.core.models.snapshot import Snapshot
-from src.core.models.watch import Watch
+from src.core.models.watch import ContentType, Watch
 from src.core.probe import ProbeResult
+from src.core.registry import ServiceRegistry
 from src.dashboard.deps import get_dashboard_user
+from src.information.core.models.base import Base as InformationBase
+from src.information.core.models.info_item import InfoItem  # noqa: F401  registers mapper
+from src.information.core.models.info_spec import InfoSpec  # noqa: F401  registers mapper
 
 TEST_DATABASE_URL = os.environ.get("TEST_DATABASE_URL")
 if not TEST_DATABASE_URL:
@@ -55,7 +75,16 @@ def anyio_backend():
 async def test_engine():
     engine = create_async_engine(TEST_DATABASE_URL)
     async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
+        # Information service owns its own DeclarativeBase + ``information`` schema.
+        # Both must exist before tests run; mirror what alembic_information.ini
+        # would create in production.
+        await conn.execute(text("CREATE SCHEMA IF NOT EXISTS information"))
+        await conn.run_sync(InformationBase.metadata.create_all)
+        # ``Base.metadata`` carries a stub ``information.info_items`` table
+        # (see ``src/core/models/watch.py``). Restrict ``create_all`` to
+        # public-schema tables so we don't redefine InformationBase's table.
+        watcher_tables = [t for t in Base.metadata.sorted_tables if t.schema in (None, "public")]
+        await conn.run_sync(Base.metadata.create_all, tables=watcher_tables)
         # DB triggers are not part of the ORM model; recreate them here to mirror migrations.
         await conn.execute(
             text("""
@@ -80,7 +109,15 @@ async def test_engine():
         )
     yield engine
     async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.drop_all)
+        # ``Base.metadata`` carries a stub ``information.info_items`` table
+        # (see ``src/core/models/watch.py``) so the cross-schema FK on
+        # ``watches.info_item_id`` resolves at import time. Drop only
+        # public-schema tables here; the Information service owns
+        # ``information.*`` and is dropped separately below.
+        watcher_tables = [t for t in Base.metadata.sorted_tables if t.schema in (None, "public")]
+        await conn.run_sync(Base.metadata.drop_all, tables=watcher_tables)
+        await conn.run_sync(InformationBase.metadata.drop_all)
+        await conn.execute(text("DROP SCHEMA IF EXISTS information CASCADE"))
     await engine.dispose()
 
 
@@ -106,22 +143,108 @@ async def db_session(test_engine) -> AsyncGenerator[AsyncSession]:
         await txn.rollback()
 
 
+# ---------------------------------------------------------------------------
+# Module-level async factories (NOT pytest fixtures).
+#
+# Tests call these directly:  ``watch = await make_watch(db_session, name="X")``
+# ---------------------------------------------------------------------------
+
+
+async def make_info_item(session, *, name="Test Item", description=None):
+    """Create and flush an InfoItem row."""
+    item = InfoItem(name=name, description=description)
+    session.add(item)
+    await session.flush()
+    return item
+
+
+async def make_info_spec(
+    session,
+    info_item,
+    *,
+    url="https://example.com",
+    selector=None,
+    fingerprint_algorithm="simhash",
+    priority=1,
+    active=True,
+):
+    """Create and flush an InfoSpec row attached to *info_item*."""
+    extraction = (
+        {"algorithm": "css", "selector": selector} if selector else {"algorithm": "full_page"}
+    )
+    document = {
+        "schema_version": 1,
+        "target": {"url": url},
+        "extraction": extraction,
+        "fingerprint": {"algorithm": fingerprint_algorithm},
+    }
+    spec = InfoSpec(
+        info_item_id=info_item.info_item_id,
+        schema_version=1,
+        document=document,
+        priority=priority,
+        active=active,
+    )
+    session.add(spec)
+    await session.flush()
+    return spec
+
+
+async def make_watch(
+    session,
+    *,
+    name="Test Watch",
+    info_item_id=None,
+    content_type=None,
+    url=None,
+    selector=None,
+    **kwargs,
+):
+    """Construct a Watch with auto-created InfoItem + primary InfoSpec.
+
+    Migration shim — handles three model states (Task 0 / 3 / 4) via
+    ``hasattr`` guards on the Watch class.
+    """
+    if info_item_id is None:
+        info_item = await make_info_item(session, name=name)
+        await make_info_spec(
+            session,
+            info_item,
+            url=url or "https://example.com",
+            selector=selector,
+        )
+        info_item_id = info_item.info_item_id
+
+    watch_kwargs = {"name": name, **kwargs}
+    watch_kwargs.setdefault("content_type", content_type or ContentType.HTML)
+
+    if hasattr(Watch, "info_item_id"):
+        watch_kwargs["info_item_id"] = info_item_id
+
+    watch = Watch(**watch_kwargs)
+    session.add(watch)
+    await session.flush()
+    return watch
+
+
+async def make_snapshot(session, watch, *, fetcher_used="http", **kwargs):
+    """Create and flush a Snapshot attached to *watch*."""
+    snapshot = Snapshot(watch_id=watch.id, fetcher_used=fetcher_used, **kwargs)
+    session.add(snapshot)
+    await session.flush()
+    return snapshot
+
+
+# ---------------------------------------------------------------------------
+# Legacy pytest-fixture variants (renamed to avoid name collision with the
+# module-level helpers above). Tests that consume them as fixtures keep
+# working: ``def test_x(default_watch_fixture)``.
+# ---------------------------------------------------------------------------
+
+
 @pytest.fixture
-def make_watch(db_session):
-    """Factory fixture: create and flush a Watch row."""
-
-    async def _make(name="Test Watch", url="https://example.com", content_type="html", **kwargs):
-        watch = Watch(name=name, url=url, content_type=content_type, **kwargs)
-        db_session.add(watch)
-        await db_session.flush()
-        return watch
-
-    return _make
-
-
-@pytest.fixture
-def make_snapshot(db_session):
-    """Factory fixture: create and flush a Snapshot row attached to *watch*."""
+def default_snapshot_fixture(db_session):
+    """Factory fixture: create and flush a Snapshot row attached to *watch* (legacy form)."""
 
     async def _make(watch, fetcher_used="http", **kwargs):
         snapshot = Snapshot(watch_id=watch.id, fetcher_used=fetcher_used, **kwargs)
@@ -151,7 +274,79 @@ def make_change(db_session):
 
 
 @pytest.fixture
-async def client(test_engine, db_session) -> AsyncGenerator[AsyncClient]:
+def info_client(db_session, monkeypatch):
+    """Mock InformationClient backed by the test DB's ``information.*`` tables.
+
+    Routes pull the SDK via ``get_registry().get_information_client()``.
+    This fixture swaps the registry singleton's cached client for an
+    AsyncMock whose ``get_info_item`` / ``get_primary_info_spec`` methods
+    look up live rows in ``db_session`` so tests can seed an InfoItem +
+    InfoSpec via ``make_info_item`` / ``make_info_spec`` and have routes
+    behave exactly as they would against the real Information service.
+
+    Tests that need to exercise SDK error paths can stub individual methods
+    on the returned mock (e.g. ``info_client.get_info_item.side_effect = NotFound``).
+    """
+    fake_client = MagicMock(spec=InformationClient)
+
+    async def _get_info_item(info_item_id: str):
+        item = await db_session.get(InfoItem, info_item_id)
+        if item is None:
+            raise NotFound(f"info_item {info_item_id} not found")
+        out = MagicMock()
+        out.info_item_id = str(item.info_item_id)
+        out.name = item.name
+        out.description = item.description
+        out.owner = None
+        out.created_at = item.created_at or datetime.now(UTC)
+        out.updated_at = item.updated_at or datetime.now(UTC)
+        return out
+
+    async def _list_info_items():
+        result = await db_session.execute(select(InfoItem))
+        items = result.scalars().all()
+        out = []
+        for item in items:
+            entry = MagicMock()
+            entry.info_item_id = str(item.info_item_id)
+            entry.name = item.name
+            entry.description = item.description
+            entry.owner = None
+            entry.created_at = item.created_at or datetime.now(UTC)
+            entry.updated_at = item.updated_at or datetime.now(UTC)
+            out.append(entry)
+        return out
+
+    async def _get_primary_info_spec(info_item_id: str, *, force_refresh: bool = False):
+        result = await db_session.execute(
+            select(InfoSpec)
+            .where(InfoSpec.info_item_id == info_item_id, InfoSpec.active.is_(True))
+            .order_by(InfoSpec.priority.asc())
+        )
+        spec = result.scalars().first()
+        if spec is None:
+            raise NotFound(f"no active spec for info_item {info_item_id}")
+        out = MagicMock()
+        out.info_item_id = str(spec.info_item_id)
+        out.info_spec_id = str(spec.info_spec_id)
+        doc = MagicMock()
+        doc.to_dict = MagicMock(return_value=dict(spec.document))
+        out.document = doc
+        return out
+
+    fake_client.get_info_item = AsyncMock(side_effect=_get_info_item)
+    fake_client.list_info_items = AsyncMock(side_effect=_list_info_items)
+    fake_client.get_primary_info_spec = AsyncMock(side_effect=_get_primary_info_spec)
+
+    # Swap the registry's cached SDK so ``get_registry().get_information_client()``
+    # everywhere returns this fake. Restore on teardown.
+    new_reg = ServiceRegistry(information_client=fake_client)
+    monkeypatch.setattr(_registry_module, "_default_registry", new_reg)
+    return fake_client
+
+
+@pytest.fixture
+async def client(test_engine, db_session, info_client) -> AsyncGenerator[AsyncClient]:
     from src.api.main import app
 
     async def override_session() -> AsyncGenerator[AsyncSession]:

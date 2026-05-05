@@ -6,6 +6,7 @@ import pytest
 from httpx import AsyncClient
 
 from src.core.notifications.dispatcher import DispatchResult
+from tests.conftest import make_watch
 
 VALID_URL = "json://hooks.example.com/notify"
 
@@ -102,13 +103,14 @@ async def test_patch_template_updates_events(client: AsyncClient):
 
 
 @pytest.mark.integration
-async def test_unassign_template_from_watch(client: AsyncClient):
+async def test_unassign_template_from_watch(client: AsyncClient, db_session):
     """DELETE /{template_id}/assign/{watch_id} removes the ref."""
-    watch_resp = await client.post(
-        "/api/v1/watches",
-        json={"name": "Unassign W", "url": "https://example.com", "content_type": "html"},
+    _watch_obj = await make_watch(
+        db_session, name="Unassign W", url="https://example.com", content_type="html"
     )
-    watch_id = watch_resp.json()["id"]
+    await db_session.commit()
+
+    watch_id = str(_watch_obj.id)
     tpl_resp = await client.post(
         "/api/v1/notifications/templates",
         json={"title": "Unassign T", "apprise_url": VALID_URL, "events": ["change_detected"]},
@@ -129,18 +131,14 @@ async def test_unassign_template_from_watch(client: AsyncClient):
 
 
 @pytest.mark.integration
-async def test_delete_template_blocked_when_refs_exist(client: AsyncClient):
+async def test_delete_template_blocked_when_refs_exist(client: AsyncClient, db_session):
     """Cannot delete a template that is referenced by a watch."""
-    watch_resp = await client.post(
-        "/api/v1/watches",
-        json={
-            "name": "W",
-            "url": "https://example.com",
-            "content_type": "html",
-        },
+    _watch_obj = await make_watch(
+        db_session, name="W", url="https://example.com", content_type="html"
     )
-    watch_id = watch_resp.json()["id"]
+    await db_session.commit()
 
+    watch_id = str(_watch_obj.id)
     tpl_resp = await client.post(
         "/api/v1/notifications/templates",
         json={

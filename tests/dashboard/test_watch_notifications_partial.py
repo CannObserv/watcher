@@ -379,9 +379,16 @@ class TestWatchNotificationTestResultRoute:
         session.get = AsyncMock(return_value=nc)
         session.commit = AsyncMock()
         result = self._mock_result(True, "Notification sent successfully")
-        with patch(
-            "src.dashboard.routes.dispatch_event", new_callable=AsyncMock, return_value=result
-        ) as mock_dispatch:
+        with (
+            patch(
+                "src.dashboard.routes.dispatch_event", new_callable=AsyncMock, return_value=result
+            ) as mock_dispatch,
+            patch(
+                "src.dashboard.routes.resolve_watch_url",
+                new_callable=AsyncMock,
+                return_value="https://x.example",
+            ),
+        ):
             resp = await _post_dashboard(
                 f"/watches/{watch.id}/notifications/{nc.id}/test-result",
                 mock_watch=watch,
@@ -405,9 +412,16 @@ class TestWatchNotificationTestResultRoute:
         session.get = AsyncMock(return_value=nc)
         session.commit = AsyncMock()
         result = self._mock_result(True, "ok")
-        with patch(
-            "src.dashboard.routes.dispatch_event", new_callable=AsyncMock, return_value=result
-        ) as mock_dispatch:
+        with (
+            patch(
+                "src.dashboard.routes.dispatch_event", new_callable=AsyncMock, return_value=result
+            ) as mock_dispatch,
+            patch(
+                "src.dashboard.routes.resolve_watch_url",
+                new_callable=AsyncMock,
+                return_value="https://x.example",
+            ),
+        ):
             await _post_dashboard(
                 f"/watches/{watch.id}/notifications/{nc.id}/test-result",
                 mock_watch=watch,
@@ -424,8 +438,15 @@ class TestWatchNotificationTestResultRoute:
         session.get = AsyncMock(return_value=nc)
         session.commit = AsyncMock()
         result = self._mock_result(False, "Delivery failed")
-        with patch(
-            "src.dashboard.routes.dispatch_event", new_callable=AsyncMock, return_value=result
+        with (
+            patch(
+                "src.dashboard.routes.dispatch_event", new_callable=AsyncMock, return_value=result
+            ),
+            patch(
+                "src.dashboard.routes.resolve_watch_url",
+                new_callable=AsyncMock,
+                return_value="https://x.example",
+            ),
         ):
             resp = await _post_dashboard(
                 f"/watches/{watch.id}/notifications/{nc.id}/test-result",

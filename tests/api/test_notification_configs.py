@@ -3,6 +3,8 @@
 import pytest
 from cryptography.fernet import Fernet
 
+from tests.conftest import make_watch
+
 pytestmark = pytest.mark.integration
 
 # A real Apprise URL that parses correctly (json:// is always available)
@@ -16,17 +18,17 @@ def set_test_key(monkeypatch):
     monkeypatch.setenv("APPRISE_SECRET_KEY", key)
 
 
-async def _make_watch(client):
-    resp = await client.post(
-        "/api/v1/watches",
-        json={"name": "Test Watch", "url": "https://example.com", "content_type": "html"},
+async def _make_watch(client, db_session):
+    watch = await make_watch(
+        db_session, name="Test Watch", url="https://example.com", content_type="html"
     )
-    return resp.json()["id"]
+    await db_session.commit()
+    return str(watch.id)
 
 
 class TestCreateNotificationConfig:
-    async def test_create_with_valid_url(self, client):
-        watch_id = await _make_watch(client)
+    async def test_create_with_valid_url(self, client, db_session):
+        watch_id = await _make_watch(client, db_session)
         resp = await client.post(
             f"/api/v1/watches/{watch_id}/notifications",
             json={"apprise_url": VALID_URL, "events": ["change_detected"]},
@@ -39,8 +41,8 @@ class TestCreateNotificationConfig:
         # apprise_url must NOT be in response
         assert "apprise_url" not in data
 
-    async def test_create_with_title(self, client):
-        watch_id = await _make_watch(client)
+    async def test_create_with_title(self, client, db_session):
+        watch_id = await _make_watch(client, db_session)
         resp = await client.post(
             f"/api/v1/watches/{watch_id}/notifications",
             json={"apprise_url": VALID_URL, "title": "Slack ops"},
@@ -48,8 +50,8 @@ class TestCreateNotificationConfig:
         assert resp.status_code == 201
         assert resp.json()["title"] == "Slack ops"
 
-    async def test_title_defaults_to_null(self, client):
-        watch_id = await _make_watch(client)
+    async def test_title_defaults_to_null(self, client, db_session):
+        watch_id = await _make_watch(client, db_session)
         resp = await client.post(
             f"/api/v1/watches/{watch_id}/notifications",
             json={"apprise_url": VALID_URL},
@@ -57,16 +59,16 @@ class TestCreateNotificationConfig:
         assert resp.status_code == 201
         assert resp.json()["title"] is None
 
-    async def test_title_max_length_100(self, client):
-        watch_id = await _make_watch(client)
+    async def test_title_max_length_100(self, client, db_session):
+        watch_id = await _make_watch(client, db_session)
         resp = await client.post(
             f"/api/v1/watches/{watch_id}/notifications",
             json={"apprise_url": VALID_URL, "title": "x" * 101},
         )
         assert resp.status_code == 422
 
-    async def test_default_events_is_change_detected(self, client):
-        watch_id = await _make_watch(client)
+    async def test_default_events_is_change_detected(self, client, db_session):
+        watch_id = await _make_watch(client, db_session)
         resp = await client.post(
             f"/api/v1/watches/{watch_id}/notifications",
             json={"apprise_url": VALID_URL},
@@ -74,39 +76,39 @@ class TestCreateNotificationConfig:
         assert resp.status_code == 201
         assert resp.json()["events"] == ["change_detected"]
 
-    async def test_invalid_apprise_url_returns_422(self, client):
-        watch_id = await _make_watch(client)
+    async def test_invalid_apprise_url_returns_422(self, client, db_session):
+        watch_id = await _make_watch(client, db_session)
         resp = await client.post(
             f"/api/v1/watches/{watch_id}/notifications",
             json={"apprise_url": INVALID_URL},
         )
         assert resp.status_code == 422
 
-    async def test_empty_events_returns_422(self, client):
-        watch_id = await _make_watch(client)
+    async def test_empty_events_returns_422(self, client, db_session):
+        watch_id = await _make_watch(client, db_session)
         resp = await client.post(
             f"/api/v1/watches/{watch_id}/notifications",
             json={"apprise_url": VALID_URL, "events": []},
         )
         assert resp.status_code == 422
 
-    async def test_invalid_event_type_returns_422(self, client):
-        watch_id = await _make_watch(client)
+    async def test_invalid_event_type_returns_422(self, client, db_session):
+        watch_id = await _make_watch(client, db_session)
         resp = await client.post(
             f"/api/v1/watches/{watch_id}/notifications",
             json={"apprise_url": VALID_URL, "events": ["nonexistent_event"]},
         )
         assert resp.status_code == 422
 
-    async def test_invalid_watch_returns_404(self, client):
+    async def test_invalid_watch_returns_404(self, client, db_session):
         resp = await client.post(
             "/api/v1/watches/00000000000000000000000000/notifications",
             json={"apprise_url": VALID_URL},
         )
         assert resp.status_code == 404
 
-    async def test_multiple_events(self, client):
-        watch_id = await _make_watch(client)
+    async def test_multiple_events(self, client, db_session):
+        watch_id = await _make_watch(client, db_session)
         resp = await client.post(
             f"/api/v1/watches/{watch_id}/notifications",
             json={"apprise_url": VALID_URL, "events": ["change_detected", "watch_error"]},
@@ -116,8 +118,8 @@ class TestCreateNotificationConfig:
 
 
 class TestListNotificationConfigs:
-    async def test_list_returns_all_configs(self, client):
-        watch_id = await _make_watch(client)
+    async def test_list_returns_all_configs(self, client, db_session):
+        watch_id = await _make_watch(client, db_session)
         await client.post(
             f"/api/v1/watches/{watch_id}/notifications",
             json={"apprise_url": VALID_URL, "events": ["change_detected"]},
@@ -130,9 +132,9 @@ class TestListNotificationConfigs:
         assert resp.status_code == 200
         assert len(resp.json()) == 2
 
-    async def test_list_excludes_other_watch_configs(self, client):
-        watch_a = await _make_watch(client)
-        watch_b = await _make_watch(client)
+    async def test_list_excludes_other_watch_configs(self, client, db_session):
+        watch_a = await _make_watch(client, db_session)
+        watch_b = await _make_watch(client, db_session)
         await client.post(
             f"/api/v1/watches/{watch_a}/notifications",
             json={"apprise_url": VALID_URL},
@@ -142,8 +144,8 @@ class TestListNotificationConfigs:
 
 
 class TestPatchNotificationConfig:
-    async def test_patch_title(self, client):
-        watch_id = await _make_watch(client)
+    async def test_patch_title(self, client, db_session):
+        watch_id = await _make_watch(client, db_session)
         create_resp = await client.post(
             f"/api/v1/watches/{watch_id}/notifications",
             json={"apprise_url": VALID_URL, "title": "Original"},
@@ -156,8 +158,8 @@ class TestPatchNotificationConfig:
         assert resp.status_code == 200
         assert resp.json()["title"] == "Updated"
 
-    async def test_patch_title_to_null(self, client):
-        watch_id = await _make_watch(client)
+    async def test_patch_title_to_null(self, client, db_session):
+        watch_id = await _make_watch(client, db_session)
         create_resp = await client.post(
             f"/api/v1/watches/{watch_id}/notifications",
             json={"apprise_url": VALID_URL, "title": "Remove me"},
@@ -170,8 +172,8 @@ class TestPatchNotificationConfig:
         assert resp.status_code == 200
         assert resp.json()["title"] is None
 
-    async def test_toggle_is_active(self, client):
-        watch_id = await _make_watch(client)
+    async def test_toggle_is_active(self, client, db_session):
+        watch_id = await _make_watch(client, db_session)
         create_resp = await client.post(
             f"/api/v1/watches/{watch_id}/notifications",
             json={"apprise_url": VALID_URL},
@@ -184,8 +186,8 @@ class TestPatchNotificationConfig:
         assert resp.status_code == 200
         assert resp.json()["is_active"] is False
 
-    async def test_update_events(self, client):
-        watch_id = await _make_watch(client)
+    async def test_update_events(self, client, db_session):
+        watch_id = await _make_watch(client, db_session)
         create_resp = await client.post(
             f"/api/v1/watches/{watch_id}/notifications",
             json={"apprise_url": VALID_URL},
@@ -198,8 +200,8 @@ class TestPatchNotificationConfig:
         assert resp.status_code == 200
         assert set(resp.json()["events"]) == {"watch_error", "watch_recovered"}
 
-    async def test_patch_invalid_event_type_returns_422(self, client):
-        watch_id = await _make_watch(client)
+    async def test_patch_invalid_event_type_returns_422(self, client, db_session):
+        watch_id = await _make_watch(client, db_session)
         create_resp = await client.post(
             f"/api/v1/watches/{watch_id}/notifications",
             json={"apprise_url": VALID_URL},
@@ -211,22 +213,22 @@ class TestPatchNotificationConfig:
         )
         assert resp.status_code == 422
 
-    async def test_patch_wrong_watch_returns_404(self, client):
-        watch_id = await _make_watch(client)
+    async def test_patch_wrong_watch_returns_404(self, client, db_session):
+        watch_id = await _make_watch(client, db_session)
         create_resp = await client.post(
             f"/api/v1/watches/{watch_id}/notifications",
             json={"apprise_url": VALID_URL},
         )
         config_id = create_resp.json()["id"]
-        other_watch_id = await _make_watch(client)
+        other_watch_id = await _make_watch(client, db_session)
         resp = await client.patch(
             f"/api/v1/watches/{other_watch_id}/notifications/{config_id}",
             json={"is_active": False},
         )
         assert resp.status_code == 404
 
-    async def test_patch_apprise_url_updates_stored_url(self, client):
-        watch_id = await _make_watch(client)
+    async def test_patch_apprise_url_updates_stored_url(self, client, db_session):
+        watch_id = await _make_watch(client, db_session)
         create_resp = await client.post(
             f"/api/v1/watches/{watch_id}/notifications",
             json={"apprise_url": VALID_URL},
@@ -242,8 +244,8 @@ class TestPatchNotificationConfig:
         assert "apprise_url" not in data  # never exposed
         assert data["channel_hint"] == "json"  # re-derived from new URL
 
-    async def test_patch_invalid_apprise_url_returns_422(self, client):
-        watch_id = await _make_watch(client)
+    async def test_patch_invalid_apprise_url_returns_422(self, client, db_session):
+        watch_id = await _make_watch(client, db_session)
         create_resp = await client.post(
             f"/api/v1/watches/{watch_id}/notifications",
             json={"apprise_url": VALID_URL},
@@ -255,8 +257,8 @@ class TestPatchNotificationConfig:
         )
         assert resp.status_code == 422
 
-    async def test_patch_empty_events_returns_422(self, client):
-        watch_id = await _make_watch(client)
+    async def test_patch_empty_events_returns_422(self, client, db_session):
+        watch_id = await _make_watch(client, db_session)
         create_resp = await client.post(
             f"/api/v1/watches/{watch_id}/notifications",
             json={"apprise_url": VALID_URL},
@@ -270,8 +272,8 @@ class TestPatchNotificationConfig:
 
 
 class TestDeleteNotificationConfig:
-    async def test_delete_config(self, client):
-        watch_id = await _make_watch(client)
+    async def test_delete_config(self, client, db_session):
+        watch_id = await _make_watch(client, db_session)
         create_resp = await client.post(
             f"/api/v1/watches/{watch_id}/notifications",
             json={"apprise_url": VALID_URL},
@@ -280,21 +282,21 @@ class TestDeleteNotificationConfig:
         resp = await client.delete(f"/api/v1/watches/{watch_id}/notifications/{config_id}")
         assert resp.status_code == 204
 
-    async def test_delete_wrong_watch_returns_404(self, client):
-        watch_id = await _make_watch(client)
+    async def test_delete_wrong_watch_returns_404(self, client, db_session):
+        watch_id = await _make_watch(client, db_session)
         create_resp = await client.post(
             f"/api/v1/watches/{watch_id}/notifications",
             json={"apprise_url": VALID_URL},
         )
         config_id = create_resp.json()["id"]
-        other = await _make_watch(client)
+        other = await _make_watch(client, db_session)
         resp = await client.delete(f"/api/v1/watches/{other}/notifications/{config_id}")
         assert resp.status_code == 404
 
 
 class TestCreateNotificationConfigFromTokens:
-    async def test_create_discord_from_tokens(self, client):
-        watch_id = await _make_watch(client)
+    async def test_create_discord_from_tokens(self, client, db_session):
+        watch_id = await _make_watch(client, db_session)
         resp = await client.post(
             f"/api/v1/watches/{watch_id}/notifications",
             json={
@@ -308,8 +310,8 @@ class TestCreateNotificationConfigFromTokens:
         assert data["channel_hint"] == "Discord"
         assert "apprise_url" not in data
 
-    async def test_missing_required_token_returns_422(self, client):
-        watch_id = await _make_watch(client)
+    async def test_missing_required_token_returns_422(self, client, db_session):
+        watch_id = await _make_watch(client, db_session)
         resp = await client.post(
             f"/api/v1/watches/{watch_id}/notifications",
             json={
@@ -319,16 +321,16 @@ class TestCreateNotificationConfigFromTokens:
         )
         assert resp.status_code == 422
 
-    async def test_unknown_schema_returns_422(self, client):
-        watch_id = await _make_watch(client)
+    async def test_unknown_schema_returns_422(self, client, db_session):
+        watch_id = await _make_watch(client, db_session)
         resp = await client.post(
             f"/api/v1/watches/{watch_id}/notifications",
             json={"plugin_schema": "notaschema", "tokens": {}},
         )
         assert resp.status_code == 422
 
-    async def test_neither_url_nor_schema_returns_422(self, client):
-        watch_id = await _make_watch(client)
+    async def test_neither_url_nor_schema_returns_422(self, client, db_session):
+        watch_id = await _make_watch(client, db_session)
         resp = await client.post(
             f"/api/v1/watches/{watch_id}/notifications",
             json={"events": ["change_detected"]},
@@ -337,11 +339,11 @@ class TestCreateNotificationConfigFromTokens:
 
 
 @pytest.mark.integration
-async def test_notification_config_has_content_config_column(db_session, make_watch):
+async def test_notification_config_has_content_config_column(db_session):
     """ORM model exposes content_config field (fails until migration + model are updated)."""
     from src.core.models.notification_config import WatchNotificationConfig
 
-    watch = await make_watch()
+    watch = await make_watch(db_session)
     config = WatchNotificationConfig(
         watch_id=watch.id,
         apprise_url="encrypted",
@@ -366,10 +368,10 @@ class TestTestNotificationConfig:
 
         return DispatchResult(success=success, reason=reason)
 
-    async def test_test_sends_notification_and_returns_success(self, client):
+    async def test_test_sends_notification_and_returns_success(self, client, db_session):
         from unittest.mock import AsyncMock, patch
 
-        watch_id = await _make_watch(client)
+        watch_id = await _make_watch(client, db_session)
         config_id = await self._make_config(client, watch_id)
         with patch(
             "src.api.routes.notification_configs.dispatch_event",
@@ -382,10 +384,10 @@ class TestTestNotificationConfig:
         assert data["success"] is True
         assert "reason" in data
 
-    async def test_test_returns_success_false_on_dispatch_failure(self, client):
+    async def test_test_returns_success_false_on_dispatch_failure(self, client, db_session):
         from unittest.mock import AsyncMock, patch
 
-        watch_id = await _make_watch(client)
+        watch_id = await _make_watch(client, db_session)
         config_id = await self._make_config(client, watch_id)
         with patch(
             "src.api.routes.notification_configs.dispatch_event",
@@ -398,17 +400,17 @@ class TestTestNotificationConfig:
         assert data["success"] is False
         assert "reason" in data
 
-    async def test_test_returns_404_for_unknown_config(self, client):
-        watch_id = await _make_watch(client)
+    async def test_test_returns_404_for_unknown_config(self, client, db_session):
+        watch_id = await _make_watch(client, db_session)
         fake_id = "01JNVAJNVAJNVAJNVAJNVAJNVA"
         resp = await client.post(f"/api/v1/watches/{watch_id}/notifications/{fake_id}/test")
         assert resp.status_code == 404
 
-    async def test_test_returns_404_for_wrong_watch(self, client):
+    async def test_test_returns_404_for_wrong_watch(self, client, db_session):
         from unittest.mock import AsyncMock, patch
 
-        watch_id = await _make_watch(client)
-        other_id = await _make_watch(client)
+        watch_id = await _make_watch(client, db_session)
+        other_id = await _make_watch(client, db_session)
         config_id = await self._make_config(client, watch_id)
         with patch(
             "src.api.routes.notification_configs.dispatch_event",
@@ -418,10 +420,10 @@ class TestTestNotificationConfig:
             resp = await client.post(f"/api/v1/watches/{other_id}/notifications/{config_id}/test")
         assert resp.status_code == 404
 
-    async def test_test_returns_success_false_on_exception(self, client):
+    async def test_test_returns_success_false_on_exception(self, client, db_session):
         from unittest.mock import AsyncMock, patch
 
-        watch_id = await _make_watch(client)
+        watch_id = await _make_watch(client, db_session)
         config_id = await self._make_config(client, watch_id)
         with patch(
             "src.api.routes.notification_configs.dispatch_event",
@@ -434,11 +436,46 @@ class TestTestNotificationConfig:
         assert data["success"] is False
         assert "reason" in data
 
+    async def test_test_returns_success_false_on_resolve_failure(self, client, db_session):
+        """SDK failure resolving watch URL must NOT 5xx — endpoint promises {success, reason}.
+
+        Regression: ``resolve_watch_url`` was called BEFORE the existing dispatch
+        try/except, so any SDK error (NotFound, ServerError, etc.) escaped as 500.
+        """
+        from unittest.mock import AsyncMock, patch
+
+        from src.core.crypto import encrypt_apprise_url
+        from src.core.models.notification_config import WatchNotificationConfig
+
+        watch = await make_watch(db_session, name="WithSpec", url="https://example.com")
+        nc = WatchNotificationConfig(
+            watch_id=watch.id,
+            apprise_url=encrypt_apprise_url(VALID_URL),
+            channel_hint="json",
+            events=["change_detected"],
+        )
+        db_session.add(nc)
+        await db_session.commit()
+
+        with patch(
+            "src.api.routes.notification_configs.resolve_watch_url",
+            new_callable=AsyncMock,
+            side_effect=RuntimeError("information service unreachable"),
+        ):
+            resp = await client.post(f"/api/v1/watches/{watch.id}/notifications/{nc.id}/test")
+        assert resp.status_code == 200, (
+            f"endpoint must never 5xx; got {resp.status_code} {resp.text}"
+        )
+        data = resp.json()
+        assert data["success"] is False
+        assert "reason" in data
+        assert "resolve" in data["reason"].lower() or "watch url" in data["reason"].lower()
+
 
 @pytest.mark.integration
-async def test_create_config_with_content_config(client):
+async def test_create_config_with_content_config(client, db_session):
     """content_config round-trips through create → response."""
-    watch_id = await _make_watch(client)
+    watch_id = await _make_watch(client, db_session)
     resp = await client.post(
         f"/api/v1/watches/{watch_id}/notifications",
         json={
@@ -455,9 +492,9 @@ async def test_create_config_with_content_config(client):
 
 
 @pytest.mark.integration
-async def test_patch_config_updates_content_config(client):
+async def test_patch_config_updates_content_config(client, db_session):
     """PATCH with content_config updates the stored value."""
-    watch_id = await _make_watch(client)
+    watch_id = await _make_watch(client, db_session)
     create_resp = await client.post(
         f"/api/v1/watches/{watch_id}/notifications",
         json={"apprise_url": VALID_URL},

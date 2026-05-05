@@ -2,20 +2,20 @@
 
 import pytest
 
+from tests.conftest import make_watch
+
 pytestmark = pytest.mark.integration
 
 
 class TestCreateProfile:
-    async def test_create_event_profile(self, client):
-        watch_resp = await client.post(
-            "/api/v1/watches",
-            json={
-                "name": "Profiled Watch",
-                "url": "https://example.com",
-                "content_type": "html",
-            },
+    async def test_create_event_profile(self, client, db_session):
+        _watch_obj = await make_watch(
+            db_session, name="Profiled Watch", url="https://example.com", content_type="html"
         )
-        watch_id = watch_resp.json()["id"]
+
+        await db_session.commit()
+
+        watch_id = str(_watch_obj.id)
         response = await client.post(
             f"/api/v1/watches/{watch_id}/profiles",
             json={
@@ -34,7 +34,7 @@ class TestCreateProfile:
         assert data["reference_date"] == "2026-04-15"
         assert len(data["rules"]) == 2
 
-    async def test_create_profile_invalid_watch(self, client):
+    async def test_create_profile_invalid_watch(self, client, db_session):
         response = await client.post(
             "/api/v1/watches/00000000000000000000000000/profiles",
             json={
@@ -48,16 +48,14 @@ class TestCreateProfile:
 
 
 class TestListProfiles:
-    async def test_list_profiles_for_watch(self, client):
-        watch_resp = await client.post(
-            "/api/v1/watches",
-            json={
-                "name": "Multi-Profile Watch",
-                "url": "https://example.com",
-                "content_type": "html",
-            },
+    async def test_list_profiles_for_watch(self, client, db_session):
+        _watch_obj = await make_watch(
+            db_session, name="Multi-Profile Watch", url="https://example.com", content_type="html"
         )
-        watch_id = watch_resp.json()["id"]
+
+        await db_session.commit()
+
+        watch_id = str(_watch_obj.id)
         await client.post(
             f"/api/v1/watches/{watch_id}/profiles",
             json={
@@ -83,12 +81,14 @@ class TestListProfiles:
 
 
 class TestUpdateProfile:
-    async def test_update_rules(self, client):
-        watch_resp = await client.post(
-            "/api/v1/watches",
-            json={"name": "Update Watch", "url": "https://example.com", "content_type": "html"},
+    async def test_update_rules(self, client, db_session):
+        _watch_obj = await make_watch(
+            db_session, name="Update Watch", url="https://example.com", content_type="html"
         )
-        watch_id = watch_resp.json()["id"]
+
+        await db_session.commit()
+
+        watch_id = str(_watch_obj.id)
         create_resp = await client.post(
             f"/api/v1/watches/{watch_id}/profiles",
             json={
@@ -113,12 +113,14 @@ class TestUpdateProfile:
         assert len(data["rules"]) == 2
         assert data["rules"][0]["days_before"] == 7
 
-    async def test_update_is_active(self, client):
-        watch_resp = await client.post(
-            "/api/v1/watches",
-            json={"name": "Deactivate Watch", "url": "https://example.com", "content_type": "html"},
+    async def test_update_is_active(self, client, db_session):
+        _watch_obj = await make_watch(
+            db_session, name="Deactivate Watch", url="https://example.com", content_type="html"
         )
-        watch_id = watch_resp.json()["id"]
+
+        await db_session.commit()
+
+        watch_id = str(_watch_obj.id)
         create_resp = await client.post(
             f"/api/v1/watches/{watch_id}/profiles",
             json={
@@ -136,12 +138,14 @@ class TestUpdateProfile:
         assert response.status_code == 200
         assert response.json()["is_active"] is False
 
-    async def test_update_post_action(self, client):
-        watch_resp = await client.post(
-            "/api/v1/watches",
-            json={"name": "Action Watch", "url": "https://example.com", "content_type": "html"},
+    async def test_update_post_action(self, client, db_session):
+        _watch_obj = await make_watch(
+            db_session, name="Action Watch", url="https://example.com", content_type="html"
         )
-        watch_id = watch_resp.json()["id"]
+
+        await db_session.commit()
+
+        watch_id = str(_watch_obj.id)
         create_resp = await client.post(
             f"/api/v1/watches/{watch_id}/profiles",
             json={
@@ -159,12 +163,14 @@ class TestUpdateProfile:
         assert response.status_code == 200
         assert response.json()["post_action"] == "archive"
 
-    async def test_update_creates_audit_log(self, client):
-        watch_resp = await client.post(
-            "/api/v1/watches",
-            json={"name": "Audit Watch", "url": "https://example.com", "content_type": "html"},
+    async def test_update_creates_audit_log(self, client, db_session):
+        _watch_obj = await make_watch(
+            db_session, name="Audit Watch", url="https://example.com", content_type="html"
         )
-        watch_id = watch_resp.json()["id"]
+
+        await db_session.commit()
+
+        watch_id = str(_watch_obj.id)
         create_resp = await client.post(
             f"/api/v1/watches/{watch_id}/profiles",
             json={
@@ -185,24 +191,28 @@ class TestUpdateProfile:
         assert events[0]["payload"]["profile_id"] == profile_id
         assert events[0]["payload"]["updated_fields"] == ["is_active"]
 
-    async def test_update_nonexistent_profile(self, client):
-        watch_resp = await client.post(
-            "/api/v1/watches",
-            json={"name": "Missing Watch", "url": "https://example.com", "content_type": "html"},
+    async def test_update_nonexistent_profile(self, client, db_session):
+        _watch_obj = await make_watch(
+            db_session, name="Missing Watch", url="https://example.com", content_type="html"
         )
-        watch_id = watch_resp.json()["id"]
+
+        await db_session.commit()
+
+        watch_id = str(_watch_obj.id)
         response = await client.patch(
             f"/api/v1/watches/{watch_id}/profiles/00000000000000000000000000",
             json={"is_active": False},
         )
         assert response.status_code == 404
 
-    async def test_update_empty_body(self, client):
-        watch_resp = await client.post(
-            "/api/v1/watches",
-            json={"name": "Empty Watch", "url": "https://example.com", "content_type": "html"},
+    async def test_update_empty_body(self, client, db_session):
+        _watch_obj = await make_watch(
+            db_session, name="Empty Watch", url="https://example.com", content_type="html"
         )
-        watch_id = watch_resp.json()["id"]
+
+        await db_session.commit()
+
+        watch_id = str(_watch_obj.id)
         create_resp = await client.post(
             f"/api/v1/watches/{watch_id}/profiles",
             json={
@@ -223,12 +233,14 @@ class TestUpdateProfile:
         assert data["post_action"] == "deactivate"
         assert data["rules"] == []
 
-    async def test_update_multiple_fields(self, client):
-        watch_resp = await client.post(
-            "/api/v1/watches",
-            json={"name": "Multi Watch", "url": "https://example.com", "content_type": "html"},
+    async def test_update_multiple_fields(self, client, db_session):
+        _watch_obj = await make_watch(
+            db_session, name="Multi Watch", url="https://example.com", content_type="html"
         )
-        watch_id = watch_resp.json()["id"]
+
+        await db_session.commit()
+
+        watch_id = str(_watch_obj.id)
         create_resp = await client.post(
             f"/api/v1/watches/{watch_id}/profiles",
             json={
@@ -263,16 +275,14 @@ class TestUpdateProfile:
 
 
 class TestDeleteProfile:
-    async def test_delete_profile(self, client):
-        watch_resp = await client.post(
-            "/api/v1/watches",
-            json={
-                "name": "Delete Profile Watch",
-                "url": "https://example.com",
-                "content_type": "html",
-            },
+    async def test_delete_profile(self, client, db_session):
+        _watch_obj = await make_watch(
+            db_session, name="Delete Profile Watch", url="https://example.com", content_type="html"
         )
-        watch_id = watch_resp.json()["id"]
+
+        await db_session.commit()
+
+        watch_id = str(_watch_obj.id)
         create_resp = await client.post(
             f"/api/v1/watches/{watch_id}/profiles",
             json={

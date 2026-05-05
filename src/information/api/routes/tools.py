@@ -12,18 +12,28 @@ from src.information.api.deps import get_db_session, get_http_fetcher
 from src.information.api.routes.info_items import _to_out as _info_item_to_out
 from src.information.api.schemas.info_item import InfoItemOut
 from src.information.api.schemas.tools import (
+    ChunkPreviewOut,
     FetchAndRenderRequest,
     FetchAndRenderResult,
+    PreviewExtractionRequest,
+    PreviewExtractionResult,
     ValidateInfoSpecRequest,
     ValidateInfoSpecResult,
     ValidationIssueOut,
 )
-from src.information.core.info_spec_schema import validate_info_spec_with_errors
+from src.information.core.info_spec_schema import (
+    InfoSpecValidationError,
+    validate_info_spec_with_errors,
+)
 from src.information.core.tools.fetch_and_render import (
     HttpFetcherProtocol,
     fetch_and_render,
 )
 from src.information.core.tools.find_info_item import find_info_item
+from src.information.core.tools.preview_extraction import (
+    TargetUnreachableError,
+    preview_extraction,
+)
 
 router = APIRouter(prefix="/tools", tags=["tools"])
 
@@ -85,4 +95,57 @@ async def fetch_and_render_route(
         body_bytes_total=result.body_bytes_total,
         truncated=result.truncated,
         screenshot_url=result.screenshot_url,
+    )
+
+
+@router.post("/preview-extraction", response_model=PreviewExtractionResult)
+async def preview_extraction_route(
+    body: PreviewExtractionRequest,
+    fetcher: HttpFetcherProtocol = Depends(get_http_fetcher),
+) -> PreviewExtractionResult:
+    """Validate, fetch, extract, and fingerprint with a candidate InfoSpec.
+
+    Composes ``validate_info_spec`` + ``fetch_and_render`` + the HTML extractor
+    + the spec's fingerprint algorithm so an authoring agent can verify the
+    spec yields the expected content before persisting via ``create_info_spec``
+    or ``create_info_item(initial_info_spec=…)``.
+
+    Returns 422 with structured errors on schema validation failure
+    (``error: "validation_failed"``) or target unreachability
+    (``error: "target_unreachable"``).
+    """
+    try:
+        result = await preview_extraction(fetcher, str(body.url), body.document)
+    except InfoSpecValidationError as e:
+        # Re-validate to produce the structured per-field error list — the
+        # raise-based path concatenates into a single string, but the route
+        # contract returns a list of {path, message} entries.
+        issues = validate_info_spec_with_errors(body.document)
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "error": "validation_failed",
+                "errors": [{"path": i.path, "message": i.message} for i in issues] or [str(e)],
+            },
+        ) from e
+    except TargetUnreachableError as e:
+        raise HTTPException(
+            status_code=422,
+            detail={"error": "target_unreachable", "message": str(e)},
+        ) from e
+
+    return PreviewExtractionResult(
+        chunks=[
+            ChunkPreviewOut(
+                index=c.index,
+                chunk_type=c.chunk_type,
+                label=c.label,
+                text=c.text,
+                char_count=c.char_count,
+            )
+            for c in result.chunks
+        ],
+        total_chars=result.total_chars,
+        fingerprint_algorithm=result.fingerprint_algorithm,
+        computed_fingerprint=result.computed_fingerprint,
     )

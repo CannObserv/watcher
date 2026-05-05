@@ -68,3 +68,44 @@ class FetchAndRenderResult(BaseModel):
             "screenshot capture isn't wired."
         ),
     )
+
+
+class PreviewExtractionRequest(BaseModel):
+    """Request body for POST /api/v1/tools/preview-extraction."""
+
+    url: HttpUrl = Field(description="Target URL to fetch and extract from.")
+    document: dict[str, Any] = Field(
+        description=(
+            "Candidate InfoSpec document. Validated against the v1 schema before "
+            "any fetch is attempted; a validation failure returns 422 with the "
+            "per-field issue list and no fetch is performed."
+        )
+    )
+
+
+class ChunkPreviewOut(BaseModel):
+    """One chunk in the preview response."""
+
+    index: int = Field(description="Position of the chunk in extraction order.")
+    chunk_type: str = Field(description="Algorithm-specific type tag (e.g. 'page', 'section').")
+    label: str = Field(description="Operator-readable chunk identifier.")
+    text: str = Field(description="Extracted chunk text.")
+    char_count: int = Field(description="Character count of ``text``.")
+
+
+class PreviewExtractionResult(BaseModel):
+    """Response body for POST /api/v1/tools/preview-extraction."""
+
+    chunks: list[ChunkPreviewOut] = Field(
+        description="Extracted chunks in order; empty when extraction yields nothing."
+    )
+    total_chars: int = Field(description="Sum of ``char_count`` across all chunks.")
+    fingerprint_algorithm: str = Field(
+        description="Algorithm used for ``computed_fingerprint`` (mirrors the spec)."
+    )
+    computed_fingerprint: str = Field(
+        description=(
+            "Fingerprint of the joined extracted text under the spec's algorithm. "
+            "sha256 → 64-char hex; simhash → decimal int as a string."
+        )
+    )

@@ -209,6 +209,37 @@ async def test_fetch_and_render_passes_render_flag(client):
 
 
 @pytest.mark.asyncio
+async def test_preview_extraction_returns_typed_result(client):
+    with respx.mock:
+        respx.post(f"{BASE_URL}/api/v1/tools/preview-extraction").mock(
+            return_value=httpx.Response(
+                200,
+                json={
+                    "chunks": [
+                        {
+                            "index": 0,
+                            "chunk_type": "page",
+                            "label": "page-1",
+                            "text": "kept",
+                            "char_count": 4,
+                        }
+                    ],
+                    "total_chars": 4,
+                    "fingerprint_algorithm": "simhash",
+                    "computed_fingerprint": "12345",
+                },
+            )
+        )
+        result = await client.preview_extraction("https://example.com", VALID_DOC)
+    assert len(result.chunks) == 1
+    assert result.chunks[0].text == "kept"
+    assert result.chunks[0].char_count == 4
+    assert result.total_chars == 4
+    assert result.fingerprint_algorithm == "simhash"
+    assert result.computed_fingerprint == "12345"
+
+
+@pytest.mark.asyncio
 async def test_create_info_item_without_initial_spec_uses_legacy_path(client):
     """Backwards-compat: omitting initial_info_spec routes through generated client."""
     with respx.mock:

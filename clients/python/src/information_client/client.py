@@ -255,6 +255,15 @@ class InformationClient:
         """
         return await _tools.fetch_and_render(self, url, render=render)
 
+    async def preview_extraction(self, url: str, document: dict) -> _tools.PreviewExtractionResult:
+        """Validate, fetch, extract, and fingerprint with a candidate InfoSpec.
+
+        Use after authoring the InfoSpec document (and optionally validating
+        via ``validate_info_spec``) to verify the extracted chunks match the
+        operator's expectation before calling ``create_info_spec``.
+        """
+        return await _tools.preview_extraction(self, url, document)
+
 
 def _unwrap(response):
     """Return parsed body on 2xx; raise typed error otherwise.

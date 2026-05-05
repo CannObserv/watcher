@@ -95,6 +95,60 @@ async def fetch_and_render(
 
 
 @dataclass(frozen=True)
+class ChunkPreview:
+    """Per-chunk preview entry from ``preview_extraction``."""
+
+    index: int
+    chunk_type: str
+    label: str
+    text: str
+    char_count: int
+
+
+@dataclass(frozen=True)
+class PreviewExtractionResult:
+    """Outcome of a ``preview_extraction`` call."""
+
+    chunks: list[ChunkPreview]
+    total_chars: int
+    fingerprint_algorithm: str
+    computed_fingerprint: str
+
+
+async def preview_extraction(
+    client_facade,
+    url: str,
+    document: dict[str, Any],
+) -> PreviewExtractionResult:
+    """Validate, fetch, extract, and fingerprint with a candidate InfoSpec.
+
+    On schema validation failure or target unreachability, the underlying
+    HTTPException is surfaced as an ``InformationClientError`` subclass with
+    the structured ``detail`` body intact.
+    """
+    body = await _post_json(
+        client_facade,
+        "/api/v1/tools/preview-extraction",
+        {"url": url, "document": document},
+    )
+    return PreviewExtractionResult(
+        chunks=[
+            ChunkPreview(
+                index=int(c["index"]),
+                chunk_type=str(c["chunk_type"]),
+                label=str(c["label"]),
+                text=str(c["text"]),
+                char_count=int(c["char_count"]),
+            )
+            for c in body.get("chunks", [])
+        ],
+        total_chars=int(body["total_chars"]),
+        fingerprint_algorithm=str(body["fingerprint_algorithm"]),
+        computed_fingerprint=str(body["computed_fingerprint"]),
+    )
+
+
+@dataclass(frozen=True)
 class InfoItemWithSpecResult:
     """``create_info_item`` response when ``initial_info_spec`` was supplied.
 

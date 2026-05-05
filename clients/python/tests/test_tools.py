@@ -57,3 +57,54 @@ async def test_validate_info_spec_sends_document_in_body(client):
     sent_body = route.calls[0].request.read()
     assert b'"document"' in sent_body
     assert b'"schema_version"' in sent_body
+
+
+def _info_item_payload(info_item_id: str, name: str) -> dict:
+    return {
+        "info_item_id": info_item_id,
+        "name": name,
+        "description": None,
+        "owner": None,
+        "created_at": "2026-05-04T00:00:00Z",
+        "updated_at": "2026-05-04T00:00:00Z",
+    }
+
+
+@pytest.mark.asyncio
+async def test_find_info_item_returns_typed_list(client):
+    with respx.mock:
+        respx.get(f"{BASE_URL}/api/v1/tools/find-info-items").mock(
+            return_value=httpx.Response(
+                200,
+                json=[
+                    _info_item_payload("01HZZ00000000000000000000A", "Colorado licenses"),
+                    _info_item_payload("01HZZ00000000000000000000B", "Colorado regulator"),
+                ],
+            )
+        )
+        results = await client.find_info_item("colorado")
+    assert len(results) == 2
+    assert results[0].name == "Colorado licenses"
+    assert results[1].name == "Colorado regulator"
+
+
+@pytest.mark.asyncio
+async def test_find_info_item_passes_query_and_limit(client):
+    with respx.mock:
+        route = respx.get(f"{BASE_URL}/api/v1/tools/find-info-items").mock(
+            return_value=httpx.Response(200, json=[])
+        )
+        await client.find_info_item("alpha", limit=5)
+    sent_url = str(route.calls[0].request.url)
+    assert "q=alpha" in sent_url
+    assert "limit=5" in sent_url
+
+
+@pytest.mark.asyncio
+async def test_find_info_item_empty_result(client):
+    with respx.mock:
+        respx.get(f"{BASE_URL}/api/v1/tools/find-info-items").mock(
+            return_value=httpx.Response(200, json=[])
+        )
+        results = await client.find_info_item("nothing")
+    assert results == []

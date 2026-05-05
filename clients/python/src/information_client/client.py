@@ -218,6 +218,14 @@ class InformationClient:
         """
         return await _tools.validate_info_spec(self, document)
 
+    async def find_info_item(self, query: str, *, limit: int = 20) -> list[InfoItemOut]:
+        """Search Information Items by name + description (case-insensitive).
+
+        Returns up to ``limit`` matches, newest first. Use before
+        ``create_info_item`` to avoid duplicating an existing item.
+        """
+        return await _tools.find_info_item(self, query, limit=limit)
+
 
 def _unwrap(response):
     """Return parsed body on 2xx; raise typed error otherwise.

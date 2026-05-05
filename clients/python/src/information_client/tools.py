@@ -15,6 +15,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from information_client.errors import error_from_response
+from information_client.generated.models.info_item_out import InfoItemOut
 
 
 @dataclass(frozen=True)
@@ -44,6 +45,30 @@ async def _post_json(client_facade, path: str, body: dict[str, Any]) -> dict[str
     if 200 <= response.status_code < 300:
         return response.json()
     raise error_from_response(int(response.status_code), response.content)
+
+
+async def _get_json(client_facade, path: str, params: dict[str, Any] | None = None) -> Any:
+    """GET counterpart of ``_post_json``."""
+    httpx_client = client_facade._gen_client.get_async_httpx_client()
+    response = await httpx_client.get(path, params=params or {})
+    if 200 <= response.status_code < 300:
+        return response.json()
+    raise error_from_response(int(response.status_code), response.content)
+
+
+async def find_info_item(client_facade, query: str, *, limit: int = 20) -> list[Any]:
+    """Search Information Items by name + description (case-insensitive substring).
+
+    Returns a list of ``InfoItemOut`` instances (the generated model) so callers
+    get the same typed shape as ``list_info_items``. Use before ``create_info_item``
+    to dedupe against existing entries.
+    """
+    body = await _get_json(
+        client_facade,
+        "/api/v1/tools/find-info-items",
+        params={"q": query, "limit": limit},
+    )
+    return [InfoItemOut.from_dict(item) for item in body]
 
 
 async def validate_info_spec(client_facade, document: dict[str, Any]) -> ValidationResult:

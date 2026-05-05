@@ -175,7 +175,9 @@ The shared concerns are coherent — "URL → bytes → chunks → fingerprint" 
 - [ ] `docs/DEPLOYMENT.md` — "Tools surface" subsection under Information Service.
 - [ ] `clients/python/README.md` (if exists) — extended SDK examples.
 
-### Task 11: MCP server for Claude tool discovery
+### Task 11: MCP server for Claude tool discovery (deferred to #147)
+
+> **Status:** Deferred to a focused follow-up PR — tracked at [#147](https://github.com/CannObserv/watcher/issues/147). Tasks 1-10 + 12 ship as the first Phase 3a slice; the MCP wrapper is a discrete feature with its own dependency surface (the `mcp` Python SDK), descriptor-shape testing, and Claude Code wiring docs. Splitting it off keeps each PR a single coherent change. The plan steps below are kept as the spec for the follow-up.
 
 **Why it's part of 3a, not deferred.** Claude (in Claude Code and Claude Desktop) discovers tools via the Model Context Protocol. Without an MCP server, every Claude consumer has to hand-derive tool descriptors from the OpenAPI spec — losing the "when to use" hints, safety annotations, and concrete examples that make tool selection reliable. Shipping the MCP wrapper alongside the API is the difference between a tool surface that's *usable by Claude* and one that's *theoretically callable*. Best practices encoded here are drawn from MCP server conventions and Anthropic's tool-use guidance.
 

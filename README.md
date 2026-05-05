@@ -8,6 +8,8 @@ Watcher is **InfoItem-native** as of Phase 2c (issue #138). A `Watch` references
 
 Detected changes flow onto a Redis Stream (`info.changes`, envelope `schema_version: 2`, partitioned by `info_item_id`) for downstream consumers (Archive in Phase 3+). The drain task runs every minute via Procrastinate's `@bp.periodic` decorator.
 
+Authoring tools live on the Information service at `/api/v1/tools/*` (Phase 3a) — `validate_info_spec`, `find_info_item`, `fetch_and_render`, `preview_extraction`, `propose_selectors`, plus an atomic `create_info_item` that takes an optional `initial_info_spec`. Smoke: `bash scripts/smoke_phase3a.sh`.
+
 Full design: [docs/plans/2026-05-04-watcher-phase2c-cutover-plan.md](docs/plans/2026-05-04-watcher-phase2c-cutover-plan.md). Operator install (incl. `INFORMATION_API_KEY`): [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).
 
 ## Setup

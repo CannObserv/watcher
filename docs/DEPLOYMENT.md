@@ -135,6 +135,22 @@ After installing `information.service`, restart `watcher.service` so its lifespa
 sudo systemctl restart watcher
 ```
 
+### Tools surface (Phase 3a)
+
+Authoring helpers under `/api/v1/tools/*`:
+
+| Endpoint | Method | Purpose |
+|---|---|---|
+| `/tools/validate-info-spec` | POST | Validate an InfoSpec doc against the v1 schema. |
+| `/tools/find-info-items?q=…` | GET | Substring search over name + description. |
+| `/tools/fetch-and-render` | POST | Fetch a target URL (5 MiB body cap; `render=True` → 501 until #3). |
+| `/tools/preview-extraction` | POST | Validate + fetch + extract + fingerprint with a candidate spec. |
+| `/tools/propose-selectors` | POST | Heuristic-ranked CSS selector candidates. |
+
+Plus an extended `POST /api/v1/info-items` that atomically creates an InfoItem + primary InfoSpec when `initial_info_spec` is supplied.
+
+Smoke after deploying: `bash scripts/smoke_phase3a.sh` exercises every tool end-to-end against the local service.
+
 ## BUILD_ID
 
 The systemd unit automatically sets `BUILD_ID` to the current git short SHA before each start via `ExecStartPre`. This value is used for:

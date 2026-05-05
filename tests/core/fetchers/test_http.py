@@ -74,3 +74,37 @@ class TestHttpFetcher:
         fetcher = HttpFetcher(client=mock_client)
         await fetcher.fetch("https://example.com", config={"headers": {"X-Custom": "test"}})
         assert captured.get("x-custom") == "test"
+
+
+class TestHttpFetcherAclose:
+    async def test_aclose_when_never_fetched_is_noop(self):
+        """Lazily-built client is None until first fetch; aclose must not raise."""
+        fetcher = HttpFetcher()
+        assert fetcher._client is None
+        await fetcher.aclose()
+        assert fetcher._client is None
+
+    async def test_aclose_after_fetch_releases_client(self):
+        mock_response = httpx.Response(
+            200, content=b"ok", request=httpx.Request("GET", "https://example.com")
+        )
+        mock_client = httpx.AsyncClient(transport=httpx.MockTransport(lambda req: mock_response))
+        fetcher = HttpFetcher(client=mock_client)
+        await fetcher.fetch("https://example.com")
+        assert fetcher._client is mock_client
+        await fetcher.aclose()
+        assert fetcher._client is None
+
+    async def test_aclose_is_idempotent(self):
+        """A second aclose is a no-op — important for shutdown handlers that
+        may be called more than once (e.g. lifespan + signal handler)."""
+        mock_response = httpx.Response(
+            200, content=b"ok", request=httpx.Request("GET", "https://example.com")
+        )
+        mock_client = httpx.AsyncClient(transport=httpx.MockTransport(lambda req: mock_response))
+        fetcher = HttpFetcher(client=mock_client)
+        await fetcher.fetch("https://example.com")
+        await fetcher.aclose()
+        # Second call must not raise.
+        await fetcher.aclose()
+        assert fetcher._client is None

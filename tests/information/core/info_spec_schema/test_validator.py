@@ -34,6 +34,24 @@ class TestValidateInfoSpecWithErrors:
         assert issues[0].path == ["schema_version"]
         assert "schema_version" in issues[0].message
 
+    def test_nested_field_violation_path_reflects_json_structure(self):
+        """A bad nested field surfaces as a path list, not a flat key."""
+        # ``target.url`` is required; removing it triggers a nested-required failure.
+        issues = validate_info_spec_with_errors({**VALID_DOC, "target": {}})
+        assert len(issues) >= 1
+        # At least one issue must point inside the ``target`` object.
+        assert any(i.path and i.path[0] == "target" for i in issues)
+
+    def test_nested_extraction_violation_path_includes_extraction(self):
+        """css algorithm without selector violates the v1 schema's allOf rule."""
+        issues = validate_info_spec_with_errors({**VALID_DOC, "extraction": {"algorithm": "css"}})
+        assert len(issues) >= 1
+        # The conditional rule fires inside the ``extraction`` subtree.
+        assert any(
+            (i.path and "extraction" in [str(s) for s in i.path]) or "extraction" in i.message
+            for i in issues
+        )
+
 
 class TestValidateInfoSpecRaises:
     def test_invalid_doc_raises_with_structured_issues(self):

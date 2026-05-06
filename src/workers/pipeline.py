@@ -9,6 +9,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ulid import ULID
 
 from src.core.differ import ChangeStatus, ChunkFingerprint, diff_chunks
+from src.core.extraction_defaults import (
+    extraction_config_from_spec as _extraction_config_from_spec,
+)
 from src.core.extractors import HtmlExtractor
 from src.core.extractors.base import ExtractionResult
 from src.core.info_resolver import ResolvedInfoSpec, resolve_primary
@@ -23,9 +26,6 @@ from src.core.rate_limiter import DomainRateLimiter
 from src.core.screenshot import capture_screenshot
 from src.core.simhash import simhash
 from src.core.storage import StorageBackend
-from src.information.core.tools.extraction_config import (
-    extraction_config_from_spec as _extraction_config_from_spec,
-)
 
 logger = get_logger(__name__)
 

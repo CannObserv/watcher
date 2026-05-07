@@ -23,7 +23,7 @@ from src.core.logging import get_logger
 from src.core.models.audit_log import EventType, audit
 from src.core.models.notification_config import WatchNotificationConfig
 from src.core.notifications.events import WatchEvent, WatchEventType
-from src.core.notifications.notify import DispatchCandidate, _dispatch_via_notifier
+from src.core.notifications.notify import DispatchCandidate, dispatch_via_notifier
 from src.core.notifier_client import get_notifier_client
 from src.core.registry import get_registry
 from src.core.watches import resolve_watch_url
@@ -44,7 +44,7 @@ async def create_notification_config(
     config = WatchNotificationConfig(
         watch_id=watch.id,
         title=data.title,
-        channel_hint=data.channel_hint or "remote",
+        channel_hint=data.channel_hint,
         events=data.events,
         content_config=data.content_config.model_dump() if data.content_config else None,
         remote_channel_id=data.remote_channel_id,
@@ -180,7 +180,7 @@ async def test_notification_config(
                 )
                 try:
                     async with get_notifier_client() as client:
-                        outcome = await _dispatch_via_notifier(
+                        outcome = await dispatch_via_notifier(
                             client,
                             candidate,
                             event,

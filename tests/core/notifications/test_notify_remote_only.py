@@ -4,7 +4,7 @@ Phase 5 (#137): the local Apprise dispatch path was removed. The notifier
 service is now the only delivery mechanism. These tests assert that:
 
   - `dispatch_event_notifications` no longer reads `USE_REMOTE_NOTIFY`
-  - it always opens a notifier client + calls `_dispatch_via_notifier`
+  - it always opens a notifier client + calls `dispatch_via_notifier`
   - the local `dispatch_event` symbol is not importable from `notify`
   - `DispatchCandidate` no longer carries an `apprise_url` field
 """

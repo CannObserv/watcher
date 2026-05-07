@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from notifier_client.errors import NotifierError
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from ulid import ULID
 
 from src.api.deps import get_db_session
 from src.api.routes.helpers import get_watch_or_404
@@ -20,11 +21,16 @@ from src.core.logging import get_logger
 from src.core.models.audit_log import EventType, audit
 from src.core.models.notification_template import DomainNcRef, NotificationTemplate, WatchNcRef
 from src.core.notifications.events import WatchEvent, WatchEventType
-from src.core.notifications.notify import DispatchCandidate, _dispatch_via_notifier
+from src.core.notifications.notify import DispatchCandidate, dispatch_via_notifier
 from src.core.notifier_client import get_notifier_client
 
 router = APIRouter(prefix="/notifications/templates", tags=["notification-templates"])
 logger = get_logger(__name__)
+
+# Sentinel watch_id for "[Test]" dispatch events that aren't tied to a real
+# watch. ULID(0) renders as 26 zero-base32 chars and stays inside the strict
+# 26-char ULID validation the schemas enforce on real watch_ids.
+_TEST_SENTINEL_WATCH_ID = str(ULID.from_int(0))
 
 
 async def _get_template_or_404(template_id: str, session: AsyncSession) -> NotificationTemplate:
@@ -63,7 +69,7 @@ async def create_template(
     """Create a new shared notification template."""
     tpl = NotificationTemplate(
         title=data.title,
-        channel_hint=data.channel_hint or "remote",
+        channel_hint=data.channel_hint,
         events=data.events,
         is_global_default=data.is_global_default,
         content_config=data.content_config.model_dump() if data.content_config else None,
@@ -221,7 +227,7 @@ async def test_template(
         return {"success": False, "reason": "no remote_channel_id configured"}
     event = WatchEvent(
         event_type=WatchEventType.CHANGE_DETECTED,
-        watch_id="00000000000000000000000000",
+        watch_id=_TEST_SENTINEL_WATCH_ID,
         watch_name="[Test]",
         watch_url="https://example.com",
         occurred_at=datetime.now(UTC),
@@ -234,7 +240,7 @@ async def test_template(
     )
     try:
         async with get_notifier_client() as client:
-            outcome = await _dispatch_via_notifier(
+            outcome = await dispatch_via_notifier(
                 client,
                 candidate,
                 event,

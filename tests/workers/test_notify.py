@@ -424,7 +424,7 @@ class TestContentConfig:
 
 class TestErrorHandling:
     async def test_dispatch_failure_does_not_raise(self):
-        """An exception inside _dispatch_via_notifier is caught and recorded."""
+        """An exception inside dispatch_via_notifier is caught and recorded."""
         tpl = _fake_template()
         session = AsyncMock(spec=AsyncSession)
         session.execute = AsyncMock(

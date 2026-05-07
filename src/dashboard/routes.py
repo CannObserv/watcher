@@ -20,7 +20,7 @@ from src.api.deps import get_db_session, get_probe_fn
 from src.api.routes.helpers import parse_ulid
 from src.api.routes.watches import delete_watch as api_delete_watch
 from src.api.schemas.content_config import ContentConfig, ContentOptions
-from src.api.schemas.notification_config import validate_event_list
+from src.api.schemas.validators import validate_event_list
 from src.core.database import get_session_factory
 from src.core.diff import compute_unified_diff
 from src.core.diff.normalize import normalize_html
@@ -39,8 +39,8 @@ from src.core.notifications.default_templates import (
 from src.core.notifications.events import EVENT_TITLES, WatchEvent, WatchEventType
 from src.core.notifications.notify import (
     DispatchCandidate,
-    _dispatch_via_notifier,
     dispatch_event_notifications,
+    dispatch_via_notifier,
 )
 from src.core.notifications.preview_fixtures import (
     build_preview_event,
@@ -2208,7 +2208,7 @@ async def watch_notification_test_result(
                 )
                 try:
                     async with get_notifier_client() as client:
-                        outcome = await _dispatch_via_notifier(
+                        outcome = await dispatch_via_notifier(
                             client,
                             candidate,
                             event,
@@ -2934,7 +2934,7 @@ async def notification_template_test_result(
         )
         try:
             async with get_notifier_client() as client:
-                outcome = await _dispatch_via_notifier(
+                outcome = await dispatch_via_notifier(
                     client,
                     candidate,
                     event,

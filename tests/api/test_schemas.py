@@ -18,13 +18,13 @@ from src.api.schemas.content_config import ContentConfig, ContentOptions
 from src.api.schemas.notification_config import (
     WatchNotificationConfigCreate,
     WatchNotificationConfigResponse,
-    validate_event_list,
 )
 from src.api.schemas.notification_template import (
     NotificationTemplateCreate,
     NotificationTemplateResponse,
 )
 from src.api.schemas.types import HttpUrlStr
+from src.api.schemas.validators import validate_event_list
 from src.api.schemas.watch import WatchCreate, WatchResponse, WatchUpdate
 from src.core.models.audit_log import EventType
 from src.core.models.watch import ContentType, Watch

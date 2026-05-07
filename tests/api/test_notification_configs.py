@@ -334,7 +334,7 @@ class TestTestNotificationConfig:
         config_id = await self._make_config(client, watch_id)
         with (
             patch(
-                "src.api.routes.notification_configs._dispatch_via_notifier",
+                "src.api.routes.notification_configs.dispatch_via_notifier",
                 new_callable=AsyncMock,
                 return_value=self._mock_result(True, "Notification sent successfully"),
             ),
@@ -353,7 +353,7 @@ class TestTestNotificationConfig:
         config_id = await self._make_config(client, watch_id)
         with (
             patch(
-                "src.api.routes.notification_configs._dispatch_via_notifier",
+                "src.api.routes.notification_configs.dispatch_via_notifier",
                 new_callable=AsyncMock,
                 return_value=self._mock_result(False, "Delivery failed"),
             ),
@@ -379,7 +379,7 @@ class TestTestNotificationConfig:
         config_id = await self._make_config(client, watch_id)
         with (
             patch(
-                "src.api.routes.notification_configs._dispatch_via_notifier",
+                "src.api.routes.notification_configs.dispatch_via_notifier",
                 new_callable=AsyncMock,
                 return_value=self._mock_result(True),
             ),

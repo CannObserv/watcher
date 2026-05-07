@@ -189,7 +189,7 @@ async def test_test_endpoint_returns_success(client: AsyncClient):
     dispatch_result = DispatchResult(success=True, reason="Notification sent successfully")
     with (
         patch(
-            "src.api.routes.notification_templates._dispatch_via_notifier",
+            "src.api.routes.notification_templates.dispatch_via_notifier",
             new_callable=AsyncMock,
             return_value=dispatch_result,
         ),
@@ -228,7 +228,7 @@ async def test_test_endpoint_returns_failure_on_dispatch_error(client: AsyncClie
 
     with (
         patch(
-            "src.api.routes.notification_templates._dispatch_via_notifier",
+            "src.api.routes.notification_templates.dispatch_via_notifier",
             new_callable=AsyncMock,
             side_effect=Exception("boom"),
         ),

@@ -381,7 +381,7 @@ class TestWatchNotificationTestResultRoute:
         result = self._mock_result(True, "Notification sent successfully")
         with (
             patch(
-                "src.dashboard.routes._dispatch_via_notifier",
+                "src.dashboard.routes.dispatch_via_notifier",
                 new_callable=AsyncMock,
                 return_value=result,
             ) as mock_dispatch,
@@ -417,7 +417,7 @@ class TestWatchNotificationTestResultRoute:
         result = self._mock_result(True, "ok")
         with (
             patch(
-                "src.dashboard.routes._dispatch_via_notifier",
+                "src.dashboard.routes.dispatch_via_notifier",
                 new_callable=AsyncMock,
                 return_value=result,
             ) as mock_dispatch,
@@ -446,7 +446,7 @@ class TestWatchNotificationTestResultRoute:
         result = self._mock_result(False, "Delivery failed")
         with (
             patch(
-                "src.dashboard.routes._dispatch_via_notifier",
+                "src.dashboard.routes.dispatch_via_notifier",
                 new_callable=AsyncMock,
                 return_value=result,
             ),

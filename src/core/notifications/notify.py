@@ -196,7 +196,7 @@ async def _load_event_unified_diff(
     return compute_unified_diff(prev_text, curr_text).unified_diff
 
 
-async def _dispatch_via_notifier(
+async def dispatch_via_notifier(
     client: NotifierClient,
     candidate: DispatchCandidate,
     event: WatchEvent,
@@ -401,7 +401,7 @@ async def dispatch_event_notifications(
                         reason="no remote_channel_id configured",
                     )
                 else:
-                    result = await _dispatch_via_notifier(
+                    result = await dispatch_via_notifier(
                         notifier_client, candidate, event, rendered_title, rendered_body
                     )
                 results.append(

@@ -11,21 +11,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from src.api.schemas.content_config import ContentConfig
 from src.api.schemas.types import ULIDStr
-from src.core.notifications.events import WatchEventType
-
-_VALID_EVENT_TYPES = {e.value for e in WatchEventType}
-
-
-def validate_event_list(events: list[str]) -> list[str]:
-    """Raise ValueError if events is empty or contains unknown WatchEventType values."""
-    if not events:
-        raise ValueError("At least one event must be selected.")
-    invalid = [e for e in events if e not in _VALID_EVENT_TYPES]
-    if invalid:
-        raise ValueError(
-            f"Unknown event type(s): {invalid}. Valid types: {sorted(_VALID_EVENT_TYPES)}"
-        )
-    return events
+from src.api.schemas.validators import validate_event_list
 
 
 class WatchNotificationConfigCreate(BaseModel):
@@ -35,7 +21,7 @@ class WatchNotificationConfigCreate(BaseModel):
     """
 
     remote_channel_id: str = Field(..., min_length=26, max_length=26)
-    channel_hint: str | None = Field(default=None, max_length=50)
+    channel_hint: str = Field(default="remote", max_length=50)
     title: str | None = Field(default=None, max_length=100)
     events: list[str] = Field(default_factory=lambda: ["change_detected"])
     content_config: ContentConfig | None = None

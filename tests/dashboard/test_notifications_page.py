@@ -227,7 +227,7 @@ async def test_test_result_returns_flash_on_success(client: AsyncClient, db_sess
     dispatch_result = DispatchResult(success=True, reason="sent")
     with (
         patch(
-            "src.dashboard.routes._dispatch_via_notifier",
+            "src.dashboard.routes.dispatch_via_notifier",
             new_callable=AsyncMock,
             return_value=dispatch_result,
         ) as mock_dispatch,
@@ -262,7 +262,7 @@ async def test_test_result_uses_template_content_config(client: AsyncClient, db_
     dispatch_result = DispatchResult(success=True, reason="sent")
     with (
         patch(
-            "src.dashboard.routes._dispatch_via_notifier",
+            "src.dashboard.routes.dispatch_via_notifier",
             new_callable=AsyncMock,
             return_value=dispatch_result,
         ) as mock_dispatch,
@@ -287,7 +287,7 @@ async def test_test_result_returns_flash_on_dispatch_failure(client: AsyncClient
 
     with (
         patch(
-            "src.dashboard.routes._dispatch_via_notifier",
+            "src.dashboard.routes.dispatch_via_notifier",
             new_callable=AsyncMock,
             side_effect=Exception("boom"),
         ),

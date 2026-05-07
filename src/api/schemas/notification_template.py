@@ -11,14 +11,14 @@ from datetime import datetime
 from pydantic import BaseModel, Field, field_validator
 
 from src.api.schemas.content_config import ContentConfig
-from src.api.schemas.notification_config import validate_event_list
 from src.api.schemas.types import ULIDStr
+from src.api.schemas.validators import validate_event_list
 
 
 class NotificationTemplateCreate(BaseModel):
     title: str = Field(..., max_length=100)
     remote_channel_id: str = Field(..., min_length=26, max_length=26)
-    channel_hint: str | None = Field(default=None, max_length=50)
+    channel_hint: str = Field(default="remote", max_length=50)
     events: list[str] = ["change_detected"]
     is_global_default: bool = False
     content_config: ContentConfig | None = None

@@ -30,17 +30,27 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    """Drop apprise_url from notification_templates and watch_notification_configs."""
+    """Drop apprise_url from notification_templates and watch_notification_configs.
+
+    WARNING: irreversible in practice. The downgrade restores the column
+    shape but NOT the Fernet ciphertext data, and the apprise dispatcher
+    (src/core/notifications/dispatcher.py) was deleted in the same Phase 5
+    sweep — there is no in-tree consumer left to read the column even if
+    its data could be restored.
+    """
     op.drop_column("notification_templates", "apprise_url")
     op.drop_column("watch_notification_configs", "apprise_url")
 
 
 def downgrade() -> None:
-    """Re-add apprise_url as nullable text on both tables.
+    """Schema-only undo: restore the column shape but NOT the data.
 
     Re-added as nullable because the original Fernet ciphertext is
     irrecoverable once dropped — restoring NOT NULL would require a
-    rebuild from external state we don't track.
+    rebuild from external state we don't track. This downgrade exists
+    for alembic-graph correctness only; the system is not functional in
+    its pre-upgrade form after running it (the dispatcher and crypto
+    helpers are gone from the codebase too).
     """
     op.add_column(
         "watch_notification_configs",

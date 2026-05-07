@@ -47,8 +47,6 @@ src/api/         FastAPI app (ASGI routes, schemas, deps)
 src/core/        Shared domain logic (models, probe, watches, notifications, diff, extractors, fetchers, scheduler, storage, crypto)
 src/dashboard/   Server-rendered UI (Jinja2 + HTMX + Tailwind)
 src/workers/     Procrastinate task queue (check_watch, schedule_tick, pipeline)
-src/information/ Information service — sibling FastAPI app on port 8020; InfoItem + InfoSpec registry (own alembic root: alembic_information/)
-clients/python/  Python SDK for the Information service (information-client); consumed by Watcher (Phase 2c) and Archive (Phase 3+)
 tools/           Operational scripts (e.g. info_changes_consumer.py — reference XREADGROUP consumer)
 tests/           Mirrors src/ structure
 deploy/          Systemd units and deployment config
@@ -67,7 +65,8 @@ skills-vendor/   Git submodules for external skill repos
 |---|---|---|
 | API (live) | 8000 | `systemctl` (`watcher.service`) |
 | API (dev) | 8001 | manual uvicorn |
-| Information service | 8020 | `systemctl` (`information.service`) |
+
+Sibling services on the same VM, separately managed: **Archiver** at `/home/exedev/archiver` (port 8020, `archiver.service`); **Notifier** at `/home/exedev/notifier`.
 
 The exe.dev proxy forwards 3000–9999. Dev server reachable at `https://watcher.exe.xyz:8001/`.
 
@@ -84,9 +83,11 @@ export $(cat /etc/watcher/.env .env 2>/dev/null | xargs)
 uv run uvicorn src.api.main:app --host 0.0.0.0 --port 8001 --reload
 ```
 
-**Information service.** Owns the canonical Information Item + InfoSpec registry. Lives at `src/information/`. Runs as `information.service` on port 8020 once installed. Migrations: `uv run alembic -c alembic_information.ini upgrade head`. Dev server: `uv run uvicorn src.information.api.main:app --host 0.0.0.0 --port 8021 --reload`.
+**Archiver service.** Owns the canonical Information Item + InfoSpec registry. Sibling repo at `/home/exedev/archiver` (extracted in #149). Watcher consumes it via the `archiver-client` SDK installed as a path dependency. Don't add Archiver code to this repo — go work in the sibling repo instead.
 
 Full lifecycle reference + cleanup timer: `docs/DEPLOYMENT.md`.
+
+**Mirrored content-acquisition code.** Watcher and Archiver share copies of `src/core/fetchers/`, `src/core/extractors/`, `src/core/simhash.py`, `src/core/extraction_defaults.py`, and `src/core/logging.py`. When changing any of these here, mirror the change to `/home/exedev/archiver/src/core/`. Notifier-style discipline; revisit when fingerprint parity becomes load-bearing (i.e., when Replicator joins the consumer set).
 
 ## Environment Files
 
@@ -102,36 +103,21 @@ export $(cat /etc/watcher/.env .env 2>/dev/null | xargs)
 ```
 
 **Key variables:**
-- `DATABASE_URL` — PostgreSQL connection (watcher + information service)
+- `DATABASE_URL` — PostgreSQL connection for watcher (Archiver owns its own database).
 - `APPRISE_SECRET_KEY` — HMAC signing key for Apprise webhook validation
 - `REDIS_URL` — Redis connection URL (default: `redis://localhost:6379/0`). Used by `ChangePublisher` and `tools/info_changes_consumer.py`. Override for testing or remote Redis.
-- `INFORMATION_BASE_URL` — Information service URL for the `InformationClient` SDK (default: `http://localhost:8020`).
-- `INFORMATION_API_KEY` — Required. API key for the `InformationClient` SDK; missing key crashes the API on boot (pre-warm in lifespan).
+- `ARCHIVER_BASE_URL` — Archiver service URL for the `ArchiverClient` SDK (default: `http://localhost:8020`).
+- `ARCHIVER_API_KEY` — Required. API key for the `ArchiverClient` SDK; missing key crashes the API on boot (pre-warm in lifespan).
 
 Full variable reference: `docs/DEPLOYMENT.md`.
 
 ## Watches & change bus (Phase 2c)
 
-Watches are InfoItem-native: a Watch references an `info_item_id` and resolves URL + fetch defaults from the primary `InfoSpec` at every callsite (`check_watch`, screenshot capture, dashboard preview). Watch creation requires `info_item_id` — the Information service is the source of truth for the URL. Legacy `url` and `fetch_config` columns no longer exist.
+Watches are InfoItem-native: a Watch references an `info_item_id` and resolves URL + fetch defaults from the primary `InfoSpec` at every callsite (`check_watch`, screenshot capture, dashboard preview). Watch creation requires `info_item_id` — the Archiver service is the source of truth for the URL. Legacy `url` and `fetch_config` columns no longer exist.
 
 Change bus envelope is `schema_version: 2`. Stream entries are partitioned by `info_item_id` (Phase 2b's v1 partitioned by `watch_id`) and carry `info_item_id`, `info_spec_id`, plus `previous_fingerprint`/`current_fingerprint`. The `drain_changes_outbox` task is registered as `@bp.periodic(cron="* * * * *")`, so the embedded worker drains every minute. A PostgreSQL transaction-scoped advisory lock (`DRAIN_ADVISORY_LOCK_ID`) keeps concurrent drains from double-publishing.
 
-Fresh hosts need `sudo cp deploy/information.service /etc/systemd/system/` before `watcher.service` will boot — see `docs/DEPLOYMENT.md` for the full install (key generation + env-var registration). On hosts where the unit isn't installed, the dev server `uv run uvicorn src.information.api.main:app --host 0.0.0.0 --port 8021 --reload &` is acceptable for development; set `INFORMATION_BASE_URL=http://localhost:8021` so consumers (Watcher dev server, smoke scripts) hit it instead of the systemd port.
-
-## Information service authoring tools (Phase 3a)
-
-The Information service exposes authoring helpers under `/api/v1/tools/*`. Non-mutating except where noted; same `X-API-Key` auth as the CRUD surface. Each route has an ergonomic SDK wrapper on `InformationClient`.
-
-| Tool | HTTP | SDK method | Use when |
-|---|---|---|---|
-| `validate_info_spec` | `POST /tools/validate-info-spec` | `validate_info_spec(doc)` | Surface schema problems on a candidate doc before `create_info_spec`. |
-| `find_info_item` | `GET /tools/find-info-items?q=…` | `find_info_item(query, limit=20)` | Dedupe before creating a new InfoItem. Substring + case-insensitive over name + description. |
-| `fetch_and_render` | `POST /tools/fetch-and-render` | `fetch_and_render(url)` | Inspect what the extractor will see. v1 is HTTP-only; `render=True` returns 501 until #3 (Playwright). 5 MiB body cap. |
-| `preview_extraction` | `POST /tools/preview-extraction` | `preview_extraction(url, doc)` | Dry-run validate + fetch + extract + fingerprint. 422 with structured `validation_failed` / `target_unreachable` codes. |
-| `propose_selectors` | `POST /tools/propose-selectors` | `propose_selectors(url, description, top_k=5)` | Rank CSS selector candidates; heuristic v1 (#146 tracks learned ranker). |
-| `create_info_item` (atomic) | `POST /info-items` w/ `initial_info_spec` | `create_info_item(..., initial_info_spec=doc)` | Mutating. Atomically create the InfoItem + primary InfoSpec in one transaction. |
-
-Smoke: `bash scripts/smoke_phase3a.sh` exercises the full authoring loop end-to-end against the live service.
+Fresh hosts need `sudo cp /home/exedev/archiver/deploy/archiver.service /etc/systemd/system/` before `watcher.service` will boot — Archiver lives in a sibling repo; see its own `docs/DEPLOYMENT.md` for full install (key generation + env-var registration). The Archiver authoring tools (`validate_info_spec`, `fetch_and_render`, `preview_extraction`, `propose_selectors`, `find_info_item`, atomic `create_info_item`) are documented in `/home/exedev/archiver/AGENTS.md`.
 
 ## Common Commands
 

@@ -118,9 +118,8 @@ uv run alembic upgrade head
 uv run alembic revision --autogenerate -m "description of change"
 uv run alembic current
 
-# Information service migrations (requires INFORMATION_DATABASE_URL in env)
-uv run alembic -c alembic_information.ini upgrade head
-uv run alembic -c alembic_information.ini revision --autogenerate -m "description of change"
+# Archiver service migrations live in the sibling repo at /home/exedev/archiver.
+# See /home/exedev/archiver/docs/COMMANDS.md.
 ```
 
 ## Change bus (Redis Streams)

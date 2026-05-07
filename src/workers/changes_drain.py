@@ -213,11 +213,10 @@ async def start_changes_drain_loop(
     ``async with get_session_factory()()`` block, which rolls back the
     transaction. Rows that were XADD'd to Redis but not yet
     ``mark_published``'d may therefore be republished by the next tick
-    or by the 1-minute periodic. This is bounded — and safe — by the
-    advisory lock (no concurrent drains) and the
-    ``published_to_bus_at IS NULL`` filter (already-marked rows are
-    skipped). The next tick does not start once cancellation is
-    observed.
+    or by the 1-minute periodic. This is bounded by the advisory lock
+    (no concurrent drains) and the ``published_to_bus_at IS NULL``
+    filter (already-marked rows are skipped). The next tick does not
+    start once cancellation is observed.
     """
     resolved_interval = interval if interval is not None else _resolve_drain_interval()
     logger.info(

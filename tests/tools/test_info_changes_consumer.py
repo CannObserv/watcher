@@ -555,6 +555,39 @@ def test_default_process_timeout_ignores_garbage(monkeypatch):
 
 
 # ---------------------------------------------------------------------------
+# CLI argument plumbing
+# ---------------------------------------------------------------------------
+
+
+def test_parser_backoff_initial_s_defaults_to_constant():
+    """``--backoff-initial-s`` default matches ``DEFAULT_BACKOFF_INITIAL_S``."""
+    args = consumer._build_parser().parse_args([])
+    assert args.backoff_initial_s == consumer.DEFAULT_BACKOFF_INITIAL_S
+
+
+def test_parser_backoff_initial_s_accepts_override():
+    """``--backoff-initial-s`` is parsed as a float and stored on the namespace."""
+    args = consumer._build_parser().parse_args(["--backoff-initial-s", "0.5"])
+    assert args.backoff_initial_s == 0.5
+
+
+@pytest.mark.asyncio
+async def test_amain_forwards_backoff_initial_s_to_consume(monkeypatch):
+    """``_amain`` plumbs the parsed value through to ``consume`` (regression
+    guard for the round-1 fix that exposed the flag on the CLI)."""
+    captured: dict = {}
+
+    async def fake_consume(**kwargs):
+        captured.update(kwargs)
+        return consumer.Metrics()
+
+    monkeypatch.setattr(consumer, "consume", fake_consume)
+    args = consumer._build_parser().parse_args(["--backoff-initial-s", "2.5"])
+    await consumer._amain(args)
+    assert captured["backoff_initial_s"] == 2.5
+
+
+# ---------------------------------------------------------------------------
 # Sub-task 5: Metrics
 # ---------------------------------------------------------------------------
 

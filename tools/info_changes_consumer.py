@@ -161,14 +161,27 @@ async def _metrics_loop(
     interval_s: float,
     shutdown_event: asyncio.Event,
 ) -> None:
-    """Background task: emit metrics every ``interval_s`` until shutdown."""
+    """Background task: emit metrics every ``interval_s`` until shutdown.
+
+    The body is wrapped in a broad ``try/except`` so that an unexpected
+    error (logger backend hiccup, non-serialisable ``extra=`` value, ...)
+    cannot silently kill the task and leave the consume loop running
+    blind on metrics. Errors are logged at WARNING; the loop keeps
+    ticking.
+    """
     while not shutdown_event.is_set():
         try:
             await asyncio.wait_for(shutdown_event.wait(), timeout=interval_s)
         except TimeoutError:
             pass
-        await _refresh_lag(client, topic, metrics)
-        _emit_metrics(metrics)
+        try:
+            await _refresh_lag(client, topic, metrics)
+            _emit_metrics(metrics)
+        except Exception as e:  # noqa: BLE001 - metrics task must not die
+            logger.warning(
+                "metrics tick failed; loop continues",
+                extra={"error": _safe_exc_message(e)},
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -281,6 +294,13 @@ async def _write_record(fp, record: dict) -> None:
     that doesn't EOF) only blocks a thread — the event loop stays
     responsive and the caller's ``asyncio.wait_for`` timeout can actually
     fire on a hung I/O path.
+
+    Note: ``asyncio.to_thread`` cannot interrupt a running thread. When
+    the caller's timeout fires the awaiting coroutine is cancelled, but
+    the underlying ``fp.write`` keeps draining bytes on the worker thread
+    until the kernel returns control. The consume loop has already moved
+    on (the message is DLQ'd and ACKed), so the late write is observable
+    only as a duplicate line in the output file.
     """
     line = json.dumps(record) + "\n"
 
@@ -689,8 +709,10 @@ async def _amain(args: argparse.Namespace) -> Metrics:
     )
 
 
-def main() -> int:
-    """CLI entry point."""
+def _build_parser() -> argparse.ArgumentParser:
+    """Construct the CLI parser. Extracted from ``main()`` so tests can
+    introspect defaults and accepted overrides without spawning the
+    asyncio runtime."""
     parser = argparse.ArgumentParser(description="Reference consumer for info.changes")
     parser.add_argument("--topic", default=DEFAULT_TOPIC)
     parser.add_argument("--group", default=DEFAULT_GROUP)
@@ -722,7 +744,7 @@ def main() -> int:
         "--backoff-initial-s",
         type=float,
         default=DEFAULT_BACKOFF_INITIAL_S,
-        help="Initial reconnect backoff in seconds (default: 1.0)",
+        help=f"Initial reconnect backoff in seconds (default: {DEFAULT_BACKOFF_INITIAL_S})",
     )
     parser.add_argument(
         "--backoff-cap-s",
@@ -736,7 +758,12 @@ def main() -> int:
         default=DEFAULT_METRICS_INTERVAL_S,
         help="Cadence for emitting cumulative metrics",
     )
-    args = parser.parse_args()
+    return parser
+
+
+def main() -> int:
+    """CLI entry point."""
+    args = _build_parser().parse_args()
 
     configure_logging()
     metrics = asyncio.run(_amain(args))

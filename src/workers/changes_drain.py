@@ -8,9 +8,23 @@ A PostgreSQL transaction-scoped advisory lock guards the drain so manual
 invocations and the cron-driven schedule can't double-publish: only one
 holder of ``DRAIN_ADVISORY_LOCK_ID`` proceeds; others log and exit early.
 The lock auto-releases at transaction end.
+
+Two drainers run concurrently in production:
+
+* The 1-minute Procrastinate periodic ``drain_changes_outbox`` is the
+  safety-net floor. It survives if the fast loop's task crashes.
+* The fast async loop (#144) ticks every
+  ``CHANGES_DRAIN_INTERVAL_SECONDS`` seconds (default 10) inside the
+  Watcher process. Sub-minute end-to-end latency from
+  ``Change.detected_at`` to Redis publish.
+
+Both share ``_drain_changes_once`` and the same advisory lock, so they
+can't double-publish.
 """
 
+import asyncio
 import json
+import os
 
 import sqlalchemy as sa
 
@@ -30,6 +44,40 @@ INFO_CHANGES_TOPIC = "info.changes"
 # transaction-level acquirer here. Constant chosen for Phase 2c; grep src/ for
 # ``pg_advisory`` before reusing this id elsewhere.
 DRAIN_ADVISORY_LOCK_ID = 0xCDA1
+
+# Fast-tick async drain loop cadence. Sub-minute target so end-to-end
+# Change-detected -> Redis-publish latency stays low; the 1-minute cron
+# stays in place as a safety floor.
+DEFAULT_DRAIN_INTERVAL_SECONDS = 10
+_DRAIN_INTERVAL_ENV_VAR = "CHANGES_DRAIN_INTERVAL_SECONDS"
+
+
+def _resolve_drain_interval() -> int:
+    """Resolve ``CHANGES_DRAIN_INTERVAL_SECONDS`` with safe fallback.
+
+    Invalid (non-numeric, zero, or negative) values fall back to
+    ``DEFAULT_DRAIN_INTERVAL_SECONDS`` and log a warning. The fast loop
+    must always have a positive cadence — a zero interval would
+    busy-loop the event loop.
+    """
+    raw = os.environ.get(_DRAIN_INTERVAL_ENV_VAR)
+    if raw is None or raw == "":
+        return DEFAULT_DRAIN_INTERVAL_SECONDS
+    try:
+        value = int(raw)
+    except ValueError:
+        logger.warning(
+            "invalid CHANGES_DRAIN_INTERVAL_SECONDS, using default",
+            extra={"raw": raw, "default": DEFAULT_DRAIN_INTERVAL_SECONDS},
+        )
+        return DEFAULT_DRAIN_INTERVAL_SECONDS
+    if value <= 0:
+        logger.warning(
+            "non-positive CHANGES_DRAIN_INTERVAL_SECONDS, using default",
+            extra={"raw": raw, "default": DEFAULT_DRAIN_INTERVAL_SECONDS},
+        )
+        return DEFAULT_DRAIN_INTERVAL_SECONDS
+    return value
 
 
 def _build_envelope(change) -> bytes:
@@ -74,20 +122,18 @@ def _build_envelope(change) -> bytes:
     ).encode("utf-8")
 
 
-@bp.periodic(cron="* * * * *", periodic_id="drain_changes_outbox")
-@bp.task(name="drain_changes_outbox", queue="default")
-async def drain_changes_outbox(*, batch_size: int = 100, **periodic_kwargs) -> dict:
-    """Publish up to ``batch_size`` unpublished Changes; return counts.
+async def _drain_changes_once(*, batch_size: int = 100) -> dict:
+    """Run a single drain pass; shared by the periodic and the fast loop.
 
-    Idempotent — only processes rows where ``published_to_bus_at IS NULL``.
-    Per-row errors are caught and counted in ``failed``; the rest of the
-    batch continues. Failed rows remain unpublished and the next drain
-    picks them up.
+    Returns a dict with ``published``, ``failed``, and
+    ``skipped_due_to_lock``. Idempotent — only processes rows where
+    ``published_to_bus_at IS NULL``. Per-row errors are caught and counted
+    in ``failed``; the rest of the batch continues.
 
     Single-writer: a transaction-scoped advisory lock
     (``DRAIN_ADVISORY_LOCK_ID``) prevents concurrent drains from
-    double-publishing. Concurrent invocations log and return
-    ``{"published": 0, "failed": 0, "skipped": True}``.
+    double-publishing. Concurrent invocations return
+    ``{"published": 0, "failed": 0, "skipped_due_to_lock": True}``.
     """
     publisher = ChangePublisher()
     published = 0
@@ -99,7 +145,7 @@ async def drain_changes_outbox(*, batch_size: int = 100, **periodic_kwargs) -> d
             )
             if not locked:
                 logger.info("drain_changes_outbox skipped — another drain holds the lock")
-                return {"published": 0, "failed": 0, "skipped": True}
+                return {"published": 0, "failed": 0, "skipped_due_to_lock": True}
             rows = await select_unpublished(session, limit=batch_size)
             for change in rows:
                 try:
@@ -122,5 +168,77 @@ async def drain_changes_outbox(*, batch_size: int = 100, **periodic_kwargs) -> d
             await session.commit()
     finally:
         await publisher.aclose()
-    logger.info("drain_changes_outbox finished", extra={"published": published, "failed": failed})
-    return {"published": published, "failed": failed}
+    return {"published": published, "failed": failed, "skipped_due_to_lock": False}
+
+
+@bp.periodic(cron="* * * * *", periodic_id="drain_changes_outbox")
+@bp.task(name="drain_changes_outbox", queue="default")
+async def drain_changes_outbox(*, batch_size: int = 100, **periodic_kwargs) -> dict:
+    """Periodic 1-minute safety-net drain.
+
+    Stays in place even with the fast async loop: if the fast loop's task
+    dies (asyncio crash, lifespan ordering bug), the cron still drains
+    every minute. The advisory lock guarantees the two never
+    double-publish.
+
+    Returns ``{"published": N, "failed": M}`` (legacy shape — keeping
+    for any callers that introspect the periodic's return). Skipped runs
+    additionally include ``"skipped": True`` for backwards compatibility
+    with prior tests.
+    """
+    result = await _drain_changes_once(batch_size=batch_size)
+    if result["skipped_due_to_lock"]:
+        return {"published": 0, "failed": 0, "skipped": True}
+    logger.info(
+        "drain_changes_outbox finished",
+        extra={"published": result["published"], "failed": result["failed"]},
+    )
+    return {"published": result["published"], "failed": result["failed"]}
+
+
+async def start_changes_drain_loop(
+    interval: float | None = None,
+) -> asyncio.Task:
+    """Start the fast-tick async drain loop; return its ``asyncio.Task``.
+
+    The loop ticks every ``interval`` seconds (default resolved from
+    ``CHANGES_DRAIN_INTERVAL_SECONDS``, falling back to
+    ``DEFAULT_DRAIN_INTERVAL_SECONDS``). Each tick calls
+    ``_drain_changes_once`` and logs structured per-tick counts. Errors
+    inside the drain are logged but never kill the loop — the periodic
+    cron remains as a floor either way.
+
+    The loop honours cancellation: when the returned task is cancelled
+    the in-flight drain finishes (it owns its own transaction); the next
+    tick does not start.
+    """
+    resolved_interval = interval if interval is not None else _resolve_drain_interval()
+    logger.info(
+        "starting fast-tick changes drain loop",
+        extra={"interval_seconds": resolved_interval},
+    )
+
+    async def _loop() -> None:
+        while True:
+            try:
+                result = await _drain_changes_once()
+                logger.info(
+                    "fast drain tick",
+                    extra={
+                        "published": result["published"],
+                        "failed": result["failed"],
+                        "skipped_due_to_lock": result["skipped_due_to_lock"],
+                    },
+                )
+            except asyncio.CancelledError:
+                # Re-raise so the task ends on shutdown without being
+                # smothered by the broad except below.
+                raise
+            except Exception:
+                logger.warning("fast drain tick raised; will retry next tick", exc_info=True)
+            try:
+                await asyncio.sleep(resolved_interval)
+            except asyncio.CancelledError:
+                raise
+
+    return asyncio.create_task(_loop(), name="changes_drain_fast_loop")

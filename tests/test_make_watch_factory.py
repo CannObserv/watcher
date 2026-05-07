@@ -9,8 +9,7 @@ import pytest
 from sqlalchemy import select
 
 from src.core.models.watch import ContentType, Watch
-from src.information.core.models.info_item import InfoItem
-from src.information.core.models.info_spec import InfoSpec
+from tests._information_test_models import InfoItem, InfoSpec
 from tests.conftest import make_info_item, make_info_spec, make_snapshot, make_watch
 
 pytestmark = pytest.mark.integration

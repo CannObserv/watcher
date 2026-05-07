@@ -3,7 +3,7 @@
 from unittest.mock import MagicMock
 
 import pytest
-from information_client import InformationClient
+from archiver_client import ArchiverClient
 
 from src.core.extractors import CsvExcelExtractor, HtmlExtractor, PdfExtractor
 from src.core.fetchers.http import HttpFetcher
@@ -61,57 +61,57 @@ class TestServiceRegistryCustomInjection:
         assert extractor is mock_cls.return_value
 
 
-class TestServiceRegistryInformationClient:
-    def test_registry_provides_information_client(self, monkeypatch):
-        monkeypatch.setenv("INFORMATION_BASE_URL", "http://localhost:8020")
-        monkeypatch.setenv("INFORMATION_API_KEY", "test-key")
+class TestServiceRegistryArchiverClient:
+    def test_registry_provides_archiver_client(self, monkeypatch):
+        monkeypatch.setenv("ARCHIVER_BASE_URL", "http://localhost:8020")
+        monkeypatch.setenv("ARCHIVER_API_KEY", "test-key")
         reg = ServiceRegistry()
-        client = reg.get_information_client()
+        client = reg.get_archiver_client()
         assert client is not None
-        assert isinstance(client, InformationClient)
+        assert isinstance(client, ArchiverClient)
         assert client._base_url == "http://localhost:8020"
 
-    def test_registry_information_client_singleton(self, monkeypatch):
+    def test_registry_archiver_client_singleton(self, monkeypatch):
         """Same instance returned on repeated calls (lazy + cached)."""
-        monkeypatch.setenv("INFORMATION_API_KEY", "test-key")
+        monkeypatch.setenv("ARCHIVER_API_KEY", "test-key")
         reg = ServiceRegistry()
-        a = reg.get_information_client()
-        b = reg.get_information_client()
+        a = reg.get_archiver_client()
+        b = reg.get_archiver_client()
         assert a is b
 
-    def test_registry_information_client_explicit_injection_wins(self):
+    def test_registry_archiver_client_explicit_injection_wins(self):
         """If injected via constructor, env vars are ignored."""
-        fake = MagicMock(spec=InformationClient)
-        reg = ServiceRegistry(information_client=fake)
-        assert reg.get_information_client() is fake
+        fake = MagicMock(spec=ArchiverClient)
+        reg = ServiceRegistry(archiver_client=fake)
+        assert reg.get_archiver_client() is fake
 
     def test_registry_raises_when_api_key_missing(self, monkeypatch):
-        monkeypatch.delenv("INFORMATION_API_KEY", raising=False)
+        monkeypatch.delenv("ARCHIVER_API_KEY", raising=False)
         reg = ServiceRegistry()
-        with pytest.raises(RuntimeError, match="INFORMATION_API_KEY"):
-            reg.get_information_client()
+        with pytest.raises(RuntimeError, match="ARCHIVER_API_KEY"):
+            reg.get_archiver_client()
 
     @pytest.mark.asyncio
-    async def test_aclose_information_client_resets_lazy_state(self, monkeypatch):
+    async def test_aclose_archiver_client_resets_lazy_state(self, monkeypatch):
         """After aclose, next get rebuilds from env."""
-        monkeypatch.setenv("INFORMATION_API_KEY", "test-key")
+        monkeypatch.setenv("ARCHIVER_API_KEY", "test-key")
         reg = ServiceRegistry()
-        client = reg.get_information_client()
-        await reg.aclose_information_client()
+        client = reg.get_archiver_client()
+        await reg.aclose_archiver_client()
         # Internal state cleared
-        assert reg._information_client is None
+        assert reg._archiver_client is None
         # Re-acquire builds a new instance
-        monkeypatch.setenv("INFORMATION_API_KEY", "different-key")
-        new_client = reg.get_information_client()
+        monkeypatch.setenv("ARCHIVER_API_KEY", "different-key")
+        new_client = reg.get_archiver_client()
         assert new_client is not client
 
     @pytest.mark.asyncio
-    async def test_aclose_information_client_is_idempotent(self):
+    async def test_aclose_archiver_client_is_idempotent(self):
         """Calling aclose without a constructed client is a no-op."""
         reg = ServiceRegistry()
         # Should not raise even if no client was ever built.
-        await reg.aclose_information_client()
-        assert reg._information_client is None
+        await reg.aclose_archiver_client()
+        assert reg._archiver_client is None
 
 
 class TestSetRegistryForTesting:

@@ -3,7 +3,7 @@
 import hashlib
 from datetime import UTC, datetime
 
-from information_client import InformationClient
+from archiver_client import ArchiverClient
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from ulid import ULID
@@ -157,7 +157,7 @@ async def _run_check_pipeline(
     session: AsyncSession,
     *,
     resolved: ResolvedInfoSpec,
-    info_client: InformationClient | None = None,
+    info_client: ArchiverClient | None = None,
 ) -> dict:
     """Core check pipeline: hash, extract, diff, store.
 

@@ -22,8 +22,8 @@ from unittest.mock import AsyncMock, MagicMock
 from urllib.parse import urlparse
 
 import pytest
+from archiver_client import ArchiverClient, NotFound
 from httpx import ASGITransport, AsyncClient
-from information_client import InformationClient, NotFound
 from sqlalchemy import event, select, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
@@ -37,9 +37,11 @@ from src.core.models.watch import ContentType, Watch
 from src.core.probe import ProbeResult
 from src.core.registry import ServiceRegistry, set_registry_for_testing
 from src.dashboard.deps import get_dashboard_user
-from src.information.core.models.base import Base as InformationBase
-from src.information.core.models.info_item import InfoItem  # noqa: F401  registers mapper
-from src.information.core.models.info_spec import InfoSpec  # noqa: F401  registers mapper
+from tests._information_test_models import (
+    InfoItem,  # noqa: F401  registers mapper
+    InformationTestBase,  # noqa: F401
+    InfoSpec,  # noqa: F401  registers mapper
+)
 
 TEST_DATABASE_URL = os.environ.get("TEST_DATABASE_URL")
 if not TEST_DATABASE_URL:
@@ -74,14 +76,15 @@ def anyio_backend():
 async def test_engine():
     engine = create_async_engine(TEST_DATABASE_URL)
     async with engine.begin() as conn:
-        # Information service owns its own DeclarativeBase + ``information`` schema.
-        # Both must exist before tests run; mirror what alembic_information.ini
-        # would create in production.
+        # The `information` schema is owned in production by the Archiver
+        # service (sibling repo at /home/exedev/archiver). For tests we
+        # recreate it locally via tests/_information_test_models.py to
+        # satisfy the cross-schema FK from `watches.info_item_id`.
         await conn.execute(text("CREATE SCHEMA IF NOT EXISTS information"))
-        await conn.run_sync(InformationBase.metadata.create_all)
+        await conn.run_sync(InformationTestBase.metadata.create_all)
         # ``Base.metadata`` carries a stub ``information.info_items`` table
         # (see ``src/core/models/watch.py``). Restrict ``create_all`` to
-        # public-schema tables so we don't redefine InformationBase's table.
+        # public-schema tables so we don't redefine the test InfoItem table.
         watcher_tables = [t for t in Base.metadata.sorted_tables if t.schema in (None, "public")]
         await conn.run_sync(Base.metadata.create_all, tables=watcher_tables)
         # DB triggers are not part of the ORM model; recreate them here to mirror migrations.
@@ -115,7 +118,7 @@ async def test_engine():
         # ``information.*`` and is dropped separately below.
         watcher_tables = [t for t in Base.metadata.sorted_tables if t.schema in (None, "public")]
         await conn.run_sync(Base.metadata.drop_all, tables=watcher_tables)
-        await conn.run_sync(InformationBase.metadata.drop_all)
+        await conn.run_sync(InformationTestBase.metadata.drop_all)
         await conn.execute(text("DROP SCHEMA IF EXISTS information CASCADE"))
     await engine.dispose()
 
@@ -274,9 +277,9 @@ def make_change(db_session):
 
 @pytest.fixture
 def info_client(db_session, request):
-    """Mock InformationClient backed by the test DB's ``information.*`` tables.
+    """Mock ArchiverClient backed by the test DB's ``information.*`` tables.
 
-    Routes pull the SDK via ``get_registry().get_information_client()``.
+    Routes pull the SDK via ``get_registry().get_archiver_client()``.
     This fixture swaps the registry singleton's cached client for an
     AsyncMock whose ``list_info_items`` / ``get_primary_info_spec`` methods
     look up live rows in ``db_session`` so tests can seed an InfoItem +
@@ -287,7 +290,7 @@ def info_client(db_session, request):
     on the returned mock
     (e.g. ``info_client.get_primary_info_spec.side_effect = NotFound``).
     """
-    fake_client = MagicMock(spec=InformationClient)
+    fake_client = MagicMock(spec=ArchiverClient)
 
     async def _list_info_items():
         result = await db_session.execute(select(InfoItem))
@@ -325,10 +328,10 @@ def info_client(db_session, request):
     fake_client.get_primary_info_spec = AsyncMock(side_effect=_get_primary_info_spec)
 
     # Swap the registry singleton via the test seam so
-    # ``get_registry().get_information_client()`` returns this fake everywhere.
+    # ``get_registry().get_archiver_client()`` returns this fake everywhere.
     # ``set_registry_for_testing(None)`` on teardown lets the next call rebuild
     # a fresh default — no leakage between tests.
-    new_reg = ServiceRegistry(information_client=fake_client)
+    new_reg = ServiceRegistry(archiver_client=fake_client)
     set_registry_for_testing(new_reg)
     request.addfinalizer(lambda: set_registry_for_testing(None))
     return fake_client

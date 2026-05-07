@@ -48,7 +48,7 @@ async def hydrate_rate_limiter(limiter: DomainRateLimiter) -> None:
 async def lifespan(application: FastAPI):
     """Hydrate rate limiter, pre-warm SDK, start config poller and procrastinate worker.
 
-    Pre-warming the InformationClient on startup means a missing INFORMATION_API_KEY
+    Pre-warming the ArchiverClient on startup means a missing ARCHIVER_API_KEY
     crashes the API on boot, not on first request. The SDK is closed last on shutdown,
     after the worker is fully gathered and the procrastinate app has closed.
     """
@@ -57,9 +57,9 @@ async def lifespan(application: FastAPI):
     limiter = get_rate_limiter()
     await hydrate_rate_limiter(limiter)
 
-    # Pre-warm the InformationClient — raises if INFORMATION_API_KEY is unset.
+    # Pre-warm the ArchiverClient — raises if ARCHIVER_API_KEY is unset.
     registry = get_registry()
-    registry.get_information_client()
+    registry.get_archiver_client()
     logger.info("information client pre-warmed")
 
     poller_task = await start_config_poller(limiter, get_session_factory())
@@ -73,7 +73,7 @@ async def lifespan(application: FastAPI):
     await asyncio.gather(poller_task, worker_task, return_exceptions=True)
     await proc_app.close_async()
     # SDK close must be the last shutdown step (no consumer can still be in flight).
-    await registry.aclose_information_client()
+    await registry.aclose_archiver_client()
 
 
 app = FastAPI(title="watcher", version="0.1.0", lifespan=lifespan)

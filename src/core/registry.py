@@ -2,7 +2,7 @@
 
 import os
 
-from information_client import InformationClient
+from archiver_client import ArchiverClient
 
 from src.core.extractors import CsvExcelExtractor, HtmlExtractor, PdfExtractor
 from src.core.extractors.base import Extractor
@@ -15,7 +15,7 @@ _DEFAULT_EXTRACTOR_MAP: dict[str, type[Extractor]] = {
     "file": CsvExcelExtractor,
 }
 
-_DEFAULT_INFORMATION_BASE_URL = "http://localhost:8020"
+_DEFAULT_ARCHIVER_BASE_URL = "http://localhost:8020"
 
 
 class ServiceRegistry:
@@ -26,19 +26,19 @@ class ServiceRegistry:
         fetcher: Fetcher | None = None,
         extractor_map: dict[str, type[Extractor]] | None = None,
         *,
-        information_client: InformationClient | None = None,
+        archiver_client: ArchiverClient | None = None,
     ) -> None:
         """Initialise the registry with optional custom implementations.
 
         All parameters default to the production implementations when omitted.
-        ``information_client`` is keyword-only and, when provided, wins over env-driven
+        ``archiver_client`` is keyword-only and, when provided, wins over env-driven
         construction (test seam).
         """
         self._fetcher: Fetcher | None = fetcher
         self._extractor_map: dict[str, type[Extractor]] = (
             extractor_map if extractor_map is not None else _DEFAULT_EXTRACTOR_MAP
         )
-        self._information_client: InformationClient | None = information_client
+        self._archiver_client: ArchiverClient | None = archiver_client
 
     def get_fetcher(self) -> Fetcher:
         """Return the registered fetcher (HttpFetcher by default)."""
@@ -51,32 +51,30 @@ class ServiceRegistry:
         extractor_cls = self._extractor_map[content_type]
         return extractor_cls()
 
-    def get_information_client(self) -> InformationClient:
-        """Return the cached InformationClient, building from env on first call.
+    def get_archiver_client(self) -> ArchiverClient:
+        """Return the cached ArchiverClient, building from env on first call.
 
-        ``INFORMATION_BASE_URL`` defaults to http://localhost:8020.
-        ``INFORMATION_API_KEY`` is required; missing key raises RuntimeError so
+        ``ARCHIVER_BASE_URL`` defaults to http://localhost:8020.
+        ``ARCHIVER_API_KEY`` is required; missing key raises RuntimeError so
         misconfiguration crashes the API on boot, not on first request.
         """
-        if self._information_client is None:
-            base_url = os.environ.get("INFORMATION_BASE_URL", _DEFAULT_INFORMATION_BASE_URL)
-            api_key = os.environ.get("INFORMATION_API_KEY")
+        if self._archiver_client is None:
+            base_url = os.environ.get("ARCHIVER_BASE_URL", _DEFAULT_ARCHIVER_BASE_URL)
+            api_key = os.environ.get("ARCHIVER_API_KEY")
             if not api_key:
-                raise RuntimeError(
-                    "INFORMATION_API_KEY is not set; cannot construct InformationClient"
-                )
-            self._information_client = InformationClient(base_url=base_url, api_key=api_key)
-        return self._information_client
+                raise RuntimeError("ARCHIVER_API_KEY is not set; cannot construct ArchiverClient")
+            self._archiver_client = ArchiverClient(base_url=base_url, api_key=api_key)
+        return self._archiver_client
 
-    async def aclose_information_client(self) -> None:
-        """Close the cached InformationClient (no-op if not yet built).
+    async def aclose_archiver_client(self) -> None:
+        """Close the cached ArchiverClient (no-op if not yet built).
 
-        Resets internal state so a subsequent ``get_information_client`` call
+        Resets internal state so a subsequent ``get_archiver_client`` call
         rebuilds from current env. Safe to call multiple times.
         """
-        if self._information_client is not None:
-            await self._information_client.aclose()
-            self._information_client = None
+        if self._archiver_client is not None:
+            await self._archiver_client.aclose()
+            self._archiver_client = None
 
 
 _default_registry: "ServiceRegistry | None" = None
@@ -95,7 +93,7 @@ def set_registry_for_testing(registry: "ServiceRegistry | None") -> None:
 
     Pass ``None`` to reset; the next ``get_registry()`` call will rebuild a
     fresh default. Tests use this to inject a registry containing a fake
-    ``InformationClient`` without poking the private global directly.
+    ``ArchiverClient`` without poking the private global directly.
     """
     global _default_registry
     _default_registry = registry

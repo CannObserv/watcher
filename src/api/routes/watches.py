@@ -5,8 +5,8 @@ from datetime import UTC, datetime
 from typing import Annotated
 
 import httpx
+from archiver_client import AuthError, NotFound, ServerError
 from fastapi import APIRouter, Depends, HTTPException
-from information_client import AuthError, NotFound, ServerError
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -37,7 +37,7 @@ async def create_watch(
 ):
     """Create a new watch bound to an existing InfoItem.
 
-    The handler validates ``info_item_id`` via the InformationClient SDK,
+    The handler validates ``info_item_id`` via the ArchiverClient SDK,
     probes the resolved URL to populate ``effective_*`` fields, upserts the
     Domain row, and persists the Watch.
 
@@ -48,7 +48,7 @@ async def create_watch(
       → 503 with ``Retry-After: 30`` header.
     - URL probe ``httpx.HTTPError`` → 422 (target unreachable).
     """
-    info_client = get_registry().get_information_client()
+    info_client = get_registry().get_archiver_client()
     try:
         return await _create_watch(
             session=session,
@@ -67,8 +67,8 @@ async def create_watch(
             detail=f"info_item_id {data.info_item_id} does not exist",
         ) from exc
     except AuthError:
-        # Loud — operator-fixable misconfiguration of INFORMATION_API_KEY.
-        logger.exception("InformationClient auth failure during watch create")
+        # Loud — operator-fixable misconfiguration of ARCHIVER_API_KEY.
+        logger.exception("ArchiverClient auth failure during watch create")
         raise HTTPException(status_code=500, detail="Information service auth failed") from None
     except (ServerError, httpx.ConnectError, httpx.TimeoutException) as exc:
         logger.warning("Information service unreachable during watch create: %s", exc)
@@ -145,7 +145,7 @@ async def update_watch(
         updated_fields=list(updates.keys()),
     )
     if "is_active" in updates:
-        info_client = get_registry().get_information_client()
+        info_client = get_registry().get_archiver_client()
         try:
             resolved_url = await resolve_watch_url(watch, info_client)
         except NotFound:
@@ -195,7 +195,7 @@ async def delete_watch(
     if not watch.is_archived:
         raise HTTPException(status_code=409, detail="Archive watch before deleting")
 
-    info_client = get_registry().get_information_client()
+    info_client = get_registry().get_archiver_client()
     try:
         resolved_url = await resolve_watch_url(watch, info_client)
     except NotFound:

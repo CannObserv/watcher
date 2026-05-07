@@ -1,4 +1,4 @@
-"""Tests for the FastAPI lifespan: pre-warm + clean shutdown of InformationClient."""
+"""Tests for the FastAPI lifespan: pre-warm + clean shutdown of ArchiverClient."""
 
 import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -19,16 +19,16 @@ def _make_dummy_task() -> asyncio.Task:
 
 
 @pytest.mark.asyncio
-async def test_lifespan_prewarms_information_client(monkeypatch):
-    """Lifespan startup must call get_information_client (pre-warm)."""
-    monkeypatch.setenv("INFORMATION_API_KEY", "test-key")
+async def test_lifespan_prewarms_archiver_client(monkeypatch):
+    """Lifespan startup must call get_archiver_client (pre-warm)."""
+    monkeypatch.setenv("ARCHIVER_API_KEY", "test-key")
 
     fake_client = MagicMock()
     fake_client.aclose = AsyncMock()
 
     fake_reg = MagicMock()
-    fake_reg.get_information_client = MagicMock(return_value=fake_client)
-    fake_reg.aclose_information_client = AsyncMock()
+    fake_reg.get_archiver_client = MagicMock(return_value=fake_client)
+    fake_reg.aclose_archiver_client = AsyncMock()
 
     fake_proc_app = MagicMock()
     fake_proc_app.open_async = AsyncMock()
@@ -55,20 +55,20 @@ async def test_lifespan_prewarms_information_client(monkeypatch):
         async with lifespan(MagicMock()):
             pass
 
-    fake_reg.get_information_client.assert_called_once()
+    fake_reg.get_archiver_client.assert_called_once()
 
 
 @pytest.mark.asyncio
-async def test_lifespan_closes_information_client_on_shutdown(monkeypatch):
-    """Lifespan exit must call reg.aclose_information_client (clean shutdown)."""
-    monkeypatch.setenv("INFORMATION_API_KEY", "test-key")
+async def test_lifespan_closes_archiver_client_on_shutdown(monkeypatch):
+    """Lifespan exit must call reg.aclose_archiver_client (clean shutdown)."""
+    monkeypatch.setenv("ARCHIVER_API_KEY", "test-key")
 
     fake_client = MagicMock()
     fake_client.aclose = AsyncMock()
 
     fake_reg = MagicMock()
-    fake_reg.get_information_client = MagicMock(return_value=fake_client)
-    fake_reg.aclose_information_client = AsyncMock()
+    fake_reg.get_archiver_client = MagicMock(return_value=fake_client)
+    fake_reg.aclose_archiver_client = AsyncMock()
 
     fake_proc_app = MagicMock()
     fake_proc_app.open_async = AsyncMock()
@@ -95,23 +95,23 @@ async def test_lifespan_closes_information_client_on_shutdown(monkeypatch):
         async with lifespan(MagicMock()):
             pass
 
-    fake_reg.aclose_information_client.assert_awaited_once()
+    fake_reg.aclose_archiver_client.assert_awaited_once()
 
 
 @pytest.mark.asyncio
 async def test_lifespan_closes_client_after_proc_app(monkeypatch):
     """SDK aclose must run AFTER the procrastinate app closes (last shutdown step)."""
-    monkeypatch.setenv("INFORMATION_API_KEY", "test-key")
+    monkeypatch.setenv("ARCHIVER_API_KEY", "test-key")
 
     call_order: list[str] = []
 
     fake_reg = MagicMock()
-    fake_reg.get_information_client = MagicMock()
+    fake_reg.get_archiver_client = MagicMock()
 
     async def _aclose_info():
-        call_order.append("aclose_information_client")
+        call_order.append("aclose_archiver_client")
 
-    fake_reg.aclose_information_client = AsyncMock(side_effect=_aclose_info)
+    fake_reg.aclose_archiver_client = AsyncMock(side_effect=_aclose_info)
 
     fake_proc_app = MagicMock()
     fake_proc_app.open_async = AsyncMock()
@@ -142,4 +142,4 @@ async def test_lifespan_closes_client_after_proc_app(monkeypatch):
         async with lifespan(MagicMock()):
             pass
 
-    assert call_order == ["proc_app.close_async", "aclose_information_client"]
+    assert call_order == ["proc_app.close_async", "aclose_archiver_client"]

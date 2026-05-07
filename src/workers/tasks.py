@@ -5,9 +5,9 @@ from urllib.parse import urlparse
 
 import httpx
 import procrastinate
-from information_client import NotFound
-from information_client.defaults import fetch_render, fetch_timeout_seconds
-from information_client.errors import ServerError
+from archiver_client import NotFound
+from archiver_client.defaults import fetch_render, fetch_timeout_seconds
+from archiver_client.errors import ServerError
 from sqlalchemy import or_, select
 from ulid import ULID
 
@@ -58,7 +58,7 @@ def _watch_base_metadata(watch: Watch) -> dict:
         max_attempts=3,
         exponential_wait=5,
         # Builtins cover fetcher errors; httpx + ServerError cover the
-        # InformationClient SDK (none of which subclass the Python builtins,
+        # ArchiverClient SDK (none of which subclass the Python builtins,
         # so they would otherwise fail the task on first attempt).
         # AuthError, NotFound, and ValidationError are NOT retried —
         # those are operator-fixable; they propagate loud or are handled
@@ -101,7 +101,7 @@ async def check_watch(watch_id: str, registry: ServiceRegistry | None = None) ->
 
         # Resolve the primary InfoSpec once; URL + fetch defaults come from the
         # spec, not the Watch row.
-        info_client = reg.get_information_client()
+        info_client = reg.get_archiver_client()
         try:
             resolved = await resolve_primary(info_client, str(watch.info_item_id))
         except NotFound:

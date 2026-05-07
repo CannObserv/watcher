@@ -148,7 +148,7 @@ async def test_notification_config(
     success = False
     reason = "Internal error during dispatch"
     try:
-        info_client = get_registry().get_information_client()
+        info_client = get_registry().get_archiver_client()
         try:
             resolved_url = await resolve_watch_url(watch, info_client)
         except Exception as exc:

@@ -15,7 +15,9 @@ the helper does not silently re-introduce model coupling if the column is ever
 renamed or scoped onto a different mapper.
 """
 
+import logging
 import os
+import re
 import subprocess
 from collections.abc import AsyncGenerator
 from datetime import UTC, datetime
@@ -26,7 +28,7 @@ from urllib.parse import urlparse
 import pytest
 from archiver_client import ArchiverClient, NotFound
 from httpx import ASGITransport, AsyncClient
-from sqlalchemy import event, select, text
+from sqlalchemy import create_engine, event, select, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 
@@ -43,6 +45,8 @@ from tests._information_test_models import (
     InfoItem,  # noqa: F401  registers mapper
     InfoSpec,  # noqa: F401  registers mapper
 )
+
+logger = logging.getLogger(__name__)
 
 ARCHIVER_REPO_PATH = Path(os.environ.get("ARCHIVER_REPO_PATH", "/home/exedev/archiver"))
 
@@ -75,6 +79,96 @@ def anyio_backend():
     return "asyncio"
 
 
+# Requires the ``revision: str`` PEP 526 annotation that the modern
+# alembic generator emits. Older or hand-edited version files without the
+# annotation cause ``_archiver_alembic_head`` to return None and the caller
+# falls through to the subprocess invocation — still correct, just no cache
+# benefit.
+_ALEMBIC_REVISION_RE = re.compile(r'^revision:\s*str\s*=\s*["\']([^"\']+)["\']', re.MULTILINE)
+_ALEMBIC_DOWN_REVISION_RE = re.compile(r'^down_revision:[^=]*=\s*["\']([^"\']+)["\']', re.MULTILINE)
+
+
+def _archiver_alembic_head() -> str | None:
+    """Return Archiver's HEAD alembic revision, or ``None`` if undetectable.
+
+    Walks ``alembic/versions/*.py`` and identifies the leaf revision (the
+    one no other revision points back to via ``down_revision``). Pure
+    file-parse — no Archiver imports, no subprocess, sub-millisecond.
+
+    Returns ``None`` rather than raising when the migrations directory is
+    missing or empty so the caller can fall through to the existing
+    subprocess invocation (which has its own clearer error message).
+    """
+    versions_dir = ARCHIVER_REPO_PATH / "alembic" / "versions"
+    if not versions_dir.is_dir():
+        return None
+
+    revisions: set[str] = set()
+    down_revisions: set[str] = set()
+    for path in versions_dir.glob("*.py"):
+        try:
+            text_content = path.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        rev_match = _ALEMBIC_REVISION_RE.search(text_content)
+        if not rev_match:
+            continue
+        revisions.add(rev_match.group(1))
+        down_match = _ALEMBIC_DOWN_REVISION_RE.search(text_content)
+        if down_match:
+            down_revisions.add(down_match.group(1))
+
+    heads = revisions - down_revisions
+    if len(heads) != 1:
+        # Empty (no migrations) or branched (multi-head) — let caller fall through.
+        return None
+    return heads.pop()
+
+
+def _to_sync_url(database_url: str) -> str:
+    """Translate an async SQLAlchemy URL to a sync one for the cache probe.
+
+    The probe is a one-shot ``SELECT version_num`` — async machinery would
+    add startup cost we're explicitly trying to avoid. ``psycopg`` (v3) is
+    a project dependency via ``procrastinate[psycopg]``, so it's always
+    available.
+    """
+    if database_url.startswith("postgresql+asyncpg://"):
+        return "postgresql+psycopg://" + database_url[len("postgresql+asyncpg://") :]
+    return database_url
+
+
+def _information_schema_at_revision(database_url: str, expected_revision: str) -> bool:
+    """Return True iff ``information.alembic_version`` already holds ``expected_revision``.
+
+    Cheap pre-check: a single ``SELECT version_num`` against the test DB.
+    Returns False on any error (missing schema, missing table, connection
+    refused, multiple rows) so the caller falls through to the full
+    subprocess invocation. Never raises — test setup must not crash on a
+    cache-probe failure.
+    """
+    sync_url = _to_sync_url(database_url)
+    engine = None
+    try:
+        engine = create_engine(sync_url)
+        with engine.connect() as conn:
+            result = conn.execute(text("SELECT version_num FROM information.alembic_version"))
+            rows = result.fetchall()
+    except Exception as exc:  # noqa: BLE001 - pre-check must never crash setup
+        logger.debug("archiver alembic cache probe failed: %s", exc)
+        return False
+    finally:
+        if engine is not None:
+            try:
+                engine.dispose()
+            except Exception:  # noqa: BLE001
+                pass
+
+    if len(rows) != 1:
+        return False
+    return rows[0][0] == expected_revision
+
+
 def _apply_archiver_migrations(database_url: str) -> None:
     """Run the Archiver service's alembic migrations against ``database_url``.
 
@@ -85,12 +179,27 @@ def _apply_archiver_migrations(database_url: str) -> None:
     alembic instead of mirroring the schema in `tests/_information_test_models.py`
     — that way schema drift is impossible: the same migrations that build prod
     build the test schema.
+
+    Cache-check (#150): if ``information.alembic_version`` already matches
+    Archiver's HEAD, skip the subprocess entirely. Saves the ~1-2 s
+    ``uv run alembic`` cold start on warm test sessions. The companion
+    teardown in ``test_engine`` no longer drops the ``information``
+    schema, so warm reruns hit the cache.
     """
     if not (ARCHIVER_REPO_PATH / "alembic.ini").is_file():
         raise RuntimeError(
             f"Archiver repo not found at {ARCHIVER_REPO_PATH}. "
             "Set ARCHIVER_REPO_PATH or clone the sibling repo."
         )
+
+    head_revision = _archiver_alembic_head()
+    if head_revision is not None and _information_schema_at_revision(database_url, head_revision):
+        logger.debug(
+            "archiver schema already at HEAD %s — skipping alembic subprocess",
+            head_revision,
+        )
+        return
+
     env = {**os.environ, "ARCHIVER_DATABASE_URL": database_url}
     try:
         subprocess.run(
@@ -148,11 +257,15 @@ async def test_engine():
     yield engine
     async with engine.begin() as conn:
         # Drop only public-schema watcher tables; the `information` schema
-        # was created by Archiver's alembic above and is dropped wholesale
-        # below so the next session starts fresh.
+        # is intentionally left alive so the next pytest session's
+        # ``_apply_archiver_migrations`` cache-check (#150) finds an
+        # already-current ``information.alembic_version`` and skips the
+        # ~1-2 s ``uv run alembic`` subprocess. Per-test data isolation
+        # for ``information.*`` rows is handled by ``db_session``'s
+        # savepoint rollback, so leaving the empty schema in place is
+        # safe between sessions.
         watcher_tables = [t for t in Base.metadata.sorted_tables if t.schema in (None, "public")]
         await conn.run_sync(Base.metadata.drop_all, tables=watcher_tables)
-        await conn.execute(text("DROP SCHEMA IF EXISTS information CASCADE"))
     await engine.dispose()
 
 

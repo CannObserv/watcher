@@ -1,13 +1,14 @@
 #!/usr/bin/env bash
-# Smoke walkthrough for Phase 2c — exercises Information service + Watcher API + Redis.
+# Smoke walkthrough for Phase 2c — exercises Archiver service + Watcher API + Redis.
 #
 # Requires:
-#   - Information service running on $ARCHIVER_BASE_URL (default http://localhost:8020).
-#     If not installed as systemd, start dev server:
-#       uv run uvicorn src.information.api.main:app --host 0.0.0.0 --port 8020 --reload &
+#   - Archiver service running on $ARCHIVER_BASE_URL (default http://localhost:8020).
+#     If not installed as systemd, start dev server from the sibling repo:
+#       cd /home/exedev/archiver && uv run uvicorn src.api.main:app --host 0.0.0.0 --port 8021 --reload &
+#       (then set ARCHIVER_BASE_URL=http://localhost:8021)
 #   - Watcher running on http://localhost:8001 (dev server) or http://localhost:8000 (systemd).
 #   - Redis running on $REDIS_URL.
-#   - ARCHIVER_API_KEY env var (matches the X-API-Key header the Information service requires).
+#   - ARCHIVER_API_KEY env var (matches the X-API-Key header the Archiver service requires).
 #   - WATCHER_API_KEY env var (matches the X-API-Key header the Watcher API requires).
 set -euo pipefail
 export $(cat /etc/watcher/.env .env 2>/dev/null | xargs)

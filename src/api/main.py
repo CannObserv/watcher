@@ -60,7 +60,7 @@ async def lifespan(application: FastAPI):
     # Pre-warm the ArchiverClient — raises if ARCHIVER_API_KEY is unset.
     registry = get_registry()
     registry.get_archiver_client()
-    logger.info("information client pre-warmed")
+    logger.info("archiver client pre-warmed")
 
     poller_task = await start_config_poller(limiter, get_session_factory())
 

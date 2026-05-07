@@ -16,8 +16,10 @@ renamed or scoped onto a different mapper.
 """
 
 import os
+import subprocess
 from collections.abc import AsyncGenerator
 from datetime import UTC, datetime
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 from urllib.parse import urlparse
 
@@ -39,9 +41,10 @@ from src.core.registry import ServiceRegistry, set_registry_for_testing
 from src.dashboard.deps import get_dashboard_user
 from tests._information_test_models import (
     InfoItem,  # noqa: F401  registers mapper
-    InformationTestBase,  # noqa: F401
     InfoSpec,  # noqa: F401  registers mapper
 )
+
+ARCHIVER_REPO_PATH = Path(os.environ.get("ARCHIVER_REPO_PATH", "/home/exedev/archiver"))
 
 TEST_DATABASE_URL = os.environ.get("TEST_DATABASE_URL")
 if not TEST_DATABASE_URL:
@@ -72,19 +75,44 @@ def anyio_backend():
     return "asyncio"
 
 
+def _apply_archiver_migrations(database_url: str) -> None:
+    """Run the Archiver service's alembic migrations against ``database_url``.
+
+    The `information` schema is owned in production by the sibling Archiver
+    repo (`/home/exedev/archiver`). Watcher tests need real `info_items` /
+    `info_specs` tables so the cross-schema FK from `watches.info_item_id`
+    resolves and seeded rows survive the FK check. We invoke archiver's own
+    alembic instead of mirroring the schema in `tests/_information_test_models.py`
+    — that way schema drift is impossible: the same migrations that build prod
+    build the test schema.
+    """
+    if not (ARCHIVER_REPO_PATH / "alembic.ini").is_file():
+        raise RuntimeError(
+            f"Archiver repo not found at {ARCHIVER_REPO_PATH}. "
+            "Set ARCHIVER_REPO_PATH or clone the sibling repo."
+        )
+    env = {**os.environ, "ARCHIVER_DATABASE_URL": database_url}
+    subprocess.run(
+        ["uv", "run", "alembic", "upgrade", "head"],
+        cwd=str(ARCHIVER_REPO_PATH),
+        env=env,
+        check=True,
+        capture_output=True,
+    )
+
+
 @pytest.fixture(scope="session")
 async def test_engine():
+    # Build the `information` schema by running Archiver's own alembic
+    # migrations against TEST_DATABASE_URL. Single source of schema truth.
+    _apply_archiver_migrations(TEST_DATABASE_URL)
+
     engine = create_async_engine(TEST_DATABASE_URL)
     async with engine.begin() as conn:
-        # The `information` schema is owned in production by the Archiver
-        # service (sibling repo at /home/exedev/archiver). For tests we
-        # recreate it locally via tests/_information_test_models.py to
-        # satisfy the cross-schema FK from `watches.info_item_id`.
-        await conn.execute(text("CREATE SCHEMA IF NOT EXISTS information"))
-        await conn.run_sync(InformationTestBase.metadata.create_all)
         # ``Base.metadata`` carries a stub ``information.info_items`` table
-        # (see ``src/core/models/watch.py``). Restrict ``create_all`` to
-        # public-schema tables so we don't redefine the test InfoItem table.
+        # (see ``src/core/models/watch.py``) for cross-schema FK resolution.
+        # Restrict ``create_all`` to public-schema tables — the `information`
+        # schema is owned by Archiver's alembic above.
         watcher_tables = [t for t in Base.metadata.sorted_tables if t.schema in (None, "public")]
         await conn.run_sync(Base.metadata.create_all, tables=watcher_tables)
         # DB triggers are not part of the ORM model; recreate them here to mirror migrations.
@@ -111,14 +139,11 @@ async def test_engine():
         )
     yield engine
     async with engine.begin() as conn:
-        # ``Base.metadata`` carries a stub ``information.info_items`` table
-        # (see ``src/core/models/watch.py``) so the cross-schema FK on
-        # ``watches.info_item_id`` resolves at import time. Drop only
-        # public-schema tables here; the Information service owns
-        # ``information.*`` and is dropped separately below.
+        # Drop only public-schema watcher tables; the `information` schema
+        # was created by Archiver's alembic above and is dropped wholesale
+        # below so the next session starts fresh.
         watcher_tables = [t for t in Base.metadata.sorted_tables if t.schema in (None, "public")]
         await conn.run_sync(Base.metadata.drop_all, tables=watcher_tables)
-        await conn.run_sync(InformationTestBase.metadata.drop_all)
         await conn.execute(text("DROP SCHEMA IF EXISTS information CASCADE"))
     await engine.dispose()
 

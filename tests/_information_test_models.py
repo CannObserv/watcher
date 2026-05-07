@@ -1,17 +1,22 @@
-"""Test-only ORM mirror of the Archiver service's `information` schema.
+"""Test-only ORM mappers for the Archiver service's `information` schema.
 
-The production models live in `/home/exedev/archiver/src/core/models/`.
-Watcher tests need to seed real `info_items` / `info_specs` rows so the
-cross-schema FK from `watches.info_item_id` resolves; these declarations
-exist solely as test scaffolding.
+The schema itself (table DDL, indexes, constraints) is provisioned in tests
+by running Archiver's own alembic migrations against the test database — see
+``_apply_archiver_migrations`` in ``tests/conftest.py``. These class
+declarations are *mappers*, not DDL: they bind to tables that already exist
+and let watcher tests use ergonomic ORM inserts/queries.
 
-If the Archiver schema changes, mirror the change here. Production watcher
-code never imports from this module.
+Production watcher code never imports from this module.
+
+Drift contract: column names + types here must intersect with the production
+schema. If Archiver adds a NOT NULL column without a server default, inserts
+through these mappers will start failing — that's the intended signal to
+update this file (or the test that needs the new column).
 """
 
 from datetime import UTC, datetime
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Index, Integer, String, func, text
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, func
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 from ulid import ULID
@@ -47,6 +52,7 @@ class InfoItem(InformationTestBase):
 
 class InfoSpec(InformationTestBase):
     __tablename__ = "info_specs"
+    __table_args__ = {"schema": "information"}
 
     info_spec_id: Mapped[ULID] = mapped_column(ULIDType(), primary_key=True, default=generate_ulid)
     info_item_id: Mapped[ULID] = mapped_column(
@@ -63,15 +69,4 @@ class InfoSpec(InformationTestBase):
         DateTime(timezone=True),
         default=lambda: datetime.now(UTC),
         server_default=func.now(),
-    )
-
-    __table_args__ = (
-        Index(
-            "uq_info_specs_active_priority_per_item",
-            "info_item_id",
-            "priority",
-            unique=True,
-            postgresql_where=text("active"),
-        ),
-        {"schema": "information"},
     )

@@ -77,25 +77,3 @@ class TestWatchEventImmutable:
         event = make_event(WatchEventType.CHANGE_DETECTED)
         with pytest.raises(Exception):
             event.watch_id = "other"
-
-
-class TestAppriseNotifyType:
-    def test_change_detected_is_info(self):
-        event = make_event(WatchEventType.CHANGE_DETECTED)
-        assert event.apprise_notify_type == "info"
-
-    def test_watch_error_is_failure(self):
-        event = make_event(WatchEventType.WATCH_ERROR)
-        assert event.apprise_notify_type == "failure"
-
-    def test_watch_recovered_is_success(self):
-        event = make_event(WatchEventType.WATCH_RECOVERED)
-        assert event.apprise_notify_type == "success"
-
-    def test_watch_archived_is_warning(self):
-        event = make_event(WatchEventType.WATCH_ARCHIVED)
-        assert event.apprise_notify_type == "warning"
-
-    def test_watch_deleted_is_warning(self):
-        event = make_event(WatchEventType.WATCH_DELETED)
-        assert event.apprise_notify_type == "warning"

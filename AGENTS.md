@@ -132,6 +132,24 @@ uv run alembic revision --autogenerate -m "description"
 
 Full reference: `docs/COMMANDS.md`.
 
+### Tests require the Archiver sibling repo
+
+Watcher's `tests/conftest.py` provisions the cross-schema `information.*`
+test tables by subprocess-invoking Archiver's own alembic against
+`TEST_DATABASE_URL`. Without the sibling repo on disk, tests fail at
+session start with "Archiver repo not found at /home/exedev/archiver".
+
+Setup:
+
+```bash
+# Default location:
+git clone <archiver-repo> /home/exedev/archiver
+cd /home/exedev/archiver && uv sync
+```
+
+Override via `ARCHIVER_REPO_PATH=/some/other/path` if you keep the
+sibling repo elsewhere.
+
 ## Agent Skills
 
 Skills live in `skills/` (agentskills.io) and `.claude/skills/` (Claude Code). Local overrides in `skills/` shadow vendor submodules in `skills-vendor/`.

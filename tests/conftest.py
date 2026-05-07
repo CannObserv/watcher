@@ -92,13 +92,21 @@ def _apply_archiver_migrations(database_url: str) -> None:
             "Set ARCHIVER_REPO_PATH or clone the sibling repo."
         )
     env = {**os.environ, "ARCHIVER_DATABASE_URL": database_url}
-    subprocess.run(
-        ["uv", "run", "alembic", "upgrade", "head"],
-        cwd=str(ARCHIVER_REPO_PATH),
-        env=env,
-        check=True,
-        capture_output=True,
-    )
+    try:
+        subprocess.run(
+            ["uv", "run", "alembic", "upgrade", "head"],
+            cwd=str(ARCHIVER_REPO_PATH),
+            env=env,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    except subprocess.CalledProcessError as e:
+        raise RuntimeError(
+            f"archiver alembic upgrade failed (exit {e.returncode}):\n"
+            f"--- stdout ---\n{e.stdout}\n"
+            f"--- stderr ---\n{e.stderr}"
+        ) from e
 
 
 @pytest.fixture(scope="session")

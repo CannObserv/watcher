@@ -150,6 +150,12 @@ cd /home/exedev/archiver && uv sync
 Override via `ARCHIVER_REPO_PATH=/some/other/path` if you keep the
 sibling repo elsewhere.
 
+**pytest-xdist is unsupported.** The fixture writes to a single
+`TEST_DATABASE_URL`; multiple xdist workers would race on `alembic
+upgrade head` and on watcher-table teardown. Tracked in #150 —
+worker-id-suffixed databases + a coordination lock are the rework when
+xdist is actually adopted.
+
 ## Agent Skills
 
 Skills live in `skills/` (agentskills.io) and `.claude/skills/` (Claude Code). Local overrides in `skills/` shadow vendor submodules in `skills-vendor/`.

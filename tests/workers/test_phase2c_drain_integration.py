@@ -102,7 +102,7 @@ async def test_check_to_drain_to_stream(
     fake_fetcher = MagicMock()
     fake_fetcher.fetch = AsyncMock(side_effect=fetch_results)
 
-    reg = ServiceRegistry(fetcher=fake_fetcher, information_client=fake_client)
+    reg = ServiceRegistry(fetcher=fake_fetcher, archiver_client=fake_client)
 
     # Redirect tasks_mod's session factory + storage to the test DB / tmp_path.
     monkeypatch.setattr(tasks_mod, "default_storage", LocalStorage(base_dir=tmp_path))

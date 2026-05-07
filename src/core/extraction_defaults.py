@@ -1,8 +1,9 @@
-"""Translate an InfoSpec ``extraction`` block into HtmlExtractor config.
+"""Consumer-side defaults and translation helpers for InfoSpec consumption.
 
-Shared between Watcher's check pipeline and the Information service's
-``preview_extraction`` tool — both need to map the same InfoSpec document
-shape onto the extractor's ``selectors`` list.
+Watcher applies these when resolving an InfoSpec document into the runtime
+arguments needed by ``HtmlExtractor`` and the fetch layer. The same logic is
+mirrored in the Archiver service's authoring tools — when changing this module,
+mirror the change there.
 """
 
 

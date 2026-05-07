@@ -11,7 +11,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from information_client import InformationClient
+from archiver_client import ArchiverClient
 
 
 @dataclass(frozen=True)
@@ -38,7 +38,7 @@ def _document_to_dict(doc: Any) -> dict[str, Any]:
 
 
 async def resolve_primary(
-    client: InformationClient,
+    client: ArchiverClient,
     info_item_id: str,
     *,
     force_refresh: bool = False,

@@ -2,7 +2,7 @@
 
 Phase 2c contract: ``url`` and ``fetch_config`` no longer live on the Watch
 model — they are owned by the canonical InfoSpec and resolved at runtime via
-the InformationClient SDK. ``WatchCreate`` accepts ``info_item_id`` instead.
+the ArchiverClient SDK. ``WatchCreate`` accepts ``info_item_id`` instead.
 ``WatchResponse`` exposes neither legacy field.
 """
 

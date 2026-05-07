@@ -13,7 +13,7 @@ from unittest.mock import AsyncMock
 
 import httpx
 import pytest
-from information_client import AuthError, NotFound, ServerError
+from archiver_client import AuthError, NotFound, ServerError
 from sqlalchemy import select
 from ulid import ULID
 

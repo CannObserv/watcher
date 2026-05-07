@@ -6,7 +6,7 @@ timeout, ServerError) in addition to Python builtins. Operator-fixable errors
 """
 
 import httpx
-from information_client.errors import AuthError, NotFound, ServerError, ValidationError
+from archiver_client.errors import AuthError, NotFound, ServerError, ValidationError
 
 from src.workers.tasks import check_watch
 

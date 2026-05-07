@@ -56,7 +56,7 @@ class HttpFetcher:
 
         Idempotent: safe to call when no fetch has happened yet (``_client``
         is still None) or when already closed. Mirrors the registry's
-        ``aclose_information_client`` pattern.
+        ``aclose_archiver_client`` pattern.
         """
         if self._client is not None:
             await self._client.aclose()

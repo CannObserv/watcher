@@ -7,10 +7,10 @@ from datetime import UTC, datetime
 from typing import Literal
 
 import httpx
+from archiver_client import AuthError, NotFound, ServerError
 from cryptography.fernet import InvalidToken
 from fastapi import APIRouter, BackgroundTasks, Depends, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
-from information_client import AuthError, NotFound, ServerError
 from jinja2 import TemplateError
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -222,7 +222,7 @@ async def watches_page(
 @router.get("/watches/new")
 async def watch_create_form(request: Request):
     """Watch creation form."""
-    info_client = get_registry().get_information_client()
+    info_client = get_registry().get_archiver_client()
     try:
         info_items = await info_client.list_info_items()
     except (ServerError, httpx.ConnectError, httpx.TimeoutException) as exc:
@@ -253,7 +253,7 @@ async def watch_create_submit(
     session: AsyncSession = Depends(get_db_session),
 ):
     """Handle watch creation form submission."""
-    info_client = get_registry().get_information_client()
+    info_client = get_registry().get_archiver_client()
     errors = []
     if not name.strip():
         errors.append("Name is required")
@@ -298,7 +298,7 @@ async def watch_create_submit(
     except NotFound:
         return await _render_with_flash(f"Information Item {info_item_id} does not exist")
     except AuthError:
-        logger.exception("InformationClient auth failure during dashboard create")
+        logger.exception("ArchiverClient auth failure during dashboard create")
         return await _render_with_flash("Information service auth failed")
     except (ServerError, httpx.ConnectError, httpx.TimeoutException) as exc:
         return await _render_with_flash(f"Information service unavailable: {exc}")
@@ -318,7 +318,7 @@ async def watch_detail_page(
     watch = await get_watch_detail(session, watch_id)
     if not watch:
         return templates.TemplateResponse(request, "pages/404.html", status_code=404)
-    info_client = get_registry().get_information_client()
+    info_client = get_registry().get_archiver_client()
     resolved_url = await resolve_watch_url(watch, info_client)
     profiles = await get_watch_profiles(session, watch.id)
     notifications = await get_watch_notifications(session, watch.id)
@@ -444,7 +444,7 @@ async def watch_screenshot_recapture(
     if snapshot is None:
         raise HTTPException(status_code=404, detail="No snapshot available for this watch")
 
-    info_client = get_registry().get_information_client()
+    info_client = get_registry().get_archiver_client()
     resolved_url = await resolve_watch_url(watch, info_client)
     result = await capture_screenshot(resolved_url)
     if result is None:
@@ -808,7 +808,7 @@ async def watch_archive(
     # still gets the notification, and log so the missing/orphaned InfoSpec
     # surfaces in monitoring.
     try:
-        info_client = get_registry().get_information_client()
+        info_client = get_registry().get_archiver_client()
         resolved_url = await resolve_watch_url(watch, info_client)
     except Exception:
         logger.exception(
@@ -2300,7 +2300,7 @@ async def watch_notification_test_result(
     success = False
     reason = "Internal error during dispatch"
     try:
-        info_client = get_registry().get_information_client()
+        info_client = get_registry().get_archiver_client()
         try:
             resolved_url = await resolve_watch_url(watch, info_client)
         except Exception as exc:

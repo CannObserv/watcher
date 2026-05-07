@@ -3,7 +3,7 @@
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 
-from information_client import InformationClient
+from archiver_client import ArchiverClient
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -21,7 +21,7 @@ from src.core.probe import ProbeResult
 logger = get_logger(__name__)
 
 
-async def resolve_watch_url(watch: Watch, client: InformationClient) -> str:
+async def resolve_watch_url(watch: Watch, client: ArchiverClient) -> str:
     """Resolve a watch's current target URL from the primary InfoSpec.
 
     Used at notification/event-emission time so ``watch_url`` reflects the
@@ -35,7 +35,7 @@ async def resolve_watch_url(watch: Watch, client: InformationClient) -> str:
 async def create_watch(
     session: AsyncSession,
     probe_fn: Callable[[str], Awaitable[ProbeResult]],
-    info_client: InformationClient,
+    info_client: ArchiverClient,
     *,
     name: str,
     info_item_id: str,

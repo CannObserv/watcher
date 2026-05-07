@@ -7,11 +7,9 @@ import re
 
 import pytest
 from httpx import AsyncClient
+from ulid import ULID
 
-from src.core.crypto import encrypt_apprise_url
 from src.core.models.notification_template import NotificationTemplate
-
-VALID_URL = "json://hooks.example.com/notify"
 
 
 def _extract_preview_select_options(html: str) -> list[str]:
@@ -61,7 +59,7 @@ async def _make_template(db_session, title="T", **kwargs) -> NotificationTemplat
     events = kwargs.pop("events", ["change_detected"])
     tpl = NotificationTemplate(
         title=title,
-        apprise_url=encrypt_apprise_url(VALID_URL),
+        remote_channel_id=str(ULID()),
         channel_hint="json",
         events=events,
         **kwargs,

@@ -410,7 +410,7 @@ class TestWatchNotificationConfigCreate:
     def test_content_config_accepted(self):
         """WatchNotificationConfigCreate accepts content_config and it's accessible."""
         schema = WatchNotificationConfigCreate(
-            apprise_url="slack://T/A/B/#chan",
+            remote_channel_id="01HV0000000000000000000099",
             content_config=ContentConfig(default=ContentOptions(include_domain=True)),
         )
         assert schema.content_config is not None
@@ -419,7 +419,7 @@ class TestWatchNotificationConfigCreate:
     def test_content_config_optional(self):
         """content_config defaults to None."""
         schema = WatchNotificationConfigCreate(
-            apprise_url="slack://T/A/B/#chan",
+            remote_channel_id="01HV0000000000000000000099",
         )
         assert schema.content_config is None
 
@@ -466,7 +466,7 @@ class TestNotificationTemplateCreate:
         """NotificationTemplateCreate accepts content_config."""
         schema = NotificationTemplateCreate(
             title="My Template",
-            apprise_url="slack://T/A/B/#chan",
+            remote_channel_id="01HV0000000000000000000099",
             content_config=ContentConfig(default=ContentOptions(include_diff_snippet=True)),
         )
         assert schema.content_config is not None
@@ -476,7 +476,7 @@ class TestNotificationTemplateCreate:
         """content_config defaults to None."""
         schema = NotificationTemplateCreate(
             title="My Template",
-            apprise_url="slack://T/A/B/#chan",
+            remote_channel_id="01HV0000000000000000000099",
         )
         assert schema.content_config is None
 

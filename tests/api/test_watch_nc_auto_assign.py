@@ -9,13 +9,10 @@ from httpx import AsyncClient
 from sqlalchemy import select
 from ulid import ULID
 
-from src.core.crypto import encrypt_apprise_url
 from src.core.models.notification_template import DomainNcRef, NotificationTemplate, WatchNcRef
 from tests.conftest import make_watch
 
 pytestmark = pytest.mark.integration
-
-VALID_URL = "json://hooks.example.com/notify"
 
 
 async def test_watch_create_does_not_seed_global_default_template(client: AsyncClient, db_session):
@@ -25,7 +22,7 @@ async def test_watch_create_does_not_seed_global_default_template(client: AsyncC
     """
     tpl = NotificationTemplate(
         title="Global Slack",
-        apprise_url=encrypt_apprise_url(VALID_URL),
+        remote_channel_id=str(ULID()),
         channel_hint="json",
         events=["change_detected"],
         is_global_default=True,
@@ -65,7 +62,7 @@ async def test_watch_create_does_not_seed_domain_default_template(client: AsyncC
 
     tpl = NotificationTemplate(
         title="Domain Template",
-        apprise_url=encrypt_apprise_url(VALID_URL),
+        remote_channel_id=str(ULID()),
         channel_hint="json",
         events=["change_detected"],
         is_global_default=False,

@@ -41,7 +41,7 @@ def _make_mock_nc(
     channel_hint="slack",
     events=None,
     is_active=True,
-    apprise_url="encrypted_token",
+    remote_channel_id=None,
     title=None,
 ):
     """Build a minimal NotificationConfig-like mock."""
@@ -50,7 +50,7 @@ def _make_mock_nc(
     nc.channel_hint = channel_hint
     nc.events = events if events is not None else ["change_detected"]
     nc.is_active = is_active
-    nc.apprise_url = apprise_url
+    nc.remote_channel_id = remote_channel_id or str(ULID())
     nc.title = title
     nc.content_config = None
     return nc
@@ -210,8 +210,7 @@ class TestWatchNotificationsPartialRoute:
         """Title appears in the notification row when the nc has a non-null title."""
         watch = _make_mock_watch()
         nc = _make_mock_nc(title="Slack ops channel")
-        with patch("src.dashboard.routes.decrypt_apprise_url", return_value="json://x.com"):
-            resp = await self._get(str(watch.id), mock_watch=watch, mock_notifications=[nc])
+        resp = await self._get(str(watch.id), mock_watch=watch, mock_notifications=[nc])
         assert resp.status_code == 200
         assert b"Slack ops channel" in resp.content
 
@@ -219,8 +218,7 @@ class TestWatchNotificationsPartialRoute:
         """When title is None, the channel_hint is still visible."""
         watch = _make_mock_watch()
         nc = _make_mock_nc(channel_hint="discord", title=None)
-        with patch("src.dashboard.routes.decrypt_apprise_url", return_value="json://x.com"):
-            resp = await self._get(str(watch.id), mock_watch=watch, mock_notifications=[nc])
+        resp = await self._get(str(watch.id), mock_watch=watch, mock_notifications=[nc])
         assert resp.status_code == 200
         assert b"discord" in resp.content
 
@@ -340,24 +338,20 @@ class TestWatchNotificationToggleRoute:
 class TestWatchNotificationCreateRoute:
     """POST /watches/{watch_id}/notifications/new"""
 
-    async def test_invalid_url_returns_200_with_error(self):
+    async def test_missing_remote_channel_id_returns_200_with_error(self):
         watch = _make_mock_watch()
         resp = await _post_dashboard(
             f"/watches/{watch.id}/notifications/new",
-            form_data={"apprise_url": "notascheme://bad", "events": "change_detected"},
+            form_data={"events": "change_detected"},
             mock_watch=watch,
         )
         assert resp.status_code == 200
-        assert (
-            b"Invalid" in resp.content
-            or b"invalid" in resp.content
-            or b"error" in resp.content.lower()
-        )
+        assert b"Remote channel ID is required" in resp.content
 
     async def test_missing_watch_returns_404(self):
         resp = await _post_dashboard(
             "/watches/01ZZZZZZZZZZZZZZZZZZZZZZZZ/notifications/new",
-            form_data={"apprise_url": "json://hooks.example.com", "events": "change_detected"},
+            form_data={"remote_channel_id": str(ULID()), "events": "change_detected"},
             mock_watch=None,
         )
         assert resp.status_code == 404
@@ -367,9 +361,15 @@ class TestWatchNotificationTestResultRoute:
     """POST /watches/{watch_id}/notifications/{config_id}/test-result"""
 
     def _mock_result(self, success=True, reason="ok"):
-        from src.core.notifications.dispatcher import DispatchResult
+        from src.core.notifications.notify import DispatchResult
 
         return DispatchResult(success=success, reason=reason)
+
+    def _patch_notifier_client(self):
+        client_mock = AsyncMock()
+        client_mock.__aenter__ = AsyncMock(return_value=client_mock)
+        client_mock.__aexit__ = AsyncMock(return_value=False)
+        return patch("src.dashboard.routes.get_notifier_client", return_value=client_mock)
 
     async def test_success_returns_flash_with_reason(self):
         watch = _make_mock_watch()
@@ -381,13 +381,16 @@ class TestWatchNotificationTestResultRoute:
         result = self._mock_result(True, "Notification sent successfully")
         with (
             patch(
-                "src.dashboard.routes.dispatch_event", new_callable=AsyncMock, return_value=result
+                "src.dashboard.routes._dispatch_via_notifier",
+                new_callable=AsyncMock,
+                return_value=result,
             ) as mock_dispatch,
             patch(
                 "src.dashboard.routes.resolve_watch_url",
                 new_callable=AsyncMock,
                 return_value="https://x.example",
             ),
+            self._patch_notifier_client(),
         ):
             resp = await _post_dashboard(
                 f"/watches/{watch.id}/notifications/{nc.id}/test-result",
@@ -400,8 +403,8 @@ class TestWatchNotificationTestResultRoute:
         assert b"Notification sent successfully" in resp.content
         mock_dispatch.assert_called_once()
         _, kwargs = mock_dispatch.call_args
-        assert "title" in kwargs and kwargs["title"]
-        assert "body" in kwargs and kwargs["body"]
+        assert "rendered_title" in kwargs and kwargs["rendered_title"]
+        assert "rendered_body" in kwargs and kwargs["rendered_body"]
 
     async def test_custom_content_config_applied_to_title(self):
         watch = _make_mock_watch()
@@ -414,13 +417,16 @@ class TestWatchNotificationTestResultRoute:
         result = self._mock_result(True, "ok")
         with (
             patch(
-                "src.dashboard.routes.dispatch_event", new_callable=AsyncMock, return_value=result
+                "src.dashboard.routes._dispatch_via_notifier",
+                new_callable=AsyncMock,
+                return_value=result,
             ) as mock_dispatch,
             patch(
                 "src.dashboard.routes.resolve_watch_url",
                 new_callable=AsyncMock,
                 return_value="https://x.example",
             ),
+            self._patch_notifier_client(),
         ):
             await _post_dashboard(
                 f"/watches/{watch.id}/notifications/{nc.id}/test-result",
@@ -428,7 +434,7 @@ class TestWatchNotificationTestResultRoute:
                 mock_session=session,
             )
         _, kwargs = mock_dispatch.call_args
-        assert kwargs["title"] == "Custom: Test Watch"
+        assert kwargs["rendered_title"] == "Custom: Test Watch"
 
     async def test_failure_returns_flash_with_reason(self):
         watch = _make_mock_watch()
@@ -440,13 +446,16 @@ class TestWatchNotificationTestResultRoute:
         result = self._mock_result(False, "Delivery failed")
         with (
             patch(
-                "src.dashboard.routes.dispatch_event", new_callable=AsyncMock, return_value=result
+                "src.dashboard.routes._dispatch_via_notifier",
+                new_callable=AsyncMock,
+                return_value=result,
             ),
             patch(
                 "src.dashboard.routes.resolve_watch_url",
                 new_callable=AsyncMock,
                 return_value="https://x.example",
             ),
+            self._patch_notifier_client(),
         ):
             resp = await _post_dashboard(
                 f"/watches/{watch.id}/notifications/{nc.id}/test-result",
@@ -464,106 +473,6 @@ class TestWatchNotificationTestResultRoute:
             mock_watch=None,
         )
         assert resp.status_code == 404
-
-
-class TestWatchNotificationCreateFromTokens:
-    """POST /watches/{id}/notifications/new with schema+tokens payload."""
-
-    async def _post_token_form(
-        self,
-        watch_id: str,
-        schema: str,
-        token_fields: dict,
-        mock_watch=None,
-        events=None,
-    ):
-        from src.api.deps import get_db_session
-        from src.api.main import app
-
-        _session = _make_mock_session()
-        _session.commit = AsyncMock()
-
-        async def override_session():
-            yield _session
-
-        app.dependency_overrides[get_db_session] = override_session
-        app.dependency_overrides.update(_AUTH_OVERRIDES)
-        try:
-            with (
-                patch(
-                    "src.dashboard.routes.get_watch_detail",
-                    new_callable=AsyncMock,
-                    return_value=mock_watch or _make_mock_watch(),
-                ),
-                patch(
-                    "src.dashboard.routes.get_watch_notifications",
-                    new_callable=AsyncMock,
-                    return_value=[],
-                ),
-                patch("src.dashboard.routes.encrypt_apprise_url", return_value="encrypted"),
-                patch("src.dashboard.routes.assemble_url", return_value=f"{schema}://assembled"),
-            ):
-                form_data = {"plugin_schema": schema, **(events or {})}
-                form_data.update({f"tok_{k}": v for k, v in token_fields.items()})
-                transport = ASGITransport(app=app)
-                async with AsyncClient(transport=transport, base_url="http://test") as client:
-                    return await client.post(
-                        f"/watches/{watch_id}/notifications/new",
-                        data=form_data,
-                    )
-        finally:
-            app.dependency_overrides.pop(get_db_session, None)
-            app.dependency_overrides.pop(get_dashboard_user, None)
-            app.dependency_overrides.pop(require_api_key, None)
-
-    async def test_token_form_submission_returns_200(self):
-        watch = _make_mock_watch()
-        resp = await self._post_token_form(
-            str(watch.id),
-            "discord",
-            {"webhook_id": "abc123", "webhook_token": "xyz789"},
-            mock_watch=watch,
-        )
-        assert resp.status_code == 200
-
-    async def test_unknown_schema_shows_error(self):
-        watch = _make_mock_watch()
-        from src.api.deps import get_db_session
-        from src.api.main import app
-
-        async def override_session():
-            yield MagicMock()
-
-        app.dependency_overrides[get_db_session] = override_session
-        app.dependency_overrides.update(_AUTH_OVERRIDES)
-        try:
-            with (
-                patch(
-                    "src.dashboard.routes.get_watch_detail",
-                    new_callable=AsyncMock,
-                    return_value=watch,
-                ),
-                patch(
-                    "src.dashboard.routes.get_watch_notifications",
-                    new_callable=AsyncMock,
-                    return_value=[],
-                ),
-                patch(
-                    "src.dashboard.routes.assemble_url",
-                    side_effect=ValueError("Unknown Apprise plugin schema"),
-                ),
-            ):
-                transport = ASGITransport(app=app)
-                async with AsyncClient(transport=transport, base_url="http://test") as client:
-                    resp = await client.post(
-                        f"/watches/{watch.id}/notifications/new",
-                        data={"plugin_schema": "notaschema", "tok_x": "y"},
-                    )
-            assert "Unknown" in resp.text
-        finally:
-            app.dependency_overrides.pop(get_db_session, None)
-            app.dependency_overrides.pop(get_dashboard_user, None)
-            app.dependency_overrides.pop(require_api_key, None)
 
 
 class TestNotificationHtmxPartial:

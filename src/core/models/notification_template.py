@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, String, Text, func, text
+from sqlalchemy import Boolean, DateTime, ForeignKey, String, func, text
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 from ulid import ULID
@@ -19,7 +19,6 @@ class NotificationTemplate(TimestampMixin, Base):
 
     id: Mapped[ULID] = mapped_column(ULIDType, primary_key=True, default=generate_ulid)
     title: Mapped[str] = mapped_column(String(100), nullable=False)
-    apprise_url: Mapped[str] = mapped_column(Text, nullable=False)
     channel_hint: Mapped[str] = mapped_column(String(50), nullable=False)
     events: Mapped[list[str]] = mapped_column(
         ARRAY(String(50)),

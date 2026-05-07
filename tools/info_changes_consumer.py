@@ -163,23 +163,24 @@ async def _metrics_loop(
 ) -> None:
     """Background task: emit metrics every ``interval_s`` until shutdown.
 
-    The body is wrapped in a broad ``try/except`` so that an unexpected
-    error (logger backend hiccup, non-serialisable ``extra=`` value, ...)
-    cannot silently kill the task and leave the consume loop running
-    blind on metrics. Errors are logged at WARNING; the loop keeps
-    ticking.
+    ``_refresh_lag`` already swallows all exceptions internally and sets
+    ``last_lag = -1`` on failure, so it never propagates. The narrow
+    ``try/except`` around ``_emit_metrics`` defends against logger backend
+    hiccups or non-serialisable ``extra=`` values that would otherwise
+    silently kill the task and leave the consume loop blind on metrics.
+    Errors are logged at WARNING; the loop keeps ticking.
     """
     while not shutdown_event.is_set():
         try:
             await asyncio.wait_for(shutdown_event.wait(), timeout=interval_s)
         except TimeoutError:
             pass
+        await _refresh_lag(client, topic, metrics)
         try:
-            await _refresh_lag(client, topic, metrics)
             _emit_metrics(metrics)
         except Exception as e:  # noqa: BLE001 - metrics task must not die
             logger.warning(
-                "metrics tick failed; loop continues",
+                "metrics emit failed; loop continues",
                 extra={"error": _safe_exc_message(e)},
             )
 
@@ -300,7 +301,9 @@ async def _write_record(fp, record: dict) -> None:
     the underlying ``fp.write`` keeps draining bytes on the worker thread
     until the kernel returns control. The consume loop has already moved
     on (the message is DLQ'd and ACKed), so the late write is observable
-    only as a duplicate line in the output file.
+    only as a stale line in the output file — the same message also
+    appears on the DLQ stream with a ``processing_timeout`` failure
+    reason.
     """
     line = json.dumps(record) + "\n"
 

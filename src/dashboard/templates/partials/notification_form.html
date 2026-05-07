@@ -5,7 +5,8 @@
   Expects:
     form_id:              str — unique DOM id prefix
     title:                str — Title input value
-    apprise_url:          str — Apprise URL input value
+    remote_channel_id:    str — Notifier channel ULID
+    channel_hint:         str — display hint (e.g. "slack", "ntfy")
     events:               list[str] — currently-subscribed event type values
     content_config:       ContentConfig | None
     show_global_default:  bool — render Global default toggle (templates only)
@@ -35,11 +36,26 @@
         </div>
 
         <div>
-          <label for="nf-url-{{ form_id }}" class="form-label">
-            Apprise URL <span class="text-red-500" aria-hidden="true">*</span>
+          <label for="nf-channel-{{ form_id }}" class="form-label">
+            Remote channel ID <span class="text-red-500" aria-hidden="true">*</span>
           </label>
-          <input type="text" id="nf-url-{{ form_id }}" name="apprise_url"
-                 value="{{ apprise_url or '' }}" required aria-required="true"
+          <input type="text" id="nf-channel-{{ form_id }}" name="remote_channel_id"
+                 value="{{ remote_channel_id or '' }}" required aria-required="true"
+                 minlength="26" maxlength="26"
+                 placeholder="01ABCD..."
+                 class="form-input mt-1">
+          <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">
+            Provision the channel in the notifier service first; paste its ULID here.
+          </p>
+        </div>
+
+        <div>
+          <label for="nf-hint-{{ form_id }}" class="form-label">
+            Channel hint
+          </label>
+          <input type="text" id="nf-hint-{{ form_id }}" name="channel_hint"
+                 value="{{ channel_hint or '' }}" maxlength="50"
+                 placeholder="slack, email, ntfy..."
                  class="form-input mt-1">
         </div>
 

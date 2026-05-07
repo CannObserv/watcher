@@ -93,7 +93,7 @@ Full lifecycle reference + cleanup timer: `docs/DEPLOYMENT.md`.
 
 Two env files load in order (later overrides earlier):
 
-1. `/etc/watcher/.env` — production secrets (`DATABASE_URL`, `APPRISE_SECRET_KEY`, `REDIS_URL`). Persistent, managed manually on the VM.
+1. `/etc/watcher/.env` — production secrets (`DATABASE_URL`, `NOTIFIER_API_KEY`, `ARCHIVER_API_KEY`, `REDIS_URL`). Persistent, managed manually on the VM.
 2. `.env` (repo root, git-ignored) — dev/agent secrets (`GH_TOKEN`, `TEST_DATABASE_URL`, `REDIS_URL`). Never commit.
 
 Load both for shell commands:
@@ -104,8 +104,9 @@ export $(cat /etc/watcher/.env .env 2>/dev/null | xargs)
 
 **Key variables:**
 - `DATABASE_URL` — PostgreSQL connection for watcher (Archiver owns its own database).
-- `APPRISE_SECRET_KEY` — HMAC signing key for Apprise webhook validation
 - `REDIS_URL` — Redis connection URL (default: `redis://localhost:6379/0`). Used by `ChangePublisher` and `tools/info_changes_consumer.py`. Override for testing or remote Redis.
+- `NOTIFIER_BASE_URL` — Notifier service URL for the `NotifierClient` SDK (e.g. `http://localhost:9000`). Required — every notification is dispatched through the notifier service.
+- `NOTIFIER_API_KEY` — Required. Watcher tenant API key issued by `scripts/seed_tenant.py` in the notifier repo.
 - `ARCHIVER_BASE_URL` — Archiver service URL for the `ArchiverClient` SDK (default: `http://localhost:8020`).
 - `ARCHIVER_API_KEY` — Required. API key for the `ArchiverClient` SDK; missing key crashes the API on boot (pre-warm in lifespan).
 

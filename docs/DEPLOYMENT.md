@@ -23,25 +23,17 @@ export $(cat /etc/watcher/.env .env 2>/dev/null | xargs)
 | Variable | Location | Required | Purpose |
 |---|---|---|---|
 | `DATABASE_URL` | `/etc/watcher/.env` | **yes** | PostgreSQL connection string |
-| `APPRISE_SECRET_KEY` | `/etc/watcher/.env` | **yes** | Fernet key for encrypting Apprise URLs at rest (raises at startup if missing) |
 | `PROCRASTINATE_DATABASE_URL` | `/etc/watcher/.env` | no | libpq-style DSN for procrastinate; falls back to `DATABASE_URL` with driver prefix stripped |
 | `GH_TOKEN` | `.env` | no | GitHub personal access token |
 | `TEST_DATABASE_URL` | `.env` | no | PostgreSQL connection string for test database |
 | `WATCHER_DATA_DIR` | env | no | Absolute path for snapshot/content storage (default `/var/lib/watcher/data`) |
 | `BUILD_ID` | env | no | Git SHA for static asset cache-busting (default `"dev"`) |
-| `NOTIFIER_BASE_URL` | `/etc/watcher/.env` | Phase 4+ | Base URL of the notifier service (e.g. `http://localhost:9000`) |
-| `NOTIFIER_API_KEY` | `/etc/watcher/.env` | Phase 4+ | Watcher tenant API key issued by `scripts/seed_tenant.py` in the notifier repo |
-| `USE_REMOTE_NOTIFY` | `/etc/watcher/.env` | Phase 4+ | Set to `"1"` to route notifications through notifier; default `"0"` (local Apprise) |
+| `NOTIFIER_BASE_URL` | `/etc/watcher/.env` | **yes** | Base URL of the notifier service (e.g. `http://localhost:9000`) |
+| `NOTIFIER_API_KEY` | `/etc/watcher/.env` | **yes** | Watcher tenant API key issued by `scripts/seed_tenant.py` in the notifier repo |
 | `INFORMATION_BASE_URL` | `/etc/watcher/.env` | no | Information service base URL (default `http://localhost:8020`) |
 | `INFORMATION_API_KEY` | `/etc/watcher/.env` | **yes** | API key for the InformationClient SDK; missing key crashes the API on boot via the lifespan pre-warm |
 | `REDIS_URL` | `/etc/watcher/.env` | no | Redis connection URL for the change bus (default `redis://localhost:6379/0`) |
 | `CHANGES_DRAIN_INTERVAL_SECONDS` | env | no | Fast-tick changes-outbox drain cadence in seconds (default `10`); the 1-minute Procrastinate periodic stays as a safety floor |
-
-Generate `APPRISE_SECRET_KEY`:
-
-```bash
-python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
-```
 
 ## Systemd Service
 

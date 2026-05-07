@@ -115,7 +115,7 @@ Full variable reference: `docs/DEPLOYMENT.md`.
 
 Watches are InfoItem-native: a Watch references an `info_item_id` and resolves URL + fetch defaults from the primary `InfoSpec` at every callsite (`check_watch`, screenshot capture, dashboard preview). Watch creation requires `info_item_id` — the Archiver service is the source of truth for the URL. Legacy `url` and `fetch_config` columns no longer exist.
 
-Change bus envelope is `schema_version: 2`. Stream entries are partitioned by `info_item_id` (Phase 2b's v1 partitioned by `watch_id`) and carry `info_item_id`, `info_spec_id`, plus `previous_fingerprint`/`current_fingerprint`. The `drain_changes_outbox` task is registered as `@bp.periodic(cron="* * * * *")`, so the embedded worker drains every minute. A PostgreSQL transaction-scoped advisory lock (`DRAIN_ADVISORY_LOCK_ID`) keeps concurrent drains from double-publishing.
+Change bus envelope is `schema_version: 2`. Stream entries are partitioned by `info_item_id` (Phase 2b's v1 partitioned by `watch_id`) and carry `info_item_id`, `info_spec_id`, plus `previous_fingerprint`/`current_fingerprint`. Two drainers run in production: the `drain_changes_outbox` task is registered as `@bp.periodic(cron="* * * * *")` so the embedded worker drains every minute, and a fast-tick async loop inside the API lifespan drains every `CHANGES_DRAIN_INTERVAL_SECONDS` (default 10s) for sub-minute latency. The 1-minute periodic stays as a safety floor; a PostgreSQL transaction-scoped advisory lock (`DRAIN_ADVISORY_LOCK_ID`) keeps concurrent drains from double-publishing.
 
 Fresh hosts need `sudo cp /home/exedev/archiver/deploy/archiver.service /etc/systemd/system/` before `watcher.service` will boot — Archiver lives in a sibling repo; see its own `docs/DEPLOYMENT.md` for full install (key generation + env-var registration). The Archiver authoring tools (`validate_info_spec`, `fetch_and_render`, `preview_extraction`, `propose_selectors`, `find_info_item`, atomic `create_info_item`) are documented in `/home/exedev/archiver/AGENTS.md`.
 
@@ -149,6 +149,12 @@ cd /home/exedev/archiver && uv sync
 
 Override via `ARCHIVER_REPO_PATH=/some/other/path` if you keep the
 sibling repo elsewhere.
+
+The `information` schema persists between pytest sessions to enable
+the cache-check (#150); per-test row isolation is still handled by
+`db_session`'s savepoint rollback. Tests that bypass `db_session` and
+write directly via `engine.connect()` will leak rows into subsequent
+sessions — don't do that.
 
 **pytest-xdist is unsupported.** The fixture writes to a single
 `TEST_DATABASE_URL`; multiple xdist workers would race on `alembic

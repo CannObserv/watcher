@@ -197,7 +197,7 @@ async def drain_changes_outbox(*, batch_size: int = 100, **periodic_kwargs) -> d
 
 
 async def start_changes_drain_loop(
-    interval: float | None = None,
+    interval: int | None = None,
 ) -> asyncio.Task:
     """Start the fast-tick async drain loop; return its ``asyncio.Task``.
 
@@ -208,9 +208,16 @@ async def start_changes_drain_loop(
     inside the drain are logged but never kill the loop — the periodic
     cron remains as a floor either way.
 
-    The loop honours cancellation: when the returned task is cancelled
-    the in-flight drain finishes (it owns its own transaction); the next
-    tick does not start.
+    Cancellation semantics: when the returned task is cancelled,
+    ``CancelledError`` propagates into ``_drain_changes_once``'s
+    ``async with get_session_factory()()`` block, which rolls back the
+    transaction. Rows that were XADD'd to Redis but not yet
+    ``mark_published``'d may therefore be republished by the next tick
+    or by the 1-minute periodic. This is bounded — and safe — by the
+    advisory lock (no concurrent drains) and the
+    ``published_to_bus_at IS NULL`` filter (already-marked rows are
+    skipped). The next tick does not start once cancellation is
+    observed.
     """
     resolved_interval = interval if interval is not None else _resolve_drain_interval()
     logger.info(
@@ -236,9 +243,6 @@ async def start_changes_drain_loop(
                 raise
             except Exception:
                 logger.warning("fast drain tick raised; will retry next tick", exc_info=True)
-            try:
-                await asyncio.sleep(resolved_interval)
-            except asyncio.CancelledError:
-                raise
+            await asyncio.sleep(resolved_interval)
 
     return asyncio.create_task(_loop(), name="changes_drain_fast_loop")

@@ -12,11 +12,8 @@ Operational features (issue #143):
 
 * **Retry/backoff on Redis reconnect.** Connection drops at startup or
   mid-loop trigger steady exponential backoff (1, 2, 4, 8, 16, 30 s; capped
-  at 30 s). The 30 s ceiling matches Redis Sentinel's typical failover
-  budget — long enough to absorb a leader election, short enough that the
-  consumer doesn't accumulate noticeable lag once Redis is back. Exits with
-  a friendly SystemExit only after ``max_reconnect_attempts`` (default:
-  unlimited) is exhausted.
+  at 30 s). Exits with a friendly SystemExit only after
+  ``max_reconnect_attempts`` (default: unlimited) is exhausted.
 
 * **Dead-letter queue.** Messages that fail validation (non-JSON payload,
   missing required envelope fields, schema_version mismatch) or exceed the
@@ -70,7 +67,6 @@ DEFAULT_TOPIC = "info.changes"
 DEFAULT_DLQ_SUFFIX = ".dead"
 DEFAULT_GROUP = "reference-consumer"
 
-# 30 s matches Sentinel-style failover budgets — see module docstring.
 DEFAULT_BACKOFF_INITIAL_S = 1.0
 DEFAULT_BACKOFF_CAP_S = 30.0
 
@@ -142,12 +138,17 @@ def _emit_metrics(metrics: Metrics) -> None:
 async def _refresh_lag(client: redis.Redis, topic: str, metrics: Metrics) -> None:
     """Update ``metrics.last_lag`` to ``XLEN(topic) - messages_consumed``.
 
-    Best-effort — failures (Redis unreachable, missing stream) silently set
-    ``last_lag`` to -1 so the metrics emitter can keep ticking.
+    Best-effort — any failure (Redis unreachable, missing stream, auth or
+    SSL surprise, encoding error) is logged at WARNING and ``last_lag`` is
+    set to -1 so the metrics emitter can keep ticking.
     """
     try:
         length = await client.xlen(topic)
-    except (redis.ConnectionError, redis.TimeoutError, redis.ResponseError):
+    except Exception as e:  # noqa: BLE001 - best-effort metrics path
+        logger.warning(
+            "lag refresh failed; metrics task continues",
+            extra={"error": _safe_exc_message(e)},
+        )
         metrics.last_lag = -1
         return
     metrics.last_lag = max(0, int(length) - metrics.messages_consumed)
@@ -273,9 +274,21 @@ def _format(msg_id: bytes, fields: dict[bytes, bytes], parsed_payload: dict) -> 
 
 
 async def _write_record(fp, record: dict) -> None:
-    """Persist a single record to the output file (flush after each)."""
-    fp.write(json.dumps(record) + "\n")
-    fp.flush()
+    """Persist a single record to the output file (flush after each).
+
+    The blocking ``write`` + ``flush`` runs on a worker thread via
+    ``asyncio.to_thread`` so a stuck file descriptor (NFS hang, full disk
+    that doesn't EOF) only blocks a thread — the event loop stays
+    responsive and the caller's ``asyncio.wait_for`` timeout can actually
+    fire on a hung I/O path.
+    """
+    line = json.dumps(record) + "\n"
+
+    def _write_sync() -> None:
+        fp.write(line)
+        fp.flush()
+
+    await asyncio.to_thread(_write_sync)
 
 
 # ---------------------------------------------------------------------------
@@ -669,6 +682,7 @@ async def _amain(args: argparse.Namespace) -> Metrics:
         dlq_topic=args.dlq_topic,
         process_timeout_s=args.process_timeout_s,
         max_reconnect_attempts=args.max_reconnect_attempts,
+        backoff_initial_s=args.backoff_initial_s,
         backoff_cap_s=args.backoff_cap_s,
         metrics_interval_s=args.metrics_interval_s,
         shutdown_event=shutdown,
@@ -703,6 +717,12 @@ def main() -> int:
         type=int,
         default=None,
         help="Give up after this many consecutive reconnects (default: unlimited)",
+    )
+    parser.add_argument(
+        "--backoff-initial-s",
+        type=float,
+        default=DEFAULT_BACKOFF_INITIAL_S,
+        help="Initial reconnect backoff in seconds (default: 1.0)",
     )
     parser.add_argument(
         "--backoff-cap-s",

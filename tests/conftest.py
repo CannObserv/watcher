@@ -79,6 +79,11 @@ def anyio_backend():
     return "asyncio"
 
 
+# Requires the ``revision: str`` PEP 526 annotation that the modern
+# alembic generator emits. Older or hand-edited version files without the
+# annotation cause ``_archiver_alembic_head`` to return None and the caller
+# falls through to the subprocess invocation — still correct, just no cache
+# benefit.
 _ALEMBIC_REVISION_RE = re.compile(r'^revision:\s*str\s*=\s*["\']([^"\']+)["\']', re.MULTILINE)
 _ALEMBIC_DOWN_REVISION_RE = re.compile(r'^down_revision:[^=]*=\s*["\']([^"\']+)["\']', re.MULTILINE)
 

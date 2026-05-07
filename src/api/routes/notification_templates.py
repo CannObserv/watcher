@@ -28,8 +28,8 @@ router = APIRouter(prefix="/notifications/templates", tags=["notification-templa
 logger = get_logger(__name__)
 
 # Sentinel watch_id for "[Test]" dispatch events that aren't tied to a real
-# watch. ULID(0) renders as 26 zero-base32 chars and stays inside the strict
-# 26-char ULID validation the schemas enforce on real watch_ids.
+# watch. ``ULID.from_int(0)`` renders as 26 zero-base32 chars and stays inside
+# the strict 26-char ULID validation the schemas enforce on real watch_ids.
 _TEST_SENTINEL_WATCH_ID = str(ULID.from_int(0))
 
 

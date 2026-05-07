@@ -34,9 +34,8 @@ def upgrade() -> None:
 
     WARNING: irreversible in practice. The downgrade restores the column
     shape but NOT the Fernet ciphertext data, and the apprise dispatcher
-    (src/core/notifications/dispatcher.py) was deleted in the same Phase 5
-    sweep — there is no in-tree consumer left to read the column even if
-    its data could be restored.
+    + crypto helpers were removed in #137 — there is no in-tree consumer
+    left to read the column even if its data could be restored.
     """
     op.drop_column("notification_templates", "apprise_url")
     op.drop_column("watch_notification_configs", "apprise_url")

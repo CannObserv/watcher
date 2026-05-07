@@ -18,10 +18,15 @@ class WatchNotificationConfigCreate(BaseModel):
     """Request body for creating a notification config.
 
     `remote_channel_id` is the notifier-service channel ULID; required.
+    `str_strip_whitespace` runs before length validation, so a
+    whitespace-only `channel_hint` collapses to ``""`` and trips
+    `min_length=1`.
     """
 
+    model_config = ConfigDict(str_strip_whitespace=True)
+
     remote_channel_id: str = Field(..., min_length=26, max_length=26)
-    channel_hint: str = Field(default="remote", max_length=50)
+    channel_hint: str = Field(default="remote", min_length=1, max_length=50)
     title: str | None = Field(default=None, max_length=100)
     events: list[str] = Field(default_factory=lambda: ["change_detected"])
     content_config: ContentConfig | None = None
@@ -33,12 +38,21 @@ class WatchNotificationConfigCreate(BaseModel):
 
 
 class WatchNotificationConfigUpdate(BaseModel):
-    """Request body for PATCH — all fields optional."""
+    """Request body for PATCH — all fields optional.
+
+    `channel_hint` stays nullable on Update so the route can use
+    ``model_fields_set`` to distinguish "not provided" (no-op) from a
+    user-supplied value. Same pattern as ``title``. The Create schema
+    is `str` (always present, default `"remote"`) — the asymmetry is
+    intentional.
+    """
+
+    model_config = ConfigDict(str_strip_whitespace=True)
 
     is_active: bool | None = None
     events: list[str] | None = None
     remote_channel_id: str | None = Field(default=None, min_length=26, max_length=26)
-    channel_hint: str | None = Field(default=None, max_length=50)
+    channel_hint: str | None = Field(default=None, min_length=1, max_length=50)
     # title uses model_fields_set in the route to distinguish "omitted" (no-op)
     # from "explicitly set to null" (clears the title). Default None means an
     # absent key won't end up in model_fields_set, so skipping the field is safe.

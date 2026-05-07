@@ -1,30 +1,36 @@
-"""CRUD API for shared notification templates."""
+"""CRUD API for shared notification templates (remote-channel only)."""
 
 from __future__ import annotations
 
 from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException
+from notifier_client.errors import NotifierError
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from ulid import ULID
 
 from src.api.deps import get_db_session
 from src.api.routes.helpers import get_watch_or_404
-from src.api.schemas.notification_config import extract_channel_hint
 from src.api.schemas.notification_template import (
     NotificationTemplateCreate,
     NotificationTemplateResponse,
     NotificationTemplateUpdate,
 )
-from src.core.crypto import encrypt_apprise_url
 from src.core.logging import get_logger
 from src.core.models.audit_log import EventType, audit
 from src.core.models.notification_template import DomainNcRef, NotificationTemplate, WatchNcRef
-from src.core.notifications.dispatcher import dispatch_event
 from src.core.notifications.events import WatchEvent, WatchEventType
+from src.core.notifications.notify import DispatchCandidate, dispatch_via_notifier
+from src.core.notifier_client import get_notifier_client
 
 router = APIRouter(prefix="/notifications/templates", tags=["notification-templates"])
 logger = get_logger(__name__)
+
+# Sentinel watch_id for "[Test]" dispatch events that aren't tied to a real
+# watch. ``ULID.from_int(0)`` renders as 26 zero-base32 chars and stays inside
+# the strict 26-char ULID validation the schemas enforce on real watch_ids.
+_TEST_SENTINEL_WATCH_ID = str(ULID.from_int(0))
 
 
 async def _get_template_or_404(template_id: str, session: AsyncSession) -> NotificationTemplate:
@@ -63,11 +69,11 @@ async def create_template(
     """Create a new shared notification template."""
     tpl = NotificationTemplate(
         title=data.title,
-        apprise_url=encrypt_apprise_url(data.apprise_url),
-        channel_hint=extract_channel_hint(data.apprise_url),
+        channel_hint=data.channel_hint,
         events=data.events,
         is_global_default=data.is_global_default,
         content_config=data.content_config.model_dump() if data.content_config else None,
+        remote_channel_id=data.remote_channel_id,
     )
     session.add(tpl)
     await session.flush()
@@ -124,9 +130,10 @@ async def update_template(
 ) -> NotificationTemplateResponse:
     """Partially update a notification template."""
     tpl = await _get_template_or_404(template_id, session)
-    if data.apprise_url is not None:
-        tpl.apprise_url = encrypt_apprise_url(data.apprise_url)
-        tpl.channel_hint = extract_channel_hint(data.apprise_url)
+    if "remote_channel_id" in data.model_fields_set and data.remote_channel_id is not None:
+        tpl.remote_channel_id = data.remote_channel_id
+    if "channel_hint" in data.model_fields_set and data.channel_hint is not None:
+        tpl.channel_hint = data.channel_hint
     if data.events is not None:
         tpl.events = data.events
     if data.is_global_default is not None:
@@ -214,19 +221,36 @@ async def test_template(
     template_id: str,
     session: AsyncSession = Depends(get_db_session),
 ) -> dict:
-    """Send a test notification using this template's configured URL."""
+    """Send a test notification using this template's configured remote channel."""
     tpl = await _get_template_or_404(template_id, session)
+    if not tpl.remote_channel_id:
+        return {"success": False, "reason": "no remote_channel_id configured"}
     event = WatchEvent(
         event_type=WatchEventType.CHANGE_DETECTED,
-        watch_id="00000000000000000000000000",
+        watch_id=_TEST_SENTINEL_WATCH_ID,
         watch_name="[Test]",
         watch_url="https://example.com",
         occurred_at=datetime.now(UTC),
     )
+    candidate = DispatchCandidate(
+        source="watch_template",
+        source_id=str(tpl.id),
+        content_config=tpl.content_config,
+        remote_channel_id=tpl.remote_channel_id,
+    )
     try:
-        result = await dispatch_event(event, tpl.apprise_url)
+        async with get_notifier_client() as client:
+            outcome = await dispatch_via_notifier(
+                client,
+                candidate,
+                event,
+                rendered_title=f"[Test] {tpl.title}",
+                rendered_body=f"Test from template '{tpl.title}'.",
+            )
         audit(session, EventType.NOTIFICATION_TEMPLATE_TESTED, template_id=template_id)
         await session.commit()
-        return {"success": result.success, "reason": result.reason}
+        return {"success": outcome.success, "reason": outcome.reason}
+    except NotifierError as exc:
+        return {"success": False, "reason": f"notifier error: {exc}"}
     except Exception as exc:
         return {"success": False, "reason": str(exc)}

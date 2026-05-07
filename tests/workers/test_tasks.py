@@ -7,12 +7,11 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import httpx
 import pytest
 from archiver_client.errors import NotFound
-from cryptography.fernet import Fernet
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from ulid import ULID
 
 import src.workers.tasks as tasks_mod
-from src.core.crypto import encrypt_apprise_url
 from src.core.fetchers.http import HttpFetcher
 from src.core.models.audit_log import AuditLog, EventType
 from src.core.models.domain import Domain
@@ -87,12 +86,6 @@ class TestWatchBaseMetadata:
         watch = self._make_watch(description=None)
         meta = _watch_base_metadata(watch)
         assert "description" not in meta
-
-
-@pytest.fixture(autouse=True)
-def set_test_key(monkeypatch):
-    key = Fernet.generate_key().decode()
-    monkeypatch.setenv("APPRISE_SECRET_KEY", key)
 
 
 class TestPersistBackoff:
@@ -389,10 +382,10 @@ class TestCheckWatchSavepointBoundary:
         # Add an active notification config so dispatch is triggered
         nc = WatchNotificationConfig(
             watch_id=watch.id,
-            apprise_url=encrypt_apprise_url("json://localhost/notify"),
             channel_hint="json",
             events=["change_detected"],
             is_active=True,
+            remote_channel_id=str(ULID()),
         )
         db_session.add(nc)
         await db_session.commit()

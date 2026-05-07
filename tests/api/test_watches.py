@@ -442,8 +442,8 @@ class TestDeleteWatch:
         )
         config = WatchNotificationConfig(
             watch_id=watch_ulid,
-            apprise_url="https://hooks.example.com/abc",
             channel_hint="https",
+            remote_channel_id="01HV0000000000000000000099",
         )
         db_session.add_all([chunk, profile, config])
         await db_session.flush()

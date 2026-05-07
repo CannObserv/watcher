@@ -8,10 +8,10 @@ from typing import Literal
 
 import httpx
 from archiver_client import AuthError, NotFound, ServerError
-from cryptography.fernet import InvalidToken
 from fastapi import APIRouter, BackgroundTasks, Depends, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from jinja2 import TemplateError
+from notifier_client.errors import NotifierError
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from ulid import ULID
@@ -20,12 +20,7 @@ from src.api.deps import get_db_session, get_probe_fn
 from src.api.routes.helpers import parse_ulid
 from src.api.routes.watches import delete_watch as api_delete_watch
 from src.api.schemas.content_config import ContentConfig, ContentOptions
-from src.api.schemas.notification_config import (
-    extract_channel_hint,
-    validate_apprise_url,
-    validate_event_list,
-)
-from src.core.crypto import decrypt_apprise_url, encrypt_apprise_url
+from src.api.schemas.validators import validate_event_list
 from src.core.database import get_session_factory
 from src.core.diff import compute_unified_diff
 from src.core.diff.normalize import normalize_html
@@ -36,24 +31,22 @@ from src.core.models.notification_config import WatchNotificationConfig
 from src.core.models.notification_template import DomainNcRef, NotificationTemplate, WatchNcRef
 from src.core.models.snapshot import Snapshot
 from src.core.models.watch import ContentType, Watch
-from src.core.notifications.apprise_builder import (
-    assemble_url,
-    get_plugin_detail,
-    get_service_name,
-    list_plugins,
-)
 from src.core.notifications.content import build_body, build_title, resolve_options
 from src.core.notifications.default_templates import (
     compose_body_prefill,
     compose_title_prefill,
 )
-from src.core.notifications.dispatcher import dispatch_event
 from src.core.notifications.events import EVENT_TITLES, WatchEvent, WatchEventType
-from src.core.notifications.notify import dispatch_event_notifications
+from src.core.notifications.notify import (
+    DispatchCandidate,
+    dispatch_event_notifications,
+    dispatch_via_notifier,
+)
 from src.core.notifications.preview_fixtures import (
     build_preview_event,
     compute_preview_unified_diff,
 )
+from src.core.notifier_client import get_notifier_client
 from src.core.probe import ProbeResult
 from src.core.registry import get_registry
 from src.core.screenshot import capture_screenshot
@@ -1401,7 +1394,6 @@ async def domain_notification_new_page(
         "pages/domain_notification_new.html",
         {
             "domain_name": domain_name,
-            "apprise_plugins": list_plugins(),
             "title": None,
             "events": None,
             "content_config": None,
@@ -1424,7 +1416,8 @@ async def domain_notification_create(
     form = await request.form()
     title = str(form.get("title") or "").strip()
     events = form.getlist("events")
-    schema_val = form.get("plugin_schema") or ""
+    remote_channel_id = str(form.get("remote_channel_id") or "").strip()
+    channel_hint = str(form.get("channel_hint") or "").strip() or "remote"
 
     _cc = _parse_content_config_from_form(form)
     _parsed_config = ContentConfig.model_validate(_cc) if _cc else None
@@ -1435,7 +1428,6 @@ async def domain_notification_create(
             "pages/domain_notification_new.html",
             {
                 "domain_name": domain_name,
-                "apprise_plugins": list_plugins(),
                 "title": title,
                 "events": events,
                 "content_config": _parsed_config,
@@ -1445,40 +1437,22 @@ async def domain_notification_create(
 
     if not title:
         return _page_error("Title is required.")
-
-    if schema_val:
-        tokens = {
-            key[4:]: str(value)
-            for key, value in form.items()
-            if key.startswith("tok_") and str(value).strip()
-        }
-        try:
-            variant_raw = form.get("variant")
-            variant_index = int(variant_raw) if variant_raw is not None else None
-            apprise_url = assemble_url(schema_val, tokens, variant_index=variant_index)
-        except ValueError as exc:
-            return _page_error(str(exc))
-    else:
-        apprise_url = str(form.get("apprise_url") or "")
-        try:
-            validate_apprise_url(apprise_url)
-        except ValueError as exc:
-            return _page_error(str(exc))
+    if not remote_channel_id:
+        return _page_error("Remote channel ID is required.")
 
     try:
         validate_event_list(events)
     except ValueError as exc:
         return _page_error(str(exc))
 
-    hint = get_service_name(schema_val) if schema_val else extract_channel_hint(apprise_url)
     tpl = NotificationTemplate(
         title=title,
-        apprise_url=encrypt_apprise_url(apprise_url),
-        channel_hint=hint,
+        channel_hint=channel_hint,
         events=events,
         is_global_default=False,
         is_active=True,
         content_config=_cc,
+        remote_channel_id=remote_channel_id,
     )
     session.add(tpl)
     await session.flush()
@@ -1488,7 +1462,7 @@ async def domain_notification_create(
         EventType.NOTIFICATION_TEMPLATE_CREATED,
         template_id=str(tpl.id),
         title=title,
-        channel_hint=hint,
+        channel_hint=channel_hint,
         source="domain_dashboard",
         domain_name=domain_name,
     )
@@ -1755,47 +1729,11 @@ async def watch_notification_new_page(
         "pages/watch_notification_new.html",
         {
             "watch": watch,
-            "apprise_plugins": list_plugins(),
             "title": None,
             "events": None,
             "content_config": None,
             "error": None,
         },
-    )
-
-
-@router.get("/partials/apprise-plugin-form")
-async def partial_apprise_plugin_form(
-    request: Request,
-    schema: str | None = None,
-    variant: int = 0,
-    raw: bool = False,
-):
-    """HTMX partial: token form for a selected Apprise plugin, or raw URL input."""
-    if raw or schema is None:
-        return templates.TemplateResponse(request, "partials/apprise_raw_url_form.html")
-    detail = get_plugin_detail(schema)
-    if detail is None:
-        raise HTTPException(status_code=404, detail=f"Unknown Apprise plugin: {schema!r}")
-
-    # Filter tokens to match selected variant: show only that variant's
-    # required tokens + all globally optional tokens.  Hide required tokens
-    # belonging to other variants.
-    variants = detail["variants"]
-    if variants and 0 <= variant < len(variants):
-        selected_required = set(variants[variant]["required_token_names"])
-        other_required: set[str] = set()
-        for i, v in enumerate(variants):
-            if i != variant:
-                other_required |= set(v["required_token_names"])
-        # Exclude tokens that are required only in other variants
-        exclude = other_required - selected_required
-        detail["tokens"] = {k: v for k, v in detail["tokens"].items() if k not in exclude}
-
-    return templates.TemplateResponse(
-        request,
-        "partials/apprise_plugin_form.html",
-        {"plugin": detail, "variant": variant},
     )
 
 
@@ -1812,80 +1750,39 @@ async def watch_notification_create(
 
     form = await request.form()
     events = form.getlist("events")
-    schema_val = form.get("plugin_schema") or ""
     title = str(form.get("title") or "").strip() or None
+    remote_channel_id = str(form.get("remote_channel_id") or "").strip()
+    channel_hint = str(form.get("channel_hint") or "").strip() or "remote"
 
-    # Determine the Apprise URL: token path or raw URL path
-    if schema_val:
-        # Token-based submission: collect tok_{name} fields
-        tokens = {
-            key[4:]: str(value)
-            for key, value in form.items()
-            if key.startswith("tok_") and str(value).strip()
-        }
-        try:
-            variant_raw = form.get("variant")
-            variant_index = int(variant_raw) if variant_raw is not None else None
-            apprise_url = assemble_url(schema_val, tokens, variant_index=variant_index)
-        except ValueError as exc:
-            _cc = _parse_content_config_from_form(form)
-            return templates.TemplateResponse(
-                request,
-                "pages/watch_notification_new.html",
-                {
-                    "watch": watch,
-                    "apprise_plugins": list_plugins(),
-                    "title": str(form.get("title") or ""),
-                    "events": form.getlist("events"),
-                    "content_config": ContentConfig.model_validate(_cc) if _cc else None,
-                    "error": str(exc),
-                },
-            )
-    else:
-        # Raw URL submission (legacy path)
-        apprise_url = str(form.get("apprise_url") or "")
-        try:
-            validate_apprise_url(apprise_url)
-        except ValueError as exc:
-            _cc = _parse_content_config_from_form(form)
-            return templates.TemplateResponse(
-                request,
-                "pages/watch_notification_new.html",
-                {
-                    "watch": watch,
-                    "apprise_plugins": list_plugins(),
-                    "title": str(form.get("title") or ""),
-                    "events": form.getlist("events"),
-                    "content_config": ContentConfig.model_validate(_cc) if _cc else None,
-                    "error": str(exc),
-                },
-            )
-
-    try:
-        validate_event_list(events)
-    except ValueError as exc:
+    def _page_error(msg: str):
         _cc = _parse_content_config_from_form(form)
         return templates.TemplateResponse(
             request,
             "pages/watch_notification_new.html",
             {
                 "watch": watch,
-                "apprise_plugins": list_plugins(),
                 "title": str(form.get("title") or ""),
                 "events": form.getlist("events"),
                 "content_config": ContentConfig.model_validate(_cc) if _cc else None,
-                "error": str(exc),
+                "error": msg,
             },
         )
 
-    hint = get_service_name(schema_val) if schema_val else extract_channel_hint(apprise_url)
+    if not remote_channel_id:
+        return _page_error("Remote channel ID is required.")
+
+    try:
+        validate_event_list(events)
+    except ValueError as exc:
+        return _page_error(str(exc))
+
     config = WatchNotificationConfig(
         watch_id=watch.id,
         title=title,
-        apprise_url=encrypt_apprise_url(apprise_url),
-        channel_hint=hint,
+        channel_hint=channel_hint,
         events=events,
         content_config=_parse_content_config_from_form(form),
+        remote_channel_id=remote_channel_id,
     )
     session.add(config)
     audit(
@@ -1933,12 +1830,6 @@ async def watch_notification_edit_page(
     nc = await session.get(WatchNotificationConfig, parse_ulid(config_id, "Config"))
     if not nc or nc.watch_id != watch.id:
         raise HTTPException(status_code=404, detail="Config not found")
-    decryption_failed = False
-    try:
-        decrypted_url = decrypt_apprise_url(nc.apprise_url)
-    except (InvalidToken, ValueError):
-        decrypted_url = ""
-        decryption_failed = True
     content_config = ContentConfig.model_validate(nc.content_config) if nc.content_config else None
     return templates.TemplateResponse(
         request,
@@ -1946,8 +1837,6 @@ async def watch_notification_edit_page(
         {
             "watch": watch,
             "nc": nc,
-            "decrypted_url": decrypted_url,
-            "decryption_failed": decryption_failed,
             "content_config": content_config,
             "error": None,
         },
@@ -1961,7 +1850,7 @@ async def watch_notification_edit(
     config_id: str,
     session: AsyncSession = Depends(get_db_session),
 ):
-    """Update apprise_url and/or events for a notification config."""
+    """Update remote_channel_id and/or events for a notification config."""
     watch = await get_watch_detail(session, watch_id)
     if not watch:
         raise HTTPException(status_code=404, detail="Watch not found")
@@ -1970,13 +1859,12 @@ async def watch_notification_edit(
         raise HTTPException(status_code=404, detail="Config not found")
 
     form = await request.form()
-    apprise_url = str(form.get("apprise_url") or "").strip()
+    remote_channel_id = str(form.get("remote_channel_id") or "").strip()
+    channel_hint = str(form.get("channel_hint") or "").strip() or nc.channel_hint
     events = form.getlist("events")
     title = str(form.get("title") or "").strip() or None
 
-    try:
-        validate_apprise_url(apprise_url)
-    except ValueError as exc:
+    def _page_error(msg: str):
         _cc = _parse_content_config_from_form(form)
         return templates.TemplateResponse(
             request,
@@ -1986,34 +1874,21 @@ async def watch_notification_edit(
                 "nc": nc,
                 "submitted_title": title,
                 "submitted_events": events,
-                "decrypted_url": apprise_url,
-                "decryption_failed": False,
                 "content_config": ContentConfig.model_validate(_cc) if _cc else None,
-                "error": str(exc),
+                "error": msg,
             },
         )
+
+    if not remote_channel_id:
+        return _page_error("Remote channel ID is required.")
 
     try:
         validate_event_list(events)
     except ValueError as exc:
-        _cc = _parse_content_config_from_form(form)
-        return templates.TemplateResponse(
-            request,
-            "pages/watch_notification_edit.html",
-            {
-                "watch": watch,
-                "nc": nc,
-                "submitted_title": title,
-                "submitted_events": events,
-                "decrypted_url": apprise_url,
-                "decryption_failed": False,
-                "content_config": ContentConfig.model_validate(_cc) if _cc else None,
-                "error": str(exc),
-            },
-        )
+        return _page_error(str(exc))
 
-    nc.apprise_url = encrypt_apprise_url(apprise_url)
-    nc.channel_hint = extract_channel_hint(apprise_url)
+    nc.remote_channel_id = remote_channel_id
+    nc.channel_hint = channel_hint
     nc.events = events
     nc.title = title
     nc.content_config = _parse_content_config_from_form(form)
@@ -2229,10 +2104,10 @@ async def watch_nc_copy_template(
     local = WatchNotificationConfig(
         watch_id=watch.id,
         title=tpl.title,
-        apprise_url=tpl.apprise_url,
         channel_hint=tpl.channel_hint,
         events=tpl.events,
         content_config=tpl.content_config,
+        remote_channel_id=tpl.remote_channel_id,
     )
     session.add(local)
     ref = await session.scalar(
@@ -2272,10 +2147,10 @@ async def watch_nc_copy_local(
     copy = WatchNotificationConfig(
         watch_id=watch.id,
         title=f"{orig.title} (copy)" if orig.title else None,
-        apprise_url=orig.apprise_url,
         channel_hint=orig.channel_hint,
         events=orig.events,
         content_config=orig.content_config,
+        remote_channel_id=orig.remote_channel_id,
     )
     session.add(copy)
     audit(session, EventType.NOTIFICATION_CONFIG_CREATED, watch_id=str(watch.id))
@@ -2312,24 +2187,38 @@ async def watch_notification_test_result(
             )
             reason = f"Failed to resolve watch URL: {exc}"
         else:
-            event = WatchEvent(
-                event_type=WatchEventType.CHANGE_DETECTED,
-                watch_id=str(watch.id),
-                watch_name=watch.name,
-                watch_url=resolved_url,
-                occurred_at=datetime.now(UTC),
-                metadata={"test": True},
-            )
-            cc = ContentConfig.model_validate(nc.content_config) if nc.content_config else None
-            opts = resolve_options(cc, WatchEventType.CHANGE_DETECTED.value)
-            outcome = await dispatch_event(
-                event,
-                nc.apprise_url,
-                title=build_title(event, opts),
-                body=build_body(event, opts),
-            )
-            success = outcome.success
-            reason = outcome.reason
+            if not nc.remote_channel_id:
+                reason = "no remote_channel_id configured"
+            else:
+                event = WatchEvent(
+                    event_type=WatchEventType.CHANGE_DETECTED,
+                    watch_id=str(watch.id),
+                    watch_name=watch.name,
+                    watch_url=resolved_url,
+                    occurred_at=datetime.now(UTC),
+                    metadata={"test": True},
+                )
+                cc = ContentConfig.model_validate(nc.content_config) if nc.content_config else None
+                opts = resolve_options(cc, WatchEventType.CHANGE_DETECTED.value)
+                candidate = DispatchCandidate(
+                    source="local",
+                    source_id=str(nc.id),
+                    content_config=nc.content_config,
+                    remote_channel_id=nc.remote_channel_id,
+                )
+                try:
+                    async with get_notifier_client() as client:
+                        outcome = await dispatch_via_notifier(
+                            client,
+                            candidate,
+                            event,
+                            rendered_title=build_title(event, opts),
+                            rendered_body=build_body(event, opts),
+                        )
+                    success = outcome.success
+                    reason = outcome.reason
+                except NotifierError as exc:
+                    reason = f"notifier error: {exc}"
     except Exception:
         logger.exception("test notification error", extra={"config_id": config_id})
     audit(
@@ -2674,13 +2563,11 @@ async def notification_template_new_page(
     request: Request,
 ):
     """Full page: create a new notification template."""
-    apprise_plugins = list_plugins()
     return templates.TemplateResponse(
         request,
         "pages/notification_new.html",
         {
             "active_page": "notifications",
-            "apprise_plugins": apprise_plugins,
             "title": None,
             "events": None,
             "is_global_default": False,
@@ -2701,9 +2588,10 @@ async def notification_template_create(
     """
     form = await request.form()
     events = form.getlist("events")
-    schema_val = form.get("plugin_schema") or ""
     title = str(form.get("title") or "").strip()
     is_global_default = bool(form.get("is_global_default"))
+    remote_channel_id = str(form.get("remote_channel_id") or "").strip()
+    channel_hint = str(form.get("channel_hint") or "").strip() or "remote"
 
     def _page_error(error_msg: str):
         _cc = _parse_content_config_from_form(form)
@@ -2712,7 +2600,6 @@ async def notification_template_create(
             "pages/notification_new.html",
             {
                 "active_page": "notifications",
-                "apprise_plugins": list_plugins(),
                 "title": str(form.get("title") or ""),
                 "events": form.getlist("events"),
                 "is_global_default": bool(form.get("is_global_default")),
@@ -2723,40 +2610,21 @@ async def notification_template_create(
 
     if not title:
         return _page_error("Title is required.")
-
-    # Determine Apprise URL: token builder or raw input
-    if schema_val:
-        tokens = {
-            key[4:]: str(value)
-            for key, value in form.items()
-            if key.startswith("tok_") and str(value).strip()
-        }
-        try:
-            variant_raw = form.get("variant")
-            variant_index = int(variant_raw) if variant_raw is not None else None
-            apprise_url = assemble_url(schema_val, tokens, variant_index=variant_index)
-        except ValueError as exc:
-            return _page_error(str(exc))
-    else:
-        apprise_url = str(form.get("apprise_url") or "")
-        try:
-            validate_apprise_url(apprise_url)
-        except ValueError as exc:
-            return _page_error(str(exc))
+    if not remote_channel_id:
+        return _page_error("Remote channel ID is required.")
 
     try:
         validate_event_list(events)
     except ValueError as exc:
         return _page_error(str(exc))
 
-    hint = get_service_name(schema_val) if schema_val else extract_channel_hint(apprise_url)
     tpl = NotificationTemplate(
         title=title,
-        apprise_url=encrypt_apprise_url(apprise_url),
-        channel_hint=hint,
+        channel_hint=channel_hint,
         events=events,
         is_global_default=is_global_default,
         content_config=_parse_content_config_from_form(form),
+        remote_channel_id=remote_channel_id,
     )
     session.add(tpl)
     audit(
@@ -2764,7 +2632,7 @@ async def notification_template_create(
         EventType.NOTIFICATION_TEMPLATE_CREATED,
         template_id=str(tpl.id),
         title=title,
-        channel_hint=hint,
+        channel_hint=channel_hint,
         source="dashboard",
     )
     await session.commit()
@@ -2786,12 +2654,6 @@ async def notification_template_edit_page(
     tpl = result.scalar_one_or_none()
     if not tpl:
         raise HTTPException(status_code=404, detail="Template not found")
-    decrypted_url = ""
-    decryption_failed = False
-    try:
-        decrypted_url = decrypt_apprise_url(tpl.apprise_url)
-    except (InvalidToken, ValueError):
-        decryption_failed = True
     watch_count = (
         await session.scalar(select(func.count()).where(WatchNcRef.template_id == tpl.id)) or 0
     )
@@ -2808,8 +2670,6 @@ async def notification_template_edit_page(
             "active_page": "notifications",
             "tpl": tpl,
             "submitted_title": tpl.title,
-            "decrypted_url": decrypted_url,
-            "decryption_failed": decryption_failed,
             "watch_count": watch_count,
             "domain_count": domain_count,
             "content_config": content_config,
@@ -2835,7 +2695,8 @@ async def notification_template_edit(
         raise HTTPException(status_code=404, detail="Template not found")
 
     form = await request.form()
-    apprise_url = str(form.get("apprise_url") or "").strip()
+    remote_channel_id = str(form.get("remote_channel_id") or "").strip()
+    channel_hint = str(form.get("channel_hint") or "").strip() or tpl.channel_hint
     events = form.getlist("events")
     title = str(form.get("title") or "").strip() or tpl.title
     is_global_default = bool(form.get("is_global_default"))
@@ -2860,8 +2721,6 @@ async def notification_template_edit(
                 "tpl": tpl,
                 "submitted_title": title,
                 "submitted_events": events,
-                "decrypted_url": apprise_url,  # show what was submitted
-                "decryption_failed": False,
                 "watch_count": watch_count,
                 "domain_count": domain_count,
                 "content_config": content_config_err,
@@ -2869,10 +2728,8 @@ async def notification_template_edit(
             },
         )
 
-    try:
-        validate_apprise_url(apprise_url)
-    except ValueError as exc:
-        return await _edit_error(str(exc))
+    if not remote_channel_id:
+        return await _edit_error("Remote channel ID is required.")
 
     try:
         validate_event_list(events)
@@ -2880,8 +2737,8 @@ async def notification_template_edit(
         return await _edit_error(str(exc))
 
     tpl.title = title
-    tpl.apprise_url = encrypt_apprise_url(apprise_url)
-    tpl.channel_hint = extract_channel_hint(apprise_url)
+    tpl.remote_channel_id = remote_channel_id
+    tpl.channel_hint = channel_hint
     tpl.events = events
     tpl.is_global_default = is_global_default
     tpl.content_config = _parse_content_config_from_form(form)
@@ -3011,11 +2868,11 @@ async def notification_template_duplicate(
         raise HTTPException(status_code=404, detail="Template not found")
     copy = NotificationTemplate(
         title=f"{tpl.title} (copy)",
-        apprise_url=tpl.apprise_url,
         channel_hint=tpl.channel_hint,
         events=list(tpl.events),
         is_global_default=False,
         content_config=tpl.content_config,
+        remote_channel_id=tpl.remote_channel_id,
     )
     session.add(copy)
     audit(
@@ -3055,30 +2912,44 @@ async def notification_template_test_result(
     if not tpl:
         raise HTTPException(status_code=404, detail="Template not found")
 
-    event = WatchEvent(
-        event_type=WatchEventType.CHANGE_DETECTED,
-        watch_id="00000000000000000000000000",
-        watch_name="Test Notification",
-        watch_url="https://example.com",
-        occurred_at=datetime.now(UTC),
-        metadata={"test": True},
-    )
-    _cc = ContentConfig.model_validate(tpl.content_config) if tpl.content_config else None
-    opts = resolve_options(_cc, WatchEventType.CHANGE_DETECTED.value)
-    try:
-        outcome = await dispatch_event(
-            event,
-            tpl.apprise_url,
-            title=build_title(event, opts),
-            body=build_body(event, opts),
-        )
-    except Exception:
-        logger.exception("test notification error", extra={"template_id": template_id})
-        reason = "Internal error during dispatch"
+    if not tpl.remote_channel_id:
         success = False
+        reason = "no remote_channel_id configured"
     else:
-        success = outcome.success
-        reason = outcome.reason
+        event = WatchEvent(
+            event_type=WatchEventType.CHANGE_DETECTED,
+            watch_id="00000000000000000000000000",
+            watch_name="Test Notification",
+            watch_url="https://example.com",
+            occurred_at=datetime.now(UTC),
+            metadata={"test": True},
+        )
+        _cc = ContentConfig.model_validate(tpl.content_config) if tpl.content_config else None
+        opts = resolve_options(_cc, WatchEventType.CHANGE_DETECTED.value)
+        candidate = DispatchCandidate(
+            source="watch_template",
+            source_id=str(tpl.id),
+            content_config=tpl.content_config,
+            remote_channel_id=tpl.remote_channel_id,
+        )
+        try:
+            async with get_notifier_client() as client:
+                outcome = await dispatch_via_notifier(
+                    client,
+                    candidate,
+                    event,
+                    rendered_title=build_title(event, opts),
+                    rendered_body=build_body(event, opts),
+                )
+            success = outcome.success
+            reason = outcome.reason
+        except NotifierError as exc:
+            success = False
+            reason = f"notifier error: {exc}"
+        except Exception:
+            logger.exception("test notification error", extra={"template_id": template_id})
+            reason = "Internal error during dispatch"
+            success = False
 
     audit(
         session,

@@ -1,18 +1,21 @@
 """Tests verifying the watch-NC add/edit forms render the new notification
 form sections (Content card + Per-event overrides + Preview pane), Step 4.
+
+After Phase 5 (#137), forms post `remote_channel_id` rather than an
+Apprise URL.
 """
 
 import re
 
 import pytest
 from httpx import AsyncClient
+from ulid import ULID
 
-from src.core.crypto import encrypt_apprise_url
 from src.core.models.notification_config import WatchNotificationConfig
 from src.core.models.watch import Watch
 from tests.conftest import make_watch
 
-VALID_URL = "json://hooks.example.com/notify"
+VALID_CHANNEL_ID = str(ULID())
 
 
 async def _make_watch(db_session, url="https://example.com", **kwargs) -> Watch:
@@ -29,10 +32,10 @@ async def _make_watch(db_session, url="https://example.com", **kwargs) -> Watch:
 async def _make_nc(db_session, watch, **kwargs) -> WatchNotificationConfig:
     nc = WatchNotificationConfig(
         watch_id=watch.id,
-        apprise_url=encrypt_apprise_url(VALID_URL),
         channel_hint="json",
         events=["change_detected"],
         is_active=True,
+        remote_channel_id=str(ULID()),
         **kwargs,
     )
     db_session.add(nc)
@@ -47,10 +50,10 @@ class TestErrorPathPreservesContentConfig:
 
     async def test_create_error_preserves_toggle_state(self, client: AsyncClient, db_session):
         watch = await _make_watch(db_session)
+        # Missing remote_channel_id triggers the validation error path.
         resp = await client.post(
             f"/watches/{watch.id}/notifications/new",
             data={
-                "apprise_url": "not-a-valid-scheme",
                 "events": ["change_detected"],
                 "content_config__include_domain": "1",
                 "content_config__include_significance": "1",
@@ -58,8 +61,6 @@ class TestErrorPathPreservesContentConfig:
             headers={"HX-Request": "true"},
         )
         assert resp.status_code == 200
-        # Error message shown (confirms we're on the error-rerender path).
-        # And content_config toggles survive the re-render.
         assert re.search(
             r'name="content_config__include_domain"[^>]*\bvalue="1"[^>]*\bchecked',
             resp.text,
@@ -74,7 +75,6 @@ class TestErrorPathPreservesContentConfig:
         resp = await client.post(
             f"/watches/{watch.id}/notifications/new",
             data={
-                "apprise_url": "not-a-valid-scheme",
                 "events": ["change_detected"],
                 "content_config__body_template": "Custom: {{ watch_url }}",
             },
@@ -93,7 +93,6 @@ class TestErrorPathPreservesContentConfig:
         resp = await client.post(
             f"/watches/{watch.id}/notifications/{nc.id}/edit",
             data={
-                "apprise_url": "not-a-valid-scheme",
                 "events": ["change_detected"],
                 "content_config__include_tags": "1",
             },
@@ -107,12 +106,10 @@ class TestErrorPathPreservesContentConfig:
 
     async def test_edit_error_preserves_events(self, client: AsyncClient, db_session):
         watch = await _make_watch(db_session)
-        # NC stored with only change_detected; submit watch_error as well
         nc = await _make_nc(db_session, watch)
         resp = await client.post(
             f"/watches/{watch.id}/notifications/{nc.id}/edit",
             data={
-                "apprise_url": "not-a-valid-scheme",
                 "events": ["change_detected", "watch_error"],
             },
             headers={"HX-Request": "true"},
@@ -130,14 +127,18 @@ class TestWatchNcNewPage:
         watch = await _make_watch(db_session)
         resp = await client.get(f"/watches/{watch.id}/notifications/new")
         assert resp.status_code == 200
-        assert b"plugin_schema" in resp.content
+        assert b"remote_channel_id" in resp.content
         assert b"watch_created" in resp.content  # disabled checkbox still present
 
     async def test_create_redirects_on_success(self, client: AsyncClient, db_session):
         watch = await _make_watch(db_session)
         resp = await client.post(
             f"/watches/{watch.id}/notifications/new",
-            data={"apprise_url": VALID_URL, "events": ["change_detected"]},
+            data={
+                "remote_channel_id": VALID_CHANNEL_ID,
+                "channel_hint": "json",
+                "events": ["change_detected"],
+            },
             follow_redirects=False,
         )
         assert resp.status_code == 303
@@ -147,11 +148,11 @@ class TestWatchNcNewPage:
         watch = await _make_watch(db_session)
         resp = await client.post(
             f"/watches/{watch.id}/notifications/new",
-            data={"apprise_url": "bad-url", "events": ["change_detected"]},
+            data={"events": ["change_detected"]},  # missing remote_channel_id
             follow_redirects=False,
         )
         assert resp.status_code == 200
-        assert b"plugin_schema" in resp.content
+        assert b"remote_channel_id" in resp.content
 
 
 @pytest.mark.integration
@@ -161,14 +162,18 @@ class TestWatchNcEditPage:
         nc = await _make_nc(db_session, watch)
         resp = await client.get(f"/watches/{watch.id}/notifications/{nc.id}/edit")
         assert resp.status_code == 200
-        assert b"apprise_url" in resp.content
+        assert b"remote_channel_id" in resp.content
 
     async def test_edit_redirects_on_success(self, client: AsyncClient, db_session):
         watch = await _make_watch(db_session)
         nc = await _make_nc(db_session, watch)
         resp = await client.post(
             f"/watches/{watch.id}/notifications/{nc.id}/edit",
-            data={"apprise_url": VALID_URL, "events": ["change_detected"]},
+            data={
+                "remote_channel_id": VALID_CHANNEL_ID,
+                "channel_hint": "json",
+                "events": ["change_detected"],
+            },
             follow_redirects=False,
         )
         assert resp.status_code == 303
@@ -179,8 +184,8 @@ class TestWatchNcEditPage:
         nc = await _make_nc(db_session, watch)
         resp = await client.post(
             f"/watches/{watch.id}/notifications/{nc.id}/edit",
-            data={"apprise_url": "bad-url", "events": ["change_detected"]},
+            data={"events": ["change_detected"]},  # missing remote_channel_id
             follow_redirects=False,
         )
         assert resp.status_code == 200
-        assert b"apprise_url" in resp.content
+        assert b"remote_channel_id" in resp.content

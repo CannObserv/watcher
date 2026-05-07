@@ -20,12 +20,6 @@
 
 <form method="post" action="/notifications/{{ tpl.id }}/edit" class="space-y-4 max-w-5xl">
 
-  {% if decryption_failed %}
-  <div role="alert" class="mb-4 text-sm text-amber-600 dark:text-amber-400">
-    Could not decrypt the stored URL — the field has been left blank. Enter the full Apprise URL to update it.
-  </div>
-  {% endif %}
-
   {% if error %}
   <div role="alert" class="mb-4 text-sm text-red-600 dark:text-red-400">{{ error }}</div>
   {% endif %}
@@ -33,7 +27,8 @@
   {% with
     form_id="tpl-" ~ (tpl.id|string),
     title=submitted_title,
-    apprise_url=decrypted_url,
+    remote_channel_id=tpl.remote_channel_id,
+    channel_hint=tpl.channel_hint,
     events=submitted_events if submitted_events is defined else tpl.events,
     show_global_default=True,
     is_global_default=tpl.is_global_default,

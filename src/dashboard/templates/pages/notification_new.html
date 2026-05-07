@@ -22,50 +22,25 @@
            class="form-input mt-1" placeholder="e.g. Ops Slack Channel">
   </div>
 
-  {# Channel picker (plugin builder + manual toggle) #}
+  {# Remote channel id — provisioned in the notifier service #}
   <div>
-    <label for="tpl-new-channel-picker" class="form-label">Notification channel</label>
-    <div class="flex items-center gap-3 mt-1">
-      <select
-        id="tpl-new-channel-picker"
-        name="_channel_picker"
-        class="form-input"
-        hx-get="/partials/apprise-plugin-form"
-        hx-target="#tpl-new-plugin-token-form"
-        hx-swap="outerHTML"
-        hx-vals='js:{schema: htmx.find("#tpl-new-channel-picker").value}'
-        hx-trigger="change"
-        onchange="document.querySelector('input[name=_url_mode_tpl_new][value=builder]').checked = true"
-        aria-label="Select notification plugin">
-        <option value="">— pick a channel —</option>
-        {% for plugin in apprise_plugins %}
-        <option value="{{ plugin.plugin_schema }}">{{ plugin.service_name }}</option>
-        {% endfor %}
-      </select>
-      <fieldset class="segment-group shrink-0" aria-label="URL entry mode">
-        <legend class="sr-only">URL entry mode</legend>
-        <label class="segment">
-          <input type="radio" name="_url_mode_tpl_new" value="builder" checked
-            hx-get="/partials/apprise-plugin-form"
-            hx-vals='js:{schema: htmx.find("#tpl-new-channel-picker").value}'
-            hx-target="#tpl-new-plugin-token-form"
-            hx-swap="outerHTML"
-            hx-trigger="click[htmx.find('#tpl-new-channel-picker').value !== '']"
-            onclick="if(!htmx.find('#tpl-new-channel-picker').value) htmx.find('#tpl-new-plugin-token-form').innerHTML=''">
-          <span class="text-xs">Builder</span>
-        </label>
-        <label class="segment">
-          <input type="radio" name="_url_mode_tpl_new" value="manual"
-            hx-get="/partials/apprise-plugin-form?raw=1"
-            hx-target="#tpl-new-plugin-token-form"
-            hx-swap="outerHTML">
-          <span class="text-xs">Manual</span>
-        </label>
-      </fieldset>
-    </div>
+    <label for="tpl-new-remote-channel-id" class="form-label">
+      Remote channel ID <span class="text-red-500" aria-hidden="true">*</span>
+    </label>
+    <input type="text" id="tpl-new-remote-channel-id" name="remote_channel_id"
+           required aria-required="true" minlength="26" maxlength="26"
+           placeholder="01ABCD..."
+           class="form-input mt-1">
+    <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">
+      Provision the channel in the notifier service first; paste its ULID here.
+    </p>
   </div>
-  <input type="hidden" name="plugin_schema" id="tpl-new-plugin-schema" value="">
-  <div id="tpl-new-plugin-token-form"></div>
+  <div>
+    <label for="tpl-new-channel-hint" class="form-label">Channel hint</label>
+    <input type="text" id="tpl-new-channel-hint" name="channel_hint"
+           maxlength="50" placeholder="slack, email, ntfy..."
+           class="form-input mt-1">
+  </div>
 
   {# Events — all event types enabled #}
   <fieldset>

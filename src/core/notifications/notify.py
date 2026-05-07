@@ -1,8 +1,11 @@
-"""Notification dispatch for watch lifecycle events."""
+"""Notification dispatch for watch lifecycle events.
 
-import os
+After Phase 5 (#137), the local Apprise dispatcher is gone — the notifier
+service is the only delivery path. Every candidate must carry a
+`remote_channel_id`; missing values are recorded as failures.
+"""
+
 import re
-from contextlib import nullcontext
 from dataclasses import dataclass
 from typing import Literal
 
@@ -28,7 +31,6 @@ from src.core.notifications.content import (
     build_title,
     resolve_options,
 )
-from src.core.notifications.dispatcher import DispatchResult, dispatch_event
 from src.core.notifications.events import WatchEvent, WatchEventType
 from src.core.notifier_client import build_idempotency_key, get_notifier_client
 from src.core.storage import StorageBackend, default_storage
@@ -43,10 +45,17 @@ _DIFF_VAR_RE = re.compile(r"\{[{%][^{}]*\b(?:diff_snippet|diff_full)\b[^{}]*[}%]
 
 
 @dataclass
+class DispatchResult:
+    """Outcome of a single notifier dispatch attempt."""
+
+    success: bool
+    reason: str
+
+
+@dataclass
 class DispatchCandidate:
     """A single notification target, drawn from global, domain, watch, or local source."""
 
-    apprise_url: str
     source: str  # "global" | "domain" | "watch_template" | "local"
     source_id: str
     content_config: dict | None = None
@@ -187,7 +196,7 @@ async def _load_event_unified_diff(
     return compute_unified_diff(prev_text, curr_text).unified_diff
 
 
-async def _dispatch_via_notifier(
+async def dispatch_via_notifier(
     client: NotifierClient,
     candidate: DispatchCandidate,
     event: WatchEvent,
@@ -254,6 +263,10 @@ async def dispatch_event_notifications(
     multiple sources (e.g. global AND manually assigned via WatchNcRef) fires once.
     Failures are logged but never raise. Writes a single audit log entry. Does not
     commit; caller is responsible.
+
+    Every candidate is dispatched via the notifier service. Candidates that lack
+    a `remote_channel_id` are recorded as failed audit results (the local Apprise
+    fallback was removed in #137).
 
     For change_detected events, the prev/curr extracted text is lazily loaded
     via `_load_event_unified_diff` once per event when at least one candidate
@@ -338,7 +351,6 @@ async def dispatch_event_notifications(
                 seen_template_ids.add(tpl_id)
                 candidates.append(
                     DispatchCandidate(
-                        apprise_url=tpl.apprise_url,
                         source=source,
                         source_id=tpl_id,
                         content_config=tpl.content_config,
@@ -349,7 +361,6 @@ async def dispatch_event_notifications(
     for c in local_configs:
         candidates.append(
             DispatchCandidate(
-                apprise_url=c.apprise_url,
                 source="local",
                 source_id=str(c.id),
                 content_config=c.content_config,
@@ -368,10 +379,8 @@ async def dispatch_event_notifications(
     ):
         unified_diff = await _load_event_unified_diff(session, event, content_type=content_type)
 
-    use_remote = os.getenv("USE_REMOTE_NOTIFY", "0") == "1"
-
     results = []
-    async with get_notifier_client() if use_remote else nullcontext() as notifier_client:
+    async with get_notifier_client() as notifier_client:
         for candidate in candidates:
             try:
                 cfg = (
@@ -382,19 +391,18 @@ async def dispatch_event_notifications(
                 options = resolve_options(cfg, event_value)
                 rendered_title = build_title(event, options)
                 rendered_body = build_body(event, options, unified_diff=unified_diff)
-                if use_remote and candidate.remote_channel_id:
-                    result = await _dispatch_via_notifier(
-                        notifier_client, candidate, event, rendered_title, rendered_body
+                if not candidate.remote_channel_id:
+                    logger.warning(
+                        "candidate has no remote_channel_id; skipping dispatch",
+                        extra={"source": candidate.source, "source_id": candidate.source_id},
+                    )
+                    result = DispatchResult(
+                        success=False,
+                        reason="no remote_channel_id configured",
                     )
                 else:
-                    if use_remote and not candidate.remote_channel_id:
-                        logger.warning(
-                            "notifier flag enabled but remote_channel_id not set;"
-                            " falling back to local",
-                            extra={"source": candidate.source, "source_id": candidate.source_id},
-                        )
-                    result = await dispatch_event(
-                        event, candidate.apprise_url, body=rendered_body, title=rendered_title
+                    result = await dispatch_via_notifier(
+                        notifier_client, candidate, event, rendered_title, rendered_body
                     )
                 results.append(
                     {

@@ -1,43 +1,59 @@
-"""Integration tests for notification template CRUD API."""
+"""Integration tests for notification template CRUD API.
+
+After Phase 5 (#137), templates carry a `remote_channel_id` instead of an
+Apprise URL.
+"""
 
 from unittest.mock import AsyncMock, patch
 
 import pytest
 from httpx import AsyncClient
+from ulid import ULID
 
-from src.core.notifications.dispatcher import DispatchResult
+from src.core.notifications.notify import DispatchResult
 from tests.conftest import make_watch
 
-VALID_URL = "json://hooks.example.com/notify"
+
+def _payload(**overrides):
+    payload = {
+        "title": "T",
+        "remote_channel_id": str(ULID()),
+        "channel_hint": "json",
+        "events": ["change_detected"],
+        "is_global_default": False,
+    }
+    payload.update(overrides)
+    return payload
+
+
+def _patch_notifier_client():
+    client_mock = AsyncMock()
+    client_mock.__aenter__ = AsyncMock(return_value=client_mock)
+    client_mock.__aexit__ = AsyncMock(return_value=False)
+    return patch(
+        "src.api.routes.notification_templates.get_notifier_client",
+        return_value=client_mock,
+    )
 
 
 @pytest.mark.integration
 async def test_create_template(client: AsyncClient):
     resp = await client.post(
         "/api/v1/notifications/templates",
-        json={
-            "title": "Ops Slack",
-            "apprise_url": VALID_URL,
-            "events": ["change_detected"],
-            "is_global_default": False,
-        },
+        json=_payload(title="Ops Slack"),
     )
     assert resp.status_code == 201
     data = resp.json()
     assert data["title"] == "Ops Slack"
     assert "id" in data
-    assert "apprise_url" not in data  # never exposed
+    assert "apprise_url" not in data
 
 
 @pytest.mark.integration
 async def test_list_templates(client: AsyncClient):
     await client.post(
         "/api/v1/notifications/templates",
-        json={
-            "title": "Template A",
-            "apprise_url": VALID_URL,
-            "events": ["change_detected"],
-        },
+        json=_payload(title="Template A"),
     )
     resp = await client.get("/api/v1/notifications/templates")
     assert resp.status_code == 200
@@ -49,7 +65,7 @@ async def test_get_template(client: AsyncClient):
     """GET /{template_id} returns the template."""
     tpl_resp = await client.post(
         "/api/v1/notifications/templates",
-        json={"title": "Fetch Me", "apprise_url": VALID_URL, "events": ["change_detected"]},
+        json=_payload(title="Fetch Me"),
     )
     template_id = tpl_resp.json()["id"]
 
@@ -73,7 +89,7 @@ async def test_patch_template_updates_title(client: AsyncClient):
     """PATCH /{template_id} updates specified fields."""
     tpl_resp = await client.post(
         "/api/v1/notifications/templates",
-        json={"title": "Old Title", "apprise_url": VALID_URL, "events": ["change_detected"]},
+        json=_payload(title="Old Title"),
     )
     template_id = tpl_resp.json()["id"]
 
@@ -90,7 +106,7 @@ async def test_patch_template_updates_events(client: AsyncClient):
     """PATCH /{template_id} can update events list."""
     tpl_resp = await client.post(
         "/api/v1/notifications/templates",
-        json={"title": "Events Test", "apprise_url": VALID_URL, "events": ["change_detected"]},
+        json=_payload(title="Events Test"),
     )
     template_id = tpl_resp.json()["id"]
 
@@ -113,7 +129,7 @@ async def test_unassign_template_from_watch(client: AsyncClient, db_session):
     watch_id = str(_watch_obj.id)
     tpl_resp = await client.post(
         "/api/v1/notifications/templates",
-        json={"title": "Unassign T", "apprise_url": VALID_URL, "events": ["change_detected"]},
+        json=_payload(title="Unassign T"),
     )
     template_id = tpl_resp.json()["id"]
 
@@ -141,11 +157,7 @@ async def test_delete_template_blocked_when_refs_exist(client: AsyncClient, db_s
     watch_id = str(_watch_obj.id)
     tpl_resp = await client.post(
         "/api/v1/notifications/templates",
-        json={
-            "title": "T",
-            "apprise_url": VALID_URL,
-            "events": ["change_detected"],
-        },
+        json=_payload(),
     )
     template_id = tpl_resp.json()["id"]
     await client.post(f"/api/v1/notifications/templates/{template_id}/assign/{watch_id}")
@@ -158,11 +170,7 @@ async def test_delete_template_blocked_when_refs_exist(client: AsyncClient, db_s
 async def test_delete_template_succeeds_when_no_refs(client: AsyncClient):
     tpl_resp = await client.post(
         "/api/v1/notifications/templates",
-        json={
-            "title": "Unused",
-            "apprise_url": VALID_URL,
-            "events": ["change_detected"],
-        },
+        json=_payload(title="Unused"),
     )
     template_id = tpl_resp.json()["id"]
     resp = await client.delete(f"/api/v1/notifications/templates/{template_id}")
@@ -171,18 +179,21 @@ async def test_delete_template_succeeds_when_no_refs(client: AsyncClient):
 
 @pytest.mark.integration
 async def test_test_endpoint_returns_success(client: AsyncClient):
-    """POST /test dispatches through dispatch_event and returns success/reason."""
+    """POST /test dispatches through the notifier client and returns success/reason."""
     tpl_resp = await client.post(
         "/api/v1/notifications/templates",
-        json={"title": "Test Me", "apprise_url": VALID_URL, "events": ["change_detected"]},
+        json=_payload(title="Test Me"),
     )
     template_id = tpl_resp.json()["id"]
 
     dispatch_result = DispatchResult(success=True, reason="Notification sent successfully")
-    with patch(
-        "src.api.routes.notification_templates.dispatch_event",
-        new_callable=AsyncMock,
-        return_value=dispatch_result,
+    with (
+        patch(
+            "src.api.routes.notification_templates.dispatch_via_notifier",
+            new_callable=AsyncMock,
+            return_value=dispatch_result,
+        ),
+        _patch_notifier_client(),
     ):
         resp = await client.post(f"/api/v1/notifications/templates/{template_id}/test")
 
@@ -192,15 +203,14 @@ async def test_test_endpoint_returns_success(client: AsyncClient):
 
 @pytest.mark.integration
 async def test_notification_template_has_content_config_column(db_session):
-    """ORM model exposes content_config field (fails until migration + model are updated)."""
-    from src.core.crypto import encrypt_apprise_url
+    """ORM model exposes content_config field."""
     from src.core.models.notification_template import NotificationTemplate
 
     tpl = NotificationTemplate(
         title="Test Template",
-        apprise_url=encrypt_apprise_url("slack://T/A/B"),
         channel_hint="slack",
         events=["change_detected"],
+        remote_channel_id=str(ULID()),
     )
     db_session.add(tpl)
     await db_session.flush()
@@ -212,14 +222,17 @@ async def test_test_endpoint_returns_failure_on_dispatch_error(client: AsyncClie
     """POST /test returns failure dict when dispatch raises, never 5xx."""
     tpl_resp = await client.post(
         "/api/v1/notifications/templates",
-        json={"title": "Fail Me", "apprise_url": VALID_URL, "events": ["change_detected"]},
+        json=_payload(title="Fail Me"),
     )
     template_id = tpl_resp.json()["id"]
 
-    with patch(
-        "src.api.routes.notification_templates.dispatch_event",
-        new_callable=AsyncMock,
-        side_effect=Exception("boom"),
+    with (
+        patch(
+            "src.api.routes.notification_templates.dispatch_via_notifier",
+            new_callable=AsyncMock,
+            side_effect=Exception("boom"),
+        ),
+        _patch_notifier_client(),
     ):
         resp = await client.post(f"/api/v1/notifications/templates/{template_id}/test")
 
@@ -232,14 +245,12 @@ async def test_create_template_with_content_config(client: AsyncClient):
     """content_config round-trips through template create → response."""
     resp = await client.post(
         "/api/v1/notifications/templates",
-        json={
-            "title": "Content Config Test",
-            "apprise_url": VALID_URL,
-            "events": ["change_detected"],
-            "content_config": {
+        json=_payload(
+            title="Content Config Test",
+            content_config={
                 "default": {"include_diff_snippet": True, "diff_snippet_lines": 7},
             },
-        },
+        ),
     )
     assert resp.status_code == 201
     data = resp.json()
@@ -252,7 +263,7 @@ async def test_patch_template_updates_content_config(client: AsyncClient):
     """PATCH /{template_id} with content_config updates the stored value."""
     tpl_resp = await client.post(
         "/api/v1/notifications/templates",
-        json={"title": "Patch CC Test", "apprise_url": VALID_URL, "events": ["change_detected"]},
+        json=_payload(title="Patch CC Test"),
     )
     template_id = tpl_resp.json()["id"]
 

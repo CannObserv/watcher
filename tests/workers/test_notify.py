@@ -1,10 +1,16 @@
-"""Tests for dispatch_event_notifications — 4-source live dispatch."""
+"""Tests for dispatch_event_notifications — 4-source dispatch via notifier.
+
+After Phase 5 (#137), every candidate goes through the notifier service —
+the local Apprise dispatcher is gone. These tests assert the dispatcher
+queries all four sources, dedupes templates, threads `content_config`
+through, lazy-loads the unified diff once per event, and never raises.
+"""
 
 from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from cryptography.fernet import Fernet
+from notifier_client.generated.models.dispatch_out_status import DispatchOutStatus
 from sqlalchemy.ext.asyncio import AsyncSession
 from ulid import ULID
 
@@ -18,14 +24,9 @@ from src.core.notifications.notify import (
 
 
 @pytest.fixture(autouse=True)
-def set_test_key(monkeypatch):
-    key = Fernet.generate_key().decode()
-    monkeypatch.setenv("APPRISE_SECRET_KEY", key)
-
-
-@pytest.fixture(autouse=True)
-def no_remote_notify(monkeypatch):
-    monkeypatch.delenv("USE_REMOTE_NOTIFY", raising=False)
+def notifier_env(monkeypatch):
+    monkeypatch.setenv("NOTIFIER_BASE_URL", "http://localhost:9000")
+    monkeypatch.setenv("NOTIFIER_API_KEY", "nk_test")
 
 
 def make_event(event_type=WatchEventType.CHANGE_DETECTED, watch_id=None):
@@ -41,13 +42,7 @@ def make_event(event_type=WatchEventType.CHANGE_DETECTED, watch_id=None):
 
 def _watch_meta_result(value, *, content_type=None):
     """Mock the row result for the dispatcher's
-    `select(Watch.effective_domain, Watch.content_type)` lookup.
-
-    `value` is the effective_domain (str or None). `content_type` is the
-    Watch.content_type (defaults to None → non-HTML branch). Returns a
-    MagicMock whose `.one_or_none()` yields either `None` (no row) or
-    the 2-tuple `(domain, content_type)`.
-    """
+    `select(Watch.effective_domain, Watch.content_type)` lookup."""
     r = MagicMock()
     r.one_or_none.return_value = None if value is None else (value, content_type)
     return r
@@ -65,45 +60,51 @@ def _result_with(*items):
     return r
 
 
-def _fake_template(tid=None):
+def _fake_template(tid=None, *, remote_channel_id=None):
     t = MagicMock()
     t.id = tid or str(ULID())
-    t.apprise_url = "json://hooks.example.com/notify"
     t.content_config = None
-    t.remote_channel_id = None
+    t.remote_channel_id = remote_channel_id or str(ULID())
     return t
 
 
-def _fake_local(cid=None):
-    from src.core.crypto import encrypt_apprise_url
+def _fake_local(cid=None, *, remote_channel_id=None):
     from src.core.models.notification_config import WatchNotificationConfig
 
     c = MagicMock(spec=WatchNotificationConfig)
     c.id = cid or ULID()
-    c.apprise_url = encrypt_apprise_url("json://local.example.com/notify")
     c.events = ["change_detected"]
     c.content_config = None
-    c.remote_channel_id = None
+    c.remote_channel_id = remote_channel_id or str(ULID())
     return c
 
 
-def _ok_result():
-    from src.core.notifications.dispatcher import DispatchResult
+def _make_dispatch_out(status="succeeded"):
+    out = MagicMock()
+    out.id = str(ULID())
+    out.status = DispatchOutStatus.SUCCEEDED if status == "succeeded" else DispatchOutStatus.FAILED
+    out.attempts = []
+    return out
 
-    return DispatchResult(success=True, reason="ok")
+
+def _mock_notifier_client(dispatch_return=None):
+    client = AsyncMock()
+    client.__aenter__ = AsyncMock(return_value=client)
+    client.__aexit__ = AsyncMock(return_value=False)
+    client.dispatch = AsyncMock(return_value=dispatch_return or _make_dispatch_out())
+    return client
 
 
 class TestNoDispatch:
     async def test_no_candidates_is_noop(self):
         """No sources → no dispatch, no audit."""
         session = AsyncMock(spec=AsyncSession)
-        # domain lookup + global + domain + watch + local = 5 calls (domain is None so 4)
         session.execute = AsyncMock(
             side_effect=[
-                _watch_meta_result(None),  # domain lookup → None (no domain query)
-                _empty_result(),  # global
-                _empty_result(),  # watch templates
-                _empty_result(),  # local
+                _watch_meta_result(None),
+                _empty_result(),
+                _empty_result(),
+                _empty_result(),
             ]
         )
         await dispatch_event_notifications(session, make_event())
@@ -117,20 +118,18 @@ class TestGlobalDispatch:
         session = AsyncMock(spec=AsyncSession)
         session.execute = AsyncMock(
             side_effect=[
-                _watch_meta_result(None),  # no domain
-                _result_with(tpl),  # global templates
-                _empty_result(),  # watch templates
-                _empty_result(),  # local
+                _watch_meta_result(None),
+                _result_with(tpl),
+                _empty_result(),
+                _empty_result(),
             ]
         )
 
-        with patch(
-            "src.core.notifications.notify.dispatch_event",
-            new_callable=AsyncMock,
-            return_value=_ok_result(),
-        ):
+        client = _mock_notifier_client()
+        with patch("src.core.notifications.notify.get_notifier_client", return_value=client):
             await dispatch_event_notifications(session, make_event())
 
+        client.dispatch.assert_called_once()
         session.add.assert_called_once()  # audit
 
     async def test_global_source_label_in_audit(self):
@@ -146,11 +145,8 @@ class TestGlobalDispatch:
             ]
         )
 
-        with patch(
-            "src.core.notifications.notify.dispatch_event",
-            new_callable=AsyncMock,
-            return_value=_ok_result(),
-        ):
+        client = _mock_notifier_client()
+        with patch("src.core.notifications.notify.get_notifier_client", return_value=client):
             await dispatch_event_notifications(session, make_event())
 
         call_kwargs = session.add.call_args[0][0]
@@ -164,19 +160,16 @@ class TestDomainDispatch:
         session = AsyncMock(spec=AsyncSession)
         session.execute = AsyncMock(
             side_effect=[
-                _watch_meta_result("example.com"),  # domain lookup
-                _empty_result(),  # global
-                _result_with(tpl),  # domain templates
-                _empty_result(),  # watch templates
-                _empty_result(),  # local
+                _watch_meta_result("example.com"),
+                _empty_result(),
+                _result_with(tpl),
+                _empty_result(),
+                _empty_result(),
             ]
         )
 
-        with patch(
-            "src.core.notifications.notify.dispatch_event",
-            new_callable=AsyncMock,
-            return_value=_ok_result(),
-        ):
+        client = _mock_notifier_client()
+        with patch("src.core.notifications.notify.get_notifier_client", return_value=client):
             await dispatch_event_notifications(session, make_event())
 
         session.add.assert_called_once()
@@ -186,10 +179,10 @@ class TestDomainDispatch:
         session = AsyncMock(spec=AsyncSession)
         session.execute = AsyncMock(
             side_effect=[
-                _watch_meta_result(None),  # no domain → skip domain query
-                _empty_result(),  # global
-                _empty_result(),  # watch templates
-                _empty_result(),  # local
+                _watch_meta_result(None),
+                _empty_result(),
+                _empty_result(),
+                _empty_result(),
             ]
         )
         await dispatch_event_notifications(session, make_event())
@@ -209,11 +202,8 @@ class TestDomainDispatch:
             ]
         )
 
-        with patch(
-            "src.core.notifications.notify.dispatch_event",
-            new_callable=AsyncMock,
-            return_value=_ok_result(),
-        ):
+        client = _mock_notifier_client()
+        with patch("src.core.notifications.notify.get_notifier_client", return_value=client):
             await dispatch_event_notifications(session, make_event())
 
         call_kwargs = session.add.call_args[0][0]
@@ -228,17 +218,14 @@ class TestWatchTemplateDispatch:
         session.execute = AsyncMock(
             side_effect=[
                 _watch_meta_result(None),
-                _empty_result(),  # global
-                _result_with(tpl),  # watch templates
-                _empty_result(),  # local
+                _empty_result(),
+                _result_with(tpl),
+                _empty_result(),
             ]
         )
 
-        with patch(
-            "src.core.notifications.notify.dispatch_event",
-            new_callable=AsyncMock,
-            return_value=_ok_result(),
-        ):
+        client = _mock_notifier_client()
+        with patch("src.core.notifications.notify.get_notifier_client", return_value=client):
             await dispatch_event_notifications(session, make_event())
 
         session.add.assert_called_once()
@@ -255,11 +242,8 @@ class TestWatchTemplateDispatch:
             ]
         )
 
-        with patch(
-            "src.core.notifications.notify.dispatch_event",
-            new_callable=AsyncMock,
-            return_value=_ok_result(),
-        ):
+        client = _mock_notifier_client()
+        with patch("src.core.notifications.notify.get_notifier_client", return_value=client):
             await dispatch_event_notifications(session, make_event())
 
         call_kwargs = session.add.call_args[0][0]
@@ -279,11 +263,8 @@ class TestLocalDispatch:
             ]
         )
 
-        with patch(
-            "src.core.notifications.notify.dispatch_event",
-            new_callable=AsyncMock,
-            return_value=_ok_result(),
-        ):
+        client = _mock_notifier_client()
+        with patch("src.core.notifications.notify.get_notifier_client", return_value=client):
             await dispatch_event_notifications(session, make_event())
 
         session.add.assert_called_once()
@@ -300,11 +281,8 @@ class TestLocalDispatch:
             ]
         )
 
-        with patch(
-            "src.core.notifications.notify.dispatch_event",
-            new_callable=AsyncMock,
-            return_value=_ok_result(),
-        ):
+        client = _mock_notifier_client()
+        with patch("src.core.notifications.notify.get_notifier_client", return_value=client):
             await dispatch_event_notifications(session, make_event())
 
         call_kwargs = session.add.call_args[0][0]
@@ -322,20 +300,17 @@ class TestDeduplication:
         session.execute = AsyncMock(
             side_effect=[
                 _watch_meta_result(None),
-                _result_with(tpl_global),  # global
-                _result_with(tpl_watch),  # watch templates (same id)
-                _empty_result(),  # local
+                _result_with(tpl_global),
+                _result_with(tpl_watch),
+                _empty_result(),
             ]
         )
 
-        with patch(
-            "src.core.notifications.notify.dispatch_event",
-            new_callable=AsyncMock,
-            return_value=_ok_result(),
-        ) as mock_dispatch:
+        client = _mock_notifier_client()
+        with patch("src.core.notifications.notify.get_notifier_client", return_value=client):
             await dispatch_event_notifications(session, make_event())
 
-        assert mock_dispatch.call_count == 1
+        assert client.dispatch.call_count == 1
 
     async def test_template_in_domain_and_watch_nc_fires_once(self):
         """Domain template also in WatchNcRef dispatches once."""
@@ -347,21 +322,18 @@ class TestDeduplication:
         session.execute = AsyncMock(
             side_effect=[
                 _watch_meta_result("example.com"),
-                _empty_result(),  # global
-                _result_with(tpl_domain),  # domain
-                _result_with(tpl_watch),  # watch (same id)
-                _empty_result(),  # local
+                _empty_result(),
+                _result_with(tpl_domain),
+                _result_with(tpl_watch),
+                _empty_result(),
             ]
         )
 
-        with patch(
-            "src.core.notifications.notify.dispatch_event",
-            new_callable=AsyncMock,
-            return_value=_ok_result(),
-        ) as mock_dispatch:
+        client = _mock_notifier_client()
+        with patch("src.core.notifications.notify.get_notifier_client", return_value=client):
             await dispatch_event_notifications(session, make_event())
 
-        assert mock_dispatch.call_count == 1
+        assert client.dispatch.call_count == 1
 
     async def test_all_four_sources_distinct_fire_four_times(self):
         """Four distinct candidates (one per source) → 4 dispatches."""
@@ -381,19 +353,16 @@ class TestDeduplication:
             ]
         )
 
-        with patch(
-            "src.core.notifications.notify.dispatch_event",
-            new_callable=AsyncMock,
-            return_value=_ok_result(),
-        ) as mock_dispatch:
+        client = _mock_notifier_client()
+        with patch("src.core.notifications.notify.get_notifier_client", return_value=client):
             await dispatch_event_notifications(session, make_event())
 
-        assert mock_dispatch.call_count == 4
+        assert client.dispatch.call_count == 4
 
 
 class TestContentConfig:
     @pytest.mark.asyncio
-    async def test_content_config_body_used_in_dispatch(self, set_test_key):
+    async def test_content_config_body_used_in_dispatch(self):
         """When a config has content_config, build_body is called and the result forwarded."""
         event = make_event(WatchEventType.CHANGE_DETECTED)
 
@@ -401,72 +370,61 @@ class TestContentConfig:
         content_cfg_dict = content_cfg.model_dump()
 
         mock_config = MagicMock()
-        mock_config.apprise_url = "encrypted_url"
         mock_config.content_config = content_cfg_dict
-        mock_config.remote_channel_id = None
-
-        dispatched_bodies = []
-
-        async def fake_dispatch(ev, url, *, body, title):
-            dispatched_bodies.append(body)
-            return MagicMock(success=True, reason="ok")
+        mock_config.remote_channel_id = str(ULID())
 
         session = AsyncMock(spec=AsyncSession)
         session.execute = AsyncMock(
             side_effect=[
-                _watch_meta_result(None),  # domain lookup → None (no domain query)
-                _empty_result(),  # global templates
-                _empty_result(),  # watch templates
-                _result_with(mock_config),  # local configs
+                _watch_meta_result(None),
+                _empty_result(),
+                _empty_result(),
+                _result_with(mock_config),
             ]
         )
 
-        with patch("src.core.notifications.notify.dispatch_event", fake_dispatch):
+        client = _mock_notifier_client()
+        with patch("src.core.notifications.notify.get_notifier_client", return_value=client):
             await dispatch_event_notifications(session, event)
 
-        assert len(dispatched_bodies) == 1
+        client.dispatch.assert_called_once()
+        body = client.dispatch.call_args.kwargs["body_template"]
         # include_domain=True but no effective_domain in metadata → no domain section added
-        # body should match the default change_detected body (just url + summary)
-        assert "example.com" in dispatched_bodies[0]
-        assert "Domain:" not in dispatched_bodies[0]
+        assert "example.com" in body
+        assert "Domain:" not in body
 
     @pytest.mark.asyncio
-    async def test_null_content_config_renders_default_body(self, set_test_key):
-        """content_config=None — dispatch_event called with the default-template body."""
+    async def test_null_content_config_renders_default_body(self):
+        """content_config=None — body is rendered from the default template."""
         event = make_event(WatchEventType.CHANGE_DETECTED)
 
         mock_config = MagicMock()
-        mock_config.apprise_url = "encrypted_url"
         mock_config.content_config = None
-        mock_config.remote_channel_id = None
-
-        dispatched_bodies = []
-
-        async def fake_dispatch(ev, url, *, body, title):
-            dispatched_bodies.append(body)
-            return MagicMock(success=True, reason="ok")
+        mock_config.remote_channel_id = str(ULID())
 
         session = AsyncMock(spec=AsyncSession)
         session.execute = AsyncMock(
             side_effect=[
-                _watch_meta_result(None),  # domain lookup → None (no domain query)
-                _empty_result(),  # global templates
-                _empty_result(),  # watch templates
-                _result_with(mock_config),  # local configs
+                _watch_meta_result(None),
+                _empty_result(),
+                _empty_result(),
+                _result_with(mock_config),
             ]
         )
 
-        with patch("src.core.notifications.notify.dispatch_event", fake_dispatch):
+        client = _mock_notifier_client()
+        with patch("src.core.notifications.notify.get_notifier_client", return_value=client):
             await dispatch_event_notifications(session, event)
 
-        assert len(dispatched_bodies) == 1
-        # Default change_detected body: "{{ watch_url }} — {{ change_summary }}"
-        assert dispatched_bodies[0] is not None
-        assert "example.com" in dispatched_bodies[0]
+        client.dispatch.assert_called_once()
+        body = client.dispatch.call_args.kwargs["body_template"]
+        assert body
+        assert "example.com" in body
 
 
 class TestErrorHandling:
     async def test_dispatch_failure_does_not_raise(self):
+        """An exception inside dispatch_via_notifier is caught and recorded."""
         tpl = _fake_template()
         session = AsyncMock(spec=AsyncSession)
         session.execute = AsyncMock(
@@ -478,13 +436,12 @@ class TestErrorHandling:
             ]
         )
 
-        with patch(
-            "src.core.notifications.notify.dispatch_event",
-            new_callable=AsyncMock,
-            side_effect=Exception("boom"),
-        ):
+        client = _mock_notifier_client()
+        client.dispatch = AsyncMock(side_effect=Exception("boom"))
+
+        with patch("src.core.notifications.notify.get_notifier_client", return_value=client):
             await dispatch_event_notifications(session, make_event())
-        # Did not raise
+        # Did not raise.
 
 
 class _FakeStorage:
@@ -562,7 +519,6 @@ class TestLoadEventUnifiedDiff:
         change.previous_snapshot_id = ULID()
         change.current_snapshot_id = ULID()
         session = AsyncMock(spec=AsyncSession)
-        # gets: Change, prev Snapshot (None), curr Snapshot — Watch fetch never reached
         session.get = AsyncMock(side_effect=[change, None, MagicMock()])
         result = await _load_event_unified_diff(session, event)
         assert result == ""
@@ -619,7 +575,6 @@ class TestLoadEventUnifiedDiff:
         result = await _load_event_unified_diff(session, event, storage=storage)
         assert result.startswith("--- content")
         assert "+beta-changed" in result
-        # Loaded text_path, not storage_path
         assert storage.load_calls == ["snapshots/w/prev.txt", "snapshots/w/curr.txt"]
 
     @pytest.mark.asyncio
@@ -636,10 +591,6 @@ class TestLoadEventUnifiedDiff:
         watch = MagicMock(content_type=ContentType.HTML)
         session = AsyncMock(spec=AsyncSession)
         session.get = AsyncMock(side_effect=[change, prev, curr, watch])
-        # Single-line HTML → must be pretty-printed across multiple lines
-        # before diffing. We verify both the content of the changed line
-        # and the multi-line shape of the diff so a regression that drops
-        # prettification (e.g. switching to raw HTML) would fail this test.
         prev_html = b"<html><body><p>alpha</p><p>beta</p></body></html>"
         curr_html = b"<html><body><p>alpha</p><p>beta-changed</p></body></html>"
         storage = _FakeStorage(
@@ -650,22 +601,16 @@ class TestLoadEventUnifiedDiff:
         )
         result = await _load_event_unified_diff(session, event, storage=storage)
         assert result.startswith("--- content")
-        # Prettified diff has the changed paragraph as a discrete `-`/`+`
-        # line, not embedded in a one-line raw-HTML dump.
         diff_lines = result.splitlines()
         assert any(line.startswith("-") and "<p>beta</p>" in line for line in diff_lines)
         assert any(line.startswith("+") and "<p>beta-changed</p>" in line for line in diff_lines)
-        # Lower bound on line count proves prettification expanded the input
-        # (raw single-line HTML diff would be ~4 lines: 2 headers + @@ + content).
         assert len(diff_lines) >= 8
-        # Loaded storage_path (raw HTML), not text_path
         assert storage.load_calls == ["snapshots/w/prev.html", "snapshots/w/curr.html"]
 
     @pytest.mark.asyncio
     async def test_html_watch_normalize_html_failure_falls_back_to_raw(self, monkeypatch):
         """When `normalize_html` raises, the function falls back to diffing
-        the un-prettified raw HTML rather than returning empty (matches the
-        dashboard's `_maybe_prettify_html` graceful-degrade)."""
+        the un-prettified raw HTML rather than returning empty."""
         event = _change_event_with_id(ULID())
         change = MagicMock()
         change.previous_snapshot_id = ULID()
@@ -688,7 +633,6 @@ class TestLoadEventUnifiedDiff:
         monkeypatch.setattr("src.core.notifications.notify.normalize_html", boom)
 
         result = await _load_event_unified_diff(session, event, storage=storage)
-        # Fallback path: raw-HTML diff is non-empty and contains the change.
         assert result.startswith("--- content")
         assert "-<html><body>alpha</body></html>" in result
         assert "+<html><body>beta</body></html>" in result
@@ -701,9 +645,7 @@ class TestLoadEventUnifiedDiff:
     async def test_html_watch_with_missing_storage_path_returns_empty(
         self, prev_storage_path, curr_storage_path
     ):
-        """HTML watch missing either side's storage_path → no fallback
-        (text_path is the chunk-joined extracted text, which is exactly
-        what we're trying to avoid)."""
+        """HTML watch missing either side's storage_path → no fallback."""
         event = _change_event_with_id(ULID())
         change = MagicMock()
         change.previous_snapshot_id = ULID()
@@ -719,8 +661,7 @@ class TestLoadEventUnifiedDiff:
     @pytest.mark.asyncio
     async def test_content_type_kwarg_skips_watch_fetch(self):
         """When `content_type` is passed, the function must not fetch the
-        Watch row — `dispatch_event_notifications` already loaded it
-        alongside `effective_domain`."""
+        Watch row — `dispatch_event_notifications` already loaded it."""
         event = _change_event_with_id(ULID())
         change = MagicMock()
         change.previous_snapshot_id = ULID()
@@ -728,7 +669,6 @@ class TestLoadEventUnifiedDiff:
         prev = MagicMock(text_path="snapshots/w/prev.txt", storage_path="snapshots/w/prev.html")
         curr = MagicMock(text_path="snapshots/w/curr.txt", storage_path="snapshots/w/curr.html")
         session = AsyncMock(spec=AsyncSession)
-        # Only 3 gets — Change, prev Snapshot, curr Snapshot. No Watch fetch.
         session.get = AsyncMock(side_effect=[change, prev, curr])
         storage = _FakeStorage(
             files={
@@ -753,7 +693,7 @@ class TestLoadEventUnifiedDiff:
         prev = MagicMock(text_path="snapshots/w/prev.txt", storage_path="snapshots/w/prev.html")
         curr = MagicMock(text_path="snapshots/w/curr.txt", storage_path="snapshots/w/curr.html")
         session = AsyncMock(spec=AsyncSession)
-        session.get = AsyncMock(side_effect=[change, prev, curr, None])  # watch missing
+        session.get = AsyncMock(side_effect=[change, prev, curr, None])
         storage = _FakeStorage(
             files={
                 "snapshots/w/prev.txt": b"alpha\nbeta\n",
@@ -771,32 +711,29 @@ class TestUnifiedDiffLazyLoad:
     is memoized across all candidates for the same event (issue #116)."""
 
     @pytest.mark.asyncio
-    async def test_no_diff_load_when_no_candidate_needs_it(self, set_test_key):
+    async def test_no_diff_load_when_no_candidate_needs_it(self):
         """Default ContentOptions (toggles off, no body_template) → no
-        snapshot text load. The dispatcher must not call _load_event_unified_diff."""
+        snapshot text load."""
         event = make_event(WatchEventType.CHANGE_DETECTED)
         event.metadata["change_id"] = str(ULID())
 
         mock_config = MagicMock()
-        mock_config.apprise_url = "encrypted_url"
-        mock_config.content_config = None  # all defaults — no diff needed
-        mock_config.remote_channel_id = None
+        mock_config.content_config = None
+        mock_config.remote_channel_id = str(ULID())
 
         session = AsyncMock(spec=AsyncSession)
         session.execute = AsyncMock(
             side_effect=[
-                _watch_meta_result(None),  # domain lookup
-                _empty_result(),  # global templates
-                _empty_result(),  # watch templates (domain templates query skipped: no domain)
-                _result_with(mock_config),  # local configs
+                _watch_meta_result(None),
+                _empty_result(),
+                _empty_result(),
+                _result_with(mock_config),
             ]
         )
 
-        async def fake_dispatch(ev, url, *, body, title):
-            return MagicMock(success=True, reason="ok")
-
+        client = _mock_notifier_client()
         with (
-            patch("src.core.notifications.notify.dispatch_event", fake_dispatch),
+            patch("src.core.notifications.notify.get_notifier_client", return_value=client),
             patch(
                 "src.core.notifications.notify._load_event_unified_diff",
                 new_callable=AsyncMock,
@@ -807,10 +744,9 @@ class TestUnifiedDiffLazyLoad:
         load_mock.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_diff_load_once_when_toggle_on(self, set_test_key):
+    async def test_diff_load_once_when_toggle_on(self):
         """include_diff_snippet=True → diff is loaded exactly once and shared
-        across N candidates. Memoization is essential — N configs must not
-        cause N storage round-trips."""
+        across N candidates."""
         event = make_event(WatchEventType.CHANGE_DETECTED)
         event.metadata["change_id"] = str(ULID())
 
@@ -818,9 +754,8 @@ class TestUnifiedDiffLazyLoad:
         configs = []
         for _ in range(3):
             c = MagicMock()
-            c.apprise_url = "encrypted_url"
             c.content_config = cfg
-            c.remote_channel_id = None
+            c.remote_channel_id = str(ULID())
             configs.append(c)
 
         session = AsyncMock(spec=AsyncSession)
@@ -833,14 +768,9 @@ class TestUnifiedDiffLazyLoad:
             ]
         )
 
-        captured_bodies = []
-
-        async def fake_dispatch(ev, url, *, body, title):
-            captured_bodies.append(body)
-            return MagicMock(success=True, reason="ok")
-
+        client = _mock_notifier_client()
         with (
-            patch("src.core.notifications.notify.dispatch_event", fake_dispatch),
+            patch("src.core.notifications.notify.get_notifier_client", return_value=client),
             patch(
                 "src.core.notifications.notify._load_event_unified_diff",
                 new_callable=AsyncMock,
@@ -850,24 +780,22 @@ class TestUnifiedDiffLazyLoad:
             await dispatch_event_notifications(session, event)
 
         load_mock.assert_called_once()
-        assert len(captured_bodies) == 3
-        # All three bodies share the same fenced diff block.
-        for body in captured_bodies:
+        assert client.dispatch.call_count == 3
+        for call in client.dispatch.call_args_list:
+            body = call.kwargs["body_template"]
             assert "```diff" in body
             assert "+new" in body
 
     @pytest.mark.asyncio
-    async def test_dispatcher_threads_content_type_to_load(self, set_test_key):
-        """The dispatcher must unpack content_type from the watch_meta row
-        and pass it through to `_load_event_unified_diff` so the inner
-        function takes the perf shortcut and skips a redundant Watch fetch."""
+    async def test_dispatcher_threads_content_type_to_load(self):
+        """The dispatcher must thread `content_type` from the watch_meta row
+        through to `_load_event_unified_diff` for the perf shortcut."""
         event = make_event(WatchEventType.CHANGE_DETECTED)
 
         cfg = ContentConfig(default=ContentOptions(include_diff_snippet=True)).model_dump()
         c = MagicMock()
-        c.apprise_url = "encrypted_url"
         c.content_config = cfg
-        c.remote_channel_id = None
+        c.remote_channel_id = str(ULID())
 
         session = AsyncMock(spec=AsyncSession)
         session.execute = AsyncMock(
@@ -880,11 +808,9 @@ class TestUnifiedDiffLazyLoad:
             ]
         )
 
-        async def fake_dispatch(ev, url, *, body, title):
-            return MagicMock(success=True, reason="ok")
-
+        client = _mock_notifier_client()
         with (
-            patch("src.core.notifications.notify.dispatch_event", fake_dispatch),
+            patch("src.core.notifications.notify.get_notifier_client", return_value=client),
             patch(
                 "src.core.notifications.notify._load_event_unified_diff",
                 new_callable=AsyncMock,
@@ -894,16 +820,11 @@ class TestUnifiedDiffLazyLoad:
             await dispatch_event_notifications(session, event)
 
         load_mock.assert_called_once()
-        # The kwarg must carry the dispatcher's row-unpacked content_type so
-        # the inner function takes the perf shortcut. A regression that drops
-        # `content_type=` would leave it absent or default-None here.
         assert load_mock.call_args.kwargs.get("content_type") == ContentType.HTML
 
     @pytest.mark.asyncio
-    async def test_diff_load_when_body_template_references_diff_snippet(self, set_test_key):
-        """body_template referencing {{ diff_snippet }} also triggers the load
-        even when the include_diff_* toggles are off, since toggles are
-        bypassed on the body_template code path."""
+    async def test_diff_load_when_body_template_references_diff_snippet(self):
+        """body_template referencing {{ diff_snippet }} also triggers the load."""
         event = make_event(WatchEventType.CHANGE_DETECTED)
         event.metadata["change_id"] = str(ULID())
 
@@ -911,9 +832,8 @@ class TestUnifiedDiffLazyLoad:
             default=ContentOptions(body_template="diff: {{ diff_snippet }}")
         ).model_dump()
         c = MagicMock()
-        c.apprise_url = "encrypted_url"
         c.content_config = cfg
-        c.remote_channel_id = None
+        c.remote_channel_id = str(ULID())
 
         session = AsyncMock(spec=AsyncSession)
         session.execute = AsyncMock(
@@ -925,11 +845,9 @@ class TestUnifiedDiffLazyLoad:
             ]
         )
 
-        async def fake_dispatch(ev, url, *, body, title):
-            return MagicMock(success=True, reason="ok")
-
+        client = _mock_notifier_client()
         with (
-            patch("src.core.notifications.notify.dispatch_event", fake_dispatch),
+            patch("src.core.notifications.notify.get_notifier_client", return_value=client),
             patch(
                 "src.core.notifications.notify._load_event_unified_diff",
                 new_callable=AsyncMock,
@@ -941,12 +859,9 @@ class TestUnifiedDiffLazyLoad:
         load_mock.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_no_diff_load_when_template_mentions_var_outside_jinja_delimiters(
-        self, set_test_key
-    ):
+    async def test_no_diff_load_when_template_mentions_var_outside_jinja_delimiters(self):
         """A body_template that mentions "diff_snippet" only as literal text
-        (not inside {{ ... }} or {% ... %}) must not trigger the lazy-load.
-        Verifies the Jinja-aware regex in _DIFF_VAR_RE (CR #4)."""
+        (not inside {{ ... }} or {% ... %}) must not trigger the lazy-load."""
         event = make_event(WatchEventType.CHANGE_DETECTED)
         event.metadata["change_id"] = str(ULID())
 
@@ -954,9 +869,8 @@ class TestUnifiedDiffLazyLoad:
             default=ContentOptions(body_template="See diff_snippet docs at example.com")
         ).model_dump()
         c = MagicMock()
-        c.apprise_url = "encrypted_url"
         c.content_config = cfg
-        c.remote_channel_id = None
+        c.remote_channel_id = str(ULID())
 
         session = AsyncMock(spec=AsyncSession)
         session.execute = AsyncMock(
@@ -968,11 +882,9 @@ class TestUnifiedDiffLazyLoad:
             ]
         )
 
-        async def fake_dispatch(ev, url, *, body, title):
-            return MagicMock(success=True, reason="ok")
-
+        client = _mock_notifier_client()
         with (
-            patch("src.core.notifications.notify.dispatch_event", fake_dispatch),
+            patch("src.core.notifications.notify.get_notifier_client", return_value=client),
             patch(
                 "src.core.notifications.notify._load_event_unified_diff",
                 new_callable=AsyncMock,
@@ -983,16 +895,14 @@ class TestUnifiedDiffLazyLoad:
         load_mock.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_no_diff_load_for_non_change_event(self, set_test_key):
-        """watch_error and other non-change events never trigger the diff load
-        even if the resolved options have diff toggles on."""
+    async def test_no_diff_load_for_non_change_event(self):
+        """watch_error and other non-change events never trigger the diff load."""
         event = make_event(WatchEventType.WATCH_ERROR)
 
         cfg = ContentConfig(default=ContentOptions(include_diff_snippet=True)).model_dump()
         c = MagicMock()
-        c.apprise_url = "encrypted_url"
         c.content_config = cfg
-        c.remote_channel_id = None
+        c.remote_channel_id = str(ULID())
         c.events = ["watch_error"]
 
         session = AsyncMock(spec=AsyncSession)
@@ -1005,11 +915,9 @@ class TestUnifiedDiffLazyLoad:
             ]
         )
 
-        async def fake_dispatch(ev, url, *, body, title):
-            return MagicMock(success=True, reason="ok")
-
+        client = _mock_notifier_client()
         with (
-            patch("src.core.notifications.notify.dispatch_event", fake_dispatch),
+            patch("src.core.notifications.notify.get_notifier_client", return_value=client),
             patch(
                 "src.core.notifications.notify._load_event_unified_diff",
                 new_callable=AsyncMock,

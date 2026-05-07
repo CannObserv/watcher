@@ -5,16 +5,14 @@ table that shows Global / Domain / Watch-assigned / Local rows with a Source col
 """
 
 import pytest
+from ulid import ULID
 
-from src.core.crypto import encrypt_apprise_url
 from src.core.models.notification_config import WatchNotificationConfig
 from src.core.models.notification_template import DomainNcRef, NotificationTemplate, WatchNcRef
 from src.core.models.watch import ContentType, Watch
 from tests.conftest import make_watch
 
 pytestmark = pytest.mark.integration
-
-VALID_URL = "json://hooks.example.com/notify"
 
 
 async def _make_watch(db_session, name: str = "W", domain: str | None = None) -> Watch:
@@ -35,7 +33,7 @@ async def _make_template(
 ) -> NotificationTemplate:
     tpl = NotificationTemplate(
         title=title,
-        apprise_url=encrypt_apprise_url(VALID_URL),
+        remote_channel_id=str(ULID()),
         channel_hint="json",
         events=["change_detected"],
         is_global_default=is_global_default,
@@ -320,7 +318,7 @@ class TestCopyLocalConfig:
         nc = WatchNotificationConfig(
             watch_id=watch.id,
             title="Original",
-            apprise_url=encrypt_apprise_url(VALID_URL),
+            remote_channel_id=str(ULID()),
             channel_hint="json",
             events=["change_detected"],
         )
@@ -348,7 +346,7 @@ class TestCopyLocalConfig:
         nc = WatchNotificationConfig(
             watch_id=watch.id,
             title="My Config",
-            apprise_url=encrypt_apprise_url(VALID_URL),
+            remote_channel_id=str(ULID()),
             channel_hint="json",
             events=["change_detected"],
         )
@@ -375,7 +373,7 @@ class TestCopyLocalConfig:
         nc = WatchNotificationConfig(
             watch_id=watch1.id,
             title="Belongs to A",
-            apprise_url=encrypt_apprise_url(VALID_URL),
+            remote_channel_id=str(ULID()),
             channel_hint="json",
             events=["change_detected"],
         )

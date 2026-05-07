@@ -9,10 +9,11 @@ Tests:
 
 import pytest
 from httpx import AsyncClient
+from ulid import ULID
 
 pytestmark = pytest.mark.integration
 
-VALID_URL = "json://hooks.example.com/notify"
+VALID_CHANNEL_ID = str(ULID())
 
 
 async def _make_domain(db_session, name: str):
@@ -30,12 +31,11 @@ async def _make_template(
     is_global_default: bool = False,
     is_active: bool = True,
 ):
-    from src.core.crypto import encrypt_apprise_url
     from src.core.models.notification_template import NotificationTemplate
 
     tpl = NotificationTemplate(
         title=title,
-        apprise_url=encrypt_apprise_url(VALID_URL),
+        remote_channel_id=str(ULID()),
         channel_hint="json",
         events=["change_detected"],
         is_global_default=is_global_default,
@@ -203,7 +203,7 @@ class TestCreateAndLinkTemplate:
             "/domains/create-link.example.com/notifications/new",
             data={
                 "title": "NewDomainTemplate",
-                "apprise_url": VALID_URL,
+                "remote_channel_id": VALID_CHANNEL_ID,
                 "channel_hint": "json",
                 "events": ["change_detected"],
             },
@@ -236,7 +236,7 @@ class TestCreateAndLinkTemplate:
             "/domains/create-refresh.example.com/notifications/new",
             data={
                 "title": "RefreshedTemplate",
-                "apprise_url": VALID_URL,
+                "remote_channel_id": VALID_CHANNEL_ID,
                 "channel_hint": "json",
                 "events": ["change_detected"],
             },
@@ -254,7 +254,7 @@ class TestCreateAndLinkTemplate:
             "/domains/create-error.example.com/notifications/new",
             data={
                 "title": "",
-                "apprise_url": VALID_URL,
+                "remote_channel_id": VALID_CHANNEL_ID,
                 "channel_hint": "json",
                 "events": ["change_detected"],
             },
@@ -268,7 +268,7 @@ class TestCreateAndLinkTemplate:
             "/domains/no-such.example.com/notifications/new",
             data={
                 "title": "ShouldFail",
-                "apprise_url": VALID_URL,
+                "remote_channel_id": VALID_CHANNEL_ID,
                 "channel_hint": "json",
                 "events": ["change_detected"],
             },

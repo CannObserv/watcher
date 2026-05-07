@@ -40,18 +40,6 @@ checkbox order in the notification form. Used as a Jinja global in the dashboard
 and as the `event_label` template context field."""
 
 
-_APPRISE_TYPES: dict[WatchEventType, str] = {
-    WatchEventType.WATCH_CREATED: "info",
-    WatchEventType.CHANGE_DETECTED: "info",
-    WatchEventType.WATCH_ERROR: "failure",
-    WatchEventType.WATCH_RECOVERED: "success",
-    WatchEventType.WATCH_PAUSED: "warning",
-    WatchEventType.WATCH_RESUMED: "info",
-    WatchEventType.WATCH_ARCHIVED: "warning",
-    WatchEventType.WATCH_DELETED: "warning",
-}
-
-
 @dataclass(frozen=True)
 class WatchEvent:
     """Immutable value object describing a watch lifecycle event.
@@ -66,8 +54,3 @@ class WatchEvent:
     watch_url: str
     occurred_at: datetime
     metadata: dict = field(default_factory=dict)
-
-    @property
-    def apprise_notify_type(self) -> str:
-        """Apprise NotifyType string for this event type."""
-        return _APPRISE_TYPES[self.event_type]

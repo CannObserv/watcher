@@ -368,11 +368,11 @@ class TestDomainModel:
 
 
 class TestNotificationConfigModel:
-    def test_create_apprise_config(self):
+    def test_create_remote_channel_config(self):
         config = WatchNotificationConfig(
             watch_id=ULID(),
-            apprise_url="slack://T/A/T/#ops",
             channel_hint="slack",
+            remote_channel_id=str(ULID()),
         )
         assert config.channel_hint == "slack"
         assert config.is_active is True
@@ -380,16 +380,16 @@ class TestNotificationConfigModel:
     def test_default_events(self):
         config = WatchNotificationConfig(
             watch_id=ULID(),
-            apprise_url="mailto://user:pass@example.com",
             channel_hint="mailto",
+            remote_channel_id=str(ULID()),
         )
         assert config.events == ["change_detected"]
 
     def test_custom_events(self):
         config = WatchNotificationConfig(
             watch_id=ULID(),
-            apprise_url="slack://T/A/T/#ops",
             channel_hint="slack",
+            remote_channel_id=str(ULID()),
             events=["change_detected", "watch_error"],
         )
         assert config.events == ["change_detected", "watch_error"]

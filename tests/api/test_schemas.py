@@ -18,7 +18,6 @@ from src.api.schemas.content_config import ContentConfig, ContentOptions
 from src.api.schemas.notification_config import (
     WatchNotificationConfigCreate,
     WatchNotificationConfigResponse,
-    validate_event_list,
 )
 from src.api.schemas.notification_template import (
     NotificationTemplateCreate,
@@ -381,36 +380,11 @@ class TestAuditLogResponse:
         assert data.watch_id is None
 
 
-class TestValidateEventList:
-    def test_valid_events_returned_unchanged(self):
-        result = validate_event_list(["change_detected", "watch_error"])
-        assert result == ["change_detected", "watch_error"]
-
-    def test_empty_list_raises(self):
-        with pytest.raises(ValueError, match="At least one event"):
-            validate_event_list([])
-
-    def test_single_valid_event(self):
-        assert validate_event_list(["watch_created"]) == ["watch_created"]
-
-    def test_unknown_event_raises(self):
-        with pytest.raises(ValueError, match="Unknown event type"):
-            validate_event_list(["not_a_real_event"])
-
-    def test_mixed_valid_and_invalid_raises(self):
-        with pytest.raises(ValueError, match="not_a_real_event"):
-            validate_event_list(["change_detected", "not_a_real_event"])
-
-    def test_error_message_names_invalid_events(self):
-        with pytest.raises(ValueError, match=r"\['bad_event'\]"):
-            validate_event_list(["bad_event"])
-
-
 class TestWatchNotificationConfigCreate:
     def test_content_config_accepted(self):
         """WatchNotificationConfigCreate accepts content_config and it's accessible."""
         schema = WatchNotificationConfigCreate(
-            apprise_url="slack://T/A/B/#chan",
+            remote_channel_id="01HV0000000000000000000099",
             content_config=ContentConfig(default=ContentOptions(include_domain=True)),
         )
         assert schema.content_config is not None
@@ -419,7 +393,7 @@ class TestWatchNotificationConfigCreate:
     def test_content_config_optional(self):
         """content_config defaults to None."""
         schema = WatchNotificationConfigCreate(
-            apprise_url="slack://T/A/B/#chan",
+            remote_channel_id="01HV0000000000000000000099",
         )
         assert schema.content_config is None
 
@@ -466,7 +440,7 @@ class TestNotificationTemplateCreate:
         """NotificationTemplateCreate accepts content_config."""
         schema = NotificationTemplateCreate(
             title="My Template",
-            apprise_url="slack://T/A/B/#chan",
+            remote_channel_id="01HV0000000000000000000099",
             content_config=ContentConfig(default=ContentOptions(include_diff_snippet=True)),
         )
         assert schema.content_config is not None
@@ -476,7 +450,7 @@ class TestNotificationTemplateCreate:
         """content_config defaults to None."""
         schema = NotificationTemplateCreate(
             title="My Template",
-            apprise_url="slack://T/A/B/#chan",
+            remote_channel_id="01HV0000000000000000000099",
         )
         assert schema.content_config is None
 

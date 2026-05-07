@@ -35,6 +35,7 @@ export $(cat /etc/watcher/.env .env 2>/dev/null | xargs)
 | `INFORMATION_BASE_URL` | `/etc/watcher/.env` | no | Information service base URL (default `http://localhost:8020`) |
 | `INFORMATION_API_KEY` | `/etc/watcher/.env` | **yes** | API key for the InformationClient SDK; missing key crashes the API on boot via the lifespan pre-warm |
 | `REDIS_URL` | `/etc/watcher/.env` | no | Redis connection URL for the change bus (default `redis://localhost:6379/0`) |
+| `CHANGES_DRAIN_INTERVAL_SECONDS` | env | no | Fast-tick changes-outbox drain cadence in seconds (default `10`); the 1-minute Procrastinate periodic stays as a safety floor |
 
 Generate `APPRISE_SECRET_KEY`:
 

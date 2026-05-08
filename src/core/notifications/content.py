@@ -199,22 +199,23 @@ def build_body(
 def _build_change_detected_body(
     event: WatchEvent, options: ContentOptions, *, unified_diff: str | None
 ) -> str:
-    """Compose the change_detected body following the issue #104 layout.
+    """Compose the change_detected body following the issue #155 layout.
 
     Header and body-block lines come from the canonical
     `CHANGE_DETECTED_HEADER_LINES` / `CHANGE_DETECTED_BODY_BLOCK_LINES`
     tuples in default_templates.py — same source of truth as the seed
     template returned by `compose_body_prefill`.
 
-    Toggle-driven section anchors:
-      - DOMAIN: header.insert(1, …)  (after watch_name)
-      - CHANGE: header.append(…)     (after WATCH, the last header line)
-      - diff: own paragraph after the body block
-      - INTERVAL / LAST CHANGED / SIGNIFICANCE: grouped in one stats paragraph
-      - DESCRIPTION / TAGS: each its own paragraph, in that order
+    Toggle-driven section anchors (header):
+      - DOMAIN: after watch_name
+      - LAST CHANGED, INTERVAL: before TIMESTAMP (in that order)
+      - CHANGE: after WATCH (the last canonical header line)
+      - SIGNIFICANCE: after CHANGE (or after WATCH when CHANGE is off)
 
-    Reordering the canonical tuples requires updating the insert/append
-    indices here.
+    Trailing paragraphs (each its own):
+      - diff (if include_diff_snippet/full)
+      - DESCRIPTION
+      - TAGS
     """
     ctx = build_template_context(event, unified_diff=unified_diff)
     metadata = event.metadata
@@ -222,8 +223,20 @@ def _build_change_detected_body(
     header = [render_template(line, ctx) for line in CHANGE_DETECTED_HEADER_LINES]
     if options.include_domain and metadata.get("effective_domain"):
         header.insert(1, f"DOMAIN: {metadata['effective_domain']}")
+
+    timestamp_idx = next(i for i, line in enumerate(header) if line.startswith("TIMESTAMP:"))
+    pre_timestamp: list[str] = []
+    if options.include_last_changed_at and metadata.get("last_changed_at"):
+        pre_timestamp.append(f"LAST CHANGED: {metadata['last_changed_at']}")
+    if options.include_temporal_context and metadata.get("check_interval"):
+        pre_timestamp.append(f"INTERVAL: {metadata['check_interval']}")
+    for offset, line in enumerate(pre_timestamp):
+        header.insert(timestamp_idx + offset, line)
+
     if options.include_change_dashboard_url and metadata.get("change_id"):
         header.append(f"CHANGE: {ctx['change_url']}")
+    if options.include_significance and metadata.get("significance") is not None:
+        header.append(f"SIGNIFICANCE: {int(metadata['significance'] * 100)}%")
 
     body_block = [render_template(line, ctx) for line in CHANGE_DETECTED_BODY_BLOCK_LINES]
 
@@ -232,16 +245,6 @@ def _build_change_detected_body(
     diff_text = _build_diff_text(unified_diff, options)
     if diff_text:
         paragraphs.append(diff_text.splitlines())
-
-    stats: list[str] = []
-    if options.include_temporal_context and metadata.get("check_interval"):
-        stats.append(f"INTERVAL: {metadata['check_interval']}")
-    if options.include_last_changed_at and metadata.get("last_changed_at"):
-        stats.append(f"LAST CHANGED: {metadata['last_changed_at']}")
-    if options.include_significance and metadata.get("significance") is not None:
-        stats.append(f"SIGNIFICANCE: {int(metadata['significance'] * 100)}%")
-    if stats:
-        paragraphs.append(stats)
 
     if options.include_description and metadata.get("description"):
         paragraphs.append([f"DESCRIPTION: {metadata['description']}"])

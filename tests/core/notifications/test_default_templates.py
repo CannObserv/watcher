@@ -28,11 +28,12 @@ class TestDefaultTitleTemplates:
             assert "event_label" in tmpl, f"{et} default title missing event_label"
             assert "watch_name" in tmpl, f"{et} default title missing watch_name"
 
-    def test_all_titles_prefixed_observo(self):
-        """The [Observo] prefix lets users filter cross-service notifications
-        by subject (issue #104)."""
+    def test_all_titles_prefixed_watcher(self):
+        """The [Watcher] prefix lets users filter watcher notifications by
+        subject alongside sister services (notifier, archiver). Switched from
+        [Observo] in #155."""
         for et, tmpl in DEFAULT_TITLE_TEMPLATES.items():
-            assert tmpl.startswith("[Observo] "), f"{et} missing [Observo] prefix"
+            assert tmpl.startswith("[Watcher] "), f"{et} missing [Watcher] prefix"
 
 
 class TestDefaultBodyTemplates:

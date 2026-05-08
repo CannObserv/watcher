@@ -10,8 +10,9 @@ directly through Jinja. The `change_detected` body is the exception:
 `src.core.notifications.content.build_body` composes it line-by-line in
 Python from the shared `CHANGE_DETECTED_HEADER_LINES` and
 `CHANGE_DETECTED_BODY_BLOCK_LINES` tuples (single source of truth) and
-interleaves optional toggle-driven sections (DOMAIN, CHANGE, diff, INTERVAL,
-LAST CHANGED, SIGNIFICANCE, DESCRIPTION, TAGS) at the issue-#104 positions.
+interleaves optional toggle-driven sections (DOMAIN, LAST CHANGED, INTERVAL,
+CHANGE, SIGNIFICANCE in the header; diff, DESCRIPTION, TAGS as trailing
+paragraphs) at the issue-#155 positions.
 `DEFAULT_BODY_TEMPLATES['change_detected']` is derived from the same tuples
 and serves only as the UI seed (`compose_body_prefill`).
 
@@ -108,7 +109,7 @@ expandable [See all variables] reference drawer. Keep in sync with
 `src.core.notifications.content.build_template_context`.
 """
 
-_TITLE = "[Observo] {{ event_label }}: {{ watch_name }}"
+_TITLE = "[Watcher] {{ event_label }}: {{ watch_name }}"
 
 
 DEFAULT_TITLE_TEMPLATES: dict[str, str] = {
@@ -126,13 +127,15 @@ DEFAULT_TITLE_TEMPLATES: dict[str, str] = {
 # Canonical skeleton for the change_detected default body. Both the seed
 # template (DEFAULT_BODY_TEMPLATES['change_detected']) and the dispatch-time
 # composer (`content.build_body`) consume these tuples — single source of
-# truth for the always-present lines. Toggle-driven sections (DOMAIN, CHANGE,
-# diff, etc.) are interleaved by the composer at the issue #104 positions;
-# the WATCH dashboard link is part of the unconditional skeleton.
+# truth for the always-present lines. Toggle-driven sections are interleaved
+# by the composer at the issue #155 positions; the WATCH dashboard link is
+# part of the unconditional skeleton.
 #
-# Composer insertion anchors (see `_build_change_detected_body`):
-#   - DOMAIN inserts into HEADER at index 1 (immediately after watch_name)
-#   - CHANGE appends to HEADER (immediately after WATCH)
+# Composer insertion anchors in HEADER (see `_build_change_detected_body`):
+#   - DOMAIN: immediately after watch_name (index 1)
+#   - LAST CHANGED, INTERVAL: immediately before TIMESTAMP (in that order)
+#   - CHANGE: immediately after WATCH
+#   - SIGNIFICANCE: immediately after CHANGE (or after WATCH when CHANGE off)
 # Reorder these tuples and the composer's index/append calls must follow.
 CHANGE_DETECTED_HEADER_LINES: tuple[str, ...] = (
     "{{ watch_name }}",

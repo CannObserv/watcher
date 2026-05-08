@@ -108,9 +108,10 @@ class TestChangeDetectedDefaultBody:
 
     def test_full_layout_with_every_toggle_on_matches_issue_format(self):
         """With every toggle on and full metadata, the body matches the issue
-        #104 layout exactly: DOMAIN between watch_name and URL; CHANGE
-        between WATCH and the body block; diff after change_summary;
-        INTERVAL/LAST CHANGED/SIGNIFICANCE grouped; DESCRIPTION + TAGS last."""
+        #155 layout exactly: DOMAIN between watch_name and URL; LAST CHANGED
+        + INTERVAL between URL and TIMESTAMP; CHANGE after WATCH;
+        SIGNIFICANCE below CHANGE; diff after the body block; DESCRIPTION +
+        TAGS last."""
         event = make_event(
             metadata={
                 **CHANGE_META,
@@ -138,9 +139,12 @@ class TestChangeDetectedDefaultBody:
             "Test Watch\n"
             "DOMAIN: example.com\n"
             "URL: https://example.com\n"
+            "LAST CHANGED: 2026-04-09\n"
+            "INTERVAL: 1h\n"
             "TIMESTAMP: 2026-04-14T12:00:00Z\n"
             f"WATCH: https://watcher.exe.xyz/watches/{WATCH_ID}\n"
-            f"CHANGE: https://watcher.exe.xyz/watches/{WATCH_ID}/changes/01HV0000000000000000000099"
+            f"CHANGE: https://watcher.exe.xyz/watches/{WATCH_ID}/changes/01HV0000000000000000000099\n"
+            "SIGNIFICANCE: 50%"
             "\n\n"
             "Change Detected\n"
             "1 added, 1 modified, 1 removed"
@@ -157,10 +161,6 @@ class TestChangeDetectedDefaultBody:
             " epsilon\n"
             "+zeta\n"
             "```"
-            "\n\n"
-            "INTERVAL: 1h\n"
-            "LAST CHANGED: 2026-04-09\n"
-            "SIGNIFICANCE: 50%"
             "\n\n"
             "DESCRIPTION: Watch for license renewals"
             "\n\n"
@@ -330,22 +330,39 @@ class TestStatsSlots:
         body = build_body(event, ContentOptions(include_significance=True))
         assert "SIGNIFICANCE: 100%" in body
 
-    def test_stats_grouped_in_one_paragraph(self):
-        """INTERVAL / LAST CHANGED / SIGNIFICANCE share a single paragraph
-        per the issue layout — no blank lines between them."""
-        event = make_event(
-            metadata={"check_interval": "1h", "last_changed_at": "2026-04-09", "significance": 0.5}
-        )
+    def test_last_changed_and_interval_render_between_url_and_timestamp(self):
+        """Per #155, LAST CHANGED + INTERVAL sit between URL and TIMESTAMP in
+        the header, with LAST CHANGED first (matches issue text ordering)."""
+        event = make_event(metadata={"check_interval": "1h", "last_changed_at": "2026-04-09"})
         body = build_body(
             event,
-            ContentOptions(
-                include_temporal_context=True,
-                include_last_changed_at=True,
-                include_significance=True,
-            ),
+            ContentOptions(include_temporal_context=True, include_last_changed_at=True),
         )
-        # The three lines should appear consecutively without intervening blanks.
-        assert "INTERVAL: 1h\nLAST CHANGED: 2026-04-09\nSIGNIFICANCE: 50%" in body
+        assert (
+            "URL: https://example.com\nLAST CHANGED: 2026-04-09\nINTERVAL: 1h\nTIMESTAMP: "
+        ) in body
+
+    def test_significance_renders_below_change(self):
+        """Per #155, SIGNIFICANCE sits in the header immediately after CHANGE."""
+        change_id = "01HV0000000000000000000099"
+        event = make_event(metadata={"change_id": change_id, "significance": 0.5})
+        body = build_body(
+            event,
+            ContentOptions(include_change_dashboard_url=True, include_significance=True),
+        )
+        # Header order: WATCH, CHANGE, SIGNIFICANCE — all consecutive, no
+        # blank lines between them.
+        assert (
+            f"CHANGE: https://watcher.exe.xyz/watches/{WATCH_ID}/changes/{change_id}\n"
+            "SIGNIFICANCE: 50%"
+        ) in body
+
+    def test_significance_renders_below_watch_when_change_off(self):
+        """SIGNIFICANCE position degrades gracefully — without CHANGE it sits
+        directly after WATCH (the last unconditional header line)."""
+        event = make_event(metadata={"significance": 0.5})
+        body = build_body(event, ContentOptions(include_significance=True))
+        assert (f"WATCH: https://watcher.exe.xyz/watches/{WATCH_ID}\nSIGNIFICANCE: 50%") in body
 
     def test_stats_omitted_when_toggles_off(self):
         event = make_event(
@@ -694,8 +711,8 @@ class TestBuildTitle:
     def test_uses_default_template_for_event_type(self):
         event = make_event(event_type=WatchEventType.CHANGE_DETECTED)
         title = build_title(event, ContentOptions())
-        # Default title carries the [Observo] prefix for cross-service filtering.
-        assert title == "[Observo] Change Detected: Test Watch"
+        # Default title carries the [Watcher] prefix for cross-service filtering.
+        assert title == "[Watcher] Change Detected: Test Watch"
 
     def test_user_title_template_overrides_default(self):
         event = make_event(event_type=WatchEventType.CHANGE_DETECTED)
@@ -707,7 +724,7 @@ class TestBuildTitle:
         for et in WatchEventType:
             event = make_event(event_type=et)
             title = build_title(event, ContentOptions())
-            assert title == f"[Observo] {EVENT_TITLES[et.value]}: Test Watch"
+            assert title == f"[Watcher] {EVENT_TITLES[et.value]}: Test Watch"
 
     def test_bad_user_template_falls_back_to_raw_string(self):
         """Preserves dispatch-never-breaks guarantee inherited from render_template."""
@@ -727,7 +744,7 @@ class TestBuildTitleStrict:
     def test_strict_still_renders_valid_default(self):
         event = make_event()
         title = build_title(event, ContentOptions(), strict=True)
-        assert title == "[Observo] Change Detected: Test Watch"
+        assert title == "[Watcher] Change Detected: Test Watch"
 
 
 class TestBuildBodyStrict:

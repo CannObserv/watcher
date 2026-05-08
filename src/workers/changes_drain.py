@@ -227,6 +227,11 @@ async def start_changes_drain_loop(
     (no concurrent drains) and the ``published_to_bus_at IS NULL``
     filter (already-marked rows are skipped). The next tick does not
     start once cancellation is observed.
+
+    Publisher lifecycle (#154): the loop owns a single ``ChangePublisher``
+    across every tick. It is constructed once when the loop starts (the
+    underlying Redis client is built lazily on first publish) and closed
+    exactly once when the task ends or is cancelled.
     """
     resolved_interval = interval if interval is not None else _resolve_drain_interval()
     logger.info(
@@ -237,9 +242,12 @@ async def start_changes_drain_loop(
     async def _loop() -> None:
         # Loop-owned publisher reused across ticks (#154). Built lazily on
         # first xadd via ChangePublisher's `_get_client`. Closed once on
-        # shutdown via the finally below.
-        publisher = ChangePublisher()
+        # shutdown via the finally below. Declared as None first so a
+        # future I/O-during-__init__ regression cannot leave the finally
+        # referencing an unbound name.
+        publisher: ChangePublisher | None = None
         try:
+            publisher = ChangePublisher()
             while True:
                 try:
                     result = await _drain_changes_once(publisher=publisher)
@@ -259,6 +267,7 @@ async def start_changes_drain_loop(
                     logger.warning("fast drain tick raised; will retry next tick", exc_info=True)
                 await asyncio.sleep(resolved_interval)
         finally:
-            await publisher.aclose()
+            if publisher is not None:
+                await publisher.aclose()
 
     return asyncio.create_task(_loop(), name="changes_drain_fast_loop")

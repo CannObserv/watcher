@@ -49,7 +49,7 @@ Determine what to review (priority order):
 ### Phase 1 — Gather context
 
 ```bash
-bash skills/reviewing-code-claude/scripts/gather-context.sh
+bash "$(git rev-parse --show-toplevel)/skills/reviewing-code-claude/scripts/gather-context.sh"
 ```
 
 Also:
@@ -57,11 +57,11 @@ Also:
 - Identify all files touched and their roles in the architecture
 
 **Don't run additional test commands beyond `gather-context.sh`.** That
-script runs the full suite once and exits non-zero on failure — the Iron
-Law and Phase 3.5 verification gate both depend on its output. The code
-review phase is otherwise read-only analysis. If you need to verify a
-specific failing behaviour mentioned in a finding, run only the relevant
-test file:
+script runs the unit suite (non-integration tests) once and exits
+non-zero on failure — the Iron Law and Phase 3.5 verification gate both
+depend on its output. The code review phase is otherwise read-only
+analysis. If you need to verify a specific failing behaviour mentioned
+in a finding, run only the relevant test file:
 ```bash
 uv run pytest tests/path/to/test_file.py --no-cov -m "not integration"
 ```

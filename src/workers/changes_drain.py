@@ -122,7 +122,9 @@ def _build_envelope(change) -> bytes:
     ).encode("utf-8")
 
 
-async def _drain_changes_once(*, batch_size: int = 100) -> dict:
+async def _drain_changes_once(
+    *, batch_size: int = 100, publisher: ChangePublisher | None = None
+) -> dict:
     """Run a single drain pass; shared by the periodic and the fast loop.
 
     Returns a dict with ``published``, ``failed``, and
@@ -134,8 +136,15 @@ async def _drain_changes_once(*, batch_size: int = 100) -> dict:
     (``DRAIN_ADVISORY_LOCK_ID``) prevents concurrent drains from
     double-publishing. Concurrent invocations return
     ``{"published": 0, "failed": 0, "skipped_due_to_lock": True}``.
+
+    Publisher ownership: if ``publisher`` is supplied the caller owns it
+    (used by the fast loop to amortize the Redis client across ticks,
+    #154). Otherwise this function constructs and closes one per call —
+    preserving the per-tick lifecycle of the 1-minute periodic worker.
     """
-    publisher = ChangePublisher()
+    owned_publisher = publisher is None
+    if publisher is None:
+        publisher = ChangePublisher()
     published = 0
     failed = 0
     try:
@@ -167,7 +176,8 @@ async def _drain_changes_once(*, batch_size: int = 100) -> dict:
                     failed += 1
             await session.commit()
     finally:
-        await publisher.aclose()
+        if owned_publisher:
+            await publisher.aclose()
     return {"published": published, "failed": failed, "skipped_due_to_lock": False}
 
 
@@ -225,23 +235,30 @@ async def start_changes_drain_loop(
     )
 
     async def _loop() -> None:
-        while True:
-            try:
-                result = await _drain_changes_once()
-                logger.info(
-                    "fast drain tick",
-                    extra={
-                        "published": result["published"],
-                        "failed": result["failed"],
-                        "skipped_due_to_lock": result["skipped_due_to_lock"],
-                    },
-                )
-            except asyncio.CancelledError:
-                # Re-raise so the task ends on shutdown without being
-                # smothered by the broad except below.
-                raise
-            except Exception:
-                logger.warning("fast drain tick raised; will retry next tick", exc_info=True)
-            await asyncio.sleep(resolved_interval)
+        # Loop-owned publisher reused across ticks (#154). Built lazily on
+        # first xadd via ChangePublisher's `_get_client`. Closed once on
+        # shutdown via the finally below.
+        publisher = ChangePublisher()
+        try:
+            while True:
+                try:
+                    result = await _drain_changes_once(publisher=publisher)
+                    logger.info(
+                        "fast drain tick",
+                        extra={
+                            "published": result["published"],
+                            "failed": result["failed"],
+                            "skipped_due_to_lock": result["skipped_due_to_lock"],
+                        },
+                    )
+                except asyncio.CancelledError:
+                    # Re-raise so the task ends on shutdown without being
+                    # smothered by the broad except below.
+                    raise
+                except Exception:
+                    logger.warning("fast drain tick raised; will retry next tick", exc_info=True)
+                await asyncio.sleep(resolved_interval)
+        finally:
+            await publisher.aclose()
 
     return asyncio.create_task(_loop(), name="changes_drain_fast_loop")

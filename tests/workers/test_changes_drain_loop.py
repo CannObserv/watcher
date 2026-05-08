@@ -203,7 +203,7 @@ async def test_start_changes_drain_loop_returns_task_and_ticks(monkeypatch):
     """``start_changes_drain_loop`` returns an ``asyncio.Task`` that calls drain."""
     calls: list[int] = []
 
-    async def fake_drain():
+    async def fake_drain(*, batch_size=100, publisher=None):
         calls.append(1)
         return {"published": 0, "failed": 0, "skipped_due_to_lock": False}
 
@@ -229,7 +229,7 @@ async def test_drain_loop_respects_cancel(monkeypatch):
     drain_started = asyncio.Event()
     drain_completed = asyncio.Event()
 
-    async def fake_drain():
+    async def fake_drain(*, batch_size=100, publisher=None):
         drain_started.set()
         # Simulate non-trivial work that must finish before shutdown returns.
         await asyncio.sleep(0.02)
@@ -254,7 +254,7 @@ async def test_drain_loop_swallows_errors_and_keeps_running(monkeypatch):
     """A drain exception must not kill the loop — it logs and ticks again."""
     call_count = {"n": 0}
 
-    async def flaky_drain():
+    async def flaky_drain(*, batch_size=100, publisher=None):
         call_count["n"] += 1
         if call_count["n"] == 1:
             raise RuntimeError("boom")
@@ -273,6 +273,112 @@ async def test_drain_loop_swallows_errors_and_keeps_running(monkeypatch):
             pass
 
     assert call_count["n"] >= 2, "loop must continue ticking after drain raises"
+
+
+@pytest.mark.asyncio
+async def test_drain_loop_reuses_single_publisher_across_ticks(monkeypatch):
+    """Fast loop builds ONE publisher and reuses it across every tick.
+
+    Constructing per-tick burns a Redis connection per fast tick (#154).
+    Ownership lives in the loop and aclose() runs exactly once on cancel.
+    """
+    init_calls: list[None] = []
+    close_calls: list[None] = []
+
+    real_init = ChangePublisher.__init__
+    real_aclose = ChangePublisher.aclose
+
+    def counting_init(self, *, redis_client=None):
+        init_calls.append(None)
+        real_init(self, redis_client=redis_client)
+
+    async def counting_aclose(self):
+        close_calls.append(None)
+        await real_aclose(self)
+
+    seen_publishers: list[ChangePublisher] = []
+
+    async def fake_drain(*, batch_size=100, publisher=None):
+        # The loop must thread its publisher through every tick.
+        assert publisher is not None, "fast loop must pass its publisher into _drain_changes_once"
+        seen_publishers.append(publisher)
+        return {"published": 0, "failed": 0, "skipped_due_to_lock": False}
+
+    with patch.object(ChangePublisher, "__init__", counting_init):
+        with patch.object(ChangePublisher, "aclose", counting_aclose):
+            monkeypatch.setattr("src.workers.changes_drain._drain_changes_once", fake_drain)
+
+            task = await start_changes_drain_loop(interval=0.01)
+            try:
+                # Allow several ticks.
+                await asyncio.sleep(0.05)
+            finally:
+                task.cancel()
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass
+
+    assert len(seen_publishers) >= 2, "loop must tick more than once for this test to be meaningful"
+    assert all(p is seen_publishers[0] for p in seen_publishers), (
+        "every tick must receive the same publisher instance"
+    )
+    assert len(init_calls) == 1, (
+        f"publisher built {len(init_calls)}× — should be reused, not rebuilt"
+    )
+    assert len(close_calls) == 1, (
+        f"publisher closed {len(close_calls)}× — should close exactly once on shutdown"
+    )
+
+
+@pytest.mark.asyncio
+async def test_drain_changes_once_does_not_close_injected_publisher():
+    """When a publisher is injected, ``_drain_changes_once`` must not close it.
+
+    Ownership stays with the caller (the fast loop). Without injection,
+    the function still builds + closes its own publisher (preserves the
+    periodic worker's lifecycle — out of scope for #154).
+    """
+    from contextlib import asynccontextmanager
+
+    fake = fakeredis_aio.FakeRedis()
+    try:
+        injected = ChangePublisher(redis_client=fake)
+        close_calls = {"n": 0}
+        real_aclose = injected.aclose
+
+        async def counting_aclose():
+            close_calls["n"] += 1
+            await real_aclose()
+
+        injected.aclose = counting_aclose  # type: ignore[method-assign]
+
+        # Stub session factory: no rows, lock acquired, commit no-op.
+        class _FakeSession:
+            async def scalar(self, *_args, **_kwargs):
+                return True
+
+            async def commit(self):
+                return None
+
+        @asynccontextmanager
+        async def _session_cm():
+            yield _FakeSession()
+
+        def _session_factory():
+            return _session_cm()
+
+        async def _no_rows(*_args, **_kwargs):
+            return []
+
+        with patch("src.workers.changes_drain.get_session_factory", return_value=_session_factory):
+            with patch("src.workers.changes_drain.select_unpublished", _no_rows):
+                result = await _drain_changes_once(publisher=injected)
+
+        assert result["skipped_due_to_lock"] is False
+        assert close_calls["n"] == 0, "injected publisher must not be closed by _drain_changes_once"
+    finally:
+        await fake.aclose()
 
 
 @pytest.mark.asyncio

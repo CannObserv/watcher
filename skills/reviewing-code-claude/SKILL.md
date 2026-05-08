@@ -56,9 +56,12 @@ Also:
 - Read AGENTS.md conventions relevant to the changed files
 - Identify all files touched and their roles in the architecture
 
-**Do not run the test suite during a review.** The code review phase is
-read-only analysis. Tests run at ship time via `pre-ship.sh`. If you need
-to verify a specific failing behaviour, run only the relevant test file:
+**Don't run additional test commands beyond `gather-context.sh`.** That
+script runs the full suite once and exits non-zero on failure — the Iron
+Law and Phase 3.5 verification gate both depend on its output. The code
+review phase is otherwise read-only analysis. If you need to verify a
+specific failing behaviour mentioned in a finding, run only the relevant
+test file:
 ```bash
 uv run pytest tests/path/to/test_file.py --no-cov -m "not integration"
 ```

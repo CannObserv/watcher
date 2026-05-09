@@ -161,8 +161,8 @@ def build_body(
       2. event_type is change_detected → `_build_change_detected_body`
          composes the body in Python from the shared
          `CHANGE_DETECTED_HEADER_LINES` / `CHANGE_DETECTED_BODY_BLOCK_LINES`
-         tuples and interleaves toggle-driven sections at the issue #104
-         positions.
+         tuples and interleaves toggle-driven sections at the canonical
+         layout positions (per-anchor list in `_build_change_detected_body`).
       3. any other event_type → render the entry from `DEFAULT_BODY_TEMPLATES`
          (a single Jinja line; toggles do not apply).
 
@@ -224,7 +224,13 @@ def _build_change_detected_body(
     if options.include_domain and metadata.get("effective_domain"):
         header.insert(1, f"DOMAIN: {metadata['effective_domain']}")
 
-    timestamp_idx = next(i for i, line in enumerate(header) if line.startswith("TIMESTAMP:"))
+    try:
+        timestamp_idx = next(i for i, line in enumerate(header) if line.startswith("TIMESTAMP:"))
+    except StopIteration as exc:
+        raise RuntimeError(
+            "CHANGE_DETECTED_HEADER_LINES missing TIMESTAMP — composer requires "
+            "this anchor for LAST CHANGED / INTERVAL insertion"
+        ) from exc
     pre_timestamp: list[str] = []
     if options.include_last_changed_at and metadata.get("last_changed_at"):
         pre_timestamp.append(f"LAST CHANGED: {metadata['last_changed_at']}")

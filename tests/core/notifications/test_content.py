@@ -79,7 +79,7 @@ class TestResolveOptions:
 class TestChangeDetectedDefaultBody:
     """The change_detected default body is composed in Python (build_body) by
     interleaving toggle-driven sections into an always-present skeleton at
-    the issue #104 layout positions."""
+    the canonical layout positions."""
 
     def test_default_skeleton_with_no_toggles(self):
         """With every toggle off and no extra metadata, the body is the rich

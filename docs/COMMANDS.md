@@ -131,9 +131,6 @@ Envelope shape is `schema_version: 2` (Phase 2c). Each entry is partitioned by `
 The `drain_changes_outbox` task is registered via `@bp.periodic(cron="* * * * *")`, so the embedded Procrastinate worker fires it every minute. Manual invocation is still available for one-shot runs:
 
 ```bash
-# Run the reference consumer (requires Redis running on REDIS_URL):
-uv run python tools/info_changes_consumer.py --group archive-ref --output /tmp/info-changes.jsonl
-
 # Inspect a stream's contents quickly:
 redis-cli XLEN info.changes
 redis-cli XRANGE info.changes - +

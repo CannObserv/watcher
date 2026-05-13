@@ -47,7 +47,7 @@ src/api/         FastAPI app (ASGI routes, schemas, deps)
 src/core/        Shared domain logic (models, probe, watches, notifications, diff, extractors, fetchers, scheduler, storage, crypto)
 src/dashboard/   Server-rendered UI (Jinja2 + HTMX + Tailwind)
 src/workers/     Procrastinate task queue (check_watch, schedule_tick, pipeline)
-tools/           Operational scripts (e.g. info_changes_consumer.py — reference XREADGROUP consumer)
+tools/           Operational scripts
 tests/           Mirrors src/ structure
 deploy/          Systemd units and deployment config
 docs/            Reference docs (COMMANDS, DEPLOYMENT, SKILLS, STYLE) + plans/
@@ -104,7 +104,7 @@ export $(cat /etc/watcher/.env .env 2>/dev/null | xargs)
 
 **Key variables:**
 - `DATABASE_URL` — PostgreSQL connection for watcher (Archiver owns its own database).
-- `REDIS_URL` — Redis connection URL (default: `redis://localhost:6379/0`). Used by `ChangePublisher` and `tools/info_changes_consumer.py`. Override for testing or remote Redis.
+- `REDIS_URL` — Redis connection URL (default: `redis://localhost:6379/0`). Override for testing or remote Redis.
 - `NOTIFIER_BASE_URL` — Notifier service URL for the `NotifierClient` SDK (e.g. `http://localhost:9000`). Required — every notification is dispatched through the notifier service.
 - `NOTIFIER_API_KEY` — Required. Watcher tenant API key issued by `scripts/seed_tenant.py` in the notifier repo.
 - `ARCHIVER_BASE_URL` — Archiver service URL for the `ArchiverClient` SDK (default: `http://localhost:8020`).

@@ -83,20 +83,21 @@ async def drain_pending_source_revisions(*, batch_size: int = 100, **periodic_kw
             )
 
             watch = await _resolve_watch_for_source(session, str(row.info_source_id))
-            event = WatchEvent(
-                event_type=WatchEventType.CHANGE_DETECTED,
-                watch_id=str(watch.id) if watch is not None else "",
-                watch_name=watch.name if watch is not None else "",
-                watch_url=(watch.effective_url or "") if watch is not None else "",
-                occurred_at=datetime.now(UTC),
-                metadata={
-                    "source_revision_id": canonical_id,
-                    "info_source_id": str(row.info_source_id),
-                    "content_fingerprint": row.content_fingerprint,
-                    "deferred": True,
-                },
-            )
-            await dispatch_event_notifications(session, event)
+            if watch is not None:
+                event = WatchEvent(
+                    event_type=WatchEventType.CHANGE_DETECTED,
+                    watch_id=str(watch.id),
+                    watch_name=watch.name,
+                    watch_url=watch.effective_url or "",
+                    occurred_at=datetime.now(UTC),
+                    metadata={
+                        "source_revision_id": canonical_id,
+                        "info_source_id": str(row.info_source_id),
+                        "content_fingerprint": row.content_fingerprint,
+                        "deferred": True,
+                    },
+                )
+                await dispatch_event_notifications(session, event)
 
             await delete_pending(session, row.id)
             drained += 1

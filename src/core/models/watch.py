@@ -27,6 +27,14 @@ Table(
     schema="information",
 )
 
+# Cross-schema FK resolution stub for info_sources (mirrors info_items pattern).
+Table(
+    "info_sources",
+    Base.metadata,
+    Column("info_source_id", ULIDType, primary_key=True),
+    schema="information",
+)
+
 
 class ContentType(enum.StrEnum):
     """Supported content types for monitoring."""
@@ -54,6 +62,12 @@ class Watch(Base, TimestampMixin):
         ULIDType,
         ForeignKey("information.info_items.info_item_id", ondelete="RESTRICT"),
         nullable=False,
+        index=True,
+    )
+    info_source_id: Mapped[ULID | None] = mapped_column(
+        ULIDType,
+        ForeignKey("information.info_sources.info_source_id", ondelete="RESTRICT"),
+        nullable=True,
         index=True,
     )
     name: Mapped[str] = mapped_column(String(255))

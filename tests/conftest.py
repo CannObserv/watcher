@@ -43,6 +43,7 @@ from src.core.registry import ServiceRegistry, set_registry_for_testing
 from src.dashboard.deps import get_dashboard_user
 from tests._information_test_models import (
     InfoItem,  # noqa: F401  registers mapper
+    InfoSource,  # noqa: F401  registers mapper
     InfoSpec,  # noqa: F401  registers mapper
 )
 
@@ -304,6 +305,17 @@ async def make_info_item(session, *, name="Test Item", description=None):
     session.add(item)
     await session.flush()
     return item
+
+
+async def make_info_source(session, *, url="https://example.com"):
+    """Create and flush an InfoSource root row (no parent, target URL required)."""
+    source = InfoSource(
+        source_spec={"schema_version": 1, "target": {"url": url}},
+        schema_version=1,
+    )
+    session.add(source)
+    await session.flush()
+    return source
 
 
 async def make_info_spec(

@@ -70,3 +70,27 @@ class InfoSpec(InformationTestBase):
         default=lambda: datetime.now(UTC),
         server_default=func.now(),
     )
+
+
+class InfoSource(InformationTestBase):
+    """Mapper-only for ``information.info_sources`` (DDL owned by Archiver)."""
+
+    __tablename__ = "info_sources"
+    __table_args__ = {"schema": "information"}
+
+    info_source_id: Mapped[ULID] = mapped_column(
+        ULIDType(), primary_key=True, default=generate_ulid
+    )
+    parent_info_source_id: Mapped[ULID | None] = mapped_column(
+        ULIDType(),
+        ForeignKey("information.info_sources.info_source_id", ondelete="RESTRICT"),
+        nullable=True,
+    )
+    source_spec: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    schema_version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+        server_default=func.now(),
+        nullable=False,
+    )

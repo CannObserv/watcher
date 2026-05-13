@@ -35,7 +35,7 @@ These are the load-bearing choices that scope the rest of the design. Recorded s
 5. **Outbox guarantees delivery to Archiver, not to a bus.** New table `pending_source_revisions` buffers POSTs when Archiver is unreachable. Drain worker retries with backoff. Notification dispatch fires on inline POST success **and** on outbox drain success.
 6. **Notification dispatch trigger is the successful POST**, inline or outbox-drained. Watcher already knows when it wrote a new revision; no bus consumption required.
 7. **`effective_domain` resolved once at Watch creation** from `info_sources.url`. Tick-time rate-limiting reads the Watch row directly. `effective_url` tracked the same way for now; long-term workflow is #157.
-8. **SDK pinned with both path-editable AND version constraint** (`>=2.1.0,<3`). Fails loudly when Archiver hits v3.
+8. **SDK pinned with both path-editable AND version constraint** (`>=2.2.0,<3`). Floor is v2.2.0 because the write-before-POST sequence depends on the optional `source_revision_id` request field added in archiver/CHANGELOG.md v2.2.0. Fails loudly when Archiver hits v3.
 9. **Acceptance criteria stay inside Watcher's boundary.** Tests assert Watcher's POST surface, outbox state, and notification dispatch — not Archiver event emission.
 
 ---
@@ -74,13 +74,16 @@ A fragment Watch's `schedule_config` participates in the min-computation but doe
 
 ### Migration mechanics
 
-For each existing `Watch.info_item_id`:
-1. Look up Archiver's `info_item_sources` for active `role='primary'` rows.
-2. If exactly 1 → create Watch row bound to that `info_source_id`, preserve other columns.
-3. If 0 → halt with operator manifest entry (orphaned Watch; needs InfoSource setup).
-4. If N>1 → halt with manifest entry (operator picks which source).
+Archiver's schema enforces `UNIQUE (info_item_id, role) WHERE deactivated_at IS NULL AND role = 'primary'` — at most one active primary InfoSource per InfoItem. The multi-primary case is impossible by construction; only the zero-primary case matters.
 
-One-shot script under `scripts/migrate_watches_to_v2.py`. Manifest is a JSONL file; operator resolves conflicts manually before re-running. Migration is not idempotent on a partial-completion state — script aborts cleanly and refuses to proceed past first conflict.
+Current state (2026-05-13): 3 Watches, 9 InfoItems, **0 active item↔source links** in production. Operator must wire each watched item to its primary InfoSource via Archiver's authoring tools (`add_info_source`) *before* running the migration.
+
+Migration script (`scripts/migrate_watches_to_v2.py`):
+1. For each existing `Watch.info_item_id`, look up the unique active primary InfoSource via the SDK.
+2. If found → set `info_source_id`, preserve other columns.
+3. If missing → hard-error with the offending `(watch_id, info_item_id)`; operator wires the binding and re-runs.
+
+No manifest, no multi-conflict resolution path. Single failure mode, single fix.
 
 ---
 
@@ -118,18 +121,22 @@ async def resolve_root_sources_with_children(
 
 Implementation: walks `parent_info_source_id` up to root, then `list_info_sources(parent_info_source_id=root_id)` for children. Single hot-path SDK call after the parent walk; avoids N+1.
 
-### Fetch loop
+### Fetch loop — write-before-POST with client-allocated ULIDs
+
+Archiver v2.2.0 accepts an optional `source_revision_id` in the POST body (see archiver/CHANGELOG.md). Watcher pre-allocates the ULID locally; the scratch filename is final from the moment bytes hit disk.
 
 `src/workers/tasks.py:check_watch` and `src/workers/pipeline.py:_run_check_pipeline` reshape:
 
 1. Load Watch by id.
 2. `resolved = resolve_root_sources_with_children(client, watch.info_source_id)`.
-3. Fetch `resolved.url` via existing fetcher infrastructure. Use `watch.effective_domain` for rate-limit bucketing.
-4. Write raw bytes to `WATCHER_CACHE_DIR/<placeholder>.bin` immediately. Compute final `source_revision_id` (ULID) as a fresh allocation, then rename the file to `<source_revision_id>.bin` before POST.
-5. Extract per root SourceSpec → SHA-256 over post-trim content → assemble POST body.
-6. POST root revision. On success: cascade. On failure: enqueue in `pending_source_revisions`, abort cascade (cascade requires the root's `source_revision_id` from Archiver's response).
-7. Cascade: for each `ResolvedFragmentSource`, extract from cached bytes → SHA-256 → POST. Each fragment is an independent outbox candidate.
+3. Fetch `resolved.url` via existing fetcher infrastructure. Use `watch.effective_domain` for rate-limit bucketing. Raw page bytes stay in memory during the tick.
+4. **Root:** extract per root SourceSpec → SHA-256 over post-trim content → allocate `root_revision_id = generate_ulid()` → write extracted bytes to `WATCHER_CACHE_DIR/<root_revision_id>.bin` → POST with `source_revision_id=root_revision_id`, `content_cache_uri=file:///…/<root_revision_id>.bin`, `content_cache_expires_at=now + TTL`.
+5. **Idempotency reconcile (rare):** the response carries the canonical id, which may differ from the supplied id if Archiver matched on `(source_id, fingerprint)` and returned an existing row (crash-recovery case). If `response.source_revision_id != root_revision_id`, rename the scratch file accordingly.
+6. **On POST failure** (Archiver unreachable, 5xx): enqueue in `pending_source_revisions` with the bytes' fingerprint + the local scratch path. Abort cascade (cascade fragments depend on the root revision existing in Archiver to bind against; deferred fragments would lose the binding).
+7. **Cascade:** for each `ResolvedFragmentSource`, extract from in-memory root bytes → SHA-256 → allocate ULID → write `<frag_revision_id>.bin` → POST → idempotency-reconcile if needed.
 8. After all POSTs land: dispatch notifications per Watch (root Watch + each fragment Watch whose source produced a new revision).
+
+`UNIQUE (info_source_id, content_fingerprint)` on Archiver's side guarantees the POST is idempotent across crash-replay; the client-supplied ULID is honored on fresh inserts only.
 
 ### Fast-path
 
@@ -146,8 +153,9 @@ Before extracting, fetch the most recent SourceRevision for the root from Archiv
 ### Scratch protocol
 
 - Directory: `WATCHER_CACHE_DIR` (default `/var/cache/watcher/scratch/`). Watcher owns. Single-VM; both Watcher's pipeline and Replicator's fallback read locally.
-- Filename: `<source_revision_id>.bin`. ULID embedded in name so the sweeper can identify the row without DB lookup.
-- POST body carries `content_cache_uri = file:///var/cache/watcher/scratch/<id>.bin` + `content_cache_expires_at = now + WATCHER_CACHE_TTL_SECONDS` (default 600s).
+- Filename: `<source_revision_id>.bin`, where the ULID is **client-allocated by Watcher and supplied to Archiver in the POST body** (archiver SDK v2.2.0+). The file is written under its final name before POST; no rename step in the happy path.
+- POST body carries `source_revision_id = <ulid>`, `content_cache_uri = file:///var/cache/watcher/scratch/<ulid>.bin`, `content_cache_expires_at = now + WATCHER_CACHE_TTL_SECONDS` (default 600s).
+- Rename safety net: if Archiver's idempotency returns a different `source_revision_id` (an existing row matched `(source_id, fingerprint)`), Watcher renames the scratch file to the canonical id.
 
 ### Sweeper
 
@@ -200,14 +208,14 @@ CREATE INDEX ix_pending_source_revisions_next_attempt
 
 - Procrastinate periodic task, runs every 60s.
 - `SELECT … FROM pending_source_revisions WHERE next_attempt_at <= now() ORDER BY next_attempt_at LIMIT 100 FOR UPDATE SKIP LOCKED`.
-- For each row: re-attempt `client.post_source_revision(...)`. Archiver POST is idempotent on `(source_id, fingerprint)` — retries are safe.
-- On success: delete row, fire notification dispatch (same code path as inline-POST success).
+- For each row: re-attempt `client.post_source_revision(..., source_revision_id=row.id, content_cache_uri=row.content_cache_uri, ...)`. The outbox row's `id` column **is** the client-supplied ULID; the scratch file at `content_cache_uri` already exists under that name. Archiver POST is idempotent on `(source_id, fingerprint)` — retries are safe.
+- On success: delete row, fire notification dispatch (same code path as inline-POST success). Sweeper will eventually retire the scratch file.
 - On failure: increment `attempts`, set `last_error`, `next_attempt_at = now() + backoff(attempts)`. Backoff is exponential capped at 1 hour.
 - After `attempts >= 10`: leave the row, log a structured alert, stop retrying. Operator triage.
 
 ### Sweeper interaction
 
-The sweeper's `EXISTS` check uses `info_source_id` + filename-derived ULID. The ULID in the filename is the *intended* `source_revision_id`; once Archiver accepts the POST and assigns its own ULID (or, more precisely, accepts the client-provided one — design contract), the IDs match. So the outbox row's `id` column doubles as the scratch filename's ULID. Confirm during implementation that `post_source_revision` honors client-provided ULIDs.
+The sweeper's per-file `EXISTS` check parses the ULID from the filename (`<source_revision_id>.bin`) and skips deletion if a `pending_source_revisions.id` matches. Because the outbox row's `id` doubles as the scratch filename's ULID — and Watcher allocates the ULID up-front, supplying it to Archiver via `source_revision_id` in the POST body (archiver v2.2.0+) — the filename remains stable across the entire lifecycle (write → POST → drain → expire → delete).
 
 ---
 
@@ -266,8 +274,10 @@ Per AGENTS.md, `src/core/simhash.py` is one of the mirrored files. If Watcher dr
 `pyproject.toml`:
 
 ```toml
-archiver-client = { path = "/home/exedev/archiver/clients/python", editable = true, version = ">=2.1.0,<3" }
+archiver-client = { path = "/home/exedev/archiver/clients/python", editable = true, version = ">=2.2.0,<3" }
 ```
+
+v2.2.0 is the floor because Phase 5 relies on the optional `source_revision_id` parameter on `post_source_revision` (added in archiver/CHANGELOG.md v2.2.0). Earlier SDKs accept the call but the server ignores the field, breaking the write-before-POST invariant.
 
 Verify uv accepts this combination. If not, fall back to:
 - Path-editable in development (`.env`-based override or extras_require)
@@ -299,17 +309,17 @@ Sweep all existing catch sites in `src/core/`, `src/workers/`, `src/api/`, `src/
 All criteria stay inside Watcher's boundary. Tests do not assert behavior in Archiver or downstream services.
 
 - [ ] `watches.info_source_id` column added; `watches.info_item_id` dropped.
-- [ ] Migration script halts on multi-primary or zero-primary items with operator manifest.
+- [ ] Migration script hard-errors with offending `(watch_id, info_item_id)` when no active primary InfoSource exists for the item; operator wires the binding via Archiver authoring tools and re-runs. (Multi-primary is impossible by schema constraint; no manifest path.)
 - [ ] Fragment-Watch create rejects with 422 when no active root Watch exists on the chain.
 - [ ] Root-Watch delete blocks when fragments exist; `?cascade=true` archives them together.
 - [ ] Effective root cadence = `min(root.schedule, min(fragment_schedules))`; root + every fragment Watch evaluates on each tick.
 - [ ] Per fetch: 1 root + N fragment SourceRevisions POSTed to Archiver, idempotent on `(source_id, fingerprint)`.
 - [ ] Fast-path: unchanged extracted root fingerprint skips cascade.
-- [ ] Scratch path populated before POST; sweeper deletes after TTL **except** for files referenced by un-drained outbox rows; best-effort PATCH-cache-clear after delete.
+- [ ] Scratch file `<source_revision_id>.bin` written **before** POST using a Watcher-allocated ULID supplied to Archiver via the v2.2.0 `source_revision_id` request field; sweeper deletes after TTL **except** for files referenced by un-drained outbox rows; best-effort PATCH-cache-clear after delete.
 - [ ] `pending_source_revisions` buffers when Archiver is unreachable; drain worker retries with backoff capped at 1 hour; gives up after 10 attempts with alert.
 - [ ] Notifications dispatched per Watch via Notifier SDK at both inline POST success and outbox drain success; root + fragment Watches dispatch independently.
 - [ ] `Snapshot`, `Change`, `simhash` (if no Archiver mirror need), `differ.py`, and `info.changes` producer plumbing removed; no references remain in `src/`, `tests/`, or `tools/`.
-- [ ] SDK pin: path-editable + `version = ">=2.1.0,<3"`; error envelope migrated to `Conflict` + `InformationError.kind/errors/data`.
+- [ ] SDK pin: path-editable + `version = ">=2.2.0,<3"`; error envelope migrated to `Conflict` + `InformationError.kind/errors/data`.
 - [ ] `effective_domain` resolved once at Watch creation from `info_sources.url`; not re-derived per tick.
 - [ ] `effective_url` continues to be tracked alongside `effective_domain` (long-term workflow in #157).
 - [ ] Watcher tests + lint pass; `uv run pytest -m integration` green; CHANGELOG entry summarizes the v2 cutover.
@@ -318,9 +328,7 @@ All criteria stay inside Watcher's boundary. Tests do not assert behavior in Arc
 
 ## Risks + open questions
 
-- **Multi-primary-source items in migration.** Manifest-and-halt is conservative; an operator may want auto-pick-first-by-created_at. Decide before running the one-shot script in production.
 - **Fragment-template var resolution.** Template helpers for per-fragment context need design — not architecture, but blocks the first notification dispatch test if unowned.
-- **Client-provided ULID for `source_revision_id`.** The scratch-file/outbox design depends on Watcher allocating the ULID before POST. Verify Archiver's `post_source_revision` honors a client-supplied id; if it returns its own, scratch filename has to be a placeholder + rename after POST, which loses the sweeper-outbox interlock cleanliness. Confirm during implementation start.
 - **`simhash.py` mirror policy.** Per AGENTS.md mirror discipline, the file may need to stay even if Watcher stops using it. Coordinate with Archiver before deleting.
 - **Redirect conveyance to Archiver (#157).** Watcher learns about new redirect targets first. Conveyance workflow is its own design effort; this plan keeps `effective_url` on Watch as an interim measure.
 

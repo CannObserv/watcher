@@ -24,9 +24,3 @@ class TestGetAppRegistration:
         )
         task_keys = {name for name, _ in app.periodic_registry.periodic_tasks}
         assert "schedule_tick" in task_keys
-
-    def test_drain_changes_outbox_registered_as_periodic(self):
-        """drain_changes_outbox runs every minute via @bp.periodic."""
-        app = get_app()
-        task_keys = {name for name, _ in app.periodic_registry.periodic_tasks}
-        assert "drain_changes_outbox" in task_keys

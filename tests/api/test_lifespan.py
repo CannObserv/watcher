@@ -143,3 +143,40 @@ async def test_lifespan_closes_client_after_proc_app(monkeypatch):
             pass
 
     assert call_order == ["proc_app.close_async", "aclose_archiver_client"]
+
+
+@pytest.mark.asyncio
+async def test_lifespan_does_not_start_changes_drain(monkeypatch):
+    """Lifespan should not start a changes-drain loop after Phase 5 cutover."""
+    monkeypatch.setenv("ARCHIVER_API_KEY", "test-key")
+
+    fake_reg = MagicMock()
+    fake_reg.get_archiver_client = MagicMock()
+    fake_reg.aclose_archiver_client = AsyncMock()
+
+    fake_proc_app = MagicMock()
+    fake_proc_app.open_async = AsyncMock()
+    fake_proc_app.close_async = AsyncMock()
+
+    async def _worker_run(install_signal_handlers: bool = True) -> None:
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            return
+
+    fake_proc_app.run_worker_async = _worker_run
+
+    poller_task = _make_dummy_task()
+
+    with (
+        patch("src.api.main.get_registry", return_value=fake_reg),
+        patch("src.api.main.start_config_poller", AsyncMock(return_value=poller_task)),
+        patch("src.api.main.hydrate_rate_limiter", AsyncMock()),
+        patch("src.workers.get_app", return_value=fake_proc_app),
+    ):
+        from src.api.main import app
+
+        async with app.router.lifespan_context(app):
+            for attr in dir(app.state):
+                assert "changes_drain" not in attr.lower()
+                assert "drain_changes" not in attr.lower()

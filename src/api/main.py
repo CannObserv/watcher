@@ -50,13 +50,8 @@ async def lifespan(application: FastAPI):
     Pre-warming the ArchiverClient on startup means a missing ARCHIVER_API_KEY
     crashes the API on boot, not on first request. The SDK is closed last on shutdown,
     after the worker is fully gathered and the procrastinate app has closed.
-
-    Also launches the fast-tick changes drain loop (#144). It runs alongside
-    the 1-minute Procrastinate periodic (which stays as a safety floor); the
-    advisory lock keeps both from double-publishing.
     """
     from src.workers import get_app
-    from src.workers.changes_drain import start_changes_drain_loop
 
     limiter = get_rate_limiter()
     await hydrate_rate_limiter(limiter)
@@ -71,12 +66,10 @@ async def lifespan(application: FastAPI):
     proc_app = get_app()
     await proc_app.open_async()
     worker_task = asyncio.create_task(proc_app.run_worker_async(install_signal_handlers=False))
-    drain_loop_task = await start_changes_drain_loop()
     yield
     poller_task.cancel()
     worker_task.cancel()
-    drain_loop_task.cancel()
-    await asyncio.gather(poller_task, worker_task, drain_loop_task, return_exceptions=True)
+    await asyncio.gather(poller_task, worker_task, return_exceptions=True)
     await proc_app.close_async()
     # SDK close must be the last shutdown step (no consumer can still be in flight).
     await registry.aclose_archiver_client()

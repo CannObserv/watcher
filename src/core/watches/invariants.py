@@ -33,6 +33,29 @@ async def _walk_to_root(client: ArchiverClient, info_source_id: str) -> list[str
     return chain
 
 
+async def _get_fragment_watch_dependents(
+    session: AsyncSession,
+    client: ArchiverClient,
+    root_watch: Watch,
+) -> list[Watch]:
+    """Return non-archived fragment Watches that depend on *root_watch*'s source.
+
+    Queries the Archiver for direct children of the root source, then loads
+    any matching non-archived Watch rows from the DB. Does NOT raise; callers
+    decide whether dependents are an error.
+    """
+    page = await client.list_info_sources(parent_info_source_id=str(root_watch.info_source_id))
+    fragment_ids = [str(f.info_source_id) for f in page.items]
+    if not fragment_ids:
+        return []
+    result = await session.execute(
+        select(Watch)
+        .where(Watch.info_source_id.in_(fragment_ids))
+        .where(Watch.is_archived.is_(False))
+    )
+    return list(result.scalars().all())
+
+
 async def require_root_watch_on_chain(
     session: AsyncSession,
     client: ArchiverClient,
@@ -59,15 +82,9 @@ async def require_no_fragment_dependents(
     root_watch: Watch,
 ) -> None:
     """Refuse to delete a root Watch whose source has fragment Watches."""
-    page = await client.list_info_sources(parent_info_source_id=str(root_watch.info_source_id))
-    fragment_ids = [str(f.info_source_id) for f in page.items]
-    if not fragment_ids:
-        return
-    result = await session.execute(
-        select(Watch.id, Watch.info_source_id)
-        .where(Watch.info_source_id.in_(fragment_ids))
-        .where(Watch.is_archived.is_(False))
-    )
-    dependents = [(str(wid), str(sid)) for wid, sid in result.all()]
+    dependents = await _get_fragment_watch_dependents(session, client, root_watch)
     if dependents:
-        raise FragmentDependentsExistError(f"root Watch has fragment dependents: {dependents}")
+        raise FragmentDependentsExistError(
+            f"root Watch has fragment dependents: "
+            f"{[(str(d.id), str(d.info_source_id)) for d in dependents]}"
+        )

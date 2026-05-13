@@ -53,6 +53,10 @@ from src.core.screenshot import capture_screenshot
 from src.core.storage import StorageBackend, default_storage
 from src.core.watches import create_watch as _create_watch
 from src.core.watches import resolve_watch_url
+from src.core.watches.invariants import (
+    RootWatchMissingError,
+    require_root_watch_on_chain,
+)
 from src.dashboard import templates
 from src.dashboard.context import (
     get_audit_entries,
@@ -239,6 +243,7 @@ async def watch_create_submit(
     request: Request,
     name: str = Form(""),
     info_item_id: str = Form(""),
+    info_source_id: str = Form(""),
     content_type: str = Form("html"),
     interval: str = Form(""),
     description: str = Form(""),
@@ -277,6 +282,23 @@ async def watch_create_submit(
     if interval.strip():
         schedule_config["interval"] = interval.strip()
 
+    # Fragment-root invariant: if info_source_id is provided and is a fragment,
+    # require an active root Watch on the chain before creating.
+    resolved_info_source_id = info_source_id.strip() or None
+    if resolved_info_source_id is not None:
+        try:
+            source = await info_client.get_info_source(resolved_info_source_id)
+            if source.parent_info_source_id is not None:
+                await require_root_watch_on_chain(
+                    session, info_client, info_source_id=resolved_info_source_id
+                )
+        except RootWatchMissingError:
+            return await _render_with_flash(
+                "Fragment source requires an active root Watch on the chain"
+            )
+        except (ServerError, httpx.ConnectError, httpx.TimeoutException) as exc:
+            return await _render_with_flash(f"Information service unavailable: {exc}")
+
     try:
         watch = await _create_watch(
             session=session,
@@ -287,6 +309,7 @@ async def watch_create_submit(
             content_type=content_type,
             schedule_config=schedule_config,
             description=description.strip() or None,
+            info_source_id=resolved_info_source_id,
         )
     except NotFound:
         return await _render_with_flash(f"Information Item {info_item_id} does not exist")
@@ -537,7 +560,18 @@ async def watch_delete(
         await api_delete_watch(watch_id=watch_id, session=session)
     except HTTPException as exc:
         if exc.status_code == 409:
-            msg = '<p class="text-red-600 text-sm mt-2">Archive the watch before deleting it.</p>'
+            detail = exc.detail
+            if isinstance(detail, dict) and detail.get("kind") == "conflict":
+                dep_count = len(detail.get("data", {}).get("dependents", []))
+                msg = (
+                    f'<p class="text-red-600 text-sm mt-2">'
+                    f"Cannot delete: {dep_count} fragment Watch(es) depend on this root. "
+                    f"Archive or delete fragment Watches first.</p>"
+                )
+            else:
+                msg = (
+                    '<p class="text-red-600 text-sm mt-2">Archive the watch before deleting it.</p>'
+                )
             return HTMLResponse(status_code=409, content=msg)
         raise
     return HTMLResponse(status_code=200, content="", headers={"HX-Redirect": "/watches"})

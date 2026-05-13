@@ -9,7 +9,7 @@ remain populated for downstream rate-limiting / domain upsert.
 columns no longer exist on the model. Tests assert the new shape directly.
 """
 
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 import httpx
 import pytest
@@ -24,7 +24,7 @@ from src.core.models.snapshot import Snapshot, SnapshotChunk
 from src.core.models.temporal_profile import TemporalProfile
 from src.core.models.watch import Watch
 from src.core.notifications.events import WatchEventType
-from tests.conftest import make_info_item, make_info_spec, make_watch
+from tests.conftest import make_info_item, make_info_source, make_info_spec, make_watch
 
 pytestmark = pytest.mark.integration
 
@@ -790,3 +790,252 @@ class TestUpdateWatchEffectiveFields:
             json={"effective_domain": "a" * 254},
         )
         assert response.status_code == 422
+
+
+class TestFragmentRootInvariants:
+    """Fragment-root invariants on Watch create/delete (Task 5.3)."""
+
+    ROOT_ID = "01HZZ00000000000000000ROOT"
+    FRAG_ID = "01HZZ000000000000000FRAGMT"
+
+    def _stub_fragment_chain(self, info_client):
+        """Make get_info_source report FRAG_ID as a child of ROOT_ID."""
+        info_client.get_info_source = AsyncMock(
+            side_effect=[
+                MagicMock(
+                    info_source_id=self.FRAG_ID,
+                    parent_info_source_id=self.ROOT_ID,
+                ),
+                MagicMock(
+                    info_source_id=self.ROOT_ID,
+                    parent_info_source_id=None,
+                ),
+            ]
+        )
+
+    def _stub_no_fragment_dependents(self, info_client):
+        """Make list_info_sources return empty (no fragments under root)."""
+        info_client.list_info_sources = AsyncMock(return_value=MagicMock(items=[]))
+
+    def _stub_fragment_dependents(self, info_client, frag_source_id):
+        """Make list_info_sources return one fragment child under root."""
+        info_client.list_info_sources = AsyncMock(
+            return_value=MagicMock(
+                items=[
+                    MagicMock(info_source_id=frag_source_id),
+                ]
+            )
+        )
+
+    async def test_create_fragment_watch_rejects_without_root(
+        self, client, db_session, info_client
+    ):
+        """POST with a fragment info_source_id and no root Watch → 422 domain error.
+
+        The invariant check fires before _create_watch, so no InfoSpec row is
+        needed — we stub get_info_source to report FRAG_ID as a fragment and
+        the response must be 422 without reaching the URL-resolution phase.
+        """
+        # Create InfoItem only (no InfoSpec) — the 422 fires before resolve_primary.
+        frag_info_item = await make_info_item(db_session, name="Frag Item 422")
+        info_item_id = str(frag_info_item.info_item_id)
+        await db_session.commit()
+
+        # Stub: FRAG_ID is a child of ROOT_ID; no Watch exists for either.
+        self._stub_fragment_chain(info_client)
+
+        response = await client.post(
+            "/api/v1/watches",
+            json={
+                "name": "Frag Watch",
+                "info_item_id": info_item_id,
+                "info_source_id": self.FRAG_ID,
+                "content_type": "html",
+            },
+        )
+        assert response.status_code == 422, response.text
+        detail = response.json()["detail"]
+        assert detail["kind"] == "domain"
+        assert "root" in detail["message"].lower()
+
+    async def test_create_fragment_watch_accepts_when_root_watched(
+        self, client, db_session, info_client
+    ):
+        """POST with a fragment info_source_id succeeds when an active root Watch exists.
+
+        Uses real InfoSource rows for both root and fragment (so FK constraints
+        pass) and stubs get_primary_info_spec to bypass the missing
+        information.info_specs table in the test DB.
+        """
+        # Create real InfoSource rows — required for the FK on watches.info_source_id.
+        root_src = await make_info_source(db_session)
+        frag_src = await make_info_source(db_session, parent_info_source_id=root_src.info_source_id)
+        root_info_item = await make_info_item(db_session, name="Root Item OK")
+        await make_watch(
+            db_session,
+            name="Root Watch OK",
+            info_item_id=root_info_item.info_item_id,
+            info_source_id=root_src.info_source_id,
+            is_active=True,
+            is_archived=False,
+        )
+        # Create InfoItem for the fragment watch (no InfoSpec needed — we stub).
+        frag_info_item = await make_info_item(db_session, name="Frag Item OK")
+        await db_session.commit()
+
+        # Stub: frag_src is child of root_src (which has an active Watch).
+        # Three calls total: (1) route initial fragment check, (2) _walk_to_root
+        # iteration for frag_src, (3) _walk_to_root iteration for root_src.
+        info_client.get_info_source = AsyncMock(
+            side_effect=[
+                MagicMock(
+                    info_source_id=str(frag_src.info_source_id),
+                    parent_info_source_id=str(root_src.info_source_id),
+                ),
+                MagicMock(
+                    info_source_id=str(frag_src.info_source_id),
+                    parent_info_source_id=str(root_src.info_source_id),
+                ),
+                MagicMock(
+                    info_source_id=str(root_src.info_source_id),
+                    parent_info_source_id=None,
+                ),
+            ]
+        )
+        # Stub get_primary_info_spec so _create_watch can resolve the URL
+        # without querying information.info_specs (which may be absent in CI).
+        spec_doc = MagicMock()
+        spec_doc.to_dict = MagicMock(
+            return_value={
+                "schema_version": 1,
+                "target": {"url": "https://example.com/frag-ok"},
+                "extraction": {"algorithm": "full_page"},
+                "fingerprint": {"algorithm": "simhash"},
+            }
+        )
+        mock_spec = MagicMock()
+        mock_spec.info_item_id = str(frag_info_item.info_item_id)
+        mock_spec.info_spec_id = "01HZZ00000000000000SPEC001"
+        mock_spec.document = spec_doc
+        info_client.get_primary_info_spec = AsyncMock(return_value=mock_spec)
+
+        response = await client.post(
+            "/api/v1/watches",
+            json={
+                "name": "Frag Watch OK",
+                "info_item_id": str(frag_info_item.info_item_id),
+                "info_source_id": str(frag_src.info_source_id),
+                "content_type": "html",
+            },
+        )
+        assert response.status_code == 201, response.text
+        assert response.json()["name"] == "Frag Watch OK"
+
+    async def test_delete_root_watch_blocks_when_fragments_exist(
+        self, client, db_session, info_client
+    ):
+        """DELETE on a root Watch with active fragment Watches → 409 conflict."""
+        # Create root source + watch.
+        root_src = await make_info_source(db_session)
+        root_item = await make_info_item(db_session, name="Root Delete")
+        root_watch = await make_watch(
+            db_session,
+            name="Root Delete Watch",
+            info_item_id=root_item.info_item_id,
+            info_source_id=root_src.info_source_id,
+            is_active=False,
+            is_archived=True,
+        )
+        # Create fragment source + watch.
+        frag_src = await make_info_source(db_session, parent_info_source_id=root_src.info_source_id)
+        frag_item = await make_info_item(db_session, name="Frag Delete")
+        frag_watch = await make_watch(
+            db_session,
+            name="Frag Delete Watch",
+            info_item_id=frag_item.info_item_id,
+            info_source_id=frag_src.info_source_id,
+            is_active=True,
+            is_archived=False,
+        )
+        await db_session.commit()
+
+        # Stub: root_src has no parent (it's a root); list_info_sources returns frag_src.
+        info_client.get_info_source = AsyncMock(
+            return_value=MagicMock(
+                info_source_id=str(root_src.info_source_id),
+                parent_info_source_id=None,
+            )
+        )
+        self._stub_fragment_dependents(info_client, frag_src.info_source_id)
+
+        response = await client.delete(f"/api/v1/watches/{root_watch.id}")
+        assert response.status_code == 409, response.text
+        detail = response.json()["detail"]
+        assert detail["kind"] == "conflict"
+        dependents = detail["data"]["dependents"]
+        assert len(dependents) >= 1
+        assert str(frag_watch.id) in [d["watch_id"] for d in dependents]
+
+    async def test_delete_root_watch_cascade_archives_fragments(
+        self, client, db_session, info_client
+    ):
+        """DELETE ?cascade=true archives fragment Watches and proceeds with root deletion."""
+        # Create root source + watch (archived so delete is allowed).
+        root_src = await make_info_source(db_session)
+        root_item = await make_info_item(db_session, name="Root Cascade")
+        root_watch = await make_watch(
+            db_session,
+            name="Root Cascade Watch",
+            info_item_id=root_item.info_item_id,
+            info_source_id=root_src.info_source_id,
+            is_active=False,
+            is_archived=True,
+        )
+        # Create fragment source + watch (active).
+        frag_src = await make_info_source(db_session, parent_info_source_id=root_src.info_source_id)
+        frag_item = await make_info_item(db_session, name="Frag Cascade")
+        frag_watch = await make_watch(
+            db_session,
+            name="Frag Cascade Watch",
+            info_item_id=frag_item.info_item_id,
+            info_source_id=frag_src.info_source_id,
+            is_active=True,
+            is_archived=False,
+        )
+        await db_session.commit()
+
+        # Stub: root_src has no parent; list_info_sources returns frag_src.
+        info_client.get_info_source = AsyncMock(
+            return_value=MagicMock(
+                info_source_id=str(root_src.info_source_id),
+                parent_info_source_id=None,
+            )
+        )
+        self._stub_fragment_dependents(info_client, frag_src.info_source_id)
+        # Stub resolve_watch_url: delete proceeds to URL resolution after cascade archive.
+        spec_doc = MagicMock()
+        spec_doc.to_dict = MagicMock(
+            return_value={
+                "schema_version": 1,
+                "target": {"url": "https://example.com/cascade"},
+                "extraction": {"algorithm": "full_page"},
+                "fingerprint": {"algorithm": "simhash"},
+            }
+        )
+        mock_spec = MagicMock()
+        mock_spec.info_item_id = str(root_item.info_item_id)
+        mock_spec.info_spec_id = "01HZZ00000000000000SPEC002"
+        mock_spec.document = spec_doc
+        info_client.get_primary_info_spec = AsyncMock(return_value=mock_spec)
+
+        response = await client.delete(f"/api/v1/watches/{root_watch.id}?cascade=true")
+        assert response.status_code == 204, response.text
+
+        # Fragment watch must be archived and inactive.
+        await db_session.refresh(frag_watch)
+        assert frag_watch.is_archived is True
+        assert frag_watch.is_active is False
+
+        # Root watch must be gone.
+        get_resp = await client.get(f"/api/v1/watches/{root_watch.id}")
+        assert get_resp.status_code == 404

@@ -20,10 +20,15 @@ class WatchCreate(BaseModel):
     The watch is bound to a pre-existing InfoItem (and its primary InfoSpec)
     in the Information service. The route validates ``info_item_id`` via the
     SDK before constructing the Watch row.
+
+    ``info_source_id`` is optional (transitional v2 field). When supplied and
+    the source is a fragment (its parent is not None), the route enforces the
+    fragment-root invariant before persisting the Watch.
     """
 
     name: str = Field(min_length=1, max_length=255)
     info_item_id: ULIDStr
+    info_source_id: ULIDStr | None = None
     content_type: ContentType
     description: str | None = None
     tags: list[str] | None = None

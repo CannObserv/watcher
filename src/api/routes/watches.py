@@ -6,7 +6,7 @@ from typing import Annotated
 
 import httpx
 from archiver_client import AuthError, NotFound, ServerError
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -23,6 +23,13 @@ from src.core.probe import ProbeResult
 from src.core.registry import get_registry
 from src.core.watches import create_watch as _create_watch
 from src.core.watches import resolve_watch_url
+from src.core.watches.invariants import (
+    FragmentDependentsExistError,
+    RootWatchMissingError,
+    _get_fragment_watch_dependents,
+    require_no_fragment_dependents,
+    require_root_watch_on_chain,
+)
 
 logger = get_logger(__name__)
 
@@ -49,6 +56,33 @@ async def create_watch(
     - URL probe ``httpx.HTTPError`` → 422 (target unreachable).
     """
     info_client = get_registry().get_archiver_client()
+
+    # Fragment-root invariant: if info_source_id is supplied and is a fragment
+    # (parent is not None), require an active root Watch on the chain.
+    if data.info_source_id is not None:
+        try:
+            source = await info_client.get_info_source(data.info_source_id)
+            if source.parent_info_source_id is not None:
+                await require_root_watch_on_chain(
+                    session, info_client, info_source_id=data.info_source_id
+                )
+        except RootWatchMissingError as exc:
+            raise HTTPException(
+                status_code=422,
+                detail={
+                    "kind": "domain",
+                    "message": "fragment requires active root Watch",
+                    "info_source_id": data.info_source_id,
+                },
+            ) from exc
+        except (AuthError, ServerError, httpx.ConnectError, httpx.TimeoutException) as exc:
+            logger.warning("Information service unreachable during fragment-root check: %s", exc)
+            raise HTTPException(
+                status_code=503,
+                detail="Information service unavailable; retry shortly",
+                headers={"Retry-After": "30"},
+            ) from exc
+
     try:
         return await _create_watch(
             session=session,
@@ -60,6 +94,7 @@ async def create_watch(
             schedule_config=data.schedule_config,
             description=data.description,
             tags=data.tags,
+            info_source_id=data.info_source_id,
         )
     except NotFound as exc:
         raise HTTPException(
@@ -187,15 +222,66 @@ async def update_watch(
 @router.delete("/{watch_id}", status_code=204)
 async def delete_watch(
     watch_id: str,
+    cascade: bool = Query(False),
     session: AsyncSession = Depends(get_db_session),
 ):
-    """Permanently delete an archived watch and all related data."""
+    """Permanently delete an archived watch and all related data.
+
+    If the watch is a root (its info_source has no parent), fragment Watches
+    that depend on it must be handled first:
+    - Without ``?cascade=true``: returns 409 with a list of dependent Watches.
+    - With ``?cascade=true``: archives each fragment Watch in the same
+      transaction before proceeding with the deletion.
+    """
     watch = await get_watch_or_404(watch_id, session)
 
     if not watch.is_archived:
         raise HTTPException(status_code=409, detail="Archive watch before deleting")
 
     info_client = get_registry().get_archiver_client()
+
+    # Fragment-dependents check: only applies when the Watch has an info_source_id
+    # (v2 watches). Root Watches block deletion when active fragment Watches exist.
+    if watch.info_source_id is not None:
+        try:
+            source = await info_client.get_info_source(str(watch.info_source_id))
+            is_root = source.parent_info_source_id is None
+            if is_root:
+                if cascade:
+                    # Archive all non-archived fragment Watches in this transaction.
+                    dependents = await _get_fragment_watch_dependents(session, info_client, watch)
+                    for dep_watch in dependents:
+                        dep_watch.is_archived = True
+                        dep_watch.is_active = False
+                    if dependents:
+                        await session.flush()
+                else:
+                    await require_no_fragment_dependents(session, info_client, watch)
+        except FragmentDependentsExistError as exc:
+            # Build dependents list for the 409 response body.
+            dependents = await _get_fragment_watch_dependents(session, info_client, watch)
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "kind": "conflict",
+                    "message": "fragment Watches depend on this root Watch",
+                    "data": {
+                        "dependents": [
+                            {
+                                "watch_id": str(dep.id),
+                                "info_source_id": str(dep.info_source_id),
+                            }
+                            for dep in dependents
+                        ]
+                    },
+                },
+            ) from exc
+        except (NotFound, ServerError, httpx.ConnectError, httpx.TimeoutException) as exc:
+            logger.warning(
+                "Information service unreachable during fragment-dependents check: %s", exc
+            )
+            # Fail open: don't block deletion if we can't reach the archiver.
+
     try:
         resolved_url = await resolve_watch_url(watch, info_client)
     except NotFound:

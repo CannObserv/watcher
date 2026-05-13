@@ -6,6 +6,7 @@ from src.core.models.audit_log import AuditLog
 from src.core.models.base import Base, TimestampMixin, ULIDType, generate_ulid
 from src.core.models.change import Change
 from src.core.models.domain import DEFAULT_MAX_CONCURRENCY, DEFAULT_MIN_INTERVAL, Domain
+from src.core.models.last_known_revision import LastKnownRevision
 from src.core.models.notification_config import WatchNotificationConfig
 from src.core.models.notification_template import DomainNcRef, NotificationTemplate, WatchNcRef
 from src.core.models.snapshot import Snapshot, SnapshotChunk
@@ -22,6 +23,7 @@ __all__ = [
     "DEFAULT_MAX_CONCURRENCY",
     "DEFAULT_MIN_INTERVAL",
     "Domain",
+    "LastKnownRevision",
     "WatchNotificationConfig",
     "NotificationTemplate",
     "WatchNcRef",

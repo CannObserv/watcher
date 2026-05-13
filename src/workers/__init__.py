@@ -40,6 +40,7 @@ def get_app() -> procrastinate.App:
     if _app is None:
         # Import task modules so decorators register on the blueprint
         # before we copy tasks into the App.
+        import src.workers.source_revisions_drain  # noqa: F401
         import src.workers.tasks  # noqa: F401
 
         _app = procrastinate.App(

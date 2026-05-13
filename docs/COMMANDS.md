@@ -124,9 +124,9 @@ uv run alembic current
 
 ## Change bus (Redis Streams)
 
-Watcher publishes `info.changes` events to Redis Streams via `ChangePublisher`. The drain worker reads unpublished rows from the `changes` table outbox columns and forwards them to Redis.
+The Archiver publishes `info.changes` events to Redis Streams. Watcher consumes entries from this stream to drive notifications and watches.
 
-Envelope shape is `schema_version: 2` (Phase 2c). Each entry is partitioned by `info_item_id` (was `watch_id` in Phase 2b's v1 shape) and carries `info_item_id`, `info_spec_id`, and `previous_fingerprint`/`current_fingerprint` so consumers can route or dedupe by Information Item without hitting Watcher.
+Envelope shape is `schema_version: 2` (Phase 2c). Each entry is partitioned by `info_item_id` (was `watch_id` in Phase 2b's v1 shape) and carries `info_item_id`, `info_spec_id`, and `previous_fingerprint`/`current_fingerprint` so consumers can route or dedupe by Information Item without additional lookups.
 
 The `drain_changes_outbox` task is registered via `@bp.periodic(cron="* * * * *")`, so the embedded Procrastinate worker fires it every minute. Manual invocation is still available for one-shot runs:
 

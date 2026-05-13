@@ -122,25 +122,6 @@ uv run alembic current
 # See /home/exedev/archiver/docs/COMMANDS.md.
 ```
 
-## Change bus (Redis Streams)
-
-The Archiver publishes `info.changes` events to Redis Streams. Watcher consumes entries from this stream to drive notifications and watches.
-
-Envelope shape is `schema_version: 2` (Phase 2c). Each entry is partitioned by `info_item_id` (was `watch_id` in Phase 2b's v1 shape) and carries `info_item_id`, `info_spec_id`, and `previous_fingerprint`/`current_fingerprint` so consumers can route or dedupe by Information Item without additional lookups.
-
-The `drain_changes_outbox` task is registered via `@bp.periodic(cron="* * * * *")`, so the embedded Procrastinate worker fires it every minute. Manual invocation is still available for one-shot runs:
-
-```bash
-# Inspect a stream's contents quickly:
-redis-cli XLEN info.changes
-redis-cli XRANGE info.changes - +
-
-# Drain unpublished Changes manually (Procrastinate task):
-uv run python -c "import asyncio; from src.workers.changes_drain import drain_changes_outbox; print(asyncio.run(drain_changes_outbox.func()))"
-```
-
-Note: `drain_changes_outbox.func()` calls the underlying async function directly, bypassing Procrastinate's queue dispatch — useful for manual one-shot runs. A PostgreSQL transaction-scoped advisory lock (`DRAIN_ADVISORY_LOCK_ID`) keeps the periodic drain and a manual run from double-publishing.
-
 ## Task Queue (Procrastinate)
 
 ```bash

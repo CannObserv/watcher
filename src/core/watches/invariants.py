@@ -20,6 +20,10 @@ class RootWatchMissingError(Exception):
 class FragmentDependentsExistError(Exception):
     """Root Watch delete attempted while fragment Watches depend on it."""
 
+    def __init__(self, message: str, *, dependents: list["Watch"]):
+        super().__init__(message)
+        self.dependents = dependents
+
 
 async def _walk_to_root(client: ArchiverClient, info_source_id: str) -> list[str]:
     """Chain of info_source_ids from leaf → root (inclusive)."""
@@ -86,5 +90,6 @@ async def require_no_fragment_dependents(
     if dependents:
         raise FragmentDependentsExistError(
             f"root Watch has fragment dependents: "
-            f"{[(str(d.id), str(d.info_source_id)) for d in dependents]}"
+            f"{[(str(d.id), str(d.info_source_id)) for d in dependents]}",
+            dependents=dependents,
         )

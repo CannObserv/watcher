@@ -258,8 +258,8 @@ async def delete_watch(
                 else:
                     await require_no_fragment_dependents(session, info_client, watch)
         except FragmentDependentsExistError as exc:
-            # Build dependents list for the 409 response body.
-            dependents = await _get_fragment_watch_dependents(session, info_client, watch)
+            # Dependents already carried on the exception; no second Archiver call needed.
+            dependents = exc.dependents
             raise HTTPException(
                 status_code=409,
                 detail={

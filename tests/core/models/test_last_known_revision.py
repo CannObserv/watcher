@@ -27,3 +27,5 @@ async def test_last_known_revision_round_trip(db_session):
         )
     ).scalar_one()
     assert fetched.content_fingerprint == row.content_fingerprint
+    assert fetched.source_revision_id == row.source_revision_id
+    assert fetched.captured_at == row.captured_at

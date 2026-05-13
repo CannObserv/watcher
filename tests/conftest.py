@@ -307,11 +307,27 @@ async def make_info_item(session, *, name="Test Item", description=None):
     return item
 
 
-async def make_info_source(session, *, url="https://example.com"):
-    """Create and flush an InfoSource root row (no parent, target URL required)."""
+async def make_info_source(session, *, url="https://example.com", parent_info_source_id=None):
+    """Create and flush an InfoSource row.
+
+    Pass *parent_info_source_id* (ULID or str) to create a fragment source;
+    omit it (or pass None) for a URL-bearing root source.
+
+    The ``information.info_sources`` table enforces a check constraint:
+    ``(parent_info_source_id IS NULL) != (url IS NULL)`` where ``url`` is a
+    computed column extracted from ``source_spec->'target'->>'url'``.
+    Fragment sources therefore must NOT include ``target.url`` in their
+    ``source_spec``.
+    """
+    if parent_info_source_id is not None:
+        # Fragment source: no target URL allowed (constraint enforces url IS NULL).
+        source_spec = {"schema_version": 1}
+    else:
+        source_spec = {"schema_version": 1, "target": {"url": url}}
     source = InfoSource(
-        source_spec={"schema_version": 1, "target": {"url": url}},
+        source_spec=source_spec,
         schema_version=1,
+        parent_info_source_id=parent_info_source_id,
     )
     session.add(source)
     await session.flush()

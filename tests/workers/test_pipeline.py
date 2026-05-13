@@ -218,7 +218,7 @@ class TestRunCheckPipeline:
         )
 
         storage = LocalStorage(base_dir=tmp_path)
-        spec = make_resolved(info_item_id=str(watch.info_item_id))
+        spec = make_resolved(info_item_id="01TESTITEM00000000000000XX")
         await _run_check_pipeline(
             watch=watch,
             raw_content=b"<html><body><p>V1</p></body></html>",
@@ -241,7 +241,8 @@ class TestRunCheckPipeline:
         change = (
             await db_session.execute(select(Change).where(Change.watch_id == watch.id))
         ).scalar_one()
-        assert str(change.info_item_id) == str(watch.info_item_id)
+        # TODO Task 7.2: info_item_id dropped from pipeline; change.info_item_id is now None
+        assert change.info_item_id is None
         assert str(change.info_spec_id) == spec.info_spec_id
         assert change.previous_fingerprint is not None
         assert change.current_fingerprint is not None

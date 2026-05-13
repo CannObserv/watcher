@@ -29,19 +29,20 @@ class MissingMappingError(Exception):
 
 
 async def migrate_watches(session, manifest: dict[str, str]) -> None:
-    """Set Watch.info_source_id for each Watch with a NULL info_source_id."""
+    """Set Watch.info_source_id for each Watch with a NULL info_source_id.
+
+    As of Task 5.5, Watch.info_item_id no longer exists and Watch.info_source_id
+    is NOT NULL. This function is now a no-op (all rows already have info_source_id
+    set by the time the migration runs). Kept for backward-compat with test suite;
+    the manifest argument is ignored.
+    """
     result = await session.execute(select(Watch).where(Watch.info_source_id.is_(None)))
     watches = list(result.scalars().all())
-    missing = []
-    for w in watches:
-        mapped = manifest.get(str(w.info_item_id))
-        if mapped is None:
-            missing.append((str(w.id), str(w.info_item_id)))
-            continue
-        w.info_source_id = mapped
-    if missing:
+    if watches:
         raise MissingMappingError(
-            f"manifest missing mappings for: {missing}. Add entries and re-run."
+            f"Found {len(watches)} Watch(es) with NULL info_source_id. "
+            "This should not happen after Task 5.5 migration. "
+            "Populate info_source_id before upgrading."
         )
     await session.commit()
 

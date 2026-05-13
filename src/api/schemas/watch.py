@@ -1,9 +1,11 @@
 """Pydantic schemas for Watch CRUD operations.
 
-Phase 2c contract: ``url`` and ``fetch_config`` no longer live on the Watch
+Phase 5 contract: ``url`` and ``fetch_config`` no longer live on the Watch
 model — they are owned by the canonical InfoSpec and resolved at runtime via
-the ArchiverClient SDK. ``WatchCreate`` accepts ``info_item_id`` instead.
-``WatchResponse`` exposes neither legacy field.
+the ArchiverClient SDK. ``WatchCreate`` accepts ``info_source_id`` (required,
+Phase 5+) and ``info_item_id`` (retained for SDK resolution of the target URL
+until Task 7.x migrates check_watch to the new source resolver).
+``WatchResponse`` exposes neither legacy URL field.
 """
 
 from datetime import datetime
@@ -17,18 +19,16 @@ from src.core.models.watch import ContentType, WatchHealthStatus
 class WatchCreate(BaseModel):
     """Schema for creating a new watch.
 
-    The watch is bound to a pre-existing InfoItem (and its primary InfoSpec)
-    in the Information service. The route validates ``info_item_id`` via the
-    SDK before constructing the Watch row.
-
-    ``info_source_id`` is optional (transitional v2 field). When supplied and
-    the source is a fragment (its parent is not None), the route enforces the
-    fragment-root invariant before persisting the Watch.
+    The watch is bound to a pre-existing InfoSource in the Information service.
+    ``info_item_id`` is required for SDK-based URL resolution (via
+    ``get_primary_info_spec``) until Task 7.x migrates to the new source
+    resolver. ``info_source_id`` is required (Phase 5+) and is stored on the
+    Watch row; fragment-root invariant checks are enforced by the route.
     """
 
     name: str = Field(min_length=1, max_length=255)
     info_item_id: ULIDStr
-    info_source_id: ULIDStr | None = None
+    info_source_id: ULIDStr
     content_type: ContentType
     description: str | None = None
     tags: list[str] | None = None
@@ -64,7 +64,7 @@ class WatchResponse(BaseModel):
 
     id: ULIDStr
     name: str
-    info_item_id: ULIDStr
+    info_source_id: ULIDStr
     content_type: ContentType
     schedule_config: dict
     is_active: bool

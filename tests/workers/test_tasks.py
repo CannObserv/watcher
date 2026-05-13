@@ -1039,7 +1039,7 @@ class TestCheckWatchResolvesUrlViaSdk:
         mock_fetcher.fetch = fetch_mock
 
         fake_spec = _make_fake_spec(
-            info_item_id=str(watch.info_item_id),
+            info_item_id="01TESTITEM00000000000000XX",
             url="https://from-spec.example.com",
             timeout_seconds=45,
         )
@@ -1127,14 +1127,14 @@ class TestCheckWatchResolvesUrlViaSdk:
 
         # Stale spec with a selector that matches nothing.
         stale_spec = _make_fake_spec(
-            info_item_id=str(watch.info_item_id),
+            info_item_id="01TESTITEM00000000000000XX",
             url="https://example.com/refresh",
             extraction_algorithm="css",
             selector=".does-not-exist",
         )
         # Fresh spec with full_page extraction.
         fresh_spec = _make_fake_spec(
-            info_item_id=str(watch.info_item_id),
+            info_item_id="01TESTITEM00000000000000XX",
             url="https://example.com/refresh",
             extraction_algorithm="full_page",
         )

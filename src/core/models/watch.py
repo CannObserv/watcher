@@ -1,4 +1,4 @@
-"""Watch model — links an InfoItem to per-watch scheduling and notification metadata."""
+"""Watch model — links an InfoSource to per-watch scheduling and notification metadata."""
 
 import enum
 from datetime import datetime
@@ -10,24 +10,16 @@ from ulid import ULID
 
 from src.core.models.base import Base, TimestampMixin, ULIDType, generate_ulid
 
-# Cross-schema FK resolution stub.
+# Cross-schema FK resolution stub for info_sources.
 #
-# ``watches.info_item_id`` references ``information.info_items.info_item_id``.
-# The Information service owns ``info_items`` on its own DeclarativeBase, so
+# ``watches.info_source_id`` references ``information.info_sources.info_source_id``.
+# The Information service owns ``info_sources`` on its own DeclarativeBase, so
 # Watcher's ``Base.metadata`` cannot resolve the FK target on its own.
 # Register a stub Table here exposing only the referenced primary key column.
 # Watcher never creates or drops this table — production DDL lives in the
 # Information service's Alembic root, and ``alembic/env.py`` filters
 # non-public schemas out of autogenerate. The stub exists purely so
 # SQLAlchemy can compile the cross-schema FK at import time.
-Table(
-    "info_items",
-    Base.metadata,
-    Column("info_item_id", ULIDType, primary_key=True),
-    schema="information",
-)
-
-# Cross-schema FK resolution stub for info_sources (mirrors info_items pattern).
 Table(
     "info_sources",
     Base.metadata,
@@ -58,16 +50,10 @@ class Watch(Base, TimestampMixin):
     __tablename__ = "watches"
 
     id: Mapped[ULID] = mapped_column(ULIDType, primary_key=True, default=generate_ulid)
-    info_item_id: Mapped[ULID] = mapped_column(
-        ULIDType,
-        ForeignKey("information.info_items.info_item_id", ondelete="RESTRICT"),
-        nullable=False,
-        index=True,
-    )
-    info_source_id: Mapped[ULID | None] = mapped_column(
+    info_source_id: Mapped[ULID] = mapped_column(
         ULIDType,
         ForeignKey("information.info_sources.info_source_id", ondelete="RESTRICT"),
-        nullable=True,
+        nullable=False,
         index=True,
     )
     name: Mapped[str] = mapped_column(String(255))

@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from src.core.notifications.events import WatchEventType
-from tests.conftest import make_info_item, make_info_spec
+from tests.conftest import make_info_item, make_info_source
 
 pytestmark = pytest.mark.integration
 
@@ -14,15 +14,19 @@ _PATCH_CORE = "src.core.watches.dispatch_event_notifications"
 
 
 async def _seed_info_item(db_session, *, name="W", url="https://example.com/p"):
+    """Create InfoItem + InfoSource; return (info_item_id, info_source_id) as str.
+
+    Phase 5: info_specs is gone; URL lives in the InfoSource source_spec.
+    """
     item = await make_info_item(db_session, name=name)
-    await make_info_spec(db_session, item, url=url)
+    source = await make_info_source(db_session, url=url)
     await db_session.commit()
-    return str(item.info_item_id)
+    return str(item.info_item_id), str(source.info_source_id)
 
 
 class TestWatchCreatedNotification:
     async def test_create_watch_dispatches_watch_created_event(self, client, db_session):
-        info_item_id = await _seed_info_item(
+        info_item_id, info_source_id = await _seed_info_item(
             db_session, name="Notify Watch", url="https://example.com/notify"
         )
         with patch(_PATCH_CORE, new_callable=AsyncMock) as mock_dispatch:
@@ -31,6 +35,7 @@ class TestWatchCreatedNotification:
                 json={
                     "name": "Notify Watch",
                     "info_item_id": info_item_id,
+                    "info_source_id": info_source_id,
                     "content_type": "html",
                 },
             )
@@ -41,7 +46,7 @@ class TestWatchCreatedNotification:
         assert kwargs["event"].watch_id == response.json()["id"]
 
     async def test_create_watch_event_includes_name_and_url(self, client, db_session):
-        info_item_id = await _seed_info_item(
+        info_item_id, info_source_id = await _seed_info_item(
             db_session, name="My Watch", url="https://example.com/page"
         )
         with patch(_PATCH_CORE, new_callable=AsyncMock) as mock_dispatch:
@@ -50,6 +55,7 @@ class TestWatchCreatedNotification:
                 json={
                     "name": "My Watch",
                     "info_item_id": info_item_id,
+                    "info_source_id": info_source_id,
                     "content_type": "html",
                 },
             )
@@ -61,10 +67,15 @@ class TestWatchCreatedNotification:
 
 class TestWatchPausedResumedNotifications:
     async def _create_watch(self, client, db_session, *, is_active=True):
-        info_item_id = await _seed_info_item(db_session)
+        info_item_id, info_source_id = await _seed_info_item(db_session)
         resp = await client.post(
             "/api/v1/watches",
-            json={"name": "W", "info_item_id": info_item_id, "content_type": "html"},
+            json={
+                "name": "W",
+                "info_item_id": info_item_id,
+                "info_source_id": info_source_id,
+                "content_type": "html",
+            },
         )
         assert resp.status_code == 201, resp.text
         watch_id = resp.json()["id"]
@@ -119,7 +130,7 @@ class TestWatchPausedResumedNotifications:
 
 class TestWatchDeletedNotification:
     async def _create_archived_watch(self, client, db_session):
-        info_item_id = await _seed_info_item(
+        info_item_id, info_source_id = await _seed_info_item(
             db_session, name="Delete Watch", url="https://example.com/d"
         )
         resp = await client.post(
@@ -127,6 +138,7 @@ class TestWatchDeletedNotification:
             json={
                 "name": "Delete Watch",
                 "info_item_id": info_item_id,
+                "info_source_id": info_source_id,
                 "content_type": "html",
             },
         )

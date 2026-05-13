@@ -7,9 +7,8 @@ from archiver_client import ArchiverClient
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
-from ulid import ULID
+from ulid import ULID  # used in ULID.from_str
 
-from src.core.info_resolver import resolve_primary
 from src.core.logging import get_logger
 from src.core.models.audit_log import EventType, audit
 from src.core.models.domain import DEFAULT_MAX_CONCURRENCY, DEFAULT_MIN_INTERVAL, Domain
@@ -27,9 +26,12 @@ async def resolve_watch_url(watch: Watch, client: ArchiverClient) -> str:
     Used at notification/event-emission time so ``watch_url`` reflects the
     operator's current spec, not a stale value. Caller passes the SDK client
     explicitly to keep the registry lookup at the request boundary.
+
+    Resolves via ``info_source_id`` once Phase 5 SDK support lands; for now
+    falls back to the InfoSource's URL from the source_spec.
     """
-    resolved = await resolve_primary(client, str(watch.info_item_id))
-    return resolved.document["target"]["url"]
+    source = await client.get_info_source(str(watch.info_source_id))
+    return source.source_spec.additional_properties["target"]["url"]
 
 
 async def create_watch(
@@ -45,14 +47,15 @@ async def create_watch(
     tags: list[str] | None = None,
     info_source_id: str | None = None,
 ) -> Watch:
-    """Create a new Watch bound to *info_item_id*.
+    """Create a new Watch.
 
-    Resolves the URL from the InfoItem's primary InfoSpec via the SDK, probes
+    Resolves the target URL from the InfoSource via ``get_info_source``, probes
     it to populate ``effective_url`` / ``effective_domain``, upserts the
     Domain row, and persists the Watch.
 
-    If *info_source_id* is provided it is stored on the Watch (transitional
-    v2 column); fragment-root invariant checks are the caller's responsibility.
+    *info_source_id* is required (Phase 5+). *info_item_id* is retained on the
+    function signature for call-site compatibility during the cutover window;
+    Tasks 7.x will remove it.
 
     Raises whatever the SDK raises (``NotFound``, ``httpx.ConnectError``,
     ``ServerError``, ``AuthError``, ``ValidationError``) — translation to
@@ -63,11 +66,13 @@ async def create_watch(
     """
     schedule_config = schedule_config if schedule_config is not None else {}
 
-    # 1. Resolve the primary InfoSpec — also serves as InfoItem-existence check.
-    #    NotFound covers both "InfoItem absent" and "InfoItem has no active spec";
-    #    ServerError / AuthError / httpx.* propagate to the route handler.
-    resolved = await resolve_primary(info_client, info_item_id)
-    url = resolved.document["target"]["url"]
+    if info_source_id is None:
+        raise ValueError("info_source_id is required (Phase 5+)")
+
+    # 1. Resolve the target URL from the InfoSource (Phase 5+).
+    #    NotFound / ServerError / AuthError / httpx.* propagate to the route handler.
+    source = await info_client.get_info_source(info_source_id)
+    url = source.source_spec.additional_properties["target"]["url"]
 
     # 2. Probe the URL — establishes effective_url / effective_domain and
     #    fails fast on connection errors. httpx.HTTPError propagates.
@@ -94,7 +99,7 @@ async def create_watch(
 
     watch_kwargs: dict = {
         "name": name,
-        "info_item_id": ULID.from_str(info_item_id),
+        "info_source_id": ULID.from_str(info_source_id),
         "content_type": content_type,
         "schedule_config": schedule_config,
         "effective_url": probe_result.effective_url,
@@ -102,8 +107,6 @@ async def create_watch(
         "description": description,
         "tags": tags,
     }
-    if info_source_id is not None:
-        watch_kwargs["info_source_id"] = ULID.from_str(info_source_id)
 
     watch = Watch(**watch_kwargs)
     session.add(watch)
@@ -114,7 +117,7 @@ async def create_watch(
         EventType.WATCH_CREATED,
         watch_id=watch.id,
         name=name,
-        info_item_id=info_item_id,
+        info_source_id=info_source_id,
         url=url,
         content_type=str(content_type),
         effective_url=probe_result.effective_url,

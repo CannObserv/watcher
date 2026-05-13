@@ -16,10 +16,12 @@ pytestmark = pytest.mark.integration
 
 
 async def _make_watch(db_session, name: str = "W", domain: str | None = None) -> Watch:
+    # Use name-based URL to avoid uniqueness constraint when multiple watches are created.
+    slug = name.lower().replace(" ", "-")
     return await make_watch(
         db_session,
         name=name,
-        url="https://example.com",
+        url=f"https://example-{slug}.com",
         content_type=ContentType.HTML,
         effective_domain=domain,
     )

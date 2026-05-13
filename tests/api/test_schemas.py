@@ -95,33 +95,40 @@ class TestHttpUrlStr:
 
 class TestWatchCreate:
     def test_valid_watch_create(self):
-        info_id = str(ULID())
+        source_id = str(ULID())
         data = WatchCreate(
             name="Test Watch",
-            info_item_id=info_id,
+            info_item_id=str(ULID()),
+            info_source_id=source_id,
             content_type="html",
         )
         assert data.name == "Test Watch"
-        assert data.info_item_id == info_id
+        assert data.info_source_id == source_id
         assert data.content_type == "html"
         assert data.schedule_config == {}
 
     def test_watch_create_requires_name(self):
         with pytest.raises(ValidationError):
-            WatchCreate(info_item_id=str(ULID()), content_type="html")
+            WatchCreate(info_item_id=str(ULID()), info_source_id=str(ULID()), content_type="html")
 
-    def test_watch_create_requires_info_item_id(self):
+    def test_watch_create_requires_info_source_id(self):
         with pytest.raises(ValidationError):
-            WatchCreate(name="Test", content_type="html")
+            WatchCreate(name="Test", info_item_id=str(ULID()), content_type="html")
 
     def test_watch_create_validates_content_type(self):
         with pytest.raises(ValidationError):
-            WatchCreate(name="Test", info_item_id=str(ULID()), content_type="invalid")
+            WatchCreate(
+                name="Test",
+                info_item_id=str(ULID()),
+                info_source_id=str(ULID()),
+                content_type="invalid",
+            )
 
     def test_watch_create_with_schedule_config(self):
         data = WatchCreate(
             name="PDF Watch",
             info_item_id=str(ULID()),
+            info_source_id=str(ULID()),
             content_type="pdf",
             schedule_config={"interval": "6h"},
         )
@@ -129,10 +136,10 @@ class TestWatchCreate:
 
     def test_watch_create_no_legacy_fields(self):
         """``url`` and ``fetch_config`` no longer accepted (silently ignored)."""
-        info_id = str(ULID())
         data = WatchCreate(
             name="Silent",
-            info_item_id=info_id,
+            info_item_id=str(ULID()),
+            info_source_id=str(ULID()),
             content_type="html",
             # These extra keys must be ignored or rejected, never stored.
         )
@@ -314,7 +321,7 @@ class TestWatchResponse:
     def _build_watch(self, **overrides):
         watch = Watch(
             name=overrides.pop("name", "Test"),
-            info_item_id=ULID(),
+            info_source_id=ULID(),
             content_type=overrides.pop("content_type", ContentType.HTML),
             **overrides,
         )
@@ -333,10 +340,11 @@ class TestWatchResponse:
         response = WatchResponse.model_validate(watch)
         assert response.is_archived is True
 
-    def test_watch_response_has_info_item_id(self):
+    def test_watch_response_has_info_source_id(self):
+        """Phase 5: WatchResponse exposes info_source_id (not info_item_id)."""
         watch = self._build_watch()
         response = WatchResponse.model_validate(watch)
-        assert response.info_item_id == str(watch.info_item_id)
+        assert response.info_source_id == str(watch.info_source_id)
 
     def test_watch_response_has_no_legacy_url_field(self):
         """Phase 2c: WatchResponse must not expose ``url`` (now in InfoSpec)."""

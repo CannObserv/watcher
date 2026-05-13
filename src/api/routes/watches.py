@@ -75,7 +75,10 @@ async def create_watch(
                     "info_source_id": data.info_source_id,
                 },
             ) from exc
-        except (AuthError, ServerError, httpx.ConnectError, httpx.TimeoutException) as exc:
+        except AuthError:
+            logger.exception("ArchiverClient auth failure during fragment-root check")
+            raise HTTPException(status_code=500, detail="Information service auth failed") from None
+        except (ServerError, httpx.ConnectError, httpx.TimeoutException) as exc:
             logger.warning("Information service unreachable during fragment-root check: %s", exc)
             raise HTTPException(
                 status_code=503,
@@ -99,7 +102,10 @@ async def create_watch(
     except NotFound as exc:
         raise HTTPException(
             status_code=422,
-            detail=f"info_item_id {data.info_item_id} does not exist",
+            detail=(
+                f"info_item_id {data.info_item_id} or "
+                f"info_source_id {data.info_source_id} does not exist"
+            ),
         ) from exc
     except AuthError:
         # Loud — operator-fixable misconfiguration of ARCHIVER_API_KEY.

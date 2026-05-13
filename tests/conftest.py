@@ -2,17 +2,17 @@
 
 tests/fixtures/ holds static sample files used by extractor tests (e.g. sample.html).
 
-Phase 2c migration shim
------------------------
+Phase 5 factory contract
+------------------------
 The module-level async helpers ``make_watch``, ``make_snapshot``, ``make_info_item``,
 and ``make_info_spec`` are NOT pytest fixtures — they are awaitable factory
 functions test code can call directly. ``default_snapshot_fixture`` and
 ``make_change`` remain as pytest fixtures for the handful of tests that still
 consume them in fixture form.
 
-The ``make_watch`` factory keeps a ``hasattr(Watch, "info_item_id")`` guard so
-the helper does not silently re-introduce model coupling if the column is ever
-renamed or scoped onto a different mapper.
+``make_watch`` requires ``info_source_id`` (Phase 5+). Callers may still pass
+``info_item_id`` for compatibility during cutover — a new InfoSource is
+auto-created in that case so the NOT NULL constraint is always satisfied.
 """
 
 import logging
@@ -174,12 +174,12 @@ def _apply_archiver_migrations(database_url: str) -> None:
     """Run the Archiver service's alembic migrations against ``database_url``.
 
     The `information` schema is owned in production by the sibling Archiver
-    repo (`/home/exedev/archiver`). Watcher tests need real `info_items` /
-    `info_specs` tables so the cross-schema FK from `watches.info_item_id`
-    resolves and seeded rows survive the FK check. We invoke archiver's own
-    alembic instead of mirroring the schema in `tests/_information_test_models.py`
-    — that way schema drift is impossible: the same migrations that build prod
-    build the test schema.
+    repo (`/home/exedev/archiver`). Watcher tests need real `info_sources` /
+    `info_specs` / `info_items` tables so the cross-schema FK from
+    `watches.info_source_id` resolves and seeded rows survive the FK check.
+    We invoke archiver's own alembic instead of mirroring the schema in
+    `tests/_information_test_models.py` — that way schema drift is impossible:
+    the same migrations that build prod build the test schema.
 
     Cache-check (#150): if ``information.alembic_version`` already matches
     Archiver's HEAD, skip the subprocess entirely. Saves the ~1-2 s
@@ -371,31 +371,29 @@ async def make_watch(
     *,
     name="Test Watch",
     info_item_id=None,
+    info_source_id=None,
     content_type=None,
     url=None,
     selector=None,
     **kwargs,
 ):
-    """Construct a Watch with auto-created InfoItem + primary InfoSpec.
+    """Construct a Watch with auto-created InfoItem + InfoSource + primary InfoSpec.
 
-    Migration shim — handles three model states (Task 0 / 3 / 4) via
-    ``hasattr`` guards on the Watch class.
+    Accepts ``info_source_id`` (preferred, Phase 5+) or ``info_item_id`` (legacy,
+    accepted for call-site compatibility during cutover). When only ``info_item_id``
+    is provided an InfoSource is auto-created so the NOT NULL constraint is satisfied.
+    When neither is provided both are auto-created.
     """
-    if info_item_id is None:
-        info_item = await make_info_item(session, name=name)
-        await make_info_spec(
-            session,
-            info_item,
-            url=url or "https://example.com",
-            selector=selector,
-        )
-        info_item_id = info_item.info_item_id
+    if info_source_id is None:
+        # Auto-create an InfoSource. info_item_id and info_spec are only
+        # needed when callers explicitly pass them (e.g. for tests that
+        # exercise SDK resolution paths). The Watch row itself only needs
+        # info_source_id (NOT NULL, Phase 5+).
+        source = await make_info_source(session, url=url or "https://example.com")
+        info_source_id = source.info_source_id
 
-    watch_kwargs = {"name": name, **kwargs}
+    watch_kwargs = {"name": name, "info_source_id": info_source_id, **kwargs}
     watch_kwargs.setdefault("content_type", content_type or ContentType.HTML)
-
-    if hasattr(Watch, "info_item_id"):
-        watch_kwargs["info_item_id"] = info_item_id
 
     watch = Watch(**watch_kwargs)
     session.add(watch)
@@ -454,11 +452,13 @@ def info_client(db_session, request):
     """Mock ArchiverClient backed by the test DB's ``information.*`` tables.
 
     Routes pull the SDK via ``get_registry().get_archiver_client()``.
-    This fixture swaps the registry singleton's cached client for an
-    AsyncMock whose ``list_info_items`` / ``get_primary_info_spec`` methods
-    look up live rows in ``db_session`` so tests can seed an InfoItem +
-    InfoSpec via ``make_info_item`` / ``make_info_spec`` and have routes
-    behave exactly as they would against the real Information service.
+    This fixture swaps the registry singleton's cached client for an AsyncMock
+    whose methods look up live rows in ``db_session`` where possible.
+
+    Phase 5: ``information.info_specs`` no longer exists in the Archiver schema.
+    ``get_primary_info_spec`` now returns a synthesized stub spec for any
+    info_item_id — tests that need a specific URL should stub
+    ``info_client.get_primary_info_spec`` directly.
 
     Tests that need to exercise SDK error paths can stub individual methods
     on the returned mock
@@ -482,24 +482,45 @@ def info_client(db_session, request):
         return out
 
     async def _get_primary_info_spec(info_item_id: str, *, force_refresh: bool = False):
-        result = await db_session.execute(
-            select(InfoSpec)
-            .where(InfoSpec.info_item_id == info_item_id, InfoSpec.active.is_(True))
-            .order_by(InfoSpec.priority.asc())
-        )
-        spec = result.scalars().first()
-        if spec is None:
-            raise NotFound(f"no active spec for info_item {info_item_id}")
+        # Phase 5: info_specs table is gone from the Archiver schema.
+        # Return a synthesised stub spec so route handlers can resolve a URL
+        # without a real InfoSpec row. Tests that need a specific URL should
+        # stub this method directly on the returned fake_client.
         out = MagicMock()
-        out.info_item_id = str(spec.info_item_id)
-        out.info_spec_id = str(spec.info_spec_id)
+        out.info_item_id = info_item_id
+        out.info_spec_id = "01TESTSPEC00000000000000XX"
         doc = MagicMock()
-        doc.to_dict = MagicMock(return_value=dict(spec.document))
+        doc.to_dict = MagicMock(
+            return_value={
+                "schema_version": 1,
+                "target": {"url": "https://example.com/page"},
+                "extraction": {"algorithm": "full_page"},
+                "fingerprint": {"algorithm": "simhash"},
+            }
+        )
         out.document = doc
+        return out
+
+    async def _get_info_source(info_source_id: str):
+        result = await db_session.execute(
+            select(InfoSource).where(InfoSource.info_source_id == info_source_id)
+        )
+        source = result.scalars().first()
+        if source is None:
+            raise NotFound(f"info_source {info_source_id} not found")
+        out = MagicMock()
+        out.info_source_id = str(source.info_source_id)
+        out.parent_info_source_id = (
+            str(source.parent_info_source_id) if source.parent_info_source_id else None
+        )
+        spec = MagicMock()
+        spec.additional_properties = source.source_spec
+        out.source_spec = spec
         return out
 
     fake_client.list_info_items = AsyncMock(side_effect=_list_info_items)
     fake_client.get_primary_info_spec = AsyncMock(side_effect=_get_primary_info_spec)
+    fake_client.get_info_source = AsyncMock(side_effect=_get_info_source)
 
     # Swap the registry singleton via the test seam so
     # ``get_registry().get_archiver_client()`` returns this fake everywhere.

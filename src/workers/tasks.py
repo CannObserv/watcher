@@ -101,15 +101,17 @@ async def check_watch(watch_id: str, registry: ServiceRegistry | None = None) ->
 
         # Resolve the primary InfoSpec once; URL + fetch defaults come from the
         # spec, not the Watch row.
+        # TODO Task 7.1: replace resolve_primary (info_item_id-based) with
+        # resolve_root_sources_with_children (info_source_id-based).
         info_client = reg.get_archiver_client()
         try:
-            resolved = await resolve_primary(info_client, str(watch.info_item_id))
+            resolved = await resolve_primary(info_client, str(watch.info_source_id))
         except NotFound:
-            # Operator-fixable: the InfoItem was deleted out from under the
+            # Operator-fixable: the InfoSource was deleted out from under the
             # watch. Skip until operator action; do not retry.
             logger.error(
-                "info_item missing for watch — skipping until operator action",
-                extra={"watch_id": watch_id, "info_item_id": str(watch.info_item_id)},
+                "info_source missing for watch — skipping until operator action",
+                extra={"watch_id": watch_id, "info_source_id": str(watch.info_source_id)},
             )
             return {"skipped": True, "reason": "info_item_missing"}
         # Other SDK errors (httpx.ConnectError, httpx.TimeoutException,

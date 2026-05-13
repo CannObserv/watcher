@@ -202,6 +202,7 @@ async def _run_check_pipeline(
             "extraction returned zero chunks — force-refreshing primary InfoSpec",
             extra={
                 "watch_id": str(watch.id),
+                # TODO Task 7.1: replace info_item_id with info_source_id key
                 "info_item_id": resolved.info_item_id,
                 "info_spec_id": resolved.info_spec_id,
             },
@@ -214,6 +215,7 @@ async def _run_check_pipeline(
                 "extraction still returned zero chunks after force_refresh",
                 extra={
                     "watch_id": str(watch.id),
+                    # TODO Task 7.1: replace info_item_id with info_source_id key
                     "info_item_id": resolved.info_item_id,
                     "info_spec_id": resolved.info_spec_id,
                 },
@@ -317,7 +319,7 @@ async def _run_check_pipeline(
                 "current_snapshot_id": snapshot_id,
                 "change_metadata": metadata,
                 "significance": significance,
-                "info_item_id": watch.info_item_id,
+                # TODO Task 7.2: populate info_item_id from resolved source chain
                 "previous_fingerprint": prev_snapshot.simhash,
                 "current_fingerprint": doc_simhash,
             }

@@ -1,12 +1,9 @@
 """Integration tests for Watch CRUD API endpoints.
 
-Phase 2c contract: ``POST /api/v1/watches`` takes ``{name, info_item_id,
-content_type}`` (no ``url`` / ``fetch_config``). The route resolves the
-URL via the SDK at create-time so ``effective_url`` / ``effective_domain``
-remain populated for downstream rate-limiting / domain upsert.
-
-``WatchResponse`` exposes neither ``url`` nor ``fetch_config`` — those
-columns no longer exist on the model. Tests assert the new shape directly.
+Phase 5 contract: ``POST /api/v1/watches`` takes ``{name, info_item_id,
+info_source_id, content_type}``. The route resolves the URL via the SDK
+(info_item_id → get_primary_info_spec stub) at create-time. The Watch row
+stores info_source_id (NOT NULL). WatchResponse exposes info_source_id.
 """
 
 from unittest.mock import AsyncMock, MagicMock
@@ -24,34 +21,39 @@ from src.core.models.snapshot import Snapshot, SnapshotChunk
 from src.core.models.temporal_profile import TemporalProfile
 from src.core.models.watch import Watch
 from src.core.notifications.events import WatchEventType
-from tests.conftest import make_info_item, make_info_source, make_info_spec, make_watch
+from tests.conftest import make_info_item, make_info_source, make_watch
 
 pytestmark = pytest.mark.integration
 
 
 async def _seed_info_item(db_session, *, name="Test InfoItem", url="https://example.com/page"):
-    """Create an InfoItem + primary InfoSpec; return its id (str)."""
+    """Create an InfoItem + InfoSource; return (info_item_id, info_source_id) as str tuple.
+
+    Phase 5: info_specs table is gone. The conftest info_client mock returns a
+    synthesised spec stub for any info_item_id, so no real InfoSpec row is needed.
+    """
     item = await make_info_item(db_session, name=name)
-    await make_info_spec(db_session, item, url=url)
+    source = await make_info_source(db_session, url=url)
     await db_session.commit()
-    return str(item.info_item_id)
+    return str(item.info_item_id), str(source.info_source_id)
 
 
 class TestCreateWatch:
     async def test_create_watch_returns_201(self, client, db_session):
-        info_item_id = await _seed_info_item(db_session)
+        info_item_id, info_source_id = await _seed_info_item(db_session)
         response = await client.post(
             "/api/v1/watches",
             json={
                 "name": "Test Watch",
                 "info_item_id": info_item_id,
+                "info_source_id": info_source_id,
                 "content_type": "html",
             },
         )
         assert response.status_code == 201, response.text
         data = response.json()
         assert data["name"] == "Test Watch"
-        assert data["info_item_id"] == info_item_id
+        assert data["info_source_id"] == info_source_id
         assert data["content_type"] == "html"
         assert data["is_active"] is True
         assert "id" in data
@@ -61,12 +63,15 @@ class TestCreateWatch:
         assert "fetch_config" not in data
 
     async def test_create_watch_with_schedule_config(self, client, db_session):
-        info_item_id = await _seed_info_item(db_session, url="https://example.com/report.pdf")
+        info_item_id, info_source_id = await _seed_info_item(
+            db_session, url="https://example.com/report.pdf"
+        )
         response = await client.post(
             "/api/v1/watches",
             json={
                 "name": "PDF Watch",
                 "info_item_id": info_item_id,
+                "info_source_id": info_source_id,
                 "content_type": "pdf",
                 "schedule_config": {"interval": "6h"},
             },
@@ -74,12 +79,13 @@ class TestCreateWatch:
         assert response.status_code == 201, response.text
 
     async def test_create_watch_invalid_content_type(self, client, db_session):
-        info_item_id = await _seed_info_item(db_session)
+        info_item_id, info_source_id = await _seed_info_item(db_session)
         response = await client.post(
             "/api/v1/watches",
             json={
                 "name": "Bad",
                 "info_item_id": info_item_id,
+                "info_source_id": info_source_id,
                 "content_type": "invalid",
             },
         )
@@ -105,12 +111,13 @@ class TestCreateWatch:
         assert "info_item_id" in response.text
 
     async def test_create_watch_sdk_connection_error_returns_503(self, client, info_client):
-        info_client.get_primary_info_spec.side_effect = httpx.ConnectError("unreachable")
+        info_client.get_info_source.side_effect = httpx.ConnectError("unreachable")
         response = await client.post(
             "/api/v1/watches",
             json={
                 "name": "Bad",
                 "info_item_id": "01ZZZZZZZZZZZZZZZZZZZZZZZZ",
+                "info_source_id": "01ZZZZZZZZZZZZZZZZZZZZZZZZ",
                 "content_type": "html",
             },
         )
@@ -118,12 +125,13 @@ class TestCreateWatch:
         assert response.headers.get("Retry-After") == "30"
 
     async def test_create_watch_sdk_auth_error_returns_500(self, client, info_client):
-        info_client.get_primary_info_spec.side_effect = AuthError("forbidden")
+        info_client.get_info_source.side_effect = AuthError("forbidden")
         response = await client.post(
             "/api/v1/watches",
             json={
                 "name": "Bad",
                 "info_item_id": "01ZZZZZZZZZZZZZZZZZZZZZZZZ",
+                "info_source_id": "01ZZZZZZZZZZZZZZZZZZZZZZZZ",
                 "content_type": "html",
             },
         )
@@ -137,12 +145,13 @@ class TestListWatches:
         assert response.json() == []
 
     async def test_list_watches_returns_created(self, client, db_session):
-        info_item_id = await _seed_info_item(db_session, name="Watch 1")
+        info_item_id, info_source_id = await _seed_info_item(db_session, name="Watch 1")
         await client.post(
             "/api/v1/watches",
             json={
                 "name": "Watch 1",
                 "info_item_id": info_item_id,
+                "info_source_id": info_source_id,
                 "content_type": "html",
             },
         )
@@ -155,12 +164,13 @@ class TestListWatches:
 
 class TestGetWatch:
     async def test_get_watch_by_id(self, client, db_session):
-        info_item_id = await _seed_info_item(db_session, name="Get Me")
+        info_item_id, info_source_id = await _seed_info_item(db_session, name="Get Me")
         create_resp = await client.post(
             "/api/v1/watches",
             json={
                 "name": "Get Me",
                 "info_item_id": info_item_id,
+                "info_source_id": info_source_id,
                 "content_type": "html",
             },
         )
@@ -170,7 +180,7 @@ class TestGetWatch:
         response = await client.get(f"/api/v1/watches/{watch_id}")
         assert response.status_code == 200
         assert response.json()["name"] == "Get Me"
-        assert response.json()["info_item_id"] == info_item_id
+        assert response.json()["info_source_id"] == info_source_id
 
     async def test_get_watch_not_found(self, client):
         response = await client.get("/api/v1/watches/00000000000000000000000000")
@@ -179,12 +189,13 @@ class TestGetWatch:
 
 class TestUpdateWatch:
     async def test_update_watch_partial(self, client, db_session):
-        info_item_id = await _seed_info_item(db_session, name="Original")
+        info_item_id, info_source_id = await _seed_info_item(db_session, name="Original")
         create_resp = await client.post(
             "/api/v1/watches",
             json={
                 "name": "Original",
                 "info_item_id": info_item_id,
+                "info_source_id": info_source_id,
                 "content_type": "html",
             },
         )
@@ -224,12 +235,13 @@ class TestUpdateWatch:
 
 class TestDeactivateWatch:
     async def test_deactivate_watch(self, client, db_session):
-        info_item_id = await _seed_info_item(db_session, name="Deactivate Me")
+        info_item_id, info_source_id = await _seed_info_item(db_session, name="Deactivate Me")
         create_resp = await client.post(
             "/api/v1/watches",
             json={
                 "name": "Deactivate Me",
                 "info_item_id": info_item_id,
+                "info_source_id": info_source_id,
                 "content_type": "html",
             },
         )
@@ -246,12 +258,13 @@ class TestDeactivateWatch:
 
 class TestAuditLog:
     async def test_create_writes_audit_entry(self, client, db_session):
-        info_item_id = await _seed_info_item(db_session, name="Audited Watch")
+        info_item_id, info_source_id = await _seed_info_item(db_session, name="Audited Watch")
         await client.post(
             "/api/v1/watches",
             json={
                 "name": "Audited Watch",
                 "info_item_id": info_item_id,
+                "info_source_id": info_source_id,
                 "content_type": "html",
             },
         )
@@ -262,16 +275,17 @@ class TestAuditLog:
             )
         )
         entry = result.scalar_one()
-        assert entry.payload["info_item_id"] == info_item_id
+        assert entry.payload["info_source_id"] == info_source_id
         assert entry.watch_id is not None
 
     async def test_update_writes_audit_entry(self, client, db_session):
-        info_item_id = await _seed_info_item(db_session, name="Update Audit")
+        info_item_id, info_source_id = await _seed_info_item(db_session, name="Update Audit")
         resp = await client.post(
             "/api/v1/watches",
             json={
                 "name": "Update Audit",
                 "info_item_id": info_item_id,
+                "info_source_id": info_source_id,
                 "content_type": "html",
             },
         )
@@ -288,12 +302,13 @@ class TestAuditLog:
         assert str(entry.watch_id) == watch_id
 
     async def test_deactivate_writes_audit_entry(self, client, db_session):
-        info_item_id = await _seed_info_item(db_session, name="Deact Audit")
+        info_item_id, info_source_id = await _seed_info_item(db_session, name="Deact Audit")
         resp = await client.post(
             "/api/v1/watches",
             json={
                 "name": "Deact Audit",
                 "info_item_id": info_item_id,
+                "info_source_id": info_source_id,
                 "content_type": "html",
             },
         )
@@ -322,12 +337,13 @@ class TestInvalidULID:
 
 class TestListWatchesFilter:
     async def test_filter_by_active_status(self, client, db_session):
-        info_item_id = await _seed_info_item(db_session, name="Active Watch")
+        info_item_id, info_source_id = await _seed_info_item(db_session, name="Active Watch")
         resp = await client.post(
             "/api/v1/watches",
             json={
                 "name": "Active Watch",
                 "info_item_id": info_item_id,
+                "info_source_id": info_source_id,
                 "content_type": "html",
             },
         )
@@ -346,12 +362,13 @@ class TestListWatchesFilter:
 class TestDeleteWatch:
     async def _create_archived_watch(self, client, db_session, *, name="Delete Me"):
         """Create a watch, archive it, return its ID."""
-        info_item_id = await _seed_info_item(db_session, name=name)
+        info_item_id, info_source_id = await _seed_info_item(db_session, name=name)
         resp = await client.post(
             "/api/v1/watches",
             json={
                 "name": name,
                 "info_item_id": info_item_id,
+                "info_source_id": info_source_id,
                 "content_type": "html",
             },
         )
@@ -375,12 +392,13 @@ class TestDeleteWatch:
         assert response.status_code == 404
 
     async def test_delete_non_archived_watch_returns_409(self, client, db_session):
-        info_item_id = await _seed_info_item(db_session, name="Still Active")
+        info_item_id, info_source_id = await _seed_info_item(db_session, name="Still Active")
         resp = await client.post(
             "/api/v1/watches",
             json={
                 "name": "Still Active",
                 "info_item_id": info_item_id,
+                "info_source_id": info_source_id,
                 "content_type": "html",
             },
         )
@@ -666,10 +684,15 @@ class TestListWatchesArchivedFilter:
 
     async def test_watch_response_includes_is_archived_field(self, client, db_session):
         """Create watch response includes is_archived=False."""
-        info_item_id = await _seed_info_item(db_session, name="W")
+        info_item_id, info_source_id = await _seed_info_item(db_session, name="W")
         resp = await client.post(
             "/api/v1/watches",
-            json={"name": "W", "info_item_id": info_item_id, "content_type": "html"},
+            json={
+                "name": "W",
+                "info_item_id": info_item_id,
+                "info_source_id": info_source_id,
+                "content_type": "html",
+            },
         )
         assert resp.status_code == 201
         assert resp.json()["is_archived"] is False
@@ -677,10 +700,17 @@ class TestListWatchesArchivedFilter:
 
 class TestCreateWatchProbe:
     async def test_create_watch_populates_effective_fields(self, client, db_session):
-        info_item_id = await _seed_info_item(db_session, name="W", url="https://example.com/page")
+        info_item_id, info_source_id = await _seed_info_item(
+            db_session, name="W", url="https://example.com/page"
+        )
         response = await client.post(
             "/api/v1/watches",
-            json={"name": "W", "info_item_id": info_item_id, "content_type": "html"},
+            json={
+                "name": "W",
+                "info_item_id": info_item_id,
+                "info_source_id": info_source_id,
+                "content_type": "html",
+            },
         )
         assert response.status_code == 201, response.text
         data = response.json()
@@ -688,32 +718,47 @@ class TestCreateWatchProbe:
         assert data["effective_domain"] == "example.com"
 
     async def test_create_watch_upserts_domain(self, client, db_session):
-        info_item_id = await _seed_info_item(db_session, name="W", url="https://example.com/p")
+        info_item_id, info_source_id = await _seed_info_item(
+            db_session, name="W", url="https://example.com/p"
+        )
         await client.post(
             "/api/v1/watches",
-            json={"name": "W", "info_item_id": info_item_id, "content_type": "html"},
+            json={
+                "name": "W",
+                "info_item_id": info_item_id,
+                "info_source_id": info_source_id,
+                "content_type": "html",
+            },
         )
         domains = (await client.get("/api/v1/domains")).json()
         assert any(d["name"] == "example.com" for d in domains)
 
     async def test_create_watch_does_not_overwrite_existing_domain_config(self, client, db_session):
-        info_item_id = await _seed_info_item(db_session, name="W", url="https://example.com/p")
+        info_item_id, info_source_id = await _seed_info_item(
+            db_session, name="W", url="https://example.com/p"
+        )
         await client.patch("/api/v1/domains/example.com", json={"min_interval": 10.0})
         await client.post(
             "/api/v1/watches",
-            json={"name": "W", "info_item_id": info_item_id, "content_type": "html"},
+            json={
+                "name": "W",
+                "info_item_id": info_item_id,
+                "info_source_id": info_source_id,
+                "content_type": "html",
+            },
         )
         domain = (await client.get("/api/v1/domains/example.com")).json()
         assert domain["min_interval"] == 10.0  # operator config preserved
 
     async def test_create_watch_sdk_server_error_returns_503(self, client, info_client):
         """ServerError from the SDK during create maps to 503 with Retry-After."""
-        info_client.get_primary_info_spec.side_effect = ServerError("boom", status_code=500)
+        info_client.get_info_source.side_effect = ServerError("boom", status_code=500)
         response = await client.post(
             "/api/v1/watches",
             json={
                 "name": "Bad",
                 "info_item_id": "01ZZZZZZZZZZZZZZZZZZZZZZZZ",
+                "info_source_id": "01ZZZZZZZZZZZZZZZZZZZZZZZZ",
                 "content_type": "html",
             },
         )
@@ -723,10 +768,17 @@ class TestCreateWatchProbe:
 
 class TestUpdateWatchEffectiveFields:
     async def test_patch_effective_url(self, client, db_session):
-        info_item_id = await _seed_info_item(db_session, name="W", url="https://example.com/p")
+        info_item_id, info_source_id = await _seed_info_item(
+            db_session, name="W", url="https://example.com/p"
+        )
         resp = await client.post(
             "/api/v1/watches",
-            json={"name": "W", "info_item_id": info_item_id, "content_type": "html"},
+            json={
+                "name": "W",
+                "info_item_id": info_item_id,
+                "info_source_id": info_source_id,
+                "content_type": "html",
+            },
         )
         watch_id = resp.json()["id"]
         response = await client.patch(
@@ -737,10 +789,17 @@ class TestUpdateWatchEffectiveFields:
         assert response.json()["effective_url"] == "https://example.com/resolved"
 
     async def test_patch_effective_domain(self, client, db_session):
-        info_item_id = await _seed_info_item(db_session, name="W", url="https://example.com/p")
+        info_item_id, info_source_id = await _seed_info_item(
+            db_session, name="W", url="https://example.com/p"
+        )
         resp = await client.post(
             "/api/v1/watches",
-            json={"name": "W", "info_item_id": info_item_id, "content_type": "html"},
+            json={
+                "name": "W",
+                "info_item_id": info_item_id,
+                "info_source_id": info_source_id,
+                "content_type": "html",
+            },
         )
         watch_id = resp.json()["id"]
         response = await client.patch(
@@ -751,10 +810,17 @@ class TestUpdateWatchEffectiveFields:
         assert response.json()["effective_domain"] == "cdn.example.com"
 
     async def test_patch_effective_url_null(self, client, db_session):
-        info_item_id = await _seed_info_item(db_session, name="W", url="https://example.com/p")
+        info_item_id, info_source_id = await _seed_info_item(
+            db_session, name="W", url="https://example.com/p"
+        )
         resp = await client.post(
             "/api/v1/watches",
-            json={"name": "W", "info_item_id": info_item_id, "content_type": "html"},
+            json={
+                "name": "W",
+                "info_item_id": info_item_id,
+                "info_source_id": info_source_id,
+                "content_type": "html",
+            },
         )
         watch_id = resp.json()["id"]
         response = await client.patch(
@@ -765,10 +831,17 @@ class TestUpdateWatchEffectiveFields:
         assert response.json()["effective_url"] is None
 
     async def test_patch_effective_domain_null(self, client, db_session):
-        info_item_id = await _seed_info_item(db_session, name="W", url="https://example.com/p")
+        info_item_id, info_source_id = await _seed_info_item(
+            db_session, name="W", url="https://example.com/p"
+        )
         resp = await client.post(
             "/api/v1/watches",
-            json={"name": "W", "info_item_id": info_item_id, "content_type": "html"},
+            json={
+                "name": "W",
+                "info_item_id": info_item_id,
+                "info_source_id": info_source_id,
+                "content_type": "html",
+            },
         )
         watch_id = resp.json()["id"]
         response = await client.patch(
@@ -779,10 +852,17 @@ class TestUpdateWatchEffectiveFields:
         assert response.json()["effective_domain"] is None
 
     async def test_patch_effective_domain_too_long_returns_422(self, client, db_session):
-        info_item_id = await _seed_info_item(db_session, name="W", url="https://example.com/p")
+        info_item_id, info_source_id = await _seed_info_item(
+            db_session, name="W", url="https://example.com/p"
+        )
         resp = await client.post(
             "/api/v1/watches",
-            json={"name": "W", "info_item_id": info_item_id, "content_type": "html"},
+            json={
+                "name": "W",
+                "info_item_id": info_item_id,
+                "info_source_id": info_source_id,
+                "content_type": "html",
+            },
         )
         watch_id = resp.json()["id"]
         response = await client.patch(
@@ -884,8 +964,18 @@ class TestFragmentRootInvariants:
         await db_session.commit()
 
         # Stub: frag_src is child of root_src (which has an active Watch).
-        # Three calls total: (1) route initial fragment check, (2) _walk_to_root
-        # iteration for frag_src, (3) _walk_to_root iteration for root_src.
+        # Four calls total:
+        #   (1) route initial fragment check → frag_src (has parent)
+        #   (2) _walk_to_root iteration → frag_src (has parent)
+        #   (3) _walk_to_root iteration → root_src (no parent, root Watch found)
+        #   (4) create_watch URL resolution → frag_src with source_spec
+        frag_source_mock = MagicMock(
+            info_source_id=str(frag_src.info_source_id),
+            parent_info_source_id=str(root_src.info_source_id),
+        )
+        frag_source_mock.source_spec.additional_properties = {
+            "target": {"url": "https://example.com/frag-ok"}
+        }
         info_client.get_info_source = AsyncMock(
             side_effect=[
                 MagicMock(
@@ -900,24 +990,9 @@ class TestFragmentRootInvariants:
                     info_source_id=str(root_src.info_source_id),
                     parent_info_source_id=None,
                 ),
+                frag_source_mock,  # 4th call: create_watch URL resolution
             ]
         )
-        # Stub get_primary_info_spec so _create_watch can resolve the URL
-        # without querying information.info_specs (which may be absent in CI).
-        spec_doc = MagicMock()
-        spec_doc.to_dict = MagicMock(
-            return_value={
-                "schema_version": 1,
-                "target": {"url": "https://example.com/frag-ok"},
-                "extraction": {"algorithm": "full_page"},
-                "fingerprint": {"algorithm": "simhash"},
-            }
-        )
-        mock_spec = MagicMock()
-        mock_spec.info_item_id = str(frag_info_item.info_item_id)
-        mock_spec.info_spec_id = "01HZZ00000000000000SPEC001"
-        mock_spec.document = spec_doc
-        info_client.get_primary_info_spec = AsyncMock(return_value=mock_spec)
 
         response = await client.post(
             "/api/v1/watches",
@@ -1005,28 +1080,17 @@ class TestFragmentRootInvariants:
         await db_session.commit()
 
         # Stub: root_src has no parent; list_info_sources returns frag_src.
-        info_client.get_info_source = AsyncMock(
-            return_value=MagicMock(
-                info_source_id=str(root_src.info_source_id),
-                parent_info_source_id=None,
-            )
+        # The MagicMock must also support source_spec.additional_properties["target"]["url"]
+        # for resolve_watch_url (called during delete notification dispatch).
+        root_source_mock = MagicMock(
+            info_source_id=str(root_src.info_source_id),
+            parent_info_source_id=None,
         )
+        root_source_mock.source_spec.additional_properties = {
+            "target": {"url": "https://example.com/cascade"}
+        }
+        info_client.get_info_source = AsyncMock(return_value=root_source_mock)
         self._stub_fragment_dependents(info_client, frag_src.info_source_id)
-        # Stub resolve_watch_url: delete proceeds to URL resolution after cascade archive.
-        spec_doc = MagicMock()
-        spec_doc.to_dict = MagicMock(
-            return_value={
-                "schema_version": 1,
-                "target": {"url": "https://example.com/cascade"},
-                "extraction": {"algorithm": "full_page"},
-                "fingerprint": {"algorithm": "simhash"},
-            }
-        )
-        mock_spec = MagicMock()
-        mock_spec.info_item_id = str(root_item.info_item_id)
-        mock_spec.info_spec_id = "01HZZ00000000000000SPEC002"
-        mock_spec.document = spec_doc
-        info_client.get_primary_info_spec = AsyncMock(return_value=mock_spec)
 
         response = await client.delete(f"/api/v1/watches/{root_watch.id}?cascade=true")
         assert response.status_code == 204, response.text

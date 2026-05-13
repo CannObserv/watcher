@@ -1,9 +1,8 @@
 """Integration tests for the create_watch service function.
 
-Phase 2c contract: ``create_watch`` takes ``info_item_id`` (not ``url``) and
-calls the SDK to validate the InfoItem + resolve the URL from the primary
-InfoSpec. The probe still runs against the resolved URL to populate
-``effective_url`` / ``effective_domain``.
+Phase 5 contract: ``create_watch`` takes ``info_source_id`` (required).
+URL resolution uses ``get_info_source`` which returns ``source_spec.additional_properties``.
+The probe runs against the resolved URL to populate ``effective_url`` / ``effective_domain``.
 """
 
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -18,7 +17,7 @@ from src.core.models.domain import Domain
 from src.core.models.watch import Watch
 from src.core.probe import ProbeResult
 from src.core.watches import create_watch, resolve_watch_url
-from tests.conftest import make_info_item, make_info_spec, make_watch
+from tests.conftest import make_info_item, make_info_source, make_watch
 
 pytestmark = pytest.mark.integration
 
@@ -41,41 +40,34 @@ def _make_probe(url: str | None = None, domain: str | None = None):
 
 
 def _make_info_client(*, info_item_id: str, url: str = "https://example.com/page"):
-    """Build an SDK mock that returns a stable InfoItem + primary spec."""
-    fake_item = MagicMock()
-    fake_item.info_item_id = info_item_id
-
-    fake_spec = MagicMock()
-    fake_spec.info_item_id = info_item_id
-    fake_spec.info_spec_id = "01TESTSPEC00000000000000XX"
-    fake_spec_doc = MagicMock()
-    fake_spec_doc.to_dict = MagicMock(
-        return_value={
-            "schema_version": 1,
-            "target": {"url": url},
-            "extraction": {"algorithm": "full_page"},
-            "fingerprint": {"algorithm": "simhash"},
-        }
-    )
-    fake_spec.document = fake_spec_doc
+    """Build an SDK mock that returns a stable InfoSource for URL resolution."""
+    fake_source_spec = MagicMock()
+    fake_source_spec.additional_properties = {"target": {"url": url}}
+    fake_source = MagicMock()
+    fake_source.info_source_id = "01TESTSOURCE0000000000000X"
+    fake_source.parent_info_source_id = None
+    fake_source.source_spec = fake_source_spec
 
     client = MagicMock()
-    client.get_info_item = AsyncMock(return_value=fake_item)
-    client.get_primary_info_spec = AsyncMock(return_value=fake_spec)
+    client.get_info_source = AsyncMock(return_value=fake_source)
     return client
 
 
 async def _seed_info(db_session, *, name="Test Item", url="https://example.com/page"):
-    """Create an InfoItem + InfoSpec; commit; return id (str)."""
+    """Create an InfoItem + InfoSource; commit; return (info_item_id, info_source_id) as str.
+
+    Phase 5: create_watch resolves URL via get_info_source. The _make_info_client
+    mock stubs this — url param here controls what the mock returns.
+    """
     item = await make_info_item(db_session, name=name)
-    await make_info_spec(db_session, item, url=url)
+    source = await make_info_source(db_session, url=url)
     await db_session.commit()
-    return str(item.info_item_id)
+    return str(item.info_item_id), str(source.info_source_id)
 
 
 class TestCreateWatch:
     async def test_returns_committed_watch(self, db_session):
-        info_item_id = await _seed_info(db_session, url="https://example.com/page")
+        info_item_id, info_source_id = await _seed_info(db_session, url="https://example.com/page")
         watch = await create_watch(
             session=db_session,
             probe_fn=_make_probe(),
@@ -84,15 +76,16 @@ class TestCreateWatch:
             ),
             name="Test Watch",
             info_item_id=info_item_id,
+            info_source_id=info_source_id,
             content_type="html",
         )
         assert isinstance(watch, Watch)
         assert watch.id is not None
         assert watch.name == "Test Watch"
-        assert str(watch.info_item_id) == info_item_id
+        assert str(watch.info_source_id) == info_source_id
 
     async def test_sets_effective_url_and_domain(self, db_session):
-        info_item_id = await _seed_info(db_session, url="https://example.com/page")
+        info_item_id, info_source_id = await _seed_info(db_session, url="https://example.com/page")
         watch = await create_watch(
             session=db_session,
             probe_fn=_make_probe(
@@ -104,13 +97,14 @@ class TestCreateWatch:
             ),
             name="Test Watch",
             info_item_id=info_item_id,
+            info_source_id=info_source_id,
             content_type="html",
         )
         assert watch.effective_url == "https://example.com/canonical"
         assert watch.effective_domain == "example.com"
 
     async def test_creates_domain_for_new_domain(self, db_session):
-        info_item_id = await _seed_info(db_session, url="https://newsite.gov/page")
+        info_item_id, info_source_id = await _seed_info(db_session, url="https://newsite.gov/page")
         await create_watch(
             session=db_session,
             probe_fn=_make_probe(domain="newsite.gov"),
@@ -119,6 +113,7 @@ class TestCreateWatch:
             ),
             name="Gov Watch",
             info_item_id=info_item_id,
+            info_source_id=info_source_id,
             content_type="html",
         )
         result = await db_session.execute(select(Domain).where(Domain.name == "newsite.gov"))
@@ -131,7 +126,7 @@ class TestCreateWatch:
         db_session.add(existing)
         await db_session.flush()
 
-        info_item_id = await _seed_info(db_session, url="https://existing.gov/page")
+        info_item_id, info_source_id = await _seed_info(db_session, url="https://existing.gov/page")
         await create_watch(
             session=db_session,
             probe_fn=_make_probe(domain="existing.gov"),
@@ -140,13 +135,16 @@ class TestCreateWatch:
             ),
             name="Existing Domain Watch",
             info_item_id=info_item_id,
+            info_source_id=info_source_id,
             content_type="html",
         )
         result = await db_session.execute(select(Domain).where(Domain.name == "existing.gov"))
         assert len(result.scalars().all()) == 1
 
     async def test_creates_audit_log_with_watch_id(self, db_session):
-        info_item_id = await _seed_info(db_session, url="https://audit-test.com/page")
+        info_item_id, info_source_id = await _seed_info(
+            db_session, url="https://audit-test.com/page"
+        )
         watch = await create_watch(
             session=db_session,
             probe_fn=_make_probe(domain="audit-test.com"),
@@ -155,6 +153,7 @@ class TestCreateWatch:
             ),
             name="Audit Watch",
             info_item_id=info_item_id,
+            info_source_id=info_source_id,
             content_type="html",
         )
         result = await db_session.execute(
@@ -167,13 +166,13 @@ class TestCreateWatch:
         assert entry.watch_id == str(watch.id)
         assert entry.payload["name"] == "Audit Watch"
         assert entry.payload["effective_domain"] == "audit-test.com"
-        assert entry.payload["info_item_id"] == info_item_id
+        assert entry.payload["info_source_id"] == info_source_id
 
     async def test_raises_on_probe_failure(self, db_session):
         async def failing_probe(url: str) -> ProbeResult:
             raise httpx.ConnectError("unreachable")
 
-        info_item_id = await _seed_info(db_session, url="https://broken.example")
+        info_item_id, info_source_id = await _seed_info(db_session, url="https://broken.example")
         with pytest.raises(httpx.HTTPError):
             await create_watch(
                 session=db_session,
@@ -183,6 +182,7 @@ class TestCreateWatch:
                 ),
                 name="Bad URL Watch",
                 info_item_id=info_item_id,
+                info_source_id=info_source_id,
                 content_type="html",
             )
 
@@ -190,7 +190,7 @@ class TestCreateWatch:
         async def failing_probe(url: str) -> ProbeResult:
             raise httpx.ConnectError("unreachable")
 
-        info_item_id = await _seed_info(db_session, url="https://broken2.example")
+        info_item_id, info_source_id = await _seed_info(db_session, url="https://broken2.example")
         with pytest.raises(httpx.HTTPError):
             await create_watch(
                 session=db_session,
@@ -200,6 +200,7 @@ class TestCreateWatch:
                 ),
                 name="Bad URL Watch",
                 info_item_id=info_item_id,
+                info_source_id=info_source_id,
                 content_type="html",
             )
 
@@ -207,7 +208,9 @@ class TestCreateWatch:
         assert result.scalar_one_or_none() is None
 
     async def test_dispatches_watch_created_notification(self, db_session):
-        info_item_id = await _seed_info(db_session, url="https://notify-test.com/page")
+        info_item_id, info_source_id = await _seed_info(
+            db_session, url="https://notify-test.com/page"
+        )
         with patch(
             "src.core.watches.dispatch_event_notifications",
             new_callable=AsyncMock,
@@ -220,6 +223,7 @@ class TestCreateWatch:
                 ),
                 name="Notify Watch",
                 info_item_id=info_item_id,
+                info_source_id=info_source_id,
                 content_type="html",
             )
             mock_dispatch.assert_awaited_once()
@@ -230,7 +234,9 @@ class TestCreateWatch:
             assert call_kwargs["event"].watch_url == "https://notify-test.com/page"
 
     async def test_passes_schedule_config_through(self, db_session):
-        info_item_id = await _seed_info(db_session, url="https://example.com/configured")
+        info_item_id, info_source_id = await _seed_info(
+            db_session, url="https://example.com/configured"
+        )
         watch = await create_watch(
             session=db_session,
             probe_fn=_make_probe(),
@@ -239,6 +245,7 @@ class TestCreateWatch:
             ),
             name="Configured Watch",
             info_item_id=info_item_id,
+            info_source_id=info_source_id,
             content_type="pdf",
             schedule_config={"interval": "6h"},
         )
@@ -247,22 +254,23 @@ class TestCreateWatch:
 
 
 class TestResolveWatchUrl:
-    """resolve_watch_url returns the URL from the watch's primary InfoSpec."""
+    """resolve_watch_url returns the URL from the watch's primary InfoSource spec."""
 
-    async def test_returns_target_url_from_primary_info_spec(self, db_session):
-        """The resolved URL comes from the spec's `target.url`, not any Watch column."""
+    async def test_returns_target_url_from_info_source(self, db_session):
+        """The resolved URL comes from the InfoSource's source_spec target.url."""
         watch = await make_watch(db_session, url="https://stale-or-missing.example.com")
 
+        fake_source_spec = MagicMock()
+        fake_source_spec.additional_properties = {
+            "target": {"url": "https://from-source.example.com"}
+        }
+        fake_source = MagicMock()
+        fake_source.source_spec = fake_source_spec
+
         fake_client = MagicMock()
-        fake_spec = MagicMock()
-        fake_spec.info_item_id = str(watch.info_item_id)
-        fake_spec.info_spec_id = "01XYZ"
-        fake_spec.document = {"target": {"url": "https://from-spec.example.com"}}
-        fake_client.get_primary_info_spec = AsyncMock(return_value=fake_spec)
+        fake_client.get_info_source = AsyncMock(return_value=fake_source)
 
         resolved_url = await resolve_watch_url(watch, fake_client)
 
-        assert resolved_url == "https://from-spec.example.com"
-        fake_client.get_primary_info_spec.assert_awaited_once_with(
-            str(watch.info_item_id), force_refresh=False
-        )
+        assert resolved_url == "https://from-source.example.com"
+        fake_client.get_info_source.assert_awaited_once_with(str(watch.info_source_id))

@@ -14,9 +14,17 @@ pytestmark = pytest.mark.integration
 VALID_CHANNEL_ID = str(ULID())
 
 
+_watch_counter = 0
+
+
 async def _make_watch(client, db_session):
+    global _watch_counter
+    _watch_counter += 1
     watch = await make_watch(
-        db_session, name="Test Watch", url="https://example.com", content_type="html"
+        db_session,
+        name=f"Test Watch {_watch_counter}",
+        url=f"https://example-{_watch_counter}.com",
+        content_type="html",
     )
     await db_session.commit()
     return str(watch.id)

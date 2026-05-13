@@ -10,7 +10,7 @@ from src.core.watches.invariants import (
     require_no_fragment_dependents,
     require_root_watch_on_chain,
 )
-from tests.conftest import make_info_item, make_info_source, make_watch
+from tests.conftest import make_info_source, make_watch
 
 pytestmark = pytest.mark.integration
 
@@ -18,10 +18,7 @@ pytestmark = pytest.mark.integration
 @pytest.mark.asyncio
 async def test_require_root_watch_passes_when_root_is_watched(db_session):
     root = await make_info_source(db_session)
-    info_item = await make_info_item(db_session)
-    await make_watch(
-        db_session, info_item_id=info_item.info_item_id, info_source_id=root.info_source_id
-    )
+    await make_watch(db_session, info_source_id=root.info_source_id)
     frag_id = "01HZZ00000000000000FRAGMENT"
     client = MagicMock()
     client.get_info_source = AsyncMock(
@@ -54,16 +51,12 @@ async def test_require_root_watch_rejects_orphan(db_session):
 async def test_require_no_dependents_blocks_when_fragments_exist(db_session):
     root_src = await make_info_source(db_session)
     frag_src = await make_info_source(db_session, parent_info_source_id=root_src.info_source_id)
-    info_item_root = await make_info_item(db_session, name="Root Item")
-    info_item_frag = await make_info_item(db_session, name="Fragment Item")
     root_watch = await make_watch(
         db_session,
-        info_item_id=info_item_root.info_item_id,
         info_source_id=root_src.info_source_id,
     )
     await make_watch(
         db_session,
-        info_item_id=info_item_frag.info_item_id,
         info_source_id=frag_src.info_source_id,
     )
     client = MagicMock()

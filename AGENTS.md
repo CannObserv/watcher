@@ -114,9 +114,18 @@ Full variable reference: `docs/DEPLOYMENT.md`.
 
 ## Watches
 
-Watches are InfoItem-native: a Watch references an `info_item_id` and resolves URL + fetch defaults from the primary `InfoSpec` at every callsite (`check_watch`, screenshot capture, dashboard preview). Watch creation requires `info_item_id` — the Archiver service is the source of truth for the URL. Legacy `url` and `fetch_config` columns no longer exist.
+Watches are InfoSource-native: each Watch references an `info_source_id`
+(root or fragment) in Archiver and stores `effective_url` /
+`effective_domain` resolved once at create time. SourceRevisions are
+POSTed to Archiver via the `archiver-client` SDK on every detected
+change; the local `pending_source_revisions` outbox + drain worker
+guarantees delivery during Archiver outages. Notifications dispatch
+inline from the pipeline's POST-success site (and outbox drain success),
+with `source_revision_id` in WatchEvent metadata.
 
-Fresh hosts need `sudo cp /home/exedev/archiver/deploy/archiver.service /etc/systemd/system/` before `watcher.service` will boot — Archiver lives in a sibling repo; see its own `docs/DEPLOYMENT.md` for full install (key generation + env-var registration). The Archiver authoring tools (`validate_info_spec`, `fetch_and_render`, `preview_extraction`, `propose_selectors`, `find_info_item`, atomic `create_info_item`) are documented in `/home/exedev/archiver/AGENTS.md`.
+Fresh hosts need the scratch directory: `sudo mkdir -p /var/cache/watcher/scratch && sudo chown watcher:watcher /var/cache/watcher/scratch` (or override via `WATCHER_CACHE_DIR`). The Archiver service must also be installed first — see its own `docs/DEPLOYMENT.md`. Archiver authoring tools (`validate_source_spec`, `fetch_and_render`, `preview_extraction`, `propose_selectors`, `find_info_item`, atomic `create_info_item`) are documented in `/home/exedev/archiver/AGENTS.md`.
+
+See [docs/plans/2026-05-13-phase-5-watcher-v2-cutover.md](docs/plans/2026-05-13-phase-5-watcher-v2-cutover.md) for the cutover design.
 
 ## Common Commands
 

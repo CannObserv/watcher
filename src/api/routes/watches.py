@@ -42,14 +42,14 @@ async def create_watch(
     probe_fn: Annotated[Callable[[str], Awaitable[ProbeResult]], Depends(get_probe_fn)],
     session: AsyncSession = Depends(get_db_session),
 ):
-    """Create a new watch bound to an existing InfoItem.
+    """Create a new watch bound to an existing InfoSource.
 
-    The handler validates ``info_item_id`` via the ArchiverClient SDK,
+    The handler validates ``info_source_id`` via the ArchiverClient SDK,
     probes the resolved URL to populate ``effective_*`` fields, upserts the
     Domain row, and persists the Watch.
 
     Error mapping:
-    - SDK ``NotFound`` (unknown ``info_item_id``) → 422.
+    - SDK ``NotFound`` (unknown ``info_source_id``) → 422.
     - SDK ``AuthError`` → 500 (operator misconfiguration).
     - SDK ``ServerError`` / ``httpx.ConnectError`` / ``httpx.TimeoutException``
       → 503 with ``Retry-After: 30`` header.
@@ -92,7 +92,6 @@ async def create_watch(
             probe_fn=probe_fn,
             info_client=info_client,
             name=data.name,
-            info_item_id=data.info_item_id,
             content_type=data.content_type,
             schedule_config=data.schedule_config,
             description=data.description,
@@ -102,10 +101,7 @@ async def create_watch(
     except NotFound as exc:
         raise HTTPException(
             status_code=422,
-            detail=(
-                f"info_item_id {data.info_item_id} or "
-                f"info_source_id {data.info_source_id} does not exist"
-            ),
+            detail=f"info_source_id {data.info_source_id} does not exist",
         ) from exc
     except AuthError:
         # Loud — operator-fixable misconfiguration of ARCHIVER_API_KEY.

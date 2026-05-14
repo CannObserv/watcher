@@ -210,12 +210,6 @@ async def watches_page(
 @router.get("/watches/new")
 async def watch_create_form(request: Request):
     """Watch creation form."""
-    info_client = get_registry().get_archiver_client()
-    try:
-        info_items = await info_client.list_info_items()
-    except (ServerError, httpx.ConnectError, httpx.TimeoutException) as exc:
-        logger.warning("Information service unreachable for create form: %s", exc)
-        info_items = []
     return templates.TemplateResponse(
         request,
         "pages/watch_form.html",
@@ -224,7 +218,6 @@ async def watch_create_form(request: Request):
             "watch": None,
             "flash": None,
             "content_types": list(ContentType),
-            "info_items": info_items,
         },
     )
 
@@ -233,7 +226,6 @@ async def watch_create_form(request: Request):
 async def watch_create_submit(
     request: Request,
     name: str = Form(""),
-    info_item_id: str = Form(""),
     info_source_id: str = Form(""),
     content_type: str = Form("html"),
     interval: str = Form(""),
@@ -246,14 +238,10 @@ async def watch_create_submit(
     errors = []
     if not name.strip():
         errors.append("Name is required")
-    if not info_item_id.strip():
-        errors.append("Information Item is required")
+    if not info_source_id.strip():
+        errors.append("InfoSource ID is required")
 
     async def _render_with_flash(flash_message: str):
-        try:
-            info_items = await info_client.list_info_items()
-        except (ServerError, httpx.ConnectError, httpx.TimeoutException):
-            info_items = []
         return templates.TemplateResponse(
             request,
             "pages/watch_form.html",
@@ -262,7 +250,6 @@ async def watch_create_submit(
                 "watch": None,
                 "flash": {"type": "error", "message": flash_message},
                 "content_types": list(ContentType),
-                "info_items": info_items,
             },
         )
 
@@ -273,22 +260,24 @@ async def watch_create_submit(
     if interval.strip():
         schedule_config["interval"] = interval.strip()
 
-    # Fragment-root invariant: if info_source_id is provided and is a fragment,
+    resolved_info_source_id = info_source_id.strip()
+
+    # Fragment-root invariant: if info_source_id is a fragment,
     # require an active root Watch on the chain before creating.
-    resolved_info_source_id = info_source_id.strip() or None
-    if resolved_info_source_id is not None:
-        try:
-            source = await info_client.get_info_source(resolved_info_source_id)
-            if source.parent_info_source_id is not None:
-                await require_root_watch_on_chain(
-                    session, info_client, info_source_id=resolved_info_source_id
-                )
-        except RootWatchMissingError:
-            return await _render_with_flash(
-                "Fragment source requires an active root Watch on the chain"
+    try:
+        source = await info_client.get_info_source(resolved_info_source_id)
+        if source.parent_info_source_id is not None:
+            await require_root_watch_on_chain(
+                session, info_client, info_source_id=resolved_info_source_id
             )
-        except (ServerError, httpx.ConnectError, httpx.TimeoutException) as exc:
-            return await _render_with_flash(f"Information service unavailable: {exc}")
+    except RootWatchMissingError:
+        return await _render_with_flash(
+            "Fragment source requires an active root Watch on the chain"
+        )
+    except NotFound:
+        return await _render_with_flash(f"InfoSource {resolved_info_source_id} does not exist")
+    except (ServerError, httpx.ConnectError, httpx.TimeoutException) as exc:
+        return await _render_with_flash(f"Information service unavailable: {exc}")
 
     try:
         watch = await _create_watch(
@@ -296,14 +285,13 @@ async def watch_create_submit(
             probe_fn=probe_fn,
             info_client=info_client,
             name=name.strip(),
-            info_item_id=info_item_id.strip(),
             content_type=content_type,
             schedule_config=schedule_config,
             description=description.strip() or None,
             info_source_id=resolved_info_source_id,
         )
     except NotFound:
-        return await _render_with_flash(f"Information Item {info_item_id} does not exist")
+        return await _render_with_flash(f"InfoSource {resolved_info_source_id} does not exist")
     except AuthError:
         logger.exception("ArchiverClient auth failure during dashboard create")
         return await _render_with_flash("Information service auth failed")

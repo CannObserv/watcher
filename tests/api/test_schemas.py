@@ -91,7 +91,6 @@ class TestWatchCreate:
         source_id = str(ULID())
         data = WatchCreate(
             name="Test Watch",
-            info_item_id=str(ULID()),
             info_source_id=source_id,
             content_type="html",
         )
@@ -102,17 +101,16 @@ class TestWatchCreate:
 
     def test_watch_create_requires_name(self):
         with pytest.raises(ValidationError):
-            WatchCreate(info_item_id=str(ULID()), info_source_id=str(ULID()), content_type="html")
+            WatchCreate(info_source_id=str(ULID()), content_type="html")
 
     def test_watch_create_requires_info_source_id(self):
         with pytest.raises(ValidationError):
-            WatchCreate(name="Test", info_item_id=str(ULID()), content_type="html")
+            WatchCreate(name="Test", content_type="html")
 
     def test_watch_create_validates_content_type(self):
         with pytest.raises(ValidationError):
             WatchCreate(
                 name="Test",
-                info_item_id=str(ULID()),
                 info_source_id=str(ULID()),
                 content_type="invalid",
             )
@@ -120,7 +118,6 @@ class TestWatchCreate:
     def test_watch_create_with_schedule_config(self):
         data = WatchCreate(
             name="PDF Watch",
-            info_item_id=str(ULID()),
             info_source_id=str(ULID()),
             content_type="pdf",
             schedule_config={"interval": "6h"},
@@ -131,7 +128,6 @@ class TestWatchCreate:
         """``url`` and ``fetch_config`` no longer accepted (silently ignored)."""
         data = WatchCreate(
             name="Silent",
-            info_item_id=str(ULID()),
             info_source_id=str(ULID()),
             content_type="html",
             # These extra keys must be ignored or rejected, never stored.

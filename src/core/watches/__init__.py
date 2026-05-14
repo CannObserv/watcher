@@ -40,12 +40,11 @@ async def create_watch(
     info_client: ArchiverClient,
     *,
     name: str,
-    info_item_id: str,
     content_type: str | ContentType,
+    info_source_id: str,
     schedule_config: dict | None = None,
     description: str | None = None,
     tags: list[str] | None = None,
-    info_source_id: str | None = None,
 ) -> Watch:
     """Create a new Watch.
 
@@ -53,9 +52,8 @@ async def create_watch(
     it to populate ``effective_url`` / ``effective_domain``, upserts the
     Domain row, and persists the Watch.
 
-    *info_source_id* is required (Phase 5+). *info_item_id* is retained on the
-    function signature for call-site compatibility during the cutover window;
-    Tasks 7.x will remove it.
+    *info_source_id* is required — identifies a root or fragment InfoSource in
+    the Archiver service; URL is resolved by walking the parent chain.
 
     Raises whatever the SDK raises (``NotFound``, ``httpx.ConnectError``,
     ``ServerError``, ``AuthError``, ``ValidationError``) — translation to
@@ -65,9 +63,6 @@ async def create_watch(
     or domain is created.
     """
     schedule_config = schedule_config if schedule_config is not None else {}
-
-    if info_source_id is None:
-        raise ValueError("info_source_id is required (Phase 5+)")
 
     # 1. Resolve the target URL from the InfoSource (Phase 5+).
     #    NotFound / ServerError / AuthError / httpx.* propagate to the route handler.

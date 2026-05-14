@@ -1,9 +1,9 @@
 """Integration tests for Watch CRUD API endpoints.
 
-Phase 5 contract: ``POST /api/v1/watches`` takes ``{name, info_item_id,
-info_source_id, content_type}``. The route resolves the URL via the SDK
-(info_item_id → get_primary_info_spec stub) at create-time. The Watch row
-stores info_source_id (NOT NULL). WatchResponse exposes info_source_id.
+Phase 5 contract: ``POST /api/v1/watches`` takes ``{name, info_source_id,
+content_type}``. The route resolves the URL via the ArchiverClient SDK
+at create-time. The Watch row stores info_source_id (NOT NULL).
+WatchResponse exposes info_source_id.
 """
 
 from unittest.mock import AsyncMock, MagicMock
@@ -90,24 +90,25 @@ class TestCreateWatch:
         )
         assert response.status_code == 422
 
-    async def test_create_watch_missing_info_item_id_returns_422(self, client):
+    async def test_create_watch_missing_info_source_id_returns_422(self, client):
         response = await client.post(
             "/api/v1/watches",
-            json={"name": "No item", "content_type": "html"},
+            json={"name": "No source", "content_type": "html"},
         )
         assert response.status_code == 422
 
-    async def test_create_watch_unknown_info_item_id_returns_422(self, client, info_client):
+    async def test_create_watch_unknown_info_source_id_returns_422(self, client, info_client):
+        info_client.get_info_source.side_effect = NotFound("not found")
         response = await client.post(
             "/api/v1/watches",
             json={
                 "name": "Bad",
-                "info_item_id": "01ZZZZZZZZZZZZZZZZZZZZZZZZ",
+                "info_source_id": "01ZZZZZZZZZZZZZZZZZZZZZZZZ",
                 "content_type": "html",
             },
         )
         assert response.status_code == 422
-        assert "info_item_id" in response.text
+        assert "info_source_id" in response.text
 
     async def test_create_watch_sdk_connection_error_returns_503(self, client, info_client):
         info_client.get_info_source.side_effect = httpx.ConnectError("unreachable")
@@ -115,7 +116,6 @@ class TestCreateWatch:
             "/api/v1/watches",
             json={
                 "name": "Bad",
-                "info_item_id": "01ZZZZZZZZZZZZZZZZZZZZZZZZ",
                 "info_source_id": "01ZZZZZZZZZZZZZZZZZZZZZZZZ",
                 "content_type": "html",
             },
@@ -129,7 +129,6 @@ class TestCreateWatch:
             "/api/v1/watches",
             json={
                 "name": "Bad",
-                "info_item_id": "01ZZZZZZZZZZZZZZZZZZZZZZZZ",
                 "info_source_id": "01ZZZZZZZZZZZZZZZZZZZZZZZZ",
                 "content_type": "html",
             },

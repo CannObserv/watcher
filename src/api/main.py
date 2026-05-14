@@ -8,7 +8,6 @@ from sqlalchemy import select
 
 from src.api.deps import require_api_key
 from src.api.routes.audit_log import router as audit_router
-from src.api.routes.changes import router as changes_router
 from src.api.routes.domains import router as domains_router
 from src.api.routes.health import router as health_router
 from src.api.routes.notification_configs import router as notification_configs_router
@@ -79,7 +78,6 @@ app = FastAPI(title="watcher", version="0.1.0", lifespan=lifespan)
 
 v1_router = APIRouter(prefix="/api/v1", dependencies=[Depends(require_api_key)])
 v1_router.include_router(watches_router)
-v1_router.include_router(changes_router)
 v1_router.include_router(profiles_router)
 v1_router.include_router(notification_configs_router)
 v1_router.include_router(notification_templates_router)

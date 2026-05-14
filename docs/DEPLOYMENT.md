@@ -89,7 +89,7 @@ sudo systemctl daemon-reload && sudo systemctl restart watcher
 ## Archiver Service
 
 The Archiver is a sibling service at `/home/exedev/archiver` (port 8020,
-`archiver.service`) that owns the canonical InfoItem + InfoSource + InfoSpec
+`archiver.service`) that owns the canonical InfoItem / InfoSource / SourceRevision / RepSpec
 registry. Watcher's lifespan pre-warms an `ArchiverClient` SDK against it;
 without `ARCHIVER_API_KEY` and a reachable service, `watcher.service` will
 refuse to boot.

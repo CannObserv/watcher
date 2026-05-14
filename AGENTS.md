@@ -83,7 +83,7 @@ export $(cat /etc/watcher/.env .env 2>/dev/null | xargs)
 uv run uvicorn src.api.main:app --host 0.0.0.0 --port 8001 --reload
 ```
 
-**Archiver service.** Owns the canonical Information Item + InfoSpec registry. Sibling repo at `/home/exedev/archiver` (extracted in #149). Watcher consumes it via the `archiver-client` SDK installed as a path dependency. Don't add Archiver code to this repo — go work in the sibling repo instead.
+**Archiver service.** Owns the canonical InfoItem / InfoSource / SourceRevision / RepSpec registry. Sibling repo at `/home/exedev/archiver` (extracted in #149). Watcher consumes it via the `archiver-client` SDK installed as a path dependency. Don't add Archiver code to this repo — go work in the sibling repo instead.
 
 Full lifecycle reference + cleanup timer: `docs/DEPLOYMENT.md`.
 

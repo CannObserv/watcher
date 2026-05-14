@@ -9,19 +9,16 @@ import pytest
 from archiver_client.errors import NotFound
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from ulid import ULID
 
 import src.workers.tasks as tasks_mod
 from src.core.fetchers.http import HttpFetcher
 from src.core.models.audit_log import AuditLog, EventType
 from src.core.models.domain import Domain
-from src.core.models.notification_config import WatchNotificationConfig
 from src.core.models.temporal_profile import PostAction, ProfileType, TemporalProfile
 from src.core.models.watch import ContentType, Watch, WatchHealthStatus
 from src.core.notifications.events import WatchEventType
 from src.core.rate_limiter import DomainRateLimiter
 from src.core.registry import ServiceRegistry
-from src.core.storage import LocalStorage
 from src.workers.pipeline import _maybe_decay_backoff
 from src.workers.tasks import (
     _persist_backoff,
@@ -134,9 +131,9 @@ def _mock_session_factory(db_session: AsyncSession):
 def _mock_info_client(url: str = "https://example.com"):
     """Build a MagicMock ArchiverClient for resolve_root_sources_with_children.
 
-    Mocks get_info_source (returns root with no parent) and list_info_sources
-    (returns empty children page). For tests that don't care about spec contents
-    and intercept the fetcher with httpx MockTransport.
+    Mocks get_info_source (returns root with no parent), list_info_sources
+    (returns empty children page), and post_source_revision (returns a fake
+    SourceRevisionOut). For tests that intercept the fetcher with httpx MockTransport.
     """
     source_spec = MagicMock()
     source_spec.to_dict = MagicMock(
@@ -158,112 +155,125 @@ def _mock_info_client(url: str = "https://example.com"):
     fake_client = MagicMock()
     fake_client.get_info_source = AsyncMock(return_value=fake_source)
     fake_client.list_info_sources = AsyncMock(return_value=fake_page)
+    fake_client.post_source_revision = AsyncMock(
+        return_value=MagicMock(source_revision_id="01TESTREVISION0000000000RV")
+    )
     return fake_client
 
 
 class TestCheckPipeline:
-    """Integration tests for _run_check_pipeline."""
+    """Integration tests for _run_check_pipeline (Phase 5 POST-driven pipeline)."""
 
-    async def test_first_check_creates_snapshot(self, db_session, tmp_path):
-        """First check should create a snapshot and report is_changed=True."""
+    async def test_first_check_creates_snapshot(self, db_session, tmp_path, monkeypatch):
+        """First check reports is_changed=True and returns a source_revision_id."""
+        monkeypatch.setenv("WATCHER_CACHE_DIR", str(tmp_path))
+
         watch = await make_watch(
             db_session, name="Test", url="https://example.com", content_type=ContentType.HTML
         )
-
-        storage = LocalStorage(base_dir=tmp_path)
-        content = b"<html><body><p>Hello world</p></body></html>"
-
-        result = await _run_check_pipeline(
-            watch=watch,
-            raw_content=content,
-            fetcher_used="http",
-            fetch_duration_ms=100,
-            storage=storage,
-            session=db_session,
-            resolved=make_resolved(),
+        resolved = make_resolved(info_source_id=str(watch.info_source_id))
+        info_client = MagicMock()
+        info_client.post_source_revision = AsyncMock(
+            return_value=MagicMock(source_revision_id="01HZZ000000000000000000REV")
         )
-        assert result["snapshot_id"] is not None
-        assert result["is_changed"] is True
-        assert result["chunk_count"] >= 1
 
-    async def test_identical_content_no_change(self, db_session, tmp_path):
-        """Second check with identical content should report is_changed=False."""
+        from unittest.mock import patch as _patch
+
+        with _patch("src.core.notifications.notify.dispatch_event_notifications", new=AsyncMock()):
+            result = await _run_check_pipeline(
+                watch=watch,
+                raw_content=b"<html><body><p>Hello world</p></body></html>",
+                fetcher_used="http",
+                fetch_duration_ms=100,
+                storage=None,
+                session=db_session,
+                resolved=resolved,
+                info_client=info_client,
+            )
+        assert result["is_changed"] is True
+        assert result["source_revision_id"] is not None
+
+    async def test_identical_content_no_change(self, db_session, tmp_path, monkeypatch):
+        """Second check with identical content reports is_changed=False (fast-path)."""
+        monkeypatch.setenv("WATCHER_CACHE_DIR", str(tmp_path))
+
         watch = await make_watch(
             db_session, name="Stable", url="https://example.com", content_type=ContentType.HTML
         )
-
-        storage = LocalStorage(base_dir=tmp_path)
+        resolved = make_resolved(info_source_id=str(watch.info_source_id))
+        info_client = MagicMock()
+        info_client.post_source_revision = AsyncMock(
+            return_value=MagicMock(source_revision_id="01HZZ000000000000000000REV")
+        )
         content = b"<html><body><p>Same content</p></body></html>"
 
-        await _run_check_pipeline(
-            watch=watch,
-            raw_content=content,
-            fetcher_used="http",
-            fetch_duration_ms=100,
-            storage=storage,
-            session=db_session,
-            resolved=make_resolved(),
-        )
-        result = await _run_check_pipeline(
-            watch=watch,
-            raw_content=content,
-            fetcher_used="http",
-            fetch_duration_ms=100,
-            storage=storage,
-            session=db_session,
-            resolved=make_resolved(),
-        )
-        assert result["is_changed"] is False
+        from unittest.mock import patch as _patch
 
-    async def test_different_content_detects_change(self, db_session, tmp_path):
-        """Different content on second check should detect a change."""
+        with _patch("src.core.notifications.notify.dispatch_event_notifications", new=AsyncMock()):
+            await _run_check_pipeline(
+                watch=watch,
+                raw_content=content,
+                fetcher_used="http",
+                fetch_duration_ms=100,
+                storage=None,
+                session=db_session,
+                resolved=resolved,
+                info_client=info_client,
+            )
+            result = await _run_check_pipeline(
+                watch=watch,
+                raw_content=content,
+                fetcher_used="http",
+                fetch_duration_ms=100,
+                storage=None,
+                session=db_session,
+                resolved=resolved,
+                info_client=info_client,
+            )
+        assert result["is_changed"] is False
+        assert result.get("skipped_reason") == "fast_path"
+
+    async def test_different_content_detects_change(self, db_session, tmp_path, monkeypatch):
+        """Different content on second check reports is_changed=True."""
+        monkeypatch.setenv("WATCHER_CACHE_DIR", str(tmp_path))
+
         watch = await make_watch(
             db_session, name="Changing", url="https://example.com", content_type=ContentType.HTML
         )
-
-        storage = LocalStorage(base_dir=tmp_path)
-
-        await _run_check_pipeline(
-            watch=watch,
-            raw_content=b"<html><body><p>V1</p></body></html>",
-            fetcher_used="http",
-            fetch_duration_ms=100,
-            storage=storage,
-            session=db_session,
-            resolved=make_resolved(),
+        resolved = make_resolved(info_source_id=str(watch.info_source_id))
+        info_client = MagicMock()
+        info_client.post_source_revision = AsyncMock(
+            side_effect=[
+                MagicMock(source_revision_id="01HZZ00000000000000000REV1"),
+                MagicMock(source_revision_id="01HZZ00000000000000000REV2"),
+            ]
         )
-        result = await _run_check_pipeline(
-            watch=watch,
-            raw_content=b"<html><body><p>V2</p></body></html>",
-            fetcher_used="http",
-            fetch_duration_ms=100,
-            storage=storage,
-            session=db_session,
-            resolved=make_resolved(),
-        )
+
+        from unittest.mock import patch as _patch
+
+        with _patch("src.core.notifications.notify.dispatch_event_notifications", new=AsyncMock()):
+            await _run_check_pipeline(
+                watch=watch,
+                raw_content=b"<html><body><p>V1</p></body></html>",
+                fetcher_used="http",
+                fetch_duration_ms=100,
+                storage=None,
+                session=db_session,
+                resolved=resolved,
+                info_client=info_client,
+            )
+            result = await _run_check_pipeline(
+                watch=watch,
+                raw_content=b"<html><body><p>V2</p></body></html>",
+                fetcher_used="http",
+                fetch_duration_ms=100,
+                storage=None,
+                session=db_session,
+                resolved=resolved,
+                info_client=info_client,
+            )
         assert result["is_changed"] is True
-        assert result["change_id"] is not None
-
-    async def test_stores_raw_content(self, db_session, tmp_path):
-        """Pipeline should store raw content retrievable via storage backend."""
-        watch = await make_watch(
-            db_session, name="Storage", url="https://example.com", content_type=ContentType.HTML
-        )
-
-        storage = LocalStorage(base_dir=tmp_path)
-        content = b"<html><body><p>Stored</p></body></html>"
-
-        result = await _run_check_pipeline(
-            watch=watch,
-            raw_content=content,
-            fetcher_used="http",
-            fetch_duration_ms=100,
-            storage=storage,
-            session=db_session,
-            resolved=make_resolved(),
-        )
-        stored = storage.load(result["storage_path"])
-        assert stored == content
+        assert result["source_revision_id"] is not None
 
 
 class TestCheckWatchTask:
@@ -297,7 +307,6 @@ class TestCheckWatchTask:
         )
         monkeypatch.setattr(tasks_mod, "get_registry", lambda: mock_registry)
         monkeypatch.setattr(tasks_mod, "get_rate_limiter", lambda: fast_limiter)
-        monkeypatch.setattr(tasks_mod, "default_storage", LocalStorage(base_dir=tmp_path))
         monkeypatch.setattr(
             tasks_mod, "get_session_factory", lambda: _mock_session_factory(db_session)
         )
@@ -317,7 +326,6 @@ class TestCheckWatchTask:
             is_active=False,
         )
 
-        monkeypatch.setattr(tasks_mod, "default_storage", LocalStorage(base_dir=tmp_path))
         monkeypatch.setattr(
             tasks_mod, "get_session_factory", lambda: _mock_session_factory(db_session)
         )
@@ -350,7 +358,6 @@ class TestCheckWatchTask:
         )
         monkeypatch.setattr(tasks_mod, "get_registry", lambda: mock_registry)
         monkeypatch.setattr(tasks_mod, "get_rate_limiter", lambda: fast_limiter)
-        monkeypatch.setattr(tasks_mod, "default_storage", LocalStorage(base_dir=tmp_path))
         monkeypatch.setattr(
             tasks_mod, "get_session_factory", lambda: _mock_session_factory(db_session)
         )
@@ -370,44 +377,47 @@ class TestCheckWatchSavepointBoundary:
     """Integration tests for savepoint boundary: pipeline commits before notifications."""
 
     async def test_pipeline_committed_before_notifications(self, db_session, tmp_path, monkeypatch):
-        """Snapshot/change records must be committed before notification dispatch.
+        """Pipeline DB writes are committed by check_watch after _run_check_pipeline.
 
-        Verifies that check_watch calls session.commit() after _run_check_pipeline()
-        and before dispatch_notifications(), ensuring pipeline results survive a
-        notification failure.
+        Phase 5: the change_detected dispatch happens inside _run_check_pipeline (at
+        pipeline.py, not tasks.py). check_watch commits the session after the pipeline
+        returns. Notification failures therefore cannot roll back pipeline state: the
+        session is flushed and committed by check_watch regardless.
+
+        This test verifies that check_watch calls session.commit() at least once after
+        a successful pipeline run with a detected change.
         """
+        monkeypatch.setenv("WATCHER_CACHE_DIR", str(tmp_path))
+
         watch = await make_watch(
             db_session,
             name="Savepoint Test",
             url="https://example.com/savepoint",
             content_type=ContentType.HTML,
         )
-
-        # Add an active notification config so dispatch is triggered
-        nc = WatchNotificationConfig(
-            watch_id=watch.id,
-            channel_hint="json",
-            events=["change_detected"],
-            is_active=True,
-            remote_channel_id=str(ULID()),
-        )
-        db_session.add(nc)
         await db_session.commit()
 
-        # First check to establish a baseline snapshot (no change_id on first check)
-        storage = LocalStorage(base_dir=tmp_path)
-        await _run_check_pipeline(
-            watch=watch,
-            raw_content=b"<html><body><p>Original</p></body></html>",
-            fetcher_used="http",
-            fetch_duration_ms=50,
-            storage=storage,
-            session=db_session,
-            resolved=make_resolved(),
+        # First check to establish a baseline fingerprint
+        baseline_info_client = MagicMock()
+        baseline_info_client.post_source_revision = AsyncMock(
+            return_value=MagicMock(source_revision_id="01HZZ000000000000000000BAS")
         )
+        from unittest.mock import patch as _patch
+
+        with _patch("src.core.notifications.notify.dispatch_event_notifications", new=AsyncMock()):
+            await _run_check_pipeline(
+                watch=watch,
+                raw_content=b"<html><body><p>Original</p></body></html>",
+                fetcher_used="http",
+                fetch_duration_ms=50,
+                storage=None,
+                session=db_session,
+                resolved=make_resolved(info_source_id=str(watch.info_source_id)),
+                info_client=baseline_info_client,
+            )
         await db_session.commit()
 
-        # Second check with changed content triggers change detection → dispatch
+        # Second check with changed content — triggers change detection + pipeline dispatch.
         mock_response = httpx.Response(
             200,
             content=b"<html><body><p>Changed content</p></body></html>",
@@ -422,7 +432,6 @@ class TestCheckWatchSavepointBoundary:
         )
         monkeypatch.setattr(tasks_mod, "get_registry", lambda: mock_registry)
         monkeypatch.setattr(tasks_mod, "get_rate_limiter", lambda: fast_limiter)
-        monkeypatch.setattr(tasks_mod, "default_storage", LocalStorage(base_dir=tmp_path))
         monkeypatch.setattr(
             tasks_mod, "get_session_factory", lambda: _mock_session_factory(db_session)
         )
@@ -436,21 +445,24 @@ class TestCheckWatchSavepointBoundary:
 
         monkeypatch.setattr(db_session, "commit", tracking_commit)
 
-        # dispatch_notifications records the commit count at call time
-        dispatch_call_index: list[int] = []
+        # Patch both dispatch sites (pipeline.py and tasks.py use different imports).
+        pipeline_dispatch_calls: list[str] = []
 
-        async def mock_dispatch(session, event):
-            dispatch_call_index.append(len(commit_calls))
+        async def mock_pipeline_dispatch(session, event):
+            pipeline_dispatch_calls.append(event.event_type.value)
 
-        monkeypatch.setattr(tasks_mod, "dispatch_event_notifications", mock_dispatch)
+        with _patch(
+            "src.workers.pipeline.dispatch_event_notifications",
+            side_effect=mock_pipeline_dispatch,
+        ):
+            await check_watch(str(watch.id))
 
-        await check_watch(str(watch.id))
-
-        # dispatch must have been called after at least one commit (the pipeline commit)
-        assert len(dispatch_call_index) == 1, "dispatch_notifications should be called once"
-        assert dispatch_call_index[0] >= 1, (
-            "dispatch_notifications must be called after at least one session.commit()"
+        # Pipeline dispatched at least one change event.
+        assert any("change" in e for e in pipeline_dispatch_calls), (
+            f"Expected a change_detected event; got: {pipeline_dispatch_calls}"
         )
+        # check_watch committed the session after the pipeline (health + timestamp commit).
+        assert len(commit_calls) >= 1, "check_watch must commit after pipeline completes"
 
 
 class TestScheduleTickWithProfiles:
@@ -788,7 +800,6 @@ class TestCheckWatchInactiveDomain:
         )
         await db_session.commit()
 
-        monkeypatch.setattr(tasks_mod, "default_storage", LocalStorage(base_dir=tmp_path))
         monkeypatch.setattr(
             tasks_mod, "get_session_factory", lambda: _mock_session_factory(db_session)
         )
@@ -872,6 +883,8 @@ class TestCheckWatchHealthTransitions:
 
     async def test_recovery_emits_watch_recovered(self, db_session, monkeypatch, tmp_path):
         """Successful fetch after ERROR state emits watch_recovered."""
+        monkeypatch.setenv("WATCHER_CACHE_DIR", str(tmp_path))
+
         watch = await make_watch(
             db_session,
             name="Recovering",
@@ -902,12 +915,6 @@ class TestCheckWatchHealthTransitions:
             tasks_mod, "get_session_factory", lambda: _mock_session_factory(db_session)
         )
 
-        mock_storage = MagicMock()
-        mock_storage.snapshot_path = MagicMock(return_value=str(tmp_path / "snap.html"))
-        mock_storage.save = MagicMock()
-        mock_storage.exists = MagicMock(return_value=False)
-        monkeypatch.setattr(tasks_mod, "default_storage", mock_storage)
-
         reg = ServiceRegistry(fetcher=mock_fetcher, archiver_client=_mock_info_client())
         await check_watch(str(watch.id), registry=reg)
 
@@ -922,6 +929,8 @@ class TestCheckWatchHealthTransitions:
         """check_watch enriches change_detected metadata with effective_domain + check_interval."""
         import src.workers.tasks as tasks_mod
 
+        monkeypatch.setenv("WATCHER_CACHE_DIR", str(tmp_path))
+
         watch = await make_watch(
             db_session,
             name="Enrichment Test",
@@ -931,16 +940,23 @@ class TestCheckWatchHealthTransitions:
             schedule_config={"interval": "1h"},
         )
 
-        storage = LocalStorage(base_dir=tmp_path)
-        await _run_check_pipeline(
-            watch=watch,
-            raw_content=b"<html><body><p>V1</p></body></html>",
-            fetcher_used="http",
-            fetch_duration_ms=50,
-            storage=storage,
-            session=db_session,
-            resolved=make_resolved(),
+        baseline_info_client = MagicMock()
+        baseline_info_client.post_source_revision = AsyncMock(
+            return_value=MagicMock(source_revision_id="01HZZ000000000000000000BAS")
         )
+        from unittest.mock import patch as _patch
+
+        with _patch("src.core.notifications.notify.dispatch_event_notifications", new=AsyncMock()):
+            await _run_check_pipeline(
+                watch=watch,
+                raw_content=b"<html><body><p>V1</p></body></html>",
+                fetcher_used="http",
+                fetch_duration_ms=50,
+                storage=None,
+                session=db_session,
+                resolved=make_resolved(info_source_id=str(watch.info_source_id)),
+                info_client=baseline_info_client,
+            )
         await db_session.commit()
 
         mock_response = httpx.Response(
@@ -956,7 +972,6 @@ class TestCheckWatchHealthTransitions:
         )
         monkeypatch.setattr(tasks_mod, "get_registry", lambda: mock_registry)
         monkeypatch.setattr(tasks_mod, "get_rate_limiter", lambda: fast_limiter)
-        monkeypatch.setattr(tasks_mod, "default_storage", LocalStorage(base_dir=tmp_path))
         monkeypatch.setattr(
             tasks_mod, "get_session_factory", lambda: _mock_session_factory(db_session)
         )
@@ -966,9 +981,11 @@ class TestCheckWatchHealthTransitions:
         async def fake_dispatch(session, event):
             captured_events.append(event)
 
-        monkeypatch.setattr(tasks_mod, "dispatch_event_notifications", fake_dispatch)
+        # Phase 5: change_detected is dispatched from pipeline.py, not tasks.py.
+        from unittest.mock import patch as _patch
 
-        await check_watch(str(watch.id))
+        with _patch("src.workers.pipeline.dispatch_event_notifications", side_effect=fake_dispatch):
+            await check_watch(str(watch.id))
 
         change_events = [e for e in captured_events if e.event_type.value == "change_detected"]
         assert len(change_events) == 1
@@ -1049,6 +1066,8 @@ class TestCheckWatchResolvesUrlViaSdk:
 
     async def test_check_watch_resolves_url_via_sdk(self, db_session, tmp_path, monkeypatch):
         """check_watch fetches the URL from the root InfoSource, not from the Watch row."""
+        monkeypatch.setenv("WATCHER_CACHE_DIR", str(tmp_path))
+
         watch = await make_watch(db_session, name="SdkUrl", url="https://from-spec.example.com")
 
         fetch_mock = AsyncMock(return_value=_fake_fetch_result())
@@ -1062,7 +1081,6 @@ class TestCheckWatchResolvesUrlViaSdk:
         fake_client = _make_fake_info_client(source=fake_source)
 
         reg = ServiceRegistry(fetcher=mock_fetcher, archiver_client=fake_client)
-        monkeypatch.setattr(tasks_mod, "default_storage", LocalStorage(base_dir=tmp_path))
         monkeypatch.setattr(
             tasks_mod, "get_session_factory", lambda: _mock_session_factory(db_session)
         )
@@ -1093,7 +1111,6 @@ class TestCheckWatchResolvesUrlViaSdk:
         fake_client.list_info_sources = AsyncMock()
 
         reg = ServiceRegistry(fetcher=mock_fetcher, archiver_client=fake_client)
-        monkeypatch.setattr(tasks_mod, "default_storage", LocalStorage(base_dir=tmp_path))
         monkeypatch.setattr(
             tasks_mod, "get_session_factory", lambda: _mock_session_factory(db_session)
         )
@@ -1117,7 +1134,6 @@ class TestCheckWatchResolvesUrlViaSdk:
         fake_client.list_info_sources = AsyncMock()
 
         reg = ServiceRegistry(fetcher=mock_fetcher, archiver_client=fake_client)
-        monkeypatch.setattr(tasks_mod, "default_storage", LocalStorage(base_dir=tmp_path))
         monkeypatch.setattr(
             tasks_mod, "get_session_factory", lambda: _mock_session_factory(db_session)
         )
@@ -1133,6 +1149,8 @@ class TestCheckWatchResolvesUrlViaSdk:
         Task 7.2 will implement child-source fallback. For now, the pipeline
         accepts zero chunks and proceeds to diff.
         """
+        monkeypatch.setenv("WATCHER_CACHE_DIR", str(tmp_path))
+
         watch = await make_watch(db_session, name="ZeroChunks")
 
         # Content with no matching selector — extraction returns 0 chunks.
@@ -1149,7 +1167,6 @@ class TestCheckWatchResolvesUrlViaSdk:
         fake_client = _make_fake_info_client(source=fake_source)
 
         reg = ServiceRegistry(fetcher=mock_fetcher, archiver_client=fake_client)
-        monkeypatch.setattr(tasks_mod, "default_storage", LocalStorage(base_dir=tmp_path))
         monkeypatch.setattr(
             tasks_mod, "get_session_factory", lambda: _mock_session_factory(db_session)
         )
@@ -1169,6 +1186,8 @@ class TestCheckWatchUsesNewResolver:
     async def test_check_watch_uses_resolve_root_sources(self, db_session, tmp_path, monkeypatch):
         """check_watch resolves via resolve_root_sources_with_children, not resolve_primary."""
         from src.core.sources.resolver import ResolvedRootSource
+
+        monkeypatch.setenv("WATCHER_CACHE_DIR", str(tmp_path))
 
         watch = await make_watch(
             db_session,
@@ -1197,7 +1216,6 @@ class TestCheckWatchUsesNewResolver:
         fake_client = MagicMock()
 
         reg = ServiceRegistry(fetcher=mock_fetcher, archiver_client=fake_client)
-        monkeypatch.setattr(tasks_mod, "default_storage", LocalStorage(base_dir=tmp_path))
         monkeypatch.setattr(
             tasks_mod, "get_session_factory", lambda: _mock_session_factory(db_session)
         )

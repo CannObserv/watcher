@@ -21,10 +21,10 @@ logger = get_logger(__name__)
 
 
 async def resolve_watch_url(watch: Watch, client: ArchiverClient) -> str:
-    """Resolve a watch's current target URL from the primary InfoSpec.
+    """Resolve a watch's current target URL from the primary InfoSource.
 
     Used at notification/event-emission time so ``watch_url`` reflects the
-    operator's current spec, not a stale value. Caller passes the SDK client
+    operator's current source, not a stale value. Caller passes the SDK client
     explicitly to keep the registry lookup at the request boundary.
 
     Resolves via ``info_source_id`` once Phase 5 SDK support lands; for now

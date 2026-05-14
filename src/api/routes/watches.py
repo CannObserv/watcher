@@ -119,7 +119,7 @@ async def create_watch(
             headers={"Retry-After": "30"},
         ) from exc
     except httpx.HTTPError as exc:
-        # URL probe failure — the InfoSpec URL is unreachable.
+        # URL probe failure — the InfoSource URL is unreachable.
         raise HTTPException(status_code=422, detail=f"URL unreachable: {exc}") from exc
 
 

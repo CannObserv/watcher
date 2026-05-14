@@ -409,7 +409,7 @@ async def watch_delete(
 
 WATCH_FIELD_META: dict[str, dict] = {
     # Phase 2c — fetch_config / url no longer live on the Watch row; the
-    # InfoSpec is the canonical source. WATCH_FIELD_META now exposes only
+    # InfoSource is the canonical source. WATCH_FIELD_META now exposes only
     # column-backed fields plus the per-watch schedule override.
     # -- Details section --
     "name": {
@@ -659,7 +659,7 @@ async def watch_archive(
 
     # Resolve the URL for the notification AFTER commit. SDK failure here must
     # not roll back the archive — fall back to a sentinel URL so the operator
-    # still gets the notification, and log so the missing/orphaned InfoSpec
+    # still gets the notification, and log so the missing/orphaned InfoSource
     # surfaces in monitoring.
     try:
         info_client = get_registry().get_archiver_client()
@@ -2019,7 +2019,7 @@ async def watch_notification_test_result(
         try:
             resolved_url = await resolve_watch_url(watch, info_client)
         except Exception as exc:
-            # Resolve failure is operator-fixable (orphaned InfoSpec, SDK
+            # Resolve failure is operator-fixable (orphaned InfoSource, SDK
             # outage). Surface a clear reason and skip dispatch — never 5xx.
             logger.exception(
                 "failed to resolve watch URL for test notification",

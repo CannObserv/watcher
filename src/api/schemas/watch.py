@@ -51,7 +51,7 @@ class WatchResponse(BaseModel):
     """Schema for returning a watch.
 
     Does not include ``url`` or ``fetch_config`` — those are properties of
-    the watch's InfoSpec, fetched from the Information service.
+    the watch's InfoSource, fetched from the Information service.
     """
 
     model_config = ConfigDict(from_attributes=True)

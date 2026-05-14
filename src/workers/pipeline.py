@@ -83,10 +83,10 @@ async def _maybe_decay_backoff(
 
 
 async def _extract_with_spec(raw_content: bytes, document: dict) -> ExtractionResult:
-    """Run the HTML extractor with config derived from the InfoSpec document.
+    """Run the HTML extractor with config derived from the InfoSource source_spec document.
 
     Phase 2c only supports HTML. PDF + FILE return in Phase 3+ once the
-    InfoSpec schema gains the corresponding extraction algorithms.
+    InfoSource schema gains the corresponding extraction algorithms.
     """
     extractor = HtmlExtractor()
     config = _extraction_config_from_spec(document)

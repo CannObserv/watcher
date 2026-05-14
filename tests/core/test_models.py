@@ -11,7 +11,6 @@ from src.core.models.audit_log import AuditLog, EventType, audit
 from src.core.models.base import ULIDType
 from src.core.models.domain import Domain
 from src.core.models.notification_config import WatchNotificationConfig
-from src.core.models.snapshot import Snapshot, SnapshotChunk
 from src.core.models.temporal_profile import PostAction, ProfileType, TemporalProfile
 from src.core.models.watch import ContentType, Watch, WatchHealthStatus
 
@@ -235,41 +234,6 @@ class TestDatabase:
         # After reset, a new engine should be created on next call
         engine2 = get_engine()
         assert engine2 is not engine
-
-
-class TestSnapshotModel:
-    def test_create_snapshot(self):
-        snap = Snapshot(
-            watch_id=ULID(),
-            content_hash="abc123",
-            simhash=42,
-            storage_path="snapshots/w1/s1.html",
-            text_path="snapshots/w1/s1.txt",
-            storage_backend="local",
-            chunk_count=3,
-            text_bytes=1024,
-            fetch_duration_ms=200,
-            fetcher_used="http",
-        )
-        assert snap.content_hash == "abc123"
-        assert snap.chunk_count == 3
-        assert snap.storage_backend == "local"
-
-
-class TestSnapshotChunkModel:
-    def test_create_chunk(self):
-        chunk = SnapshotChunk(
-            snapshot_id=ULID(),
-            chunk_index=0,
-            chunk_type="page",
-            chunk_label="Page 1",
-            content_hash="def456",
-            simhash=99,
-            char_count=500,
-            excerpt="First 500 chars...",
-        )
-        assert chunk.chunk_index == 0
-        assert chunk.chunk_type == "page"
 
 
 class TestTemporalProfileModel:

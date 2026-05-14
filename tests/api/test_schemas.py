@@ -7,13 +7,6 @@ from pydantic import BaseModel, ValidationError
 from ulid import ULID
 
 from src.api.schemas.audit_log import AuditLogResponse
-from src.api.schemas.change import (
-    ChangeDetailResponse,
-    ChangeResponse,
-    SnapshotChunkResponse,
-    SnapshotResponse,
-    SnapshotWithChunksResponse,
-)
 from src.api.schemas.content_config import ContentConfig, ContentOptions
 from src.api.schemas.notification_config import (
     WatchNotificationConfigCreate,
@@ -176,145 +169,9 @@ class TestWatchUpdate:
         assert data.effective_url == "https://example.com/resolved"
 
 
-class TestSnapshotChunkResponse:
-    def test_from_dict(self):
-        data = SnapshotChunkResponse.model_validate(
-            {
-                "id": "01KM7A9TP2B0BQCNZ5PZX4MH86",
-                "snapshot_id": "01KM7A9TP2B0BQCNZ5PZX4MH87",
-                "chunk_index": 0,
-                "chunk_type": "text",
-                "chunk_label": "section-1",
-                "content_hash": "abc123",
-                "simhash": 12345678,
-                "char_count": 500,
-                "excerpt": "First 200 chars...",
-            }
-        )
-        assert data.id == "01KM7A9TP2B0BQCNZ5PZX4MH86"
-        assert data.snapshot_id == "01KM7A9TP2B0BQCNZ5PZX4MH87"
-        assert data.chunk_index == 0
-        assert data.chunk_type == "text"
-        assert data.chunk_label == "section-1"
-        assert data.content_hash == "abc123"
-        assert data.simhash == 12345678
-        assert data.char_count == 500
-        assert data.excerpt == "First 200 chars..."
-
-
-class TestSnapshotResponse:
-    def test_from_dict(self):
-        ts = datetime(2026, 3, 21, 12, 0, 0, tzinfo=UTC)
-        data = SnapshotResponse.model_validate(
-            {
-                "id": "01KM7A9TP2B0BQCNZ5PZX4MH87",
-                "watch_id": "01KM7A9TP2B0BQCNZ5PZX4MH89",
-                "content_hash": "sha256abc",
-                "simhash": 99999999,
-                "storage_path": "/data/snapshots/abc.html",
-                "text_path": "/data/snapshots/abc.txt",
-                "storage_backend": "local",
-                "chunk_count": 3,
-                "text_bytes": 4096,
-                "fetch_duration_ms": 250,
-                "fetcher_used": "http",
-                "fetched_at": ts,
-            }
-        )
-        assert data.id == "01KM7A9TP2B0BQCNZ5PZX4MH87"
-        assert data.watch_id == "01KM7A9TP2B0BQCNZ5PZX4MH89"
-        assert data.content_hash == "sha256abc"
-        assert data.chunk_count == 3
-        assert data.fetched_at == ts
-        assert data.screenshot_path is None
-        assert data.screenshot_browser is None
-
-
-class TestChangeResponse:
-    def test_from_dict(self):
-        ts = datetime(2026, 3, 21, 12, 0, 0, tzinfo=UTC)
-        data = ChangeResponse.model_validate(
-            {
-                "id": "01KM7A9TP2B0BQCNZ5PZX4MH8A",
-                "watch_id": "01KM7A9TP2B0BQCNZ5PZX4MH89",
-                "previous_snapshot_id": "01KM7A9TP2B0BQCNZ5PZX4MH87",
-                "current_snapshot_id": "01KM7A9TP2B0BQCNZ5PZX4MH88",
-                "change_metadata": {"added": 2, "removed": 1},
-                "significance": None,
-                "detected_at": ts,
-            }
-        )
-        assert data.id == "01KM7A9TP2B0BQCNZ5PZX4MH8A"
-        assert data.previous_snapshot_id == "01KM7A9TP2B0BQCNZ5PZX4MH87"
-        assert data.current_snapshot_id == "01KM7A9TP2B0BQCNZ5PZX4MH88"
-        assert data.change_metadata == {"added": 2, "removed": 1}
-        assert data.significance is None
-        assert data.detected_at == ts
-
-
-class TestSnapshotWithChunksResponse:
-    def test_importable_from_schemas(self):
-        assert SnapshotWithChunksResponse is not None
-
-    def test_has_chunks_field(self):
-        ts = datetime(2026, 3, 21, 12, 0, 0, tzinfo=UTC)
-        data = SnapshotWithChunksResponse.model_validate(
-            {
-                "id": "01KM7A9TP2B0BQCNZ5PZX4MH87",
-                "watch_id": "01KM7A9TP2B0BQCNZ5PZX4MH89",
-                "content_hash": "sha256abc",
-                "simhash": 99999999,
-                "storage_path": "/data/snapshots/abc.html",
-                "text_path": "/data/snapshots/abc.txt",
-                "storage_backend": "local",
-                "chunk_count": 0,
-                "text_bytes": 0,
-                "fetch_duration_ms": 100,
-                "fetcher_used": "http",
-                "fetched_at": ts,
-                "chunks": [],
-            }
-        )
-        assert data.chunks == []
-
-
-class TestChangeDetailResponse:
-    def test_importable_from_schemas(self):
-        assert ChangeDetailResponse is not None
-
-    def test_has_snapshot_fields(self):
-        ts = datetime(2026, 3, 21, 12, 0, 0, tzinfo=UTC)
-        snapshot_dict = {
-            "id": "01KM7A9TP2B0BQCNZ5PZX4MH88",
-            "watch_id": "01KM7A9TP2B0BQCNZ5PZX4MH89",
-            "content_hash": "sha256abc",
-            "simhash": 99999999,
-            "storage_path": "/data/snapshots/abc.html",
-            "text_path": "/data/snapshots/abc.txt",
-            "storage_backend": "local",
-            "chunk_count": 0,
-            "text_bytes": 0,
-            "fetch_duration_ms": 100,
-            "fetcher_used": "http",
-            "fetched_at": ts,
-            "chunks": [],
-        }
-        data = ChangeDetailResponse.model_validate(
-            {
-                "id": "01KM7A9TP2B0BQCNZ5PZX4MH8A",
-                "watch_id": "01KM7A9TP2B0BQCNZ5PZX4MH89",
-                "previous_snapshot_id": "01KM7A9TP2B0BQCNZ5PZX4MH87",
-                "current_snapshot_id": "01KM7A9TP2B0BQCNZ5PZX4MH88",
-                "change_metadata": {},
-                "significance": None,
-                "detected_at": ts,
-                "current_snapshot": snapshot_dict,
-                "previous_snapshot": None,
-            }
-        )
-        assert data.current_snapshot is not None
-        assert data.current_snapshot.id == "01KM7A9TP2B0BQCNZ5PZX4MH88"
-        assert data.previous_snapshot is None
+# Phase 5 (#156): TestSnapshotChunkResponse, TestSnapshotResponse, TestChangeResponse,
+# TestSnapshotWithChunksResponse, TestChangeDetailResponse removed.
+# src/api/schemas/change.py deleted; Snapshot/Change tables dropped.
 
 
 class TestWatchResponse:

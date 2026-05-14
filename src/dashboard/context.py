@@ -11,7 +11,6 @@ from ulid import ULID
 from src.core.models.audit_log import AuditLog, EventType
 from src.core.models.domain import Domain
 from src.core.models.notification_config import WatchNotificationConfig
-from src.core.models.snapshot import Snapshot
 from src.core.models.temporal_profile import TemporalProfile
 from src.core.models.watch import Watch
 
@@ -216,14 +215,12 @@ async def get_watch_timeline(
     offset: int = 0,
     limit: int = 50,
 ) -> list[dict]:
-    """Return a unified lifecycle event timeline for a watch.
+    """Return lifecycle event timeline for a watch.
 
-    Merges AuditLog entries and Snapshot rows (as pipeline run events) into
-    a single chronological list sorted newest-first. Supports offset-based
-    pagination.
+    Sources AuditLog entries into a chronological list sorted newest-first.
+    Supports offset-based pagination.
 
-    Phase 5 (#156): Change rows removed — the ``change.detected`` event type
-    no longer appears in timelines.
+    Phase 5 (#156): Snapshot + Change tables dropped — timeline is AuditLog-only.
 
     Each entry is a dict with keys:
     - ``event_type`` — string identifier for the event
@@ -237,27 +234,15 @@ async def get_watch_timeline(
     except ValueError:
         return []
 
-    # --- AuditLog rows (config + error events; excludes CHECK_SNAPSHOT_CREATED to avoid
-    #     double-counting with the Snapshot rows fetched below) ---
+    # Phase 5 (#156): Snapshot table dropped. Timeline now sourced from AuditLog only.
     audit_stmt = select(
         AuditLog.event_type.label("event_type"),
         AuditLog.created_at.label("timestamp"),
         AuditLog.payload.label("payload"),
         AuditLog.id.label("source_id"),
-    ).where(
-        AuditLog.watch_id == parsed,
-        AuditLog.event_type != EventType.CHECK_SNAPSHOT_CREATED,
-    )
+    ).where(AuditLog.watch_id == parsed)
 
-    # --- Snapshot rows (authoritative source for pipeline run events) ---
-    snapshot_stmt = select(
-        Snapshot.id.label("source_id"),
-        Snapshot.fetched_at.label("timestamp"),
-    ).where(Snapshot.watch_id == parsed)
-
-    # Execute queries
     audit_rows = list((await session.execute(audit_stmt)).all())
-    snapshot_rows = list((await session.execute(snapshot_stmt)).all())
 
     entries: list[dict] = []
 
@@ -281,17 +266,6 @@ async def get_watch_timeline(
             }
         )
 
-    for row in snapshot_rows:
-        entries.append(
-            {
-                "event_type": "check.snapshot_created",
-                "timestamp": row.timestamp,
-                "summary": "Snapshot fetched",
-                "detail_url": None,
-                "category": "run",
-            }
-        )
-
     # Sort all entries newest-first, then apply pagination
     entries.sort(key=lambda e: e["timestamp"], reverse=True)
     return entries[offset : offset + limit]
@@ -303,39 +277,17 @@ async def get_watch_timeline_count(
 ) -> int:
     """Return total number of timeline entries for a watch (for pagination).
 
-    Phase 5 (#156): Change rows excluded — only AuditLog + Snapshot counted.
+    Phase 5 (#156): Snapshot table dropped — count is AuditLog rows only.
     """
     try:
         parsed = ULID.from_str(watch_id)
     except ValueError:
         return 0
 
-    audit_count = (
-        await session.scalar(
-            select(func.count(AuditLog.id)).where(
-                AuditLog.watch_id == parsed,
-                AuditLog.event_type != EventType.CHECK_SNAPSHOT_CREATED,
-            )
-        )
+    return (
+        await session.scalar(select(func.count(AuditLog.id)).where(AuditLog.watch_id == parsed))
         or 0
     )
-    snapshot_count = (
-        await session.scalar(select(func.count(Snapshot.id)).where(Snapshot.watch_id == parsed))
-        or 0
-    )
-    return audit_count + snapshot_count
-
-
-async def get_latest_snapshot(session: AsyncSession, watch_id: ULID) -> Snapshot | None:
-    """Fetch the most recent snapshot for a watch, or None."""
-    stmt = (
-        select(Snapshot)
-        .where(Snapshot.watch_id == watch_id)
-        .order_by(Snapshot.fetched_at.desc())
-        .limit(1)
-    )
-    result = await session.execute(stmt)
-    return result.scalar_one_or_none()
 
 
 async def get_watch_profiles(session: AsyncSession, watch_id: ULID) -> list[TemporalProfile]:

@@ -4,14 +4,16 @@ tests/fixtures/ holds static sample files used by extractor tests (e.g. sample.h
 
 Phase 5 factory contract
 ------------------------
-The module-level async helpers ``make_watch``, ``make_snapshot``, ``make_info_item``,
-and ``make_info_spec`` are NOT pytest fixtures — they are awaitable factory
-functions test code can call directly. ``default_snapshot_fixture`` remains
-as a pytest fixture for tests that consume it in fixture form.
+The module-level async helpers ``make_watch``, ``make_info_item``, and
+``make_info_spec`` are NOT pytest fixtures — they are awaitable factory
+functions test code can call directly.
 
 ``make_watch`` requires ``info_source_id`` (Phase 5+). Callers may still pass
 ``info_item_id`` for compatibility during cutover — a new InfoSource is
 auto-created in that case so the NOT NULL constraint is always satisfied.
+
+Phase 5 (#156): ``make_snapshot`` and ``default_snapshot_fixture`` removed —
+Snapshot table dropped.
 """
 
 import logging
@@ -34,7 +36,6 @@ from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from src.api.deps import get_db_session, get_probe_fn, require_api_key
 from src.core.models import Base
 from src.core.models.app_user import AppUser
-from src.core.models.snapshot import Snapshot
 from src.core.models.watch import ContentType, Watch
 from src.core.probe import ProbeResult
 from src.core.registry import ServiceRegistry, set_registry_for_testing
@@ -379,32 +380,13 @@ async def make_watch(
     return watch
 
 
-async def make_snapshot(session, watch, *, fetcher_used="http", **kwargs):
-    """Create and flush a Snapshot attached to *watch*."""
-    snapshot = Snapshot(watch_id=watch.id, fetcher_used=fetcher_used, **kwargs)
-    session.add(snapshot)
-    await session.flush()
-    return snapshot
-
-
 # ---------------------------------------------------------------------------
 # Legacy pytest-fixture variants (renamed to avoid name collision with the
 # module-level helpers above). Tests that consume them as fixtures keep
 # working: ``def test_x(default_watch_fixture)``.
 # ---------------------------------------------------------------------------
-
-
-@pytest.fixture
-def default_snapshot_fixture(db_session):
-    """Factory fixture: create and flush a Snapshot row attached to *watch* (legacy form)."""
-
-    async def _make(watch, fetcher_used="http", **kwargs):
-        snapshot = Snapshot(watch_id=watch.id, fetcher_used=fetcher_used, **kwargs)
-        db_session.add(snapshot)
-        await db_session.flush()
-        return snapshot
-
-    return _make
+# Phase 5 (#156): make_snapshot + default_snapshot_fixture removed.
+# Snapshot table dropped; tests that used them are also removed.
 
 
 @pytest.fixture

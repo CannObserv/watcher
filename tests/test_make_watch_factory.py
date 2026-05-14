@@ -2,6 +2,8 @@
 
 Phase 5: ``make_watch`` auto-creates an InfoSource (not InfoItem + InfoSpec).
 The Watch row references ``info_source_id``; ``info_item_id`` is gone.
+
+Phase 5 (#156): ``make_snapshot`` removed — Snapshot table dropped.
 """
 
 import pytest
@@ -9,7 +11,7 @@ from sqlalchemy import select
 
 from src.core.models.watch import ContentType, Watch
 from tests._information_test_models import InfoItem, InfoSource
-from tests.conftest import make_info_item, make_info_source, make_snapshot, make_watch
+from tests.conftest import make_info_item, make_info_source, make_watch
 
 pytestmark = pytest.mark.integration
 
@@ -50,18 +52,4 @@ async def test_make_watch_url_passed_to_info_source(db_session):
     assert not hasattr(Watch, "url")
 
 
-async def test_make_snapshot_attaches_to_watch(db_session):
-    watch = await make_watch(db_session, name="Snap Watch")
-    snap = await make_snapshot(
-        db_session,
-        watch,
-        content_hash="abc",
-        simhash=0,
-        storage_path="/tmp/x",
-        text_path="/tmp/x.txt",
-        chunk_count=1,
-        text_bytes=10,
-        fetch_duration_ms=1,
-    )
-    assert snap.watch_id == watch.id
-    assert snap.fetcher_used == "http"
+# Phase 5 (#156): test_make_snapshot_attaches_to_watch removed — Snapshot table dropped.

@@ -9,12 +9,11 @@ from typing import Literal
 import httpx
 from archiver_client import AuthError, NotFound, ServerError
 from fastapi import APIRouter, BackgroundTasks, Depends, Form, HTTPException, Request
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
+from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from jinja2 import TemplateError
 from notifier_client.errors import NotifierError
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
-from ulid import ULID
 
 from src.api.deps import get_db_session, get_probe_fn
 from src.api.routes.helpers import parse_ulid
@@ -27,7 +26,6 @@ from src.core.models.audit_log import EventType, audit
 from src.core.models.domain import Domain
 from src.core.models.notification_config import WatchNotificationConfig
 from src.core.models.notification_template import DomainNcRef, NotificationTemplate, WatchNcRef
-from src.core.models.snapshot import Snapshot
 from src.core.models.watch import ContentType, Watch
 from src.core.notifications.content import build_body, build_title, resolve_options
 from src.core.notifications.default_templates import (
@@ -47,8 +45,6 @@ from src.core.notifications.preview_fixtures import (
 from src.core.notifier_client import get_notifier_client
 from src.core.probe import ProbeResult
 from src.core.registry import get_registry
-from src.core.screenshot import capture_screenshot
-from src.core.storage import default_storage
 from src.core.watches import create_watch as _create_watch
 from src.core.watches import resolve_watch_url
 from src.core.watches.invariants import (
@@ -62,7 +58,6 @@ from src.dashboard.context import (
     get_domain_watches,
     get_domains_total_count,
     get_domains_with_watch_counts,
-    get_latest_snapshot,
     get_queue_health,
     get_watch_detail,
     get_watch_list,
@@ -326,7 +321,10 @@ async def watch_detail_page(
     watch_id: str,
     session: AsyncSession = Depends(get_db_session),
 ):
-    """Watch detail page with profiles, notifications, and change history."""
+    """Watch detail page with profiles and notifications.
+
+    Phase 5 (#156): snapshot_meta removed — Snapshot table dropped.
+    """
     watch = await get_watch_detail(session, watch_id)
     if not watch:
         return templates.TemplateResponse(request, "pages/404.html", status_code=404)
@@ -334,33 +332,12 @@ async def watch_detail_page(
     resolved_url = await resolve_watch_url(watch, info_client)
     profiles = await get_watch_profiles(session, watch.id)
     notifications = await get_watch_notifications(session, watch.id)
-    latest_snapshot = await get_latest_snapshot(session, watch.id)
 
     # Build field contexts for content-type-aware rendering
     applicable_fields = _watch_fields_for_content_type(watch.content_type)
     field_contexts = {
         name: _watch_field_context(request, watch, name, mode="view") for name in applicable_fields
     }
-
-    # Build snapshot metadata whenever a snapshot exists; screenshot fields are conditional.
-    storage = default_storage
-    snapshot_meta = None
-    if latest_snapshot is not None:
-        raw_bytes = None
-        if latest_snapshot.storage_path and storage.exists(latest_snapshot.storage_path):
-            raw_bytes = storage.size(latest_snapshot.storage_path)
-        has_screenshot = latest_snapshot.screenshot_path is not None and storage.exists(
-            latest_snapshot.screenshot_path
-        )
-        snapshot_meta = {
-            "snapshot_id": str(latest_snapshot.id),
-            "fetched_at": latest_snapshot.fetched_at,
-            "chunk_count": latest_snapshot.chunk_count,
-            "text_bytes": latest_snapshot.text_bytes,
-            "raw_bytes": raw_bytes,
-            "screenshot_browser": latest_snapshot.screenshot_browser if has_screenshot else None,
-            "has_screenshot": has_screenshot,
-        }
 
     # Check if the watch's domain is inactive (disables the status toggle)
     domain_inactive = False
@@ -384,7 +361,7 @@ async def watch_detail_page(
         "profiles": profiles,
         "notifications": notifications,
         "field_contexts": field_contexts,
-        "snapshot_meta": snapshot_meta,
+        "snapshot_meta": None,
         "domain_inactive": domain_inactive,
         "timeline": timeline,
         "timeline_total": timeline_total,
@@ -399,140 +376,6 @@ async def watch_detail_page(
         "extra_params": {},
     }
     return templates.TemplateResponse(request, "pages/watch_detail.html", context)
-
-
-@router.get("/watches/{watch_id}/screenshot")
-async def watch_screenshot(
-    watch_id: str,
-    snapshot_id: str | None = None,
-    session: AsyncSession = Depends(get_db_session),
-):
-    """Serve the PNG screenshot for the latest (or specified) snapshot of a watch."""
-    watch = await get_watch_detail(session, watch_id)
-    if not watch:
-        raise HTTPException(status_code=404, detail="Watch not found")
-
-    if snapshot_id:
-        try:
-            sid = ULID.from_str(snapshot_id)
-        except ValueError:
-            raise HTTPException(status_code=404, detail="Snapshot not found")
-        result = await session.execute(
-            select(Snapshot).where(Snapshot.id == sid, Snapshot.watch_id == watch.id)
-        )
-        snapshot = result.scalar_one_or_none()
-    else:
-        snapshot = await get_latest_snapshot(session, watch.id)
-
-    storage = default_storage
-    if (
-        snapshot is None
-        or snapshot.screenshot_path is None
-        or not storage.exists(snapshot.screenshot_path)
-    ):
-        raise HTTPException(status_code=404, detail="Screenshot not available")
-
-    png_bytes = storage.load(snapshot.screenshot_path)
-    return Response(content=png_bytes, media_type="image/png")
-
-
-@router.post("/watches/{watch_id}/screenshot")
-async def watch_screenshot_recapture(
-    watch_id: str,
-    session: AsyncSession = Depends(get_db_session),
-):
-    """Trigger an on-demand screenshot re-capture for the latest snapshot of a watch.
-
-    Returns JSON:
-    - ``{"status": "ok", "screenshot_path": "..."}`` on success.
-    - ``{"status": "unavailable", "detail": "..."}`` if Playwright not installed.
-    - 404 if the watch or its latest snapshot does not exist.
-    """
-    watch = await get_watch_detail(session, watch_id)
-    if not watch:
-        raise HTTPException(status_code=404, detail="Watch not found")
-
-    snapshot = await get_latest_snapshot(session, watch.id)
-    if snapshot is None:
-        raise HTTPException(status_code=404, detail="No snapshot available for this watch")
-
-    info_client = get_registry().get_archiver_client()
-    resolved_url = await resolve_watch_url(watch, info_client)
-    result = await capture_screenshot(resolved_url)
-    if result is None:
-        return JSONResponse(
-            status_code=200,
-            content={"status": "unavailable", "detail": "Playwright not installed"},
-        )
-
-    storage = default_storage
-    screenshot_path = storage.snapshot_path(str(watch.id), str(snapshot.id), "png")
-    storage.save(screenshot_path, result.png_bytes)
-
-    snapshot.screenshot_path = screenshot_path
-    snapshot.screenshot_browser = result.browser
-    await session.flush()
-
-    return JSONResponse(
-        status_code=200,
-        content={"status": "ok", "screenshot_path": screenshot_path},
-    )
-
-
-@router.get("/watches/{watch_id}/snapshots/{snapshot_id}/content")
-async def watch_snapshot_content(
-    watch_id: str,
-    snapshot_id: str,
-    session: AsyncSession = Depends(get_db_session),
-):
-    """Serve the stored snapshot text/content as an escaped HTML page.
-
-    Prefers ``text_path`` (extracted text); falls back to ``storage_path`` (raw content).
-    Returns 404 if the watch, snapshot, or storage file is not found.
-    """
-    watch = await get_watch_detail(session, watch_id)
-    if not watch:
-        raise HTTPException(status_code=404, detail="Watch not found")
-
-    try:
-        sid = ULID.from_str(snapshot_id)
-    except ValueError:
-        raise HTTPException(status_code=404, detail="Snapshot not found")
-
-    result = await session.execute(
-        select(Snapshot).where(Snapshot.id == sid, Snapshot.watch_id == watch.id)
-    )
-    snapshot = result.scalar_one_or_none()
-    if snapshot is None:
-        raise HTTPException(status_code=404, detail="Snapshot not found")
-
-    storage = default_storage
-
-    # Prefer extracted text; fall back to raw storage
-    content_path: str | None = None
-    if snapshot.text_path and storage.exists(snapshot.text_path):
-        content_path = snapshot.text_path
-    elif snapshot.storage_path and storage.exists(snapshot.storage_path):
-        content_path = snapshot.storage_path
-
-    if content_path is None:
-        raise HTTPException(status_code=404, detail="Snapshot content not available")
-
-    raw_bytes = storage.load(content_path)
-    text = raw_bytes.decode("utf-8", errors="replace")
-    escaped = html_lib.escape(text)
-
-    html_page = (
-        "<!doctype html><html><head>"
-        "<meta charset='utf-8'>"
-        f"<title>Snapshot content — {html_lib.escape(watch.name)}</title>"
-        "<style>body{font-family:monospace;white-space:pre-wrap;padding:1rem;}"
-        "pre{margin:0;}</style>"
-        "</head><body>"
-        f"<pre>{escaped}</pre>"
-        "</body></html>"
-    )
-    return HTMLResponse(content=html_page)
 
 
 @router.delete("/watches/{watch_id}")

@@ -6,7 +6,6 @@ import pytest
 
 from src.core.models.audit_log import AuditLog, EventType
 from src.core.models.domain import Domain
-from src.core.models.snapshot import Snapshot
 from src.core.models.watch import ContentType
 from src.dashboard.context import (
     get_dashboard_stats,
@@ -392,18 +391,7 @@ class TestGetDomainsFiltered:
 
 @pytest.mark.integration
 class TestGetWatchTimeline:
-    """Tests for the unified lifecycle event timeline."""
-
-    _snap_kwargs = dict(
-        content_hash="a" * 64,
-        simhash=0,
-        storage_path="/tmp/s",
-        text_path="/tmp/t",
-        chunk_count=1,
-        text_bytes=100,
-        fetch_duration_ms=50,
-        fetcher_used="http",
-    )
+    """Tests for the lifecycle event timeline (AuditLog-only after Phase 5 #156)."""
 
     async def test_empty_watch_returns_empty(self, db_session):
         watch = await make_watch(db_session, name="Empty", url="https://a.com", content_type="html")
@@ -437,21 +425,6 @@ class TestGetWatchTimeline:
         assert isinstance(item["summary"], str)
         assert len(item["summary"]) > 0
 
-    async def test_snapshot_surfaces_as_run_entry(self, db_session):
-        watch = await make_watch(
-            db_session, name="Run Watch", url="https://a.com", content_type="html"
-        )
-
-        snap = Snapshot(watch_id=watch.id, **self._snap_kwargs)
-        db_session.add(snap)
-        await db_session.flush()
-
-        result = await get_watch_timeline(db_session, str(watch.id), offset=0, limit=50)
-        run_entries = [r for r in result if r["category"] == "run"]
-        assert len(run_entries) == 1
-        assert run_entries[0]["event_type"] == "check.snapshot_created"
-        assert run_entries[0]["timestamp"] is not None
-
     async def test_fetch_failed_audit_event_surfaces_as_error(self, db_session):
         watch = await make_watch(
             db_session, name="Error Watch", url="https://a.com", content_type="html"
@@ -477,9 +450,13 @@ class TestGetWatchTimeline:
         t1 = datetime(2025, 1, 1, 12, 0, tzinfo=UTC)
         t2 = datetime(2025, 1, 2, 12, 0, tzinfo=UTC)
 
-        snap1 = Snapshot(watch_id=watch.id, fetched_at=t1, **self._snap_kwargs)
-        snap2 = Snapshot(watch_id=watch.id, fetched_at=t2, **self._snap_kwargs)
-        db_session.add_all([snap1, snap2])
+        for ts in (t1, t2):
+            entry = AuditLog(
+                event_type=EventType.CHECK_NO_CHANGE,
+                watch_id=watch.id,
+                created_at=ts,
+            )
+            db_session.add(entry)
         await db_session.flush()
 
         result = await get_watch_timeline(db_session, str(watch.id), offset=0, limit=50)
@@ -492,7 +469,8 @@ class TestGetWatchTimeline:
         )
 
         for _ in range(5):
-            db_session.add(Snapshot(watch_id=watch.id, **self._snap_kwargs))
+            entry = AuditLog(event_type=EventType.CHECK_NO_CHANGE, watch_id=watch.id)
+            db_session.add(entry)
         await db_session.flush()
 
         all_results = await get_watch_timeline(db_session, str(watch.id), offset=0, limit=50)
@@ -501,7 +479,6 @@ class TestGetWatchTimeline:
 
         assert len(page1) == 3
         assert len(page2) == 2
-        # Combined pages should match the full result
         assert [r["timestamp"] for r in page1 + page2] == [r["timestamp"] for r in all_results]
 
     async def test_entry_keys_present(self, db_session):
@@ -509,8 +486,8 @@ class TestGetWatchTimeline:
             db_session, name="Key Watch", url="https://a.com", content_type="html"
         )
 
-        snap = Snapshot(watch_id=watch.id, **self._snap_kwargs)
-        db_session.add(snap)
+        entry = AuditLog(event_type=EventType.CHECK_NO_CHANGE, watch_id=watch.id)
+        db_session.add(entry)
         await db_session.flush()
 
         result = await get_watch_timeline(db_session, str(watch.id), offset=0, limit=50)

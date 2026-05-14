@@ -9,7 +9,6 @@ from src.core.models.last_known_revision import LastKnownRevision
 from src.core.models.notification_config import WatchNotificationConfig
 from src.core.models.notification_template import DomainNcRef, NotificationTemplate, WatchNcRef
 from src.core.models.pending_source_revision import PendingSourceRevision
-from src.core.models.snapshot import Snapshot, SnapshotChunk
 from src.core.models.temporal_profile import PostAction, ProfileType, TemporalProfile
 from src.core.models.watch import ContentType, Watch
 
@@ -30,8 +29,6 @@ __all__ = [
     "DomainNcRef",
     "PostAction",
     "ProfileType",
-    "Snapshot",
-    "SnapshotChunk",
     "TemporalProfile",
     "TimestampMixin",
     "ULIDType",

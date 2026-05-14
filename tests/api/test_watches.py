@@ -17,7 +17,6 @@ from ulid import ULID
 from src.core.models.audit_log import AuditLog, EventType
 from src.core.models.domain import Domain
 from src.core.models.notification_config import WatchNotificationConfig
-from src.core.models.snapshot import Snapshot, SnapshotChunk
 from src.core.models.temporal_profile import TemporalProfile
 from src.core.models.watch import Watch
 from src.core.notifications.events import WatchEventType
@@ -423,36 +422,14 @@ class TestDeleteWatch:
         assert entry.watch_id is None  # SET NULL after cascade
 
     async def test_delete_cascades_children(self, client, db_session):
-        """Deleting a watch cascades to all child records."""
-        watch_id = await self._create_archived_watch(client, db_session, name="Cascade")
+        """Deleting a watch cascades to all child records.
 
-        # Insert child records directly via session
+        Phase 5 (#156): Snapshot/SnapshotChunk tables dropped — only TemporalProfile
+        and WatchNotificationConfig cascade is verified here.
+        """
+        watch_id = await self._create_archived_watch(client, db_session, name="Cascade")
         watch_ulid = ULID.from_str(watch_id)
 
-        snapshot = Snapshot(
-            watch_id=watch_ulid,
-            content_hash="a" * 64,
-            simhash=123,
-            storage_path="/tmp/test",
-            text_path="/tmp/test.txt",
-            chunk_count=1,
-            text_bytes=100,
-            fetch_duration_ms=50,
-            fetcher_used="http",
-        )
-        db_session.add(snapshot)
-        await db_session.flush()
-
-        chunk = SnapshotChunk(
-            snapshot_id=snapshot.id,
-            chunk_index=0,
-            chunk_type="section",
-            chunk_label="test",
-            content_hash="b" * 64,
-            simhash=456,
-            char_count=50,
-            excerpt="test content",
-        )
         profile = TemporalProfile(
             watch_id=watch_ulid,
             profile_type="event",
@@ -463,35 +440,17 @@ class TestDeleteWatch:
             channel_hint="https",
             remote_channel_id="01HV0000000000000000000099",
         )
-        db_session.add_all([chunk, profile, config])
+        db_session.add_all([profile, config])
         await db_session.flush()
 
         # Delete the watch
         await client.delete(f"/api/v1/watches/{watch_id}")
 
-        # Verify children are gone
+        # Verify watch is gone
         watches = (
             (await db_session.execute(select(Watch).where(Watch.id == watch_ulid))).scalars().all()
         )
         assert len(watches) == 0
-
-        snapshots = (
-            (await db_session.execute(select(Snapshot).where(Snapshot.watch_id == watch_ulid)))
-            .scalars()
-            .all()
-        )
-        assert len(snapshots) == 0
-
-        chunks = (
-            (
-                await db_session.execute(
-                    select(SnapshotChunk).where(SnapshotChunk.snapshot_id == snapshot.id)
-                )
-            )
-            .scalars()
-            .all()
-        )
-        assert len(chunks) == 0
 
         profiles = (
             (

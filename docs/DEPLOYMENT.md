@@ -33,8 +33,8 @@ export $(cat /etc/watcher/.env .env 2>/dev/null | xargs)
 | `BUILD_ID` | env | no | Git SHA for static asset cache-busting (default `"dev"`) |
 | `NOTIFIER_BASE_URL` | `/etc/watcher/.env` | **yes** | Base URL of the notifier service (e.g. `http://localhost:9000`) |
 | `NOTIFIER_API_KEY` | `/etc/watcher/.env` | **yes** | Watcher tenant API key issued by `scripts/seed_tenant.py` in the notifier repo |
-| `INFORMATION_BASE_URL` | `/etc/watcher/.env` | no | Information service base URL (default `http://localhost:8020`) |
-| `INFORMATION_API_KEY` | `/etc/watcher/.env` | **yes** | API key for the InformationClient SDK; missing key crashes the API on boot via the lifespan pre-warm |
+| `ARCHIVER_BASE_URL` | `/etc/watcher/.env` | no | Archiver service base URL (default `http://localhost:8020`) |
+| `ARCHIVER_API_KEY` | `/etc/watcher/.env` | **yes** | API key for the ArchiverClient SDK; missing key crashes the API on boot via the lifespan pre-warm |
 | `REDIS_URL` | `/etc/watcher/.env` | no | Redis connection URL for the change bus (default `redis://localhost:6379/0`) |
 | `CHANGES_DRAIN_INTERVAL_SECONDS` | env | no | Fast-tick changes-outbox drain cadence in seconds (default `10`); the 1-minute Procrastinate periodic stays as a safety floor |
 
@@ -44,7 +44,7 @@ A systemd unit file is provided at `deploy/watcher.service`.
 
 ### Installation
 
-> **Install the Information service first** — see [§ Information Service](#information-service) below. `watcher.service` pre-warms an `InformationClient` in its lifespan and will crash-loop on missing `INFORMATION_API_KEY` until the Information service section is complete.
+> **Install the Archiver service first** — see [§ Archiver Service](#archiver-service) below. `watcher.service` pre-warms an `ArchiverClient` in its lifespan and will crash-loop on missing `ARCHIVER_API_KEY` until the Archiver service section is complete.
 
 ```bash
 # Create system env directory
@@ -86,70 +86,21 @@ sudo journalctl -u watcher -f
 sudo systemctl daemon-reload && sudo systemctl restart watcher
 ```
 
-## Information Service
+## Archiver Service
 
-The Information service is a sibling FastAPI app (`src/information/`) that owns the canonical InfoItem + InfoSpec registry. Watcher's lifespan pre-warms an `InformationClient` SDK against it; without `INFORMATION_API_KEY` and a reachable service, `watcher.service` will refuse to boot.
+The Archiver is a sibling service at `/home/exedev/archiver` (port 8020,
+`archiver.service`) that owns the canonical InfoItem + InfoSource + InfoSpec
+registry. Watcher's lifespan pre-warms an `ArchiverClient` SDK against it;
+without `ARCHIVER_API_KEY` and a reachable service, `watcher.service` will
+refuse to boot.
 
-A systemd unit file is provided at `deploy/information.service`.
-
-### Installation
-
-```bash
-# Generate a strong API key (used by both the service and consumers)
-KEY=$(python -c "import secrets; print(secrets.token_urlsafe(32))")
-
-# Add to /etc/watcher/.env (shared by both services — both load EnvironmentFile=/etc/watcher/.env)
-echo "INFORMATION_BASE_URL=http://localhost:8020" | sudo tee -a /etc/watcher/.env
-echo "INFORMATION_API_KEY=$KEY"                   | sudo tee -a /etc/watcher/.env
-sudo chmod 640 /etc/watcher/.env  # group read required so the service user can load it
-
-# Apply Information service migrations (separate alembic root)
-export $(cat /etc/watcher/.env .env 2>/dev/null | xargs)
-uv run alembic -c alembic_information.ini upgrade head
-
-# Install + enable + start
-sudo cp deploy/information.service /etc/systemd/system/information.service
-sudo systemctl daemon-reload
-sudo systemctl enable --now information.service
-
-# Verify
-curl -s -H "X-API-Key: $INFORMATION_API_KEY" http://localhost:8020/api/v1/info-items
-```
-
-### Managing the Service
-
-```bash
-# Restart after code changes
-sudo systemctl restart information
-
-# Check status
-sudo systemctl status information
-
-# Follow logs
-sudo journalctl -u information -f
-```
-
-After installing `information.service`, restart `watcher.service` so its lifespan pre-warm picks up the now-reachable SDK target:
+See `/home/exedev/archiver/docs/DEPLOYMENT.md` for the full Archiver install
+(key generation, env-var registration, systemd unit). After installing
+`archiver.service`, restart `watcher.service`:
 
 ```bash
 sudo systemctl restart watcher
 ```
-
-### Tools surface (Phase 3a)
-
-Authoring helpers under `/api/v1/tools/*`:
-
-| Endpoint | Method | Purpose |
-|---|---|---|
-| `/tools/validate-info-spec` | POST | Validate an InfoSpec doc against the v1 schema. |
-| `/tools/find-info-items?q=…` | GET | Substring search over name + description. |
-| `/tools/fetch-and-render` | POST | Fetch a target URL (5 MiB body cap; `render=True` → 501 until #3). |
-| `/tools/preview-extraction` | POST | Validate + fetch + extract + fingerprint with a candidate spec. |
-| `/tools/propose-selectors` | POST | Heuristic-ranked CSS selector candidates. |
-
-Plus an extended `POST /api/v1/info-items` that atomically creates an InfoItem + primary InfoSpec when `initial_info_spec` is supplied.
-
-Smoke after deploying: `bash scripts/smoke_phase3a.sh` exercises every tool end-to-end against the local service.
 
 ## BUILD_ID
 

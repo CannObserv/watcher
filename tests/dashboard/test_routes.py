@@ -141,17 +141,14 @@ class TestWatchCreate:
         assert response.status_code == 200
         assert b"New Watch" in response.content
 
-    async def test_create_form_has_info_item_picker(self, client, db_session):
-        """The new create form renders an InfoItem <select>, not URL/fetch fields."""
-        # Seed two InfoItems so the picker has options to render.
-        await make_info_item(db_session, name="Picker A")
-        await make_info_item(db_session, name="Picker B")
-        await db_session.commit()
+    async def test_create_form_has_info_source_picker(self, client):
+        """The create form renders an InfoSource ID text input, not URL/fetch fields."""
         response = await client.get("/watches/new")
         assert b'name="name"' in response.content
-        assert b'name="info_item_id"' in response.content
+        assert b'name="info_source_id"' in response.content
         assert b'name="content_type"' in response.content
-        # URL and fetch_config form fields are gone.
+        # Old info_item_id picker and URL/fetch_config fields are gone.
+        assert b'name="info_item_id"' not in response.content
         assert b'name="url"' not in response.content
 
     async def test_create_watch_redirects(self, client, db_session):

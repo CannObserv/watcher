@@ -57,34 +57,38 @@ async def create_watch(
     """
     info_client = get_registry().get_archiver_client()
 
-    # Fragment-root invariant: if info_source_id is supplied and is a fragment
-    # (parent is not None), require an active root Watch on the chain.
-    if data.info_source_id is not None:
-        try:
-            source = await info_client.get_info_source(data.info_source_id)
-            if source.parent_info_source_id is not None:
-                await require_root_watch_on_chain(
-                    session, info_client, info_source_id=data.info_source_id
-                )
-        except RootWatchMissingError as exc:
-            raise HTTPException(
-                status_code=422,
-                detail={
-                    "kind": "domain",
-                    "message": "fragment requires active root Watch",
-                    "info_source_id": data.info_source_id,
-                },
-            ) from exc
-        except AuthError:
-            logger.exception("ArchiverClient auth failure during fragment-root check")
-            raise HTTPException(status_code=500, detail="Information service auth failed") from None
-        except (ServerError, httpx.ConnectError, httpx.TimeoutException) as exc:
-            logger.warning("Information service unreachable during fragment-root check: %s", exc)
-            raise HTTPException(
-                status_code=503,
-                detail="Information service unavailable; retry shortly",
-                headers={"Retry-After": "30"},
-            ) from exc
+    # Fragment-root invariant: check if info_source_id is a fragment and
+    # require an active root Watch on the chain if so.
+    try:
+        source = await info_client.get_info_source(data.info_source_id)
+        if source.parent_info_source_id is not None:
+            await require_root_watch_on_chain(
+                session, info_client, info_source_id=data.info_source_id
+            )
+    except NotFound as exc:
+        raise HTTPException(
+            status_code=422,
+            detail=f"info_source_id {data.info_source_id} does not exist",
+        ) from exc
+    except RootWatchMissingError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "kind": "domain",
+                "message": "fragment requires active root Watch",
+                "info_source_id": data.info_source_id,
+            },
+        ) from exc
+    except AuthError:
+        logger.exception("ArchiverClient auth failure during fragment-root check")
+        raise HTTPException(status_code=500, detail="Information service auth failed") from None
+    except (ServerError, httpx.ConnectError, httpx.TimeoutException) as exc:
+        logger.warning("Information service unreachable during fragment-root check: %s", exc)
+        raise HTTPException(
+            status_code=503,
+            detail="Information service unavailable; retry shortly",
+            headers={"Retry-After": "30"},
+        ) from exc
 
     try:
         return await _create_watch(

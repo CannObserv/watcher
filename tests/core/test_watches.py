@@ -39,7 +39,7 @@ def _make_probe(url: str | None = None, domain: str | None = None):
     return probe_fn
 
 
-def _make_info_client(*, info_item_id: str, url: str = "https://example.com/page"):
+def _make_info_client(*, url: str = "https://example.com/page"):
     """Build an SDK mock that returns a stable InfoSource for URL resolution."""
     fake_source_spec = MagicMock()
     fake_source_spec.additional_properties = {"target": {"url": url}}
@@ -71,11 +71,8 @@ class TestCreateWatch:
         watch = await create_watch(
             session=db_session,
             probe_fn=_make_probe(),
-            info_client=_make_info_client(
-                info_item_id=info_item_id, url="https://example.com/page"
-            ),
+            info_client=_make_info_client(url="https://example.com/page"),
             name="Test Watch",
-            info_item_id=info_item_id,
             info_source_id=info_source_id,
             content_type="html",
         )
@@ -92,11 +89,8 @@ class TestCreateWatch:
                 url="https://example.com/canonical",
                 domain="example.com",
             ),
-            info_client=_make_info_client(
-                info_item_id=info_item_id, url="https://example.com/page"
-            ),
+            info_client=_make_info_client(url="https://example.com/page"),
             name="Test Watch",
-            info_item_id=info_item_id,
             info_source_id=info_source_id,
             content_type="html",
         )
@@ -108,11 +102,8 @@ class TestCreateWatch:
         await create_watch(
             session=db_session,
             probe_fn=_make_probe(domain="newsite.gov"),
-            info_client=_make_info_client(
-                info_item_id=info_item_id, url="https://newsite.gov/page"
-            ),
+            info_client=_make_info_client(url="https://newsite.gov/page"),
             name="Gov Watch",
-            info_item_id=info_item_id,
             info_source_id=info_source_id,
             content_type="html",
         )
@@ -130,11 +121,8 @@ class TestCreateWatch:
         await create_watch(
             session=db_session,
             probe_fn=_make_probe(domain="existing.gov"),
-            info_client=_make_info_client(
-                info_item_id=info_item_id, url="https://existing.gov/page"
-            ),
+            info_client=_make_info_client(url="https://existing.gov/page"),
             name="Existing Domain Watch",
-            info_item_id=info_item_id,
             info_source_id=info_source_id,
             content_type="html",
         )
@@ -148,11 +136,8 @@ class TestCreateWatch:
         watch = await create_watch(
             session=db_session,
             probe_fn=_make_probe(domain="audit-test.com"),
-            info_client=_make_info_client(
-                info_item_id=info_item_id, url="https://audit-test.com/page"
-            ),
+            info_client=_make_info_client(url="https://audit-test.com/page"),
             name="Audit Watch",
-            info_item_id=info_item_id,
             info_source_id=info_source_id,
             content_type="html",
         )
@@ -177,11 +162,8 @@ class TestCreateWatch:
             await create_watch(
                 session=db_session,
                 probe_fn=failing_probe,
-                info_client=_make_info_client(
-                    info_item_id=info_item_id, url="https://broken.example"
-                ),
+                info_client=_make_info_client(url="https://broken.example"),
                 name="Bad URL Watch",
-                info_item_id=info_item_id,
                 info_source_id=info_source_id,
                 content_type="html",
             )
@@ -195,11 +177,8 @@ class TestCreateWatch:
             await create_watch(
                 session=db_session,
                 probe_fn=failing_probe,
-                info_client=_make_info_client(
-                    info_item_id=info_item_id, url="https://broken2.example"
-                ),
+                info_client=_make_info_client(url="https://broken2.example"),
                 name="Bad URL Watch",
-                info_item_id=info_item_id,
                 info_source_id=info_source_id,
                 content_type="html",
             )
@@ -218,11 +197,8 @@ class TestCreateWatch:
             watch = await create_watch(
                 session=db_session,
                 probe_fn=_make_probe(domain="notify-test.com"),
-                info_client=_make_info_client(
-                    info_item_id=info_item_id, url="https://notify-test.com/page"
-                ),
+                info_client=_make_info_client(url="https://notify-test.com/page"),
                 name="Notify Watch",
-                info_item_id=info_item_id,
                 info_source_id=info_source_id,
                 content_type="html",
             )
@@ -240,11 +216,8 @@ class TestCreateWatch:
         watch = await create_watch(
             session=db_session,
             probe_fn=_make_probe(),
-            info_client=_make_info_client(
-                info_item_id=info_item_id, url="https://example.com/configured"
-            ),
+            info_client=_make_info_client(url="https://example.com/configured"),
             name="Configured Watch",
-            info_item_id=info_item_id,
             info_source_id=info_source_id,
             content_type="pdf",
             schedule_config={"interval": "6h"},
@@ -290,7 +263,6 @@ class TestCreateWatchFragmentUrl:
                 probe_fn=_make_probe(url="https://root.example.com/page"),
                 info_client=client,
                 name="Fragment Watch",
-                info_item_id=info_item_id,
                 info_source_id=info_source_id,
                 content_type="html",
             )

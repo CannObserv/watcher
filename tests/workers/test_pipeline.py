@@ -1,16 +1,16 @@
 """Tests for _run_check_pipeline and helpers in workers.pipeline."""
 
-from unittest.mock import AsyncMock, patch
+import hashlib
+from datetime import UTC, datetime
+from unittest.mock import AsyncMock, MagicMock, patch
 
+import httpx
 import pytest
 from sqlalchemy import select
 
 from src.core.differ import ChangeStatus, ChunkFingerprint, diff_chunks
-from src.core.models.change import Change
-from src.core.models.snapshot import Snapshot
-from src.core.models.watch import ContentType
-from src.core.screenshot import ScreenshotResult
-from src.core.storage import LocalStorage
+from src.core.models.pending_source_revision import PendingSourceRevision
+from src.core.sources.revision_cache import upsert_last_known
 from src.workers.pipeline import (
     _EXT_MAP,
     _compute_significance,
@@ -79,303 +79,155 @@ class TestExtractWithSpec:
         assert "dropped" not in joined
 
 
+# ---------------------------------------------------------------------------
+# New Phase 5 pipeline tests (Task 7.2)
+# ---------------------------------------------------------------------------
+
+
+def _make_info_client(source_revision_id: str = "01HZZ000000000000000000REV") -> MagicMock:
+    """Build a mock ArchiverClient with post_source_revision pre-wired."""
+    client = MagicMock()
+    client.post_source_revision = AsyncMock(
+        return_value=MagicMock(source_revision_id=source_revision_id)
+    )
+    return client
+
+
 @pytest.mark.integration
 class TestRunCheckPipeline:
-    async def test_first_check_creates_snapshot(self, db_session, tmp_path):
-        watch = await make_watch(
-            db_session, name="Test", url="https://example.com", content_type=ContentType.HTML
-        )
+    """New POST-driven pipeline (Phase 5, Task 7.2)."""
 
-        storage = LocalStorage(base_dir=tmp_path)
-        content = b"<html><body><p>Hello world</p></body></html>"
+    async def test_happy_path_writes_scratch_and_posts(self, db_session, tmp_path, monkeypatch):
+        """Writes scratch file under WATCHER_CACHE_DIR, POSTs root revision, returns changed."""
+        monkeypatch.setenv("WATCHER_CACHE_DIR", str(tmp_path))
 
-        result = await _run_check_pipeline(
-            watch=watch,
-            raw_content=content,
-            fetcher_used="http",
-            fetch_duration_ms=100,
-            storage=storage,
-            session=db_session,
-            resolved=make_resolved(),
-        )
-        assert result["snapshot_id"] is not None
+        watch = await make_watch(db_session, name="Happy", url="https://example.com")
+        resolved = make_resolved(info_source_id="01HZZ000000000000000000SRC")
+        info_client = _make_info_client("01HZZ000000000000000000REV")
+
+        with patch("src.core.notifications.notify.dispatch_event_notifications", new=AsyncMock()):
+            result = await _run_check_pipeline(
+                watch=watch,
+                raw_content=b"<html><body><p>Hello world</p></body></html>",
+                fetcher_used="http",
+                fetch_duration_ms=100,
+                storage=None,
+                session=db_session,
+                resolved=resolved,
+                info_client=info_client,
+            )
+
         assert result["is_changed"] is True
-        assert result["chunk_count"] >= 1
+        assert result["source_revision_id"] is not None
 
-    async def test_identical_content_no_change(self, db_session, tmp_path):
-        watch = await make_watch(
-            db_session, name="Stable", url="https://example.com", content_type=ContentType.HTML
+        # Scratch file written
+        bin_files = list(tmp_path.glob("*.bin"))
+        assert len(bin_files) == 1
+
+        # POST called once
+        info_client.post_source_revision.assert_awaited_once()
+
+    async def test_fast_path_skips_when_fingerprint_matches(
+        self, db_session, tmp_path, monkeypatch
+    ):
+        """Seeded fingerprint matching extraction → skipped, no POST."""
+        monkeypatch.setenv("WATCHER_CACHE_DIR", str(tmp_path))
+
+        raw_content = b"<html><body><p>Same content</p></body></html>"
+        resolved = make_resolved(info_source_id="01HZZ000000000000000000SRC")
+        watch = await make_watch(db_session, name="Fast", url="https://example.com")
+
+        # Compute the fingerprint the pipeline will produce
+        extraction = await _extract_with_spec(raw_content, resolved.source_spec)
+        root_bytes = "\n".join(c.text for c in extraction.chunks).encode()
+        expected_fp = "sha256:" + hashlib.sha256(root_bytes).hexdigest()
+
+        # Seed the cache
+        now = datetime.now(UTC)
+        await upsert_last_known(
+            db_session,
+            info_source_id=resolved.info_source_id,
+            content_fingerprint=expected_fp,
+            source_revision_id="01HZZ000000000000000000OLD",
+            captured_at=now,
         )
 
-        storage = LocalStorage(base_dir=tmp_path)
-        content = b"<html><body><p>Same content</p></body></html>"
+        info_client = _make_info_client()
 
-        await _run_check_pipeline(
-            watch=watch,
-            raw_content=content,
-            fetcher_used="http",
-            fetch_duration_ms=100,
-            storage=storage,
-            session=db_session,
-            resolved=make_resolved(),
-        )
         result = await _run_check_pipeline(
             watch=watch,
-            raw_content=content,
+            raw_content=raw_content,
             fetcher_used="http",
             fetch_duration_ms=100,
-            storage=storage,
+            storage=None,
             session=db_session,
-            resolved=make_resolved(),
+            resolved=resolved,
+            info_client=info_client,
         )
+
         assert result["is_changed"] is False
+        assert result.get("skipped_reason") == "fast_path"
+        info_client.post_source_revision.assert_not_awaited()
 
-    async def test_different_content_detects_change(self, db_session, tmp_path):
-        watch = await make_watch(
-            db_session, name="Changing", url="https://example.com", content_type=ContentType.HTML
-        )
+    async def test_outbox_on_post_failure(self, db_session, tmp_path, monkeypatch):
+        """ConnectError → row in pending_source_revisions, result.outbox=True."""
+        monkeypatch.setenv("WATCHER_CACHE_DIR", str(tmp_path))
 
-        storage = LocalStorage(base_dir=tmp_path)
+        watch = await make_watch(db_session, name="Outbox", url="https://example.com")
+        resolved = make_resolved(info_source_id="01HZZ000000000000000000SRC")
 
-        await _run_check_pipeline(
-            watch=watch,
-            raw_content=b"<html><body><p>V1</p></body></html>",
-            fetcher_used="http",
-            fetch_duration_ms=100,
-            storage=storage,
-            session=db_session,
-            resolved=make_resolved(),
-        )
-        result = await _run_check_pipeline(
-            watch=watch,
-            raw_content=b"<html><body><p>V2</p></body></html>",
-            fetcher_used="http",
-            fetch_duration_ms=100,
-            storage=storage,
-            session=db_session,
-            resolved=make_resolved(),
-        )
-        assert result["is_changed"] is True
-        assert result["change_id"] is not None
-
-    async def test_stores_raw_content(self, db_session, tmp_path):
-        watch = await make_watch(
-            db_session, name="Storage", url="https://example.com", content_type=ContentType.HTML
-        )
-
-        storage = LocalStorage(base_dir=tmp_path)
-        content = b"<html><body><p>Stored</p></body></html>"
+        info_client = MagicMock()
+        info_client.post_source_revision = AsyncMock(side_effect=httpx.ConnectError("refused"))
 
         result = await _run_check_pipeline(
             watch=watch,
-            raw_content=content,
+            raw_content=b"<html><body><p>Content</p></body></html>",
             fetcher_used="http",
             fetch_duration_ms=100,
-            storage=storage,
+            storage=None,
             session=db_session,
-            resolved=make_resolved(),
-        )
-        stored = storage.load(result["storage_path"])
-        assert stored == content
-
-    async def test_significance_stored_on_change_record(self, db_session, tmp_path):
-        """Persisted Change record has correct significance value."""
-        watch = await make_watch(
-            db_session, name="Sig", url="https://example.com", content_type=ContentType.HTML
+            resolved=resolved,
+            info_client=info_client,
         )
 
-        storage = LocalStorage(base_dir=tmp_path)
-        await _run_check_pipeline(
-            watch=watch,
-            raw_content=b"<html><body><p>V1</p></body></html>",
-            fetcher_used="http",
-            fetch_duration_ms=100,
-            storage=storage,
-            session=db_session,
-            resolved=make_resolved(),
-        )
-        result2 = await _run_check_pipeline(
-            watch=watch,
-            raw_content=b"<html><body><p>V2</p></body></html>",
-            fetcher_used="http",
-            fetch_duration_ms=100,
-            storage=storage,
-            session=db_session,
-            resolved=make_resolved(),
-        )
-        assert result2["change_id"] is not None
+        assert result.get("outbox") is True
 
-        stmt = select(Change).where(Change.watch_id == watch.id)
-        change = (await db_session.execute(stmt)).scalar_one()
-        assert change is not None
-        assert change.significance is not None
-        assert 0.0 <= change.significance <= 1.0
+        rows = (await db_session.execute(select(PendingSourceRevision))).scalars().all()
+        assert len(rows) == 1
 
-    async def test_change_persists_info_item_id_and_fingerprints(self, db_session, tmp_path):
-        """Change rows carry previous/current fingerprints.
+    async def test_idempotency_reconcile_renames_scratch(self, db_session, tmp_path, monkeypatch):
+        """When server returns a different source_revision_id, scratch is renamed to canonical."""
+        monkeypatch.setenv("WATCHER_CACHE_DIR", str(tmp_path))
 
-        info_item_id/info_spec_id populated in Task 7.2.
-        """
-        watch = await make_watch(
-            db_session, name="Fp", url="https://example.com", content_type=ContentType.HTML
-        )
+        watch = await make_watch(db_session, name="Rename", url="https://example.com")
+        resolved = make_resolved(info_source_id="01HZZ000000000000000000SRC")
 
-        storage = LocalStorage(base_dir=tmp_path)
-        spec = make_resolved()
-        await _run_check_pipeline(
-            watch=watch,
-            raw_content=b"<html><body><p>V1</p></body></html>",
-            fetcher_used="http",
-            fetch_duration_ms=100,
-            storage=storage,
-            session=db_session,
-            resolved=spec,
-        )
-        result2 = await _run_check_pipeline(
-            watch=watch,
-            raw_content=b"<html><body><p>V2 changed</p></body></html>",
-            fetcher_used="http",
-            fetch_duration_ms=100,
-            storage=storage,
-            session=db_session,
-            resolved=spec,
-        )
-        assert result2["change_id"] is not None
-        change = (
-            await db_session.execute(select(Change).where(Change.watch_id == watch.id))
-        ).scalar_one()
-        # TODO Task 7.2: info_item_id populated from resolved source chain
-        assert change.info_item_id is None
-        # info_spec_id not populated by Task 7.1; will be dropped in Stage 10
-        assert change.info_spec_id is None
-        assert change.previous_fingerprint is not None
-        assert change.current_fingerprint is not None
+        canonical_id = "01HZZ000CANONICAL000000CAN"  # 26-char ULID-length
+        info_client = _make_info_client(canonical_id)
 
-    async def test_change_metadata_includes_significance(self, db_session, tmp_path):
-        """change_metadata returned by pipeline includes significance key."""
-        watch = await make_watch(
-            db_session, name="SigMeta", url="https://example.com", content_type=ContentType.HTML
-        )
+        with patch("src.core.notifications.notify.dispatch_event_notifications", new=AsyncMock()):
+            result = await _run_check_pipeline(
+                watch=watch,
+                raw_content=b"<html><body><p>Rename test</p></body></html>",
+                fetcher_used="http",
+                fetch_duration_ms=100,
+                storage=None,
+                session=db_session,
+                resolved=resolved,
+                info_client=info_client,
+            )
 
-        storage = LocalStorage(base_dir=tmp_path)
-        await _run_check_pipeline(
-            watch=watch,
-            raw_content=b"<html><body><p>V1</p></body></html>",
-            fetcher_used="http",
-            fetch_duration_ms=100,
-            storage=storage,
-            session=db_session,
-            resolved=make_resolved(),
-        )
-        result2 = await _run_check_pipeline(
-            watch=watch,
-            raw_content=b"<html><body><p>V2 changed</p></body></html>",
-            fetcher_used="http",
-            fetch_duration_ms=100,
-            storage=storage,
-            session=db_session,
-            resolved=make_resolved(),
-        )
-        assert result2["change_id"] is not None
-        assert "significance" in result2["change_metadata"]
-        sig = result2["change_metadata"]["significance"]
-        assert 0.0 <= sig <= 1.0
+        assert result["source_revision_id"] == canonical_id
 
-    async def test_change_metadata_includes_change_id(self, db_session, tmp_path):
-        """change_metadata returned by pipeline includes change_id key matching change_id result."""
-        watch = await make_watch(
-            db_session, name="ChgIdMeta", url="https://example.com", content_type=ContentType.HTML
-        )
+        # Canonical file exists
+        canonical_file = tmp_path / f"{canonical_id}.bin"
+        assert canonical_file.exists()
 
-        storage = LocalStorage(base_dir=tmp_path)
-        await _run_check_pipeline(
-            watch=watch,
-            raw_content=b"<html><body><p>V1</p></body></html>",
-            fetcher_used="http",
-            fetch_duration_ms=100,
-            storage=storage,
-            session=db_session,
-            resolved=make_resolved(),
+        # Only canonical file, no allocated-id file with a different name
+        bin_files = list(tmp_path.glob("*.bin"))
+        assert all(f.stem == canonical_id for f in bin_files), (
+            f"Expected only canonical file; found: {[f.name for f in bin_files]}"
         )
-        result2 = await _run_check_pipeline(
-            watch=watch,
-            raw_content=b"<html><body><p>V2 changed</p></body></html>",
-            fetcher_used="http",
-            fetch_duration_ms=100,
-            storage=storage,
-            session=db_session,
-            resolved=make_resolved(),
-        )
-        assert result2["change_id"] is not None
-        assert "change_id" in result2["change_metadata"]
-        assert result2["change_metadata"]["change_id"] == result2["change_id"]
-
-    async def test_change_insert_updates_last_changed_at(self, db_session, tmp_path):
-        """DB trigger stamps watches.last_changed_at when a Change row is inserted."""
-        watch = await make_watch(
-            db_session, name="Trigger", url="https://example.com", content_type=ContentType.HTML
-        )
-        assert watch.last_changed_at is None
-
-        storage = LocalStorage(base_dir=tmp_path)
-        await _run_check_pipeline(
-            watch=watch,
-            raw_content=b"<html><body><p>V1</p></body></html>",
-            fetcher_used="http",
-            fetch_duration_ms=100,
-            storage=storage,
-            session=db_session,
-            resolved=make_resolved(),
-        )
-        result2 = await _run_check_pipeline(
-            watch=watch,
-            raw_content=b"<html><body><p>V2 changed</p></body></html>",
-            fetcher_used="http",
-            fetch_duration_ms=100,
-            storage=storage,
-            session=db_session,
-            resolved=make_resolved(),
-        )
-        assert result2["change_id"] is not None
-
-        # The trigger fires AFTER INSERT on changes; expire the watch to force a DB re-read.
-        await db_session.refresh(watch)
-        assert watch.last_changed_at is not None
-
-    async def test_no_change_leaves_last_changed_at_unchanged(self, db_session, tmp_path):
-        """last_changed_at stays None when no Change row is ever inserted.
-
-        First pipeline run: establishes baseline snapshot but has no previous to diff against,
-        so no Change is created and the trigger never fires.
-        Second pipeline run: identical content → fast-path hash match → no new snapshot or Change.
-        """
-        watch = await make_watch(
-            db_session, name="Stable2", url="https://example.com", content_type=ContentType.HTML
-        )
-
-        storage = LocalStorage(base_dir=tmp_path)
-        content = b"<html><body><p>Same</p></body></html>"
-
-        await _run_check_pipeline(
-            watch=watch,
-            raw_content=content,
-            fetcher_used="http",
-            fetch_duration_ms=100,
-            storage=storage,
-            session=db_session,
-            resolved=make_resolved(),
-        )
-        await _run_check_pipeline(
-            watch=watch,
-            raw_content=content,
-            fetcher_used="http",
-            fetch_duration_ms=100,
-            storage=storage,
-            session=db_session,
-            resolved=make_resolved(),
-        )
-        await db_session.refresh(watch)
-        assert watch.last_changed_at is None
 
 
 class TestModifiedMetadataInvariant:
@@ -452,119 +304,3 @@ class TestComputeSignificance:
         """Edge case: no chunks at all → treat as unchanged."""
         sig = _compute_significance(added=0, removed=0, modified=0, total_curr=0)
         assert sig == 1.0
-
-
-@pytest.mark.integration
-class TestRunCheckPipelineScreenshot:
-    async def test_screenshot_saved_when_capture_succeeds(self, db_session, tmp_path):
-        """Pipeline sets screenshot_path on snapshot when capture returns bytes."""
-        watch = await make_watch(
-            db_session, name="Shot", url="https://example.com", content_type=ContentType.HTML
-        )
-
-        fake_png = b"\x89PNG\r\nfake"
-        fake_result = ScreenshotResult(png_bytes=fake_png, browser="Chromium 130.0.0")
-        storage = LocalStorage(base_dir=tmp_path)
-
-        with patch(
-            "src.workers.pipeline.capture_screenshot",
-            new=AsyncMock(return_value=fake_result),
-        ):
-            result = await _run_check_pipeline(
-                watch=watch,
-                raw_content=b"<html><body><p>Hi</p></body></html>",
-                fetcher_used="http",
-                fetch_duration_ms=100,
-                storage=storage,
-                session=db_session,
-                resolved=make_resolved(url="https://example.com/screenshot"),
-            )
-
-        assert result["screenshot_path"] is not None
-        assert result["screenshot_path"].endswith(".png")
-        assert storage.exists(result["screenshot_path"])
-        stored = storage.load(result["screenshot_path"])
-        assert stored == fake_png
-
-        # Snapshot record should reflect path and browser
-        snap = (
-            await db_session.execute(select(Snapshot).where(Snapshot.watch_id == watch.id))
-        ).scalar_one()
-        assert snap.screenshot_path == result["screenshot_path"]
-        assert snap.screenshot_browser == "Chromium 130.0.0"
-
-    async def test_screenshot_uses_resolved_url(self, db_session, tmp_path):
-        """capture_screenshot is invoked with the InfoSpec target URL, not watch.url."""
-        watch = await make_watch(
-            db_session,
-            name="UrlSrc",
-            url="https://watch-row.example.com",
-            content_type=ContentType.HTML,
-        )
-
-        storage = LocalStorage(base_dir=tmp_path)
-        capture = AsyncMock(return_value=ScreenshotResult(png_bytes=b"png", browser="x"))
-        with patch("src.workers.pipeline.capture_screenshot", new=capture):
-            await _run_check_pipeline(
-                watch=watch,
-                raw_content=b"<html><body><p>Hi</p></body></html>",
-                fetcher_used="http",
-                fetch_duration_ms=100,
-                storage=storage,
-                session=db_session,
-                resolved=make_resolved(url="https://from-spec.example.com"),
-            )
-
-        capture.assert_awaited_once()
-        args, _ = capture.call_args
-        assert args[0] == "https://from-spec.example.com"
-
-    async def test_screenshot_path_none_when_capture_fails(self, db_session, tmp_path):
-        """Pipeline leaves screenshot_path null when capture returns None."""
-        watch = await make_watch(
-            db_session, name="NoShot", url="https://example.com", content_type=ContentType.HTML
-        )
-
-        storage = LocalStorage(base_dir=tmp_path)
-
-        with patch("src.workers.pipeline.capture_screenshot", new=AsyncMock(return_value=None)):
-            result = await _run_check_pipeline(
-                watch=watch,
-                raw_content=b"<html><body><p>Hi</p></body></html>",
-                fetcher_used="http",
-                fetch_duration_ms=100,
-                storage=storage,
-                session=db_session,
-                resolved=make_resolved(),
-            )
-
-        assert result["screenshot_path"] is None
-        snap = (
-            await db_session.execute(select(Snapshot).where(Snapshot.watch_id == watch.id))
-        ).scalar_one()
-        assert snap.screenshot_path is None
-
-    async def test_pipeline_succeeds_when_screenshot_raises(self, db_session, tmp_path):
-        """Screenshot failure never propagates — pipeline still returns a snapshot."""
-        watch = await make_watch(
-            db_session, name="CrashShot", url="https://example.com", content_type=ContentType.HTML
-        )
-
-        storage = LocalStorage(base_dir=tmp_path)
-
-        async def _raise(*_a, **_kw):
-            raise RuntimeError("boom")
-
-        with patch("src.workers.pipeline.capture_screenshot", new=_raise):
-            result = await _run_check_pipeline(
-                watch=watch,
-                raw_content=b"<html><body><p>Hi</p></body></html>",
-                fetcher_used="http",
-                fetch_duration_ms=100,
-                storage=storage,
-                session=db_session,
-                resolved=make_resolved(),
-            )
-
-        # The pipeline result should still have a snapshot_id
-        assert result["snapshot_id"] is not None

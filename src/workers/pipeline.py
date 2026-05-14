@@ -1,34 +1,45 @@
-"""Check-watch pipeline: content extraction, diffing, and snapshot persistence."""
+"""Check-watch pipeline: content extraction, fingerprinting, and SourceRevision POST."""
 
 import hashlib
-from datetime import UTC, datetime
+import os
+from datetime import UTC, datetime, timedelta
 
 from archiver_client import ArchiverClient
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.core.differ import ChangeStatus, ChunkFingerprint, diff_chunks
 from src.core.extraction_defaults import (
     extraction_config_from_spec as _extraction_config_from_spec,
 )
 from src.core.extractors import HtmlExtractor
 from src.core.extractors.base import ExtractionResult
 from src.core.logging import get_logger
-from src.core.models.audit_log import EventType, audit
-from src.core.models.base import generate_ulid
-from src.core.models.change import Change
 from src.core.models.domain import Domain
-from src.core.models.snapshot import Snapshot, SnapshotChunk
-from src.core.models.watch import ContentType, Watch
+from src.core.notifications.events import WatchEvent, WatchEventType
+from src.core.notifications.notify import dispatch_event_notifications
 from src.core.rate_limiter import DomainRateLimiter
-from src.core.screenshot import capture_screenshot
-from src.core.simhash import simhash
+from src.core.sources.outbox import enqueue_pending
 from src.core.sources.resolver import ResolvedRootSource
+from src.core.sources.revision_cache import get_last_fingerprint, upsert_last_known
+from src.core.sources.scratch import (
+    allocate_revision_id,
+    rename_scratch_to_canonical,
+    scratch_path_for,
+    write_scratch_bytes,
+)
 from src.core.storage import StorageBackend
 
 logger = get_logger(__name__)
 
 _INT64_MAX = (1 << 63) - 1
+
+WATCHER_CACHE_TTL_SECONDS = int(os.environ.get("WATCHER_CACHE_TTL_SECONDS", "600"))
+
+# Phase 2c: only HTML survives the InfoSpec cutover. Migration aborts on
+# non-HTML content_type; PDF + FILE pipelines return in Phase 3+.
+_EXT_MAP = {
+    "html": "html",
+}
 
 
 def _compute_significance(*, added: int, removed: int, modified: int, total_curr: int) -> float:
@@ -43,13 +54,6 @@ def _compute_significance(*, added: int, removed: int, modified: int, total_curr
     changed = added + removed + modified
     sig = 1.0 - changed / total_curr
     return max(0.0, min(1.0, sig))
-
-
-# Phase 2c: only HTML survives the InfoSpec cutover. Migration aborts on
-# non-HTML content_type; PDF + FILE pipelines return in Phase 3+.
-_EXT_MAP = {
-    "html": "html",
-}
 
 
 def _to_signed64(val: int) -> int:
@@ -107,35 +111,6 @@ async def _maybe_decay_backoff(
     return True
 
 
-async def _get_previous_snapshot(
-    session: AsyncSession,
-    watch_id: object,
-) -> Snapshot | None:
-    """Fetch most recent snapshot for a watch, or None."""
-    stmt = (
-        select(Snapshot)
-        .where(Snapshot.watch_id == watch_id)
-        .order_by(Snapshot.fetched_at.desc())
-        .limit(1)
-    )
-    result = await session.execute(stmt)
-    return result.scalar_one_or_none()
-
-
-async def _get_snapshot_chunks(
-    session: AsyncSession,
-    snapshot_id: object,
-) -> list[SnapshotChunk]:
-    """Fetch all chunks for a snapshot ordered by index."""
-    stmt = (
-        select(SnapshotChunk)
-        .where(SnapshotChunk.snapshot_id == snapshot_id)
-        .order_by(SnapshotChunk.chunk_index)
-    )
-    result = await session.execute(stmt)
-    return list(result.scalars().all())
-
-
 async def _extract_with_spec(raw_content: bytes, document: dict) -> ExtractionResult:
     """Run the HTML extractor with config derived from the InfoSpec document.
 
@@ -148,206 +123,102 @@ async def _extract_with_spec(raw_content: bytes, document: dict) -> ExtractionRe
 
 
 async def _run_check_pipeline(
-    watch: Watch,
+    watch,
     raw_content: bytes,
     fetcher_used: str,
     fetch_duration_ms: int,
-    storage: StorageBackend,
+    storage: StorageBackend | None,
     session: AsyncSession,
     *,
     resolved: ResolvedRootSource,
     info_client: ArchiverClient | None = None,
 ) -> dict:
-    """Core check pipeline: hash, extract, diff, store.
+    """Fetch → scratch → POST root SourceRevision → dispatch. Outbox on POST failure.
 
-    Returns dict with snapshot_id, is_changed, change_id, chunk_count, storage_path.
-
-    ``resolved`` carries the root InfoSource the caller already fetched (always
-    supplied in production by ``check_watch``). ``info_client`` is reserved for
-    future use (e.g. child-source resolution in Task 7.2/7.3).
+    Returns dict with is_changed, and on success: source_revision_id, scratch_path.
+    Returns is_changed=False + skipped_reason="fast_path" when fingerprint is unchanged.
+    Returns outbox=True when POST fails (cascade aborted).
     """
-    # 1. Compute content hash and doc-level simhash
-    content_hash = hashlib.sha256(raw_content).hexdigest()
-    doc_simhash = _to_signed64(simhash(raw_content.decode(errors="replace")))
+    # 1. Extract root content per source_spec.
+    root_extracted = await _extract_with_spec(raw_content, resolved.source_spec)
+    # Compose bytes from chunk text (joined with newlines, UTF-8 encoded).
+    root_bytes = "\n".join(c.text for c in root_extracted.chunks).encode()
 
-    # 2. Check previous snapshot
-    prev_snapshot = await _get_previous_snapshot(session, watch.id)
+    # 2. SHA-256 over post-trim content.
+    fingerprint = "sha256:" + hashlib.sha256(root_bytes).hexdigest()
 
-    # 3. Fast path: identical content
-    if prev_snapshot and prev_snapshot.content_hash == content_hash:
-        logger.info("no change detected", extra={"watch_id": str(watch.id)})
-        audit(session, EventType.CHECK_NO_CHANGE, watch_id=watch.id, content_hash=content_hash)
-        await session.flush()
-        return {
-            "snapshot_id": None,
-            "is_changed": False,
-            "change_id": None,
-            "chunk_count": 0,
-            "storage_path": None,
-            "change_metadata": {},
-        }
+    # 3. Fast-path: local cache.
+    prior_fp = await get_last_fingerprint(session, resolved.info_source_id)
+    if prior_fp == fingerprint:
+        return {"is_changed": False, "skipped_reason": "fast_path"}
 
-    # 4. Extract content using the resolved InfoSource spec.
-    document = resolved.source_spec
-    extraction = await _extract_with_spec(raw_content, document)
+    # 4. Allocate ULID, write scratch.
+    allocated_id = allocate_revision_id()
+    scratch_path = write_scratch_bytes(allocated_id, root_bytes)
+    cache_uri = f"file://{scratch_path}"
+    now = datetime.now(UTC)
+    expires_at = now + timedelta(seconds=WATCHER_CACHE_TTL_SECONDS)
 
-    # 4a. Zero-chunk warning (force-refresh retry removed in Task 7.1;
-    # Task 7.2 will implement child-source fallback via the full source chain).
-    if not extraction.chunks:
-        logger.warning(
-            "extraction returned zero chunks",
-            extra={
-                "watch_id": str(watch.id),
-                "info_source_id": resolved.info_source_id,
-            },
+    # 5. POST to Archiver.
+    try:
+        response = await info_client.post_source_revision(
+            info_source_id=resolved.info_source_id,
+            content_fingerprint=fingerprint,
+            captured_at=now,
+            source_revision_id=allocated_id,
+            content_cache_uri=cache_uri,
+            content_cache_expires_at=expires_at,
+            content_size_bytes=len(root_bytes),
+            content_media_type=None,
         )
-
-    chunks = extraction.chunks
-
-    # 5. Store raw + extracted text
-    snapshot_id = generate_ulid()
-    ext = _EXT_MAP.get(str(watch.content_type).lower(), "html")
-    raw_path = storage.snapshot_path(str(watch.id), str(snapshot_id), ext)
-    text_path = storage.snapshot_path(str(watch.id), str(snapshot_id), "txt")
-    storage.save(raw_path, raw_content)
-    full_text = "\n".join(c.text for c in chunks)
-    storage.save(text_path, full_text.encode())
-
-    # 6. Create Snapshot record
-    snapshot = Snapshot(
-        id=snapshot_id,
-        watch_id=watch.id,
-        content_hash=content_hash,
-        simhash=doc_simhash,
-        storage_path=raw_path,
-        text_path=text_path,
-        storage_backend="local",
-        chunk_count=len(chunks),
-        text_bytes=len(full_text.encode()),
-        fetch_duration_ms=fetch_duration_ms,
-        fetcher_used=fetcher_used,
-    )
-    session.add(snapshot)
-    await session.flush()
-
-    # 7. Create SnapshotChunk records
-    for chunk in chunks:
-        session.add(
-            SnapshotChunk(
-                snapshot_id=snapshot_id,
-                chunk_index=chunk.index,
-                chunk_type=chunk.chunk_type,
-                chunk_label=chunk.label,
-                content_hash=chunk.content_hash,
-                simhash=_to_signed64(chunk.simhash),
-                char_count=chunk.char_count,
-                excerpt=chunk.excerpt,
-            )
+    except Exception as e:
+        # Outbox path. Abort cascade (cascade requires root revision to exist).
+        await enqueue_pending(
+            session,
+            info_source_id=resolved.info_source_id,
+            content_fingerprint=fingerprint,
+            captured_at=now,
+            content_cache_uri=cache_uri,
+            content_cache_expires_at=expires_at,
+            content_size_bytes=len(root_bytes),
+            content_media_type=None,
         )
-    await session.flush()
+        return {"is_changed": True, "outbox": True, "error": str(e)}
 
-    # 8-9. Diff against previous if exists
-    change_id = None
-    metadata: dict = {}
-    if prev_snapshot:
-        prev_chunks_db = await _get_snapshot_chunks(session, prev_snapshot.id)
-        prev_fingerprints = [
-            ChunkFingerprint(
-                index=c.chunk_index,
-                label=c.chunk_label,
-                content_hash=c.content_hash,
-                simhash=c.simhash,
-            )
-            for c in prev_chunks_db
-        ]
-        curr_fingerprints = [
-            ChunkFingerprint(
-                index=c.index,
-                label=c.label,
-                content_hash=c.content_hash,
-                simhash=c.simhash,
-            )
-            for c in chunks
-        ]
-        changes = diff_chunks(prev_fingerprints, curr_fingerprints)
-        has_real_changes = any(
-            ch.status in (ChangeStatus.ADDED, ChangeStatus.REMOVED, ChangeStatus.MODIFIED)
-            for ch in changes
-        )
-        if has_real_changes:
-            n_added = sum(1 for c in changes if c.status == ChangeStatus.ADDED)
-            n_removed = sum(1 for c in changes if c.status == ChangeStatus.REMOVED)
-            n_modified = sum(1 for c in changes if c.status == ChangeStatus.MODIFIED)
-            significance = _compute_significance(
-                added=n_added,
-                removed=n_removed,
-                modified=n_modified,
-                total_curr=len(chunks),
-            )
-            metadata = {
-                "added": [c.chunk_label for c in changes if c.status == ChangeStatus.ADDED],
-                "removed": [c.chunk_label for c in changes if c.status == ChangeStatus.REMOVED],
-                "modified": [
-                    {"label": c.chunk_label, "similarity": c.similarity}
-                    for c in changes
-                    if c.status == ChangeStatus.MODIFIED
-                ],
-                "significance": significance,
-            }
-            change_kwargs: dict = {
-                "watch_id": watch.id,
-                "previous_snapshot_id": prev_snapshot.id,
-                "current_snapshot_id": snapshot_id,
-                "change_metadata": metadata,
-                "significance": significance,
-                # TODO Task 7.2: populate info_item_id from resolved source chain
-                "previous_fingerprint": prev_snapshot.simhash,
-                "current_fingerprint": doc_simhash,
-                # info_spec_id column dropped in Stage 10; not populated here
-            }
-            change = Change(**change_kwargs)
-            session.add(change)
-            await session.flush()
-            change_id = change.id
-            # Stored in metadata so it flows into WatchEvent for the
-            # include_change_dashboard_url content option's URL construction.
-            metadata["change_id"] = str(change.id)
+    # 6. Idempotency reconcile (rare: server returned a different ULID).
+    canonical_id = str(response.source_revision_id)
+    if canonical_id != allocated_id:
+        rename_scratch_to_canonical(allocated_id, canonical_id)
 
-    # 10. Audit log
-    audit(
+    # 7. Update local cache.
+    await upsert_last_known(
         session,
-        EventType.CHECK_SNAPSHOT_CREATED,
-        watch_id=watch.id,
-        snapshot_id=str(snapshot_id),
-        content_hash=content_hash,
-        chunk_count=len(chunks),
-        is_changed=change_id is not None or prev_snapshot is None,
+        info_source_id=resolved.info_source_id,
+        content_fingerprint=fingerprint,
+        source_revision_id=canonical_id,
+        captured_at=now,
     )
-    await session.flush()
 
-    # 11. Screenshot (optional — HTML only; non-fatal if Playwright not installed or capture fails)
-    screenshot_path: str | None = None
-    if watch.content_type == ContentType.HTML:
-        screenshot_url = resolved.url if resolved is not None else None
-        if screenshot_url:
-            try:
-                screenshot_result = await capture_screenshot(screenshot_url)
-                if screenshot_result is not None:
-                    screenshot_path = storage.snapshot_path(str(watch.id), str(snapshot_id), "png")
-                    storage.save(screenshot_path, screenshot_result.png_bytes)
-                    snapshot.screenshot_path = screenshot_path
-                    snapshot.screenshot_browser = screenshot_result.browser
-                    await session.flush()
-            except Exception as exc:
-                logger.warning("screenshot step failed for watch %s: %s", str(watch.id), exc)
+    # 8. Dispatch via existing WatchEvent path.
+    effective_url = getattr(watch, "effective_url", None) or resolved.url
+    event = WatchEvent(
+        event_type=WatchEventType.CHANGE_DETECTED,
+        watch_id=str(watch.id),
+        watch_name=watch.name,
+        watch_url=effective_url,
+        occurred_at=now,
+        metadata={
+            "source_revision_id": canonical_id,
+            "info_source_id": resolved.info_source_id,
+            "content_fingerprint": fingerprint,
+        },
+    )
+    await dispatch_event_notifications(session, event)
 
-    # 12. Return result
-    return {
-        "snapshot_id": str(snapshot_id),
-        "is_changed": change_id is not None or prev_snapshot is None,
-        "change_id": str(change_id) if change_id else None,
-        "chunk_count": len(chunks),
-        "storage_path": raw_path,
-        "screenshot_path": screenshot_path,
-        "change_metadata": metadata if change_id else {},
+    result = {
+        "is_changed": True,
+        "source_revision_id": canonical_id,
+        "scratch_path": str(scratch_path_for(canonical_id)),
     }
+    # Cascade lives in Task 7.3 — appends to `result`.
+    return result

@@ -253,6 +253,54 @@ class TestCreateWatch:
         assert watch.schedule_config == {"interval": "6h"}
 
 
+class TestCreateWatchFragmentUrl:
+    async def test_create_watch_resolves_fragment_to_root_url(self, db_session):
+        """A fragment Watch's effective_url is the chain's root URL."""
+        from unittest.mock import AsyncMock, MagicMock, patch
+
+        # Seed info rows so conftest/DB setup passes
+        info_item_id, info_source_id = await _seed_info(
+            db_session, url="https://root.example.com/page"
+        )
+
+        # Build a client that returns the fragment first, then the root
+        frag_spec = MagicMock()
+        frag_spec.additional_properties = {"extraction": {"algorithm": "css", "selector": "#x"}}
+        frag_source = MagicMock()
+        frag_source.info_source_id = "01HZZ00000000000000FRAGMENT"
+        frag_source.parent_info_source_id = "01HZZ00000000000000000ROOT"
+        frag_source.source_spec = frag_spec
+
+        root_spec = MagicMock()
+        root_spec.additional_properties = {"target": {"url": "https://root.example.com/page"}}
+        root_source = MagicMock()
+        root_source.info_source_id = "01HZZ00000000000000000ROOT"
+        root_source.parent_info_source_id = None
+        root_source.source_spec = root_spec
+
+        client = MagicMock()
+        client.get_info_source = AsyncMock(side_effect=[frag_source, root_source])
+
+        with patch(
+            "src.core.watches.dispatch_event_notifications",
+            new_callable=AsyncMock,
+        ):
+            watch = await create_watch(
+                session=db_session,
+                probe_fn=_make_probe(url="https://root.example.com/page"),
+                info_client=client,
+                name="Fragment Watch",
+                info_item_id=info_item_id,
+                info_source_id=info_source_id,
+                content_type="html",
+            )
+
+        assert watch.effective_url == "https://root.example.com/page"
+        assert watch.effective_domain == "root.example.com"
+        # Two get_info_source calls: fragment + root walk
+        assert client.get_info_source.call_count == 2
+
+
 class TestResolveWatchUrl:
     """resolve_watch_url returns the URL from the watch's primary InfoSource spec."""
 

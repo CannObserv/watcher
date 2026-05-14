@@ -71,8 +71,17 @@ async def create_watch(
 
     # 1. Resolve the target URL from the InfoSource (Phase 5+).
     #    NotFound / ServerError / AuthError / httpx.* propagate to the route handler.
+    #    Fragments have no target.url — walk up parent chain to find the root URL.
     source = await info_client.get_info_source(info_source_id)
-    url = source.source_spec.additional_properties["target"]["url"]
+    spec_props = source.source_spec.additional_properties
+    url = spec_props.get("target", {}).get("url")
+    while url is None and source.parent_info_source_id is not None:
+        source = await info_client.get_info_source(str(source.parent_info_source_id))
+        url = source.source_spec.additional_properties.get("target", {}).get("url")
+    if url is None:
+        raise ValueError(
+            f"InfoSource {info_source_id}: no target.url found on source or any ancestor"
+        )
 
     # 2. Probe the URL — establishes effective_url / effective_domain and
     #    fails fast on connection errors. httpx.HTTPError propagates.

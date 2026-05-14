@@ -22,7 +22,6 @@ from src.core.rate_limiter import get_rate_limiter
 from src.core.registry import ServiceRegistry, get_registry
 from src.core.scheduler import compute_next_check, evaluate_post_actions
 from src.core.sources.resolver import resolve_root_sources_with_children
-from src.core.storage import default_storage
 from src.core.utils import format_utc_iso
 from src.workers import bp
 from src.workers.notify import dispatch_event_notifications
@@ -170,13 +169,11 @@ async def check_watch(watch_id: str, registry: ServiceRegistry | None = None) ->
             return {"error": f"HTTP {fetch_result.status_code}"}
 
         # Run pipeline
-        storage = default_storage
         result = await _run_check_pipeline(
             watch=watch,
             raw_content=fetch_result.content,
             fetcher_used=fetch_result.fetcher_used,
             fetch_duration_ms=fetch_result.duration_ms,
-            storage=storage,
             session=session,
             resolved=resolved,
             info_client=info_client,
@@ -206,19 +203,6 @@ async def check_watch(watch_id: str, registry: ServiceRegistry | None = None) ->
                 metadata=_watch_base_metadata(watch),
             )
             await dispatch_event_notifications(session=session, event=recovery_event)
-            await session.commit()
-
-        # Dispatch change_detected notification if content changed
-        if result.get("change_id"):
-            change_event = WatchEvent(
-                event_type=WatchEventType.CHANGE_DETECTED,
-                watch_id=str(watch.id),
-                watch_name=watch.name,
-                watch_url=url,
-                occurred_at=datetime.now(UTC),
-                metadata={**result.get("change_metadata", {}), **_watch_base_metadata(watch)},
-            )
-            await dispatch_event_notifications(session=session, event=change_event)
             await session.commit()
 
     # schedule_tick is the sole scheduler — no self-deferral here.

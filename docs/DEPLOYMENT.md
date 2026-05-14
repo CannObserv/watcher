@@ -26,7 +26,6 @@ export $(cat /etc/watcher/.env .env 2>/dev/null | xargs)
 | `PROCRASTINATE_DATABASE_URL` | `/etc/watcher/.env` | no | libpq-style DSN for procrastinate; falls back to `DATABASE_URL` with driver prefix stripped |
 | `GH_TOKEN` | `.env` | no | GitHub personal access token |
 | `TEST_DATABASE_URL` | `.env` | no | PostgreSQL connection string for test database |
-| `WATCHER_DATA_DIR` | env | no | Absolute path for snapshot/content storage (default `/var/lib/watcher/data`) |
 | `WATCHER_CACHE_DIR` | env | no | Scratch directory for SourceRevision bytes (default `/var/cache/watcher/scratch`); must be writable by `watcher` user |
 | `WATCHER_CACHE_TTL_SECONDS` | env | no | Scratch-file lifetime before sweeper removes it (default `600`) |
 | `WATCHER_CACHE_SWEEP_INTERVAL_SECONDS` | env | no | Sweeper periodic interval in seconds (default `60`) |

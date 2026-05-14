@@ -15,6 +15,7 @@ from src.core.extractors import HtmlExtractor
 from src.core.extractors.base import ExtractionResult
 from src.core.logging import get_logger
 from src.core.models.domain import Domain
+from src.core.models.watch import Watch
 from src.core.notifications.events import WatchEvent, WatchEventType
 from src.core.notifications.notify import dispatch_event_notifications
 from src.core.rate_limiter import DomainRateLimiter
@@ -220,5 +221,90 @@ async def _run_check_pipeline(
         "source_revision_id": canonical_id,
         "scratch_path": str(scratch_path_for(canonical_id)),
     }
-    # Cascade lives in Task 7.3 — appends to `result`.
+
+    # Fragment cascade: extract each child from the same raw_content bytes.
+    fragment_revision_ids = []
+    for fragment in resolved.children:
+        frag_extracted = await _extract_with_spec(raw_content, fragment.source_spec)
+        frag_bytes = "\n".join(c.text for c in frag_extracted.chunks).encode()
+        frag_fingerprint = "sha256:" + hashlib.sha256(frag_bytes).hexdigest()
+
+        # Per-fragment fast-path.
+        prior_frag_fp = await get_last_fingerprint(session, fragment.info_source_id)
+        if prior_frag_fp == frag_fingerprint:
+            continue
+
+        frag_allocated_id = allocate_revision_id()
+        frag_scratch_path = write_scratch_bytes(frag_allocated_id, frag_bytes)
+        frag_cache_uri = f"file://{frag_scratch_path}"
+        frag_now = datetime.now(UTC)
+        frag_expires_at = frag_now + timedelta(seconds=WATCHER_CACHE_TTL_SECONDS)
+        frag_media_type = getattr(frag_extracted, "media_type", None)
+
+        try:
+            frag_response = await info_client.post_source_revision(
+                info_source_id=fragment.info_source_id,
+                content_fingerprint=frag_fingerprint,
+                captured_at=frag_now,
+                source_revision_id=frag_allocated_id,
+                content_cache_uri=frag_cache_uri,
+                content_cache_expires_at=frag_expires_at,
+                content_size_bytes=len(frag_bytes),
+                content_media_type=frag_media_type,
+            )
+        except Exception:
+            await enqueue_pending(
+                session,
+                info_source_id=fragment.info_source_id,
+                content_fingerprint=frag_fingerprint,
+                captured_at=frag_now,
+                content_cache_uri=frag_cache_uri,
+                content_cache_expires_at=frag_expires_at,
+                content_size_bytes=len(frag_bytes),
+                content_media_type=frag_media_type,
+            )
+            continue
+
+        frag_canonical_id = str(frag_response.source_revision_id)
+        if frag_canonical_id != frag_allocated_id:
+            rename_scratch_to_canonical(frag_allocated_id, frag_canonical_id)
+
+        await upsert_last_known(
+            session,
+            info_source_id=fragment.info_source_id,
+            content_fingerprint=frag_fingerprint,
+            source_revision_id=frag_canonical_id,
+            captured_at=frag_now,
+        )
+
+        # Dispatch per-fragment Watch if one exists.
+        frag_watch_q = await session.execute(
+            select(Watch)
+            .where(Watch.info_source_id == fragment.info_source_id)
+            .where(Watch.is_active.is_(True))
+            .where(Watch.is_archived.is_(False))
+        )
+        frag_watch = frag_watch_q.scalar_one_or_none()
+        if frag_watch is not None:
+            await dispatch_event_notifications(
+                session,
+                WatchEvent(
+                    event_type=WatchEventType.CHANGE_DETECTED,
+                    watch_id=str(frag_watch.id),
+                    watch_name=frag_watch.name,
+                    watch_url=frag_watch.effective_url or resolved.url,
+                    occurred_at=frag_now,
+                    metadata={
+                        "source_revision_id": frag_canonical_id,
+                        "info_source_id": fragment.info_source_id,
+                        "content_fingerprint": frag_fingerprint,
+                        "is_fragment": True,
+                        "parent_info_source_id": fragment.parent_info_source_id,
+                    },
+                ),
+            )
+
+        fragment_revision_ids.append(frag_canonical_id)
+
+    result["fragment_revision_ids"] = fragment_revision_ids
     return result

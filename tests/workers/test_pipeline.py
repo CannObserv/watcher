@@ -19,7 +19,7 @@ from src.workers.pipeline import (
     _run_check_pipeline,
     _to_signed64,
 )
-from tests.conftest import make_watch
+from tests.conftest import make_info_source, make_watch
 from tests.workers.conftest import make_resolved
 
 
@@ -228,6 +228,165 @@ class TestRunCheckPipeline:
         assert all(f.stem == canonical_id for f in bin_files), (
             f"Expected only canonical file; found: {[f.name for f in bin_files]}"
         )
+
+
+# ---------------------------------------------------------------------------
+# Phase 5 Task 7.3 — fragment cascade tests
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.integration
+class TestRunCheckPipelineCascade:
+    """Fragment cascade: extract each child from root bytes, POST, reconcile, dispatch."""
+
+    async def test_pipeline_cascades_fragments_from_cached_bytes(
+        self, db_session, tmp_path, monkeypatch
+    ):
+        """Root + 2 fragments → 3 POSTs, 3 scratch files, 2 fragment_revision_ids."""
+        from src.core.sources.resolver import ResolvedFragmentSource, ResolvedRootSource
+
+        monkeypatch.setenv("WATCHER_CACHE_DIR", str(tmp_path))
+        monkeypatch.setenv("WATCHER_CACHE_TTL_SECONDS", "600")
+
+        # Create the root watch (auto-creates a real info_source row).
+        watch = await make_watch(db_session, name="Root", url="https://example.com")
+        root_source_id = str(watch.info_source_id)
+
+        # Create two real fragment info_source rows (FK-valid).
+        frag1_source = await make_info_source(db_session, parent_info_source_id=root_source_id)
+        frag2_source = await make_info_source(db_session, parent_info_source_id=root_source_id)
+        frag1_id = str(frag1_source.info_source_id)
+        frag2_id = str(frag2_source.info_source_id)
+
+        resolved = ResolvedRootSource(
+            info_source_id=root_source_id,
+            url="https://example.com",
+            source_spec={
+                "target": {"url": "https://example.com"},
+                "extraction": {"algorithm": "full_page"},
+            },
+            children=[
+                ResolvedFragmentSource(
+                    info_source_id=frag1_id,
+                    parent_info_source_id=root_source_id,
+                    source_spec={"extraction": {"algorithm": "css", "selector": "#x"}},
+                ),
+                ResolvedFragmentSource(
+                    info_source_id=frag2_id,
+                    parent_info_source_id=root_source_id,
+                    source_spec={"extraction": {"algorithm": "css", "selector": "#y"}},
+                ),
+            ],
+        )
+
+        fake_client = MagicMock()
+        fake_client.post_source_revision = AsyncMock(
+            side_effect=[
+                MagicMock(source_revision_id="01HZZ00000000000000000REV"),
+                MagicMock(source_revision_id="01HZZ00000000000000FREV1"),
+                MagicMock(source_revision_id="01HZZ00000000000000FREV2"),
+            ]
+        )
+
+        raw = b"<html><body><div id='x'>sect-x</div><div id='y'>sect-y</div></body></html>"
+        with patch("src.core.notifications.notify.dispatch_event_notifications", new=AsyncMock()):
+            result = await _run_check_pipeline(
+                watch=watch,
+                raw_content=raw,
+                fetcher_used="http",
+                fetch_duration_ms=10,
+                storage=None,
+                session=db_session,
+                resolved=resolved,
+                info_client=fake_client,
+            )
+
+        # 3 POSTs: root + 2 fragments
+        assert fake_client.post_source_revision.await_count == 3
+        # 3 scratch files (root + 2 fragments)
+        bin_files = list(tmp_path.glob("*.bin"))
+        assert len(bin_files) == 3
+        assert len(result["fragment_revision_ids"]) == 2
+
+    async def test_pipeline_fragment_fast_path_skips_unchanged(
+        self, db_session, tmp_path, monkeypatch
+    ):
+        """Fragment whose fingerprint already matches → no POST for that fragment."""
+        from src.core.sources.resolver import ResolvedFragmentSource, ResolvedRootSource
+
+        monkeypatch.setenv("WATCHER_CACHE_DIR", str(tmp_path))
+        monkeypatch.setenv("WATCHER_CACHE_TTL_SECONDS", "600")
+
+        raw_content = b"<html><body><div id='x'>sect-x</div><div id='y'>sect-y</div></body></html>"
+        frag1_spec = {"extraction": {"algorithm": "css", "selector": "#x"}}
+
+        # Pre-compute fragment 1's fingerprint so we can seed the cache.
+        frag1_extracted = await _extract_with_spec(raw_content, frag1_spec)
+        frag1_bytes = "\n".join(c.text for c in frag1_extracted.chunks).encode()
+        frag1_fp = "sha256:" + hashlib.sha256(frag1_bytes).hexdigest()
+
+        watch = await make_watch(db_session, name="Root", url="https://example.com")
+        root_source_id = str(watch.info_source_id)
+
+        frag1_source = await make_info_source(db_session, parent_info_source_id=root_source_id)
+        frag2_source = await make_info_source(db_session, parent_info_source_id=root_source_id)
+        frag1_id = str(frag1_source.info_source_id)
+        frag2_id = str(frag2_source.info_source_id)
+
+        # Seed fragment 1's fingerprint → fast-path will skip it.
+        await upsert_last_known(
+            db_session,
+            info_source_id=frag1_id,
+            content_fingerprint=frag1_fp,
+            source_revision_id="01HZZ00000000000000FOLD1",
+            captured_at=datetime.now(UTC),
+        )
+
+        resolved = ResolvedRootSource(
+            info_source_id=root_source_id,
+            url="https://example.com",
+            source_spec={
+                "target": {"url": "https://example.com"},
+                "extraction": {"algorithm": "full_page"},
+            },
+            children=[
+                ResolvedFragmentSource(
+                    info_source_id=frag1_id,
+                    parent_info_source_id=root_source_id,
+                    source_spec=frag1_spec,
+                ),
+                ResolvedFragmentSource(
+                    info_source_id=frag2_id,
+                    parent_info_source_id=root_source_id,
+                    source_spec={"extraction": {"algorithm": "css", "selector": "#y"}},
+                ),
+            ],
+        )
+
+        fake_client = MagicMock()
+        fake_client.post_source_revision = AsyncMock(
+            side_effect=[
+                MagicMock(source_revision_id="01HZZ00000000000000000REV"),
+                MagicMock(source_revision_id="01HZZ00000000000000FREV2"),
+            ]
+        )
+
+        with patch("src.core.notifications.notify.dispatch_event_notifications", new=AsyncMock()):
+            result = await _run_check_pipeline(
+                watch=watch,
+                raw_content=raw_content,
+                fetcher_used="http",
+                fetch_duration_ms=10,
+                storage=None,
+                session=db_session,
+                resolved=resolved,
+                info_client=fake_client,
+            )
+
+        # Only 2 POSTs: root + frag2 (frag1 skipped via fast-path).
+        assert fake_client.post_source_revision.await_count == 2
+        # Only 1 fragment revision committed (frag2).
+        assert len(result["fragment_revision_ids"]) == 1
 
 
 class TestModifiedMetadataInvariant:

@@ -27,6 +27,9 @@ export $(cat /etc/watcher/.env .env 2>/dev/null | xargs)
 | `GH_TOKEN` | `.env` | no | GitHub personal access token |
 | `TEST_DATABASE_URL` | `.env` | no | PostgreSQL connection string for test database |
 | `WATCHER_DATA_DIR` | env | no | Absolute path for snapshot/content storage (default `/var/lib/watcher/data`) |
+| `WATCHER_CACHE_DIR` | env | no | Scratch directory for SourceRevision bytes (default `/var/cache/watcher/scratch`); must be writable by `watcher` user |
+| `WATCHER_CACHE_TTL_SECONDS` | env | no | Scratch-file lifetime before sweeper removes it (default `600`) |
+| `WATCHER_CACHE_SWEEP_INTERVAL_SECONDS` | env | no | Sweeper periodic interval in seconds (default `60`) |
 | `BUILD_ID` | env | no | Git SHA for static asset cache-busting (default `"dev"`) |
 | `NOTIFIER_BASE_URL` | `/etc/watcher/.env` | **yes** | Base URL of the notifier service (e.g. `http://localhost:9000`) |
 | `NOTIFIER_API_KEY` | `/etc/watcher/.env` | **yes** | Watcher tenant API key issued by `scripts/seed_tenant.py` in the notifier repo |
@@ -53,6 +56,10 @@ sudo chown root:exedev /etc/watcher/.env
 
 # IMPORTANT: /etc/watcher/.env must exist before starting the service.
 # Without it, systemd will refuse to start the unit (EnvironmentFile is required).
+
+# Scratch directory for SourceRevision bytes
+sudo mkdir -p /var/cache/watcher/scratch
+sudo chown watcher:watcher /var/cache/watcher/scratch
 
 # Copy (or symlink) the unit file
 sudo cp deploy/watcher.service /etc/systemd/system/watcher.service

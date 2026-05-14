@@ -9,7 +9,6 @@ from ulid import ULID
 from src.core.database import get_database_url, get_engine, reset_engine
 from src.core.models.audit_log import AuditLog, EventType, audit
 from src.core.models.base import ULIDType
-from src.core.models.change import Change
 from src.core.models.domain import Domain
 from src.core.models.notification_config import WatchNotificationConfig
 from src.core.models.snapshot import Snapshot, SnapshotChunk
@@ -271,34 +270,6 @@ class TestSnapshotChunkModel:
         )
         assert chunk.chunk_index == 0
         assert chunk.chunk_type == "page"
-
-
-class TestChangeModel:
-    def test_create_change(self):
-        change = Change(
-            watch_id=ULID(),
-            previous_snapshot_id=ULID(),
-            current_snapshot_id=ULID(),
-            change_metadata={"modified": [{"index": 0, "label": "Page 1"}]},
-        )
-        assert change.change_metadata["modified"][0]["label"] == "Page 1"
-
-    def test_visual_change_score_defaults_to_none(self):
-        change = Change(
-            watch_id=ULID(),
-            previous_snapshot_id=ULID(),
-            current_snapshot_id=ULID(),
-        )
-        assert change.visual_change_score is None
-
-    def test_visual_change_score_can_be_set(self):
-        change = Change(
-            watch_id=ULID(),
-            previous_snapshot_id=ULID(),
-            current_snapshot_id=ULID(),
-            visual_change_score=0.42,
-        )
-        assert change.visual_change_score == pytest.approx(0.42)
 
 
 class TestTemporalProfileModel:

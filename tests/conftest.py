@@ -6,9 +6,8 @@ Phase 5 factory contract
 ------------------------
 The module-level async helpers ``make_watch``, ``make_snapshot``, ``make_info_item``,
 and ``make_info_spec`` are NOT pytest fixtures — they are awaitable factory
-functions test code can call directly. ``default_snapshot_fixture`` and
-``make_change`` remain as pytest fixtures for the handful of tests that still
-consume them in fixture form.
+functions test code can call directly. ``default_snapshot_fixture`` remains
+as a pytest fixture for tests that consume it in fixture form.
 
 ``make_watch`` requires ``info_source_id`` (Phase 5+). Callers may still pass
 ``info_item_id`` for compatibility during cutover — a new InfoSource is
@@ -35,7 +34,6 @@ from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from src.api.deps import get_db_session, get_probe_fn, require_api_key
 from src.core.models import Base
 from src.core.models.app_user import AppUser
-from src.core.models.change import Change
 from src.core.models.snapshot import Snapshot
 from src.core.models.watch import ContentType, Watch
 from src.core.probe import ProbeResult
@@ -233,28 +231,8 @@ async def test_engine():
         # schema is owned by Archiver's alembic above.
         watcher_tables = [t for t in Base.metadata.sorted_tables if t.schema in (None, "public")]
         await conn.run_sync(Base.metadata.create_all, tables=watcher_tables)
-        # DB triggers are not part of the ORM model; recreate them here to mirror migrations.
-        await conn.execute(
-            text("""
-            CREATE OR REPLACE FUNCTION trg_fn_watches_last_changed_at()
-            RETURNS TRIGGER AS $$
-            BEGIN
-                UPDATE watches
-                   SET last_changed_at = NEW.detected_at
-                 WHERE id = NEW.watch_id;
-                RETURN NEW;
-            END;
-            $$ LANGUAGE plpgsql;
-        """)
-        )
-        await conn.execute(
-            text("""
-            CREATE OR REPLACE TRIGGER trg_changes_update_last_changed_at
-            AFTER INSERT ON changes
-            FOR EACH ROW
-            EXECUTE FUNCTION trg_fn_watches_last_changed_at();
-        """)
-        )
+        # Phase 5 (#156): trg_changes_update_last_changed_at trigger removed.
+        # No triggers to recreate.
     yield engine
     async with engine.begin() as conn:
         # Drop only public-schema watcher tables; the `information` schema
@@ -425,24 +403,6 @@ def default_snapshot_fixture(db_session):
         db_session.add(snapshot)
         await db_session.flush()
         return snapshot
-
-    return _make
-
-
-@pytest.fixture
-def make_change(db_session):
-    """Factory fixture: create and flush a Change row linking two snapshots."""
-
-    async def _make(watch, current_snapshot, previous_snapshot=None, **kwargs):
-        change = Change(
-            watch_id=watch.id,
-            current_snapshot_id=current_snapshot.id,
-            previous_snapshot_id=previous_snapshot.id if previous_snapshot else None,
-            **kwargs,
-        )
-        db_session.add(change)
-        await db_session.flush()
-        return change
 
     return _make
 

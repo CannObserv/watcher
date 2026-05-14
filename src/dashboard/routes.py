@@ -22,8 +22,6 @@ from src.api.routes.watches import delete_watch as api_delete_watch
 from src.api.schemas.content_config import ContentConfig, ContentOptions
 from src.api.schemas.validators import validate_event_list
 from src.core.database import get_session_factory
-from src.core.diff import compute_unified_diff
-from src.core.diff.normalize import normalize_html
 from src.core.logging import get_logger
 from src.core.models.audit_log import EventType, audit
 from src.core.models.domain import Domain
@@ -50,7 +48,7 @@ from src.core.notifier_client import get_notifier_client
 from src.core.probe import ProbeResult
 from src.core.registry import get_registry
 from src.core.screenshot import capture_screenshot
-from src.core.storage import StorageBackend, default_storage
+from src.core.storage import default_storage
 from src.core.watches import create_watch as _create_watch
 from src.core.watches import resolve_watch_url
 from src.core.watches.invariants import (
@@ -60,15 +58,12 @@ from src.core.watches.invariants import (
 from src.dashboard import templates
 from src.dashboard.context import (
     get_audit_entries,
-    get_change_detail,
     get_dashboard_stats,
     get_domain_watches,
     get_domains_total_count,
     get_domains_with_watch_counts,
     get_latest_snapshot,
     get_queue_health,
-    get_recent_changes,
-    get_watch_changes,
     get_watch_detail,
     get_watch_list,
     get_watch_notifications,
@@ -171,16 +166,17 @@ async def dashboard_home(
     request: Request,
     session: AsyncSession = Depends(get_db_session),
 ):
-    """Dashboard home page with stats, recent changes, and system health."""
+    """Dashboard home page with stats and system health.
+
+    Phase 5 (#156): Recent Changes section removed — Change table dropped.
+    """
     stats = await get_dashboard_stats(session)
-    changes = await get_recent_changes(session, limit=20)
     queue = await get_queue_health(session)
     domains = await get_domains_with_watch_counts(session)
 
     context = {
         "active_page": "dashboard",
         "stats": stats,
-        "changes": changes,
         "queue": queue,
         "domains": domains,
     }
@@ -1592,16 +1588,6 @@ async def partial_stats_cards(
     return templates.TemplateResponse(request, "partials/stats_cards.html", {"stats": stats})
 
 
-@router.get("/partials/recent-changes")
-async def partial_recent_changes(
-    request: Request,
-    session: AsyncSession = Depends(get_db_session),
-):
-    """HTMX partial: recent changes table."""
-    changes = await get_recent_changes(session, limit=20)
-    return templates.TemplateResponse(request, "partials/recent_changes.html", {"changes": changes})
-
-
 @router.get("/partials/system-health")
 async def partial_system_health(
     request: Request,
@@ -1681,17 +1667,6 @@ async def partial_domain_watches(
             "order": order,
         },
     )
-
-
-@router.get("/partials/watch-changes/{watch_id}")
-async def partial_watch_changes(
-    request: Request,
-    watch_id: str,
-    session: AsyncSession = Depends(get_db_session),
-):
-    """HTMX partial: change history for a watch (legacy endpoint)."""
-    changes = await get_watch_changes(session, watch_id)
-    return templates.TemplateResponse(request, "partials/watch_changes.html", {"changes": changes})
 
 
 @router.get("/partials/watch-timeline/{watch_id}")
@@ -2275,94 +2250,6 @@ async def watch_notification_test_result(
             "flash_oob_message": message,
         },
     )
-
-
-def _load_snapshot_text(storage: StorageBackend, snapshot, path_attr: str) -> str:
-    """Load text content from a snapshot's storage path. Returns empty string on failure."""
-    if not snapshot:
-        return ""
-    path = getattr(snapshot, path_attr, None)
-    if not path:
-        return ""
-    try:
-        return storage.load(path).decode(errors="replace")
-    except FileNotFoundError:
-        return ""
-
-
-def _maybe_prettify_html(text: str, *, mode: str, content_type: ContentType | str | None) -> str:
-    """For Raw Content mode on HTML watches, pretty-print before diffing so
-    long single-line markup wraps readably (issue #118). Other modes / types
-    pass through untouched — Extracted Text is already line-oriented; PDF/file
-    content isn't HTML.
-
-    html5lib is lenient but not invincible — exotic encodings, deeply nested
-    DOMs, or lxml memory failures could throw. On any error, log and fall back
-    to the unprettified text so the change-detail page degrades gracefully
-    instead of 500ing.
-    """
-    if mode == "raw" and content_type == "html":
-        try:
-            return normalize_html(text)
-        except Exception:
-            logger.exception(
-                "normalize_html failed; falling back to raw text",
-                extra={"input_len": len(text), "content_type": str(content_type)},
-            )
-            return text
-    return text
-
-
-@router.get("/changes/{change_id}")
-async def change_detail_page(
-    request: Request,
-    change_id: str,
-    mode: Literal["extracted", "raw"] = "extracted",
-    session: AsyncSession = Depends(get_db_session),
-):
-    """Change detail page with metadata, chunks, and diff."""
-    detail = await get_change_detail(session, change_id)
-    if not detail:
-        return templates.TemplateResponse(request, "pages/404.html", status_code=404)
-
-    storage = default_storage
-    path_attr = "storage_path" if mode == "raw" else "text_path"
-    prev_text = _load_snapshot_text(storage, detail["previous_snapshot"], path_attr)
-    curr_text = _load_snapshot_text(storage, detail["current_snapshot"], path_attr)
-    content_type = detail.get("watch_content_type")
-    prev_text = _maybe_prettify_html(prev_text, mode=mode, content_type=content_type)
-    curr_text = _maybe_prettify_html(curr_text, mode=mode, content_type=content_type)
-    diff = compute_unified_diff(prev_text, curr_text)
-
-    context = {
-        "active_page": "watches",
-        **detail,
-        "diff": diff,
-    }
-    return templates.TemplateResponse(request, "pages/change_detail.html", context)
-
-
-@router.get("/partials/diff/{change_id}")
-async def partial_diff(
-    request: Request,
-    change_id: str,
-    mode: Literal["extracted", "raw"] = "extracted",
-    session: AsyncSession = Depends(get_db_session),
-):
-    """HTMX partial: diff view (extracted text or raw content)."""
-    detail = await get_change_detail(session, change_id)
-    if not detail:
-        return templates.TemplateResponse(request, "pages/404.html", status_code=404)
-
-    storage = default_storage
-    path_attr = "storage_path" if mode == "raw" else "text_path"
-    prev_text = _load_snapshot_text(storage, detail["previous_snapshot"], path_attr)
-    curr_text = _load_snapshot_text(storage, detail["current_snapshot"], path_attr)
-    content_type = detail.get("watch_content_type")
-    prev_text = _maybe_prettify_html(prev_text, mode=mode, content_type=content_type)
-    curr_text = _maybe_prettify_html(curr_text, mode=mode, content_type=content_type)
-    diff = compute_unified_diff(prev_text, curr_text)
-    return templates.TemplateResponse(request, "partials/diff_view.html", {"diff": diff})
 
 
 @router.get("/audit")

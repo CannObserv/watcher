@@ -7,7 +7,6 @@ import httpx
 import pytest
 from sqlalchemy import select
 
-from src.core.models.change import Change
 from src.core.models.domain import Domain
 from src.core.models.snapshot import Snapshot
 from src.core.models.watch import ContentType, Watch, WatchHealthStatus
@@ -50,10 +49,6 @@ class TestPartialEndpoints:
         response = await client.get("/partials/stats-cards")
         assert response.status_code == 200
         assert b"Total Watches" in response.content
-
-    async def test_recent_changes_partial(self, client):
-        response = await client.get("/partials/recent-changes")
-        assert response.status_code == 200
 
     async def test_system_health_partial(self, client):
         response = await client.get("/partials/system-health")
@@ -307,120 +302,6 @@ class TestWatchRowDomainInactiveBadge:
         assert b"Domain Inactive" not in response.content
 
 
-class TestChangeDetail:
-    async def test_change_detail_404_invalid(self, client):
-        response = await client.get("/changes/bad-id")
-        assert response.status_code == 404
-
-    async def test_change_detail_404_not_found(self, client):
-        response = await client.get("/changes/01JNZZZZZZZZZZZZZZZZZZZZZZ")
-        assert response.status_code == 404
-
-    async def test_change_detail_shows_screenshot_thumbnails(self, client, db_session):
-        watch = await make_watch(
-            db_session, name="Screenshotter", url="https://example.com", content_type="html"
-        )
-
-        snap_defaults = dict(
-            watch_id=watch.id,
-            content_hash="a" * 64,
-            simhash=0,
-            storage_path="/tmp/s",
-            text_path="/tmp/t",
-            chunk_count=1,
-            text_bytes=100,
-            fetch_duration_ms=50,
-            fetcher_used="http",
-        )
-        prev_snap = Snapshot(**snap_defaults, screenshot_path="screenshots/w/prev.png")
-        curr_snap = Snapshot(**snap_defaults, screenshot_path="screenshots/w/curr.png")
-        db_session.add_all([prev_snap, curr_snap])
-        await db_session.flush()
-
-        change = Change(
-            watch_id=watch.id,
-            previous_snapshot_id=prev_snap.id,
-            current_snapshot_id=curr_snap.id,
-        )
-        db_session.add(change)
-        await db_session.flush()
-
-        response = await client.get(f"/changes/{change.id}")
-        assert response.status_code == 200
-        # Both snapshot_id params should appear in screenshot URLs
-        assert str(prev_snap.id).encode() in response.content
-        assert str(curr_snap.id).encode() in response.content
-        assert b"screenshot" in response.content.lower()
-
-    async def test_change_detail_no_screenshot_section_without_paths(self, client, db_session):
-        watch = await make_watch(
-            db_session, name="No Screenshot", url="https://example.com", content_type="html"
-        )
-
-        snap_defaults = dict(
-            watch_id=watch.id,
-            content_hash="b" * 64,
-            simhash=0,
-            storage_path="/tmp/s",
-            text_path="/tmp/t",
-            chunk_count=1,
-            text_bytes=100,
-            fetch_duration_ms=50,
-            fetcher_used="http",
-        )
-        prev_snap = Snapshot(**snap_defaults)
-        curr_snap = Snapshot(**snap_defaults)
-        db_session.add_all([prev_snap, curr_snap])
-        await db_session.flush()
-
-        change = Change(
-            watch_id=watch.id,
-            previous_snapshot_id=prev_snap.id,
-            current_snapshot_id=curr_snap.id,
-        )
-        db_session.add(change)
-        await db_session.flush()
-
-        response = await client.get(f"/changes/{change.id}")
-        assert response.status_code == 200
-        # No screenshot section should appear — no snapshot_id= screenshot params
-        assert b"Visual Comparison" not in response.content
-
-    async def test_change_list_shows_visual_change_score_badge(self, client, db_session):
-        watch = await make_watch(
-            db_session, name="Visual Score Watch", url="https://example.com", content_type="html"
-        )
-
-        snap_defaults = dict(
-            watch_id=watch.id,
-            content_hash="c" * 64,
-            simhash=0,
-            storage_path="/tmp/s",
-            text_path="/tmp/t",
-            chunk_count=1,
-            text_bytes=100,
-            fetch_duration_ms=50,
-            fetcher_used="http",
-        )
-        prev_snap = Snapshot(**snap_defaults)
-        curr_snap = Snapshot(**snap_defaults)
-        db_session.add_all([prev_snap, curr_snap])
-        await db_session.flush()
-
-        change = Change(
-            watch_id=watch.id,
-            previous_snapshot_id=prev_snap.id,
-            current_snapshot_id=curr_snap.id,
-            visual_change_score=0.85,
-        )
-        db_session.add(change)
-        await db_session.flush()
-
-        response = await client.get("/partials/recent-changes")
-        assert response.status_code == 200
-        assert b"85%" in response.content
-
-
 class TestAuditLog:
     async def test_audit_page_returns_200(self, client):
         response = await client.get("/audit")
@@ -439,11 +320,6 @@ class TestAuditLog:
 class Test404Template:
     async def test_watch_detail_404_uses_template(self, client):
         response = await client.get("/watches/not-a-ulid")
-        assert response.status_code == 404
-        assert b"Not Found" in response.content
-
-    async def test_change_detail_404_uses_template(self, client):
-        response = await client.get("/changes/01JNZZZZZZZZZZZZZZZZZZZZZZ")
         assert response.status_code == 404
         assert b"Not Found" in response.content
 

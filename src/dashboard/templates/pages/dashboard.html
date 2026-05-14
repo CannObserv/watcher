@@ -11,10 +11,4 @@
     {% include "partials/system_health.html" %}
   </div>
 </div>
-<div class="mt-8">
-  <h3 class="text-lg font-semibold text-gray-900 dark:text-white mb-4">Recent Changes</h3>
-  <div id="recent-changes" hx-get="/partials/recent-changes" hx-trigger="every 30s" hx-swap="innerHTML" aria-live="polite" aria-atomic="false">
-    {% include "partials/recent_changes.html" %}
-  </div>
-</div>
 {% endblock %}

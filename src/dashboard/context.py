@@ -9,33 +9,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ulid import ULID
 
 from src.core.models.audit_log import AuditLog, EventType
-from src.core.models.change import Change
 from src.core.models.domain import Domain
 from src.core.models.notification_config import WatchNotificationConfig
-from src.core.models.snapshot import Snapshot, SnapshotChunk
+from src.core.models.snapshot import Snapshot
 from src.core.models.temporal_profile import TemporalProfile
 from src.core.models.watch import Watch
-
-
-def summarize_change_metadata(metadata: dict) -> str:
-    """Summarize change metadata as a human-readable string.
-
-    Counts added, modified, and removed chunks from *metadata* and returns
-    a comma-joined description (e.g. ``"2 added, 1 modified"``).  Returns
-    ``"change detected"`` when all counts are zero or keys are absent.
-    """
-    added = len(metadata.get("added", []))
-    modified = len(metadata.get("modified", []))
-    removed = len(metadata.get("removed", []))
-    parts = []
-    if added:
-        parts.append(f"{added} added")
-    if modified:
-        parts.append(f"{modified} modified")
-    if removed:
-        parts.append(f"{removed} removed")
-    return ", ".join(parts) if parts else "change detected"
-
 
 _WATCH_SORT_COLS: dict[str, Any] = {
     "name": Watch.name,
@@ -78,15 +56,15 @@ async def get_watch_list(
 
 
 async def get_dashboard_stats(session: AsyncSession) -> dict:
-    """Aggregate counts for dashboard stat cards."""
+    """Aggregate counts for dashboard stat cards.
+
+    Phase 5 (#156): changes_today is always 0 — Change table dropped.
+    """
     total = await session.scalar(select(func.count(Watch.id)))
     active = await session.scalar(select(func.count(Watch.id)).where(Watch.is_active.is_(True)))
 
     today_start = datetime.now(UTC).replace(hour=0, minute=0, second=0, microsecond=0)
 
-    changes_today = await session.scalar(
-        select(func.count(Change.id)).where(Change.detected_at >= today_start)
-    )
     checks_today = await session.scalar(
         select(func.count(AuditLog.id)).where(
             AuditLog.event_type.in_(
@@ -103,37 +81,14 @@ async def get_dashboard_stats(session: AsyncSession) -> dict:
     return {
         "total_watches": total or 0,
         "active_watches": active or 0,
-        "changes_today": changes_today or 0,
+        "changes_today": 0,
         "checks_today": checks_today or 0,
     }
 
 
 async def get_recent_changes(session: AsyncSession, limit: int = 20) -> list[dict]:
-    """Fetch recent changes with watch names for display."""
-    stmt = (
-        select(Change, Watch.name)
-        .join(Watch, Change.watch_id == Watch.id)
-        .order_by(Change.detected_at.desc())
-        .limit(limit)
-    )
-    result = await session.execute(stmt)
-    rows = result.all()
-
-    changes = []
-    for change, watch_name in rows:
-        summary = summarize_change_metadata(change.change_metadata or {})
-
-        changes.append(
-            {
-                "id": str(change.id),
-                "watch_id": str(change.watch_id),
-                "watch_name": watch_name,
-                "detected_at": change.detected_at,
-                "summary": summary,
-                "visual_change_score": change.visual_change_score,
-            }
-        )
-    return changes
+    """Return empty list — Change table removed in Phase 5 (#156)."""
+    return []
 
 
 async def get_queue_health(session: AsyncSession) -> dict:
@@ -182,59 +137,6 @@ def get_rate_limiter_state(limiter=None) -> list[dict]:
     return limiter.get_domain_states()
 
 
-async def get_change_detail(session: AsyncSession, change_id: str) -> dict | None:
-    """Fetch a change with its snapshots, chunks, and watch name."""
-    try:
-        parsed = ULID.from_str(change_id)
-    except ValueError:
-        return None
-
-    change = await session.get(Change, parsed)
-    if not change:
-        return None
-
-    # Watch name
-    watch = await session.get(Watch, change.watch_id)
-    watch_name = watch.name if watch else "Unknown"
-
-    # Snapshots
-    prev_snap = await session.get(Snapshot, change.previous_snapshot_id)
-    curr_snap = await session.get(Snapshot, change.current_snapshot_id)
-
-    # Chunks for current snapshot
-    curr_chunks = []
-    if curr_snap:
-        stmt = (
-            select(SnapshotChunk)
-            .where(SnapshotChunk.snapshot_id == curr_snap.id)
-            .order_by(SnapshotChunk.chunk_index)
-        )
-        result = await session.execute(stmt)
-        curr_chunks = list(result.scalars().all())
-
-    # Chunks for previous snapshot
-    prev_chunks = []
-    if prev_snap:
-        stmt = (
-            select(SnapshotChunk)
-            .where(SnapshotChunk.snapshot_id == prev_snap.id)
-            .order_by(SnapshotChunk.chunk_index)
-        )
-        result = await session.execute(stmt)
-        prev_chunks = list(result.scalars().all())
-
-    return {
-        "change": change,
-        "watch_name": watch_name,
-        "watch_id": str(change.watch_id),
-        "watch_content_type": watch.content_type if watch else None,
-        "current_snapshot": curr_snap,
-        "previous_snapshot": prev_snap,
-        "current_chunks": curr_chunks,
-        "previous_chunks": prev_chunks,
-    }
-
-
 async def get_audit_entries(
     session: AsyncSession,
     event_type: str | None = None,
@@ -267,28 +169,8 @@ async def get_watch_detail(session: AsyncSession, watch_id: str) -> Watch | None
 
 
 async def get_watch_changes(session: AsyncSession, watch_id: str, limit: int = 50) -> list[dict]:
-    """Fetch change history for a specific watch."""
-    try:
-        parsed = ULID.from_str(watch_id)
-    except ValueError:
-        return []
-    stmt = (
-        select(Change)
-        .where(Change.watch_id == parsed)
-        .order_by(Change.detected_at.desc())
-        .limit(limit)
-    )
-    result = await session.execute(stmt)
-    changes = []
-    for change in result.scalars().all():
-        changes.append(
-            {
-                "id": str(change.id),
-                "detected_at": change.detected_at,
-                "summary": summarize_change_metadata(change.change_metadata or {}),
-            }
-        )
-    return changes
+    """Return empty list — Change table removed in Phase 5 (#156)."""
+    return []
 
 
 _TIMELINE_SUMMARY: dict[str, str] = {
@@ -336,16 +218,19 @@ async def get_watch_timeline(
 ) -> list[dict]:
     """Return a unified lifecycle event timeline for a watch.
 
-    Merges AuditLog entries, Snapshot rows (as pipeline run events), and
-    Change rows (as change-detected events) into a single chronological list
-    sorted newest-first.  Supports offset-based pagination.
+    Merges AuditLog entries and Snapshot rows (as pipeline run events) into
+    a single chronological list sorted newest-first. Supports offset-based
+    pagination.
+
+    Phase 5 (#156): Change rows removed — the ``change.detected`` event type
+    no longer appears in timelines.
 
     Each entry is a dict with keys:
     - ``event_type`` — string identifier for the event
     - ``timestamp`` — timezone-aware datetime
     - ``summary`` — short human-readable description
     - ``detail_url`` — optional URL for a detail page (or ``None``)
-    - ``category`` — one of ``"change"``, ``"error"``, ``"config"``, ``"run"``
+    - ``category`` — one of ``"error"``, ``"config"``, ``"run"``
     """
     try:
         parsed = ULID.from_str(watch_id)
@@ -370,17 +255,9 @@ async def get_watch_timeline(
         Snapshot.fetched_at.label("timestamp"),
     ).where(Snapshot.watch_id == parsed)
 
-    # --- Change rows ---
-    change_stmt = select(
-        Change.id.label("source_id"),
-        Change.detected_at.label("timestamp"),
-        Change.change_metadata.label("change_metadata"),
-    ).where(Change.watch_id == parsed)
-
-    # Execute all three queries
+    # Execute queries
     audit_rows = list((await session.execute(audit_stmt)).all())
     snapshot_rows = list((await session.execute(snapshot_stmt)).all())
-    change_rows = list((await session.execute(change_stmt)).all())
 
     entries: list[dict] = []
 
@@ -415,19 +292,6 @@ async def get_watch_timeline(
             }
         )
 
-    for row in change_rows:
-        meta = row.change_metadata or {}
-        summary = summarize_change_metadata(meta)
-        entries.append(
-            {
-                "event_type": "change.detected",
-                "timestamp": row.timestamp,
-                "summary": summary,
-                "detail_url": f"/changes/{row.source_id}",
-                "category": "change",
-            }
-        )
-
     # Sort all entries newest-first, then apply pagination
     entries.sort(key=lambda e: e["timestamp"], reverse=True)
     return entries[offset : offset + limit]
@@ -437,7 +301,10 @@ async def get_watch_timeline_count(
     session: AsyncSession,
     watch_id: str,
 ) -> int:
-    """Return total number of timeline entries for a watch (for pagination)."""
+    """Return total number of timeline entries for a watch (for pagination).
+
+    Phase 5 (#156): Change rows excluded — only AuditLog + Snapshot counted.
+    """
     try:
         parsed = ULID.from_str(watch_id)
     except ValueError:
@@ -456,10 +323,7 @@ async def get_watch_timeline_count(
         await session.scalar(select(func.count(Snapshot.id)).where(Snapshot.watch_id == parsed))
         or 0
     )
-    change_count = (
-        await session.scalar(select(func.count(Change.id)).where(Change.watch_id == parsed)) or 0
-    )
-    return audit_count + snapshot_count + change_count
+    return audit_count + snapshot_count
 
 
 async def get_latest_snapshot(session: AsyncSession, watch_id: ULID) -> Snapshot | None:

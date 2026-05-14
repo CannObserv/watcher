@@ -4,7 +4,6 @@ from src.core.models.api_key import ApiKey
 from src.core.models.app_user import AppUser
 from src.core.models.audit_log import AuditLog
 from src.core.models.base import Base, TimestampMixin, ULIDType, generate_ulid
-from src.core.models.change import Change
 from src.core.models.domain import DEFAULT_MAX_CONCURRENCY, DEFAULT_MIN_INTERVAL, Domain
 from src.core.models.last_known_revision import LastKnownRevision
 from src.core.models.notification_config import WatchNotificationConfig
@@ -19,7 +18,6 @@ __all__ = [
     "AppUser",
     "AuditLog",
     "Base",
-    "Change",
     "ContentType",
     "DEFAULT_MAX_CONCURRENCY",
     "DEFAULT_MIN_INTERVAL",

@@ -5,25 +5,20 @@ from datetime import UTC, datetime
 import pytest
 
 from src.core.models.audit_log import AuditLog, EventType
-from src.core.models.change import Change
 from src.core.models.domain import Domain
 from src.core.models.snapshot import Snapshot
 from src.core.models.watch import ContentType
 from src.dashboard.context import (
-    get_change_detail,
     get_dashboard_stats,
     get_domain_watches,
     get_domains_with_watch_counts,
     get_queue_health,
     get_rate_limiter_state,
-    get_recent_changes,
-    get_watch_changes,
     get_watch_detail,
     get_watch_list,
     get_watch_timeline,
-    summarize_change_metadata,
 )
-from tests.conftest import make_snapshot, make_watch
+from tests.conftest import make_watch
 
 
 @pytest.mark.integration
@@ -48,33 +43,6 @@ class TestGetDashboardStats:
         stats = await get_dashboard_stats(db_session)
         assert stats["total_watches"] == 2
         assert stats["active_watches"] == 1
-
-
-@pytest.mark.integration
-class TestGetRecentChanges:
-    async def test_empty(self, db_session):
-        changes = await get_recent_changes(db_session)
-        assert changes == []
-
-    async def test_returns_changes_with_watch_name(self, db_session, make_change):
-        snap_defaults = dict(
-            content_hash="a" * 64,
-            simhash=0,
-            storage_path="/tmp/s",
-            text_path="/tmp/t",
-            chunk_count=1,
-            text_bytes=100,
-            fetch_duration_ms=50,
-        )
-        watch = await make_watch(db_session, name="Test Watch")
-        prev_snap = await make_snapshot(db_session, watch, **snap_defaults)
-        curr_snap = await make_snapshot(db_session, watch, **snap_defaults)
-        await make_change(watch, curr_snap, prev_snap, change_metadata={"added": ["Page 1"]})
-
-        changes = await get_recent_changes(db_session, limit=10)
-        assert len(changes) == 1
-        assert changes[0]["watch_name"] == "Test Watch"
-        assert changes[0]["id"] is not None
 
 
 @pytest.mark.integration
@@ -294,92 +262,6 @@ class TestGetWatchDetail:
 
 
 @pytest.mark.integration
-class TestGetChangeDetail:
-    async def test_returns_change_with_snapshots(self, db_session, make_change_with_snapshots):
-        change = await make_change_with_snapshots(
-            change_metadata={"added": ["Section A"], "modified": [], "removed": []},
-        )
-        result = await get_change_detail(db_session, str(change.id))
-        assert result is not None
-        assert result["change"] is not None
-        assert result["watch_name"] == "W"
-        assert result["current_snapshot"] is not None
-        assert len(result["current_chunks"]) == 1
-
-    async def test_not_found(self, db_session):
-        result = await get_change_detail(db_session, "01JNZZZZZZZZZZZZZZZZZZZZZZ")
-        assert result is None
-
-    async def test_invalid_id(self, db_session):
-        result = await get_change_detail(db_session, "bad")
-        assert result is None
-
-    async def test_returns_visual_change_score_when_set(
-        self, db_session, make_change_with_snapshots
-    ):
-        change = await make_change_with_snapshots(visual_change_score=0.75)
-        result = await get_change_detail(db_session, str(change.id))
-        assert result is not None
-        assert result["change"].visual_change_score == pytest.approx(0.75)
-
-    async def test_snapshots_expose_screenshot_path(self, db_session, make_change_with_snapshots):
-        change = await make_change_with_snapshots(
-            screenshot_paths=("screenshots/w/prev.png", "screenshots/w/curr.png"),
-        )
-        result = await get_change_detail(db_session, str(change.id))
-        assert result is not None
-        assert result["previous_snapshot"].screenshot_path == "screenshots/w/prev.png"
-        assert result["current_snapshot"].screenshot_path == "screenshots/w/curr.png"
-
-    async def test_include_chunk_false_skips_chunk_creation(
-        self, db_session, make_change_with_snapshots
-    ):
-        """include_chunk=False yields a change with no SnapshotChunks and chunk_count=0."""
-        change = await make_change_with_snapshots(include_chunk=False)
-        result = await get_change_detail(db_session, str(change.id))
-        assert result is not None
-        assert result["current_chunks"] == []
-        assert result["current_snapshot"].chunk_count == 0
-        assert result["previous_snapshot"].chunk_count == 0
-
-
-@pytest.mark.integration
-class TestGetWatchChanges:
-    async def test_empty(self, db_session):
-        watch = await make_watch(
-            db_session, name="No Changes", url="https://a.com", content_type="html"
-        )
-
-        result = await get_watch_changes(db_session, str(watch.id))
-        assert result == []
-
-
-class TestSummarizeChangeMetadata:
-    def test_all_counts(self):
-        meta = {"added": ["a", "b"], "modified": ["c"], "removed": ["d", "e", "f"]}
-        assert summarize_change_metadata(meta) == "2 added, 1 modified, 3 removed"
-
-    def test_only_added(self):
-        assert summarize_change_metadata({"added": ["x"]}) == "1 added"
-
-    def test_only_modified(self):
-        assert summarize_change_metadata({"modified": ["x", "y"]}) == "2 modified"
-
-    def test_only_removed(self):
-        assert summarize_change_metadata({"removed": ["x"]}) == "1 removed"
-
-    def test_empty_metadata(self):
-        assert summarize_change_metadata({}) == "change detected"
-
-    def test_zero_counts(self):
-        meta = {"added": [], "modified": [], "removed": []}
-        assert summarize_change_metadata(meta) == "change detected"
-
-    def test_missing_keys(self):
-        assert summarize_change_metadata({"added": ["x"], "removed": []}) == "1 added"
-
-
-@pytest.mark.integration
 class TestGetDomainsWithWatchCounts:
     async def test_empty_domains(self, db_session):
         result = await get_domains_with_watch_counts(db_session)
@@ -569,32 +451,6 @@ class TestGetWatchTimeline:
         assert len(run_entries) == 1
         assert run_entries[0]["event_type"] == "check.snapshot_created"
         assert run_entries[0]["timestamp"] is not None
-
-    async def test_change_surfaces_as_change_entry(self, db_session):
-        watch = await make_watch(
-            db_session, name="Change Watch", url="https://a.com", content_type="html"
-        )
-
-        prev_snap = Snapshot(watch_id=watch.id, **self._snap_kwargs)
-        curr_snap = Snapshot(watch_id=watch.id, **self._snap_kwargs)
-        db_session.add_all([prev_snap, curr_snap])
-        await db_session.flush()
-
-        change = Change(
-            watch_id=watch.id,
-            previous_snapshot_id=prev_snap.id,
-            current_snapshot_id=curr_snap.id,
-            change_metadata={"added": ["Page 1"]},
-        )
-        db_session.add(change)
-        await db_session.flush()
-
-        result = await get_watch_timeline(db_session, str(watch.id), offset=0, limit=50)
-        change_entries = [r for r in result if r["category"] == "change"]
-        assert len(change_entries) == 1
-        assert change_entries[0]["event_type"] == "change.detected"
-        assert change_entries[0]["detail_url"] is not None
-        assert str(change.id) in change_entries[0]["detail_url"]
 
     async def test_fetch_failed_audit_event_surfaces_as_error(self, db_session):
         watch = await make_watch(

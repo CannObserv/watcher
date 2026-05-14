@@ -6,7 +6,6 @@ from datetime import UTC, datetime
 from archiver_client import ArchiverClient
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from ulid import ULID
 
 from src.core.differ import ChangeStatus, ChunkFingerprint, diff_chunks
 from src.core.extraction_defaults import (
@@ -14,7 +13,6 @@ from src.core.extraction_defaults import (
 )
 from src.core.extractors import HtmlExtractor
 from src.core.extractors.base import ExtractionResult
-from src.core.info_resolver import ResolvedInfoSpec, resolve_primary
 from src.core.logging import get_logger
 from src.core.models.audit_log import EventType, audit
 from src.core.models.base import generate_ulid
@@ -25,6 +23,7 @@ from src.core.models.watch import ContentType, Watch
 from src.core.rate_limiter import DomainRateLimiter
 from src.core.screenshot import capture_screenshot
 from src.core.simhash import simhash
+from src.core.sources.resolver import ResolvedRootSource
 from src.core.storage import StorageBackend
 
 logger = get_logger(__name__)
@@ -156,18 +155,16 @@ async def _run_check_pipeline(
     storage: StorageBackend,
     session: AsyncSession,
     *,
-    resolved: ResolvedInfoSpec,
+    resolved: ResolvedRootSource,
     info_client: ArchiverClient | None = None,
 ) -> dict:
     """Core check pipeline: hash, extract, diff, store.
 
     Returns dict with snapshot_id, is_changed, change_id, chunk_count, storage_path.
 
-    ``resolved`` carries the primary InfoSpec the caller already fetched (always
-    supplied in production by ``check_watch``). ``info_client`` is optional; when
-    provided, it's used to force a spec re-fetch on zero-chunk extraction. When
-    ``info_client`` is omitted and extraction yields zero chunks, the empty
-    result is accepted as-is and proceeds to diff.
+    ``resolved`` carries the root InfoSource the caller already fetched (always
+    supplied in production by ``check_watch``). ``info_client`` is reserved for
+    future use (e.g. child-source resolution in Task 7.2/7.3).
     """
     # 1. Compute content hash and doc-level simhash
     content_hash = hashlib.sha256(raw_content).hexdigest()
@@ -190,36 +187,20 @@ async def _run_check_pipeline(
             "change_metadata": {},
         }
 
-    # 4. Extract content using the resolved InfoSpec.
-    document = resolved.document
+    # 4. Extract content using the resolved InfoSource spec.
+    document = resolved.source_spec
     extraction = await _extract_with_spec(raw_content, document)
 
-    # 4a. Force-refresh + retry path: when extraction returns zero chunks,
-    # the spec selector may be stale. Refresh the spec and re-run extraction
-    # against the same content (no re-fetch).
-    if not extraction.chunks and info_client is not None:
-        logger.info(
-            "extraction returned zero chunks — force-refreshing primary InfoSpec",
+    # 4a. Zero-chunk warning (force-refresh retry removed in Task 7.1;
+    # Task 7.2 will implement child-source fallback via the full source chain).
+    if not extraction.chunks:
+        logger.warning(
+            "extraction returned zero chunks",
             extra={
                 "watch_id": str(watch.id),
-                # TODO Task 7.1: replace info_item_id with info_source_id key
-                "info_item_id": resolved.info_item_id,
-                "info_spec_id": resolved.info_spec_id,
+                "info_source_id": resolved.info_source_id,
             },
         )
-        resolved = await resolve_primary(info_client, resolved.info_item_id, force_refresh=True)
-        document = resolved.document
-        extraction = await _extract_with_spec(raw_content, document)
-        if not extraction.chunks:
-            logger.warning(
-                "extraction still returned zero chunks after force_refresh",
-                extra={
-                    "watch_id": str(watch.id),
-                    # TODO Task 7.1: replace info_item_id with info_source_id key
-                    "info_item_id": resolved.info_item_id,
-                    "info_spec_id": resolved.info_spec_id,
-                },
-            )
 
     chunks = extraction.chunks
 
@@ -322,9 +303,8 @@ async def _run_check_pipeline(
                 # TODO Task 7.2: populate info_item_id from resolved source chain
                 "previous_fingerprint": prev_snapshot.simhash,
                 "current_fingerprint": doc_simhash,
+                # info_spec_id column dropped in Stage 10; not populated here
             }
-            if resolved is not None:
-                change_kwargs["info_spec_id"] = ULID.from_str(resolved.info_spec_id)
             change = Change(**change_kwargs)
             session.add(change)
             await session.flush()
@@ -348,9 +328,7 @@ async def _run_check_pipeline(
     # 11. Screenshot (optional — HTML only; non-fatal if Playwright not installed or capture fails)
     screenshot_path: str | None = None
     if watch.content_type == ContentType.HTML:
-        screenshot_url = (
-            resolved.document.get("target", {}).get("url") if resolved is not None else None
-        )
+        screenshot_url = resolved.url if resolved is not None else None
         if screenshot_url:
             try:
                 screenshot_result = await capture_screenshot(screenshot_url)

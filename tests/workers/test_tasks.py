@@ -132,14 +132,14 @@ def _mock_session_factory(db_session: AsyncSession):
 
 
 def _mock_info_client(url: str = "https://example.com"):
-    """Build a MagicMock ArchiverClient that returns a stable primary InfoSpec.
+    """Build a MagicMock ArchiverClient for resolve_root_sources_with_children.
 
-    For legacy tests that don't care about spec contents — the resolver will
-    return a full_page InfoSpec with a fixed URL the fetcher mock then ignores
-    (those tests intercept the fetcher with httpx MockTransport).
+    Mocks get_info_source (returns root with no parent) and list_info_sources
+    (returns empty children page). For tests that don't care about spec contents
+    and intercept the fetcher with httpx MockTransport.
     """
-    fake_doc = MagicMock()
-    fake_doc.to_dict = MagicMock(
+    source_spec = MagicMock()
+    source_spec.to_dict = MagicMock(
         return_value={
             "schema_version": 1,
             "target": {"url": url},
@@ -147,13 +147,17 @@ def _mock_info_client(url: str = "https://example.com"):
             "fingerprint": {"algorithm": "simhash"},
         }
     )
-    fake_spec = MagicMock()
-    fake_spec.info_item_id = "01TESTITEM00000000000000XX"
-    fake_spec.info_spec_id = "01TESTSPEC00000000000000XX"
-    fake_spec.document = fake_doc
+    fake_source = MagicMock()
+    fake_source.info_source_id = "01TESTSOURCE000000000000XX"
+    fake_source.parent_info_source_id = None
+    fake_source.source_spec = source_spec
+
+    fake_page = MagicMock()
+    fake_page.items = []
 
     fake_client = MagicMock()
-    fake_client.get_primary_info_spec = AsyncMock(return_value=fake_spec)
+    fake_client.get_info_source = AsyncMock(return_value=fake_source)
+    fake_client.list_info_sources = AsyncMock(return_value=fake_page)
     return fake_client
 
 
@@ -972,41 +976,54 @@ class TestCheckWatchHealthTransitions:
         assert change_events[0].metadata["check_interval"] == "1h"
 
 
-def _make_fake_spec(
+def _make_fake_source(
     *,
-    info_item_id: str,
-    info_spec_id: str = "01TESTSPEC0000000000000000",
+    info_source_id: str = "01TESTSOURCE000000000000XX",
     url: str = "https://from-spec.example.com",
     timeout_seconds: int | None = None,
     render: bool | None = None,
     extraction_algorithm: str = "full_page",
     selector: str | None = None,
 ):
-    """Build a MagicMock matching archiver_client.InfoSpecOut shape."""
+    """Build a MagicMock matching archiver_client.InfoSourceOut shape for the root source."""
     fetch_block: dict = {}
     if timeout_seconds is not None:
         fetch_block["timeout_seconds"] = timeout_seconds
     if render is not None:
         fetch_block["render"] = render
-    target = {"url": url}
+    target: dict = {"url": url}
     if fetch_block:
         target["fetch"] = fetch_block
     extraction: dict = {"algorithm": extraction_algorithm}
     if selector is not None:
         extraction["selector"] = selector
-    document = {
+    source_spec_dict = {
         "schema_version": 1,
         "target": target,
         "extraction": extraction,
         "fingerprint": {"algorithm": "simhash"},
     }
-    fake_doc = MagicMock()
-    fake_doc.to_dict = MagicMock(return_value=document)
-    fake_spec = MagicMock()
-    fake_spec.info_item_id = info_item_id
-    fake_spec.info_spec_id = info_spec_id
-    fake_spec.document = fake_doc
-    return fake_spec
+    fake_source_spec = MagicMock()
+    fake_source_spec.to_dict = MagicMock(return_value=source_spec_dict)
+    fake_source = MagicMock()
+    fake_source.info_source_id = info_source_id
+    fake_source.parent_info_source_id = None
+    fake_source.source_spec = fake_source_spec
+    return fake_source
+
+
+def _make_fake_info_client(
+    source: MagicMock | None = None, *, url: str = "https://from-spec.example.com"
+):
+    """Build a MagicMock ArchiverClient wired for resolve_root_sources_with_children."""
+    if source is None:
+        source = _make_fake_source(url=url)
+    fake_page = MagicMock()
+    fake_page.items = []
+    fake_client = MagicMock()
+    fake_client.get_info_source = AsyncMock(return_value=source)
+    fake_client.list_info_sources = AsyncMock(return_value=fake_page)
+    return fake_client
 
 
 def _fake_fetch_result(
@@ -1028,23 +1045,21 @@ def _fake_fetch_result(
 
 
 class TestCheckWatchResolvesUrlViaSdk:
-    """check_watch must resolve URL/fetch defaults from the InfoSpec, not the Watch row."""
+    """check_watch must resolve URL/fetch defaults from the InfoSource, not the Watch row."""
 
     async def test_check_watch_resolves_url_via_sdk(self, db_session, tmp_path, monkeypatch):
-        """check_watch fetches the URL from the primary InfoSpec, not from the Watch row."""
+        """check_watch fetches the URL from the root InfoSource, not from the Watch row."""
         watch = await make_watch(db_session, name="SdkUrl", url="https://from-spec.example.com")
 
         fetch_mock = AsyncMock(return_value=_fake_fetch_result())
         mock_fetcher = MagicMock()
         mock_fetcher.fetch = fetch_mock
 
-        fake_spec = _make_fake_spec(
-            info_item_id="01TESTITEM00000000000000XX",
+        fake_source = _make_fake_source(
             url="https://from-spec.example.com",
             timeout_seconds=45,
         )
-        fake_client = MagicMock()
-        fake_client.get_primary_info_spec = AsyncMock(return_value=fake_spec)
+        fake_client = _make_fake_info_client(source=fake_source)
 
         reg = ServiceRegistry(fetcher=mock_fetcher, archiver_client=fake_client)
         monkeypatch.setattr(tasks_mod, "default_storage", LocalStorage(base_dir=tmp_path))
@@ -1056,7 +1071,7 @@ class TestCheckWatchResolvesUrlViaSdk:
 
         fetch_mock.assert_awaited_once()
         args, kwargs = fetch_mock.call_args
-        # First positional arg or a `url=` kwarg should be the spec URL.
+        # First positional arg or a `url=` kwarg should be the source URL.
         passed_url = args[0] if args else kwargs.get("url")
         assert passed_url == "https://from-spec.example.com"
         config = kwargs.get("config") or {}
@@ -1065,16 +1080,17 @@ class TestCheckWatchResolvesUrlViaSdk:
     async def test_check_watch_skips_when_info_item_missing(
         self, db_session, tmp_path, monkeypatch
     ):
-        """If the SDK 404s on info_item lookup, the watch is skipped (not retried)."""
+        """If the SDK 404s on info_source lookup, the watch is skipped (not retried)."""
         watch = await make_watch(db_session, name="Missing")
 
         mock_fetcher = MagicMock()
         mock_fetcher.fetch = AsyncMock()
 
         fake_client = MagicMock()
-        fake_client.get_primary_info_spec = AsyncMock(
-            side_effect=NotFound("info_item not found", status_code=404, body="")
+        fake_client.get_info_source = AsyncMock(
+            side_effect=NotFound("info_source not found", status_code=404, body="")
         )
+        fake_client.list_info_sources = AsyncMock()
 
         reg = ServiceRegistry(fetcher=mock_fetcher, archiver_client=fake_client)
         monkeypatch.setattr(tasks_mod, "default_storage", LocalStorage(base_dir=tmp_path))
@@ -1095,9 +1111,10 @@ class TestCheckWatchResolvesUrlViaSdk:
         mock_fetcher.fetch = AsyncMock()
 
         fake_client = MagicMock()
-        fake_client.get_primary_info_spec = AsyncMock(
+        fake_client.get_info_source = AsyncMock(
             side_effect=httpx.ConnectError("Information service down")
         )
+        fake_client.list_info_sources = AsyncMock()
 
         reg = ServiceRegistry(fetcher=mock_fetcher, archiver_client=fake_client)
         monkeypatch.setattr(tasks_mod, "default_storage", LocalStorage(base_dir=tmp_path))
@@ -1108,40 +1125,28 @@ class TestCheckWatchResolvesUrlViaSdk:
         with pytest.raises(httpx.ConnectError):
             await check_watch(str(watch.id), registry=reg)
 
-    async def test_check_watch_force_refreshes_on_extraction_failure(
+    async def test_check_watch_zero_chunks_proceeds_without_retry(
         self, db_session, tmp_path, monkeypatch
     ):
-        """Empty extraction triggers a force_refresh + one retry of extraction (not fetch).
+        """Zero-chunk extraction no longer retries (force_refresh removed in Task 7.1).
 
-        First SDK call returns a stale spec whose CSS selector matches no chunks,
-        the second (with force_refresh=True) returns a fresh full_page spec that
-        matches. SDK called twice; fetcher called only once.
+        Task 7.2 will implement child-source fallback. For now, the pipeline
+        accepts zero chunks and proceeds to diff.
         """
-        watch = await make_watch(db_session, name="Refresh")
+        watch = await make_watch(db_session, name="ZeroChunks")
 
-        # Content with no matching `.target` selector — first extraction returns 0 chunks.
+        # Content with no matching selector — extraction returns 0 chunks.
         content = b"<html><body><section>real</section></body></html>"
         fetch_mock = AsyncMock(return_value=_fake_fetch_result(content=content))
         mock_fetcher = MagicMock()
         mock_fetcher.fetch = fetch_mock
 
-        # Stale spec with a selector that matches nothing.
-        stale_spec = _make_fake_spec(
-            info_item_id="01TESTITEM00000000000000XX",
-            url="https://example.com/refresh",
+        fake_source = _make_fake_source(
+            url="https://example.com/zeochunks",
             extraction_algorithm="css",
             selector=".does-not-exist",
         )
-        # Fresh spec with full_page extraction.
-        fresh_spec = _make_fake_spec(
-            info_item_id="01TESTITEM00000000000000XX",
-            url="https://example.com/refresh",
-            extraction_algorithm="full_page",
-        )
-
-        fake_client = MagicMock()
-        primary_mock = AsyncMock(side_effect=[stale_spec, fresh_spec])
-        fake_client.get_primary_info_spec = primary_mock
+        fake_client = _make_fake_info_client(source=fake_source)
 
         reg = ServiceRegistry(fetcher=mock_fetcher, archiver_client=fake_client)
         monkeypatch.setattr(tasks_mod, "default_storage", LocalStorage(base_dir=tmp_path))
@@ -1151,9 +1156,56 @@ class TestCheckWatchResolvesUrlViaSdk:
 
         await check_watch(str(watch.id), registry=reg)
 
-        # Fetcher called only once (no re-fetch).
+        # Fetcher called only once (no re-fetch, no retry).
         assert fetch_mock.await_count == 1
-        # SDK called twice; second call must use force_refresh=True.
-        assert primary_mock.await_count == 2
-        second_call_kwargs = primary_mock.call_args_list[1].kwargs
-        assert second_call_kwargs.get("force_refresh") is True
+        # SDK get_info_source called once (no force_refresh retry).
+        assert fake_client.get_info_source.await_count == 1
+
+
+class TestCheckWatchUsesNewResolver:
+    """check_watch must call resolve_root_sources_with_children, not resolve_primary."""
+
+    @pytest.mark.asyncio
+    async def test_check_watch_uses_resolve_root_sources(self, db_session, tmp_path, monkeypatch):
+        """check_watch resolves via resolve_root_sources_with_children, not resolve_primary."""
+        from src.core.sources.resolver import ResolvedRootSource
+
+        watch = await make_watch(
+            db_session,
+            name="NewResolver",
+            url="https://example.com/newresolver",
+            content_type=ContentType.HTML,
+        )
+
+        fake_resolved = ResolvedRootSource(
+            info_source_id=str(watch.info_source_id),
+            url="https://example.com/newresolver",
+            source_spec={
+                "schema_version": 1,
+                "target": {"url": "https://example.com/newresolver"},
+                "extraction": {"algorithm": "full_page"},
+                "fingerprint": {"algorithm": "simhash"},
+            },
+            children=[],
+        )
+
+        content = b"<html><body><p>resolver test</p></body></html>"
+        fetch_mock = AsyncMock(return_value=_fake_fetch_result(content=content))
+        mock_fetcher = MagicMock()
+        mock_fetcher.fetch = fetch_mock
+
+        fake_client = MagicMock()
+
+        reg = ServiceRegistry(fetcher=mock_fetcher, archiver_client=fake_client)
+        monkeypatch.setattr(tasks_mod, "default_storage", LocalStorage(base_dir=tmp_path))
+        monkeypatch.setattr(
+            tasks_mod, "get_session_factory", lambda: _mock_session_factory(db_session)
+        )
+
+        with patch(
+            "src.workers.tasks.resolve_root_sources_with_children",
+            new=AsyncMock(return_value=fake_resolved),
+        ) as mock_resolve:
+            await check_watch(str(watch.id), registry=reg)
+
+        mock_resolve.assert_awaited_once()

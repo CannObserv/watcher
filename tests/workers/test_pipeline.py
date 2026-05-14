@@ -212,13 +212,16 @@ class TestRunCheckPipeline:
         assert 0.0 <= change.significance <= 1.0
 
     async def test_change_persists_info_item_id_and_fingerprints(self, db_session, tmp_path):
-        """Change rows carry info_item_id, info_spec_id, and previous/current fingerprints."""
+        """Change rows carry previous/current fingerprints.
+
+        info_item_id/info_spec_id populated in Task 7.2.
+        """
         watch = await make_watch(
             db_session, name="Fp", url="https://example.com", content_type=ContentType.HTML
         )
 
         storage = LocalStorage(base_dir=tmp_path)
-        spec = make_resolved(info_item_id="01TESTITEM00000000000000XX")
+        spec = make_resolved()
         await _run_check_pipeline(
             watch=watch,
             raw_content=b"<html><body><p>V1</p></body></html>",
@@ -241,9 +244,10 @@ class TestRunCheckPipeline:
         change = (
             await db_session.execute(select(Change).where(Change.watch_id == watch.id))
         ).scalar_one()
-        # TODO Task 7.2: info_item_id dropped from pipeline; change.info_item_id is now None
+        # TODO Task 7.2: info_item_id populated from resolved source chain
         assert change.info_item_id is None
-        assert str(change.info_spec_id) == spec.info_spec_id
+        # info_spec_id not populated by Task 7.1; will be dropped in Stage 10
+        assert change.info_spec_id is None
         assert change.previous_fingerprint is not None
         assert change.current_fingerprint is not None
 

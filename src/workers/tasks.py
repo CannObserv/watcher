@@ -12,7 +12,6 @@ from sqlalchemy import or_, select
 from ulid import ULID
 
 from src.core.database import get_session_factory
-from src.core.info_resolver import resolve_primary
 from src.core.logging import get_logger
 from src.core.models.audit_log import EventType, audit
 from src.core.models.domain import Domain
@@ -22,6 +21,7 @@ from src.core.notifications.events import WatchEvent, WatchEventType
 from src.core.rate_limiter import get_rate_limiter
 from src.core.registry import ServiceRegistry, get_registry
 from src.core.scheduler import compute_next_check, evaluate_post_actions
+from src.core.sources.resolver import resolve_root_sources_with_children
 from src.core.storage import default_storage
 from src.core.utils import format_utc_iso
 from src.workers import bp
@@ -99,13 +99,13 @@ async def check_watch(watch_id: str, registry: ServiceRegistry | None = None) ->
             )
             return {"skipped": True}
 
-        # Resolve the primary InfoSpec once; URL + fetch defaults come from the
-        # spec, not the Watch row.
-        # TODO Task 7.1: replace resolve_primary (info_item_id-based) with
-        # resolve_root_sources_with_children (info_source_id-based).
+        # Resolve the root InfoSource; URL + fetch defaults come from the
+        # source_spec, not the Watch row.
         info_client = reg.get_archiver_client()
         try:
-            resolved = await resolve_primary(info_client, str(watch.info_source_id))
+            resolved = await resolve_root_sources_with_children(
+                info_client, str(watch.info_source_id)
+            )
         except NotFound:
             # Operator-fixable: the InfoSource was deleted out from under the
             # watch. Skip until operator action; do not retry.
@@ -118,13 +118,13 @@ async def check_watch(watch_id: str, registry: ServiceRegistry | None = None) ->
         # ServerError) propagate to Procrastinate's RetryStrategy. AuthError
         # and ValidationError propagate loud (operator-fixable).
 
-        url = resolved.document["target"]["url"]
+        url = resolved.url
         # NB: fetch_render is resolved but the current HttpFetcher does not
         # accept a `render` flag — JS rendering is Phase 3 work. Pass only
         # `timeout` to stay within the existing fetcher contract.
         # TODO Phase 3: render flag plumbing into fetcher.
-        _render = fetch_render(resolved.document)  # noqa: F841 — reserved for Phase 3
-        fetch_timeout = fetch_timeout_seconds(resolved.document)
+        _render = fetch_render(resolved.source_spec)  # noqa: F841 — reserved for Phase 3
+        fetch_timeout = fetch_timeout_seconds(resolved.source_spec)
         fetch_config = {"timeout": fetch_timeout}
 
         rate_limit_domain = watch.effective_domain or urlparse(url).hostname or url

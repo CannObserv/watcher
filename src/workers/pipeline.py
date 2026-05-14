@@ -28,40 +28,10 @@ from src.core.sources.scratch import (
     scratch_path_for,
     write_scratch_bytes,
 )
-from src.core.storage import StorageBackend
 
 logger = get_logger(__name__)
 
-_INT64_MAX = (1 << 63) - 1
-
 WATCHER_CACHE_TTL_SECONDS = int(os.environ.get("WATCHER_CACHE_TTL_SECONDS", "600"))
-
-# Phase 2c: only HTML survives the InfoSpec cutover. Migration aborts on
-# non-HTML content_type; PDF + FILE pipelines return in Phase 3+.
-_EXT_MAP = {
-    "html": "html",
-}
-
-
-def _compute_significance(*, added: int, removed: int, modified: int, total_curr: int) -> float:
-    """Compute change significance as fraction of unchanged chunks.
-
-    Returns 1.0 - (added + removed + modified) / total_curr, clamped to [0.0, 1.0].
-    1.0 = no chunks changed; 0.0 = all or more chunks changed (including when
-    removed exceeds total_curr, which clamps to 0.0).
-    """
-    if total_curr == 0:
-        return 1.0
-    changed = added + removed + modified
-    sig = 1.0 - changed / total_curr
-    return max(0.0, min(1.0, sig))
-
-
-def _to_signed64(val: int) -> int:
-    """Convert unsigned 64-bit simhash to signed int64 for PostgreSQL BIGINT."""
-    if val > _INT64_MAX:
-        return val - (1 << 64)
-    return val
 
 
 async def _persist_backoff(domain_name: str, new_interval: float, session: AsyncSession) -> None:
@@ -128,11 +98,11 @@ async def _run_check_pipeline(
     raw_content: bytes,
     fetcher_used: str,
     fetch_duration_ms: int,
-    storage: StorageBackend | None,
     session: AsyncSession,
     *,
     resolved: ResolvedRootSource,
     info_client: ArchiverClient | None = None,
+    storage: None = None,
 ) -> dict:
     """Fetch → scratch → POST root SourceRevision → dispatch. Outbox on POST failure.
 
@@ -159,6 +129,11 @@ async def _run_check_pipeline(
     cache_uri = f"file://{scratch_path}"
     now = datetime.now(UTC)
     expires_at = now + timedelta(seconds=WATCHER_CACHE_TTL_SECONDS)
+
+    # Mark the change time on the watch. Semantics: "Watcher observed a change
+    # at this instant." Happens regardless of whether the Archiver POST succeeds
+    # (outbox enqueue is still an observed change).
+    watch.last_changed_at = now
 
     # 5. POST to Archiver.
     try:
@@ -202,17 +177,28 @@ async def _run_check_pipeline(
 
     # 8. Dispatch via existing WatchEvent path.
     effective_url = getattr(watch, "effective_url", None) or resolved.url
+    change_meta: dict = {
+        "source_revision_id": canonical_id,
+        "info_source_id": resolved.info_source_id,
+        "content_fingerprint": fingerprint,
+    }
+    # Enrich with watch-level context for notification templates.
+    if getattr(watch, "effective_domain", None):
+        change_meta["effective_domain"] = watch.effective_domain
+    interval = (getattr(watch, "schedule_config", None) or {}).get("interval")
+    if interval:
+        change_meta["check_interval"] = interval
+    if getattr(watch, "tags", None):
+        change_meta["tags"] = watch.tags
+    if getattr(watch, "description", None):
+        change_meta["description"] = watch.description
     event = WatchEvent(
         event_type=WatchEventType.CHANGE_DETECTED,
         watch_id=str(watch.id),
         watch_name=watch.name,
         watch_url=effective_url,
         occurred_at=now,
-        metadata={
-            "source_revision_id": canonical_id,
-            "info_source_id": resolved.info_source_id,
-            "content_fingerprint": fingerprint,
-        },
+        metadata=change_meta,
     )
     await dispatch_event_notifications(session, event)
 

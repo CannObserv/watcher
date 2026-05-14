@@ -11,37 +11,12 @@ from sqlalchemy import select
 from src.core.models.pending_source_revision import PendingSourceRevision
 from src.core.sources.revision_cache import upsert_last_known
 from src.workers.pipeline import (
-    _EXT_MAP,
-    _compute_significance,
     _extract_with_spec,
     _extraction_config_from_spec,
     _run_check_pipeline,
-    _to_signed64,
 )
 from tests.conftest import make_info_source, make_watch
 from tests.workers.conftest import make_resolved
-
-
-class TestToSigned64:
-    def test_small_positive_value_unchanged(self):
-        assert _to_signed64(42) == 42
-
-    def test_value_at_boundary_unchanged(self):
-        boundary = (1 << 63) - 1
-        assert _to_signed64(boundary) == boundary
-
-    def test_value_above_boundary_wraps(self):
-        val = 1 << 63
-        assert _to_signed64(val) == -(1 << 63)
-
-    def test_max_uint64_wraps(self):
-        assert _to_signed64((1 << 64) - 1) == -1
-
-
-class TestExtractorMap:
-    def test_ext_map_has_html_only_in_phase2c(self):
-        """Phase 2c: only HTML survives the InfoSpec cutover."""
-        assert _EXT_MAP == {"html": "html"}
 
 
 class TestExtractionConfigFromSpec:
@@ -228,6 +203,50 @@ class TestRunCheckPipeline:
             f"Expected only canonical file; found: {[f.name for f in bin_files]}"
         )
 
+    async def test_pipeline_updates_last_changed_at_on_change(
+        self, db_session, tmp_path, monkeypatch
+    ):
+        """A detected change updates watch.last_changed_at; fast-path does not."""
+        monkeypatch.setenv("WATCHER_CACHE_DIR", str(tmp_path))
+
+        watch = await make_watch(db_session, name="LCA", url="https://example.com")
+        resolved = make_resolved(info_source_id=str(watch.info_source_id))
+        assert watch.last_changed_at is None
+
+        info_client = _make_info_client("01HZZ000000000000000000LCA")
+        raw_content = b"<html><body><p>Changed</p></body></html>"
+
+        with patch("src.core.notifications.notify.dispatch_event_notifications", new=AsyncMock()):
+            result = await _run_check_pipeline(
+                watch=watch,
+                raw_content=raw_content,
+                fetcher_used="http",
+                fetch_duration_ms=10,
+                storage=None,
+                session=db_session,
+                resolved=resolved,
+                info_client=info_client,
+            )
+
+        assert result["is_changed"] is True
+        assert watch.last_changed_at is not None
+
+        # Fast-path (same content again) must NOT update last_changed_at.
+        before = watch.last_changed_at
+        with patch("src.core.notifications.notify.dispatch_event_notifications", new=AsyncMock()):
+            result2 = await _run_check_pipeline(
+                watch=watch,
+                raw_content=raw_content,
+                fetcher_used="http",
+                fetch_duration_ms=10,
+                storage=None,
+                session=db_session,
+                resolved=resolved,
+                info_client=info_client,
+            )
+        assert result2["is_changed"] is False
+        assert watch.last_changed_at == before
+
 
 # ---------------------------------------------------------------------------
 # Phase 5 Task 7.3 — fragment cascade tests
@@ -388,30 +407,5 @@ class TestRunCheckPipelineCascade:
         assert len(result["fragment_revision_ids"]) == 1
 
 
-# Phase 5 (#156): TestModifiedMetadataInvariant removed — differ.py deleted.
-
-
-class TestComputeSignificance:
-    def test_all_new_chunks_significance_zero(self):
-        """No previous snapshot → all curr chunks are 'added' → 0.0."""
-        sig = _compute_significance(added=3, removed=0, modified=0, total_curr=3)
-        assert sig == 0.0
-
-    def test_all_removed_clamps_to_zero(self):
-        """More removed than curr chunks → clamp to 0.0."""
-        sig = _compute_significance(added=0, removed=5, modified=0, total_curr=2)
-        assert sig == 0.0
-
-    def test_no_changes_significance_one(self):
-        sig = _compute_significance(added=0, removed=0, modified=0, total_curr=5)
-        assert sig == 1.0
-
-    def test_mixed_significance(self):
-        # 2 changed out of 10 curr → 1 - 2/10 = 0.8
-        sig = _compute_significance(added=1, removed=0, modified=1, total_curr=10)
-        assert abs(sig - 0.8) < 1e-9
-
-    def test_zero_total_curr_returns_one(self):
-        """Edge case: no chunks at all → treat as unchanged."""
-        sig = _compute_significance(added=0, removed=0, modified=0, total_curr=0)
-        assert sig == 1.0
+# Phase 5 (#156): TestModifiedMetadataInvariant and TestComputeSignificance removed —
+# differ.py and _compute_significance deleted in Phase 5 cutover.

@@ -56,38 +56,11 @@ class TestBuildPreviewEvent:
 
 
 class TestComputePreviewUnifiedDiff:
-    def test_change_detected_produces_real_unified_diff(self):
-        """Preview path computes a real unified diff from canned text so the
-        preview endpoint can render diff_snippet/diff_full without DB access."""
-        diff = compute_preview_unified_diff("change_detected")
-        assert diff
-        assert diff.startswith("--- content")
-        assert "+++ content" in diff
-        assert "@@" in diff
+    """Phase 5 (#156): diff pipeline removed — compute_preview_unified_diff always returns ''."""
 
-    def test_diff_reflects_html_normalization(self):
-        """Diff must go through normalize_html so structure matches the dispatcher (#125).
-
-        Asserts the output differs from a raw (un-normalized) diff — if normalize_html
-        is skipped the two diffs would be identical.
-        """
-        from src.core.diff.textual import compute_unified_diff
-        from src.core.notifications.preview_fixtures import (
-            _PREVIEW_CURRENT_TEXT,
-            _PREVIEW_PREVIOUS_TEXT,
-        )
-
-        raw_diff = compute_unified_diff(_PREVIEW_PREVIOUS_TEXT, _PREVIEW_CURRENT_TEXT).unified_diff
-        normalized_diff = compute_preview_unified_diff("change_detected")
-        assert normalized_diff != raw_diff, (
-            "normalize_html should restructure the diff vs raw input"
-        )
-
-    def test_non_diff_events_return_empty_string(self):
-        """Events without canned previous_text/current_text return empty."""
+    def test_returns_empty_string_for_all_events(self):
+        """Diff pipeline removed in Phase 5; all events return empty string."""
         for et in WatchEventType:
-            if et.value == "change_detected":
-                continue
             assert compute_preview_unified_diff(et.value) == ""
 
     def test_unknown_event_type_returns_empty(self):

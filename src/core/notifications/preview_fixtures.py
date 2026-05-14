@@ -5,21 +5,15 @@ database. `MOCK_EVENT_FIXTURES` holds one fixture per event type, keyed by the
 string `WatchEventType` value. `build_preview_event()` wraps the fixture in a
 `WatchEvent` suitable for passing through `build_title` / `build_body`.
 
-For change_detected, the fixture exposes ``previous_text`` / ``current_text``
-as HTML strings. `compute_preview_unified_diff()` passes them through
-`normalize_html` (html5lib + lxml pretty-print) before diffing, mirroring the
-dispatcher's HTML-watch path so preview line counts and structure match
-production output (#125).
-
-Preview is fixture-only for v1. A future extension could source a fixture from
-a real recent watch event for a given user — tracked in the design doc under
-"Out of scope (v1)".
+Phase 5 (#156): ``compute_preview_unified_diff`` now returns an empty string.
+The diff pipeline (Snapshot → Change → unified diff) was removed; preview diffs
+are not reconstructable without real content. Templates receive ``unified_diff=""``
+and diff_snippet / diff_full slots simply render nothing, which is acceptable for
+a stateless preview.
 """
 
 from datetime import UTC, datetime
 
-from src.core.diff.normalize import normalize_html
-from src.core.diff.textual import compute_unified_diff
 from src.core.notifications.events import WatchEvent, WatchEventType
 
 _PREVIEW_WATCH_ID = "01KPPFATBNYQGBB38SQ06DN9HY"
@@ -134,19 +128,9 @@ def build_preview_event(event_type: str) -> WatchEvent:
 
 
 def compute_preview_unified_diff(event_type: str) -> str:
-    """Return the unified diff for a preview event, or '' for non-diff events.
+    """Return empty string — diff pipeline removed in Phase 5 (#156).
 
-    Computed live from the fixture's `previous_text` / `current_text` so the
-    preview path stays stateless and never touches storage. Empty string for
-    event types that don't carry diff text (everything except change_detected).
+    The Snapshot/Change tables were dropped; there is no content to diff.
+    Preview templates receive ``unified_diff=""`` and diff slots render nothing.
     """
-    metadata = MOCK_EVENT_FIXTURES.get(event_type, {})
-    prev = metadata.get("previous_text")
-    curr = metadata.get("current_text")
-    if not prev or not curr:
-        return ""
-    try:
-        prev, curr = normalize_html(prev), normalize_html(curr)
-    except Exception:
-        pass  # fixture HTML is well-formed; failure here is unexpected but non-fatal
-    return compute_unified_diff(prev, curr).unified_diff
+    return ""

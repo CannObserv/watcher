@@ -6,7 +6,6 @@ import pytest
 from jinja2 import TemplateError, UndefinedError
 
 from src.api.schemas.content_config import ContentConfig, ContentOptions
-from src.core.diff.textual import compute_unified_diff
 from src.core.notifications.content import (
     build_body,
     build_template_context,
@@ -38,15 +37,31 @@ CHANGE_META = {
     "modified": [{"label": "Contact Info", "similarity": 0.85}],
 }
 
-# Canonical canned diff used across diff/snippet tests. Real unified-diff output
-# from compute_unified_diff so the rendering pipeline (fence + truncation) gets
-# realistic input.
-SAMPLE_PREV = "alpha\nbeta\ngamma\ndelta\nepsilon\n"
-SAMPLE_CURR = "alpha\nbeta-changed\ngamma\ndelta\nepsilon\nzeta\n"
+# Canonical canned diff used across diff/snippet tests.
+# Phase 5 (#156): diff pipeline removed; hardcoded sample replaces live
+# compute_unified_diff call so test_content.py stays independent of src/core/diff/.
+_SAMPLE_UNIFIED_DIFF = (
+    "--- content\n"
+    "+++ content\n"
+    "@@ -1,5 +1,6 @@\n"
+    " alpha\n"
+    "\n"
+    "-beta\n"
+    "\n"
+    "+beta-changed\n"
+    "\n"
+    " gamma\n"
+    "\n"
+    " delta\n"
+    "\n"
+    " epsilon\n"
+    "\n"
+    "+zeta\n"
+)
 
 
 def _sample_unified_diff() -> str:
-    return compute_unified_diff(SAMPLE_PREV, SAMPLE_CURR).unified_diff
+    return _SAMPLE_UNIFIED_DIFF
 
 
 class TestResolveOptions:
@@ -262,10 +277,15 @@ class TestDiffSlot:
         """diff_snippet_lines caps lines but never truncates mid-hunk —
         when set below the first hunk's full size, only file headers + the
         @@ line are emitted, with the truncation footer."""
-        # Build a diff with two hunks so we can verify hunk-boundary behavior.
-        prev = "a\nb\nc\nd\ne\nf\ng\nh\ni\nj\nk\nl\nm\nn\no\np\nq\nr\ns\nt\nu\n"
-        curr = "a\nB\nc\nd\ne\nf\ng\nh\ni\nj\nk\nl\nm\nn\nO\np\nq\nr\ns\nt\nu\n"
-        diff = compute_unified_diff(prev, curr).unified_diff
+        # Two-hunk canned diff (Phase 5 #156: pre-computed, no live diff call).
+        diff = (
+            "--- content\n"
+            "+++ content\n"
+            "@@ -1,5 +1,5 @@\n"
+            " a\n\n-b\n\n+B\n\n c\n\n d\n\n e\n\n"
+            "@@ -12,7 +12,7 @@\n"
+            " l\n\n m\n\n n\n\n-o\n\n+O\n\n p\n\n q\n\n r\n"
+        )
         event = make_event(metadata=CHANGE_META)
         # Cap below first hunk size — only headers + @@ should fit.
         body = build_body(
@@ -586,12 +606,10 @@ class TestBuildTemplateContext:
 
     def test_diff_snippet_capped_at_default(self):
         """Default snippet cap (25 lines) caps long diffs; diff_full keeps all."""
-        # Build a long synthetic diff: 50 line changes
-        prev_lines = [f"line-{i}" for i in range(50)]
-        curr_lines = [f"changed-{i}" if i % 2 == 0 else f"line-{i}" for i in range(50)]
-        long_diff = compute_unified_diff(
-            "\n".join(prev_lines) + "\n", "\n".join(curr_lines) + "\n"
-        ).unified_diff
+        # Canned long diff — 30 changed lines so the 25-line cap fires.
+        # Phase 5 (#156): pre-computed; no live compute_unified_diff call.
+        hunk_lines = "".join(f"-old-{i}\n+new-{i}\n" for i in range(30))
+        long_diff = f"--- content\n+++ content\n@@ -1,60 +1,60 @@\n{hunk_lines}"
         event = make_event(metadata=CHANGE_META)
         ctx = build_template_context(event, unified_diff=long_diff)
         snippet_lines = ctx["diff_snippet"].count("\n") + 1
@@ -688,12 +706,9 @@ class TestBuildBodyWithTemplates:
         default; build_body overrides it with options.diff_snippet_lines so
         a custom template referencing {{ diff_snippet }} honors the
         preference."""
-        # Multi-hunk diff so the cap actually matters.
-        prev_lines = [f"line-{i}" for i in range(50)]
-        curr_lines = [f"changed-{i}" if i % 5 == 0 else f"line-{i}" for i in range(50)]
-        long_diff = compute_unified_diff(
-            "\n".join(prev_lines) + "\n", "\n".join(curr_lines) + "\n"
-        ).unified_diff
+        # Canned long diff — 30 changed lines; Phase 5 (#156) pre-computed.
+        hunk_lines = "".join(f"-old-{i}\n+new-{i}\n" for i in range(30))
+        long_diff = f"--- content\n+++ content\n@@ -1,60 +1,60 @@\n{hunk_lines}"
 
         event = make_event(metadata=CHANGE_META)
         opts = ContentOptions(body_template="{{ diff_snippet }}", diff_snippet_lines=4)

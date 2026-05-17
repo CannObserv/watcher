@@ -15,7 +15,7 @@
   </div>
 
   <div>
-    {% include "partials/info_source_picker.html" %}
+    {% include "partials/target_picker.html" %}
   </div>
 
   <div>
@@ -27,16 +27,6 @@
       {% endfor %}
     </select>
     <p id="content_type-error" class="mt-1 text-xs text-red-600 dark:text-red-400" hidden></p>
-  </div>
-
-  <div>
-    <label for="interval" class="form-label">Check Interval</label>
-    <input type="text" name="interval" id="interval" placeholder="1d"
-      value=""
-      aria-describedby="interval-hint"
-      class="form-input mt-1">
-    <p id="interval-hint" class="mt-1 text-xs text-gray-500 dark:text-gray-400">Format: 30s, 15m, 6h, 1d</p>
-    <p id="interval-error" class="mt-1 text-xs text-red-600 dark:text-red-400" hidden></p>
   </div>
 
   <div>

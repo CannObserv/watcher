@@ -1,4 +1,4 @@
-"""Watch creation service — shared logic used by both API and dashboard routes."""
+"""Watch creation service — InfoItem-first model (#160)."""
 
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
@@ -7,31 +7,56 @@ from archiver_client import ArchiverClient
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
-from ulid import ULID  # used in ULID.from_str
+from ulid import ULID
 
 from src.core.logging import get_logger
 from src.core.models.audit_log import EventType, audit
 from src.core.models.domain import DEFAULT_MAX_CONCURRENCY, DEFAULT_MIN_INTERVAL, Domain
 from src.core.models.watch import ContentType, Watch
+from src.core.models.watched_item import WatchedItem
 from src.core.notifications.events import WatchEvent, WatchEventType
 from src.core.notifications.notify import dispatch_event_notifications
 from src.core.probe import ProbeResult
+from src.core.watches.info_item_fetch import fetch_info_item_bindings
 
 logger = get_logger(__name__)
 
 
 async def resolve_watch_url(watch: Watch, client: ArchiverClient) -> str:
-    """Resolve a watch's current target URL from the primary InfoSource.
+    """Resolve the operator-facing URL for a Watch — the InfoItem's primary URL.
 
-    Used at notification/event-emission time so ``watch_url`` reflects the
-    operator's current source, not a stale value. Caller passes the SDK client
-    explicitly to keep the registry lookup at the request boundary.
-
-    Resolves via ``info_source_id`` once Phase 5 SDK support lands; for now
-    falls back to the InfoSource's URL from the source_spec.
+    Both primary-target (target_info_source_id IS NULL) and sub_aspect-target
+    Watches share the same fetch URL because the InfoItem is a fetch group
+    (Archiver v3.1.0 invariant). Used by notification dispatch to build
+    WatchEvent.watch_url.
     """
-    source = await client.get_info_source(str(watch.info_source_id))
-    return source.source_spec.additional_properties["target"]["url"]
+    bindings = await fetch_info_item_bindings(client, str(watch.info_item_id))
+    return bindings.primary_url
+
+
+async def _get_or_create_watched_item(
+    session: AsyncSession, *, info_item_id: ULID, fallback_name: str
+) -> WatchedItem:
+    """Look up or create the WatchedItem for an InfoItem.
+
+    The WatchedItem is 1:1 with the InfoItem (uniqueness constraint on
+    info_item_id). SELECT-then-INSERT without a savepoint: concurrent
+    Watch-creation calls on the same InfoItem (e.g. two operators racing on
+    the dashboard, or an API client + a UI submission) raise IntegrityError
+    here and propagate to the caller. The check-cycle path (which only reads
+    WatchedItems) is unaffected. Acceptable for v1 — Watch creation is rare
+    and operator-driven; harden with `begin_nested()` + retry if a real race
+    surfaces.
+    """
+    existing = (
+        await session.execute(select(WatchedItem).where(WatchedItem.info_item_id == info_item_id))
+    ).scalar_one_or_none()
+    if existing is not None:
+        return existing
+    wi = WatchedItem(info_item_id=info_item_id, name=fallback_name)
+    session.add(wi)
+    await session.flush()
+    return wi
 
 
 async def create_watch(
@@ -40,90 +65,92 @@ async def create_watch(
     info_client: ArchiverClient,
     *,
     name: str,
-    content_type: str | ContentType,
-    info_source_id: str,
-    schedule_config: dict | None = None,
+    info_item_id: str,
+    target_info_source_id: str | None = None,
+    content_type: str | ContentType | None = None,
     description: str | None = None,
     tags: list[str] | None = None,
 ) -> Watch:
-    """Create a new Watch.
+    """Create a Watch on an InfoItem's primary content or a sub_aspect fragment.
 
-    Resolves the target URL from the InfoSource via ``get_info_source``, probes
-    it to populate ``effective_url`` / ``effective_domain``, upserts the
-    Domain row, and persists the Watch.
+    Steps:
+    1. Resolve the InfoItem's bindings + primary URL via fetch_info_item_bindings.
+    2. If target_info_source_id is set, validate it is bound with role='sub_aspect'.
+    3. Probe the URL → effective_url / effective_domain (redirect-detection).
+    4. Upsert the Domain row.
+    5. Get-or-create the WatchedItem for this InfoItem.
+    6. Persist Watch + audit + dispatch WATCH_CREATED event.
 
-    *info_source_id* is required — identifies a root or fragment InfoSource in
-    the Archiver service; URL is resolved by walking the parent chain.
-
-    Raises whatever the SDK raises (``NotFound``, ``httpx.ConnectError``,
-    ``ServerError``, ``AuthError``, ``ValidationError``) — translation to
-    HTTP status codes is the route layer's concern.
-
-    Probe failures (``httpx.HTTPError``) propagate to the caller — no watch
-    or domain is created.
+    Raises:
+        ValueError — target_info_source_id is set but doesn't match a sub_aspect binding.
+        archiver_client.NotFound — info_item_id (or its primary binding) unknown.
+        httpx.HTTPError — probe failed.
     """
-    schedule_config = schedule_config if schedule_config is not None else {}
+    bindings = await fetch_info_item_bindings(info_client, info_item_id)
 
-    # 1. Resolve the target URL from the InfoSource (Phase 5+).
-    #    NotFound / ServerError / AuthError / httpx.* propagate to the route handler.
-    #    Fragments have no target.url — walk up parent chain to find the root URL.
-    source = await info_client.get_info_source(info_source_id)
-    spec_props = source.source_spec.additional_properties
-    url = spec_props.get("target", {}).get("url")
-    while url is None and source.parent_info_source_id is not None:
-        source = await info_client.get_info_source(str(source.parent_info_source_id))
-        url = source.source_spec.additional_properties.get("target", {}).get("url")
-    if url is None:
-        raise ValueError(
-            f"InfoSource {info_source_id}: no target.url found on source or any ancestor"
-        )
-
-    # 2. Probe the URL — establishes effective_url / effective_domain and
-    #    fails fast on connection errors. httpx.HTTPError propagates.
-    probe_result = await probe_fn(url)
-
-    # 3. Upsert domain — insert with defaults if new, leave config intact if
-    #    existing. Guard against TOCTOU race: concurrent inserts may both
-    #    pass the scalar_one_or_none() check and hit the unique constraint.
-    domain_stmt = select(Domain).where(Domain.name == probe_result.effective_domain)
-    domain_result = await session.execute(domain_stmt)
-    if not domain_result.scalar_one_or_none():
-        try:
-            session.add(
-                Domain(
-                    name=probe_result.effective_domain,
-                    min_interval=DEFAULT_MIN_INTERVAL,
-                    max_concurrency=DEFAULT_MAX_CONCURRENCY,
-                    current_interval=DEFAULT_MIN_INTERVAL,
-                )
+    if target_info_source_id is not None:
+        sub_ids = {str(s.info_source_id) for s in bindings.sub_aspects}
+        if target_info_source_id not in sub_ids:
+            raise ValueError(
+                f"target_info_source_id {target_info_source_id} is not a sub_aspect "
+                f"of InfoItem {info_item_id}"
             )
-            await session.flush()
+
+    probe_result = await probe_fn(bindings.primary_url)
+
+    # Upsert Domain via a savepoint so a concurrent insert raising IntegrityError
+    # doesn't roll back the enclosing transaction (which contains the in-flight
+    # Watch + WatchedItem inserts).
+    domain_stmt = select(Domain).where(Domain.name == probe_result.effective_domain)
+    if not (await session.execute(domain_stmt)).scalar_one_or_none():
+        try:
+            async with session.begin_nested():
+                session.add(
+                    Domain(
+                        name=probe_result.effective_domain,
+                        min_interval=DEFAULT_MIN_INTERVAL,
+                        max_concurrency=DEFAULT_MAX_CONCURRENCY,
+                        current_interval=DEFAULT_MIN_INTERVAL,
+                    )
+                )
         except IntegrityError:
-            await session.rollback()
+            # Concurrent insert won the race. The savepoint auto-rolls back;
+            # the enclosing transaction stays intact.
+            pass
+
+    watched_item = await _get_or_create_watched_item(
+        session,
+        info_item_id=ULID.from_str(info_item_id),
+        fallback_name=name,
+    )
 
     watch_kwargs: dict = {
         "name": name,
-        "info_source_id": ULID.from_str(info_source_id),
+        "info_item_id": ULID.from_str(info_item_id),
+        "target_info_source_id": (
+            ULID.from_str(target_info_source_id) if target_info_source_id else None
+        ),
+        "watched_item_id": watched_item.id,
         "content_type": content_type,
-        "schedule_config": schedule_config,
         "effective_url": probe_result.effective_url,
         "effective_domain": probe_result.effective_domain,
         "description": description,
         "tags": tags,
     }
-
     watch = Watch(**watch_kwargs)
     session.add(watch)
-    await session.flush()  # populate watch.id before audit
+    await session.flush()
 
     audit(
         session,
         EventType.WATCH_CREATED,
         watch_id=watch.id,
         name=name,
-        info_source_id=info_source_id,
-        url=url,
-        content_type=str(content_type),
+        info_item_id=info_item_id,
+        target_info_source_id=target_info_source_id,
+        watched_item_id=str(watched_item.id),
+        url=bindings.primary_url,
+        content_type=str(content_type) if content_type is not None else None,
         effective_url=probe_result.effective_url,
         effective_domain=probe_result.effective_domain,
     )
@@ -133,8 +160,7 @@ async def create_watch(
             event_type=WatchEventType.WATCH_CREATED,
             watch_id=str(watch.id),
             watch_name=watch.name,
-            # At create-time the resolved-spec URL *is* the new watch's URL.
-            watch_url=url,
+            watch_url=bindings.primary_url,
             occurred_at=datetime.now(UTC),
         ),
     )

@@ -103,17 +103,21 @@ class TestDeleteDomain:
         assert response.status_code == 404
 
     async def test_delete_domain_with_watches_returns_409(self, client, db_session):
-        from tests.conftest import make_info_item, make_info_source
+        from tests.conftest import bind_primary_source, make_info_item, make_info_source
 
         item = await make_info_item(db_session, name="W")
         source = await make_info_source(db_session, url="https://example.com/p")
+        await bind_primary_source(
+            db_session,
+            info_item_id=item.info_item_id,
+            info_source_id=source.info_source_id,
+        )
         await db_session.commit()
         resp = await client.post(
             "/api/v1/watches",
             json={
                 "name": "W",
                 "info_item_id": str(item.info_item_id),
-                "info_source_id": str(source.info_source_id),
                 "content_type": "html",
             },
         )

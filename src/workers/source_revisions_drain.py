@@ -22,18 +22,22 @@ def _get_archiver_client():
     return get_registry().get_archiver_client()
 
 
-async def _resolve_watch_for_source(session, info_source_id: str) -> Watch | None:
-    """Return the active Watch for this source, or None.
+async def _resolve_sub_aspect_watch(session, info_source_id: str) -> Watch | None:
+    """Return the active sub_aspect-target Watch for this source, or None.
 
-    Returns None when the Watch model does not yet have an ``info_source_id``
-    column (pre-Stage-6 migration) — the caller falls back to a source-only
-    event in that case.
+    Phase 6 (#160): Watches no longer carry ``info_source_id``. A Watch is
+    matched here only when its ``target_info_source_id`` equals the pending
+    row's ``info_source_id`` — i.e. only sub_aspect-target Watches.
+
+    Primary-target Watches (``target_info_source_id IS NULL``) cannot be
+    located from a primary InfoSource id alone: Watcher has no local
+    (info_source_id → info_item_id) reverse lookup in v1. The caller logs
+    and skips the notification in that case; the SourceRevision is still
+    persisted upstream in Archiver.
     """
-    if not hasattr(Watch, "info_source_id"):
-        return None
     result = await session.execute(
         select(Watch)
-        .where(Watch.info_source_id == info_source_id)
+        .where(Watch.target_info_source_id == info_source_id)
         .where(Watch.is_active.is_(True))
         .where(Watch.is_archived.is_(False))
     )
@@ -82,7 +86,7 @@ async def drain_pending_source_revisions(*, batch_size: int = 100, **periodic_kw
                 captured_at=row.captured_at,
             )
 
-            watch = await _resolve_watch_for_source(session, str(row.info_source_id))
+            watch = await _resolve_sub_aspect_watch(session, str(row.info_source_id))
             if watch is not None:
                 event = WatchEvent(
                     event_type=WatchEventType.CHANGE_DETECTED,
@@ -98,6 +102,17 @@ async def drain_pending_source_revisions(*, batch_size: int = 100, **periodic_kw
                     },
                 )
                 await dispatch_event_notifications(session, event)
+            else:
+                # v1 limitation: primary-target Watches cannot be located from
+                # the InfoSource id alone (no local reverse lookup). The
+                # SourceRevision is persisted in Archiver; only the deferred
+                # notification fan-out is dropped. Operators see the change on
+                # the next successful cycle's fingerprint comparison.
+                logger.warning(
+                    "drain: no sub_aspect Watch for info_source_id=%s; "
+                    "primary-target retry notify skipped (v1 limitation)",
+                    str(row.info_source_id),
+                )
 
             await delete_pending(session, row.id)
             drained += 1

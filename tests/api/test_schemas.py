@@ -88,22 +88,41 @@ class TestHttpUrlStr:
 
 class TestWatchCreate:
     def test_valid_watch_create(self):
-        source_id = str(ULID())
+        item_id = str(ULID())
         data = WatchCreate(
             name="Test Watch",
-            info_source_id=source_id,
+            info_item_id=item_id,
             content_type="html",
         )
         assert data.name == "Test Watch"
-        assert data.info_source_id == source_id
+        assert data.info_item_id == item_id
+        assert data.target_info_source_id is None
         assert data.content_type == "html"
-        assert data.schedule_config == {}
+
+    def test_watch_create_with_target_info_source(self):
+        item_id = str(ULID())
+        sub_id = str(ULID())
+        data = WatchCreate(
+            name="Sub Watch",
+            info_item_id=item_id,
+            target_info_source_id=sub_id,
+            content_type="html",
+        )
+        assert data.info_item_id == item_id
+        assert data.target_info_source_id == sub_id
+
+    def test_watch_create_content_type_optional(self):
+        data = WatchCreate(
+            name="Untyped",
+            info_item_id=str(ULID()),
+        )
+        assert data.content_type is None
 
     def test_watch_create_requires_name(self):
         with pytest.raises(ValidationError):
-            WatchCreate(info_source_id=str(ULID()), content_type="html")
+            WatchCreate(info_item_id=str(ULID()), content_type="html")
 
-    def test_watch_create_requires_info_source_id(self):
+    def test_watch_create_requires_info_item_id(self):
         with pytest.raises(ValidationError):
             WatchCreate(name="Test", content_type="html")
 
@@ -111,29 +130,22 @@ class TestWatchCreate:
         with pytest.raises(ValidationError):
             WatchCreate(
                 name="Test",
-                info_source_id=str(ULID()),
+                info_item_id=str(ULID()),
                 content_type="invalid",
             )
 
-    def test_watch_create_with_schedule_config(self):
-        data = WatchCreate(
-            name="PDF Watch",
-            info_source_id=str(ULID()),
-            content_type="pdf",
-            schedule_config={"interval": "6h"},
-        )
-        assert data.schedule_config == {"interval": "6h"}
-
     def test_watch_create_no_legacy_fields(self):
-        """``url`` and ``fetch_config`` no longer accepted (silently ignored)."""
+        """``url``, ``fetch_config``, ``info_source_id``, and ``schedule_config``
+        are gone from the create shape."""
         data = WatchCreate(
             name="Silent",
-            info_source_id=str(ULID()),
+            info_item_id=str(ULID()),
             content_type="html",
-            # These extra keys must be ignored or rejected, never stored.
         )
         assert not hasattr(data, "url")
         assert not hasattr(data, "fetch_config")
+        assert not hasattr(data, "info_source_id")
+        assert not hasattr(data, "schedule_config")
 
 
 class TestWatchUpdate:
@@ -147,14 +159,29 @@ class TestWatchUpdate:
         assert data.name is None
 
     def test_update_url_field_not_present(self):
-        """URL is intentionally omitted from WatchUpdate — owned by InfoSpec."""
+        """URL is intentionally omitted from WatchUpdate — owned by the InfoSource."""
         data = WatchUpdate(name="No URL change")
         assert not hasattr(data, "url")
 
     def test_update_no_fetch_config_field(self):
-        """fetch_config is owned by the InfoSpec; never on the watch row."""
+        """fetch_config is owned by the InfoSource; never on the Watch row."""
         data = WatchUpdate(name="X")
         assert not hasattr(data, "fetch_config")
+
+    def test_update_no_schedule_config(self):
+        """schedule_config moved to WatchedItem; never on the WatchUpdate shape."""
+        data = WatchUpdate(name="X")
+        assert not hasattr(data, "schedule_config")
+
+    def test_update_no_info_item_id(self):
+        """info_item_id is immutable after creation — not on WatchUpdate."""
+        data = WatchUpdate(name="X")
+        assert not hasattr(data, "info_item_id")
+
+    def test_update_no_target_info_source_id(self):
+        """target_info_source_id is immutable after creation — not on WatchUpdate."""
+        data = WatchUpdate(name="X")
+        assert not hasattr(data, "target_info_source_id")
 
     def test_update_rejects_invalid_effective_url(self):
         with pytest.raises(ValidationError):
@@ -174,7 +201,9 @@ class TestWatchResponse:
     def _build_watch(self, **overrides):
         watch = Watch(
             name=overrides.pop("name", "Test"),
-            info_source_id=ULID(),
+            info_item_id=overrides.pop("info_item_id", ULID()),
+            target_info_source_id=overrides.pop("target_info_source_id", None),
+            watched_item_id=overrides.pop("watched_item_id", ULID()),
             content_type=overrides.pop("content_type", ContentType.HTML),
             **overrides,
         )
@@ -193,20 +222,42 @@ class TestWatchResponse:
         response = WatchResponse.model_validate(watch)
         assert response.is_archived is True
 
-    def test_watch_response_has_info_source_id(self):
-        """Phase 5: WatchResponse exposes info_source_id (not info_item_id)."""
+    def test_watch_response_has_info_item_id(self):
+        """#160: WatchResponse exposes info_item_id (not info_source_id)."""
         watch = self._build_watch()
         response = WatchResponse.model_validate(watch)
-        assert response.info_source_id == str(watch.info_source_id)
+        assert response.info_item_id == str(watch.info_item_id)
 
-    def test_watch_response_has_no_legacy_url_field(self):
-        """Phase 2c: WatchResponse must not expose ``url`` (now in InfoSpec)."""
+    def test_watch_response_target_info_source_id_nullable(self):
+        """Primary-target Watches expose target_info_source_id=None."""
         watch = self._build_watch()
         response = WatchResponse.model_validate(watch)
-        # model_dump must not contain ``url`` or ``fetch_config`` keys.
+        assert response.target_info_source_id is None
+
+    def test_watch_response_target_info_source_id_present(self):
+        """Sub_aspect-target Watches expose target_info_source_id as a string."""
+        sub_id = ULID()
+        watch = self._build_watch(target_info_source_id=sub_id)
+        response = WatchResponse.model_validate(watch)
+        assert response.target_info_source_id == str(sub_id)
+
+    def test_watch_response_has_watched_item_id(self):
+        """#160: WatchResponse exposes watched_item_id."""
+        wi_id = ULID()
+        watch = self._build_watch(watched_item_id=wi_id)
+        response = WatchResponse.model_validate(watch)
+        assert response.watched_item_id == str(wi_id)
+
+    def test_watch_response_has_no_legacy_fields(self):
+        """WatchResponse must not expose ``url``, ``fetch_config``,
+        ``info_source_id``, or ``schedule_config``."""
+        watch = self._build_watch()
+        response = WatchResponse.model_validate(watch)
         dumped = response.model_dump()
         assert "url" not in dumped
         assert "fetch_config" not in dumped
+        assert "info_source_id" not in dumped
+        assert "schedule_config" not in dumped
 
 
 class TestAuditLogResponse:

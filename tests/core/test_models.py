@@ -50,18 +50,15 @@ class TestWatchModel:
         assert watch.name == "Test Watch"
         assert watch.content_type == ContentType.HTML
         assert watch.is_active is True
-        assert watch.schedule_config == {}
         assert watch.last_checked_at is None
 
     def test_create_watch_with_all_fields(self):
         watch = Watch(
             name="PDF Watch",
             content_type=ContentType.PDF,
-            schedule_config={"interval": "6h"},
             is_active=False,
         )
         assert watch.content_type == ContentType.PDF
-        assert watch.schedule_config == {"interval": "6h"}
         assert watch.is_active is False
 
     def test_content_type_enum_values(self):

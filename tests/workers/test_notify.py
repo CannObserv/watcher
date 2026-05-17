@@ -37,11 +37,11 @@ def make_event(event_type=WatchEventType.CHANGE_DETECTED, watch_id=None):
     )
 
 
-def _watch_meta_result(value, *, content_type=None):
+def _watch_meta_result(value, *, content_type=None, watched_item_id=None):
     """Mock the row result for the dispatcher's
-    `select(Watch.effective_domain, Watch.content_type)` lookup."""
+    `select(Watch.effective_domain, Watch.content_type, Watch.watched_item_id)` lookup."""
     r = MagicMock()
-    r.one_or_none.return_value = None if value is None else (value, content_type)
+    r.one_or_none.return_value = None if value is None else (value, content_type, watched_item_id)
     return r
 
 

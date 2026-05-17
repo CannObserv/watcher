@@ -23,7 +23,7 @@ async def _make_watch(client, db_session):
     watch = await make_watch(
         db_session,
         name=f"Test Watch {_watch_counter}",
-        url=f"https://example-{_watch_counter}.com",
+        primary_url=f"https://example-{_watch_counter}.com",
         content_type="html",
     )
     await db_session.commit()
@@ -402,7 +402,7 @@ class TestTestNotificationConfig:
 
         from src.core.models.notification_config import WatchNotificationConfig
 
-        watch = await make_watch(db_session, name="WithSpec", url="https://example.com")
+        watch = await make_watch(db_session, name="WithSpec", primary_url="https://example.com")
         nc = WatchNotificationConfig(
             watch_id=watch.id,
             channel_hint="json",

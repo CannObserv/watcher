@@ -11,6 +11,8 @@ from src.core.models.notification_template import DomainNcRef, NotificationTempl
 from src.core.models.pending_source_revision import PendingSourceRevision
 from src.core.models.temporal_profile import PostAction, ProfileType, TemporalProfile
 from src.core.models.watch import ContentType, Watch
+from src.core.models.watched_item import WatchedItem
+from src.core.models.watched_item_notification_template import WatchedItemNotificationTemplate
 
 __all__ = [
     "ApiKey",
@@ -33,5 +35,7 @@ __all__ = [
     "TimestampMixin",
     "ULIDType",
     "Watch",
+    "WatchedItem",
+    "WatchedItemNotificationTemplate",
     "generate_ulid",
 ]

@@ -14,7 +14,10 @@ class TestWatchDetailPage:
 
     async def test_detail_page_has_status_toggle(self, client, db_session):
         watch = await make_watch(
-            db_session, name="Toggle Test", url="https://example.com", content_type=ContentType.HTML
+            db_session,
+            name="Toggle Test",
+            primary_url="https://example.com",
+            content_type=ContentType.HTML,
         )
         response = await client.get(f"/watches/{watch.id}")
         assert response.status_code == 200
@@ -23,7 +26,10 @@ class TestWatchDetailPage:
 
     async def test_detail_page_fields_show_edit_button_in_view_mode(self, client, db_session):
         watch = await make_watch(
-            db_session, name="View Mode", url="https://example.com", content_type=ContentType.HTML
+            db_session,
+            name="View Mode",
+            primary_url="https://example.com",
+            content_type=ContentType.HTML,
         )
         response = await client.get(f"/watches/{watch.id}")
         assert response.status_code == 200
@@ -34,7 +40,10 @@ class TestWatchDetailPage:
 
     async def test_detail_page_shows_content_type_readonly(self, client, db_session):
         watch = await make_watch(
-            db_session, name="CT Read", url="https://example.com", content_type=ContentType.PDF
+            db_session,
+            name="CT Read",
+            primary_url="https://example.com",
+            content_type=ContentType.PDF,
         )
         response = await client.get(f"/watches/{watch.id}")
         assert response.status_code == 200
@@ -47,7 +56,7 @@ class TestWatchDetailPage:
         watch = await make_watch(
             db_session,
             name="No Fetch Config",
-            url="https://example.com",
+            primary_url="https://example.com",
             content_type=ContentType.HTML,
         )
         response = await client.get(f"/watches/{watch.id}")
@@ -60,7 +69,10 @@ class TestWatchDetailPage:
 
     async def test_detail_page_has_danger_zone(self, client, db_session):
         watch = await make_watch(
-            db_session, name="DZ Test", url="https://example.com", content_type=ContentType.HTML
+            db_session,
+            name="DZ Test",
+            primary_url="https://example.com",
+            content_type=ContentType.HTML,
         )
         response = await client.get(f"/watches/{watch.id}")
         content = response.content.decode()
@@ -69,7 +81,10 @@ class TestWatchDetailPage:
 
     async def test_detail_page_has_metadata_footer(self, client, db_session):
         watch = await make_watch(
-            db_session, name="Meta Test", url="https://example.com", content_type=ContentType.HTML
+            db_session,
+            name="Meta Test",
+            primary_url="https://example.com",
+            content_type=ContentType.HTML,
         )
         response = await client.get(f"/watches/{watch.id}")
         content = response.content.decode()
@@ -79,7 +94,10 @@ class TestWatchDetailPage:
     async def test_detail_page_no_edit_button_in_header(self, client, db_session):
         """Edit button in header removed — editing is now inline."""
         watch = await make_watch(
-            db_session, name="No Edit Btn", url="https://example.com", content_type=ContentType.HTML
+            db_session,
+            name="No Edit Btn",
+            primary_url="https://example.com",
+            content_type=ContentType.HTML,
         )
         response = await client.get(f"/watches/{watch.id}")
         content = response.content.decode()
@@ -91,7 +109,10 @@ class TestWatchFieldPartialGet:
 
     async def test_field_partial_view_mode_default(self, client, db_session):
         watch = await make_watch(
-            db_session, name="Field View", url="https://example.com", content_type=ContentType.HTML
+            db_session,
+            name="Field View",
+            primary_url="https://example.com",
+            content_type=ContentType.HTML,
         )
         response = await client.get(
             f"/watches/{watch.id}/field/name",
@@ -104,7 +125,10 @@ class TestWatchFieldPartialGet:
 
     async def test_field_partial_edit_mode(self, client, db_session):
         watch = await make_watch(
-            db_session, name="Field Edit", url="https://example.com", content_type=ContentType.HTML
+            db_session,
+            name="Field Edit",
+            primary_url="https://example.com",
+            content_type=ContentType.HTML,
         )
         response = await client.get(
             f"/watches/{watch.id}/field/name?mode=edit",
@@ -117,7 +141,10 @@ class TestWatchFieldPartialGet:
 
     async def test_field_partial_invalid_field_returns_400(self, client, db_session):
         watch = await make_watch(
-            db_session, name="Bad Field", url="https://example.com", content_type=ContentType.HTML
+            db_session,
+            name="Bad Field",
+            primary_url="https://example.com",
+            content_type=ContentType.HTML,
         )
         response = await client.get(f"/watches/{watch.id}/field/nonexistent")
         assert response.status_code == 400
@@ -131,7 +158,10 @@ class TestWatchFieldPartialGet:
 
     async def test_field_partial_non_htmx_redirects(self, client, db_session):
         watch = await make_watch(
-            db_session, name="No HTMX", url="https://example.com", content_type=ContentType.HTML
+            db_session,
+            name="No HTMX",
+            primary_url="https://example.com",
+            content_type=ContentType.HTML,
         )
         response = await client.get(
             f"/watches/{watch.id}/field/name",
@@ -145,7 +175,10 @@ class TestWatchFieldUpdate:
 
     async def test_update_name_returns_view_mode(self, client, db_session):
         watch = await make_watch(
-            db_session, name="Old Name", url="https://example.com", content_type=ContentType.HTML
+            db_session,
+            name="Old Name",
+            primary_url="https://example.com",
+            content_type=ContentType.HTML,
         )
         response = await client.post(
             f"/watches/{watch.id}/field/name",
@@ -156,22 +189,30 @@ class TestWatchFieldUpdate:
         assert b"New Name" in response.content
         assert b"<input" not in response.content
 
-    async def test_update_interval(self, client, db_session):
+    async def test_interval_field_inline_edit_returns_400(self, client, db_session):
+        """#160 Task 11.3: schedule_config moved to the WatchedItem; per-Watch
+        interval edit is gone. The dispatcher must reject the legacy field name.
+        """
         watch = await make_watch(
-            db_session, name="Interval", url="https://example.com", content_type=ContentType.HTML
+            db_session,
+            name="Interval",
+            primary_url="https://example.com",
+            content_type=ContentType.HTML,
         )
         response = await client.post(
             f"/watches/{watch.id}/field/interval",
             data={"value": "6h"},
             headers={"HX-Request": "true"},
         )
-        assert response.status_code == 200
-        assert b"6h" in response.content
+        assert response.status_code == 400
 
     async def test_update_url_field_returns_400(self, client, db_session):
         """Phase 2c: ``url`` is no longer an editable column; the dispatcher rejects."""
         watch = await make_watch(
-            db_session, name="No URL", url="https://example.com", content_type=ContentType.HTML
+            db_session,
+            name="No URL",
+            primary_url="https://example.com",
+            content_type=ContentType.HTML,
         )
         response = await client.post(
             f"/watches/{watch.id}/field/url",
@@ -185,7 +226,7 @@ class TestWatchFieldUpdate:
         watch = await make_watch(
             db_session,
             name="No fetch_config",
-            url="https://example.com",
+            primary_url="https://example.com",
             content_type=ContentType.HTML,
         )
         response = await client.post(
@@ -197,7 +238,7 @@ class TestWatchFieldUpdate:
 
     async def test_update_invalid_field_returns_400(self, client, db_session):
         watch = await make_watch(
-            db_session, name="Bad", url="https://example.com", content_type=ContentType.HTML
+            db_session, name="Bad", primary_url="https://example.com", content_type=ContentType.HTML
         )
         response = await client.post(
             f"/watches/{watch.id}/field/nonexistent",
@@ -207,7 +248,10 @@ class TestWatchFieldUpdate:
 
     async def test_non_htmx_redirects(self, client, db_session):
         watch = await make_watch(
-            db_session, name="Redirect", url="https://example.com", content_type=ContentType.HTML
+            db_session,
+            name="Redirect",
+            primary_url="https://example.com",
+            content_type=ContentType.HTML,
         )
         response = await client.post(
             f"/watches/{watch.id}/field/name",
@@ -224,7 +268,7 @@ class TestWatchDetailDomainRow:
         watch = await make_watch(
             db_session,
             name="Domain Row",
-            url="https://domain-row.com/p",
+            primary_url="https://domain-row.com/p",
             content_type=ContentType.HTML,
             effective_domain="domain-row.com",
         )
@@ -236,7 +280,7 @@ class TestWatchDetailDomainRow:
         watch = await make_watch(
             db_session,
             name="Domain Label",
-            url="https://domain-label.com/p",
+            primary_url="https://domain-label.com/p",
             content_type=ContentType.HTML,
             effective_domain="domain-label.com",
         )
@@ -249,7 +293,7 @@ class TestWatchDetailDomainRow:
         watch = await make_watch(
             db_session,
             name="No Domain",
-            url="https://nodomain.com/p",
+            primary_url="https://nodomain.com/p",
             content_type=ContentType.HTML,
             effective_domain=None,
         )
@@ -264,7 +308,7 @@ class TestWatchStatusToggle:
         watch = await make_watch(
             db_session,
             name="Active",
-            url="https://example.com",
+            primary_url="https://example.com",
             content_type=ContentType.HTML,
             is_active=True,
         )
@@ -282,7 +326,7 @@ class TestWatchStatusToggle:
         watch = await make_watch(
             db_session,
             name="Suspended Badge",
-            url="https://susp-badge.com/p",
+            primary_url="https://susp-badge.com/p",
             content_type=ContentType.HTML,
             is_active=False,
             domain_suspended=True,
@@ -296,7 +340,7 @@ class TestWatchStatusToggle:
         watch = await make_watch(
             db_session,
             name="Manual Badge",
-            url="https://manual-badge.com/p",
+            primary_url="https://manual-badge.com/p",
             content_type=ContentType.HTML,
             is_active=False,
             domain_suspended=False,
@@ -310,7 +354,7 @@ class TestWatchStatusToggle:
         watch = await make_watch(
             db_session,
             name="Inactive",
-            url="https://example.com",
+            primary_url="https://example.com",
             content_type=ContentType.HTML,
             is_active=False,
         )
@@ -326,7 +370,7 @@ class TestWatchStatusToggle:
         watch = await make_watch(
             db_session,
             name="Archived",
-            url="https://example.com",
+            primary_url="https://example.com",
             content_type=ContentType.HTML,
             is_active=False,
             is_archived=True,
@@ -342,7 +386,7 @@ class TestWatchStatusToggle:
         watch = await make_watch(
             db_session,
             name="Suspended Watch",
-            url="https://inactive-domain.com/p",
+            primary_url="https://inactive-domain.com/p",
             content_type=ContentType.HTML,
             effective_domain="inactive-domain.com",
             is_active=False,
@@ -360,7 +404,7 @@ class TestWatchStatusToggle:
         watch = await make_watch(
             db_session,
             name="Active Despite Inactive Domain",
-            url="https://inactive-domain2.com/p",
+            primary_url="https://inactive-domain2.com/p",
             content_type=ContentType.HTML,
             effective_domain="inactive-domain2.com",
             is_active=True,
@@ -380,7 +424,10 @@ class TestWatchArchiveRestore:
 
     async def test_archive_sets_flags(self, client, db_session):
         watch = await make_watch(
-            db_session, name="To Archive", url="https://example.com", content_type=ContentType.HTML
+            db_session,
+            name="To Archive",
+            primary_url="https://example.com",
+            content_type=ContentType.HTML,
         )
         response = await client.post(
             f"/watches/{watch.id}/archive",
@@ -395,7 +442,7 @@ class TestWatchArchiveRestore:
         watch = await make_watch(
             db_session,
             name="To Restore",
-            url="https://example.com",
+            primary_url="https://example.com",
             content_type=ContentType.HTML,
             is_active=False,
             is_archived=True,
@@ -413,7 +460,7 @@ class TestWatchArchiveRestore:
         watch = await make_watch(
             db_session,
             name="Archived DZ",
-            url="https://example.com",
+            primary_url="https://example.com",
             content_type=ContentType.HTML,
             is_active=False,
             is_archived=True,
@@ -425,7 +472,10 @@ class TestWatchArchiveRestore:
 
     async def test_non_archived_detail_shows_archive_button(self, client, db_session):
         watch = await make_watch(
-            db_session, name="Active DZ", url="https://example.com", content_type=ContentType.HTML
+            db_session,
+            name="Active DZ",
+            primary_url="https://example.com",
+            content_type=ContentType.HTML,
         )
         response = await client.get(f"/watches/{watch.id}")
         content = response.content.decode()
@@ -440,7 +490,7 @@ class TestWatchDeleteRequiresArchived:
         watch = await make_watch(
             db_session,
             name="Not Archived",
-            url="https://example.com",
+            primary_url="https://example.com",
             content_type=ContentType.HTML,
             is_active=False,
         )
@@ -451,7 +501,7 @@ class TestWatchDeleteRequiresArchived:
         watch = await make_watch(
             db_session,
             name="Archived Del",
-            url="https://example.com",
+            primary_url="https://example.com",
             content_type=ContentType.HTML,
             is_active=False,
             is_archived=True,

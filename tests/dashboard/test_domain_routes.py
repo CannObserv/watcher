@@ -122,7 +122,7 @@ class TestDomainDetail:
         await make_watch(
             db_session,
             name="My Watch",
-            url="https://watched.com/page",
+            primary_url="https://watched.com/page",
             content_type="html",
             effective_domain="watched.com",
         )
@@ -150,7 +150,7 @@ class TestDomainWatchesTableDomainInactiveBadge:
         await make_watch(
             db_session,
             name="Suspended",
-            url="https://ds-tbl.com/p",
+            primary_url="https://ds-tbl.com/p",
             content_type="html",
             effective_domain="ds-tbl.com",
             is_active=False,
@@ -164,7 +164,7 @@ class TestDomainWatchesTableDomainInactiveBadge:
         await make_watch(
             db_session,
             name="Manual Off",
-            url="https://mi-tbl.com/p",
+            primary_url="https://mi-tbl.com/p",
             content_type="html",
             effective_domain="mi-tbl.com",
             is_active=False,
@@ -297,7 +297,7 @@ class TestDomainDelete:
         await make_watch(
             db_session,
             name="W",
-            url="https://busy-del.com/p",
+            primary_url="https://busy-del.com/p",
             content_type="html",
             effective_domain="busy-del.com",
         )
@@ -341,7 +341,7 @@ class TestDomainToggleActive:
         watch = await make_watch(
             db_session,
             name="Active Watch",
-            url="https://suspend.com/p",
+            primary_url="https://suspend.com/p",
             content_type="html",
             effective_domain="suspend.com",
             is_active=True,
@@ -358,7 +358,7 @@ class TestDomainToggleActive:
         watch = await make_watch(
             db_session,
             name="Already Inactive",
-            url="https://skip-inactive.com/p",
+            primary_url="https://skip-inactive.com/p",
             content_type="html",
             effective_domain="skip-inactive.com",
             is_active=False,
@@ -374,7 +374,7 @@ class TestDomainToggleActive:
         watch = await make_watch(
             db_session,
             name="Archived Watch",
-            url="https://skip-archived.com/p",
+            primary_url="https://skip-archived.com/p",
             content_type="html",
             effective_domain="skip-archived.com",
             is_active=False,
@@ -391,7 +391,7 @@ class TestDomainToggleActive:
         watch = await make_watch(
             db_session,
             name="Suspended Watch",
-            url="https://restore.com/p",
+            primary_url="https://restore.com/p",
             content_type="html",
             effective_domain="restore.com",
             is_active=False,
@@ -411,7 +411,7 @@ class TestDomainToggleActive:
         watch = await make_watch(
             db_session,
             name="Manual Inactive",
-            url="https://manual.com/p",
+            primary_url="https://manual.com/p",
             content_type="html",
             effective_domain="manual.com",
             is_active=False,
@@ -443,7 +443,7 @@ class TestDomainToggleActive:
         await make_watch(
             db_session,
             name="OOB Watch",
-            url="https://htmx-oob.com/p",
+            primary_url="https://htmx-oob.com/p",
             content_type="html",
             effective_domain="htmx-oob.com",
             is_active=True,
@@ -465,7 +465,7 @@ class TestDomainToggleActive:
         await make_watch(
             db_session,
             name="Badge Watch",
-            url="https://htmx-badge.com/p",
+            primary_url="https://htmx-badge.com/p",
             content_type="html",
             effective_domain="htmx-badge.com",
             is_active=True,

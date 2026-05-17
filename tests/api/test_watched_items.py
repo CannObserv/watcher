@@ -183,3 +183,65 @@ class TestMarkReviewed:
 
         response = await client.post(f"/api/v1/watched-items/{ULID()}/mark-reviewed")
         assert response.status_code == 404
+
+
+class TestTemplateCrud:
+    async def test_list_empty(self, client, db_session):
+        wi = await _make_watched_item(db_session)
+        response = await client.get(f"/api/v1/watched-items/{wi.id}/notification-templates")
+        assert response.status_code == 200
+        assert response.json() == []
+
+    async def test_create_returns_record(self, client, db_session):
+        wi = await _make_watched_item(db_session)
+        response = await client.post(
+            f"/api/v1/watched-items/{wi.id}/notification-templates",
+            json={
+                "title": "Email Greg",
+                "channel_hint": "mailto://x:y@z",
+                "events": ["change_detected"],
+            },
+        )
+        assert response.status_code == 201
+        data = response.json()
+        assert data["title"] == "Email Greg"
+        assert data["watched_item_id"] == str(wi.id)
+
+    async def test_create_404_unknown_parent(self, client):
+        from ulid import ULID
+
+        response = await client.post(
+            f"/api/v1/watched-items/{ULID()}/notification-templates",
+            json={"channel_hint": "mailto://x:y@z"},
+        )
+        assert response.status_code == 404
+
+    async def test_patch_updates(self, client, db_session):
+        wi = await _make_watched_item(db_session)
+        create = await client.post(
+            f"/api/v1/watched-items/{wi.id}/notification-templates",
+            json={"channel_hint": "mailto://x:y@z"},
+        )
+        tpl_id = create.json()["id"]
+        response = await client.patch(
+            f"/api/v1/watched-items/{wi.id}/notification-templates/{tpl_id}",
+            json={"is_active": False, "title": "Renamed"},
+        )
+        assert response.status_code == 200
+        assert response.json()["is_active"] is False
+        assert response.json()["title"] == "Renamed"
+
+    async def test_delete(self, client, db_session):
+        wi = await _make_watched_item(db_session)
+        create = await client.post(
+            f"/api/v1/watched-items/{wi.id}/notification-templates",
+            json={"channel_hint": "mailto://x:y@z"},
+        )
+        tpl_id = create.json()["id"]
+        response = await client.delete(
+            f"/api/v1/watched-items/{wi.id}/notification-templates/{tpl_id}"
+        )
+        assert response.status_code == 204
+        # Verify gone
+        listing = await client.get(f"/api/v1/watched-items/{wi.id}/notification-templates")
+        assert listing.json() == []

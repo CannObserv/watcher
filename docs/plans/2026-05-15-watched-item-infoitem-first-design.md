@@ -1,13 +1,14 @@
 # Watcher: InfoItem-first Watch model — design
 
-**Status:** Approved 2026-05-15
+**Status:** Approved 2026-05-15; reassessed 2026-05-17 against shipped Archiver v3.0.0–v3.2.0
 **Tracking issue:** #160
 **Supersedes:** #158 (dynamic InfoSource selector for Watch-create form). The original UX shortcut around ULID-paste is superseded by this larger reframing.
-**Depends on Archiver:**
-- `CannObserv/archiver#21` — role refactor (primary becomes implicit; `role` column applies to fragment bindings with values `{cross_check, sub_aspect}`)
-- `CannObserv/archiver#22` — cascade-contract documentation + content-kind compatibility validation across an InfoItem's bindings
-- `CannObserv/archiver#23` — `list_info_items` server-side filter parameter (`name_contains` or `q`)
-- `CannObserv/archiver#20` — `list_info_sources` URL/search filter (existing)
+**Archiver dependencies — all shipped:**
+- `CannObserv/archiver#21` (v3.0.0) — role refactor: `role IS NULL` for the InfoItem's root binding (the implicit primary); `role ∈ {cross_check, sub_aspect}` for fragment bindings. SDK `add_info_source(info_item_id, info_source_id, role=None)` with `Literal['cross_check', 'sub_aspect'] | None`. **Also reshaped `SourceRevisionCapturedEvent`** — see "Reassessment notes" below.
+- `CannObserv/archiver#22` (v3.1.0) — cascade contract codified in `source_spec_schema/v1.json` description; content-kind families `{html_text: css|xpath|regex|full_page; json: jsonpath}` enforced at bind time. Cross-family attempts return `422 domain` with `code='algorithm_family_mismatch'` and `data={expected_family, actual_algorithm}`.
+- `CannObserv/archiver#23` (v3.1.0) — **shipped differently than designed.** Instead of adding `name_contains` to `list_info_items`, the existing `find_info_item(query, limit)` SDK tool method is now backed by `pg_trgm` GIN indexes on `info_items.name` and `description`. See Section 5.1.
+- `CannObserv/archiver#24` (v3.2.0) — **new, not in original design.** All bus event payloads on `info.changes` carry `schema_version: int = 1`; consumer mirrors must parse with `extra="ignore"`. No current Watcher consumer; documentation note for future.
+- `CannObserv/archiver#20` — `list_info_sources` URL/search filter (still open at last check; not needed by this design).
 
 ## Goal
 
@@ -155,7 +156,7 @@ No exclusion semantics in v1.
 
 **Two-step picker on `/watches/new`:**
 
-1. **InfoItem typeahead** — search by name against `archiver.list_info_items()`. Server-side filter via the new Archiver param (`name_contains` or `q`); falls back to paginate-and-filter-in-Python before that lands.
+1. **InfoItem typeahead** — search via `archiver.find_info_item(query, limit)`. The SDK method searches `name + description` case-insensitively (backed by `pg_trgm` GIN indexes per Archiver v3.1.0, #23); returns up to `limit` matches, newest first. Defaults to `limit=20`; Watcher's picker should pass a small bounded limit (suggest 10–20) and re-query as the operator types. **No paginate-and-filter-client-side fallback is needed** — `find_info_item` is the supported typeahead primitive.
 2. **Content-target picker** — server-renders the InfoItem's binding tree:
 
    ```
@@ -173,8 +174,8 @@ No exclusion semantics in v1.
 **Routes (Watcher dashboard):**
 
 - `GET /watches/new` — step 1, InfoItem typeahead form
-- `GET /watches/new/info-items?q=…` — typeahead results partial (HTMX)
-- `GET /watches/new/binding-tree?info_item_id=…` — step 2, binding-tree partial
+- `GET /watches/new/info-items?q=…` — typeahead results partial (HTMX); proxies `archiver.find_info_item`
+- `GET /watches/new/binding-tree?info_item_id=…` — step 2, binding-tree partial; sources from `archiver.get_info_item(info_item_id)` which returns `InfoItemOut` including `info_item_sources: list[InfoItemSourceOut]` with `role: str | None`. Render `role IS NULL` rows as "primary" (always exactly one)
 - `POST /watches/new` — submit (validates target against role; auto-creates WatchedItem if first)
 - `GET /watched-items` — list page
 - `GET /watched-items/{id}` — detail page (lists child Watches; surfaces sub_aspect review)
@@ -201,6 +202,22 @@ No exclusion semantics in v1.
 | Diff-on-view fragment review | Operator-driven cadence; no event subscription infrastructure; degrades gracefully if Archiver and Watcher are out of sync. |
 | Collection descoped | Not blocking primary work; revisit when cross-InfoItem grouping needs surface in real usage. |
 
+## Reassessment notes (2026-05-17)
+
+Archiver shipped #21–24 ahead of Watcher implementation. The shipped surface matches the design with three deltas worth recording before implementers start:
+
+1. **`#23` shipped as `find_info_item` indexing, not `list_info_items` filter.** Section 5.1 + routes updated above. Net effect: simpler than designed — the picker uses the existing tool-search SDK method (`find_info_item(query, limit)`), and the "paginate-and-filter-in-Python fallback" path is unnecessary. No design concept changes.
+
+2. **`SourceRevisionCapturedEvent` payload reshaped** (rolled into #21, beyond original scope). `info_item_ids: list[str]` → `bindings: list[InfoItemBinding]` where each `{info_item_id: str, role: str | None}`. This is on the `info.changes` Redis Stream which Watcher does **not** consume today — Section 5.3's fragment review is "diff on view" via `get_info_item`, not event-driven. No Watcher v1 work. **Carry forward if/when Watcher gains an event consumer:** the per-binding `role` field is exactly the discriminator a future proactive sub_aspect-notification feature would want (filter on `bindings[*].role == 'sub_aspect'`).
+
+3. **`#24` event `schema_version`** is producer-set on all `info.changes` payloads and consumers are required to parse with `extra="ignore"` per the new Archiver AGENTS convention. Same applicability: Watcher has no consumer today. **Carry forward:** any future Watcher event consumer must mirror this — pin a Pydantic model with `model_config = ConfigDict(extra="ignore")` and switch on `schema_version` only when the bump-on-incompatible-reshape convention forces it.
+
+4. **`#22` content-kind family enforcement** is at bind-time in Archiver only. Watcher does not create `info_item_sources` rows — Archiver does. The `algorithm_family_mismatch` error is therefore not surfaced through any Watcher code path in v1. **Optional future surface:** Watcher's WatchedItem detail page could display the InfoItem's content-kind family (derived from primary's algorithm) as a small label — useful operator context but not blocking.
+
+5. **Implicit primary in picker rendering.** SDK returns `InfoItemSourceOut.role: str | None`. Watcher renders `role IS NULL` rows with a "primary" badge; `role == 'cross_check'` as muted/infrastructure; `role == 'sub_aspect'` as selectable. No design change — this is a coding-detail note.
+
+6. **No Watcher code changes triggered by the Archiver upgrade itself.** Watcher's existing SDK usage (`get_info_source`, `create_source_revision`, `defaults.*`) does not touch `role` or the reshaped event payload. The Phase 5 `require_root_watch_on_chain` invariant still exists at [src/core/watches/invariants.py:63](../../src/core/watches/invariants.py#L63) and gets dropped during Section 2 implementation, as designed.
+
 ## Out of scope
 
 - **Cross-InfoItem `Collection` grouping.** Designed and descoped; pick up as a follow-on workstream.
@@ -212,10 +229,11 @@ No exclusion semantics in v1.
 
 ## Implementation order (rough)
 
-1. **Archiver:** role refactor (Section 1) — blocks Watcher.
-2. **Archiver:** cascade contract + content-kind compat (Section 1.5) — parallel with #1, no Watcher block.
-3. **Archiver:** `list_info_items` filter — non-blocking; Watcher can ship without it.
-4. **Watcher:** new tables (`watched_items`, `watched_item_notification_templates`); Watch column reshape; drop fragment-root invariant.
-5. **Watcher:** scheduler reshape — InfoItem-level fetching; resolution module.
-6. **Watcher:** dashboard routes + picker UX.
-7. **Watcher:** fragment-review UI.
+1. **Archiver:** ✅ role refactor (#21, v3.0.0).
+2. **Archiver:** ✅ cascade contract + content-kind compat (#22, v3.1.0).
+3. **Archiver:** ✅ `find_info_item` pg_trgm backing (#23, v3.1.0).
+4. **Archiver:** ✅ event `schema_version` (#24, v3.2.0).
+5. **Watcher:** new tables (`watched_items`, `watched_item_notification_templates`); Watch column reshape (drop `info_source_id`/`schedule_config`, add `info_item_id`/`target_info_source_id`/`watched_item_id`); drop fragment-root invariant.
+6. **Watcher:** scheduler reshape — InfoItem-level fetching; resolution module.
+7. **Watcher:** dashboard routes + picker UX (uses `find_info_item` + `get_info_item`).
+8. **Watcher:** fragment-review UI (diff-on-view via `get_info_item` + `last_reviewed_at`).

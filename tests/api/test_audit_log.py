@@ -58,3 +58,16 @@ class TestListAuditLog:
         response = await client.get("/api/v1/audit?limit=1")
         assert response.status_code == 200
         assert len(response.json()) <= 1
+
+
+class TestWatchedItemEventTypes:
+    def test_watched_item_event_constants_exist(self):
+        from src.core.models.audit_log import EventType
+
+        assert EventType.WATCHED_ITEM_UPDATED == "watched_item.updated"
+        assert EventType.WATCHED_ITEM_ARCHIVED == "watched_item.archived"
+        assert EventType.WATCHED_ITEM_RESTORED == "watched_item.restored"
+        assert EventType.WATCHED_ITEM_REVIEWED == "watched_item.reviewed"
+        assert EventType.WATCHED_ITEM_TEMPLATE_CREATED == "watched_item_template.created"
+        assert EventType.WATCHED_ITEM_TEMPLATE_UPDATED == "watched_item_template.updated"
+        assert EventType.WATCHED_ITEM_TEMPLATE_DELETED == "watched_item_template.deleted"

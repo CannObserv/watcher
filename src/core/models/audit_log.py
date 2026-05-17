@@ -46,6 +46,13 @@ class EventType:
     WATCH_NC_ASSIGNED = "watch_nc.assigned"
     WATCH_NC_UNASSIGNED = "watch_nc.unassigned"
     WATCHED_ITEM_THROTTLED = "watched_item.throttled"
+    WATCHED_ITEM_UPDATED = "watched_item.updated"
+    WATCHED_ITEM_ARCHIVED = "watched_item.archived"
+    WATCHED_ITEM_RESTORED = "watched_item.restored"
+    WATCHED_ITEM_REVIEWED = "watched_item.reviewed"
+    WATCHED_ITEM_TEMPLATE_CREATED = "watched_item_template.created"
+    WATCHED_ITEM_TEMPLATE_UPDATED = "watched_item_template.updated"
+    WATCHED_ITEM_TEMPLATE_DELETED = "watched_item_template.deleted"
     DOMAIN_NC_DEFAULT_ADDED = "domain_nc_default.added"
     DOMAIN_NC_DEFAULT_REMOVED = "domain_nc_default.removed"
 

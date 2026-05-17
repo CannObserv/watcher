@@ -13,6 +13,7 @@ from src.core.models.domain import Domain
 from src.core.models.notification_config import WatchNotificationConfig
 from src.core.models.temporal_profile import TemporalProfile
 from src.core.models.watch import Watch
+from src.core.models.watched_item import WatchedItem
 
 _WATCH_SORT_COLS: dict[str, Any] = {
     "name": Watch.name,
@@ -413,5 +414,17 @@ async def get_domain_watches(
         stmt = stmt.where(Watch.name.ilike(f"%{escaped}%"))
     if is_active is not None:
         stmt = stmt.where(Watch.is_active == is_active)
+    result = await session.execute(stmt)
+    return list(result.scalars().all())
+
+
+async def get_watched_item_list(
+    session: AsyncSession,
+    include_archived: bool = False,
+) -> list[WatchedItem]:
+    """Fetch WatchedItems for dashboard list display."""
+    stmt = select(WatchedItem).order_by(WatchedItem.name)
+    if not include_archived:
+        stmt = stmt.where(WatchedItem.archived_at.is_(None))
     result = await session.execute(stmt)
     return list(result.scalars().all())

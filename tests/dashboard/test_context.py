@@ -660,3 +660,48 @@ class TestGetDomainWatches:
         result = await get_domain_watches(db_session, "ex.com", is_active=True)
         assert len(result) == 1
         assert result[0].name == "Active"
+
+
+@pytest.mark.integration
+class TestGetWatchedItemList:
+    async def test_excludes_archived_by_default(self, db_session):
+        from src.core.models.watched_item import WatchedItem
+        from src.dashboard.context import get_watched_item_list
+        from tests.conftest import make_info_item
+
+        item_a = await make_info_item(db_session)
+        item_b = await make_info_item(db_session)
+        db_session.add_all(
+            [
+                WatchedItem(info_item_id=item_a.info_item_id, name="Active"),
+                WatchedItem(
+                    info_item_id=item_b.info_item_id,
+                    name="Archived",
+                    archived_at=datetime.now(UTC),
+                    is_active=False,
+                ),
+            ]
+        )
+        await db_session.flush()
+        results = await get_watched_item_list(db_session)
+        names = [wi.name for wi in results]
+        assert "Active" in names
+        assert "Archived" not in names
+
+    async def test_include_archived(self, db_session):
+        from src.core.models.watched_item import WatchedItem
+        from src.dashboard.context import get_watched_item_list
+        from tests.conftest import make_info_item
+
+        item = await make_info_item(db_session)
+        db_session.add(
+            WatchedItem(
+                info_item_id=item.info_item_id,
+                name="Arc",
+                archived_at=datetime.now(UTC),
+                is_active=False,
+            )
+        )
+        await db_session.flush()
+        results = await get_watched_item_list(db_session, include_archived=True)
+        assert any(wi.name == "Arc" for wi in results)

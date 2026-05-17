@@ -14,7 +14,7 @@ class TestGetAppRegistration:
 
     def test_blueprint_tasks_registered(self):
         app = get_app()
-        assert "check_watch" in app.tasks
+        assert "check_watched_item" in app.tasks
         assert "schedule_tick" in app.tasks
 
     def test_schedule_tick_registered_as_periodic(self):

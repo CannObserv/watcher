@@ -1,9 +1,11 @@
 """Pydantic schemas for Watch CRUD operations.
 
-Phase 5 contract: ``url`` and ``fetch_config`` no longer live on the Watch
-model — they are owned by the canonical InfoSource and resolved at runtime via
-the ArchiverClient SDK. ``WatchCreate`` accepts ``info_source_id`` (required)
-and derives URL from it. ``WatchResponse`` exposes neither legacy URL field.
+#160 contract: Watch is InfoItem-first. ``info_item_id`` is required and points
+at an Archiver InfoItem; ``target_info_source_id`` is optional and selects a
+sub_aspect fragment of that InfoItem. Schedule + URL no longer live on the
+Watch — scheduling is owned by the parent WatchedItem; URL is resolved from the
+InfoItem's primary InfoSource via the ArchiverClient at create-time and stored
+as ``effective_*`` snapshots.
 """
 
 from datetime import datetime
@@ -15,31 +17,30 @@ from src.core.models.watch import ContentType, WatchHealthStatus
 
 
 class WatchCreate(BaseModel):
-    """Schema for creating a new watch.
+    """Schema for creating a new Watch.
 
-    The watch is bound to a pre-existing InfoSource in the Archiver service.
-    ``info_source_id`` (required) identifies the root or fragment InfoSource;
-    the route resolves the target URL from it and enforces the fragment-root
-    invariant.
+    Identifies the target as either the InfoItem's primary content
+    (``target_info_source_id=None``) or one of its sub_aspect fragments
+    (``target_info_source_id`` set to the binding's info_source_id).
     """
 
     name: str = Field(min_length=1, max_length=255)
-    info_source_id: ULIDStr
-    content_type: ContentType
+    info_item_id: ULIDStr
+    target_info_source_id: ULIDStr | None = None
+    content_type: ContentType | None = None
     description: str | None = None
     tags: list[str] | None = None
-    schedule_config: dict = Field(default_factory=dict)
 
 
 class WatchUpdate(BaseModel):
-    """Schema for updating a watch. All fields optional.
+    """Schema for updating a Watch. All fields optional.
 
-    ``url`` / ``fetch_config`` no longer exist on the model.
+    ``info_item_id`` and ``target_info_source_id`` are immutable after
+    creation — re-target by deleting and recreating the Watch.
     """
 
     name: str | None = None
     content_type: ContentType | None = None
-    schedule_config: dict | None = None
     is_active: bool | None = None
     effective_url: HttpUrlStr | None = None
     effective_domain: str | None = Field(default=None, max_length=253)
@@ -48,19 +49,21 @@ class WatchUpdate(BaseModel):
 
 
 class WatchResponse(BaseModel):
-    """Schema for returning a watch.
+    """Schema for returning a Watch.
 
-    Does not include ``url`` or ``fetch_config`` — those are properties of
-    the watch's InfoSource, fetched from the Information service.
+    Exposes the new identity columns (``info_item_id``,
+    ``target_info_source_id``, ``watched_item_id``) and the cached
+    ``effective_url`` / ``effective_domain`` snapshots.
     """
 
     model_config = ConfigDict(from_attributes=True)
 
     id: ULIDStr
     name: str
-    info_source_id: ULIDStr
-    content_type: ContentType
-    schedule_config: dict
+    info_item_id: ULIDStr
+    target_info_source_id: ULIDStr | None = None
+    watched_item_id: ULIDStr
+    content_type: ContentType | None = None
     is_active: bool
     is_archived: bool
     domain_suspended: bool

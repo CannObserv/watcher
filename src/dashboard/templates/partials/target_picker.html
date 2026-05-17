@@ -1,0 +1,21 @@
+{# Minimal target picker — operator pastes InfoItem ULID and optional sub_aspect ULID.
+   Replaced by InfoItem typeahead in a follow-up plan. #}
+<label for="info_item_id" class="form-label">InfoItem ID</label>
+<input type="text" name="info_item_id" id="info_item_id" required
+  placeholder="01XXXXXXXXXXXXXXXXXXXXXXXXX"
+  pattern="[0-9A-Za-z]{26}"
+  class="form-input mt-1 font-mono">
+<p id="info_item_id-hint" class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+  Paste the InfoItem ULID from the Archiver service.
+</p>
+<p id="info_item_id-error" class="mt-1 text-xs text-red-600 dark:text-red-400" hidden></p>
+
+<label for="target_info_source_id" class="form-label mt-4">sub_aspect ID (optional)</label>
+<input type="text" name="target_info_source_id" id="target_info_source_id"
+  placeholder="(leave blank for primary content)"
+  pattern="[0-9A-Za-z]{26}"
+  class="form-input mt-1 font-mono">
+<p id="target_info_source_id-hint" class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+  Optional — leave blank to watch the InfoItem's primary content.
+</p>
+<p id="target_info_source_id-error" class="mt-1 text-xs text-red-600 dark:text-red-400" hidden></p>

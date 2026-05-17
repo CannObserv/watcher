@@ -156,7 +156,10 @@ class TestWatchFieldUpdate:
         assert b"New Name" in response.content
         assert b"<input" not in response.content
 
-    async def test_update_interval(self, client, db_session):
+    async def test_interval_field_inline_edit_returns_400(self, client, db_session):
+        """#160 Task 11.3: schedule_config moved to the WatchedItem; per-Watch
+        interval edit is gone. The dispatcher must reject the legacy field name.
+        """
         watch = await make_watch(
             db_session, name="Interval", url="https://example.com", content_type=ContentType.HTML
         )
@@ -165,8 +168,7 @@ class TestWatchFieldUpdate:
             data={"value": "6h"},
             headers={"HX-Request": "true"},
         )
-        assert response.status_code == 200
-        assert b"6h" in response.content
+        assert response.status_code == 400
 
     async def test_update_url_field_returns_400(self, client, db_session):
         """Phase 2c: ``url`` is no longer an editable column; the dispatcher rejects."""

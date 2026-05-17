@@ -31,9 +31,17 @@ def _make_event(event_type=WatchEventType.CHANGE_DETECTED):
     )
 
 
-def _watch_meta_result(domain=None):
+def _watch_meta_result(domain=None, watched_item_id=None, *, missing=False):
+    """Default: a watch exists with the given domain + a synthetic watched_item_id.
+
+    Pass ``missing=True`` to simulate Watch.one_or_none() returning None (no row).
+    """
     r = MagicMock()
-    r.one_or_none.return_value = None if domain is None else (domain, None)
+    if missing:
+        r.one_or_none.return_value = None
+    else:
+        wid = watched_item_id if watched_item_id is not None else ULID()
+        r.one_or_none.return_value = (domain, None, wid)
     return r
 
 
@@ -104,6 +112,7 @@ class TestRemoteOnlyDispatch:
                 _watch_meta_result(None),
                 _empty_result(),  # global
                 _empty_result(),  # watch templates
+                _empty_result(),  # watched_item templates
                 _result_with(local_cfg),  # local
             ]
         )
@@ -146,6 +155,7 @@ class TestRemoteOnlyDispatch:
         session.execute = AsyncMock(
             side_effect=[
                 _watch_meta_result(None),
+                _empty_result(),
                 _empty_result(),
                 _empty_result(),
                 _result_with(local_cfg),

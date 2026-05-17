@@ -47,10 +47,7 @@ from src.core.probe import ProbeResult
 from src.core.registry import get_registry
 from src.core.watches import create_watch as _create_watch
 from src.core.watches import resolve_watch_url
-from src.core.watches.invariants import (
-    RootWatchMissingError,
-    require_root_watch_on_chain,
-)
+from src.core.watches.resolution import resolved_schedule_config
 from src.dashboard import templates
 from src.dashboard.context import (
     get_audit_entries,
@@ -178,6 +175,18 @@ async def dashboard_home(
     return templates.TemplateResponse(request, "pages/dashboard.html", context)
 
 
+def _attach_resolved_interval(watches: list[Watch]) -> None:
+    """Attach `resolved_interval` to each Watch for read-only display in the list.
+
+    Pinned v1 behavior (#160 Task 11.5): Watch rows surface the inherited
+    interval string from WatchedItem.default_schedule_config (falling back to
+    the system default). The attribute lives only on the in-memory object; the
+    full WatchedItem-level edit UI is a follow-up plan.
+    """
+    for w in watches:
+        w.resolved_interval = resolved_schedule_config(w).get("interval", "1d")
+
+
 @router.get("/watches")
 async def watches_page(
     request: Request,
@@ -193,6 +202,7 @@ async def watches_page(
     watches = await get_watch_list(
         session, is_active=is_active, search=q, domain=domain, sort=sort, order=order
     )
+    _attach_resolved_interval(watches)
     health_map = {w.id: w.health_status for w in watches}
     context = {
         "active_page": "watches",
@@ -226,20 +236,26 @@ async def watch_create_form(request: Request):
 async def watch_create_submit(
     request: Request,
     name: str = Form(""),
-    info_source_id: str = Form(""),
+    info_item_id: str = Form(""),
+    target_info_source_id: str = Form(""),
     content_type: str = Form("html"),
-    interval: str = Form(""),
     description: str = Form(""),
     probe_fn: Callable[[str], Awaitable[ProbeResult]] = Depends(get_probe_fn),
     session: AsyncSession = Depends(get_db_session),
 ):
-    """Handle watch creation form submission."""
+    """Handle watch creation form submission.
+
+    #160 InfoItem-first shape: form accepts ``info_item_id`` (required) and an
+    optional ``target_info_source_id`` for sub_aspect Watches. Schedule is
+    inherited from the parent WatchedItem; per-Watch override UI is a follow-up
+    plan. Mirrors the error mapping of the API route in ``src/api/routes/watches.py``.
+    """
     info_client = get_registry().get_archiver_client()
     errors = []
     if not name.strip():
         errors.append("Name is required")
-    if not info_source_id.strip():
-        errors.append("InfoSource ID is required")
+    if not info_item_id.strip():
+        errors.append("InfoItem ID is required")
 
     async def _render_with_flash(flash_message: str):
         return templates.TemplateResponse(
@@ -256,28 +272,8 @@ async def watch_create_submit(
     if errors:
         return await _render_with_flash(". ".join(errors))
 
-    schedule_config: dict = {}
-    if interval.strip():
-        schedule_config["interval"] = interval.strip()
-
-    resolved_info_source_id = info_source_id.strip()
-
-    # Fragment-root invariant: if info_source_id is a fragment,
-    # require an active root Watch on the chain before creating.
-    try:
-        source = await info_client.get_info_source(resolved_info_source_id)
-        if source.parent_info_source_id is not None:
-            await require_root_watch_on_chain(
-                session, info_client, info_source_id=resolved_info_source_id
-            )
-    except RootWatchMissingError:
-        return await _render_with_flash(
-            "Fragment source requires an active root Watch on the chain"
-        )
-    except NotFound:
-        return await _render_with_flash(f"InfoSource {resolved_info_source_id} does not exist")
-    except (ServerError, httpx.ConnectError, httpx.TimeoutException) as exc:
-        return await _render_with_flash(f"Information service unavailable: {exc}")
+    resolved_info_item_id = info_item_id.strip()
+    resolved_target = target_info_source_id.strip() or None
 
     try:
         watch = await _create_watch(
@@ -285,13 +281,15 @@ async def watch_create_submit(
             probe_fn=probe_fn,
             info_client=info_client,
             name=name.strip(),
+            info_item_id=resolved_info_item_id,
+            target_info_source_id=resolved_target,
             content_type=content_type,
-            schedule_config=schedule_config,
             description=description.strip() or None,
-            info_source_id=resolved_info_source_id,
         )
     except NotFound:
-        return await _render_with_flash(f"InfoSource {resolved_info_source_id} does not exist")
+        return await _render_with_flash(f"InfoItem {resolved_info_item_id} does not exist")
+    except ValueError as exc:
+        return await _render_with_flash(str(exc))
     except AuthError:
         logger.exception("ArchiverClient auth failure during dashboard create")
         return await _render_with_flash("Information service auth failed")
@@ -409,8 +407,11 @@ async def watch_delete(
 
 WATCH_FIELD_META: dict[str, dict] = {
     # Phase 2c — fetch_config / url no longer live on the Watch row; the
-    # InfoSource is the canonical source. WATCH_FIELD_META now exposes only
-    # column-backed fields plus the per-watch schedule override.
+    # InfoSource is the canonical source.
+    # #160 — schedule_config moved to WatchedItem.default_schedule_config; the
+    # `interval` row is rendered read-only on the detail page (the resolved
+    # value flows from `resolved_schedule_config`). Per-Watch override UI is a
+    # follow-up plan; only column-backed fields stay editable here.
     # -- Details section --
     "name": {
         "label": "Name",
@@ -430,18 +431,21 @@ WATCH_FIELD_META: dict[str, dict] = {
         "format": lambda w: w.description or "",
         "content_types": None,
     },
-    # -- Schedule section --
+    # -- Schedule section (read-only resolved view) --
     "interval": {
         "label": "Check Interval",
-        "hint": "Format: 30s, 15m, 6h, 1d",
-        "type": "text",
-        "source": "schedule_config",
-        "cast": lambda v: v.strip(),
-        "format": lambda w: (w.schedule_config or {}).get("interval", "1d"),
+        "hint": "Inherited from the parent WatchedItem.",
+        "type": "readonly",
+        "source": "readonly",
+        "cast": lambda v: v,
+        "format": lambda w: resolved_schedule_config(w).get("interval", "1d"),
         "content_types": None,
     },
 }
-EDITABLE_WATCH_FIELDS = set(WATCH_FIELD_META.keys())
+# Inline-editable fields: `interval` is read-only so it is excluded.
+EDITABLE_WATCH_FIELDS = {
+    name for name, meta in WATCH_FIELD_META.items() if meta["source"] != "readonly"
+}
 
 
 def _watch_fields_for_content_type(content_type: str) -> list[str]:
@@ -484,13 +488,6 @@ def _apply_watch_field_update(watch: Watch, field_name: str, raw_value: str) -> 
     source = meta["source"]
     if source == "column":
         setattr(watch, field_name, typed_value)
-    elif source == "schedule_config":
-        config = dict(watch.schedule_config or {})
-        if typed_value:
-            config[field_name] = typed_value
-        else:
-            config.pop(field_name, None)
-        watch.schedule_config = config
 
 
 @router.get("/watches/{watch_id}/field/{field_name}")
@@ -733,6 +730,7 @@ async def watch_deactivate(
         await session.refresh(watch)
 
     if request.headers.get("HX-Request") == "true":
+        _attach_resolved_interval([watch])
         health_map = {watch.id: watch.health_status}
         return templates.TemplateResponse(
             request,
@@ -1449,6 +1447,7 @@ async def partial_watch_table(
     watches = await get_watch_list(
         session, is_active=is_active, search=q, domain=domain, sort=sort, order=order
     )
+    _attach_resolved_interval(watches)
     health_map = {w.id: w.health_status for w in watches}
     return templates.TemplateResponse(
         request,

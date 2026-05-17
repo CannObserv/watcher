@@ -45,6 +45,7 @@ class EventType:
     DOMAIN_DELETED = "domain.deleted"
     WATCH_NC_ASSIGNED = "watch_nc.assigned"
     WATCH_NC_UNASSIGNED = "watch_nc.unassigned"
+    WATCHED_ITEM_THROTTLED = "watched_item.throttled"
     DOMAIN_NC_DEFAULT_ADDED = "domain_nc_default.added"
     DOMAIN_NC_DEFAULT_REMOVED = "domain_nc_default.removed"
 

@@ -94,3 +94,29 @@ class InfoSource(InformationTestBase):
         server_default=func.now(),
         nullable=False,
     )
+
+
+class InfoItemSource(InformationTestBase):
+    """Mapper-only for ``information.info_item_sources`` (DDL owned by Archiver)."""
+
+    __tablename__ = "info_item_sources"
+    __table_args__ = {"schema": "information"}
+
+    info_item_id: Mapped[ULID] = mapped_column(
+        ULIDType(),
+        ForeignKey("information.info_items.info_item_id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    info_source_id: Mapped[ULID] = mapped_column(
+        ULIDType(),
+        ForeignKey("information.info_sources.info_source_id"),
+        primary_key=True,
+    )
+    role: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+        server_default=func.now(),
+        nullable=False,
+    )
+    deactivated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

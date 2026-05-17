@@ -1,55 +1,108 @@
-"""Tests for the module-level factory helpers in tests/conftest.py.
+"""Tests for the test factory itself.
 
-Phase 5: ``make_watch`` auto-creates an InfoSource (not InfoItem + InfoSpec).
-The Watch row references ``info_source_id``; ``info_item_id`` is gone.
-
-Phase 5 (#156): ``make_snapshot`` removed — Snapshot table dropped.
+The Watch row references ``info_item_id`` + optional ``target_info_source_id``
+under a parent ``WatchedItem``; the legacy ``info_source_id``/``schedule_config``
+columns are gone (#160).
 """
 
 import pytest
-from sqlalchemy import select
 
-from src.core.models.watch import ContentType, Watch
-from tests._information_test_models import InfoItem, InfoSource
-from tests.conftest import make_info_item, make_info_source, make_watch
+from src.core.models import WatchedItem
+from tests.conftest import (
+    bind_primary_source,
+    bind_sub_aspect,
+    make_info_item,
+    make_info_source,
+    make_watch,
+)
 
 pytestmark = pytest.mark.integration
 
 
-async def test_make_info_item_persists(db_session):
-    item = await make_info_item(db_session, name="Sample")
-    fetched = (await db_session.execute(select(InfoItem))).scalar_one()
-    assert fetched.info_item_id == item.info_item_id
-    assert fetched.name == "Sample"
+async def test_make_watch_auto_creates_info_item_source_and_watched_item(db_session):
+    """Factory wires up an InfoItem, primary InfoSource binding, and WatchedItem."""
+    watch = await make_watch(db_session, name="Auto")
+    assert watch.info_item_id is not None
+    assert watch.target_info_source_id is None
+    assert watch.watched_item_id is not None
+    assert watch.watched_item is not None
+    assert watch.watched_item.info_item_id == watch.info_item_id
 
 
-async def test_make_info_source_persists(db_session):
-    source = await make_info_source(db_session, url="https://example.org/page")
-    fetched = (await db_session.execute(select(InfoSource))).scalar_one()
-    assert fetched.info_source_id == source.info_source_id
-    assert fetched.source_spec["target"]["url"] == "https://example.org/page"
+async def test_make_watch_eager_loads_watched_item(db_session):
+    """The factory refreshes the relationship so callers don't pay a lazy load."""
+    watch = await make_watch(db_session, name="Eager")
+    # No await on `watch.watched_item` access — joined-loaded by the factory.
+    assert isinstance(watch.watched_item, WatchedItem)
 
 
-async def test_make_watch_creates_info_source(db_session):
-    watch = await make_watch(db_session, name="Auto Watch")
-    assert isinstance(watch, Watch)
-    assert watch.name == "Auto Watch"
-    assert watch.content_type == ContentType.HTML
-    assert watch.info_source_id is not None
+async def test_make_watch_with_existing_info_item_attaches_to_existing_watched_item(
+    db_session,
+):
+    """Two Watches on the same info_item_id share a WatchedItem."""
+    item = await make_info_item(db_session)
+    primary = await make_info_source(db_session, url="https://example.com/shared")
+    await bind_primary_source(
+        db_session,
+        info_item_id=item.info_item_id,
+        info_source_id=primary.info_source_id,
+    )
 
-    sources = (await db_session.execute(select(InfoSource))).scalars().all()
-    assert len(sources) == 1
-    assert sources[0].info_source_id == watch.info_source_id
-
-
-async def test_make_watch_url_passed_to_info_source(db_session):
-    """URL is stored in the InfoSource source_spec, not on Watch."""
-    await make_watch(db_session, name="URL Watch", url="https://example.com")
-    sources = (await db_session.execute(select(InfoSource))).scalars().all()
-    assert len(sources) == 1
-    assert sources[0].source_spec["target"]["url"] == "https://example.com"
-    # Watch itself has no url column in Phase 5
-    assert not hasattr(Watch, "url")
+    w1 = await make_watch(db_session, name="First", info_item_id=item.info_item_id)
+    w2 = await make_watch(db_session, name="Second", info_item_id=item.info_item_id)
+    assert w1.watched_item_id == w2.watched_item_id
 
 
-# Phase 5 (#156): test_make_snapshot_attaches_to_watch removed — Snapshot table dropped.
+async def test_make_watch_with_sub_aspect_target(db_session):
+    """target_info_source_id persists when supplied."""
+    item = await make_info_item(db_session)
+    primary = await make_info_source(db_session, url="https://example.com/x")
+    fragment = await make_info_source(db_session, parent_info_source_id=primary.info_source_id)
+    await bind_primary_source(
+        db_session,
+        info_item_id=item.info_item_id,
+        info_source_id=primary.info_source_id,
+    )
+    await bind_sub_aspect(
+        db_session,
+        info_item_id=item.info_item_id,
+        info_source_id=fragment.info_source_id,
+    )
+
+    watch = await make_watch(
+        db_session,
+        name="Sub",
+        info_item_id=item.info_item_id,
+        target_info_source_id=fragment.info_source_id,
+    )
+    assert watch.target_info_source_id == fragment.info_source_id
+
+
+async def test_make_watch_rejects_mismatched_watched_item(db_session):
+    """Passing a WatchedItem bound to a different InfoItem raises."""
+    item1 = await make_info_item(db_session, name="A")
+    item2 = await make_info_item(db_session, name="B")
+    primary1 = await make_info_source(db_session, url="https://example.com/a")
+    primary2 = await make_info_source(db_session, url="https://example.com/b")
+    await bind_primary_source(
+        db_session,
+        info_item_id=item1.info_item_id,
+        info_source_id=primary1.info_source_id,
+    )
+    await bind_primary_source(
+        db_session,
+        info_item_id=item2.info_item_id,
+        info_source_id=primary2.info_source_id,
+    )
+
+    wi1 = WatchedItem(info_item_id=item1.info_item_id, name="W1")
+    db_session.add(wi1)
+    await db_session.flush()
+
+    with pytest.raises(AssertionError, match="must match"):
+        await make_watch(
+            db_session,
+            name="bad",
+            info_item_id=item2.info_item_id,
+            watched_item=wi1,
+        )

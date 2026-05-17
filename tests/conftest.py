@@ -2,15 +2,18 @@
 
 tests/fixtures/ holds static sample files used by extractor tests (e.g. sample.html).
 
-Phase 5 factory contract
-------------------------
-The module-level async helpers ``make_watch``, ``make_info_item``, and
-``make_info_spec`` are NOT pytest fixtures — they are awaitable factory
-functions test code can call directly.
+Phase 6 factory contract (#160)
+-------------------------------
+The module-level async helpers ``make_watch``, ``make_info_item``,
+``make_info_source``, ``bind_primary_source``, and ``bind_sub_aspect`` are
+NOT pytest fixtures — they are awaitable factory functions test code can
+call directly.
 
-``make_watch`` requires ``info_source_id`` (Phase 5+). Callers may still pass
-``info_item_id`` for compatibility during cutover — a new InfoSource is
-auto-created in that case so the NOT NULL constraint is always satisfied.
+``make_watch`` now takes ``info_item_id`` (Phase 6 / #160 shape) and an
+optional ``target_info_source_id`` to discriminate sub-aspect Watches. A
+parent ``WatchedItem`` is auto-created (or attached) so the new 1:1
+``watched_items.info_item_id`` unique constraint is honoured. The legacy
+``info_source_id``/``schedule_config`` columns are gone.
 
 Phase 5 (#156): ``make_snapshot`` and ``default_snapshot_fixture`` removed —
 Snapshot table dropped.
@@ -36,12 +39,14 @@ from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from src.api.deps import get_db_session, get_probe_fn, require_api_key
 from src.core.models import Base
 from src.core.models.app_user import AppUser
-from src.core.models.watch import ContentType, Watch
+from src.core.models.watch import Watch
+from src.core.models.watched_item import WatchedItem
 from src.core.probe import ProbeResult
 from src.core.registry import ServiceRegistry, set_registry_for_testing
 from src.dashboard.deps import get_dashboard_user
 from tests._information_test_models import (
     InfoItem,  # noqa: F401  registers mapper
+    InfoItemSource,
     InfoSource,  # noqa: F401  registers mapper
     InfoSpec,  # noqa: F401  registers mapper
 )
@@ -313,6 +318,30 @@ async def make_info_source(session, *, url="https://example.com", parent_info_so
     return source
 
 
+async def bind_primary_source(session, *, info_item_id, info_source_id):
+    """Insert a role=NULL binding (primary) into information.info_item_sources."""
+    session.add(
+        InfoItemSource(
+            info_item_id=info_item_id,
+            info_source_id=info_source_id,
+            role=None,
+        )
+    )
+    await session.flush()
+
+
+async def bind_sub_aspect(session, *, info_item_id, info_source_id):
+    """Insert a role='sub_aspect' binding into information.info_item_sources."""
+    session.add(
+        InfoItemSource(
+            info_item_id=info_item_id,
+            info_source_id=info_source_id,
+            role="sub_aspect",
+        )
+    )
+    await session.flush()
+
+
 async def make_info_spec(
     session,
     info_item,
@@ -350,33 +379,74 @@ async def make_watch(
     *,
     name="Test Watch",
     info_item_id=None,
-    info_source_id=None,
-    content_type=None,
-    url=None,
-    selector=None,
+    target_info_source_id=None,
+    watched_item=None,
+    primary_url="https://example.com",
     **kwargs,
 ):
-    """Construct a Watch with auto-created InfoItem + InfoSource + primary InfoSpec.
+    """Construct a Watch tied to a WatchedItem + InfoItem (#160 shape).
 
-    Accepts ``info_source_id`` (preferred, Phase 5+) or ``info_item_id`` (legacy,
-    accepted for call-site compatibility during cutover). When only ``info_item_id``
-    is provided an InfoSource is auto-created so the NOT NULL constraint is satisfied.
-    When neither is provided both are auto-created.
+    When ``info_item_id`` is not supplied, an InfoItem + primary InfoSource +
+    binding are auto-created. When ``watched_item`` is not supplied, a fresh
+    WatchedItem is auto-created (or attaches to an existing one for the same
+    info_item_id).
+
+    Extra ``**kwargs`` flow into the Watch constructor (tags, description,
+    content_type, etc.). Note: ``schedule_config`` no longer lives on Watch
+    (moved to WatchedItem.default_schedule_config); callers that previously
+    passed it should construct/mutate the WatchedItem instead.
+
+    Legacy alias: pre-#160 callers passed ``url=`` to point the InfoSource at a
+    specific URL. We accept it as an alias for ``primary_url`` so the legacy
+    test surface keeps working without a mass rewrite.
     """
-    if info_source_id is None:
-        # Auto-create an InfoSource. info_item_id and info_spec are only
-        # needed when callers explicitly pass them (e.g. for tests that
-        # exercise SDK resolution paths). The Watch row itself only needs
-        # info_source_id (NOT NULL, Phase 5+).
-        source = await make_info_source(session, url=url or "https://example.com")
-        info_source_id = source.info_source_id
+    if "url" in kwargs:
+        primary_url = kwargs.pop("url")
+    if info_item_id is None:
+        item = await make_info_item(session)
+        info_item_id = item.info_item_id
+        primary = await make_info_source(session, url=primary_url)
+        await bind_primary_source(
+            session,
+            info_item_id=info_item_id,
+            info_source_id=primary.info_source_id,
+        )
 
-    watch_kwargs = {"name": name, "info_source_id": info_source_id, **kwargs}
-    watch_kwargs.setdefault("content_type", content_type or ContentType.HTML)
+    if watched_item is None:
+        # Attach to existing WatchedItem for this info_item_id if present;
+        # otherwise create a fresh one. The 1:1 uniqueness on info_item_id
+        # would otherwise fail when two Watches share an InfoItem.
+        existing = (
+            await session.execute(
+                select(WatchedItem).where(WatchedItem.info_item_id == info_item_id)
+            )
+        ).scalar_one_or_none()
+        if existing is not None:
+            watched_item = existing
+        else:
+            watched_item = WatchedItem(info_item_id=info_item_id, name=f"WI for {name}")
+            session.add(watched_item)
+            await session.flush()
+    elif watched_item.info_item_id != info_item_id:
+        raise AssertionError(
+            f"watched_item.info_item_id ({watched_item.info_item_id}) "
+            f"must match info_item_id ({info_item_id})"
+        )
 
+    watch_kwargs = {
+        "name": name,
+        "info_item_id": info_item_id,
+        "target_info_source_id": target_info_source_id,
+        "watched_item_id": watched_item.id,
+        **kwargs,
+    }
     watch = Watch(**watch_kwargs)
     session.add(watch)
     await session.flush()
+    # Eager-populate the watched_item relationship so callers can read
+    # watch.watched_item without a separate await. The model declares
+    # lazy="joined" but `flush()` alone doesn't trigger the join.
+    await session.refresh(watch, ["watched_item"])
     return watch
 
 
@@ -455,14 +525,44 @@ def info_client(db_session, request):
         out.parent_info_source_id = (
             str(source.parent_info_source_id) if source.parent_info_source_id else None
         )
+        # Per Archiver v3.0.0: InfoSourceOut.url is a first-class field — root
+        # sources expose target.url, fragments are NULL.
+        out.url = (source.source_spec or {}).get("target", {}).get("url")
         spec = MagicMock()
         spec.additional_properties = source.source_spec
         out.source_spec = spec
         return out
 
+    async def _get_info_item(info_item_id: str):
+        result = await db_session.execute(
+            select(InfoItem).where(InfoItem.info_item_id == info_item_id)
+        )
+        item = result.scalars().first()
+        if item is None:
+            raise NotFound(f"info_item {info_item_id} not found")
+        bindings_result = await db_session.execute(
+            select(InfoItemSource).where(
+                InfoItemSource.info_item_id == item.info_item_id,
+                InfoItemSource.deactivated_at.is_(None),
+            )
+        )
+        out = MagicMock()
+        out.info_item_id = str(item.info_item_id)
+        out.name = item.name
+        out.description = item.description
+        info_item_sources = []
+        for binding in bindings_result.scalars().all():
+            b = MagicMock()
+            b.info_source_id = str(binding.info_source_id)
+            b.role = binding.role
+            info_item_sources.append(b)
+        out.info_item_sources = info_item_sources
+        return out
+
     fake_client.list_info_items = AsyncMock(side_effect=_list_info_items)
     fake_client.get_primary_info_spec = AsyncMock(side_effect=_get_primary_info_spec)
     fake_client.get_info_source = AsyncMock(side_effect=_get_info_source)
+    fake_client.get_info_item = AsyncMock(side_effect=_get_info_item)
 
     # Swap the registry singleton via the test seam so
     # ``get_registry().get_archiver_client()`` returns this fake everywhere.

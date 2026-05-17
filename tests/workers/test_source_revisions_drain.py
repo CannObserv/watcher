@@ -11,6 +11,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.models.pending_source_revision import PendingSourceRevision
 from src.workers.source_revisions_drain import drain_pending_source_revisions
+from tests.conftest import (
+    bind_primary_source,
+    bind_sub_aspect,
+    make_info_item,
+    make_info_source,
+    make_watch,
+)
 
 pytestmark = pytest.mark.integration
 
@@ -30,11 +37,36 @@ def _async_session_factory_returning(db_session: AsyncSession):
 
 
 @pytest.mark.asyncio
-async def test_drain_posts_and_deletes_on_success(db_session, monkeypatch):
-    """Successful POST → row deleted; dispatch_event_notifications called with source_revision_id."""  # noqa: E501
+async def test_drain_sub_aspect_dispatches_change_event(db_session, monkeypatch):
+    """sub_aspect retry → Watch matched by target_info_source_id; CHANGE_DETECTED dispatched."""
+    item = await make_info_item(db_session)
+    primary = await make_info_source(db_session, url="https://example.com/primary")
+    await bind_primary_source(
+        db_session,
+        info_item_id=item.info_item_id,
+        info_source_id=primary.info_source_id,
+    )
+    sub = await make_info_source(
+        db_session,
+        parent_info_source_id=primary.info_source_id,
+    )
+    await bind_sub_aspect(
+        db_session,
+        info_item_id=item.info_item_id,
+        info_source_id=sub.info_source_id,
+    )
+    watch = await make_watch(
+        db_session,
+        name="Sub",
+        info_item_id=item.info_item_id,
+        target_info_source_id=sub.info_source_id,
+        effective_url="https://example.com/primary#sub",
+    )
+    await db_session.commit()
+
     now = datetime.now(UTC)
     row = PendingSourceRevision(
-        info_source_id="01HZZ00000000000000000000F",
+        info_source_id=str(sub.info_source_id),
         content_fingerprint=FP,
         captured_at=now,
         content_cache_uri="file:///x.bin",
@@ -67,11 +99,92 @@ async def test_drain_posts_and_deletes_on_success(db_session, monkeypatch):
     assert result["drained"] == 1
     assert result["failed"] == 0
     fake_client.post_source_revision.assert_awaited_once()
-    # TODO(#156): Once Watch.info_source_id lands (Task 5.1), seed a real Watch
-    # in the success-path test and assert dispatch IS awaited.
-    fake_dispatch.assert_not_awaited()
+    fake_dispatch.assert_awaited_once()
+
+    # Inspect the dispatched event metadata.
+    dispatched_event = fake_dispatch.await_args.args[1]
+    assert dispatched_event.watch_id == str(watch.id)
+    assert dispatched_event.watch_name == "Sub"
+    assert dispatched_event.metadata["source_revision_id"] == str(row.id)
+    assert dispatched_event.metadata["info_source_id"] == str(sub.info_source_id)
+    assert dispatched_event.metadata["content_fingerprint"] == FP
+    assert dispatched_event.metadata.get("deferred") is True
 
     # Row must be deleted after success.
+    remaining = (
+        await db_session.execute(
+            select(PendingSourceRevision).where(PendingSourceRevision.id == row.id)
+        )
+    ).scalar_one_or_none()
+    assert remaining is None
+
+
+@pytest.mark.asyncio
+async def test_drain_primary_target_logs_and_skips_dispatch(db_session, monkeypatch, caplog):
+    """primary-target retry → no sub_aspect Watch match; warn + skip notify; row deleted."""
+    item = await make_info_item(db_session)
+    primary = await make_info_source(db_session, url="https://example.com/primary")
+    await bind_primary_source(
+        db_session,
+        info_item_id=item.info_item_id,
+        info_source_id=primary.info_source_id,
+    )
+    # Primary-target Watch — target_info_source_id is NULL by design.
+    await make_watch(
+        db_session,
+        name="Primary",
+        info_item_id=item.info_item_id,
+        target_info_source_id=None,
+        effective_url="https://example.com/primary",
+    )
+    await db_session.commit()
+
+    now = datetime.now(UTC)
+    row = PendingSourceRevision(
+        info_source_id=str(primary.info_source_id),
+        content_fingerprint=FP,
+        captured_at=now,
+        content_cache_uri="file:///x.bin",
+        content_cache_expires_at=now + timedelta(seconds=600),
+        next_attempt_at=now,
+    )
+    db_session.add(row)
+    await db_session.commit()
+
+    fake_client = MagicMock()
+    fake_client.post_source_revision = AsyncMock(
+        return_value=MagicMock(
+            source_revision_id=str(row.id),
+            content_fingerprint=FP,
+        )
+    )
+    fake_dispatch = AsyncMock()
+
+    from src.workers import source_revisions_drain as mod
+
+    monkeypatch.setattr(
+        mod,
+        "get_session_factory",
+        lambda: _async_session_factory_returning(db_session),
+    )
+    monkeypatch.setattr(mod, "_get_archiver_client", lambda: fake_client)
+    monkeypatch.setattr(mod, "dispatch_event_notifications", fake_dispatch)
+
+    with caplog.at_level("WARNING", logger="src.workers.source_revisions_drain"):
+        result = await drain_pending_source_revisions(batch_size=10)
+
+    assert result["drained"] == 1
+    assert result["failed"] == 0
+    fake_client.post_source_revision.assert_awaited_once()
+    # v1 limitation: primary-target retries don't notify.
+    fake_dispatch.assert_not_awaited()
+    assert any(
+        "primary-target retry notify skipped" in rec.message
+        and str(primary.info_source_id) in rec.message
+        for rec in caplog.records
+    )
+
+    # Row must still be deleted after success — SourceRevision persisted.
     remaining = (
         await db_session.execute(
             select(PendingSourceRevision).where(PendingSourceRevision.id == row.id)

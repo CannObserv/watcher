@@ -5,23 +5,36 @@ from unittest.mock import AsyncMock, patch
 
 import httpx
 import pytest
+from archiver_client import NotFound
 from sqlalchemy import select
 
 from src.core.models.domain import Domain
 from src.core.models.watch import ContentType, Watch, WatchHealthStatus
 from src.core.notifications.events import WatchEventType
-from tests.conftest import make_info_item, make_info_source, make_watch
+from tests.conftest import (
+    bind_primary_source,
+    make_info_item,
+    make_info_source,
+    make_watch,
+)
 
 
 async def _seed_info_item(db_session, *, name="Test InfoItem", url="https://example.com"):
-    """Create + commit an InfoItem and InfoSource; return (info_item_id, info_source_id) as str.
+    """Create + commit an InfoItem with a bound primary InfoSource; return info_item_id (str).
 
-    Phase 5: info_specs is gone. The URL is stored on the InfoSource source_spec.
+    #160: dashboard form takes ``info_item_id`` only (with optional
+    sub_aspect ULID). The primary URL is resolved server-side via the
+    ArchiverClient — tests need the binding present so the SDK mock can find it.
     """
     item = await make_info_item(db_session, name=name)
-    source = await make_info_source(db_session, url=url)
+    primary = await make_info_source(db_session, url=url)
+    await bind_primary_source(
+        db_session,
+        info_item_id=item.info_item_id,
+        info_source_id=primary.info_source_id,
+    )
     await db_session.commit()
-    return str(item.info_item_id), str(source.info_source_id)
+    return str(item.info_item_id)
 
 
 pytestmark = pytest.mark.integration
@@ -102,13 +115,12 @@ class TestWatchList:
 
 class TestWatchDetail:
     async def test_detail_page_returns_200(self, client, db_session):
-        info_item_id, info_source_id = await _seed_info_item(db_session, name="Detail Watch")
+        info_item_id = await _seed_info_item(db_session, name="Detail Watch")
         resp = await client.post(
             "/api/v1/watches",
             json={
                 "name": "Detail Watch",
                 "info_item_id": info_item_id,
-                "info_source_id": info_source_id,
                 "content_type": "html",
             },
         )
@@ -141,24 +153,29 @@ class TestWatchCreate:
         assert response.status_code == 200
         assert b"New Watch" in response.content
 
-    async def test_create_form_has_info_source_picker(self, client):
-        """The create form renders an InfoSource ID text input, not URL/fetch fields."""
+    async def test_create_form_has_target_picker(self, client):
+        """The create form renders the minimal target picker.
+
+        Operator pastes an InfoItem ID and an optional sub_aspect ID.
+        """
         response = await client.get("/watches/new")
         assert b'name="name"' in response.content
-        assert b'name="info_source_id"' in response.content
+        assert b'name="info_item_id"' in response.content
+        assert b'name="target_info_source_id"' in response.content
         assert b'name="content_type"' in response.content
-        # Old info_item_id picker and URL/fetch_config fields are gone.
-        assert b'name="info_item_id"' not in response.content
+        # The pre-#160 InfoSource picker + URL/fetch_config + per-watch interval
+        # fields are gone.
+        assert b'name="info_source_id"' not in response.content
         assert b'name="url"' not in response.content
+        assert b'name="interval"' not in response.content
 
     async def test_create_watch_redirects(self, client, db_session):
-        info_item_id, info_source_id = await _seed_info_item(db_session, name="Created Watch")
+        info_item_id = await _seed_info_item(db_session, name="Created Watch")
         response = await client.post(
             "/watches/new",
             data={
                 "name": "Created Watch",
                 "info_item_id": info_item_id,
-                "info_source_id": info_source_id,
                 "content_type": "html",
             },
             follow_redirects=False,
@@ -166,13 +183,12 @@ class TestWatchCreate:
         assert response.status_code == 303
 
     async def test_create_watch_missing_name_shows_error(self, client, db_session):
-        info_item_id, info_source_id = await _seed_info_item(db_session, name="X")
+        info_item_id = await _seed_info_item(db_session, name="X")
         response = await client.post(
             "/watches/new",
             data={
                 "name": "",
                 "info_item_id": info_item_id,
-                "info_source_id": info_source_id,
                 "content_type": "html",
             },
         )
@@ -182,7 +198,7 @@ class TestWatchCreate:
     async def test_create_watch_sets_effective_domain_and_creates_domain_record(
         self, client, db_session
     ):
-        info_item_id, info_source_id = await _seed_info_item(
+        info_item_id = await _seed_info_item(
             db_session, name="Domain Test Watch", url="https://lcb.wa.gov/page"
         )
         response = await client.post(
@@ -190,7 +206,6 @@ class TestWatchCreate:
             data={
                 "name": "Domain Test Watch",
                 "info_item_id": info_item_id,
-                "info_source_id": info_source_id,
                 "content_type": "html",
             },
             follow_redirects=False,
@@ -205,7 +220,7 @@ class TestWatchCreate:
         assert domain_result.scalar_one_or_none() is not None
 
     async def test_create_watch_unreachable_url_shows_error(self, client, db_session):
-        info_item_id, info_source_id = await _seed_info_item(db_session, name="Bad Watch")
+        info_item_id = await _seed_info_item(db_session, name="Bad Watch")
         with patch(
             "src.dashboard.routes._create_watch",
             new_callable=AsyncMock,
@@ -216,12 +231,83 @@ class TestWatchCreate:
                 data={
                     "name": "Bad Watch",
                     "info_item_id": info_item_id,
-                    "info_source_id": info_source_id,
                     "content_type": "html",
                 },
             )
         assert response.status_code == 200
         assert b"unreachable" in response.content.lower()
+
+    async def test_create_watch_info_item_only_redirects(self, client, db_session):
+        """#160 Task 11.1: POST /watches/new with info_item_id only → 303 redirect.
+
+        No info_source_id, no interval, no target_info_source_id — the minimal
+        dashboard flow.
+        """
+        info_item_id = await _seed_info_item(db_session, name="Minimal Watch")
+        response = await client.post(
+            "/watches/new",
+            data={
+                "name": "Minimal Watch",
+                "info_item_id": info_item_id,
+            },
+            follow_redirects=False,
+        )
+        assert response.status_code == 303
+        assert response.headers["location"].startswith("/watches/")
+
+    async def test_create_watch_bad_info_item_id_shows_flash(self, client, db_session):
+        """#160 Task 11.1: POST with an unknown info_item_id → 200 + flash text."""
+        # Decoy InfoItem keeps the schema warm; the form payload uses a bogus id.
+        await _seed_info_item(db_session, name="Decoy")
+        bogus_id = "01ZZZZZZZZZZZZZZZZZZZZZZZZ"
+        with patch(
+            "src.dashboard.routes._create_watch",
+            new_callable=AsyncMock,
+            side_effect=NotFound(f"info_item {bogus_id} not found"),
+        ):
+            response = await client.post(
+                "/watches/new",
+                data={
+                    "name": "Bogus Target",
+                    "info_item_id": bogus_id,
+                    "content_type": "html",
+                },
+            )
+        assert response.status_code == 200
+        # Flash text mentions the missing InfoItem.
+        body = response.content.lower()
+        assert b"does not exist" in body
+        assert bogus_id.encode().lower() in body
+        # Sanity: form did not 5xx and we are back on the create page.
+        assert b"New Watch" in response.content
+
+
+class TestWatchListNoScheduleColumn:
+    """#160 Task 11.1: the list table no longer surfaces a schedule_config column."""
+
+    async def test_list_page_omits_schedule_config_column(self, client, db_session):
+        await make_watch(
+            db_session,
+            name="Listed Watch",
+            url="https://list-cols.example.com",
+            content_type="html",
+        )
+        response = await client.get("/watches")
+        assert response.status_code == 200
+        # Legacy schedule_config header / cell is gone; raw column-name reference
+        # must not leak into the rendered table.
+        assert b"schedule_config" not in response.content
+
+    async def test_table_partial_omits_schedule_config_column(self, client, db_session):
+        await make_watch(
+            db_session,
+            name="Partial Watch",
+            url="https://partial-cols.example.com",
+            content_type="html",
+        )
+        response = await client.get("/partials/watch-table")
+        assert response.status_code == 200
+        assert b"schedule_config" not in response.content
 
 
 class TestWatchInlineEditUrlGone:
@@ -329,7 +415,7 @@ _NOTIFY_PATCH = "src.dashboard.routes.dispatch_event_notifications"
 
 class TestWatchArchive:
     async def _create_watch(self, client, db_session):
-        info_item_id, info_source_id = await _seed_info_item(
+        info_item_id = await _seed_info_item(
             db_session, name="Archive Me", url="https://example.com/arc"
         )
         resp = await client.post(
@@ -337,7 +423,6 @@ class TestWatchArchive:
             json={
                 "name": "Archive Me",
                 "info_item_id": info_item_id,
-                "info_source_id": info_source_id,
                 "content_type": "html",
             },
         )
@@ -447,7 +532,7 @@ class TestWatchArchive:
 
 class TestWatchDeactivate:
     async def _create_active_watch(self, client, db_session):
-        info_item_id, info_source_id = await _seed_info_item(
+        info_item_id = await _seed_info_item(
             db_session, name="Deactivate Me", url="https://example.com"
         )
         resp = await client.post(
@@ -455,7 +540,6 @@ class TestWatchDeactivate:
             json={
                 "name": "Deactivate Me",
                 "info_item_id": info_item_id,
-                "info_source_id": info_source_id,
                 "content_type": "html",
             },
         )
@@ -500,13 +584,12 @@ class TestWatchDeactivate:
 
     async def test_deactivate_archived_watch_returns_409(self, client, db_session):
         """Deactivating an archived watch returns 409, consistent with toggle-active."""
-        info_item_id, info_source_id = await _seed_info_item(db_session, name="Arc Watch")
+        info_item_id = await _seed_info_item(db_session, name="Arc Watch")
         resp = await client.post(
             "/api/v1/watches",
             json={
                 "name": "Arc Watch",
                 "info_item_id": info_item_id,
-                "info_source_id": info_source_id,
                 "content_type": "html",
             },
         )
@@ -541,13 +624,12 @@ class TestWatchDeactivate:
 
 class TestWatchDelete:
     async def _create_and_archive(self, client, db_session):
-        info_item_id, info_source_id = await _seed_info_item(db_session, name="Delete Me")
+        info_item_id = await _seed_info_item(db_session, name="Delete Me")
         resp = await client.post(
             "/api/v1/watches",
             json={
                 "name": "Delete Me",
                 "info_item_id": info_item_id,
-                "info_source_id": info_source_id,
                 "content_type": "html",
             },
         )
@@ -562,15 +644,12 @@ class TestWatchDelete:
         assert response.headers.get("hx-redirect") == "/watches"
 
     async def test_delete_non_archived_watch_returns_409(self, client, db_session):
-        info_item_id, info_source_id = await _seed_info_item(
-            db_session, name="Cannot Delete Active"
-        )
+        info_item_id = await _seed_info_item(db_session, name="Cannot Delete Active")
         resp = await client.post(
             "/api/v1/watches",
             json={
                 "name": "Cannot Delete Active",
                 "info_item_id": info_item_id,
-                "info_source_id": info_source_id,
                 "content_type": "html",
             },
         )
@@ -648,7 +727,7 @@ class TestDomainDetailFilters:
             follow_redirects=False,
         )
         name = resp.headers["location"].rstrip("/").split("/")[-1]
-        info_item_id, info_source_id = await _seed_info_item(
+        info_item_id = await _seed_info_item(
             db_session, name=watch_name, url=f"https://{name}/page"
         )
         await client.post(
@@ -656,7 +735,6 @@ class TestDomainDetailFilters:
             json={
                 "name": watch_name,
                 "info_item_id": info_item_id,
-                "info_source_id": info_source_id,
                 "content_type": "html",
             },
         )
@@ -726,13 +804,12 @@ class TestAuditLogFilters:
 
 class TestWatchTimeline:
     async def _create_watch(self, client, db_session):
-        info_item_id, info_source_id = await _seed_info_item(db_session, name="Timeline Watch")
+        info_item_id = await _seed_info_item(db_session, name="Timeline Watch")
         resp = await client.post(
             "/api/v1/watches",
             json={
                 "name": "Timeline Watch",
                 "info_item_id": info_item_id,
-                "info_source_id": info_source_id,
                 "content_type": "html",
             },
         )

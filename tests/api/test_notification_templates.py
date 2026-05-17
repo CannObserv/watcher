@@ -122,7 +122,7 @@ async def test_patch_template_updates_events(client: AsyncClient):
 async def test_unassign_template_from_watch(client: AsyncClient, db_session):
     """DELETE /{template_id}/assign/{watch_id} removes the ref."""
     _watch_obj = await make_watch(
-        db_session, name="Unassign W", url="https://example.com", content_type="html"
+        db_session, name="Unassign W", primary_url="https://example.com", content_type="html"
     )
     await db_session.commit()
 
@@ -150,7 +150,7 @@ async def test_unassign_template_from_watch(client: AsyncClient, db_session):
 async def test_delete_template_blocked_when_refs_exist(client: AsyncClient, db_session):
     """Cannot delete a template that is referenced by a watch."""
     _watch_obj = await make_watch(
-        db_session, name="W", url="https://example.com", content_type="html"
+        db_session, name="W", primary_url="https://example.com", content_type="html"
     )
     await db_session.commit()
 

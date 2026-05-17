@@ -628,7 +628,9 @@ class TestDeleteWatchSiblingSemantics:
 
         response = await client.delete(f"/api/v1/watches/{primary_id}")
         assert response.status_code == 409, response.text
-        assert "sub_aspect" in response.json()["detail"].lower()
+        detail = response.json()["detail"]
+        assert detail["kind"] == "primary_has_sub_aspect_siblings"
+        assert "sub_aspect" in detail["message"].lower()
 
     async def test_delete_sub_aspect_watch_returns_204(self, client, db_session):
         """Sub_aspect-target Watch is always deletable when archived."""

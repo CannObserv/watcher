@@ -117,18 +117,35 @@ Full variable reference: `docs/DEPLOYMENT.md`.
 
 ## Watches
 
-Watches are InfoSource-native: each Watch references an `info_source_id`
-(root or fragment) in Archiver and stores `effective_url` /
-`effective_domain` resolved once at create time. SourceRevisions are
-POSTed to Archiver via the `archiver-client` SDK on every detected
-change; the local `pending_source_revisions` outbox + drain worker
-guarantees delivery during Archiver outages. Notifications dispatch
-inline from the pipeline's POST-success site (and outbox drain success),
-with `source_revision_id` in WatchEvent metadata.
+Watches are InfoItem-first (#160): each Watch references an `info_item_id`
+(parent InfoItem in Archiver) and optionally a `target_info_source_id` (a
+sub_aspect fragment under that InfoItem; NULL ⇒ the InfoItem's primary
+content). Each Watch belongs to a `WatchedItem` (1:1 with an Archiver
+InfoItem) that owns shared defaults: `default_schedule_config`,
+`default_content_type`, `default_tags`, plus `WatchedItemNotificationTemplate`
+rows. Live inheritance: per-Watch override → WatchedItem default → system
+default (see `src/core/watches/resolution.py`).
+
+One fetch per WatchedItem per cycle. The InfoItem's primary URL is fetched
+once; primary + cross_check + sub_aspect bindings all extract from the same
+bytes (Archiver's "fetch group" invariant). Per-Watch notifications dispatch
+only when the Watch's target binding's fingerprint changed. Cross_check
+bindings produce SourceRevisions for selector-rot detection (#157) but never
+trigger Watch notifications.
+
+`effective_url` / `effective_domain` are resolved once at Watch-create time
+(via `probe_fn`). SourceRevisions are POSTed to Archiver via the
+`archiver-client` SDK on every detected change; the local
+`pending_source_revisions` outbox + drain worker guarantees delivery during
+Archiver outages. Notifications dispatch inline from the pipeline's
+POST-success site (and outbox drain success for sub_aspect-target Watches),
+with `source_revision_id` in WatchEvent metadata. Primary-target retries on
+the drain log-and-skip the notification (v1 limitation; SourceRevision still
+persists).
 
 Fresh hosts need the scratch directory: `sudo mkdir -p /var/cache/watcher/scratch && sudo chown watcher:watcher /var/cache/watcher/scratch` (or override via `WATCHER_CACHE_DIR`). The Archiver service must also be installed first — see its own `docs/DEPLOYMENT.md`. Archiver authoring tools (`validate_source_spec`, `fetch_and_render`, `preview_extraction`, `propose_selectors`, `find_info_item`, atomic `create_info_item`) are documented in `/home/exedev/archiver/AGENTS.md`.
 
-See [docs/plans/2026-05-13-phase-5-watcher-v2-cutover.md](docs/plans/2026-05-13-phase-5-watcher-v2-cutover.md) for the cutover design.
+See [docs/plans/2026-05-15-watched-item-infoitem-first-design.md](docs/plans/2026-05-15-watched-item-infoitem-first-design.md) for the full design and [docs/plans/2026-05-17-watched-item-watch-reshape.md](docs/plans/2026-05-17-watched-item-watch-reshape.md) for the implementation plan. The Phase 5 cutover design ([docs/plans/2026-05-13-phase-5-watcher-v2-cutover.md](docs/plans/2026-05-13-phase-5-watcher-v2-cutover.md)) is historical and was superseded by #160.
 
 ## Common Commands
 

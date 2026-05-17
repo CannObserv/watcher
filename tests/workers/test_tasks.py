@@ -66,7 +66,7 @@ def _fake_fetch_result(
 def _make_pipeline_stub(*, posted: int = 0, changed_ids: list[str] | None = None) -> AsyncMock:
     """Return an AsyncMock that mimics `process_watched_item`'s return shape."""
 
-    async def _proc(session, info_client, watched_item, *, raw_content):
+    async def _proc(session, info_client, watched_item, *, raw_content, bindings=None):
         return WatchedItemResult(
             bindings_processed=1,
             revisions_posted=posted,

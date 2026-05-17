@@ -89,7 +89,7 @@ class TestWatchList:
         await make_watch(
             db_session,
             name="W",
-            url="https://a.com",
+            primary_url="https://a.com",
             content_type="html",
             health_status=WatchHealthStatus.OK,
         )
@@ -100,7 +100,7 @@ class TestWatchList:
         await make_watch(
             db_session,
             name="W",
-            url="https://a.com",
+            primary_url="https://a.com",
             content_type="html",
             health_status=WatchHealthStatus.ERROR,
         )
@@ -108,7 +108,7 @@ class TestWatchList:
         assert b"Error" in response.content
 
     async def test_health_badge_unknown(self, client, db_session):
-        await make_watch(db_session, name="W", url="https://a.com", content_type="html")
+        await make_watch(db_session, name="W", primary_url="https://a.com", content_type="html")
         response = await client.get("/watches")
         assert b"Unknown" in response.content
 
@@ -136,7 +136,7 @@ class TestWatchDetail:
     async def test_detail_page_shows_resolved_url_no_inline_edit(self, client, db_session):
         """Detail page renders ``resolved_url`` plainly — no Edit handle on it."""
         watch = await make_watch(
-            db_session, name="No URL Edit", url="https://example.com/x", content_type="html"
+            db_session, name="No URL Edit", primary_url="https://example.com/x", content_type="html"
         )
         await db_session.commit()
         response = await client.get(f"/watches/{watch.id}")
@@ -289,7 +289,7 @@ class TestWatchListNoScheduleColumn:
         await make_watch(
             db_session,
             name="Listed Watch",
-            url="https://list-cols.example.com",
+            primary_url="https://list-cols.example.com",
             content_type="html",
         )
         response = await client.get("/watches")
@@ -302,7 +302,7 @@ class TestWatchListNoScheduleColumn:
         await make_watch(
             db_session,
             name="Partial Watch",
-            url="https://partial-cols.example.com",
+            primary_url="https://partial-cols.example.com",
             content_type="html",
         )
         response = await client.get("/partials/watch-table")
@@ -315,7 +315,7 @@ class TestWatchInlineEditUrlGone:
 
     async def test_get_url_field_inline_edit_returns_4xx(self, client, db_session):
         watch = await make_watch(
-            db_session, name="No URL Edit", url="https://example.com", content_type="html"
+            db_session, name="No URL Edit", primary_url="https://example.com", content_type="html"
         )
         await db_session.commit()
         response = await client.get(
@@ -327,7 +327,7 @@ class TestWatchInlineEditUrlGone:
 
     async def test_post_url_field_inline_edit_returns_4xx(self, client, db_session):
         watch = await make_watch(
-            db_session, name="No URL Edit", url="https://example.com", content_type="html"
+            db_session, name="No URL Edit", primary_url="https://example.com", content_type="html"
         )
         await db_session.commit()
         response = await client.post(
@@ -340,7 +340,10 @@ class TestWatchInlineEditUrlGone:
     async def test_post_timeout_field_inline_edit_returns_4xx(self, client, db_session):
         """fetch_config keys are gone too — ``timeout`` was the canonical example."""
         watch = await make_watch(
-            db_session, name="No timeout edit", url="https://example.com", content_type="html"
+            db_session,
+            name="No timeout edit",
+            primary_url="https://example.com",
+            content_type="html",
         )
         await db_session.commit()
         response = await client.post(
@@ -356,7 +359,7 @@ class TestWatchRowDomainInactiveBadge:
         await make_watch(
             db_session,
             name="Suspended Watch",
-            url="https://ds-badge.com/p",
+            primary_url="https://ds-badge.com/p",
             content_type=ContentType.HTML,
             effective_domain="ds-badge.com",
             is_active=False,
@@ -372,7 +375,7 @@ class TestWatchRowDomainInactiveBadge:
         await make_watch(
             db_session,
             name="Manual Inactive",
-            url="https://mi-badge.com/p",
+            primary_url="https://mi-badge.com/p",
             content_type=ContentType.HTML,
             effective_domain="mi-badge.com",
             is_active=False,
@@ -474,7 +477,7 @@ class TestWatchArchive:
         watch = await make_watch(
             db_session,
             name="Resolve Fails",
-            url="https://example.com/resolve-fails",
+            primary_url="https://example.com/resolve-fails",
             content_type=ContentType.HTML,
         )
         await db_session.commit()
@@ -501,7 +504,10 @@ class TestWatchArchive:
         section), resulting in the entire page rendering nested inside that div.
         """
         watch = await make_watch(
-            db_session, name="Target Test", url="https://example.com", content_type=ContentType.HTML
+            db_session,
+            name="Target Test",
+            primary_url="https://example.com",
+            content_type=ContentType.HTML,
         )
         response = await client.get(f"/watches/{watch.id}")
         assert response.status_code == 200
@@ -519,7 +525,7 @@ class TestWatchArchive:
         watch = await make_watch(
             db_session,
             name="Restore Target",
-            url="https://example.com",
+            primary_url="https://example.com",
             content_type=ContentType.HTML,
             is_archived=True,
         )
@@ -834,7 +840,7 @@ class TestDomainDetailFilters:
         await make_watch(
             db_session,
             name="Healthy Watch",
-            url=f"https://{name}/page",
+            primary_url=f"https://{name}/page",
             content_type="html",
             effective_domain=name,
             health_status=WatchHealthStatus.OK,

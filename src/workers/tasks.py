@@ -32,9 +32,8 @@ from src.core.notifications.events import WatchEvent, WatchEventType
 from src.core.rate_limiter import get_rate_limiter
 from src.core.registry import ServiceRegistry, get_registry
 from src.core.scheduler import compute_next_check, evaluate_post_actions
-from src.core.utils import format_utc_iso
 from src.core.watches.info_item_fetch import fetch_info_item_bindings
-from src.core.watches.resolution import resolved_schedule_config
+from src.core.watches.resolution import resolved_schedule_config, watch_event_base_metadata
 from src.workers import bp
 from src.workers.notify import dispatch_event_notifications
 from src.workers.pipeline import (
@@ -44,33 +43,6 @@ from src.workers.pipeline import (
 )
 
 logger = get_logger(__name__)
-
-
-# ---------------------------------------------------------------------------
-# Metadata helpers
-# ---------------------------------------------------------------------------
-
-
-def _watched_item_base_metadata(watch: Watch) -> dict:
-    """Common metadata fields added to WatchEvents for content-builder use.
-
-    Replaces ``_watch_base_metadata`` (removed in #160). The interval is read
-    via the resolution chain (Watch override → WatchedItem default →
-    system default) since Watch no longer owns ``schedule_config``.
-    """
-    meta: dict = {}
-    if watch.effective_domain:
-        meta["effective_domain"] = watch.effective_domain
-    interval = resolved_schedule_config(watch).get("interval")
-    if interval:
-        meta["check_interval"] = interval
-    if watch.last_changed_at:
-        meta["last_changed_at"] = format_utc_iso(watch.last_changed_at)
-    if watch.tags:
-        meta["tags"] = watch.tags
-    if watch.description:
-        meta["description"] = watch.description
-    return meta
 
 
 # ---------------------------------------------------------------------------
@@ -206,7 +178,7 @@ async def check_watched_item(watched_item_id: str, registry: ServiceRegistry | N
                     occurred_at=now,
                     metadata={
                         "status_code": fetch_result.status_code,
-                        **_watched_item_base_metadata(w),
+                        **watch_event_base_metadata(w),
                     },
                 )
                 await dispatch_event_notifications(session=session, event=error_event)
@@ -214,12 +186,15 @@ async def check_watched_item(watched_item_id: str, registry: ServiceRegistry | N
                 await session.commit()
             return {"error": f"HTTP {fetch_result.status_code}"}
 
-        # Successful fetch → run the per-WatchedItem pipeline.
+        # Successful fetch → run the per-WatchedItem pipeline. Pass the
+        # already-fetched bindings so the pipeline avoids a second SDK
+        # round-trip (we resolved them upthread to compute the URL).
         result = await process_watched_item(
             session=session,
             info_client=info_client,
             watched_item=watched_item,
             raw_content=fetch_result.content,
+            bindings=bindings,
         )
 
         # Update last_checked_at + health on every child Watch. The pipeline
@@ -247,7 +222,7 @@ async def check_watched_item(watched_item_id: str, registry: ServiceRegistry | N
                 watch_name=w.name,
                 watch_url=w.effective_url or url,
                 occurred_at=now,
-                metadata=_watched_item_base_metadata(w),
+                metadata=watch_event_base_metadata(w),
             )
             await dispatch_event_notifications(session=session, event=recovery_event)
         if recovered:

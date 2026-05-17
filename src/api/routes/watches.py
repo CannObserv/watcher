@@ -206,7 +206,13 @@ async def delete_watch(
     watch = await get_watch_or_404(watch_id, session)
 
     if not watch.is_archived:
-        raise HTTPException(status_code=409, detail="Archive watch before deleting")
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "kind": "not_archived",
+                "message": "Archive watch before deleting",
+            },
+        )
 
     if watch.target_info_source_id is None:
         sibling_stmt = (
@@ -221,10 +227,13 @@ async def delete_watch(
         if sibling is not None:
             raise HTTPException(
                 status_code=409,
-                detail=(
-                    "primary Watch has dependent sub_aspect Watches; "
-                    "archive or delete them first, or archive the WatchedItem."
-                ),
+                detail={
+                    "kind": "primary_has_sub_aspect_siblings",
+                    "message": (
+                        "primary Watch has dependent sub_aspect Watches; "
+                        "archive or delete them first, or archive the WatchedItem."
+                    ),
+                },
             )
 
     info_client = get_registry().get_archiver_client()

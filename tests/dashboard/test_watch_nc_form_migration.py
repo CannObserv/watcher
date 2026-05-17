@@ -18,10 +18,10 @@ from tests.conftest import make_watch
 VALID_CHANNEL_ID = str(ULID())
 
 
-async def _make_watch(db_session, url="https://example.com", **kwargs) -> Watch:
+async def _make_watch(db_session, primary_url="https://example.com", **kwargs) -> Watch:
     return await make_watch(
         db_session,
-        url=url,
+        primary_url=primary_url,
         name=kwargs.pop("name", "Test Watch"),
         is_active=True,
         content_type="html",

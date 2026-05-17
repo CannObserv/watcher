@@ -39,8 +39,13 @@ from src.core.sources.scratch import (
     rename_scratch_to_canonical,
     write_scratch_bytes,
 )
-from src.core.watches.info_item_fetch import fetch_info_item_bindings
-from src.core.watches.resolution import resolved_schedule_config
+from src.core.watches.info_item_fetch import (
+    InfoItemBindings,
+    InfoSourceProto,
+    SourceSpecProto,
+    fetch_info_item_bindings,
+)
+from src.core.watches.resolution import watch_event_base_metadata
 
 logger = get_logger(__name__)
 
@@ -151,17 +156,19 @@ class WatchedItemResult:
     errors: list[str] = field(default_factory=list)
 
 
-def _spec_dict(spec_obj: object) -> dict:
+def _spec_dict(spec_obj: SourceSpecProto | dict | object) -> dict:
     """Coerce a binding's `source_spec` into a plain dict.
 
-    The Archiver SDK returns the spec as an `UNSET`-aware object exposing
-    `additional_properties` (the JSONB document). The mock client in tests
-    follows the same shape.
+    The Archiver SDK returns the spec as a ``SourceSpecProto`` wrapper exposing
+    ``additional_properties`` (the JSONB document). Tests sometimes pass a
+    plain dict or a mock with ``to_dict()``; handle both.
     """
-    if hasattr(spec_obj, "additional_properties"):
-        return dict(spec_obj.additional_properties)  # type: ignore[attr-defined]
-    if hasattr(spec_obj, "to_dict"):
-        return dict(spec_obj.to_dict())  # type: ignore[attr-defined]
+    additional = getattr(spec_obj, "additional_properties", None)
+    if additional is not None:
+        return dict(additional)
+    to_dict_method = getattr(spec_obj, "to_dict", None)
+    if callable(to_dict_method):
+        return dict(to_dict_method())
     if isinstance(spec_obj, dict):
         return dict(spec_obj)
     return {}
@@ -170,7 +177,7 @@ def _spec_dict(spec_obj: object) -> dict:
 async def _process_binding(
     session: AsyncSession,
     info_client: ArchiverClient,
-    binding: object,
+    binding: InfoSourceProto,
     raw_content: bytes,
     now: datetime,
 ) -> BindingOutcome:
@@ -179,10 +186,10 @@ async def _process_binding(
     Returns the per-binding outcome. Caller decides whether the change should
     trigger a Watch notification (cross_check bindings never do).
     """
-    info_source_id = str(binding.info_source_id)  # type: ignore[attr-defined]
+    info_source_id = str(binding.info_source_id)
     outcome = BindingOutcome(info_source_id=info_source_id)
 
-    document = _spec_dict(binding.source_spec)  # type: ignore[attr-defined]
+    document = _spec_dict(binding.source_spec)
     extracted = await _extract_with_spec(raw_content, document)
     content_bytes = "\n".join(c.text for c in extracted.chunks).encode()
     fingerprint = "sha256:" + hashlib.sha256(content_bytes).hexdigest()
@@ -250,10 +257,14 @@ async def process_watched_item(
     watched_item: WatchedItem,
     *,
     raw_content: bytes,
+    bindings: InfoItemBindings | None = None,
 ) -> WatchedItemResult:
     """Run one check cycle for a WatchedItem.
 
     1. Resolve the InfoItem's bindings via Archiver (primary + cross_checks + sub_aspects).
+       Callers that have already fetched bindings (e.g. ``check_watched_item``
+       resolved the primary URL before fetching) may pass them via the
+       ``bindings`` kwarg to avoid a second SDK round-trip.
     2. For each binding, extract content, fingerprint, fast-path against the
        local revision cache, and POST/enqueue if changed.
     3. Load this WatchedItem's active+non-archived child Watches; for each
@@ -273,19 +284,14 @@ async def process_watched_item(
     can update last_checked_at / last_changed_at on child Watches.
     """
     result = WatchedItemResult()
-    bindings = await fetch_info_item_bindings(info_client, str(watched_item.info_item_id))
+    if bindings is None:
+        bindings = await fetch_info_item_bindings(info_client, str(watched_item.info_item_id))
     now = datetime.now(UTC)
 
-    primary_source_id = str(bindings.primary.info_source_id)  # type: ignore[attr-defined]
+    primary_source_id = str(bindings.primary.info_source_id)
     all_bindings = [bindings.primary, *bindings.cross_checks, *bindings.sub_aspects]
-    cross_check_ids = {
-        str(b.info_source_id)  # type: ignore[attr-defined]
-        for b in bindings.cross_checks
-    }
-    sub_aspect_ids = {
-        str(b.info_source_id)  # type: ignore[attr-defined]
-        for b in bindings.sub_aspects
-    }
+    cross_check_ids = {str(b.info_source_id) for b in bindings.cross_checks}
+    sub_aspect_ids = {str(b.info_source_id) for b in bindings.sub_aspects}
 
     # Process each binding and track which fingerprints actually changed
     # (Archiver-acked). Outbox-only changes do not fire inline notifications.
@@ -353,16 +359,8 @@ async def process_watched_item(
             "source_revision_id": target_outcome.source_revision_id,
             "info_source_id": target_id,
             "content_fingerprint": target_outcome.content_fingerprint,
+            **watch_event_base_metadata(watch),
         }
-        if watch.effective_domain:
-            change_meta["effective_domain"] = watch.effective_domain
-        interval = resolved_schedule_config(watch).get("interval")
-        if interval:
-            change_meta["check_interval"] = interval
-        if watch.tags:
-            change_meta["tags"] = watch.tags
-        if watch.description:
-            change_meta["description"] = watch.description
         if watch.target_info_source_id is not None:
             change_meta["is_fragment"] = True
             change_meta["parent_info_source_id"] = primary_source_id

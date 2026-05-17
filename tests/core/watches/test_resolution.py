@@ -2,21 +2,13 @@
 
 from unittest.mock import MagicMock
 
-import pytest
-
-from src.core.models.notification_config import WatchNotificationConfig
 from src.core.models.watch import ContentType
-from src.core.models.watched_item_notification_template import (
-    WatchedItemNotificationTemplate,
-)
 from src.core.watches.resolution import (
     SYSTEM_DEFAULT_SCHEDULE_CONFIG,
     resolved_content_type,
-    resolved_notification_dispatches,
     resolved_schedule_config,
     resolved_tags,
 )
-from tests.conftest import make_watch
 
 
 def _watch(*, content_type=None, tags=None, watched_item=None):
@@ -77,138 +69,3 @@ def test_tags_merge_additively():
 def test_tags_empty_when_both_unset():
     w = _watch(tags=None, watched_item=_wi(default_tags=None))
     assert resolved_tags(w) == []
-
-
-# ---------------------------------------------------------------------------
-# resolved_notification_dispatches — Approach B union
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.integration
-@pytest.mark.asyncio
-async def test_resolved_notification_dispatches_unions_template_and_watch_configs(
-    db_session,
-):
-    """Approach B: union of WatchedItem templates + Watch's own configs."""
-    watch = await make_watch(db_session)
-
-    template = WatchedItemNotificationTemplate(
-        watched_item_id=watch.watched_item_id,
-        channel_hint="slack",
-        events=["change_detected"],
-    )
-    config = WatchNotificationConfig(
-        watch_id=watch.id,
-        channel_hint="email",
-        events=["change_detected"],
-    )
-    db_session.add_all([template, config])
-    await db_session.flush()
-
-    rows = await resolved_notification_dispatches(db_session, watch)
-    assert len(rows) == 2
-    sources = {r.source for r in rows}
-    assert sources == {"watched_item_template", "watch_config"}
-
-
-@pytest.mark.integration
-@pytest.mark.asyncio
-async def test_resolved_notification_dispatches_templates_only(db_session):
-    """Watch with no own configs, WatchedItem with 2 templates → 2 entries."""
-    watch = await make_watch(db_session)
-
-    t1 = WatchedItemNotificationTemplate(
-        watched_item_id=watch.watched_item_id,
-        channel_hint="slack",
-        events=["change_detected"],
-    )
-    t2 = WatchedItemNotificationTemplate(
-        watched_item_id=watch.watched_item_id,
-        channel_hint="email",
-        events=["change_detected"],
-    )
-    db_session.add_all([t1, t2])
-    await db_session.flush()
-
-    rows = await resolved_notification_dispatches(db_session, watch)
-    assert len(rows) == 2
-    assert all(r.source == "watched_item_template" for r in rows)
-
-
-@pytest.mark.integration
-@pytest.mark.asyncio
-async def test_resolved_notification_dispatches_own_config_only(db_session):
-    """Watch with 1 own config, WatchedItem with 0 templates → 1 entry."""
-    watch = await make_watch(db_session)
-
-    config = WatchNotificationConfig(
-        watch_id=watch.id,
-        channel_hint="email",
-        events=["change_detected"],
-    )
-    db_session.add(config)
-    await db_session.flush()
-
-    rows = await resolved_notification_dispatches(db_session, watch)
-    assert len(rows) == 1
-    assert rows[0].source == "watch_config"
-
-
-@pytest.mark.integration
-@pytest.mark.asyncio
-async def test_resolved_notification_dispatches_filters_inactive(db_session):
-    """Inactive template and inactive config are excluded."""
-    watch = await make_watch(db_session)
-
-    inactive_template = WatchedItemNotificationTemplate(
-        watched_item_id=watch.watched_item_id,
-        channel_hint="slack",
-        events=["change_detected"],
-        is_active=False,
-    )
-    inactive_config = WatchNotificationConfig(
-        watch_id=watch.id,
-        channel_hint="email",
-        events=["change_detected"],
-        is_active=False,
-    )
-    db_session.add_all([inactive_template, inactive_config])
-    await db_session.flush()
-
-    rows = await resolved_notification_dispatches(db_session, watch)
-    assert rows == []
-
-
-@pytest.mark.integration
-@pytest.mark.asyncio
-async def test_resolved_notification_dispatches_filters_by_event_type(db_session):
-    """Rows without the requested event_type are excluded."""
-    watch = await make_watch(db_session)
-
-    matching = WatchedItemNotificationTemplate(
-        watched_item_id=watch.watched_item_id,
-        channel_hint="slack",
-        events=["change_detected"],
-    )
-    non_matching_template = WatchedItemNotificationTemplate(
-        watched_item_id=watch.watched_item_id,
-        channel_hint="slack",
-        events=["watch_created"],
-    )
-    matching_config = WatchNotificationConfig(
-        watch_id=watch.id,
-        channel_hint="email",
-        events=["change_detected"],
-    )
-    non_matching_config = WatchNotificationConfig(
-        watch_id=watch.id,
-        channel_hint="email",
-        events=["watch_created"],
-    )
-    db_session.add_all([matching, non_matching_template, matching_config, non_matching_config])
-    await db_session.flush()
-
-    rows = await resolved_notification_dispatches(db_session, watch, event_type="change_detected")
-    assert len(rows) == 2
-    sources = {r.source for r in rows}
-    assert sources == {"watched_item_template", "watch_config"}

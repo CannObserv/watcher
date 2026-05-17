@@ -1,12 +1,37 @@
 """Resolve an Archiver InfoItem's bindings, partitioned by role."""
 
 from dataclasses import dataclass
+from typing import Protocol, runtime_checkable
 
 from archiver_client import ArchiverClient
 
 from src.core.logging import get_logger
 
 logger = get_logger(__name__)
+
+
+@runtime_checkable
+class SourceSpecProto(Protocol):
+    """The SDK's SourceSpec wrapper exposes the JSONB document as
+    ``additional_properties``."""
+
+    additional_properties: dict
+
+
+@runtime_checkable
+class InfoSourceProto(Protocol):
+    """Minimal duck-type for an Archiver SDK ``InfoSourceOut`` row.
+
+    The pipeline and binding helpers only need ``info_source_id``, ``url``,
+    ``parent_info_source_id``, and ``source_spec``. Declaring this protocol
+    lets downstream consumers drop ``# type: ignore[attr-defined]`` against
+    the duck-typed bindings without importing the generated SDK class.
+    """
+
+    info_source_id: object  # ULID or str depending on SDK version; str() coerces
+    url: str | None
+    parent_info_source_id: object | None
+    source_spec: SourceSpecProto
 
 
 @dataclass
@@ -20,9 +45,9 @@ class InfoItemBindings:
     its bytes.
     """
 
-    primary: object  # InfoSourceOut for the primary (role IS NULL)
-    cross_checks: list[object]
-    sub_aspects: list[object]
+    primary: InfoSourceProto
+    cross_checks: list[InfoSourceProto]
+    sub_aspects: list[InfoSourceProto]
     primary_url: str
 
 

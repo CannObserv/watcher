@@ -2,21 +2,16 @@
 
 Per design Section 4 (#160). Resolution is performed at read time so edits to a
 WatchedItem propagate immediately to all child Watches that do not override the
-field. Tags merge additively (union); scalars override. ``resolved_notification_dispatches``
-returns the Approach B union of WatchedItem templates + per-Watch configs as a
-single uniform list of dispatch candidates.
+field. Tags merge additively (union); scalars override.
+
+Notification dispatch (the Approach B union of WatchedItem templates +
+per-Watch configs) is implemented inline in
+``src/core/notifications/notify.py``; there is no separate resolver function
+because the dispatcher already operates directly on the row objects.
 """
 
-from dataclasses import dataclass
-
-from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
-
-from src.core.models.notification_config import WatchNotificationConfig
 from src.core.models.watch import ContentType, Watch
-from src.core.models.watched_item_notification_template import (
-    WatchedItemNotificationTemplate,
-)
+from src.core.utils import format_utc_iso
 
 SYSTEM_DEFAULT_SCHEDULE_CONFIG: dict = {"interval": "1d"}
 SYSTEM_DEFAULT_CONTENT_TYPE: ContentType = ContentType.HTML
@@ -51,78 +46,27 @@ def resolved_tags(watch: Watch) -> list[str]:
     return sorted(set(wi_tags) | set(own))
 
 
-@dataclass
-class ResolvedNotificationDispatch:
-    """A single notification dispatch target, normalised across both source tables.
+def watch_event_base_metadata(watch: Watch) -> dict:
+    """Common metadata fields shared across WatchEvent dispatches.
 
-    `source` discriminates origin for logging/audit only — the notifier-facing
-    dispatcher treats both kinds identically. ``source_id`` is the row id from
-    the originating table (`WatchedItemNotificationTemplate.id` or
-    `WatchNotificationConfig.id`), stringified.
+    Used by both the change-detected dispatch in ``src/workers/pipeline.py``
+    and the error/recovery dispatches in ``src/workers/tasks.py``. Per-event
+    keys (``source_revision_id``, ``status_code``, etc.) are layered by the
+    caller on top of this base.
+
+    Interval is read via the resolution chain so a WatchedItem-level edit
+    propagates without a per-Watch update.
     """
-
-    source: str  # "watched_item_template" | "watch_config"
-    source_id: str
-    channel_hint: str
-    events: list[str]
-    content_config: dict | None
-    remote_channel_id: str | None
-
-
-async def resolved_notification_dispatches(
-    session: AsyncSession,
-    watch: Watch,
-    *,
-    event_type: str | None = None,
-) -> list[ResolvedNotificationDispatch]:
-    """Approach B union of WatchedItem templates + per-Watch configs.
-
-    Per design Section 4.3. Returns one entry per active row from either source.
-    No suppression semantics in v1 — every active row that matches the event
-    filter (when supplied) becomes a dispatch candidate.
-
-    `event_type` (optional) filters both sets to rows whose `events` array
-    contains the given WatchEventType code. When ``None``, all active rows are
-    returned regardless of event subscription. De-duplication by row id is not
-    needed: the two tables have disjoint primary-key namespaces (different
-    parent FKs), so the same row cannot appear in both sets.
-    """
-    template_q = select(WatchedItemNotificationTemplate).where(
-        WatchedItemNotificationTemplate.watched_item_id == watch.watched_item_id,
-        WatchedItemNotificationTemplate.is_active.is_(True),
-    )
-    config_q = select(WatchNotificationConfig).where(
-        WatchNotificationConfig.watch_id == watch.id,
-        WatchNotificationConfig.is_active.is_(True),
-    )
-    if event_type is not None:
-        template_q = template_q.where(WatchedItemNotificationTemplate.events.contains([event_type]))
-        config_q = config_q.where(WatchNotificationConfig.events.contains([event_type]))
-
-    template_rows = (await session.execute(template_q)).scalars().all()
-    config_rows = (await session.execute(config_q)).scalars().all()
-
-    resolved: list[ResolvedNotificationDispatch] = []
-    for tpl in template_rows:
-        resolved.append(
-            ResolvedNotificationDispatch(
-                source="watched_item_template",
-                source_id=str(tpl.id),
-                channel_hint=tpl.channel_hint,
-                events=list(tpl.events),
-                content_config=tpl.content_config,
-                remote_channel_id=tpl.remote_channel_id,
-            )
-        )
-    for cfg in config_rows:
-        resolved.append(
-            ResolvedNotificationDispatch(
-                source="watch_config",
-                source_id=str(cfg.id),
-                channel_hint=cfg.channel_hint,
-                events=list(cfg.events),
-                content_config=cfg.content_config,
-                remote_channel_id=cfg.remote_channel_id,
-            )
-        )
-    return resolved
+    meta: dict = {}
+    if watch.effective_domain:
+        meta["effective_domain"] = watch.effective_domain
+    interval = resolved_schedule_config(watch).get("interval")
+    if interval:
+        meta["check_interval"] = interval
+    if watch.last_changed_at:
+        meta["last_changed_at"] = format_utc_iso(watch.last_changed_at)
+    if watch.tags:
+        meta["tags"] = watch.tags
+    if watch.description:
+        meta["description"] = watch.description
+    return meta

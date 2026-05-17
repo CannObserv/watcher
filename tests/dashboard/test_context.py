@@ -30,11 +30,11 @@ class TestGetDashboardStats:
         assert stats["checks_today"] == 0
 
     async def test_counts_watches(self, db_session):
-        await make_watch(db_session, name="W1", url="https://a.com", content_type="html")
+        await make_watch(db_session, name="W1", primary_url="https://a.com", content_type="html")
         await make_watch(
             db_session,
             name="W2",
-            url="https://b.com",
+            primary_url="https://b.com",
             content_type="html",
             is_active=False,
         )
@@ -79,7 +79,7 @@ class TestGetWatchList:
         assert result == []
 
     async def test_returns_watches(self, db_session):
-        await make_watch(db_session, name="W1", url="https://a.com", content_type="html")
+        await make_watch(db_session, name="W1", primary_url="https://a.com", content_type="html")
 
         result = await get_watch_list(db_session)
         assert len(result) == 1
@@ -87,11 +87,13 @@ class TestGetWatchList:
         assert hasattr(result[0], "last_checked_at")
 
     async def test_filter_active(self, db_session):
-        await make_watch(db_session, name="Active", url="https://a.com", content_type="html")
+        await make_watch(
+            db_session, name="Active", primary_url="https://a.com", content_type="html"
+        )
         await make_watch(
             db_session,
             name="Inactive",
-            url="https://b.com",
+            primary_url="https://b.com",
             content_type="html",
             is_active=False,
         )
@@ -102,11 +104,13 @@ class TestGetWatchList:
         assert active_only[0].name == "Active"
 
     async def test_excludes_archived_by_default(self, db_session):
-        await make_watch(db_session, name="Normal", url="https://a.com", content_type="html")
+        await make_watch(
+            db_session, name="Normal", primary_url="https://a.com", content_type="html"
+        )
         await make_watch(
             db_session,
             name="Archived",
-            url="https://b.com",
+            primary_url="https://b.com",
             content_type="html",
             is_active=False,
             is_archived=True,
@@ -119,11 +123,13 @@ class TestGetWatchList:
         assert "Archived" not in names
 
     async def test_include_archived_returns_all(self, db_session):
-        await make_watch(db_session, name="Normal", url="https://a.com", content_type="html")
+        await make_watch(
+            db_session, name="Normal", primary_url="https://a.com", content_type="html"
+        )
         await make_watch(
             db_session,
             name="Archived",
-            url="https://b.com",
+            primary_url="https://b.com",
             content_type="html",
             is_active=False,
             is_archived=True,
@@ -136,8 +142,12 @@ class TestGetWatchList:
         assert "Archived" in names
 
     async def test_search_filters_by_name(self, db_session):
-        await make_watch(db_session, name="Alpha Watch", url="https://a.com", content_type="html")
-        await make_watch(db_session, name="Beta Watch", url="https://b.com", content_type="html")
+        await make_watch(
+            db_session, name="Alpha Watch", primary_url="https://a.com", content_type="html"
+        )
+        await make_watch(
+            db_session, name="Beta Watch", primary_url="https://b.com", content_type="html"
+        )
         await db_session.flush()
         result = await get_watch_list(db_session, search="alpha")
         assert len(result) == 1
@@ -147,14 +157,14 @@ class TestGetWatchList:
         await make_watch(
             db_session,
             name="W1",
-            url="https://a.com",
+            primary_url="https://a.com",
             content_type="html",
             effective_domain="a.com",
         )
         await make_watch(
             db_session,
             name="W2",
-            url="https://b.com",
+            primary_url="https://b.com",
             content_type="html",
             effective_domain="b.com",
         )
@@ -167,21 +177,21 @@ class TestGetWatchList:
         await make_watch(
             db_session,
             name="Sub",
-            url="https://sub.example.com",
+            primary_url="https://sub.example.com",
             content_type="html",
             effective_domain="sub.example.com",
         )
         await make_watch(
             db_session,
             name="Root",
-            url="https://example.com",
+            primary_url="https://example.com",
             content_type="html",
             effective_domain="example.com",
         )
         await make_watch(
             db_session,
             name="Other",
-            url="https://other.com",
+            primary_url="https://other.com",
             content_type="html",
             effective_domain="other.com",
         )
@@ -193,22 +203,22 @@ class TestGetWatchList:
         assert "Other" not in names
 
     async def test_sort_by_name_asc(self, db_session):
-        await make_watch(db_session, name="Zebra", url="https://a.com", content_type="html")
-        await make_watch(db_session, name="Apple", url="https://b.com", content_type="html")
+        await make_watch(db_session, name="Zebra", primary_url="https://a.com", content_type="html")
+        await make_watch(db_session, name="Apple", primary_url="https://b.com", content_type="html")
         await db_session.flush()
         result = await get_watch_list(db_session, sort="name", order="asc")
         assert result[0].name == "Apple"
         assert result[1].name == "Zebra"
 
     async def test_sort_by_name_desc(self, db_session):
-        await make_watch(db_session, name="Zebra", url="https://a.com", content_type="html")
-        await make_watch(db_session, name="Apple", url="https://b.com", content_type="html")
+        await make_watch(db_session, name="Zebra", primary_url="https://a.com", content_type="html")
+        await make_watch(db_session, name="Apple", primary_url="https://b.com", content_type="html")
         await db_session.flush()
         result = await get_watch_list(db_session, sort="name", order="desc")
         assert result[0].name == "Zebra"
 
     async def test_unknown_sort_key_falls_back_to_last_checked(self, db_session):
-        await make_watch(db_session, name="W", url="https://a.com", content_type="html")
+        await make_watch(db_session, name="W", primary_url="https://a.com", content_type="html")
         await db_session.flush()
         result = await get_watch_list(db_session, sort="INVALID", order="asc")
         assert len(result) == 1
@@ -217,11 +227,13 @@ class TestGetWatchList:
         await make_watch(
             db_session,
             name="Changed",
-            url="https://a.com",
+            primary_url="https://a.com",
             content_type="html",
             last_changed_at=datetime(2024, 1, 1, tzinfo=UTC),
         )
-        await make_watch(db_session, name="NeverChanged", url="https://b.com", content_type="html")
+        await make_watch(
+            db_session, name="NeverChanged", primary_url="https://b.com", content_type="html"
+        )
         await db_session.flush()
         result = await get_watch_list(db_session, sort="last_changed_at", order="asc")
         assert result[0].name == "NeverChanged"
@@ -230,11 +242,13 @@ class TestGetWatchList:
         await make_watch(
             db_session,
             name="Changed",
-            url="https://a.com",
+            primary_url="https://a.com",
             content_type="html",
             last_changed_at=datetime(2024, 1, 1, tzinfo=UTC),
         )
-        await make_watch(db_session, name="NeverChanged", url="https://b.com", content_type="html")
+        await make_watch(
+            db_session, name="NeverChanged", primary_url="https://b.com", content_type="html"
+        )
         await db_session.flush()
         result = await get_watch_list(db_session, sort="last_changed_at", order="desc")
         assert result[-1].name == "NeverChanged"
@@ -244,7 +258,7 @@ class TestGetWatchList:
 class TestGetWatchDetail:
     async def test_returns_watch(self, db_session):
         watch = await make_watch(
-            db_session, name="Detail", url="https://a.com", content_type="html"
+            db_session, name="Detail", primary_url="https://a.com", content_type="html"
         )
 
         result = await get_watch_detail(db_session, str(watch.id))
@@ -272,7 +286,7 @@ class TestGetDomainsWithWatchCounts:
         await make_watch(
             db_session,
             name="Test",
-            url="https://example.com",
+            primary_url="https://example.com",
             content_type=ContentType.HTML,
             effective_domain="example.com",
         )
@@ -362,7 +376,7 @@ class TestGetDomainsFiltered:
         await make_watch(
             db_session,
             name="W",
-            url="https://checked.com",
+            primary_url="https://checked.com",
             content_type="html",
             effective_domain="checked.com",
             last_checked_at=now,
@@ -394,7 +408,9 @@ class TestGetWatchTimeline:
     """Tests for the lifecycle event timeline (AuditLog-only after Phase 5 #156)."""
 
     async def test_empty_watch_returns_empty(self, db_session):
-        watch = await make_watch(db_session, name="Empty", url="https://a.com", content_type="html")
+        watch = await make_watch(
+            db_session, name="Empty", primary_url="https://a.com", content_type="html"
+        )
 
         result = await get_watch_timeline(db_session, str(watch.id), offset=0, limit=50)
         assert result == []
@@ -405,7 +421,7 @@ class TestGetWatchTimeline:
 
     async def test_audit_log_event_surfaces_as_config_entry(self, db_session):
         watch = await make_watch(
-            db_session, name="Config Watch", url="https://a.com", content_type="html"
+            db_session, name="Config Watch", primary_url="https://a.com", content_type="html"
         )
 
         entry = AuditLog(
@@ -427,7 +443,7 @@ class TestGetWatchTimeline:
 
     async def test_fetch_failed_audit_event_surfaces_as_error(self, db_session):
         watch = await make_watch(
-            db_session, name="Error Watch", url="https://a.com", content_type="html"
+            db_session, name="Error Watch", primary_url="https://a.com", content_type="html"
         )
 
         entry = AuditLog(
@@ -444,7 +460,7 @@ class TestGetWatchTimeline:
 
     async def test_ordering_newest_first(self, db_session):
         watch = await make_watch(
-            db_session, name="Order Watch", url="https://a.com", content_type="html"
+            db_session, name="Order Watch", primary_url="https://a.com", content_type="html"
         )
 
         t1 = datetime(2025, 1, 1, 12, 0, tzinfo=UTC)
@@ -465,7 +481,7 @@ class TestGetWatchTimeline:
 
     async def test_pagination_offset_and_limit(self, db_session):
         watch = await make_watch(
-            db_session, name="Page Watch", url="https://a.com", content_type="html"
+            db_session, name="Page Watch", primary_url="https://a.com", content_type="html"
         )
 
         for _ in range(5):
@@ -483,7 +499,7 @@ class TestGetWatchTimeline:
 
     async def test_entry_keys_present(self, db_session):
         watch = await make_watch(
-            db_session, name="Key Watch", url="https://a.com", content_type="html"
+            db_session, name="Key Watch", primary_url="https://a.com", content_type="html"
         )
 
         entry = AuditLog(event_type=EventType.CHECK_NO_CHANGE, watch_id=watch.id)
@@ -505,14 +521,14 @@ class TestGetDomainWatches:
         await make_watch(
             db_session,
             name="W1",
-            url="https://ex.com/a",
+            primary_url="https://ex.com/a",
             content_type="html",
             effective_domain="ex.com",
         )
         await make_watch(
             db_session,
             name="W2",
-            url="https://other.com/b",
+            primary_url="https://other.com/b",
             content_type="html",
             effective_domain="other.com",
         )
@@ -525,14 +541,14 @@ class TestGetDomainWatches:
         await make_watch(
             db_session,
             name="Zebra",
-            url="https://ex.com/z",
+            primary_url="https://ex.com/z",
             content_type="html",
             effective_domain="ex.com",
         )
         await make_watch(
             db_session,
             name="Apple",
-            url="https://ex.com/a",
+            primary_url="https://ex.com/a",
             content_type="html",
             effective_domain="ex.com",
         )
@@ -544,7 +560,7 @@ class TestGetDomainWatches:
         await make_watch(
             db_session,
             name="Old",
-            url="https://ex.com/old",
+            primary_url="https://ex.com/old",
             content_type="html",
             effective_domain="ex.com",
             last_changed_at=datetime(2024, 1, 1, tzinfo=UTC),
@@ -552,7 +568,7 @@ class TestGetDomainWatches:
         await make_watch(
             db_session,
             name="New",
-            url="https://ex.com/new",
+            primary_url="https://ex.com/new",
             content_type="html",
             effective_domain="ex.com",
             last_changed_at=datetime(2025, 1, 1, tzinfo=UTC),
@@ -566,7 +582,7 @@ class TestGetDomainWatches:
         await make_watch(
             db_session,
             name="Changed",
-            url="https://ex.com/c",
+            primary_url="https://ex.com/c",
             content_type="html",
             effective_domain="ex.com",
             last_changed_at=datetime(2024, 1, 1, tzinfo=UTC),
@@ -574,7 +590,7 @@ class TestGetDomainWatches:
         await make_watch(
             db_session,
             name="NeverChanged",
-            url="https://ex.com/n",
+            primary_url="https://ex.com/n",
             content_type="html",
             effective_domain="ex.com",
         )
@@ -586,7 +602,7 @@ class TestGetDomainWatches:
         await make_watch(
             db_session,
             name="Changed",
-            url="https://ex.com/c",
+            primary_url="https://ex.com/c",
             content_type="html",
             effective_domain="ex.com",
             last_changed_at=datetime(2024, 1, 1, tzinfo=UTC),
@@ -594,7 +610,7 @@ class TestGetDomainWatches:
         await make_watch(
             db_session,
             name="NeverChanged",
-            url="https://ex.com/n",
+            primary_url="https://ex.com/n",
             content_type="html",
             effective_domain="ex.com",
         )
@@ -608,14 +624,14 @@ class TestGetDomainWatches:
         await make_watch(
             db_session,
             name="Alpha",
-            url="https://ex.com/a",
+            primary_url="https://ex.com/a",
             content_type="html",
             effective_domain="ex.com",
         )
         await make_watch(
             db_session,
             name="Beta",
-            url="https://ex.com/b",
+            primary_url="https://ex.com/b",
             content_type="html",
             effective_domain="ex.com",
         )
@@ -628,14 +644,14 @@ class TestGetDomainWatches:
         await make_watch(
             db_session,
             name="Active",
-            url="https://ex.com/a",
+            primary_url="https://ex.com/a",
             content_type="html",
             effective_domain="ex.com",
         )
         await make_watch(
             db_session,
             name="Inactive",
-            url="https://ex.com/b",
+            primary_url="https://ex.com/b",
             content_type="html",
             effective_domain="ex.com",
             is_active=False,

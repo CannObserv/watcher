@@ -21,7 +21,7 @@ async def _make_watch(db_session, name: str = "W", domain: str | None = None) ->
     return await make_watch(
         db_session,
         name=name,
-        url=f"https://example-{slug}.com",
+        primary_url=f"https://example-{slug}.com",
         content_type=ContentType.HTML,
         effective_domain=domain,
     )

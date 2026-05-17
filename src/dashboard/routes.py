@@ -385,9 +385,12 @@ async def watch_delete(
         await api_delete_watch(watch_id=watch_id, session=session)
     except HTTPException as exc:
         if exc.status_code == 409:
+            # API returns {"kind": <discriminator>, "message": <human>} for 409s.
+            # Fall through to the generic "archive first" message if the shape
+            # is unexpected (defensive — older callers, or future discriminators).
             detail = exc.detail
-            detail_text = str(detail) if detail is not None else ""
-            if "sub_aspect" in detail_text:
+            kind = detail.get("kind") if isinstance(detail, dict) else None
+            if kind == "primary_has_sub_aspect_siblings":
                 msg = (
                     '<p class="text-red-600 text-sm mt-2">'
                     "Cannot delete: this primary Watch has dependent sub_aspect Watches. "

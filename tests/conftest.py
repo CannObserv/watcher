@@ -9,14 +9,15 @@ The module-level async helpers ``make_watch``, ``make_info_item``,
 NOT pytest fixtures — they are awaitable factory functions test code can
 call directly.
 
-``make_watch`` now takes ``info_item_id`` (Phase 6 / #160 shape) and an
-optional ``target_info_source_id`` to discriminate sub-aspect Watches. A
-parent ``WatchedItem`` is auto-created (or attached) so the new 1:1
+``make_watch`` takes ``info_item_id`` (#160 shape) and an optional
+``target_info_source_id`` to discriminate sub-aspect Watches. A parent
+``WatchedItem`` is auto-created (or attached) so the new 1:1
 ``watched_items.info_item_id`` unique constraint is honoured. The legacy
-``info_source_id``/``schedule_config`` columns are gone.
+``info_source_id`` / ``schedule_config`` columns are gone.
 
 Phase 5 (#156): ``make_snapshot`` and ``default_snapshot_fixture`` removed —
-Snapshot table dropped.
+Snapshot table dropped. ``InfoSpec`` table and ``make_info_spec`` factory
+also dead-code-removed under #160 (the spec moved into ``InfoSource.source_spec``).
 """
 
 import logging
@@ -48,7 +49,6 @@ from tests._information_test_models import (
     InfoItem,  # noqa: F401  registers mapper
     InfoItemSource,
     InfoSource,  # noqa: F401  registers mapper
-    InfoSpec,  # noqa: F401  registers mapper
 )
 
 logger = logging.getLogger(__name__)
@@ -342,38 +342,6 @@ async def bind_sub_aspect(session, *, info_item_id, info_source_id):
     await session.flush()
 
 
-async def make_info_spec(
-    session,
-    info_item,
-    *,
-    url="https://example.com",
-    selector=None,
-    fingerprint_algorithm="simhash",
-    priority=1,
-    active=True,
-):
-    """Create and flush an InfoSpec row attached to *info_item*."""
-    extraction = (
-        {"algorithm": "css", "selector": selector} if selector else {"algorithm": "full_page"}
-    )
-    document = {
-        "schema_version": 1,
-        "target": {"url": url},
-        "extraction": extraction,
-        "fingerprint": {"algorithm": fingerprint_algorithm},
-    }
-    spec = InfoSpec(
-        info_item_id=info_item.info_item_id,
-        schema_version=1,
-        document=document,
-        priority=priority,
-        active=active,
-    )
-    session.add(spec)
-    await session.flush()
-    return spec
-
-
 async def make_watch(
     session,
     *,
@@ -394,14 +362,9 @@ async def make_watch(
     Extra ``**kwargs`` flow into the Watch constructor (tags, description,
     content_type, etc.). Note: ``schedule_config`` no longer lives on Watch
     (moved to WatchedItem.default_schedule_config); callers that previously
-    passed it should construct/mutate the WatchedItem instead.
-
-    Legacy alias: pre-#160 callers passed ``url=`` to point the InfoSource at a
-    specific URL. We accept it as an alias for ``primary_url`` so the legacy
-    test surface keeps working without a mass rewrite.
+    passed it should construct/mutate the WatchedItem instead. Use
+    ``primary_url=`` to seed the auto-created InfoSource's URL.
     """
-    if "url" in kwargs:
-        primary_url = kwargs.pop("url")
     if info_item_id is None:
         item = await make_info_item(session)
         info_item_id = item.info_item_id

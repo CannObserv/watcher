@@ -1,0 +1,29 @@
+{# Expects: tpl, watched_item. #}
+<tr id="wi-tpl-{{ tpl.id }}" class="hover:bg-gray-50 dark:hover:bg-gray-800">
+  <td class="font-medium text-gray-900 dark:text-white">{{ tpl.title or "—" }}</td>
+  <td><span class="chip">{{ tpl.channel_hint }}</span></td>
+  <td>
+    <div class="chip-group">
+      {% for ev in tpl.events %}<span class="chip">{{ ev }}</span>{% endfor %}
+    </div>
+  </td>
+  <td>
+    {% if tpl.is_active %}<span class="badge badge-active">Active</span>
+    {% else %}<span class="badge badge-inactive">Inactive</span>{% endif %}
+  </td>
+  <td class="text-end">
+    <div class="flex items-center gap-2 justify-end">
+      <button
+        hx-get="/watched-items/{{ watched_item.id }}/templates/{{ tpl.id }}/edit"
+        hx-target="#wi-tpl-{{ tpl.id }}"
+        hx-swap="outerHTML"
+        class="btn btn-secondary btn-sm">Edit</button>
+      <button
+        hx-delete="/watched-items/{{ watched_item.id }}/templates/{{ tpl.id }}"
+        hx-confirm="Delete this template? This cannot be undone."
+        hx-target="#wi-templates-tbody"
+        hx-swap="innerHTML"
+        class="btn btn-danger-outline btn-sm">Delete</button>
+    </div>
+  </td>
+</tr>

@@ -39,6 +39,24 @@
   </div>
 </section>
 
+<section class="mb-8">
+  <div class="flex items-center justify-between mb-4">
+    <h3 class="text-lg font-semibold text-gray-900 dark:text-white">Notification Templates</h3>
+    <button
+      hx-get="/watched-items/{{ watched_item.id }}/templates/new"
+      hx-target="#wi-templates-tbody"
+      hx-swap="afterbegin"
+      class="btn btn-secondary btn-sm">+ Add</button>
+  </div>
+  <div
+    id="wi-templates"
+    hx-get="/partials/watched-item-templates/{{ watched_item.id }}"
+    hx-trigger="load"
+    hx-swap="innerHTML">
+    {% include "partials/watched_item_templates.html" %}
+  </div>
+</section>
+
 {# Child Watches table — reuse partial scoped by watched_item_id #}
 <section class="mb-8">
   <h3 class="text-lg font-semibold text-gray-900 dark:text-white mb-4">Watches</h3>

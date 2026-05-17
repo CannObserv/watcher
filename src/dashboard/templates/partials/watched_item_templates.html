@@ -1,0 +1,25 @@
+{# Expects: watched_item, templates. #}
+<div class="overflow-x-auto">
+  <table class="data-table" id="wi-templates-table">
+    <thead>
+      <tr>
+        <th scope="col">Title</th>
+        <th scope="col">Channel</th>
+        <th scope="col">Events</th>
+        <th scope="col">Status</th>
+        <th scope="col"><span class="sr-only">Actions</span></th>
+      </tr>
+    </thead>
+    <tbody id="wi-templates-tbody" class="divide-y divide-gray-100 dark:divide-gray-700">
+      {% if templates %}
+        {% for tpl in templates %}
+          {% include "partials/watched_item_template_row.html" %}
+        {% endfor %}
+      {% else %}
+        <tr>
+          <td colspan="5" class="text-center text-gray-500 dark:text-gray-400 py-6">No notification templates yet.</td>
+        </tr>
+      {% endif %}
+    </tbody>
+  </table>
+</div>

@@ -75,6 +75,7 @@ from src.dashboard.context import (
     get_watch_timeline_count,
     get_watched_item_detail,
     get_watched_item_list,
+    get_watched_item_templates,
 )
 from src.dashboard.deps import get_dashboard_user
 
@@ -901,6 +902,8 @@ async def watched_item_detail_page(
 
     new_subaspect_count = count_new_subaspects(info_item, wi.last_reviewed_at)
 
+    wi_templates = await get_watched_item_templates(session, wi.id)
+
     field_contexts = {
         name: _watched_item_field_context(request, wi, name, mode="view")
         for name in ("name", "description", "default_schedule_interval", "default_content_type")
@@ -919,6 +922,7 @@ async def watched_item_detail_page(
             "flash": None,
             "field_contexts": field_contexts,
             "new_subaspect_count": new_subaspect_count,
+            "templates": wi_templates,
         },
     )
 
@@ -1112,6 +1116,23 @@ async def watched_item_tag_remove(
         request,
         "partials/watched_item_tags_editor.html",
         {"watched_item": wi},
+    )
+
+
+@router.get("/partials/watched-item-templates/{watched_item_id}")
+async def watched_item_templates_partial(
+    request: Request,
+    watched_item_id: str,
+    session: AsyncSession = Depends(get_db_session),
+):
+    wi = await get_watched_item_detail(session, watched_item_id)
+    if not wi:
+        raise HTTPException(status_code=404, detail="WatchedItem not found")
+    wi_templates = await get_watched_item_templates(session, wi.id)
+    return templates.TemplateResponse(
+        request,
+        "partials/watched_item_templates.html",
+        {"watched_item": wi, "templates": wi_templates},
     )
 
 

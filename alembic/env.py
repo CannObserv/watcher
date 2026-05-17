@@ -26,14 +26,27 @@ def render_item(type_, obj, autogen_context):
 
 
 def _include_object(object, name, type_, reflected, compare_to):
-    """Restrict autogenerate to the public schema (Watcher's tables).
+    """Restrict autogenerate to Watcher-owned tables in the public schema.
 
-    The Information service owns its own schema (``information``) under a
-    separate Alembic root (``alembic_information.ini``). Without this filter,
-    autogenerate would emit spurious drops of ``information.*`` tables.
+    Filters out:
+    - Non-public schemas: the Information service owns ``information`` on a
+      separate Alembic root (``alembic_information.ini``).
+    - Procrastinate-managed tables: the task queue installs and migrates its
+      own ``procrastinate_*`` tables at app startup; they should not appear
+      in Watcher's Alembic diffs.
+    - ``notification_event_types``: a runtime-managed catalog table not
+      declared as a SQLAlchemy model.
     """
     if hasattr(object, "schema") and object.schema not in (None, "public"):
         return False
+    if type_ == "table" and (
+        name.startswith("procrastinate_") or name == "notification_event_types"
+    ):
+        return False
+    if type_ == "index" and reflected and getattr(object, "table", None) is not None:
+        table_name = object.table.name
+        if table_name.startswith("procrastinate_") or table_name == "notification_event_types":
+            return False
     return True
 
 

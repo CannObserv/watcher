@@ -895,6 +895,11 @@ async def watched_item_detail_page(
         )
         info_item = None
 
+    field_contexts = {
+        name: _watched_item_field_context(request, wi, name, mode="view")
+        for name in ("name", "description", "default_schedule_interval", "default_content_type")
+    }
+
     return templates.TemplateResponse(
         request,
         "pages/watched_item_detail.html",
@@ -906,6 +911,7 @@ async def watched_item_detail_page(
             "child_watches": children,
             "watches": children,  # `watch_table.html` reads "watches"
             "flash": None,
+            "field_contexts": field_contexts,
         },
     )
 
@@ -939,6 +945,69 @@ async def watched_item_restore(
             status_code=200,
             headers={"HX-Redirect": f"/watched-items/{watched_item_id}"},
         )
+    return RedirectResponse(url=f"/watched-items/{watched_item_id}", status_code=303)
+
+
+@router.get("/watched-items/{watched_item_id}/field/{field_name}")
+async def watched_item_field_partial(
+    request: Request,
+    watched_item_id: str,
+    field_name: str,
+    mode: Literal["view", "edit"] = "view",
+    session: AsyncSession = Depends(get_db_session),
+):
+    """Serve a single WatchedItem field partial in view or edit mode."""
+    if field_name not in EDITABLE_WATCHED_ITEM_FIELDS:
+        raise HTTPException(status_code=400, detail=f"Field '{field_name}' is not editable")
+
+    wi = await get_watched_item_detail(session, watched_item_id)
+    if not wi:
+        raise HTTPException(status_code=404, detail="WatchedItem not found")
+
+    if request.headers.get("HX-Request") != "true":
+        return RedirectResponse(url=f"/watched-items/{watched_item_id}", status_code=303)
+
+    ctx = _watched_item_field_context(request, wi, field_name, mode=mode)
+    return templates.TemplateResponse(request, "partials/watched_item_field.html", ctx)
+
+
+@router.post("/watched-items/{watched_item_id}/field/{field_name}")
+async def watched_item_field_update(
+    request: Request,
+    watched_item_id: str,
+    field_name: str,
+    value: str = Form(""),
+    session: AsyncSession = Depends(get_db_session),
+):
+    """Update a single WatchedItem field (HTMX inline edit)."""
+    if field_name not in EDITABLE_WATCHED_ITEM_FIELDS:
+        raise HTTPException(status_code=400, detail=f"Field '{field_name}' is not editable")
+
+    wi = await get_watched_item_detail(session, watched_item_id)
+    if not wi:
+        raise HTTPException(status_code=404, detail="WatchedItem not found")
+
+    if field_name == "name" and not value.strip():
+        raise HTTPException(status_code=400, detail="Name cannot be empty")
+
+    try:
+        _apply_watched_item_field_update(wi, field_name, value)
+    except (ValueError, TypeError) as exc:
+        raise HTTPException(status_code=400, detail=f"Invalid value: {exc}") from exc
+
+    audit(
+        session,
+        EventType.WATCHED_ITEM_UPDATED,
+        watched_item_id=str(wi.id),
+        updated_fields=[field_name],
+        source="dashboard",
+    )
+    await session.commit()
+    await session.refresh(wi)
+
+    if request.headers.get("HX-Request") == "true":
+        ctx = _watched_item_field_context(request, wi, field_name, mode="view")
+        return templates.TemplateResponse(request, "partials/watched_item_field.html", ctx)
     return RedirectResponse(url=f"/watched-items/{watched_item_id}", status_code=303)
 
 

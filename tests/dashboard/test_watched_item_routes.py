@@ -217,6 +217,91 @@ class TestFieldHelpers:
         assert wi.default_schedule_config in (None, {})
 
 
+class TestFieldRoutes:
+    async def test_get_field_partial_view_mode(self, client, db_session):
+        from src.core.models.watched_item import WatchedItem
+        from tests.conftest import make_info_item
+
+        item = await make_info_item(db_session)
+        wi = WatchedItem(info_item_id=item.info_item_id, name="FieldTest")
+        db_session.add(wi)
+        await db_session.flush()
+        await db_session.commit()
+        response = await client.get(
+            f"/watched-items/{wi.id}/field/name",
+            headers={"HX-Request": "true"},
+        )
+        assert response.status_code == 200
+        assert b"FieldTest" in response.content
+
+    async def test_post_field_updates(self, client, db_session):
+        from src.core.models.watched_item import WatchedItem
+        from tests.conftest import make_info_item
+
+        item = await make_info_item(db_session)
+        wi = WatchedItem(info_item_id=item.info_item_id, name="Old")
+        db_session.add(wi)
+        await db_session.flush()
+        await db_session.commit()
+        response = await client.post(
+            f"/watched-items/{wi.id}/field/name",
+            data={"value": "New"},
+            headers={"HX-Request": "true"},
+        )
+        assert response.status_code == 200
+        await db_session.refresh(wi)
+        assert wi.name == "New"
+
+    async def test_post_interval_updates_jsonb(self, client, db_session):
+        from src.core.models.watched_item import WatchedItem
+        from tests.conftest import make_info_item
+
+        item = await make_info_item(db_session)
+        wi = WatchedItem(info_item_id=item.info_item_id, name="Sched")
+        db_session.add(wi)
+        await db_session.flush()
+        await db_session.commit()
+        response = await client.post(
+            f"/watched-items/{wi.id}/field/default_schedule_interval",
+            data={"value": "45m"},
+            headers={"HX-Request": "true"},
+        )
+        assert response.status_code == 200
+        await db_session.refresh(wi)
+        assert wi.default_schedule_config == {"interval": "45m"}
+
+    async def test_invalid_interval_rejected(self, client, db_session):
+        from src.core.models.watched_item import WatchedItem
+        from tests.conftest import make_info_item
+
+        item = await make_info_item(db_session)
+        wi = WatchedItem(info_item_id=item.info_item_id, name="Sched")
+        db_session.add(wi)
+        await db_session.flush()
+        await db_session.commit()
+        response = await client.post(
+            f"/watched-items/{wi.id}/field/default_schedule_interval",
+            data={"value": "bogus"},
+            headers={"HX-Request": "true"},
+        )
+        assert response.status_code == 400
+
+    async def test_unknown_field_400(self, client, db_session):
+        from src.core.models.watched_item import WatchedItem
+        from tests.conftest import make_info_item
+
+        item = await make_info_item(db_session)
+        wi = WatchedItem(info_item_id=item.info_item_id, name="X")
+        db_session.add(wi)
+        await db_session.flush()
+        await db_session.commit()
+        response = await client.get(
+            f"/watched-items/{wi.id}/field/nonsense",
+            headers={"HX-Request": "true"},
+        )
+        assert response.status_code == 400
+
+
 def _fake_info_item_out(*, info_item_id, primary_url="https://example.com"):
     """Minimal InfoItemOut-shaped mock for the summary card."""
     from datetime import UTC, datetime

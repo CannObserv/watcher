@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "macros/fields.html" import watched_item_field with context %}
 {% block title %}{{ watched_item.name }} — watcher{% endblock %}
 {% block content %}
 <div class="flex justify-between items-center mb-6 flex-wrap gap-4">
@@ -17,18 +18,13 @@
 
 {% include "partials/watched_item_info_item_card.html" %}
 
-{# Defaults (read-only in this slice; inline-edit added in Slice 4) #}
 <section class="mb-8">
   <h3 class="text-lg font-semibold text-gray-900 dark:text-white mb-4">Defaults</h3>
-  <div class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 divide-y divide-gray-200 dark:divide-gray-700 p-4 space-y-2">
-    <p><span class="form-label">Interval</span>: {{ (watched_item.default_schedule_config or {}).get("interval") or "—" }}</p>
-    <p><span class="form-label">Content Type</span>: {{ (watched_item.default_content_type or "—")|upper }}</p>
-    <p>
-      <span class="form-label">Tags</span>:
-      {% if watched_item.default_tags %}
-        <span class="chip-group">{% for t in watched_item.default_tags %}<span class="chip">{{ t }}</span>{% endfor %}</span>
-      {% else %}—{% endif %}
-    </p>
+  <div class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 divide-y divide-gray-200 dark:divide-gray-700">
+    {{ watched_item_field(field_contexts["name"]) }}
+    {{ watched_item_field(field_contexts["description"]) }}
+    {{ watched_item_field(field_contexts["default_schedule_interval"]) }}
+    {{ watched_item_field(field_contexts["default_content_type"]) }}
   </div>
 </section>
 

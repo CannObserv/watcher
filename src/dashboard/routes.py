@@ -62,6 +62,7 @@ from src.dashboard.context import (
     get_watch_profiles,
     get_watch_timeline,
     get_watch_timeline_count,
+    get_watched_item_detail,
     get_watched_item_list,
 )
 from src.dashboard.deps import get_dashboard_user
@@ -761,6 +762,58 @@ async def watched_items_page(
             "active_page": "watched-items",
             "watched_items": watched_items,
             "include_archived": include_archived,
+            "flash": None,
+        },
+    )
+
+
+@router.get("/watched-items/{watched_item_id}")
+async def watched_item_detail_page(
+    request: Request,
+    watched_item_id: str,
+    session: AsyncSession = Depends(get_db_session),
+):
+    """Detail page for a WatchedItem."""
+    wi = await get_watched_item_detail(session, watched_item_id)
+    if wi is None:
+        return templates.TemplateResponse(
+            request, "pages/404.html", {"request": request}, status_code=404
+        )
+
+    children = (
+        (
+            await session.execute(
+                select(Watch).where(Watch.watched_item_id == wi.id).order_by(Watch.name)
+            )
+        )
+        .scalars()
+        .all()
+    )
+
+    client_sdk = get_registry().get_archiver_client()
+    try:
+        info_item = await client_sdk.get_info_item(str(wi.info_item_id))
+    except NotFound:
+        info_item = None
+    except (httpx.ConnectError, ServerError):
+        # Archiver down or unreachable — render the page with a placeholder
+        # rather than hard-500. The summary card template handles `info_item is None`.
+        logger.warning(
+            "Archiver unavailable while rendering watched_item detail",
+            extra={"watched_item_id": str(wi.id)},
+        )
+        info_item = None
+
+    return templates.TemplateResponse(
+        request,
+        "pages/watched_item_detail.html",
+        {
+            "request": request,
+            "active_page": "watched-items",
+            "watched_item": wi,
+            "info_item": info_item,
+            "child_watches": children,
+            "watches": children,  # `watch_table.html` reads "watches"
             "flash": None,
         },
     )

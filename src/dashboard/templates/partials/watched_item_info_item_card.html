@@ -1,0 +1,33 @@
+{# InfoItem summary card. Expects: info_item (SDK InfoItemOut or None), watched_item. #}
+{% if info_item is none %}
+<div class="stat-card mb-6 text-sm text-gray-500">Archiver InfoItem summary unavailable.</div>
+{% else %}
+<div class="stat-card mb-6">
+  <div class="flex justify-between items-start mb-3">
+    <div>
+      <p class="text-sm text-gray-500 dark:text-gray-400">Archiver InfoItem</p>
+      <p class="font-semibold text-gray-900 dark:text-white">{{ info_item.name }}</p>
+    </div>
+    <span class="text-xs font-mono text-gray-400">{{ info_item.info_item_id }}</span>
+  </div>
+  {% if info_item.info_item_sources %}
+  <ul class="text-sm space-y-1">
+    {% for src in info_item.info_item_sources %}
+    <li class="flex items-center gap-2">
+      {% if src.role is none %}
+      <span class="badge badge-info">primary</span>
+      {% elif src.role == "cross_check" %}
+      <span class="badge badge-inactive">cross_check</span>
+      {% else %}
+      <span class="badge badge-active">{{ src.role }}</span>
+      {% endif %}
+      <span class="font-mono text-xs text-gray-500">{{ src.info_source_id }}</span>
+      {% if src.role is none and src.url is defined %}
+      <span class="text-gray-600 dark:text-gray-300 truncate">{{ src.url }}</span>
+      {% endif %}
+    </li>
+    {% endfor %}
+  </ul>
+  {% endif %}
+</div>
+{% endif %}

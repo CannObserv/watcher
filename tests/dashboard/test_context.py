@@ -705,3 +705,26 @@ class TestGetWatchedItemList:
         await db_session.flush()
         results = await get_watched_item_list(db_session, include_archived=True)
         assert any(wi.name == "Arc" for wi in results)
+
+
+@pytest.mark.integration
+class TestGetWatchedItemDetail:
+    async def test_returns_record(self, db_session):
+        from src.core.models.watched_item import WatchedItem
+        from src.dashboard.context import get_watched_item_detail
+        from tests.conftest import make_info_item
+
+        item = await make_info_item(db_session)
+        wi = WatchedItem(info_item_id=item.info_item_id, name="X")
+        db_session.add(wi)
+        await db_session.flush()
+        loaded = await get_watched_item_detail(db_session, str(wi.id))
+        assert loaded is not None
+        assert loaded.name == "X"
+
+    async def test_unknown_returns_none(self, db_session):
+        from ulid import ULID
+
+        from src.dashboard.context import get_watched_item_detail
+
+        assert await get_watched_item_detail(db_session, str(ULID())) is None

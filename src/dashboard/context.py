@@ -14,6 +14,9 @@ from src.core.models.notification_config import WatchNotificationConfig
 from src.core.models.temporal_profile import TemporalProfile
 from src.core.models.watch import Watch
 from src.core.models.watched_item import WatchedItem
+from src.core.models.watched_item_notification_template import (
+    WatchedItemNotificationTemplate,
+)
 
 _WATCH_SORT_COLS: dict[str, Any] = {
     "name": Watch.name,
@@ -427,4 +430,27 @@ async def get_watched_item_list(
     if not include_archived:
         stmt = stmt.where(WatchedItem.archived_at.is_(None))
     result = await session.execute(stmt)
+    return list(result.scalars().all())
+
+
+async def get_watched_item_detail(
+    session: AsyncSession, watched_item_id: str
+) -> WatchedItem | None:
+    """Fetch a single WatchedItem; returns None on invalid ID or not-found."""
+    try:
+        wi_ulid = ULID.from_str(watched_item_id)
+    except (ValueError, TypeError):
+        return None
+    return await session.get(WatchedItem, wi_ulid)
+
+
+async def get_watched_item_templates(
+    session: AsyncSession, watched_item_id: ULID
+) -> list[WatchedItemNotificationTemplate]:
+    """Load notification templates under a WatchedItem (created_at asc)."""
+    result = await session.execute(
+        select(WatchedItemNotificationTemplate)
+        .where(WatchedItemNotificationTemplate.watched_item_id == watched_item_id)
+        .order_by(WatchedItemNotificationTemplate.created_at)
+    )
     return list(result.scalars().all())

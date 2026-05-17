@@ -454,3 +454,17 @@ async def get_watched_item_templates(
         .order_by(WatchedItemNotificationTemplate.created_at)
     )
     return list(result.scalars().all())
+
+
+def count_new_subaspects(info_item, last_reviewed_at) -> int:
+    """Count sub_aspect bindings created since last_reviewed_at.
+
+    last_reviewed_at=None means all sub_aspects are 'new'.
+    """
+    if info_item is None:
+        return 0
+    sources = info_item.info_item_sources or []
+    subaspects = [s for s in sources if s.role == "sub_aspect"]
+    if last_reviewed_at is None:
+        return len(subaspects)
+    return sum(1 for s in subaspects if s.created_at > last_reviewed_at)

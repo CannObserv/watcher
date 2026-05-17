@@ -369,6 +369,96 @@ class TestTagsEditor:
         assert wi.default_tags == ["a"]
 
 
+class TestSubAspectBanner:
+    async def test_banner_shows_count_when_new(self, client, db_session, info_client):
+        from datetime import UTC, datetime, timedelta
+        from types import SimpleNamespace
+        from unittest.mock import AsyncMock
+
+        from src.core.models.watched_item import WatchedItem
+        from tests.conftest import make_info_item
+
+        item = await make_info_item(db_session)
+        old = datetime.now(UTC) - timedelta(days=10)
+        wi = WatchedItem(
+            info_item_id=item.info_item_id,
+            name="Review",
+            last_reviewed_at=old,
+        )
+        db_session.add(wi)
+        await db_session.flush()
+        await db_session.commit()
+
+        info_client.get_info_item = AsyncMock(
+            return_value=SimpleNamespace(
+                info_item_id=str(item.info_item_id),
+                name="Has new",
+                description=None,
+                owner=None,
+                info_item_sources=[
+                    SimpleNamespace(
+                        info_source_id="p",
+                        role=None,
+                        created_at=datetime.now(UTC) - timedelta(days=15),
+                    ),
+                    SimpleNamespace(
+                        info_source_id="s1", role="sub_aspect", created_at=datetime.now(UTC)
+                    ),
+                    SimpleNamespace(
+                        info_source_id="s2", role="sub_aspect", created_at=datetime.now(UTC)
+                    ),
+                ],
+            )
+        )
+        response = await client.get(f"/watched-items/{wi.id}")
+        assert b"2 new sub_aspects" in response.content
+
+    async def test_no_banner_when_none_new(self, client, db_session, info_client):
+        from datetime import UTC, datetime
+        from types import SimpleNamespace
+        from unittest.mock import AsyncMock
+
+        from src.core.models.watched_item import WatchedItem
+        from tests.conftest import make_info_item
+
+        item = await make_info_item(db_session)
+        wi = WatchedItem(
+            info_item_id=item.info_item_id,
+            name="Reviewed",
+            last_reviewed_at=datetime.now(UTC),
+        )
+        db_session.add(wi)
+        await db_session.flush()
+        await db_session.commit()
+        info_client.get_info_item = AsyncMock(
+            return_value=SimpleNamespace(
+                info_item_id=str(item.info_item_id),
+                name="x",
+                description=None,
+                owner=None,
+                info_item_sources=[],
+            )
+        )
+        response = await client.get(f"/watched-items/{wi.id}")
+        assert b"new sub_aspects" not in response.content
+
+    async def test_mark_reviewed_stamps_now(self, client, db_session, info_client):
+        from src.core.models.watched_item import WatchedItem
+        from tests.conftest import make_info_item
+
+        item = await make_info_item(db_session)
+        wi = WatchedItem(info_item_id=item.info_item_id, name="Stamp")
+        db_session.add(wi)
+        await db_session.flush()
+        await db_session.commit()
+        response = await client.post(
+            f"/watched-items/{wi.id}/mark-reviewed", follow_redirects=False
+        )
+        assert response.status_code in (200, 303)
+        await db_session.refresh(wi)
+        assert wi.last_reviewed_at is not None
+
+
 def _fake_info_item_out(*, info_item_id, primary_url="https://example.com"):
     """Minimal InfoItemOut-shaped mock for the summary card."""
     from datetime import UTC, datetime

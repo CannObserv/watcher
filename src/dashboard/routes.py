@@ -21,6 +21,9 @@ from src.api.routes.watched_items import (
     archive_watched_item as _api_archive_watched_item,
 )
 from src.api.routes.watched_items import (
+    mark_reviewed as _api_mark_reviewed,
+)
+from src.api.routes.watched_items import (
     restore_watched_item as _api_restore_watched_item,
 )
 from src.api.routes.watches import delete_watch as api_delete_watch
@@ -57,6 +60,7 @@ from src.core.watches import resolve_watch_url
 from src.core.watches.resolution import resolved_schedule_config
 from src.dashboard import templates
 from src.dashboard.context import (
+    count_new_subaspects,
     get_audit_entries,
     get_dashboard_stats,
     get_domain_watches,
@@ -895,6 +899,8 @@ async def watched_item_detail_page(
         )
         info_item = None
 
+    new_subaspect_count = count_new_subaspects(info_item, wi.last_reviewed_at)
+
     field_contexts = {
         name: _watched_item_field_context(request, wi, name, mode="view")
         for name in ("name", "description", "default_schedule_interval", "default_content_type")
@@ -912,6 +918,7 @@ async def watched_item_detail_page(
             "watches": children,  # `watch_table.html` reads "watches"
             "flash": None,
             "field_contexts": field_contexts,
+            "new_subaspect_count": new_subaspect_count,
         },
     )
 
@@ -940,6 +947,22 @@ async def watched_item_restore(
 ):
     """Dashboard restore — parent only."""
     await _api_restore_watched_item(watched_item_id, session)
+    if request.headers.get("HX-Request") == "true":
+        return Response(
+            status_code=200,
+            headers={"HX-Redirect": f"/watched-items/{watched_item_id}"},
+        )
+    return RedirectResponse(url=f"/watched-items/{watched_item_id}", status_code=303)
+
+
+@router.post("/watched-items/{watched_item_id}/mark-reviewed")
+async def watched_item_mark_reviewed(
+    request: Request,
+    watched_item_id: str,
+    session: AsyncSession = Depends(get_db_session),
+):
+    """Stamp last_reviewed_at = now() on a WatchedItem."""
+    await _api_mark_reviewed(watched_item_id, session)
     if request.headers.get("HX-Request") == "true":
         return Response(
             status_code=200,

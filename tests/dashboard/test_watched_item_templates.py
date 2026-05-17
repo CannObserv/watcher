@@ -52,3 +52,68 @@ class TestTemplatesPartial:
         )
         assert b"Email" in response.content
         assert b"mailto" in response.content or b"channel" in response.content
+
+
+class TestTemplateCrudRoutes:
+    async def test_new_form_renders(self, client, db_session):
+        wi = await _seed(db_session)
+        response = await client.get(
+            f"/watched-items/{wi.id}/templates/new",
+            headers={"HX-Request": "true"},
+        )
+        assert response.status_code == 200
+        assert b"channel_hint" in response.content
+
+    async def test_create_inserts_row(self, client, db_session):
+        wi = await _seed(db_session)
+        response = await client.post(
+            f"/watched-items/{wi.id}/templates",
+            data={"title": "T1", "channel_hint": "mailto://a:b@c", "events": "change_detected"},
+            headers={"HX-Request": "true"},
+        )
+        assert response.status_code == 200
+        listing = await client.get(
+            f"/partials/watched-item-templates/{wi.id}",
+            headers={"HX-Request": "true"},
+        )
+        assert b"T1" in listing.content
+
+    async def test_edit_form_renders(self, client, db_session):
+        wi = await _seed(db_session)
+        tpl = await _seed_tpl(db_session, wi)
+        response = await client.get(
+            f"/watched-items/{wi.id}/templates/{tpl.id}/edit",
+            headers={"HX-Request": "true"},
+        )
+        assert response.status_code == 200
+        assert b"Email" in response.content
+
+    async def test_update_persists(self, client, db_session):
+        wi = await _seed(db_session)
+        tpl = await _seed_tpl(db_session, wi)
+        response = await client.post(
+            f"/watched-items/{wi.id}/templates/{tpl.id}",
+            data={
+                "title": "Renamed",
+                "channel_hint": tpl.channel_hint,
+                "events": "change_detected",
+            },
+            headers={"HX-Request": "true"},
+        )
+        assert response.status_code == 200
+        await db_session.refresh(tpl)
+        assert tpl.title == "Renamed"
+
+    async def test_delete_removes_row(self, client, db_session):
+        wi = await _seed(db_session)
+        tpl = await _seed_tpl(db_session, wi)
+        response = await client.delete(
+            f"/watched-items/{wi.id}/templates/{tpl.id}",
+            headers={"HX-Request": "true"},
+        )
+        assert response.status_code == 200
+        listing = await client.get(
+            f"/partials/watched-item-templates/{wi.id}",
+            headers={"HX-Request": "true"},
+        )
+        assert b"No notification templates" in listing.content

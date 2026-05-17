@@ -36,6 +36,9 @@ from src.core.models.domain import Domain
 from src.core.models.notification_config import WatchNotificationConfig
 from src.core.models.notification_template import DomainNcRef, NotificationTemplate, WatchNcRef
 from src.core.models.watch import ContentType, Watch
+from src.core.models.watched_item_notification_template import (
+    WatchedItemNotificationTemplate,
+)
 from src.core.notifications.content import build_body, build_title, resolve_options
 from src.core.notifications.default_templates import (
     compose_body_prefill,
@@ -1133,6 +1136,155 @@ async def watched_item_templates_partial(
         request,
         "partials/watched_item_templates.html",
         {"watched_item": wi, "templates": wi_templates},
+    )
+
+
+@router.get("/watched-items/{watched_item_id}/templates/new")
+async def watched_item_template_new_form(
+    request: Request,
+    watched_item_id: str,
+    session: AsyncSession = Depends(get_db_session),
+):
+    wi = await get_watched_item_detail(session, watched_item_id)
+    if not wi:
+        raise HTTPException(status_code=404)
+    return templates.TemplateResponse(
+        request,
+        "partials/watched_item_template_form.html",
+        {"watched_item": wi, "tpl": None},
+    )
+
+
+@router.post("/watched-items/{watched_item_id}/templates")
+async def watched_item_template_create(
+    request: Request,
+    watched_item_id: str,
+    title: str = Form(""),
+    channel_hint: str = Form(...),
+    events: str = Form("change_detected"),
+    session: AsyncSession = Depends(get_db_session),
+):
+    wi = await get_watched_item_detail(session, watched_item_id)
+    if not wi:
+        raise HTTPException(status_code=404)
+    event_list = [e.strip() for e in events.split(",") if e.strip()]
+    try:
+        event_list = validate_event_list(event_list)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    tpl = WatchedItemNotificationTemplate(
+        watched_item_id=wi.id,
+        title=title.strip() or None,
+        channel_hint=channel_hint.strip(),
+        events=event_list,
+    )
+    session.add(tpl)
+    audit(
+        session,
+        EventType.WATCHED_ITEM_TEMPLATE_CREATED,
+        watched_item_id=str(wi.id),
+        source="dashboard",
+    )
+    await session.commit()
+
+    refreshed = await get_watched_item_templates(session, wi.id)
+    return templates.TemplateResponse(
+        request,
+        "partials/watched_item_templates.html",
+        {"watched_item": wi, "templates": refreshed},
+    )
+
+
+@router.get("/watched-items/{watched_item_id}/templates/{tpl_id}/edit")
+async def watched_item_template_edit_form(
+    request: Request,
+    watched_item_id: str,
+    tpl_id: str,
+    session: AsyncSession = Depends(get_db_session),
+):
+    wi = await get_watched_item_detail(session, watched_item_id)
+    if not wi:
+        raise HTTPException(status_code=404)
+    tpl = await session.get(WatchedItemNotificationTemplate, parse_ulid(tpl_id))
+    if not tpl or tpl.watched_item_id != wi.id:
+        raise HTTPException(status_code=404)
+    return templates.TemplateResponse(
+        request,
+        "partials/watched_item_template_form.html",
+        {"watched_item": wi, "tpl": tpl},
+    )
+
+
+@router.post("/watched-items/{watched_item_id}/templates/{tpl_id}")
+async def watched_item_template_update(
+    request: Request,
+    watched_item_id: str,
+    tpl_id: str,
+    title: str = Form(""),
+    channel_hint: str = Form(...),
+    events: str = Form("change_detected"),
+    session: AsyncSession = Depends(get_db_session),
+):
+    wi = await get_watched_item_detail(session, watched_item_id)
+    if not wi:
+        raise HTTPException(status_code=404)
+    tpl = await session.get(WatchedItemNotificationTemplate, parse_ulid(tpl_id))
+    if not tpl or tpl.watched_item_id != wi.id:
+        raise HTTPException(status_code=404)
+    event_list = [e.strip() for e in events.split(",") if e.strip()]
+    try:
+        event_list = validate_event_list(event_list)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    tpl.title = title.strip() or None
+    tpl.channel_hint = channel_hint.strip()
+    tpl.events = event_list
+    audit(
+        session,
+        EventType.WATCHED_ITEM_TEMPLATE_UPDATED,
+        watched_item_id=str(wi.id),
+        template_id=str(tpl.id),
+        source="dashboard",
+    )
+    await session.commit()
+
+    refreshed = await get_watched_item_templates(session, wi.id)
+    return templates.TemplateResponse(
+        request,
+        "partials/watched_item_templates.html",
+        {"watched_item": wi, "templates": refreshed},
+    )
+
+
+@router.delete("/watched-items/{watched_item_id}/templates/{tpl_id}")
+async def watched_item_template_delete(
+    request: Request,
+    watched_item_id: str,
+    tpl_id: str,
+    session: AsyncSession = Depends(get_db_session),
+):
+    wi = await get_watched_item_detail(session, watched_item_id)
+    if not wi:
+        raise HTTPException(status_code=404)
+    tpl = await session.get(WatchedItemNotificationTemplate, parse_ulid(tpl_id))
+    if not tpl or tpl.watched_item_id != wi.id:
+        raise HTTPException(status_code=404)
+    audit(
+        session,
+        EventType.WATCHED_ITEM_TEMPLATE_DELETED,
+        watched_item_id=str(wi.id),
+        template_id=str(tpl.id),
+        source="dashboard",
+    )
+    await session.delete(tpl)
+    await session.commit()
+
+    refreshed = await get_watched_item_templates(session, wi.id)
+    return templates.TemplateResponse(
+        request,
+        "partials/watched_item_templates.html",
+        {"watched_item": wi, "templates": refreshed},
     )
 
 

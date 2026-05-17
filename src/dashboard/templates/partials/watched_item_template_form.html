@@ -1,0 +1,31 @@
+{# Expects: watched_item, tpl (None for new). #}
+{% set is_new = tpl is none %}
+<tr id="{% if is_new %}wi-tpl-new{% else %}wi-tpl-{{ tpl.id }}{% endif %}">
+  <td colspan="5">
+    <form
+      {% if is_new %}
+      hx-post="/watched-items/{{ watched_item.id }}/templates"
+      {% else %}
+      hx-post="/watched-items/{{ watched_item.id }}/templates/{{ tpl.id }}"
+      {% endif %}
+      hx-target="#wi-templates-tbody" hx-swap="innerHTML"
+      class="space-y-2">
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <input class="form-input" name="title" placeholder="Title (optional)"
+               value="{{ tpl.title or '' if not is_new else '' }}">
+        <input class="form-input" name="channel_hint" required placeholder="e.g. mailto://x:y@z"
+               value="{{ tpl.channel_hint if not is_new else '' }}">
+      </div>
+      <input class="form-input" name="events" placeholder="Comma-separated events"
+             value="{{ (tpl.events|join(',')) if not is_new else 'change_detected' }}">
+      <div class="flex gap-2 justify-end">
+        <button type="button" hx-get="/partials/watched-item-templates/{{ watched_item.id }}"
+                hx-target="#wi-templates" hx-swap="innerHTML"
+                class="btn btn-secondary btn-sm">Cancel</button>
+        <button type="submit" class="btn btn-primary btn-sm">
+          {% if is_new %}Create{% else %}Save{% endif %}
+        </button>
+      </div>
+    </form>
+  </td>
+</tr>

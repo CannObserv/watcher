@@ -17,6 +17,12 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from src.api.deps import get_db_session, get_probe_fn
 from src.api.routes.helpers import parse_ulid
+from src.api.routes.watched_items import (
+    archive_watched_item as _api_archive_watched_item,
+)
+from src.api.routes.watched_items import (
+    restore_watched_item as _api_restore_watched_item,
+)
 from src.api.routes.watches import delete_watch as api_delete_watch
 from src.api.schemas.content_config import ContentConfig, ContentOptions
 from src.api.schemas.validators import validate_event_list
@@ -817,6 +823,38 @@ async def watched_item_detail_page(
             "flash": None,
         },
     )
+
+
+@router.post("/watched-items/{watched_item_id}/archive")
+async def watched_item_archive(
+    request: Request,
+    watched_item_id: str,
+    session: AsyncSession = Depends(get_db_session),
+):
+    """Dashboard archive — cascades to child Watches (delegates to shared logic)."""
+    await _api_archive_watched_item(watched_item_id, session)
+    if request.headers.get("HX-Request") == "true":
+        return Response(
+            status_code=200,
+            headers={"HX-Redirect": f"/watched-items/{watched_item_id}"},
+        )
+    return RedirectResponse(url=f"/watched-items/{watched_item_id}", status_code=303)
+
+
+@router.post("/watched-items/{watched_item_id}/restore")
+async def watched_item_restore(
+    request: Request,
+    watched_item_id: str,
+    session: AsyncSession = Depends(get_db_session),
+):
+    """Dashboard restore — parent only."""
+    await _api_restore_watched_item(watched_item_id, session)
+    if request.headers.get("HX-Request") == "true":
+        return Response(
+            status_code=200,
+            headers={"HX-Redirect": f"/watched-items/{watched_item_id}"},
+        )
+    return RedirectResponse(url=f"/watched-items/{watched_item_id}", status_code=303)
 
 
 @router.get("/domains")

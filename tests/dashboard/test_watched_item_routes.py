@@ -103,6 +103,63 @@ class TestDetailPage:
         assert b"Archive" in response.content
 
 
+class TestArchiveRestore:
+    async def test_archive_redirects_back(self, client, db_session, info_client):
+        from src.core.models.watched_item import WatchedItem
+        from tests.conftest import make_info_item
+
+        item = await make_info_item(db_session)
+        wi = WatchedItem(info_item_id=item.info_item_id, name="ToArchive")
+        db_session.add(wi)
+        await db_session.flush()
+        await db_session.commit()
+
+        response = await client.post(f"/watched-items/{wi.id}/archive", follow_redirects=False)
+        assert response.status_code in (200, 303)
+
+    async def test_archive_cascades_to_child_watches(self, client, db_session, info_client):
+        from src.core.models.watched_item import WatchedItem
+        from tests.conftest import make_info_item, make_watch
+
+        item = await make_info_item(db_session)
+        wi = WatchedItem(info_item_id=item.info_item_id, name="Parent")
+        db_session.add(wi)
+        await db_session.flush()
+        w = await make_watch(
+            db_session,
+            name="Child",
+            watched_item=wi,
+            info_item_id=wi.info_item_id,
+        )
+        await db_session.commit()
+
+        await client.post(f"/watched-items/{wi.id}/archive", follow_redirects=False)
+
+        await db_session.refresh(w)
+        assert w.is_archived is True
+
+    async def test_restore_clears_archived_at(self, client, db_session, info_client):
+        from datetime import UTC, datetime
+
+        from src.core.models.watched_item import WatchedItem
+        from tests.conftest import make_info_item
+
+        item = await make_info_item(db_session)
+        wi = WatchedItem(
+            info_item_id=item.info_item_id,
+            name="Arc",
+            archived_at=datetime.now(UTC),
+            is_active=False,
+        )
+        db_session.add(wi)
+        await db_session.flush()
+        await db_session.commit()
+
+        await client.post(f"/watched-items/{wi.id}/restore", follow_redirects=False)
+        await db_session.refresh(wi)
+        assert wi.archived_at is None
+
+
 def _fake_info_item_out(*, info_item_id, primary_url="https://example.com"):
     """Minimal InfoItemOut-shaped mock for the summary card."""
     from datetime import UTC, datetime

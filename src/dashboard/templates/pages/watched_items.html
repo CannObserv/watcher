@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+{% block title %}Watched Items — watcher{% endblock %}
+{% block content %}
+<div class="flex justify-between items-center mb-6 flex-wrap gap-4">
+  <h2 class="text-2xl font-semibold text-gray-900 dark:text-white">Watched Items</h2>
+</div>
+
+{% if watched_items %}
+<div class="overflow-x-auto rounded-lg border border-gray-200 dark:border-gray-700">
+  <table class="data-table">
+    <thead>
+      <tr>
+        <th scope="col">Name</th>
+        <th scope="col">InfoItem</th>
+        <th scope="col">Interval</th>
+        <th scope="col">Content Type</th>
+        <th scope="col">Tags</th>
+        <th scope="col">Status</th>
+        <th scope="col">Last Reviewed</th>
+      </tr>
+    </thead>
+    <tbody class="divide-y divide-gray-100 dark:divide-gray-700">
+    {% for wi in watched_items %}
+      <tr>
+        <td class="font-medium">
+          <a href="/watched-items/{{ wi.id }}" class="link">{{ wi.name }}</a>
+        </td>
+        <td class="text-xs text-gray-500 dark:text-gray-400 font-mono">{{ wi.info_item_id }}</td>
+        <td>{{ (wi.default_schedule_config or {}).get("interval") or "—" }}</td>
+        <td>{{ (wi.default_content_type or "—")|upper }}</td>
+        <td>
+          {% if wi.default_tags %}
+            <div class="chip-group">
+            {% for t in wi.default_tags %}<span class="chip">{{ t }}</span>{% endfor %}
+            </div>
+          {% else %}<span class="text-gray-400">—</span>{% endif %}
+        </td>
+        <td>
+          {% if wi.archived_at %}<span class="badge badge-archived">Archived</span>
+          {% elif wi.is_active %}<span class="badge badge-active">Active</span>
+          {% else %}<span class="badge badge-inactive">Inactive</span>{% endif %}
+        </td>
+        <td class="text-gray-500 dark:text-gray-400">
+          {% if wi.last_reviewed_at %}{{ wi.last_reviewed_at.strftime('%Y-%m-%d') }}
+          {% else %}Never{% endif %}
+        </td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% else %}
+<div class="stat-card text-center py-12">
+  <p class="text-lg font-medium text-gray-900 dark:text-white mb-2">No watched items yet</p>
+  <p class="text-sm text-gray-500 dark:text-gray-400 mb-6">
+    A WatchedItem is auto-created when you add the first Watch under an Archiver InfoItem.
+  </p>
+  <a href="/watches/new" class="btn btn-primary">Create your first Watch</a>
+</div>
+{% endif %}
+{% endblock %}

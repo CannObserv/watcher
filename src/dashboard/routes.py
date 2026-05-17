@@ -62,6 +62,7 @@ from src.dashboard.context import (
     get_watch_profiles,
     get_watch_timeline,
     get_watch_timeline_count,
+    get_watched_item_list,
 )
 from src.dashboard.deps import get_dashboard_user
 
@@ -742,6 +743,27 @@ async def watch_deactivate(
             {"watch": watch, "health_map": health_map},
         )
     return RedirectResponse(url="/watches", status_code=303)
+
+
+@router.get("/watched-items")
+async def watched_items_page(
+    request: Request,
+    include_archived: bool = False,
+    session: AsyncSession = Depends(get_db_session),
+):
+    """List page for WatchedItems."""
+    watched_items = await get_watched_item_list(session, include_archived=include_archived)
+    return templates.TemplateResponse(
+        request,
+        "pages/watched_items.html",
+        {
+            "request": request,
+            "active_page": "watched-items",
+            "watched_items": watched_items,
+            "include_archived": include_archived,
+            "flash": None,
+        },
+    )
 
 
 @router.get("/domains")

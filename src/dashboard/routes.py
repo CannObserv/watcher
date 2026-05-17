@@ -386,12 +386,13 @@ async def watch_delete(
     except HTTPException as exc:
         if exc.status_code == 409:
             detail = exc.detail
-            if isinstance(detail, dict) and detail.get("kind") == "conflict":
-                dep_count = len(detail.get("data", {}).get("dependents", []))
+            detail_text = str(detail) if detail is not None else ""
+            if "sub_aspect" in detail_text:
                 msg = (
-                    f'<p class="text-red-600 text-sm mt-2">'
-                    f"Cannot delete: {dep_count} fragment Watch(es) depend on this root. "
-                    f"Archive or delete fragment Watches first.</p>"
+                    '<p class="text-red-600 text-sm mt-2">'
+                    "Cannot delete: this primary Watch has dependent sub_aspect Watches. "
+                    "Archive or delete the sub_aspect Watches first, or archive the WatchedItem."
+                    "</p>"
                 )
             else:
                 msg = (

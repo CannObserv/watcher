@@ -1,7 +1,8 @@
-{# Field render macros. Import with context so macros inherit watch/domain from caller scope.
+{# Field render macros. Import with context so macros inherit watch/domain/watched_item from caller scope.
    Usage: {% from "macros/fields.html" import watch_field with context %}
           {{ watch_field(field_contexts["name"]) }}
-          {{ domain_field(field_contexts["min_interval"]) }} #}
+          {{ domain_field(field_contexts["min_interval"]) }}
+          {{ watched_item_field(field_contexts["name"]) }} #}
 
 {% macro watch_field(ctx) %}
 {% set field_name = ctx.field_name %}
@@ -29,4 +30,18 @@
 {% set field_options = ctx.field_options %}
 {% set field_mode = ctx.field_mode %}
 {% include "partials/domain_field.html" %}
+{% endmacro %}
+
+{% macro watched_item_field(ctx) %}
+{% set field_name = ctx.field_name %}
+{% set field_label = ctx.field_label %}
+{% set field_hint = ctx.field_hint %}
+{% set field_value = ctx.field_value %}
+{% set field_type = ctx.field_type %}
+{% set field_step = ctx.field_step %}
+{% set field_min = ctx.field_min %}
+{% set field_unit = ctx.field_unit %}
+{% set field_options = ctx.field_options %}
+{% set field_mode = ctx.field_mode %}
+{% include "partials/watched_item_field.html" %}
 {% endmacro %}

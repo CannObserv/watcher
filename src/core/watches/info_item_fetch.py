@@ -65,9 +65,9 @@ async def fetch_info_item_bindings(
     has no URL.
     """
     info_item = await info_client.get_info_item(info_item_id)
-    primary = None
-    cross_checks: list[object] = []
-    sub_aspects: list[object] = []
+    primary: InfoSourceProto | None = None
+    cross_checks: list[InfoSourceProto] = []
+    sub_aspects: list[InfoSourceProto] = []
     for binding in info_item.info_item_sources:
         source = await info_client.get_info_source(str(binding.info_source_id))
         if binding.role is None:

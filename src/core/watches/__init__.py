@@ -40,10 +40,13 @@ async def _get_or_create_watched_item(
     """Look up or create the WatchedItem for an InfoItem.
 
     The WatchedItem is 1:1 with the InfoItem (uniqueness constraint on
-    info_item_id). Not concurrency-safe across processes — a race between two
-    first-Watch creations on the same InfoItem would surface as IntegrityError
-    here and propagate. Pre-prod call patterns are serialized via the per-tick
-    scheduler, so this is acceptable for v1.
+    info_item_id). SELECT-then-INSERT without a savepoint: concurrent
+    Watch-creation calls on the same InfoItem (e.g. two operators racing on
+    the dashboard, or an API client + a UI submission) raise IntegrityError
+    here and propagate to the caller. The check-cycle path (which only reads
+    WatchedItems) is unaffected. Acceptable for v1 — Watch creation is rare
+    and operator-driven; harden with `begin_nested()` + retry if a real race
+    surfaces.
     """
     existing = (
         await session.execute(select(WatchedItem).where(WatchedItem.info_item_id == info_item_id))

@@ -51,6 +51,7 @@ from src.core.notifications.preview_fixtures import (
 from src.core.notifier_client import get_notifier_client
 from src.core.probe import ProbeResult
 from src.core.registry import get_registry
+from src.core.scheduler import parse_interval
 from src.core.watches import create_watch as _create_watch
 from src.core.watches import resolve_watch_url
 from src.core.watches.resolution import resolved_schedule_config
@@ -500,6 +501,90 @@ def _apply_watch_field_update(watch: Watch, field_name: str, raw_value: str) -> 
     source = meta["source"]
     if source == "column":
         setattr(watch, field_name, typed_value)
+
+
+# --- WatchedItem inline field editing ---
+
+
+def _format_interval(wi) -> str:
+    cfg = wi.default_schedule_config or {}
+    return cfg.get("interval") or ""
+
+
+def _format_content_type(wi) -> str:
+    return wi.default_content_type or ""
+
+
+WATCHED_ITEM_FIELD_META: dict[str, dict] = {
+    "name": {
+        "label": "Name",
+        "hint": None,
+        "type": "text",
+        "source": "column",
+        "cast": lambda v: v.strip(),
+        "format": lambda wi: wi.name,
+    },
+    "description": {
+        "label": "Description",
+        "hint": "Optional notes for operators",
+        "type": "textarea",
+        "source": "column",
+        "cast": lambda v: v.strip() or None,
+        "format": lambda wi: wi.description or "",
+    },
+    "default_schedule_interval": {
+        "label": "Default Interval",
+        "hint": "e.g. 30s, 15m, 6h, 1d. reduce_frequency post-actions may slow this independently.",
+        "type": "text",
+        "source": "schedule_interval",
+        "cast": lambda v: v.strip(),
+        "format": _format_interval,
+    },
+    "default_content_type": {
+        "label": "Default Content Type",
+        "hint": "Applied to child Watches that don't override.",
+        "type": "select",
+        "source": "column",
+        "cast": lambda v: v.strip() or None,
+        "format": _format_content_type,
+        "options": [("", "—"), ("html", "HTML"), ("pdf", "PDF")],
+    },
+}
+
+EDITABLE_WATCHED_ITEM_FIELDS = set(WATCHED_ITEM_FIELD_META.keys())
+
+
+def _watched_item_field_context(request: Request, wi, field_name: str, mode: str = "view") -> dict:
+    meta = WATCHED_ITEM_FIELD_META[field_name]
+    return {
+        "watched_item": wi,
+        "field_name": field_name,
+        "field_label": meta["label"],
+        "field_hint": meta.get("hint"),
+        "field_value": meta["format"](wi),
+        "field_type": meta["type"],
+        "field_options": meta.get("options"),
+        "field_mode": mode,
+    }
+
+
+def _apply_watched_item_field_update(wi, field_name: str, raw_value: str) -> None:
+    meta = WATCHED_ITEM_FIELD_META[field_name]
+    cast_fn = meta["cast"]
+    typed_value = cast_fn(raw_value)
+    source = meta["source"]
+    if source == "column":
+        setattr(wi, field_name, typed_value)
+    elif source == "schedule_interval":
+        if not typed_value:
+            wi.default_schedule_config = None
+        else:
+            # Validate interval shape
+            parse_interval(typed_value)
+            wi.default_schedule_config = {
+                **(wi.default_schedule_config or {}),
+                "interval": typed_value,
+            }
 
 
 @router.get("/watches/{watch_id}/field/{field_name}")

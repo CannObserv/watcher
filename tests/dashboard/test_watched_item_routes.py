@@ -160,6 +160,63 @@ class TestArchiveRestore:
         assert wi.archived_at is None
 
 
+class TestFieldHelpers:
+    def test_interval_format(self):
+        from unittest.mock import MagicMock
+
+        from src.dashboard.routes import _watched_item_field_context
+
+        wi = MagicMock()
+        wi.default_schedule_config = {"interval": "15m"}
+        ctx = _watched_item_field_context(MagicMock(), wi, "default_schedule_interval", mode="view")
+        assert ctx["field_value"] == "15m"
+
+    def test_interval_empty_renders_blank(self):
+        from unittest.mock import MagicMock
+
+        from src.dashboard.routes import _watched_item_field_context
+
+        wi = MagicMock()
+        wi.default_schedule_config = None
+        ctx = _watched_item_field_context(MagicMock(), wi, "default_schedule_interval", mode="view")
+        assert ctx["field_value"] == ""
+
+    def test_apply_interval_writes_into_dict(self):
+        from ulid import ULID
+
+        from src.core.models.watched_item import WatchedItem
+        from src.dashboard.routes import _apply_watched_item_field_update
+
+        wi = WatchedItem(info_item_id=ULID(), name="x")
+        _apply_watched_item_field_update(wi, "default_schedule_interval", "30m")
+        assert wi.default_schedule_config == {"interval": "30m"}
+
+    def test_apply_interval_rejects_invalid(self):
+        import pytest
+        from ulid import ULID
+
+        from src.core.models.watched_item import WatchedItem
+        from src.dashboard.routes import _apply_watched_item_field_update
+
+        wi = WatchedItem(info_item_id=ULID(), name="x")
+        with pytest.raises(ValueError):
+            _apply_watched_item_field_update(wi, "default_schedule_interval", "bogus")
+
+    def test_apply_interval_empty_clears(self):
+        from ulid import ULID
+
+        from src.core.models.watched_item import WatchedItem
+        from src.dashboard.routes import _apply_watched_item_field_update
+
+        wi = WatchedItem(
+            info_item_id=ULID(),
+            name="x",
+            default_schedule_config={"interval": "1h"},
+        )
+        _apply_watched_item_field_update(wi, "default_schedule_interval", "")
+        assert wi.default_schedule_config in (None, {})
+
+
 def _fake_info_item_out(*, info_item_id, primary_url="https://example.com"):
     """Minimal InfoItemOut-shaped mock for the summary card."""
     from datetime import UTC, datetime

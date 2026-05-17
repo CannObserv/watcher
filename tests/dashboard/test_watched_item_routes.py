@@ -302,6 +302,73 @@ class TestFieldRoutes:
         assert response.status_code == 400
 
 
+class TestTagsEditor:
+    async def test_get_tags_partial(self, client, db_session):
+        from src.core.models.watched_item import WatchedItem
+        from tests.conftest import make_info_item
+
+        item = await make_info_item(db_session)
+        wi = WatchedItem(info_item_id=item.info_item_id, name="T", default_tags=["a", "b"])
+        db_session.add(wi)
+        await db_session.flush()
+        await db_session.commit()
+        response = await client.get(f"/watched-items/{wi.id}/tags", headers={"HX-Request": "true"})
+        assert response.status_code == 200
+        assert b"a" in response.content and b"b" in response.content
+
+    async def test_add_tag(self, client, db_session):
+        from src.core.models.watched_item import WatchedItem
+        from tests.conftest import make_info_item
+
+        item = await make_info_item(db_session)
+        wi = WatchedItem(info_item_id=item.info_item_id, name="T")
+        db_session.add(wi)
+        await db_session.flush()
+        await db_session.commit()
+        response = await client.post(
+            f"/watched-items/{wi.id}/tags",
+            data={"tag": "newtag"},
+            headers={"HX-Request": "true"},
+        )
+        assert response.status_code == 200
+        await db_session.refresh(wi)
+        assert "newtag" in (wi.default_tags or [])
+
+    async def test_remove_tag(self, client, db_session):
+        from src.core.models.watched_item import WatchedItem
+        from tests.conftest import make_info_item
+
+        item = await make_info_item(db_session)
+        wi = WatchedItem(info_item_id=item.info_item_id, name="T", default_tags=["x", "y", "z"])
+        db_session.add(wi)
+        await db_session.flush()
+        await db_session.commit()
+        response = await client.delete(
+            f"/watched-items/{wi.id}/tags/y",
+            headers={"HX-Request": "true"},
+        )
+        assert response.status_code == 200
+        await db_session.refresh(wi)
+        assert wi.default_tags == ["x", "z"]
+
+    async def test_add_dedupes(self, client, db_session):
+        from src.core.models.watched_item import WatchedItem
+        from tests.conftest import make_info_item
+
+        item = await make_info_item(db_session)
+        wi = WatchedItem(info_item_id=item.info_item_id, name="T", default_tags=["a"])
+        db_session.add(wi)
+        await db_session.flush()
+        await db_session.commit()
+        await client.post(
+            f"/watched-items/{wi.id}/tags",
+            data={"tag": "a"},
+            headers={"HX-Request": "true"},
+        )
+        await db_session.refresh(wi)
+        assert wi.default_tags == ["a"]
+
+
 def _fake_info_item_out(*, info_item_id, primary_url="https://example.com"):
     """Minimal InfoItemOut-shaped mock for the summary card."""
     from datetime import UTC, datetime

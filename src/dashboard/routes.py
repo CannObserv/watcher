@@ -1011,6 +1011,87 @@ async def watched_item_field_update(
     return RedirectResponse(url=f"/watched-items/{watched_item_id}", status_code=303)
 
 
+@router.get("/watched-items/{watched_item_id}/tags")
+async def watched_item_tags_partial(
+    request: Request,
+    watched_item_id: str,
+    session: AsyncSession = Depends(get_db_session),
+):
+    wi = await get_watched_item_detail(session, watched_item_id)
+    if not wi:
+        raise HTTPException(status_code=404, detail="WatchedItem not found")
+    return templates.TemplateResponse(
+        request,
+        "partials/watched_item_tags_editor.html",
+        {"watched_item": wi},
+    )
+
+
+@router.post("/watched-items/{watched_item_id}/tags")
+async def watched_item_tag_add(
+    request: Request,
+    watched_item_id: str,
+    tag: str = Form(...),
+    session: AsyncSession = Depends(get_db_session),
+):
+    wi = await get_watched_item_detail(session, watched_item_id)
+    if not wi:
+        raise HTTPException(status_code=404, detail="WatchedItem not found")
+    tag = tag.strip()
+    if not tag:
+        raise HTTPException(status_code=400, detail="Tag cannot be empty")
+    current = list(wi.default_tags or [])
+    if tag not in current:
+        current.append(tag)
+        wi.default_tags = sorted(current)
+        audit(
+            session,
+            EventType.WATCHED_ITEM_UPDATED,
+            watched_item_id=str(wi.id),
+            updated_fields=["default_tags"],
+            tag_added=tag,
+            source="dashboard",
+        )
+        await session.commit()
+        await session.refresh(wi)
+    return templates.TemplateResponse(
+        request,
+        "partials/watched_item_tags_editor.html",
+        {"watched_item": wi},
+    )
+
+
+@router.delete("/watched-items/{watched_item_id}/tags/{tag}")
+async def watched_item_tag_remove(
+    request: Request,
+    watched_item_id: str,
+    tag: str,
+    session: AsyncSession = Depends(get_db_session),
+):
+    wi = await get_watched_item_detail(session, watched_item_id)
+    if not wi:
+        raise HTTPException(status_code=404, detail="WatchedItem not found")
+    current = list(wi.default_tags or [])
+    if tag in current:
+        current.remove(tag)
+        wi.default_tags = current or None
+        audit(
+            session,
+            EventType.WATCHED_ITEM_UPDATED,
+            watched_item_id=str(wi.id),
+            updated_fields=["default_tags"],
+            tag_removed=tag,
+            source="dashboard",
+        )
+        await session.commit()
+        await session.refresh(wi)
+    return templates.TemplateResponse(
+        request,
+        "partials/watched_item_tags_editor.html",
+        {"watched_item": wi},
+    )
+
+
 @router.get("/domains")
 async def domains_page(
     request: Request,

@@ -14,6 +14,7 @@ from src.api.routes.notification_configs import router as notification_configs_r
 from src.api.routes.notification_templates import router as notification_templates_router
 from src.api.routes.probe import router as probe_router
 from src.api.routes.temporal_profiles import router as profiles_router
+from src.api.routes.watched_items import router as watched_items_router
 from src.api.routes.watches import router as watches_router
 from src.core.config_poller import start_config_poller
 from src.core.database import get_session_factory
@@ -84,6 +85,7 @@ v1_router.include_router(notification_templates_router)
 v1_router.include_router(audit_router)
 v1_router.include_router(domains_router)
 v1_router.include_router(probe_router)
+v1_router.include_router(watched_items_router)
 app.include_router(v1_router)
 app.include_router(health_router)
 register_dashboard(app)

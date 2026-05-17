@@ -113,3 +113,73 @@ class TestPatchWatchedItem:
             json={"default_content_type": "bogus"},
         )
         assert response.status_code == 422
+
+
+class TestArchiveRestore:
+    async def test_archive_marks_record(self, client, db_session):
+        wi = await _make_watched_item(db_session)
+        response = await client.post(f"/api/v1/watched-items/{wi.id}/archive")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["archived_at"] is not None
+        assert data["is_active"] is False
+
+    async def test_archive_cascades_to_child_watches(self, client, db_session):
+        from tests.conftest import make_watch
+
+        wi = await _make_watched_item(db_session)
+        w1 = await make_watch(db_session, name="C1", watched_item=wi, info_item_id=wi.info_item_id)
+        w2 = await make_watch(db_session, name="C2", watched_item=wi, info_item_id=wi.info_item_id)
+        await db_session.commit()
+        response = await client.post(f"/api/v1/watched-items/{wi.id}/archive")
+        assert response.status_code == 200
+        # Reload children and confirm cascade
+        await db_session.refresh(w1)
+        await db_session.refresh(w2)
+        assert w1.is_active is False and w1.is_archived is True
+        assert w2.is_active is False and w2.is_archived is True
+
+    async def test_restore_parent_only(self, client, db_session):
+        from datetime import UTC, datetime
+
+        from tests.conftest import make_watch
+
+        wi = await _make_watched_item(db_session, archived_at=datetime.now(UTC), is_active=False)
+        w = await make_watch(
+            db_session,
+            name="ChildArchived",
+            watched_item=wi,
+            info_item_id=wi.info_item_id,
+            is_active=False,
+            is_archived=True,
+        )
+        await db_session.commit()
+        response = await client.post(f"/api/v1/watched-items/{wi.id}/restore")
+        assert response.status_code == 200
+        assert response.json()["archived_at"] is None
+        await db_session.refresh(w)
+        # Restore is parent-only — children stay archived.
+        assert w.is_archived is True
+
+    async def test_archive_404(self, client):
+        from ulid import ULID
+
+        response = await client.post(f"/api/v1/watched-items/{ULID()}/archive")
+        assert response.status_code == 404
+
+
+class TestMarkReviewed:
+    async def test_stamps_now(self, client, db_session):
+        wi = await _make_watched_item(db_session)
+        before = wi.last_reviewed_at
+        response = await client.post(f"/api/v1/watched-items/{wi.id}/mark-reviewed")
+        assert response.status_code == 200
+        stamped = response.json()["last_reviewed_at"]
+        assert stamped is not None
+        assert before is None or stamped > before.isoformat()
+
+    async def test_404(self, client):
+        from ulid import ULID
+
+        response = await client.post(f"/api/v1/watched-items/{ULID()}/mark-reviewed")
+        assert response.status_code == 404

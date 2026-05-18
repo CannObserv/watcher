@@ -188,7 +188,7 @@ class TestDetailPage:
         assert response.status_code == 200
         # Detail page now uses the picker's binding-tree partial — but
         # when the SDK fails, the page falls back to a placeholder.
-        assert b"InfoItem summary unavailable" in response.content
+        assert b"Information Item summary unavailable" in response.content
 
     @pytest.mark.parametrize("exc_factory", _SDK_FAILURE_FACTORIES)
     async def test_renders_when_get_info_item_fails(
@@ -210,7 +210,7 @@ class TestDetailPage:
         info_client.get_info_item = AsyncMock(side_effect=exc_factory())
         response = await client.get(f"/watched-items/{wi.id}")
         assert response.status_code == 200
-        assert b"Archiver InfoItem summary unavailable" in response.content
+        assert b"Archiver Information Item summary unavailable" in response.content
 
     async def test_renders_danger_zone_archive(self, client, db_session, info_client):
         from unittest.mock import AsyncMock

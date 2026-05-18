@@ -14,7 +14,7 @@ class TestWatchedItemCreateForm:
     async def test_form_returns_200(self, client):
         response = await client.get("/watched-items/new")
         assert response.status_code == 200
-        assert b"New WatchedItem" in response.content
+        assert b"New Watched Item" in response.content
 
     async def test_form_renders_typeahead_picker(self, client):
         response = await client.get("/watched-items/new")
@@ -160,4 +160,4 @@ class TestListPageHasCreateLink:
         response = await client.get("/watched-items")
         body = response.content
         assert b"/watched-items/new" in body
-        assert b"New WatchedItem" in body
+        assert b"New Watched Item" in body

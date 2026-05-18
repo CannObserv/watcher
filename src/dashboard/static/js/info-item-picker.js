@@ -14,6 +14,8 @@
     if (!input) return;
     var resultsId = input.getAttribute('aria-controls');
     if (!resultsId) return;
+    var treeEl = picker.querySelector('[id$="-binding-tree"]');
+    var treeId = treeEl ? treeEl.id : null;
 
     var activeIdx = -1;
 
@@ -66,9 +68,18 @@
 
     /* Reset highlight after HTMX swaps in new results. */
     document.body.addEventListener('htmx:afterSwap', function (e) {
-      if (e.detail && e.detail.target && e.detail.target.id === resultsId) {
+      var targetId = e.detail && e.detail.target && e.detail.target.id;
+      if (targetId === resultsId) {
         activeIdx = -1;
         input.setAttribute('aria-expanded', options().length > 0 ? 'true' : 'false');
+      }
+      /* Clear the search input and results when a selection populates the binding tree. */
+      if (treeId && targetId === treeId) {
+        input.value = '';
+        var region = document.getElementById(resultsId);
+        if (region) region.innerHTML = '';
+        highlight(-1);
+        input.setAttribute('aria-expanded', 'false');
       }
     });
   }

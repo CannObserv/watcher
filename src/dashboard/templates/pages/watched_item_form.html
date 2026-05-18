@@ -1,26 +1,21 @@
 {% extends "base.html" %}
-{% block title %}New WatchedItem — Watcher{% endblock %}
+{% block title %}New Watched Item — Watcher{% endblock %}
 {% block content %}
-<h2 class="text-2xl font-bold text-gray-900 dark:text-white mb-6">New WatchedItem</h2>
+<h2 class="text-2xl font-bold text-gray-900 dark:text-white mb-6">New Watched Item</h2>
 
 {% include "partials/flash.html" %}
 
 <form id="wi-create" method="post" action="/watched-items/new" class="max-w-xl space-y-6">
-  <fieldset>
-    <legend class="form-label">InfoItem</legend>
-    {% with target_form_id="wi-create", mode="select_only" %}
+  <div>
+    {% with target_form_id="wi-create", mode="select_only", field_hint="Subscribes this Watched Item to one Archiver Information Item (1:1). Defaults below apply to all child Watches that don't override." %}
     {% include "partials/info_item_picker/typeahead.html" %}
     {% endwith %}
-    <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">
-      Subscribes this WatchedItem to one Archiver InfoItem (1:1). Defaults below
-      apply to all child Watches that don't override.
-    </p>
-  </fieldset>
+  </div>
 
   <div>
     <label for="name" class="form-label">Name <span class="text-xs text-gray-500">(optional)</span></label>
     <input type="text" name="name" id="name" maxlength="255" class="form-input mt-1"
-      placeholder="Defaults to the InfoItem's name.">
+      placeholder="Defaults to the Information Item's name.">
   </div>
 
   <div>
@@ -52,7 +47,7 @@
   </div>
 
   <div class="flex gap-3">
-    <button type="submit" class="btn btn-primary">Create WatchedItem</button>
+    <button type="submit" class="btn btn-primary">Create Watched Item</button>
     <a href="/watched-items" class="btn btn-secondary">Cancel</a>
   </div>
 </form>

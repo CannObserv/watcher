@@ -1,10 +1,14 @@
 {# Step-1 InfoItem typeahead. Caller passes:
    target_form_id: str (the form that contains the eventual <input name="info_item_id">)
    mode: "select_with_target" | "select_only"
-   field_label: str (optional; defaults to "InfoItem")
+   field_label: str (optional; defaults to "Information Item")
+   field_hint: str (optional; displayed between label and input)
 #}
 <div class="info-item-picker" data-target-form="{{ target_form_id }}" data-mode="{{ mode }}">
-  <label for="{{ target_form_id }}-iip-input" class="form-label">{{ field_label or "InfoItem" }}</label>
+  <label for="{{ target_form_id }}-iip-input" class="form-label">{{ field_label or "Information Item" }}</label>
+  {% if field_hint %}
+  <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">{{ field_hint }}</p>
+  {% endif %}
   <input
     id="{{ target_form_id }}-iip-input"
     type="search"

@@ -17,7 +17,7 @@
 </div>
 
 {% if info_item is none %}
-<div class="stat-card mb-6 text-sm text-gray-500">Archiver InfoItem summary unavailable.</div>
+<div class="stat-card mb-6 text-sm text-gray-500">Archiver Information Item summary unavailable.</div>
 {% else %}
 <div class="mb-6">
   {% with mode="readonly_tree" %}
@@ -66,7 +66,7 @@
   {% if child_watches %}
   {% include "partials/watch_table.html" with context %}
   {% else %}
-  <p class="text-sm text-gray-500">No watches under this WatchedItem.</p>
+  <p class="text-sm text-gray-500">No watches under this Watched Item.</p>
   {% endif %}
 </section>
 
@@ -82,7 +82,7 @@
   {% if not watched_item.archived_at %}
   <div class="flex items-center justify-between">
     <div>
-      <p class="text-sm font-medium text-gray-900 dark:text-white">Archive this WatchedItem</p>
+      <p class="text-sm font-medium text-gray-900 dark:text-white">Archive this Watched Item</p>
       <p class="text-xs text-gray-500 dark:text-gray-400">Stops the fetch cycle and cascades to all child Watches.</p>
     </div>
     <form method="post" action="/watched-items/{{ watched_item.id }}/archive">
@@ -97,7 +97,7 @@
   {% else %}
   <div class="flex items-center justify-between">
     <div>
-      <p class="text-sm font-medium text-gray-900 dark:text-white">Restore this WatchedItem</p>
+      <p class="text-sm font-medium text-gray-900 dark:text-white">Restore this Watched Item</p>
       <p class="text-xs text-gray-500 dark:text-gray-400">Child Watches stay archived; restore them individually.</p>
     </div>
     <form method="post" action="/watched-items/{{ watched_item.id }}/restore">

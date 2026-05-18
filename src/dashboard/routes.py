@@ -234,6 +234,40 @@ async def watches_page(
     return templates.TemplateResponse(request, "pages/watches.html", context)
 
 
+@router.get("/info-items/search")
+async def info_items_search(
+    request: Request,
+    q: str = "",
+    mode: Literal["select_with_target", "select_only"] = "select_with_target",
+    target_form_id: str = "watch-create",
+):
+    """Typeahead results partial for the InfoItem picker.
+
+    Mirrors the design's ``/watches/new/info-items`` route but generalized so
+    the same picker can be reused on /watched-items/new (mode=select_only)
+    and /watches/new (mode=select_with_target). Empty query short-circuits;
+    SDK errors degrade to an empty result set with a logged warning.
+    """
+    query = q.strip()
+    if not query:
+        return templates.TemplateResponse(
+            request,
+            "partials/info_item_picker/results.html",
+            {"results": [], "mode": mode, "target_form_id": target_form_id, "query": ""},
+        )
+    info_client = get_registry().get_archiver_client()
+    try:
+        results = await info_client.find_info_item(query, limit=20)
+    except (ServerError, httpx.ConnectError, httpx.TimeoutException, AuthError):
+        logger.warning("find_info_item failed during picker search", extra={"q": query})
+        results = []
+    return templates.TemplateResponse(
+        request,
+        "partials/info_item_picker/results.html",
+        {"results": results, "mode": mode, "target_form_id": target_form_id, "query": query},
+    )
+
+
 @router.get("/watches/new")
 async def watch_create_form(request: Request):
     """Watch creation form."""

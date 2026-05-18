@@ -5,38 +5,47 @@
 
 {% include "partials/flash.html" %}
 
-<form method="post" id="watch-create" class="max-w-xl space-y-6">
+<form id="watch-create" method="post" action="/watches/new" class="max-w-xl space-y-6">
   <div>
     <label for="name" class="form-label">Name</label>
-    <input type="text" name="name" id="name" required
-      value=""
-      class="form-input mt-1">
-    <p id="name-error" class="mt-1 text-xs text-red-600 dark:text-red-400" hidden></p>
+    <input type="text" name="name" id="name" required class="form-input mt-1">
   </div>
 
-  <div>
-    <input type="hidden" name="info_item_id" value="" form="watch-create" id="watch-create-info-item-id">
+  <fieldset>
+    <legend class="form-label">Target</legend>
+    <input type="hidden" name="info_item_id" id="watch-create-info-item-id" value="">
     {% with target_form_id="watch-create", mode="select_with_target" %}
     {% include "partials/info_item_picker/typeahead.html" %}
     {% endwith %}
-  </div>
+  </fieldset>
+
+  <details class="text-sm">
+    <summary class="cursor-pointer text-gray-600 dark:text-gray-400">Paste ULID</summary>
+    <div class="mt-2 space-y-2">
+      <label for="info_item_id_manual" class="form-label">InfoItem ULID</label>
+      <input type="text" name="info_item_id_manual" id="info_item_id_manual"
+        class="form-input mt-1 font-mono"
+        placeholder="01XXXXXXXXXXXXXXXXXXXXXXXXX">
+      <label for="target_info_source_id_manual" class="form-label">sub_aspect ULID (optional)</label>
+      <input type="text" name="target_info_source_id_manual" id="target_info_source_id_manual"
+        class="form-input mt-1 font-mono"
+        placeholder="(leave blank for primary)">
+      <p class="text-xs text-gray-500 dark:text-gray-400">Power-user fallback. Either use the picker above OR these inputs — not both.</p>
+    </div>
+  </details>
 
   <div>
     <label for="content_type" class="form-label">Content Type</label>
-    <select name="content_type" id="content_type"
-      class="form-input mt-1">
+    <select name="content_type" id="content_type" class="form-input mt-1">
       {% for ct in content_types %}
       <option value="{{ ct.value }}">{{ ct.value | upper }}</option>
       {% endfor %}
     </select>
-    <p id="content_type-error" class="mt-1 text-xs text-red-600 dark:text-red-400" hidden></p>
   </div>
 
   <div>
     <label for="description" class="form-label">Description</label>
-    <textarea name="description" id="description" rows="2"
-      class="form-input mt-1"></textarea>
-    <p id="description-error" class="mt-1 text-xs text-red-600 dark:text-red-400" hidden></p>
+    <textarea name="description" id="description" rows="2" class="form-input mt-1"></textarea>
   </div>
 
   <div class="flex gap-3">

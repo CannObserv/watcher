@@ -331,7 +331,8 @@ async def watch_create_submit(
     request: Request,
     name: str = Form(""),
     info_item_id: str = Form(""),
-    target_info_source_id: str = Form(""),
+    info_item_id_manual: str = Form(""),
+    target_info_source_id_manual: str = Form(""),
     content_type: str = Form("html"),
     description: str = Form(""),
     probe_fn: Callable[[str], Awaitable[ProbeResult]] = Depends(get_probe_fn),
@@ -339,17 +340,28 @@ async def watch_create_submit(
 ):
     """Handle watch creation form submission.
 
-    #160 InfoItem-first shape: form accepts ``info_item_id`` (required) and an
-    optional ``target_info_source_id`` for sub_aspect Watches. Schedule is
-    inherited from the parent WatchedItem; per-Watch override UI is a follow-up
-    plan. Mirrors the error mapping of the API route in ``src/api/routes/watches.py``.
+    #162: form accepts either picker output (``info_item_id`` from the
+    typeahead-injected hidden input + ``watch-create__target`` radio) OR a
+    paste-ULID fallback (``info_item_id_manual`` + ``target_info_source_id_manual``).
+    Picker wins when its ``info_item_id`` is non-empty; the manual block is
+    read only when the picker is empty.
     """
+    form = await request.form()
+    target_radio = form.get("watch-create__target", "").strip()
+
+    if info_item_id.strip():
+        resolved_info_item_id = info_item_id.strip()
+        resolved_target = target_radio or None
+    else:
+        resolved_info_item_id = info_item_id_manual.strip()
+        resolved_target = target_info_source_id_manual.strip() or None
+
     info_client = get_registry().get_archiver_client()
     errors = []
     if not name.strip():
         errors.append("Name is required")
-    if not info_item_id.strip():
-        errors.append("InfoItem ID is required")
+    if not resolved_info_item_id:
+        errors.append("InfoItem is required")
 
     async def _render_with_flash(flash_message: str):
         return templates.TemplateResponse(
@@ -365,9 +377,6 @@ async def watch_create_submit(
 
     if errors:
         return await _render_with_flash(". ".join(errors))
-
-    resolved_info_item_id = info_item_id.strip()
-    resolved_target = target_info_source_id.strip() or None
 
     try:
         watch = await _create_watch(

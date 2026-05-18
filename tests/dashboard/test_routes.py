@@ -13,6 +13,7 @@ from src.core.models.watch import ContentType, Watch, WatchHealthStatus
 from src.core.notifications.events import WatchEventType
 from tests.conftest import (
     bind_primary_source,
+    bind_sub_aspect,
     make_info_item,
     make_info_source,
     make_watch,
@@ -153,21 +154,19 @@ class TestWatchCreate:
         assert response.status_code == 200
         assert b"New Watch" in response.content
 
-    async def test_create_form_has_target_picker(self, client):
-        """The create form renders the minimal target picker.
-
-        Operator pastes an InfoItem ID and an optional sub_aspect ID.
-        """
+    async def test_create_form_renders_typeahead_picker(self, client):
         response = await client.get("/watches/new")
-        assert b'name="name"' in response.content
-        assert b'name="info_item_id"' in response.content
-        assert b'name="target_info_source_id"' in response.content
-        assert b'name="content_type"' in response.content
-        # The pre-#160 InfoSource picker + URL/fetch_config + per-watch interval
-        # fields are gone.
-        assert b'name="info_source_id"' not in response.content
-        assert b'name="url"' not in response.content
-        assert b'name="interval"' not in response.content
+        body = response.content
+        # The form switched from ULID-paste to typeahead.
+        assert b'role="combobox"' in body
+        assert b'hx-get="/info-items/search' in body
+        # Hidden info_item_id input lives on the form.
+        assert b'name="info_item_id"' in body
+        # Power-user paste-ULID fallback is wrapped in <details>.
+        assert b"<details" in body
+        assert b"Paste ULID" in body
+        # Legacy minimal-picker text input is gone.
+        assert b'pattern="[0-9A-Za-z]{26}"' not in body
 
     async def test_create_watch_redirects(self, client, db_session):
         info_item_id = await _seed_info_item(db_session, name="Created Watch")
@@ -176,6 +175,49 @@ class TestWatchCreate:
             data={
                 "name": "Created Watch",
                 "info_item_id": info_item_id,
+                "watch-create__target": "",  # primary
+                "content_type": "html",
+            },
+            follow_redirects=False,
+        )
+        assert response.status_code == 303
+
+    async def test_create_watch_with_subaspect_target(self, client, db_session):
+        item = await make_info_item(db_session)
+        primary = await make_info_source(db_session, url="https://example.com")
+        await bind_primary_source(
+            db_session,
+            info_item_id=item.info_item_id,
+            info_source_id=primary.info_source_id,
+        )
+        sub = await make_info_source(db_session, parent_info_source_id=primary.info_source_id)
+        await bind_sub_aspect(
+            db_session,
+            info_item_id=item.info_item_id,
+            info_source_id=sub.info_source_id,
+        )
+        await db_session.commit()
+        response = await client.post(
+            "/watches/new",
+            data={
+                "name": "Sub Watch",
+                "info_item_id": str(item.info_item_id),
+                "watch-create__target": str(sub.info_source_id),
+                "content_type": "html",
+            },
+            follow_redirects=False,
+        )
+        assert response.status_code == 303
+
+    async def test_create_watch_via_paste_ulid_fallback(self, client, db_session):
+        """When picker is empty, fall back to manual paste fields."""
+        info_item_id = await _seed_info_item(db_session, name="Manual Paste")
+        response = await client.post(
+            "/watches/new",
+            data={
+                "name": "Manual Paste",
+                "info_item_id": "",  # picker empty
+                "info_item_id_manual": info_item_id,
                 "content_type": "html",
             },
             follow_redirects=False,
@@ -189,6 +231,7 @@ class TestWatchCreate:
             data={
                 "name": "",
                 "info_item_id": info_item_id,
+                "watch-create__target": "",
                 "content_type": "html",
             },
         )
@@ -206,6 +249,7 @@ class TestWatchCreate:
             data={
                 "name": "Domain Test Watch",
                 "info_item_id": info_item_id,
+                "watch-create__target": "",
                 "content_type": "html",
             },
             follow_redirects=False,
@@ -231,6 +275,7 @@ class TestWatchCreate:
                 data={
                     "name": "Bad Watch",
                     "info_item_id": info_item_id,
+                    "watch-create__target": "",
                     "content_type": "html",
                 },
             )
@@ -238,11 +283,7 @@ class TestWatchCreate:
         assert b"unreachable" in response.content.lower()
 
     async def test_create_watch_info_item_only_redirects(self, client, db_session):
-        """#160 Task 11.1: POST /watches/new with info_item_id only → 303 redirect.
-
-        No info_source_id, no interval, no target_info_source_id — the minimal
-        dashboard flow.
-        """
+        """Minimal POST — info_item_id via picker, no target, no extras."""
         info_item_id = await _seed_info_item(db_session, name="Minimal Watch")
         response = await client.post(
             "/watches/new",
@@ -256,8 +297,7 @@ class TestWatchCreate:
         assert response.headers["location"].startswith("/watches/")
 
     async def test_create_watch_bad_info_item_id_shows_flash(self, client, db_session):
-        """#160 Task 11.1: POST with an unknown info_item_id → 200 + flash text."""
-        # Decoy InfoItem keeps the schema warm; the form payload uses a bogus id.
+        """Unknown info_item_id → 200 with flash, not a 5xx."""
         await _seed_info_item(db_session, name="Decoy")
         bogus_id = "01ZZZZZZZZZZZZZZZZZZZZZZZZ"
         with patch(
@@ -270,15 +310,14 @@ class TestWatchCreate:
                 data={
                     "name": "Bogus Target",
                     "info_item_id": bogus_id,
+                    "watch-create__target": "",
                     "content_type": "html",
                 },
             )
         assert response.status_code == 200
-        # Flash text mentions the missing InfoItem.
         body = response.content.lower()
         assert b"does not exist" in body
         assert bogus_id.encode().lower() in body
-        # Sanity: form did not 5xx and we are back on the create page.
         assert b"New Watch" in response.content
 
 

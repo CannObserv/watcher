@@ -434,3 +434,17 @@ class TestWatchedItemCreate:
             default_tags=["regulatory"],
         )
         assert schema.default_content_type == "html"
+
+    def test_watched_item_create_rejects_invalid_content_type(self):
+        with pytest.raises(ValidationError):
+            WatchedItemCreate(
+                info_item_id="01ABCDEFGHJKMNPQRSTVWXYZ00",
+                default_content_type="garbage",
+            )
+
+    def test_watched_item_create_none_content_type_ok(self):
+        schema = WatchedItemCreate(
+            info_item_id="01ABCDEFGHJKMNPQRSTVWXYZ00",
+            default_content_type=None,
+        )
+        assert schema.default_content_type is None

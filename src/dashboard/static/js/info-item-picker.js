@@ -29,7 +29,13 @@
         input.setAttribute('aria-activedescendant', '');
         return;
       }
-      activeIdx = Math.max(0, Math.min(opts.length - 1, idx));
+      if (idx < 0) {
+        activeIdx = -1;
+        opts.forEach(function (o) { o.setAttribute('aria-selected', 'false'); });
+        input.setAttribute('aria-activedescendant', '');
+        return;
+      }
+      activeIdx = Math.min(opts.length - 1, idx);
       opts.forEach(function (o, i) {
         o.setAttribute('aria-selected', i === activeIdx ? 'true' : 'false');
       });
@@ -51,7 +57,8 @@
         }
       } else if (e.key === 'Escape') {
         input.value = '';
-        document.getElementById(resultsId).innerHTML = '';
+        var region = document.getElementById(resultsId);
+        if (region) region.innerHTML = '';
         highlight(-1);
         input.setAttribute('aria-expanded', 'false');
       }

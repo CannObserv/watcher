@@ -1,0 +1,15 @@
+{% if new_subaspect_count and new_subaspect_count > 0 %}
+<div class="rounded-md border border-blue-200 dark:border-blue-800 bg-blue-50 dark:bg-blue-950/30 p-4 mb-6 flex items-center justify-between">
+  <p class="text-sm text-blue-700 dark:text-blue-300">
+    <strong>{{ new_subaspect_count }} new sub_aspect{{ "s" if new_subaspect_count != 1 else "" }}</strong>
+    available
+    {% if watched_item.last_reviewed_at %}since {{ watched_item.last_reviewed_at.strftime('%Y-%m-%d') }}{% endif %}.
+  </p>
+  <form method="post" action="/watched-items/{{ watched_item.id }}/mark-reviewed">
+    <button type="submit"
+      hx-post="/watched-items/{{ watched_item.id }}/mark-reviewed"
+      hx-target="body" hx-push-url="true"
+      class="btn btn-primary btn-sm">Mark reviewed</button>
+  </form>
+</div>
+{% endif %}

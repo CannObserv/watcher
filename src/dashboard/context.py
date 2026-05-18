@@ -13,6 +13,10 @@ from src.core.models.domain import Domain
 from src.core.models.notification_config import WatchNotificationConfig
 from src.core.models.temporal_profile import TemporalProfile
 from src.core.models.watch import Watch
+from src.core.models.watched_item import WatchedItem
+from src.core.models.watched_item_notification_template import (
+    WatchedItemNotificationTemplate,
+)
 
 _WATCH_SORT_COLS: dict[str, Any] = {
     "name": Watch.name,
@@ -415,3 +419,52 @@ async def get_domain_watches(
         stmt = stmt.where(Watch.is_active == is_active)
     result = await session.execute(stmt)
     return list(result.scalars().all())
+
+
+async def get_watched_item_list(
+    session: AsyncSession,
+    include_archived: bool = False,
+) -> list[WatchedItem]:
+    """Fetch WatchedItems for dashboard list display."""
+    stmt = select(WatchedItem).order_by(WatchedItem.name)
+    if not include_archived:
+        stmt = stmt.where(WatchedItem.archived_at.is_(None))
+    result = await session.execute(stmt)
+    return list(result.scalars().all())
+
+
+async def get_watched_item_detail(
+    session: AsyncSession, watched_item_id: str
+) -> WatchedItem | None:
+    """Fetch a single WatchedItem; returns None on invalid ID or not-found."""
+    try:
+        wi_ulid = ULID.from_str(watched_item_id)
+    except (ValueError, TypeError):
+        return None
+    return await session.get(WatchedItem, wi_ulid)
+
+
+async def get_watched_item_templates(
+    session: AsyncSession, watched_item_id: ULID
+) -> list[WatchedItemNotificationTemplate]:
+    """Load notification templates under a WatchedItem (created_at asc)."""
+    result = await session.execute(
+        select(WatchedItemNotificationTemplate)
+        .where(WatchedItemNotificationTemplate.watched_item_id == watched_item_id)
+        .order_by(WatchedItemNotificationTemplate.created_at)
+    )
+    return list(result.scalars().all())
+
+
+def count_new_subaspects(info_item, last_reviewed_at) -> int:
+    """Count sub_aspect bindings created since last_reviewed_at.
+
+    last_reviewed_at=None means all sub_aspects are 'new'.
+    """
+    if info_item is None:
+        return 0
+    sources = info_item.info_item_sources or []
+    subaspects = [s for s in sources if s.role == "sub_aspect"]
+    if last_reviewed_at is None:
+        return len(subaspects)
+    return sum(1 for s in subaspects if s.created_at > last_reviewed_at)

@@ -355,9 +355,11 @@ async def make_watch(
     """Construct a Watch tied to a WatchedItem + InfoItem (#160 shape).
 
     When ``info_item_id`` is not supplied, an InfoItem + primary InfoSource +
-    binding are auto-created. When ``watched_item`` is not supplied, a fresh
-    WatchedItem is auto-created (or attaches to an existing one for the same
-    info_item_id).
+    binding are auto-created — except when ``watched_item`` is supplied, in
+    which case ``info_item_id`` defaults to ``watched_item.info_item_id`` so
+    callers don't have to repeat it. When ``watched_item`` is not supplied,
+    a fresh WatchedItem is auto-created (or attaches to an existing one for
+    the same info_item_id).
 
     Extra ``**kwargs`` flow into the Watch constructor (tags, description,
     content_type, etc.). Note: ``schedule_config`` no longer lives on Watch
@@ -365,6 +367,11 @@ async def make_watch(
     passed it should construct/mutate the WatchedItem instead. Use
     ``primary_url=`` to seed the auto-created InfoSource's URL.
     """
+    if info_item_id is None and watched_item is not None:
+        # Default to the WatchedItem's InfoItem so the assertion below can't
+        # trip on an auto-created mismatch.
+        info_item_id = watched_item.info_item_id
+
     if info_item_id is None:
         item = await make_info_item(session)
         info_item_id = item.info_item_id

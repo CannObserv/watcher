@@ -1,0 +1,105 @@
+{% extends "base.html" %}
+{% from "macros/fields.html" import watched_item_field with context %}
+{% block title %}{{ watched_item.name }} — watcher{% endblock %}
+{% block content %}
+<div class="flex justify-between items-center mb-6 flex-wrap gap-4">
+  <div>
+    <h2 class="text-2xl font-semibold text-gray-900 dark:text-white">{{ watched_item.name }}</h2>
+    {% if watched_item.description %}
+    <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">{{ watched_item.description }}</p>
+    {% endif %}
+  </div>
+  <div>
+    {% if watched_item.archived_at %}<span class="badge badge-archived">Archived</span>
+    {% elif watched_item.is_active %}<span class="badge badge-active">Active</span>
+    {% else %}<span class="badge badge-inactive">Inactive</span>{% endif %}
+  </div>
+</div>
+
+{% include "partials/watched_item_info_item_card.html" %}
+
+{% include "partials/watched_item_subaspect_banner.html" %}
+
+<section class="mb-8">
+  <h3 class="text-lg font-semibold text-gray-900 dark:text-white mb-4">Defaults</h3>
+  <div class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 divide-y divide-gray-200 dark:divide-gray-700">
+    {{ watched_item_field(field_contexts["name"]) }}
+    {{ watched_item_field(field_contexts["description"]) }}
+    {{ watched_item_field(field_contexts["default_schedule_interval"]) }}
+    {{ watched_item_field(field_contexts["default_content_type"]) }}
+    <div class="p-4">
+      <span class="form-label mb-2 block">Default Tags</span>
+      {% include "partials/watched_item_tags_editor.html" %}
+    </div>
+  </div>
+</section>
+
+<section class="mb-8">
+  <div class="flex items-center justify-between mb-4">
+    <h3 class="text-lg font-semibold text-gray-900 dark:text-white">Notification Templates</h3>
+    <button
+      hx-get="/watched-items/{{ watched_item.id }}/templates/new"
+      hx-target="#wi-templates-tbody"
+      hx-swap="afterbegin"
+      class="btn btn-secondary btn-sm">+ Add</button>
+  </div>
+  <div
+    id="wi-templates"
+    hx-get="/partials/watched-item-templates/{{ watched_item.id }}"
+    hx-trigger="load"
+    hx-swap="innerHTML">
+    {% include "partials/watched_item_templates.html" %}
+  </div>
+</section>
+
+{# Child Watches table — reuse partial scoped by watched_item_id #}
+<section class="mb-8">
+  <h3 class="text-lg font-semibold text-gray-900 dark:text-white mb-4">Watches</h3>
+  {% if child_watches %}
+  {% include "partials/watch_table.html" with context %}
+  {% else %}
+  <p class="text-sm text-gray-500">No watches under this WatchedItem.</p>
+  {% endif %}
+</section>
+
+{# Metadata #}
+<p class="text-xs text-gray-400 dark:text-gray-500 mb-8">
+  Metadata · ID: {{ watched_item.id }} · Created: {{ watched_item.created_at.strftime("%Y-%m-%d") }} · Updated: {{ watched_item.updated_at.strftime("%Y-%m-%d") }}
+  {% if watched_item.last_reviewed_at %} · Reviewed: {{ watched_item.last_reviewed_at.strftime("%Y-%m-%d") }}{% endif %}
+</p>
+
+{# Danger zone #}
+<section class="border border-red-200 dark:border-red-800 rounded-lg p-6">
+  <h3 class="text-lg font-semibold text-red-600 dark:text-red-400 mb-4">Danger Zone</h3>
+  {% if not watched_item.archived_at %}
+  <div class="flex items-center justify-between">
+    <div>
+      <p class="text-sm font-medium text-gray-900 dark:text-white">Archive this WatchedItem</p>
+      <p class="text-xs text-gray-500 dark:text-gray-400">Stops the fetch cycle and cascades to all child Watches.</p>
+    </div>
+    <form method="post" action="/watched-items/{{ watched_item.id }}/archive">
+      <button type="submit"
+        hx-post="/watched-items/{{ watched_item.id }}/archive"
+        hx-confirm="Archive {{ watched_item.name }}? All child Watches will also be archived."
+        hx-target="body"
+        hx-push-url="true"
+        class="btn btn-danger-outline min-h-[44px]">Archive</button>
+    </form>
+  </div>
+  {% else %}
+  <div class="flex items-center justify-between">
+    <div>
+      <p class="text-sm font-medium text-gray-900 dark:text-white">Restore this WatchedItem</p>
+      <p class="text-xs text-gray-500 dark:text-gray-400">Child Watches stay archived; restore them individually.</p>
+    </div>
+    <form method="post" action="/watched-items/{{ watched_item.id }}/restore">
+      <button type="submit"
+        hx-post="/watched-items/{{ watched_item.id }}/restore"
+        hx-target="body"
+        hx-push-url="true"
+        class="btn btn-secondary min-h-[44px]">Restore</button>
+    </form>
+  </div>
+  {% endif %}
+</section>
+{% endblock %}

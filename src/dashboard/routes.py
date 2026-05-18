@@ -17,6 +17,15 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from src.api.deps import get_db_session, get_probe_fn
 from src.api.routes.helpers import parse_ulid
+from src.api.routes.watched_items import (
+    archive_watched_item as _api_archive_watched_item,
+)
+from src.api.routes.watched_items import (
+    mark_reviewed as _api_mark_reviewed,
+)
+from src.api.routes.watched_items import (
+    restore_watched_item as _api_restore_watched_item,
+)
 from src.api.routes.watches import delete_watch as api_delete_watch
 from src.api.schemas.content_config import ContentConfig, ContentOptions
 from src.api.schemas.validators import validate_event_list
@@ -27,6 +36,9 @@ from src.core.models.domain import Domain
 from src.core.models.notification_config import WatchNotificationConfig
 from src.core.models.notification_template import DomainNcRef, NotificationTemplate, WatchNcRef
 from src.core.models.watch import ContentType, Watch
+from src.core.models.watched_item_notification_template import (
+    WatchedItemNotificationTemplate,
+)
 from src.core.notifications.content import build_body, build_title, resolve_options
 from src.core.notifications.default_templates import (
     compose_body_prefill,
@@ -45,11 +57,13 @@ from src.core.notifications.preview_fixtures import (
 from src.core.notifier_client import get_notifier_client
 from src.core.probe import ProbeResult
 from src.core.registry import get_registry
+from src.core.scheduler import parse_interval
 from src.core.watches import create_watch as _create_watch
 from src.core.watches import resolve_watch_url
 from src.core.watches.resolution import resolved_schedule_config
 from src.dashboard import templates
 from src.dashboard.context import (
+    count_new_subaspects,
     get_audit_entries,
     get_dashboard_stats,
     get_domain_watches,
@@ -62,6 +76,9 @@ from src.dashboard.context import (
     get_watch_profiles,
     get_watch_timeline,
     get_watch_timeline_count,
+    get_watched_item_detail,
+    get_watched_item_list,
+    get_watched_item_templates,
 )
 from src.dashboard.deps import get_dashboard_user
 
@@ -494,6 +511,90 @@ def _apply_watch_field_update(watch: Watch, field_name: str, raw_value: str) -> 
         setattr(watch, field_name, typed_value)
 
 
+# --- WatchedItem inline field editing ---
+
+
+def _format_interval(wi) -> str:
+    cfg = wi.default_schedule_config or {}
+    return cfg.get("interval") or ""
+
+
+def _format_content_type(wi) -> str:
+    return wi.default_content_type or ""
+
+
+WATCHED_ITEM_FIELD_META: dict[str, dict] = {
+    "name": {
+        "label": "Name",
+        "hint": None,
+        "type": "text",
+        "source": "column",
+        "cast": lambda v: v.strip(),
+        "format": lambda wi: wi.name,
+    },
+    "description": {
+        "label": "Description",
+        "hint": "Optional notes for operators",
+        "type": "textarea",
+        "source": "column",
+        "cast": lambda v: v.strip() or None,
+        "format": lambda wi: wi.description or "",
+    },
+    "default_schedule_interval": {
+        "label": "Default Interval",
+        "hint": "e.g. 30s, 15m, 6h, 1d. reduce_frequency post-actions may slow this independently.",
+        "type": "text",
+        "source": "schedule_interval",
+        "cast": lambda v: v.strip(),
+        "format": _format_interval,
+    },
+    "default_content_type": {
+        "label": "Default Content Type",
+        "hint": "Applied to child Watches that don't override.",
+        "type": "select",
+        "source": "column",
+        "cast": lambda v: v.strip() or None,
+        "format": _format_content_type,
+        "options": [("", "—"), ("html", "HTML"), ("pdf", "PDF")],
+    },
+}
+
+EDITABLE_WATCHED_ITEM_FIELDS = set(WATCHED_ITEM_FIELD_META.keys())
+
+
+def _watched_item_field_context(request: Request, wi, field_name: str, mode: str = "view") -> dict:
+    meta = WATCHED_ITEM_FIELD_META[field_name]
+    return {
+        "watched_item": wi,
+        "field_name": field_name,
+        "field_label": meta["label"],
+        "field_hint": meta.get("hint"),
+        "field_value": meta["format"](wi),
+        "field_type": meta["type"],
+        "field_options": meta.get("options"),
+        "field_mode": mode,
+    }
+
+
+def _apply_watched_item_field_update(wi, field_name: str, raw_value: str) -> None:
+    meta = WATCHED_ITEM_FIELD_META[field_name]
+    cast_fn = meta["cast"]
+    typed_value = cast_fn(raw_value)
+    source = meta["source"]
+    if source == "column":
+        setattr(wi, field_name, typed_value)
+    elif source == "schedule_interval":
+        if not typed_value:
+            wi.default_schedule_config = None
+        else:
+            # Validate interval shape
+            parse_interval(typed_value)
+            wi.default_schedule_config = {
+                **(wi.default_schedule_config or {}),
+                "interval": typed_value,
+            }
+
+
 @router.get("/watches/{watch_id}/field/{field_name}")
 async def watch_field_partial(
     request: Request,
@@ -742,6 +843,477 @@ async def watch_deactivate(
             {"watch": watch, "health_map": health_map},
         )
     return RedirectResponse(url="/watches", status_code=303)
+
+
+@router.get("/watched-items")
+async def watched_items_page(
+    request: Request,
+    include_archived: bool = False,
+    session: AsyncSession = Depends(get_db_session),
+):
+    """List page for WatchedItems."""
+    watched_items = await get_watched_item_list(session, include_archived=include_archived)
+    return templates.TemplateResponse(
+        request,
+        "pages/watched_items.html",
+        {
+            "request": request,
+            "active_page": "watched-items",
+            "watched_items": watched_items,
+            "include_archived": include_archived,
+            "flash": None,
+        },
+    )
+
+
+@router.get("/watched-items/{watched_item_id}")
+async def watched_item_detail_page(
+    request: Request,
+    watched_item_id: str,
+    session: AsyncSession = Depends(get_db_session),
+):
+    """Detail page for a WatchedItem."""
+    wi = await get_watched_item_detail(session, watched_item_id)
+    if wi is None:
+        return templates.TemplateResponse(
+            request, "pages/404.html", {"request": request}, status_code=404
+        )
+
+    children = (
+        (
+            await session.execute(
+                select(Watch).where(Watch.watched_item_id == wi.id).order_by(Watch.name)
+            )
+        )
+        .scalars()
+        .all()
+    )
+
+    client_sdk = get_registry().get_archiver_client()
+    try:
+        info_item = await client_sdk.get_info_item(str(wi.info_item_id))
+    except NotFound:
+        info_item = None
+    except (httpx.ConnectError, ServerError, AuthError):
+        # Archiver down, unreachable, or auth misconfigured — render the page
+        # with a placeholder rather than hard-500. The summary card template
+        # handles `info_item is None`.
+        logger.warning(
+            "Archiver unavailable while rendering watched_item detail",
+            extra={"watched_item_id": str(wi.id)},
+        )
+        info_item = None
+
+    # InfoItemSourceOut from get_info_item doesn't include the URL — resolve the
+    # primary binding via a second SDK call. Tracked for Archiver-side enrichment
+    # (return URL inline with InfoItem) as a future optimization.
+    primary_url: str | None = None
+    if info_item is not None and info_item.info_item_sources:
+        primary_source = next((s for s in info_item.info_item_sources if s.role is None), None)
+        if primary_source is not None:
+            try:
+                src = await client_sdk.get_info_source(primary_source.info_source_id)
+                primary_url = src.url
+            except (NotFound, httpx.ConnectError, ServerError, AuthError):
+                logger.warning(
+                    "primary InfoSource unavailable while rendering watched_item detail",
+                    extra={
+                        "watched_item_id": str(wi.id),
+                        "info_source_id": primary_source.info_source_id,
+                    },
+                )
+
+    new_subaspect_count = count_new_subaspects(info_item, wi.last_reviewed_at)
+
+    wi_templates = await get_watched_item_templates(session, wi.id)
+
+    field_contexts = {
+        name: _watched_item_field_context(request, wi, name, mode="view")
+        for name in ("name", "description", "default_schedule_interval", "default_content_type")
+    }
+
+    return templates.TemplateResponse(
+        request,
+        "pages/watched_item_detail.html",
+        {
+            "request": request,
+            "active_page": "watched-items",
+            "watched_item": wi,
+            "info_item": info_item,
+            "primary_url": primary_url,
+            "child_watches": children,
+            "watches": children,  # `watch_table.html` reads "watches"
+            "flash": None,
+            "field_contexts": field_contexts,
+            "new_subaspect_count": new_subaspect_count,
+            "templates": wi_templates,
+        },
+    )
+
+
+@router.post("/watched-items/{watched_item_id}/archive")
+async def watched_item_archive(
+    request: Request,
+    watched_item_id: str,
+    session: AsyncSession = Depends(get_db_session),
+):
+    """Dashboard archive — cascades to child Watches (delegates to shared logic)."""
+    await _api_archive_watched_item(watched_item_id, session)
+    if request.headers.get("HX-Request") == "true":
+        return Response(
+            status_code=200,
+            headers={"HX-Redirect": f"/watched-items/{watched_item_id}"},
+        )
+    return RedirectResponse(url=f"/watched-items/{watched_item_id}", status_code=303)
+
+
+@router.post("/watched-items/{watched_item_id}/restore")
+async def watched_item_restore(
+    request: Request,
+    watched_item_id: str,
+    session: AsyncSession = Depends(get_db_session),
+):
+    """Dashboard restore — parent only."""
+    await _api_restore_watched_item(watched_item_id, session)
+    if request.headers.get("HX-Request") == "true":
+        return Response(
+            status_code=200,
+            headers={"HX-Redirect": f"/watched-items/{watched_item_id}"},
+        )
+    return RedirectResponse(url=f"/watched-items/{watched_item_id}", status_code=303)
+
+
+@router.post("/watched-items/{watched_item_id}/mark-reviewed")
+async def watched_item_mark_reviewed(
+    request: Request,
+    watched_item_id: str,
+    session: AsyncSession = Depends(get_db_session),
+):
+    """Stamp last_reviewed_at = now() on a WatchedItem."""
+    await _api_mark_reviewed(watched_item_id, session)
+    if request.headers.get("HX-Request") == "true":
+        return Response(
+            status_code=200,
+            headers={"HX-Redirect": f"/watched-items/{watched_item_id}"},
+        )
+    return RedirectResponse(url=f"/watched-items/{watched_item_id}", status_code=303)
+
+
+@router.get("/watched-items/{watched_item_id}/field/{field_name}")
+async def watched_item_field_partial(
+    request: Request,
+    watched_item_id: str,
+    field_name: str,
+    mode: Literal["view", "edit"] = "view",
+    session: AsyncSession = Depends(get_db_session),
+):
+    """Serve a single WatchedItem field partial in view or edit mode."""
+    if field_name not in EDITABLE_WATCHED_ITEM_FIELDS:
+        raise HTTPException(status_code=400, detail=f"Field '{field_name}' is not editable")
+
+    wi = await get_watched_item_detail(session, watched_item_id)
+    if not wi:
+        raise HTTPException(status_code=404, detail="WatchedItem not found")
+
+    if request.headers.get("HX-Request") != "true":
+        return RedirectResponse(url=f"/watched-items/{watched_item_id}", status_code=303)
+
+    ctx = _watched_item_field_context(request, wi, field_name, mode=mode)
+    return templates.TemplateResponse(request, "partials/watched_item_field.html", ctx)
+
+
+@router.post("/watched-items/{watched_item_id}/field/{field_name}")
+async def watched_item_field_update(
+    request: Request,
+    watched_item_id: str,
+    field_name: str,
+    value: str = Form(""),
+    session: AsyncSession = Depends(get_db_session),
+):
+    """Update a single WatchedItem field (HTMX inline edit)."""
+    if field_name not in EDITABLE_WATCHED_ITEM_FIELDS:
+        raise HTTPException(status_code=400, detail=f"Field '{field_name}' is not editable")
+
+    wi = await get_watched_item_detail(session, watched_item_id)
+    if not wi:
+        raise HTTPException(status_code=404, detail="WatchedItem not found")
+
+    if field_name == "name" and not value.strip():
+        raise HTTPException(status_code=400, detail="Name cannot be empty")
+
+    try:
+        _apply_watched_item_field_update(wi, field_name, value)
+    except (ValueError, TypeError) as exc:
+        raise HTTPException(status_code=400, detail=f"Invalid value: {exc}") from exc
+
+    audit(
+        session,
+        EventType.WATCHED_ITEM_UPDATED,
+        watched_item_id=str(wi.id),
+        updated_fields=[field_name],
+        source="dashboard",
+    )
+    await session.commit()
+    await session.refresh(wi)
+
+    if request.headers.get("HX-Request") == "true":
+        ctx = _watched_item_field_context(request, wi, field_name, mode="view")
+        return templates.TemplateResponse(request, "partials/watched_item_field.html", ctx)
+    return RedirectResponse(url=f"/watched-items/{watched_item_id}", status_code=303)
+
+
+@router.get("/watched-items/{watched_item_id}/tags")
+async def watched_item_tags_partial(
+    request: Request,
+    watched_item_id: str,
+    session: AsyncSession = Depends(get_db_session),
+):
+    wi = await get_watched_item_detail(session, watched_item_id)
+    if not wi:
+        raise HTTPException(status_code=404, detail="WatchedItem not found")
+    return templates.TemplateResponse(
+        request,
+        "partials/watched_item_tags_editor.html",
+        {"watched_item": wi},
+    )
+
+
+@router.post("/watched-items/{watched_item_id}/tags")
+async def watched_item_tag_add(
+    request: Request,
+    watched_item_id: str,
+    tag: str = Form(...),
+    session: AsyncSession = Depends(get_db_session),
+):
+    wi = await get_watched_item_detail(session, watched_item_id)
+    if not wi:
+        raise HTTPException(status_code=404, detail="WatchedItem not found")
+    tag = tag.strip()
+    if not tag:
+        raise HTTPException(status_code=400, detail="Tag cannot be empty")
+    # Mirror the template's HTML5 pattern="[^\s,]+" so non-HTMX callers
+    # (curl, scripts) can't bypass it.
+    if any(c.isspace() or c == "," for c in tag):
+        raise HTTPException(
+            status_code=400,
+            detail="Tag cannot contain whitespace or commas",
+        )
+    current = list(wi.default_tags or [])
+    if tag not in current:
+        current.append(tag)
+        wi.default_tags = sorted(current)
+        audit(
+            session,
+            EventType.WATCHED_ITEM_UPDATED,
+            watched_item_id=str(wi.id),
+            updated_fields=["default_tags"],
+            tag_added=tag,
+            source="dashboard",
+        )
+        await session.commit()
+        await session.refresh(wi)
+    return templates.TemplateResponse(
+        request,
+        "partials/watched_item_tags_editor.html",
+        {"watched_item": wi},
+    )
+
+
+@router.delete("/watched-items/{watched_item_id}/tags/{tag}")
+async def watched_item_tag_remove(
+    request: Request,
+    watched_item_id: str,
+    tag: str,
+    session: AsyncSession = Depends(get_db_session),
+):
+    wi = await get_watched_item_detail(session, watched_item_id)
+    if not wi:
+        raise HTTPException(status_code=404, detail="WatchedItem not found")
+    current = list(wi.default_tags or [])
+    if tag in current:
+        current.remove(tag)
+        wi.default_tags = current or None
+        audit(
+            session,
+            EventType.WATCHED_ITEM_UPDATED,
+            watched_item_id=str(wi.id),
+            updated_fields=["default_tags"],
+            tag_removed=tag,
+            source="dashboard",
+        )
+        await session.commit()
+        await session.refresh(wi)
+    return templates.TemplateResponse(
+        request,
+        "partials/watched_item_tags_editor.html",
+        {"watched_item": wi},
+    )
+
+
+@router.get("/partials/watched-item-templates/{watched_item_id}")
+async def watched_item_templates_partial(
+    request: Request,
+    watched_item_id: str,
+    session: AsyncSession = Depends(get_db_session),
+):
+    wi = await get_watched_item_detail(session, watched_item_id)
+    if not wi:
+        raise HTTPException(status_code=404, detail="WatchedItem not found")
+    wi_templates = await get_watched_item_templates(session, wi.id)
+    return templates.TemplateResponse(
+        request,
+        "partials/watched_item_templates.html",
+        {"watched_item": wi, "templates": wi_templates},
+    )
+
+
+@router.get("/watched-items/{watched_item_id}/templates/new")
+async def watched_item_template_new_form(
+    request: Request,
+    watched_item_id: str,
+    session: AsyncSession = Depends(get_db_session),
+):
+    wi = await get_watched_item_detail(session, watched_item_id)
+    if not wi:
+        raise HTTPException(status_code=404)
+    return templates.TemplateResponse(
+        request,
+        "partials/watched_item_template_form.html",
+        {"watched_item": wi, "tpl": None},
+    )
+
+
+@router.post("/watched-items/{watched_item_id}/templates")
+async def watched_item_template_create(
+    request: Request,
+    watched_item_id: str,
+    title: str = Form(""),
+    channel_hint: str = Form(...),
+    events: str = Form("change_detected"),
+    session: AsyncSession = Depends(get_db_session),
+):
+    wi = await get_watched_item_detail(session, watched_item_id)
+    if not wi:
+        raise HTTPException(status_code=404)
+    event_list = [e.strip() for e in events.split(",") if e.strip()]
+    try:
+        event_list = validate_event_list(event_list)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    tpl = WatchedItemNotificationTemplate(
+        watched_item_id=wi.id,
+        title=title.strip() or None,
+        channel_hint=channel_hint.strip(),
+        events=event_list,
+    )
+    session.add(tpl)
+    audit(
+        session,
+        EventType.WATCHED_ITEM_TEMPLATE_CREATED,
+        watched_item_id=str(wi.id),
+        source="dashboard",
+    )
+    await session.commit()
+
+    refreshed = await get_watched_item_templates(session, wi.id)
+    return templates.TemplateResponse(
+        request,
+        "partials/watched_item_template_rows.html",
+        {"watched_item": wi, "templates": refreshed},
+    )
+
+
+@router.get("/watched-items/{watched_item_id}/templates/{tpl_id}/edit")
+async def watched_item_template_edit_form(
+    request: Request,
+    watched_item_id: str,
+    tpl_id: str,
+    session: AsyncSession = Depends(get_db_session),
+):
+    wi = await get_watched_item_detail(session, watched_item_id)
+    if not wi:
+        raise HTTPException(status_code=404)
+    tpl = await session.get(WatchedItemNotificationTemplate, parse_ulid(tpl_id))
+    if not tpl or tpl.watched_item_id != wi.id:
+        raise HTTPException(status_code=404)
+    return templates.TemplateResponse(
+        request,
+        "partials/watched_item_template_form.html",
+        {"watched_item": wi, "tpl": tpl},
+    )
+
+
+@router.post("/watched-items/{watched_item_id}/templates/{tpl_id}")
+async def watched_item_template_update(
+    request: Request,
+    watched_item_id: str,
+    tpl_id: str,
+    title: str = Form(""),
+    channel_hint: str = Form(...),
+    events: str = Form("change_detected"),
+    session: AsyncSession = Depends(get_db_session),
+):
+    wi = await get_watched_item_detail(session, watched_item_id)
+    if not wi:
+        raise HTTPException(status_code=404)
+    tpl = await session.get(WatchedItemNotificationTemplate, parse_ulid(tpl_id))
+    if not tpl or tpl.watched_item_id != wi.id:
+        raise HTTPException(status_code=404)
+    event_list = [e.strip() for e in events.split(",") if e.strip()]
+    try:
+        event_list = validate_event_list(event_list)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    tpl.title = title.strip() or None
+    tpl.channel_hint = channel_hint.strip()
+    tpl.events = event_list
+    audit(
+        session,
+        EventType.WATCHED_ITEM_TEMPLATE_UPDATED,
+        watched_item_id=str(wi.id),
+        template_id=str(tpl.id),
+        source="dashboard",
+    )
+    await session.commit()
+
+    refreshed = await get_watched_item_templates(session, wi.id)
+    return templates.TemplateResponse(
+        request,
+        "partials/watched_item_template_rows.html",
+        {"watched_item": wi, "templates": refreshed},
+    )
+
+
+@router.delete("/watched-items/{watched_item_id}/templates/{tpl_id}")
+async def watched_item_template_delete(
+    request: Request,
+    watched_item_id: str,
+    tpl_id: str,
+    session: AsyncSession = Depends(get_db_session),
+):
+    wi = await get_watched_item_detail(session, watched_item_id)
+    if not wi:
+        raise HTTPException(status_code=404)
+    tpl = await session.get(WatchedItemNotificationTemplate, parse_ulid(tpl_id))
+    if not tpl or tpl.watched_item_id != wi.id:
+        raise HTTPException(status_code=404)
+    audit(
+        session,
+        EventType.WATCHED_ITEM_TEMPLATE_DELETED,
+        watched_item_id=str(wi.id),
+        template_id=str(tpl.id),
+        source="dashboard",
+    )
+    await session.delete(tpl)
+    await session.commit()
+
+    refreshed = await get_watched_item_templates(session, wi.id)
+    return templates.TemplateResponse(
+        request,
+        "partials/watched_item_template_rows.html",
+        {"watched_item": wi, "templates": refreshed},
+    )
 
 
 @router.get("/domains")

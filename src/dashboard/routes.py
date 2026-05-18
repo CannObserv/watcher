@@ -894,9 +894,10 @@ async def watched_item_detail_page(
         info_item = await client_sdk.get_info_item(str(wi.info_item_id))
     except NotFound:
         info_item = None
-    except (httpx.ConnectError, ServerError):
-        # Archiver down or unreachable — render the page with a placeholder
-        # rather than hard-500. The summary card template handles `info_item is None`.
+    except (httpx.ConnectError, ServerError, AuthError):
+        # Archiver down, unreachable, or auth misconfigured — render the page
+        # with a placeholder rather than hard-500. The summary card template
+        # handles `info_item is None`.
         logger.warning(
             "Archiver unavailable while rendering watched_item detail",
             extra={"watched_item_id": str(wi.id)},
@@ -913,7 +914,7 @@ async def watched_item_detail_page(
             try:
                 src = await client_sdk.get_info_source(primary_source.info_source_id)
                 primary_url = src.url
-            except (NotFound, httpx.ConnectError, ServerError):
+            except (NotFound, httpx.ConnectError, ServerError, AuthError):
                 logger.warning(
                     "primary InfoSource unavailable while rendering watched_item detail",
                     extra={

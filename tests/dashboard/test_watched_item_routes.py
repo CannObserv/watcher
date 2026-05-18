@@ -82,6 +82,53 @@ class TestDetailPage:
         response = await client.get(f"/watched-items/{wi.id}")
         assert b"https://example.org/foo" in response.content
 
+    async def test_binding_list_excludes_primary(self, client, db_session, info_client):
+        """Regression: the primary InfoSource is represented by the URL in the
+        header; it must not also appear as a row in the binding list (would
+        be redundant)."""
+        from datetime import UTC, datetime
+        from types import SimpleNamespace
+        from unittest.mock import AsyncMock
+
+        from src.core.models.watched_item import WatchedItem
+        from tests.conftest import make_info_item
+
+        item = await make_info_item(db_session)
+        wi = WatchedItem(info_item_id=item.info_item_id, name="Bindings")
+        db_session.add(wi)
+        await db_session.flush()
+        await db_session.commit()
+        info_client.get_info_item = AsyncMock(
+            return_value=SimpleNamespace(
+                info_item_id=str(item.info_item_id),
+                name="Item",
+                description=None,
+                owner=None,
+                info_item_sources=[
+                    SimpleNamespace(
+                        info_source_id="primary-src-id",
+                        role=None,
+                        created_at=datetime.now(UTC),
+                    ),
+                    SimpleNamespace(
+                        info_source_id="cross-check-src-id",
+                        role="cross_check",
+                        created_at=datetime.now(UTC),
+                    ),
+                ],
+            )
+        )
+        info_client.get_info_source = AsyncMock(
+            return_value=_fake_info_source_out(url="https://example.com/page")
+        )
+        response = await client.get(f"/watched-items/{wi.id}")
+        body = response.content
+        # The cross_check row renders.
+        assert b"cross-check-src-id" in body
+        # The primary's info_source_id does NOT appear in the binding list —
+        # the URL stands in for it in the header.
+        assert b"primary-src-id" not in body
+
     async def test_renders_without_primary_url_when_archiver_partial(
         self, client, db_session, info_client
     ):

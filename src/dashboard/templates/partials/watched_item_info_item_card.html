@@ -15,13 +15,14 @@
     </div>
     <span class="text-xs font-mono text-gray-400">{{ info_item.info_item_id }}</span>
   </div>
-  {% if info_item.info_item_sources %}
+  {# Binding list excludes the primary — it's already represented above as the
+     InfoItem name + URL. Only cross_check / sub_aspect rows show here. #}
+  {% set non_primary = info_item.info_item_sources | rejectattr("role", "none") | list %}
+  {% if non_primary %}
   <ul class="text-sm space-y-1">
-    {% for src in info_item.info_item_sources %}
+    {% for src in non_primary %}
     <li class="flex items-center gap-2">
-      {% if src.role is none %}
-      <span class="badge badge-info">primary</span>
-      {% elif src.role == "cross_check" %}
+      {% if src.role == "cross_check" %}
       <span class="badge badge-inactive">cross_check</span>
       {% else %}
       <span class="badge badge-active">{{ src.role }}</span>

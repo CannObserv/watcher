@@ -16,7 +16,15 @@
   </div>
 </div>
 
-{% include "partials/watched_item_info_item_card.html" %}
+{% if info_item is none %}
+<div class="stat-card mb-6 text-sm text-gray-500">Archiver InfoItem summary unavailable.</div>
+{% else %}
+<div class="mb-6">
+  {% with mode="readonly_tree" %}
+  {% include "partials/info_item_picker/binding_tree.html" %}
+  {% endwith %}
+</div>
+{% endif %}
 
 {% include "partials/watched_item_subaspect_banner.html" %}
 

@@ -55,6 +55,7 @@ async def test_partitions_primary_cross_check_sub_aspect():
     assert bindings.primary_url == "https://example.com"
     assert {c.info_source_id for c in bindings.cross_checks} == {"X1"}
     assert {s.info_source_id for s in bindings.sub_aspects} == {"S1", "S2"}
+    assert bindings.info_item is info_item
 
 
 async def test_raises_when_no_primary():

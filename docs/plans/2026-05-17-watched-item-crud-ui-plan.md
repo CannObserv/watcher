@@ -3305,8 +3305,8 @@ gh issue close 161 --comment "Shipped via the WatchedItem CRUD UI implementation
 ## Out of scope (do not implement in this plan)
 
 - Bulk "Add Watches for new sub_aspects" — #164.
-- InfoItem typeahead picker on Watch-create — separate follow-up.
+- InfoItem typeahead picker on Watch-create — separate follow-up. **— Implemented under [2026-05-18 plan](2026-05-18-info-item-picker-and-watched-item-create.md) (#162).**
 - Cross-InfoItem Collection grouping — descoped from #160.
 - Free-form JSONB editor for `default_schedule_config`.
 - Per-Watch suppression of inherited WatchedItem templates.
-- Standalone `POST /api/v1/watched-items` create endpoint.
+- Standalone `POST /api/v1/watched-items` create endpoint. **— Superseded by [2026-05-18 plan](2026-05-18-info-item-picker-and-watched-item-create.md); in scope under #162's expanded scope.**

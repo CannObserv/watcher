@@ -93,7 +93,11 @@ class TestDetailPage:
             return_value=_fake_info_source_out(url="https://example.org/foo")
         )
         response = await client.get(f"/watched-items/{wi.id}")
-        assert b"https://example.org/foo" in response.content
+        body = response.content
+        # Primary URL still surfaces in the new binding-tree partial.
+        assert b"https://example.org/foo" in body
+        # Readonly mode: no radio inputs in the tree.
+        assert b'type="radio"' not in body
 
     async def test_binding_list_excludes_primary(self, client, db_session, info_client):
         """Regression: the primary InfoSource is represented by the URL in the
@@ -131,9 +135,20 @@ class TestDetailPage:
                 ],
             )
         )
-        info_client.get_info_source = AsyncMock(
-            return_value=_fake_info_source_out(url="https://example.com/page")
-        )
+
+        # get_info_source is called per-binding by fetch_info_item_bindings.
+        # Side-effect returns the right id so the template renders correctly.
+        async def _src(info_source_id):
+            return SimpleNamespace(
+                info_source_id=info_source_id,
+                url="https://example.com/page" if info_source_id == "primary-src-id" else None,
+                parent_info_source_id=(
+                    None if info_source_id == "primary-src-id" else "primary-src-id"
+                ),
+                source_spec=SimpleNamespace(additional_properties={}),
+            )
+
+        info_client.get_info_source = AsyncMock(side_effect=_src)
         response = await client.get(f"/watched-items/{wi.id}")
         body = response.content
         # The cross_check row renders.
@@ -149,7 +164,12 @@ class TestDetailPage:
         """Regression: detail page must render when InfoItem succeeds but
         get_info_source fails. Parametrised across every exception class in
         the route's except clause so a future refactor splitting them can't
-        silently regress any single path."""
+        silently regress any single path.
+
+        With the binding-tree partial, a get_info_source failure causes
+        fetch_info_item_bindings to raise, so the route falls back to the
+        'summary unavailable' placeholder rather than a partial card.
+        """
         from unittest.mock import AsyncMock
 
         from src.core.models.watched_item import WatchedItem
@@ -166,8 +186,9 @@ class TestDetailPage:
         info_client.get_info_source = AsyncMock(side_effect=exc_factory())
         response = await client.get(f"/watched-items/{wi.id}")
         assert response.status_code == 200
-        # InfoItem card still renders even without the URL
-        assert b"Fake InfoItem" in response.content
+        # Detail page now uses the picker's binding-tree partial — but
+        # when the SDK fails, the page falls back to a placeholder.
+        assert b"InfoItem summary unavailable" in response.content
 
     @pytest.mark.parametrize("exc_factory", _SDK_FAILURE_FACTORIES)
     async def test_renders_when_get_info_item_fails(
@@ -210,6 +231,74 @@ class TestDetailPage:
         response = await client.get(f"/watched-items/{wi.id}")
         assert b"Danger Zone" in response.content
         assert b"Archive" in response.content
+
+    async def test_new_sub_aspects_get_badge(self, client, db_session, info_client):
+        """Sub_aspects created after last_reviewed_at get a 'new' badge in the tree."""
+        from datetime import UTC, datetime, timedelta
+        from types import SimpleNamespace
+        from unittest.mock import AsyncMock
+
+        from src.core.models.watched_item import WatchedItem
+        from tests.conftest import make_info_item
+
+        item = await make_info_item(db_session)
+        wi = WatchedItem(
+            info_item_id=item.info_item_id,
+            name="WI",
+            last_reviewed_at=datetime.now(UTC) - timedelta(days=7),
+        )
+        db_session.add(wi)
+        await db_session.flush()
+        await db_session.commit()
+
+        # The route's new logic uses fetch_info_item_bindings,
+        # which calls get_info_item + get_info_source(per binding). Stub BOTH
+        # to return shape-consistent objects so the "new"-badge path is exercised.
+        info_client.get_info_item = AsyncMock(
+            return_value=SimpleNamespace(
+                info_item_id=str(item.info_item_id),
+                name="N",
+                description=None,
+                owner=None,
+                info_item_sources=[
+                    SimpleNamespace(
+                        info_source_id="primary",
+                        role=None,
+                        created_at=datetime.now(UTC) - timedelta(days=14),
+                    ),
+                    SimpleNamespace(
+                        info_source_id="new-sub",
+                        role="sub_aspect",
+                        created_at=datetime.now(UTC),
+                    ),
+                ],
+            )
+        )
+
+        # get_info_source is called per-binding by fetch_info_item_bindings.
+        async def _src(info_source_id):
+            if info_source_id == "primary":
+                return SimpleNamespace(
+                    info_source_id="primary",
+                    url="https://example.com",
+                    parent_info_source_id=None,
+                    source_spec=SimpleNamespace(additional_properties={}),
+                )
+            return SimpleNamespace(
+                info_source_id=info_source_id,
+                url=None,
+                parent_info_source_id="primary",
+                source_spec=SimpleNamespace(additional_properties={}),
+            )
+
+        info_client.get_info_source = AsyncMock(side_effect=_src)
+
+        response = await client.get(f"/watched-items/{wi.id}")
+        body = response.content
+        assert b"new-sub" in body
+        # The "new" badge fires because the sub_aspect's created_at is newer
+        # than the WatchedItem's last_reviewed_at.
+        assert b"badge-warning" in body
 
 
 class TestArchiveRestore:
@@ -539,6 +628,18 @@ class TestSubAspectBanner:
                 ],
             )
         )
+
+        # fetch_info_item_bindings calls get_info_source per-binding; stub it so
+        # the route can resolve bindings and count_new_subaspects gets a live info_item.
+        async def _src(info_source_id):
+            return SimpleNamespace(
+                info_source_id=info_source_id,
+                url="https://example.com" if info_source_id == "p" else None,
+                parent_info_source_id=None if info_source_id == "p" else "p",
+                source_spec=SimpleNamespace(additional_properties={}),
+            )
+
+        info_client.get_info_source = AsyncMock(side_effect=_src)
         response = await client.get(f"/watched-items/{wi.id}")
         assert b"2 new sub_aspects" in response.content
 

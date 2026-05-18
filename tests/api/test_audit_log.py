@@ -71,3 +71,7 @@ class TestWatchedItemEventTypes:
         assert EventType.WATCHED_ITEM_TEMPLATE_CREATED == "watched_item_template.created"
         assert EventType.WATCHED_ITEM_TEMPLATE_UPDATED == "watched_item_template.updated"
         assert EventType.WATCHED_ITEM_TEMPLATE_DELETED == "watched_item_template.deleted"
+
+
+def test_watched_item_created_event_exists():
+    assert EventType.WATCHED_ITEM_CREATED == "watched_item.created"

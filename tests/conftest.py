@@ -33,7 +33,7 @@ from urllib.parse import urlparse
 import pytest
 from archiver_client import ArchiverClient, NotFound
 from httpx import ASGITransport, AsyncClient
-from sqlalchemy import create_engine, event, select, text
+from sqlalchemy import create_engine, event, or_, select, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 
@@ -529,10 +529,34 @@ def info_client(db_session, request):
         out.info_item_sources = info_item_sources
         return out
 
+    async def _find_info_item(query: str, *, limit: int = 20):
+        # ILIKE on name + description, mirroring Archiver's pg_trgm-backed
+        # find_info_item, but minus the trigram ranking — substring is fine
+        # for tests.
+        q = f"%{query}%"
+        result = await db_session.execute(
+            select(InfoItem)
+            .where(or_(InfoItem.name.ilike(q), InfoItem.description.ilike(q)))
+            .order_by(InfoItem.created_at.desc())
+            .limit(limit)
+        )
+        items = result.scalars().all()
+        out = []
+        for item in items:
+            entry = MagicMock()
+            entry.info_item_id = str(item.info_item_id)
+            entry.name = item.name
+            entry.description = item.description
+            entry.created_at = item.created_at or datetime.now(UTC)
+            entry.updated_at = item.updated_at or datetime.now(UTC)
+            out.append(entry)
+        return out
+
     fake_client.list_info_items = AsyncMock(side_effect=_list_info_items)
     fake_client.get_primary_info_spec = AsyncMock(side_effect=_get_primary_info_spec)
     fake_client.get_info_source = AsyncMock(side_effect=_get_info_source)
     fake_client.get_info_item = AsyncMock(side_effect=_get_info_item)
+    fake_client.find_info_item = AsyncMock(side_effect=_find_info_item)
 
     # Swap the registry singleton via the test seam so
     # ``get_registry().get_archiver_client()`` returns this fake everywhere.

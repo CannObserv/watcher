@@ -2,27 +2,36 @@
 
 from datetime import UTC, datetime
 
+import httpx
+from archiver_client import AuthError, NotFound, ServerError
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
+from ulid import ULID
 
 from src.api.deps import get_db_session
 from src.api.routes.helpers import parse_ulid
 from src.api.schemas.watched_item import (
+    WatchedItemCreate,
     WatchedItemPatch,
     WatchedItemResponse,
     WatchedItemTemplateCreate,
     WatchedItemTemplatePatch,
     WatchedItemTemplateResponse,
 )
+from src.core.logging import get_logger
 from src.core.models.audit_log import EventType, audit
 from src.core.models.watch import Watch
 from src.core.models.watched_item import WatchedItem
 from src.core.models.watched_item_notification_template import (
     WatchedItemNotificationTemplate,
 )
+from src.core.registry import get_registry
 
 router = APIRouter(prefix="/watched-items", tags=["watched-items"])
+
+logger = get_logger(__name__)
 
 
 async def _get_or_404(session: AsyncSession, wi_id: str) -> WatchedItem:
@@ -45,6 +54,64 @@ async def list_watched_items(
         stmt = stmt.where(WatchedItem.archived_at.is_(None))
     result = await session.execute(stmt)
     return list(result.scalars().all())
+
+
+@router.post("", response_model=WatchedItemResponse, status_code=201)
+async def create_watched_item(
+    data: WatchedItemCreate, session: AsyncSession = Depends(get_db_session)
+):
+    """Create a standalone WatchedItem bound to an Archiver InfoItem.
+
+    The InfoItem's existence + name are resolved via the Archiver SDK.
+    Errors mirror the Watch-create route: NotFound → 422,
+    AuthError → 500, ServerError/network → 503 with Retry-After.
+    """
+    info_client = get_registry().get_archiver_client()
+    try:
+        info_item = await info_client.get_info_item(data.info_item_id)
+    except NotFound as exc:
+        raise HTTPException(
+            status_code=422, detail=f"info_item_id {data.info_item_id} does not exist"
+        ) from exc
+    except AuthError:
+        logger.exception("ArchiverClient auth failure during watched_item create")
+        raise HTTPException(status_code=500, detail="Information service auth failed") from None
+    except (ServerError, httpx.ConnectError, httpx.TimeoutException) as exc:
+        logger.warning("Information service unreachable during watched_item create: %s", exc)
+        raise HTTPException(
+            status_code=503,
+            detail="Information service unavailable; retry shortly",
+            headers={"Retry-After": "30"},
+        ) from exc
+
+    wi = WatchedItem(
+        info_item_id=ULID.from_str(data.info_item_id),
+        name=data.name or info_item.name,
+        description=data.description,
+        default_schedule_config=data.default_schedule_config,
+        default_content_type=data.default_content_type,
+        default_tags=data.default_tags,
+    )
+    session.add(wi)
+    try:
+        await session.flush()
+    except IntegrityError as exc:
+        await session.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail=f"WatchedItem for info_item_id {data.info_item_id} already exists",
+        ) from exc
+    audit(
+        session,
+        EventType.WATCHED_ITEM_CREATED,
+        watched_item_id=str(wi.id),
+        info_item_id=data.info_item_id,
+        name=wi.name,
+        source="api",
+    )
+    await session.commit()
+    await session.refresh(wi)
+    return wi
 
 
 @router.get("/{watched_item_id}", response_model=WatchedItemResponse)

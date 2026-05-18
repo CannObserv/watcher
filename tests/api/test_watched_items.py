@@ -3,7 +3,7 @@
 from unittest.mock import AsyncMock
 
 import pytest
-from archiver_client import NotFound
+from archiver_client import NotFound, ServerError
 from sqlalchemy import select
 
 from src.core.models.audit_log import AuditLog, EventType
@@ -306,6 +306,15 @@ class TestCreateWatchedItem:
             json={"info_item_id": "01ZZZZZZZZZZZZZZZZZZZZZZZZ"},
         )
         assert response.status_code == 422
+
+    async def test_archiver_server_error_returns_503_with_retry_after(self, client, info_client):
+        info_client.get_info_item = AsyncMock(side_effect=ServerError("boom"))
+        response = await client.post(
+            "/api/v1/watched-items",
+            json={"info_item_id": "01ZZZZZZZZZZZZZZZZZZZZZZZZ"},
+        )
+        assert response.status_code == 503
+        assert response.headers.get("Retry-After") == "30"
 
     async def test_emits_audit_event(self, client, db_session, info_client):
         item = await make_info_item(db_session, name="A")

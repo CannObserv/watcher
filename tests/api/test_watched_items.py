@@ -7,6 +7,7 @@ from archiver_client import NotFound
 from sqlalchemy import select
 
 from src.core.models.audit_log import AuditLog, EventType
+from tests.conftest import make_info_item
 
 pytestmark = pytest.mark.integration
 
@@ -14,7 +15,6 @@ pytestmark = pytest.mark.integration
 async def _make_watched_item(db_session, **overrides):
     """Helper: create a WatchedItem + parent InfoItem via the test fixtures."""
     from src.core.models.watched_item import WatchedItem
-    from tests.conftest import make_info_item
 
     item = await make_info_item(db_session)
     wi = WatchedItem(info_item_id=item.info_item_id, name=overrides.pop("name", "Test WI"))
@@ -254,8 +254,6 @@ class TestTemplateCrud:
 
 class TestCreateWatchedItem:
     async def test_creates_with_info_item_name_fallback(self, client, db_session, info_client):
-        from tests.conftest import make_info_item
-
         item = await make_info_item(db_session, name="Source Item")
         await db_session.commit()
         response = await client.post(
@@ -271,8 +269,6 @@ class TestCreateWatchedItem:
         assert body["archived_at"] is None
 
     async def test_uses_supplied_name(self, client, db_session, info_client):
-        from tests.conftest import make_info_item
-
         item = await make_info_item(db_session, name="Source")
         await db_session.commit()
         response = await client.post(
@@ -291,8 +287,6 @@ class TestCreateWatchedItem:
         assert body["default_tags"] == ["regulatory"]
 
     async def test_duplicate_info_item_id_returns_409(self, client, db_session, info_client):
-        from tests.conftest import make_info_item
-
         item = await make_info_item(db_session, name="X")
         await db_session.commit()
         r1 = await client.post(
@@ -314,8 +308,6 @@ class TestCreateWatchedItem:
         assert response.status_code == 422
 
     async def test_emits_audit_event(self, client, db_session, info_client):
-        from tests.conftest import make_info_item
-
         item = await make_info_item(db_session, name="A")
         await db_session.commit()
         await client.post("/api/v1/watched-items", json={"info_item_id": str(item.info_item_id)})

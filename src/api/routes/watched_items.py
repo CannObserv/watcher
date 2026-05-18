@@ -77,6 +77,7 @@ async def create_watched_item(
         logger.exception("ArchiverClient auth failure during watched_item create")
         raise HTTPException(status_code=500, detail="Information service auth failed") from None
     except (ServerError, httpx.ConnectError, httpx.TimeoutException) as exc:
+        logger.warning("Information service unreachable during watched_item create: %s", exc)
         raise HTTPException(
             status_code=503,
             detail="Information service unavailable; retry shortly",

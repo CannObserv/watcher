@@ -13,7 +13,6 @@
 
   <fieldset>
     <legend class="form-label">Target</legend>
-    <input type="hidden" name="info_item_id" id="watch-create-info-item-id" value="">
     {% with target_form_id="watch-create", mode="select_with_target" %}
     {% include "partials/info_item_picker/typeahead.html" %}
     {% endwith %}
@@ -24,11 +23,11 @@
     <div class="mt-2 space-y-2">
       <label for="info_item_id_manual" class="form-label">InfoItem ULID</label>
       <input type="text" name="info_item_id_manual" id="info_item_id_manual"
-        class="form-input mt-1 font-mono"
+        pattern="[0-9A-Za-z]{26}" class="form-input mt-1 font-mono"
         placeholder="01XXXXXXXXXXXXXXXXXXXXXXXXX">
       <label for="target_info_source_id_manual" class="form-label">sub_aspect ULID (optional)</label>
       <input type="text" name="target_info_source_id_manual" id="target_info_source_id_manual"
-        class="form-input mt-1 font-mono"
+        pattern="[0-9A-Za-z]{26}" class="form-input mt-1 font-mono"
         placeholder="(leave blank for primary)">
       <p class="text-xs text-gray-500 dark:text-gray-400">Power-user fallback. Either use the picker above OR these inputs — not both.</p>
     </div>

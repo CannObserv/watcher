@@ -160,13 +160,13 @@ class TestWatchCreate:
         # The form switched from ULID-paste to typeahead.
         assert b'role="combobox"' in body
         assert b'hx-get="/info-items/search' in body
-        # Hidden info_item_id input lives on the form.
-        assert b'name="info_item_id"' in body
+        # Picker binding-tree container is present (info_item_id injected dynamically by picker).
+        assert b'id="watch-create-binding-tree"' in body
         # Power-user paste-ULID fallback is wrapped in <details>.
         assert b"<details" in body
         assert b"Paste ULID" in body
-        # Legacy minimal-picker text input is gone.
-        assert b'pattern="[0-9A-Za-z]{26}"' not in body
+        # Legacy minimal-picker hint text is gone (was rendered always by target_picker.html).
+        assert b"Paste the InfoItem ULID from the Archiver service" not in body
 
     async def test_create_watch_redirects(self, client, db_session):
         info_item_id = await _seed_info_item(db_session, name="Created Watch")

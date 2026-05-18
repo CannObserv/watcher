@@ -47,6 +47,10 @@ async def _get_or_create_watched_item(
     WatchedItems) is unaffected. Acceptable for v1 — Watch creation is rare
     and operator-driven; harden with `begin_nested()` + retry if a real race
     surfaces.
+
+    Emits a WATCHED_ITEM_CREATED audit row with ``source="auto_create"`` only
+    when a new row is inserted, so consumers can distinguish operator-driven
+    creates from auto-create.
     """
     existing = (
         await session.execute(select(WatchedItem).where(WatchedItem.info_item_id == info_item_id))
@@ -56,6 +60,14 @@ async def _get_or_create_watched_item(
     wi = WatchedItem(info_item_id=info_item_id, name=fallback_name)
     session.add(wi)
     await session.flush()
+    audit(
+        session,
+        EventType.WATCHED_ITEM_CREATED,
+        watched_item_id=str(wi.id),
+        info_item_id=str(info_item_id),
+        name=fallback_name,
+        source="auto_create",
+    )
     return wi
 
 

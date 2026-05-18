@@ -171,25 +171,47 @@ class TestBindingTreeRoute:
         assert "<input " not in body
         assert 'type="radio"' not in body
 
-    async def test_404_unknown_info_item(self, client, info_client):
+    async def test_unknown_info_item_returns_200_error_partial(self, client, info_client):
+        """NotFound → 200 error partial so HTMX swaps the message into the target div."""
         info_client.get_info_item = AsyncMock(side_effect=NotFound("nope"))
         response = await client.get("/info-items/01ZZZZZZZZZZZZZZZZZZZZZZZZ/binding-tree")
-        assert response.status_code == 404
+        assert response.status_code == 200
+        assert "not found" in response.text.lower()
 
-    async def test_404_info_item_with_no_primary_binding(self, client, db_session, info_client):
-        """InfoItem exists but has no primary binding — fetch_info_item_bindings raises
-        ValueError; route must return a 404 partial, not a 500."""
+    async def test_select_with_target_no_primary_binding_returns_200_error(
+        self, client, db_session, info_client
+    ):
+        """select_with_target + no primary binding → 200 error partial (HTMX must swap it)."""
         item = await make_info_item(db_session)
         await db_session.commit()
-        response = await client.get(f"/info-items/{item.info_item_id}/binding-tree")
-        assert response.status_code == 404
-        assert "primary" in response.text.lower() or "not found" in response.text.lower()
+        response = await client.get(
+            f"/info-items/{item.info_item_id}/binding-tree?mode=select_with_target"
+        )
+        assert response.status_code == 200
+        assert "primary" in response.text.lower()
 
-    async def test_503_on_archiver_transport_error(self, client, info_client):
-        """SDK transport error during tree render degrades to a 503 partial."""
+    async def test_select_only_no_primary_binding_renders_tree(
+        self, client, db_session, info_client
+    ):
+        """select_only mode must render the binding tree even when the InfoItem has no
+        primary binding — WI-create only needs info_item_id, not a watch target."""
+        item = await make_info_item(db_session, name="No-Binding Item")
+        await db_session.commit()
+        response = await client.get(
+            f"/info-items/{item.info_item_id}/binding-tree?mode=select_only&target_form_id=wi-create"
+        )
+        assert response.status_code == 200
+        body = response.text
+        assert "No-Binding Item" in body
+        # Hidden input must be present so the WI-create form gets info_item_id
+        assert f'value="{item.info_item_id}"' in body
+        assert 'name="info_item_id"' in body
+
+    async def test_transport_error_returns_200_error_partial(self, client, info_client):
+        """SDK transport error → 200 error partial so HTMX swaps the message."""
         info_client.get_info_item = AsyncMock(side_effect=ServerError("boom"))
         response = await client.get("/info-items/01ZZZZZZZZZZZZZZZZZZZZZZZZ/binding-tree")
-        assert response.status_code == 503
+        assert response.status_code == 200
         assert "unavailable" in response.text.lower()
 
 

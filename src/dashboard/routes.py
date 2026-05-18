@@ -283,22 +283,43 @@ async def info_item_binding_tree(
     """Step-2 binding tree partial.
 
     Bound to the search route's result-row hx-get target. Renders the
-    primary + sub_aspects (selectable in step-2 modes) + cross_checks (muted,
-    never selectable). NotFound / ValueError → 404 partial; SDK transport
-    errors degrade to a 503 partial rather than raising.
+    primary + sub_aspects (selectable in select_with_target) + cross_checks (muted).
+
+    All error paths return 200 so HTMX swaps the message into the target div;
+    4xx/5xx responses are silently discarded by HTMX's default error handling.
+
+    Mode-specific binding requirements:
+    - ``select_with_target``: requires a primary binding; ValueError → 200 error partial.
+    - ``select_only`` / ``readonly_tree``: degrade gracefully on ValueError — renders the
+      tree with primary_url=None so WI-create can still submit info_item_id.
 
     ``new_subaspect_ids`` is a comma-separated list of info_source_ids to
-    flag with a "new" badge — only meaningful in ``readonly_tree`` mode
-    (sub_aspect-review surface on the WatchedItem detail page).
+    flag with a "new" badge — only meaningful in ``readonly_tree`` mode.
     """
     info_client = get_registry().get_archiver_client()
     try:
-        bindings = await fetch_info_item_bindings(info_client, info_item_id)
-        info_item = bindings.info_item
-    except (NotFound, ValueError):
+        try:
+            bindings = await fetch_info_item_bindings(info_client, info_item_id)
+            info_item = bindings.info_item
+            primary_url = bindings.primary_url
+            cross_checks = bindings.cross_checks
+            sub_aspects = bindings.sub_aspects
+        except ValueError:
+            if mode == "select_with_target":
+                msg = "InfoItem has no primary binding — cannot select a watch target."
+                return HTMLResponse(
+                    f'<p class="text-sm text-red-600">{msg}</p>',
+                    status_code=200,
+                )
+            # select_only / readonly_tree: show the InfoItem without requiring a primary
+            info_item = await info_client.get_info_item(info_item_id)
+            primary_url = None
+            cross_checks = []
+            sub_aspects = []
+    except NotFound:
         return HTMLResponse(
-            '<p class="text-sm text-red-600">InfoItem not found or has no primary binding.</p>',
-            status_code=404,
+            '<p class="text-sm text-red-600">InfoItem not found.</p>',
+            status_code=200,
         )
     except (ServerError, httpx.ConnectError, httpx.TimeoutException, AuthError):
         logger.warning(
@@ -307,7 +328,7 @@ async def info_item_binding_tree(
         )
         return HTMLResponse(
             '<p class="text-sm text-red-600">InfoItem bindings temporarily unavailable.</p>',
-            status_code=503,
+            status_code=200,
         )
     flagged = {s.strip() for s in new_subaspect_ids.split(",") if s.strip()} or None
     return templates.TemplateResponse(
@@ -315,9 +336,9 @@ async def info_item_binding_tree(
         "partials/info_item_picker/binding_tree.html",
         {
             "info_item": info_item,
-            "primary_url": bindings.primary_url,
-            "cross_checks": bindings.cross_checks,
-            "sub_aspects": bindings.sub_aspects,
+            "primary_url": primary_url,
+            "cross_checks": cross_checks,
+            "sub_aspects": sub_aspects,
             "mode": mode,
             "target_form_id": target_form_id,
             "new_subaspect_ids": flagged,

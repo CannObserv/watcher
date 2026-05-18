@@ -18,6 +18,13 @@
     var treeId = treeEl ? treeEl.id : null;
 
     var activeIdx = -1;
+    var pendingName = null;
+
+    /* Capture the selected item's name before HTMX fires the binding-tree request. */
+    picker.addEventListener('click', function (e) {
+      var btn = e.target.closest('[data-info-item-name]');
+      if (btn) pendingName = btn.dataset.infoItemName;
+    });
 
     function options() {
       var region = document.getElementById(resultsId);
@@ -80,6 +87,15 @@
         if (region) region.innerHTML = '';
         highlight(-1);
         input.setAttribute('aria-expanded', 'false');
+        /* Populate the parent form's name field with the selected item name if blank. */
+        if (pendingName) {
+          var form = document.getElementById(picker.dataset.targetForm);
+          if (form) {
+            var nameField = form.querySelector('[name="name"]');
+            if (nameField && !nameField.value) nameField.value = pendingName;
+          }
+          pendingName = null;
+        }
       }
     });
   }

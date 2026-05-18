@@ -46,6 +46,7 @@ class EventType:
     WATCH_NC_ASSIGNED = "watch_nc.assigned"
     WATCH_NC_UNASSIGNED = "watch_nc.unassigned"
     WATCHED_ITEM_THROTTLED = "watched_item.throttled"
+    WATCHED_ITEM_CREATED = "watched_item.created"
     WATCHED_ITEM_UPDATED = "watched_item.updated"
     WATCHED_ITEM_ARCHIVED = "watched_item.archived"
     WATCHED_ITEM_RESTORED = "watched_item.restored"

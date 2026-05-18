@@ -3,6 +3,7 @@
 import pytest
 from sqlalchemy import select
 
+from src.core.models.audit_log import AuditLog, EventType
 from src.core.models.watched_item import WatchedItem
 from tests.conftest import make_info_item
 
@@ -115,8 +116,6 @@ class TestWatchedItemCreateSubmit:
         assert b"interval" in response.content.lower()
 
     async def test_emits_audit_with_source_dashboard(self, client, db_session, info_client):
-        from src.core.models.audit_log import AuditLog, EventType
-
         item = await make_info_item(db_session, name="Z")
         await db_session.commit()
         await client.post(

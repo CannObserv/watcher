@@ -60,6 +60,7 @@ from src.core.registry import get_registry
 from src.core.scheduler import parse_interval
 from src.core.watches import create_watch as _create_watch
 from src.core.watches import resolve_watch_url
+from src.core.watches.info_item_fetch import fetch_info_item_bindings
 from src.core.watches.resolution import resolved_schedule_config
 from src.dashboard import templates
 from src.dashboard.context import (
@@ -265,6 +266,48 @@ async def info_items_search(
         request,
         "partials/info_item_picker/results.html",
         {"results": results, "mode": mode, "target_form_id": target_form_id, "query": query},
+    )
+
+
+@router.get("/info-items/{info_item_id}/binding-tree")
+async def info_item_binding_tree(
+    request: Request,
+    info_item_id: str,
+    mode: Literal["select_with_target", "select_only", "readonly_tree"] = "select_with_target",
+    target_form_id: str = "watch-create",
+    new_subaspect_ids: str = "",
+):
+    """Step-2 binding tree partial.
+
+    Bound to the search route's result-row hx-get target. Renders the
+    primary + sub_aspects (selectable in step-2 modes) + cross_checks (muted,
+    never selectable). NotFound → 404 partial.
+
+    ``new_subaspect_ids`` is a comma-separated list of info_source_ids to
+    flag with a "new" badge — only meaningful in ``readonly_tree`` mode
+    (sub_aspect-review surface on the WatchedItem detail page).
+    """
+    info_client = get_registry().get_archiver_client()
+    try:
+        bindings = await fetch_info_item_bindings(info_client, info_item_id)
+        info_item = await info_client.get_info_item(info_item_id)
+    except NotFound:
+        return HTMLResponse(
+            '<p class="text-sm text-red-600">InfoItem not found.</p>', status_code=404
+        )
+    flagged = {s.strip() for s in new_subaspect_ids.split(",") if s.strip()} or None
+    return templates.TemplateResponse(
+        request,
+        "partials/info_item_picker/binding_tree.html",
+        {
+            "info_item": info_item,
+            "primary_url": bindings.primary_url,
+            "cross_checks": bindings.cross_checks,
+            "sub_aspects": bindings.sub_aspects,
+            "mode": mode,
+            "target_form_id": target_form_id,
+            "new_subaspect_ids": flagged,
+        },
     )
 
 

@@ -1,4 +1,6 @@
-{# Expects: watched_item, templates. #}
+{# Expects: watched_item, templates. Full table — used for initial page load (via the
+   detail page's #wi-templates container). The mutation handlers return the rows-only
+   partial (watched_item_template_rows.html) instead. #}
 <div class="overflow-x-auto">
   <table class="data-table" id="wi-templates-table">
     <thead>
@@ -11,15 +13,7 @@
       </tr>
     </thead>
     <tbody id="wi-templates-tbody" class="divide-y divide-gray-100 dark:divide-gray-700">
-      {% if templates %}
-        {% for tpl in templates %}
-          {% include "partials/watched_item_template_row.html" %}
-        {% endfor %}
-      {% else %}
-        <tr>
-          <td colspan="5" class="text-center text-gray-500 dark:text-gray-400 py-6">No notification templates yet.</td>
-        </tr>
-      {% endif %}
+      {% include "partials/watched_item_template_rows.html" %}
     </tbody>
   </table>
 </div>

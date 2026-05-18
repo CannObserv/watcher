@@ -1,0 +1,11 @@
+{# Expects: watched_item, templates. Rows only — no <table>/<tbody> wrapper.
+   Returned by the mutation handlers; swapped into #wi-templates-tbody via innerHTML. #}
+{% if templates %}
+  {% for tpl in templates %}
+    {% include "partials/watched_item_template_row.html" %}
+  {% endfor %}
+{% else %}
+  <tr>
+    <td colspan="5" class="text-center text-gray-500 dark:text-gray-400 py-6">No notification templates yet.</td>
+  </tr>
+{% endif %}

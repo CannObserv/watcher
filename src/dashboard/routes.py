@@ -1191,7 +1191,7 @@ async def watched_item_template_create(
     refreshed = await get_watched_item_templates(session, wi.id)
     return templates.TemplateResponse(
         request,
-        "partials/watched_item_templates.html",
+        "partials/watched_item_template_rows.html",
         {"watched_item": wi, "templates": refreshed},
     )
 
@@ -1252,7 +1252,7 @@ async def watched_item_template_update(
     refreshed = await get_watched_item_templates(session, wi.id)
     return templates.TemplateResponse(
         request,
-        "partials/watched_item_templates.html",
+        "partials/watched_item_template_rows.html",
         {"watched_item": wi, "templates": refreshed},
     )
 
@@ -1283,7 +1283,7 @@ async def watched_item_template_delete(
     refreshed = await get_watched_item_templates(session, wi.id)
     return templates.TemplateResponse(
         request,
-        "partials/watched_item_templates.html",
+        "partials/watched_item_template_rows.html",
         {"watched_item": wi, "templates": refreshed},
     )
 

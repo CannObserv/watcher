@@ -117,3 +117,60 @@ class TestTemplateCrudRoutes:
             headers={"HX-Request": "true"},
         )
         assert b"No notification templates" in listing.content
+
+    async def test_create_returns_rows_only_not_wrapped_table(self, client, db_session):
+        """Regression: mutation handlers must return rows-only to avoid nested-table HTML.
+
+        hx-target is #wi-templates-tbody with innerHTML swap, so the response body
+        must be tbody-row content, NOT a wrapped <table>.
+        """
+        wi = await _seed(db_session)
+        response = await client.post(
+            f"/watched-items/{wi.id}/templates",
+            data={"title": "T", "channel_hint": "mailto://a:b@c", "events": "change_detected"},
+            headers={"HX-Request": "true"},
+        )
+        assert response.status_code == 200
+        body = response.content
+        # Must NOT contain a wrapping <table> or <thead>
+        assert b"<table" not in body
+        assert b"<thead" not in body
+        # SHOULD contain a row with the new title
+        assert b"<tr" in body
+        assert b"T" in body
+
+    async def test_update_returns_rows_only_not_wrapped_table(self, client, db_session):
+        """Regression: update mutation must return rows-only partial, not wrapped table."""
+        wi = await _seed(db_session)
+        tpl = await _seed_tpl(db_session, wi)
+        response = await client.post(
+            f"/watched-items/{wi.id}/templates/{tpl.id}",
+            data={
+                "title": "Renamed",
+                "channel_hint": tpl.channel_hint,
+                "events": "change_detected",
+            },
+            headers={"HX-Request": "true"},
+        )
+        assert response.status_code == 200
+        body = response.content
+        assert b"<table" not in body
+        assert b"<thead" not in body
+        assert b"<tr" in body
+        assert b"Renamed" in body
+
+    async def test_delete_returns_rows_only_not_wrapped_table(self, client, db_session):
+        """Regression: delete mutation must return rows-only partial, not wrapped table."""
+        wi = await _seed(db_session)
+        tpl = await _seed_tpl(db_session, wi)
+        response = await client.delete(
+            f"/watched-items/{wi.id}/templates/{tpl.id}",
+            headers={"HX-Request": "true"},
+        )
+        assert response.status_code == 200
+        body = response.content
+        assert b"<table" not in body
+        assert b"<thead" not in body
+        # After deleting the only template, the empty-state row should appear
+        assert b"<tr" in body
+        assert b"No notification templates" in body

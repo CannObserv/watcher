@@ -1,6 +1,12 @@
 """Integration tests for WatchedItem API endpoints."""
 
+from unittest.mock import AsyncMock
+
 import pytest
+from archiver_client import NotFound
+from sqlalchemy import select
+
+from src.core.models.audit_log import AuditLog, EventType
 
 pytestmark = pytest.mark.integration
 
@@ -244,3 +250,83 @@ class TestTemplateCrud:
         # Verify gone
         listing = await client.get(f"/api/v1/watched-items/{wi.id}/notification-templates")
         assert listing.json() == []
+
+
+class TestCreateWatchedItem:
+    async def test_creates_with_info_item_name_fallback(self, client, db_session, info_client):
+        from tests.conftest import make_info_item
+
+        item = await make_info_item(db_session, name="Source Item")
+        await db_session.commit()
+        response = await client.post(
+            "/api/v1/watched-items",
+            json={"info_item_id": str(item.info_item_id)},
+        )
+        assert response.status_code == 201, response.text
+        body = response.json()
+        assert body["info_item_id"] == str(item.info_item_id)
+        # Name falls back to the InfoItem's name when not supplied.
+        assert body["name"] == "Source Item"
+        assert body["default_schedule_config"] is None
+        assert body["archived_at"] is None
+
+    async def test_uses_supplied_name(self, client, db_session, info_client):
+        from tests.conftest import make_info_item
+
+        item = await make_info_item(db_session, name="Source")
+        await db_session.commit()
+        response = await client.post(
+            "/api/v1/watched-items",
+            json={
+                "info_item_id": str(item.info_item_id),
+                "name": "Overridden",
+                "default_schedule_config": {"interval": "10m"},
+                "default_tags": ["regulatory"],
+            },
+        )
+        assert response.status_code == 201
+        body = response.json()
+        assert body["name"] == "Overridden"
+        assert body["default_schedule_config"] == {"interval": "10m"}
+        assert body["default_tags"] == ["regulatory"]
+
+    async def test_duplicate_info_item_id_returns_409(self, client, db_session, info_client):
+        from tests.conftest import make_info_item
+
+        item = await make_info_item(db_session, name="X")
+        await db_session.commit()
+        r1 = await client.post(
+            "/api/v1/watched-items", json={"info_item_id": str(item.info_item_id)}
+        )
+        assert r1.status_code == 201
+        r2 = await client.post(
+            "/api/v1/watched-items", json={"info_item_id": str(item.info_item_id)}
+        )
+        assert r2.status_code == 409
+        assert "already" in r2.json()["detail"].lower()
+
+    async def test_unknown_info_item_returns_422(self, client, info_client):
+        info_client.get_info_item = AsyncMock(side_effect=NotFound("nope"))
+        response = await client.post(
+            "/api/v1/watched-items",
+            json={"info_item_id": "01ZZZZZZZZZZZZZZZZZZZZZZZZ"},
+        )
+        assert response.status_code == 422
+
+    async def test_emits_audit_event(self, client, db_session, info_client):
+        from tests.conftest import make_info_item
+
+        item = await make_info_item(db_session, name="A")
+        await db_session.commit()
+        await client.post("/api/v1/watched-items", json={"info_item_id": str(item.info_item_id)})
+        events = (
+            (
+                await db_session.execute(
+                    select(AuditLog).where(AuditLog.event_type == EventType.WATCHED_ITEM_CREATED)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert len(events) == 1
+        assert events[0].payload["source"] == "api"

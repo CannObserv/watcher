@@ -1064,38 +1064,42 @@ async def watched_item_detail_page(
     )
 
     client_sdk = get_registry().get_archiver_client()
+    info_item = None
+    primary_url: str | None = None
+    cross_checks: list = []
+    sub_aspects: list = []
+    new_subaspect_ids: set[str] = set()
     try:
         info_item = await client_sdk.get_info_item(str(wi.info_item_id))
+        bindings = await fetch_info_item_bindings(client_sdk, str(wi.info_item_id))
+        primary_url = bindings.primary_url
+        cross_checks = bindings.cross_checks
+        sub_aspects = bindings.sub_aspects
+        # Build the "new" set from the raw bindings list (it has .role +
+        # .created_at), keyed by info_source_id. The partial reads by id, so
+        # ordering between bindings.sub_aspects and info_item.info_item_sources
+        # never has to line up.
+        raw_subaspects = [b for b in (info_item.info_item_sources or []) if b.role == "sub_aspect"]
+        if wi.last_reviewed_at is None:
+            new_subaspect_ids = {str(b.info_source_id) for b in raw_subaspects}
+        else:
+            new_subaspect_ids = {
+                str(b.info_source_id) for b in raw_subaspects if b.created_at > wi.last_reviewed_at
+            }
     except NotFound:
         info_item = None
     except (httpx.ConnectError, ServerError, AuthError):
-        # Archiver down, unreachable, or auth misconfigured — render the page
-        # with a placeholder rather than hard-500. The summary card template
-        # handles `info_item is None`.
         logger.warning(
             "Archiver unavailable while rendering watched_item detail",
             extra={"watched_item_id": str(wi.id)},
         )
         info_item = None
-
-    # InfoItemSourceOut from get_info_item doesn't include the URL — resolve the
-    # primary binding via a second SDK call. Tracked for Archiver-side enrichment
-    # (return URL inline with InfoItem) as a future optimization.
-    primary_url: str | None = None
-    if info_item is not None and info_item.info_item_sources:
-        primary_source = next((s for s in info_item.info_item_sources if s.role is None), None)
-        if primary_source is not None:
-            try:
-                src = await client_sdk.get_info_source(primary_source.info_source_id)
-                primary_url = src.url
-            except (NotFound, httpx.ConnectError, ServerError, AuthError):
-                logger.warning(
-                    "primary InfoSource unavailable while rendering watched_item detail",
-                    extra={
-                        "watched_item_id": str(wi.id),
-                        "info_source_id": primary_source.info_source_id,
-                    },
-                )
+    except ValueError:
+        logger.warning(
+            "InfoItem has no valid primary binding while rendering watched_item detail",
+            extra={"watched_item_id": str(wi.id)},
+        )
+        info_item = None
 
     new_subaspect_count = count_new_subaspects(info_item, wi.last_reviewed_at)
 
@@ -1115,6 +1119,9 @@ async def watched_item_detail_page(
             "watched_item": wi,
             "info_item": info_item,
             "primary_url": primary_url,
+            "cross_checks": cross_checks,
+            "sub_aspects": sub_aspects,
+            "new_subaspect_ids": new_subaspect_ids,
             "child_watches": children,
             "watches": children,  # `watch_table.html` reads "watches"
             "flash": None,

@@ -1,4 +1,6 @@
-{# InfoItem summary card. Expects: info_item (SDK InfoItemOut or None), watched_item. #}
+{# InfoItem summary card. Expects: info_item (SDK InfoItemOut or None),
+   watched_item, primary_url (str or None — resolved separately by the route
+   because the SDK's InfoItemSourceOut doesn't include the URL). #}
 {% if info_item is none %}
 <div class="stat-card mb-6 text-sm text-gray-500">Archiver InfoItem summary unavailable.</div>
 {% else %}
@@ -7,6 +9,9 @@
     <div>
       <p class="text-sm text-gray-500 dark:text-gray-400">Archiver InfoItem</p>
       <p class="font-semibold text-gray-900 dark:text-white">{{ info_item.name }}</p>
+      {% if primary_url %}
+      <p class="text-sm text-gray-600 dark:text-gray-300 mt-1 break-all">{{ primary_url }}</p>
+      {% endif %}
     </div>
     <span class="text-xs font-mono text-gray-400">{{ info_item.info_item_id }}</span>
   </div>
@@ -22,9 +27,6 @@
       <span class="badge badge-active">{{ src.role }}</span>
       {% endif %}
       <span class="font-mono text-xs text-gray-500">{{ src.info_source_id }}</span>
-      {% if src.role is none and src.url is defined %}
-      <span class="text-gray-600 dark:text-gray-300 truncate">{{ src.url }}</span>
-      {% endif %}
     </li>
     {% endfor %}
   </ul>

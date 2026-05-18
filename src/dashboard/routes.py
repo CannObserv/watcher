@@ -903,6 +903,25 @@ async def watched_item_detail_page(
         )
         info_item = None
 
+    # InfoItemSourceOut from get_info_item doesn't include the URL — resolve the
+    # primary binding via a second SDK call. Tracked for Archiver-side enrichment
+    # (return URL inline with InfoItem) as a future optimization.
+    primary_url: str | None = None
+    if info_item is not None and info_item.info_item_sources:
+        primary_source = next((s for s in info_item.info_item_sources if s.role is None), None)
+        if primary_source is not None:
+            try:
+                src = await client_sdk.get_info_source(primary_source.info_source_id)
+                primary_url = src.url
+            except (NotFound, httpx.ConnectError, ServerError):
+                logger.warning(
+                    "primary InfoSource unavailable while rendering watched_item detail",
+                    extra={
+                        "watched_item_id": str(wi.id),
+                        "info_source_id": primary_source.info_source_id,
+                    },
+                )
+
     new_subaspect_count = count_new_subaspects(info_item, wi.last_reviewed_at)
 
     wi_templates = await get_watched_item_templates(session, wi.id)
@@ -920,6 +939,7 @@ async def watched_item_detail_page(
             "active_page": "watched-items",
             "watched_item": wi,
             "info_item": info_item,
+            "primary_url": primary_url,
             "child_watches": children,
             "watches": children,  # `watch_table.html` reads "watches"
             "flash": None,
@@ -1070,6 +1090,13 @@ async def watched_item_tag_add(
     tag = tag.strip()
     if not tag:
         raise HTTPException(status_code=400, detail="Tag cannot be empty")
+    # Mirror the template's HTML5 pattern="[^\s,]+" so non-HTMX callers
+    # (curl, scripts) can't bypass it.
+    if any(c.isspace() or c == "," for c in tag):
+        raise HTTPException(
+            status_code=400,
+            detail="Tag cannot contain whitespace or commas",
+        )
     current = list(wi.default_tags or [])
     if tag not in current:
         current.append(tag)

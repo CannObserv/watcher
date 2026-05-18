@@ -128,8 +128,8 @@ class TestArchiveRestore:
         from tests.conftest import make_watch
 
         wi = await _make_watched_item(db_session)
-        w1 = await make_watch(db_session, name="C1", watched_item=wi, info_item_id=wi.info_item_id)
-        w2 = await make_watch(db_session, name="C2", watched_item=wi, info_item_id=wi.info_item_id)
+        w1 = await make_watch(db_session, name="C1", watched_item=wi)
+        w2 = await make_watch(db_session, name="C2", watched_item=wi)
         await db_session.commit()
         response = await client.post(f"/api/v1/watched-items/{wi.id}/archive")
         assert response.status_code == 200
@@ -149,7 +149,6 @@ class TestArchiveRestore:
             db_session,
             name="ChildArchived",
             watched_item=wi,
-            info_item_id=wi.info_item_id,
             is_active=False,
             is_archived=True,
         )

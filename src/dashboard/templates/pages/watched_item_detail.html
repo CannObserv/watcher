@@ -29,12 +29,7 @@
     {{ watched_item_field(field_contexts["default_content_type"]) }}
     <div class="p-4">
       <span class="form-label mb-2 block">Default Tags</span>
-      <div
-        hx-get="/watched-items/{{ watched_item.id }}/tags"
-        hx-trigger="load"
-        hx-swap="outerHTML">
-        {% include "partials/watched_item_tags_editor.html" %}
-      </div>
+      {% include "partials/watched_item_tags_editor.html" %}
     </div>
   </div>
 </section>

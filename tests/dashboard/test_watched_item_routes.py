@@ -74,13 +74,39 @@ class TestDetailPage:
         await db_session.flush()
         await db_session.commit()
         info_client.get_info_item = AsyncMock(
-            return_value=_fake_info_item_out(
-                info_item_id=str(item.info_item_id),
-                primary_url="https://example.org/foo",
-            )
+            return_value=_fake_info_item_out(info_item_id=str(item.info_item_id))
+        )
+        info_client.get_info_source = AsyncMock(
+            return_value=_fake_info_source_out(url="https://example.org/foo")
         )
         response = await client.get(f"/watched-items/{wi.id}")
         assert b"https://example.org/foo" in response.content
+
+    async def test_renders_without_primary_url_when_archiver_partial(
+        self, client, db_session, info_client
+    ):
+        """Regression: detail page must render when InfoItem succeeds but
+        get_info_source fails (Archiver partial outage)."""
+        from unittest.mock import AsyncMock
+
+        from archiver_client import NotFound
+
+        from src.core.models.watched_item import WatchedItem
+        from tests.conftest import make_info_item
+
+        item = await make_info_item(db_session)
+        wi = WatchedItem(info_item_id=item.info_item_id, name="Partial")
+        db_session.add(wi)
+        await db_session.flush()
+        await db_session.commit()
+        info_client.get_info_item = AsyncMock(
+            return_value=_fake_info_item_out(info_item_id=str(item.info_item_id))
+        )
+        info_client.get_info_source = AsyncMock(side_effect=NotFound("nope"))
+        response = await client.get(f"/watched-items/{wi.id}")
+        assert response.status_code == 200
+        # InfoItem card still renders
+        assert b"Fake InfoItem" in response.content
 
     async def test_renders_danger_zone_archive(self, client, db_session, info_client):
         from unittest.mock import AsyncMock
@@ -129,7 +155,6 @@ class TestArchiveRestore:
             db_session,
             name="Child",
             watched_item=wi,
-            info_item_id=wi.info_item_id,
         )
         await db_session.commit()
 
@@ -368,6 +393,27 @@ class TestTagsEditor:
         await db_session.refresh(wi)
         assert wi.default_tags == ["a"]
 
+    @pytest.mark.parametrize("bad_tag", ["foo bar", "foo,bar", "a\tb", "x\ny"])
+    async def test_add_rejects_whitespace_or_comma(self, client, db_session, bad_tag):
+        """Server-side validation mirrors the HTML5 pattern='[^\\s,]+' so
+        non-HTMX callers can't bypass the tag format constraint."""
+        from src.core.models.watched_item import WatchedItem
+        from tests.conftest import make_info_item
+
+        item = await make_info_item(db_session)
+        wi = WatchedItem(info_item_id=item.info_item_id, name="T")
+        db_session.add(wi)
+        await db_session.flush()
+        await db_session.commit()
+        response = await client.post(
+            f"/watched-items/{wi.id}/tags",
+            data={"tag": bad_tag},
+            headers={"HX-Request": "true"},
+        )
+        assert response.status_code == 400
+        await db_session.refresh(wi)
+        assert wi.default_tags is None
+
 
 class TestSubAspectBanner:
     async def test_banner_shows_count_when_new(self, client, db_session, info_client):
@@ -459,8 +505,14 @@ class TestSubAspectBanner:
         assert wi.last_reviewed_at is not None
 
 
-def _fake_info_item_out(*, info_item_id, primary_url="https://example.com"):
-    """Minimal InfoItemOut-shaped mock for the summary card."""
+def _fake_info_item_out(*, info_item_id):
+    """Minimal InfoItemOut-shaped mock for the summary card.
+
+    Matches the real SDK `InfoItemSourceOut` shape — no `url` attribute on
+    the source. The detail route resolves the primary URL via a separate
+    ``get_info_source(...)`` call; tests that need the URL must stub that
+    call too (see :func:`_fake_info_source_out`).
+    """
     from datetime import UTC, datetime
     from types import SimpleNamespace
 
@@ -474,7 +526,13 @@ def _fake_info_item_out(*, info_item_id, primary_url="https://example.com"):
                 info_source_id="fake-primary-src",
                 role=None,  # primary
                 created_at=datetime.now(UTC),
-                url=primary_url,
             ),
         ],
     )
+
+
+def _fake_info_source_out(url="https://example.com"):
+    """Minimal InfoSourceOut-shaped mock for ``get_info_source`` calls."""
+    from types import SimpleNamespace
+
+    return SimpleNamespace(info_source_id="fake-primary-src", url=url)

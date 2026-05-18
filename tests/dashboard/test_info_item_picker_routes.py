@@ -1,6 +1,7 @@
 """Tests for InfoItem picker dashboard routes (#162)."""
 
 import pytest
+from archiver_client import ServerError
 
 from tests.conftest import make_info_item
 
@@ -38,6 +39,12 @@ class TestSearchRoute:
         response = await client.get("/info-items/search?q=")
         assert response.status_code == 200
         info_client.find_info_item.assert_not_called()
+
+    async def test_sdk_server_error_degrades_to_empty_results(self, client, info_client):
+        info_client.find_info_item.side_effect = ServerError("boom")
+        response = await client.get("/info-items/search?q=anything")
+        assert response.status_code == 200
+        assert "No matches" in response.text
 
     async def test_search_limit_capped_at_20(self, client, info_client, db_session):
         for i in range(25):

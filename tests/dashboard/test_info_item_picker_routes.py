@@ -176,6 +176,22 @@ class TestBindingTreeRoute:
         response = await client.get("/info-items/01ZZZZZZZZZZZZZZZZZZZZZZZZ/binding-tree")
         assert response.status_code == 404
 
+    async def test_404_info_item_with_no_primary_binding(self, client, db_session, info_client):
+        """InfoItem exists but has no primary binding — fetch_info_item_bindings raises
+        ValueError; route must return a 404 partial, not a 500."""
+        item = await make_info_item(db_session)
+        await db_session.commit()
+        response = await client.get(f"/info-items/{item.info_item_id}/binding-tree")
+        assert response.status_code == 404
+        assert "primary" in response.text.lower() or "not found" in response.text.lower()
+
+    async def test_503_on_archiver_transport_error(self, client, info_client):
+        """SDK transport error during tree render degrades to a 503 partial."""
+        info_client.get_info_item = AsyncMock(side_effect=ServerError("boom"))
+        response = await client.get("/info-items/01ZZZZZZZZZZZZZZZZZZZZZZZZ/binding-tree")
+        assert response.status_code == 503
+        assert "unavailable" in response.text.lower()
+
 
 class TestTypeaheadPartial:
     async def test_typeahead_renders_combobox_attributes(self, client, db_session, info_client):

@@ -32,6 +32,13 @@ class TestWatchedItemCreateForm:
         assert b'name="default_content_type"' in body
         assert b'name="default_tags"' in body
 
+    async def test_form_lists_all_content_types(self, client):
+        response = await client.get("/watched-items/new")
+        body = response.content
+        assert b'value="html"' in body
+        assert b'value="pdf"' in body
+        assert b'value="file"' in body
+
 
 class TestWatchedItemCreateSubmit:
     async def test_redirects_on_success(self, client, db_session, info_client):
@@ -114,6 +121,19 @@ class TestWatchedItemCreateSubmit:
         )
         assert response.status_code == 200
         assert b"interval" in response.content.lower()
+
+    async def test_invalid_content_type_shows_flash(self, client, db_session, info_client):
+        item = await make_info_item(db_session, name="CT Bad")
+        await db_session.commit()
+        response = await client.post(
+            "/watched-items/new",
+            data={
+                "info_item_id": str(item.info_item_id),
+                "default_content_type": "garbage",
+            },
+        )
+        assert response.status_code == 200
+        assert b"content type" in response.content.lower()
 
     async def test_emits_audit_with_source_dashboard(self, client, db_session, info_client):
         item = await make_info_item(db_session, name="Z")

@@ -284,7 +284,8 @@ async def info_item_binding_tree(
 
     Bound to the search route's result-row hx-get target. Renders the
     primary + sub_aspects (selectable in step-2 modes) + cross_checks (muted,
-    never selectable). NotFound → 404 partial.
+    never selectable). NotFound / ValueError → 404 partial; SDK transport
+    errors degrade to a 503 partial rather than raising.
 
     ``new_subaspect_ids`` is a comma-separated list of info_source_ids to
     flag with a "new" badge — only meaningful in ``readonly_tree`` mode
@@ -294,9 +295,19 @@ async def info_item_binding_tree(
     try:
         bindings = await fetch_info_item_bindings(info_client, info_item_id)
         info_item = bindings.info_item
-    except NotFound:
+    except (NotFound, ValueError):
         return HTMLResponse(
-            '<p class="text-sm text-red-600">InfoItem not found.</p>', status_code=404
+            '<p class="text-sm text-red-600">InfoItem not found or has no primary binding.</p>',
+            status_code=404,
+        )
+    except (ServerError, httpx.ConnectError, httpx.TimeoutException, AuthError):
+        logger.warning(
+            "Archiver unavailable during binding-tree render",
+            extra={"info_item_id": info_item_id},
+        )
+        return HTMLResponse(
+            '<p class="text-sm text-red-600">InfoItem bindings temporarily unavailable.</p>',
+            status_code=503,
         )
     flagged = {s.strip() for s in new_subaspect_ids.split(",") if s.strip()} or None
     return templates.TemplateResponse(
@@ -940,7 +951,7 @@ async def watched_item_create_form(request: Request):
     return templates.TemplateResponse(
         request,
         "pages/watched_item_form.html",
-        {"active_page": "watched-items", "flash": None},
+        {"active_page": "watched-items", "flash": None, "content_types": list(ContentType)},
     )
 
 
@@ -967,7 +978,11 @@ async def watched_item_create_submit(
         return templates.TemplateResponse(
             request,
             "pages/watched_item_form.html",
-            {"active_page": "watched-items", "flash": {"type": level, "message": message}},
+            {
+                "active_page": "watched-items",
+                "flash": {"type": level, "message": message},
+                "content_types": list(ContentType),
+            },
         )
 
     iid = info_item_id.strip()
@@ -980,6 +995,13 @@ async def watched_item_create_submit(
             parse_interval(interval_raw)
         except ValueError as exc:
             return await _render_with_flash(str(exc))
+
+    ct_raw = default_content_type.strip() or None
+    if ct_raw is not None:
+        try:
+            ContentType(ct_raw)
+        except ValueError:
+            return await _render_with_flash(f"Invalid content type: {ct_raw!r}")
 
     tags = [t.strip() for t in default_tags.split(",") if t.strip()] or None
 
@@ -998,7 +1020,7 @@ async def watched_item_create_submit(
         name=(name.strip() or info_item.name),
         description=description.strip() or None,
         default_schedule_config={"interval": interval_raw} if interval_raw else None,
-        default_content_type=(default_content_type.strip() or None),
+        default_content_type=ct_raw,
         default_tags=tags,
     )
     session.add(wi)

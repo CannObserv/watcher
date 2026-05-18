@@ -39,8 +39,9 @@
     <label for="default_content_type" class="form-label">Default content type <span class="text-xs text-gray-500">(optional)</span></label>
     <select name="default_content_type" id="default_content_type" class="form-input mt-1">
       <option value="">—</option>
-      <option value="html">HTML</option>
-      <option value="pdf">PDF</option>
+      {% for ct in content_types %}
+      <option value="{{ ct.value }}">{{ ct.value | upper }}</option>
+      {% endfor %}
     </select>
   </div>
 

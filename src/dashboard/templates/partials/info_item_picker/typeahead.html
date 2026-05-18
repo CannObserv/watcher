@@ -17,7 +17,7 @@
     aria-controls="{{ target_form_id }}-iip-results"
     aria-activedescendant=""
     hx-get="/info-items/search?mode={{ mode }}&amp;target_form_id={{ target_form_id }}"
-    hx-trigger="input changed delay:250ms, search"
+    hx-trigger="input changed delay:250ms"
     hx-target="#{{ target_form_id }}-iip-results"
     hx-swap="innerHTML"
     hx-params="q"

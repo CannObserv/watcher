@@ -15,12 +15,10 @@
         class="block w-full text-start min-h-[44px]"
         data-info-item-id="{{ item.info_item_id }}"
         data-info-item-name="{{ item.name }}"
-        {% if mode == "select_with_target" %}
-        hx-get="/info-items/{{ item.info_item_id }}/binding-tree?mode=select_with_target&amp;target_form_id={{ target_form_id }}"
+        {% if mode != "readonly_tree" %}
+        hx-get="/info-items/{{ item.info_item_id }}/binding-tree?mode={{ mode }}&amp;target_form_id={{ target_form_id }}"
         hx-target="#{{ target_form_id }}-binding-tree"
         hx-swap="innerHTML"
-        {% else %}
-        data-info-item-select="true"
         {% endif %}>
         <span class="block font-medium text-gray-900 dark:text-white">{{ item.name }}</span>
         {% if item.description %}

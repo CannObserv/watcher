@@ -63,6 +63,21 @@ class TestSearchRoute:
         args, kwargs = info_client.find_info_item.call_args
         assert kwargs.get("limit") == 20
 
+    async def test_select_only_result_has_binding_tree_htmx(self, client, db_session, info_client):
+        """select_only buttons must carry hx-get to the binding-tree route so
+        the hidden info_item_id input is injected when an option is chosen.
+        Without it the WatchedItem create form can never submit a valid id."""
+        await make_info_item(db_session, name="Picker Test Item")
+        await db_session.commit()
+        response = await client.get(
+            "/info-items/search?q=picker&mode=select_only&target_form_id=wi-create"
+        )
+        assert response.status_code == 200
+        body = response.text
+        assert "binding-tree" in body
+        assert "mode=select_only" in body
+        assert "data-info-item-select" not in body
+
 
 class TestBindingTreeRoute:
     async def test_renders_primary_only(self, client, db_session, info_client):

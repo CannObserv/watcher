@@ -18,6 +18,7 @@ from src.api.schemas.notification_template import (
 )
 from src.api.schemas.types import HttpUrlStr
 from src.api.schemas.watch import WatchCreate, WatchResponse, WatchUpdate
+from src.api.schemas.watched_item import WatchedItemCreate
 from src.core.models.audit_log import EventType
 from src.core.models.watch import ContentType, Watch
 
@@ -410,3 +411,26 @@ class TestNotificationTemplateResponse:
             }
         )
         assert resp.content_config is None
+
+
+class TestWatchedItemCreate:
+    def test_watched_item_create_requires_info_item_id(self):
+        with pytest.raises(ValidationError):
+            WatchedItemCreate(name="X")
+
+    def test_watched_item_create_minimal_ok(self):
+        schema = WatchedItemCreate(info_item_id="01ABCDEFGHJKMNPQRSTVWXYZ00")
+        assert schema.info_item_id == "01ABCDEFGHJKMNPQRSTVWXYZ00"
+        assert schema.name is None
+        assert schema.default_tags is None
+
+    def test_watched_item_create_full_ok(self):
+        schema = WatchedItemCreate(
+            info_item_id="01ABCDEFGHJKMNPQRSTVWXYZ00",
+            name="Custom Name",
+            description="Note",
+            default_schedule_config={"interval": "15m"},
+            default_content_type="html",
+            default_tags=["regulatory"],
+        )
+        assert schema.default_content_type == "html"

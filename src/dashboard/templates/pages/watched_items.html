@@ -3,6 +3,7 @@
 {% block content %}
 <div class="flex justify-between items-center mb-6 flex-wrap gap-4">
   <h2 class="text-2xl font-semibold text-gray-900 dark:text-white">Watched Items</h2>
+  <a href="/watched-items/new" class="btn btn-primary">New WatchedItem</a>
 </div>
 
 {% if watched_items %}
@@ -53,9 +54,13 @@
 <div class="stat-card text-center py-12">
   <p class="text-lg font-medium text-gray-900 dark:text-white mb-2">No watched items yet</p>
   <p class="text-sm text-gray-500 dark:text-gray-400 mb-6">
-    A WatchedItem is auto-created when you add the first Watch under an Archiver InfoItem.
+    Create a WatchedItem to stage defaults, or jump straight to creating a Watch
+    (a WatchedItem is auto-created on the first Watch under an InfoItem).
   </p>
-  <a href="/watches/new" class="btn btn-primary">Create your first Watch</a>
+  <div class="flex justify-center gap-3">
+    <a href="/watched-items/new" class="btn btn-primary">New WatchedItem</a>
+    <a href="/watches/new" class="btn btn-secondary">New Watch</a>
+  </div>
 </div>
 {% endif %}
 {% endblock %}

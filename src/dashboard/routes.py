@@ -13,7 +13,9 @@ from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from jinja2 import TemplateError
 from notifier_client.errors import NotifierError
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+from ulid import ULID
 
 from src.api.deps import get_db_session, get_probe_fn
 from src.api.routes.helpers import parse_ulid
@@ -36,6 +38,7 @@ from src.core.models.domain import Domain
 from src.core.models.notification_config import WatchNotificationConfig
 from src.core.models.notification_template import DomainNcRef, NotificationTemplate, WatchNcRef
 from src.core.models.watch import ContentType, Watch
+from src.core.models.watched_item import WatchedItem
 from src.core.models.watched_item_notification_template import (
     WatchedItemNotificationTemplate,
 )
@@ -929,6 +932,91 @@ async def watch_deactivate(
             {"watch": watch, "health_map": health_map},
         )
     return RedirectResponse(url="/watches", status_code=303)
+
+
+@router.get("/watched-items/new")
+async def watched_item_create_form(request: Request):
+    """Standalone WatchedItem create form."""
+    return templates.TemplateResponse(
+        request,
+        "pages/watched_item_form.html",
+        {"active_page": "watched-items", "flash": None},
+    )
+
+
+@router.post("/watched-items/new")
+async def watched_item_create_submit(
+    request: Request,
+    info_item_id: str = Form(""),
+    name: str = Form(""),
+    description: str = Form(""),
+    default_schedule_interval: str = Form(""),
+    default_content_type: str = Form(""),
+    default_tags: str = Form(""),
+    session: AsyncSession = Depends(get_db_session),
+):
+    """Create a standalone WatchedItem from the dashboard form.
+
+    Mirrors the API route's error handling but renders flashes instead of
+    raising HTTPException. Audit row uses ``source="dashboard"`` to
+    distinguish from API-driven (``source="api"``) and auto-create
+    (``source="auto_create"``).
+    """
+
+    async def _render_with_flash(message: str, level: str = "error"):
+        return templates.TemplateResponse(
+            request,
+            "pages/watched_item_form.html",
+            {"active_page": "watched-items", "flash": {"type": level, "message": message}},
+        )
+
+    iid = info_item_id.strip()
+    if not iid:
+        return await _render_with_flash("InfoItem is required")
+
+    interval_raw = default_schedule_interval.strip()
+    if interval_raw:
+        try:
+            parse_interval(interval_raw)
+        except ValueError as exc:
+            return await _render_with_flash(str(exc))
+
+    tags = [t.strip() for t in default_tags.split(",") if t.strip()] or None
+
+    info_client = get_registry().get_archiver_client()
+    try:
+        info_item = await info_client.get_info_item(iid)
+    except NotFound:
+        return await _render_with_flash(f"InfoItem {iid} does not exist")
+    except AuthError:
+        return await _render_with_flash("Information service auth failed")
+    except (ServerError, httpx.ConnectError, httpx.TimeoutException) as exc:
+        return await _render_with_flash(f"Information service unavailable: {exc}")
+
+    wi = WatchedItem(
+        info_item_id=ULID.from_str(iid),
+        name=(name.strip() or info_item.name),
+        description=description.strip() or None,
+        default_schedule_config={"interval": interval_raw} if interval_raw else None,
+        default_content_type=(default_content_type.strip() or None),
+        default_tags=tags,
+    )
+    session.add(wi)
+    try:
+        await session.flush()
+    except IntegrityError:
+        await session.rollback()
+        return await _render_with_flash(f"WatchedItem for InfoItem {iid} already exists")
+    audit(
+        session,
+        EventType.WATCHED_ITEM_CREATED,
+        watched_item_id=str(wi.id),
+        info_item_id=iid,
+        name=wi.name,
+        source="dashboard",
+    )
+    await session.commit()
+    return RedirectResponse(url=f"/watched-items/{wi.id}", status_code=303)
 
 
 @router.get("/watched-items")

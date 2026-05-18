@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+{% block title %}New WatchedItem — Watcher{% endblock %}
+{% block content %}
+<h2 class="text-2xl font-bold text-gray-900 dark:text-white mb-6">New WatchedItem</h2>
+
+{% include "partials/flash.html" %}
+
+<form id="wi-create" method="post" action="/watched-items/new" class="max-w-xl space-y-6">
+  <fieldset>
+    <legend class="form-label">InfoItem</legend>
+    {% with target_form_id="wi-create", mode="select_only" %}
+    {% include "partials/info_item_picker/typeahead.html" %}
+    {% endwith %}
+    <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">
+      Subscribes this WatchedItem to one Archiver InfoItem (1:1). Defaults below
+      apply to all child Watches that don't override.
+    </p>
+  </fieldset>
+
+  <div>
+    <label for="name" class="form-label">Name <span class="text-xs text-gray-500">(optional)</span></label>
+    <input type="text" name="name" id="name" maxlength="255" class="form-input mt-1"
+      placeholder="Defaults to the InfoItem's name.">
+  </div>
+
+  <div>
+    <label for="description" class="form-label">Description <span class="text-xs text-gray-500">(optional)</span></label>
+    <textarea name="description" id="description" rows="2" class="form-input mt-1"></textarea>
+  </div>
+
+  <div>
+    <label for="default_schedule_interval" class="form-label">Default interval <span class="text-xs text-gray-500">(optional)</span></label>
+    <input type="text" name="default_schedule_interval" id="default_schedule_interval"
+      placeholder="e.g. 15m, 6h, 1d" class="form-input mt-1">
+    <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">Child Watches inherit unless they override.</p>
+  </div>
+
+  <div>
+    <label for="default_content_type" class="form-label">Default content type <span class="text-xs text-gray-500">(optional)</span></label>
+    <select name="default_content_type" id="default_content_type" class="form-input mt-1">
+      <option value="">—</option>
+      <option value="html">HTML</option>
+      <option value="pdf">PDF</option>
+    </select>
+  </div>
+
+  <div>
+    <label for="default_tags" class="form-label">Default tags <span class="text-xs text-gray-500">(optional, comma-separated)</span></label>
+    <input type="text" name="default_tags" id="default_tags" class="form-input mt-1"
+      placeholder="regulatory, legislative">
+  </div>
+
+  <div class="flex gap-3">
+    <button type="submit" class="btn btn-primary">Create WatchedItem</button>
+    <a href="/watched-items" class="btn btn-secondary">Cancel</a>
+  </div>
+</form>
+{% endblock %}

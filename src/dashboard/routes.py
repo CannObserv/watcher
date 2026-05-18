@@ -293,7 +293,7 @@ async def info_item_binding_tree(
     info_client = get_registry().get_archiver_client()
     try:
         bindings = await fetch_info_item_bindings(info_client, info_item_id)
-        info_item = await info_client.get_info_item(info_item_id)
+        info_item = bindings.info_item
     except NotFound:
         return HTMLResponse(
             '<p class="text-sm text-red-600">InfoItem not found.</p>', status_code=404
@@ -1070,8 +1070,8 @@ async def watched_item_detail_page(
     sub_aspects: list = []
     new_subaspect_ids: set[str] = set()
     try:
-        info_item = await client_sdk.get_info_item(str(wi.info_item_id))
         bindings = await fetch_info_item_bindings(client_sdk, str(wi.info_item_id))
+        info_item = bindings.info_item
         primary_url = bindings.primary_url
         cross_checks = bindings.cross_checks
         sub_aspects = bindings.sub_aspects

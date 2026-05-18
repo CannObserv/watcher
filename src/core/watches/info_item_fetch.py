@@ -1,7 +1,7 @@
 """Resolve an Archiver InfoItem's bindings, partitioned by role."""
 
 from dataclasses import dataclass
-from typing import Protocol, runtime_checkable
+from typing import Any, Protocol, runtime_checkable
 
 from archiver_client import ArchiverClient
 
@@ -43,12 +43,16 @@ class InfoItemBindings:
     `sub_aspects` are fragment-shaped bindings with role='sub_aspect'.
     `primary_url` is the root URL the cycle fetches; all extractions run against
     its bytes.
+    `info_item` is the SDK's full ``InfoItemOut`` (with ``info_item_sources``
+    list carrying ``role`` + ``created_at``) so callers don't need to re-issue
+    ``get_info_item`` for the parent record.
     """
 
     primary: InfoSourceProto
     cross_checks: list[InfoSourceProto]
     sub_aspects: list[InfoSourceProto]
     primary_url: str
+    info_item: Any
 
 
 async def fetch_info_item_bindings(
@@ -101,4 +105,5 @@ async def fetch_info_item_bindings(
         cross_checks=cross_checks,
         sub_aspects=sub_aspects,
         primary_url=primary_url,
+        info_item=info_item,
     )

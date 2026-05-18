@@ -16,8 +16,11 @@
     <span class="text-xs font-mono text-gray-400">{{ info_item.info_item_id }}</span>
   </div>
   {# Binding list excludes the primary — it's already represented above as the
-     InfoItem name + URL. Only cross_check / sub_aspect rows show here. #}
-  {% set non_primary = info_item.info_item_sources | rejectattr("role", "none") | list %}
+     InfoItem name + URL. Only cross_check / sub_aspect rows show here. The
+     `or []` defends against an SDK contract drift returning None instead of
+     an empty list (current SDK always returns a list). #}
+  {% set sources = info_item.info_item_sources or [] %}
+  {% set non_primary = sources | rejectattr("role", "none") | list %}
   {% if non_primary %}
   <ul class="text-sm space-y-1">
     {% for src in non_primary %}

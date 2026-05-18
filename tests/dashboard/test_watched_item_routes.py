@@ -1,8 +1,21 @@
 """Integration tests for WatchedItem dashboard routes."""
 
+import httpx
 import pytest
+from archiver_client import AuthError, NotFound, ServerError
 
 pytestmark = pytest.mark.integration
+
+# Every exception class the watched_item_detail_page route's two SDK
+# try/except blocks promise to swallow. Used to parametrise graceful-
+# fallback tests so a future refactor splitting the except clauses can't
+# silently regress any single path.
+_SDK_FAILURE_FACTORIES = [
+    pytest.param(lambda: NotFound("nope"), id="NotFound"),
+    pytest.param(lambda: ServerError("nope"), id="ServerError"),
+    pytest.param(lambda: AuthError("nope"), id="AuthError"),
+    pytest.param(lambda: httpx.ConnectError("nope"), id="ConnectError"),
+]
 
 
 class TestListPage:
@@ -129,14 +142,15 @@ class TestDetailPage:
         # the URL stands in for it in the header.
         assert b"primary-src-id" not in body
 
+    @pytest.mark.parametrize("exc_factory", _SDK_FAILURE_FACTORIES)
     async def test_renders_without_primary_url_when_archiver_partial(
-        self, client, db_session, info_client
+        self, client, db_session, info_client, exc_factory
     ):
         """Regression: detail page must render when InfoItem succeeds but
-        get_info_source fails (Archiver partial outage)."""
+        get_info_source fails. Parametrised across every exception class in
+        the route's except clause so a future refactor splitting them can't
+        silently regress any single path."""
         from unittest.mock import AsyncMock
-
-        from archiver_client import NotFound
 
         from src.core.models.watched_item import WatchedItem
         from tests.conftest import make_info_item
@@ -149,11 +163,33 @@ class TestDetailPage:
         info_client.get_info_item = AsyncMock(
             return_value=_fake_info_item_out(info_item_id=str(item.info_item_id))
         )
-        info_client.get_info_source = AsyncMock(side_effect=NotFound("nope"))
+        info_client.get_info_source = AsyncMock(side_effect=exc_factory())
         response = await client.get(f"/watched-items/{wi.id}")
         assert response.status_code == 200
-        # InfoItem card still renders
+        # InfoItem card still renders even without the URL
         assert b"Fake InfoItem" in response.content
+
+    @pytest.mark.parametrize("exc_factory", _SDK_FAILURE_FACTORIES)
+    async def test_renders_when_get_info_item_fails(
+        self, client, db_session, info_client, exc_factory
+    ):
+        """Regression: detail page must render with the 'summary unavailable'
+        placeholder when get_info_item itself fails. Parametrised across
+        every exception class in the route's except clause."""
+        from unittest.mock import AsyncMock
+
+        from src.core.models.watched_item import WatchedItem
+        from tests.conftest import make_info_item
+
+        item = await make_info_item(db_session)
+        wi = WatchedItem(info_item_id=item.info_item_id, name="Outage")
+        db_session.add(wi)
+        await db_session.flush()
+        await db_session.commit()
+        info_client.get_info_item = AsyncMock(side_effect=exc_factory())
+        response = await client.get(f"/watched-items/{wi.id}")
+        assert response.status_code == 200
+        assert b"Archiver InfoItem summary unavailable" in response.content
 
     async def test_renders_danger_zone_archive(self, client, db_session, info_client):
         from unittest.mock import AsyncMock

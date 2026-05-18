@@ -5,7 +5,7 @@
 
 {% include "partials/flash.html" %}
 
-<form method="post" class="max-w-xl space-y-6">
+<form method="post" id="watch-create" class="max-w-xl space-y-6">
   <div>
     <label for="name" class="form-label">Name</label>
     <input type="text" name="name" id="name" required
@@ -15,7 +15,10 @@
   </div>
 
   <div>
-    {% include "partials/target_picker.html" %}
+    <input type="hidden" name="info_item_id" value="" form="watch-create" id="watch-create-info-item-id">
+    {% with target_form_id="watch-create", mode="select_with_target" %}
+    {% include "partials/info_item_picker/typeahead.html" %}
+    {% endwith %}
   </div>
 
   <div>

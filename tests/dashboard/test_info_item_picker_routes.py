@@ -160,3 +160,14 @@ class TestBindingTreeRoute:
         info_client.get_info_item = AsyncMock(side_effect=NotFound("nope"))
         response = await client.get("/info-items/01ZZZZZZZZZZZZZZZZZZZZZZZZ/binding-tree")
         assert response.status_code == 404
+
+
+class TestTypeaheadPartial:
+    async def test_typeahead_renders_combobox_attributes(self, client, db_session, info_client):
+        response = await client.get("/watches/new")
+        assert response.status_code == 200
+        body = response.text
+        assert 'role="combobox"' in body
+        assert "aria-expanded" in body
+        assert "aria-activedescendant" in body
+        assert 'hx-get="/info-items/search' in body

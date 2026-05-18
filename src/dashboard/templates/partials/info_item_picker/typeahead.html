@@ -1,0 +1,35 @@
+{# Step-1 InfoItem typeahead. Caller passes:
+   target_form_id: str (the form that contains the eventual <input name="info_item_id">)
+   mode: "select_with_target" | "select_only"
+   field_label: str (optional; defaults to "InfoItem")
+#}
+<div class="info-item-picker" data-target-form="{{ target_form_id }}" data-mode="{{ mode }}">
+  <label for="{{ target_form_id }}-iip-input" class="form-label">{{ field_label or "InfoItem" }}</label>
+  <input
+    id="{{ target_form_id }}-iip-input"
+    type="search"
+    class="form-input mt-1"
+    autocomplete="off"
+    placeholder="Type to search by name…"
+    role="combobox"
+    aria-expanded="false"
+    aria-autocomplete="list"
+    aria-controls="{{ target_form_id }}-iip-results"
+    aria-activedescendant=""
+    hx-get="/info-items/search?mode={{ mode }}&amp;target_form_id={{ target_form_id }}"
+    hx-trigger="input changed delay:250ms, search"
+    hx-target="#{{ target_form_id }}-iip-results"
+    hx-swap="innerHTML"
+    hx-params="q,mode,target_form_id"
+    name="q">
+  <div id="{{ target_form_id }}-iip-results"
+       class="border border-gray-200 dark:border-gray-700 rounded-md mt-1 max-h-72 overflow-y-auto"
+       aria-live="polite" aria-atomic="false">
+    {# Initial empty state — server-renders no <ul> until first search. #}
+  </div>
+  <div id="{{ target_form_id }}-binding-tree" class="mt-3">
+    {# Binding-tree partial swapped in here when an option is chosen
+       (mode=select_with_target). For select_only, a hidden info_item_id
+       input is injected into the parent form via the binding-tree partial. #}
+  </div>
+</div>

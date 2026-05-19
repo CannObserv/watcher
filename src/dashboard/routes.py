@@ -306,7 +306,7 @@ async def info_item_binding_tree(
             sub_aspects = bindings.sub_aspects
         except ValueError:
             if mode == "select_with_target":
-                msg = "InfoItem has no primary binding — cannot select a watch target."
+                msg = "Information Item has no primary binding — cannot select a watch target."
                 return HTMLResponse(
                     f'<p class="text-sm text-red-600">{msg}</p>',
                     status_code=200,
@@ -318,7 +318,7 @@ async def info_item_binding_tree(
             sub_aspects = []
     except NotFound:
         return HTMLResponse(
-            '<p class="text-sm text-red-600">InfoItem not found.</p>',
+            '<p class="text-sm text-red-600">Information Item not found.</p>',
             status_code=200,
         )
     except (ServerError, httpx.ConnectError, httpx.TimeoutException, AuthError):
@@ -326,8 +326,9 @@ async def info_item_binding_tree(
             "Archiver unavailable during binding-tree render",
             extra={"info_item_id": info_item_id},
         )
+        msg = "Information Item bindings temporarily unavailable."
         return HTMLResponse(
-            '<p class="text-sm text-red-600">InfoItem bindings temporarily unavailable.</p>',
+            f'<p class="text-sm text-red-600">{msg}</p>',
             status_code=200,
         )
     flagged = {s.strip() for s in new_subaspect_ids.split(",") if s.strip()} or None

@@ -166,9 +166,11 @@ class TestDetailPage:
         the route's except clause so a future refactor splitting them can't
         silently regress any single path.
 
-        With the binding-tree partial, a get_info_source failure causes
-        fetch_info_item_bindings to raise, so the route falls back to the
-        'summary unavailable' placeholder rather than a partial card.
+        get_info_source failures propagate as SDK exceptions (ServerError etc.),
+        not ValueError, so the outer except clause applies and the route falls
+        back to the 'summary unavailable' placeholder.  The ValueError recovery
+        path (no primary binding) is covered by
+        test_renders_info_item_name_when_no_primary_binding.
         """
         from unittest.mock import AsyncMock
 

@@ -244,6 +244,8 @@ Entry points only: call `configure_logging()` once.
 - Explicit imports only
 - Small, focused functions
 
+**ULID format errors:** Both surfaces treat malformed ULIDs as 404, not 400. API routes use `parse_ulid` ([src/api/routes/helpers.py](src/api/routes/helpers.py)) which raises `HTTPException(404)`; dashboard helpers (`get_watch_detail`, `get_watched_item_detail` in [src/dashboard/context.py](src/dashboard/context.py)) return `None` and the route renders a 404 page. New ULID-accepting routes must follow this convention — do not introduce 400 for ULID format errors.
+
 **DB Triggers (gotcha):**
 - Triggers live in Alembic migrations (`CREATE OR REPLACE FUNCTION` + `CREATE OR REPLACE TRIGGER`; downgrade with `DROP TRIGGER IF EXISTS … ON table; DROP FUNCTION IF EXISTS …`).
 - Integration tests use `Base.metadata.create_all` (not migrations), so triggers are NOT applied automatically. Any trigger added in a migration must also be recreated in `tests/conftest.py` inside the `test_engine` fixture, after `create_all`.

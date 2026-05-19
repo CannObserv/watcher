@@ -1,5 +1,6 @@
 """Dashboard settings routes — API key management."""
 
+import asyncio
 import json
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
@@ -11,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.api.deps import get_db_session
 from src.core.models.api_key import ApiKey
 from src.core.models.app_user import AppUser
+from src.core.models.notification_template import NotificationTemplate
 from src.dashboard import templates
 from src.dashboard.deps import generate_api_key, get_dashboard_user
 
@@ -36,14 +38,25 @@ async def settings_landing(
     session: AsyncSession = Depends(get_db_session),
 ):
     """Render settings landing page with API key count."""
-    result = await session.execute(
-        select(func.count()).select_from(ApiKey).where(ApiKey.user_id == user.id)
+    key_result, tpl_result = await asyncio.gather(
+        session.execute(select(func.count()).select_from(ApiKey).where(ApiKey.user_id == user.id)),
+        session.execute(
+            select(func.count())
+            .select_from(NotificationTemplate)
+            .where(NotificationTemplate.is_active == True)  # noqa: E712
+        ),
     )
-    key_count = result.scalar_one()
+    key_count = key_result.scalar_one()
+    tpl_count = tpl_result.scalar_one()
     return templates.TemplateResponse(
         request,
         "pages/settings.html",
-        {"active_page": "settings", "user": user, "api_key_count": key_count},
+        {
+            "active_page": "settings",
+            "user": user,
+            "api_key_count": key_count,
+            "notification_template_count": tpl_count,
+        },
     )
 
 

@@ -352,6 +352,48 @@ async def test_notifications_index_has_settings_breadcrumb(client: AsyncClient):
 
 
 @pytest.mark.integration
+async def test_notification_new_highlights_settings_nav(client: AsyncClient):
+    """GET /notifications/new — Settings nav link is active."""
+    resp = await client.get("/notifications/new")
+    assert resp.status_code == 200
+    pattern = r'href="/settings"[^>]*nav-link-active|nav-link-active[^>]*href="/settings"'
+    assert re.search(pattern, resp.text)
+
+
+@pytest.mark.integration
+async def test_notification_edit_highlights_settings_nav(client: AsyncClient, db_session):
+    """GET /notifications/{id}/edit — Settings nav link is active."""
+    tpl = await _make_template(db_session)
+    await db_session.commit()
+    resp = await client.get(f"/notifications/{tpl.id}/edit")
+    assert resp.status_code == 200
+    pattern = r'href="/settings"[^>]*nav-link-active|nav-link-active[^>]*href="/settings"'
+    assert re.search(pattern, resp.text)
+
+
+@pytest.mark.integration
+async def test_notification_new_breadcrumb_includes_settings(client: AsyncClient):
+    """GET /notifications/new — breadcrumb exposes Settings → Notification Templates → New."""
+    resp = await client.get("/notifications/new")
+    assert resp.status_code == 200
+    body = resp.text
+    assert re.search(r'aria-label="Breadcrumb".*?href="/settings"', body, re.DOTALL)
+    assert re.search(r'aria-label="Breadcrumb".*?href="/notifications"', body, re.DOTALL)
+
+
+@pytest.mark.integration
+async def test_notification_edit_breadcrumb_includes_settings(client: AsyncClient, db_session):
+    """GET /notifications/{id}/edit — breadcrumb includes Settings → Notification Templates."""
+    tpl = await _make_template(db_session, title="BreadcrumbTest")
+    await db_session.commit()
+    resp = await client.get(f"/notifications/{tpl.id}/edit")
+    assert resp.status_code == 200
+    body = resp.text
+    assert re.search(r'aria-label="Breadcrumb".*?href="/settings"', body, re.DOTALL)
+    assert re.search(r'aria-label="Breadcrumb".*?href="/notifications"', body, re.DOTALL)
+
+
+@pytest.mark.integration
 async def test_notification_edit_page_loads(client: AsyncClient, db_session):
     tpl = await _make_template(db_session, title="Edit Me")
     await db_session.commit()

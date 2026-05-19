@@ -44,7 +44,7 @@ A committed directory in `skills/` completely supersedes the vendor version (no 
 
 | Skill | Override reason |
 |---|---|
-| `shipping-work-python-fastapi` | Thin override of upstream variant: sources `/etc/watcher/.env` + `$PROJECT_ROOT/.env` via `set -a; source; set +a` before delegating to upstream pre-ship; bracket-less commit convention documented in Step 2 |
+| `shipping-work-python-fastapi` | Thin override of upstream variant: sources `/etc/watcher/.env` + `$PROJECT_ROOT/.env` via `set -a; source; set +a` before delegating to upstream pre-ship; bracketed commit convention (`[type]` is literal) documented in Step 2 |
 | `brainstorming` | Project conventions (docs/plans/ path, commit format); invokes using-git-worktrees after design approval; FastAPI stack context; proactive-suggestion mode |
 
 ## SocratiCode (Codebase Search)

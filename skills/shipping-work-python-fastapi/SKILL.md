@@ -1,7 +1,7 @@
 ---
 name: shipping-work-python-fastapi
 description: "For Python/FastAPI projects (uv + ruff + pytest): finalizes work by ensuring everything is committed, pushed to the remote, and reflected on GitHub: closes issues, posts summary comments, and presents a completion table. Use when the user says 'ship it', 'push GH', 'close GH', or 'wrap up' and the project is a FastAPI service."
-compatibility: Designed for Python FastAPI projects using uv, ruff, pytest. Requires git, gh, uv. pytest-cov is optional — pre-ship.sh auto-detects it and adds --no-cov when present.
+compatibility: Designed for Python FastAPI projects using uv, ruff, pytest. Requires git, gh, uv. pytest-cov is optional — pre-ship.sh auto-detects it and adds --no-cov when present. Watcher variant: also requires /etc/watcher/.env (system secrets); sourced via pre-ship wrapper before delegating to upstream.
 metadata:
   author: gregoryfoster
   version: "1.2"
@@ -9,6 +9,8 @@ metadata:
   overrides: gregoryfoster-skills/shipping-work-python-fastapi
   override-reason: "Sources /etc/watcher/.env (system secrets) and $PROJECT_ROOT/.env (repo-local overrides) before delegating to upstream pre-ship via set -a/set +a to handle values containing spaces, quotes, or newlines correctly."
 ---
+
+<!-- forked from gregoryfoster-skills@d5d2b30 -->
 
 # Shipping Work — Python/FastAPI — watcher
 
@@ -72,16 +74,16 @@ If the script exits 1: review the listed files, decide whether each requires a d
 bash scripts/check-status.sh
 ```
 
-If uncommitted changes exist, commit them following the watcher convention (bracket-less):
+If uncommitted changes exist, commit them following the watcher convention:
 
 ```
-#<number> type: <description>       # with GH issue
-type: <description>                 # without GH issue
+#<number> [type]: <description>       # with GH issue
+[type]: <description>                 # without GH issue
 ```
 
-Common `type` values: `feat`, `fix`, `refactor`, `docs`, `test`, `chore`. Scope parens optional: `chore(cr): ...`.
+Common `[type]` values: `feat`, `fix`, `refactor`, `docs`, `test`, `chore`. Scope parens optional: `chore(cr): ...`.
 
-Multiple issues: `#19, #20 type: <description>`
+Multiple issues: `#19, #20 [type]: <description>`
 
 ### Step 2.5 — Worktree-aware merge (if applicable)
 

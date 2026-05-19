@@ -66,6 +66,7 @@
         }
       } else if (e.key === 'Escape') {
         input.value = '';
+        pendingName = null;
         var region = document.getElementById(resultsId);
         if (region) region.innerHTML = '';
         highlight(-1);

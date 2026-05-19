@@ -207,6 +207,23 @@ class TestBindingTreeRoute:
         assert f'value="{item.info_item_id}"' in body
         assert 'name="info_item_id"' in body
 
+    async def test_readonly_tree_no_primary_binding_renders_tree(
+        self, client, db_session, info_client
+    ):
+        """readonly_tree mode degrades gracefully when the InfoItem has no primary binding
+        — same path as select_only; no radio controls, no hidden info_item_id input."""
+        item = await make_info_item(db_session, name="Readonly No-Binding")
+        await db_session.commit()
+        response = await client.get(
+            f"/info-items/{item.info_item_id}/binding-tree?mode=readonly_tree"
+        )
+        assert response.status_code == 200
+        body = response.text
+        assert "Readonly No-Binding" in body
+        # readonly_tree never injects a hidden input
+        assert 'name="info_item_id"' not in body
+        assert "<input " not in body
+
     async def test_transport_error_returns_200_error_partial(self, client, info_client):
         """SDK transport error → 200 error partial so HTMX swaps the message."""
         info_client.get_info_item = AsyncMock(side_effect=ServerError("boom"))

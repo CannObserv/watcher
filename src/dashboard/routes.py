@@ -396,7 +396,7 @@ async def watch_create_submit(
     if not name.strip():
         errors.append("Name is required")
     if not resolved_info_item_id:
-        errors.append("InfoItem is required")
+        errors.append("Information Item is required")
 
     async def _render_with_flash(flash_message: str):
         return templates.TemplateResponse(
@@ -425,7 +425,7 @@ async def watch_create_submit(
             description=description.strip() or None,
         )
     except NotFound:
-        return await _render_with_flash(f"InfoItem {resolved_info_item_id} does not exist")
+        return await _render_with_flash(f"Information Item {resolved_info_item_id} does not exist")
     except ValueError as exc:
         return await _render_with_flash(str(exc))
     except AuthError:
@@ -1008,7 +1008,7 @@ async def watched_item_create_submit(
 
     iid = info_item_id.strip()
     if not iid:
-        return await _render_with_flash("InfoItem is required")
+        return await _render_with_flash("Information Item is required")
 
     interval_raw = default_schedule_interval.strip()
     if interval_raw:
@@ -1030,7 +1030,7 @@ async def watched_item_create_submit(
     try:
         info_item = await info_client.get_info_item(iid)
     except NotFound:
-        return await _render_with_flash(f"InfoItem {iid} does not exist")
+        return await _render_with_flash(f"Information Item {iid} does not exist")
     except AuthError:
         return await _render_with_flash("Information service auth failed")
     except (ServerError, httpx.ConnectError, httpx.TimeoutException) as exc:
@@ -1049,7 +1049,7 @@ async def watched_item_create_submit(
         await session.flush()
     except IntegrityError:
         await session.rollback()
-        return await _render_with_flash(f"WatchedItem for InfoItem {iid} already exists")
+        return await _render_with_flash(f"Watched Item for Information Item {iid} already exists")
     audit(
         session,
         EventType.WATCHED_ITEM_CREATED,
@@ -1142,7 +1142,14 @@ async def watched_item_detail_page(
             "InfoItem has no valid primary binding while rendering watched_item detail",
             extra={"watched_item_id": str(wi.id)},
         )
-        info_item = None
+        # Don't null out info_item — readonly_tree renders without a primary binding.
+        try:
+            info_item = await client_sdk.get_info_item(str(wi.info_item_id))
+            primary_url = None
+            cross_checks = []
+            sub_aspects = []
+        except (NotFound, ServerError, httpx.ConnectError, AuthError):
+            info_item = None
 
     new_subaspect_count = count_new_subaspects(info_item, wi.last_reviewed_at)
 

@@ -212,6 +212,42 @@ class TestDetailPage:
         assert response.status_code == 200
         assert b"Archiver Information Item summary unavailable" in response.content
 
+    async def test_renders_info_item_name_when_no_primary_binding(
+        self, client, db_session, info_client
+    ):
+        """ValueError (no primary binding) must render the InfoItem name in readonly_tree mode,
+        not fall back to the 'unavailable' placeholder."""
+        from types import SimpleNamespace
+        from unittest.mock import AsyncMock
+
+        from src.core.models.watched_item import WatchedItem
+        from tests.conftest import make_info_item
+
+        item = await make_info_item(db_session, name="No-Primary Item")
+        wi = WatchedItem(info_item_id=item.info_item_id, name="No-Primary WI")
+        db_session.add(wi)
+        await db_session.flush()
+        await db_session.commit()
+        # No info_item_sources → fetch_info_item_bindings raises ValueError;
+        # route recovers with a second get_info_item call.
+        info_client.get_info_item = AsyncMock(
+            return_value=SimpleNamespace(
+                info_item_id=str(item.info_item_id),
+                name="No-Primary Item",
+                description=None,
+                owner=None,
+                info_item_sources=[],
+            )
+        )
+        response = await client.get(f"/watched-items/{wi.id}")
+        assert response.status_code == 200
+        body = response.text
+        assert "No-Primary Item" in body
+        assert "unavailable" not in body.lower()
+        # readonly_tree injects no radio or hidden info_item_id inputs
+        assert 'type="radio"' not in body
+        assert 'name="info_item_id"' not in body
+
     async def test_renders_danger_zone_archive(self, client, db_session, info_client):
         from unittest.mock import AsyncMock
 

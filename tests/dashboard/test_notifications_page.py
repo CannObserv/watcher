@@ -330,6 +330,28 @@ async def test_duplicate_404_for_unknown_id(client: AsyncClient):
 
 
 @pytest.mark.integration
+async def test_notifications_index_highlights_settings_nav(client: AsyncClient):
+    """GET /notifications — Settings nav link is active, not a separate Notifications link."""
+    resp = await client.get("/notifications")
+    assert resp.status_code == 200
+    body = resp.text
+    # Settings link carries nav-link-active
+    pattern = r'href="/settings"[^>]*nav-link-active|nav-link-active[^>]*href="/settings"'
+    assert re.search(pattern, body)
+    # No standalone Notifications nav link
+    assert 'href="/notifications" class="nav-link' not in body
+
+
+@pytest.mark.integration
+async def test_notifications_index_has_settings_breadcrumb(client: AsyncClient):
+    """GET /notifications — page content shows a ← Settings back-link (like settings_api_keys)."""
+    resp = await client.get("/notifications")
+    assert resp.status_code == 200
+    # Must contain the breadcrumb text, not just the nav link
+    assert "← Settings" in resp.text
+
+
+@pytest.mark.integration
 async def test_notification_edit_page_loads(client: AsyncClient, db_session):
     tpl = await _make_template(db_session, title="Edit Me")
     await db_session.commit()

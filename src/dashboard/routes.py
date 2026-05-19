@@ -3111,7 +3111,7 @@ async def notifications_page(
         request,
         "pages/notifications.html",
         {
-            "active_page": "notifications",
+            "active_page": "settings",
             "notification_templates": notification_templates,
         },
     )
@@ -3126,7 +3126,7 @@ async def notification_template_new_page(
         request,
         "pages/notification_new.html",
         {
-            "active_page": "notifications",
+            "active_page": "settings",
             "title": None,
             "events": None,
             "is_global_default": False,
@@ -3158,7 +3158,7 @@ async def notification_template_create(
             request,
             "pages/notification_new.html",
             {
-                "active_page": "notifications",
+                "active_page": "settings",
                 "title": str(form.get("title") or ""),
                 "events": form.getlist("events"),
                 "is_global_default": bool(form.get("is_global_default")),
@@ -3226,7 +3226,7 @@ async def notification_template_edit_page(
         request,
         "pages/notification_edit.html",
         {
-            "active_page": "notifications",
+            "active_page": "settings",
             "tpl": tpl,
             "submitted_title": tpl.title,
             "watch_count": watch_count,
@@ -3276,7 +3276,7 @@ async def notification_template_edit(
             request,
             "pages/notification_edit.html",
             {
-                "active_page": "notifications",
+                "active_page": "settings",
                 "tpl": tpl,
                 "submitted_title": title,
                 "submitted_events": events,

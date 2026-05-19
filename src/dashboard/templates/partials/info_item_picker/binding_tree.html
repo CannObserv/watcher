@@ -8,10 +8,17 @@
    new_subaspect_ids: set[str] | None (sub_aspects to flag as "new" — only used in readonly_tree)
 #}
 <div class="stat-card" aria-label="Information Item binding tree">
-  <header class="mb-3">
-    <p class="text-sm text-gray-500 dark:text-gray-400">Archiver Information Item</p>
-    <p class="font-semibold text-gray-900 dark:text-white">{{ info_item.name }}</p>
-    <p class="text-xs font-mono text-gray-400">{{ info_item.info_item_id }}</p>
+  <header class="mb-3 flex items-start justify-between gap-2">
+    <div>
+      <p class="text-sm text-gray-500 dark:text-gray-400">Archiver Information Item</p>
+      <p class="font-semibold text-gray-900 dark:text-white">{{ info_item.name }}</p>
+      <p class="text-xs font-mono text-gray-400">{{ info_item.info_item_id }}</p>
+    </div>
+    {% if mode != "readonly_tree" %}
+    <button type="button" data-picker-clear
+      class="btn shrink-0 text-xs"
+      aria-label="Change selection">Change</button>
+    {% endif %}
   </header>
 
   <ul class="space-y-2 text-sm">

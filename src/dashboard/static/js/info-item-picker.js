@@ -19,11 +19,35 @@
 
     var activeIdx = -1;
     var pendingName = null;
+    var appliedName = null;
+
+    function clearSelection() {
+      var treeContainer = document.getElementById(treeId);
+      if (treeContainer) treeContainer.innerHTML = '';
+      var form = document.getElementById(picker.dataset.targetForm);
+      if (form) {
+        var hidden = form.querySelector('input[name="info_item_id"]');
+        if (hidden) hidden.remove();
+        if (appliedName) {
+          var nameField = form.querySelector('[name="name"]');
+          if (nameField && nameField.value === appliedName) nameField.value = '';
+        }
+      }
+      appliedName = null;
+      pendingName = null;
+      input.value = '';
+      var region = document.getElementById(resultsId);
+      if (region) region.innerHTML = '';
+      highlight(-1);
+      input.setAttribute('aria-expanded', 'false');
+      input.focus();
+    }
 
     /* Capture the selected item's name before HTMX fires the binding-tree request. */
     picker.addEventListener('click', function (e) {
       var btn = e.target.closest('[data-info-item-name]');
       if (btn) pendingName = btn.dataset.infoItemName;
+      if (e.target.closest('[data-picker-clear]')) clearSelection();
     });
 
     function options() {
@@ -65,12 +89,17 @@
           opts[activeIdx].click();
         }
       } else if (e.key === 'Escape') {
-        input.value = '';
-        pendingName = null;
-        var region = document.getElementById(resultsId);
-        if (region) region.innerHTML = '';
-        highlight(-1);
-        input.setAttribute('aria-expanded', 'false');
+        var tree = document.getElementById(treeId);
+        if (!input.value && tree && tree.innerHTML.trim()) {
+          clearSelection();
+        } else {
+          input.value = '';
+          pendingName = null;
+          var region = document.getElementById(resultsId);
+          if (region) region.innerHTML = '';
+          highlight(-1);
+          input.setAttribute('aria-expanded', 'false');
+        }
       }
     });
 
@@ -93,7 +122,10 @@
           var form = document.getElementById(picker.dataset.targetForm);
           if (form) {
             var nameField = form.querySelector('[name="name"]');
-            if (nameField && !nameField.value) nameField.value = pendingName;
+            if (nameField && !nameField.value) {
+              nameField.value = pendingName;
+              appliedName = pendingName;
+            }
           }
           pendingName = null;
         }

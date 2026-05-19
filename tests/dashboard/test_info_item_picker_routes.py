@@ -232,6 +232,47 @@ class TestBindingTreeRoute:
         assert "unavailable" in response.text.lower()
 
 
+class TestClearSelectionControl:
+    async def test_select_with_target_renders_change_button(self, client, db_session, info_client):
+        item = await make_info_item(db_session, name="X")
+        primary = await make_info_source(db_session, url="https://example.com/p")
+        await bind_primary_source(
+            db_session,
+            info_item_id=item.info_item_id,
+            info_source_id=primary.info_source_id,
+        )
+        await db_session.commit()
+        response = await client.get(
+            f"/info-items/{item.info_item_id}/binding-tree?mode=select_with_target"
+        )
+        assert response.status_code == 200
+        assert "data-picker-clear" in response.text
+
+    async def test_select_only_renders_change_button(self, client, db_session, info_client):
+        item = await make_info_item(db_session, name="X")
+        await db_session.commit()
+        response = await client.get(
+            f"/info-items/{item.info_item_id}/binding-tree?mode=select_only&target_form_id=wi-create"
+        )
+        assert response.status_code == 200
+        assert "data-picker-clear" in response.text
+
+    async def test_readonly_tree_omits_change_button(self, client, db_session, info_client):
+        item = await make_info_item(db_session, name="X")
+        primary = await make_info_source(db_session, url="https://example.com/p")
+        await bind_primary_source(
+            db_session,
+            info_item_id=item.info_item_id,
+            info_source_id=primary.info_source_id,
+        )
+        await db_session.commit()
+        response = await client.get(
+            f"/info-items/{item.info_item_id}/binding-tree?mode=readonly_tree"
+        )
+        assert response.status_code == 200
+        assert "data-picker-clear" not in response.text
+
+
 class TestTypeaheadPartial:
     async def test_typeahead_renders_combobox_attributes(self, client, db_session, info_client):
         response = await client.get("/watches/new")

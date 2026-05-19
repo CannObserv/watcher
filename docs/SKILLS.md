@@ -24,7 +24,7 @@ Init after cloning: `git submodule update --init --recursive`
 
 Submodule freshness auto-enforced by `UserPromptSubmit` hook in `.claude/settings.json`. Force-refresh: `git submodule update --remote --merge skills-vendor/gregoryfoster-skills skills-vendor/obra-superpowers`
 
-To add a new external skill repo: follow the `managing-skills-claude` skill.
+To add a new external skill repo: follow the `managing-skills` skill.
 
 ## Skill Sources
 
@@ -44,10 +44,8 @@ A committed directory in `skills/` completely supersedes the vendor version (no 
 
 | Skill | Override reason |
 |---|---|
-| `reviewing-code-claude` | FastAPI-specific review dimensions; ruff lint check; TDD discipline; Iron Law + rationalization-prevention table; Phase 3.5 verification gate |
-| `shipping-work-claude` | `uv run pytest --no-cov` + `uv run ruff check` in pre-ship.sh; `#<n> [type]: <desc>` commit convention; Iron Law + HARD-GATE on partial issue closure |
+| `shipping-work-python-fastapi` | Thin override of upstream variant: sources `/etc/watcher/.env` + `$PROJECT_ROOT/.env` via `set -a; source; set +a` before delegating to upstream pre-ship; bracket-less commit convention documented in Step 2 |
 | `brainstorming` | Project conventions (docs/plans/ path, commit format); invokes using-git-worktrees after design approval; FastAPI stack context; proactive-suggestion mode |
-| `writing-plans` | Plans saved to `docs/plans/` (vendor default is `docs/superpowers/plans/`) |
 
 ## SocratiCode (Codebase Search)
 

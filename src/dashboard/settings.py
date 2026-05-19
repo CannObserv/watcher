@@ -1,6 +1,5 @@
 """Dashboard settings routes — API key management."""
 
-import asyncio
 import json
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
@@ -37,17 +36,19 @@ async def settings_landing(
     user: AppUser = Depends(get_dashboard_user),
     session: AsyncSession = Depends(get_db_session),
 ):
-    """Render settings landing page with API key count."""
-    key_result, tpl_result = await asyncio.gather(
-        session.execute(select(func.count()).select_from(ApiKey).where(ApiKey.user_id == user.id)),
-        session.execute(
+    """Render settings landing page with API key count and active notification template count."""
+    key_count = (
+        await session.execute(
+            select(func.count()).select_from(ApiKey).where(ApiKey.user_id == user.id)
+        )
+    ).scalar_one()
+    tpl_count = (
+        await session.execute(
             select(func.count())
             .select_from(NotificationTemplate)
             .where(NotificationTemplate.is_active == True)  # noqa: E712
-        ),
-    )
-    key_count = key_result.scalar_one()
-    tpl_count = tpl_result.scalar_one()
+        )
+    ).scalar_one()
     return templates.TemplateResponse(
         request,
         "pages/settings.html",

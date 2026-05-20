@@ -59,6 +59,10 @@ class TestListAuditLog:
         assert response.status_code == 200
         assert len(response.json()) <= 1
 
+    async def test_filter_by_invalid_watch_id_returns_400(self, client):
+        response = await client.get("/api/v1/audit?watch_id=not-a-ulid")
+        assert response.status_code == 400
+
 
 class TestWatchedItemEventTypes:
     def test_watched_item_event_constants_exist(self):

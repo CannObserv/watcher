@@ -45,6 +45,69 @@ class TestListPage:
         response = await client.get("/")
         assert b'href="/watched-items"' in response.content
 
+    async def test_removed_columns_absent(self, client, db_session):
+        """Information Item, Content Type, Tags, Last Reviewed columns are gone."""
+        from src.core.models.watched_item import WatchedItem
+        from tests.conftest import make_info_item
+
+        item = await make_info_item(db_session)
+        db_session.add(WatchedItem(info_item_id=item.info_item_id, name="ColTest"))
+        await db_session.flush()
+        await db_session.commit()
+        response = await client.get("/watched-items")
+        body = response.content
+        assert b"Information Item" not in body
+        assert b"Content Type" not in body
+        assert b"Last Reviewed" not in body
+
+    async def test_new_column_headers_present(self, client, db_session):
+        """Last Check, Next Check, Aspect Review headers appear."""
+        from src.core.models.watched_item import WatchedItem
+        from tests.conftest import make_info_item
+
+        item = await make_info_item(db_session)
+        db_session.add(WatchedItem(info_item_id=item.info_item_id, name="ColTest2"))
+        await db_session.flush()
+        await db_session.commit()
+        response = await client.get("/watched-items")
+        body = response.content
+        assert b"Last Check" in body
+        assert b"Next Check" in body
+        assert b"Aspect Review" in body
+
+    async def test_next_check_has_data_attribute_when_last_checked(self, client, db_session):
+        """Rows with last_checked_at render a data-next-check ISO timestamp."""
+        from datetime import UTC, datetime
+
+        from src.core.models.watched_item import WatchedItem
+        from tests.conftest import make_info_item
+
+        item = await make_info_item(db_session)
+        wi = WatchedItem(
+            info_item_id=item.info_item_id,
+            name="WithCheck",
+            last_checked_at=datetime.now(UTC),
+            default_schedule_config={"interval": "1h"},
+        )
+        db_session.add(wi)
+        await db_session.flush()
+        await db_session.commit()
+        response = await client.get("/watched-items")
+        assert b"data-next-check" in response.content
+
+    async def test_aspect_review_htmx_trigger_rendered_per_row(self, client, db_session):
+        """Each row has an HTMX lazy-load trigger for the aspect-review pill."""
+        from src.core.models.watched_item import WatchedItem
+        from tests.conftest import make_info_item
+
+        item = await make_info_item(db_session)
+        wi = WatchedItem(info_item_id=item.info_item_id, name="HtmxRow")
+        db_session.add(wi)
+        await db_session.flush()
+        await db_session.commit()
+        response = await client.get("/watched-items")
+        assert b"aspect-review-status" in response.content
+
 
 class TestDetailPage:
     async def test_returns_200_with_archiver_mock(self, client, db_session, info_client):
@@ -758,3 +821,120 @@ def _fake_info_source_out(url="https://example.com"):
     from types import SimpleNamespace
 
     return SimpleNamespace(info_source_id="fake-primary-src", url=url)
+
+
+class TestAspectReviewStatus:
+    """HTMX endpoint that returns a pill showing sub_aspect review state."""
+
+    async def test_returns_available_pill_when_new_subaspects(
+        self, client, db_session, info_client
+    ):
+        from datetime import UTC, datetime, timedelta
+        from types import SimpleNamespace
+        from unittest.mock import AsyncMock
+
+        from src.core.models.watched_item import WatchedItem
+        from tests.conftest import make_info_item
+
+        item = await make_info_item(db_session)
+        old = datetime.now(UTC) - timedelta(days=5)
+        wi = WatchedItem(info_item_id=item.info_item_id, name="HasNew", last_reviewed_at=old)
+        db_session.add(wi)
+        await db_session.flush()
+        await db_session.commit()
+
+        info_client.get_info_item = AsyncMock(
+            return_value=SimpleNamespace(
+                info_item_id=str(item.info_item_id),
+                name="x",
+                description=None,
+                owner=None,
+                info_item_sources=[
+                    SimpleNamespace(
+                        info_source_id="p",
+                        role=None,
+                        created_at=datetime.now(UTC) - timedelta(days=10),
+                    ),
+                    SimpleNamespace(
+                        info_source_id="s1",
+                        role="sub_aspect",
+                        created_at=datetime.now(UTC),
+                    ),
+                ],
+            )
+        )
+        info_client.get_info_source = AsyncMock(
+            side_effect=lambda sid: SimpleNamespace(
+                info_source_id=sid,
+                url="https://example.com" if sid == "p" else None,
+                parent_info_source_id=None if sid == "p" else "p",
+                source_spec=SimpleNamespace(additional_properties={}),
+            )
+        )
+
+        response = await client.get(
+            f"/watched-items/{wi.id}/aspect-review-status",
+            headers={"HX-Request": "true"},
+        )
+        assert response.status_code == 200
+        assert b"available" in response.content.lower()
+
+    async def test_returns_current_pill_when_no_new(self, client, db_session, info_client):
+        from datetime import UTC, datetime
+        from types import SimpleNamespace
+        from unittest.mock import AsyncMock
+
+        from src.core.models.watched_item import WatchedItem
+        from tests.conftest import make_info_item
+
+        item = await make_info_item(db_session)
+        wi = WatchedItem(
+            info_item_id=item.info_item_id,
+            name="Current",
+            last_reviewed_at=datetime.now(UTC),
+        )
+        db_session.add(wi)
+        await db_session.flush()
+        await db_session.commit()
+
+        info_client.get_info_item = AsyncMock(
+            return_value=SimpleNamespace(
+                info_item_id=str(item.info_item_id),
+                name="x",
+                description=None,
+                owner=None,
+                info_item_sources=[],
+            )
+        )
+
+        response = await client.get(
+            f"/watched-items/{wi.id}/aspect-review-status",
+            headers={"HX-Request": "true"},
+        )
+        assert response.status_code == 200
+        assert b"current" in response.content.lower()
+
+    async def test_returns_404_for_unknown_wi(self, client):
+        from ulid import ULID
+
+        response = await client.get(
+            f"/watched-items/{ULID()}/aspect-review-status",
+            headers={"HX-Request": "true"},
+        )
+        assert response.status_code == 404
+
+    async def test_non_htmx_redirects(self, client, db_session):
+        from src.core.models.watched_item import WatchedItem
+        from tests.conftest import make_info_item
+
+        item = await make_info_item(db_session)
+        wi = WatchedItem(info_item_id=item.info_item_id, name="Redirect")
+        db_session.add(wi)
+        await db_session.flush()
+        await db_session.commit()
+
+        response = await client.get(
+            f"/watched-items/{wi.id}/aspect-review-status",
+            follow_redirects=False,
+        )
+        assert response.status_code == 303

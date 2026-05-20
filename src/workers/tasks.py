@@ -167,6 +167,7 @@ async def check_watched_item(watched_item_id: str, registry: ServiceRegistry | N
                 w.health_status = WatchHealthStatus.ERROR
                 if previous != WatchHealthStatus.ERROR:
                     transitioned.append(w)
+            watched_item.last_checked_at = now
             await session.commit()
 
             for w in transitioned:
@@ -204,6 +205,7 @@ async def check_watched_item(watched_item_id: str, registry: ServiceRegistry | N
             prior_health[str(w.id)] = w.health_status
             w.last_checked_at = now
             w.health_status = WatchHealthStatus.OK
+        watched_item.last_checked_at = now
         await session.commit()
 
         # Domain backoff decay after successful fetch.

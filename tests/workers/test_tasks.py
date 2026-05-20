@@ -201,6 +201,10 @@ class TestCheckWatchedItem:
         assert sibling.last_checked_at is not None
         assert sibling.last_checked_at >= before
 
+        await db_session.refresh(watched_item)
+        assert watched_item.last_checked_at is not None
+        assert watched_item.last_checked_at >= before
+
     async def test_noop_when_no_active_children(self, db_session, monkeypatch):
         """A WatchedItem with no active child Watches skips fetcher + pipeline."""
         watch = await make_watch(db_session, name="Inactive", is_active=False)

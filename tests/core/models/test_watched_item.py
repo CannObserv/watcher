@@ -23,6 +23,7 @@ async def test_watched_item_defaults(db_session: AsyncSession) -> None:
     assert fetched.is_active is True
     assert fetched.archived_at is None
     assert fetched.last_reviewed_at is None
+    assert fetched.last_checked_at is None
     assert fetched.default_schedule_config is None
     assert fetched.default_content_type is None
     assert fetched.default_tags is None

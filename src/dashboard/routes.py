@@ -60,7 +60,7 @@ from src.core.notifications.preview_fixtures import (
 from src.core.notifier_client import get_notifier_client
 from src.core.probe import ProbeResult
 from src.core.registry import get_registry
-from src.core.scheduler import parse_interval
+from src.core.scheduler import compute_next_check, parse_interval
 from src.core.watches import create_watch as _create_watch
 from src.core.watches import resolve_watch_url
 from src.core.watches.info_item_fetch import fetch_info_item_bindings
@@ -1071,6 +1071,15 @@ async def watched_items_page(
 ):
     """List page for WatchedItems."""
     watched_items = await get_watched_item_list(session, include_archived=include_archived)
+    now = datetime.now(UTC)
+    next_check_map: dict[str, datetime | None] = {}
+    for wi in watched_items:
+        if wi.last_checked_at is not None and wi.default_schedule_config:
+            next_check_map[str(wi.id)] = compute_next_check(
+                wi.default_schedule_config, wi.last_checked_at, now=now
+            )
+        else:
+            next_check_map[str(wi.id)] = None
     return templates.TemplateResponse(
         request,
         "pages/watched_items.html",
@@ -1078,6 +1087,7 @@ async def watched_items_page(
             "request": request,
             "active_page": "watched-items",
             "watched_items": watched_items,
+            "next_check_map": next_check_map,
             "include_archived": include_archived,
             "flash": None,
         },
@@ -1229,6 +1239,42 @@ async def watched_item_mark_reviewed(
             headers={"HX-Redirect": f"/watched-items/{watched_item_id}"},
         )
     return RedirectResponse(url=f"/watched-items/{watched_item_id}", status_code=303)
+
+
+@router.get("/watched-items/{watched_item_id}/aspect-review-status")
+async def watched_item_aspect_review_status(
+    request: Request,
+    watched_item_id: str,
+    session: AsyncSession = Depends(get_db_session),
+):
+    """HTMX partial: pill showing whether new sub_aspects are available."""
+    if request.headers.get("HX-Request") != "true":
+        return RedirectResponse(url=f"/watched-items/{watched_item_id}", status_code=303)
+
+    wi = await get_watched_item_detail(session, watched_item_id)
+    if wi is None:
+        raise HTTPException(status_code=404)
+
+    new_count = 0
+    try:
+        client_sdk = get_registry().get_archiver_client()
+        bindings = await fetch_info_item_bindings(client_sdk, str(wi.info_item_id))
+        new_count = count_new_subaspects(bindings.info_item, wi.last_reviewed_at)
+    except (
+        NotFound,
+        AuthError,
+        ServerError,
+        httpx.ConnectError,
+        httpx.TimeoutException,
+        ValueError,
+    ):
+        pass
+
+    return templates.TemplateResponse(
+        request,
+        "partials/aspect_review_pill.html",
+        {"new_subaspect_count": new_count},
+    )
 
 
 @router.get("/watched-items/{watched_item_id}/field/{field_name}")

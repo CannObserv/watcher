@@ -280,6 +280,54 @@ class TestCheckWatchedItem:
         await db_session.refresh(watch)
         assert watch.health_status == WatchHealthStatus.ERROR
 
+        await db_session.refresh(watched_item)
+        assert watched_item.last_checked_at is not None
+
+    async def test_stamps_watched_item_last_checked_at_on_fetch_failure(
+        self, db_session, monkeypatch
+    ):
+        """WatchedItem.last_checked_at is stamped even when the HTTP fetch fails."""
+        from datetime import UTC, datetime
+
+        watch = await make_watch(db_session, name="FailStamp")
+        watched_item = watch.watched_item
+        assert watched_item.last_checked_at is None
+        await db_session.commit()
+
+        before = datetime.now(UTC)
+
+        mock_fetcher = MagicMock()
+        mock_fetcher.fetch = AsyncMock(
+            return_value=_fake_fetch_result(content=b"err", status_code=503)
+        )
+        monkeypatch.setattr(
+            tasks_mod,
+            "fetch_info_item_bindings",
+            AsyncMock(
+                return_value=MagicMock(
+                    primary=MagicMock(info_source_id="src", url="https://example.com/"),
+                    primary_url="https://example.com/",
+                    cross_checks=[],
+                    sub_aspects=[],
+                )
+            ),
+        )
+        monkeypatch.setattr(tasks_mod, "process_watched_item", _make_pipeline_stub())
+        monkeypatch.setattr(
+            tasks_mod, "get_session_factory", lambda: _mock_session_factory(db_session)
+        )
+        monkeypatch.setattr(
+            tasks_mod, "get_rate_limiter", lambda: DomainRateLimiter(min_interval=0.0)
+        )
+
+        reg = ServiceRegistry(fetcher=mock_fetcher, archiver_client=MagicMock())
+        result = await check_watched_item(str(watched_item.id), registry=reg)
+        assert "error" in result
+
+        await db_session.refresh(watched_item)
+        assert watched_item.last_checked_at is not None
+        assert watched_item.last_checked_at >= before
+
 
 # ---------------------------------------------------------------------------
 # schedule_tick (per-WatchedItem aggregation).

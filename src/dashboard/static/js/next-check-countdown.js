@@ -27,11 +27,20 @@
     });
   }
 
+  function updateInTable(tableEl) {
+    tableEl.querySelectorAll("[data-next-check]").forEach(function (el) {
+      el.textContent = formatCountdown(el.dataset.nextCheck);
+    });
+  }
+
   document.addEventListener("DOMContentLoaded", function () {
     updateAll();
     setInterval(updateAll, 60_000);
   });
 
-  // Re-run after HTMX swaps in case the table is dynamically updated.
-  document.addEventListener("htmx:afterSwap", updateAll);
+  // Re-run only within the swapped table after HTMX updates the list.
+  document.addEventListener("htmx:afterSwap", function (evt) {
+    const table = evt.target.closest("table");
+    if (table) updateInTable(table);
+  });
 })();

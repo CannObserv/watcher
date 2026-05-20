@@ -8,7 +8,8 @@ WatchedItem, aggregating ``last_checked_at`` across each WI's child Watches.
 
 The ``last_changed_at`` field on individual Watches is owned by the pipeline
 (it knows which target binding changed). This task owns ``last_checked_at``
-on every child Watch and the health-status / domain-backoff machinery.
+on every child Watch and on the parent WatchedItem, and the health-status /
+domain-backoff machinery.
 """
 
 from datetime import UTC, datetime
@@ -68,7 +69,8 @@ logger = get_logger(__name__)
 async def check_watched_item(watched_item_id: str, registry: ServiceRegistry | None = None) -> dict:
     """Fetch the parent InfoItem's primary URL and run the pipeline.
 
-    Updates ``last_checked_at`` on every active+non-archived child Watch.
+    Updates ``last_checked_at`` on every active+non-archived child Watch and
+    on the parent WatchedItem (both success and fetch-failure paths).
     ``last_changed_at`` is set inline by the pipeline on Watches whose target
     binding changed and was POSTed to Archiver successfully.
     """

@@ -28,7 +28,7 @@
         </td>
         <td class="text-sm text-gray-500 dark:text-gray-400">
           {% if wi.last_checked_at %}
-            {{ wi.last_checked_at.strftime('%b %-d, %H:%M') }}
+            {{ wi.last_checked_at.strftime('%b %e, %H:%M').strip() }}
           {% else %}
             <span class="text-gray-400">—</span>
           {% endif %}
@@ -37,7 +37,7 @@
         <td>
           {% if next_check %}
             <span class="tabular-nums text-sm" data-next-check="{{ next_check.strftime('%Y-%m-%dT%H:%M:%SZ') }}">
-              {{- next_check.strftime('%b %-d, %H:%M') -}}
+              {{- next_check.strftime('%b %e, %H:%M').strip() -}}
             </span>
           {% else %}
             <span class="text-gray-400">—</span>

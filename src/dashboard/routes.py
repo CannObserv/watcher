@@ -1260,15 +1260,13 @@ async def watched_item_aspect_review_status(
         client_sdk = get_registry().get_archiver_client()
         bindings = await fetch_info_item_bindings(client_sdk, str(wi.info_item_id))
         new_count = count_new_subaspects(bindings.info_item, wi.last_reviewed_at)
-    except (
-        NotFound,
-        AuthError,
-        ServerError,
-        httpx.ConnectError,
-        httpx.TimeoutException,
-        ValueError,
-    ):
+    except ValueError:
         pass
+    except (NotFound, AuthError, ServerError, httpx.ConnectError, httpx.TimeoutException):
+        logger.warning(
+            "Archiver unavailable for aspect review status",
+            extra={"watched_item_id": watched_item_id},
+        )
 
     return templates.TemplateResponse(
         request,

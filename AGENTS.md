@@ -244,7 +244,12 @@ Entry points only: call `configure_logging()` once.
 - Explicit imports only
 - Small, focused functions
 
-**ULID format errors:** Both surfaces treat malformed ULIDs as 404, not 400. API routes use `parse_ulid` ([src/api/routes/helpers.py](src/api/routes/helpers.py)) which raises `HTTPException(404)`; dashboard helpers (`get_watch_detail`, `get_watched_item_detail` in [src/dashboard/context.py](src/dashboard/context.py)) return `None` and the route renders a 404 page. New ULID-accepting routes must follow this convention — do not introduce 400 for ULID format errors.
+**ULID format errors:** Treatment depends on whether the ULID is a path parameter or a filter query parameter.
+
+- **Path parameters** (e.g. `/watches/{id}`) → 404. Use `parse_ulid` from [src/api/routes/helpers.py](src/api/routes/helpers.py), which raises `HTTPException(404)`. Dashboard helpers (`get_watch_detail`, `get_watched_item_detail` in [src/dashboard/context.py](src/dashboard/context.py)) return `None` and the route renders a 404 page.
+- **Filter query parameters** on list endpoints (e.g. `?watch_id=<value>`) → 400. Use `parse_filter_ulid` from [src/api/routes/helpers.py](src/api/routes/helpers.py), which raises `HTTPException(400, "Invalid <field> format")`. Pass the parameter name as `field` (e.g. `parse_filter_ulid(watch_id, "watch_id")`).
+
+Do not use `parse_ulid` for filter query params — the endpoint itself exists; an unparseable filter value is a bad request, not a missing resource.
 
 **DB Triggers (gotcha):**
 - Triggers live in Alembic migrations (`CREATE OR REPLACE FUNCTION` + `CREATE OR REPLACE TRIGGER`; downgrade with `DROP TRIGGER IF EXISTS … ON table; DROP FUNCTION IF EXISTS …`).

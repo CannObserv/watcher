@@ -23,7 +23,7 @@ class TestParseUlid:
 class TestParseFilterUlid:
     def test_valid_ulid_returns_ulid(self):
         value = str(ULID())
-        result = parse_filter_ulid(value, "Watch")
+        result = parse_filter_ulid(value, "watch_id")
         assert isinstance(result, ULID)
 
     def test_invalid_ulid_raises_400(self):

@@ -59,6 +59,7 @@ class TestListPage:
         assert b"Information Item" not in body
         assert b"Content Type" not in body
         assert b"Last Reviewed" not in body
+        assert b"Tags" not in body
 
     async def test_new_column_headers_present(self, client, db_session):
         """Last Check, Next Check, Aspect Review headers appear."""

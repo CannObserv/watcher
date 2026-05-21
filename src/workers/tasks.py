@@ -262,8 +262,6 @@ async def schedule_tick(timestamp: int) -> None:
       ``default_schedule_config`` so all siblings feel the slowdown
       (#160 design: per-InfoItem fetch budget). Audited as
       ``WATCHED_ITEM_THROTTLED``.
-
-    Future migration adds ``WatchedItem.last_checked_at`` to avoid the join.
     """
     now = datetime.now(UTC)
 

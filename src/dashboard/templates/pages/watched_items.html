@@ -42,13 +42,8 @@
   </div>
 </div>
 
-<div id="watched-items-table-container"
-     aria-live="polite" aria-atomic="false">
-  {% include "partials/watched_items_table.html" %}
-</div>
-
-{% if not watched_items and not q %}
-<div class="stat-card text-center py-12 mt-6">
+{% if total_count == 0 and not q %}
+<div class="stat-card text-center py-12">
   <p class="text-lg font-medium text-gray-900 dark:text-white mb-2">No watched items yet</p>
   <p class="text-sm text-gray-500 dark:text-gray-400 mb-6">
     Create a Watched Item to stage defaults, or jump straight to creating a Watch
@@ -58,6 +53,11 @@
     <a href="/watched-items/new" class="btn btn-primary">New Watched Item</a>
     <a href="/watches/new" class="btn btn-secondary">New Watch</a>
   </div>
+</div>
+{% else %}
+<div id="watched-items-table-container"
+     aria-live="polite" aria-atomic="false">
+  {% include "partials/watched_items_table.html" %}
 </div>
 {% endif %}
 {% endblock %}

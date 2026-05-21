@@ -1064,7 +1064,9 @@ async def watched_item_create_submit(
     return RedirectResponse(url=f"/watched-items/{wi.id}", status_code=303)
 
 
-def _build_next_check_map(watched_items: list, now: datetime) -> dict[str, datetime | None]:
+def _build_next_check_map(
+    watched_items: list[WatchedItem], now: datetime
+) -> dict[str, datetime | None]:
     result: dict[str, datetime | None] = {}
     for wi in watched_items:
         if wi.last_checked_at is not None and wi.default_schedule_config:

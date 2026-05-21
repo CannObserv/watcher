@@ -9,7 +9,7 @@
       hx-get="{{ base_url }}"
       hx-target="{{ hx_target|default('#domains-table-container') }}"
       hx-swap="innerHTML"
-      hx-include="{{ hx_include|default('[name=\'q\'],[name=\'status\']') }}"
+      hx-include="{{ hx_include|default("[name='q'],[name='status']") }}"
       name="page_size"
       aria-label="Results per page">
       {% for size in [25, 50, 100] %}

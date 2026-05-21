@@ -1113,8 +1113,15 @@ async def watched_items_page(
             "page_size": page_size,
             "total_count": total_count,
             "base_url": "/partials/watched-items-table",
+            "hx_target": "#watched-items-table-container",
+            "hx_include": "[name='q'],[name='include_archived']",
             "extra_params": {
-                k: v for k, v in {"q": q, "include_archived": include_archived or None}.items() if v
+                k: v
+                for k, v in {
+                    "q": q,
+                    "include_archived": "true" if include_archived else None,
+                }.items()
+                if v
             },
             "flash": None,
         },
@@ -1155,7 +1162,12 @@ async def partial_watched_items_table(
             "hx_target": "#watched-items-table-container",
             "hx_include": "[name='q'],[name='include_archived']",
             "extra_params": {
-                k: v for k, v in {"q": q, "include_archived": include_archived or None}.items() if v
+                k: v
+                for k, v in {
+                    "q": q,
+                    "include_archived": "true" if include_archived else None,
+                }.items()
+                if v
             },
         },
     )

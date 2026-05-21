@@ -3,7 +3,7 @@
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import func, select, text
+from sqlalchemy import Select, func, select, text
 from sqlalchemy.exc import ProgrammingError
 from sqlalchemy.ext.asyncio import AsyncSession
 from ulid import ULID
@@ -421,7 +421,9 @@ async def get_domain_watches(
     return list(result.scalars().all())
 
 
-def _apply_watched_item_filters(stmt, *, search: str | None, include_archived: bool):
+def _apply_watched_item_filters(
+    stmt: Select, *, search: str | None, include_archived: bool
+) -> Select:
     if not include_archived:
         stmt = stmt.where(WatchedItem.archived_at.is_(None))
     if search:

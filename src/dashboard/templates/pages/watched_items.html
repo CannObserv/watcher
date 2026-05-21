@@ -24,10 +24,10 @@
     <form method="get" action="/watched-items" class="flex gap-1">
       <input type="hidden" name="q" value="{{ q or '' }}">
       <fieldset class="segment-group" role="radiogroup" aria-label="Filter by archived status">
-        {% for value, label in [("", "Active"), ("true", "All")] %}
+        {% for value, label in [("false", "Active"), ("true", "All")] %}
         <label class="segment">
           <input type="radio" name="include_archived" value="{{ value }}"
-            {% if (include_archived and value == "true") or (not include_archived and value == "") %}checked{% endif %}
+            {% if (include_archived and value == "true") or (not include_archived and value == "false") %}checked{% endif %}
             hx-get="/partials/watched-items-table"
             hx-target="#watched-items-table-container"
             hx-swap="innerHTML"

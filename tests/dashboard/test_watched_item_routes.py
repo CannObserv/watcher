@@ -493,6 +493,65 @@ class TestListPageSearchAndPagination:
         response = await client.get("/partials/watched-items-table?include_archived=true")
         assert b"ShowArchived WI" in response.content
 
+    async def test_include_archived_false_explicit_param(self, client, db_session):
+        """include_archived=false (the radio value) is accepted — not a 422."""
+        from datetime import UTC, datetime
+
+        from src.core.models.watched_item import WatchedItem
+        from tests.conftest import make_info_item
+
+        item = await make_info_item(db_session)
+        db_session.add(
+            WatchedItem(
+                info_item_id=item.info_item_id,
+                name="HiddenArchived",
+                archived_at=datetime.now(UTC),
+            )
+        )
+        await db_session.flush()
+        await db_session.commit()
+
+        response = await client.get("/partials/watched-items-table?include_archived=false")
+        assert response.status_code == 200
+        assert b"HiddenArchived" not in response.content
+
+    async def test_search_with_active_filter(self, client, db_session):
+        """q + include_archived=false (the radio value HTMX sends) works correctly."""
+        from src.core.models.watched_item import WatchedItem
+        from tests.conftest import make_info_item
+
+        item_a = await make_info_item(db_session, name="SearchAlpha")
+        item_b = await make_info_item(db_session, name="SearchBeta")
+        db_session.add(WatchedItem(info_item_id=item_a.info_item_id, name="SearchAlpha WI"))
+        db_session.add(WatchedItem(info_item_id=item_b.info_item_id, name="SearchBeta WI"))
+        await db_session.flush()
+        await db_session.commit()
+
+        response = await client.get(
+            "/partials/watched-items-table?q=SearchAlpha&include_archived=false"
+        )
+        assert response.status_code == 200
+        body = response.content
+        assert b"SearchAlpha WI" in body
+        assert b"SearchBeta WI" not in body
+
+    async def test_full_page_hx_target_and_include_in_pagination_context(self, client, db_session):
+        """SSR page passes hx_target and hx_include so pagination targets the right container."""
+        from src.core.models.watched_item import WatchedItem
+        from tests.conftest import make_info_item
+
+        for name in ("PA", "PB", "PC"):
+            item = await make_info_item(db_session, name=name)
+            db_session.add(WatchedItem(info_item_id=item.info_item_id, name=name))
+        await db_session.flush()
+        await db_session.commit()
+
+        response = await client.get("/watched-items?page_size=2")
+        body = response.content
+        # Pagination rendered via SSR must target the watched-items container, not domains.
+        assert b"watched-items-table-container" in body
+        assert b"domains-table-container" not in body
+
     async def test_empty_state_on_no_search_matches(self, client):
         response = await client.get("/partials/watched-items-table?q=xyzzy_no_match")
         assert response.status_code == 200

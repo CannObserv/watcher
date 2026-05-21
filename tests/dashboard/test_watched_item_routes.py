@@ -62,7 +62,7 @@ class TestListPage:
         assert b"Tags" not in body
 
     async def test_new_column_headers_present(self, client, db_session):
-        """Last Check, Next Check, Aspect Review headers appear."""
+        """Last Check, Next Check, Status headers appear; Aspect Review removed (#173)."""
         from src.core.models.watched_item import WatchedItem
         from tests.conftest import make_info_item
 
@@ -74,7 +74,7 @@ class TestListPage:
         body = response.content
         assert b"Last Check" in body
         assert b"Next Check" in body
-        assert b"Aspect Review" in body
+        assert b"Aspect Review" not in body
 
     async def test_next_check_has_data_attribute_when_last_checked(self, client, db_session):
         """Rows with last_checked_at render a data-next-check ISO timestamp."""
@@ -96,8 +96,8 @@ class TestListPage:
         response = await client.get("/watched-items")
         assert b"data-next-check" in response.content
 
-    async def test_aspect_review_htmx_trigger_rendered_per_row(self, client, db_session):
-        """Each row has an HTMX lazy-load trigger for the aspect-review pill."""
+    async def test_aspect_review_column_removed(self, client, db_session):
+        """Aspect Review column removed from list view (#173) — no per-row Archiver calls."""
         from src.core.models.watched_item import WatchedItem
         from tests.conftest import make_info_item
 
@@ -107,7 +107,7 @@ class TestListPage:
         await db_session.flush()
         await db_session.commit()
         response = await client.get("/watched-items")
-        assert b"aspect-review-status" in response.content
+        assert b"aspect-review-status" not in response.content
 
 
 class TestDetailPage:
@@ -401,6 +401,122 @@ class TestDetailPage:
         # The "new" badge fires because the sub_aspect's created_at is newer
         # than the WatchedItem's last_reviewed_at.
         assert b"badge-warning" in body
+
+
+class TestListPageSearchAndPagination:
+    async def test_partial_route_returns_200(self, client):
+        response = await client.get("/partials/watched-items-table")
+        assert response.status_code == 200
+
+    async def test_search_filters_by_name(self, client, db_session):
+        from src.core.models.watched_item import WatchedItem
+        from tests.conftest import make_info_item
+
+        item_a = await make_info_item(db_session, name="Alpha Item")
+        item_b = await make_info_item(db_session, name="Beta Item")
+        db_session.add(WatchedItem(info_item_id=item_a.info_item_id, name="Alpha WI"))
+        db_session.add(WatchedItem(info_item_id=item_b.info_item_id, name="Beta WI"))
+        await db_session.flush()
+        await db_session.commit()
+
+        response = await client.get("/partials/watched-items-table?q=Alpha")
+        body = response.content
+        assert b"Alpha WI" in body
+        assert b"Beta WI" not in body
+
+    async def test_search_is_case_insensitive(self, client, db_session):
+        from src.core.models.watched_item import WatchedItem
+        from tests.conftest import make_info_item
+
+        item = await make_info_item(db_session)
+        db_session.add(WatchedItem(info_item_id=item.info_item_id, name="Cannabis Observer"))
+        await db_session.flush()
+        await db_session.commit()
+
+        response = await client.get("/partials/watched-items-table?q=cannabis")
+        assert b"Cannabis Observer" in response.content
+
+    async def test_pagination_returns_page_two(self, client, db_session):
+        from src.core.models.watched_item import WatchedItem
+        from tests.conftest import make_info_item
+
+        for name in ("AAA", "BBB", "CCC"):
+            item = await make_info_item(db_session, name=name)
+            db_session.add(WatchedItem(info_item_id=item.info_item_id, name=name))
+        await db_session.flush()
+        await db_session.commit()
+
+        response = await client.get("/partials/watched-items-table?page=2&page_size=2")
+        body = response.content
+        # Page 1 has AAA, BBB (alphabetical); page 2 has CCC only.
+        assert b"CCC" in body
+        assert b"AAA" not in body
+        assert b"BBB" not in body
+
+    async def test_include_archived_false_hides_archived(self, client, db_session):
+        from datetime import UTC, datetime
+
+        from src.core.models.watched_item import WatchedItem
+        from tests.conftest import make_info_item
+
+        item = await make_info_item(db_session)
+        db_session.add(
+            WatchedItem(
+                info_item_id=item.info_item_id,
+                name="Archived WI",
+                archived_at=datetime.now(UTC),
+            )
+        )
+        await db_session.flush()
+        await db_session.commit()
+
+        response = await client.get("/partials/watched-items-table")
+        assert b"Archived WI" not in response.content
+
+    async def test_include_archived_true_shows_archived(self, client, db_session):
+        from datetime import UTC, datetime
+
+        from src.core.models.watched_item import WatchedItem
+        from tests.conftest import make_info_item
+
+        item = await make_info_item(db_session)
+        db_session.add(
+            WatchedItem(
+                info_item_id=item.info_item_id,
+                name="ShowArchived WI",
+                archived_at=datetime.now(UTC),
+            )
+        )
+        await db_session.flush()
+        await db_session.commit()
+
+        response = await client.get("/partials/watched-items-table?include_archived=true")
+        assert b"ShowArchived WI" in response.content
+
+    async def test_empty_state_on_no_search_matches(self, client):
+        response = await client.get("/partials/watched-items-table?q=xyzzy_no_match")
+        assert response.status_code == 200
+        assert b"No watched items" in response.content
+
+    async def test_full_page_renders_search_bar(self, client):
+        response = await client.get("/watched-items")
+        body = response.content
+        assert b'name="q"' in body
+        assert b"Filter by name" in body
+
+    async def test_no_aspect_review_column(self, client, db_session):
+        from src.core.models.watched_item import WatchedItem
+        from tests.conftest import make_info_item
+
+        item = await make_info_item(db_session)
+        db_session.add(WatchedItem(info_item_id=item.info_item_id, name="NoAR"))
+        await db_session.flush()
+        await db_session.commit()
+
+        response = await client.get("/watched-items")
+        body = response.content
+        assert b"Aspect Review" not in body
+        assert b"aspect-review-status" not in body
 
 
 class TestArchiveRestore:

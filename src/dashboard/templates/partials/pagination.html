@@ -1,4 +1,4 @@
-{# Reusable sticky-footer pagination. Expects: page, page_size, total_count, base_url, extra_params (dict), hx_target (optional). #}
+{# Reusable sticky-footer pagination. Expects: page, page_size, total_count, base_url, extra_params (dict), hx_target (optional), hx_include (optional). #}
 {% set total_pages = (total_count + page_size - 1) // page_size %}
 {% if total_pages > 1 or page_size != 25 %}
 <nav class="sticky bottom-0 bg-white dark:bg-gray-900 border-t border-gray-200 dark:border-gray-700 py-3 px-4 flex items-center justify-between mt-4" aria-label="Pagination">
@@ -9,7 +9,7 @@
       hx-get="{{ base_url }}"
       hx-target="{{ hx_target|default('#domains-table-container') }}"
       hx-swap="innerHTML"
-      hx-include="[name='q'],[name='status']"
+      hx-include="{{ hx_include|default('[name=\'q\'],[name=\'status\']') }}"
       name="page_size"
       aria-label="Results per page">
       {% for size in [25, 50, 100] %}

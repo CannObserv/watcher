@@ -6,63 +6,49 @@
   <a href="/watched-items/new" class="btn btn-primary">New Watched Item</a>
 </div>
 
-{% if watched_items %}
-<div class="overflow-x-auto rounded-lg border border-gray-200 dark:border-gray-700">
-  <table class="data-table">
-    <thead>
-      <tr>
-        <th scope="col">Name</th>
-        <th scope="col">Last Check</th>
-        <th scope="col">Interval</th>
-        <th scope="col">Next Check</th>
-        <th scope="col">Status</th>
-        <th scope="col">Aspect Review</th>
-      </tr>
-    </thead>
-    <tbody class="divide-y divide-gray-100 dark:divide-gray-700">
-    {% for wi in watched_items %}
-      {% set next_check = next_check_map[wi.id | string] %}
-      <tr>
-        <td class="font-medium">
-          <a href="/watched-items/{{ wi.id }}" class="link">{{ wi.name }}</a>
-        </td>
-        <td class="text-sm text-gray-500 dark:text-gray-400">
-          {% if wi.last_checked_at %}
-            {{ wi.last_checked_at.strftime('%b %e, %H:%M').strip() }}
-          {% else %}
-            <span class="text-gray-400">—</span>
-          {% endif %}
-        </td>
-        <td>{{ (wi.default_schedule_config or {}).get("interval") or "—" }}</td>
-        <td>
-          {% if next_check %}
-            <span class="tabular-nums text-sm" data-next-check="{{ next_check.strftime('%Y-%m-%dT%H:%M:%SZ') }}">
-              {{- next_check.strftime('%b %e, %H:%M').strip() -}}
-            </span>
-          {% else %}
-            <span class="text-gray-400">—</span>
-          {% endif %}
-        </td>
-        <td>
-          {% if wi.archived_at %}<span class="badge badge-archived">Archived</span>
-          {% elif wi.is_active %}<span class="badge badge-active">Active</span>
-          {% else %}<span class="badge badge-inactive">Inactive</span>{% endif %}
-        </td>
-        <td>
-          <span
-            hx-get="/watched-items/{{ wi.id }}/aspect-review-status"
-            hx-trigger="load"
+<div class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-4 mb-6">
+  <div class="flex flex-wrap gap-3 items-end">
+    <div class="flex-1 min-w-[200px]">
+      <label for="wi-search" class="sr-only">Filter watched items by name</label>
+      <input type="search" id="wi-search" name="q"
+        placeholder="Filter by name…"
+        value="{{ q or '' }}"
+        class="form-input"
+        hx-get="/partials/watched-items-table"
+        hx-target="#watched-items-table-container"
+        hx-swap="innerHTML"
+        hx-trigger="input changed delay:300ms, search"
+        hx-include="[name='include_archived']"
+        aria-label="Filter watched items by name">
+    </div>
+    <form method="get" action="/watched-items" class="flex gap-1">
+      <input type="hidden" name="q" value="{{ q or '' }}">
+      <fieldset class="segment-group" role="radiogroup" aria-label="Filter by archived status">
+        {% for value, label in [("", "Active"), ("true", "All")] %}
+        <label class="segment">
+          <input type="radio" name="include_archived" value="{{ value }}"
+            {% if (include_archived and value == "true") or (not include_archived and value == "") %}checked{% endif %}
+            hx-get="/partials/watched-items-table"
+            hx-target="#watched-items-table-container"
             hx-swap="innerHTML"
-            aria-live="polite">
-          </span>
-        </td>
-      </tr>
-    {% endfor %}
-    </tbody>
-  </table>
+            hx-trigger="change"
+            hx-include="#wi-search">
+          <span>{{ label }}</span>
+        </label>
+        {% endfor %}
+      </fieldset>
+      <noscript><button type="submit" class="btn btn-secondary">Apply</button></noscript>
+    </form>
+  </div>
 </div>
-{% else %}
-<div class="stat-card text-center py-12">
+
+<div id="watched-items-table-container"
+     aria-live="polite" aria-atomic="false">
+  {% include "partials/watched_items_table.html" %}
+</div>
+
+{% if not watched_items and not q %}
+<div class="stat-card text-center py-12 mt-6">
   <p class="text-lg font-medium text-gray-900 dark:text-white mb-2">No watched items yet</p>
   <p class="text-sm text-gray-500 dark:text-gray-400 mb-6">
     Create a Watched Item to stage defaults, or jump straight to creating a Watch

@@ -83,6 +83,7 @@ from src.dashboard.context import (
     get_watched_item_detail,
     get_watched_item_list,
     get_watched_item_templates,
+    get_watched_items_total_count,
 )
 from src.dashboard.deps import get_dashboard_user
 
@@ -1063,23 +1064,39 @@ async def watched_item_create_submit(
     return RedirectResponse(url=f"/watched-items/{wi.id}", status_code=303)
 
 
-@router.get("/watched-items")
-async def watched_items_page(
-    request: Request,
-    include_archived: bool = False,
-    session: AsyncSession = Depends(get_db_session),
-):
-    """List page for WatchedItems."""
-    watched_items = await get_watched_item_list(session, include_archived=include_archived)
-    now = datetime.now(UTC)
-    next_check_map: dict[str, datetime | None] = {}
+def _build_next_check_map(watched_items: list, now: datetime) -> dict[str, datetime | None]:
+    result: dict[str, datetime | None] = {}
     for wi in watched_items:
         if wi.last_checked_at is not None and wi.default_schedule_config:
-            next_check_map[str(wi.id)] = compute_next_check(
+            result[str(wi.id)] = compute_next_check(
                 wi.default_schedule_config, wi.last_checked_at, now=now
             )
         else:
-            next_check_map[str(wi.id)] = None
+            result[str(wi.id)] = None
+    return result
+
+
+@router.get("/watched-items")
+async def watched_items_page(
+    request: Request,
+    q: str | None = None,
+    include_archived: bool = False,
+    page: int = 1,
+    page_size: int = 25,
+    session: AsyncSession = Depends(get_db_session),
+):
+    """List page for WatchedItems."""
+    watched_items = await get_watched_item_list(
+        session,
+        search=q,
+        include_archived=include_archived,
+        page=page,
+        page_size=page_size,
+    )
+    total_count = await get_watched_items_total_count(
+        session, search=q, include_archived=include_archived
+    )
+    now = datetime.now(UTC)
     return templates.TemplateResponse(
         request,
         "pages/watched_items.html",
@@ -1087,9 +1104,57 @@ async def watched_items_page(
             "request": request,
             "active_page": "watched-items",
             "watched_items": watched_items,
-            "next_check_map": next_check_map,
+            "next_check_map": _build_next_check_map(watched_items, now),
             "include_archived": include_archived,
+            "q": q or "",
+            "page": page,
+            "page_size": page_size,
+            "total_count": total_count,
+            "base_url": "/partials/watched-items-table",
+            "extra_params": {
+                k: v for k, v in {"q": q, "include_archived": include_archived or None}.items() if v
+            },
             "flash": None,
+        },
+    )
+
+
+@router.get("/partials/watched-items-table")
+async def partial_watched_items_table(
+    request: Request,
+    q: str | None = None,
+    include_archived: bool = False,
+    page: int = 1,
+    page_size: int = 25,
+    session: AsyncSession = Depends(get_db_session),
+):
+    """HTMX partial: watched-items table with search, filter, and pagination."""
+    watched_items = await get_watched_item_list(
+        session,
+        search=q,
+        include_archived=include_archived,
+        page=page,
+        page_size=page_size,
+    )
+    total_count = await get_watched_items_total_count(
+        session, search=q, include_archived=include_archived
+    )
+    now = datetime.now(UTC)
+    return templates.TemplateResponse(
+        request,
+        "partials/watched_items_table.html",
+        {
+            "watched_items": watched_items,
+            "next_check_map": _build_next_check_map(watched_items, now),
+            "page": page,
+            "page_size": page_size,
+            "total_count": total_count,
+            "base_url": "/partials/watched-items-table",
+            "hx_target": "#watched-items-table-container",
+            "hx_include": "[name='q'],[name='include_archived']",
+            "extra_params": {
+                k: v for k, v in {"q": q, "include_archived": include_archived or None}.items() if v
+            },
         },
     )
 

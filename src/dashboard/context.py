@@ -421,16 +421,42 @@ async def get_domain_watches(
     return list(result.scalars().all())
 
 
-async def get_watched_item_list(
-    session: AsyncSession,
-    include_archived: bool = False,
-) -> list[WatchedItem]:
-    """Fetch WatchedItems for dashboard list display."""
-    stmt = select(WatchedItem).order_by(WatchedItem.name)
+def _apply_watched_item_filters(stmt, *, search: str | None, include_archived: bool):
     if not include_archived:
         stmt = stmt.where(WatchedItem.archived_at.is_(None))
+    if search:
+        escaped = search.replace("%", "\\%").replace("_", "\\_")
+        stmt = stmt.where(WatchedItem.name.ilike(f"%{escaped}%"))
+    return stmt
+
+
+async def get_watched_item_list(
+    session: AsyncSession,
+    *,
+    include_archived: bool = False,
+    search: str | None = None,
+    page: int = 1,
+    page_size: int = 25,
+) -> list[WatchedItem]:
+    """Fetch WatchedItems for dashboard list display with search and pagination."""
+    stmt = select(WatchedItem).order_by(WatchedItem.name)
+    stmt = _apply_watched_item_filters(stmt, search=search, include_archived=include_archived)
+    stmt = stmt.offset((page - 1) * page_size).limit(page_size)
     result = await session.execute(stmt)
     return list(result.scalars().all())
+
+
+async def get_watched_items_total_count(
+    session: AsyncSession,
+    *,
+    include_archived: bool = False,
+    search: str | None = None,
+) -> int:
+    """Count WatchedItems matching the given filters (for pagination)."""
+    stmt = select(func.count(WatchedItem.id))
+    stmt = _apply_watched_item_filters(stmt, search=search, include_archived=include_archived)
+    result = await session.execute(stmt)
+    return result.scalar_one()
 
 
 async def get_watched_item_detail(

@@ -1,0 +1,56 @@
+<div class="overflow-x-auto rounded-lg border border-gray-200 dark:border-gray-700">
+  <table class="data-table">
+    <thead>
+      <tr>
+        <th scope="col">Name</th>
+        <th scope="col">Last Check</th>
+        <th scope="col">Interval</th>
+        <th scope="col">Next Check</th>
+        <th scope="col">Status</th>
+      </tr>
+    </thead>
+    <tbody class="divide-y divide-gray-100 dark:divide-gray-700">
+    {% if watched_items %}
+      {% for wi in watched_items %}
+        {% set next_check = next_check_map[wi.id | string] %}
+        <tr>
+          <td class="font-medium">
+            <a href="/watched-items/{{ wi.id }}" class="link">{{ wi.name }}</a>
+          </td>
+          <td class="text-sm text-gray-500 dark:text-gray-400">
+            {% if wi.last_checked_at %}
+              {{ wi.last_checked_at.strftime('%b %e, %H:%M').strip() }}
+            {% else %}
+              <span class="text-gray-400">—</span>
+            {% endif %}
+          </td>
+          <td>{{ (wi.default_schedule_config or {}).get("interval") or "—" }}</td>
+          <td>
+            {% if next_check %}
+              <span class="tabular-nums text-sm" data-next-check="{{ next_check.strftime('%Y-%m-%dT%H:%M:%SZ') }}">
+                {{- next_check.strftime('%b %e, %H:%M').strip() -}}
+              </span>
+            {% else %}
+              <span class="text-gray-400">—</span>
+            {% endif %}
+          </td>
+          <td>
+            {% if wi.archived_at %}<span class="badge badge-archived">Archived</span>
+            {% elif wi.is_active %}<span class="badge badge-active">Active</span>
+            {% else %}<span class="badge badge-inactive">Inactive</span>{% endif %}
+          </td>
+        </tr>
+      {% endfor %}
+    {% else %}
+      <tr>
+        <td colspan="5" class="text-center py-8 text-gray-500 dark:text-gray-400 text-sm">
+          No watched items found.
+        </td>
+      </tr>
+    {% endif %}
+    </tbody>
+  </table>
+</div>
+{% if watched_items %}
+{% include "partials/pagination.html" %}
+{% endif %}

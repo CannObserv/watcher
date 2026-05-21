@@ -1064,6 +1064,14 @@ async def watched_item_create_submit(
     return RedirectResponse(url=f"/watched-items/{wi.id}", status_code=303)
 
 
+def _watched_item_extra_params(q: str | None, include_archived: bool) -> dict[str, str]:
+    return {
+        k: v
+        for k, v in {"q": q, "include_archived": "true" if include_archived else None}.items()
+        if v
+    }
+
+
 def _build_next_check_map(
     watched_items: list[WatchedItem], now: datetime
 ) -> dict[str, datetime | None]:
@@ -1115,14 +1123,7 @@ async def watched_items_page(
             "base_url": "/partials/watched-items-table",
             "hx_target": "#watched-items-table-container",
             "hx_include": "[name='q'],[name='include_archived']",
-            "extra_params": {
-                k: v
-                for k, v in {
-                    "q": q,
-                    "include_archived": "true" if include_archived else None,
-                }.items()
-                if v
-            },
+            "extra_params": _watched_item_extra_params(q, include_archived),
             "flash": None,
         },
     )
@@ -1161,14 +1162,7 @@ async def partial_watched_items_table(
             "base_url": "/partials/watched-items-table",
             "hx_target": "#watched-items-table-container",
             "hx_include": "[name='q'],[name='include_archived']",
-            "extra_params": {
-                k: v
-                for k, v in {
-                    "q": q,
-                    "include_archived": "true" if include_archived else None,
-                }.items()
-                if v
-            },
+            "extra_params": _watched_item_extra_params(q, include_archived),
         },
     )
 

@@ -36,7 +36,8 @@
     {{ watched_item_field(field_contexts["default_schedule_interval"]) }}
     {{ watched_item_field(field_contexts["default_content_type"]) }}
     <div class="p-4">
-      <span class="form-label mb-2 block">Default Tags</span>
+      <span class="form-label mb-1 block">Default Tags</span>
+      <p class="text-xs text-gray-500 dark:text-gray-400 mb-2">Separate multiple tags with commas.</p>
       {% include "partials/watched_item_tags_editor.html" %}
     </div>
   </div>

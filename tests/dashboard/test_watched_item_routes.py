@@ -957,10 +957,9 @@ class TestTagsEditor:
         await db_session.refresh(wi)
         assert wi.default_tags == ["a"]
 
-    @pytest.mark.parametrize("bad_tag", ["foo bar", "foo,bar", "a\tb", "x\ny"])
-    async def test_add_rejects_whitespace_or_comma(self, client, db_session, bad_tag):
-        """Server-side validation mirrors the HTML5 pattern='[^\\s,]+' so
-        non-HTMX callers can't bypass the tag format constraint."""
+    @pytest.mark.parametrize("bad_tag", [" ", ",", " , "])
+    async def test_add_rejects_empty_or_whitespace_only(self, client, db_session, bad_tag):
+        """All-whitespace or comma-only input yields no valid tags → 400."""
         from src.core.models.watched_item import WatchedItem
         from tests.conftest import make_info_item
 
@@ -977,6 +976,66 @@ class TestTagsEditor:
         assert response.status_code == 400
         await db_session.refresh(wi)
         assert wi.default_tags is None
+
+    async def test_add_tag_with_space(self, client, db_session):
+        """Tags containing spaces are accepted and stored verbatim."""
+        from src.core.models.watched_item import WatchedItem
+        from tests.conftest import make_info_item
+
+        item = await make_info_item(db_session)
+        wi = WatchedItem(info_item_id=item.info_item_id, name="T")
+        db_session.add(wi)
+        await db_session.flush()
+        await db_session.commit()
+        response = await client.post(
+            f"/watched-items/{wi.id}/tags",
+            data={"tag": "wslcb board"},
+            headers={"HX-Request": "true"},
+        )
+        assert response.status_code == 200
+        await db_session.refresh(wi)
+        assert "wslcb board" in (wi.default_tags or [])
+
+    async def test_add_comma_separated_tags(self, client, db_session):
+        """Comma-separated input adds multiple tags in one request."""
+        from src.core.models.watched_item import WatchedItem
+        from tests.conftest import make_info_item
+
+        item = await make_info_item(db_session)
+        wi = WatchedItem(info_item_id=item.info_item_id, name="T")
+        db_session.add(wi)
+        await db_session.flush()
+        await db_session.commit()
+        response = await client.post(
+            f"/watched-items/{wi.id}/tags",
+            data={"tag": "foo, bar, baz"},
+            headers={"HX-Request": "true"},
+        )
+        assert response.status_code == 200
+        await db_session.refresh(wi)
+        assert wi.default_tags == ["bar", "baz", "foo"]
+
+    async def test_remove_tag_with_space(self, client, db_session):
+        """Tags containing spaces can be removed via URL-encoded path."""
+        from urllib.parse import quote
+
+        from src.core.models.watched_item import WatchedItem
+        from tests.conftest import make_info_item
+
+        item = await make_info_item(db_session)
+        wi = WatchedItem(
+            info_item_id=item.info_item_id, name="T", default_tags=["wslcb board", "x"]
+        )
+        db_session.add(wi)
+        await db_session.flush()
+        await db_session.commit()
+        response = await client.delete(
+            f"/watched-items/{wi.id}/tags/{quote('wslcb board', safe='')}",
+            headers={"HX-Request": "true"},
+        )
+        assert response.status_code == 200
+        await db_session.refresh(wi)
+        assert wi.default_tags == ["x"]
 
 
 class TestSubAspectBanner:

@@ -1462,26 +1462,20 @@ async def watched_item_tag_add(
     wi = await get_watched_item_detail(session, watched_item_id)
     if not wi:
         raise HTTPException(status_code=404, detail="WatchedItem not found")
-    tag = tag.strip()
-    if not tag:
-        raise HTTPException(status_code=400, detail="Tag cannot be empty")
-    # Mirror the template's HTML5 pattern="[^\s,]+" so non-HTMX callers
-    # (curl, scripts) can't bypass it.
-    if any(c.isspace() or c == "," for c in tag):
-        raise HTTPException(
-            status_code=400,
-            detail="Tag cannot contain whitespace or commas",
-        )
+    tags_raw = [t.strip() for t in tag.split(",") if t.strip()]
+    if not tags_raw:
+        raise HTTPException(status_code=400, detail="No valid tags provided")
     current = list(wi.default_tags or [])
-    if tag not in current:
-        current.append(tag)
+    added = [t for t in tags_raw if t not in current]
+    if added:
+        current.extend(added)
         wi.default_tags = sorted(current)
         audit(
             session,
             EventType.WATCHED_ITEM_UPDATED,
             watched_item_id=str(wi.id),
             updated_fields=["default_tags"],
-            tag_added=tag,
+            tags_added=added,
             source="dashboard",
         )
         await session.commit()

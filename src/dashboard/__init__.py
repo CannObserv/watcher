@@ -1,6 +1,7 @@
 """Dashboard — server-rendered UI for watcher."""
 
 from pathlib import Path
+from urllib.parse import quote as _url_quote
 
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
@@ -17,6 +18,7 @@ templates = Jinja2Templates(directory=str(TEMPLATE_DIR))
 templates.env.globals["build_id"] = BUILD_ID
 templates.env.globals["event_titles"] = EVENT_TITLES
 templates.env.globals["template_variables"] = TEMPLATE_VARIABLES
+templates.env.filters["url_quote"] = lambda s: _url_quote(str(s), safe="")
 
 
 def register_dashboard(app: FastAPI) -> None:

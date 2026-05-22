@@ -181,7 +181,7 @@ class TestWatchCreate:
         assert response.status_code == 200
         body = response.content
         assert b'hx-trigger="load"' in body
-        assert info_item_id.encode() in body
+        assert (b"/info-items/" + info_item_id.encode()) in body
 
     async def test_create_form_degrades_for_unknown_watched_item_id(self, client):
         """Unknown watched_item_id returns 200 with no pre-population load trigger."""

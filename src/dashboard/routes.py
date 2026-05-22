@@ -302,6 +302,7 @@ async def info_item_binding_tree(
         try:
             bindings = await fetch_info_item_bindings(info_client, info_item_id)
             info_item = bindings.info_item
+            du = info_item.dashboard_url
             primary_url = bindings.primary_url
             cross_checks = bindings.cross_checks
             sub_aspects = bindings.sub_aspects
@@ -314,6 +315,7 @@ async def info_item_binding_tree(
                 )
             # select_only / readonly_tree: show the InfoItem without requiring a primary
             info_item = await info_client.get_info_item(info_item_id)
+            du = info_item.dashboard_url
             primary_url = None
             cross_checks = []
             sub_aspects = []
@@ -333,7 +335,6 @@ async def info_item_binding_tree(
             status_code=200,
         )
     flagged = {s.strip() for s in new_subaspect_ids.split(",") if s.strip()} or None
-    du = info_item.dashboard_url
     return templates.TemplateResponse(
         request,
         "partials/info_item_picker/binding_tree.html",

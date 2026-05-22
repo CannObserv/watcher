@@ -4,7 +4,7 @@ import enum
 from datetime import datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import Boolean, Column, DateTime, ForeignKey, String, Table, Text
+from sqlalchemy import Boolean, DateTime, ForeignKey, String, Text
 from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.orm import Mapped, mapped_column, relationship, validates
 from ulid import ULID
@@ -13,25 +13,6 @@ from src.core.models.base import Base, TimestampMixin, ULIDType, generate_ulid
 
 if TYPE_CHECKING:
     from src.core.models.watched_item import WatchedItem
-
-# Cross-schema FK resolution stubs for the Information service.
-# Watcher's Base.metadata cannot resolve FKs into the `information` schema on
-# its own — Archiver owns those tables on a separate DeclarativeBase. Register
-# stub Tables exposing only the referenced primary key columns. Watcher never
-# creates or drops these tables; production DDL lives in Archiver's Alembic
-# root, and alembic/env.py filters non-public schemas out of autogenerate.
-Table(
-    "info_items",
-    Base.metadata,
-    Column("info_item_id", ULIDType, primary_key=True),
-    schema="information",
-)
-Table(
-    "info_sources",
-    Base.metadata,
-    Column("info_source_id", ULIDType, primary_key=True),
-    schema="information",
-)
 
 
 class ContentType(enum.StrEnum):
@@ -68,13 +49,11 @@ class Watch(Base, TimestampMixin):
     id: Mapped[ULID] = mapped_column(ULIDType, primary_key=True, default=generate_ulid)
     info_item_id: Mapped[ULID] = mapped_column(
         ULIDType,
-        ForeignKey("information.info_items.info_item_id", ondelete="RESTRICT"),
         nullable=False,
         index=True,
     )
     target_info_source_id: Mapped[ULID | None] = mapped_column(
         ULIDType,
-        ForeignKey("information.info_sources.info_source_id", ondelete="RESTRICT"),
         nullable=True,
         index=True,
     )

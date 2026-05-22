@@ -9,7 +9,7 @@ from typing import Literal
 import httpx
 from archiver_client import AuthError, NotFound, ServerError
 from archiver_client.generated.types import UNSET
-from fastapi import APIRouter, BackgroundTasks, Depends, Form, HTTPException, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, Form, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from jinja2 import TemplateError
 from notifier_client.errors import NotifierError
@@ -350,8 +350,17 @@ async def info_item_binding_tree(
 
 
 @router.get("/watches/new")
-async def watch_create_form(request: Request):
-    """Watch creation form."""
+async def watch_create_form(
+    request: Request,
+    watched_item_id: str | None = Query(None),
+    session: AsyncSession = Depends(get_db_session),
+):
+    """Watch creation form. Accepts optional watched_item_id to pre-select the InfoItem."""
+    pre_info_item_id: str | None = None
+    if watched_item_id is not None:
+        wi = await get_watched_item_detail(session, watched_item_id)
+        if wi is not None:
+            pre_info_item_id = str(wi.info_item_id)
     return templates.TemplateResponse(
         request,
         "pages/watch_form.html",
@@ -360,6 +369,7 @@ async def watch_create_form(request: Request):
             "watch": None,
             "flash": None,
             "content_types": list(ContentType),
+            "pre_info_item_id": pre_info_item_id,
         },
     )
 

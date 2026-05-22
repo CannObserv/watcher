@@ -34,7 +34,12 @@
     {# Initial empty state — server-renders no <ul> until first search. #}
   </div>
   <div id="{{ target_form_id }}-binding-tree" class="mt-3"
-       aria-live="polite" aria-atomic="true">
+       aria-live="polite" aria-atomic="true"
+       {% if pre_info_item_id %}
+       hx-get="/info-items/{{ pre_info_item_id }}/binding-tree?mode={{ mode }}&target_form_id={{ target_form_id }}"
+       hx-trigger="load"
+       hx-swap="innerHTML"
+       {% endif %}>
     {# Binding-tree partial swapped in here when an option is chosen
        (mode=select_with_target). For select_only, a hidden info_item_id
        input is injected into the parent form via the binding-tree partial. #}

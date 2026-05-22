@@ -62,7 +62,11 @@
 
 {# Child Watches table — reuse partial scoped by watched_item_id #}
 <section class="mb-8">
-  <h3 class="text-lg font-semibold text-gray-900 dark:text-white mb-4">Watches</h3>
+  <div class="flex items-center justify-between mb-4">
+    <h3 class="text-lg font-semibold text-gray-900 dark:text-white">Watches</h3>
+    <a href="/watches/new?watched_item_id={{ watched_item.id }}"
+       class="btn btn-secondary btn-sm">+ New Watch</a>
+  </div>
   {% if child_watches %}
   {% include "partials/watch_table.html" with context %}
   {% else %}

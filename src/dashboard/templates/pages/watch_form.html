@@ -13,7 +13,7 @@
 
   <fieldset>
     <legend class="form-label">Target</legend>
-    {% with target_form_id="watch-create", mode="select_with_target" %}
+    {% with target_form_id="watch-create", mode="select_with_target", pre_info_item_id=pre_info_item_id %}
     {% include "partials/info_item_picker/typeahead.html" %}
     {% endwith %}
   </fieldset>

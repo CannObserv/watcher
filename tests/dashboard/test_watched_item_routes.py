@@ -903,6 +903,7 @@ class TestTagsEditor:
         response = await client.get(f"/watched-items/{wi.id}/tags", headers={"HX-Request": "true"})
         assert response.status_code == 200
         assert b"a" in response.content and b"b" in response.content
+        assert b'<span class="chip"><span>' in response.content
 
     async def test_add_tag(self, client, db_session):
         from src.core.models.watched_item import WatchedItem

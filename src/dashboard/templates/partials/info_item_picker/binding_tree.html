@@ -1,6 +1,7 @@
 {# Step-2 / readonly InfoItem binding tree. Caller passes:
    info_item: InfoItemOut-shaped (.info_item_id, .name)
    primary_url: str | None (resolved by route from get_info_source on the primary)
+   info_item_dashboard_url: str | None (optional; links InfoItem ULID to Archiver dashboard when set)
    cross_checks: list of InfoSourceOut-shaped objects
    sub_aspects: list of InfoSourceOut-shaped objects
    mode: "select_with_target" | "select_only" | "readonly_tree"

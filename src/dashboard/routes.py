@@ -987,7 +987,12 @@ async def watched_item_create_form(request: Request):
     return templates.TemplateResponse(
         request,
         "pages/watched_item_form.html",
-        {"active_page": "watched-items", "flash": None, "content_types": list(ContentType)},
+        {
+            "active_page": "watched-items",
+            "flash": None,
+            "content_types": list(ContentType),
+            "pre_info_item_id": None,
+        },
     )
 
 
@@ -1018,6 +1023,7 @@ async def watched_item_create_submit(
                 "active_page": "watched-items",
                 "flash": {"type": level, "message": message},
                 "content_types": list(ContentType),
+                "pre_info_item_id": None,
             },
         )
 

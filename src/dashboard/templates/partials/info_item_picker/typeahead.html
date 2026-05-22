@@ -3,6 +3,7 @@
    mode: "select_with_target" | "select_only"
    field_label: str (optional; defaults to "Information Item")
    field_hint: str (optional; displayed between label and input)
+   pre_info_item_id: str | None (optional; pre-populates the binding tree via hx-trigger="load")
 #}
 <div class="info-item-picker" data-target-form="{{ target_form_id }}" data-mode="{{ mode }}">
   <label for="{{ target_form_id }}-iip-input" class="form-label">{{ field_label or "Information Item" }}</label>

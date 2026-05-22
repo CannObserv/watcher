@@ -1046,6 +1046,8 @@ async def watched_item_create_submit(
             return await _render_with_flash(f"Invalid content type: {ct_raw!r}")
 
     tags = [t.strip() for t in default_tags.split(",") if t.strip()] or None
+    if tags and any(len(t) > 255 for t in tags):
+        return await _render_with_flash("Tag too long (max 255 characters each)")
 
     info_client = get_registry().get_archiver_client()
     try:
@@ -1465,6 +1467,8 @@ async def watched_item_tag_add(
     tags_raw = [t.strip() for t in tag.split(",") if t.strip()]
     if not tags_raw:
         raise HTTPException(status_code=400, detail="No valid tags provided")
+    if any(len(t) > 255 for t in tags_raw):
+        raise HTTPException(status_code=400, detail="Tag too long (max 255 characters each)")
     current = list(wi.default_tags or [])
     added = [t for t in tags_raw if t not in current]
     if added:

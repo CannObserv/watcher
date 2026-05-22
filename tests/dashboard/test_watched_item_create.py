@@ -135,6 +135,19 @@ class TestWatchedItemCreateSubmit:
         assert response.status_code == 200
         assert b"content type" in response.content.lower()
 
+    async def test_tag_too_long_shows_flash(self, client, db_session, info_client):
+        item = await make_info_item(db_session, name="TL")
+        await db_session.commit()
+        response = await client.post(
+            "/watched-items/new",
+            data={
+                "info_item_id": str(item.info_item_id),
+                "default_tags": "x" * 256,
+            },
+        )
+        assert response.status_code == 200
+        assert b"too long" in response.content.lower()
+
     async def test_emits_audit_with_source_dashboard(self, client, db_session, info_client):
         item = await make_info_item(db_session, name="Z")
         await db_session.commit()

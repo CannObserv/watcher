@@ -1037,6 +1037,44 @@ class TestTagsEditor:
         await db_session.refresh(wi)
         assert wi.default_tags == ["x"]
 
+    async def test_add_partial_duplicate_csv(self, client, db_session):
+        """When CSV input mixes existing and new tags, only new tags are added."""
+        from src.core.models.watched_item import WatchedItem
+        from tests.conftest import make_info_item
+
+        item = await make_info_item(db_session)
+        wi = WatchedItem(info_item_id=item.info_item_id, name="T", default_tags=["existing"])
+        db_session.add(wi)
+        await db_session.flush()
+        await db_session.commit()
+        response = await client.post(
+            f"/watched-items/{wi.id}/tags",
+            data={"tag": "existing, new"},
+            headers={"HX-Request": "true"},
+        )
+        assert response.status_code == 200
+        await db_session.refresh(wi)
+        assert wi.default_tags == ["existing", "new"]
+
+    async def test_add_rejects_tag_too_long(self, client, db_session):
+        """A tag exceeding 255 characters is rejected with 400."""
+        from src.core.models.watched_item import WatchedItem
+        from tests.conftest import make_info_item
+
+        item = await make_info_item(db_session)
+        wi = WatchedItem(info_item_id=item.info_item_id, name="T")
+        db_session.add(wi)
+        await db_session.flush()
+        await db_session.commit()
+        response = await client.post(
+            f"/watched-items/{wi.id}/tags",
+            data={"tag": "x" * 256},
+            headers={"HX-Request": "true"},
+        )
+        assert response.status_code == 400
+        await db_session.refresh(wi)
+        assert wi.default_tags is None
+
 
 class TestSubAspectBanner:
     async def test_banner_shows_count_when_new(self, client, db_session, info_client):

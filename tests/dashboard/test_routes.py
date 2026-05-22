@@ -168,6 +168,29 @@ class TestWatchCreate:
         # Legacy minimal-picker hint text is gone (was rendered always by target_picker.html).
         assert b"Paste the InfoItem ULID from the Archiver service" not in body
 
+    async def test_create_form_prepopulates_with_valid_watched_item_id(self, client, db_session):
+        """watched_item_id param triggers hx-trigger=load on the binding-tree div."""
+        from src.core.models.watched_item import WatchedItem
+
+        info_item_id = await _seed_info_item(db_session, name="Pre-pop Item")
+        wi = WatchedItem(info_item_id=info_item_id, name="Pre-pop WI")
+        db_session.add(wi)
+        await db_session.flush()
+        await db_session.commit()
+        response = await client.get(f"/watches/new?watched_item_id={wi.id}")
+        assert response.status_code == 200
+        body = response.content
+        assert b'hx-trigger="load"' in body
+        assert info_item_id.encode() in body
+
+    async def test_create_form_degrades_for_unknown_watched_item_id(self, client):
+        """Unknown watched_item_id returns 200 with no pre-population load trigger."""
+        from ulid import ULID
+
+        response = await client.get(f"/watches/new?watched_item_id={ULID()}")
+        assert response.status_code == 200
+        assert b'hx-trigger="load"' not in response.content
+
     async def test_create_watch_redirects(self, client, db_session):
         info_item_id = await _seed_info_item(db_session, name="Created Watch")
         response = await client.post(

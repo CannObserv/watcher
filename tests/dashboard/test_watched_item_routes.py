@@ -185,6 +185,7 @@ class TestDetailPage:
                 name="Item",
                 description=None,
                 owner=None,
+                dashboard_url=None,
                 info_item_sources=[
                     SimpleNamespace(
                         info_source_id="primary-src-id",
@@ -302,6 +303,7 @@ class TestDetailPage:
                 name="No-Primary Item",
                 description=None,
                 owner=None,
+                dashboard_url=None,
                 info_item_sources=[],
             )
         )
@@ -334,6 +336,117 @@ class TestDetailPage:
         assert b"Danger Zone" in response.content
         assert b"Archive" in response.content
 
+    async def test_new_watch_button_visible_when_active_with_primary_url(
+        self, client, db_session, info_client
+    ):
+        """New Watch button appears on active WI that has a resolved primary URL."""
+        from types import SimpleNamespace
+        from unittest.mock import AsyncMock
+
+        from src.core.models.watched_item import WatchedItem
+        from tests.conftest import bind_primary_source, make_info_item, make_info_source
+
+        item = await make_info_item(db_session)
+        src = await make_info_source(db_session, url="https://example.com/target")
+        await bind_primary_source(
+            db_session, info_item_id=item.info_item_id, info_source_id=src.info_source_id
+        )
+        wi = WatchedItem(info_item_id=item.info_item_id, name="Active")
+        db_session.add(wi)
+        await db_session.flush()
+        await db_session.commit()
+
+        info_client.get_info_item = AsyncMock(
+            return_value=SimpleNamespace(
+                info_item_id=str(item.info_item_id),
+                name="Active Item",
+                description=None,
+                owner=None,
+                dashboard_url=None,
+                info_item_sources=[
+                    SimpleNamespace(
+                        info_source_id=str(src.info_source_id),
+                        role=None,
+                        created_at=item.created_at,
+                    )
+                ],
+            )
+        )
+        response = await client.get(f"/watched-items/{wi.id}")
+        assert b"+ New Watch" in response.content
+
+    async def test_new_watch_button_hidden_when_archived(self, client, db_session, info_client):
+        """New Watch button absent on archived WI even if primary URL is present."""
+        from datetime import UTC, datetime
+        from types import SimpleNamespace
+        from unittest.mock import AsyncMock
+
+        from src.core.models.watched_item import WatchedItem
+        from tests.conftest import bind_primary_source, make_info_item, make_info_source
+
+        item = await make_info_item(db_session)
+        src = await make_info_source(db_session, url="https://example.com/target")
+        await bind_primary_source(
+            db_session, info_item_id=item.info_item_id, info_source_id=src.info_source_id
+        )
+        wi = WatchedItem(
+            info_item_id=item.info_item_id,
+            name="Archived",
+            archived_at=datetime.now(UTC),
+        )
+        db_session.add(wi)
+        await db_session.flush()
+        await db_session.commit()
+
+        info_client.get_info_item = AsyncMock(
+            return_value=SimpleNamespace(
+                info_item_id=str(item.info_item_id),
+                name="Archived Item",
+                description=None,
+                owner=None,
+                dashboard_url=None,
+                info_item_sources=[
+                    SimpleNamespace(
+                        info_source_id=str(src.info_source_id),
+                        role=None,
+                        created_at=item.created_at,
+                    )
+                ],
+            )
+        )
+        response = await client.get(f"/watched-items/{wi.id}")
+        assert b"+ New Watch" not in response.content
+
+    async def test_new_watch_button_hidden_when_no_primary_url(
+        self, client, db_session, info_client
+    ):
+        """New Watch button absent when InfoItem has no primary InfoSource binding."""
+        from types import SimpleNamespace
+        from unittest.mock import AsyncMock
+
+        from src.core.models.watched_item import WatchedItem
+        from tests.conftest import make_info_item
+
+        item = await make_info_item(db_session)
+        wi = WatchedItem(info_item_id=item.info_item_id, name="NoPrimary")
+        db_session.add(wi)
+        await db_session.flush()
+        await db_session.commit()
+
+        # No primary binding → fetch_info_item_bindings raises ValueError → primary_url=None
+        info_client.get_info_item = AsyncMock(
+            return_value=SimpleNamespace(
+                info_item_id=str(item.info_item_id),
+                name="No Primary Item",
+                description=None,
+                owner=None,
+                dashboard_url=None,
+                info_item_sources=[],
+            )
+        )
+        response = await client.get(f"/watched-items/{wi.id}")
+        assert b"+ New Watch" not in response.content
+
     async def test_new_sub_aspects_get_badge(self, client, db_session, info_client):
         """Sub_aspects created after last_reviewed_at get a 'new' badge in the tree."""
         from datetime import UTC, datetime, timedelta
@@ -362,6 +475,7 @@ class TestDetailPage:
                 name="N",
                 description=None,
                 owner=None,
+                dashboard_url=None,
                 info_item_sources=[
                     SimpleNamespace(
                         info_source_id="primary",
@@ -890,6 +1004,7 @@ class TestSubAspectBanner:
                 name="Has new",
                 description=None,
                 owner=None,
+                dashboard_url=None,
                 info_item_sources=[
                     SimpleNamespace(
                         info_source_id="p",
@@ -943,6 +1058,7 @@ class TestSubAspectBanner:
                 name="x",
                 description=None,
                 owner=None,
+                dashboard_url=None,
                 info_item_sources=[],
             )
         )
@@ -982,6 +1098,7 @@ def _fake_info_item_out(*, info_item_id):
         name="Fake InfoItem",
         description=None,
         owner=None,
+        dashboard_url=None,
         info_item_sources=[
             SimpleNamespace(
                 info_source_id="fake-primary-src",
@@ -1025,6 +1142,7 @@ class TestAspectReviewStatus:
                 name="x",
                 description=None,
                 owner=None,
+                dashboard_url=None,
                 info_item_sources=[
                     SimpleNamespace(
                         info_source_id="p",
@@ -1079,6 +1197,7 @@ class TestAspectReviewStatus:
                 name="x",
                 description=None,
                 owner=None,
+                dashboard_url=None,
                 info_item_sources=[],
             )
         )

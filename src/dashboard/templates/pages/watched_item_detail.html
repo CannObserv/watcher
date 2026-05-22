@@ -64,8 +64,10 @@
 <section class="mb-8">
   <div class="flex items-center justify-between mb-4">
     <h3 class="text-lg font-semibold text-gray-900 dark:text-white">Watches</h3>
+    {% if not watched_item.archived_at and primary_url %}
     <a href="/watches/new?watched_item_id={{ watched_item.id }}"
        class="btn btn-secondary btn-sm">+ New Watch</a>
+    {% endif %}
   </div>
   {% if child_watches %}
   {% include "partials/watch_table.html" with context %}

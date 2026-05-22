@@ -8,7 +8,6 @@ from typing import Literal
 
 import httpx
 from archiver_client import AuthError, NotFound, ServerError
-from archiver_client.generated.types import UNSET
 from fastapi import APIRouter, BackgroundTasks, Depends, Form, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from jinja2 import TemplateError
@@ -334,12 +333,14 @@ async def info_item_binding_tree(
             status_code=200,
         )
     flagged = {s.strip() for s in new_subaspect_ids.split(",") if s.strip()} or None
+    du = info_item.dashboard_url
     return templates.TemplateResponse(
         request,
         "partials/info_item_picker/binding_tree.html",
         {
             "info_item": info_item,
             "primary_url": primary_url,
+            "info_item_dashboard_url": du if isinstance(du, str) else None,
             "cross_checks": cross_checks,
             "sub_aspects": sub_aspects,
             "mode": mode,
@@ -1212,8 +1213,8 @@ async def watched_item_detail_page(
         bindings = await fetch_info_item_bindings(client_sdk, str(wi.info_item_id))
         info_item = bindings.info_item
         primary_url = bindings.primary_url
-        raw_du = getattr(info_item, "dashboard_url", UNSET)
-        info_item_dashboard_url = raw_du if isinstance(raw_du, str) else None
+        du = info_item.dashboard_url
+        info_item_dashboard_url = du if isinstance(du, str) else None
         cross_checks = bindings.cross_checks
         sub_aspects = bindings.sub_aspects
         # Build the "new" set from the raw bindings list (it has .role +
@@ -1243,8 +1244,8 @@ async def watched_item_detail_page(
         # Don't null out info_item — readonly_tree renders without a primary binding.
         try:
             info_item = await client_sdk.get_info_item(str(wi.info_item_id))
-            raw_du = getattr(info_item, "dashboard_url", UNSET)
-            info_item_dashboard_url = raw_du if isinstance(raw_du, str) else None
+            du = info_item.dashboard_url
+            info_item_dashboard_url = du if isinstance(du, str) else None
             primary_url = None
             cross_checks = []
             sub_aspects = []

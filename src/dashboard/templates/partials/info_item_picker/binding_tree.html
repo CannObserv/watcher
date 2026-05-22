@@ -12,7 +12,12 @@
     <div>
       <p class="text-sm text-gray-500 dark:text-gray-400">Archiver Information Item</p>
       <p class="font-semibold text-gray-900 dark:text-white">{{ info_item.name }}</p>
+      {% if info_item_dashboard_url %}
+      <a href="{{ info_item_dashboard_url }}" target="_blank" rel="noopener noreferrer"
+         class="text-xs font-mono text-gray-400 hover:underline">{{ info_item.info_item_id }}</a>
+      {% else %}
       <p class="text-xs font-mono text-gray-400">{{ info_item.info_item_id }}</p>
+      {% endif %}
     </div>
     {% if mode != "readonly_tree" %}
     <button type="button" data-picker-clear
@@ -30,13 +35,19 @@
           class="mt-1">
         <span>
           <span class="badge badge-active">primary</span>
-          <span class="break-all text-gray-700 dark:text-gray-300">{{ primary_url or "—" }}</span>
+          {% if primary_url %}
+          <a href="{{ primary_url }}" target="_blank" rel="noopener noreferrer"
+             class="break-all link">{{ primary_url }}</a>
+          {% else %}<span class="break-all text-gray-700 dark:text-gray-300">—</span>{% endif %}
         </span>
       </label>
       {% else %}
       <span class="flex items-start gap-2">
         <span class="badge badge-active">primary</span>
-        <span class="break-all text-gray-700 dark:text-gray-300">{{ primary_url or "—" }}</span>
+        {% if primary_url %}
+        <a href="{{ primary_url }}" target="_blank" rel="noopener noreferrer"
+           class="break-all link">{{ primary_url }}</a>
+        {% else %}<span class="break-all text-gray-700 dark:text-gray-300">—</span>{% endif %}
       </span>
       {% endif %}
     </li>

@@ -179,11 +179,13 @@ def _apply_archiver_migrations(database_url: str) -> None:
 
     The `information` schema is owned in production by the sibling Archiver
     repo (`/home/exedev/archiver`). Watcher tests need real `info_sources` /
-    `info_specs` / `info_items` tables so the cross-schema FK from
-    `watches.info_source_id` resolves and seeded rows survive the FK check.
-    We invoke archiver's own alembic instead of mirroring the schema in
-    `tests/_information_test_models.py` — that way schema drift is impossible:
-    the same migrations that build prod build the test schema.
+    `info_specs` / `info_items` tables because conftest helpers
+    (``make_info_item``, ``make_info_source``, ``bind_primary_source``, etc.)
+    write ``information.*`` rows that the ``info_client`` mock fixture reads
+    back via ``InfoItemSource`` queries.  We invoke archiver's own alembic
+    instead of mirroring the schema in ``tests/_information_test_models.py``
+    — that way schema drift is impossible: the same migrations that build prod
+    build the test schema.
 
     Cache-check (#150): if ``information.alembic_version`` already matches
     Archiver's HEAD, skip the subprocess entirely. Saves the ~1-2 s
@@ -231,10 +233,8 @@ async def test_engine():
 
     engine = create_async_engine(TEST_DATABASE_URL)
     async with engine.begin() as conn:
-        # ``Base.metadata`` carries a stub ``information.info_items`` table
-        # (see ``src/core/models/watch.py``) for cross-schema FK resolution.
-        # Restrict ``create_all`` to public-schema tables — the `information`
-        # schema is owned by Archiver's alembic above.
+        # Restrict ``create_all`` to public-schema watcher tables — the
+        # ``information`` schema is owned by Archiver's alembic above.
         watcher_tables = [t for t in Base.metadata.sorted_tables if t.schema in (None, "public")]
         await conn.run_sync(Base.metadata.create_all, tables=watcher_tables)
         # Phase 5 (#156): trg_changes_update_last_changed_at trigger removed.

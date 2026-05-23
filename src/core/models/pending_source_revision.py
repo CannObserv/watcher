@@ -10,7 +10,7 @@ Watcher allocates the ULID up-front and references the scratch file
 
 from datetime import datetime
 
-from sqlalchemy import BigInteger, DateTime, Integer, Text, UniqueConstraint, func
+from sqlalchemy import BigInteger, DateTime, Index, Integer, Text, UniqueConstraint, func, text
 from sqlalchemy.orm import Mapped, mapped_column
 from ulid import ULID
 
@@ -44,5 +44,10 @@ class PendingSourceRevision(Base):
             "info_source_id",
             "content_fingerprint",
             name="uq_pending_source_revisions_source_fingerprint",
+        ),
+        Index(
+            "ix_pending_source_revisions_next_attempt",
+            "next_attempt_at",
+            postgresql_where=text("attempts < 10"),
         ),
     )

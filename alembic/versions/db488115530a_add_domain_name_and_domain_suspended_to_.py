@@ -67,6 +67,17 @@ def downgrade() -> None:
         "watches",
         sa.Column("effective_domain", sa.VARCHAR(length=253), autoincrement=False, nullable=True),
     )
+    # Backfill effective_domain from watched_items.domain_name so the column is
+    # not left entirely NULL after rollback.
+    op.execute(
+        """
+        UPDATE watches w
+        SET effective_domain = wi.domain_name
+        FROM watched_items wi
+        WHERE wi.id = w.watched_item_id
+          AND wi.domain_name IS NOT NULL
+        """
+    )
     op.drop_constraint("fk_watched_items_domain_name", "watched_items", type_="foreignkey")
     op.drop_index(op.f("ix_watched_items_domain_name"), table_name="watched_items")
     op.drop_column("watched_items", "domain_suspended")

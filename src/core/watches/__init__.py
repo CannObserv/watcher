@@ -168,7 +168,7 @@ async def create_watch(
         url=bindings.primary_url,
         content_type=str(content_type) if content_type is not None else None,
         effective_url=probe_result.effective_url,
-        effective_domain=probe_result.effective_domain,
+        domain_name=probe_result.effective_domain,
     )
     await dispatch_event_notifications(
         session=session,

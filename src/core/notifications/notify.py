@@ -113,7 +113,7 @@ async def dispatch_event_notifications(
 
     Queries five live sources in priority order:
       1. Global templates (NotificationTemplate.is_global_default=True) — all watches
-      2. Domain templates (DomainNcRef) — watches whose effective_domain matches
+      2. Domain templates (DomainNcRef) — watches whose domain_name (via WatchedItem) matches
       3. Watch-assigned templates (WatchNcRef) — this watch only, deduped vs. 1+2
       4. WatchedItem templates (WatchedItemNotificationTemplate) — Approach B union
          from this watch's parent WatchedItem (#160 Task 9)

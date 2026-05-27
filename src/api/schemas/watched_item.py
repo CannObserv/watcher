@@ -72,6 +72,8 @@ class WatchedItemResponse(BaseModel):
     default_schedule_config: dict | None
     default_content_type: str | None
     default_tags: list[str] | None
+    domain_name: str | None = None
+    domain_suspended: bool = False
     created_at: datetime
     updated_at: datetime
 

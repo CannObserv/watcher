@@ -464,7 +464,7 @@ class TestScheduleTickInactiveDomain:
         await make_watch(
             db_session,
             name="On Paused Domain",
-            effective_domain="paused.com",
+            domain_name="paused.com",
             is_active=True,
         )
         await db_session.commit()

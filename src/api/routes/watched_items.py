@@ -46,12 +46,16 @@ async def _get_or_404(session: AsyncSession, wi_id: str) -> WatchedItem:
 @router.get("", response_model=list[WatchedItemResponse])
 async def list_watched_items(
     include_archived: bool = False,
+    domain: str | None = None,
     session: AsyncSession = Depends(get_db_session),
 ):
-    """List WatchedItems. Archived excluded unless ``include_archived=true``."""
+    """List WatchedItems. Archived excluded unless ``include_archived=true``.
+    Filter by domain hostname with ``domain=``."""
     stmt = select(WatchedItem).order_by(WatchedItem.name)
     if not include_archived:
         stmt = stmt.where(WatchedItem.archived_at.is_(None))
+    if domain is not None:
+        stmt = stmt.where(WatchedItem.domain_name == domain)
     result = await session.execute(stmt)
     return list(result.scalars().all())
 

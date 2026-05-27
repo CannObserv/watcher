@@ -53,7 +53,9 @@ async def get_watch_list(
         stmt = stmt.where(Watch.name.ilike(f"%{escaped}%"))
     if domain:
         escaped = domain.replace("%", "\\%").replace("_", "\\_")
-        stmt = stmt.where(Watch.effective_domain.ilike(f"%{escaped}%"))
+        stmt = stmt.join(WatchedItem, WatchedItem.id == Watch.watched_item_id).where(
+            WatchedItem.domain_name.ilike(f"%{escaped}%")
+        )
     result = await session.execute(stmt)
     return list(result.scalars().all())
 
@@ -354,7 +356,8 @@ async def get_domains_with_watch_counts(
             func.count(Watch.id).label("watch_count"),
             func.max(Watch.last_checked_at).label("last_checked"),
         )
-        .outerjoin(Watch, Watch.effective_domain == Domain.name)
+        .outerjoin(WatchedItem, WatchedItem.domain_name == Domain.name)
+        .outerjoin(Watch, Watch.watched_item_id == WatchedItem.id)
         .group_by(Domain.id)
     )
 
@@ -399,24 +402,19 @@ async def get_domains_total_count(
     return result.scalar_one()
 
 
-async def get_domain_watches(
+async def get_domain_watched_items(
     session: AsyncSession,
     domain_name: str,
     *,
     search: str | None = None,
-    is_active: bool | None = None,
-    sort: str = "name",
-    order: str = "asc",
-) -> list[Watch]:
-    """Fetch watches for a domain with optional name search, status filter, and sorting."""
-    col = _WATCH_SORT_COLS.get(sort, Watch.name)
-    order_expr = col.asc().nulls_first() if order == "asc" else col.desc().nulls_last()
-    stmt = select(Watch).where(Watch.effective_domain == domain_name).order_by(order_expr)
+) -> list[WatchedItem]:
+    """Fetch WatchedItems for a domain with optional name search."""
+    stmt = (
+        select(WatchedItem).where(WatchedItem.domain_name == domain_name).order_by(WatchedItem.name)
+    )
     if search:
         escaped = search.replace("%", "\\%").replace("_", "\\_")
-        stmt = stmt.where(Watch.name.ilike(f"%{escaped}%"))
-    if is_active is not None:
-        stmt = stmt.where(Watch.is_active == is_active)
+        stmt = stmt.where(WatchedItem.name.ilike(f"%{escaped}%"))
     result = await session.execute(stmt)
     return list(result.scalars().all())
 

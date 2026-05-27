@@ -261,7 +261,7 @@ class TestWatchCreate:
         assert response.status_code == 200
         assert b"required" in response.content.lower() or b"error" in response.content.lower()
 
-    async def test_create_watch_sets_effective_domain_and_creates_domain_record(
+    async def test_create_watch_sets_domain_name_and_creates_domain_record(
         self, client, db_session
     ):
         info_item_id = await _seed_info_item(
@@ -281,8 +281,9 @@ class TestWatchCreate:
         watch_id = response.headers["location"].rstrip("/").split("/")[-1]
         result = await db_session.execute(select(Watch).where(Watch.id == watch_id))
         watch = result.scalar_one()
+        await db_session.refresh(watch, ["watched_item"])
         assert watch.effective_url == "https://lcb.wa.gov/page"
-        assert watch.effective_domain == "lcb.wa.gov"
+        assert watch.watched_item.domain_name == "lcb.wa.gov"
         domain_result = await db_session.execute(select(Domain).where(Domain.name == "lcb.wa.gov"))
         assert domain_result.scalar_one_or_none() is not None
 
@@ -423,7 +424,7 @@ class TestWatchRowDomainInactiveBadge:
             name="Suspended Watch",
             primary_url="https://ds-badge.com/p",
             content_type=ContentType.HTML,
-            effective_domain="ds-badge.com",
+            domain_name="ds-badge.com",
             is_active=False,
             domain_suspended=True,
         )
@@ -439,7 +440,7 @@ class TestWatchRowDomainInactiveBadge:
             name="Manual Inactive",
             primary_url="https://mi-badge.com/p",
             content_type=ContentType.HTML,
-            effective_domain="mi-badge.com",
+            domain_name="mi-badge.com",
             is_active=False,
             domain_suspended=False,
         )
@@ -863,53 +864,22 @@ class TestDomainDetailFilters:
         )
         return name
 
-    async def test_domain_detail_has_segment_control(self, client, db_session):
-        name = await self._create_domain_with_watch(client, db_session, "Domain Filter Watch")
-        response = await client.get(f"/domains/{name}")
-        body = response.content
-        assert b'role="radiogroup"' in body
-        assert b'name="status"' in body  # was: name="watch_status"
-
     async def test_domain_detail_no_filter_pill(self, client, db_session):
         name = await self._create_domain_with_watch(client, db_session, "Domain Filter Watch 2")
         response = await client.get(f"/domains/{name}")
         assert b"filter-pill" not in response.content
 
-    async def test_domain_watches_partial(self, client, db_session):
+    async def test_domain_watched_items_partial(self, client, db_session):
         name = await self._create_domain_with_watch(client, db_session, "Partial Watch")
-        response = await client.get(f"/partials/domain-watches/{name}")
+        response = await client.get(f"/partials/domain-watched-items/{name}")
         assert response.status_code == 200
         assert b"Partial Watch" in response.content
 
-    async def test_domain_watches_partial_search(self, client, db_session):
+    async def test_domain_watched_items_partial_search(self, client, db_session):
         name = await self._create_domain_with_watch(client, db_session, "Searchable Watch")
-        response = await client.get(f"/partials/domain-watches/{name}?q=searchable")
+        response = await client.get(f"/partials/domain-watched-items/{name}?q=searchable")
         assert response.status_code == 200
         assert b"Searchable Watch" in response.content
-
-    async def test_domain_watches_partial_sort(self, client, db_session):
-        name = await self._create_domain_with_watch(client, db_session, "Sort Watch")
-        response = await client.get(f"/partials/domain-watches/{name}?sort=name&order=asc")
-        assert response.status_code == 200
-
-    async def test_domain_watches_partial_health_badge(self, client, db_session):
-        resp = await client.post(
-            "/domains",
-            data={"url": "https://example.com/page"},
-            follow_redirects=False,
-        )
-        name = resp.headers["location"].rstrip("/").split("/")[-1]
-        await make_watch(
-            db_session,
-            name="Healthy Watch",
-            primary_url=f"https://{name}/page",
-            content_type="html",
-            effective_domain=name,
-            health_status=WatchHealthStatus.OK,
-        )
-        response = await client.get(f"/partials/domain-watches/{name}")
-        assert response.status_code == 200
-        assert b"Healthy" in response.content
 
 
 class TestAuditLogFilters:

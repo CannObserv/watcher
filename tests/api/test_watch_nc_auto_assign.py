@@ -79,7 +79,7 @@ async def test_watch_create_does_not_seed_domain_default_template(client: AsyncC
         name="Domain No-Seed Test",
         primary_url=f"https://{domain_name}/page",
         content_type="html",
-        effective_domain=domain_name,
+        domain_name=domain_name,
     )
     await db_session.commit()
     watch_id = str(watch.id)

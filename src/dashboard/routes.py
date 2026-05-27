@@ -70,7 +70,7 @@ from src.dashboard.context import (
     count_new_subaspects,
     get_audit_entries,
     get_dashboard_stats,
-    get_domain_watches,
+    get_domain_watched_items,
     get_domains_total_count,
     get_domains_with_watch_counts,
     get_queue_health,
@@ -479,14 +479,7 @@ async def watch_detail_page(
     }
 
     # Check if the watch's domain is inactive (disables the status toggle)
-    domain_inactive = False
-    if watch.effective_domain:
-        domain_result = await session.execute(
-            select(Domain).where(Domain.name == watch.effective_domain)
-        )
-        domain = domain_result.scalar_one_or_none()
-        if domain and not domain.is_active:
-            domain_inactive = True
+    domain_inactive = bool(watch.watched_item and watch.watched_item.domain_suspended)
 
     # Initial timeline page (page 1, no category filter)
     timeline_page_size = 25
@@ -811,20 +804,13 @@ async def watch_toggle_active(
 
     new_active = active == "true"
 
-    # Block activation while the watch's domain is inactive (kill-switch)
-    domain_inactive = False
-    if watch.effective_domain:
-        domain_result = await session.execute(
-            select(Domain).where(Domain.name == watch.effective_domain)
+    # Block activation while the watch's domain is suspended (kill-switch)
+    domain_inactive = bool(watch.watched_item and watch.watched_item.domain_suspended)
+    if domain_inactive and new_active:
+        raise HTTPException(
+            status_code=409,
+            detail="Cannot activate watch while its domain is inactive",
         )
-        domain = domain_result.scalar_one_or_none()
-        if domain and not domain.is_active:
-            domain_inactive = True
-            if new_active:
-                raise HTTPException(
-                    status_code=409,
-                    detail="Cannot activate watch while its domain is inactive",
-                )
 
     watch.is_active = new_active
 
@@ -1874,10 +1860,17 @@ async def domain_toggle_active(
     domain.is_active = new_active
 
     if not new_active:
-        # Suspend all currently-active, non-archived watches in this domain
+        # Cascade: mark WatchedItem suspended, then suspend all active child watches.
+        wi_result = await session.execute(
+            select(WatchedItem).where(WatchedItem.domain_name == name)
+        )
+        for wi in wi_result.scalars().all():
+            wi.domain_suspended = True
         watches_result = await session.execute(
-            select(Watch).where(
-                Watch.effective_domain == name,
+            select(Watch)
+            .join(WatchedItem, WatchedItem.id == Watch.watched_item_id)
+            .where(
+                WatchedItem.domain_name == name,
                 Watch.is_active == True,  # noqa: E712
                 Watch.is_archived == False,  # noqa: E712
             )
@@ -1887,10 +1880,17 @@ async def domain_toggle_active(
             watch.domain_suspended = True
         audit(session, EventType.DOMAIN_DEACTIVATED, domain_name=name, source="dashboard")
     else:
-        # Restore only watches that were suspended by a previous domain deactivation
+        # Restore: clear WatchedItem suspended flag, reactivate domain-suspended watches.
+        wi_result = await session.execute(
+            select(WatchedItem).where(WatchedItem.domain_name == name)
+        )
+        for wi in wi_result.scalars().all():
+            wi.domain_suspended = False
         watches_result = await session.execute(
-            select(Watch).where(
-                Watch.effective_domain == name,
+            select(Watch)
+            .join(WatchedItem, WatchedItem.id == Watch.watched_item_id)
+            .where(
+                WatchedItem.domain_name == name,
                 Watch.domain_suspended == True,  # noqa: E712
                 Watch.is_archived == False,  # noqa: E712
             )
@@ -1904,12 +1904,11 @@ async def domain_toggle_active(
     await session.refresh(domain)
 
     if request.headers.get("HX-Request") == "true":
-        watches = await get_domain_watches(session, name)
-        health_map = {w.id: w.health_status for w in watches}
+        watched_items = await get_domain_watched_items(session, name)
         return templates.TemplateResponse(
             request,
             "partials/domain_toggle_oob.html",
-            {"domain": domain, "watches": watches, "health_map": health_map},
+            {"domain": domain, "watched_items": watched_items},
         )
     return RedirectResponse(url=f"/domains/{name}", status_code=303)
 
@@ -1935,13 +1934,13 @@ async def domain_delete(
         msg = '<p class="text-red-600 text-sm mt-2">Archive the domain before deleting it.</p>'
         return HTMLResponse(status_code=409, content=msg)
 
-    watch_result = await session.execute(
-        select(Watch).where(Watch.effective_domain == name).limit(1)
+    wi_result = await session.execute(
+        select(WatchedItem).where(WatchedItem.domain_name == name).limit(1)
     )
-    if watch_result.scalar_one_or_none():
+    if wi_result.scalar_one_or_none():
         msg = (
             f'<p class="text-red-600 text-sm mt-2">'
-            f"Cannot delete: watches still reference domain '{html_lib.escape(name)}'.</p>"
+            f"Cannot delete: watched items still reference domain '{html_lib.escape(name)}'.</p>"
         )
         return HTMLResponse(status_code=409, content=msg)
 
@@ -2089,11 +2088,7 @@ async def domain_detail_page(
     if not domain:
         return templates.TemplateResponse(request, "pages/404.html", status_code=404)
 
-    is_active = _status_to_is_active(status)
-    watches = await get_domain_watches(
-        session, name, search=q, is_active=is_active, sort=sort, order=order
-    )
-    health_map = {w.id: w.health_status for w in watches}
+    watched_items = await get_domain_watched_items(session, name, search=q)
 
     field_contexts = {
         fname: _field_context(request, domain, fname, mode="view") for fname in DOMAIN_FIELD_META
@@ -2102,12 +2097,8 @@ async def domain_detail_page(
     context = {
         "active_page": "domains",
         "domain": domain,
-        "watches": watches,
-        "health_map": health_map,
+        "watched_items": watched_items,
         "q": q or "",
-        "status": status or "",
-        "sort": sort,
-        "order": order,
         "flash": None,
         "field_contexts": field_contexts,
     }
@@ -2412,37 +2403,26 @@ async def partial_watch_table(
     )
 
 
-@router.get("/partials/domain-watches/{name}")
-async def partial_domain_watches(
+@router.get("/partials/domain-watched-items/{name}")
+async def partial_domain_watched_items(
     request: Request,
     name: str,
     q: str | None = None,
-    status: str | None = None,
-    sort: str = "name",
-    order: str = "asc",
     session: AsyncSession = Depends(get_db_session),
 ):
-    """HTMX partial: domain watch table with filter, search, and sort."""
+    """HTMX partial: domain WatchedItems list with optional name search."""
     result = await session.execute(select(Domain).where(Domain.name == name))
     domain = result.scalar_one_or_none()
     if not domain:
         raise HTTPException(status_code=404)
-    is_active = _status_to_is_active(status)
-    watches = await get_domain_watches(
-        session, name, search=q, is_active=is_active, sort=sort, order=order
-    )
-    health_map = {w.id: w.health_status for w in watches}
+    watched_items = await get_domain_watched_items(session, name, search=q)
     return templates.TemplateResponse(
         request,
-        "partials/domain_watches_table.html",
+        "partials/domain_watched_items_table.html",
         {
             "domain": domain,
-            "watches": watches,
-            "health_map": health_map,
+            "watched_items": watched_items,
             "q": q or "",
-            "status": status or "",
-            "sort": sort,
-            "order": order,
         },
     )
 
@@ -2717,11 +2697,12 @@ async def _render_watch_notifications(
     # 2. Domain templates
     domain_templates = []
     domain_ids: set[str] = set()
-    if watch.effective_domain:
+    _watch_domain = watch.watched_item.domain_name if watch.watched_item else None
+    if _watch_domain:
         domain_result = await session.execute(
             select(NotificationTemplate)
             .join(DomainNcRef, DomainNcRef.template_id == NotificationTemplate.id)
-            .where(DomainNcRef.domain_name == watch.effective_domain)
+            .where(DomainNcRef.domain_name == _watch_domain)
             .order_by(NotificationTemplate.title)
         )
         domain_templates = domain_result.scalars().all()
@@ -2787,9 +2768,10 @@ async def watch_nc_assign_row(
     excluded_ids = {str(row[0]) for row in assigned_result}
 
     # Domain templates for this watch's domain (auto-dispatched, don't show in picker)
-    if watch.effective_domain:
+    _watch_domain = watch.watched_item.domain_name if watch.watched_item else None
+    if _watch_domain:
         domain_result = await session.execute(
-            select(DomainNcRef.template_id).where(DomainNcRef.domain_name == watch.effective_domain)
+            select(DomainNcRef.template_id).where(DomainNcRef.domain_name == _watch_domain)
         )
         excluded_ids.update(str(row[0]) for row in domain_result)
 

@@ -41,7 +41,7 @@ def _watch_meta_result(domain=None, watched_item_id=None, *, missing=False):
         r.one_or_none.return_value = None
     else:
         wid = watched_item_id if watched_item_id is not None else ULID()
-        r.one_or_none.return_value = (domain, None, wid)
+        r.one_or_none.return_value = (domain, wid)
     return r
 
 

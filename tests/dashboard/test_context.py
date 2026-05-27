@@ -9,7 +9,7 @@ from src.core.models.domain import Domain
 from src.core.models.watch import ContentType
 from src.dashboard.context import (
     get_dashboard_stats,
-    get_domain_watches,
+    get_domain_watched_items,
     get_domains_with_watch_counts,
     get_queue_health,
     get_rate_limiter_state,
@@ -159,14 +159,14 @@ class TestGetWatchList:
             name="W1",
             primary_url="https://a.com",
             content_type="html",
-            effective_domain="a.com",
+            domain_name="a.com",
         )
         await make_watch(
             db_session,
             name="W2",
             primary_url="https://b.com",
             content_type="html",
-            effective_domain="b.com",
+            domain_name="b.com",
         )
         await db_session.flush()
         result = await get_watch_list(db_session, domain="a.com")
@@ -179,21 +179,21 @@ class TestGetWatchList:
             name="Sub",
             primary_url="https://sub.example.com",
             content_type="html",
-            effective_domain="sub.example.com",
+            domain_name="sub.example.com",
         )
         await make_watch(
             db_session,
             name="Root",
             primary_url="https://example.com",
             content_type="html",
-            effective_domain="example.com",
+            domain_name="example.com",
         )
         await make_watch(
             db_session,
             name="Other",
             primary_url="https://other.com",
             content_type="html",
-            effective_domain="other.com",
+            domain_name="other.com",
         )
         await db_session.flush()
         result = await get_watch_list(db_session, domain="example")
@@ -288,7 +288,7 @@ class TestGetDomainsWithWatchCounts:
             name="Test",
             primary_url="https://example.com",
             content_type=ContentType.HTML,
-            effective_domain="example.com",
+            domain_name="example.com",
         )
 
         result = await get_domains_with_watch_counts(db_session)
@@ -378,7 +378,7 @@ class TestGetDomainsFiltered:
             name="W",
             primary_url="https://checked.com",
             content_type="html",
-            effective_domain="checked.com",
+            domain_name="checked.com",
             last_checked_at=now,
         )
         result = await get_domains_with_watch_counts(db_session)
@@ -516,150 +516,53 @@ class TestGetWatchTimeline:
 
 
 @pytest.mark.integration
-class TestGetDomainWatches:
-    async def test_returns_watches_for_domain(self, db_session):
-        await make_watch(
-            db_session,
-            name="W1",
-            primary_url="https://ex.com/a",
-            content_type="html",
-            effective_domain="ex.com",
+class TestGetDomainWatchedItems:
+    async def test_returns_watched_items_for_domain(self, db_session):
+        from src.core.models.domain import Domain
+        from src.core.models.watched_item import WatchedItem
+        from tests.conftest import make_info_item
+
+        item_a = await make_info_item(db_session)
+        item_b = await make_info_item(db_session)
+        db_session.add(Domain(name="ex.com"))
+        db_session.add(Domain(name="other.com"))
+        await db_session.flush()
+        db_session.add(
+            WatchedItem(info_item_id=item_a.info_item_id, name="Ex Item", domain_name="ex.com")
         )
-        await make_watch(
-            db_session,
-            name="W2",
-            primary_url="https://other.com/b",
-            content_type="html",
-            effective_domain="other.com",
+        db_session.add(
+            WatchedItem(
+                info_item_id=item_b.info_item_id, name="Other Item", domain_name="other.com"
+            )
         )
         await db_session.flush()
-        result = await get_domain_watches(db_session, "ex.com")
+        result = await get_domain_watched_items(db_session, "ex.com")
         assert len(result) == 1
-        assert result[0].name == "W1"
+        assert result[0].name == "Ex Item"
 
-    async def test_sort_by_name_asc(self, db_session):
-        await make_watch(
-            db_session,
-            name="Zebra",
-            primary_url="https://ex.com/z",
-            content_type="html",
-            effective_domain="ex.com",
-        )
-        await make_watch(
-            db_session,
-            name="Apple",
-            primary_url="https://ex.com/a",
-            content_type="html",
-            effective_domain="ex.com",
-        )
-        await db_session.flush()
-        result = await get_domain_watches(db_session, "ex.com", sort="name", order="asc")
-        assert result[0].name == "Apple"
-
-    async def test_sort_by_last_changed_desc(self, db_session):
-        await make_watch(
-            db_session,
-            name="Old",
-            primary_url="https://ex.com/old",
-            content_type="html",
-            effective_domain="ex.com",
-            last_changed_at=datetime(2024, 1, 1, tzinfo=UTC),
-        )
-        await make_watch(
-            db_session,
-            name="New",
-            primary_url="https://ex.com/new",
-            content_type="html",
-            effective_domain="ex.com",
-            last_changed_at=datetime(2025, 1, 1, tzinfo=UTC),
-        )
-        result = await get_domain_watches(
-            db_session, "ex.com", sort="last_changed_at", order="desc"
-        )
-        assert result[0].name == "New"
-
-    async def test_null_last_changed_at_first_when_asc(self, db_session):
-        await make_watch(
-            db_session,
-            name="Changed",
-            primary_url="https://ex.com/c",
-            content_type="html",
-            effective_domain="ex.com",
-            last_changed_at=datetime(2024, 1, 1, tzinfo=UTC),
-        )
-        await make_watch(
-            db_session,
-            name="NeverChanged",
-            primary_url="https://ex.com/n",
-            content_type="html",
-            effective_domain="ex.com",
-        )
-        await db_session.flush()
-        result = await get_domain_watches(db_session, "ex.com", sort="last_changed_at", order="asc")
-        assert result[0].name == "NeverChanged"
-
-    async def test_null_last_changed_at_last_when_desc(self, db_session):
-        await make_watch(
-            db_session,
-            name="Changed",
-            primary_url="https://ex.com/c",
-            content_type="html",
-            effective_domain="ex.com",
-            last_changed_at=datetime(2024, 1, 1, tzinfo=UTC),
-        )
-        await make_watch(
-            db_session,
-            name="NeverChanged",
-            primary_url="https://ex.com/n",
-            content_type="html",
-            effective_domain="ex.com",
-        )
-        await db_session.flush()
-        result = await get_domain_watches(
-            db_session, "ex.com", sort="last_changed_at", order="desc"
-        )
-        assert result[-1].name == "NeverChanged"
+    async def test_returns_empty_for_unknown_domain(self, db_session):
+        result = await get_domain_watched_items(db_session, "unknown.com")
+        assert result == []
 
     async def test_search_filters_by_name(self, db_session):
-        await make_watch(
-            db_session,
-            name="Alpha",
-            primary_url="https://ex.com/a",
-            content_type="html",
-            effective_domain="ex.com",
-        )
-        await make_watch(
-            db_session,
-            name="Beta",
-            primary_url="https://ex.com/b",
-            content_type="html",
-            effective_domain="ex.com",
-        )
-        await db_session.flush()
-        result = await get_domain_watches(db_session, "ex.com", search="alp")
-        assert len(result) == 1
-        assert result[0].name == "Alpha"
+        from src.core.models.domain import Domain
+        from src.core.models.watched_item import WatchedItem
+        from tests.conftest import make_info_item
 
-    async def test_filter_by_is_active(self, db_session):
-        await make_watch(
-            db_session,
-            name="Active",
-            primary_url="https://ex.com/a",
-            content_type="html",
-            effective_domain="ex.com",
+        item_a = await make_info_item(db_session)
+        item_b = await make_info_item(db_session)
+        db_session.add(Domain(name="ex.com"))
+        await db_session.flush()
+        db_session.add(
+            WatchedItem(info_item_id=item_a.info_item_id, name="Alpha Item", domain_name="ex.com")
         )
-        await make_watch(
-            db_session,
-            name="Inactive",
-            primary_url="https://ex.com/b",
-            content_type="html",
-            effective_domain="ex.com",
-            is_active=False,
+        db_session.add(
+            WatchedItem(info_item_id=item_b.info_item_id, name="Beta Item", domain_name="ex.com")
         )
         await db_session.flush()
-        result = await get_domain_watches(db_session, "ex.com", is_active=True)
+        result = await get_domain_watched_items(db_session, "ex.com", search="alp")
         assert len(result) == 1
-        assert result[0].name == "Active"
+        assert result[0].name == "Alpha Item"
 
 
 @pytest.mark.integration

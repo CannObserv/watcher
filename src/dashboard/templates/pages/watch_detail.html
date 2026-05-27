@@ -69,15 +69,15 @@
       </div>
     </div>
 
-    {# Domain (read-only link) #}
-    {% if watch.effective_domain %}
+    {# Domain (read-only link, sourced from WatchedItem) #}
+    {% if watch.watched_item and watch.watched_item.domain_name %}
     <div class="p-4" id="field-domain">
       <div class="grid grid-cols-[1fr_auto] sm:grid-cols-[min(18rem,40%)_auto_1fr_auto] items-center gap-x-4 gap-y-1">
         <div class="min-w-0">
           <span class="form-label mb-0">Domain</span>
         </div>
         <div class="flex items-center gap-2">
-          <a href="/domains/{{ watch.effective_domain }}" class="link text-sm font-medium">{{ watch.effective_domain }}</a>
+          <a href="/domains/{{ watch.watched_item.domain_name }}" class="link text-sm font-medium">{{ watch.watched_item.domain_name }}</a>
         </div>
       </div>
     </div>

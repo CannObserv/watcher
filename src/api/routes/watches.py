@@ -15,7 +15,6 @@ from src.api.routes.helpers import get_watch_or_404
 from src.api.schemas.watch import WatchCreate, WatchResponse, WatchUpdate
 from src.core.logging import get_logger
 from src.core.models.audit_log import EventType, audit
-from src.core.models.domain import Domain
 from src.core.models.watch import Watch
 from src.core.notifications.events import WatchEvent, WatchEventType
 from src.core.notifications.notify import dispatch_event_notifications
@@ -125,13 +124,12 @@ async def update_watch(
     updates = data.model_dump(exclude_unset=True)
     previous_active = watch.is_active
 
-    if updates.get("is_active") is True and watch.effective_domain:
-        domain_result = await session.execute(
-            select(Domain).where(Domain.name == watch.effective_domain)
-        )
-        domain = domain_result.scalar_one_or_none()
-        if domain and not domain.is_active:
-            raise HTTPException(status_code=409, detail="Domain is inactive")
+    if (
+        updates.get("is_active") is True
+        and watch.watched_item
+        and watch.watched_item.domain_suspended
+    ):
+        raise HTTPException(status_code=409, detail="Domain is inactive")
 
     column_names = {c.key for c in Watch.__table__.columns}
     for field, value in updates.items():

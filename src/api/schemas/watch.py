@@ -43,7 +43,6 @@ class WatchUpdate(BaseModel):
     content_type: ContentType | None = None
     is_active: bool | None = None
     effective_url: HttpUrlStr | None = None
-    effective_domain: str | None = Field(default=None, max_length=253)
     description: str | None = None
     tags: list[str] | None = None
 
@@ -51,9 +50,9 @@ class WatchUpdate(BaseModel):
 class WatchResponse(BaseModel):
     """Schema for returning a Watch.
 
-    Exposes the new identity columns (``info_item_id``,
-    ``target_info_source_id``, ``watched_item_id``) and the cached
-    ``effective_url`` / ``effective_domain`` snapshots.
+    Exposes the identity columns (``info_item_id``, ``target_info_source_id``,
+    ``watched_item_id``) and the cached ``effective_url`` snapshot.
+    Domain info lives on WatchedItem.
     """
 
     model_config = ConfigDict(from_attributes=True)
@@ -70,7 +69,6 @@ class WatchResponse(BaseModel):
     last_checked_at: datetime | None = None
     last_changed_at: datetime | None = None
     effective_url: str | None = None
-    effective_domain: str | None = None
     description: str | None = None
     tags: list[str] | None = None
     health_status: WatchHealthStatus

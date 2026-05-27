@@ -124,7 +124,7 @@ class TestDeleteDomain:
         assert resp.status_code == 201, resp.text
         response = await client.delete("/api/v1/domains/example.com")
         assert response.status_code == 409
-        assert "watches" in response.json()["detail"].lower()
+        assert "watched items" in response.json()["detail"].lower()
 
 
 class TestDomainArchiveFields:

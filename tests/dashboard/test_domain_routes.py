@@ -124,7 +124,7 @@ class TestDomainDetail:
             name="My Watch",
             primary_url="https://watched.com/page",
             content_type="html",
-            effective_domain="watched.com",
+            domain_name="watched.com",
         )
         response = await client.get("/domains/watched.com")
         assert b"Watches" in response.content
@@ -152,7 +152,7 @@ class TestDomainWatchesTableDomainInactiveBadge:
             name="Suspended",
             primary_url="https://ds-tbl.com/p",
             content_type="html",
-            effective_domain="ds-tbl.com",
+            domain_name="ds-tbl.com",
             is_active=False,
             domain_suspended=True,
         )
@@ -166,7 +166,7 @@ class TestDomainWatchesTableDomainInactiveBadge:
             name="Manual Off",
             primary_url="https://mi-tbl.com/p",
             content_type="html",
-            effective_domain="mi-tbl.com",
+            domain_name="mi-tbl.com",
             is_active=False,
             domain_suspended=False,
         )
@@ -299,7 +299,7 @@ class TestDomainDelete:
             name="W",
             primary_url="https://busy-del.com/p",
             content_type="html",
-            effective_domain="busy-del.com",
+            domain_name="busy-del.com",
         )
         response = await client.post("/domains/busy-del.com/delete")
         assert response.status_code == 409
@@ -343,7 +343,7 @@ class TestDomainToggleActive:
             name="Active Watch",
             primary_url="https://suspend.com/p",
             content_type="html",
-            effective_domain="suspend.com",
+            domain_name="suspend.com",
             is_active=True,
         )
 
@@ -360,7 +360,7 @@ class TestDomainToggleActive:
             name="Already Inactive",
             primary_url="https://skip-inactive.com/p",
             content_type="html",
-            effective_domain="skip-inactive.com",
+            domain_name="skip-inactive.com",
             is_active=False,
         )
 
@@ -376,7 +376,7 @@ class TestDomainToggleActive:
             name="Archived Watch",
             primary_url="https://skip-archived.com/p",
             content_type="html",
-            effective_domain="skip-archived.com",
+            domain_name="skip-archived.com",
             is_active=False,
             is_archived=True,
         )
@@ -393,7 +393,7 @@ class TestDomainToggleActive:
             name="Suspended Watch",
             primary_url="https://restore.com/p",
             content_type="html",
-            effective_domain="restore.com",
+            domain_name="restore.com",
             is_active=False,
             domain_suspended=True,
         )
@@ -413,7 +413,7 @@ class TestDomainToggleActive:
             name="Manual Inactive",
             primary_url="https://manual.com/p",
             content_type="html",
-            effective_domain="manual.com",
+            domain_name="manual.com",
             is_active=False,
             domain_suspended=False,
         )
@@ -445,7 +445,7 @@ class TestDomainToggleActive:
             name="OOB Watch",
             primary_url="https://htmx-oob.com/p",
             content_type="html",
-            effective_domain="htmx-oob.com",
+            domain_name="htmx-oob.com",
             is_active=True,
         )
         await db_session.commit()
@@ -467,7 +467,7 @@ class TestDomainToggleActive:
             name="Badge Watch",
             primary_url="https://htmx-badge.com/p",
             content_type="html",
-            effective_domain="htmx-badge.com",
+            domain_name="htmx-badge.com",
             is_active=True,
         )
         await db_session.commit()

@@ -270,7 +270,7 @@ class TestWatchDetailDomainRow:
             name="Domain Row",
             primary_url="https://domain-row.com/p",
             content_type=ContentType.HTML,
-            effective_domain="domain-row.com",
+            domain_name="domain-row.com",
         )
         response = await client.get(f"/watches/{watch.id}")
         assert response.status_code == 200
@@ -282,7 +282,7 @@ class TestWatchDetailDomainRow:
             name="Domain Label",
             primary_url="https://domain-label.com/p",
             content_type=ContentType.HTML,
-            effective_domain="domain-label.com",
+            domain_name="domain-label.com",
         )
         response = await client.get(f"/watches/{watch.id}")
         content = response.content.decode()
@@ -295,7 +295,7 @@ class TestWatchDetailDomainRow:
             name="No Domain",
             primary_url="https://nodomain.com/p",
             content_type=ContentType.HTML,
-            effective_domain=None,
+            domain_name=None,
         )
         response = await client.get(f"/watches/{watch.id}")
         assert b"/domains/" not in response.content
@@ -388,7 +388,7 @@ class TestWatchStatusToggle:
             name="Suspended Watch",
             primary_url="https://inactive-domain.com/p",
             content_type=ContentType.HTML,
-            effective_domain="inactive-domain.com",
+            domain_name="inactive-domain.com",
             is_active=False,
             domain_suspended=True,
         )
@@ -406,7 +406,7 @@ class TestWatchStatusToggle:
             name="Active Despite Inactive Domain",
             primary_url="https://inactive-domain2.com/p",
             content_type=ContentType.HTML,
-            effective_domain="inactive-domain2.com",
+            domain_name="inactive-domain2.com",
             is_active=True,
         )
         response = await client.post(

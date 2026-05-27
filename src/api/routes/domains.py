@@ -15,7 +15,7 @@ from src.core.models.domain import (
     DEFAULT_MIN_INTERVAL,
     Domain,
 )
-from src.core.models.watch import Watch
+from src.core.models.watched_item import WatchedItem
 
 router = APIRouter(prefix="/domains", tags=["domains"])
 
@@ -97,16 +97,16 @@ async def upsert_domain(
 async def delete_domain(name: str, session: AsyncSession = Depends(get_db_session)):
     """Delete a domain config.
 
-    Returns 409 if any watches still reference this domain as their effective_domain.
+    Returns 409 if any watched items still reference this domain.
     """
     domain = await _get_domain_or_404(name, session)
 
-    stmt = select(Watch).where(Watch.effective_domain == name).limit(1)
+    stmt = select(WatchedItem).where(WatchedItem.domain_name == name).limit(1)
     result = await session.execute(stmt)
     if result.scalar_one_or_none():
         raise HTTPException(
             status_code=409,
-            detail=f"Cannot delete: watches still reference domain '{name}'",
+            detail=f"Cannot delete: watched items still reference domain '{name}'",
         )
 
     await session.delete(domain)

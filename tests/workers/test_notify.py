@@ -37,11 +37,11 @@ def make_event(event_type=WatchEventType.CHANGE_DETECTED, watch_id=None):
     )
 
 
-def _watch_meta_result(value, *, content_type=None, watched_item_id=None):
+def _watch_meta_result(value, *, watched_item_id=None):
     """Mock the row result for the dispatcher's
-    `select(Watch.effective_domain, Watch.content_type, Watch.watched_item_id)` lookup."""
+    `select(WatchedItem.domain_name, Watch.watched_item_id)` lookup."""
     r = MagicMock()
-    r.one_or_none.return_value = None if value is None else (value, content_type, watched_item_id)
+    r.one_or_none.return_value = None if value is None else (value, watched_item_id)
     return r
 
 
@@ -152,7 +152,7 @@ class TestGlobalDispatch:
 
 class TestDomainDispatch:
     async def test_domain_template_fires_for_watch_in_domain(self):
-        """Domain templates dispatch when watch has a matching effective_domain."""
+        """Domain templates dispatch when watch has a matching domain_name."""
         tpl = _fake_template()
         session = AsyncMock(spec=AsyncSession)
         session.execute = AsyncMock(
@@ -172,7 +172,7 @@ class TestDomainDispatch:
         session.add.assert_called_once()
 
     async def test_domain_template_not_queried_when_no_domain(self):
-        """Domain query is skipped entirely when effective_domain is None."""
+        """Domain query is skipped entirely when domain_name is None."""
         session = AsyncMock(spec=AsyncSession)
         session.execute = AsyncMock(
             side_effect=[

@@ -23,7 +23,7 @@ async def _make_watch(db_session, name: str = "W", domain: str | None = None) ->
         name=name,
         primary_url=f"https://example-{slug}.com",
         content_type=ContentType.HTML,
-        effective_domain=domain,
+        domain_name=domain,
     )
 
 

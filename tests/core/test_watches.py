@@ -91,7 +91,7 @@ class TestCreateWatch:
             content_type="html",
         )
         assert watch.effective_url == "https://example.com/canonical"
-        assert watch.effective_domain == "example.com"
+        assert watch.watched_item.domain_name == "example.com"
 
     async def test_creates_domain_for_new_domain(self, db_session, info_client):
         item, _ = await _seed_item_with_primary(db_session, url="https://newsite.gov/page")
@@ -266,7 +266,7 @@ async def test_create_watch_info_item_first_auto_creates_watched_item(
     assert watch.target_info_source_id is None
     assert watch.watched_item_id is not None
     assert watch.effective_url is not None
-    assert watch.effective_domain is not None
+    assert watch.watched_item.domain_name is not None
     assert watch.watched_item.info_item_id == item.info_item_id
     # WatchedItem.name falls back to the Watch's name when auto-created.
     assert watch.watched_item.name == "OR registry"

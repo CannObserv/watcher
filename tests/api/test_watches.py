@@ -15,7 +15,6 @@ from sqlalchemy import select
 from ulid import ULID
 
 from src.core.models.audit_log import AuditLog, EventType
-from src.core.models.domain import Domain
 from src.core.models.notification_config import WatchNotificationConfig
 from src.core.models.temporal_profile import TemporalProfile
 from src.core.models.watch import Watch
@@ -338,15 +337,14 @@ class TestUpdateWatch:
         assert response.status_code == 404
 
     async def test_update_activate_blocked_when_domain_inactive(self, client, db_session):
-        db_session.add(Domain(name="blocked-api.com", is_active=False))
         watch = await make_watch(
             db_session,
             name="Suspended",
             primary_url="https://blocked-api.com/p",
             content_type="html",
-            effective_domain="blocked-api.com",
             is_active=False,
         )
+        watch.watched_item.domain_suspended = True
         await db_session.commit()
         response = await client.patch(
             f"/api/v1/watches/{watch.id}",
@@ -933,7 +931,6 @@ class TestCreateWatchProbe:
         assert response.status_code == 201, response.text
         data = response.json()
         assert data["effective_url"] == "https://example.com/page"
-        assert data["effective_domain"] == "example.com"
 
     async def test_create_watch_upserts_domain(self, client, db_session):
         info_item_id = await _seed_info_item(db_session, name="W", url="https://example.com/p")
@@ -1002,24 +999,6 @@ class TestUpdateWatchEffectiveFields:
         assert response.status_code == 200
         assert response.json()["effective_url"] == "https://example.com/resolved"
 
-    async def test_patch_effective_domain(self, client, db_session):
-        info_item_id = await _seed_info_item(db_session, name="W", url="https://example.com/p")
-        resp = await client.post(
-            "/api/v1/watches",
-            json={
-                "name": "W",
-                "info_item_id": info_item_id,
-                "content_type": "html",
-            },
-        )
-        watch_id = resp.json()["id"]
-        response = await client.patch(
-            f"/api/v1/watches/{watch_id}",
-            json={"effective_domain": "cdn.example.com"},
-        )
-        assert response.status_code == 200
-        assert response.json()["effective_domain"] == "cdn.example.com"
-
     async def test_patch_effective_url_null(self, client, db_session):
         info_item_id = await _seed_info_item(db_session, name="W", url="https://example.com/p")
         resp = await client.post(
@@ -1037,38 +1016,3 @@ class TestUpdateWatchEffectiveFields:
         )
         assert response.status_code == 200
         assert response.json()["effective_url"] is None
-
-    async def test_patch_effective_domain_null(self, client, db_session):
-        info_item_id = await _seed_info_item(db_session, name="W", url="https://example.com/p")
-        resp = await client.post(
-            "/api/v1/watches",
-            json={
-                "name": "W",
-                "info_item_id": info_item_id,
-                "content_type": "html",
-            },
-        )
-        watch_id = resp.json()["id"]
-        response = await client.patch(
-            f"/api/v1/watches/{watch_id}",
-            json={"effective_domain": None},
-        )
-        assert response.status_code == 200
-        assert response.json()["effective_domain"] is None
-
-    async def test_patch_effective_domain_too_long_returns_422(self, client, db_session):
-        info_item_id = await _seed_info_item(db_session, name="W", url="https://example.com/p")
-        resp = await client.post(
-            "/api/v1/watches",
-            json={
-                "name": "W",
-                "info_item_id": info_item_id,
-                "content_type": "html",
-            },
-        )
-        watch_id = resp.json()["id"]
-        response = await client.patch(
-            f"/api/v1/watches/{watch_id}",
-            json={"effective_domain": "a" * 254},
-        )
-        assert response.status_code == 422

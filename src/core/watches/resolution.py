@@ -58,8 +58,9 @@ def watch_event_base_metadata(watch: Watch) -> dict:
     propagates without a per-Watch update.
     """
     meta: dict = {}
-    if watch.effective_domain:
-        meta["effective_domain"] = watch.effective_domain
+    domain = watch.watched_item.domain_name if watch.watched_item else None
+    if domain:
+        meta["effective_domain"] = domain
     interval = resolved_schedule_config(watch).get("interval")
     if interval:
         meta["check_interval"] = interval

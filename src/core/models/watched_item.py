@@ -2,7 +2,7 @@
 
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, String, Text
+from sqlalchemy import Boolean, DateTime, ForeignKey, String, Text
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.orm import Mapped, mapped_column, validates
 from ulid import ULID
@@ -22,6 +22,11 @@ class WatchedItem(Base, TimestampMixin):
     Watcher schema level — Archiver owns that table on a separate
     DeclarativeBase. Watcher trusts the Archiver SDK to validate
     info_item_id at create-time.
+
+    `domain_name` is the hostname of the InfoItem's primary URL, set at
+    Watch-create time. NULL for standalone WatchedItems with no Watches yet.
+    `domain_suspended` is set to True when the parent Domain is deactivated
+    and cleared on reactivation; used for UI banners and the suspension cascade.
     """
 
     __tablename__ = "watched_items"
@@ -49,10 +54,21 @@ class WatchedItem(Base, TimestampMixin):
     default_tags: Mapped[list[str] | None] = mapped_column(
         ARRAY(String), nullable=True, default=None
     )
+    domain_name: Mapped[str | None] = mapped_column(
+        String(253),
+        ForeignKey("domains.name", ondelete="SET NULL"),
+        nullable=True,
+        default=None,
+        index=True,
+    )
+    domain_suspended: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="false"
+    )
 
     def __init__(self, **kwargs: object) -> None:
         """Set Python-side defaults for fields not provided."""
         kwargs.setdefault("is_active", True)
+        kwargs.setdefault("domain_suspended", False)
         super().__init__(**kwargs)
 
     @validates("default_content_type")

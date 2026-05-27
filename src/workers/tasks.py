@@ -129,11 +129,9 @@ async def check_watched_item(watched_item_id: str, registry: ServiceRegistry | N
         fetch_config: dict = {}
 
         rate_limit_domain = urlparse(url).hostname or url
-        # Prefer the child Watch's recorded effective_domain when all children
-        # agree, so domain-backoff state keys match what watch-create probed.
-        domains = {w.effective_domain for w in children if w.effective_domain}
-        if len(domains) == 1:
-            rate_limit_domain = domains.pop()
+        # Prefer the WatchedItem's domain_name when set (matches what watch-create probed).
+        if watched_item.domain_name:
+            rate_limit_domain = watched_item.domain_name
 
         async with get_rate_limiter().acquire_for_domain(rate_limit_domain):
             fetch_result = await reg.get_fetcher().fetch(url, config=fetch_config)
@@ -279,11 +277,11 @@ async def schedule_tick(timestamp: int) -> None:
         wi_ids = [wi.id for wi in watched_items]
 
         # Load all active+non-archived child Watches for those WatchedItems,
-        # filtered to active domains. Plus join domain rows so we can skip
-        # WatchedItems whose only children sit on inactive domains.
+        # filtered to active domains. Join Domain via WatchedItem.domain_name.
         w_stmt = (
             select(Watch, Domain)
-            .outerjoin(Domain, Domain.name == Watch.effective_domain)
+            .join(WatchedItem, WatchedItem.id == Watch.watched_item_id)
+            .outerjoin(Domain, Domain.name == WatchedItem.domain_name)
             .where(
                 Watch.watched_item_id.in_(wi_ids),
                 Watch.is_active.is_(True),

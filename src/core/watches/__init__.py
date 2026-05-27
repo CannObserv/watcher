@@ -136,6 +136,11 @@ async def create_watch(
         fallback_name=name,
     )
 
+    # Populate domain_name on the WatchedItem if not yet set (first Watch wins).
+    if watched_item.domain_name is None and probe_result.effective_domain:
+        watched_item.domain_name = probe_result.effective_domain
+        await session.flush()
+
     watch_kwargs: dict = {
         "name": name,
         "info_item_id": ULID.from_str(info_item_id),
@@ -145,7 +150,6 @@ async def create_watch(
         "watched_item_id": watched_item.id,
         "content_type": content_type,
         "effective_url": probe_result.effective_url,
-        "effective_domain": probe_result.effective_domain,
         "description": description,
         "tags": tags,
     }

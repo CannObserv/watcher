@@ -28,9 +28,23 @@
 
 {% include "partials/watched_item_subaspect_banner.html" %}
 
+{% if watched_item.domain_suspended %}
+<div class="mb-4 p-4 rounded-lg bg-orange-50 dark:bg-orange-950 border border-orange-200 dark:border-orange-800 text-sm text-orange-800 dark:text-orange-200" role="alert">
+  Domain Inactive — watches for this item are suspended until the domain is reactivated.
+</div>
+{% endif %}
+
 <section class="mb-8">
   <h3 class="text-lg font-semibold text-gray-900 dark:text-white mb-4">Defaults</h3>
   <div class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 divide-y divide-gray-200 dark:divide-gray-700">
+    {% if watched_item.domain_name %}
+    <div class="p-4">
+      <span class="form-label mb-0">Domain</span>
+      <div class="mt-1">
+        <a href="/domains/{{ watched_item.domain_name }}" class="link text-sm">{{ watched_item.domain_name }}</a>
+      </div>
+    </div>
+    {% endif %}
     {{ watched_item_field(field_contexts["name"]) }}
     {{ watched_item_field(field_contexts["description"]) }}
     {{ watched_item_field(field_contexts["default_schedule_interval"]) }}

@@ -80,13 +80,12 @@ class TestWatchModel:
                 content_type="invalid",
             )
 
-    def test_watch_effective_fields_default_none(self):
+    def test_watch_effective_url_defaults_none(self):
         watch = Watch(
             name="Test",
             content_type=ContentType.HTML,
         )
         assert watch.effective_url is None
-        assert watch.effective_domain is None
 
     def test_watch_is_archived_defaults_false(self):
         watch = Watch(

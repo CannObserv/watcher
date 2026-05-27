@@ -20,6 +20,7 @@ from src.core.models.audit_log import EventType, audit
 from src.core.models.notification_config import WatchNotificationConfig
 from src.core.models.notification_template import DomainNcRef, NotificationTemplate, WatchNcRef
 from src.core.models.watch import Watch
+from src.core.models.watched_item import WatchedItem
 from src.core.models.watched_item_notification_template import (
     WatchedItemNotificationTemplate,
 )
@@ -137,11 +138,11 @@ async def dispatch_event_notifications(
     watch_ulid = ULID.from_str(event.watch_id)
     event_value = event.event_type.value
 
-    # Resolve effective_domain + parent watched_item_id for this watch in one query.
+    # Resolve effective_domain (from WatchedItem.domain_name) + watched_item_id.
     watch_row = await session.execute(
-        select(Watch.effective_domain, Watch.content_type, Watch.watched_item_id).where(
-            Watch.id == watch_ulid
-        )
+        select(WatchedItem.domain_name, Watch.watched_item_id)
+        .join(WatchedItem, WatchedItem.id == Watch.watched_item_id, isouter=True)
+        .where(Watch.id == watch_ulid)
     )
     watch_meta = watch_row.one_or_none()
     effective_domain: str | None
@@ -150,7 +151,7 @@ async def dispatch_event_notifications(
         effective_domain = None
         watched_item_id = None
     else:
-        effective_domain, _, watched_item_id = watch_meta
+        effective_domain, watched_item_id = watch_meta
 
     # 1. Global templates
     global_result = await session.execute(

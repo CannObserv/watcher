@@ -40,6 +40,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from src.api.deps import get_db_session, get_probe_fn, require_api_key
 from src.core.models import Base
 from src.core.models.app_user import AppUser
+from src.core.models.domain import Domain
 from src.core.models.watch import Watch
 from src.core.models.watched_item import WatchedItem
 from src.core.probe import ProbeResult
@@ -362,11 +363,15 @@ async def make_watch(
     the same info_item_id).
 
     Extra ``**kwargs`` flow into the Watch constructor (tags, description,
-    content_type, etc.). Note: ``schedule_config`` no longer lives on Watch
-    (moved to WatchedItem.default_schedule_config); callers that previously
-    passed it should construct/mutate the WatchedItem instead. Use
-    ``primary_url=`` to seed the auto-created InfoSource's URL.
+    content_type, etc.). Pass ``domain_name=`` to set WatchedItem.domain_name
+    (domain lives on WatchedItem now, not Watch). Note: ``schedule_config`` no
+    longer lives on Watch (moved to WatchedItem.default_schedule_config);
+    callers that previously passed it should construct/mutate the WatchedItem
+    instead. Use ``primary_url=`` to seed the auto-created InfoSource's URL.
     """
+    # domain_name lives on WatchedItem, not Watch — extract before passing to Watch.
+    domain_name = kwargs.pop("domain_name", None)
+
     if info_item_id is None and watched_item is not None:
         # Default to the WatchedItem's InfoItem so the assertion below can't
         # trip on an auto-created mismatch.
@@ -413,6 +418,24 @@ async def make_watch(
     watch = Watch(**watch_kwargs)
     session.add(watch)
     await session.flush()
+
+    # Apply domain_name to the WatchedItem if provided (and not already set).
+    # Auto-create the Domain row if it doesn't exist (FK requires it).
+    if domain_name is not None and watched_item.domain_name is None:
+        existing_domain = (
+            await session.execute(select(Domain).where(Domain.name == domain_name))
+        ).scalar_one_or_none()
+        if existing_domain is None:
+            session.add(Domain(name=domain_name))
+            await session.flush()
+        watched_item.domain_name = domain_name
+        await session.flush()
+
+    # Propagate domain_suspended to WatchedItem (mirrors cascade behavior).
+    if kwargs.get("domain_suspended") and not watched_item.domain_suspended:
+        watched_item.domain_suspended = True
+        await session.flush()
+
     # Eager-populate the watched_item relationship so callers can read
     # watch.watched_item without a separate await. The model declares
     # lazy="joined" but `flush()` alone doesn't trigger the join.

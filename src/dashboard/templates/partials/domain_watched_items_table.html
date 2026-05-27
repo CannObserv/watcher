@@ -1,0 +1,42 @@
+{% if watched_items %}
+<div class="overflow-x-auto">
+  <table class="data-table">
+    <thead>
+      <tr>
+        <th scope="col">Name</th>
+        <th scope="col">Status</th>
+        <th scope="col">Last Checked</th>
+      </tr>
+    </thead>
+    <tbody class="divide-y divide-gray-100 dark:divide-gray-700">
+      {% for wi in watched_items %}
+      <tr class="hover:bg-gray-50 dark:hover:bg-gray-800">
+        <td class="font-medium text-gray-900 dark:text-white">
+          <a href="/watched-items/{{ wi.id }}" class="link">{{ wi.name }}</a>
+        </td>
+        <td>
+          {% if wi.domain_suspended %}
+            <span class="badge badge-warning">Domain Inactive</span>
+          {% elif wi.archived_at %}
+            <span class="badge badge-archived">Archived</span>
+          {% elif wi.is_active %}
+            <span class="badge badge-active">Active</span>
+          {% else %}
+            <span class="badge badge-inactive">Inactive</span>
+          {% endif %}
+        </td>
+        <td class="text-gray-500 dark:text-gray-400 text-sm">
+          {% if wi.last_checked_at %}
+            {{ wi.last_checked_at.strftime("%Y-%m-%d %H:%M") }} UTC
+          {% else %}
+            <span class="text-gray-400 dark:text-gray-600">Never</span>
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% else %}
+<p class="text-sm text-gray-500 dark:text-gray-400">No watched items for this domain.</p>
+{% endif %}

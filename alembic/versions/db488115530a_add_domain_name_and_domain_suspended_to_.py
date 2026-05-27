@@ -32,16 +32,10 @@ def upgrade() -> None:
     op.create_index(
         op.f("ix_watched_items_domain_name"), "watched_items", ["domain_name"], unique=False
     )
-    op.create_foreign_key(
-        "fk_watched_items_domain_name",
-        "watched_items",
-        "domains",
-        ["domain_name"],
-        ["name"],
-        ondelete="SET NULL",
-    )
 
-    # Backfill domain_name from the earliest Watch per WatchedItem.
+    # Backfill domain_name from the earliest Watch per WatchedItem BEFORE
+    # creating the FK constraint so a missing domains row surfaces as a clear
+    # data error rather than a constraint violation mid-backfill.
     op.execute(
         """
         UPDATE watched_items wi
@@ -56,6 +50,15 @@ def upgrade() -> None:
         ) w
         WHERE wi.id = w.watched_item_id
         """
+    )
+
+    op.create_foreign_key(
+        "fk_watched_items_domain_name",
+        "watched_items",
+        "domains",
+        ["domain_name"],
+        ["name"],
+        ondelete="SET NULL",
     )
 
     op.drop_column("watches", "effective_domain")

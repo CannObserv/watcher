@@ -138,20 +138,20 @@ async def dispatch_event_notifications(
     watch_ulid = ULID.from_str(event.watch_id)
     event_value = event.event_type.value
 
-    # Resolve effective_domain (from WatchedItem.domain_name) + watched_item_id.
+    # Resolve domain_name (from WatchedItem) + watched_item_id.
     watch_row = await session.execute(
         select(WatchedItem.domain_name, Watch.watched_item_id)
         .join(WatchedItem, WatchedItem.id == Watch.watched_item_id, isouter=True)
         .where(Watch.id == watch_ulid)
     )
     watch_meta = watch_row.one_or_none()
-    effective_domain: str | None
+    domain_name: str | None
     watched_item_id: ULID | None
     if watch_meta is None:
-        effective_domain = None
+        domain_name = None
         watched_item_id = None
     else:
-        effective_domain, watched_item_id = watch_meta
+        domain_name, watched_item_id = watch_meta
 
     # 1. Global templates
     global_result = await session.execute(
@@ -165,12 +165,12 @@ async def dispatch_event_notifications(
 
     # 2. Domain templates
     domain_templates = []
-    if effective_domain:
+    if domain_name:
         domain_result = await session.execute(
             select(NotificationTemplate)
             .join(DomainNcRef, DomainNcRef.template_id == NotificationTemplate.id)
             .where(
-                DomainNcRef.domain_name == effective_domain,
+                DomainNcRef.domain_name == domain_name,
                 NotificationTemplate.is_active.is_(True),
                 NotificationTemplate.events.contains([event_value]),
             )

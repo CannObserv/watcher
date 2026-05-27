@@ -336,6 +336,53 @@ class TestDetailPage:
         assert b"Danger Zone" in response.content
         assert b"Archive" in response.content
 
+    async def test_domain_suspended_banner_renders(self, client, db_session, info_client):
+        """Domain Inactive alert shows when watched_item.domain_suspended=True."""
+        from unittest.mock import AsyncMock
+
+        from src.core.models.watched_item import WatchedItem
+        from tests.conftest import make_info_item
+
+        item = await make_info_item(db_session)
+        wi = WatchedItem(
+            info_item_id=item.info_item_id, name="Suspended Item", domain_suspended=True
+        )
+        db_session.add(wi)
+        await db_session.flush()
+        await db_session.commit()
+        info_client.get_info_item = AsyncMock(
+            return_value=_fake_info_item_out(info_item_id=str(item.info_item_id))
+        )
+        response = await client.get(f"/watched-items/{wi.id}")
+        assert response.status_code == 200
+        assert b"Domain Inactive" in response.content
+
+    async def test_domain_name_link_renders(self, client, db_session, info_client):
+        """Domain link appears and points to /domains/<name> when domain_name is set."""
+        from unittest.mock import AsyncMock
+
+        from src.core.models.domain import Domain
+        from src.core.models.watched_item import WatchedItem
+        from tests.conftest import make_info_item
+
+        db_session.add(Domain(name="detail-domain.com"))
+        item = await make_info_item(db_session)
+        wi = WatchedItem(
+            info_item_id=item.info_item_id,
+            name="Domain Link Item",
+            domain_name="detail-domain.com",
+        )
+        db_session.add(wi)
+        await db_session.flush()
+        await db_session.commit()
+        info_client.get_info_item = AsyncMock(
+            return_value=_fake_info_item_out(info_item_id=str(item.info_item_id))
+        )
+        response = await client.get(f"/watched-items/{wi.id}")
+        assert response.status_code == 200
+        assert b"/domains/detail-domain.com" in response.content
+        assert b"detail-domain.com" in response.content
+
     async def test_new_watch_button_visible_when_active_with_primary_url(
         self, client, db_session, info_client
     ):

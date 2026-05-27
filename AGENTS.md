@@ -124,8 +124,10 @@ Watches are InfoItem-first (#160): each Watch references an `info_item_id`
 sub_aspect fragment under that InfoItem; NULL ⇒ the InfoItem's primary
 content). Each Watch belongs to a `WatchedItem` (1:1 with an Archiver
 InfoItem) that owns shared defaults: `default_schedule_config`,
-`default_content_type`, `default_tags`, plus `WatchedItemNotificationTemplate`
-rows. Live inheritance: per-Watch override → WatchedItem default → system
+`default_content_type`, `default_tags`, `domain_name` (FK → `Domain.name`, set
+at first Watch-create time; first Watch wins), `domain_suspended` (cascaded True/False
+by domain deactivation/reactivation), plus `WatchedItemNotificationTemplate` rows.
+Live inheritance: per-Watch override → WatchedItem default → system
 default (see `src/core/watches/resolution.py`).
 
 One fetch per WatchedItem per cycle. The InfoItem's primary URL is fetched
@@ -135,8 +137,9 @@ only when the Watch's target binding's fingerprint changed. Cross_check
 bindings produce SourceRevisions for selector-rot detection (#157) but never
 trigger Watch notifications.
 
-`effective_url` / `effective_domain` are resolved once at Watch-create time
-(via `probe_fn`). SourceRevisions are POSTed to Archiver via the
+`effective_url` is resolved once at Watch-create time (via `probe_fn`);
+`domain_name` is recorded on the parent `WatchedItem` (first Watch wins, FK →
+`Domain.name`). SourceRevisions are POSTed to Archiver via the
 `archiver-client` SDK on every detected change; the local
 `pending_source_revisions` outbox + drain worker guarantees delivery during
 Archiver outages. Notifications dispatch inline from the pipeline's

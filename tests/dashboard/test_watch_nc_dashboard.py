@@ -64,7 +64,7 @@ class TestUnifiedNotificationsTable:
 
     @pytest.mark.integration
     async def test_domain_template_appears_for_matching_domain(self, client, db_session):
-        """Domain templates appear for watches whose effective_domain matches."""
+        """Domain templates appear for watches whose domain_name matches."""
         from src.core.models.domain import DEFAULT_MAX_CONCURRENCY, DEFAULT_MIN_INTERVAL, Domain
 
         domain_name = "watch-nc-test.example.com"

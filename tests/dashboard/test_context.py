@@ -154,7 +154,7 @@ class TestGetWatchList:
         assert len(result) == 1
         assert result[0].name == "Alpha Watch"
 
-    async def test_domain_filters_by_effective_domain(self, db_session):
+    async def test_domain_filters_by_domain_name(self, db_session):
         await make_watch(
             db_session,
             name="W1",

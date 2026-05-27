@@ -144,7 +144,7 @@ class TestDomainDetail:
         assert b"Archive" in response.content
 
 
-class TestDomainWatchesTableDomainInactiveBadge:
+class TestDomainWatchedItemsTableDomainInactiveBadge:
     async def test_suspended_watch_shows_domain_inactive_badge(self, client, db_session):
         db_session.add(Domain(name="ds-tbl.com", is_active=False))
         await make_watch(
@@ -350,8 +350,10 @@ class TestDomainToggleActive:
         await client.post("/domains/suspend.com/toggle-active", data={"active": "false"})
 
         await db_session.refresh(watch)
+        await db_session.refresh(watch.watched_item)
         assert watch.is_active is False
         assert watch.domain_suspended is True
+        assert watch.watched_item.domain_suspended is True
 
     async def test_toggle_inactive_skips_already_inactive_watches(self, client, db_session):
         db_session.add(Domain(name="skip-inactive.com"))
@@ -401,8 +403,10 @@ class TestDomainToggleActive:
         await client.post("/domains/restore.com/toggle-active", data={"active": "true"})
 
         await db_session.refresh(watch)
+        await db_session.refresh(watch.watched_item)
         assert watch.is_active is True
         assert watch.domain_suspended is False
+        assert watch.watched_item.domain_suspended is False
 
     async def test_toggle_active_does_not_restore_manually_inactive_watches(
         self, client, db_session

@@ -839,7 +839,7 @@ class TestWatchListFilters:
 
 class TestDomainDetailFilters:
     async def _create_domain_with_watch(self, client, db_session, watch_name="Filter Watch"):
-        """Create a domain and a watch whose effective_domain matches it.
+        """Create a domain and a watch whose domain_name matches it.
 
         The mock probe extracts hostname from URL, so the watch URL must
         use the domain name as its hostname for the watch to appear in

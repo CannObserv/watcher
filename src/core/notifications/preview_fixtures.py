@@ -23,7 +23,7 @@ _PREVIEW_OCCURRED_AT = datetime(2026, 4, 15, 12, 0, 0, tzinfo=UTC)
 
 
 _SHARED_CONTEXT = {
-    "effective_domain": "example.com",
+    "domain_name": "example.com",
     "check_interval": "1h",
     "last_changed_at": "2026-04-15T03:22:00Z",
     "tags": ["regulatory", "filings"],

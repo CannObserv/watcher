@@ -221,8 +221,8 @@ def _build_change_detected_body(
     metadata = event.metadata
 
     header = [render_template(line, ctx) for line in CHANGE_DETECTED_HEADER_LINES]
-    if options.include_domain and metadata.get("effective_domain"):
-        header.insert(1, f"DOMAIN: {metadata['effective_domain']}")
+    if options.include_domain and metadata.get("domain_name"):
+        header.insert(1, f"DOMAIN: {metadata['domain_name']}")
 
     try:
         timestamp_idx = next(i for i, line in enumerate(header) if line.startswith("TIMESTAMP:"))

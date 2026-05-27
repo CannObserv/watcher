@@ -127,7 +127,7 @@ class TestDomainDetail:
             domain_name="watched.com",
         )
         response = await client.get("/domains/watched.com")
-        assert b"Watches" in response.content
+        assert b"Watched Items" in response.content
         assert b"My Watch" in response.content
 
     async def test_detail_page_shows_metadata(self, client, db_session):

@@ -4,7 +4,7 @@ Phase 6 contract: ``create_watch`` takes ``info_item_id`` (required) and
 optional ``target_info_source_id`` (must be a sub_aspect binding).
 URL resolution uses ``fetch_info_item_bindings`` which returns the
 InfoItem's primary URL. The probe runs against that resolved URL to
-populate ``effective_url`` / ``effective_domain``.
+populate ``effective_url``; domain_name is set on the parent WatchedItem.
 """
 
 from unittest.mock import AsyncMock, patch
@@ -144,7 +144,7 @@ class TestCreateWatch:
         entry = result.scalar_one()
         assert entry.watch_id == str(watch.id)
         assert entry.payload["name"] == "Audit Watch"
-        assert entry.payload["effective_domain"] == "audit-test.com"
+        assert entry.payload["domain_name"] == "audit-test.com"
         assert entry.payload["info_item_id"] == str(item.info_item_id)
 
     async def test_raises_on_probe_failure(self, db_session, info_client):

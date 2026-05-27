@@ -2679,7 +2679,7 @@ async def _render_watch_notifications(
 
     Sources (in display order):
       global_templates  — NotificationTemplate.is_global_default=True
-      domain_templates  — DomainNcRef for watch.effective_domain
+      domain_templates  — DomainNcRef for watch.watched_item.domain_name
       watch_templates   — WatchNcRef for this watch, minus global/domain ids
       notifications     — WatchNotificationConfig for this watch (local)
     """

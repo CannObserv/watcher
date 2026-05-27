@@ -94,7 +94,7 @@ TEMPLATE_VARIABLES: list[TemplateVariable] = [
     # watch_error-only
     TemplateVariable("status_code", "int", "HTTP status code returned", "watch_error"),
     # Contextual — populated when relevant metadata exists on the watch
-    TemplateVariable("effective_domain", "str", "Resolved domain of the watch URL", "contextual"),
+    TemplateVariable("domain_name", "str", "Resolved domain of the watch URL", "contextual"),
     TemplateVariable("check_interval", "str", 'Check cadence (e.g. "1h")', "contextual"),
     TemplateVariable(
         "last_changed_at", "str", "UTC timestamp of last detected change", "contextual"

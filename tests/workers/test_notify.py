@@ -386,7 +386,7 @@ class TestContentConfig:
 
         client.dispatch.assert_called_once()
         body = client.dispatch.call_args.kwargs["body_template"]
-        # include_domain=True but no effective_domain in metadata → no domain section added
+        # include_domain=True but no domain_name in metadata → no domain section added
         assert "example.com" in body
         assert "Domain:" not in body
 

@@ -7,6 +7,7 @@ import pytest
 from src.core.models.audit_log import AuditLog, EventType
 from src.core.models.domain import Domain
 from src.core.models.watch import ContentType
+from src.core.models.watched_item import WatchedItem
 from src.dashboard.context import (
     get_dashboard_stats,
     get_domain_watched_items,
@@ -17,7 +18,7 @@ from src.dashboard.context import (
     get_watch_list,
     get_watch_timeline,
 )
-from tests.conftest import make_watch
+from tests.conftest import make_info_item, make_watch
 
 
 @pytest.mark.integration
@@ -518,10 +519,6 @@ class TestGetWatchTimeline:
 @pytest.mark.integration
 class TestGetDomainWatchedItems:
     async def test_returns_watched_items_for_domain(self, db_session):
-        from src.core.models.domain import Domain
-        from src.core.models.watched_item import WatchedItem
-        from tests.conftest import make_info_item
-
         item_a = await make_info_item(db_session)
         item_b = await make_info_item(db_session)
         db_session.add(Domain(name="ex.com"))
@@ -545,10 +542,6 @@ class TestGetDomainWatchedItems:
         assert result == []
 
     async def test_search_filters_by_name(self, db_session):
-        from src.core.models.domain import Domain
-        from src.core.models.watched_item import WatchedItem
-        from tests.conftest import make_info_item
-
         item_a = await make_info_item(db_session)
         item_b = await make_info_item(db_session)
         db_session.add(Domain(name="ex.com"))

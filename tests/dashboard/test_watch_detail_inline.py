@@ -289,7 +289,7 @@ class TestWatchDetailDomainRow:
         assert "Domain" in content
         assert "domain-label.com" in content
 
-    async def test_detail_page_no_domain_row_when_no_effective_domain(self, client, db_session):
+    async def test_detail_page_no_domain_row_when_no_domain_name(self, client, db_session):
         watch = await make_watch(
             db_session,
             name="No Domain",

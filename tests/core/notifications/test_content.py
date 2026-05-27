@@ -131,7 +131,7 @@ class TestChangeDetectedDefaultBody:
             metadata={
                 **CHANGE_META,
                 "change_id": "01HV0000000000000000000099",
-                "effective_domain": "example.com",
+                "domain_name": "example.com",
                 "check_interval": "1h",
                 "last_changed_at": "2026-04-09",
                 "significance": 0.5,
@@ -211,7 +211,7 @@ class TestChangeDetectedDefaultBody:
 
 class TestDomainSlot:
     def test_renders_between_name_and_url_when_toggle_on_and_metadata_present(self):
-        event = make_event(metadata={"effective_domain": "example.com"})
+        event = make_event(metadata={"domain_name": "example.com"})
         body = build_body(event, ContentOptions(include_domain=True))
         # DOMAIN appears between watch_name (line 0) and URL (line 2).
         lines = body.split("\n")
@@ -220,7 +220,7 @@ class TestDomainSlot:
         assert lines[2].startswith("URL:")
 
     def test_omitted_when_toggle_off(self):
-        event = make_event(metadata={"effective_domain": "example.com"})
+        event = make_event(metadata={"domain_name": "example.com"})
         body = build_body(event, ContentOptions(include_domain=False))
         assert "DOMAIN" not in body
 
@@ -682,14 +682,14 @@ class TestBuildBodyWithTemplates:
     def test_body_template_overrides_default_body_and_toggles(self):
         """Custom body_template replaces the entire default body — toggles
         are not applied. This is the power-user escape hatch."""
-        event = make_event(metadata={"effective_domain": "example.com"})
+        event = make_event(metadata={"domain_name": "example.com"})
         opts = ContentOptions(include_domain=True, body_template="custom: {{ watch_name }}")
         body = build_body(event, opts)
         assert body == "custom: Test Watch"
         assert "DOMAIN" not in body
 
     def test_body_template_none_uses_default_body(self):
-        event = make_event(metadata={"effective_domain": "example.com"})
+        event = make_event(metadata={"domain_name": "example.com"})
         opts = ContentOptions(include_domain=True, body_template=None)
         body = build_body(event, opts)
         assert "DOMAIN: example.com" in body
@@ -772,7 +772,7 @@ class TestBuildBodyStrict:
     def test_strict_renders_default_body(self):
         """change_detected default body is composed in pure Python — strict
         mode is irrelevant on this code path but must not regress."""
-        event = make_event(metadata={"effective_domain": "example.com", **CHANGE_META})
+        event = make_event(metadata={"domain_name": "example.com", **CHANGE_META})
         body = build_body(event, ContentOptions(include_domain=True), strict=True)
         assert "URL: https://example.com" in body
         assert "DOMAIN: example.com" in body

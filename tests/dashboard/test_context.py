@@ -557,6 +557,202 @@ class TestGetDomainWatchedItems:
         assert len(result) == 1
         assert result[0].name == "Alpha Item"
 
+    async def test_sort_by_name_desc(self, db_session):
+        item_a = await make_info_item(db_session)
+        item_b = await make_info_item(db_session)
+        db_session.add(Domain(name="ex.com"))
+        await db_session.flush()
+        db_session.add(
+            WatchedItem(info_item_id=item_a.info_item_id, name="Alpha", domain_name="ex.com")
+        )
+        db_session.add(
+            WatchedItem(info_item_id=item_b.info_item_id, name="Beta", domain_name="ex.com")
+        )
+        await db_session.flush()
+        result = await get_domain_watched_items(db_session, "ex.com", sort="name", order="desc")
+        assert [wi.name for wi in result] == ["Beta", "Alpha"]
+
+    async def test_sort_by_last_checked_at_desc_nulls_last(self, db_session):
+        item_a = await make_info_item(db_session)
+        item_b = await make_info_item(db_session)
+        db_session.add(Domain(name="ex.com"))
+        await db_session.flush()
+        db_session.add(
+            WatchedItem(
+                info_item_id=item_a.info_item_id,
+                name="Checked",
+                domain_name="ex.com",
+                last_checked_at=datetime(2025, 1, 1, tzinfo=UTC),
+            )
+        )
+        db_session.add(
+            WatchedItem(info_item_id=item_b.info_item_id, name="Unchecked", domain_name="ex.com")
+        )
+        await db_session.flush()
+        result = await get_domain_watched_items(
+            db_session, "ex.com", sort="last_checked_at", order="desc"
+        )
+        assert result[0].name == "Checked"
+        assert result[1].name == "Unchecked"
+
+    async def test_sort_by_last_checked_at_asc_nulls_first(self, db_session):
+        item_a = await make_info_item(db_session)
+        item_b = await make_info_item(db_session)
+        db_session.add(Domain(name="ex.com"))
+        await db_session.flush()
+        db_session.add(
+            WatchedItem(
+                info_item_id=item_a.info_item_id,
+                name="Checked",
+                domain_name="ex.com",
+                last_checked_at=datetime(2025, 1, 1, tzinfo=UTC),
+            )
+        )
+        db_session.add(
+            WatchedItem(info_item_id=item_b.info_item_id, name="Unchecked", domain_name="ex.com")
+        )
+        await db_session.flush()
+        result = await get_domain_watched_items(
+            db_session, "ex.com", sort="last_checked_at", order="asc"
+        )
+        assert result[0].name == "Unchecked"
+        assert result[1].name == "Checked"
+
+    async def test_status_active_excludes_archived_suspended_and_inactive(self, db_session):
+        items = [await make_info_item(db_session) for _ in range(4)]
+        db_session.add(Domain(name="ex.com"))
+        await db_session.flush()
+        db_session.add(
+            WatchedItem(info_item_id=items[0].info_item_id, name="Active", domain_name="ex.com")
+        )
+        db_session.add(
+            WatchedItem(
+                info_item_id=items[1].info_item_id,
+                name="Archived",
+                domain_name="ex.com",
+                archived_at=datetime(2025, 1, 1, tzinfo=UTC),
+                is_active=False,
+            )
+        )
+        db_session.add(
+            WatchedItem(
+                info_item_id=items[2].info_item_id,
+                name="Suspended",
+                domain_name="ex.com",
+                domain_suspended=True,
+            )
+        )
+        db_session.add(
+            WatchedItem(
+                info_item_id=items[3].info_item_id,
+                name="Inactive",
+                domain_name="ex.com",
+                is_active=False,
+            )
+        )
+        await db_session.flush()
+        result = await get_domain_watched_items(db_session, "ex.com", status="active")
+        assert [wi.name for wi in result] == ["Active"]
+
+    async def test_status_archived_returns_only_archived(self, db_session):
+        item_a = await make_info_item(db_session)
+        item_b = await make_info_item(db_session)
+        db_session.add(Domain(name="ex.com"))
+        await db_session.flush()
+        db_session.add(
+            WatchedItem(info_item_id=item_a.info_item_id, name="Active", domain_name="ex.com")
+        )
+        db_session.add(
+            WatchedItem(
+                info_item_id=item_b.info_item_id,
+                name="Archived",
+                domain_name="ex.com",
+                archived_at=datetime(2025, 1, 1, tzinfo=UTC),
+                is_active=False,
+            )
+        )
+        await db_session.flush()
+        result = await get_domain_watched_items(db_session, "ex.com", status="archived")
+        assert [wi.name for wi in result] == ["Archived"]
+
+    async def test_status_suspended_returns_only_suspended(self, db_session):
+        item_a = await make_info_item(db_session)
+        item_b = await make_info_item(db_session)
+        db_session.add(Domain(name="ex.com"))
+        await db_session.flush()
+        db_session.add(
+            WatchedItem(info_item_id=item_a.info_item_id, name="Active", domain_name="ex.com")
+        )
+        db_session.add(
+            WatchedItem(
+                info_item_id=item_b.info_item_id,
+                name="Suspended",
+                domain_name="ex.com",
+                domain_suspended=True,
+            )
+        )
+        await db_session.flush()
+        result = await get_domain_watched_items(db_session, "ex.com", status="suspended")
+        assert [wi.name for wi in result] == ["Suspended"]
+
+    async def test_status_inactive_returns_only_inactive(self, db_session):
+        item_a = await make_info_item(db_session)
+        item_b = await make_info_item(db_session)
+        item_c = await make_info_item(db_session)
+        db_session.add(Domain(name="ex.com"))
+        await db_session.flush()
+        db_session.add(
+            WatchedItem(info_item_id=item_a.info_item_id, name="Active", domain_name="ex.com")
+        )
+        db_session.add(
+            WatchedItem(
+                info_item_id=item_b.info_item_id,
+                name="Inactive",
+                domain_name="ex.com",
+                is_active=False,
+            )
+        )
+        db_session.add(
+            WatchedItem(
+                info_item_id=item_c.info_item_id,
+                name="Archived",
+                domain_name="ex.com",
+                archived_at=datetime(2025, 1, 1, tzinfo=UTC),
+                is_active=False,
+            )
+        )
+        await db_session.flush()
+        result = await get_domain_watched_items(db_session, "ex.com", status="inactive")
+        assert [wi.name for wi in result] == ["Inactive"]
+
+    async def test_status_none_includes_all(self, db_session):
+        items = [await make_info_item(db_session) for _ in range(3)]
+        db_session.add(Domain(name="ex.com"))
+        await db_session.flush()
+        db_session.add(
+            WatchedItem(info_item_id=items[0].info_item_id, name="Active", domain_name="ex.com")
+        )
+        db_session.add(
+            WatchedItem(
+                info_item_id=items[1].info_item_id,
+                name="Archived",
+                domain_name="ex.com",
+                archived_at=datetime(2025, 1, 1, tzinfo=UTC),
+                is_active=False,
+            )
+        )
+        db_session.add(
+            WatchedItem(
+                info_item_id=items[2].info_item_id,
+                name="Suspended",
+                domain_name="ex.com",
+                domain_suspended=True,
+            )
+        )
+        await db_session.flush()
+        result = await get_domain_watched_items(db_session, "ex.com", status=None)
+        assert len(result) == 3
+
 
 @pytest.mark.integration
 class TestGetWatchedItemList:

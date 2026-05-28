@@ -1842,6 +1842,10 @@ async def domain_toggle_active(
     request: Request,
     name: str,
     active: str = Form(""),
+    q: str | None = Query(None),
+    status: str | None = Query(None),
+    sort: str = Query("name"),
+    order: str = Query("asc"),
     session: AsyncSession = Depends(get_db_session),
 ):
     """Toggle domain active status.
@@ -1904,11 +1908,20 @@ async def domain_toggle_active(
     await session.refresh(domain)
 
     if request.headers.get("HX-Request") == "true":
-        watched_items = await get_domain_watched_items(session, name)
+        watched_items = await get_domain_watched_items(
+            session, name, search=q, sort=sort, order=order, status=status
+        )
         return templates.TemplateResponse(
             request,
             "partials/domain_toggle_oob.html",
-            {"domain": domain, "watched_items": watched_items},
+            {
+                "domain": domain,
+                "watched_items": watched_items,
+                "q": q or "",
+                "sort": sort,
+                "order": order,
+                "status": status or "",
+            },
         )
     return RedirectResponse(url=f"/domains/{name}", status_code=303)
 
@@ -2088,7 +2101,13 @@ async def domain_detail_page(
     if not domain:
         return templates.TemplateResponse(request, "pages/404.html", status_code=404)
 
-    watched_items = await get_domain_watched_items(session, name, search=q)
+    watched_items = await get_domain_watched_items(
+        session, name, search=q, sort=sort, order=order, status=status
+    )
+    all_wi_count_result = await session.execute(
+        select(func.count(WatchedItem.id)).where(WatchedItem.domain_name == name)
+    )
+    all_watched_items_count = all_wi_count_result.scalar_one()
 
     field_contexts = {
         fname: _field_context(request, domain, fname, mode="view") for fname in DOMAIN_FIELD_META
@@ -2098,7 +2117,11 @@ async def domain_detail_page(
         "active_page": "domains",
         "domain": domain,
         "watched_items": watched_items,
+        "all_watched_items_count": all_watched_items_count,
         "q": q or "",
+        "sort": sort,
+        "order": order,
+        "status": status or "",
         "flash": None,
         "field_contexts": field_contexts,
     }
@@ -2408,14 +2431,19 @@ async def partial_domain_watched_items(
     request: Request,
     name: str,
     q: str | None = None,
+    status: str | None = None,
+    sort: str = "name",
+    order: str = "asc",
     session: AsyncSession = Depends(get_db_session),
 ):
-    """HTMX partial: domain WatchedItems list with optional name search."""
+    """HTMX partial: domain WatchedItems table with search, sort, and status filter."""
     result = await session.execute(select(Domain).where(Domain.name == name))
     domain = result.scalar_one_or_none()
     if not domain:
         raise HTTPException(status_code=404)
-    watched_items = await get_domain_watched_items(session, name, search=q)
+    watched_items = await get_domain_watched_items(
+        session, name, search=q, sort=sort, order=order, status=status
+    )
     return templates.TemplateResponse(
         request,
         "partials/domain_watched_items_table.html",
@@ -2423,6 +2451,9 @@ async def partial_domain_watched_items(
             "domain": domain,
             "watched_items": watched_items,
             "q": q or "",
+            "sort": sort,
+            "order": order,
+            "status": status or "",
         },
     )
 

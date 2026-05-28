@@ -881,6 +881,20 @@ class TestDomainDetailFilters:
         assert response.status_code == 200
         assert b"Searchable Watch" in response.content
 
+    async def test_domain_watched_items_partial_sort_and_status(self, client, db_session):
+        name = await self._create_domain_with_watch(client, db_session, "Sort Status Watch")
+        response = await client.get(
+            f"/partials/domain-watched-items/{name}?sort=last_checked_at&order=desc&status=active"
+        )
+        assert response.status_code == 200
+        assert b"Sort Status Watch" in response.content
+
+    async def test_domain_watched_items_partial_status_archived_empty(self, client, db_session):
+        name = await self._create_domain_with_watch(client, db_session, "Archived Filter Watch")
+        response = await client.get(f"/partials/domain-watched-items/{name}?status=archived")
+        assert response.status_code == 200
+        assert b"No watched items" in response.content
+
 
 class TestAuditLogFilters:
     async def test_audit_page_has_chip_group(self, client):

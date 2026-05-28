@@ -13,7 +13,8 @@
           {% if domain.archived_at is not none %}disabled{% endif %}
           hx-post="/domains/{{ domain.name }}/toggle-active"
           hx-target="#domain-status-toggle"
-          hx-swap="outerHTML">
+          hx-swap="outerHTML"
+          hx-include="#wi-search,[name='status'],[name='sort'],[name='order']">
         <span class="toggle__track"><span class="toggle__thumb"></span></span>
         <span class="toggle__label">
           {% if domain.archived_at is not none %}

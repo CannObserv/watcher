@@ -27,6 +27,11 @@ _WATCH_SORT_COLS: dict[str, Any] = {
     "created_at": Watch.created_at,
 }
 
+_DOMAIN_WI_SORT_COLS: dict[str, Any] = {
+    "name": WatchedItem.name,
+    "last_checked_at": WatchedItem.last_checked_at,
+}
+
 
 async def get_watch_list(
     session: AsyncSession,
@@ -407,14 +412,33 @@ async def get_domain_watched_items(
     domain_name: str,
     *,
     search: str | None = None,
+    sort: str = "name",
+    order: str = "asc",
+    status: str | None = None,
 ) -> list[WatchedItem]:
-    """Fetch WatchedItems for a domain with optional name search."""
-    stmt = (
-        select(WatchedItem).where(WatchedItem.domain_name == domain_name).order_by(WatchedItem.name)
-    )
+    """Fetch WatchedItems for a domain with optional search, sort, and status filter."""
+    col = _DOMAIN_WI_SORT_COLS.get(sort, WatchedItem.name)
+    order_expr = col.asc().nulls_first() if order == "asc" else col.desc().nulls_last()
+    stmt = select(WatchedItem).where(WatchedItem.domain_name == domain_name).order_by(order_expr)
     if search:
         escaped = search.replace("%", "\\%").replace("_", "\\_")
         stmt = stmt.where(WatchedItem.name.ilike(f"%{escaped}%"))
+    if status == "active":
+        stmt = stmt.where(
+            WatchedItem.archived_at.is_(None),
+            WatchedItem.domain_suspended.is_(False),
+            WatchedItem.is_active.is_(True),
+        )
+    elif status == "inactive":
+        stmt = stmt.where(
+            WatchedItem.archived_at.is_(None),
+            WatchedItem.domain_suspended.is_(False),
+            WatchedItem.is_active.is_(False),
+        )
+    elif status == "archived":
+        stmt = stmt.where(WatchedItem.archived_at.isnot(None))
+    elif status == "suspended":
+        stmt = stmt.where(WatchedItem.domain_suspended.is_(True))
     result = await session.execute(stmt)
     return list(result.scalars().all())
 

@@ -1,11 +1,66 @@
+{# Search and status filter bar #}
+<div class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-4 mb-4">
+  <div class="flex flex-wrap gap-3 items-end">
+    <div class="flex-1 min-w-[200px]">
+      <label for="wi-search" class="sr-only">Search watched items</label>
+      <input type="search" id="wi-search" name="q"
+        placeholder="Search watched items…"
+        value="{{ q or '' }}"
+        class="form-input"
+        hx-get="/partials/domain-watched-items/{{ domain.name }}"
+        hx-target="#domain-watches"
+        hx-swap="innerHTML"
+        hx-trigger="input changed delay:300ms, search"
+        hx-include="[name='status'],[name='sort'],[name='order']"
+        aria-label="Search watched items by name">
+    </div>
+    <fieldset class="segment-group" role="radiogroup" aria-label="Filter by status">
+      {% for value, label in [("", "All"), ("active", "Active"), ("inactive", "Inactive"), ("archived", "Archived"), ("suspended", "Suspended")] %}
+      <label class="segment">
+        <input type="radio" name="status" value="{{ value }}"
+          {% if status == value %}checked{% endif %}
+          hx-get="/partials/domain-watched-items/{{ domain.name }}"
+          hx-target="#domain-watches"
+          hx-swap="innerHTML"
+          hx-trigger="change"
+          hx-include="#wi-search,[name='sort'],[name='order']">
+        <span>{{ label }}</span>
+      </label>
+      {% endfor %}
+    </fieldset>
+    {# Hidden inputs carry sort state so search/filter can include them #}
+    <input type="hidden" name="sort" value="{{ sort }}">
+    <input type="hidden" name="order" value="{{ order }}">
+  </div>
+</div>
+
+<div aria-live="polite" aria-atomic="false">
 {% if watched_items %}
-<div class="overflow-x-auto">
+<div class="overflow-x-auto rounded-lg border border-gray-200 dark:border-gray-700">
   <table class="data-table">
     <thead>
       <tr>
-        <th scope="col">Name</th>
+        {% set sortable_cols = [("name", "Name"), ("last_checked_at", "Last Checked")] %}
+        {% for col_key, col_label in sortable_cols %}
+        {% set is_sorted = sort == col_key %}
+        {% set next_order = "asc" if (is_sorted and order == "desc") else "desc" %}
+        <th scope="col">
+          <button type="button"
+            hx-get="/partials/domain-watched-items/{{ domain.name }}"
+            hx-target="#domain-watches"
+            hx-swap="innerHTML"
+            hx-include="#wi-search,[name='status']"
+            hx-vals='{"sort": "{{ col_key }}", "order": "{{ next_order }}"}'
+            class="flex items-center gap-1 text-start w-full font-semibold text-gray-700 dark:text-gray-300 hover:text-co-purple-600 dark:hover:text-co-purple-400 min-h-[44px]"
+            aria-label="Sort by {{ col_label }}{% if is_sorted %}, currently {{ order }}ending{% endif %}">
+            {{ col_label }}
+            <span aria-hidden="true" class="text-xs opacity-60">
+              {% if is_sorted %}{{ "↑" if order == "asc" else "↓" }}{% else %}⇅{% endif %}
+            </span>
+          </button>
+        </th>
+        {% endfor %}
         <th scope="col">Status</th>
-        <th scope="col">Last Checked</th>
       </tr>
     </thead>
     <tbody class="divide-y divide-gray-100 dark:divide-gray-700">
@@ -13,6 +68,13 @@
       <tr class="hover:bg-gray-50 dark:hover:bg-gray-800">
         <td class="font-medium text-gray-900 dark:text-white">
           <a href="/watched-items/{{ wi.id }}" class="link">{{ wi.name }}</a>
+        </td>
+        <td class="text-gray-500 dark:text-gray-400 text-sm">
+          {% if wi.last_checked_at %}
+            {{ wi.last_checked_at.strftime("%Y-%m-%d %H:%M") }} UTC
+          {% else %}
+            <span class="text-gray-400 dark:text-gray-600">Never</span>
+          {% endif %}
         </td>
         <td>
           {% if wi.domain_suspended %}
@@ -25,18 +87,14 @@
             <span class="badge badge-inactive">Inactive</span>
           {% endif %}
         </td>
-        <td class="text-gray-500 dark:text-gray-400 text-sm">
-          {% if wi.last_checked_at %}
-            {{ wi.last_checked_at.strftime("%Y-%m-%d %H:%M") }} UTC
-          {% else %}
-            <span class="text-gray-400 dark:text-gray-600">Never</span>
-          {% endif %}
-        </td>
       </tr>
       {% endfor %}
     </tbody>
   </table>
 </div>
 {% else %}
-<p class="text-sm text-gray-500 dark:text-gray-400">No watched items for this domain.</p>
+<p class="text-sm text-gray-500 dark:text-gray-400">
+  No watched items{% if q or status %} matching filters{% endif %}.
+</p>
 {% endif %}
+</div>

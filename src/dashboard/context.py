@@ -339,7 +339,7 @@ def _apply_domain_filters(stmt, *, search: str | None = None, status: str | None
     return stmt
 
 
-async def get_domains_with_watch_counts(
+async def get_domains_with_watched_item_counts(
     session: AsyncSession,
     *,
     search: str | None = None,
@@ -347,7 +347,7 @@ async def get_domains_with_watch_counts(
     page: int = 1,
     page_size: int | None = None,
 ) -> list[dict]:
-    """Fetch domains with watch count, last_checked, search, filter, and pagination.
+    """Fetch domains with watched item count, last_checked, search, filter, and pagination.
 
     Args:
         search: Substring match on domain name.
@@ -358,7 +358,7 @@ async def get_domains_with_watch_counts(
     stmt = (
         select(
             Domain,
-            func.count(Watch.id).label("watch_count"),
+            func.count(WatchedItem.id.distinct()).label("watched_item_count"),
             func.max(Watch.last_checked_at).label("last_checked"),
         )
         .outerjoin(WatchedItem, WatchedItem.domain_name == Domain.name)
@@ -384,13 +384,13 @@ async def get_domains_with_watch_counts(
             "max_concurrency": domain.max_concurrency,
             "last_request_at": domain.last_request_at,
             "in_backoff": domain.current_interval > domain.min_interval,
-            "watch_count": watch_count,
+            "watched_item_count": watched_item_count,
             "last_checked": last_checked,
             "status": domain.status,
             "notes": domain.notes,
             "archived_at": domain.archived_at,
         }
-        for domain, watch_count, last_checked in rows
+        for domain, watched_item_count, last_checked in rows
     ]
 
 

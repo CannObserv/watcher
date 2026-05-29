@@ -72,7 +72,7 @@ from src.dashboard.context import (
     get_dashboard_stats,
     get_domain_watched_items,
     get_domains_total_count,
-    get_domains_with_watch_counts,
+    get_domains_with_watched_item_counts,
     get_queue_health,
     get_watch_detail,
     get_watch_list,
@@ -186,7 +186,7 @@ async def dashboard_home(
     """
     stats = await get_dashboard_stats(session)
     queue = await get_queue_health(session)
-    domains = await get_domains_with_watch_counts(session)
+    domains = await get_domains_with_watched_item_counts(session)
 
     context = {
         "active_page": "dashboard",
@@ -1684,7 +1684,7 @@ async def domains_page(
     session: AsyncSession = Depends(get_db_session),
 ):
     """Domains list page with search, filter, and pagination."""
-    domains = await get_domains_with_watch_counts(
+    domains = await get_domains_with_watched_item_counts(
         session,
         search=q,
         status=status,
@@ -1716,7 +1716,7 @@ async def partial_domains_table(
     session: AsyncSession = Depends(get_db_session),
 ):
     """HTMX partial: domains table with search, filter, and pagination."""
-    domains = await get_domains_with_watch_counts(
+    domains = await get_domains_with_watched_item_counts(
         session,
         search=q,
         status=status,
@@ -2386,7 +2386,7 @@ async def partial_system_health(
 ):
     """HTMX partial: queue health and rate limiter."""
     queue = await get_queue_health(session)
-    domains = await get_domains_with_watch_counts(session)
+    domains = await get_domains_with_watched_item_counts(session)
     return templates.TemplateResponse(
         request,
         "partials/system_health.html",

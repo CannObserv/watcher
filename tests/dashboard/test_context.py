@@ -11,7 +11,7 @@ from src.core.models.watched_item import WatchedItem
 from src.dashboard.context import (
     get_dashboard_stats,
     get_domain_watched_items,
-    get_domains_with_watch_counts,
+    get_domains_with_watched_item_counts,
     get_queue_health,
     get_rate_limiter_state,
     get_watch_detail,
@@ -276,9 +276,9 @@ class TestGetWatchDetail:
 
 
 @pytest.mark.integration
-class TestGetDomainsWithWatchCounts:
+class TestGetDomainsWithWatchedItemCounts:
     async def test_empty_domains(self, db_session):
-        result = await get_domains_with_watch_counts(db_session)
+        result = await get_domains_with_watched_item_counts(db_session)
         assert result == []
 
     async def test_domain_with_watches(self, db_session):
@@ -292,27 +292,49 @@ class TestGetDomainsWithWatchCounts:
             domain_name="example.com",
         )
 
-        result = await get_domains_with_watch_counts(db_session)
+        result = await get_domains_with_watched_item_counts(db_session)
         assert len(result) == 1
         assert result[0]["name"] == "example.com"
-        assert result[0]["watch_count"] == 1
+        assert result[0]["watched_item_count"] == 1
         assert result[0]["in_backoff"] is False
+
+    async def test_multiple_watches_per_watched_item_counts_as_one(self, db_session):
+        """One WatchedItem with two Watches must report watched_item_count=1, not 2."""
+        domain = Domain(name="multi.com", min_interval=1.0, max_concurrency=2)
+        db_session.add(domain)
+        first_watch = await make_watch(
+            db_session,
+            name="Watch A",
+            primary_url="https://multi.com",
+            content_type=ContentType.HTML,
+            domain_name="multi.com",
+        )
+        await make_watch(
+            db_session,
+            name="Watch B",
+            watched_item=first_watch.watched_item,
+            content_type=ContentType.HTML,
+        )
+
+        result = await get_domains_with_watched_item_counts(db_session)
+        assert len(result) == 1
+        assert result[0]["watched_item_count"] == 1
 
     async def test_domain_with_no_watches(self, db_session):
         domain = Domain(name="orphan.com", min_interval=1.0, max_concurrency=2)
         db_session.add(domain)
         await db_session.flush()
 
-        result = await get_domains_with_watch_counts(db_session)
+        result = await get_domains_with_watched_item_counts(db_session)
         assert len(result) == 1
-        assert result[0]["watch_count"] == 0
+        assert result[0]["watched_item_count"] == 0
 
     async def test_domain_in_backoff(self, db_session):
         domain = Domain(name="slow.com", min_interval=1.0, max_concurrency=2, current_interval=4.0)
         db_session.add(domain)
         await db_session.flush()
 
-        result = await get_domains_with_watch_counts(db_session)
+        result = await get_domains_with_watched_item_counts(db_session)
         assert result[0]["in_backoff"] is True
         assert result[0]["current_interval"] == 4.0
 
@@ -323,7 +345,7 @@ class TestGetDomainsFiltered:
         db_session.add(Domain(name="alpha.com"))
         db_session.add(Domain(name="beta.com"))
         await db_session.flush()
-        result = await get_domains_with_watch_counts(db_session, search="alpha")
+        result = await get_domains_with_watched_item_counts(db_session, search="alpha")
         assert len(result) == 1
         assert result[0]["name"] == "alpha.com"
 
@@ -331,7 +353,7 @@ class TestGetDomainsFiltered:
         db_session.add(Domain(name="active.com"))
         db_session.add(Domain(name="gone.com", archived_at=datetime.now(UTC)))
         await db_session.flush()
-        result = await get_domains_with_watch_counts(db_session, status="active")
+        result = await get_domains_with_watched_item_counts(db_session, status="active")
         names = [d["name"] for d in result]
         assert "active.com" in names
         assert "gone.com" not in names
@@ -340,7 +362,7 @@ class TestGetDomainsFiltered:
         db_session.add(Domain(name="live.com"))
         db_session.add(Domain(name="gone.com", archived_at=datetime.now(UTC)))
         await db_session.flush()
-        result = await get_domains_with_watch_counts(db_session, status="archived")
+        result = await get_domains_with_watched_item_counts(db_session, status="archived")
         names = [d["name"] for d in result]
         assert "gone.com" in names
         assert "live.com" not in names
@@ -349,7 +371,7 @@ class TestGetDomainsFiltered:
         db_session.add(Domain(name="normal.com"))
         db_session.add(Domain(name="slow.com", current_interval=5.0))
         await db_session.flush()
-        result = await get_domains_with_watch_counts(db_session, status="backoff")
+        result = await get_domains_with_watched_item_counts(db_session, status="backoff")
         names = [d["name"] for d in result]
         assert "slow.com" in names
         assert "normal.com" not in names
@@ -358,7 +380,7 @@ class TestGetDomainsFiltered:
         for i in range(5):
             db_session.add(Domain(name=f"dom{i:02d}.com"))
         await db_session.flush()
-        result = await get_domains_with_watch_counts(db_session, page=1, page_size=2)
+        result = await get_domains_with_watched_item_counts(db_session, page=1, page_size=2)
         assert len(result) == 2
         assert result[0]["name"] == "dom00.com"
 
@@ -366,7 +388,7 @@ class TestGetDomainsFiltered:
         for i in range(5):
             db_session.add(Domain(name=f"dom{i:02d}.com"))
         await db_session.flush()
-        result = await get_domains_with_watch_counts(db_session, page=2, page_size=2)
+        result = await get_domains_with_watched_item_counts(db_session, page=2, page_size=2)
         assert len(result) == 2
         assert result[0]["name"] == "dom02.com"
 
@@ -382,25 +404,25 @@ class TestGetDomainsFiltered:
             domain_name="checked.com",
             last_checked_at=now,
         )
-        result = await get_domains_with_watch_counts(db_session)
+        result = await get_domains_with_watched_item_counts(db_session)
         assert result[0]["last_checked"] == now
 
     async def test_last_checked_none_when_no_watches(self, db_session):
         db_session.add(Domain(name="orphan.com"))
         await db_session.flush()
-        result = await get_domains_with_watch_counts(db_session)
+        result = await get_domains_with_watched_item_counts(db_session)
         assert result[0]["last_checked"] is None
 
     async def test_result_includes_status(self, db_session):
         db_session.add(Domain(name="s.com"))
         await db_session.flush()
-        result = await get_domains_with_watch_counts(db_session)
+        result = await get_domains_with_watched_item_counts(db_session)
         assert result[0]["status"] == "active"
 
     async def test_result_includes_notes(self, db_session):
         db_session.add(Domain(name="n.com", notes="important"))
         await db_session.flush()
-        result = await get_domains_with_watch_counts(db_session)
+        result = await get_domains_with_watched_item_counts(db_session)
         assert result[0]["notes"] == "important"
 
 

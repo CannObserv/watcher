@@ -4,7 +4,7 @@
       <tr>
         <th scope="col">Domain</th>
         <th scope="col">Status</th>
-        <th scope="col">Watches</th>
+        <th scope="col">Watched Items</th>
         <th scope="col">Last Checked</th>
         <th scope="col"><span class="sr-only">Actions</span></th>
       </tr>
@@ -25,7 +25,7 @@
           <span class="badge badge-active">Active</span>
           {% endif %}
         </td>
-        <td>{{ domain.watch_count }}</td>
+        <td>{{ domain.watched_item_count }}</td>
         <td>{{ domain.last_checked.strftime("%Y-%m-%d %H:%M") if domain.last_checked else "—" }}</td>
         <td class="text-end">
           <a href="/domains/{{ domain.name }}" class="btn btn-secondary py-1 px-3 text-sm min-h-[44px]">Edit</a>

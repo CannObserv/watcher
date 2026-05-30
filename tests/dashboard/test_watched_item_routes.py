@@ -563,6 +563,28 @@ class TestDetailPage:
         # than the WatchedItem's last_reviewed_at.
         assert b"badge-warning" in body
 
+    async def test_detail_page_with_child_watch_renders_200(self, client, db_session, info_client):
+        """Regression: health_map must be passed when the WI has child watches.
+
+        The watch_table partial reads health_map in watch_row.html; if the route
+        omits it the template throws UndefinedError when the watch loop executes.
+        """
+        from unittest.mock import AsyncMock
+
+        from tests.conftest import make_watch
+
+        watch = await make_watch(db_session, name="Child Watch")
+        wi = watch.watched_item
+        await db_session.commit()
+
+        info_client.get_info_item = AsyncMock(
+            return_value=_fake_info_item_out(info_item_id=str(wi.info_item_id))
+        )
+
+        response = await client.get(f"/watched-items/{wi.id}")
+        assert response.status_code == 200
+        assert b"Child Watch" in response.content
+
 
 class TestListPageSearchAndPagination:
     async def test_partial_route_returns_200(self, client):

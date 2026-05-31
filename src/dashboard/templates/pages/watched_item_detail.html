@@ -84,11 +84,7 @@
        class="btn btn-secondary btn-sm">+ New Watch</a>
     {% endif %}
   </div>
-  {% if child_watches %}
-  {% include "partials/watch_table.html" with context %}
-  {% else %}
-  <p class="text-sm text-gray-500">No watches under this Watched Item.</p>
-  {% endif %}
+  {% include "partials/wi_watches_table.html" %}
 </section>
 
 {# Metadata #}

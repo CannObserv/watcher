@@ -1,0 +1,23 @@
+{% if watches %}
+<div class="overflow-x-auto">
+  <table class="data-table">
+    <thead>
+      <tr>
+        <th scope="col"><span class="font-semibold text-gray-700 dark:text-gray-300">Name</span></th>
+        <th scope="col"><span class="font-semibold text-gray-700 dark:text-gray-300">Status</span></th>
+        <th scope="col"><span class="font-semibold text-gray-700 dark:text-gray-300">Health</span></th>
+        <th scope="col"><span class="font-semibold text-gray-700 dark:text-gray-300">Interval</span></th>
+        <th scope="col"><span class="font-semibold text-gray-700 dark:text-gray-300">Last Checked</span></th>
+        <th scope="col"><span class="font-semibold text-gray-700 dark:text-gray-300">Last Changed</span></th>
+      </tr>
+    </thead>
+    <tbody class="divide-y divide-gray-100 dark:divide-gray-700">
+      {% for watch in watches %}
+        {% include "partials/watch_row.html" %}
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% else %}
+<p class="text-gray-500 dark:text-gray-400 text-sm">No watches under this Watched Item.</p>
+{% endif %}

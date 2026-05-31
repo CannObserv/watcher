@@ -581,6 +581,26 @@ class TestDetailPage:
         assert response.status_code == 200
         assert b"Child Watch" in response.content
 
+    async def test_child_watch_table_uses_static_headers_not_global_partial(
+        self, client, db_session, info_client
+    ):
+        """Regression #182: sort buttons must NOT point at /partials/watch-table.
+
+        The global partial returns all watches; child watches on the WI detail
+        page must render a static (non-HTMX-sorted) table scoped to this WI.
+        """
+        from tests.conftest import make_watch
+
+        watch = await make_watch(db_session, name="Scoped Watch")
+        wi = watch.watched_item
+        await db_session.commit()
+
+        response = await client.get(f"/watched-items/{wi.id}")
+        assert response.status_code == 200
+        assert b"Scoped Watch" in response.content
+        # Must NOT contain HTMX sort buttons targeting the global watch-table partial
+        assert b'hx-get="/partials/watch-table"' not in response.content
+
 
 class TestListPageSearchAndPagination:
     async def test_partial_route_returns_200(self, client):

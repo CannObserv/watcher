@@ -548,6 +548,8 @@ def info_client(db_session, request):
             b = MagicMock()
             b.info_source_id = str(binding.info_source_id)
             b.role = binding.role
+            b.is_active = binding.deactivated_at is None
+            b.deactivated_at = binding.deactivated_at
             info_item_sources.append(b)
         out.info_item_sources = info_item_sources
         return out

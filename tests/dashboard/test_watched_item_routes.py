@@ -568,18 +568,14 @@ class TestDetailPage:
 
         The watch_table partial reads health_map in watch_row.html; if the route
         omits it the template throws UndefinedError when the watch loop executes.
+        Uses the DB-backed info_client fixture (no overrides) to exercise the
+        full success path through fetch_info_item_bindings.
         """
-        from unittest.mock import AsyncMock
-
         from tests.conftest import make_watch
 
         watch = await make_watch(db_session, name="Child Watch")
         wi = watch.watched_item
         await db_session.commit()
-
-        info_client.get_info_item = AsyncMock(
-            return_value=_fake_info_item_out(info_item_id=str(wi.info_item_id))
-        )
 
         response = await client.get(f"/watched-items/{wi.id}")
         assert response.status_code == 200
@@ -1270,6 +1266,8 @@ def _fake_info_item_out(*, info_item_id):
             SimpleNamespace(
                 info_source_id="fake-primary-src",
                 role=None,  # primary
+                is_active=True,
+                deactivated_at=None,
                 created_at=datetime.now(UTC),
             ),
         ],

@@ -1269,8 +1269,7 @@ async def watched_item_detail_page(
             "cross_checks": cross_checks,
             "sub_aspects": sub_aspects,
             "new_subaspect_ids": new_subaspect_ids,
-            "child_watches": children,
-            "watches": children,  # `watch_table.html` reads "watches"
+            "watches": children,
             "health_map": {w.id: w.health_status for w in children},
             "flash": None,
             "field_contexts": field_contexts,

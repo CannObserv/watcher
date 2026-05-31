@@ -601,6 +601,22 @@ class TestDetailPage:
         # Must NOT contain HTMX sort buttons targeting the global watch-table partial
         assert b'hx-get="/partials/watch-table"' not in response.content
 
+    async def test_detail_page_with_no_child_watches_shows_empty_state(
+        self, client, db_session, info_client
+    ):
+        """WI detail page shows fallback text when there are no child watches."""
+        from src.core.models.watched_item import WatchedItem
+        from tests.conftest import make_info_item
+
+        item = await make_info_item(db_session)
+        wi = WatchedItem(info_item_id=item.info_item_id, name="Empty WI")
+        db_session.add(wi)
+        await db_session.commit()
+
+        response = await client.get(f"/watched-items/{wi.id}")
+        assert response.status_code == 200
+        assert b"No watches under this Watched Item" in response.content
+
 
 class TestListPageSearchAndPagination:
     async def test_partial_route_returns_200(self, client):

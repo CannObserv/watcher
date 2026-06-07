@@ -13,7 +13,6 @@ from src.core.models.watch import ContentType, Watch, WatchHealthStatus
 from src.core.notifications.events import WatchEventType
 from tests.conftest import (
     bind_primary_source,
-    bind_sub_aspect,
     make_info_item,
     make_info_source,
     make_watch,
@@ -199,33 +198,6 @@ class TestWatchCreate:
                 "name": "Created Watch",
                 "info_item_id": info_item_id,
                 "watch-create__target": "",  # primary
-                "content_type": "html",
-            },
-            follow_redirects=False,
-        )
-        assert response.status_code == 303
-
-    async def test_create_watch_with_subaspect_target(self, client, db_session):
-        item = await make_info_item(db_session)
-        primary = await make_info_source(db_session, url="https://example.com")
-        await bind_primary_source(
-            db_session,
-            info_item_id=item.info_item_id,
-            info_source_id=primary.info_source_id,
-        )
-        sub = await make_info_source(db_session, parent_info_source_id=primary.info_source_id)
-        await bind_sub_aspect(
-            db_session,
-            info_item_id=item.info_item_id,
-            info_source_id=sub.info_source_id,
-        )
-        await db_session.commit()
-        response = await client.post(
-            "/watches/new",
-            data={
-                "name": "Sub Watch",
-                "info_item_id": str(item.info_item_id),
-                "watch-create__target": str(sub.info_source_id),
                 "content_type": "html",
             },
             follow_redirects=False,
@@ -729,61 +701,6 @@ class TestWatchDelete:
     async def test_delete_missing_watch_returns_404(self, client):
         response = await client.delete("/watches/not-a-ulid")
         assert response.status_code == 404
-
-    async def test_delete_primary_with_active_sub_aspect_sibling_renders_sibling_message(
-        self, client, db_session
-    ):
-        """Dashboard surfaces the sub_aspect-sibling reason, not the generic archive prompt."""
-        from sqlalchemy import select
-        from ulid import ULID
-
-        from tests._information_test_models import InfoItemSource
-        from tests.conftest import bind_sub_aspect, make_info_source
-
-        info_item_id = await _seed_info_item(db_session, name="Has Sibling")
-        # Look up the primary InfoSource that _seed_info_item bound.
-        primary_iss = (
-            await db_session.execute(
-                select(InfoItemSource)
-                .where(InfoItemSource.info_item_id == ULID.from_str(info_item_id))
-                .where(InfoItemSource.role.is_(None))
-            )
-        ).scalar_one()
-        primary_info_source_id = primary_iss.info_source_id
-
-        primary_resp = await client.post(
-            "/api/v1/watches",
-            json={"name": "Primary", "info_item_id": info_item_id, "content_type": "html"},
-        )
-        primary_id = primary_resp.json()["id"]
-
-        # Create a sub_aspect fragment under the primary InfoSource and bind it.
-        fragment = await make_info_source(
-            db_session,
-            parent_info_source_id=primary_info_source_id,
-        )
-        await bind_sub_aspect(
-            db_session,
-            info_item_id=ULID.from_str(info_item_id),
-            info_source_id=fragment.info_source_id,
-        )
-        await db_session.commit()
-
-        await client.post(
-            "/api/v1/watches",
-            json={
-                "name": "Sub",
-                "info_item_id": info_item_id,
-                "target_info_source_id": str(fragment.info_source_id),
-                "content_type": "html",
-            },
-        )
-
-        await client.post(f"/watches/{primary_id}/archive")
-        response = await client.delete(f"/watches/{primary_id}")
-        assert response.status_code == 409
-        assert b"sub_aspect" in response.content
-        assert b"Archive the watch before deleting it" not in response.content
 
 
 class TestDomainsPage:

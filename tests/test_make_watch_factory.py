@@ -1,16 +1,10 @@
-"""Tests for the test factory itself.
-
-The Watch row references ``info_item_id`` + optional ``target_info_source_id``
-under a parent ``WatchedItem``; the legacy ``info_source_id``/``schedule_config``
-columns are gone (#160).
-"""
+"""Tests for the test factory itself."""
 
 import pytest
 
 from src.core.models import WatchedItem
 from tests.conftest import (
     bind_primary_source,
-    bind_sub_aspect,
     make_info_item,
     make_info_source,
     make_watch,
@@ -51,31 +45,6 @@ async def test_make_watch_with_existing_info_item_attaches_to_existing_watched_i
     w1 = await make_watch(db_session, name="First", info_item_id=item.info_item_id)
     w2 = await make_watch(db_session, name="Second", info_item_id=item.info_item_id)
     assert w1.watched_item_id == w2.watched_item_id
-
-
-async def test_make_watch_with_sub_aspect_target(db_session):
-    """target_info_source_id persists when supplied."""
-    item = await make_info_item(db_session)
-    primary = await make_info_source(db_session, url="https://example.com/x")
-    fragment = await make_info_source(db_session, parent_info_source_id=primary.info_source_id)
-    await bind_primary_source(
-        db_session,
-        info_item_id=item.info_item_id,
-        info_source_id=primary.info_source_id,
-    )
-    await bind_sub_aspect(
-        db_session,
-        info_item_id=item.info_item_id,
-        info_source_id=fragment.info_source_id,
-    )
-
-    watch = await make_watch(
-        db_session,
-        name="Sub",
-        info_item_id=item.info_item_id,
-        target_info_source_id=fragment.info_source_id,
-    )
-    assert watch.target_info_source_id == fragment.info_source_id
 
 
 async def test_make_watch_rejects_mismatched_watched_item(db_session):

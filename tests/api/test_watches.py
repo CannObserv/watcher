@@ -1,10 +1,4 @@
-"""Integration tests for Watch CRUD API endpoints.
-
-#160 contract: ``POST /api/v1/watches`` takes
-``{name, info_item_id, target_info_source_id?, content_type?, ...}``. The route
-resolves the InfoItem's primary URL via the ArchiverClient SDK and persists a
-Watch tied to a WatchedItem (get-or-create on info_item_id).
-"""
+"""Integration tests for Watch CRUD API endpoints."""
 
 from unittest.mock import AsyncMock
 
@@ -22,7 +16,6 @@ from src.core.models.watched_item import WatchedItem
 from src.core.notifications.events import WatchEventType
 from tests.conftest import (
     bind_primary_source,
-    bind_sub_aspect,
     make_info_item,
     make_info_source,
     make_watch,
@@ -47,36 +40,6 @@ async def _seed_info_item(
     )
     await db_session.commit()
     return str(item.info_item_id)
-
-
-async def _seed_info_item_with_sub_aspect(
-    db_session,
-    *,
-    name="Test InfoItem",
-    primary_url="https://example.com/page",
-):
-    """Create an InfoItem with a primary + one sub_aspect binding.
-
-    Returns ``(info_item_id, sub_aspect_info_source_id)`` as strs.
-    """
-    item = await make_info_item(db_session, name=name)
-    primary = await make_info_source(db_session, url=primary_url)
-    await bind_primary_source(
-        db_session,
-        info_item_id=item.info_item_id,
-        info_source_id=primary.info_source_id,
-    )
-    sub_source = await make_info_source(
-        db_session,
-        parent_info_source_id=primary.info_source_id,
-    )
-    await bind_sub_aspect(
-        db_session,
-        info_item_id=item.info_item_id,
-        info_source_id=sub_source.info_source_id,
-    )
-    await db_session.commit()
-    return str(item.info_item_id), str(sub_source.info_source_id)
 
 
 class TestCreateWatch:
@@ -189,77 +152,6 @@ class TestCreateWatch:
         )
         assert response.status_code == 503
         assert response.headers.get("Retry-After") == "30"
-
-
-class TestCreateWatchSubAspect:
-    async def test_create_watch_with_valid_sub_aspect_target(self, client, db_session):
-        """POST with a target_info_source_id bound as sub_aspect → 201."""
-        info_item_id, sub_id = await _seed_info_item_with_sub_aspect(db_session)
-        response = await client.post(
-            "/api/v1/watches",
-            json={
-                "name": "Sub Watch",
-                "info_item_id": info_item_id,
-                "target_info_source_id": sub_id,
-                "content_type": "html",
-            },
-        )
-        assert response.status_code == 201, response.text
-        data = response.json()
-        assert data["info_item_id"] == info_item_id
-        assert data["target_info_source_id"] == sub_id
-
-    async def test_create_watch_with_invalid_sub_aspect_target_returns_422(
-        self, client, db_session
-    ):
-        """target_info_source_id not bound as sub_aspect of the InfoItem → 422."""
-        info_item_id = await _seed_info_item(db_session)
-        unbound = await make_info_source(db_session, url="https://other.example.com/")
-        await db_session.commit()
-        response = await client.post(
-            "/api/v1/watches",
-            json={
-                "name": "Bad Target",
-                "info_item_id": info_item_id,
-                "target_info_source_id": str(unbound.info_source_id),
-                "content_type": "html",
-            },
-        )
-        assert response.status_code == 422
-
-
-class TestCreateWatchWatchedItemReuse:
-    async def test_second_watch_attaches_to_existing_watched_item(self, client, db_session):
-        """Second POST for the same info_item_id reuses the WatchedItem.
-
-        The first POST creates a WatchedItem; the second adds a sub_aspect Watch
-        sharing the same watched_item_id. WatchedItem is 1:1 with InfoItem.
-        """
-        info_item_id, sub_id = await _seed_info_item_with_sub_aspect(db_session)
-
-        first = await client.post(
-            "/api/v1/watches",
-            json={
-                "name": "Primary Watch",
-                "info_item_id": info_item_id,
-                "content_type": "html",
-            },
-        )
-        assert first.status_code == 201, first.text
-        first_wi = first.json()["watched_item_id"]
-        assert first_wi
-
-        second = await client.post(
-            "/api/v1/watches",
-            json={
-                "name": "Sub Watch",
-                "info_item_id": info_item_id,
-                "target_info_source_id": sub_id,
-                "content_type": "html",
-            },
-        )
-        assert second.status_code == 201, second.text
-        assert second.json()["watched_item_id"] == first_wi
 
 
 class TestListWatches:
@@ -585,157 +477,6 @@ class TestDeleteWatch:
             .all()
         )
         assert len(configs) == 0
-
-
-class TestDeleteWatchSiblingSemantics:
-    """#160 pinned semantics: primary Watches with sub_aspect siblings block."""
-
-    async def test_delete_primary_with_active_sub_aspect_sibling_returns_409(
-        self, client, db_session
-    ):
-        """Primary Watch + active sub_aspect Watch on same WatchedItem → 409."""
-        info_item_id, sub_id = await _seed_info_item_with_sub_aspect(db_session)
-
-        primary_resp = await client.post(
-            "/api/v1/watches",
-            json={
-                "name": "Primary",
-                "info_item_id": info_item_id,
-                "content_type": "html",
-            },
-        )
-        assert primary_resp.status_code == 201, primary_resp.text
-        primary_id = primary_resp.json()["id"]
-
-        sub_resp = await client.post(
-            "/api/v1/watches",
-            json={
-                "name": "Sub",
-                "info_item_id": info_item_id,
-                "target_info_source_id": sub_id,
-                "content_type": "html",
-            },
-        )
-        assert sub_resp.status_code == 201, sub_resp.text
-
-        # Archive the primary so it's eligible for deletion.
-        primary_watch = await db_session.get(Watch, ULID.from_str(primary_id))
-        primary_watch.is_active = False
-        primary_watch.is_archived = True
-        await db_session.commit()
-
-        response = await client.delete(f"/api/v1/watches/{primary_id}")
-        assert response.status_code == 409, response.text
-        detail = response.json()["detail"]
-        assert detail["kind"] == "primary_has_sub_aspect_siblings"
-        assert "sub_aspect" in detail["message"].lower()
-
-    async def test_delete_sub_aspect_watch_returns_204(self, client, db_session):
-        """Sub_aspect-target Watch is always deletable when archived."""
-        info_item_id, sub_id = await _seed_info_item_with_sub_aspect(db_session)
-
-        # Need a primary Watch to anchor the WatchedItem.
-        await client.post(
-            "/api/v1/watches",
-            json={
-                "name": "Primary",
-                "info_item_id": info_item_id,
-                "content_type": "html",
-            },
-        )
-        sub_resp = await client.post(
-            "/api/v1/watches",
-            json={
-                "name": "Sub",
-                "info_item_id": info_item_id,
-                "target_info_source_id": sub_id,
-                "content_type": "html",
-            },
-        )
-        sub_id_watch = sub_resp.json()["id"]
-
-        sub_watch = await db_session.get(Watch, ULID.from_str(sub_id_watch))
-        sub_watch.is_active = False
-        sub_watch.is_archived = True
-        await db_session.commit()
-
-        response = await client.delete(f"/api/v1/watches/{sub_id_watch}")
-        assert response.status_code == 204, response.text
-
-    async def test_delete_primary_with_archived_sub_aspect_sibling_returns_204(
-        self, client, db_session
-    ):
-        """Archived sub_aspect Watches do not block primary deletion."""
-        info_item_id, sub_id = await _seed_info_item_with_sub_aspect(db_session)
-
-        primary_resp = await client.post(
-            "/api/v1/watches",
-            json={
-                "name": "Primary",
-                "info_item_id": info_item_id,
-                "content_type": "html",
-            },
-        )
-        primary_id = primary_resp.json()["id"]
-        sub_resp = await client.post(
-            "/api/v1/watches",
-            json={
-                "name": "Sub",
-                "info_item_id": info_item_id,
-                "target_info_source_id": sub_id,
-                "content_type": "html",
-            },
-        )
-        sub_watch_id = sub_resp.json()["id"]
-
-        # Archive both.
-        for wid in (primary_id, sub_watch_id):
-            w = await db_session.get(Watch, ULID.from_str(wid))
-            w.is_active = False
-            w.is_archived = True
-        await db_session.commit()
-
-        response = await client.delete(f"/api/v1/watches/{primary_id}")
-        assert response.status_code == 204, response.text
-
-    async def test_delete_primary_with_inactive_sub_aspect_sibling_returns_204(
-        self, client, db_session
-    ):
-        """Inactive (but unarchived) sub_aspect Watches do not block primary deletion."""
-        info_item_id, sub_id = await _seed_info_item_with_sub_aspect(db_session)
-
-        primary_resp = await client.post(
-            "/api/v1/watches",
-            json={
-                "name": "Primary",
-                "info_item_id": info_item_id,
-                "content_type": "html",
-            },
-        )
-        primary_id = primary_resp.json()["id"]
-        sub_resp = await client.post(
-            "/api/v1/watches",
-            json={
-                "name": "Sub",
-                "info_item_id": info_item_id,
-                "target_info_source_id": sub_id,
-                "content_type": "html",
-            },
-        )
-        sub_watch_id = sub_resp.json()["id"]
-
-        # Deactivate the sub (still not archived).
-        sub_watch = await db_session.get(Watch, ULID.from_str(sub_watch_id))
-        sub_watch.is_active = False
-        await db_session.commit()
-        # Archive the primary.
-        primary_watch = await db_session.get(Watch, ULID.from_str(primary_id))
-        primary_watch.is_active = False
-        primary_watch.is_archived = True
-        await db_session.commit()
-
-        response = await client.delete(f"/api/v1/watches/{primary_id}")
-        assert response.status_code == 204, response.text
 
 
 class TestSDKFailureHandling:

@@ -12,11 +12,15 @@ Drift contract: column names + types here must intersect with the production
 schema. If Archiver adds a NOT NULL column without a server default, inserts
 through these mappers will start failing — that's the intended signal to
 update this file (or the test that needs the new column).
+
+Updated to Archiver v4.0.0: InfoSource simplified (url first-class column,
+source_specs[] array, no parent_info_source_id/source_spec/schema_version);
+InfoItemSource drops role.
 """
 
 from datetime import UTC, datetime
 
-from sqlalchemy import DateTime, ForeignKey, Integer, String, func
+from sqlalchemy import DateTime, String, func
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 from ulid import ULID
@@ -51,7 +55,12 @@ class InfoItem(InformationTestBase):
 
 
 class InfoSource(InformationTestBase):
-    """Mapper-only for ``information.info_sources`` (DDL owned by Archiver)."""
+    """Mapper-only for ``information.info_sources`` (DDL owned by Archiver v4.0.0).
+
+    v4.0.0 changes: url is now a first-class NOT NULL column; source_specs is
+    an array of extraction/fingerprint spec dicts; parent_info_source_id,
+    source_spec (singular), and schema_version removed.
+    """
 
     __tablename__ = "info_sources"
     __table_args__ = {"schema": "information"}
@@ -59,13 +68,8 @@ class InfoSource(InformationTestBase):
     info_source_id: Mapped[ULID] = mapped_column(
         ULIDType(), primary_key=True, default=generate_ulid
     )
-    parent_info_source_id: Mapped[ULID | None] = mapped_column(
-        ULIDType(),
-        ForeignKey("information.info_sources.info_source_id", ondelete="RESTRICT"),
-        nullable=True,
-    )
-    source_spec: Mapped[dict] = mapped_column(JSONB, nullable=False)
-    schema_version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    url: Mapped[str] = mapped_column(String(2000), nullable=False)
+    source_specs: Mapped[list] = mapped_column(JSONB, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         default=lambda: datetime.now(UTC),
@@ -75,22 +79,22 @@ class InfoSource(InformationTestBase):
 
 
 class InfoItemSource(InformationTestBase):
-    """Mapper-only for ``information.info_item_sources`` (DDL owned by Archiver)."""
+    """Mapper-only for ``information.info_item_sources`` (DDL owned by Archiver v4.0.0).
+
+    v4.0.0 changes: role column removed (all active bindings are primary).
+    """
 
     __tablename__ = "info_item_sources"
     __table_args__ = {"schema": "information"}
 
     info_item_id: Mapped[ULID] = mapped_column(
         ULIDType(),
-        ForeignKey("information.info_items.info_item_id", ondelete="CASCADE"),
         primary_key=True,
     )
     info_source_id: Mapped[ULID] = mapped_column(
         ULIDType(),
-        ForeignKey("information.info_sources.info_source_id"),
         primary_key=True,
     )
-    role: Mapped[str | None] = mapped_column(String(50), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         default=lambda: datetime.now(UTC),

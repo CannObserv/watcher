@@ -19,10 +19,8 @@ from src.core.models.domain import Domain
 from src.core.models.watch import Watch
 from src.core.probe import ProbeResult
 from src.core.watches import create_watch, resolve_watch_url
-from tests._information_test_models import InfoItemSource
 from tests.conftest import (
     bind_primary_source,
-    bind_sub_aspect,
     make_info_item,
     make_info_source,
     make_watch,
@@ -299,63 +297,3 @@ async def test_create_watch_attaches_to_existing_watched_item(db_session, info_c
     assert w1.watched_item_id == w2.watched_item_id
     # First watch's name wins for the WatchedItem fallback name.
     assert w1.watched_item.name == "First"
-
-
-async def test_create_watch_with_sub_aspect_target(db_session, info_client, probe_fn):
-    """target_info_source_id validates against the InfoItem's sub_aspect bindings."""
-    item = await make_info_item(db_session)
-    primary = await make_info_source(db_session, url="https://example.com/y")
-    fragment = await make_info_source(db_session, parent_info_source_id=primary.info_source_id)
-    await bind_primary_source(
-        db_session,
-        info_item_id=item.info_item_id,
-        info_source_id=primary.info_source_id,
-    )
-    await bind_sub_aspect(
-        db_session,
-        info_item_id=item.info_item_id,
-        info_source_id=fragment.info_source_id,
-    )
-
-    watch = await create_watch(
-        session=db_session,
-        probe_fn=probe_fn,
-        info_client=info_client,
-        name="Sub",
-        info_item_id=str(item.info_item_id),
-        target_info_source_id=str(fragment.info_source_id),
-    )
-    assert watch.target_info_source_id == fragment.info_source_id
-
-
-async def test_create_watch_rejects_target_not_a_sub_aspect(db_session, info_client, probe_fn):
-    """target_info_source_id pointing at a non-sub_aspect raises ValueError."""
-    item = await make_info_item(db_session)
-    primary = await make_info_source(db_session, url="https://example.com/z")
-    cross_check_frag = await make_info_source(
-        db_session, parent_info_source_id=primary.info_source_id
-    )
-    await bind_primary_source(
-        db_session,
-        info_item_id=item.info_item_id,
-        info_source_id=primary.info_source_id,
-    )
-    # Bind as cross_check (not sub_aspect)
-    db_session.add(
-        InfoItemSource(
-            info_item_id=item.info_item_id,
-            info_source_id=cross_check_frag.info_source_id,
-            role="cross_check",
-        )
-    )
-    await db_session.flush()
-
-    with pytest.raises(ValueError, match="not a sub_aspect"):
-        await create_watch(
-            session=db_session,
-            probe_fn=probe_fn,
-            info_client=info_client,
-            name="bad",
-            info_item_id=str(item.info_item_id),
-            target_info_source_id=str(cross_check_frag.info_source_id),
-        )

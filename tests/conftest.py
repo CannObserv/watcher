@@ -2,22 +2,23 @@
 
 tests/fixtures/ holds static sample files used by extractor tests (e.g. sample.html).
 
-Phase 6 factory contract (#160)
--------------------------------
+Factory contract (#185 Phase A)
+--------------------------------
 The module-level async helpers ``make_watch``, ``make_info_item``,
-``make_info_source``, ``bind_primary_source``, and ``bind_sub_aspect`` are
-NOT pytest fixtures — they are awaitable factory functions test code can
-call directly.
+``make_info_source``, and ``bind_primary_source`` are NOT pytest fixtures —
+they are awaitable factory functions test code can call directly.
 
-``make_watch`` takes ``info_item_id`` (#160 shape) and an optional
-``target_info_source_id`` to discriminate sub-aspect Watches. A parent
-``WatchedItem`` is auto-created (or attached) so the new 1:1
-``watched_items.info_item_id`` unique constraint is honoured. The legacy
-``info_source_id`` / ``schedule_config`` columns are gone.
+``make_watch`` takes an optional ``info_item_id`` and ``watched_item``.
+A parent ``WatchedItem`` is auto-created (or attached) to honour the 1:1
+``watched_items.info_item_id`` uniqueness constraint. The legacy
+``target_info_source_id`` / ``schedule_config`` columns are gone.
+
+Archiver v4.0.0: sub_aspect concept removed — ``bind_sub_aspect`` deleted;
+``make_info_source`` no longer accepts ``parent_info_source_id``.
 
 Phase 5 (#156): ``make_snapshot`` and ``default_snapshot_fixture`` removed —
 Snapshot table dropped. ``InfoSpec`` table and ``make_info_spec`` factory
-also dead-code-removed under #160 (the spec moved into ``InfoSource.source_spec``).
+also dead-code-removed under #160.
 """
 
 import logging
@@ -292,52 +293,38 @@ async def make_info_item(session, *, name="Test Item", description=None):
     return item
 
 
-async def make_info_source(session, *, url="https://example.com", parent_info_source_id=None):
-    """Create and flush an InfoSource row.
+async def make_info_source(
+    session,
+    *,
+    url="https://example.com",
+    source_specs=None,
+):
+    """Create and flush an InfoSource row (Archiver v4.0.0 shape).
 
-    Pass *parent_info_source_id* (ULID or str) to create a fragment source;
-    omit it (or pass None) for a URL-bearing root source.
-
-    The ``information.info_sources`` table enforces a check constraint:
-    ``(parent_info_source_id IS NULL) != (url IS NULL)`` where ``url`` is a
-    computed column extracted from ``source_spec->'target'->>'url'``.
-    Fragment sources therefore must NOT include ``target.url`` in their
-    ``source_spec``.
+    ``source_specs`` is a list of extraction/fingerprint spec dicts following
+    the Archiver format ``[{schema_version, extraction, fingerprint}]``.
+    Defaults to a single full-page/simhash spec when omitted.
     """
-    if parent_info_source_id is not None:
-        # Fragment source: no target URL allowed (constraint enforces url IS NULL).
-        source_spec = {"schema_version": 1}
-    else:
-        source_spec = {"schema_version": 1, "target": {"url": url}}
-    source = InfoSource(
-        source_spec=source_spec,
-        schema_version=1,
-        parent_info_source_id=parent_info_source_id,
-    )
+    if source_specs is None:
+        source_specs = [
+            {
+                "schema_version": 1,
+                "extraction": {"algorithm": "full_page"},
+                "fingerprint": {"algorithm": "simhash"},
+            }
+        ]
+    source = InfoSource(url=url, source_specs=source_specs)
     session.add(source)
     await session.flush()
     return source
 
 
 async def bind_primary_source(session, *, info_item_id, info_source_id):
-    """Insert a role=NULL binding (primary) into information.info_item_sources."""
+    """Insert a binding into information.info_item_sources (Archiver v4.0.0: no role)."""
     session.add(
         InfoItemSource(
             info_item_id=info_item_id,
             info_source_id=info_source_id,
-            role=None,
-        )
-    )
-    await session.flush()
-
-
-async def bind_sub_aspect(session, *, info_item_id, info_source_id):
-    """Insert a role='sub_aspect' binding into information.info_item_sources."""
-    session.add(
-        InfoItemSource(
-            info_item_id=info_item_id,
-            info_source_id=info_source_id,
-            role="sub_aspect",
         )
     )
     await session.flush()
@@ -348,12 +335,11 @@ async def make_watch(
     *,
     name="Test Watch",
     info_item_id=None,
-    target_info_source_id=None,
     watched_item=None,
     primary_url="https://example.com",
     **kwargs,
 ):
-    """Construct a Watch tied to a WatchedItem + InfoItem (#160 shape).
+    """Construct a Watch tied to a WatchedItem + InfoItem (#185 Phase A shape).
 
     When ``info_item_id`` is not supplied, an InfoItem + primary InfoSource +
     binding are auto-created — except when ``watched_item`` is supplied, in
@@ -363,11 +349,11 @@ async def make_watch(
     the same info_item_id).
 
     Extra ``**kwargs`` flow into the Watch constructor (tags, description,
-    content_type, etc.). Pass ``domain_name=`` to set WatchedItem.domain_name
-    (domain lives on WatchedItem now, not Watch). Note: ``schedule_config`` no
-    longer lives on Watch (moved to WatchedItem.default_schedule_config);
-    callers that previously passed it should construct/mutate the WatchedItem
-    instead. Use ``primary_url=`` to seed the auto-created InfoSource's URL.
+    content_type, etc.). Pass ``domain_name=`` to set WatchedItem.domain_name.
+    Note: ``schedule_config`` no longer lives on Watch (moved to
+    WatchedItem.default_schedule_config). Use ``primary_url=`` to seed the
+    auto-created InfoSource's URL. ``target_info_source_id`` removed (Archiver
+    v4.0.0: sub_aspect concept eliminated).
     """
     # domain_name lives on WatchedItem, not Watch — extract before passing to Watch.
     domain_name = kwargs.pop("domain_name", None)
@@ -411,7 +397,6 @@ async def make_watch(
     watch_kwargs = {
         "name": name,
         "info_item_id": info_item_id,
-        "target_info_source_id": target_info_source_id,
         "watched_item_id": watched_item.id,
         **kwargs,
     }
@@ -515,14 +500,12 @@ def info_client(db_session, request):
             raise NotFound(f"info_source {info_source_id} not found")
         out = MagicMock()
         out.info_source_id = str(source.info_source_id)
-        out.parent_info_source_id = (
-            str(source.parent_info_source_id) if source.parent_info_source_id else None
-        )
-        # Per Archiver v3.0.0: InfoSourceOut.url is a first-class field — root
-        # sources expose target.url, fragments are NULL.
-        out.url = (source.source_spec or {}).get("target", {}).get("url")
+        out.url = source.url
+        out.source_specs = source.source_specs or []
+        # Bridge: synthesize source_spec for fetch_info_item_bindings compat
+        # (fetch_info_item_bindings is deleted in Phase A step 3).
         spec = MagicMock()
-        spec.additional_properties = source.source_spec
+        spec.additional_properties = (source.source_specs or [{}])[0]
         out.source_spec = spec
         return out
 
@@ -547,7 +530,7 @@ def info_client(db_session, request):
         for binding in bindings_result.scalars().all():
             b = MagicMock()
             b.info_source_id = str(binding.info_source_id)
-            b.role = binding.role
+            b.role = None  # v4.0.0: role removed; all active bindings are primary
             b.is_active = binding.deactivated_at is None
             b.deactivated_at = binding.deactivated_at
             info_item_sources.append(b)

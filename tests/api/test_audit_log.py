@@ -3,31 +3,22 @@
 import pytest
 
 from src.core.models.audit_log import EventType
-from tests.conftest import bind_primary_source, make_info_item, make_info_source
+from src.core.models.watched_item import WatchedItem
+from tests.conftest import make_info_item
 
 pytestmark = pytest.mark.integration
 
 
 async def _create_watch_via_api(client, db_session, *, name="W"):
-    """Seed an InfoItem + bound primary InfoSource and create a Watch via the API.
-
-    Exercises the full audit pipeline end-to-end.
-    """
+    """Create a WatchedItem and then a Watch via the API."""
     item = await make_info_item(db_session, name=name)
-    source = await make_info_source(db_session, url="https://example.com")
-    await bind_primary_source(
-        db_session,
-        info_item_id=item.info_item_id,
-        info_source_id=source.info_source_id,
-    )
+    wi = WatchedItem(info_item_id=item.info_item_id, name=name, effective_url="https://example.com")
+    db_session.add(wi)
+    await db_session.flush()
     await db_session.commit()
     resp = await client.post(
         "/api/v1/watches",
-        json={
-            "name": name,
-            "info_item_id": str(item.info_item_id),
-            "content_type": "html",
-        },
+        json={"name": name, "watched_item_id": str(wi.id), "content_type": "html"},
     )
     assert resp.status_code == 201, resp.text
     return resp.json()["id"]

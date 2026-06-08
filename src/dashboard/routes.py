@@ -7,7 +7,6 @@ from datetime import UTC, datetime
 from typing import Literal
 
 import httpx
-from archiver_client import AuthError, NotFound, ServerError
 from fastapi import APIRouter, BackgroundTasks, Depends, Form, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from jinja2 import TemplateError
@@ -15,7 +14,6 @@ from notifier_client.errors import NotifierError
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
-from ulid import ULID
 
 from src.api.deps import get_db_session, get_probe_fn
 from src.api.routes.helpers import parse_ulid
@@ -34,7 +32,7 @@ from src.api.schemas.validators import validate_event_list
 from src.core.database import get_session_factory
 from src.core.logging import get_logger
 from src.core.models.audit_log import EventType, audit
-from src.core.models.domain import Domain
+from src.core.models.domain import DEFAULT_MAX_CONCURRENCY, DEFAULT_MIN_INTERVAL, Domain
 from src.core.models.notification_config import WatchNotificationConfig
 from src.core.models.notification_template import DomainNcRef, NotificationTemplate, WatchNcRef
 from src.core.models.watch import ContentType, Watch
@@ -59,15 +57,11 @@ from src.core.notifications.preview_fixtures import (
 )
 from src.core.notifier_client import get_notifier_client
 from src.core.probe import ProbeResult
-from src.core.registry import get_registry
 from src.core.scheduler import compute_next_check, parse_interval
 from src.core.watches import create_watch as _create_watch
-from src.core.watches import resolve_watch_url
-from src.core.watches.info_item_fetch import fetch_info_item_bindings
 from src.core.watches.resolution import resolved_schedule_config
 from src.dashboard import templates
 from src.dashboard.context import (
-    count_new_subaspects,
     get_audit_entries,
     get_dashboard_stats,
     get_domain_watched_items,
@@ -239,130 +233,16 @@ async def watches_page(
     return templates.TemplateResponse(request, "pages/watches.html", context)
 
 
-@router.get("/info-items/search")
-async def info_items_search(
-    request: Request,
-    q: str = "",
-    mode: Literal["select_with_target", "select_only"] = "select_with_target",
-    target_form_id: str = "watch-create",
-):
-    """Typeahead results partial for the InfoItem picker.
-
-    Mirrors the design's ``/watches/new/info-items`` route but generalized so
-    the same picker can be reused on /watched-items/new (mode=select_only)
-    and /watches/new (mode=select_with_target). Empty query short-circuits;
-    SDK errors degrade to an empty result set with a logged warning.
-    """
-    query = q.strip()
-    if not query:
-        return templates.TemplateResponse(
-            request,
-            "partials/info_item_picker/results.html",
-            {"results": [], "mode": mode, "target_form_id": target_form_id, "query": ""},
-        )
-    info_client = get_registry().get_archiver_client()
-    try:
-        results = await info_client.find_info_item(query, limit=20)
-    except (ServerError, httpx.ConnectError, httpx.TimeoutException, AuthError):
-        logger.warning("find_info_item failed during picker search", extra={"q": query})
-        results = []
-    return templates.TemplateResponse(
-        request,
-        "partials/info_item_picker/results.html",
-        {"results": results, "mode": mode, "target_form_id": target_form_id, "query": query},
-    )
-
-
-@router.get("/info-items/{info_item_id}/binding-tree")
-async def info_item_binding_tree(
-    request: Request,
-    info_item_id: str,
-    mode: Literal["select_with_target", "select_only", "readonly_tree"] = "select_with_target",
-    target_form_id: str = "watch-create",
-    new_subaspect_ids: str = "",
-):
-    """Step-2 binding tree partial.
-
-    Bound to the search route's result-row hx-get target. Renders the
-    primary + sub_aspects (selectable in select_with_target) + cross_checks (muted).
-
-    All error paths return 200 so HTMX swaps the message into the target div;
-    4xx/5xx responses are silently discarded by HTMX's default error handling.
-
-    Mode-specific binding requirements:
-    - ``select_with_target``: requires a primary binding; ValueError → 200 error partial.
-    - ``select_only`` / ``readonly_tree``: degrade gracefully on ValueError — renders the
-      tree with primary_url=None so WI-create can still submit info_item_id.
-
-    ``new_subaspect_ids`` is a comma-separated list of info_source_ids to
-    flag with a "new" badge — only meaningful in ``readonly_tree`` mode.
-    """
-    info_client = get_registry().get_archiver_client()
-    try:
-        try:
-            bindings = await fetch_info_item_bindings(info_client, info_item_id)
-            info_item = bindings.info_item
-            du = info_item.dashboard_url
-            primary_url = bindings.primary_url
-            cross_checks = bindings.cross_checks
-            sub_aspects = bindings.sub_aspects
-        except ValueError:
-            if mode == "select_with_target":
-                msg = "Information Item has no primary binding — cannot select a watch target."
-                return HTMLResponse(
-                    f'<p class="text-sm text-red-600">{msg}</p>',
-                    status_code=200,
-                )
-            # select_only / readonly_tree: show the InfoItem without requiring a primary
-            info_item = await info_client.get_info_item(info_item_id)
-            du = info_item.dashboard_url
-            primary_url = None
-            cross_checks = []
-            sub_aspects = []
-    except NotFound:
-        return HTMLResponse(
-            '<p class="text-sm text-red-600">Information Item not found.</p>',
-            status_code=200,
-        )
-    except (ServerError, httpx.ConnectError, httpx.TimeoutException, AuthError):
-        logger.warning(
-            "Archiver unavailable during binding-tree render",
-            extra={"info_item_id": info_item_id},
-        )
-        msg = "Information Item bindings temporarily unavailable."
-        return HTMLResponse(
-            f'<p class="text-sm text-red-600">{msg}</p>',
-            status_code=200,
-        )
-    flagged = {s.strip() for s in new_subaspect_ids.split(",") if s.strip()} or None
-    return templates.TemplateResponse(
-        request,
-        "partials/info_item_picker/binding_tree.html",
-        {
-            "info_item": info_item,
-            "primary_url": primary_url,
-            "info_item_dashboard_url": du if isinstance(du, str) else None,
-            "cross_checks": cross_checks,
-            "sub_aspects": sub_aspects,
-            "mode": mode,
-            "target_form_id": target_form_id,
-            "new_subaspect_ids": flagged,
-        },
-    )
-
-
 @router.get("/watches/new")
 async def watch_create_form(
     request: Request,
     watched_item_id: str | None = Query(None),
     session: AsyncSession = Depends(get_db_session),
 ):
-    """Watch creation form. Accepts optional watched_item_id to pre-select the InfoItem."""
-    pre_info_item_id: str | None = None
+    """Watch creation form. Requires ?watched_item_id=<id> to identify the parent."""
+    wi: WatchedItem | None = None
     if watched_item_id is not None:
         wi = await get_watched_item_detail(session, watched_item_id)
-        if wi is not None:
-            pre_info_item_id = str(wi.info_item_id)
     return templates.TemplateResponse(
         request,
         "pages/watch_form.html",
@@ -371,7 +251,7 @@ async def watch_create_form(
             "watch": None,
             "flash": None,
             "content_types": list(ContentType),
-            "pre_info_item_id": pre_info_item_id,
+            "watched_item": wi,
         },
     )
 
@@ -380,34 +260,23 @@ async def watch_create_form(
 async def watch_create_submit(
     request: Request,
     name: str = Form(""),
-    info_item_id: str = Form(""),
-    info_item_id_manual: str = Form(""),
+    watched_item_id: str = Form(""),
     content_type: str = Form("html"),
     description: str = Form(""),
-    probe_fn: Callable[[str], Awaitable[ProbeResult]] = Depends(get_probe_fn),
     session: AsyncSession = Depends(get_db_session),
 ):
     """Handle watch creation form submission.
 
-    #162: form accepts either picker output (``info_item_id`` from the
-    typeahead-injected hidden input) OR a paste-ULID fallback
-    (``info_item_id_manual``). Picker wins when its ``info_item_id`` is
-    non-empty.
+    Requires ``watched_item_id`` (hidden form field set from the URL param or
+    submitted explicitly). The WatchedItem must already exist.
     """
-
-    if info_item_id.strip():
-        resolved_info_item_id = info_item_id.strip()
-    else:
-        resolved_info_item_id = info_item_id_manual.strip()
-
-    info_client = get_registry().get_archiver_client()
     errors = []
     if not name.strip():
         errors.append("Name is required")
-    if not resolved_info_item_id:
-        errors.append("Information Item is required")
+    if not watched_item_id.strip():
+        errors.append("Watched Item is required")
 
-    async def _render_with_flash(flash_message: str):
+    async def _render_with_flash(flash_message: str, wi=None):
         return templates.TemplateResponse(
             request,
             "pages/watch_form.html",
@@ -416,33 +285,29 @@ async def watch_create_submit(
                 "watch": None,
                 "flash": {"type": "error", "message": flash_message},
                 "content_types": list(ContentType),
+                "watched_item": wi,
             },
         )
 
     if errors:
-        return await _render_with_flash(". ".join(errors))
+        wi_id = watched_item_id.strip()
+        wi = await get_watched_item_detail(session, wi_id) if wi_id else None
+        return await _render_with_flash(". ".join(errors), wi=wi)
+
+    wi = await get_watched_item_detail(session, watched_item_id.strip())
+    if wi is None:
+        return await _render_with_flash(f"Watched Item {watched_item_id.strip()} does not exist")
 
     try:
         watch = await _create_watch(
             session=session,
-            probe_fn=probe_fn,
-            info_client=info_client,
             name=name.strip(),
-            info_item_id=resolved_info_item_id,
+            watched_item_id=str(wi.id),
             content_type=content_type,
             description=description.strip() or None,
         )
-    except NotFound:
-        return await _render_with_flash(f"Information Item {resolved_info_item_id} does not exist")
     except ValueError as exc:
-        return await _render_with_flash(str(exc))
-    except AuthError:
-        logger.exception("ArchiverClient auth failure during dashboard create")
-        return await _render_with_flash("Information service auth failed")
-    except (ServerError, httpx.ConnectError, httpx.TimeoutException) as exc:
-        return await _render_with_flash(f"Information service unavailable: {exc}")
-    except httpx.HTTPError as exc:
-        return await _render_with_flash(f"URL unreachable: {exc}")
+        return await _render_with_flash(str(exc), wi=wi)
 
     return RedirectResponse(url=f"/watches/{watch.id}", status_code=303)
 
@@ -460,8 +325,8 @@ async def watch_detail_page(
     watch = await get_watch_detail(session, watch_id)
     if not watch:
         return templates.TemplateResponse(request, "pages/404.html", status_code=404)
-    info_client = get_registry().get_archiver_client()
-    resolved_url = await resolve_watch_url(watch, info_client)
+    wi_url = watch.watched_item.effective_url if watch.watched_item else None
+    resolved_url = wi_url or f"watch:{watch.id}"
     profiles = await get_watch_profiles(session, watch.id)
     notifications = await get_watch_notifications(session, watch.id)
 
@@ -874,19 +739,8 @@ async def watch_archive(
     audit(session, EventType.WATCH_ARCHIVED, watch_id=watch.id, name=watch.name, source="dashboard")
     await session.commit()
 
-    # Resolve the URL for the notification AFTER commit. SDK failure here must
-    # not roll back the archive — fall back to a sentinel URL so the operator
-    # still gets the notification, and log so the missing/orphaned InfoSource
-    # surfaces in monitoring.
-    try:
-        info_client = get_registry().get_archiver_client()
-        resolved_url = await resolve_watch_url(watch, info_client)
-    except Exception:
-        logger.exception(
-            "failed to resolve watch URL for archive notification",
-            extra={"watch_id": str(watch.id)},
-        )
-        resolved_url = f"watch:{watch.id}"
+    wi_url = watch.watched_item.effective_url if watch.watched_item else None
+    resolved_url = wi_url or f"watch:{watch.id}"
     background_tasks.add_task(
         _dispatch_archive_notification,
         watch_id=str(watch.id),
@@ -971,7 +825,6 @@ async def watched_item_create_form(request: Request):
             "active_page": "watched-items",
             "flash": None,
             "content_types": list(ContentType),
-            "pre_info_item_id": None,
         },
     )
 
@@ -979,20 +832,19 @@ async def watched_item_create_form(request: Request):
 @router.post("/watched-items/new")
 async def watched_item_create_submit(
     request: Request,
-    info_item_id: str = Form(""),
+    url: str = Form(""),
     name: str = Form(""),
     description: str = Form(""),
     default_schedule_interval: str = Form(""),
     default_content_type: str = Form(""),
     default_tags: str = Form(""),
+    probe_fn: Callable[[str], Awaitable[ProbeResult]] = Depends(get_probe_fn),
     session: AsyncSession = Depends(get_db_session),
 ):
     """Create a standalone WatchedItem from the dashboard form.
 
-    Mirrors the API route's error handling but renders flashes instead of
-    raising HTTPException. Audit row uses ``source="dashboard"`` to
-    distinguish from API-driven (``source="api"``) and auto-create
-    (``source="auto_create"``).
+    Accepts a URL directly; probes it for effective_url + domain_name.
+    Audit row uses ``source="dashboard"``.
     """
 
     async def _render_with_flash(message: str, level: str = "error"):
@@ -1003,13 +855,12 @@ async def watched_item_create_submit(
                 "active_page": "watched-items",
                 "flash": {"type": level, "message": message},
                 "content_types": list(ContentType),
-                "pre_info_item_id": None,
             },
         )
 
-    iid = info_item_id.strip()
-    if not iid:
-        return await _render_with_flash("Information Item is required")
+    url_raw = url.strip()
+    if not url_raw:
+        return await _render_with_flash("URL is required")
 
     interval_raw = default_schedule_interval.strip()
     if interval_raw:
@@ -1029,35 +880,42 @@ async def watched_item_create_submit(
     if tags and any(len(t) > 255 for t in tags):
         return await _render_with_flash("Tag too long (max 255 characters each)")
 
-    info_client = get_registry().get_archiver_client()
     try:
-        info_item = await info_client.get_info_item(iid)
-    except NotFound:
-        return await _render_with_flash(f"Information Item {iid} does not exist")
-    except AuthError:
-        return await _render_with_flash("Information service auth failed")
-    except (ServerError, httpx.ConnectError, httpx.TimeoutException) as exc:
-        return await _render_with_flash(f"Information service unavailable: {exc}")
+        probe_result = await probe_fn(url_raw)
+    except httpx.HTTPError as exc:
+        return await _render_with_flash(f"URL unreachable: {exc}")
 
+    domain_stmt = select(Domain).where(Domain.name == probe_result.effective_domain)
+    if not (await session.execute(domain_stmt)).scalar_one_or_none():
+        try:
+            async with session.begin_nested():
+                session.add(
+                    Domain(
+                        name=probe_result.effective_domain,
+                        min_interval=DEFAULT_MIN_INTERVAL,
+                        max_concurrency=DEFAULT_MAX_CONCURRENCY,
+                        current_interval=DEFAULT_MIN_INTERVAL,
+                    )
+                )
+        except IntegrityError:
+            pass
+
+    wi_name = name.strip() or probe_result.effective_domain or url_raw
     wi = WatchedItem(
-        info_item_id=ULID.from_str(iid),
-        name=(name.strip() or info_item.name),
+        effective_url=probe_result.effective_url,
+        domain_name=probe_result.effective_domain or None,
+        name=wi_name,
         description=description.strip() or None,
         default_schedule_config={"interval": interval_raw} if interval_raw else None,
         default_content_type=ct_raw,
         default_tags=tags,
     )
     session.add(wi)
-    try:
-        await session.flush()
-    except IntegrityError:
-        await session.rollback()
-        return await _render_with_flash(f"Watched Item for Information Item {iid} already exists")
+    await session.flush()
     audit(
         session,
         EventType.WATCHED_ITEM_CREATED,
         watched_item_id=str(wi.id),
-        info_item_id=iid,
         name=wi.name,
         source="dashboard",
     )
@@ -1191,58 +1049,6 @@ async def watched_item_detail_page(
         .all()
     )
 
-    client_sdk = get_registry().get_archiver_client()
-    info_item = None
-    primary_url: str | None = None
-    info_item_dashboard_url: str | None = None
-    cross_checks: list = []
-    sub_aspects: list = []
-    new_subaspect_ids: set[str] = set()
-    try:
-        bindings = await fetch_info_item_bindings(client_sdk, str(wi.info_item_id))
-        info_item = bindings.info_item
-        primary_url = bindings.primary_url
-        du = info_item.dashboard_url
-        info_item_dashboard_url = du if isinstance(du, str) else None
-        cross_checks = bindings.cross_checks
-        sub_aspects = bindings.sub_aspects
-        # Build the "new" set from the raw bindings list (it has .role +
-        # .created_at), keyed by info_source_id. The partial reads by id, so
-        # ordering between bindings.sub_aspects and info_item.info_item_sources
-        # never has to line up.
-        raw_subaspects = [b for b in (info_item.info_item_sources or []) if b.role == "sub_aspect"]
-        if wi.last_reviewed_at is None:
-            new_subaspect_ids = {str(b.info_source_id) for b in raw_subaspects}
-        else:
-            new_subaspect_ids = {
-                str(b.info_source_id) for b in raw_subaspects if b.created_at > wi.last_reviewed_at
-            }
-    except NotFound:
-        info_item = None
-    except (httpx.ConnectError, ServerError, AuthError):
-        logger.warning(
-            "Archiver unavailable while rendering watched_item detail",
-            extra={"watched_item_id": str(wi.id)},
-        )
-        info_item = None
-    except ValueError:
-        logger.warning(
-            "InfoItem has no valid primary binding while rendering watched_item detail",
-            extra={"watched_item_id": str(wi.id)},
-        )
-        # Don't null out info_item — readonly_tree renders without a primary binding.
-        try:
-            info_item = await client_sdk.get_info_item(str(wi.info_item_id))
-            du = info_item.dashboard_url
-            info_item_dashboard_url = du if isinstance(du, str) else None
-            primary_url = None
-            cross_checks = []
-            sub_aspects = []
-        except (NotFound, ServerError, httpx.ConnectError, AuthError):
-            info_item = None
-
-    new_subaspect_count = count_new_subaspects(info_item, wi.last_reviewed_at)
-
     wi_templates = await get_watched_item_templates(session, wi.id)
 
     field_contexts = {
@@ -1257,19 +1063,12 @@ async def watched_item_detail_page(
             "request": request,
             "active_page": "watched-items",
             "watched_item": wi,
-            "info_item": info_item,
-            "primary_url": primary_url,
-            "info_item_dashboard_url": info_item_dashboard_url,
-            "cross_checks": cross_checks,
-            "sub_aspects": sub_aspects,
-            "new_subaspect_ids": new_subaspect_ids,
             "watches": children,
             "health_map": {
                 w.id: (w.watched_item.health_status if w.watched_item else None) for w in children
             },
             "flash": None,
             "field_contexts": field_contexts,
-            "new_subaspect_count": new_subaspect_count,
             "templates": wi_templates,
         },
     )
@@ -1321,40 +1120,6 @@ async def watched_item_mark_reviewed(
             headers={"HX-Redirect": f"/watched-items/{watched_item_id}"},
         )
     return RedirectResponse(url=f"/watched-items/{watched_item_id}", status_code=303)
-
-
-@router.get("/watched-items/{watched_item_id}/aspect-review-status")
-async def watched_item_aspect_review_status(
-    request: Request,
-    watched_item_id: str,
-    session: AsyncSession = Depends(get_db_session),
-):
-    """HTMX partial: pill showing whether new sub_aspects are available."""
-    if request.headers.get("HX-Request") != "true":
-        return RedirectResponse(url=f"/watched-items/{watched_item_id}", status_code=303)
-
-    wi = await get_watched_item_detail(session, watched_item_id)
-    if wi is None:
-        raise HTTPException(status_code=404)
-
-    new_count = 0
-    try:
-        client_sdk = get_registry().get_archiver_client()
-        bindings = await fetch_info_item_bindings(client_sdk, str(wi.info_item_id))
-        new_count = count_new_subaspects(bindings.info_item, wi.last_reviewed_at)
-    except ValueError:
-        pass
-    except (NotFound, AuthError, ServerError, httpx.ConnectError, httpx.TimeoutException):
-        logger.warning(
-            "Archiver unavailable for aspect review status",
-            extra={"watched_item_id": watched_item_id},
-        )
-
-    return templates.TemplateResponse(
-        request,
-        "partials/aspect_review_pill.html",
-        {"new_subaspect_count": new_count},
-    )
 
 
 @router.get("/watched-items/{watched_item_id}/field/{field_name}")
@@ -2970,51 +2735,41 @@ async def watch_notification_test_result(
         raise HTTPException(status_code=404, detail="Config not found")
     success = False
     reason = "Internal error during dispatch"
+    wi_url = watch.watched_item.effective_url if watch.watched_item else None
+    resolved_url = wi_url or f"watch:{watch.id}"
     try:
-        info_client = get_registry().get_archiver_client()
-        try:
-            resolved_url = await resolve_watch_url(watch, info_client)
-        except Exception as exc:
-            # Resolve failure is operator-fixable (orphaned InfoSource, SDK
-            # outage). Surface a clear reason and skip dispatch — never 5xx.
-            logger.exception(
-                "failed to resolve watch URL for test notification",
-                extra={"config_id": config_id, "watch_id": str(watch.id)},
-            )
-            reason = f"Failed to resolve watch URL: {exc}"
+        if not nc.remote_channel_id:
+            reason = "no remote_channel_id configured"
         else:
-            if not nc.remote_channel_id:
-                reason = "no remote_channel_id configured"
-            else:
-                event = WatchEvent(
-                    event_type=WatchEventType.CHANGE_DETECTED,
-                    watch_id=str(watch.id),
-                    watch_name=watch.name,
-                    watch_url=resolved_url,
-                    occurred_at=datetime.now(UTC),
-                    metadata={"test": True},
-                )
-                cc = ContentConfig.model_validate(nc.content_config) if nc.content_config else None
-                opts = resolve_options(cc, WatchEventType.CHANGE_DETECTED.value)
-                candidate = DispatchCandidate(
-                    source="local",
-                    source_id=str(nc.id),
-                    content_config=nc.content_config,
-                    remote_channel_id=nc.remote_channel_id,
-                )
-                try:
-                    async with get_notifier_client() as client:
-                        outcome = await dispatch_via_notifier(
-                            client,
-                            candidate,
-                            event,
-                            rendered_title=build_title(event, opts),
-                            rendered_body=build_body(event, opts),
-                        )
-                    success = outcome.success
-                    reason = outcome.reason
-                except NotifierError as exc:
-                    reason = f"notifier error: {exc}"
+            event = WatchEvent(
+                event_type=WatchEventType.CHANGE_DETECTED,
+                watch_id=str(watch.id),
+                watch_name=watch.name,
+                watch_url=resolved_url,
+                occurred_at=datetime.now(UTC),
+                metadata={"test": True},
+            )
+            cc = ContentConfig.model_validate(nc.content_config) if nc.content_config else None
+            opts = resolve_options(cc, WatchEventType.CHANGE_DETECTED.value)
+            candidate = DispatchCandidate(
+                source="local",
+                source_id=str(nc.id),
+                content_config=nc.content_config,
+                remote_channel_id=nc.remote_channel_id,
+            )
+            try:
+                async with get_notifier_client() as client:
+                    outcome = await dispatch_via_notifier(
+                        client,
+                        candidate,
+                        event,
+                        rendered_title=build_title(event, opts),
+                        rendered_body=build_body(event, opts),
+                    )
+                success = outcome.success
+                reason = outcome.reason
+            except NotifierError as exc:
+                reason = f"notifier error: {exc}"
     except Exception:
         logger.exception("test notification error", extra={"config_id": config_id})
     audit(

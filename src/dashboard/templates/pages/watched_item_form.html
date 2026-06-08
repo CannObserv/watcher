@@ -7,15 +7,16 @@
 
 <form id="wi-create" method="post" action="/watched-items/new" class="max-w-xl space-y-6">
   <div>
-    {% with target_form_id="wi-create", mode="select_only", field_hint="Subscribes this Watched Item to one Archiver Information Item (1:1). Defaults below apply to all child Watches that don't override." %}
-    {% include "partials/info_item_picker/typeahead.html" %}
-    {% endwith %}
+    <label for="url" class="form-label">URL <span class="text-red-500" aria-hidden="true">*</span></label>
+    <input type="url" name="url" id="url" required class="form-input mt-1"
+      placeholder="https://example.gov/page">
+    <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">The page to monitor. Will be probed for the canonical URL.</p>
   </div>
 
   <div>
     <label for="name" class="form-label">Name <span class="text-xs text-gray-500">(optional)</span></label>
     <input type="text" name="name" id="name" maxlength="255" class="form-input mt-1"
-      placeholder="Defaults to the Information Item's name.">
+      placeholder="Defaults to the domain name.">
   </div>
 
   <div>

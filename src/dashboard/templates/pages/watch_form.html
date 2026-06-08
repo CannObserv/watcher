@@ -5,33 +5,22 @@
 
 {% include "partials/flash.html" %}
 
+{% if watched_item %}
 <form id="watch-create" method="post" action="/watches/new" class="max-w-xl space-y-6">
+  <input type="hidden" name="watched_item_id" value="{{ watched_item.id }}">
+
+  <div class="stat-card">
+    <p class="text-sm text-gray-500 dark:text-gray-400 mb-1">Watched Item</p>
+    <p class="font-medium text-gray-900 dark:text-white">{{ watched_item.name }}</p>
+    {% if watched_item.effective_url %}
+    <a href="{{ watched_item.effective_url }}" class="link text-sm break-all" target="_blank" rel="noopener noreferrer">{{ watched_item.effective_url }}</a>
+    {% endif %}
+  </div>
+
   <div>
     <label for="name" class="form-label">Name</label>
     <input type="text" name="name" id="name" required class="form-input mt-1">
   </div>
-
-  <fieldset>
-    <legend class="form-label">Target</legend>
-    {% with target_form_id="watch-create", mode="select_with_target", pre_info_item_id=pre_info_item_id %}
-    {% include "partials/info_item_picker/typeahead.html" %}
-    {% endwith %}
-  </fieldset>
-
-  <details class="text-sm">
-    <summary class="cursor-pointer text-gray-600 dark:text-gray-400">Paste ULID</summary>
-    <div class="mt-2 space-y-2">
-      <label for="info_item_id_manual" class="form-label">Information Item ULID</label>
-      <input type="text" name="info_item_id_manual" id="info_item_id_manual"
-        pattern="[0-9A-Za-z]{26}" class="form-input mt-1 font-mono"
-        placeholder="01XXXXXXXXXXXXXXXXXXXXXXXXX">
-      <label for="target_info_source_id_manual" class="form-label">sub_aspect ULID (optional)</label>
-      <input type="text" name="target_info_source_id_manual" id="target_info_source_id_manual"
-        pattern="[0-9A-Za-z]{26}" class="form-input mt-1 font-mono"
-        placeholder="(leave blank for primary)">
-      <p class="text-xs text-gray-500 dark:text-gray-400">Power-user fallback. Either use the picker above OR these inputs — not both.</p>
-    </div>
-  </details>
 
   <div>
     <label for="content_type" class="form-label">Content Type</label>
@@ -49,7 +38,12 @@
 
   <div class="flex gap-3">
     <button type="submit" class="btn btn-primary">Create Watch</button>
-    <a href="/watches" class="btn btn-secondary">Cancel</a>
+    <a href="/watched-items/{{ watched_item.id }}" class="btn btn-secondary">Cancel</a>
   </div>
 </form>
+{% else %}
+<div class="stat-card text-sm text-gray-600 dark:text-gray-400">
+  <p>To create a Watch, navigate to a <a href="/watched-items" class="link">Watched Item</a> and click <strong>+ New Watch</strong>.</p>
+</div>
+{% endif %}
 {% endblock %}

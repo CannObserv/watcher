@@ -384,8 +384,15 @@ async def make_watch(
         ).scalar_one_or_none()
         if existing is not None:
             watched_item = existing
+            if not watched_item.effective_url and primary_url:
+                watched_item.effective_url = primary_url
+                await session.flush()
         else:
-            watched_item = WatchedItem(info_item_id=info_item_id, name=f"WI for {name}")
+            watched_item = WatchedItem(
+                info_item_id=info_item_id,
+                name=f"WI for {name}",
+                effective_url=primary_url,
+            )
             session.add(watched_item)
             await session.flush()
     elif watched_item.info_item_id != info_item_id:

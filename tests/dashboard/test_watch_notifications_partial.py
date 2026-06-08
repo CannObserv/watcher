@@ -28,11 +28,13 @@ def _make_mock_session():
     return session
 
 
-def _make_mock_watch(watch_id=None, name="Test Watch"):
+def _make_mock_watch(watch_id=None, name="Test Watch", url="https://x.example"):
     """Build a minimal Watch-like mock."""
     watch = MagicMock()
     watch.id = watch_id or ULID()
     watch.name = name
+    watch.watched_item = MagicMock()
+    watch.watched_item.effective_url = url
     return watch
 
 
@@ -385,11 +387,6 @@ class TestWatchNotificationTestResultRoute:
                 new_callable=AsyncMock,
                 return_value=result,
             ) as mock_dispatch,
-            patch(
-                "src.dashboard.routes.resolve_watch_url",
-                new_callable=AsyncMock,
-                return_value="https://x.example",
-            ),
             self._patch_notifier_client(),
         ):
             resp = await _post_dashboard(
@@ -421,11 +418,6 @@ class TestWatchNotificationTestResultRoute:
                 new_callable=AsyncMock,
                 return_value=result,
             ) as mock_dispatch,
-            patch(
-                "src.dashboard.routes.resolve_watch_url",
-                new_callable=AsyncMock,
-                return_value="https://x.example",
-            ),
             self._patch_notifier_client(),
         ):
             await _post_dashboard(
@@ -449,11 +441,6 @@ class TestWatchNotificationTestResultRoute:
                 "src.dashboard.routes.dispatch_via_notifier",
                 new_callable=AsyncMock,
                 return_value=result,
-            ),
-            patch(
-                "src.dashboard.routes.resolve_watch_url",
-                new_callable=AsyncMock,
-                return_value="https://x.example",
             ),
             self._patch_notifier_client(),
         ):

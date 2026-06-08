@@ -16,12 +16,12 @@ from src.core.models.watch import ContentType
 class WatchCreate(BaseModel):
     """Schema for creating a new Watch.
 
-    Targets the InfoItem's primary content only. Sub_aspect targeting was
-    removed in Archiver v4.0.0.
+    The WatchedItem must already exist. No Archiver SDK calls — URL resolution
+    is the WatchedItem's responsibility (#185 Phase A).
     """
 
     name: str = Field(min_length=1, max_length=255)
-    info_item_id: ULIDStr
+    watched_item_id: ULIDStr
     content_type: ContentType | None = None
     description: str | None = None
     tags: list[str] | None = None

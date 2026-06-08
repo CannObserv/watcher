@@ -89,28 +89,28 @@ class TestHttpUrlStr:
 
 class TestWatchCreate:
     def test_valid_watch_create(self):
-        item_id = str(ULID())
+        wi_id = str(ULID())
         data = WatchCreate(
             name="Test Watch",
-            info_item_id=item_id,
+            watched_item_id=wi_id,
             content_type="html",
         )
         assert data.name == "Test Watch"
-        assert data.info_item_id == item_id
+        assert data.watched_item_id == wi_id
         assert data.content_type == "html"
 
     def test_watch_create_content_type_optional(self):
         data = WatchCreate(
             name="Untyped",
-            info_item_id=str(ULID()),
+            watched_item_id=str(ULID()),
         )
         assert data.content_type is None
 
     def test_watch_create_requires_name(self):
         with pytest.raises(ValidationError):
-            WatchCreate(info_item_id=str(ULID()), content_type="html")
+            WatchCreate(watched_item_id=str(ULID()), content_type="html")
 
-    def test_watch_create_requires_info_item_id(self):
+    def test_watch_create_requires_watched_item_id(self):
         with pytest.raises(ValidationError):
             WatchCreate(name="Test", content_type="html")
 
@@ -118,20 +118,21 @@ class TestWatchCreate:
         with pytest.raises(ValidationError):
             WatchCreate(
                 name="Test",
-                info_item_id=str(ULID()),
+                watched_item_id=str(ULID()),
                 content_type="invalid",
             )
 
     def test_watch_create_no_legacy_fields(self):
-        """``url``, ``fetch_config``, ``info_source_id``, ``schedule_config``, and
-        ``target_info_source_id`` are gone from the create shape."""
+        """``url``, ``fetch_config``, ``info_source_id``, ``schedule_config``,
+        ``target_info_source_id``, and ``info_item_id`` are gone from the create shape."""
         data = WatchCreate(
             name="Silent",
-            info_item_id=str(ULID()),
+            watched_item_id=str(ULID()),
             content_type="html",
         )
         assert not hasattr(data, "url")
         assert not hasattr(data, "fetch_config")
+        assert not hasattr(data, "info_item_id")
         assert not hasattr(data, "info_source_id")
         assert not hasattr(data, "schedule_config")
         assert not hasattr(data, "target_info_source_id")

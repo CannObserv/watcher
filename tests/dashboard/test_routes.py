@@ -3,38 +3,29 @@
 import re
 from unittest.mock import AsyncMock, patch
 
-import httpx
 import pytest
-from archiver_client import NotFound
-from sqlalchemy import select
 
-from src.core.models.domain import Domain
 from src.core.models.watch import ContentType, Watch, WatchHealthStatus
+from src.core.models.watched_item import WatchedItem
 from src.core.notifications.events import WatchEventType
 from tests.conftest import (
-    bind_primary_source,
     make_info_item,
-    make_info_source,
     make_watch,
 )
 
 
-async def _seed_info_item(db_session, *, name="Test InfoItem", url="https://example.com"):
-    """Create + commit an InfoItem with a bound primary InfoSource; return info_item_id (str).
-
-    #160: dashboard form takes ``info_item_id`` only (with optional
-    sub_aspect ULID). The primary URL is resolved server-side via the
-    ArchiverClient — tests need the binding present so the SDK mock can find it.
-    """
+async def _make_wi(db_session, *, name="Test WI", url="https://example.com"):
+    """Create + flush a WatchedItem with effective_url; return it."""
     item = await make_info_item(db_session, name=name)
-    primary = await make_info_source(db_session, url=url)
-    await bind_primary_source(
-        db_session,
+    wi = WatchedItem(
         info_item_id=item.info_item_id,
-        info_source_id=primary.info_source_id,
+        name=name,
+        effective_url=url,
     )
+    db_session.add(wi)
+    await db_session.flush()
     await db_session.commit()
-    return str(item.info_item_id)
+    return wi
 
 
 pytestmark = pytest.mark.integration
@@ -107,12 +98,12 @@ class TestWatchList:
 
 class TestWatchDetail:
     async def test_detail_page_returns_200(self, client, db_session):
-        info_item_id = await _seed_info_item(db_session, name="Detail Watch")
+        wi = await _make_wi(db_session, name="Detail Watch")
         resp = await client.post(
             "/api/v1/watches",
             json={
                 "name": "Detail Watch",
-                "info_item_id": info_item_id,
+                "watched_item_id": str(wi.id),
                 "content_type": "html",
             },
         )
@@ -145,168 +136,106 @@ class TestWatchCreate:
         assert response.status_code == 200
         assert b"New Watch" in response.content
 
-    async def test_create_form_renders_typeahead_picker(self, client):
+    async def test_create_form_without_wi_shows_guidance(self, client):
+        """Without ?watched_item_id, form shows guidance to go to a WatchedItem."""
         response = await client.get("/watches/new")
         body = response.content
-        # The form switched from ULID-paste to typeahead.
-        assert b'role="combobox"' in body
-        assert b'hx-get="/info-items/search' in body
-        # Picker binding-tree container is present (info_item_id injected dynamically by picker).
-        assert b'id="watch-create-binding-tree"' in body
-        # Power-user paste-ULID fallback is wrapped in <details>.
-        assert b"<details" in body
-        assert b"Paste ULID" in body
-        # Legacy minimal-picker hint text is gone (was rendered always by target_picker.html).
-        assert b"Paste the InfoItem ULID from the Archiver service" not in body
+        # No typeahead picker — that was removed in step 7.
+        assert b'role="combobox"' not in body
+        assert b"info-items/search" not in body
+        # Guidance copy
+        assert b"Watched Item" in body
 
-    async def test_create_form_prepopulates_with_valid_watched_item_id(self, client, db_session):
-        """watched_item_id param triggers hx-trigger=load on the binding-tree div."""
+    async def test_create_form_shows_wi_when_provided(self, client, db_session):
+        """?watched_item_id shows the WI's name + URL and includes a hidden field."""
         from src.core.models.watched_item import WatchedItem
+        from tests.conftest import make_info_item
 
-        info_item_id = await _seed_info_item(db_session, name="Pre-pop Item")
-        wi = WatchedItem(info_item_id=info_item_id, name="Pre-pop WI")
+        item = await make_info_item(db_session, name="Pre-pop Item")
+        wi = WatchedItem(
+            info_item_id=item.info_item_id,
+            name="Pre-pop WI",
+            effective_url="https://example.com/page",
+        )
         db_session.add(wi)
         await db_session.flush()
         await db_session.commit()
         response = await client.get(f"/watches/new?watched_item_id={wi.id}")
         assert response.status_code == 200
         body = response.content
-        assert b'hx-trigger="load"' in body
-        assert (b"/info-items/" + info_item_id.encode()) in body
+        assert b"Pre-pop WI" in body
+        assert b"https://example.com/page" in body
+        assert str(wi.id).encode() in body
 
     async def test_create_form_degrades_for_unknown_watched_item_id(self, client):
-        """Unknown watched_item_id returns 200 with no pre-population load trigger."""
+        """Unknown watched_item_id → 200, shows guidance (no error)."""
         from ulid import ULID
 
         response = await client.get(f"/watches/new?watched_item_id={ULID()}")
         assert response.status_code == 200
-        assert b'hx-trigger="load"' not in response.content
 
     async def test_create_watch_redirects(self, client, db_session):
-        info_item_id = await _seed_info_item(db_session, name="Created Watch")
+        """Posting with a valid watched_item_id creates a Watch and redirects."""
+        from src.core.models.watched_item import WatchedItem
+        from tests.conftest import make_info_item
+
+        item = await make_info_item(db_session, name="Created Watch")
+        wi = WatchedItem(
+            info_item_id=item.info_item_id,
+            name="WI for Create",
+            effective_url="https://example.com/create",
+        )
+        db_session.add(wi)
+        await db_session.flush()
+        await db_session.commit()
         response = await client.post(
             "/watches/new",
             data={
                 "name": "Created Watch",
-                "info_item_id": info_item_id,
-                "watch-create__target": "",  # primary
+                "watched_item_id": str(wi.id),
                 "content_type": "html",
-            },
-            follow_redirects=False,
-        )
-        assert response.status_code == 303
-
-    async def test_create_watch_via_paste_ulid_fallback(self, client, db_session):
-        """When picker is empty, fall back to manual paste fields."""
-        info_item_id = await _seed_info_item(db_session, name="Manual Paste")
-        response = await client.post(
-            "/watches/new",
-            data={
-                "name": "Manual Paste",
-                "info_item_id": "",  # picker empty
-                "info_item_id_manual": info_item_id,
-                "content_type": "html",
-            },
-            follow_redirects=False,
-        )
-        assert response.status_code == 303
-
-    async def test_create_watch_missing_name_shows_error(self, client, db_session):
-        info_item_id = await _seed_info_item(db_session, name="X")
-        response = await client.post(
-            "/watches/new",
-            data={
-                "name": "",
-                "info_item_id": info_item_id,
-                "watch-create__target": "",
-                "content_type": "html",
-            },
-        )
-        assert response.status_code == 200
-        assert b"required" in response.content.lower() or b"error" in response.content.lower()
-
-    async def test_create_watch_sets_domain_name_and_creates_domain_record(
-        self, client, db_session
-    ):
-        info_item_id = await _seed_info_item(
-            db_session, name="Domain Test Watch", url="https://lcb.wa.gov/page"
-        )
-        response = await client.post(
-            "/watches/new",
-            data={
-                "name": "Domain Test Watch",
-                "info_item_id": info_item_id,
-                "watch-create__target": "",
-                "content_type": "html",
-            },
-            follow_redirects=False,
-        )
-        assert response.status_code == 303
-        watch_id = response.headers["location"].rstrip("/").split("/")[-1]
-        result = await db_session.execute(select(Watch).where(Watch.id == watch_id))
-        watch = result.scalar_one()
-        await db_session.refresh(watch, ["watched_item"])
-        assert watch.watched_item.effective_url == "https://lcb.wa.gov/page"
-        assert watch.watched_item.domain_name == "lcb.wa.gov"
-        domain_result = await db_session.execute(select(Domain).where(Domain.name == "lcb.wa.gov"))
-        assert domain_result.scalar_one_or_none() is not None
-
-    async def test_create_watch_unreachable_url_shows_error(self, client, db_session):
-        info_item_id = await _seed_info_item(db_session, name="Bad Watch")
-        with patch(
-            "src.dashboard.routes._create_watch",
-            new_callable=AsyncMock,
-            side_effect=httpx.ConnectError("unreachable"),
-        ):
-            response = await client.post(
-                "/watches/new",
-                data={
-                    "name": "Bad Watch",
-                    "info_item_id": info_item_id,
-                    "watch-create__target": "",
-                    "content_type": "html",
-                },
-            )
-        assert response.status_code == 200
-        assert b"unreachable" in response.content.lower()
-
-    async def test_create_watch_info_item_only_redirects(self, client, db_session):
-        """Minimal POST — info_item_id via picker, no target, no extras."""
-        info_item_id = await _seed_info_item(db_session, name="Minimal Watch")
-        response = await client.post(
-            "/watches/new",
-            data={
-                "name": "Minimal Watch",
-                "info_item_id": info_item_id,
             },
             follow_redirects=False,
         )
         assert response.status_code == 303
         assert response.headers["location"].startswith("/watches/")
 
-    async def test_create_watch_bad_info_item_id_shows_flash(self, client, db_session):
-        """Unknown info_item_id → 200 with flash, not a 5xx."""
-        await _seed_info_item(db_session, name="Decoy")
-        bogus_id = "01ZZZZZZZZZZZZZZZZZZZZZZZZ"
-        with patch(
-            "src.dashboard.routes._create_watch",
-            new_callable=AsyncMock,
-            side_effect=NotFound(f"info_item {bogus_id} not found"),
-        ):
-            response = await client.post(
-                "/watches/new",
-                data={
-                    "name": "Bogus Target",
-                    "info_item_id": bogus_id,
-                    "watch-create__target": "",
-                    "content_type": "html",
-                },
-            )
+    async def test_create_watch_missing_name_shows_error(self, client, db_session):
+        from src.core.models.watched_item import WatchedItem
+        from tests.conftest import make_info_item
+
+        item = await make_info_item(db_session, name="X")
+        wi = WatchedItem(info_item_id=item.info_item_id, name="WI X")
+        db_session.add(wi)
+        await db_session.flush()
+        await db_session.commit()
+        response = await client.post(
+            "/watches/new",
+            data={
+                "name": "",
+                "watched_item_id": str(wi.id),
+                "content_type": "html",
+            },
+        )
+        assert response.status_code == 200
+        assert b"required" in response.content.lower() or b"error" in response.content.lower()
+
+    async def test_create_watch_bad_watched_item_id_shows_flash(self, client, db_session):
+        """Unknown watched_item_id → 200 with flash."""
+        from ulid import ULID
+
+        bogus_id = str(ULID())
+        response = await client.post(
+            "/watches/new",
+            data={
+                "name": "Bogus Target",
+                "watched_item_id": bogus_id,
+                "content_type": "html",
+            },
+        )
         assert response.status_code == 200
         body = response.content.lower()
         assert b"does not exist" in body
-        assert bogus_id.encode().lower() in body
-        assert b"New Watch" in response.content
 
 
 class TestWatchListNoScheduleColumn:
@@ -445,14 +374,12 @@ _NOTIFY_PATCH = "src.dashboard.routes.dispatch_event_notifications"
 
 class TestWatchArchive:
     async def _create_watch(self, client, db_session):
-        info_item_id = await _seed_info_item(
-            db_session, name="Archive Me", url="https://example.com/arc"
-        )
+        wi = await _make_wi(db_session, name="Archive Me", url="https://example.com/arc")
         resp = await client.post(
             "/api/v1/watches",
             json={
                 "name": "Archive Me",
-                "info_item_id": info_item_id,
+                "watched_item_id": str(wi.id),
                 "content_type": "html",
             },
         )
@@ -492,32 +419,27 @@ class TestWatchArchive:
         await db_session.refresh(watch)
         assert watch.is_archived is True
 
-    async def test_archive_completes_when_resolve_watch_url_raises(self, client, db_session):
-        """SDK failure resolving the URL must NOT roll back the archive.
+    async def test_archive_completes_when_no_effective_url(self, client, db_session):
+        """Archive must succeed even when WatchedItem has no effective_url.
 
-        Regression: ``resolve_watch_url`` was called AFTER ``session.commit()``
-        but its exception escaped as a 500, leaking a partial-success state to
-        the operator (archive persisted but UI reports failure). The handler
-        must log + dispatch with a sentinel URL (or skip dispatch) and still
-        return the redirect.
+        Regression guard: route now reads effective_url directly from the
+        WatchedItem instead of calling the Archiver SDK. A missing URL must
+        fall back to a sentinel, not raise.
         """
         watch = await make_watch(
             db_session,
-            name="Resolve Fails",
-            primary_url="https://example.com/resolve-fails",
+            name="No URL Watch",
+            primary_url="",
             content_type=ContentType.HTML,
         )
+        # Clear effective_url to simulate a WatchedItem without a URL.
+        watch.watched_item.effective_url = ""
+        await db_session.flush()
         await db_session.commit()
-        with patch(
-            "src.dashboard.routes.resolve_watch_url",
-            new_callable=AsyncMock,
-            side_effect=RuntimeError("information service unreachable"),
-        ):
-            response = await client.post(f"/watches/{watch.id}/archive")
+        response = await client.post(f"/watches/{watch.id}/archive")
         assert response.status_code in (200, 303), (
-            f"archive must complete despite SDK failure; got {response.status_code}"
+            f"archive must complete without effective_url; got {response.status_code}"
         )
-        # archive must be persisted regardless
         db_watch = await db_session.get(Watch, watch.id)
         await db_session.refresh(db_watch)
         assert db_watch.is_archived is True
@@ -565,14 +487,12 @@ class TestWatchArchive:
 
 class TestWatchDeactivate:
     async def _create_active_watch(self, client, db_session):
-        info_item_id = await _seed_info_item(
-            db_session, name="Deactivate Me", url="https://example.com"
-        )
+        wi = await _make_wi(db_session, name="Deactivate Me", url="https://example.com")
         resp = await client.post(
             "/api/v1/watches",
             json={
                 "name": "Deactivate Me",
-                "info_item_id": info_item_id,
+                "watched_item_id": str(wi.id),
                 "content_type": "html",
             },
         )
@@ -617,12 +537,12 @@ class TestWatchDeactivate:
 
     async def test_deactivate_archived_watch_returns_409(self, client, db_session):
         """Deactivating an archived watch returns 409, consistent with toggle-active."""
-        info_item_id = await _seed_info_item(db_session, name="Arc Watch")
+        wi = await _make_wi(db_session, name="Arc Watch")
         resp = await client.post(
             "/api/v1/watches",
             json={
                 "name": "Arc Watch",
-                "info_item_id": info_item_id,
+                "watched_item_id": str(wi.id),
                 "content_type": "html",
             },
         )
@@ -657,12 +577,12 @@ class TestWatchDeactivate:
 
 class TestWatchDelete:
     async def _create_and_archive(self, client, db_session):
-        info_item_id = await _seed_info_item(db_session, name="Delete Me")
+        wi = await _make_wi(db_session, name="Delete Me")
         resp = await client.post(
             "/api/v1/watches",
             json={
                 "name": "Delete Me",
-                "info_item_id": info_item_id,
+                "watched_item_id": str(wi.id),
                 "content_type": "html",
             },
         )
@@ -677,12 +597,12 @@ class TestWatchDelete:
         assert response.headers.get("hx-redirect") == "/watches"
 
     async def test_delete_non_archived_watch_returns_409(self, client, db_session):
-        info_item_id = await _seed_info_item(db_session, name="Cannot Delete Active")
+        wi = await _make_wi(db_session, name="Cannot Delete Active")
         resp = await client.post(
             "/api/v1/watches",
             json={
                 "name": "Cannot Delete Active",
-                "info_item_id": info_item_id,
+                "watched_item_id": str(wi.id),
                 "content_type": "html",
             },
         )
@@ -748,26 +668,22 @@ class TestWatchListFilters:
 
 class TestDomainDetailFilters:
     async def _create_domain_with_watch(self, client, db_session, watch_name="Filter Watch"):
-        """Create a domain and a watch whose domain_name matches it.
-
-        The mock probe extracts hostname from URL, so the watch URL must
-        use the domain name as its hostname for the watch to appear in
-        the domain's watch list.
-        """
+        """Create a domain and a watch whose domain_name matches it."""
         resp = await client.post(
             "/domains",
             data={"url": "https://example.com/page"},
             follow_redirects=False,
         )
         name = resp.headers["location"].rstrip("/").split("/")[-1]
-        info_item_id = await _seed_info_item(
-            db_session, name=watch_name, url=f"https://{name}/page"
-        )
+        wi = await _make_wi(db_session, name=watch_name, url=f"https://{name}/page")
+        wi.domain_name = name
+        await db_session.flush()
+        await db_session.commit()
         await client.post(
             "/api/v1/watches",
             json={
                 "name": watch_name,
-                "info_item_id": info_item_id,
+                "watched_item_id": str(wi.id),
                 "content_type": "html",
             },
         )
@@ -820,12 +736,12 @@ class TestAuditLogFilters:
 
 class TestWatchTimeline:
     async def _create_watch(self, client, db_session):
-        info_item_id = await _seed_info_item(db_session, name="Timeline Watch")
+        wi = await _make_wi(db_session, name="Timeline Watch")
         resp = await client.post(
             "/api/v1/watches",
             json={
                 "name": "Timeline Watch",
-                "info_item_id": info_item_id,
+                "watched_item_id": str(wi.id),
                 "content_type": "html",
             },
         )

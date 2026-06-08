@@ -1,21 +1,8 @@
-"""Integration tests for WatchedItem dashboard routes."""
+"""Integration tests for WatchedItem dashboard routes (#185 Phase A step 7)."""
 
-import httpx
 import pytest
-from archiver_client import AuthError, NotFound, ServerError
 
 pytestmark = pytest.mark.integration
-
-# Every exception class the watched_item_detail_page route's two SDK
-# try/except blocks promise to swallow. Used to parametrise graceful-
-# fallback tests so a future refactor splitting the except clauses can't
-# silently regress any single path.
-_SDK_FAILURE_FACTORIES = [
-    pytest.param(lambda: NotFound("nope"), id="NotFound"),
-    pytest.param(lambda: ServerError("nope"), id="ServerError"),
-    pytest.param(lambda: AuthError("nope"), id="AuthError"),
-    pytest.param(lambda: httpx.ConnectError("nope"), id="ConnectError"),
-]
 
 
 class TestListPage:
@@ -26,7 +13,6 @@ class TestListPage:
     async def test_empty_state_renders_cta(self, client):
         response = await client.get("/watched-items")
         body = response.content
-        # Empty state copy + CTA to /watches/new
         assert b"No watched items yet" in body
         assert b"/watches/new" in body
 
@@ -62,7 +48,7 @@ class TestListPage:
         assert b"Tags" not in body
 
     async def test_new_column_headers_present(self, client, db_session):
-        """Last Check, Next Check, Status headers appear; Aspect Review removed (#173)."""
+        """Last Check, Next Check, Status headers appear; Aspect Review removed."""
         from src.core.models.watched_item import WatchedItem
         from tests.conftest import make_info_item
 
@@ -97,7 +83,7 @@ class TestListPage:
         assert b"data-next-check" in response.content
 
     async def test_aspect_review_column_removed(self, client, db_session):
-        """Aspect Review column removed from list view (#173) — no per-row Archiver calls."""
+        """Aspect Review column removed from list view (#173)."""
         from src.core.models.watched_item import WatchedItem
         from tests.conftest import make_info_item
 
@@ -111,9 +97,7 @@ class TestListPage:
 
 
 class TestDetailPage:
-    async def test_returns_200_with_archiver_mock(self, client, db_session, info_client):
-        from unittest.mock import AsyncMock
-
+    async def test_returns_200(self, client, db_session):
         from src.core.models.watched_item import WatchedItem
         from tests.conftest import make_info_item
 
@@ -122,12 +106,6 @@ class TestDetailPage:
         db_session.add(wi)
         await db_session.flush()
         await db_session.commit()
-
-        info_client.get_info_item = AsyncMock(
-            return_value=_fake_info_item_out(
-                info_item_id=str(item.info_item_id),
-            )
-        )
 
         response = await client.get(f"/watched-items/{wi.id}")
         assert response.status_code == 200
@@ -139,186 +117,40 @@ class TestDetailPage:
         response = await client.get(f"/watched-items/{ULID()}")
         assert response.status_code == 404
 
-    async def test_renders_info_item_summary(self, client, db_session, info_client):
-        from unittest.mock import AsyncMock
-
+    async def test_shows_effective_url(self, client, db_session):
         from src.core.models.watched_item import WatchedItem
         from tests.conftest import make_info_item
 
         item = await make_info_item(db_session)
-        wi = WatchedItem(info_item_id=item.info_item_id, name="Summary Test")
+        wi = WatchedItem(
+            info_item_id=item.info_item_id,
+            name="URL Test",
+            effective_url="https://example.org/foo",
+        )
         db_session.add(wi)
         await db_session.flush()
         await db_session.commit()
-        info_client.get_info_item = AsyncMock(
-            return_value=_fake_info_item_out(info_item_id=str(item.info_item_id))
-        )
-        info_client.get_info_source = AsyncMock(
-            return_value=_fake_info_source_out(url="https://example.org/foo")
-        )
+        response = await client.get(f"/watched-items/{wi.id}")
+        assert b"https://example.org/foo" in response.content
+
+    async def test_no_binding_tree(self, client, db_session):
+        """Binding tree removed in step 7 — no info_item_picker partials."""
+        from src.core.models.watched_item import WatchedItem
+        from tests.conftest import make_info_item
+
+        item = await make_info_item(db_session)
+        wi = WatchedItem(info_item_id=item.info_item_id, name="No Tree WI")
+        db_session.add(wi)
+        await db_session.flush()
+        await db_session.commit()
         response = await client.get(f"/watched-items/{wi.id}")
         body = response.content
-        # Primary URL still surfaces in the new binding-tree partial.
-        assert b"https://example.org/foo" in body
-        # Readonly mode: no radio inputs in the tree.
+        assert b"binding_tree" not in body
+        assert b"info_item_picker" not in body
+        # No radio inputs (those were part of the tree)
         assert b'type="radio"' not in body
 
-    async def test_binding_list_excludes_primary(self, client, db_session, info_client):
-        """Regression: the primary InfoSource is represented by the URL in the
-        header; it must not also appear as a row in the binding list (would
-        be redundant)."""
-        from datetime import UTC, datetime
-        from types import SimpleNamespace
-        from unittest.mock import AsyncMock
-
-        from src.core.models.watched_item import WatchedItem
-        from tests.conftest import make_info_item
-
-        item = await make_info_item(db_session)
-        wi = WatchedItem(info_item_id=item.info_item_id, name="Bindings")
-        db_session.add(wi)
-        await db_session.flush()
-        await db_session.commit()
-        info_client.get_info_item = AsyncMock(
-            return_value=SimpleNamespace(
-                info_item_id=str(item.info_item_id),
-                name="Item",
-                description=None,
-                owner=None,
-                dashboard_url=None,
-                info_item_sources=[
-                    SimpleNamespace(
-                        info_source_id="primary-src-id",
-                        role=None,
-                        created_at=datetime.now(UTC),
-                    ),
-                    SimpleNamespace(
-                        info_source_id="cross-check-src-id",
-                        role="cross_check",
-                        created_at=datetime.now(UTC),
-                    ),
-                ],
-            )
-        )
-
-        # get_info_source is called per-binding by fetch_info_item_bindings.
-        # Side-effect returns the right id so the template renders correctly.
-        async def _src(info_source_id):
-            return SimpleNamespace(
-                info_source_id=info_source_id,
-                url="https://example.com/page" if info_source_id == "primary-src-id" else None,
-                parent_info_source_id=(
-                    None if info_source_id == "primary-src-id" else "primary-src-id"
-                ),
-                source_spec=SimpleNamespace(additional_properties={}),
-            )
-
-        info_client.get_info_source = AsyncMock(side_effect=_src)
-        response = await client.get(f"/watched-items/{wi.id}")
-        body = response.content
-        # The cross_check row renders.
-        assert b"cross-check-src-id" in body
-        # The primary's info_source_id does NOT appear in the binding list —
-        # the URL stands in for it in the header.
-        assert b"primary-src-id" not in body
-
-    @pytest.mark.parametrize("exc_factory", _SDK_FAILURE_FACTORIES)
-    async def test_renders_without_primary_url_when_archiver_partial(
-        self, client, db_session, info_client, exc_factory
-    ):
-        """Regression: detail page must render when InfoItem succeeds but
-        get_info_source fails. Parametrised across every exception class in
-        the route's except clause so a future refactor splitting them can't
-        silently regress any single path.
-
-        get_info_source failures propagate as SDK exceptions (ServerError etc.),
-        not ValueError, so the outer except clause applies and the route falls
-        back to the 'summary unavailable' placeholder.  The ValueError recovery
-        path (no primary binding) is covered by
-        test_renders_info_item_name_when_no_primary_binding.
-        """
-        from unittest.mock import AsyncMock
-
-        from src.core.models.watched_item import WatchedItem
-        from tests.conftest import make_info_item
-
-        item = await make_info_item(db_session)
-        wi = WatchedItem(info_item_id=item.info_item_id, name="Partial")
-        db_session.add(wi)
-        await db_session.flush()
-        await db_session.commit()
-        info_client.get_info_item = AsyncMock(
-            return_value=_fake_info_item_out(info_item_id=str(item.info_item_id))
-        )
-        info_client.get_info_source = AsyncMock(side_effect=exc_factory())
-        response = await client.get(f"/watched-items/{wi.id}")
-        assert response.status_code == 200
-        # Detail page now uses the picker's binding-tree partial — but
-        # when the SDK fails, the page falls back to a placeholder.
-        assert b"Information Item summary unavailable" in response.content
-
-    @pytest.mark.parametrize("exc_factory", _SDK_FAILURE_FACTORIES)
-    async def test_renders_when_get_info_item_fails(
-        self, client, db_session, info_client, exc_factory
-    ):
-        """Regression: detail page must render with the 'summary unavailable'
-        placeholder when get_info_item itself fails. Parametrised across
-        every exception class in the route's except clause."""
-        from unittest.mock import AsyncMock
-
-        from src.core.models.watched_item import WatchedItem
-        from tests.conftest import make_info_item
-
-        item = await make_info_item(db_session)
-        wi = WatchedItem(info_item_id=item.info_item_id, name="Outage")
-        db_session.add(wi)
-        await db_session.flush()
-        await db_session.commit()
-        info_client.get_info_item = AsyncMock(side_effect=exc_factory())
-        response = await client.get(f"/watched-items/{wi.id}")
-        assert response.status_code == 200
-        assert b"Archiver Information Item summary unavailable" in response.content
-
-    async def test_renders_info_item_name_when_no_primary_binding(
-        self, client, db_session, info_client
-    ):
-        """ValueError (no primary binding) must render the InfoItem name in readonly_tree mode,
-        not fall back to the 'unavailable' placeholder."""
-        from types import SimpleNamespace
-        from unittest.mock import AsyncMock
-
-        from src.core.models.watched_item import WatchedItem
-        from tests.conftest import make_info_item
-
-        item = await make_info_item(db_session, name="No-Primary Item")
-        wi = WatchedItem(info_item_id=item.info_item_id, name="No-Primary WI")
-        db_session.add(wi)
-        await db_session.flush()
-        await db_session.commit()
-        # No info_item_sources → fetch_info_item_bindings raises ValueError;
-        # route recovers with a second get_info_item call.
-        info_client.get_info_item = AsyncMock(
-            return_value=SimpleNamespace(
-                info_item_id=str(item.info_item_id),
-                name="No-Primary Item",
-                description=None,
-                owner=None,
-                dashboard_url=None,
-                info_item_sources=[],
-            )
-        )
-        response = await client.get(f"/watched-items/{wi.id}")
-        assert response.status_code == 200
-        body = response.text
-        assert "No-Primary Item" in body
-        assert "unavailable" not in body.lower()
-        # readonly_tree injects no radio or hidden info_item_id inputs
-        assert 'type="radio"' not in body
-        assert 'name="info_item_id"' not in body
-
-    async def test_renders_danger_zone_archive(self, client, db_session, info_client):
-        from unittest.mock import AsyncMock
-
+    async def test_renders_danger_zone(self, client, db_session):
         from src.core.models.watched_item import WatchedItem
         from tests.conftest import make_info_item
 
@@ -327,19 +159,12 @@ class TestDetailPage:
         db_session.add(wi)
         await db_session.flush()
         await db_session.commit()
-        info_client.get_info_item = AsyncMock(
-            return_value=_fake_info_item_out(
-                info_item_id=str(item.info_item_id),
-            )
-        )
         response = await client.get(f"/watched-items/{wi.id}")
         assert b"Danger Zone" in response.content
         assert b"Archive" in response.content
 
-    async def test_domain_suspended_banner_renders(self, client, db_session, info_client):
+    async def test_domain_suspended_banner_renders(self, client, db_session):
         """Domain Inactive alert shows when watched_item.domain_suspended=True."""
-        from unittest.mock import AsyncMock
-
         from src.core.models.watched_item import WatchedItem
         from tests.conftest import make_info_item
 
@@ -350,17 +175,12 @@ class TestDetailPage:
         db_session.add(wi)
         await db_session.flush()
         await db_session.commit()
-        info_client.get_info_item = AsyncMock(
-            return_value=_fake_info_item_out(info_item_id=str(item.info_item_id))
-        )
         response = await client.get(f"/watched-items/{wi.id}")
         assert response.status_code == 200
         assert b"Domain Inactive" in response.content
 
-    async def test_domain_name_link_renders(self, client, db_session, info_client):
+    async def test_domain_name_link_renders(self, client, db_session):
         """Domain link appears and points to /domains/<name> when domain_name is set."""
-        from unittest.mock import AsyncMock
-
         from src.core.models.domain import Domain
         from src.core.models.watched_item import WatchedItem
         from tests.conftest import make_info_item
@@ -375,102 +195,52 @@ class TestDetailPage:
         db_session.add(wi)
         await db_session.flush()
         await db_session.commit()
-        info_client.get_info_item = AsyncMock(
-            return_value=_fake_info_item_out(info_item_id=str(item.info_item_id))
-        )
         response = await client.get(f"/watched-items/{wi.id}")
         assert response.status_code == 200
         assert b"/domains/detail-domain.com" in response.content
         assert b"detail-domain.com" in response.content
 
-    async def test_new_watch_button_visible_when_active_with_primary_url(
-        self, client, db_session, info_client
+    async def test_new_watch_button_visible_when_active_with_effective_url(
+        self, client, db_session
     ):
-        """New Watch button appears on active WI that has a resolved primary URL."""
-        from types import SimpleNamespace
-        from unittest.mock import AsyncMock
-
+        """New Watch button appears on active WI that has effective_url set."""
         from src.core.models.watched_item import WatchedItem
-        from tests.conftest import bind_primary_source, make_info_item, make_info_source
+        from tests.conftest import make_info_item
 
         item = await make_info_item(db_session)
-        src = await make_info_source(db_session, url="https://example.com/target")
-        await bind_primary_source(
-            db_session, info_item_id=item.info_item_id, info_source_id=src.info_source_id
+        wi = WatchedItem(
+            info_item_id=item.info_item_id,
+            name="Active",
+            effective_url="https://example.com/target",
         )
-        wi = WatchedItem(info_item_id=item.info_item_id, name="Active")
         db_session.add(wi)
         await db_session.flush()
         await db_session.commit()
-
-        info_client.get_info_item = AsyncMock(
-            return_value=SimpleNamespace(
-                info_item_id=str(item.info_item_id),
-                name="Active Item",
-                description=None,
-                owner=None,
-                dashboard_url=None,
-                info_item_sources=[
-                    SimpleNamespace(
-                        info_source_id=str(src.info_source_id),
-                        role=None,
-                        created_at=item.created_at,
-                    )
-                ],
-            )
-        )
         response = await client.get(f"/watched-items/{wi.id}")
         assert b"+ New Watch" in response.content
 
-    async def test_new_watch_button_hidden_when_archived(self, client, db_session, info_client):
-        """New Watch button absent on archived WI even if primary URL is present."""
+    async def test_new_watch_button_hidden_when_archived(self, client, db_session):
+        """New Watch button absent on archived WI."""
         from datetime import UTC, datetime
-        from types import SimpleNamespace
-        from unittest.mock import AsyncMock
 
         from src.core.models.watched_item import WatchedItem
-        from tests.conftest import bind_primary_source, make_info_item, make_info_source
+        from tests.conftest import make_info_item
 
         item = await make_info_item(db_session)
-        src = await make_info_source(db_session, url="https://example.com/target")
-        await bind_primary_source(
-            db_session, info_item_id=item.info_item_id, info_source_id=src.info_source_id
-        )
         wi = WatchedItem(
             info_item_id=item.info_item_id,
             name="Archived",
+            effective_url="https://example.com/target",
             archived_at=datetime.now(UTC),
         )
         db_session.add(wi)
         await db_session.flush()
         await db_session.commit()
-
-        info_client.get_info_item = AsyncMock(
-            return_value=SimpleNamespace(
-                info_item_id=str(item.info_item_id),
-                name="Archived Item",
-                description=None,
-                owner=None,
-                dashboard_url=None,
-                info_item_sources=[
-                    SimpleNamespace(
-                        info_source_id=str(src.info_source_id),
-                        role=None,
-                        created_at=item.created_at,
-                    )
-                ],
-            )
-        )
         response = await client.get(f"/watched-items/{wi.id}")
         assert b"+ New Watch" not in response.content
 
-    async def test_new_watch_button_hidden_when_no_primary_url(
-        self, client, db_session, info_client
-    ):
-        """New Watch button absent when InfoItem has no primary InfoSource binding."""
-        from types import SimpleNamespace
-        from unittest.mock import AsyncMock
-
+    async def test_new_watch_button_hidden_when_no_effective_url(self, client, db_session):
+        """New Watch button absent when WatchedItem has no effective_url."""
         from src.core.models.watched_item import WatchedItem
         from tests.conftest import make_info_item
 
@@ -479,98 +249,11 @@ class TestDetailPage:
         db_session.add(wi)
         await db_session.flush()
         await db_session.commit()
-
-        # No primary binding → fetch_info_item_bindings raises ValueError → primary_url=None
-        info_client.get_info_item = AsyncMock(
-            return_value=SimpleNamespace(
-                info_item_id=str(item.info_item_id),
-                name="No Primary Item",
-                description=None,
-                owner=None,
-                dashboard_url=None,
-                info_item_sources=[],
-            )
-        )
         response = await client.get(f"/watched-items/{wi.id}")
         assert b"+ New Watch" not in response.content
 
-    async def test_new_sub_aspects_get_badge(self, client, db_session, info_client):
-        """Sub_aspects created after last_reviewed_at get a 'new' badge in the tree."""
-        from datetime import UTC, datetime, timedelta
-        from types import SimpleNamespace
-        from unittest.mock import AsyncMock
-
-        from src.core.models.watched_item import WatchedItem
-        from tests.conftest import make_info_item
-
-        item = await make_info_item(db_session)
-        wi = WatchedItem(
-            info_item_id=item.info_item_id,
-            name="WI",
-            last_reviewed_at=datetime.now(UTC) - timedelta(days=7),
-        )
-        db_session.add(wi)
-        await db_session.flush()
-        await db_session.commit()
-
-        # The route's new logic uses fetch_info_item_bindings,
-        # which calls get_info_item + get_info_source(per binding). Stub BOTH
-        # to return shape-consistent objects so the "new"-badge path is exercised.
-        info_client.get_info_item = AsyncMock(
-            return_value=SimpleNamespace(
-                info_item_id=str(item.info_item_id),
-                name="N",
-                description=None,
-                owner=None,
-                dashboard_url=None,
-                info_item_sources=[
-                    SimpleNamespace(
-                        info_source_id="primary",
-                        role=None,
-                        created_at=datetime.now(UTC) - timedelta(days=14),
-                    ),
-                    SimpleNamespace(
-                        info_source_id="new-sub",
-                        role="sub_aspect",
-                        created_at=datetime.now(UTC),
-                    ),
-                ],
-            )
-        )
-
-        # get_info_source is called per-binding by fetch_info_item_bindings.
-        async def _src(info_source_id):
-            if info_source_id == "primary":
-                return SimpleNamespace(
-                    info_source_id="primary",
-                    url="https://example.com",
-                    parent_info_source_id=None,
-                    source_spec=SimpleNamespace(additional_properties={}),
-                )
-            return SimpleNamespace(
-                info_source_id=info_source_id,
-                url=None,
-                parent_info_source_id="primary",
-                source_spec=SimpleNamespace(additional_properties={}),
-            )
-
-        info_client.get_info_source = AsyncMock(side_effect=_src)
-
-        response = await client.get(f"/watched-items/{wi.id}")
-        body = response.content
-        assert b"new-sub" in body
-        # The "new" badge fires because the sub_aspect's created_at is newer
-        # than the WatchedItem's last_reviewed_at.
-        assert b"badge-warning" in body
-
-    async def test_detail_page_with_child_watch_renders_200(self, client, db_session, info_client):
-        """Regression: health_map must be passed when the WI has child watches.
-
-        The watch_table partial reads health_map in watch_row.html; if the route
-        omits it the template throws UndefinedError when the watch loop executes.
-        Uses the DB-backed info_client fixture (no overrides) to exercise the
-        full success path through fetch_info_item_bindings.
-        """
+    async def test_detail_page_with_child_watch_renders_200(self, client, db_session):
+        """Regression: health_map must be passed when the WI has child watches."""
         from tests.conftest import make_watch
 
         watch = await make_watch(db_session, name="Child Watch")
@@ -582,13 +265,9 @@ class TestDetailPage:
         assert b"Child Watch" in response.content
 
     async def test_child_watch_table_uses_static_headers_not_global_partial(
-        self, client, db_session, info_client
+        self, client, db_session
     ):
-        """Regression #182: sort buttons must NOT point at /partials/watch-table.
-
-        The global partial returns all watches; child watches on the WI detail
-        page must render a static (non-HTMX-sorted) table scoped to this WI.
-        """
+        """Regression #182: sort buttons must NOT point at /partials/watch-table."""
         from tests.conftest import make_watch
 
         watch = await make_watch(db_session, name="Scoped Watch")
@@ -598,13 +277,9 @@ class TestDetailPage:
         response = await client.get(f"/watched-items/{wi.id}")
         assert response.status_code == 200
         assert b"Scoped Watch" in response.content
-        # Must NOT contain HTMX sort buttons targeting the global watch-table partial
         assert b'hx-get="/partials/watch-table"' not in response.content
 
-    async def test_detail_page_with_no_child_watches_shows_empty_state(
-        self, client, db_session, info_client
-    ):
-        """WI detail page shows fallback text when there are no child watches."""
+    async def test_detail_page_with_no_child_watches_shows_empty_state(self, client, db_session):
         from src.core.models.watched_item import WatchedItem
         from tests.conftest import make_info_item
 
@@ -616,6 +291,21 @@ class TestDetailPage:
         response = await client.get(f"/watched-items/{wi.id}")
         assert response.status_code == 200
         assert b"No watches under this Watched Item" in response.content
+
+    async def test_aspect_review_status_route_gone(self, client, db_session):
+        """The /aspect-review-status route was removed in step 7."""
+        from src.core.models.watched_item import WatchedItem
+        from tests.conftest import make_info_item
+
+        item = await make_info_item(db_session)
+        wi = WatchedItem(info_item_id=item.info_item_id, name="Review Gone")
+        db_session.add(wi)
+        await db_session.commit()
+        response = await client.get(
+            f"/watched-items/{wi.id}/aspect-review-status",
+            headers={"HX-Request": "true"},
+        )
+        assert response.status_code == 404
 
 
 class TestListPageSearchAndPagination:
@@ -663,7 +353,6 @@ class TestListPageSearchAndPagination:
 
         response = await client.get("/partials/watched-items-table?page=2&page_size=2")
         body = response.content
-        # Page 1 has AAA, BBB (alphabetical); page 2 has CCC only.
         assert b"CCC" in body
         assert b"AAA" not in body
         assert b"BBB" not in body
@@ -709,7 +398,6 @@ class TestListPageSearchAndPagination:
         assert b"ShowArchived WI" in response.content
 
     async def test_include_archived_false_explicit_param(self, client, db_session):
-        """include_archived=false (the radio value) is accepted — not a 422."""
         from datetime import UTC, datetime
 
         from src.core.models.watched_item import WatchedItem
@@ -730,28 +418,7 @@ class TestListPageSearchAndPagination:
         assert response.status_code == 200
         assert b"HiddenArchived" not in response.content
 
-    async def test_search_with_active_filter(self, client, db_session):
-        """q + include_archived=false (the radio value HTMX sends) works correctly."""
-        from src.core.models.watched_item import WatchedItem
-        from tests.conftest import make_info_item
-
-        item_a = await make_info_item(db_session, name="SearchAlpha")
-        item_b = await make_info_item(db_session, name="SearchBeta")
-        db_session.add(WatchedItem(info_item_id=item_a.info_item_id, name="SearchAlpha WI"))
-        db_session.add(WatchedItem(info_item_id=item_b.info_item_id, name="SearchBeta WI"))
-        await db_session.flush()
-        await db_session.commit()
-
-        response = await client.get(
-            "/partials/watched-items-table?q=SearchAlpha&include_archived=false"
-        )
-        assert response.status_code == 200
-        body = response.content
-        assert b"SearchAlpha WI" in body
-        assert b"SearchBeta WI" not in body
-
     async def test_full_page_hx_target_and_include_in_pagination_context(self, client, db_session):
-        """SSR page passes hx_target and hx_include so pagination targets the right container."""
         from src.core.models.watched_item import WatchedItem
         from tests.conftest import make_info_item
 
@@ -763,7 +430,6 @@ class TestListPageSearchAndPagination:
 
         response = await client.get("/watched-items?page_size=2")
         body = response.content
-        # Pagination rendered via SSR must target the watched-items container, not domains.
         assert b"watched-items-table-container" in body
         assert b"domains-table-container" not in body
 
@@ -794,7 +460,7 @@ class TestListPageSearchAndPagination:
 
 
 class TestArchiveRestore:
-    async def test_archive_redirects_back(self, client, db_session, info_client):
+    async def test_archive_redirects_back(self, client, db_session):
         from src.core.models.watched_item import WatchedItem
         from tests.conftest import make_info_item
 
@@ -807,7 +473,7 @@ class TestArchiveRestore:
         response = await client.post(f"/watched-items/{wi.id}/archive", follow_redirects=False)
         assert response.status_code in (200, 303)
 
-    async def test_archive_cascades_to_child_watches(self, client, db_session, info_client):
+    async def test_archive_cascades_to_child_watches(self, client, db_session):
         from src.core.models.watched_item import WatchedItem
         from tests.conftest import make_info_item, make_watch
 
@@ -815,11 +481,7 @@ class TestArchiveRestore:
         wi = WatchedItem(info_item_id=item.info_item_id, name="Parent")
         db_session.add(wi)
         await db_session.flush()
-        w = await make_watch(
-            db_session,
-            name="Child",
-            watched_item=wi,
-        )
+        w = await make_watch(db_session, name="Child", watched_item=wi)
         await db_session.commit()
 
         await client.post(f"/watched-items/{wi.id}/archive", follow_redirects=False)
@@ -827,7 +489,7 @@ class TestArchiveRestore:
         await db_session.refresh(w)
         assert w.is_archived is True
 
-    async def test_restore_clears_archived_at(self, client, db_session, info_client):
+    async def test_restore_clears_archived_at(self, client, db_session):
         from datetime import UTC, datetime
 
         from src.core.models.watched_item import WatchedItem
@@ -1041,230 +703,7 @@ class TestTagsEditor:
         await db_session.refresh(wi)
         assert wi.default_tags == ["x", "z"]
 
-    async def test_add_dedupes(self, client, db_session):
-        from src.core.models.watched_item import WatchedItem
-        from tests.conftest import make_info_item
-
-        item = await make_info_item(db_session)
-        wi = WatchedItem(info_item_id=item.info_item_id, name="T", default_tags=["a"])
-        db_session.add(wi)
-        await db_session.flush()
-        await db_session.commit()
-        await client.post(
-            f"/watched-items/{wi.id}/tags",
-            data={"tag": "a"},
-            headers={"HX-Request": "true"},
-        )
-        await db_session.refresh(wi)
-        assert wi.default_tags == ["a"]
-
-    @pytest.mark.parametrize("bad_tag", [" ", ",", " , "])
-    async def test_add_rejects_empty_or_whitespace_only(self, client, db_session, bad_tag):
-        """All-whitespace or comma-only input yields no valid tags → 400."""
-        from src.core.models.watched_item import WatchedItem
-        from tests.conftest import make_info_item
-
-        item = await make_info_item(db_session)
-        wi = WatchedItem(info_item_id=item.info_item_id, name="T")
-        db_session.add(wi)
-        await db_session.flush()
-        await db_session.commit()
-        response = await client.post(
-            f"/watched-items/{wi.id}/tags",
-            data={"tag": bad_tag},
-            headers={"HX-Request": "true"},
-        )
-        assert response.status_code == 400
-        await db_session.refresh(wi)
-        assert wi.default_tags is None
-
-    async def test_add_tag_with_space(self, client, db_session):
-        """Tags containing spaces are accepted and stored verbatim."""
-        from src.core.models.watched_item import WatchedItem
-        from tests.conftest import make_info_item
-
-        item = await make_info_item(db_session)
-        wi = WatchedItem(info_item_id=item.info_item_id, name="T")
-        db_session.add(wi)
-        await db_session.flush()
-        await db_session.commit()
-        response = await client.post(
-            f"/watched-items/{wi.id}/tags",
-            data={"tag": "wslcb board"},
-            headers={"HX-Request": "true"},
-        )
-        assert response.status_code == 200
-        await db_session.refresh(wi)
-        assert "wslcb board" in (wi.default_tags or [])
-
-    async def test_add_comma_separated_tags(self, client, db_session):
-        """Comma-separated input adds multiple tags in one request."""
-        from src.core.models.watched_item import WatchedItem
-        from tests.conftest import make_info_item
-
-        item = await make_info_item(db_session)
-        wi = WatchedItem(info_item_id=item.info_item_id, name="T")
-        db_session.add(wi)
-        await db_session.flush()
-        await db_session.commit()
-        response = await client.post(
-            f"/watched-items/{wi.id}/tags",
-            data={"tag": "foo, bar, baz"},
-            headers={"HX-Request": "true"},
-        )
-        assert response.status_code == 200
-        await db_session.refresh(wi)
-        assert wi.default_tags == ["bar", "baz", "foo"]
-
-    async def test_remove_tag_with_space(self, client, db_session):
-        """Tags containing spaces can be removed via URL-encoded path."""
-        from urllib.parse import quote
-
-        from src.core.models.watched_item import WatchedItem
-        from tests.conftest import make_info_item
-
-        item = await make_info_item(db_session)
-        wi = WatchedItem(
-            info_item_id=item.info_item_id, name="T", default_tags=["wslcb board", "x"]
-        )
-        db_session.add(wi)
-        await db_session.flush()
-        await db_session.commit()
-        response = await client.delete(
-            f"/watched-items/{wi.id}/tags/{quote('wslcb board', safe='')}",
-            headers={"HX-Request": "true"},
-        )
-        assert response.status_code == 200
-        await db_session.refresh(wi)
-        assert wi.default_tags == ["x"]
-
-    async def test_add_partial_duplicate_csv(self, client, db_session):
-        """When CSV input mixes existing and new tags, only new tags are added."""
-        from src.core.models.watched_item import WatchedItem
-        from tests.conftest import make_info_item
-
-        item = await make_info_item(db_session)
-        wi = WatchedItem(info_item_id=item.info_item_id, name="T", default_tags=["existing"])
-        db_session.add(wi)
-        await db_session.flush()
-        await db_session.commit()
-        response = await client.post(
-            f"/watched-items/{wi.id}/tags",
-            data={"tag": "existing, new"},
-            headers={"HX-Request": "true"},
-        )
-        assert response.status_code == 200
-        await db_session.refresh(wi)
-        assert wi.default_tags == ["existing", "new"]
-
-    async def test_add_rejects_tag_too_long(self, client, db_session):
-        """A tag exceeding 255 characters is rejected with 400."""
-        from src.core.models.watched_item import WatchedItem
-        from tests.conftest import make_info_item
-
-        item = await make_info_item(db_session)
-        wi = WatchedItem(info_item_id=item.info_item_id, name="T")
-        db_session.add(wi)
-        await db_session.flush()
-        await db_session.commit()
-        response = await client.post(
-            f"/watched-items/{wi.id}/tags",
-            data={"tag": "x" * 256},
-            headers={"HX-Request": "true"},
-        )
-        assert response.status_code == 400
-        await db_session.refresh(wi)
-        assert wi.default_tags is None
-
-
-class TestSubAspectBanner:
-    async def test_banner_shows_count_when_new(self, client, db_session, info_client):
-        from datetime import UTC, datetime, timedelta
-        from types import SimpleNamespace
-        from unittest.mock import AsyncMock
-
-        from src.core.models.watched_item import WatchedItem
-        from tests.conftest import make_info_item
-
-        item = await make_info_item(db_session)
-        old = datetime.now(UTC) - timedelta(days=10)
-        wi = WatchedItem(
-            info_item_id=item.info_item_id,
-            name="Review",
-            last_reviewed_at=old,
-        )
-        db_session.add(wi)
-        await db_session.flush()
-        await db_session.commit()
-
-        info_client.get_info_item = AsyncMock(
-            return_value=SimpleNamespace(
-                info_item_id=str(item.info_item_id),
-                name="Has new",
-                description=None,
-                owner=None,
-                dashboard_url=None,
-                info_item_sources=[
-                    SimpleNamespace(
-                        info_source_id="p",
-                        role=None,
-                        created_at=datetime.now(UTC) - timedelta(days=15),
-                    ),
-                    SimpleNamespace(
-                        info_source_id="s1", role="sub_aspect", created_at=datetime.now(UTC)
-                    ),
-                    SimpleNamespace(
-                        info_source_id="s2", role="sub_aspect", created_at=datetime.now(UTC)
-                    ),
-                ],
-            )
-        )
-
-        # fetch_info_item_bindings calls get_info_source per-binding; stub it so
-        # the route can resolve bindings and count_new_subaspects gets a live info_item.
-        async def _src(info_source_id):
-            return SimpleNamespace(
-                info_source_id=info_source_id,
-                url="https://example.com" if info_source_id == "p" else None,
-                parent_info_source_id=None if info_source_id == "p" else "p",
-                source_spec=SimpleNamespace(additional_properties={}),
-            )
-
-        info_client.get_info_source = AsyncMock(side_effect=_src)
-        response = await client.get(f"/watched-items/{wi.id}")
-        assert b"2 new sub_aspects" in response.content
-
-    async def test_no_banner_when_none_new(self, client, db_session, info_client):
-        from datetime import UTC, datetime
-        from types import SimpleNamespace
-        from unittest.mock import AsyncMock
-
-        from src.core.models.watched_item import WatchedItem
-        from tests.conftest import make_info_item
-
-        item = await make_info_item(db_session)
-        wi = WatchedItem(
-            info_item_id=item.info_item_id,
-            name="Reviewed",
-            last_reviewed_at=datetime.now(UTC),
-        )
-        db_session.add(wi)
-        await db_session.flush()
-        await db_session.commit()
-        info_client.get_info_item = AsyncMock(
-            return_value=SimpleNamespace(
-                info_item_id=str(item.info_item_id),
-                name="x",
-                description=None,
-                owner=None,
-                dashboard_url=None,
-                info_item_sources=[],
-            )
-        )
-        response = await client.get(f"/watched-items/{wi.id}")
-        assert b"new sub_aspects" not in response.content
-
-    async def test_mark_reviewed_stamps_now(self, client, db_session, info_client):
+    async def test_mark_reviewed_stamps_now(self, client, db_session):
         from src.core.models.watched_item import WatchedItem
         from tests.conftest import make_info_item
 
@@ -1279,158 +718,3 @@ class TestSubAspectBanner:
         assert response.status_code in (200, 303)
         await db_session.refresh(wi)
         assert wi.last_reviewed_at is not None
-
-
-def _fake_info_item_out(*, info_item_id):
-    """Minimal InfoItemOut-shaped mock for the summary card.
-
-    Matches the real SDK `InfoItemSourceOut` shape — no `url` attribute on
-    the source. The detail route resolves the primary URL via a separate
-    ``get_info_source(...)`` call; tests that need the URL must stub that
-    call too (see :func:`_fake_info_source_out`).
-    """
-    from datetime import UTC, datetime
-    from types import SimpleNamespace
-
-    return SimpleNamespace(
-        info_item_id=info_item_id,
-        name="Fake InfoItem",
-        description=None,
-        owner=None,
-        dashboard_url=None,
-        info_item_sources=[
-            SimpleNamespace(
-                info_source_id="fake-primary-src",
-                role=None,  # primary
-                is_active=True,
-                deactivated_at=None,
-                created_at=datetime.now(UTC),
-            ),
-        ],
-    )
-
-
-def _fake_info_source_out(url="https://example.com"):
-    """Minimal InfoSourceOut-shaped mock for ``get_info_source`` calls."""
-    from types import SimpleNamespace
-
-    return SimpleNamespace(info_source_id="fake-primary-src", url=url)
-
-
-class TestAspectReviewStatus:
-    """HTMX endpoint that returns a pill showing sub_aspect review state."""
-
-    async def test_returns_available_pill_when_new_subaspects(
-        self, client, db_session, info_client
-    ):
-        from datetime import UTC, datetime, timedelta
-        from types import SimpleNamespace
-        from unittest.mock import AsyncMock
-
-        from src.core.models.watched_item import WatchedItem
-        from tests.conftest import make_info_item
-
-        item = await make_info_item(db_session)
-        old = datetime.now(UTC) - timedelta(days=5)
-        wi = WatchedItem(info_item_id=item.info_item_id, name="HasNew", last_reviewed_at=old)
-        db_session.add(wi)
-        await db_session.flush()
-        await db_session.commit()
-
-        info_client.get_info_item = AsyncMock(
-            return_value=SimpleNamespace(
-                info_item_id=str(item.info_item_id),
-                name="x",
-                description=None,
-                owner=None,
-                dashboard_url=None,
-                info_item_sources=[
-                    SimpleNamespace(
-                        info_source_id="p",
-                        role=None,
-                        created_at=datetime.now(UTC) - timedelta(days=10),
-                    ),
-                    SimpleNamespace(
-                        info_source_id="s1",
-                        role="sub_aspect",
-                        created_at=datetime.now(UTC),
-                    ),
-                ],
-            )
-        )
-        info_client.get_info_source = AsyncMock(
-            side_effect=lambda sid: SimpleNamespace(
-                info_source_id=sid,
-                url="https://example.com" if sid == "p" else None,
-                parent_info_source_id=None if sid == "p" else "p",
-                source_spec=SimpleNamespace(additional_properties={}),
-            )
-        )
-
-        response = await client.get(
-            f"/watched-items/{wi.id}/aspect-review-status",
-            headers={"HX-Request": "true"},
-        )
-        assert response.status_code == 200
-        assert b"available" in response.content.lower()
-
-    async def test_returns_current_pill_when_no_new(self, client, db_session, info_client):
-        from datetime import UTC, datetime
-        from types import SimpleNamespace
-        from unittest.mock import AsyncMock
-
-        from src.core.models.watched_item import WatchedItem
-        from tests.conftest import make_info_item
-
-        item = await make_info_item(db_session)
-        wi = WatchedItem(
-            info_item_id=item.info_item_id,
-            name="Current",
-            last_reviewed_at=datetime.now(UTC),
-        )
-        db_session.add(wi)
-        await db_session.flush()
-        await db_session.commit()
-
-        info_client.get_info_item = AsyncMock(
-            return_value=SimpleNamespace(
-                info_item_id=str(item.info_item_id),
-                name="x",
-                description=None,
-                owner=None,
-                dashboard_url=None,
-                info_item_sources=[],
-            )
-        )
-
-        response = await client.get(
-            f"/watched-items/{wi.id}/aspect-review-status",
-            headers={"HX-Request": "true"},
-        )
-        assert response.status_code == 200
-        assert b"current" in response.content.lower()
-
-    async def test_returns_404_for_unknown_wi(self, client):
-        from ulid import ULID
-
-        response = await client.get(
-            f"/watched-items/{ULID()}/aspect-review-status",
-            headers={"HX-Request": "true"},
-        )
-        assert response.status_code == 404
-
-    async def test_non_htmx_redirects(self, client, db_session):
-        from src.core.models.watched_item import WatchedItem
-        from tests.conftest import make_info_item
-
-        item = await make_info_item(db_session)
-        wi = WatchedItem(info_item_id=item.info_item_id, name="Redirect")
-        db_session.add(wi)
-        await db_session.flush()
-        await db_session.commit()
-
-        response = await client.get(
-            f"/watched-items/{wi.id}/aspect-review-status",
-            follow_redirects=False,
-        )
-        assert response.status_code == 303

@@ -16,17 +16,41 @@
   </div>
 </div>
 
-{% if info_item is none %}
-<div class="stat-card mb-6 text-sm text-gray-500">Archiver Information Item summary unavailable.</div>
-{% else %}
-<div class="mb-6">
-  {% with mode="readonly_tree" %}
-  {% include "partials/info_item_picker/binding_tree.html" %}
-  {% endwith %}
+{# URL + stats summary card #}
+<div class="stat-card mb-6">
+  <dl class="space-y-2 text-sm">
+    {% if watched_item.effective_url %}
+    <div>
+      <dt class="form-label mb-0 text-xs">URL</dt>
+      <dd><a href="{{ watched_item.effective_url }}" class="link break-all" target="_blank" rel="noopener noreferrer">{{ watched_item.effective_url }}</a></dd>
+    </div>
+    {% endif %}
+    {% if watched_item.last_checked_at %}
+    <div>
+      <dt class="form-label mb-0 text-xs">Last checked</dt>
+      <dd class="text-gray-700 dark:text-gray-300">{{ watched_item.last_checked_at.strftime("%Y-%m-%d %H:%M UTC") }}</dd>
+    </div>
+    {% endif %}
+    {% if watched_item.last_changed_at %}
+    <div>
+      <dt class="form-label mb-0 text-xs">Last changed</dt>
+      <dd class="text-gray-700 dark:text-gray-300">{{ watched_item.last_changed_at.strftime("%Y-%m-%d %H:%M UTC") }}</dd>
+    </div>
+    {% endif %}
+    {% if watched_item.health_status and watched_item.health_status.value != "unknown" %}
+    <div>
+      <dt class="form-label mb-0 text-xs">Health</dt>
+      <dd>
+        {% if watched_item.health_status.value == "error" %}
+        <span class="badge badge-error">{{ watched_item.health_status.value }}</span>
+        {% else %}
+        <span class="badge badge-active">{{ watched_item.health_status.value }}</span>
+        {% endif %}
+      </dd>
+    </div>
+    {% endif %}
+  </dl>
 </div>
-{% endif %}
-
-{% include "partials/watched_item_subaspect_banner.html" %}
 
 {% if watched_item.domain_suspended %}
 <div class="mb-4 p-4 rounded-lg bg-orange-50 dark:bg-orange-950 border border-orange-200 dark:border-orange-800 text-sm text-orange-800 dark:text-orange-200" role="alert">
@@ -79,7 +103,7 @@
 <section class="mb-8">
   <div class="flex items-center justify-between mb-4">
     <h3 class="text-lg font-semibold text-gray-900 dark:text-white">Watches</h3>
-    {% if not watched_item.archived_at and primary_url %}
+    {% if not watched_item.archived_at and watched_item.effective_url %}
     <a href="/watches/new?watched_item_id={{ watched_item.id }}"
        class="btn btn-secondary btn-sm">+ New Watch</a>
     {% endif %}

@@ -25,8 +25,6 @@ from src.core.models.notification_config import WatchNotificationConfig
 from src.core.notifications.events import WatchEvent, WatchEventType
 from src.core.notifications.notify import DispatchCandidate, dispatch_via_notifier
 from src.core.notifier_client import get_notifier_client
-from src.core.registry import get_registry
-from src.core.watches import resolve_watch_url
 
 logger = get_logger(__name__)
 
@@ -151,46 +149,38 @@ async def test_notification_config(
     success = False
     reason = "Internal error during dispatch"
     try:
-        info_client = get_registry().get_archiver_client()
-        try:
-            resolved_url = await resolve_watch_url(watch, info_client)
-        except Exception as exc:
-            logger.exception(
-                "failed to resolve watch URL for test notification",
-                extra={"config_id": config_id, "watch_id": str(watch.id)},
-            )
-            reason = f"Failed to resolve watch URL: {exc}"
+        wi_url = watch.watched_item and watch.watched_item.effective_url
+        resolved_url = wi_url or f"watch:{watch.id}"
+        if not nc.remote_channel_id:
+            reason = "no remote_channel_id configured"
         else:
-            if not nc.remote_channel_id:
-                reason = "no remote_channel_id configured"
-            else:
-                event = WatchEvent(
-                    event_type=WatchEventType.CHANGE_DETECTED,
-                    watch_id=str(watch.id),
-                    watch_name=watch.name,
-                    watch_url=resolved_url,
-                    occurred_at=datetime.now(UTC),
-                    metadata={"test": True},
-                )
-                candidate = DispatchCandidate(
-                    source="local",
-                    source_id=str(nc.id),
-                    content_config=nc.content_config,
-                    remote_channel_id=nc.remote_channel_id,
-                )
-                try:
-                    async with get_notifier_client() as client:
-                        outcome = await dispatch_via_notifier(
-                            client,
-                            candidate,
-                            event,
-                            rendered_title="[Test] Watch notification",
-                            rendered_body=f"Test from watch '{watch.name}'.",
-                        )
-                    success = outcome.success
-                    reason = outcome.reason
-                except NotifierError as exc:
-                    reason = f"notifier error: {exc}"
+            event = WatchEvent(
+                event_type=WatchEventType.CHANGE_DETECTED,
+                watch_id=str(watch.id),
+                watch_name=watch.name,
+                watch_url=resolved_url,
+                occurred_at=datetime.now(UTC),
+                metadata={"test": True},
+            )
+            candidate = DispatchCandidate(
+                source="local",
+                source_id=str(nc.id),
+                content_config=nc.content_config,
+                remote_channel_id=nc.remote_channel_id,
+            )
+            try:
+                async with get_notifier_client() as client:
+                    outcome = await dispatch_via_notifier(
+                        client,
+                        candidate,
+                        event,
+                        rendered_title="[Test] Watch notification",
+                        rendered_body=f"Test from watch '{watch.name}'.",
+                    )
+                success = outcome.success
+                reason = outcome.reason
+            except NotifierError as exc:
+                reason = f"notifier error: {exc}"
     except Exception:
         logger.exception("test notification error", extra={"config_id": config_id})
     audit(

@@ -1,4 +1,4 @@
-"""Tests for the scratch-cache sweeper periodic task."""
+"""Tests for the scratch-cache sweeper periodic task (#185 Phase A step 6)."""
 
 import os
 from contextlib import asynccontextmanager
@@ -9,7 +9,7 @@ import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 from ulid import ULID
 
-from src.core.models.pending_source_revision import PendingSourceRevision
+from src.core.models.pending_archiver_sync import PendingArchiverSync
 
 pytestmark = pytest.mark.integration
 
@@ -26,6 +26,27 @@ def _async_session_factory_returning(db_session: AsyncSession):
     factory = MagicMock()
     factory.return_value = _ctx()
     return factory
+
+
+async def _make_watched_item_and_change_revision(db_session, revision_ulid_str: str):
+    """Create the minimal rows needed for a PendingArchiverSync row."""
+    from src.core.models.change_revision import ChangeRevision
+    from src.core.models.watched_item import WatchedItem
+
+    wi = WatchedItem(name="Sweeper Test WI")
+    db_session.add(wi)
+    await db_session.flush()
+
+    rev = ChangeRevision(
+        id=ULID.from_str(revision_ulid_str),
+        watched_item_id=wi.id,
+        content_fingerprint=FP,
+        captured_at=datetime.now(UTC),
+        schema_version=1,
+    )
+    db_session.add(rev)
+    await db_session.flush()
+    return wi, rev
 
 
 @pytest.mark.asyncio
@@ -73,8 +94,8 @@ async def test_sweeper_deletes_files_older_than_ttl(tmp_path, monkeypatch, db_se
 
 
 @pytest.mark.asyncio
-async def test_sweeper_skips_files_in_outbox(tmp_path, monkeypatch, db_session):
-    """Files whose ULID is in pending_source_revisions are skipped (outbox interlock)."""
+async def test_sweeper_skips_files_in_pending_archiver_sync(tmp_path, monkeypatch, db_session):
+    """Files whose ULID is a change_revision_id in pending_archiver_sync are skipped."""
     from src.workers import cache_sweeper as mod
     from src.workers.cache_sweeper import sweep_scratch_cache
 
@@ -101,11 +122,10 @@ async def test_sweeper_skips_files_in_outbox(tmp_path, monkeypatch, db_session):
     os.utime(f, (mtime, mtime))
 
     now = datetime.now(UTC)
-    row = PendingSourceRevision(
-        id=ULID.from_str(reserved_str),
-        info_source_id=ULID.from_str("01JZZZZZZZZZZZZZZZZZZZZ003"),
-        content_fingerprint=FP,
-        captured_at=now,
+    wi, rev = await _make_watched_item_and_change_revision(db_session, reserved_str)
+    row = PendingArchiverSync(
+        change_revision_id=rev.id,
+        watched_item_id=wi.id,
         content_cache_uri=f"file://{f}",
         content_cache_expires_at=now + timedelta(seconds=600),
         next_attempt_at=now,

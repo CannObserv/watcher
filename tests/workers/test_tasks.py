@@ -137,14 +137,16 @@ class TestMaybeDecayBackoff:
 class TestCheckWatchedItem:
     """The periodic per-WatchedItem task wires fetcher → pipeline → timestamps."""
 
-    async def test_updates_last_checked_at_on_every_child_watch(self, db_session, monkeypatch):
-        """Every active child Watch should have last_checked_at set, even if its
-        target binding did not change in this cycle."""
+    async def test_updates_last_checked_at_on_watched_item(self, db_session, monkeypatch):
+        """check_watched_item stamps WatchedItem.last_checked_at after each cycle.
+
+        #185 Phase A step 6: last_checked_at moved from per-Watch to WatchedItem.
+        """
         wi_watch = await make_watch(db_session, name="Primary")
         watched_item = wi_watch.watched_item
 
-        # Sibling Watch under the same WatchedItem (target unchanged here).
-        sibling = await make_watch(
+        # Sibling Watch under the same WatchedItem.
+        await make_watch(
             db_session,
             name="Sibling",
             info_item_id=watched_item.info_item_id,
@@ -171,13 +173,6 @@ class TestCheckWatchedItem:
         monkeypatch.setattr(tasks_mod, "process_watched_item", _make_pipeline_stub())
 
         await check_watched_item(str(watched_item.id), registry=reg)
-
-        await db_session.refresh(wi_watch)
-        await db_session.refresh(sibling)
-        assert wi_watch.last_checked_at is not None
-        assert wi_watch.last_checked_at >= before
-        assert sibling.last_checked_at is not None
-        assert sibling.last_checked_at >= before
 
         await db_session.refresh(watched_item)
         assert watched_item.last_checked_at is not None
@@ -241,10 +236,8 @@ class TestCheckWatchedItem:
         )
         assert len(audit_rows) == 1
 
-        await db_session.refresh(watch)
-        assert watch.health_status == WatchHealthStatus.ERROR
-
         await db_session.refresh(watched_item)
+        assert watched_item.health_status == WatchHealthStatus.ERROR
         assert watched_item.last_checked_at is not None
 
     async def test_stamps_watched_item_last_checked_at_on_fetch_failure(
@@ -288,23 +281,22 @@ class TestCheckWatchedItem:
 
 
 class TestScheduleTickAggregation:
-    """schedule_tick enqueues per-WatchedItem based on MIN(child last_checked_at)."""
+    """schedule_tick enqueues per-WatchedItem based on WatchedItem.last_checked_at."""
 
-    async def test_enqueues_when_min_child_overdue(self, db_session, monkeypatch):
-        """A WatchedItem whose earliest child check is older than the interval is due."""
+    async def test_enqueues_when_watched_item_overdue(self, db_session, monkeypatch):
+        """A WatchedItem whose last_checked_at is older than the interval is due."""
         now = datetime(2026, 5, 17, 12, 0, 0, tzinfo=UTC)
         # Default schedule on the WatchedItem = 1h.
         watch_a = await make_watch(db_session, name="A")
         wi = watch_a.watched_item
         wi.default_schedule_config = {"interval": "1h"}
-        watch_a.last_checked_at = now - timedelta(hours=2)
-        watch_b = await make_watch(
+        wi.last_checked_at = now - timedelta(hours=2)
+        await make_watch(
             db_session,
             name="B",
             info_item_id=wi.info_item_id,
             watched_item=wi,
         )
-        watch_b.last_checked_at = now - timedelta(minutes=5)
         await db_session.commit()
 
         monkeypatch.setattr(
@@ -326,13 +318,13 @@ class TestScheduleTickAggregation:
         assert len(defer_calls) == 1
         assert defer_calls[0]["watched_item_id"] == str(wi.id)
 
-    async def test_does_not_enqueue_when_all_children_fresh(self, db_session, monkeypatch):
-        """If every child Watch was checked recently, the WatchedItem is not due."""
+    async def test_does_not_enqueue_when_watched_item_fresh(self, db_session, monkeypatch):
+        """If the WatchedItem was checked recently, it is not due."""
         now = datetime(2026, 5, 17, 12, 0, 0, tzinfo=UTC)
         w = await make_watch(db_session, name="Fresh")
         wi = w.watched_item
         wi.default_schedule_config = {"interval": "1h"}
-        w.last_checked_at = now - timedelta(minutes=5)
+        wi.last_checked_at = now - timedelta(minutes=5)
         await db_session.commit()
 
         monkeypatch.setattr(
@@ -351,12 +343,12 @@ class TestScheduleTickAggregation:
         mock_configure.return_value.defer_async.assert_not_called()
 
     async def test_null_last_checked_at_is_due_immediately(self, db_session, monkeypatch):
-        """A Watch with NULL last_checked_at means the WatchedItem is overdue."""
+        """A WatchedItem with NULL last_checked_at is always overdue."""
         now = datetime(2026, 5, 17, 12, 0, 0, tzinfo=UTC)
         w = await make_watch(db_session, name="Never")
         wi = w.watched_item
         wi.default_schedule_config = {"interval": "1h"}
-        # explicitly leave last_checked_at as None.
+        # explicitly leave wi.last_checked_at as None.
         await db_session.commit()
 
         monkeypatch.setattr(
@@ -454,7 +446,7 @@ class TestPostActions:
         w_target = await make_watch(db_session, name="Profiled")
         wi = w_target.watched_item
         wi.default_schedule_config = {"interval": "1h"}
-        w_target.last_checked_at = now - timedelta(hours=25)
+        wi.last_checked_at = now - timedelta(hours=25)
 
         # Sibling sharing the same WatchedItem.
         sibling = await make_watch(
@@ -463,7 +455,6 @@ class TestPostActions:
             info_item_id=wi.info_item_id,
             watched_item=wi,
         )
-        sibling.last_checked_at = now - timedelta(hours=25)
 
         # Expired event profile attached to w_target only — reduce_frequency.
         profile = TemporalProfile(
@@ -517,7 +508,7 @@ class TestPostActions:
         now = datetime(2026, 5, 17, 12, 0, 0, tzinfo=UTC)
         w = await make_watch(db_session, name="Will Deactivate")
         w.watched_item.default_schedule_config = {"interval": "1d"}
-        w.last_checked_at = now - timedelta(hours=25)
+        w.watched_item.last_checked_at = now - timedelta(hours=25)
 
         profile = TemporalProfile(
             watch_id=w.id,
@@ -552,7 +543,7 @@ class TestPostActions:
         now = datetime(2026, 5, 17, 12, 0, 0, tzinfo=UTC)
         w = await make_watch(db_session, name="Will Archive")
         w.watched_item.default_schedule_config = {"interval": "1d"}
-        w.last_checked_at = now - timedelta(hours=25)
+        w.watched_item.last_checked_at = now - timedelta(hours=25)
 
         profile = TemporalProfile(
             watch_id=w.id,

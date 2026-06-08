@@ -1,10 +1,8 @@
 """Integration tests for the create_watch service function (InfoItem-first, #160).
 
-Phase 6 contract: ``create_watch`` takes ``info_item_id`` (required) and
-optional ``target_info_source_id`` (must be a sub_aspect binding).
-URL resolution uses ``fetch_info_item_bindings`` which returns the
-InfoItem's primary URL. The probe runs against that resolved URL to
-populate ``effective_url``; domain_name is set on the parent WatchedItem.
+#185 Phase A step 6: Watch no longer stores info_item_id, effective_url, or
+target_info_source_id. These live on WatchedItem. create_watch probes the URL
+and sets watched_item.effective_url (first Watch wins).
 """
 
 from unittest.mock import AsyncMock, patch
@@ -73,9 +71,10 @@ class TestCreateWatch:
         assert isinstance(watch, Watch)
         assert watch.id is not None
         assert watch.name == "Test Watch"
-        assert watch.info_item_id == item.info_item_id
+        assert watch.watched_item.info_item_id == item.info_item_id
 
-    async def test_sets_effective_url_and_domain(self, db_session, info_client):
+    async def test_sets_effective_url_on_watched_item(self, db_session, info_client):
+        """create_watch populates watched_item.effective_url from probe result."""
         item, _ = await _seed_item_with_primary(db_session, url="https://example.com/page")
         watch = await create_watch(
             session=db_session,
@@ -88,7 +87,7 @@ class TestCreateWatch:
             info_item_id=str(item.info_item_id),
             content_type="html",
         )
-        assert watch.effective_url == "https://example.com/canonical"
+        assert watch.watched_item.effective_url == "https://example.com/canonical"
         assert watch.watched_item.domain_name == "example.com"
 
     async def test_creates_domain_for_new_domain(self, db_session, info_client):
@@ -201,13 +200,14 @@ class TestCreateWatch:
 
 
 class TestResolveWatchUrl:
-    """resolve_watch_url returns the URL from the InfoItem's primary binding."""
+    """resolve_watch_url resolves via watched_item.info_item_id (deprecated helper)."""
 
-    async def test_returns_primary_url_from_info_item(self, db_session, info_client):
+    async def test_returns_primary_url_via_watched_item(self, db_session, info_client):
         item, _ = await _seed_item_with_primary(
             db_session, url="https://from-info-item.example.com"
         )
         watch = await make_watch(db_session, info_item_id=item.info_item_id)
+        await db_session.refresh(watch, ["watched_item"])
 
         resolved_url = await resolve_watch_url(watch, info_client)
 
@@ -260,12 +260,11 @@ async def test_create_watch_info_item_first_auto_creates_watched_item(
         info_item_id=str(item.info_item_id),
     )
 
-    assert watch.info_item_id == item.info_item_id
-    assert watch.target_info_source_id is None
+    # Phase A step 6: info_item_id + effective_url live on WatchedItem, not Watch.
     assert watch.watched_item_id is not None
-    assert watch.effective_url is not None
-    assert watch.watched_item.domain_name is not None
     assert watch.watched_item.info_item_id == item.info_item_id
+    assert watch.watched_item.effective_url is not None
+    assert watch.watched_item.domain_name is not None
     # WatchedItem.name falls back to the Watch's name when auto-created.
     assert watch.watched_item.name == "OR registry"
 

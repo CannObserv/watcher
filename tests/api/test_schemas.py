@@ -147,10 +147,11 @@ class TestWatchUpdate:
         data = WatchUpdate()
         assert data.name is None
 
-    def test_update_url_field_not_present(self):
-        """URL is intentionally omitted from WatchUpdate — owned by the InfoSource."""
+    def test_update_no_url_or_effective_url(self):
+        """URL lives on WatchedItem; not mutable via WatchUpdate."""
         data = WatchUpdate(name="No URL change")
         assert not hasattr(data, "url")
+        assert not hasattr(data, "effective_url")
 
     def test_update_no_fetch_config_field(self):
         """fetch_config is owned by the InfoSource; never on the Watch row."""
@@ -168,17 +169,9 @@ class TestWatchUpdate:
         assert not hasattr(data, "info_item_id")
 
     def test_update_no_target_info_source_id(self):
-        """target_info_source_id is immutable after creation — not on WatchUpdate."""
+        """target_info_source_id removed in Archiver v4.0.0 — not on WatchUpdate."""
         data = WatchUpdate(name="X")
         assert not hasattr(data, "target_info_source_id")
-
-    def test_update_rejects_invalid_effective_url(self):
-        with pytest.raises(ValidationError):
-            WatchUpdate(effective_url="not-a-url")
-
-    def test_update_accepts_valid_effective_url(self):
-        data = WatchUpdate(effective_url="https://example.com/resolved")
-        assert data.effective_url == "https://example.com/resolved"
 
 
 # Phase 5 (#156): TestSnapshotChunkResponse, TestSnapshotResponse, TestChangeResponse,
@@ -190,8 +183,6 @@ class TestWatchResponse:
     def _build_watch(self, **overrides):
         watch = Watch(
             name=overrides.pop("name", "Test"),
-            info_item_id=overrides.pop("info_item_id", ULID()),
-            target_info_source_id=overrides.pop("target_info_source_id", None),
             watched_item_id=overrides.pop("watched_item_id", ULID()),
             content_type=overrides.pop("content_type", ContentType.HTML),
             **overrides,
@@ -211,39 +202,32 @@ class TestWatchResponse:
         response = WatchResponse.model_validate(watch)
         assert response.is_archived is True
 
-    def test_watch_response_has_info_item_id(self):
-        """#160: WatchResponse exposes info_item_id (not info_source_id)."""
-        watch = self._build_watch()
-        response = WatchResponse.model_validate(watch)
-        assert response.info_item_id == str(watch.info_item_id)
-
-    def test_watch_response_target_info_source_id_nullable(self):
-        """Primary-target Watches expose target_info_source_id=None."""
-        watch = self._build_watch()
-        response = WatchResponse.model_validate(watch)
-        assert response.target_info_source_id is None
-
-    def test_watch_response_target_info_source_id_present(self):
-        """Sub_aspect-target Watches expose target_info_source_id as a string."""
-        sub_id = ULID()
-        watch = self._build_watch(target_info_source_id=sub_id)
-        response = WatchResponse.model_validate(watch)
-        assert response.target_info_source_id == str(sub_id)
-
     def test_watch_response_has_watched_item_id(self):
-        """#160: WatchResponse exposes watched_item_id."""
+        """WatchResponse exposes watched_item_id."""
         wi_id = ULID()
         watch = self._build_watch(watched_item_id=wi_id)
         response = WatchResponse.model_validate(watch)
         assert response.watched_item_id == str(wi_id)
 
+    def test_watch_response_has_suspended_by_domain(self):
+        """Watch.domain_suspended renamed suspended_by_domain (#185 step 6)."""
+        watch = self._build_watch(suspended_by_domain=True)
+        response = WatchResponse.model_validate(watch)
+        assert response.suspended_by_domain is True
+
     def test_watch_response_has_no_legacy_fields(self):
-        """WatchResponse must not expose ``url``, ``fetch_config``,
-        ``info_source_id``, or ``schedule_config``."""
+        """WatchResponse must not expose dropped columns."""
         watch = self._build_watch()
         response = WatchResponse.model_validate(watch)
         dumped = response.model_dump()
         assert "url" not in dumped
+        assert "effective_url" not in dumped
+        assert "info_item_id" not in dumped
+        assert "target_info_source_id" not in dumped
+        assert "last_checked_at" not in dumped
+        assert "last_changed_at" not in dumped
+        assert "health_status" not in dumped
+        assert "domain_suspended" not in dumped
         assert "fetch_config" not in dumped
         assert "info_source_id" not in dumped
         assert "schedule_config" not in dumped

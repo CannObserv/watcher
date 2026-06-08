@@ -21,9 +21,6 @@ from src.core.models.watched_item_notification_template import (
 _WATCH_SORT_COLS: dict[str, Any] = {
     "name": Watch.name,
     "status": Watch.is_active,
-    "health": Watch.health_status,
-    "last_checked_at": Watch.last_checked_at,
-    "last_changed_at": Watch.last_changed_at,
     "created_at": Watch.created_at,
 }
 
@@ -31,6 +28,11 @@ _DOMAIN_WI_SORT_COLS: dict[str, Any] = {
     "name": WatchedItem.name,
     "last_checked_at": WatchedItem.last_checked_at,
 }
+
+
+def _wi_subq(col):
+    """Correlated subquery: SELECT col FROM watched_items WHERE id = watches.watched_item_id."""
+    return select(col).where(WatchedItem.id == Watch.watched_item_id).scalar_subquery()
 
 
 async def get_watch_list(
@@ -44,9 +46,16 @@ async def get_watch_list(
 ) -> list[Watch]:
     """Fetch watches for list display with optional filtering and sorting.
 
-    Default sort is ``last_checked_at desc`` (changed from ``created_at`` in #101).
+    Sorting by health/last_checked_at/last_changed_at uses correlated subqueries
+    against the parent WatchedItem (these columns moved from Watch in #185 Phase A
+    step 6). Default sort is ``last_checked_at desc``.
     """
-    col = _WATCH_SORT_COLS.get(sort, Watch.last_checked_at)
+    wi_sort: dict[str, Any] = {
+        "health": _wi_subq(WatchedItem.health_status),
+        "last_checked_at": _wi_subq(WatchedItem.last_checked_at),
+        "last_changed_at": _wi_subq(WatchedItem.last_changed_at),
+    }
+    col = _WATCH_SORT_COLS.get(sort) or wi_sort.get(sort, _wi_subq(WatchedItem.last_checked_at))
     order_expr = col.asc().nulls_first() if order == "asc" else col.desc().nulls_last()
     stmt = select(Watch).order_by(order_expr)
     if is_active is not None:
@@ -58,8 +67,10 @@ async def get_watch_list(
         stmt = stmt.where(Watch.name.ilike(f"%{escaped}%"))
     if domain:
         escaped = domain.replace("%", "\\%").replace("_", "\\_")
-        stmt = stmt.join(WatchedItem, WatchedItem.id == Watch.watched_item_id).where(
-            WatchedItem.domain_name.ilike(f"%{escaped}%")
+        stmt = stmt.where(
+            Watch.watched_item_id.in_(
+                select(WatchedItem.id).where(WatchedItem.domain_name.ilike(f"%{escaped}%"))
+            )
         )
     result = await session.execute(stmt)
     return list(result.scalars().all())
@@ -359,7 +370,7 @@ async def get_domains_with_watched_item_counts(
         select(
             Domain,
             func.count(WatchedItem.id.distinct()).label("watched_item_count"),
-            func.max(Watch.last_checked_at).label("last_checked"),
+            func.max(WatchedItem.last_checked_at).label("last_checked"),
         )
         .outerjoin(WatchedItem, WatchedItem.domain_name == Domain.name)
         .outerjoin(Watch, Watch.watched_item_id == WatchedItem.id)

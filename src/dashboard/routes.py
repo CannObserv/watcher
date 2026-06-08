@@ -225,7 +225,7 @@ async def watches_page(
         session, is_active=is_active, search=q, domain=domain, sort=sort, order=order
     )
     _attach_resolved_interval(watches)
-    health_map = {w.id: w.health_status for w in watches}
+    health_map = {w.id: w.watched_item.health_status for w in watches if w.watched_item}
     context = {
         "active_page": "watches",
         "watches": watches,
@@ -951,7 +951,8 @@ async def watch_deactivate(
 
     if request.headers.get("HX-Request") == "true":
         _attach_resolved_interval([watch])
-        health_map = {watch.id: watch.health_status}
+        wi_health = watch.watched_item.health_status if watch.watched_item else None
+        health_map = {watch.id: wi_health}
         return templates.TemplateResponse(
             request,
             "partials/watch_row.html",
@@ -1263,7 +1264,9 @@ async def watched_item_detail_page(
             "sub_aspects": sub_aspects,
             "new_subaspect_ids": new_subaspect_ids,
             "watches": children,
-            "health_map": {w.id: w.health_status for w in children},
+            "health_map": {
+                w.id: (w.watched_item.health_status if w.watched_item else None) for w in children
+            },
             "flash": None,
             "field_contexts": field_contexts,
             "new_subaspect_count": new_subaspect_count,
@@ -1874,7 +1877,7 @@ async def domain_toggle_active(
         )
         for watch in watches_result.scalars().all():
             watch.is_active = False
-            watch.domain_suspended = True
+            watch.suspended_by_domain = True
         audit(session, EventType.DOMAIN_DEACTIVATED, domain_name=name, source="dashboard")
     else:
         # Restore: clear WatchedItem suspended flag, reactivate domain-suspended watches.
@@ -1888,13 +1891,13 @@ async def domain_toggle_active(
             .join(WatchedItem, WatchedItem.id == Watch.watched_item_id)
             .where(
                 WatchedItem.domain_name == name,
-                Watch.domain_suspended == True,  # noqa: E712
+                Watch.suspended_by_domain == True,  # noqa: E712
                 Watch.is_archived == False,  # noqa: E712
             )
         )
         for watch in watches_result.scalars().all():
             watch.is_active = True
-            watch.domain_suspended = False
+            watch.suspended_by_domain = False
         audit(session, EventType.DOMAIN_ACTIVATED, domain_name=name, source="dashboard")
 
     await session.commit()
@@ -2403,7 +2406,7 @@ async def partial_watch_table(
         session, is_active=is_active, search=q, domain=domain, sort=sort, order=order
     )
     _attach_resolved_interval(watches)
-    health_map = {w.id: w.health_status for w in watches}
+    health_map = {w.id: w.watched_item.health_status for w in watches if w.watched_item}
     return templates.TemplateResponse(
         request,
         "partials/watch_table.html",

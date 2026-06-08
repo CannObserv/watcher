@@ -10,7 +10,7 @@ from ulid import ULID
 
 from src.core.database import get_session_factory
 from src.core.logging import get_logger
-from src.core.models.pending_source_revision import PendingSourceRevision
+from src.core.models.pending_archiver_sync import PendingArchiverSync
 from src.core.registry import get_registry
 from src.workers import bp
 
@@ -32,11 +32,12 @@ def _ttl_seconds() -> int:
 @bp.periodic(cron="* * * * *", periodic_id="sweep_scratch_cache")
 @bp.task(name="sweep_scratch_cache", queue="default")
 async def sweep_scratch_cache(**periodic_kwargs) -> dict:
-    """Delete scratch files older than TTL, skipping files with pending outbox rows.
+    """Delete scratch files older than TTL, skipping files with pending sync rows.
 
     Candidates are files whose names match ``<ULID>.bin``. Files whose ULID
-    appears in ``pending_source_revisions`` are skipped — those rows own the
-    scratch file and the drain worker will remove it upon success.
+    appears as a ``change_revision_id`` in ``pending_archiver_sync`` are
+    skipped — those rows own the scratch file and the drain worker will remove
+    it upon success.
 
     After deletion, sends a best-effort PATCH to Archiver to clear the cache
     URI so Archiver knows the file is gone.
@@ -68,7 +69,9 @@ async def sweep_scratch_cache(**periodic_kwargs) -> dict:
     factory = get_session_factory()
     async with factory() as session:
         result = await session.execute(
-            select(PendingSourceRevision.id).where(PendingSourceRevision.id.in_(candidate_ulids))
+            select(PendingArchiverSync.change_revision_id).where(
+                PendingArchiverSync.change_revision_id.in_(candidate_ulids)
+            )
         )
         reserved = {str(rid) for (rid,) in result.all()}
 

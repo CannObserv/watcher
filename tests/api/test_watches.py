@@ -56,15 +56,19 @@ class TestCreateWatch:
         assert response.status_code == 201, response.text
         data = response.json()
         assert data["name"] == "Test Watch"
-        assert data["info_item_id"] == info_item_id
-        assert data["target_info_source_id"] is None
         assert "watched_item_id" in data
         assert data["watched_item_id"]
         assert data["content_type"] == "html"
         assert data["is_active"] is True
         assert "id" in data
         assert "created_at" in data
-        # Legacy fields must not appear on the new shape.
+        # Dropped fields must not appear in the Phase A step 6 shape.
+        assert "info_item_id" not in data
+        assert "target_info_source_id" not in data
+        assert "effective_url" not in data
+        assert "last_checked_at" not in data
+        assert "last_changed_at" not in data
+        assert "health_status" not in data
         assert "url" not in data
         assert "fetch_config" not in data
         assert "info_source_id" not in data
@@ -194,7 +198,7 @@ class TestGetWatch:
         response = await client.get(f"/api/v1/watches/{watch_id}")
         assert response.status_code == 200
         assert response.json()["name"] == "Get Me"
-        assert response.json()["info_item_id"] == info_item_id
+        assert "watched_item_id" in response.json()
 
     async def test_get_watch_not_found(self, client):
         response = await client.get("/api/v1/watches/00000000000000000000000000")
@@ -653,7 +657,8 @@ class TestListWatchesArchivedFilter:
 
 
 class TestCreateWatchProbe:
-    async def test_create_watch_populates_effective_fields(self, client, db_session):
+    async def test_create_watch_populates_effective_url_on_watched_item(self, client, db_session):
+        """Watch-create sets effective_url on WatchedItem (#185 Phase A)."""
         info_item_id = await _seed_info_item(db_session, name="W", url="https://example.com/page")
         response = await client.post(
             "/api/v1/watches",
@@ -664,8 +669,9 @@ class TestCreateWatchProbe:
             },
         )
         assert response.status_code == 201, response.text
-        data = response.json()
-        assert data["effective_url"] == "https://example.com/page"
+        wi_id = response.json()["watched_item_id"]
+        wi_resp = await client.get(f"/api/v1/watched-items/{wi_id}")
+        assert wi_resp.json()["effective_url"] == "https://example.com/page"
 
     async def test_create_watch_upserts_domain(self, client, db_session):
         info_item_id = await _seed_info_item(db_session, name="W", url="https://example.com/p")
@@ -713,41 +719,3 @@ class TestCreateWatchProbe:
             )
         ).scalar_one()
         assert str(wi_row.info_item_id) == info_item_id
-
-
-class TestUpdateWatchEffectiveFields:
-    async def test_patch_effective_url(self, client, db_session):
-        info_item_id = await _seed_info_item(db_session, name="W", url="https://example.com/p")
-        resp = await client.post(
-            "/api/v1/watches",
-            json={
-                "name": "W",
-                "info_item_id": info_item_id,
-                "content_type": "html",
-            },
-        )
-        watch_id = resp.json()["id"]
-        response = await client.patch(
-            f"/api/v1/watches/{watch_id}",
-            json={"effective_url": "https://example.com/resolved"},
-        )
-        assert response.status_code == 200
-        assert response.json()["effective_url"] == "https://example.com/resolved"
-
-    async def test_patch_effective_url_null(self, client, db_session):
-        info_item_id = await _seed_info_item(db_session, name="W", url="https://example.com/p")
-        resp = await client.post(
-            "/api/v1/watches",
-            json={
-                "name": "W",
-                "info_item_id": info_item_id,
-                "content_type": "html",
-            },
-        )
-        watch_id = resp.json()["id"]
-        response = await client.patch(
-            f"/api/v1/watches/{watch_id}",
-            json={"effective_url": None},
-        )
-        assert response.status_code == 200
-        assert response.json()["effective_url"] is None

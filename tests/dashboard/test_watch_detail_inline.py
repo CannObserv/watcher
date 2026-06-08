@@ -416,7 +416,7 @@ class TestWatchStatusToggle:
         assert response.status_code in (200, 303)
         await db_session.refresh(watch)
         assert watch.is_active is False
-        assert watch.domain_suspended is False
+        assert watch.suspended_by_domain is False
 
 
 class TestWatchArchiveRestore:

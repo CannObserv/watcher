@@ -396,13 +396,12 @@ class TestTestNotificationConfig:
             resp = await client.post(f"/api/v1/watches/{other_id}/notifications/{config_id}/test")
         assert resp.status_code == 404
 
-    async def test_test_returns_success_false_on_resolve_failure(self, client, db_session):
-        """SDK failure resolving watch URL must NOT 5xx — endpoint promises {success, reason}."""
-        from unittest.mock import AsyncMock, patch
-
+    async def test_test_uses_sentinel_url_when_no_effective_url(self, client, db_session):
+        """When watched_item.effective_url is empty, test notification uses watch:id sentinel."""
         from src.core.models.notification_config import WatchNotificationConfig
 
-        watch = await make_watch(db_session, name="WithSpec", primary_url="https://example.com")
+        watch = await make_watch(db_session, name="NoURL", primary_url="https://example.com")
+        watch.watched_item.effective_url = ""
         nc = WatchNotificationConfig(
             watch_id=watch.id,
             channel_hint="json",
@@ -412,19 +411,10 @@ class TestTestNotificationConfig:
         db_session.add(nc)
         await db_session.commit()
 
-        with patch(
-            "src.api.routes.notification_configs.resolve_watch_url",
-            new_callable=AsyncMock,
-            side_effect=RuntimeError("information service unreachable"),
-        ):
-            resp = await client.post(f"/api/v1/watches/{watch.id}/notifications/{nc.id}/test")
-        assert resp.status_code == 200, (
-            f"endpoint must never 5xx; got {resp.status_code} {resp.text}"
-        )
+        resp = await client.post(f"/api/v1/watches/{watch.id}/notifications/{nc.id}/test")
+        assert resp.status_code == 200
         data = resp.json()
-        assert data["success"] is False
-        assert "reason" in data
-        assert "resolve" in data["reason"].lower() or "watch url" in data["reason"].lower()
+        assert "success" in data
 
 
 @pytest.mark.integration

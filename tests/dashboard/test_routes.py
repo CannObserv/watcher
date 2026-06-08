@@ -86,24 +86,16 @@ class TestWatchList:
         assert response.status_code == 200
 
     async def test_health_badge_ok(self, client, db_session):
-        await make_watch(
-            db_session,
-            name="W",
-            primary_url="https://a.com",
-            content_type="html",
-            health_status=WatchHealthStatus.OK,
-        )
+        w = await make_watch(db_session, name="W", primary_url="https://a.com", content_type="html")
+        w.watched_item.health_status = WatchHealthStatus.OK
+        await db_session.commit()
         response = await client.get("/watches")
         assert b"Healthy" in response.content
 
     async def test_health_badge_error(self, client, db_session):
-        await make_watch(
-            db_session,
-            name="W",
-            primary_url="https://a.com",
-            content_type="html",
-            health_status=WatchHealthStatus.ERROR,
-        )
+        w = await make_watch(db_session, name="W", primary_url="https://a.com", content_type="html")
+        w.watched_item.health_status = WatchHealthStatus.ERROR
+        await db_session.commit()
         response = await client.get("/watches")
         assert b"Error" in response.content
 
@@ -254,7 +246,7 @@ class TestWatchCreate:
         result = await db_session.execute(select(Watch).where(Watch.id == watch_id))
         watch = result.scalar_one()
         await db_session.refresh(watch, ["watched_item"])
-        assert watch.effective_url == "https://lcb.wa.gov/page"
+        assert watch.watched_item.effective_url == "https://lcb.wa.gov/page"
         assert watch.watched_item.domain_name == "lcb.wa.gov"
         domain_result = await db_session.execute(select(Domain).where(Domain.name == "lcb.wa.gov"))
         assert domain_result.scalar_one_or_none() is not None

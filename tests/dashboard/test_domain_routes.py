@@ -352,7 +352,7 @@ class TestDomainToggleActive:
         await db_session.refresh(watch)
         await db_session.refresh(watch.watched_item)
         assert watch.is_active is False
-        assert watch.domain_suspended is True
+        assert watch.suspended_by_domain is True
         assert watch.watched_item.domain_suspended is True
 
     async def test_toggle_inactive_skips_already_inactive_watches(self, client, db_session):
@@ -369,7 +369,7 @@ class TestDomainToggleActive:
         await client.post("/domains/skip-inactive.com/toggle-active", data={"active": "false"})
 
         await db_session.refresh(watch)
-        assert watch.domain_suspended is False
+        assert watch.suspended_by_domain is False
 
     async def test_toggle_inactive_skips_archived_watches(self, client, db_session):
         db_session.add(Domain(name="skip-archived.com"))
@@ -386,7 +386,7 @@ class TestDomainToggleActive:
         await client.post("/domains/skip-archived.com/toggle-active", data={"active": "false"})
 
         await db_session.refresh(watch)
-        assert watch.domain_suspended is False
+        assert watch.suspended_by_domain is False
 
     async def test_toggle_active_restores_suspended_watches(self, client, db_session):
         db_session.add(Domain(name="restore.com", is_active=False))
@@ -405,7 +405,7 @@ class TestDomainToggleActive:
         await db_session.refresh(watch)
         await db_session.refresh(watch.watched_item)
         assert watch.is_active is True
-        assert watch.domain_suspended is False
+        assert watch.suspended_by_domain is False
         assert watch.watched_item.domain_suspended is False
 
     async def test_toggle_active_does_not_restore_manually_inactive_watches(

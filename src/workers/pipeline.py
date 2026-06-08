@@ -264,7 +264,6 @@ async def process_watched_item(
             metadata=change_meta,
         )
         await dispatch_event_notifications(session=session, event=event)
-        watch.last_changed_at = now
         notifications += 1
 
     return WatchedItemResult(

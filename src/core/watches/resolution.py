@@ -64,8 +64,8 @@ def watch_event_base_metadata(watch: Watch) -> dict:
     interval = resolved_schedule_config(watch).get("interval")
     if interval:
         meta["check_interval"] = interval
-    if watch.last_changed_at:
-        meta["last_changed_at"] = format_utc_iso(watch.last_changed_at)
+    if watch.watched_item and watch.watched_item.last_changed_at:
+        meta["last_changed_at"] = format_utc_iso(watch.watched_item.last_changed_at)
     if watch.tags:
         meta["tags"] = watch.tags
     if watch.description:

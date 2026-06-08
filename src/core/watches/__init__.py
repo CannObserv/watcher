@@ -23,13 +23,15 @@ logger = get_logger(__name__)
 
 
 async def resolve_watch_url(watch: Watch, client: ArchiverClient) -> str:
-    """Resolve the operator-facing URL for a Watch — the InfoItem's primary URL.
+    """Resolve the operator-facing URL for a Watch via the InfoItem's primary binding.
 
     Deprecated: prefer ``watch.watched_item.effective_url`` which is set at
-    Watch-create time without a round-trip to Archiver. Retained for call sites
-    that haven't migrated yet (Steps 5/7 of #185 Phase A).
+    Watch-create time without a round-trip to Archiver.
     """
-    bindings = await fetch_info_item_bindings(client, str(watch.info_item_id))
+    info_item_id = str(watch.watched_item.info_item_id) if watch.watched_item else None
+    if not info_item_id:
+        return f"watch:{watch.id}"
+    bindings = await fetch_info_item_bindings(client, info_item_id)
     return bindings.primary_url
 
 
@@ -136,10 +138,8 @@ async def create_watch(
 
     watch = Watch(
         name=name,
-        info_item_id=ULID.from_str(info_item_id),
         watched_item_id=watched_item.id,
         content_type=content_type,
-        effective_url=probe_result.effective_url,
         description=description,
         tags=tags,
     )

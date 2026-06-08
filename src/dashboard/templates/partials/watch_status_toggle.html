@@ -20,7 +20,7 @@
           <span class="badge badge-archived">Archived</span>
           {% elif watch.is_active %}
           <span class="badge badge-active">Active</span>
-          {% elif watch.domain_suspended %}
+          {% elif watch.suspended_by_domain %}
           <span class="badge badge-warning">Domain Inactive</span>
           {% else %}
           <span class="badge badge-inactive">Inactive</span>

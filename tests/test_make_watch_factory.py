@@ -14,13 +14,14 @@ pytestmark = pytest.mark.integration
 
 
 async def test_make_watch_auto_creates_info_item_source_and_watched_item(db_session):
-    """Factory wires up an InfoItem, primary InfoSource binding, and WatchedItem."""
+    """Factory wires up an InfoItem, primary InfoSource binding, and WatchedItem.
+
+    #185 Phase A step 6: info_item_id lives on WatchedItem, not Watch.
+    """
     watch = await make_watch(db_session, name="Auto")
-    assert watch.info_item_id is not None
-    assert watch.target_info_source_id is None
     assert watch.watched_item_id is not None
     assert watch.watched_item is not None
-    assert watch.watched_item.info_item_id == watch.info_item_id
+    assert watch.watched_item.info_item_id is not None
 
 
 async def test_make_watch_eager_loads_watched_item(db_session):

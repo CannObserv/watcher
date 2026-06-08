@@ -194,28 +194,6 @@ async def delete_watch(
             },
         )
 
-    if watch.target_info_source_id is None:
-        sibling_stmt = (
-            select(Watch.id)
-            .where(Watch.watched_item_id == watch.watched_item_id)
-            .where(Watch.id != watch.id)
-            .where(Watch.target_info_source_id.is_not(None))
-            .where(Watch.is_active.is_(True))
-            .where(Watch.is_archived.is_(False))
-        )
-        sibling = (await session.execute(sibling_stmt)).first()
-        if sibling is not None:
-            raise HTTPException(
-                status_code=409,
-                detail={
-                    "kind": "primary_has_sub_aspect_siblings",
-                    "message": (
-                        "primary Watch has dependent sub_aspect Watches; "
-                        "archive or delete them first, or archive the WatchedItem."
-                    ),
-                },
-            )
-
     # #185 Phase A: resolve URL from local WatchedItem; no Archiver SDK call.
     resolved_url = (watch.watched_item and watch.watched_item.effective_url) or f"watch:{watch.id}"
     audit(

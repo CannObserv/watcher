@@ -13,6 +13,7 @@ from src.core.models.domain import Domain
 from src.core.models.notification_config import WatchNotificationConfig
 from src.core.models.temporal_profile import PostAction, ProfileType, TemporalProfile
 from src.core.models.watch import ContentType, Watch, WatchHealthStatus
+from src.core.models.watched_item import WatchedItem
 
 
 class TestULIDType:
@@ -50,7 +51,7 @@ class TestWatchModel:
         assert watch.name == "Test Watch"
         assert watch.content_type == ContentType.HTML
         assert watch.is_active is True
-        assert watch.last_checked_at is None
+        assert watch.suspended_by_domain is False
 
     def test_create_watch_with_all_fields(self):
         watch = Watch(
@@ -80,13 +81,6 @@ class TestWatchModel:
                 content_type="invalid",
             )
 
-    def test_watch_effective_url_defaults_none(self):
-        watch = Watch(
-            name="Test",
-            content_type=ContentType.HTML,
-        )
-        assert watch.effective_url is None
-
     def test_watch_is_archived_defaults_false(self):
         watch = Watch(
             name="Test",
@@ -102,25 +96,14 @@ class TestWatchModel:
         )
         assert watch.is_archived is True
 
-    def test_health_status_default_is_unknown(self):
-        w = Watch(name="T", content_type=ContentType.HTML)
-        assert w.health_status == WatchHealthStatus.UNKNOWN
+    def test_health_status_on_watched_item(self):
+        """health_status lives on WatchedItem (#185 step 6), not Watch."""
+        wi = WatchedItem(name="T")
+        assert wi.health_status == WatchHealthStatus.UNKNOWN
 
-    def test_health_status_coercion_from_string(self):
-        w = Watch(
-            name="T",
-            content_type=ContentType.HTML,
-            health_status="ok",
-        )
-        assert w.health_status == WatchHealthStatus.OK
-
-    def test_health_status_invalid_raises(self):
-        with pytest.raises(ValueError, match="Invalid health_status"):
-            Watch(
-                name="T",
-                content_type=ContentType.HTML,
-                health_status="bad",
-            )
+    def test_health_status_coercion_from_string_on_watched_item(self):
+        wi = WatchedItem(name="T", health_status="ok")
+        assert wi.health_status == WatchHealthStatus.OK
 
 
 class TestAuditHelper:

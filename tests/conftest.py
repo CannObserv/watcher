@@ -394,12 +394,17 @@ async def make_watch(
             f"must match info_item_id ({info_item_id})"
         )
 
+    # Extract cascade-suspend flag before passing kwargs to Watch constructor.
+    # Accepts both "domain_suspended" (legacy) and "suspended_by_domain" (current).
+    suspended = kwargs.pop("suspended_by_domain", kwargs.pop("domain_suspended", False))
+
     watch_kwargs = {
         "name": name,
-        "info_item_id": info_item_id,
         "watched_item_id": watched_item.id,
         **kwargs,
     }
+    if suspended:
+        watch_kwargs["suspended_by_domain"] = True
     watch = Watch(**watch_kwargs)
     session.add(watch)
     await session.flush()
@@ -416,8 +421,8 @@ async def make_watch(
         watched_item.domain_name = domain_name
         await session.flush()
 
-    # Propagate domain_suspended to WatchedItem (mirrors cascade behavior).
-    if kwargs.get("domain_suspended") and not watched_item.domain_suspended:
+    # Propagate cascade-suspend to WatchedItem (mirrors domain-deactivation cascade).
+    if suspended and not watched_item.domain_suspended:
         watched_item.domain_suspended = True
         await session.flush()
 

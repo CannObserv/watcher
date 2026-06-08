@@ -1,15 +1,9 @@
 """Procrastinate task wrappers: ``check_watched_item`` and ``schedule_tick``.
 
-Phase 6 / Task 8 (#160). ``check_watched_item`` replaces the per-Watch
-``check_watch`` task: it fetches the parent InfoItem's primary URL once and
-calls ``process_watched_item`` (pipeline.py) which extracts per binding and
-dispatches per child Watch. ``schedule_tick`` is rewired to enqueue per
-WatchedItem, aggregating ``last_checked_at`` across each WI's child Watches.
-
-The ``last_changed_at`` field on individual Watches is owned by the pipeline
-(it knows which target binding changed). This task owns ``last_checked_at``
-on every child Watch and on the parent WatchedItem, and the health-status /
-domain-backoff machinery.
+#185 Phase A step 6. Health status, last_checked_at, and last_changed_at now
+live on WatchedItem (not per Watch). ``check_watched_item`` updates the parent
+WatchedItem's health and timestamp; ``schedule_tick`` uses WatchedItem's
+last_checked_at to determine whether a cycle is due.
 """
 
 from datetime import UTC, datetime
@@ -63,12 +57,12 @@ logger = get_logger(__name__)
     ),
 )
 async def check_watched_item(watched_item_id: str, registry: ServiceRegistry | None = None) -> dict:
-    """Fetch the parent InfoItem's primary URL and run the pipeline.
+    """Fetch the WatchedItem's URL and run the pipeline.
 
-    Updates ``last_checked_at`` on every active+non-archived child Watch and
-    on the parent WatchedItem (both success and fetch-failure paths).
-    ``last_changed_at`` is set inline by the pipeline on Watches whose target
-    binding changed and was POSTed to Archiver successfully.
+    Updates ``last_checked_at`` and ``health_status`` on the WatchedItem
+    (both success and fetch-failure paths). Individual Watches receive
+    WATCH_ERROR / WATCH_RECOVERED events when the WatchedItem's health
+    transitions; CHANGE_DETECTED is dispatched inline by the pipeline.
     """
     reg = registry if registry is not None else get_registry()
     async with get_session_factory()() as session:
@@ -85,9 +79,9 @@ async def check_watched_item(watched_item_id: str, registry: ServiceRegistry | N
             return {"skipped": True}
 
         # Load active+non-archived child Watches up-front so we know whether
-        # there's any work to do and so we can update timestamps after the
-        # pipeline. The pipeline reloads these itself for dispatch — duplicate
-        # query is cheap and keeps the two surfaces decoupled.
+        # there's any work to do and so we can dispatch events after the
+        # pipeline. The pipeline reloads these itself for CHANGE_DETECTED
+        # dispatch — duplicate query is cheap and keeps surfaces decoupled.
         children = (
             (
                 await session.execute(
@@ -144,32 +138,27 @@ async def check_watched_item(watched_item_id: str, registry: ServiceRegistry | N
                 watched_item_id=str(watched_item.id),
                 status_code=fetch_result.status_code,
             )
-            # Mark every child Watch ERROR; dispatch WATCH_ERROR once per
-            # Watch whose health transitioned OK/UNKNOWN → ERROR.
-            transitioned: list[Watch] = []
-            for w in children:
-                w.last_checked_at = now
-                previous = w.health_status
-                w.health_status = WatchHealthStatus.ERROR
-                if previous != WatchHealthStatus.ERROR:
-                    transitioned.append(w)
+            # Track health transition on WatchedItem; dispatch WATCH_ERROR to
+            # every active child Watch if WatchedItem transitions to ERROR.
+            previous_health = watched_item.health_status
+            watched_item.health_status = WatchHealthStatus.ERROR
             watched_item.last_checked_at = now
             await session.commit()
 
-            for w in transitioned:
-                error_event = WatchEvent(
-                    event_type=WatchEventType.WATCH_ERROR,
-                    watch_id=str(w.id),
-                    watch_name=w.name,
-                    watch_url=watched_item.effective_url or w.effective_url or url,
-                    occurred_at=now,
-                    metadata={
-                        "status_code": fetch_result.status_code,
-                        **watch_event_base_metadata(w),
-                    },
-                )
-                await dispatch_event_notifications(session=session, event=error_event)
-            if transitioned:
+            if previous_health != WatchHealthStatus.ERROR:
+                for w in children:
+                    error_event = WatchEvent(
+                        event_type=WatchEventType.WATCH_ERROR,
+                        watch_id=str(w.id),
+                        watch_name=w.name,
+                        watch_url=watched_item.effective_url or url,
+                        occurred_at=now,
+                        metadata={
+                            "status_code": fetch_result.status_code,
+                            **watch_event_base_metadata(w),
+                        },
+                    )
+                    await dispatch_event_notifications(session=session, event=error_event)
                 await session.commit()
             return {"error": f"HTTP {fetch_result.status_code}"}
 
@@ -180,13 +169,9 @@ async def check_watched_item(watched_item_id: str, registry: ServiceRegistry | N
             raw_content=fetch_result.content,
         )
 
-        # Update last_checked_at + health on every child Watch. The pipeline
-        # already set last_changed_at on the ones whose target changed.
-        prior_health: dict[str, WatchHealthStatus] = {}
-        for w in children:
-            prior_health[str(w.id)] = w.health_status
-            w.last_checked_at = now
-            w.health_status = WatchHealthStatus.OK
+        # Track health + timestamp on WatchedItem.
+        previous_health = watched_item.health_status
+        watched_item.health_status = WatchHealthStatus.OK
         watched_item.last_checked_at = now
         await session.commit()
 
@@ -197,19 +182,19 @@ async def check_watched_item(watched_item_id: str, registry: ServiceRegistry | N
             await _maybe_decay_backoff(rate_limit_domain, _limiter, session)
             await session.commit()
 
-        # Recovery events: dispatch WATCH_RECOVERED per Watch on ERROR → OK.
-        recovered = [w for w in children if prior_health.get(str(w.id)) == WatchHealthStatus.ERROR]
-        for w in recovered:
-            recovery_event = WatchEvent(
-                event_type=WatchEventType.WATCH_RECOVERED,
-                watch_id=str(w.id),
-                watch_name=w.name,
-                watch_url=watched_item.effective_url or w.effective_url or url,
-                occurred_at=now,
-                metadata=watch_event_base_metadata(w),
-            )
-            await dispatch_event_notifications(session=session, event=recovery_event)
-        if recovered:
+        # Recovery events: dispatch WATCH_RECOVERED per child Watch when
+        # WatchedItem transitions ERROR → OK.
+        if previous_health == WatchHealthStatus.ERROR:
+            for w in children:
+                recovery_event = WatchEvent(
+                    event_type=WatchEventType.WATCH_RECOVERED,
+                    watch_id=str(w.id),
+                    watch_name=w.name,
+                    watch_url=watched_item.effective_url or url,
+                    occurred_at=now,
+                    metadata=watch_event_base_metadata(w),
+                )
+                await dispatch_event_notifications(session=session, event=recovery_event)
             await session.commit()
 
     return {
@@ -231,17 +216,15 @@ async def check_watched_item(watched_item_id: str, registry: ServiceRegistry | N
 async def schedule_tick(timestamp: int) -> None:
     """Enqueue ``check_watched_item`` jobs for every WatchedItem due now.
 
-    A WatchedItem is "due" when ``MIN(last_checked_at)`` over its
-    active+non-archived child Watches is older than the WatchedItem's
-    resolved interval (a NULL last_checked_at always counts as due).
+    A WatchedItem is "due" when ``last_checked_at`` is NULL (never checked) or
+    when any child Watch's resolved schedule says the next check is overdue.
+    Temporal profiles live on Watch; the tightest applicable interval wins.
 
-    Temporal profiles still live on Watch and are evaluated per child; the
-    tightest applicable interval wins. Post-actions:
+    Post-actions:
     * ``deactivate`` / ``archive`` flip the individual triggering Watch off.
     * ``reduce_frequency`` mutates the parent WatchedItem's
-      ``default_schedule_config`` so all siblings feel the slowdown
-      (#160 design: per-InfoItem fetch budget). Audited as
-      ``WATCHED_ITEM_THROTTLED``.
+      ``default_schedule_config`` so all siblings feel the slowdown.
+      Audited as ``WATCHED_ITEM_THROTTLED``.
     """
     now = datetime.now(UTC)
 
@@ -365,42 +348,40 @@ async def schedule_tick(timestamp: int) -> None:
             if not active_children:
                 continue
 
-            # A WatchedItem is due iff any child Watch is due. A child is due
-            # when ``compute_next_check`` (resolved interval + any temporal
-            # profile) returns a timestamp <= now, or its last_checked_at is
-            # NULL (never checked).
+            # A WatchedItem is due iff its last_checked_at is NULL (never checked)
+            # or any child Watch's resolved schedule is overdue.
             due_now = False
-            for watch in active_children:
-                if watch.last_checked_at is None:
-                    due_now = True
-                    break
-                profiles_orm = profiles_by_watch.get(str(watch.id), [])
-                profiles = (
-                    [
-                        {
-                            "id": str(p.id),
-                            "profile_type": p.profile_type,
-                            "reference_date": p.reference_date,
-                            "date_range_start": p.date_range_start,
-                            "date_range_end": p.date_range_end,
-                            "rules": p.rules,
-                            "post_action": p.post_action,
-                            "is_active": p.is_active,
-                        }
-                        for p in profiles_orm
-                    ]
-                    if profiles_orm
-                    else None
-                )
-                next_due = compute_next_check(
-                    schedule_config=resolved_schedule_config(watch),
-                    last_checked_at=watch.last_checked_at,
-                    now=now,
-                    profiles=profiles,
-                )
-                if next_due <= now:
-                    due_now = True
-                    break
+            if wi.last_checked_at is None:
+                due_now = True
+            else:
+                for watch in active_children:
+                    profiles_orm = profiles_by_watch.get(str(watch.id), [])
+                    profiles = (
+                        [
+                            {
+                                "id": str(p.id),
+                                "profile_type": p.profile_type,
+                                "reference_date": p.reference_date,
+                                "date_range_start": p.date_range_start,
+                                "date_range_end": p.date_range_end,
+                                "rules": p.rules,
+                                "post_action": p.post_action,
+                                "is_active": p.is_active,
+                            }
+                            for p in profiles_orm
+                        ]
+                        if profiles_orm
+                        else None
+                    )
+                    next_due = compute_next_check(
+                        schedule_config=resolved_schedule_config(watch),
+                        last_checked_at=wi.last_checked_at,
+                        now=now,
+                        profiles=profiles,
+                    )
+                    if next_due <= now:
+                        due_now = True
+                        break
 
             if due_now:
                 logger.info(

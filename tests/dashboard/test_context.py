@@ -85,7 +85,7 @@ class TestGetWatchList:
         result = await get_watch_list(db_session)
         assert len(result) == 1
         assert result[0].name == "W1"
-        assert hasattr(result[0], "last_checked_at")
+        assert hasattr(result[0], "watched_item")  # WatchedItem owns timestamps
 
     async def test_filter_active(self, db_session):
         await make_watch(
@@ -225,13 +225,10 @@ class TestGetWatchList:
         assert len(result) == 1
 
     async def test_null_last_changed_at_first_when_asc(self, db_session):
-        await make_watch(
-            db_session,
-            name="Changed",
-            primary_url="https://a.com",
-            content_type="html",
-            last_changed_at=datetime(2024, 1, 1, tzinfo=UTC),
+        w_changed = await make_watch(
+            db_session, name="Changed", primary_url="https://a.com", content_type="html"
         )
+        w_changed.watched_item.last_changed_at = datetime(2024, 1, 1, tzinfo=UTC)
         await make_watch(
             db_session, name="NeverChanged", primary_url="https://b.com", content_type="html"
         )
@@ -240,13 +237,10 @@ class TestGetWatchList:
         assert result[0].name == "NeverChanged"
 
     async def test_null_last_changed_at_last_when_desc(self, db_session):
-        await make_watch(
-            db_session,
-            name="Changed",
-            primary_url="https://a.com",
-            content_type="html",
-            last_changed_at=datetime(2024, 1, 1, tzinfo=UTC),
+        w_changed = await make_watch(
+            db_session, name="Changed", primary_url="https://a.com", content_type="html"
         )
+        w_changed.watched_item.last_changed_at = datetime(2024, 1, 1, tzinfo=UTC)
         await make_watch(
             db_session, name="NeverChanged", primary_url="https://b.com", content_type="html"
         )
@@ -392,18 +386,19 @@ class TestGetDomainsFiltered:
         assert len(result) == 2
         assert result[0]["name"] == "dom02.com"
 
-    async def test_last_checked_from_watches(self, db_session):
+    async def test_last_checked_from_watched_item(self, db_session):
         domain = Domain(name="checked.com")
         db_session.add(domain)
         now = datetime.now(UTC)
-        await make_watch(
+        w = await make_watch(
             db_session,
             name="W",
             primary_url="https://checked.com",
             content_type="html",
             domain_name="checked.com",
-            last_checked_at=now,
         )
+        w.watched_item.last_checked_at = now
+        await db_session.flush()
         result = await get_domains_with_watched_item_counts(db_session)
         assert result[0]["last_checked"] == now
 

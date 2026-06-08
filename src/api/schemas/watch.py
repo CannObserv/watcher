@@ -1,19 +1,16 @@
 """Pydantic schemas for Watch CRUD operations.
 
-#185 Phase A: Watch is InfoItem-first. ``info_item_id`` is required; the
-sub_aspect concept (``target_info_source_id``) was removed in Archiver v4.0.0.
-Schedule + URL no longer live on the Watch — scheduling is owned by the parent
-WatchedItem; URL is resolved from the InfoItem's primary InfoSource via the
-ArchiverClient at create-time and stored as ``effective_url`` on both Watch and
-WatchedItem.
+#185 Phase A step 6: per-Watch tracking columns dropped. WatchResponse now
+exposes only the stable per-Watch identity and lifecycle fields. Health,
+timestamps, and URL live on WatchedItem.
 """
 
 from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from src.api.schemas.types import HttpUrlStr, ULIDStr
-from src.core.models.watch import ContentType, WatchHealthStatus
+from src.api.schemas.types import ULIDStr
+from src.core.models.watch import ContentType
 
 
 class WatchCreate(BaseModel):
@@ -33,14 +30,13 @@ class WatchCreate(BaseModel):
 class WatchUpdate(BaseModel):
     """Schema for updating a Watch. All fields optional.
 
-    ``info_item_id`` and ``target_info_source_id`` are immutable after
-    creation — re-target by deleting and recreating the Watch.
+    Identity fields (info_item_id) are immutable after creation — re-target
+    by deleting and recreating the Watch.
     """
 
     name: str | None = None
     content_type: ContentType | None = None
     is_active: bool | None = None
-    effective_url: HttpUrlStr | None = None
     description: str | None = None
     tags: list[str] | None = None
 
@@ -48,27 +44,22 @@ class WatchUpdate(BaseModel):
 class WatchResponse(BaseModel):
     """Schema for returning a Watch.
 
-    Exposes the identity columns (``info_item_id``, ``target_info_source_id``,
-    ``watched_item_id``) and the cached ``effective_url`` snapshot.
-    Domain info lives on WatchedItem.
+    Per-Watch fields: identity (id, watched_item_id), display
+    (name, content_type, description, tags), lifecycle flags
+    (is_active, is_archived, suspended_by_domain), timestamps
+    (created_at, updated_at). Health and URL live on WatchedItem.
     """
 
     model_config = ConfigDict(from_attributes=True)
 
     id: ULIDStr
     name: str
-    info_item_id: ULIDStr
-    target_info_source_id: ULIDStr | None = None
     watched_item_id: ULIDStr
     content_type: ContentType | None = None
     is_active: bool
     is_archived: bool
-    domain_suspended: bool
-    last_checked_at: datetime | None = None
-    last_changed_at: datetime | None = None
-    effective_url: str | None = None
+    suspended_by_domain: bool
     description: str | None = None
     tags: list[str] | None = None
-    health_status: WatchHealthStatus
     created_at: datetime
     updated_at: datetime

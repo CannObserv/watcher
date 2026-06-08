@@ -1,38 +1,38 @@
-"""WatchedItem model — 1:1 mirror of an Archiver InfoItem subscription."""
+"""WatchedItem model — monitored content target, optionally linked to an Archiver InfoItem."""
 
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, String, Text
+from sqlalchemy import Boolean, DateTime, ForeignKey, Index, String, Text, text
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.orm import Mapped, mapped_column, validates
 from ulid import ULID
 
 from src.core.models.base import Base, TimestampMixin, ULIDType, generate_ulid
-from src.core.models.watch import ContentType
+from src.core.models.watch import ContentType, WatchHealthStatus
 
 
 class WatchedItem(Base, TimestampMixin):
-    """Operator's subscription to one Archiver InfoItem.
+    """Operator's subscription to a monitored content target.
 
     Owns shared defaults that child Watches inherit at read time via the
     resolution chain (Watch override → WatchedItem default → system default).
 
-    Identity is `info_item_id` (cross-schema reference to
-    `information.info_items.info_item_id`). The FK is not declared at the
-    Watcher schema level — Archiver owns that table on a separate
-    DeclarativeBase. Watcher trusts the Archiver SDK to validate
-    info_item_id at create-time.
+    `info_item_id` links to an Archiver InfoItem (cross-schema reference to
+    `information.info_items.info_item_id`). Nullable — standalone WatchedItems
+    with no InfoItem reference are allowed; partial unique index enforces
+    uniqueness when set.
 
-    `domain_name` is the hostname of the InfoItem's primary URL, set at
-    Watch-create time. NULL for standalone WatchedItems with no Watches yet.
-    `domain_suspended` is set to True when the parent Domain is deactivated
-    and cleared on reactivation; used for UI banners and the suspension cascade.
+    `effective_url` and `source_specs` are set at Watch-create time and drive
+    the pipeline directly, without an Archiver SDK call per cycle.
+
+    `domain_name` is the hostname of the primary URL, set at Watch-create time.
+    `domain_suspended` is set True when the parent Domain is deactivated.
     """
 
     __tablename__ = "watched_items"
 
     id: Mapped[ULID] = mapped_column(ULIDType, primary_key=True, default=generate_ulid)
-    info_item_id: Mapped[ULID] = mapped_column(ULIDType, unique=True, nullable=False, index=True)
+    info_item_id: Mapped[ULID | None] = mapped_column(ULIDType, nullable=True)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     description: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
     is_active: Mapped[bool] = mapped_column(
@@ -65,10 +65,43 @@ class WatchedItem(Base, TimestampMixin):
         Boolean, nullable=False, default=False, server_default="false"
     )
 
+    # Pipeline state — populated at Watch-create time; updated by pipeline.
+    effective_url: Mapped[str] = mapped_column(Text, nullable=False, default="", server_default="")
+    source_specs: Mapped[list] = mapped_column(
+        ARRAY(JSONB(astext_type=Text())),
+        nullable=False,
+        default=list,
+        server_default=text("ARRAY[]::jsonb[]"),
+    )
+    archiver_info_source_id: Mapped[str | None] = mapped_column(
+        String(26), nullable=True, default=None
+    )
+    last_changed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, default=None
+    )
+    health_status: Mapped[WatchHealthStatus] = mapped_column(
+        String(10),
+        nullable=True,
+        default=WatchHealthStatus.UNKNOWN,
+        server_default="unknown",
+    )
+
+    __table_args__ = (
+        Index(
+            "ix_watched_items_info_item_id",
+            "info_item_id",
+            unique=True,
+            postgresql_where=text("info_item_id IS NOT NULL"),
+        ),
+    )
+
     def __init__(self, **kwargs: object) -> None:
         """Set Python-side defaults for fields not provided."""
         kwargs.setdefault("is_active", True)
         kwargs.setdefault("domain_suspended", False)
+        kwargs.setdefault("effective_url", "")
+        kwargs.setdefault("source_specs", [])
+        kwargs.setdefault("health_status", WatchHealthStatus.UNKNOWN)
         super().__init__(**kwargs)
 
     @validates("default_content_type")

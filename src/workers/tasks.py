@@ -17,8 +17,6 @@ from urllib.parse import urlparse
 
 import httpx
 import procrastinate
-from archiver_client import NotFound
-from archiver_client.errors import ServerError
 from sqlalchemy import or_, select
 from ulid import ULID
 
@@ -33,7 +31,6 @@ from src.core.notifications.events import WatchEvent, WatchEventType
 from src.core.rate_limiter import get_rate_limiter
 from src.core.registry import ServiceRegistry, get_registry
 from src.core.scheduler import compute_next_check, evaluate_post_actions
-from src.core.watches.info_item_fetch import fetch_info_item_bindings
 from src.core.watches.resolution import resolved_schedule_config, watch_event_base_metadata
 from src.workers import bp
 from src.workers.notify import dispatch_event_notifications
@@ -62,7 +59,6 @@ logger = get_logger(__name__)
             TimeoutError,
             httpx.ConnectError,
             httpx.TimeoutException,
-            ServerError,
         },
     ),
 )
@@ -111,27 +107,17 @@ async def check_watched_item(watched_item_id: str, registry: ServiceRegistry | N
             )
             return {"skipped": True, "reason": "no_active_children"}
 
-        info_client = reg.get_archiver_client()
-        try:
-            bindings = await fetch_info_item_bindings(info_client, str(watched_item.info_item_id))
-        except NotFound:
-            logger.error(
-                "info_item missing for watched_item — skipping until operator action",
-                extra={
-                    "watched_item_id": watched_item_id,
-                    "info_item_id": str(watched_item.info_item_id),
-                },
+        url = watched_item.effective_url
+        if not url:
+            logger.warning(
+                "watched_item has no effective_url — skipping until Watch-create populates it",
+                extra={"watched_item_id": watched_item_id},
             )
-            return {"skipped": True, "reason": "info_item_missing"}
+            return {"skipped": True, "reason": "no_effective_url"}
 
-        url = bindings.primary_url
-        # NB: render flag is reserved for Phase 3 plumbing.
         fetch_config: dict = {}
 
-        rate_limit_domain = urlparse(url).hostname or url
-        # Prefer the WatchedItem's domain_name when set (matches what watch-create probed).
-        if watched_item.domain_name:
-            rate_limit_domain = watched_item.domain_name
+        rate_limit_domain = watched_item.domain_name or urlparse(url).hostname or url
 
         async with get_rate_limiter().acquire_for_domain(rate_limit_domain):
             fetch_result = await reg.get_fetcher().fetch(url, config=fetch_config)
@@ -175,7 +161,7 @@ async def check_watched_item(watched_item_id: str, registry: ServiceRegistry | N
                     event_type=WatchEventType.WATCH_ERROR,
                     watch_id=str(w.id),
                     watch_name=w.name,
-                    watch_url=w.effective_url or url,
+                    watch_url=watched_item.effective_url or w.effective_url or url,
                     occurred_at=now,
                     metadata={
                         "status_code": fetch_result.status_code,
@@ -187,15 +173,11 @@ async def check_watched_item(watched_item_id: str, registry: ServiceRegistry | N
                 await session.commit()
             return {"error": f"HTTP {fetch_result.status_code}"}
 
-        # Successful fetch → run the per-WatchedItem pipeline. Pass the
-        # already-fetched bindings so the pipeline avoids a second SDK
-        # round-trip (we resolved them upthread to compute the URL).
+        # Successful fetch → run the per-WatchedItem pipeline.
         result = await process_watched_item(
             session=session,
-            info_client=info_client,
             watched_item=watched_item,
             raw_content=fetch_result.content,
-            bindings=bindings,
         )
 
         # Update last_checked_at + health on every child Watch. The pipeline
@@ -222,7 +204,7 @@ async def check_watched_item(watched_item_id: str, registry: ServiceRegistry | N
                 event_type=WatchEventType.WATCH_RECOVERED,
                 watch_id=str(w.id),
                 watch_name=w.name,
-                watch_url=w.effective_url or url,
+                watch_url=watched_item.effective_url or w.effective_url or url,
                 occurred_at=now,
                 metadata=watch_event_base_metadata(w),
             )
@@ -231,11 +213,11 @@ async def check_watched_item(watched_item_id: str, registry: ServiceRegistry | N
             await session.commit()
 
     return {
-        "bindings_processed": result.bindings_processed,
-        "revisions_posted": result.revisions_posted,
-        "revisions_enqueued": result.revisions_enqueued,
-        "cache_hits": result.cache_hits,
+        "baseline_established": result.baseline_established,
+        "cache_hit": result.cache_hit,
+        "changed": result.changed,
         "notifications_dispatched": result.notifications_dispatched,
+        "archiver_sync_enqueued": result.archiver_sync_enqueued,
     }
 
 

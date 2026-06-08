@@ -1,14 +1,10 @@
-"""Per-WatchedItem pipeline: fetch once, extract per binding, dispatch per Watch.
+"""Per-WatchedItem pipeline: fetch once, extract, fingerprint, dispatch.
 
-Phase 6 / Task 7 (#160). Replaces the per-Watch `_run_check_pipeline` with
-`process_watched_item`: fetch the InfoItem's primary URL once, extract per
-binding (primary + cross_checks + sub_aspects), and dispatch a CHANGE_DETECTED
-WatchEvent to each child Watch whose target binding's fingerprint changed in
-this cycle.
-
-Cross_check bindings post SourceRevisions (so #157 selector-rot tooling can
-read them) but never trigger Watch notifications regardless of fingerprint
-movement.
+#185 Phase A. The pipeline reads effective_url and source_specs directly from
+the WatchedItem (set at Watch-create time), removing the per-cycle Archiver SDK
+call. ChangeRevision rows serve as the local fingerprint history; the first row
+is a baseline (no notification); subsequent changes dispatch CHANGE_DETECTED to
+all active non-archived child Watches.
 """
 
 import hashlib
@@ -16,7 +12,6 @@ import os
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 
-from archiver_client import ArchiverClient
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -26,25 +21,15 @@ from src.core.extraction_defaults import (
 from src.core.extractors import HtmlExtractor
 from src.core.extractors.base import ExtractionResult
 from src.core.logging import get_logger
+from src.core.models.change_revision import ChangeRevision
 from src.core.models.domain import Domain
+from src.core.models.pending_archiver_sync import PendingArchiverSync
 from src.core.models.watch import Watch
 from src.core.models.watched_item import WatchedItem
 from src.core.notifications.events import WatchEvent, WatchEventType
 from src.core.notifications.notify import dispatch_event_notifications
 from src.core.rate_limiter import DomainRateLimiter
-from src.core.sources.outbox import enqueue_pending
-from src.core.sources.revision_cache import get_last_fingerprint, upsert_last_known
-from src.core.sources.scratch import (
-    allocate_revision_id,
-    rename_scratch_to_canonical,
-    write_scratch_bytes,
-)
-from src.core.watches.info_item_fetch import (
-    InfoItemBindings,
-    InfoSourceProto,
-    SourceSpecProto,
-    fetch_info_item_bindings,
-)
+from src.core.sources.scratch import write_scratch_bytes
 from src.core.watches.resolution import watch_event_base_metadata
 
 logger = get_logger(__name__)
@@ -53,15 +38,12 @@ WATCHER_CACHE_TTL_SECONDS = int(os.environ.get("WATCHER_CACHE_TTL_SECONDS", "600
 
 
 # ---------------------------------------------------------------------------
-# Backoff helpers — invoked by `check_watched_item` in tasks.py (Task 8).
+# Backoff helpers — invoked by `check_watched_item` in tasks.py.
 # ---------------------------------------------------------------------------
 
 
 async def _persist_backoff(domain_name: str, new_interval: float, session: AsyncSession) -> None:
-    """Persist backoff state to the Domain table after a 429 response.
-
-    Caller is responsible for committing the session after this call.
-    """
+    """Persist backoff state to the Domain table after a 429 response."""
     stmt = select(Domain).where(Domain.name == domain_name)
     result = await session.execute(stmt)
     domain = result.scalar_one_or_none()
@@ -78,8 +60,7 @@ async def _maybe_decay_backoff(
 ) -> bool:
     """Check if a domain's backoff should decay and reset if so.
 
-    Returns True if decay was applied, False otherwise.
-    Caller is responsible for committing the session.
+    Returns True if decay was applied.
     """
     stmt = select(Domain).where(Domain.name == domain_name)
     result = await session.execute(stmt)
@@ -106,211 +87,151 @@ async def _maybe_decay_backoff(
 
 
 # ---------------------------------------------------------------------------
-# Extraction helper (preserved — still used per binding).
+# Extraction helpers.
 # ---------------------------------------------------------------------------
 
 
 async def _extract_with_spec(raw_content: bytes, document: dict) -> ExtractionResult:
-    """Run the HTML extractor with config derived from the InfoSource source_spec document.
-
-    Phase 2c only supports HTML. PDF + FILE return in Phase 3+ once the
-    InfoSource schema gains the corresponding extraction algorithms.
-    """
+    """Run the HTML extractor with config derived from a source_spec document."""
     extractor = HtmlExtractor()
     config = _extraction_config_from_spec(document)
     return await extractor.extract(raw_content, config=config)
 
 
-# ---------------------------------------------------------------------------
-# Per-WatchedItem pipeline (Phase 6 / Task 7).
-# ---------------------------------------------------------------------------
-
-
 @dataclass
-class BindingOutcome:
-    """Outcome of processing one InfoSource binding within a cycle."""
+class ExtractionOutcome:
+    """Result of extracting and fingerprinting raw content."""
 
-    info_source_id: str
-    posted: bool = False
-    enqueued: bool = False
-    cache_hit: bool = False
-    source_revision_id: str | None = None
-    content_fingerprint: str | None = None
-    error: str | None = None
+    content_fingerprint: str
+    content_bytes: bytes
+    content_size_bytes: int
+    schema_version: int
+
+
+async def _extract_and_fingerprint(
+    raw_content: bytes,
+    source_specs: list[dict],
+) -> ExtractionOutcome:
+    """Extract content and fingerprint, trying source_specs in order until non-empty.
+
+    Falls back to the next spec if the current one yields no chunks. If all
+    specs yield empty chunks, uses the last result (fingerprinting empty content
+    is a valid baseline).
+    """
+    specs: list[dict] = source_specs if source_specs else [{}]
+    result = ExtractionResult(chunks=[])
+    used_spec: dict = {}
+    for spec in specs:
+        result = await _extract_with_spec(raw_content, spec)
+        used_spec = spec
+        if result.chunks:
+            break
+    content_bytes = "\n".join(c.text for c in result.chunks).encode()
+    fingerprint = "sha256:" + hashlib.sha256(content_bytes).hexdigest()
+    return ExtractionOutcome(
+        content_fingerprint=fingerprint,
+        content_bytes=content_bytes,
+        content_size_bytes=len(content_bytes),
+        schema_version=int(used_spec.get("schema_version", 1)),
+    )
+
+
+# ---------------------------------------------------------------------------
+# Per-WatchedItem pipeline.
+# ---------------------------------------------------------------------------
 
 
 @dataclass
 class WatchedItemResult:
-    """Per-binding outcomes + dispatch counts for a single WatchedItem cycle.
+    """Outcome of one check cycle for a WatchedItem."""
 
-    `check_watched_item` (Task 8) uses these to update last_checked_at on every
-    Watch and last_changed_at on Watches whose target binding changed.
-    """
-
-    bindings_processed: int = 0
-    revisions_posted: int = 0
-    revisions_enqueued: int = 0
-    cache_hits: int = 0
+    baseline_established: bool = False
+    cache_hit: bool = False
+    changed: bool = False
     notifications_dispatched: int = 0
-    changed_info_source_ids: list[str] = field(default_factory=list)
+    archiver_sync_enqueued: bool = False
     errors: list[str] = field(default_factory=list)
-
-
-def _spec_dict(spec_obj: SourceSpecProto | dict | object) -> dict:
-    """Coerce a binding's `source_spec` into a plain dict.
-
-    The Archiver SDK returns the spec as a ``SourceSpecProto`` wrapper exposing
-    ``additional_properties`` (the JSONB document). Tests sometimes pass a
-    plain dict or a mock with ``to_dict()``; handle both.
-    """
-    additional = getattr(spec_obj, "additional_properties", None)
-    if additional is not None:
-        return dict(additional)
-    to_dict_method = getattr(spec_obj, "to_dict", None)
-    if callable(to_dict_method):
-        return dict(to_dict_method())
-    if isinstance(spec_obj, dict):
-        return dict(spec_obj)
-    return {}
-
-
-async def _process_binding(
-    session: AsyncSession,
-    info_client: ArchiverClient,
-    binding: InfoSourceProto,
-    raw_content: bytes,
-    now: datetime,
-) -> BindingOutcome:
-    """Extract → fingerprint → fast-path → POST/enqueue → cache for one binding.
-
-    Returns the per-binding outcome. Caller decides whether the change should
-    trigger a Watch notification (cross_check bindings never do).
-    """
-    info_source_id = str(binding.info_source_id)
-    outcome = BindingOutcome(info_source_id=info_source_id)
-
-    document = _spec_dict(binding.source_spec)
-    extracted = await _extract_with_spec(raw_content, document)
-    content_bytes = "\n".join(c.text for c in extracted.chunks).encode()
-    fingerprint = "sha256:" + hashlib.sha256(content_bytes).hexdigest()
-    outcome.content_fingerprint = fingerprint
-
-    prior_fp = await get_last_fingerprint(session, info_source_id)
-    if prior_fp == fingerprint:
-        outcome.cache_hit = True
-        return outcome
-
-    allocated_id = allocate_revision_id()
-    scratch_path = write_scratch_bytes(allocated_id, content_bytes)
-    cache_uri = f"file://{scratch_path}"
-    expires_at = now + timedelta(seconds=WATCHER_CACHE_TTL_SECONDS)
-    media_type = getattr(extracted, "media_type", None)
-
-    try:
-        response = await info_client.post_source_revision(
-            info_source_id=info_source_id,
-            content_fingerprint=fingerprint,
-            captured_at=now,
-            source_revision_id=allocated_id,
-            content_cache_uri=cache_uri,
-            content_cache_expires_at=expires_at,
-            content_size_bytes=len(content_bytes),
-            content_media_type=media_type,
-        )
-    except Exception as e:
-        # Outbox path — Archiver unreachable. Notification will fire from the
-        # drain worker once the row is acked (Task 8b).
-        await enqueue_pending(
-            session,
-            info_source_id=info_source_id,
-            content_fingerprint=fingerprint,
-            captured_at=now,
-            content_cache_uri=cache_uri,
-            content_cache_expires_at=expires_at,
-            content_size_bytes=len(content_bytes),
-            content_media_type=media_type,
-        )
-        outcome.enqueued = True
-        outcome.error = str(e)
-        return outcome
-
-    canonical_id = str(response.source_revision_id)
-    if canonical_id != allocated_id:
-        rename_scratch_to_canonical(allocated_id, canonical_id)
-
-    await upsert_last_known(
-        session,
-        info_source_id=info_source_id,
-        content_fingerprint=fingerprint,
-        source_revision_id=canonical_id,
-        captured_at=now,
-    )
-
-    outcome.posted = True
-    outcome.source_revision_id = canonical_id
-    return outcome
 
 
 async def process_watched_item(
     session: AsyncSession,
-    info_client: ArchiverClient,
     watched_item: WatchedItem,
     *,
     raw_content: bytes,
-    bindings: InfoItemBindings | None = None,
 ) -> WatchedItemResult:
     """Run one check cycle for a WatchedItem.
 
-    1. Resolve the InfoItem's bindings via Archiver (primary + cross_checks + sub_aspects).
-       Callers that have already fetched bindings (e.g. ``check_watched_item``
-       resolved the primary URL before fetching) may pass them via the
-       ``bindings`` kwarg to avoid a second SDK round-trip.
-    2. For each binding, extract content, fingerprint, fast-path against the
-       local revision cache, and POST/enqueue if changed.
-    3. Load this WatchedItem's active+non-archived child Watches; for each
-       Watch dispatch a CHANGE_DETECTED event iff its target binding's
-       fingerprint changed in this cycle. ``target_info_source_id IS NULL``
-       points at the primary binding; non-NULL points at a specific
-       sub_aspect.
+    1. Extract content using `watched_item.source_specs`; fingerprint.
+    2. Query `change_revisions` for the last fingerprint.
+    3. First run: insert baseline ChangeRevision, no notification.
+    4. Same fingerprint: cache hit, no action.
+    5. Changed: insert new ChangeRevision, optionally enqueue PendingArchiverSync,
+       dispatch CHANGE_DETECTED to all active non-archived child Watches.
 
-    Cross_check bindings post SourceRevisions but never produce a Watch
-    notification — they are selector-rot infrastructure (#157).
-
-    Watches whose ``target_info_source_id`` no longer matches any active
-    sub_aspect binding are logged and skipped (Archiver may have deactivated
-    the binding between cycles).
-
-    Returns per-cycle outcomes so the caller (Task 8 ``check_watched_item``)
-    can update last_checked_at / last_changed_at on child Watches.
+    `watched_item.last_changed_at` is updated on change.
+    `last_checked_at` and `health_status` are managed by the caller (tasks.py).
     """
-    result = WatchedItemResult()
-    if bindings is None:
-        bindings = await fetch_info_item_bindings(info_client, str(watched_item.info_item_id))
     now = datetime.now(UTC)
+    source_specs: list[dict] = watched_item.source_specs or [{}]
 
-    primary_source_id = str(bindings.primary.info_source_id)
-    all_bindings = [bindings.primary, *bindings.cross_checks, *bindings.sub_aspects]
-    cross_check_ids = {str(b.info_source_id) for b in bindings.cross_checks}
-    sub_aspect_ids = {str(b.info_source_id) for b in bindings.sub_aspects}
+    outcome = await _extract_and_fingerprint(raw_content, source_specs)
 
-    # Process each binding and track which fingerprints actually changed
-    # (Archiver-acked). Outbox-only changes do not fire inline notifications.
-    outcomes: dict[str, BindingOutcome] = {}
-    for binding in all_bindings:
-        outcome = await _process_binding(session, info_client, binding, raw_content, now)
-        outcomes[outcome.info_source_id] = outcome
-        result.bindings_processed += 1
-        if outcome.posted:
-            result.revisions_posted += 1
-            result.changed_info_source_ids.append(outcome.info_source_id)
-        if outcome.enqueued:
-            result.revisions_enqueued += 1
-            if outcome.error:
-                result.errors.append(outcome.error)
-        if outcome.cache_hit:
-            result.cache_hits += 1
+    last_rev = (
+        await session.execute(
+            select(ChangeRevision)
+            .where(ChangeRevision.watched_item_id == watched_item.id)
+            .order_by(ChangeRevision.captured_at.desc())
+            .limit(1)
+        )
+    ).scalar_one_or_none()
 
-    # Load child Watches and dispatch per-Watch if its target binding changed.
+    if last_rev is None:
+        # First run: establish baseline — no notification.
+        session.add(
+            ChangeRevision(
+                watched_item_id=watched_item.id,
+                content_fingerprint=outcome.content_fingerprint,
+                captured_at=now,
+                content_size_bytes=outcome.content_size_bytes,
+                schema_version=outcome.schema_version,
+            )
+        )
+        return WatchedItemResult(baseline_established=True)
+
+    if last_rev.content_fingerprint == outcome.content_fingerprint:
+        return WatchedItemResult(cache_hit=True)
+
+    # Fingerprint changed: insert new ChangeRevision.
+    rev = ChangeRevision(
+        watched_item_id=watched_item.id,
+        content_fingerprint=outcome.content_fingerprint,
+        captured_at=now,
+        content_size_bytes=outcome.content_size_bytes,
+        schema_version=outcome.schema_version,
+    )
+    session.add(rev)
+    await session.flush()  # populate rev.id before scratch write
+
+    scratch_path = write_scratch_bytes(str(rev.id), outcome.content_bytes)
+    expires_at = now + timedelta(seconds=WATCHER_CACHE_TTL_SECONDS)
+    cache_uri = f"file://{scratch_path}"
+
+    archiver_sync_enqueued = False
+    if watched_item.archiver_info_source_id:
+        session.add(
+            PendingArchiverSync(
+                change_revision_id=rev.id,
+                watched_item_id=watched_item.id,
+                content_cache_uri=cache_uri,
+                content_cache_expires_at=expires_at,
+                next_attempt_at=now,
+            )
+        )
+        archiver_sync_enqueued = True
+
+    watched_item.last_changed_at = now
+
+    # Dispatch CHANGE_DETECTED to every active non-archived child Watch.
     watches = (
         (
             await session.execute(
@@ -324,57 +245,30 @@ async def process_watched_item(
         .all()
     )
 
+    notifications = 0
     for watch in watches:
-        if watch.target_info_source_id is None:
-            target_id = primary_source_id
-        else:
-            target_id = str(watch.target_info_source_id)
-            if target_id in cross_check_ids:
-                # Defence-in-depth: Watch should never point at a cross_check
-                # (#160 invariant), but if one slipped through we never
-                # dispatch from this surface.
-                logger.warning(
-                    "Watch %s targets cross_check binding %s; skipping dispatch",
-                    watch.id,
-                    target_id,
-                )
-                continue
-            if target_id not in sub_aspect_ids:
-                logger.warning(
-                    "Watch %s targets info_source_id=%s which is no longer a "
-                    "sub_aspect of InfoItem %s; skipping",
-                    watch.id,
-                    target_id,
-                    watched_item.info_item_id,
-                )
-                continue
-
-        target_outcome = outcomes.get(target_id)
-        if target_outcome is None or not target_outcome.posted:
-            # Either no binding (shouldn't happen given the checks above) or
-            # the fingerprint didn't change / outbox-only this cycle.
-            continue
-
         change_meta: dict = {
-            "source_revision_id": target_outcome.source_revision_id,
-            "info_source_id": target_id,
-            "content_fingerprint": target_outcome.content_fingerprint,
+            "change_revision_id": str(rev.id),
+            "content_fingerprint": outcome.content_fingerprint,
             **watch_event_base_metadata(watch),
         }
-        if watch.target_info_source_id is not None:
-            change_meta["is_fragment"] = True
-            change_meta["parent_info_source_id"] = primary_source_id
+        if archiver_sync_enqueued:
+            change_meta["archiver_revision_id"] = None  # back-filled by drain worker
 
         event = WatchEvent(
             event_type=WatchEventType.CHANGE_DETECTED,
             watch_id=str(watch.id),
             watch_name=watch.name,
-            watch_url=watch.effective_url or bindings.primary_url,
+            watch_url=watched_item.effective_url,
             occurred_at=now,
             metadata=change_meta,
         )
-        await dispatch_event_notifications(session, event)
-        result.notifications_dispatched += 1
+        await dispatch_event_notifications(session=session, event=event)
         watch.last_changed_at = now
+        notifications += 1
 
-    return result
+    return WatchedItemResult(
+        changed=True,
+        notifications_dispatched=notifications,
+        archiver_sync_enqueued=archiver_sync_enqueued,
+    )

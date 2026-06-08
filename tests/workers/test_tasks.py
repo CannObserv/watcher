@@ -63,15 +63,11 @@ def _fake_fetch_result(
     return result
 
 
-def _make_pipeline_stub(*, posted: int = 0, changed_ids: list[str] | None = None) -> AsyncMock:
+def _make_pipeline_stub(*, changed: bool = False) -> AsyncMock:
     """Return an AsyncMock that mimics `process_watched_item`'s return shape."""
 
-    async def _proc(session, info_client, watched_item, *, raw_content, bindings=None):
-        return WatchedItemResult(
-            bindings_processed=1,
-            revisions_posted=posted,
-            changed_info_source_ids=changed_ids or [],
-        )
+    async def _proc(session, watched_item, *, raw_content):
+        return WatchedItemResult(changed=changed)
 
     return AsyncMock(side_effect=_proc)
 
@@ -156,39 +152,21 @@ class TestCheckWatchedItem:
         )
         await db_session.commit()
 
+        watched_item.effective_url = "https://example.com/page"
+        await db_session.flush()
+
         before = datetime.now(UTC)
 
-        # Stub fetcher + info_client; pipeline is mocked.
         fetch_mock = AsyncMock(return_value=_fake_fetch_result())
         mock_fetcher = MagicMock()
         mock_fetcher.fetch = fetch_mock
 
-        fake_client = MagicMock()
-        # Primary URL resolution
-        primary_binding = MagicMock()
-        primary_binding.info_source_id = "01PRIMARYSOURCE000000000XX"
-        primary_binding.url = "https://example.com/page"
-        fake_client._noop = None  # placeholder; pipeline-call is stubbed below.
-
-        reg = ServiceRegistry(fetcher=mock_fetcher, archiver_client=fake_client)
+        reg = ServiceRegistry(fetcher=mock_fetcher)
         monkeypatch.setattr(
             tasks_mod, "get_session_factory", lambda: _mock_session_factory(db_session)
         )
         monkeypatch.setattr(
             tasks_mod, "get_rate_limiter", lambda: DomainRateLimiter(min_interval=0.0)
-        )
-        # Resolve primary URL via a thin patch — caller-side fetch needs *some* URL.
-        monkeypatch.setattr(
-            tasks_mod,
-            "fetch_info_item_bindings",
-            AsyncMock(
-                return_value=MagicMock(
-                    primary=primary_binding,
-                    primary_url="https://example.com/page",
-                    cross_checks=[],
-                    sub_aspects=[],
-                )
-            ),
         )
         monkeypatch.setattr(tasks_mod, "process_watched_item", _make_pipeline_stub())
 
@@ -221,7 +199,7 @@ class TestCheckWatchedItem:
             tasks_mod, "get_session_factory", lambda: _mock_session_factory(db_session)
         )
 
-        reg = ServiceRegistry(fetcher=mock_fetcher, archiver_client=MagicMock())
+        reg = ServiceRegistry(fetcher=mock_fetcher)
         result = await check_watched_item(str(watched_item.id), registry=reg)
 
         assert result.get("skipped") is True
@@ -232,6 +210,7 @@ class TestCheckWatchedItem:
         """A non-success HTTP response audits CHECK_FETCH_FAILED and marks Watches ERROR."""
         watch = await make_watch(db_session, name="Fails")
         watched_item = watch.watched_item
+        watched_item.effective_url = "https://example.com/page"
         await db_session.commit()
 
         mock_fetcher = MagicMock()
@@ -239,21 +218,6 @@ class TestCheckWatchedItem:
             return_value=_fake_fetch_result(content=b"err", status_code=500)
         )
 
-        primary_binding = MagicMock()
-        primary_binding.info_source_id = "01PRIMARYSOURCE000000000XX"
-        primary_binding.url = "https://example.com/page"
-        monkeypatch.setattr(
-            tasks_mod,
-            "fetch_info_item_bindings",
-            AsyncMock(
-                return_value=MagicMock(
-                    primary=primary_binding,
-                    primary_url="https://example.com/page",
-                    cross_checks=[],
-                    sub_aspects=[],
-                )
-            ),
-        )
         monkeypatch.setattr(tasks_mod, "process_watched_item", _make_pipeline_stub())
         monkeypatch.setattr(
             tasks_mod, "get_session_factory", lambda: _mock_session_factory(db_session)
@@ -262,7 +226,7 @@ class TestCheckWatchedItem:
             tasks_mod, "get_rate_limiter", lambda: DomainRateLimiter(min_interval=0.0)
         )
 
-        reg = ServiceRegistry(fetcher=mock_fetcher, archiver_client=MagicMock())
+        reg = ServiceRegistry(fetcher=mock_fetcher)
         result = await check_watched_item(str(watched_item.id), registry=reg)
         assert "error" in result
 
@@ -291,6 +255,7 @@ class TestCheckWatchedItem:
 
         watch = await make_watch(db_session, name="FailStamp")
         watched_item = watch.watched_item
+        watched_item.effective_url = "https://example.com/"
         assert watched_item.last_checked_at is None
         await db_session.commit()
 
@@ -300,18 +265,6 @@ class TestCheckWatchedItem:
         mock_fetcher.fetch = AsyncMock(
             return_value=_fake_fetch_result(content=b"err", status_code=503)
         )
-        monkeypatch.setattr(
-            tasks_mod,
-            "fetch_info_item_bindings",
-            AsyncMock(
-                return_value=MagicMock(
-                    primary=MagicMock(info_source_id="src", url="https://example.com/"),
-                    primary_url="https://example.com/",
-                    cross_checks=[],
-                    sub_aspects=[],
-                )
-            ),
-        )
         monkeypatch.setattr(tasks_mod, "process_watched_item", _make_pipeline_stub())
         monkeypatch.setattr(
             tasks_mod, "get_session_factory", lambda: _mock_session_factory(db_session)
@@ -320,7 +273,7 @@ class TestCheckWatchedItem:
             tasks_mod, "get_rate_limiter", lambda: DomainRateLimiter(min_interval=0.0)
         )
 
-        reg = ServiceRegistry(fetcher=mock_fetcher, archiver_client=MagicMock())
+        reg = ServiceRegistry(fetcher=mock_fetcher)
         result = await check_watched_item(str(watched_item.id), registry=reg)
         assert "error" in result
 

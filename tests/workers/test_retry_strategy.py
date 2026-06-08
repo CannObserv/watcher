@@ -1,32 +1,22 @@
 """Unit tests for the Procrastinate RetryStrategy on check_watched_item.
 
-The check_watched_item task must retry on SDK transient errors (httpx connection
-or timeout, ServerError) in addition to Python builtins. Operator-fixable errors
-(AuthError, NotFound, ValidationError) are NOT retried; those propagate.
+check_watched_item retries on transient network errors (httpx connection or
+timeout, Python builtins). Since #185 Phase A removed the Archiver SDK call
+from the pipeline path, ServerError is no longer a relevant retry exception.
 """
 
 import httpx
-from archiver_client.errors import AuthError, NotFound, ServerError, ValidationError
 
 from src.workers.tasks import check_watched_item
 
 
-def test_check_watched_item_retry_strategy_includes_sdk_errors() -> None:
-    """check_watched_item retries on SDK transient failures, not on operator-fixable ones."""
+def test_check_watched_item_retry_strategy_includes_network_errors() -> None:
+    """check_watched_item retries on transient network failures."""
     retry_exceptions = check_watched_item.retry_strategy.retry_exceptions
     assert ConnectionError in retry_exceptions
     assert TimeoutError in retry_exceptions
     assert httpx.ConnectError in retry_exceptions
     assert httpx.TimeoutException in retry_exceptions
-    assert ServerError in retry_exceptions
-
-
-def test_check_watched_item_retry_strategy_excludes_operator_errors() -> None:
-    """Auth/NotFound/Validation must NOT be retried — operator-fixable, propagate loud."""
-    retry_exceptions = check_watched_item.retry_strategy.retry_exceptions
-    assert AuthError not in retry_exceptions
-    assert NotFound not in retry_exceptions
-    assert ValidationError not in retry_exceptions
 
 
 def test_check_watched_item_retry_strategy_max_attempts_is_three() -> None:

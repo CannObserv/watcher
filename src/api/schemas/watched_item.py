@@ -69,7 +69,7 @@ class WatchedItemResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: ULIDStr
-    info_item_id: ULIDStr
+    info_item_id: ULIDStr | None = None
     name: str
     description: str | None
     is_active: bool

@@ -1064,9 +1064,7 @@ async def watched_item_detail_page(
             "active_page": "watched-items",
             "watched_item": wi,
             "watches": children,
-            "health_map": {
-                w.id: (w.watched_item.health_status if w.watched_item else None) for w in children
-            },
+            "health_map": {w.id: wi.health_status for w in children},
             "flash": None,
             "field_contexts": field_contexts,
             "templates": wi_templates,
@@ -1112,7 +1110,11 @@ async def watched_item_mark_reviewed(
     watched_item_id: str,
     session: AsyncSession = Depends(get_db_session),
 ):
-    """Stamp last_reviewed_at = now() on a WatchedItem."""
+    """Stamp last_reviewed_at = now() on a WatchedItem.
+
+    Dashboard UI for this is pending (#185 Phase A removed the sub_aspect banner
+    that contained the only form). Callable via direct POST or the API route.
+    """
     await _api_mark_reviewed(watched_item_id, session)
     if request.headers.get("HX-Request") == "true":
         return Response(

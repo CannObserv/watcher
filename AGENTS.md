@@ -119,44 +119,34 @@ Full variable reference: `docs/DEPLOYMENT.md`.
 
 ## Watches
 
-Watches are InfoItem-first (#160): each Watch references an `info_item_id`
-(parent InfoItem in Archiver) and optionally a `target_info_source_id` (a
-sub_aspect fragment under that InfoItem; NULL ⇒ the InfoItem's primary
-content). Each Watch belongs to a `WatchedItem` (1:1 with an Archiver
-InfoItem) that owns shared defaults: `default_schedule_config`,
+Watches are WatchedItem-first (#185 Phase A): each Watch belongs to a
+`WatchedItem` that owns the canonical `effective_url` and `source_specs` used
+by the pipeline. `WatchedItem` also owns shared defaults: `default_schedule_config`,
 `default_content_type`, `default_tags`, `domain_name` (FK → `Domain.name`, set
-at first Watch-create time; first Watch wins), `domain_suspended` (cascaded True/False
-by domain deactivation/reactivation), plus `WatchedItemNotificationTemplate` rows.
+at WatchedItem-create time), `domain_suspended` (cascaded True/False by domain
+deactivation/reactivation), plus `WatchedItemNotificationTemplate` rows.
 Live inheritance: per-Watch override → WatchedItem default → system
 default (see `src/core/watches/resolution.py`).
 
-One fetch per WatchedItem per cycle. The InfoItem's primary URL is fetched
-once; primary + cross_check + sub_aspect bindings all extract from the same
-bytes (Archiver's "fetch group" invariant). Per-Watch notifications dispatch
-only when the Watch's target binding's fingerprint changed. Cross_check
-bindings produce SourceRevisions for selector-rot detection (#157) but never
-trigger Watch notifications.
-
-`effective_url` is resolved once at Watch-create time (via `probe_fn`);
-`domain_name` is recorded on the parent `WatchedItem` (first Watch wins, FK →
-`Domain.name`). SourceRevisions are POSTed to Archiver via the
+`info_item_id` on `WatchedItem` is nullable — WatchedItems created via the
+dashboard (`POST /watched-items/new`) have no InfoItem reference; those created
+via the API (`POST /api/v1/watched-items`) still require one. `effective_url`
+and `domain_name` are set at WatchedItem-create time by probing the URL (no
+Archiver SDK call per cycle). SourceRevisions are POSTed to Archiver via the
 `archiver-client` SDK on every detected change; the local
-`pending_source_revisions` outbox + drain worker guarantees delivery during
-Archiver outages. Notifications dispatch inline from the pipeline's
-POST-success site (and outbox drain success for sub_aspect-target Watches),
-with `source_revision_id` in WatchEvent metadata. Primary-target retries on
-the drain log-and-skip the notification (v1 limitation; SourceRevision still
-persists).
+`pending_archiver_sync` outbox + drain worker guarantees delivery during
+Archiver outages. Notifications dispatch inline from the pipeline on change
+detection, with `change_revision_id` in WatchEvent metadata.
 
 Fresh hosts need the scratch directory: `sudo mkdir -p /var/cache/watcher/scratch && sudo chown watcher:watcher /var/cache/watcher/scratch` (or override via `WATCHER_CACHE_DIR`). The Archiver service must also be installed first — see its own `docs/DEPLOYMENT.md`. Archiver authoring tools (`validate_source_spec`, `fetch_and_render`, `preview_extraction`, `propose_selectors`, `find_info_item`, atomic `create_info_item`) are documented in `/home/exedev/archiver/AGENTS.md`.
 
-Operators manage WatchedItem defaults (`name`, `description`, `default_schedule_config`, `default_content_type`, `default_tags`), archive/restore lifecycle, notification-template CRUD, and the sub_aspect review banner via the `/watched-items` dashboard. Same surface is exposed at `/api/v1/watched-items`. WatchedItems can be created standalone at `POST /api/v1/watched-items` or `GET/POST /watched-items/new` (dashboard); they are also auto-created on the first Watch under an InfoItem. Archive cascades to all child Watches; restore is parent-only.
+Operators manage WatchedItem defaults (`name`, `description`, `default_schedule_config`, `default_content_type`, `default_tags`), archive/restore lifecycle, and notification-template CRUD via the `/watched-items` dashboard. Same surface is exposed at `/api/v1/watched-items`. WatchedItems are created at `POST /api/v1/watched-items` (requires `info_item_id`) or `GET/POST /watched-items/new` (dashboard — URL-first, no InfoItem required). Archive cascades to all child Watches; restore is parent-only.
 
 **Watched Items list view** (`#172`, `#173`): columns are Name → Last Check → Interval → Next Check → Status. Next Check is a live countdown rendered by `src/dashboard/static/js/next-check-countdown.js` (loaded globally via `base.html`; reads `data-next-check` ISO timestamp attributes, refreshes every 60 s). List has server-side name search and pagination: `GET /partials/watched-items-table?q=&page=&page_size=&include_archived=` is the HTMX partial; the full page (`GET /watched-items`) accepts the same params and SSR-includes the partial on first load. Active/All archived toggle is a segment-group that cross-includes the search input. Aspect Review column removed (#173) — too expensive per-row; will surface on WatchedItem detail page behind a Redis cache (tracked in #163).
 
-**InfoItem picker** (`#162`): shared typeahead widget used on Watch-create and WatchedItem-create forms. Routes: `GET /info-items/search` (typeahead results partial, HTMX), `GET /info-items/{id}/binding-tree` (step-2 binding display, three modes: `select_with_target`, `select_only`, `readonly_tree`). Template partials: `src/dashboard/templates/partials/info_item_picker/{typeahead,results,binding_tree}.html`. JS keyboard nav: `src/dashboard/static/js/info-item-picker.js` (loaded via `base.html`). Picker mode summary: `select_with_target` — Watch-create, radios for primary/sub_aspect; `select_only` — WI-create, InfoItem selection only (no target picking); `readonly_tree` — WI detail page, no form controls. `GET /watches/new` accepts optional `?watched_item_id=<ulid>` — pre-populates the picker via `hx-trigger="load"` on the binding-tree div; `pre_info_item_id` (optional context var in `typeahead.html`) drives this.
+**InfoItem picker removed** (`#185 Phase A step 7`): the InfoItem typeahead picker (routes `GET /info-items/search`, `GET /info-items/{id}/binding-tree`; JS `info-item-picker.js`; templates `partials/info_item_picker/`) was removed. Watch-create now requires a pre-existing WatchedItem (`?watched_item_id=<ulid>`); WatchedItem-create accepts a URL directly and probes it for `effective_url` + `domain_name`.
 
-**Watched Item detail** (`#174`): InfoItem ULID in the binding tree is a hyperlink to the Archiver dashboard when `info_item_dashboard_url` (resolved from `InfoItemOut.dashboard_url`) is set; falls back to plain monospace text. Primary URL is a clickable `<a class="link">` when present. The Watches section header has a `+ New Watch` button linking to `/watches/new?watched_item_id=<id>` — guarded by `not watched_item.archived_at and primary_url` (no button when archived or no primary binding). Both `watched_item_detail_page` and `info_item_binding_tree` routes pass `info_item_dashboard_url` to the template.
+**Watched Item detail** (`#174`, updated `#185`): shows `effective_url`, `last_checked_at`, `last_changed_at`, and `health_status` from local WatchedItem columns — no Archiver SDK calls. The `+ New Watch` button is guarded by `not watched_item.archived_at and watched_item.effective_url`. `POST /watched-items/{id}/mark-reviewed` (stamps `last_reviewed_at`) is API-only for now; no dashboard UI until a replacement is designed.
 
 Plans: design at [docs/plans/2026-05-15-watched-item-infoitem-first-design.md](docs/plans/2026-05-15-watched-item-infoitem-first-design.md); #160 reshape at [docs/plans/2026-05-17-watched-item-watch-reshape.md](docs/plans/2026-05-17-watched-item-watch-reshape.md); #161 CRUD UI at [docs/plans/2026-05-17-watched-item-crud-ui-plan.md](docs/plans/2026-05-17-watched-item-crud-ui-plan.md). The Phase 5 cutover design ([docs/plans/2026-05-13-phase-5-watcher-v2-cutover.md](docs/plans/2026-05-13-phase-5-watcher-v2-cutover.md)) is historical and was superseded by #160.
 

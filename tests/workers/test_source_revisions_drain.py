@@ -1,4 +1,4 @@
-"""Drain worker for pending_source_revisions."""
+"""Drain worker for pending_archiver_sync."""
 
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
@@ -9,18 +9,16 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.core.models.pending_source_revision import PendingSourceRevision
-from src.workers.source_revisions_drain import drain_pending_source_revisions
-from tests.conftest import (
-    bind_primary_source,
-    make_info_item,
-    make_info_source,
-    make_watch,
-)
+from src.core.models.base import generate_ulid
+from src.core.models.change_revision import ChangeRevision
+from src.core.models.pending_archiver_sync import PendingArchiverSync
+from src.workers.source_revisions_drain import drain_pending_archiver_sync
+from tests.conftest import make_watch
 
 pytestmark = pytest.mark.integration
 
 FP = "sha256:" + "a" * 64
+ARCHIVER_SOURCE_ID = "01HZZ00000000000000000000S"
 
 
 def _async_session_factory_returning(db_session: AsyncSession):
@@ -35,73 +33,74 @@ def _async_session_factory_returning(db_session: AsyncSession):
     return factory
 
 
-@pytest.mark.asyncio
-async def test_drain_primary_target_logs_and_skips_dispatch(db_session, monkeypatch, caplog):
-    """primary-target retry → warn + skip notify; row deleted."""
-    item = await make_info_item(db_session)
-    primary = await make_info_source(db_session, url="https://example.com/primary")
-    await bind_primary_source(
-        db_session,
-        info_item_id=item.info_item_id,
-        info_source_id=primary.info_source_id,
-    )
-    await make_watch(
-        db_session,
-        name="Primary",
-        info_item_id=item.info_item_id,
-        effective_url="https://example.com/primary",
-    )
-    await db_session.commit()
-
+async def _setup_pending_row(db_session: AsyncSession, *, with_archiver_id: bool = True) -> tuple:
+    """Create WatchedItem + ChangeRevision + PendingArchiverSync."""
     now = datetime.now(UTC)
-    row = PendingSourceRevision(
-        info_source_id=str(primary.info_source_id),
+    watch = await make_watch(db_session, name="DrainTest")
+    wi = watch.watched_item
+    if with_archiver_id:
+        wi.archiver_info_source_id = ARCHIVER_SOURCE_ID
+    await db_session.flush()
+
+    rev = ChangeRevision(
+        watched_item_id=wi.id,
         content_fingerprint=FP,
         captured_at=now,
+        content_size_bytes=1024,
+        schema_version=1,
+    )
+    db_session.add(rev)
+    await db_session.flush()
+
+    pending = PendingArchiverSync(
+        change_revision_id=rev.id,
+        watched_item_id=wi.id,
         content_cache_uri="file:///x.bin",
         content_cache_expires_at=now + timedelta(seconds=600),
         next_attempt_at=now,
     )
-    db_session.add(row)
+    db_session.add(pending)
     await db_session.commit()
 
+    return watch, wi, rev, pending
+
+
+@pytest.mark.asyncio
+async def test_drain_success_back_populates_revision_id(db_session, monkeypatch):
+    """Successful POST: ChangeRevision.archiver_revision_id set, pending row deleted."""
+    _, _, rev, pending = await _setup_pending_row(db_session)
+
+    canonical_id = str(generate_ulid())
     fake_client = MagicMock()
     fake_client.post_source_revision = AsyncMock(
-        return_value=MagicMock(
-            source_revision_id=str(row.id),
-            content_fingerprint=FP,
-        )
+        return_value=MagicMock(source_revision_id=canonical_id)
     )
-    fake_dispatch = AsyncMock()
 
     from src.workers import source_revisions_drain as mod
 
     monkeypatch.setattr(
-        mod,
-        "get_session_factory",
-        lambda: _async_session_factory_returning(db_session),
+        mod, "get_session_factory", lambda: _async_session_factory_returning(db_session)
     )
     monkeypatch.setattr(mod, "_get_archiver_client", lambda: fake_client)
-    monkeypatch.setattr(mod, "dispatch_event_notifications", fake_dispatch)
 
-    with caplog.at_level("WARNING", logger="src.workers.source_revisions_drain"):
-        result = await drain_pending_source_revisions(batch_size=10)
-
+    result = await drain_pending_archiver_sync(batch_size=10)
     assert result["drained"] == 1
     assert result["failed"] == 0
-    fake_client.post_source_revision.assert_awaited_once()
-    # v1 limitation: primary-target retries don't notify.
-    fake_dispatch.assert_not_awaited()
-    assert any(
-        "primary-target retry notify skipped" in rec.message
-        and str(primary.info_source_id) in rec.message
-        for rec in caplog.records
-    )
 
-    # Row must still be deleted after success — SourceRevision persisted.
+    fake_client.post_source_revision.assert_awaited_once()
+    call_kw = fake_client.post_source_revision.call_args.kwargs
+    assert call_kw["info_source_id"] == ARCHIVER_SOURCE_ID
+    assert call_kw["source_revision_id"] == str(rev.id)
+    assert call_kw["content_fingerprint"] == FP
+
+    # ChangeRevision should have archiver_revision_id back-populated.
+    await db_session.refresh(rev)
+    assert str(rev.archiver_revision_id) == canonical_id
+
+    # PendingArchiverSync row should be deleted.
     remaining = (
         await db_session.execute(
-            select(PendingSourceRevision).where(PendingSourceRevision.id == row.id)
+            select(PendingArchiverSync).where(PendingArchiverSync.id == pending.id)
         )
     ).scalar_one_or_none()
     assert remaining is None
@@ -110,40 +109,58 @@ async def test_drain_primary_target_logs_and_skips_dispatch(db_session, monkeypa
 @pytest.mark.asyncio
 async def test_drain_marks_failure_on_archiver_error(db_session, monkeypatch):
     """ConnectError → row.attempts++, last_error set, row remains."""
+    _, _, _, pending = await _setup_pending_row(db_session)
     now = datetime.now(UTC)
-    row = PendingSourceRevision(
-        info_source_id="01HZZ00000000000000000000F",
-        content_fingerprint=FP,
-        captured_at=now,
-        content_cache_uri="file:///x.bin",
-        content_cache_expires_at=now + timedelta(seconds=600),
-        next_attempt_at=now,
-    )
-    db_session.add(row)
-    await db_session.commit()
 
     fake_client = MagicMock()
     fake_client.post_source_revision = AsyncMock(side_effect=httpx.ConnectError("nope"))
 
     from src.workers import source_revisions_drain as mod
 
-    monkeypatch.setattr(mod, "_get_archiver_client", lambda: fake_client)
-    monkeypatch.setattr(mod, "dispatch_event_notifications", AsyncMock())
     monkeypatch.setattr(
-        mod,
-        "get_session_factory",
-        lambda: _async_session_factory_returning(db_session),
+        mod, "get_session_factory", lambda: _async_session_factory_returning(db_session)
     )
+    monkeypatch.setattr(mod, "_get_archiver_client", lambda: fake_client)
 
-    result = await drain_pending_source_revisions(batch_size=10)
+    result = await drain_pending_archiver_sync(batch_size=10)
     assert result["drained"] == 0
     assert result["failed"] == 1
 
     stored = (
         await db_session.execute(
-            select(PendingSourceRevision).where(PendingSourceRevision.id == row.id)
+            select(PendingArchiverSync).where(PendingArchiverSync.id == pending.id)
         )
     ).scalar_one()
     assert stored.attempts == 1
     assert stored.last_error and "ConnectError" in stored.last_error
     assert stored.next_attempt_at > now
+
+
+@pytest.mark.asyncio
+async def test_drain_drops_row_when_archiver_info_source_id_missing(
+    db_session, monkeypatch, caplog
+):
+    """Row dropped (logged + deleted) when WatchedItem has no archiver_info_source_id."""
+    _, _, _, pending = await _setup_pending_row(db_session, with_archiver_id=False)
+
+    fake_client = MagicMock()
+    fake_client.post_source_revision = AsyncMock()
+
+    from src.workers import source_revisions_drain as mod
+
+    monkeypatch.setattr(
+        mod, "get_session_factory", lambda: _async_session_factory_returning(db_session)
+    )
+    monkeypatch.setattr(mod, "_get_archiver_client", lambda: fake_client)
+
+    with caplog.at_level("ERROR", logger="src.workers.source_revisions_drain"):
+        await drain_pending_archiver_sync(batch_size=10)
+
+    fake_client.post_source_revision.assert_not_awaited()
+    remaining = (
+        await db_session.execute(
+            select(PendingArchiverSync).where(PendingArchiverSync.id == pending.id)
+        )
+    ).scalar_one_or_none()
+    assert remaining is None
+    assert any("archiver_info_source_id" in r.message for r in caplog.records)

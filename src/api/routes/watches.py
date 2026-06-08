@@ -1,4 +1,4 @@
-"""Watch CRUD API endpoints (#160 InfoItem-first shape)."""
+"""Watch CRUD API endpoints (#160 InfoItem-first shape, #185 Phase A)."""
 
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
@@ -21,7 +21,6 @@ from src.core.notifications.notify import dispatch_event_notifications
 from src.core.probe import ProbeResult
 from src.core.registry import get_registry
 from src.core.watches import create_watch as _create_watch
-from src.core.watches import resolve_watch_url
 
 logger = get_logger(__name__)
 
@@ -34,14 +33,15 @@ async def create_watch(
     probe_fn: Annotated[Callable[[str], Awaitable[ProbeResult]], Depends(get_probe_fn)],
     session: AsyncSession = Depends(get_db_session),
 ):
-    """Create a Watch on an InfoItem's primary content or sub_aspect fragment.
+    """Create a Watch on an InfoItem's primary content.
 
     The InfoItem's primary URL is resolved via the ArchiverClient SDK, probed
-    once for redirect-detection, then stored as ``effective_*`` columns.
+    once for redirect-detection, then stored as ``effective_url`` on both Watch
+    and WatchedItem.
 
     Error mapping:
     - SDK ``NotFound`` (unknown ``info_item_id`` / missing primary binding) → 422.
-    - ``ValueError`` (target_info_source_id not a sub_aspect of the InfoItem) → 422.
+    - ``ValueError`` (binding validation error) → 422.
     - SDK ``AuthError`` → 500 (operator misconfiguration).
     - SDK ``ServerError`` / ``httpx.ConnectError`` / ``httpx.TimeoutException``
       → 503 with ``Retry-After: 30`` header.
@@ -55,7 +55,6 @@ async def create_watch(
             info_client=info_client,
             name=data.name,
             info_item_id=data.info_item_id,
-            target_info_source_id=data.target_info_source_id,
             content_type=data.content_type,
             description=data.description,
             tags=data.tags,
@@ -144,18 +143,9 @@ async def update_watch(
         updated_fields=list(updates.keys()),
     )
     if "is_active" in updates:
-        info_client = get_registry().get_archiver_client()
-        try:
-            resolved_url = await resolve_watch_url(watch, info_client)
-        except NotFound:
-            # Mirrors src/workers/tasks.py: an InfoItem deleted out from under
-            # the watch should not block operator-requested pause/resume.
-            # Fall back to a sentinel URL so the notification still fires.
-            logger.error(
-                "info_item missing for watch — emitting lifecycle event with sentinel URL",
-                extra={"watch_id": str(watch.id)},
-            )
-            resolved_url = f"watch:{watch.id}"
+        # #185 Phase A: resolve URL from local WatchedItem; no Archiver SDK call.
+        wi_url = watch.watched_item and watch.watched_item.effective_url
+        resolved_url = wi_url or f"watch:{watch.id}"
         if previous_active and not watch.is_active:
             await dispatch_event_notifications(
                 session=session,
@@ -192,14 +182,6 @@ async def delete_watch(
 
     #160 pinned semantics: ``DELETE`` removes exactly one Watch — never cascades
     to siblings.
-
-    * Primary-target Watch (``target_info_source_id IS NULL``): deletable iff no
-      other active+unarchived Watch with ``target_info_source_id IS NOT NULL``
-      exists for the same ``watched_item_id``. Sibling sub_aspect Watches block
-      deletion with 409 — the operator must archive or delete them first, or
-      archive the parent WatchedItem.
-    * Sub_aspect-target Watch (``target_info_source_id IS NOT NULL``): always
-      deletable when archived.
     """
     watch = await get_watch_or_404(watch_id, session)
 
@@ -234,18 +216,8 @@ async def delete_watch(
                 },
             )
 
-    info_client = get_registry().get_archiver_client()
-    try:
-        resolved_url = await resolve_watch_url(watch, info_client)
-    except NotFound:
-        # Mirrors src/workers/tasks.py: an InfoItem deleted out from under the
-        # watch should not block operator-requested deletion. Fall back to a
-        # sentinel URL so audit + notification still record the event.
-        logger.error(
-            "info_item missing for watch — deleting with sentinel URL",
-            extra={"watch_id": str(watch.id)},
-        )
-        resolved_url = f"watch:{watch.id}"
+    # #185 Phase A: resolve URL from local WatchedItem; no Archiver SDK call.
+    resolved_url = (watch.watched_item and watch.watched_item.effective_url) or f"watch:{watch.id}"
     audit(
         session,
         EventType.WATCH_DELETED,

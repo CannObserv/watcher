@@ -382,7 +382,6 @@ async def watch_create_submit(
     name: str = Form(""),
     info_item_id: str = Form(""),
     info_item_id_manual: str = Form(""),
-    target_info_source_id_manual: str = Form(""),
     content_type: str = Form("html"),
     description: str = Form(""),
     probe_fn: Callable[[str], Awaitable[ProbeResult]] = Depends(get_probe_fn),
@@ -391,20 +390,15 @@ async def watch_create_submit(
     """Handle watch creation form submission.
 
     #162: form accepts either picker output (``info_item_id`` from the
-    typeahead-injected hidden input + ``watch-create__target`` radio) OR a
-    paste-ULID fallback (``info_item_id_manual`` + ``target_info_source_id_manual``).
-    Picker wins when its ``info_item_id`` is non-empty; the manual block is
-    read only when the picker is empty.
+    typeahead-injected hidden input) OR a paste-ULID fallback
+    (``info_item_id_manual``). Picker wins when its ``info_item_id`` is
+    non-empty.
     """
-    form = await request.form()
-    target_radio = form.get("watch-create__target", "").strip()
 
     if info_item_id.strip():
         resolved_info_item_id = info_item_id.strip()
-        resolved_target = target_radio or None
     else:
         resolved_info_item_id = info_item_id_manual.strip()
-        resolved_target = target_info_source_id_manual.strip() or None
 
     info_client = get_registry().get_archiver_client()
     errors = []
@@ -435,7 +429,6 @@ async def watch_create_submit(
             info_client=info_client,
             name=name.strip(),
             info_item_id=resolved_info_item_id,
-            target_info_source_id=resolved_target,
             content_type=content_type,
             description=description.strip() or None,
         )

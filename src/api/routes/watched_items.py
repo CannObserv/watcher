@@ -1,4 +1,4 @@
-"""WatchedItem CRUD API endpoints (#161)."""
+"""WatchedItem CRUD API endpoints (#161, #185 Phase A)."""
 
 from datetime import UTC, datetime
 
@@ -13,6 +13,7 @@ from ulid import ULID
 from src.api.deps import get_db_session
 from src.api.routes.helpers import parse_ulid
 from src.api.schemas.watched_item import (
+    ChangeRevisionResponse,
     WatchedItemCreate,
     WatchedItemPatch,
     WatchedItemResponse,
@@ -22,6 +23,7 @@ from src.api.schemas.watched_item import (
 )
 from src.core.logging import get_logger
 from src.core.models.audit_log import EventType, audit
+from src.core.models.change_revision import ChangeRevision
 from src.core.models.watch import Watch
 from src.core.models.watched_item import WatchedItem
 from src.core.models.watched_item_notification_template import (
@@ -95,6 +97,8 @@ async def create_watched_item(
         default_schedule_config=data.default_schedule_config,
         default_content_type=data.default_content_type,
         default_tags=data.default_tags,
+        effective_url=data.url or "",
+        source_specs=data.source_specs or [],
     )
     session.add(wi)
     try:
@@ -223,6 +227,21 @@ async def mark_reviewed(watched_item_id: str, session: AsyncSession = Depends(ge
     await session.commit()
     await session.refresh(wi)
     return wi
+
+
+@router.get(
+    "/{watched_item_id}/revisions",
+    response_model=list[ChangeRevisionResponse],
+)
+async def list_revisions(watched_item_id: str, session: AsyncSession = Depends(get_db_session)):
+    """List ChangeRevisions for a WatchedItem, newest first."""
+    wi = await _get_or_404(session, watched_item_id)
+    result = await session.execute(
+        select(ChangeRevision)
+        .where(ChangeRevision.watched_item_id == wi.id)
+        .order_by(ChangeRevision.captured_at.desc())
+    )
+    return list(result.scalars().all())
 
 
 async def _template_or_404(

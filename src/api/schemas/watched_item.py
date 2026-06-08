@@ -1,10 +1,10 @@
-"""Pydantic schemas for WatchedItem and WatchedItemNotificationTemplate API."""
+"""Pydantic schemas for WatchedItem, WatchedItemNotificationTemplate, and ChangeRevision."""
 
 from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from src.api.schemas.types import ULIDStr
+from src.api.schemas.types import HttpUrlStr, ULIDStr
 from src.api.schemas.validators import validate_event_list
 from src.core.models.watch import ContentType
 
@@ -15,6 +15,10 @@ class WatchedItemCreate(BaseModel):
     Identity is ``info_item_id`` (must reference a known Archiver InfoItem,
     1:1). The InfoItem's existence is NOT validated here — the route layer
     does that via the Archiver SDK and maps NotFound → 422.
+
+    ``url`` and ``source_specs`` seed the local pipeline inputs: the URL the
+    fetch cycle will use and the extraction specs for fingerprinting. These
+    are optional at create time and can be updated later via PATCH.
     """
 
     info_item_id: ULIDStr
@@ -23,6 +27,8 @@ class WatchedItemCreate(BaseModel):
     default_schedule_config: dict | None = None
     default_content_type: str | None = None
     default_tags: list[str] | None = None
+    url: HttpUrlStr | None = None
+    source_specs: list[dict] | None = None
 
     @field_validator("default_content_type")
     @classmethod
@@ -69,9 +75,12 @@ class WatchedItemResponse(BaseModel):
     is_active: bool
     archived_at: datetime | None
     last_reviewed_at: datetime | None
+    last_changed_at: datetime | None
     default_schedule_config: dict | None
     default_content_type: str | None
     default_tags: list[str] | None
+    effective_url: str
+    source_specs: list[dict]
     domain_name: str | None = None
     domain_suspended: bool = False
     created_at: datetime
@@ -125,3 +134,17 @@ class WatchedItemTemplateResponse(BaseModel):
     remote_channel_id: str | None
     created_at: datetime
     updated_at: datetime
+
+
+class ChangeRevisionResponse(BaseModel):
+    """One ChangeRevision record for a WatchedItem."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: ULIDStr
+    watched_item_id: ULIDStr
+    content_fingerprint: str
+    captured_at: datetime
+    content_size_bytes: int | None
+    archiver_revision_id: ULIDStr | None
+    schema_version: int

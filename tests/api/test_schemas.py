@@ -97,20 +97,7 @@ class TestWatchCreate:
         )
         assert data.name == "Test Watch"
         assert data.info_item_id == item_id
-        assert data.target_info_source_id is None
         assert data.content_type == "html"
-
-    def test_watch_create_with_target_info_source(self):
-        item_id = str(ULID())
-        sub_id = str(ULID())
-        data = WatchCreate(
-            name="Sub Watch",
-            info_item_id=item_id,
-            target_info_source_id=sub_id,
-            content_type="html",
-        )
-        assert data.info_item_id == item_id
-        assert data.target_info_source_id == sub_id
 
     def test_watch_create_content_type_optional(self):
         data = WatchCreate(
@@ -136,8 +123,8 @@ class TestWatchCreate:
             )
 
     def test_watch_create_no_legacy_fields(self):
-        """``url``, ``fetch_config``, ``info_source_id``, and ``schedule_config``
-        are gone from the create shape."""
+        """``url``, ``fetch_config``, ``info_source_id``, ``schedule_config``, and
+        ``target_info_source_id`` are gone from the create shape."""
         data = WatchCreate(
             name="Silent",
             info_item_id=str(ULID()),
@@ -147,6 +134,7 @@ class TestWatchCreate:
         assert not hasattr(data, "fetch_config")
         assert not hasattr(data, "info_source_id")
         assert not hasattr(data, "schedule_config")
+        assert not hasattr(data, "target_info_source_id")
 
 
 class TestWatchUpdate:

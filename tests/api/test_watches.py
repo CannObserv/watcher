@@ -479,20 +479,16 @@ class TestDeleteWatch:
         assert len(configs) == 0
 
 
-class TestSDKFailureHandling:
-    """SDK-failure paths in PATCH/DELETE handlers must not 5xx the user request.
+class TestLifecycleEventURL:
+    """PATCH/DELETE routes use watched_item.effective_url for lifecycle events.
 
-    Pattern mirrors ``src/workers/tasks.py``: catch ``NotFound`` from the SDK
-    when resolving the watch URL and degrade gracefully (sentinel URL or skip
-    the notification dispatch) so an orphaned InfoItem doesn't block operator
-    actions on the watch row.
+    #185 Phase A: Archiver SDK no longer called in PATCH/DELETE; URL comes
+    from the local WatchedItem row. Empty effective_url falls back to a
+    sentinel so events always have a URL.
     """
 
-    async def test_pause_dispatches_event_when_resolve_url_raises_notfound(
-        self, client, db_session
-    ):
-        """PATCH ``is_active=false`` must still dispatch a WATCH_PAUSED event with a
-        sentinel URL when the SDK raises NotFound (orphaned InfoItem)."""
+    async def test_pause_dispatches_with_watched_item_effective_url(self, client, db_session):
+        """PATCH is_active=false dispatches WATCH_PAUSED with watched_item.effective_url."""
         from unittest.mock import patch
 
         watch = await make_watch(
@@ -501,32 +497,47 @@ class TestSDKFailureHandling:
             primary_url="https://example.com",
             is_active=True,
         )
+        watch.watched_item.effective_url = "https://example.com/resolved"
         await db_session.commit()
 
         notify_patch = "src.api.routes.watches.dispatch_event_notifications"
-        with (
-            patch(
-                "src.api.routes.watches.resolve_watch_url",
-                new_callable=AsyncMock,
-                side_effect=NotFound("info_item missing"),
-            ),
-            patch(notify_patch, new_callable=AsyncMock) as mock_dispatch,
-        ):
+        with patch(notify_patch, new_callable=AsyncMock) as mock_dispatch:
             response = await client.patch(
                 f"/api/v1/watches/{watch.id}",
                 json={"is_active": False},
             )
         assert response.status_code == 200, response.text
         mock_dispatch.assert_awaited_once()
-        _, kwargs = mock_dispatch.call_args
-        event = kwargs["event"]
+        event = mock_dispatch.call_args.kwargs["event"]
+        assert event.event_type == WatchEventType.WATCH_PAUSED
+        assert event.watch_url == "https://example.com/resolved"
+
+    async def test_pause_falls_back_to_sentinel_when_effective_url_empty(self, client, db_session):
+        """PATCH is_active=false uses sentinel URL when watched_item.effective_url is empty."""
+        from unittest.mock import patch
+
+        watch = await make_watch(
+            db_session,
+            name="Paused Watch",
+            primary_url="https://example.com",
+            is_active=True,
+        )
+        # effective_url = "" (default) — should fall back to sentinel
+        await db_session.commit()
+
+        notify_patch = "src.api.routes.watches.dispatch_event_notifications"
+        with patch(notify_patch, new_callable=AsyncMock) as mock_dispatch:
+            response = await client.patch(
+                f"/api/v1/watches/{watch.id}",
+                json={"is_active": False},
+            )
+        assert response.status_code == 200, response.text
+        event = mock_dispatch.call_args.kwargs["event"]
         assert event.event_type == WatchEventType.WATCH_PAUSED
         assert event.watch_url == f"watch:{watch.id}"
 
-    async def test_resume_dispatches_event_when_resolve_url_raises_notfound(
-        self, client, db_session
-    ):
-        """PATCH ``is_active=true`` must still dispatch WATCH_RESUMED with a sentinel URL."""
+    async def test_resume_dispatches_with_watched_item_effective_url(self, client, db_session):
+        """PATCH is_active=true dispatches WATCH_RESUMED with watched_item.effective_url."""
         from unittest.mock import patch
 
         watch = await make_watch(
@@ -535,32 +546,22 @@ class TestSDKFailureHandling:
             primary_url="https://example.com",
             is_active=False,
         )
+        watch.watched_item.effective_url = "https://example.com/page"
         await db_session.commit()
 
         notify_patch = "src.api.routes.watches.dispatch_event_notifications"
-        with (
-            patch(
-                "src.api.routes.watches.resolve_watch_url",
-                new_callable=AsyncMock,
-                side_effect=NotFound("info_item missing"),
-            ),
-            patch(notify_patch, new_callable=AsyncMock) as mock_dispatch,
-        ):
+        with patch(notify_patch, new_callable=AsyncMock) as mock_dispatch:
             response = await client.patch(
                 f"/api/v1/watches/{watch.id}",
                 json={"is_active": True},
             )
         assert response.status_code == 200, response.text
-        mock_dispatch.assert_awaited_once()
-        _, kwargs = mock_dispatch.call_args
-        event = kwargs["event"]
+        event = mock_dispatch.call_args.kwargs["event"]
         assert event.event_type == WatchEventType.WATCH_RESUMED
-        assert event.watch_url == f"watch:{watch.id}"
+        assert event.watch_url == "https://example.com/page"
 
-    async def test_delete_completes_when_resolve_url_raises_notfound(self, client, db_session):
-        """DELETE on archived watch must succeed even if InfoItem is gone."""
-        from unittest.mock import patch
-
+    async def test_delete_uses_watched_item_effective_url(self, client, db_session):
+        """DELETE dispatches WATCH_DELETED using watched_item.effective_url."""
         watch = await make_watch(
             db_session,
             name="Archived Watch",
@@ -568,18 +569,11 @@ class TestSDKFailureHandling:
             is_active=False,
             is_archived=True,
         )
+        watch.watched_item.effective_url = "https://example.com/page"
         await db_session.commit()
 
-        with patch(
-            "src.api.routes.watches.resolve_watch_url",
-            new_callable=AsyncMock,
-            side_effect=NotFound("info_item missing"),
-        ):
-            response = await client.delete(f"/api/v1/watches/{watch.id}")
-        assert response.status_code == 204, (
-            f"DELETE must complete despite NotFound; got {response.status_code} {response.text}"
-        )
-        # Watch must actually be gone.
+        response = await client.delete(f"/api/v1/watches/{watch.id}")
+        assert response.status_code == 204
         get_resp = await client.get(f"/api/v1/watches/{watch.id}")
         assert get_resp.status_code == 404
 

@@ -1,4 +1,4 @@
-"""Watch creation service — InfoItem-first model (#160)."""
+"""Watch creation service — InfoItem-first model (#160, #185 Phase A)."""
 
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
@@ -25,10 +25,9 @@ logger = get_logger(__name__)
 async def resolve_watch_url(watch: Watch, client: ArchiverClient) -> str:
     """Resolve the operator-facing URL for a Watch — the InfoItem's primary URL.
 
-    Both primary-target (target_info_source_id IS NULL) and sub_aspect-target
-    Watches share the same fetch URL because the InfoItem is a fetch group
-    (Archiver v3.1.0 invariant). Used by notification dispatch to build
-    WatchEvent.watch_url.
+    Deprecated: prefer ``watch.watched_item.effective_url`` which is set at
+    Watch-create time without a round-trip to Archiver. Retained for call sites
+    that haven't migrated yet (Steps 5/7 of #185 Phase A).
     """
     bindings = await fetch_info_item_bindings(client, str(watch.info_item_id))
     return bindings.primary_url
@@ -78,35 +77,25 @@ async def create_watch(
     *,
     name: str,
     info_item_id: str,
-    target_info_source_id: str | None = None,
     content_type: str | ContentType | None = None,
     description: str | None = None,
     tags: list[str] | None = None,
 ) -> Watch:
-    """Create a Watch on an InfoItem's primary content or a sub_aspect fragment.
+    """Create a Watch on an InfoItem's primary content.
 
     Steps:
-    1. Resolve the InfoItem's bindings + primary URL via fetch_info_item_bindings.
-    2. If target_info_source_id is set, validate it is bound with role='sub_aspect'.
-    3. Probe the URL → effective_url / effective_domain (redirect-detection).
-    4. Upsert the Domain row.
-    5. Get-or-create the WatchedItem for this InfoItem.
+    1. Resolve the InfoItem's primary URL via fetch_info_item_bindings.
+    2. Probe the URL → effective_url / effective_domain (redirect-detection).
+    3. Upsert the Domain row.
+    4. Get-or-create the WatchedItem for this InfoItem.
+    5. Set watched_item.effective_url from the probe (first Watch wins).
     6. Persist Watch + audit + dispatch WATCH_CREATED event.
 
     Raises:
-        ValueError — target_info_source_id is set but doesn't match a sub_aspect binding.
         archiver_client.NotFound — info_item_id (or its primary binding) unknown.
         httpx.HTTPError — probe failed.
     """
     bindings = await fetch_info_item_bindings(info_client, info_item_id)
-
-    if target_info_source_id is not None:
-        sub_ids = {str(s.info_source_id) for s in bindings.sub_aspects}
-        if target_info_source_id not in sub_ids:
-            raise ValueError(
-                f"target_info_source_id {target_info_source_id} is not a sub_aspect "
-                f"of InfoItem {info_item_id}"
-            )
 
     probe_result = await probe_fn(bindings.primary_url)
 
@@ -136,24 +125,24 @@ async def create_watch(
         fallback_name=name,
     )
 
-    # Populate domain_name on the WatchedItem if not yet set (first Watch wins).
+    # Populate domain_name + effective_url on the WatchedItem if not yet set
+    # (first Watch wins).
     if watched_item.domain_name is None and probe_result.effective_domain:
         watched_item.domain_name = probe_result.effective_domain
         await session.flush()
+    if not watched_item.effective_url and probe_result.effective_url:
+        watched_item.effective_url = probe_result.effective_url
+        await session.flush()
 
-    watch_kwargs: dict = {
-        "name": name,
-        "info_item_id": ULID.from_str(info_item_id),
-        "target_info_source_id": (
-            ULID.from_str(target_info_source_id) if target_info_source_id else None
-        ),
-        "watched_item_id": watched_item.id,
-        "content_type": content_type,
-        "effective_url": probe_result.effective_url,
-        "description": description,
-        "tags": tags,
-    }
-    watch = Watch(**watch_kwargs)
+    watch = Watch(
+        name=name,
+        info_item_id=ULID.from_str(info_item_id),
+        watched_item_id=watched_item.id,
+        content_type=content_type,
+        effective_url=probe_result.effective_url,
+        description=description,
+        tags=tags,
+    )
     session.add(watch)
     await session.flush()
 
@@ -163,7 +152,6 @@ async def create_watch(
         watch_id=watch.id,
         name=name,
         info_item_id=info_item_id,
-        target_info_source_id=target_info_source_id,
         watched_item_id=str(watched_item.id),
         url=bindings.primary_url,
         content_type=str(content_type) if content_type is not None else None,

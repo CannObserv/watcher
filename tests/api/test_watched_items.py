@@ -252,6 +252,75 @@ class TestTemplateCrud:
         assert listing.json() == []
 
 
+class TestWatchedItemRevisions:
+    async def test_empty_revisions(self, client, db_session):
+        wi = await _make_watched_item(db_session)
+        response = await client.get(f"/api/v1/watched-items/{wi.id}/revisions")
+        assert response.status_code == 200
+        assert response.json() == []
+
+    async def test_returns_revisions_newest_first(self, client, db_session):
+        from datetime import UTC, datetime, timedelta
+
+        from src.core.models.change_revision import ChangeRevision
+
+        wi = await _make_watched_item(db_session)
+        now = datetime.now(UTC)
+        r1 = ChangeRevision(
+            watched_item_id=wi.id,
+            content_fingerprint="sha256:" + "a" * 64,
+            captured_at=now - timedelta(hours=1),
+            schema_version=1,
+        )
+        r2 = ChangeRevision(
+            watched_item_id=wi.id,
+            content_fingerprint="sha256:" + "b" * 64,
+            captured_at=now,
+            schema_version=1,
+        )
+        db_session.add_all([r1, r2])
+        await db_session.commit()
+
+        response = await client.get(f"/api/v1/watched-items/{wi.id}/revisions")
+        assert response.status_code == 200
+        data = response.json()
+        assert len(data) == 2
+        # Newest first
+        assert data[0]["content_fingerprint"] == r2.content_fingerprint
+        assert data[1]["content_fingerprint"] == r1.content_fingerprint
+
+    async def test_revision_response_fields(self, client, db_session):
+        from datetime import UTC, datetime
+
+        from src.core.models.change_revision import ChangeRevision
+
+        wi = await _make_watched_item(db_session)
+        rev = ChangeRevision(
+            watched_item_id=wi.id,
+            content_fingerprint="sha256:" + "c" * 64,
+            captured_at=datetime.now(UTC),
+            content_size_bytes=512,
+            schema_version=1,
+        )
+        db_session.add(rev)
+        await db_session.commit()
+
+        response = await client.get(f"/api/v1/watched-items/{wi.id}/revisions")
+        data = response.json()[0]
+        assert "id" in data
+        assert "watched_item_id" in data
+        assert data["content_fingerprint"].startswith("sha256:")
+        assert data["content_size_bytes"] == 512
+        assert data["schema_version"] == 1
+        assert data["archiver_revision_id"] is None
+
+    async def test_revisions_404_unknown_watched_item(self, client):
+        from ulid import ULID
+
+        response = await client.get(f"/api/v1/watched-items/{ULID()}/revisions")
+        assert response.status_code == 404
+
+
 class TestCreateWatchedItem:
     async def test_creates_with_info_item_name_fallback(self, client, db_session, info_client):
         item = await make_info_item(db_session, name="Source Item")
@@ -331,3 +400,41 @@ class TestCreateWatchedItem:
         )
         assert len(events) == 1
         assert events[0].payload["source"] == "api"
+
+    async def test_creates_with_url_and_source_specs(self, client, db_session, info_client):
+        """url + source_specs set effective_url and source_specs on the WatchedItem."""
+
+        item = await make_info_item(db_session, name="WithUrl")
+        await db_session.commit()
+        response = await client.post(
+            "/api/v1/watched-items",
+            json={
+                "info_item_id": str(item.info_item_id),
+                "url": "https://example.com/page",
+                "source_specs": [{"schema_version": 1, "extraction": {"algorithm": "full_page"}}],
+            },
+        )
+        assert response.status_code == 201, response.text
+        body = response.json()
+        assert body["effective_url"] == "https://example.com/page"
+        assert body["source_specs"] == [
+            {"schema_version": 1, "extraction": {"algorithm": "full_page"}}
+        ]
+
+    async def test_response_includes_effective_url_and_source_specs(
+        self, client, db_session, info_client
+    ):
+        """WatchedItem response always includes effective_url and source_specs."""
+        item = await make_info_item(db_session, name="RespFields")
+        await db_session.commit()
+        response = await client.post(
+            "/api/v1/watched-items",
+            json={"info_item_id": str(item.info_item_id)},
+        )
+        assert response.status_code == 201
+        body = response.json()
+        assert "effective_url" in body
+        assert "source_specs" in body
+        # Default values when not supplied
+        assert body["effective_url"] == ""
+        assert body["source_specs"] == []

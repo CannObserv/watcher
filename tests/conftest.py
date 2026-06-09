@@ -457,14 +457,9 @@ def info_client(db_session, request):
     This fixture swaps the registry singleton's cached client for an AsyncMock
     whose methods look up live rows in ``db_session`` where possible.
 
-    Phase 5: ``information.info_specs`` no longer exists in the Archiver schema.
-    ``get_primary_info_spec`` now returns a synthesized stub spec for any
-    info_item_id — tests that need a specific URL should stub
-    ``info_client.get_primary_info_spec`` directly.
-
     Tests that need to exercise SDK error paths can stub individual methods
     on the returned mock
-    (e.g. ``info_client.get_primary_info_spec.side_effect = NotFound``).
+    (e.g. ``info_client.get_info_item.side_effect = NotFound``).
     """
     fake_client = MagicMock(spec=ArchiverClient)
 
@@ -483,26 +478,6 @@ def info_client(db_session, request):
             out.append(entry)
         return out
 
-    async def _get_primary_info_spec(info_item_id: str, *, force_refresh: bool = False):
-        # Phase 5: info_specs table is gone from the Archiver schema.
-        # Return a synthesised stub spec so route handlers can resolve a URL
-        # without a real InfoSpec row. Tests that need a specific URL should
-        # stub this method directly on the returned fake_client.
-        out = MagicMock()
-        out.info_item_id = info_item_id
-        out.info_spec_id = "01TESTSPEC00000000000000XX"
-        doc = MagicMock()
-        doc.to_dict = MagicMock(
-            return_value={
-                "schema_version": 1,
-                "target": {"url": "https://example.com/page"},
-                "extraction": {"algorithm": "full_page"},
-                "fingerprint": {"algorithm": "simhash"},
-            }
-        )
-        out.document = doc
-        return out
-
     async def _get_info_source(info_source_id: str):
         result = await db_session.execute(
             select(InfoSource).where(InfoSource.info_source_id == info_source_id)
@@ -514,11 +489,6 @@ def info_client(db_session, request):
         out.info_source_id = str(source.info_source_id)
         out.url = source.url
         out.source_specs = source.source_specs or []
-        # Bridge: synthesize source_spec for fetch_info_item_bindings compat
-        # (fetch_info_item_bindings is deleted in Phase A step 3).
-        spec = MagicMock()
-        spec.additional_properties = (source.source_specs or [{}])[0]
-        out.source_spec = spec
         return out
 
     async def _get_info_item(info_item_id: str):
@@ -542,7 +512,6 @@ def info_client(db_session, request):
         for binding in bindings_result.scalars().all():
             b = MagicMock()
             b.info_source_id = str(binding.info_source_id)
-            b.role = None  # v4.0.0: role removed; all active bindings are primary
             b.is_active = binding.deactivated_at is None
             b.deactivated_at = binding.deactivated_at
             info_item_sources.append(b)
@@ -573,7 +542,6 @@ def info_client(db_session, request):
         return out
 
     fake_client.list_info_items = AsyncMock(side_effect=_list_info_items)
-    fake_client.get_primary_info_spec = AsyncMock(side_effect=_get_primary_info_spec)
     fake_client.get_info_source = AsyncMock(side_effect=_get_info_source)
     fake_client.get_info_item = AsyncMock(side_effect=_get_info_item)
     fake_client.find_info_item = AsyncMock(side_effect=_find_info_item)

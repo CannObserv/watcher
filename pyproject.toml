@@ -26,7 +26,7 @@ dependencies = [
     "redis>=5.0,<6",
     "html5lib>=1.1",
     "notifier-client",
-    "archiver-client>=3.2.1,<4",
+    "archiver-client>=4.0.0,<5",
 ]
 
 [project.optional-dependencies]

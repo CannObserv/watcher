@@ -76,6 +76,24 @@ class TestGetWatchedItem:
         assert response.status_code == 200
         assert response.json()["name"] == "Single"
 
+    async def test_returns_null_info_item_id_for_standalone(self, client, db_session):
+        """Dashboard-created WatchedItems (info_item_id=None) must serialise cleanly.
+
+        Regression for the ULIDStr BeforeValidator silently coercing None → "None".
+        """
+        from src.core.models.watched_item import WatchedItem
+
+        wi = WatchedItem(name="Standalone", effective_url="https://example.com/s")
+        db_session.add(wi)
+        await db_session.flush()
+        await db_session.commit()
+
+        response = await client.get(f"/api/v1/watched-items/{wi.id}")
+        assert response.status_code == 200
+        body = response.json()
+        assert body["name"] == "Standalone"
+        assert body["info_item_id"] is None
+
 
 class TestPatchWatchedItem:
     async def test_404_unknown(self, client):

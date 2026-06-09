@@ -10,15 +10,15 @@ from src.core.models.watch import ContentType
 
 
 class WatchedItemCreate(BaseModel):
-    """Create a standalone WatchedItem.
+    """Create a WatchedItem via ``POST /api/v1/watched-items``.
 
-    Identity is ``info_item_id`` (must reference a known Archiver InfoItem,
-    1:1). The InfoItem's existence is NOT validated here — the route layer
-    does that via the Archiver SDK and maps NotFound → 422.
+    ``info_item_id`` is required for the API route — the route validates
+    existence via the Archiver SDK (NotFound → 422). Dashboard creates
+    (``POST /watched-items/new``) bypass this schema entirely and accept a URL
+    instead, producing a WatchedItem with ``info_item_id=None``.
 
-    ``url`` and ``source_specs`` seed the local pipeline inputs: the URL the
-    fetch cycle will use and the extraction specs for fingerprinting. These
-    are optional at create time and can be updated later via PATCH.
+    ``url`` and ``source_specs`` seed the local pipeline inputs. Optional at
+    create time; updatable later via PATCH.
     """
 
     info_item_id: ULIDStr
@@ -64,7 +64,11 @@ class WatchedItemPatch(BaseModel):
 
 
 class WatchedItemResponse(BaseModel):
-    """Single WatchedItem record."""
+    """Single WatchedItem record.
+
+    ``info_item_id`` is null for WatchedItems created via the dashboard
+    (URL-first, no InfoItem required). API-created WatchedItems always have it.
+    """
 
     model_config = ConfigDict(from_attributes=True)
 

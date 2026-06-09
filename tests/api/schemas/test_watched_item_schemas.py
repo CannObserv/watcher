@@ -69,6 +69,45 @@ class TestWatchedItemResponse:
         assert r.name == "X"
 
 
+class TestIssue186SchemaAdditions:
+    """#186 — new fields on WatchedItemResponse, WatchedItemCreate, WatchedItemPatch."""
+
+    def test_response_has_health_status(self):
+        from src.api.schemas.watched_item import WatchedItemResponse
+
+        assert "health_status" in WatchedItemResponse.model_fields
+
+    def test_response_has_last_checked_at(self):
+        from src.api.schemas.watched_item import WatchedItemResponse
+
+        assert "last_checked_at" in WatchedItemResponse.model_fields
+
+    def test_response_has_archiver_info_source_id(self):
+        from src.api.schemas.watched_item import WatchedItemResponse
+
+        assert "archiver_info_source_id" in WatchedItemResponse.model_fields
+
+    def test_create_accepts_archiver_info_source_id(self):
+        from src.api.schemas.watched_item import WatchedItemCreate
+
+        schema = WatchedItemCreate(
+            url="https://example.com", archiver_info_source_id="01ABCDEFGHJKMNPQRSTVWXYZ00"
+        )
+        assert schema.archiver_info_source_id == "01ABCDEFGHJKMNPQRSTVWXYZ00"
+
+    def test_patch_accepts_archiver_info_source_id(self):
+        from src.api.schemas.watched_item import WatchedItemPatch
+
+        p = WatchedItemPatch(archiver_info_source_id="01ABCDEFGHJKMNPQRSTVWXYZ00")
+        assert p.archiver_info_source_id == "01ABCDEFGHJKMNPQRSTVWXYZ00"
+
+    def test_patch_archiver_info_source_id_is_optional(self):
+        from src.api.schemas.watched_item import WatchedItemPatch
+
+        p = WatchedItemPatch()
+        assert "archiver_info_source_id" not in p.model_dump(exclude_unset=True)
+
+
 class TestTemplateSchemas:
     def test_template_create_defaults(self):
         from src.api.schemas.watched_item import WatchedItemTemplateCreate

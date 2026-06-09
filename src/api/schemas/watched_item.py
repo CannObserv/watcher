@@ -34,6 +34,7 @@ class WatchedItemCreate(BaseModel):
     default_tags: list[str] | None = None
     url: HttpUrlStr | None = None
     source_specs: list[dict] | None = None
+    archiver_info_source_id: str | None = Field(None, max_length=26)
 
     @model_validator(mode="after")
     def _require_anchor(self) -> "WatchedItemCreate":
@@ -61,6 +62,7 @@ class WatchedItemPatch(BaseModel):
     default_schedule_config: dict | None = None
     default_content_type: str | None = None
     default_tags: list[str] | None = None
+    archiver_info_source_id: str | None = Field(None, max_length=26)
 
     @field_validator("default_content_type")
     @classmethod
@@ -90,12 +92,15 @@ class WatchedItemResponse(BaseModel):
     is_active: bool
     archived_at: datetime | None
     last_reviewed_at: datetime | None
+    last_checked_at: datetime | None
     last_changed_at: datetime | None
+    health_status: str
     default_schedule_config: dict | None
     default_content_type: str | None
     default_tags: list[str] | None
     effective_url: str
     source_specs: list[dict]
+    archiver_info_source_id: str | None = None
     domain_name: str | None = None
     domain_suspended: bool = False
     created_at: datetime

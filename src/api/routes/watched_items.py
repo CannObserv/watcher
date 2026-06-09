@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ulid import ULID
 
 from src.api.deps import get_db_session, get_probe_fn
-from src.api.routes.helpers import parse_ulid
+from src.api.routes.helpers import parse_filter_ulid, parse_ulid
 from src.api.schemas.watched_item import (
     ChangeRevisionResponse,
     WatchedItemCreate,
@@ -33,6 +33,7 @@ from src.core.models.watched_item_notification_template import (
 )
 from src.core.probe import ProbeResult
 from src.core.registry import get_registry
+from src.workers.tasks import check_watched_item
 
 router = APIRouter(prefix="/watched-items", tags=["watched-items"])
 
@@ -52,15 +53,20 @@ async def _get_or_404(session: AsyncSession, wi_id: str) -> WatchedItem:
 async def list_watched_items(
     include_archived: bool = False,
     domain: str | None = None,
+    archiver_info_item_id: str | None = None,
     session: AsyncSession = Depends(get_db_session),
 ):
     """List WatchedItems. Archived excluded unless ``include_archived=true``.
-    Filter by domain hostname with ``domain=``."""
+    Filter by domain hostname with ``domain=`` or by Archiver InfoItem with
+    ``archiver_info_item_id=``."""
     stmt = select(WatchedItem).order_by(WatchedItem.name)
     if not include_archived:
         stmt = stmt.where(WatchedItem.archived_at.is_(None))
     if domain is not None:
         stmt = stmt.where(WatchedItem.domain_name == domain)
+    if archiver_info_item_id is not None:
+        ulid = parse_filter_ulid(archiver_info_item_id, "archiver_info_item_id")
+        stmt = stmt.where(WatchedItem.archiver_info_item_id == ulid)
     result = await session.execute(stmt)
     return list(result.scalars().all())
 
@@ -115,6 +121,7 @@ async def create_watched_item(
             default_tags=data.default_tags,
             effective_url=data.url or "",
             source_specs=data.source_specs or [],
+            archiver_info_source_id=data.archiver_info_source_id,
         )
     else:
         try:
@@ -279,6 +286,39 @@ async def mark_reviewed(watched_item_id: str, session: AsyncSession = Depends(ge
     )
     await session.commit()
     await session.refresh(wi)
+    return wi
+
+
+@router.post("/{watched_item_id}/check-now", response_model=WatchedItemResponse, status_code=202)
+async def check_now(watched_item_id: str, session: AsyncSession = Depends(get_db_session)):
+    """Enqueue an immediate ``check_watched_item`` task for a WatchedItem.
+
+    Pre-flight guards:
+    - 409 if the WatchedItem is archived.
+    - 422 if ``effective_url`` is empty (nothing to fetch).
+    - 422 if there are no active child Watches (nobody to notify).
+    """
+    wi = await _get_or_404(session, watched_item_id)
+
+    if wi.archived_at is not None:
+        raise HTTPException(status_code=409, detail="WatchedItem is archived")
+
+    if not wi.effective_url:
+        raise HTTPException(status_code=422, detail="WatchedItem has no effective url")
+
+    active_watches = (
+        (
+            await session.execute(
+                select(Watch).where(Watch.watched_item_id == wi.id, Watch.is_active.is_(True))
+            )
+        )
+        .scalars()
+        .all()
+    )
+    if not active_watches:
+        raise HTTPException(status_code=422, detail="WatchedItem has no active watches")
+
+    await check_watched_item.configure().defer_async(watched_item_id=str(wi.id))
     return wi
 
 

@@ -488,3 +488,153 @@ class TestCreateWatchedItem:
         """At least one of archiver_info_item_id or url is required."""
         response = await client.post("/api/v1/watched-items", json={"name": "Missing anchor"})
         assert response.status_code == 422
+
+    async def test_create_stores_archiver_info_source_id(self, client, db_session, info_client):
+        """archiver_info_source_id is persisted when supplied on create."""
+        item = await make_info_item(db_session, name="SrcId")
+        await db_session.commit()
+        src_id = "01ABCDEFGHJKMNPQRSTVWXYZ00"
+        response = await client.post(
+            "/api/v1/watched-items",
+            json={
+                "archiver_info_item_id": str(item.info_item_id),
+                "archiver_info_source_id": src_id,
+            },
+        )
+        assert response.status_code == 201, response.text
+        assert response.json()["archiver_info_source_id"] == src_id
+
+    async def test_response_includes_health_status_last_checked_at(self, client, db_session):
+        """health_status and last_checked_at appear in every WatchedItem response."""
+        wi = await _make_watched_item(db_session, name="HealthFields")
+        response = await client.get(f"/api/v1/watched-items/{wi.id}")
+        assert response.status_code == 200
+        body = response.json()
+        assert "health_status" in body
+        assert "last_checked_at" in body
+        assert body["health_status"] == "unknown"
+        assert body["last_checked_at"] is None
+
+
+class TestListFilterByArchiverInfoItemId:
+    async def test_filter_returns_matching_item(self, client, db_session):
+        """?archiver_info_item_id= returns only the WatchedItem with that ULID."""
+        from src.core.models.watched_item import WatchedItem
+
+        item = await make_info_item(db_session, name="Filtered")
+        wi = WatchedItem(archiver_info_item_id=item.info_item_id, name="Match")
+        db_session.add(wi)
+        await _make_watched_item(db_session, name="Other")
+        await db_session.commit()
+
+        response = await client.get(
+            f"/api/v1/watched-items?archiver_info_item_id={item.info_item_id}"
+        )
+        assert response.status_code == 200
+        names = [r["name"] for r in response.json()]
+        assert names == ["Match"]
+
+    async def test_filter_empty_result(self, client, db_session):
+        """?archiver_info_item_id= for a ULID with no matching item returns []."""
+        from ulid import ULID
+
+        await _make_watched_item(db_session, name="Unrelated")
+        await db_session.commit()
+
+        response = await client.get(f"/api/v1/watched-items?archiver_info_item_id={ULID()}")
+        assert response.status_code == 200
+        assert response.json() == []
+
+    async def test_filter_bad_ulid_returns_400(self, client):
+        """?archiver_info_item_id=bad returns 400, not 404 or 500."""
+        response = await client.get("/api/v1/watched-items?archiver_info_item_id=not-a-ulid")
+        assert response.status_code == 400
+
+
+class TestPatchArchiverInfoSourceId:
+    async def test_patch_updates_archiver_info_source_id(self, client, db_session):
+        """PATCH sets archiver_info_source_id on the WatchedItem."""
+        wi = await _make_watched_item(db_session)
+        src_id = "01ABCDEFGHJKMNPQRSTVWXYZ00"
+        response = await client.patch(
+            f"/api/v1/watched-items/{wi.id}",
+            json={"archiver_info_source_id": src_id},
+        )
+        assert response.status_code == 200
+        assert response.json()["archiver_info_source_id"] == src_id
+
+    async def test_patch_clears_archiver_info_source_id(self, client, db_session):
+        """PATCH with null clears archiver_info_source_id."""
+        wi = await _make_watched_item(db_session)
+        wi.archiver_info_source_id = "01ABCDEFGHJKMNPQRSTVWXYZ00"
+        await db_session.commit()
+
+        response = await client.patch(
+            f"/api/v1/watched-items/{wi.id}",
+            json={"archiver_info_source_id": None},
+        )
+        assert response.status_code == 200
+        assert response.json()["archiver_info_source_id"] is None
+
+
+class TestCheckNow:
+    async def test_202_enqueues_task(self, client, db_session):
+        """POST /check-now returns 202 with WatchedItem body and defers a task."""
+        from unittest.mock import AsyncMock, patch
+
+        from tests.conftest import make_watch
+
+        wi = await _make_watched_item(db_session, name="CheckNow")
+        wi.effective_url = "https://example.com"
+        await make_watch(db_session, name="W1", watched_item=wi)
+        await db_session.commit()
+
+        with patch("src.api.routes.watched_items.check_watched_item") as mock_task:
+            mock_task.configure.return_value.defer_async = AsyncMock()
+            response = await client.post(f"/api/v1/watched-items/{wi.id}/check-now")
+
+        assert response.status_code == 202
+        body = response.json()
+        assert body["id"] == str(wi.id)
+        mock_task.configure.return_value.defer_async.assert_awaited_once_with(
+            watched_item_id=str(wi.id)
+        )
+
+    async def test_404_unknown(self, client):
+        from ulid import ULID
+
+        response = await client.post(f"/api/v1/watched-items/{ULID()}/check-now")
+        assert response.status_code == 404
+
+    async def test_409_when_archived(self, client, db_session):
+        from datetime import UTC, datetime
+
+        wi = await _make_watched_item(db_session, archived_at=datetime.now(UTC), is_active=False)
+        response = await client.post(f"/api/v1/watched-items/{wi.id}/check-now")
+        assert response.status_code == 409
+        assert "archived" in response.json()["detail"].lower()
+
+    async def test_422_when_no_effective_url(self, client, db_session):
+        from src.core.models.watched_item import WatchedItem
+
+        wi = WatchedItem(name="NoUrl", effective_url="")
+        db_session.add(wi)
+        await db_session.commit()
+
+        response = await client.post(f"/api/v1/watched-items/{wi.id}/check-now")
+        assert response.status_code == 422
+        assert "url" in response.json()["detail"].lower()
+
+    async def test_422_when_no_active_watches(self, client, db_session):
+        from tests.conftest import make_watch
+
+        wi = await _make_watched_item(db_session, name="NoActiveWatches")
+        wi.effective_url = "https://example.com"
+        await make_watch(
+            db_session, name="Archived", watched_item=wi, is_archived=True, is_active=False
+        )
+        await db_session.commit()
+
+        response = await client.post(f"/api/v1/watched-items/{wi.id}/check-now")
+        assert response.status_code == 422
+        assert "watch" in response.json()["detail"].lower()

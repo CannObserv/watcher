@@ -1,5 +1,6 @@
 """WatchedItem CRUD API endpoints (#161, #185 Phase A)."""
 
+from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 
 import httpx
@@ -10,7 +11,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from ulid import ULID
 
-from src.api.deps import get_db_session
+from src.api.deps import get_db_session, get_probe_fn
 from src.api.routes.helpers import parse_ulid
 from src.api.schemas.watched_item import (
     ChangeRevisionResponse,
@@ -24,11 +25,13 @@ from src.api.schemas.watched_item import (
 from src.core.logging import get_logger
 from src.core.models.audit_log import EventType, audit
 from src.core.models.change_revision import ChangeRevision
+from src.core.models.domain import DEFAULT_MAX_CONCURRENCY, DEFAULT_MIN_INTERVAL, Domain
 from src.core.models.watch import Watch
 from src.core.models.watched_item import WatchedItem
 from src.core.models.watched_item_notification_template import (
     WatchedItemNotificationTemplate,
 )
+from src.core.probe import ProbeResult
 from src.core.registry import get_registry
 
 router = APIRouter(prefix="/watched-items", tags=["watched-items"])
@@ -64,42 +67,89 @@ async def list_watched_items(
 
 @router.post("", response_model=WatchedItemResponse, status_code=201)
 async def create_watched_item(
-    data: WatchedItemCreate, session: AsyncSession = Depends(get_db_session)
+    data: WatchedItemCreate,
+    session: AsyncSession = Depends(get_db_session),
+    probe_fn: Callable[[str], Awaitable[ProbeResult]] = Depends(get_probe_fn),
 ):
-    """Create a standalone WatchedItem bound to an Archiver InfoItem.
+    """Create a standalone WatchedItem.
 
-    The InfoItem's existence + name are resolved via the Archiver SDK.
-    Errors mirror the Watch-create route: NotFound → 422,
-    AuthError → 500, ServerError/network → 503 with Retry-After.
+    Two paths depending on which anchor is provided:
+
+    **InfoItem-linked** (``info_item_id`` set): validates the InfoItem via the
+    Archiver SDK; name defaults to the InfoItem's name.
+    Errors: NotFound → 422, AuthError → 500, ServerError/network → 503.
+
+    **URL-only** (``url`` set, no ``info_item_id``): probes the URL for
+    ``effective_url`` + ``domain_name``; name defaults to the probed domain.
+    ``info_item_id`` is null on the resulting record.
+    Error: unreachable URL → 422.
+
+    At least one of ``info_item_id`` or ``url`` is required (schema-enforced).
     """
-    info_client = get_registry().get_archiver_client()
-    try:
-        info_item = await info_client.get_info_item(data.info_item_id)
-    except NotFound as exc:
-        raise HTTPException(
-            status_code=422, detail=f"info_item_id {data.info_item_id} does not exist"
-        ) from exc
-    except AuthError:
-        logger.exception("ArchiverClient auth failure during watched_item create")
-        raise HTTPException(status_code=500, detail="Information service auth failed") from None
-    except (ServerError, httpx.ConnectError, httpx.TimeoutException) as exc:
-        logger.warning("Information service unreachable during watched_item create: %s", exc)
-        raise HTTPException(
-            status_code=503,
-            detail="Information service unavailable; retry shortly",
-            headers={"Retry-After": "30"},
-        ) from exc
+    if data.info_item_id:
+        info_client = get_registry().get_archiver_client()
+        try:
+            info_item = await info_client.get_info_item(data.info_item_id)
+        except NotFound as exc:
+            raise HTTPException(
+                status_code=422, detail=f"info_item_id {data.info_item_id} does not exist"
+            ) from exc
+        except AuthError:
+            logger.exception("ArchiverClient auth failure during watched_item create")
+            raise HTTPException(status_code=500, detail="Information service auth failed") from None
+        except (ServerError, httpx.ConnectError, httpx.TimeoutException) as exc:
+            logger.warning("Information service unreachable during watched_item create: %s", exc)
+            raise HTTPException(
+                status_code=503,
+                detail="Information service unavailable; retry shortly",
+                headers={"Retry-After": "30"},
+            ) from exc
 
-    wi = WatchedItem(
-        info_item_id=ULID.from_str(data.info_item_id),
-        name=data.name or info_item.name,
-        description=data.description,
-        default_schedule_config=data.default_schedule_config,
-        default_content_type=data.default_content_type,
-        default_tags=data.default_tags,
-        effective_url=data.url or "",
-        source_specs=data.source_specs or [],
-    )
+        wi = WatchedItem(
+            info_item_id=ULID.from_str(data.info_item_id),
+            name=data.name or info_item.name,
+            description=data.description,
+            default_schedule_config=data.default_schedule_config,
+            default_content_type=data.default_content_type,
+            default_tags=data.default_tags,
+            effective_url=data.url or "",
+            source_specs=data.source_specs or [],
+        )
+    else:
+        try:
+            probe_result = await probe_fn(data.url)
+        except httpx.HTTPError as exc:
+            raise HTTPException(status_code=422, detail=f"URL unreachable: {exc}") from exc
+
+        domain = probe_result.effective_domain
+        if domain:
+            if not (
+                await session.execute(select(Domain).where(Domain.name == domain))
+            ).scalar_one_or_none():
+                try:
+                    async with session.begin_nested():
+                        session.add(
+                            Domain(
+                                name=domain,
+                                min_interval=DEFAULT_MIN_INTERVAL,
+                                max_concurrency=DEFAULT_MAX_CONCURRENCY,
+                                current_interval=DEFAULT_MIN_INTERVAL,
+                            )
+                        )
+                except IntegrityError:
+                    pass
+
+        wi = WatchedItem(
+            effective_url=probe_result.effective_url,
+            domain_name=domain or None,
+            name=data.name or domain or data.url,
+            description=data.description,
+            default_schedule_config=data.default_schedule_config,
+            default_content_type=data.default_content_type,
+            default_tags=data.default_tags,
+            source_specs=data.source_specs or [],
+        )
+
     session.add(wi)
     try:
         await session.flush()

@@ -2,7 +2,7 @@
 
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from src.api.schemas.types import HttpUrlStr, ULIDStr
 from src.api.schemas.validators import validate_event_list
@@ -12,16 +12,21 @@ from src.core.models.watch import ContentType
 class WatchedItemCreate(BaseModel):
     """Create a WatchedItem via ``POST /api/v1/watched-items``.
 
-    ``info_item_id`` is required for the API route — the route validates
-    existence via the Archiver SDK (NotFound → 422). Dashboard creates
-    (``POST /watched-items/new``) bypass this schema entirely and accept a URL
-    instead, producing a WatchedItem with ``info_item_id=None``.
+    Two creation paths:
+    - **InfoItem-linked** (``info_item_id`` provided): the InfoItem's existence
+      is validated via the Archiver SDK (NotFound → 422); name defaults to the
+      InfoItem's name when omitted.
+    - **URL-only** (``url`` provided, no ``info_item_id``): the URL is probed
+      for ``effective_url`` + ``domain_name``; name defaults to the probed
+      domain. Produces a WatchedItem with ``info_item_id=None`` (#185 Phase A).
 
-    ``url`` and ``source_specs`` seed the local pipeline inputs. Optional at
+    At least one of ``info_item_id`` or ``url`` is required.
+
+    ``source_specs`` seeds the local pipeline extraction config. Optional at
     create time; updatable later via PATCH.
     """
 
-    info_item_id: ULIDStr
+    info_item_id: ULIDStr | None = None
     name: str | None = Field(None, min_length=1, max_length=255)
     description: str | None = None
     default_schedule_config: dict | None = None
@@ -29,6 +34,12 @@ class WatchedItemCreate(BaseModel):
     default_tags: list[str] | None = None
     url: HttpUrlStr | None = None
     source_specs: list[dict] | None = None
+
+    @model_validator(mode="after")
+    def _require_anchor(self) -> "WatchedItemCreate":
+        if not self.info_item_id and not self.url:
+            raise ValueError("At least one of info_item_id or url is required")
+        return self
 
     @field_validator("default_content_type")
     @classmethod

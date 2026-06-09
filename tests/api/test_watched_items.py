@@ -456,3 +456,30 @@ class TestCreateWatchedItem:
         # Default values when not supplied
         assert body["effective_url"] == ""
         assert body["source_specs"] == []
+
+    async def test_creates_without_info_item_id_url_only(self, client, db_session):
+        """URL-only creates a WatchedItem with info_item_id=null (#185 Phase A)."""
+        response = await client.post(
+            "/api/v1/watched-items",
+            json={"url": "https://example.com/standalone", "name": "Standalone WI"},
+        )
+        assert response.status_code == 201, response.text
+        body = response.json()
+        assert body["info_item_id"] is None
+        assert body["name"] == "Standalone WI"
+        assert body["effective_url"] == "https://example.com/standalone"
+        assert body["domain_name"] == "example.com"
+
+    async def test_url_only_name_falls_back_to_domain(self, client, db_session):
+        """Name defaults to the probed domain when not supplied."""
+        response = await client.post(
+            "/api/v1/watched-items",
+            json={"url": "https://lcb.wa.gov/page"},
+        )
+        assert response.status_code == 201, response.text
+        assert response.json()["name"] == "lcb.wa.gov"
+
+    async def test_neither_info_item_id_nor_url_returns_422(self, client):
+        """At least one of info_item_id or url is required."""
+        response = await client.post("/api/v1/watched-items", json={"name": "Missing anchor"})
+        assert response.status_code == 422

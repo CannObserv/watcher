@@ -17,7 +17,7 @@ _PATCH_CORE = "src.core.watches.dispatch_event_notifications"
 async def _make_wi(db_session, *, name="W", url="https://example.com/p"):
     """Create a WatchedItem with effective_url; return it."""
     item = await make_info_item(db_session, name=name)
-    wi = WatchedItem(info_item_id=item.info_item_id, name=name, effective_url=url)
+    wi = WatchedItem(archiver_info_item_id=item.info_item_id, name=name, effective_url=url)
     db_session.add(wi)
     await db_session.flush()
     await db_session.commit()

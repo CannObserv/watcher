@@ -60,11 +60,11 @@ def test_watched_item_has_health_and_timestamps():
 
 def test_watched_item_domain_name_defaults_none():
     """domain_name is nullable — standalone WatchedItems have no domain yet."""
-    wi = WatchedItem(info_item_id=__import__("ulid").ULID(), name="Test")
+    wi = WatchedItem(archiver_info_item_id=__import__("ulid").ULID(), name="Test")
     assert wi.domain_name is None
 
 
 def test_watched_item_domain_suspended_defaults_false():
     """domain_suspended defaults False."""
-    wi = WatchedItem(info_item_id=__import__("ulid").ULID(), name="Test")
+    wi = WatchedItem(archiver_info_item_id=__import__("ulid").ULID(), name="Test")
     assert wi.domain_suspended is False

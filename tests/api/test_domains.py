@@ -110,7 +110,7 @@ class TestDeleteDomain:
         db_session.add(Domain(name="example.com"))
         item = await make_info_item(db_session, name="W")
         wi = WatchedItem(
-            info_item_id=item.info_item_id,
+            archiver_info_item_id=item.info_item_id,
             name="W",
             effective_url="https://example.com/p",
             domain_name="example.com",

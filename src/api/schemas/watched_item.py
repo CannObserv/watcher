@@ -13,20 +13,20 @@ class WatchedItemCreate(BaseModel):
     """Create a WatchedItem via ``POST /api/v1/watched-items``.
 
     Two creation paths:
-    - **InfoItem-linked** (``info_item_id`` provided): the InfoItem's existence
+    - **InfoItem-linked** (``archiver_info_item_id`` provided): the InfoItem's existence
       is validated via the Archiver SDK (NotFound → 422); name defaults to the
       InfoItem's name when omitted.
-    - **URL-only** (``url`` provided, no ``info_item_id``): the URL is probed
+    - **URL-only** (``url`` provided, no ``archiver_info_item_id``): the URL is probed
       for ``effective_url`` + ``domain_name``; name defaults to the probed
-      domain. Produces a WatchedItem with ``info_item_id=None`` (#185 Phase A).
+      domain. Produces a WatchedItem with ``archiver_info_item_id=None`` (#185 Phase A).
 
-    At least one of ``info_item_id`` or ``url`` is required.
+    At least one of ``archiver_info_item_id`` or ``url`` is required.
 
     ``source_specs`` seeds the local pipeline extraction config. Optional at
     create time; updatable later via PATCH.
     """
 
-    info_item_id: ULIDStr | None = None
+    archiver_info_item_id: ULIDStr | None = None
     name: str | None = Field(None, min_length=1, max_length=255)
     description: str | None = None
     default_schedule_config: dict | None = None
@@ -37,8 +37,8 @@ class WatchedItemCreate(BaseModel):
 
     @model_validator(mode="after")
     def _require_anchor(self) -> "WatchedItemCreate":
-        if not self.info_item_id and not self.url:
-            raise ValueError("At least one of info_item_id or url is required")
+        if not self.archiver_info_item_id and not self.url:
+            raise ValueError("At least one of archiver_info_item_id or url is required")
         return self
 
     @field_validator("default_content_type")
@@ -77,14 +77,14 @@ class WatchedItemPatch(BaseModel):
 class WatchedItemResponse(BaseModel):
     """Single WatchedItem record.
 
-    ``info_item_id`` is null for WatchedItems created via the dashboard
+    ``archiver_info_item_id`` is null for WatchedItems created via the dashboard
     (URL-first, no InfoItem required). API-created WatchedItems always have it.
     """
 
     model_config = ConfigDict(from_attributes=True)
 
     id: ULIDStr
-    info_item_id: ULIDStr | None = None
+    archiver_info_item_id: ULIDStr | None = None
     name: str
     description: str | None
     is_active: bool

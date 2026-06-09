@@ -12,12 +12,12 @@ pytestmark = pytest.mark.integration
 
 
 async def test_watched_item_defaults(db_session: AsyncSession) -> None:
-    info_item_id = ULID()
-    wi = WatchedItem(info_item_id=info_item_id, name="Test WatchedItem")
+    archiver_info_item_id = ULID()
+    wi = WatchedItem(archiver_info_item_id=archiver_info_item_id, name="Test WatchedItem")
     db_session.add(wi)
     await db_session.flush()
 
-    stmt = select(WatchedItem).where(WatchedItem.info_item_id == info_item_id)
+    stmt = select(WatchedItem).where(WatchedItem.archiver_info_item_id == archiver_info_item_id)
     fetched = (await db_session.execute(stmt)).scalar_one()
     assert fetched.name == "Test WatchedItem"
     assert fetched.is_active is True
@@ -31,34 +31,34 @@ async def test_watched_item_defaults(db_session: AsyncSession) -> None:
     assert fetched.updated_at is not None
 
 
-async def test_watched_item_info_item_id_unique(db_session: AsyncSession) -> None:
-    info_item_id = ULID()
-    db_session.add(WatchedItem(info_item_id=info_item_id, name="A"))
+async def test_watched_item_archiver_info_item_id_unique(db_session: AsyncSession) -> None:
+    archiver_info_item_id = ULID()
+    db_session.add(WatchedItem(archiver_info_item_id=archiver_info_item_id, name="A"))
     await db_session.flush()
-    db_session.add(WatchedItem(info_item_id=info_item_id, name="B"))
+    db_session.add(WatchedItem(archiver_info_item_id=archiver_info_item_id, name="B"))
     with pytest.raises(IntegrityError):
         await db_session.flush()
 
 
 async def test_watched_item_validates_default_content_type(db_session: AsyncSession) -> None:
     wi = WatchedItem(
-        info_item_id=ULID(),
+        archiver_info_item_id=ULID(),
         name="Test",
         default_content_type="html",  # string coerces to enum
     )
     assert wi.default_content_type == ContentType.HTML
 
     with pytest.raises(ValueError, match="Invalid default_content_type"):
-        WatchedItem(info_item_id=ULID(), name="Bad", default_content_type="not_a_type")
+        WatchedItem(archiver_info_item_id=ULID(), name="Bad", default_content_type="not_a_type")
 
 
 async def test_watched_item_default_content_type_none_allowed(db_session: AsyncSession) -> None:
-    wi = WatchedItem(info_item_id=ULID(), name="NullCT", default_content_type=None)
+    wi = WatchedItem(archiver_info_item_id=ULID(), name="NullCT", default_content_type=None)
     assert wi.default_content_type is None
 
 
 async def test_notification_template_defaults(db_session: AsyncSession) -> None:
-    wi = WatchedItem(info_item_id=ULID(), name="W")
+    wi = WatchedItem(archiver_info_item_id=ULID(), name="W")
     db_session.add(wi)
     await db_session.flush()
 
@@ -85,7 +85,7 @@ async def test_notification_template_defaults(db_session: AsyncSession) -> None:
 
 
 async def test_notification_template_cascade_delete(db_session: AsyncSession) -> None:
-    wi = WatchedItem(info_item_id=ULID(), name="W")
+    wi = WatchedItem(archiver_info_item_id=ULID(), name="W")
     db_session.add(wi)
     await db_session.flush()
     tmpl_id = ULID()

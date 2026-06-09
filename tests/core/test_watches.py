@@ -23,7 +23,7 @@ async def _make_wi(db_session, *, name="Test WI", url="https://example.com/page"
     """Create + flush a WatchedItem with effective_url; return it."""
     item = await make_info_item(db_session, name=name)
     wi = WatchedItem(
-        info_item_id=item.info_item_id,
+        archiver_info_item_id=item.info_item_id,
         name=name,
         effective_url=url,
     )
@@ -117,7 +117,9 @@ class TestCreateWatch:
     async def test_watch_url_in_event_falls_back_to_sentinel(self, db_session):
         """When WatchedItem has no effective_url, event uses watch: sentinel."""
         item = await make_info_item(db_session)
-        wi = WatchedItem(info_item_id=item.info_item_id, name="No URL WI", effective_url="")
+        wi = WatchedItem(
+            archiver_info_item_id=item.info_item_id, name="No URL WI", effective_url=""
+        )
         db_session.add(wi)
         await db_session.flush()
         await db_session.commit()

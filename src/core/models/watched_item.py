@@ -17,7 +17,7 @@ class WatchedItem(Base, TimestampMixin):
     Owns shared defaults that child Watches inherit at read time via the
     resolution chain (Watch override → WatchedItem default → system default).
 
-    `info_item_id` links to an Archiver InfoItem (cross-schema reference to
+    `archiver_info_item_id` links to an Archiver InfoItem (cross-schema reference to
     `information.info_items.info_item_id`). Nullable — standalone WatchedItems
     with no InfoItem reference are allowed; partial unique index enforces
     uniqueness when set.
@@ -32,7 +32,7 @@ class WatchedItem(Base, TimestampMixin):
     __tablename__ = "watched_items"
 
     id: Mapped[ULID] = mapped_column(ULIDType, primary_key=True, default=generate_ulid)
-    info_item_id: Mapped[ULID | None] = mapped_column(ULIDType, nullable=True)
+    archiver_info_item_id: Mapped[ULID | None] = mapped_column(ULIDType, nullable=True)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     description: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
     is_active: Mapped[bool] = mapped_column(
@@ -88,10 +88,10 @@ class WatchedItem(Base, TimestampMixin):
 
     __table_args__ = (
         Index(
-            "ix_watched_items_info_item_id",
-            "info_item_id",
+            "ix_watched_items_archiver_info_item_id",
+            "archiver_info_item_id",
             unique=True,
-            postgresql_where=text("info_item_id IS NOT NULL"),
+            postgresql_where=text("archiver_info_item_id IS NOT NULL"),
         ),
     )
 

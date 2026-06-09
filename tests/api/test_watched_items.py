@@ -17,7 +17,7 @@ async def _make_watched_item(db_session, **overrides):
     from src.core.models.watched_item import WatchedItem
 
     item = await make_info_item(db_session)
-    wi = WatchedItem(info_item_id=item.info_item_id, name=overrides.pop("name", "Test WI"))
+    wi = WatchedItem(archiver_info_item_id=item.info_item_id, name=overrides.pop("name", "Test WI"))
     for k, v in overrides.items():
         setattr(wi, k, v)
     db_session.add(wi)
@@ -76,8 +76,8 @@ class TestGetWatchedItem:
         assert response.status_code == 200
         assert response.json()["name"] == "Single"
 
-    async def test_returns_null_info_item_id_for_standalone(self, client, db_session):
-        """Dashboard-created WatchedItems (info_item_id=None) must serialise cleanly.
+    async def test_returns_null_archiver_info_item_id_for_standalone(self, client, db_session):
+        """Dashboard-created WatchedItems (archiver_info_item_id=None) must serialise cleanly.
 
         Regression for the ULIDStr BeforeValidator silently coercing None → "None".
         """
@@ -92,7 +92,7 @@ class TestGetWatchedItem:
         assert response.status_code == 200
         body = response.json()
         assert body["name"] == "Standalone"
-        assert body["info_item_id"] is None
+        assert body["archiver_info_item_id"] is None
 
 
 class TestPatchWatchedItem:
@@ -345,11 +345,11 @@ class TestCreateWatchedItem:
         await db_session.commit()
         response = await client.post(
             "/api/v1/watched-items",
-            json={"info_item_id": str(item.info_item_id)},
+            json={"archiver_info_item_id": str(item.info_item_id)},
         )
         assert response.status_code == 201, response.text
         body = response.json()
-        assert body["info_item_id"] == str(item.info_item_id)
+        assert body["archiver_info_item_id"] == str(item.info_item_id)
         # Name falls back to the InfoItem's name when not supplied.
         assert body["name"] == "Source Item"
         assert body["default_schedule_config"] is None
@@ -361,7 +361,7 @@ class TestCreateWatchedItem:
         response = await client.post(
             "/api/v1/watched-items",
             json={
-                "info_item_id": str(item.info_item_id),
+                "archiver_info_item_id": str(item.info_item_id),
                 "name": "Overridden",
                 "default_schedule_config": {"interval": "10m"},
                 "default_tags": ["regulatory"],
@@ -373,24 +373,26 @@ class TestCreateWatchedItem:
         assert body["default_schedule_config"] == {"interval": "10m"}
         assert body["default_tags"] == ["regulatory"]
 
-    async def test_duplicate_info_item_id_returns_409(self, client, db_session, info_client):
+    async def test_duplicate_archiver_info_item_id_returns_409(
+        self, client, db_session, info_client
+    ):
         item = await make_info_item(db_session, name="X")
         await db_session.commit()
         r1 = await client.post(
-            "/api/v1/watched-items", json={"info_item_id": str(item.info_item_id)}
+            "/api/v1/watched-items", json={"archiver_info_item_id": str(item.info_item_id)}
         )
         assert r1.status_code == 201
         r2 = await client.post(
-            "/api/v1/watched-items", json={"info_item_id": str(item.info_item_id)}
+            "/api/v1/watched-items", json={"archiver_info_item_id": str(item.info_item_id)}
         )
         assert r2.status_code == 409
         assert "already" in r2.json()["detail"].lower()
 
-    async def test_unknown_info_item_returns_422(self, client, info_client):
+    async def test_unknown_archiver_info_item_returns_422(self, client, info_client):
         info_client.get_info_item = AsyncMock(side_effect=NotFound("nope"))
         response = await client.post(
             "/api/v1/watched-items",
-            json={"info_item_id": "01ZZZZZZZZZZZZZZZZZZZZZZZZ"},
+            json={"archiver_info_item_id": "01ZZZZZZZZZZZZZZZZZZZZZZZZ"},
         )
         assert response.status_code == 422
 
@@ -398,7 +400,7 @@ class TestCreateWatchedItem:
         info_client.get_info_item = AsyncMock(side_effect=ServerError("boom"))
         response = await client.post(
             "/api/v1/watched-items",
-            json={"info_item_id": "01ZZZZZZZZZZZZZZZZZZZZZZZZ"},
+            json={"archiver_info_item_id": "01ZZZZZZZZZZZZZZZZZZZZZZZZ"},
         )
         assert response.status_code == 503
         assert response.headers.get("Retry-After") == "30"
@@ -406,7 +408,10 @@ class TestCreateWatchedItem:
     async def test_emits_audit_event(self, client, db_session, info_client):
         item = await make_info_item(db_session, name="A")
         await db_session.commit()
-        await client.post("/api/v1/watched-items", json={"info_item_id": str(item.info_item_id)})
+        await client.post(
+            "/api/v1/watched-items",
+            json={"archiver_info_item_id": str(item.info_item_id)},
+        )
         events = (
             (
                 await db_session.execute(
@@ -427,7 +432,7 @@ class TestCreateWatchedItem:
         response = await client.post(
             "/api/v1/watched-items",
             json={
-                "info_item_id": str(item.info_item_id),
+                "archiver_info_item_id": str(item.info_item_id),
                 "url": "https://example.com/page",
                 "source_specs": [{"schema_version": 1, "extraction": {"algorithm": "full_page"}}],
             },
@@ -447,7 +452,7 @@ class TestCreateWatchedItem:
         await db_session.commit()
         response = await client.post(
             "/api/v1/watched-items",
-            json={"info_item_id": str(item.info_item_id)},
+            json={"archiver_info_item_id": str(item.info_item_id)},
         )
         assert response.status_code == 201
         body = response.json()
@@ -457,15 +462,15 @@ class TestCreateWatchedItem:
         assert body["effective_url"] == ""
         assert body["source_specs"] == []
 
-    async def test_creates_without_info_item_id_url_only(self, client, db_session):
-        """URL-only creates a WatchedItem with info_item_id=null (#185 Phase A)."""
+    async def test_creates_without_archiver_info_item_id_url_only(self, client, db_session):
+        """URL-only creates a WatchedItem with archiver_info_item_id=null (#185 Phase A)."""
         response = await client.post(
             "/api/v1/watched-items",
             json={"url": "https://example.com/standalone", "name": "Standalone WI"},
         )
         assert response.status_code == 201, response.text
         body = response.json()
-        assert body["info_item_id"] is None
+        assert body["archiver_info_item_id"] is None
         assert body["name"] == "Standalone WI"
         assert body["effective_url"] == "https://example.com/standalone"
         assert body["domain_name"] == "example.com"
@@ -479,7 +484,7 @@ class TestCreateWatchedItem:
         assert response.status_code == 201, response.text
         assert response.json()["name"] == "lcb.wa.gov"
 
-    async def test_neither_info_item_id_nor_url_returns_422(self, client):
-        """At least one of info_item_id or url is required."""
+    async def test_neither_archiver_info_item_id_nor_url_returns_422(self, client):
+        """At least one of archiver_info_item_id or url is required."""
         response = await client.post("/api/v1/watched-items", json={"name": "Missing anchor"})
         assert response.status_code == 422

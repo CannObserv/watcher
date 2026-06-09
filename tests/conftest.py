@@ -8,9 +8,9 @@ The module-level async helpers ``make_watch``, ``make_info_item``,
 ``make_info_source``, and ``bind_primary_source`` are NOT pytest fixtures —
 they are awaitable factory functions test code can call directly.
 
-``make_watch`` takes an optional ``info_item_id`` and ``watched_item``.
+``make_watch`` takes an optional ``archiver_info_item_id`` and ``watched_item``.
 A parent ``WatchedItem`` is auto-created (or attached) to honour the 1:1
-``watched_items.info_item_id`` uniqueness constraint. The legacy
+``watched_items.archiver_info_item_id`` uniqueness constraint. The legacy
 ``target_info_source_id`` / ``schedule_config`` columns are gone.
 
 Archiver v4.0.0: sub_aspect concept removed — ``bind_sub_aspect`` deleted;
@@ -334,19 +334,19 @@ async def make_watch(
     session,
     *,
     name="Test Watch",
-    info_item_id=None,
+    archiver_info_item_id=None,
     watched_item=None,
     primary_url="https://example.com",
     **kwargs,
 ):
     """Construct a Watch tied to a WatchedItem + InfoItem (#185 Phase A shape).
 
-    When ``info_item_id`` is not supplied, an InfoItem + primary InfoSource +
+    When ``archiver_info_item_id`` is not supplied, an InfoItem + primary InfoSource +
     binding are auto-created — except when ``watched_item`` is supplied, in
-    which case ``info_item_id`` defaults to ``watched_item.info_item_id`` so
-    callers don't have to repeat it. When ``watched_item`` is not supplied,
+    which case ``archiver_info_item_id`` defaults to ``watched_item.archiver_info_item_id``
+    so callers don't have to repeat it. When ``watched_item`` is not supplied,
     a fresh WatchedItem is auto-created (or attaches to an existing one for
-    the same info_item_id).
+    the same archiver_info_item_id).
 
     Extra ``**kwargs`` flow into the Watch constructor (tags, description,
     content_type, etc.). Pass ``domain_name=`` to set WatchedItem.domain_name.
@@ -358,28 +358,30 @@ async def make_watch(
     # domain_name lives on WatchedItem, not Watch — extract before passing to Watch.
     domain_name = kwargs.pop("domain_name", None)
 
-    if info_item_id is None and watched_item is not None:
+    if archiver_info_item_id is None and watched_item is not None:
         # Default to the WatchedItem's InfoItem so the assertion below can't
         # trip on an auto-created mismatch.
-        info_item_id = watched_item.info_item_id
+        archiver_info_item_id = watched_item.archiver_info_item_id
 
-    if info_item_id is None:
+    if archiver_info_item_id is None:
         item = await make_info_item(session)
-        info_item_id = item.info_item_id
+        archiver_info_item_id = item.info_item_id
         primary = await make_info_source(session, url=primary_url)
         await bind_primary_source(
             session,
-            info_item_id=info_item_id,
+            info_item_id=archiver_info_item_id,
             info_source_id=primary.info_source_id,
         )
 
     if watched_item is None:
-        # Attach to existing WatchedItem for this info_item_id if present;
-        # otherwise create a fresh one. The 1:1 uniqueness on info_item_id
+        # Attach to existing WatchedItem for this archiver_info_item_id if present;
+        # otherwise create a fresh one. The 1:1 uniqueness on archiver_info_item_id
         # would otherwise fail when two Watches share an InfoItem.
         existing = (
             await session.execute(
-                select(WatchedItem).where(WatchedItem.info_item_id == info_item_id)
+                select(WatchedItem).where(
+                    WatchedItem.archiver_info_item_id == archiver_info_item_id
+                )
             )
         ).scalar_one_or_none()
         if existing is not None:
@@ -389,16 +391,16 @@ async def make_watch(
                 await session.flush()
         else:
             watched_item = WatchedItem(
-                info_item_id=info_item_id,
+                archiver_info_item_id=archiver_info_item_id,
                 name=f"WI for {name}",
                 effective_url=primary_url,
             )
             session.add(watched_item)
             await session.flush()
-    elif watched_item.info_item_id != info_item_id:
+    elif watched_item.archiver_info_item_id != archiver_info_item_id:
         raise AssertionError(
-            f"watched_item.info_item_id ({watched_item.info_item_id}) "
-            f"must match info_item_id ({info_item_id})"
+            f"watched_item.archiver_info_item_id ({watched_item.archiver_info_item_id}) "
+            f"must match archiver_info_item_id ({archiver_info_item_id})"
         )
 
     # Extract cascade-suspend flag before passing kwargs to Watch constructor.

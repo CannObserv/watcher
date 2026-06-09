@@ -542,11 +542,17 @@ class TestGetDomainWatchedItems:
         db_session.add(Domain(name="other.com"))
         await db_session.flush()
         db_session.add(
-            WatchedItem(info_item_id=item_a.info_item_id, name="Ex Item", domain_name="ex.com")
+            WatchedItem(
+                archiver_info_item_id=item_a.info_item_id,
+                name="Ex Item",
+                domain_name="ex.com",
+            )
         )
         db_session.add(
             WatchedItem(
-                info_item_id=item_b.info_item_id, name="Other Item", domain_name="other.com"
+                archiver_info_item_id=item_b.info_item_id,
+                name="Other Item",
+                domain_name="other.com",
             )
         )
         await db_session.flush()
@@ -564,10 +570,18 @@ class TestGetDomainWatchedItems:
         db_session.add(Domain(name="ex.com"))
         await db_session.flush()
         db_session.add(
-            WatchedItem(info_item_id=item_a.info_item_id, name="Alpha Item", domain_name="ex.com")
+            WatchedItem(
+                archiver_info_item_id=item_a.info_item_id,
+                name="Alpha Item",
+                domain_name="ex.com",
+            )
         )
         db_session.add(
-            WatchedItem(info_item_id=item_b.info_item_id, name="Beta Item", domain_name="ex.com")
+            WatchedItem(
+                archiver_info_item_id=item_b.info_item_id,
+                name="Beta Item",
+                domain_name="ex.com",
+            )
         )
         await db_session.flush()
         result = await get_domain_watched_items(db_session, "ex.com", search="alp")
@@ -580,10 +594,18 @@ class TestGetDomainWatchedItems:
         db_session.add(Domain(name="ex.com"))
         await db_session.flush()
         db_session.add(
-            WatchedItem(info_item_id=item_a.info_item_id, name="Alpha", domain_name="ex.com")
+            WatchedItem(
+                archiver_info_item_id=item_a.info_item_id,
+                name="Alpha",
+                domain_name="ex.com",
+            )
         )
         db_session.add(
-            WatchedItem(info_item_id=item_b.info_item_id, name="Beta", domain_name="ex.com")
+            WatchedItem(
+                archiver_info_item_id=item_b.info_item_id,
+                name="Beta",
+                domain_name="ex.com",
+            )
         )
         await db_session.flush()
         result = await get_domain_watched_items(db_session, "ex.com", sort="name", order="desc")
@@ -596,14 +618,18 @@ class TestGetDomainWatchedItems:
         await db_session.flush()
         db_session.add(
             WatchedItem(
-                info_item_id=item_a.info_item_id,
+                archiver_info_item_id=item_a.info_item_id,
                 name="Checked",
                 domain_name="ex.com",
                 last_checked_at=datetime(2025, 1, 1, tzinfo=UTC),
             )
         )
         db_session.add(
-            WatchedItem(info_item_id=item_b.info_item_id, name="Unchecked", domain_name="ex.com")
+            WatchedItem(
+                archiver_info_item_id=item_b.info_item_id,
+                name="Unchecked",
+                domain_name="ex.com",
+            )
         )
         await db_session.flush()
         result = await get_domain_watched_items(
@@ -619,14 +645,18 @@ class TestGetDomainWatchedItems:
         await db_session.flush()
         db_session.add(
             WatchedItem(
-                info_item_id=item_a.info_item_id,
+                archiver_info_item_id=item_a.info_item_id,
                 name="Checked",
                 domain_name="ex.com",
                 last_checked_at=datetime(2025, 1, 1, tzinfo=UTC),
             )
         )
         db_session.add(
-            WatchedItem(info_item_id=item_b.info_item_id, name="Unchecked", domain_name="ex.com")
+            WatchedItem(
+                archiver_info_item_id=item_b.info_item_id,
+                name="Unchecked",
+                domain_name="ex.com",
+            )
         )
         await db_session.flush()
         result = await get_domain_watched_items(
@@ -640,11 +670,15 @@ class TestGetDomainWatchedItems:
         db_session.add(Domain(name="ex.com"))
         await db_session.flush()
         db_session.add(
-            WatchedItem(info_item_id=items[0].info_item_id, name="Active", domain_name="ex.com")
+            WatchedItem(
+                archiver_info_item_id=items[0].info_item_id,
+                name="Active",
+                domain_name="ex.com",
+            )
         )
         db_session.add(
             WatchedItem(
-                info_item_id=items[1].info_item_id,
+                archiver_info_item_id=items[1].info_item_id,
                 name="Archived",
                 domain_name="ex.com",
                 archived_at=datetime(2025, 1, 1, tzinfo=UTC),
@@ -653,7 +687,7 @@ class TestGetDomainWatchedItems:
         )
         db_session.add(
             WatchedItem(
-                info_item_id=items[2].info_item_id,
+                archiver_info_item_id=items[2].info_item_id,
                 name="Suspended",
                 domain_name="ex.com",
                 domain_suspended=True,
@@ -661,7 +695,7 @@ class TestGetDomainWatchedItems:
         )
         db_session.add(
             WatchedItem(
-                info_item_id=items[3].info_item_id,
+                archiver_info_item_id=items[3].info_item_id,
                 name="Inactive",
                 domain_name="ex.com",
                 is_active=False,
@@ -677,11 +711,15 @@ class TestGetDomainWatchedItems:
         db_session.add(Domain(name="ex.com"))
         await db_session.flush()
         db_session.add(
-            WatchedItem(info_item_id=item_a.info_item_id, name="Active", domain_name="ex.com")
+            WatchedItem(
+                archiver_info_item_id=item_a.info_item_id,
+                name="Active",
+                domain_name="ex.com",
+            )
         )
         db_session.add(
             WatchedItem(
-                info_item_id=item_b.info_item_id,
+                archiver_info_item_id=item_b.info_item_id,
                 name="Archived",
                 domain_name="ex.com",
                 archived_at=datetime(2025, 1, 1, tzinfo=UTC),
@@ -698,11 +736,15 @@ class TestGetDomainWatchedItems:
         db_session.add(Domain(name="ex.com"))
         await db_session.flush()
         db_session.add(
-            WatchedItem(info_item_id=item_a.info_item_id, name="Active", domain_name="ex.com")
+            WatchedItem(
+                archiver_info_item_id=item_a.info_item_id,
+                name="Active",
+                domain_name="ex.com",
+            )
         )
         db_session.add(
             WatchedItem(
-                info_item_id=item_b.info_item_id,
+                archiver_info_item_id=item_b.info_item_id,
                 name="Suspended",
                 domain_name="ex.com",
                 domain_suspended=True,
@@ -719,11 +761,15 @@ class TestGetDomainWatchedItems:
         db_session.add(Domain(name="ex.com"))
         await db_session.flush()
         db_session.add(
-            WatchedItem(info_item_id=item_a.info_item_id, name="Active", domain_name="ex.com")
+            WatchedItem(
+                archiver_info_item_id=item_a.info_item_id,
+                name="Active",
+                domain_name="ex.com",
+            )
         )
         db_session.add(
             WatchedItem(
-                info_item_id=item_b.info_item_id,
+                archiver_info_item_id=item_b.info_item_id,
                 name="Inactive",
                 domain_name="ex.com",
                 is_active=False,
@@ -731,7 +777,7 @@ class TestGetDomainWatchedItems:
         )
         db_session.add(
             WatchedItem(
-                info_item_id=item_c.info_item_id,
+                archiver_info_item_id=item_c.info_item_id,
                 name="Archived",
                 domain_name="ex.com",
                 archived_at=datetime(2025, 1, 1, tzinfo=UTC),
@@ -747,11 +793,15 @@ class TestGetDomainWatchedItems:
         db_session.add(Domain(name="ex.com"))
         await db_session.flush()
         db_session.add(
-            WatchedItem(info_item_id=items[0].info_item_id, name="Active", domain_name="ex.com")
+            WatchedItem(
+                archiver_info_item_id=items[0].info_item_id,
+                name="Active",
+                domain_name="ex.com",
+            )
         )
         db_session.add(
             WatchedItem(
-                info_item_id=items[1].info_item_id,
+                archiver_info_item_id=items[1].info_item_id,
                 name="Archived",
                 domain_name="ex.com",
                 archived_at=datetime(2025, 1, 1, tzinfo=UTC),
@@ -760,7 +810,7 @@ class TestGetDomainWatchedItems:
         )
         db_session.add(
             WatchedItem(
-                info_item_id=items[2].info_item_id,
+                archiver_info_item_id=items[2].info_item_id,
                 name="Suspended",
                 domain_name="ex.com",
                 domain_suspended=True,
@@ -782,9 +832,9 @@ class TestGetWatchedItemList:
         item_b = await make_info_item(db_session)
         db_session.add_all(
             [
-                WatchedItem(info_item_id=item_a.info_item_id, name="Active"),
+                WatchedItem(archiver_info_item_id=item_a.info_item_id, name="Active"),
                 WatchedItem(
-                    info_item_id=item_b.info_item_id,
+                    archiver_info_item_id=item_b.info_item_id,
                     name="Archived",
                     archived_at=datetime.now(UTC),
                     is_active=False,
@@ -805,7 +855,7 @@ class TestGetWatchedItemList:
         item = await make_info_item(db_session)
         db_session.add(
             WatchedItem(
-                info_item_id=item.info_item_id,
+                archiver_info_item_id=item.info_item_id,
                 name="Arc",
                 archived_at=datetime.now(UTC),
                 is_active=False,
@@ -824,7 +874,7 @@ class TestGetWatchedItemDetail:
         from tests.conftest import make_info_item
 
         item = await make_info_item(db_session)
-        wi = WatchedItem(info_item_id=item.info_item_id, name="X")
+        wi = WatchedItem(archiver_info_item_id=item.info_item_id, name="X")
         db_session.add(wi)
         await db_session.flush()
         loaded = await get_watched_item_detail(db_session, str(wi.id))

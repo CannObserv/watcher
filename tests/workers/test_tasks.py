@@ -149,7 +149,7 @@ class TestCheckWatchedItem:
         await make_watch(
             db_session,
             name="Sibling",
-            info_item_id=watched_item.info_item_id,
+            archiver_info_item_id=watched_item.archiver_info_item_id,
             watched_item=watched_item,
         )
         await db_session.commit()
@@ -294,7 +294,7 @@ class TestScheduleTickAggregation:
         await make_watch(
             db_session,
             name="B",
-            info_item_id=wi.info_item_id,
+            archiver_info_item_id=wi.archiver_info_item_id,
             watched_item=wi,
         )
         await db_session.commit()
@@ -452,7 +452,7 @@ class TestPostActions:
         sibling = await make_watch(
             db_session,
             name="Sibling",
-            info_item_id=wi.info_item_id,
+            archiver_info_item_id=wi.archiver_info_item_id,
             watched_item=wi,
         )
 

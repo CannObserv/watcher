@@ -387,19 +387,19 @@ class TestNotificationTemplateResponse:
 
 
 class TestWatchedItemCreate:
-    def test_watched_item_create_requires_info_item_id(self):
+    def test_watched_item_create_requires_archiver_info_item_id_or_url(self):
         with pytest.raises(ValidationError):
             WatchedItemCreate(name="X")
 
     def test_watched_item_create_minimal_ok(self):
-        schema = WatchedItemCreate(info_item_id="01ABCDEFGHJKMNPQRSTVWXYZ00")
-        assert schema.info_item_id == "01ABCDEFGHJKMNPQRSTVWXYZ00"
+        schema = WatchedItemCreate(archiver_info_item_id="01ABCDEFGHJKMNPQRSTVWXYZ00")
+        assert schema.archiver_info_item_id == "01ABCDEFGHJKMNPQRSTVWXYZ00"
         assert schema.name is None
         assert schema.default_tags is None
 
     def test_watched_item_create_full_ok(self):
         schema = WatchedItemCreate(
-            info_item_id="01ABCDEFGHJKMNPQRSTVWXYZ00",
+            archiver_info_item_id="01ABCDEFGHJKMNPQRSTVWXYZ00",
             name="Custom Name",
             description="Note",
             default_schedule_config={"interval": "15m"},
@@ -411,13 +411,13 @@ class TestWatchedItemCreate:
     def test_watched_item_create_rejects_invalid_content_type(self):
         with pytest.raises(ValidationError):
             WatchedItemCreate(
-                info_item_id="01ABCDEFGHJKMNPQRSTVWXYZ00",
+                archiver_info_item_id="01ABCDEFGHJKMNPQRSTVWXYZ00",
                 default_content_type="garbage",
             )
 
     def test_watched_item_create_none_content_type_ok(self):
         schema = WatchedItemCreate(
-            info_item_id="01ABCDEFGHJKMNPQRSTVWXYZ00",
+            archiver_info_item_id="01ABCDEFGHJKMNPQRSTVWXYZ00",
             default_content_type=None,
         )
         assert schema.default_content_type is None

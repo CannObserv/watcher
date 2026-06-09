@@ -86,13 +86,14 @@ async def create_watched_item(
 
     At least one of ``info_item_id`` or ``url`` is required (schema-enforced).
     """
-    if data.info_item_id:
+    if data.archiver_info_item_id:
         info_client = get_registry().get_archiver_client()
         try:
-            info_item = await info_client.get_info_item(data.info_item_id)
+            info_item = await info_client.get_info_item(data.archiver_info_item_id)
         except NotFound as exc:
             raise HTTPException(
-                status_code=422, detail=f"info_item_id {data.info_item_id} does not exist"
+                status_code=422,
+                detail=f"archiver_info_item_id {data.archiver_info_item_id} does not exist",
             ) from exc
         except AuthError:
             logger.exception("ArchiverClient auth failure during watched_item create")
@@ -106,7 +107,7 @@ async def create_watched_item(
             ) from exc
 
         wi = WatchedItem(
-            info_item_id=ULID.from_str(data.info_item_id),
+            archiver_info_item_id=ULID.from_str(data.archiver_info_item_id),
             name=data.name or info_item.name,
             description=data.description,
             default_schedule_config=data.default_schedule_config,
@@ -157,13 +158,15 @@ async def create_watched_item(
         await session.rollback()
         raise HTTPException(
             status_code=409,
-            detail=f"WatchedItem for info_item_id {data.info_item_id} already exists",
+            detail=(
+                f"WatchedItem for archiver_info_item_id {data.archiver_info_item_id} already exists"
+            ),
         ) from exc
     audit(
         session,
         EventType.WATCHED_ITEM_CREATED,
         watched_item_id=str(wi.id),
-        info_item_id=data.info_item_id,
+        archiver_info_item_id=data.archiver_info_item_id,
         name=wi.name,
         source="api",
     )

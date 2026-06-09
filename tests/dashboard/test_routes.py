@@ -18,7 +18,7 @@ async def _make_wi(db_session, *, name="Test WI", url="https://example.com"):
     """Create + flush a WatchedItem with effective_url; return it."""
     item = await make_info_item(db_session, name=name)
     wi = WatchedItem(
-        info_item_id=item.info_item_id,
+        archiver_info_item_id=item.info_item_id,
         name=name,
         effective_url=url,
     )
@@ -153,7 +153,7 @@ class TestWatchCreate:
 
         item = await make_info_item(db_session, name="Pre-pop Item")
         wi = WatchedItem(
-            info_item_id=item.info_item_id,
+            archiver_info_item_id=item.info_item_id,
             name="Pre-pop WI",
             effective_url="https://example.com/page",
         )
@@ -181,7 +181,7 @@ class TestWatchCreate:
 
         item = await make_info_item(db_session, name="Created Watch")
         wi = WatchedItem(
-            info_item_id=item.info_item_id,
+            archiver_info_item_id=item.info_item_id,
             name="WI for Create",
             effective_url="https://example.com/create",
         )
@@ -205,7 +205,7 @@ class TestWatchCreate:
         from tests.conftest import make_info_item
 
         item = await make_info_item(db_session, name="X")
-        wi = WatchedItem(info_item_id=item.info_item_id, name="WI X")
+        wi = WatchedItem(archiver_info_item_id=item.info_item_id, name="WI X")
         db_session.add(wi)
         await db_session.flush()
         await db_session.commit()

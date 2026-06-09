@@ -248,7 +248,10 @@ class TestProcessWatchedItem:
         wi.effective_url = "https://example.com"
         wi.source_specs = [{"schema_version": 1, "extraction": {"algorithm": "full_page"}}]
         w2 = await make_watch(
-            db_session, name="Watch2", watched_item=wi, info_item_id=wi.info_item_id
+            db_session,
+            name="Watch2",
+            watched_item=wi,
+            archiver_info_item_id=wi.archiver_info_item_id,
         )
         await db_session.flush()
 

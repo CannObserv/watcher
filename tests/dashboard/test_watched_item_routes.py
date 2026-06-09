@@ -21,7 +21,7 @@ class TestListPage:
         from tests.conftest import make_info_item
 
         item = await make_info_item(db_session)
-        db_session.add(WatchedItem(info_item_id=item.info_item_id, name="Listed"))
+        db_session.add(WatchedItem(archiver_info_item_id=item.info_item_id, name="Listed"))
         await db_session.flush()
         await db_session.commit()
         response = await client.get("/watched-items")
@@ -37,7 +37,7 @@ class TestListPage:
         from tests.conftest import make_info_item
 
         item = await make_info_item(db_session)
-        db_session.add(WatchedItem(info_item_id=item.info_item_id, name="ColTest"))
+        db_session.add(WatchedItem(archiver_info_item_id=item.info_item_id, name="ColTest"))
         await db_session.flush()
         await db_session.commit()
         response = await client.get("/watched-items")
@@ -53,7 +53,7 @@ class TestListPage:
         from tests.conftest import make_info_item
 
         item = await make_info_item(db_session)
-        db_session.add(WatchedItem(info_item_id=item.info_item_id, name="ColTest2"))
+        db_session.add(WatchedItem(archiver_info_item_id=item.info_item_id, name="ColTest2"))
         await db_session.flush()
         await db_session.commit()
         response = await client.get("/watched-items")
@@ -71,7 +71,7 @@ class TestListPage:
 
         item = await make_info_item(db_session)
         wi = WatchedItem(
-            info_item_id=item.info_item_id,
+            archiver_info_item_id=item.info_item_id,
             name="WithCheck",
             last_checked_at=datetime.now(UTC),
             default_schedule_config={"interval": "1h"},
@@ -88,7 +88,7 @@ class TestListPage:
         from tests.conftest import make_info_item
 
         item = await make_info_item(db_session)
-        wi = WatchedItem(info_item_id=item.info_item_id, name="HtmxRow")
+        wi = WatchedItem(archiver_info_item_id=item.info_item_id, name="HtmxRow")
         db_session.add(wi)
         await db_session.flush()
         await db_session.commit()
@@ -102,7 +102,7 @@ class TestDetailPage:
         from tests.conftest import make_info_item
 
         item = await make_info_item(db_session)
-        wi = WatchedItem(info_item_id=item.info_item_id, name="Detail Test")
+        wi = WatchedItem(archiver_info_item_id=item.info_item_id, name="Detail Test")
         db_session.add(wi)
         await db_session.flush()
         await db_session.commit()
@@ -123,7 +123,7 @@ class TestDetailPage:
 
         item = await make_info_item(db_session)
         wi = WatchedItem(
-            info_item_id=item.info_item_id,
+            archiver_info_item_id=item.info_item_id,
             name="URL Test",
             effective_url="https://example.org/foo",
         )
@@ -139,7 +139,7 @@ class TestDetailPage:
         from tests.conftest import make_info_item
 
         item = await make_info_item(db_session)
-        wi = WatchedItem(info_item_id=item.info_item_id, name="No Tree WI")
+        wi = WatchedItem(archiver_info_item_id=item.info_item_id, name="No Tree WI")
         db_session.add(wi)
         await db_session.flush()
         await db_session.commit()
@@ -155,7 +155,7 @@ class TestDetailPage:
         from tests.conftest import make_info_item
 
         item = await make_info_item(db_session)
-        wi = WatchedItem(info_item_id=item.info_item_id, name="Danger")
+        wi = WatchedItem(archiver_info_item_id=item.info_item_id, name="Danger")
         db_session.add(wi)
         await db_session.flush()
         await db_session.commit()
@@ -170,7 +170,7 @@ class TestDetailPage:
 
         item = await make_info_item(db_session)
         wi = WatchedItem(
-            info_item_id=item.info_item_id, name="Suspended Item", domain_suspended=True
+            archiver_info_item_id=item.info_item_id, name="Suspended Item", domain_suspended=True
         )
         db_session.add(wi)
         await db_session.flush()
@@ -188,7 +188,7 @@ class TestDetailPage:
         db_session.add(Domain(name="detail-domain.com"))
         item = await make_info_item(db_session)
         wi = WatchedItem(
-            info_item_id=item.info_item_id,
+            archiver_info_item_id=item.info_item_id,
             name="Domain Link Item",
             domain_name="detail-domain.com",
         )
@@ -209,7 +209,7 @@ class TestDetailPage:
 
         item = await make_info_item(db_session)
         wi = WatchedItem(
-            info_item_id=item.info_item_id,
+            archiver_info_item_id=item.info_item_id,
             name="Active",
             effective_url="https://example.com/target",
         )
@@ -228,7 +228,7 @@ class TestDetailPage:
 
         item = await make_info_item(db_session)
         wi = WatchedItem(
-            info_item_id=item.info_item_id,
+            archiver_info_item_id=item.info_item_id,
             name="Archived",
             effective_url="https://example.com/target",
             archived_at=datetime.now(UTC),
@@ -245,7 +245,7 @@ class TestDetailPage:
         from tests.conftest import make_info_item
 
         item = await make_info_item(db_session)
-        wi = WatchedItem(info_item_id=item.info_item_id, name="NoPrimary")
+        wi = WatchedItem(archiver_info_item_id=item.info_item_id, name="NoPrimary")
         db_session.add(wi)
         await db_session.flush()
         await db_session.commit()
@@ -284,7 +284,7 @@ class TestDetailPage:
         from tests.conftest import make_info_item
 
         item = await make_info_item(db_session)
-        wi = WatchedItem(info_item_id=item.info_item_id, name="Empty WI")
+        wi = WatchedItem(archiver_info_item_id=item.info_item_id, name="Empty WI")
         db_session.add(wi)
         await db_session.commit()
 
@@ -298,7 +298,7 @@ class TestDetailPage:
         from tests.conftest import make_info_item
 
         item = await make_info_item(db_session)
-        wi = WatchedItem(info_item_id=item.info_item_id, name="Review Gone")
+        wi = WatchedItem(archiver_info_item_id=item.info_item_id, name="Review Gone")
         db_session.add(wi)
         await db_session.commit()
         response = await client.get(
@@ -319,8 +319,8 @@ class TestListPageSearchAndPagination:
 
         item_a = await make_info_item(db_session, name="Alpha Item")
         item_b = await make_info_item(db_session, name="Beta Item")
-        db_session.add(WatchedItem(info_item_id=item_a.info_item_id, name="Alpha WI"))
-        db_session.add(WatchedItem(info_item_id=item_b.info_item_id, name="Beta WI"))
+        db_session.add(WatchedItem(archiver_info_item_id=item_a.info_item_id, name="Alpha WI"))
+        db_session.add(WatchedItem(archiver_info_item_id=item_b.info_item_id, name="Beta WI"))
         await db_session.flush()
         await db_session.commit()
 
@@ -334,7 +334,9 @@ class TestListPageSearchAndPagination:
         from tests.conftest import make_info_item
 
         item = await make_info_item(db_session)
-        db_session.add(WatchedItem(info_item_id=item.info_item_id, name="Cannabis Observer"))
+        db_session.add(
+            WatchedItem(archiver_info_item_id=item.info_item_id, name="Cannabis Observer")
+        )
         await db_session.flush()
         await db_session.commit()
 
@@ -347,7 +349,7 @@ class TestListPageSearchAndPagination:
 
         for name in ("AAA", "BBB", "CCC"):
             item = await make_info_item(db_session, name=name)
-            db_session.add(WatchedItem(info_item_id=item.info_item_id, name=name))
+            db_session.add(WatchedItem(archiver_info_item_id=item.info_item_id, name=name))
         await db_session.flush()
         await db_session.commit()
 
@@ -366,7 +368,7 @@ class TestListPageSearchAndPagination:
         item = await make_info_item(db_session)
         db_session.add(
             WatchedItem(
-                info_item_id=item.info_item_id,
+                archiver_info_item_id=item.info_item_id,
                 name="Archived WI",
                 archived_at=datetime.now(UTC),
             )
@@ -386,7 +388,7 @@ class TestListPageSearchAndPagination:
         item = await make_info_item(db_session)
         db_session.add(
             WatchedItem(
-                info_item_id=item.info_item_id,
+                archiver_info_item_id=item.info_item_id,
                 name="ShowArchived WI",
                 archived_at=datetime.now(UTC),
             )
@@ -406,7 +408,7 @@ class TestListPageSearchAndPagination:
         item = await make_info_item(db_session)
         db_session.add(
             WatchedItem(
-                info_item_id=item.info_item_id,
+                archiver_info_item_id=item.info_item_id,
                 name="HiddenArchived",
                 archived_at=datetime.now(UTC),
             )
@@ -424,7 +426,7 @@ class TestListPageSearchAndPagination:
 
         for name in ("PA", "PB", "PC"):
             item = await make_info_item(db_session, name=name)
-            db_session.add(WatchedItem(info_item_id=item.info_item_id, name=name))
+            db_session.add(WatchedItem(archiver_info_item_id=item.info_item_id, name=name))
         await db_session.flush()
         await db_session.commit()
 
@@ -449,7 +451,7 @@ class TestListPageSearchAndPagination:
         from tests.conftest import make_info_item
 
         item = await make_info_item(db_session)
-        db_session.add(WatchedItem(info_item_id=item.info_item_id, name="NoAR"))
+        db_session.add(WatchedItem(archiver_info_item_id=item.info_item_id, name="NoAR"))
         await db_session.flush()
         await db_session.commit()
 
@@ -465,7 +467,7 @@ class TestArchiveRestore:
         from tests.conftest import make_info_item
 
         item = await make_info_item(db_session)
-        wi = WatchedItem(info_item_id=item.info_item_id, name="ToArchive")
+        wi = WatchedItem(archiver_info_item_id=item.info_item_id, name="ToArchive")
         db_session.add(wi)
         await db_session.flush()
         await db_session.commit()
@@ -478,7 +480,7 @@ class TestArchiveRestore:
         from tests.conftest import make_info_item, make_watch
 
         item = await make_info_item(db_session)
-        wi = WatchedItem(info_item_id=item.info_item_id, name="Parent")
+        wi = WatchedItem(archiver_info_item_id=item.info_item_id, name="Parent")
         db_session.add(wi)
         await db_session.flush()
         w = await make_watch(db_session, name="Child", watched_item=wi)
@@ -497,7 +499,7 @@ class TestArchiveRestore:
 
         item = await make_info_item(db_session)
         wi = WatchedItem(
-            info_item_id=item.info_item_id,
+            archiver_info_item_id=item.info_item_id,
             name="Arc",
             archived_at=datetime.now(UTC),
             is_active=False,
@@ -538,7 +540,7 @@ class TestFieldHelpers:
         from src.core.models.watched_item import WatchedItem
         from src.dashboard.routes import _apply_watched_item_field_update
 
-        wi = WatchedItem(info_item_id=ULID(), name="x")
+        wi = WatchedItem(archiver_info_item_id=ULID(), name="x")
         _apply_watched_item_field_update(wi, "default_schedule_interval", "30m")
         assert wi.default_schedule_config == {"interval": "30m"}
 
@@ -549,7 +551,7 @@ class TestFieldHelpers:
         from src.core.models.watched_item import WatchedItem
         from src.dashboard.routes import _apply_watched_item_field_update
 
-        wi = WatchedItem(info_item_id=ULID(), name="x")
+        wi = WatchedItem(archiver_info_item_id=ULID(), name="x")
         with pytest.raises(ValueError):
             _apply_watched_item_field_update(wi, "default_schedule_interval", "bogus")
 
@@ -560,7 +562,7 @@ class TestFieldHelpers:
         from src.dashboard.routes import _apply_watched_item_field_update
 
         wi = WatchedItem(
-            info_item_id=ULID(),
+            archiver_info_item_id=ULID(),
             name="x",
             default_schedule_config={"interval": "1h"},
         )
@@ -574,7 +576,7 @@ class TestFieldRoutes:
         from tests.conftest import make_info_item
 
         item = await make_info_item(db_session)
-        wi = WatchedItem(info_item_id=item.info_item_id, name="FieldTest")
+        wi = WatchedItem(archiver_info_item_id=item.info_item_id, name="FieldTest")
         db_session.add(wi)
         await db_session.flush()
         await db_session.commit()
@@ -590,7 +592,7 @@ class TestFieldRoutes:
         from tests.conftest import make_info_item
 
         item = await make_info_item(db_session)
-        wi = WatchedItem(info_item_id=item.info_item_id, name="Old")
+        wi = WatchedItem(archiver_info_item_id=item.info_item_id, name="Old")
         db_session.add(wi)
         await db_session.flush()
         await db_session.commit()
@@ -608,7 +610,7 @@ class TestFieldRoutes:
         from tests.conftest import make_info_item
 
         item = await make_info_item(db_session)
-        wi = WatchedItem(info_item_id=item.info_item_id, name="Sched")
+        wi = WatchedItem(archiver_info_item_id=item.info_item_id, name="Sched")
         db_session.add(wi)
         await db_session.flush()
         await db_session.commit()
@@ -626,7 +628,7 @@ class TestFieldRoutes:
         from tests.conftest import make_info_item
 
         item = await make_info_item(db_session)
-        wi = WatchedItem(info_item_id=item.info_item_id, name="Sched")
+        wi = WatchedItem(archiver_info_item_id=item.info_item_id, name="Sched")
         db_session.add(wi)
         await db_session.flush()
         await db_session.commit()
@@ -642,7 +644,7 @@ class TestFieldRoutes:
         from tests.conftest import make_info_item
 
         item = await make_info_item(db_session)
-        wi = WatchedItem(info_item_id=item.info_item_id, name="X")
+        wi = WatchedItem(archiver_info_item_id=item.info_item_id, name="X")
         db_session.add(wi)
         await db_session.flush()
         await db_session.commit()
@@ -659,7 +661,7 @@ class TestTagsEditor:
         from tests.conftest import make_info_item
 
         item = await make_info_item(db_session)
-        wi = WatchedItem(info_item_id=item.info_item_id, name="T", default_tags=["a", "b"])
+        wi = WatchedItem(archiver_info_item_id=item.info_item_id, name="T", default_tags=["a", "b"])
         db_session.add(wi)
         await db_session.flush()
         await db_session.commit()
@@ -673,7 +675,7 @@ class TestTagsEditor:
         from tests.conftest import make_info_item
 
         item = await make_info_item(db_session)
-        wi = WatchedItem(info_item_id=item.info_item_id, name="T")
+        wi = WatchedItem(archiver_info_item_id=item.info_item_id, name="T")
         db_session.add(wi)
         await db_session.flush()
         await db_session.commit()
@@ -691,7 +693,9 @@ class TestTagsEditor:
         from tests.conftest import make_info_item
 
         item = await make_info_item(db_session)
-        wi = WatchedItem(info_item_id=item.info_item_id, name="T", default_tags=["x", "y", "z"])
+        wi = WatchedItem(
+            archiver_info_item_id=item.info_item_id, name="T", default_tags=["x", "y", "z"]
+        )
         db_session.add(wi)
         await db_session.flush()
         await db_session.commit()
@@ -708,7 +712,7 @@ class TestTagsEditor:
         from tests.conftest import make_info_item
 
         item = await make_info_item(db_session)
-        wi = WatchedItem(info_item_id=item.info_item_id, name="Stamp")
+        wi = WatchedItem(archiver_info_item_id=item.info_item_id, name="Stamp")
         db_session.add(wi)
         await db_session.flush()
         await db_session.commit()

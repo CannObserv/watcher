@@ -12,7 +12,9 @@ pytestmark = pytest.mark.integration
 async def _create_watch_via_api(client, db_session, *, name="W"):
     """Create a WatchedItem and then a Watch via the API."""
     item = await make_info_item(db_session, name=name)
-    wi = WatchedItem(info_item_id=item.info_item_id, name=name, effective_url="https://example.com")
+    wi = WatchedItem(
+        archiver_info_item_id=item.info_item_id, name=name, effective_url="https://example.com"
+    )
     db_session.add(wi)
     await db_session.flush()
     await db_session.commit()

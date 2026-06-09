@@ -4,6 +4,23 @@ import pytest
 from pydantic import ValidationError
 
 
+class TestRenameArchiversInfoItemId:
+    """Regression guard: field must be archiver_info_item_id, not info_item_id."""
+
+    def test_response_has_archiver_info_item_id(self):
+        from src.api.schemas.watched_item import WatchedItemResponse
+
+        assert "archiver_info_item_id" in WatchedItemResponse.model_fields
+        assert "info_item_id" not in WatchedItemResponse.model_fields
+
+    def test_create_accepts_archiver_info_item_id(self):
+        from src.api.schemas.watched_item import WatchedItemCreate
+
+        schema = WatchedItemCreate(archiver_info_item_id="01ABCDEFGHJKMNPQRSTVWXYZ00")
+        assert schema.archiver_info_item_id == "01ABCDEFGHJKMNPQRSTVWXYZ00"
+        assert "info_item_id" not in WatchedItemCreate.model_fields
+
+
 class TestWatchedItemPatch:
     def test_accepts_all_optional_fields(self):
         from src.api.schemas.watched_item import WatchedItemPatch
@@ -45,7 +62,7 @@ class TestWatchedItemResponse:
         from src.api.schemas.watched_item import WatchedItemResponse
         from src.core.models.watched_item import WatchedItem
 
-        wi = WatchedItem(info_item_id=ULID(), name="X")
+        wi = WatchedItem(archiver_info_item_id=ULID(), name="X")
         wi.id = ULID()
         wi.created_at = wi.updated_at = datetime.now(UTC)
         r = WatchedItemResponse.model_validate(wi)

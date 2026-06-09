@@ -21,7 +21,7 @@ async def test_make_watch_auto_creates_info_item_source_and_watched_item(db_sess
     watch = await make_watch(db_session, name="Auto")
     assert watch.watched_item_id is not None
     assert watch.watched_item is not None
-    assert watch.watched_item.info_item_id is not None
+    assert watch.watched_item.archiver_info_item_id is not None
 
 
 async def test_make_watch_eager_loads_watched_item(db_session):
@@ -43,8 +43,8 @@ async def test_make_watch_with_existing_info_item_attaches_to_existing_watched_i
         info_source_id=primary.info_source_id,
     )
 
-    w1 = await make_watch(db_session, name="First", info_item_id=item.info_item_id)
-    w2 = await make_watch(db_session, name="Second", info_item_id=item.info_item_id)
+    w1 = await make_watch(db_session, name="First", archiver_info_item_id=item.info_item_id)
+    w2 = await make_watch(db_session, name="Second", archiver_info_item_id=item.info_item_id)
     assert w1.watched_item_id == w2.watched_item_id
 
 
@@ -65,7 +65,7 @@ async def test_make_watch_rejects_mismatched_watched_item(db_session):
         info_source_id=primary2.info_source_id,
     )
 
-    wi1 = WatchedItem(info_item_id=item1.info_item_id, name="W1")
+    wi1 = WatchedItem(archiver_info_item_id=item1.info_item_id, name="W1")
     db_session.add(wi1)
     await db_session.flush()
 
@@ -73,6 +73,6 @@ async def test_make_watch_rejects_mismatched_watched_item(db_session):
         await make_watch(
             db_session,
             name="bad",
-            info_item_id=item2.info_item_id,
+            archiver_info_item_id=item2.info_item_id,
             watched_item=wi1,
         )

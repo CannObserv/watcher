@@ -489,6 +489,16 @@ class TestCreateWatchedItem:
         response = await client.post("/api/v1/watched-items", json={"name": "Missing anchor"})
         assert response.status_code == 422
 
+    async def test_url_only_create_stores_archiver_info_source_id(self, client, db_session):
+        """#1 fix: archiver_info_source_id must be persisted on the URL-only path."""
+        src_id = "01ABCDEFGHJKMNPQRSTVWXYZ00"
+        response = await client.post(
+            "/api/v1/watched-items",
+            json={"url": "https://example.com/srcid", "archiver_info_source_id": src_id},
+        )
+        assert response.status_code == 201, response.text
+        assert response.json()["archiver_info_source_id"] == src_id
+
     async def test_create_stores_archiver_info_source_id(self, client, db_session, info_client):
         """archiver_info_source_id is persisted when supplied on create."""
         item = await make_info_item(db_session, name="SrcId")
@@ -638,3 +648,26 @@ class TestCheckNow:
         response = await client.post(f"/api/v1/watched-items/{wi.id}/check-now")
         assert response.status_code == 422
         assert "watch" in response.json()["detail"].lower()
+
+    async def test_202_emits_audit_log(self, client, db_session):
+        """#3 fix: check-now must write a WATCHED_ITEM_CHECK_REQUESTED audit entry."""
+        from unittest.mock import AsyncMock, patch
+
+        from src.core.models.audit_log import AuditLog, EventType
+        from tests.conftest import make_watch
+
+        wi = await _make_watched_item(db_session, name="AuditCheckNow")
+        wi.effective_url = "https://example.com"
+        await make_watch(db_session, name="W", watched_item=wi)
+        await db_session.commit()
+
+        with patch("src.api.routes.watched_items.check_watched_item") as mock_task:
+            mock_task.configure.return_value.defer_async = AsyncMock()
+            await client.post(f"/api/v1/watched-items/{wi.id}/check-now")
+
+        result = await db_session.execute(
+            select(AuditLog).where(AuditLog.event_type == EventType.WATCHED_ITEM_CHECK_REQUESTED)
+        )
+        entries = result.scalars().all()
+        assert len(entries) == 1
+        assert entries[0].payload["watched_item_id"] == str(wi.id)

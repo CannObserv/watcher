@@ -81,16 +81,16 @@ async def create_watched_item(
 
     Two paths depending on which anchor is provided:
 
-    **InfoItem-linked** (``info_item_id`` set): validates the InfoItem via the
+    **InfoItem-linked** (``archiver_info_item_id`` set): validates the InfoItem via the
     Archiver SDK; name defaults to the InfoItem's name.
     Errors: NotFound → 422, AuthError → 500, ServerError/network → 503.
 
-    **URL-only** (``url`` set, no ``info_item_id``): probes the URL for
+    **URL-only** (``url`` set, no ``archiver_info_item_id``): probes the URL for
     ``effective_url`` + ``domain_name``; name defaults to the probed domain.
-    ``info_item_id`` is null on the resulting record.
+    ``archiver_info_item_id`` is null on the resulting record.
     Error: unreachable URL → 422.
 
-    At least one of ``info_item_id`` or ``url`` is required (schema-enforced).
+    At least one of ``archiver_info_item_id`` or ``url`` is required (schema-enforced).
     """
     if data.archiver_info_item_id:
         info_client = get_registry().get_archiver_client()
@@ -156,6 +156,7 @@ async def create_watched_item(
             default_content_type=data.default_content_type,
             default_tags=data.default_tags,
             source_specs=data.source_specs or [],
+            archiver_info_source_id=data.archiver_info_source_id,
         )
 
     session.add(wi)
@@ -318,6 +319,8 @@ async def check_now(watched_item_id: str, session: AsyncSession = Depends(get_db
     if not active_watches:
         raise HTTPException(status_code=422, detail="WatchedItem has no active watches")
 
+    audit(session, EventType.WATCHED_ITEM_CHECK_REQUESTED, watched_item_id=str(wi.id), source="api")
+    await session.commit()
     await check_watched_item.configure().defer_async(watched_item_id=str(wi.id))
     return wi
 

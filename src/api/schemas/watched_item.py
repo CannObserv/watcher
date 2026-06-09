@@ -6,7 +6,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 from src.api.schemas.types import HttpUrlStr, ULIDStr
 from src.api.schemas.validators import validate_event_list
-from src.core.models.watch import ContentType
+from src.core.models.watch import ContentType, WatchHealthStatus
 
 
 class WatchedItemCreate(BaseModel):
@@ -94,7 +94,7 @@ class WatchedItemResponse(BaseModel):
     last_reviewed_at: datetime | None
     last_checked_at: datetime | None
     last_changed_at: datetime | None
-    health_status: str
+    health_status: WatchHealthStatus
     default_schedule_config: dict | None
     default_content_type: str | None
     default_tags: list[str] | None

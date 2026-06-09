@@ -51,6 +51,7 @@ class EventType:
     WATCHED_ITEM_ARCHIVED = "watched_item.archived"
     WATCHED_ITEM_RESTORED = "watched_item.restored"
     WATCHED_ITEM_REVIEWED = "watched_item.reviewed"
+    WATCHED_ITEM_CHECK_REQUESTED = "watched_item.check_requested"
     WATCHED_ITEM_TEMPLATE_CREATED = "watched_item_template.created"
     WATCHED_ITEM_TEMPLATE_UPDATED = "watched_item_template.updated"
     WATCHED_ITEM_TEMPLATE_DELETED = "watched_item_template.deleted"

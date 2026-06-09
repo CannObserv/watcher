@@ -478,19 +478,6 @@ def info_client(db_session, request):
             out.append(entry)
         return out
 
-    async def _get_info_source(info_source_id: str):
-        result = await db_session.execute(
-            select(InfoSource).where(InfoSource.info_source_id == info_source_id)
-        )
-        source = result.scalars().first()
-        if source is None:
-            raise NotFound(f"info_source {info_source_id} not found")
-        out = MagicMock()
-        out.info_source_id = str(source.info_source_id)
-        out.url = source.url
-        out.source_specs = source.source_specs or []
-        return out
-
     async def _get_info_item(info_item_id: str):
         result = await db_session.execute(
             select(InfoItem).where(InfoItem.info_item_id == info_item_id)
@@ -542,7 +529,6 @@ def info_client(db_session, request):
         return out
 
     fake_client.list_info_items = AsyncMock(side_effect=_list_info_items)
-    fake_client.get_info_source = AsyncMock(side_effect=_get_info_source)
     fake_client.get_info_item = AsyncMock(side_effect=_get_info_item)
     fake_client.find_info_item = AsyncMock(side_effect=_find_info_item)
 

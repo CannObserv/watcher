@@ -649,6 +649,20 @@ class TestCheckNow:
         assert response.status_code == 422
         assert "watch" in response.json()["detail"].lower()
 
+    async def test_422_when_watch_archived_but_is_active_true(self, client, db_session):
+        """#7: is_archived=True must block check-now even if is_active was not cleared."""
+        from tests.conftest import make_watch
+
+        wi = await _make_watched_item(db_session, name="SplitFlagsWI")
+        wi.effective_url = "https://example.com"
+        await make_watch(
+            db_session, name="Weird", watched_item=wi, is_archived=True, is_active=True
+        )
+        await db_session.commit()
+
+        response = await client.post(f"/api/v1/watched-items/{wi.id}/check-now")
+        assert response.status_code == 422
+
     async def test_202_emits_audit_log(self, client, db_session):
         """#3 fix: check-now must write a WATCHED_ITEM_CHECK_REQUESTED audit entry."""
         from unittest.mock import AsyncMock, patch

@@ -128,9 +128,9 @@ deactivation/reactivation), plus `WatchedItemNotificationTemplate` rows.
 Live inheritance: per-Watch override → WatchedItem default → system
 default (see `src/core/watches/resolution.py`).
 
-`info_item_id` on `WatchedItem` is nullable — WatchedItems created via the
-dashboard (`POST /watched-items/new`) have no InfoItem reference; those created
-via the API (`POST /api/v1/watched-items`) still require one. `effective_url`
+`archiver_info_item_id` on `WatchedItem` is nullable — WatchedItems created via the
+dashboard (`POST /watched-items/new`) have no InfoItem reference; API-created ones
+may also omit it when using the URL-only path. `effective_url`
 and `domain_name` are set at WatchedItem-create time by probing the URL (no
 Archiver SDK call per cycle). SourceRevisions are POSTed to Archiver via the
 `archiver-client` SDK on every detected change; the local
@@ -140,7 +140,7 @@ detection, with `change_revision_id` in WatchEvent metadata.
 
 Fresh hosts need the scratch directory: `sudo mkdir -p /var/cache/watcher/scratch && sudo chown watcher:watcher /var/cache/watcher/scratch` (or override via `WATCHER_CACHE_DIR`). The Archiver service must also be installed first — see its own `docs/DEPLOYMENT.md`. Archiver authoring tools (`validate_source_spec`, `fetch_and_render`, `preview_extraction`, `propose_selectors`, `find_info_item`, atomic `create_info_item`) are documented in `/home/exedev/archiver/AGENTS.md`.
 
-Operators manage WatchedItem defaults (`name`, `description`, `default_schedule_config`, `default_content_type`, `default_tags`), archive/restore lifecycle, and notification-template CRUD via the `/watched-items` dashboard. Same surface is exposed at `/api/v1/watched-items`. WatchedItems are created at `POST /api/v1/watched-items` (requires `info_item_id`) or `GET/POST /watched-items/new` (dashboard — URL-first, no InfoItem required). Archive cascades to all child Watches; restore is parent-only.
+Operators manage WatchedItem defaults (`name`, `description`, `default_schedule_config`, `default_content_type`, `default_tags`), archive/restore lifecycle, and notification-template CRUD via the `/watched-items` dashboard. Same surface is exposed at `/api/v1/watched-items`. WatchedItems are created at `POST /api/v1/watched-items` (accepts `archiver_info_item_id` or `url`; both optional but at least one required) or `GET/POST /watched-items/new` (dashboard — URL-first). Archive cascades to all child Watches; restore is parent-only. Filter by InfoItem with `GET /api/v1/watched-items?archiver_info_item_id=<ulid>`. Trigger an immediate check with `POST /api/v1/watched-items/{id}/check-now` (202; pre-flight: not archived, has `effective_url`, has active watches).
 
 **Watched Items list view** (`#172`, `#173`): columns are Name → Last Check → Interval → Next Check → Status. Next Check is a live countdown rendered by `src/dashboard/static/js/next-check-countdown.js` (loaded globally via `base.html`; reads `data-next-check` ISO timestamp attributes, refreshes every 60 s). List has server-side name search and pagination: `GET /partials/watched-items-table?q=&page=&page_size=&include_archived=` is the HTMX partial; the full page (`GET /watched-items`) accepts the same params and SSR-includes the partial on first load. Active/All archived toggle is a segment-group that cross-includes the search input. Aspect Review column removed (#173) — too expensive per-row; will surface on WatchedItem detail page behind a Redis cache (tracked in #163).
 

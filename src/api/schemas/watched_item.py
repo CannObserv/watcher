@@ -70,6 +70,14 @@ class WatchedItemPatch(BaseModel):
     source_specs: list[dict] | None = None
     archiver_info_source_id: str | None = Field(None, min_length=1, max_length=26)
 
+    @model_validator(mode="after")
+    def _reject_explicit_null(self) -> "WatchedItemPatch":
+        """Reject explicit null for NOT NULL DB columns; omitting the field is fine."""
+        for field in ("name", "effective_url", "source_specs"):
+            if field in self.model_fields_set and getattr(self, field) is None:
+                raise ValueError(f"{field} cannot be null; omit the field to leave it unchanged")
+        return self
+
     @field_validator("default_content_type")
     @classmethod
     def _ct(cls, v: str | None) -> str | None:

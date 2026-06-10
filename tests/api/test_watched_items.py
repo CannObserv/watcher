@@ -587,16 +587,58 @@ class TestPatchArchiverInfoSourceId:
         assert response.json()["archiver_info_source_id"] is None
 
 
+class TestPatchEffectiveUrlAndSourceSpecs:
+    """#187 — PATCH must persist effective_url and source_specs through the full route."""
+
+    async def test_patch_updates_effective_url(self, client, db_session):
+        """PATCH sets effective_url on the WatchedItem."""
+        wi = await _make_watched_item(db_session)
+        response = await client.patch(
+            f"/api/v1/watched-items/{wi.id}",
+            json={"effective_url": "https://example.com/new-path"},
+        )
+        assert response.status_code == 200
+        assert response.json()["effective_url"] == "https://example.com/new-path"
+
+    async def test_patch_updates_source_specs(self, client, db_session):
+        """PATCH sets source_specs on the WatchedItem."""
+        wi = await _make_watched_item(db_session)
+        specs = [
+            {"schema_version": 1, "extraction": {"algorithm": "css_selector", "selector": "main"}}
+        ]
+        response = await client.patch(
+            f"/api/v1/watched-items/{wi.id}",
+            json={"source_specs": specs},
+        )
+        assert response.status_code == 200
+        assert response.json()["source_specs"] == specs
+
+    async def test_patch_rejects_null_effective_url(self, client, db_session):
+        """PATCH with null effective_url returns 422."""
+        wi = await _make_watched_item(db_session)
+        response = await client.patch(
+            f"/api/v1/watched-items/{wi.id}",
+            json={"effective_url": None},
+        )
+        assert response.status_code == 422
+
+    async def test_patch_invalid_url_returns_422(self, client, db_session):
+        """PATCH with a non-URL string returns 422."""
+        wi = await _make_watched_item(db_session)
+        response = await client.patch(
+            f"/api/v1/watched-items/{wi.id}",
+            json={"effective_url": "not-a-url"},
+        )
+        assert response.status_code == 422
+
+
 class TestCheckNow:
     async def test_202_enqueues_task(self, client, db_session):
         """POST /check-now returns 202 with WatchedItem body and defers a task."""
         from unittest.mock import AsyncMock, patch
 
-        from tests.conftest import make_watch
-
         wi = await _make_watched_item(db_session, name="CheckNow")
         wi.effective_url = "https://example.com"
-        await make_watch(db_session, name="W1", watched_item=wi)
         await db_session.commit()
 
         with patch("src.api.routes.watched_items.check_watched_item") as mock_task:
@@ -673,11 +715,9 @@ class TestCheckNow:
         from unittest.mock import AsyncMock, patch
 
         from src.core.models.audit_log import AuditLog, EventType
-        from tests.conftest import make_watch
 
         wi = await _make_watched_item(db_session, name="AuditCheckNow")
         wi.effective_url = "https://example.com"
-        await make_watch(db_session, name="W", watched_item=wi)
         await db_session.commit()
 
         with patch("src.api.routes.watched_items.check_watched_item") as mock_task:

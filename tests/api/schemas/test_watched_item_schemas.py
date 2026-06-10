@@ -160,6 +160,24 @@ class TestIssue187SchemaAdditions:
         p = WatchedItemPatch()
         assert "source_specs" not in p.model_dump(exclude_unset=True)
 
+    def test_patch_rejects_explicit_null_effective_url(self):
+        from src.api.schemas.watched_item import WatchedItemPatch
+
+        with pytest.raises(ValidationError):
+            WatchedItemPatch(effective_url=None)
+
+    def test_patch_rejects_explicit_null_source_specs(self):
+        from src.api.schemas.watched_item import WatchedItemPatch
+
+        with pytest.raises(ValidationError):
+            WatchedItemPatch(source_specs=None)
+
+    def test_patch_rejects_explicit_null_name(self):
+        from src.api.schemas.watched_item import WatchedItemPatch
+
+        with pytest.raises(ValidationError):
+            WatchedItemPatch(name=None)
+
 
 class TestTemplateSchemas:
     def test_template_create_defaults(self):

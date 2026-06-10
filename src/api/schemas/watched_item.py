@@ -55,13 +55,19 @@ class WatchedItemCreate(BaseModel):
 
 
 class WatchedItemPatch(BaseModel):
-    """Partial update to a WatchedItem. All fields optional."""
+    """Partial update to a WatchedItem. All fields optional.
+
+    ``effective_url`` is set directly without re-probing — Archiver is the
+    authoritative source for URL succession.
+    """
 
     name: str | None = Field(None, min_length=1, max_length=255)
     description: str | None = None
     default_schedule_config: dict | None = None
     default_content_type: str | None = None
     default_tags: list[str] | None = None
+    effective_url: HttpUrlStr | None = None
+    source_specs: list[dict] | None = None
     archiver_info_source_id: str | None = Field(None, min_length=1, max_length=26)
 
     @field_validator("default_content_type")

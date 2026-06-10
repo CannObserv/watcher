@@ -297,7 +297,6 @@ async def check_now(watched_item_id: str, session: AsyncSession = Depends(get_db
     Pre-flight guards:
     - 409 if the WatchedItem is archived.
     - 422 if ``effective_url`` is empty (nothing to fetch).
-    - 422 if there are no active child Watches (nobody to notify).
     """
     wi = await _get_or_404(session, watched_item_id)
 
@@ -306,22 +305,6 @@ async def check_now(watched_item_id: str, session: AsyncSession = Depends(get_db
 
     if not wi.effective_url:
         raise HTTPException(status_code=422, detail="WatchedItem has no effective url")
-
-    active_watches = (
-        (
-            await session.execute(
-                select(Watch).where(
-                    Watch.watched_item_id == wi.id,
-                    Watch.is_active.is_(True),
-                    Watch.is_archived.is_(False),
-                )
-            )
-        )
-        .scalars()
-        .all()
-    )
-    if not active_watches:
-        raise HTTPException(status_code=422, detail="WatchedItem has no active watches")
 
     await check_watched_item.configure().defer_async(watched_item_id=str(wi.id))
     audit(session, EventType.WATCHED_ITEM_CHECK_REQUESTED, watched_item_id=str(wi.id), source="api")

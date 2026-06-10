@@ -635,33 +635,38 @@ class TestCheckNow:
         assert response.status_code == 422
         assert "url" in response.json()["detail"].lower()
 
-    async def test_422_when_no_active_watches(self, client, db_session):
-        from tests.conftest import make_watch
+    async def test_202_when_no_active_watches(self, client, db_session):
+        """#187: check-now must succeed even with zero active Watch subscriptions."""
+        from unittest.mock import AsyncMock, patch
 
         wi = await _make_watched_item(db_session, name="NoActiveWatches")
+        wi.effective_url = "https://example.com"
+        await db_session.commit()
+
+        with patch("src.api.routes.watched_items.check_watched_item") as mock_task:
+            mock_task.configure.return_value.defer_async = AsyncMock()
+            response = await client.post(f"/api/v1/watched-items/{wi.id}/check-now")
+
+        assert response.status_code == 202
+
+    async def test_202_when_all_watches_archived(self, client, db_session):
+        """#187: archived-only Watch subscriptions must not block check-now."""
+        from unittest.mock import AsyncMock, patch
+
+        from tests.conftest import make_watch
+
+        wi = await _make_watched_item(db_session, name="AllArchivedWatches")
         wi.effective_url = "https://example.com"
         await make_watch(
             db_session, name="Archived", watched_item=wi, is_archived=True, is_active=False
         )
         await db_session.commit()
 
-        response = await client.post(f"/api/v1/watched-items/{wi.id}/check-now")
-        assert response.status_code == 422
-        assert "watch" in response.json()["detail"].lower()
+        with patch("src.api.routes.watched_items.check_watched_item") as mock_task:
+            mock_task.configure.return_value.defer_async = AsyncMock()
+            response = await client.post(f"/api/v1/watched-items/{wi.id}/check-now")
 
-    async def test_422_when_watch_archived_but_is_active_true(self, client, db_session):
-        """#7: is_archived=True must block check-now even if is_active was not cleared."""
-        from tests.conftest import make_watch
-
-        wi = await _make_watched_item(db_session, name="SplitFlagsWI")
-        wi.effective_url = "https://example.com"
-        await make_watch(
-            db_session, name="Weird", watched_item=wi, is_archived=True, is_active=True
-        )
-        await db_session.commit()
-
-        response = await client.post(f"/api/v1/watched-items/{wi.id}/check-now")
-        assert response.status_code == 422
+        assert response.status_code == 202
 
     async def test_202_emits_audit_log(self, client, db_session):
         """#3 fix: check-now must write a WATCHED_ITEM_CHECK_REQUESTED audit entry."""

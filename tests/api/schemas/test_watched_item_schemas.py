@@ -126,6 +126,41 @@ class TestIssue186SchemaAdditions:
             WatchedItemPatch(archiver_info_source_id="")
 
 
+class TestIssue187SchemaAdditions:
+    """#187 — WatchedItemPatch must expose effective_url and source_specs."""
+
+    def test_patch_accepts_effective_url(self):
+        from src.api.schemas.watched_item import WatchedItemPatch
+
+        p = WatchedItemPatch(effective_url="https://example.com/new")
+        assert p.effective_url == "https://example.com/new"
+
+    def test_patch_effective_url_is_optional(self):
+        from src.api.schemas.watched_item import WatchedItemPatch
+
+        p = WatchedItemPatch()
+        assert "effective_url" not in p.model_dump(exclude_unset=True)
+
+    def test_patch_rejects_empty_effective_url(self):
+        from src.api.schemas.watched_item import WatchedItemPatch
+
+        with pytest.raises(ValidationError):
+            WatchedItemPatch(effective_url="")
+
+    def test_patch_accepts_source_specs(self):
+        from src.api.schemas.watched_item import WatchedItemPatch
+
+        specs = [{"schema_version": 1, "extraction": {"algorithm": "full_page"}}]
+        p = WatchedItemPatch(source_specs=specs)
+        assert p.source_specs == specs
+
+    def test_patch_source_specs_is_optional(self):
+        from src.api.schemas.watched_item import WatchedItemPatch
+
+        p = WatchedItemPatch()
+        assert "source_specs" not in p.model_dump(exclude_unset=True)
+
+
 class TestTemplateSchemas:
     def test_template_create_defaults(self):
         from src.api.schemas.watched_item import WatchedItemTemplateCreate

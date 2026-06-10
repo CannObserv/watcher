@@ -107,6 +107,24 @@ class TestIssue186SchemaAdditions:
         p = WatchedItemPatch()
         assert "archiver_info_source_id" not in p.model_dump(exclude_unset=True)
 
+    def test_create_rejects_empty_archiver_info_source_id(self):
+        """#8: empty string must be rejected — semantically different from null."""
+        from pydantic import ValidationError
+
+        from src.api.schemas.watched_item import WatchedItemCreate
+
+        with pytest.raises(ValidationError):
+            WatchedItemCreate(url="https://example.com", archiver_info_source_id="")
+
+    def test_patch_rejects_empty_archiver_info_source_id(self):
+        """#8: same constraint on the patch schema."""
+        from pydantic import ValidationError
+
+        from src.api.schemas.watched_item import WatchedItemPatch
+
+        with pytest.raises(ValidationError):
+            WatchedItemPatch(archiver_info_source_id="")
+
 
 class TestTemplateSchemas:
     def test_template_create_defaults(self):

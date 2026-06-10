@@ -34,7 +34,7 @@ class WatchedItemCreate(BaseModel):
     default_tags: list[str] | None = None
     url: HttpUrlStr | None = None
     source_specs: list[dict] | None = None
-    archiver_info_source_id: str | None = Field(None, max_length=26)
+    archiver_info_source_id: str | None = Field(None, min_length=1, max_length=26)
 
     @model_validator(mode="after")
     def _require_anchor(self) -> "WatchedItemCreate":
@@ -62,7 +62,7 @@ class WatchedItemPatch(BaseModel):
     default_schedule_config: dict | None = None
     default_content_type: str | None = None
     default_tags: list[str] | None = None
-    archiver_info_source_id: str | None = Field(None, max_length=26)
+    archiver_info_source_id: str | None = Field(None, min_length=1, max_length=26)
 
     @field_validator("default_content_type")
     @classmethod

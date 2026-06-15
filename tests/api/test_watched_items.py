@@ -634,6 +634,73 @@ class TestIssue188IsActive:
         assert "paused" in response.json()["detail"].lower()
 
 
+class TestIssue189PauseResumeAuditEvents:
+    """#189 — dedicated pause/resume audit events, split from the generic UPDATED."""
+
+    async def _events(self, db_session, wi_id, event_type):
+        rows = (
+            (await db_session.execute(select(AuditLog).where(AuditLog.event_type == event_type)))
+            .scalars()
+            .all()
+        )
+        return [r for r in rows if r.payload.get("watched_item_id") == str(wi_id)]
+
+    async def test_pause_emits_paused_not_updated(self, client, db_session):
+        """PATCH is_active=False on an active item emits PAUSED, not UPDATED."""
+        wi = await _make_watched_item(db_session, name="P", is_active=True)
+        response = await client.patch(f"/api/v1/watched-items/{wi.id}", json={"is_active": False})
+        assert response.status_code == 200
+        paused = await self._events(db_session, wi.id, EventType.WATCHED_ITEM_PAUSED)
+        updated = await self._events(db_session, wi.id, EventType.WATCHED_ITEM_UPDATED)
+        assert len(paused) == 1
+        assert paused[0].payload["source"] == "api"
+        assert updated == []
+
+    async def test_resume_emits_resumed_not_updated(self, client, db_session):
+        """PATCH is_active=True on a paused item emits RESUMED, not UPDATED."""
+        wi = await _make_watched_item(db_session, name="R", is_active=False)
+        response = await client.patch(f"/api/v1/watched-items/{wi.id}", json={"is_active": True})
+        assert response.status_code == 200
+        resumed = await self._events(db_session, wi.id, EventType.WATCHED_ITEM_RESUMED)
+        updated = await self._events(db_session, wi.id, EventType.WATCHED_ITEM_UPDATED)
+        assert len(resumed) == 1
+        assert updated == []
+
+    async def test_noop_is_active_emits_nothing(self, client, db_session):
+        """PATCH is_active=True on an already-active item emits no audit event."""
+        wi = await _make_watched_item(db_session, name="N", is_active=True)
+        response = await client.patch(f"/api/v1/watched-items/{wi.id}", json={"is_active": True})
+        assert response.status_code == 200
+        paused = await self._events(db_session, wi.id, EventType.WATCHED_ITEM_PAUSED)
+        resumed = await self._events(db_session, wi.id, EventType.WATCHED_ITEM_RESUMED)
+        updated = await self._events(db_session, wi.id, EventType.WATCHED_ITEM_UPDATED)
+        assert paused == [] and resumed == [] and updated == []
+
+    async def test_mixed_patch_emits_both_events(self, client, db_session):
+        """PATCH is_active + name emits PAUSED for the transition and UPDATED for the rest."""
+        wi = await _make_watched_item(db_session, name="M", is_active=True)
+        response = await client.patch(
+            f"/api/v1/watched-items/{wi.id}",
+            json={"is_active": False, "name": "Renamed"},
+        )
+        assert response.status_code == 200
+        paused = await self._events(db_session, wi.id, EventType.WATCHED_ITEM_PAUSED)
+        updated = await self._events(db_session, wi.id, EventType.WATCHED_ITEM_UPDATED)
+        assert len(paused) == 1
+        assert len(updated) == 1
+        # is_active is carried by the dedicated event, not the generic one.
+        assert updated[0].payload["updated_fields"] == ["name"]
+
+    async def test_non_active_patch_unchanged(self, client, db_session):
+        """PATCH of non-activation fields still emits a single UPDATED event."""
+        wi = await _make_watched_item(db_session, name="U", is_active=True)
+        response = await client.patch(f"/api/v1/watched-items/{wi.id}", json={"name": "OnlyName"})
+        assert response.status_code == 200
+        updated = await self._events(db_session, wi.id, EventType.WATCHED_ITEM_UPDATED)
+        assert len(updated) == 1
+        assert updated[0].payload["updated_fields"] == ["name"]
+
+
 class TestListFilterByArchiverInfoItemId:
     async def test_filter_returns_matching_item(self, client, db_session):
         """?archiver_info_item_id= returns only the WatchedItem with that ULID."""

@@ -202,6 +202,11 @@ async def patch_watched_item(
     ``is_active`` (pause/resume) cannot be changed on an archived item — the
     archive/restore lifecycle owns activation while archived. Such a PATCH
     returns 409; use ``POST /{id}/restore`` to reactivate.
+
+    An ``is_active`` transition emits a dedicated ``WATCHED_ITEM_PAUSED`` /
+    ``WATCHED_ITEM_RESUMED`` audit event (#189) and is excluded from the
+    generic ``WATCHED_ITEM_UPDATED`` event, which carries only the other
+    changed fields. A no-op (same value) emits nothing.
     """
     wi = await _get_or_404(session, watched_item_id)
     updates = data.model_dump(exclude_unset=True)
@@ -210,14 +215,28 @@ async def patch_watched_item(
             status_code=409,
             detail="WatchedItem is archived; activation is controlled by restore",
         )
+    previous_active = wi.is_active
     for field, value in updates.items():
         setattr(wi, field, value)
-    if updates:
+
+    # #189: an is_active transition gets a dedicated pause/resume audit event
+    # (mirroring archive/restore), kept out of the generic UPDATED entry so
+    # operators can filter by event type. A no-op (same value) emits nothing.
+    if "is_active" in updates and wi.is_active != previous_active:
+        audit(
+            session,
+            EventType.WATCHED_ITEM_RESUMED if wi.is_active else EventType.WATCHED_ITEM_PAUSED,
+            watched_item_id=str(wi.id),
+            source="api",
+        )
+
+    other_fields = sorted(k for k in updates if k != "is_active")
+    if other_fields:
         audit(
             session,
             EventType.WATCHED_ITEM_UPDATED,
             watched_item_id=str(wi.id),
-            updated_fields=sorted(updates.keys()),
+            updated_fields=other_fields,
             source="api",
         )
     await session.commit()

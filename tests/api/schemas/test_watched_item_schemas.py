@@ -179,6 +179,40 @@ class TestIssue187SchemaAdditions:
             WatchedItemPatch(name=None)
 
 
+class TestIssue188IsActive:
+    """#188 — is_active on WatchedItemCreate (default True) and WatchedItemPatch."""
+
+    def test_create_defaults_is_active_true(self):
+        from src.api.schemas.watched_item import WatchedItemCreate
+
+        c = WatchedItemCreate(url="https://example.com")
+        assert c.is_active is True
+
+    def test_create_accepts_is_active_false(self):
+        from src.api.schemas.watched_item import WatchedItemCreate
+
+        c = WatchedItemCreate(url="https://example.com", is_active=False)
+        assert c.is_active is False
+
+    def test_patch_accepts_is_active(self):
+        from src.api.schemas.watched_item import WatchedItemPatch
+
+        p = WatchedItemPatch(is_active=False)
+        assert p.is_active is False
+
+    def test_patch_is_active_is_optional(self):
+        from src.api.schemas.watched_item import WatchedItemPatch
+
+        p = WatchedItemPatch()
+        assert "is_active" not in p.model_dump(exclude_unset=True)
+
+    def test_patch_rejects_explicit_null_is_active(self):
+        from src.api.schemas.watched_item import WatchedItemPatch
+
+        with pytest.raises(ValidationError):
+            WatchedItemPatch(is_active=None)
+
+
 class TestTemplateSchemas:
     def test_template_create_defaults(self):
         from src.api.schemas.watched_item import WatchedItemTemplateCreate

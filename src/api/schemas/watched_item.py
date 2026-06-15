@@ -29,6 +29,7 @@ class WatchedItemCreate(BaseModel):
     archiver_info_item_id: ULIDStr | None = None
     name: str | None = Field(None, min_length=1, max_length=255)
     description: str | None = None
+    is_active: bool = True
     default_schedule_config: dict | None = None
     default_content_type: str | None = None
     default_tags: list[str] | None = None
@@ -63,6 +64,7 @@ class WatchedItemPatch(BaseModel):
 
     name: str | None = Field(None, min_length=1, max_length=255)
     description: str | None = None
+    is_active: bool | None = None
     default_schedule_config: dict | None = None
     default_content_type: str | None = None
     default_tags: list[str] | None = None
@@ -73,7 +75,7 @@ class WatchedItemPatch(BaseModel):
     @model_validator(mode="after")
     def _reject_explicit_null(self) -> "WatchedItemPatch":
         """Reject explicit null for NOT NULL DB columns; omitting the field is fine."""
-        for field in ("name", "effective_url", "source_specs"):
+        for field in ("name", "is_active", "effective_url", "source_specs"):
             if field in self.model_fields_set and getattr(self, field) is None:
                 raise ValueError(f"{field} cannot be null; omit the field to leave it unchanged")
         return self

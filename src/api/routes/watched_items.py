@@ -116,6 +116,7 @@ async def create_watched_item(
             archiver_info_item_id=ULID.from_str(data.archiver_info_item_id),
             name=data.name or info_item.name,
             description=data.description,
+            is_active=data.is_active,
             default_schedule_config=data.default_schedule_config,
             default_content_type=data.default_content_type,
             default_tags=data.default_tags,
@@ -152,6 +153,7 @@ async def create_watched_item(
             domain_name=domain or None,
             name=data.name or domain or data.url,
             description=data.description,
+            is_active=data.is_active,
             default_schedule_config=data.default_schedule_config,
             default_content_type=data.default_content_type,
             default_tags=data.default_tags,
@@ -195,9 +197,19 @@ async def patch_watched_item(
     data: WatchedItemPatch,
     session: AsyncSession = Depends(get_db_session),
 ):
-    """Update mutable WatchedItem fields. All fields optional."""
+    """Update mutable WatchedItem fields. All fields optional.
+
+    ``is_active`` (pause/resume) cannot be changed on an archived item — the
+    archive/restore lifecycle owns activation while archived. Such a PATCH
+    returns 409; use ``POST /{id}/restore`` to reactivate.
+    """
     wi = await _get_or_404(session, watched_item_id)
     updates = data.model_dump(exclude_unset=True)
+    if "is_active" in updates and wi.archived_at is not None:
+        raise HTTPException(
+            status_code=409,
+            detail="WatchedItem is archived; activation is controlled by restore",
+        )
     for field, value in updates.items():
         setattr(wi, field, value)
     if updates:
@@ -296,12 +308,17 @@ async def check_now(watched_item_id: str, session: AsyncSession = Depends(get_db
 
     Pre-flight guards:
     - 409 if the WatchedItem is archived.
+    - 409 if the WatchedItem is paused (``is_active=False``) — the task would
+      short-circuit, so reject up front rather than enqueue a silent no-op.
     - 422 if ``effective_url`` is empty (nothing to fetch).
     """
     wi = await _get_or_404(session, watched_item_id)
 
     if wi.archived_at is not None:
         raise HTTPException(status_code=409, detail="WatchedItem is archived")
+
+    if not wi.is_active:
+        raise HTTPException(status_code=409, detail="WatchedItem is paused")
 
     if not wi.effective_url:
         raise HTTPException(status_code=422, detail="WatchedItem has no effective url")

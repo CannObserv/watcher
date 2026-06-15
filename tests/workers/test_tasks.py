@@ -201,6 +201,36 @@ class TestCheckWatchedItem:
         fetch_mock.assert_not_called()
         proc_mock.assert_not_called()
 
+    async def test_skips_paused_watched_item_with_active_children(self, db_session, monkeypatch):
+        """#188 CR-2: a paused (is_active=False, NOT archived) WatchedItem with an
+        active child Watch is skipped before fetch/pipeline.
+
+        Pre-#188 this state was unreachable (the only path to is_active=False was
+        archive, which cascades children to archived). Now pause/resume makes it a
+        normal state, so the task's `not is_active` guard must be exercised."""
+        watch = await make_watch(db_session, name="ActiveChild", is_active=True)
+        watched_item = watch.watched_item
+        watched_item.is_active = False
+        watched_item.effective_url = "https://example.com/page"
+        await db_session.commit()
+
+        fetch_mock = AsyncMock(return_value=_fake_fetch_result())
+        mock_fetcher = MagicMock()
+        mock_fetcher.fetch = fetch_mock
+
+        proc_mock = _make_pipeline_stub()
+        monkeypatch.setattr(tasks_mod, "process_watched_item", proc_mock)
+        monkeypatch.setattr(
+            tasks_mod, "get_session_factory", lambda: _mock_session_factory(db_session)
+        )
+
+        reg = ServiceRegistry(fetcher=mock_fetcher)
+        result = await check_watched_item(str(watched_item.id), registry=reg)
+
+        assert result.get("skipped") is True
+        fetch_mock.assert_not_called()
+        proc_mock.assert_not_called()
+
     async def test_fetch_failure_logs_audit_and_sets_health(self, db_session, monkeypatch):
         """A non-success HTTP response audits CHECK_FETCH_FAILED and marks Watches ERROR."""
         watch = await make_watch(db_session, name="Fails")

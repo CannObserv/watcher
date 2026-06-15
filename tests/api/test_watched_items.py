@@ -526,6 +526,114 @@ class TestCreateWatchedItem:
         assert body["last_checked_at"] is None
 
 
+class TestIssue188IsActive:
+    """#188 — provision-paused on create + pause/resume via patch, decoupled from archive."""
+
+    async def test_create_defaults_active(self, client, db_session):
+        """A WatchedItem created without is_active is active."""
+        response = await client.post(
+            "/api/v1/watched-items",
+            json={"url": "https://example.com/active-default"},
+        )
+        assert response.status_code == 201, response.text
+        assert response.json()["is_active"] is True
+
+    async def test_create_paused_url_only(self, client, db_session):
+        """is_active=False on the URL-only path provisions a paused WatchedItem."""
+        response = await client.post(
+            "/api/v1/watched-items",
+            json={"url": "https://example.com/paused", "is_active": False},
+        )
+        assert response.status_code == 201, response.text
+        body = response.json()
+        assert body["is_active"] is False
+        # Paused is NOT archived.
+        assert body["archived_at"] is None
+
+    async def test_create_paused_info_item_linked(self, client, db_session, info_client):
+        """is_active=False on the InfoItem-linked path provisions a paused WatchedItem."""
+        item = await make_info_item(db_session, name="PausedLinked")
+        await db_session.commit()
+        response = await client.post(
+            "/api/v1/watched-items",
+            json={"archiver_info_item_id": str(item.info_item_id), "is_active": False},
+        )
+        assert response.status_code == 201, response.text
+        assert response.json()["is_active"] is False
+
+    async def test_patch_pause(self, client, db_session):
+        """PATCH is_active=False pauses without touching archived_at."""
+        wi = await _make_watched_item(db_session, name="ToPause")
+        response = await client.patch(
+            f"/api/v1/watched-items/{wi.id}",
+            json={"is_active": False},
+        )
+        assert response.status_code == 200
+        body = response.json()
+        assert body["is_active"] is False
+        assert body["archived_at"] is None
+
+    async def test_patch_resume(self, client, db_session):
+        """PATCH is_active=True resumes a paused WatchedItem."""
+        wi = await _make_watched_item(db_session, name="ToResume", is_active=False)
+        response = await client.patch(
+            f"/api/v1/watched-items/{wi.id}",
+            json={"is_active": True},
+        )
+        assert response.status_code == 200
+        assert response.json()["is_active"] is True
+
+    async def test_patch_rejects_explicit_null_is_active(self, client, db_session):
+        """PATCH with null is_active returns 422 (NOT NULL column)."""
+        wi = await _make_watched_item(db_session, name="NullActive")
+        response = await client.patch(
+            f"/api/v1/watched-items/{wi.id}",
+            json={"is_active": None},
+        )
+        assert response.status_code == 422
+
+    async def test_patch_is_active_on_archived_returns_409(self, client, db_session):
+        """#188 CR-1: PATCH is_active on an archived item is rejected — use restore."""
+        from datetime import UTC, datetime
+
+        wi = await _make_watched_item(
+            db_session, name="ArchivedResume", archived_at=datetime.now(UTC), is_active=False
+        )
+        response = await client.patch(
+            f"/api/v1/watched-items/{wi.id}",
+            json={"is_active": True},
+        )
+        assert response.status_code == 409
+        assert "archived" in response.json()["detail"].lower()
+        # State unchanged.
+        await db_session.refresh(wi)
+        assert wi.is_active is False
+        assert wi.archived_at is not None
+
+    async def test_patch_other_fields_on_archived_still_works(self, client, db_session):
+        """The archived guard fires only for is_active — other fields stay editable."""
+        from datetime import UTC, datetime
+
+        wi = await _make_watched_item(
+            db_session, name="ArchivedRename", archived_at=datetime.now(UTC), is_active=False
+        )
+        response = await client.patch(
+            f"/api/v1/watched-items/{wi.id}",
+            json={"name": "Renamed While Archived"},
+        )
+        assert response.status_code == 200
+        assert response.json()["name"] == "Renamed While Archived"
+
+    async def test_check_now_409_when_paused(self, client, db_session):
+        """check-now on a paused (not archived) item returns 409, not a silent no-op."""
+        wi = await _make_watched_item(db_session, name="PausedCheckNow", is_active=False)
+        wi.effective_url = "https://example.com"
+        await db_session.commit()
+        response = await client.post(f"/api/v1/watched-items/{wi.id}/check-now")
+        assert response.status_code == 409
+        assert "paused" in response.json()["detail"].lower()
+
+
 class TestListFilterByArchiverInfoItemId:
     async def test_filter_returns_matching_item(self, client, db_session):
         """?archiver_info_item_id= returns only the WatchedItem with that ULID."""

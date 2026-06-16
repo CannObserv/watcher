@@ -218,7 +218,7 @@ class TestDatabase:
 class TestTemporalProfileModel:
     def test_create_event_profile(self):
         profile = TemporalProfile(
-            watch_id=ULID(),
+            watched_item_id=ULID(),
             profile_type=ProfileType.EVENT,
             reference_date=date(2026, 4, 15),
             rules=[{"days_before": 30, "interval": "6h"}, {"days_before": 7, "interval": "1h"}],
@@ -230,7 +230,7 @@ class TestTemporalProfileModel:
 
     def test_create_seasonal_profile(self):
         profile = TemporalProfile(
-            watch_id=ULID(),
+            watched_item_id=ULID(),
             profile_type=ProfileType.SEASONAL,
             date_range_start=date(2026, 1, 15),
             date_range_end=date(2026, 6, 30),
@@ -241,7 +241,7 @@ class TestTemporalProfileModel:
 
     def test_create_deadline_profile(self):
         profile = TemporalProfile(
-            watch_id=ULID(),
+            watched_item_id=ULID(),
             profile_type=ProfileType.DEADLINE,
             reference_date=date(2026, 5, 1),
             rules=[{"days_before": 14, "interval": "12h"}],
@@ -251,7 +251,7 @@ class TestTemporalProfileModel:
 
     def test_defaults(self):
         profile = TemporalProfile(
-            watch_id=ULID(),
+            watched_item_id=ULID(),
             profile_type=ProfileType.EVENT,
             reference_date=date(2026, 4, 15),
             rules=[],

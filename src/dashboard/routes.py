@@ -74,12 +74,12 @@ from src.dashboard.context import (
     get_watch_detail,
     get_watch_list,
     get_watch_notifications,
-    get_watch_profiles,
     get_watch_timeline,
     get_watch_timeline_count,
     get_watched_item_activity,
     get_watched_item_detail,
     get_watched_item_list,
+    get_watched_item_profiles,
     get_watched_item_templates,
     get_watched_items_total_count,
 )
@@ -332,7 +332,7 @@ async def watch_detail_page(
         return templates.TemplateResponse(request, "pages/404.html", status_code=404)
     wi_url = watch.watched_item.effective_url if watch.watched_item else None
     resolved_url = wi_url or f"watch:{watch.id}"
-    profiles = await get_watch_profiles(session, watch.id)
+    profiles = await get_watched_item_profiles(session, watch.watched_item_id)
     notifications = await get_watch_notifications(session, watch.id)
 
     # Build field contexts for content-type-aware rendering

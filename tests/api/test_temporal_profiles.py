@@ -18,9 +18,9 @@ class TestCreateProfile:
 
         await db_session.commit()
 
-        watch_id = str(_watch_obj.id)
+        watched_item_id = str(_watch_obj.watched_item_id)
         response = await client.post(
-            f"/api/v1/watches/{watch_id}/profiles",
+            f"/api/v1/watched-items/{watched_item_id}/profiles",
             json={
                 "profile_type": "event",
                 "reference_date": "2026-04-15",
@@ -39,7 +39,7 @@ class TestCreateProfile:
 
     async def test_create_profile_invalid_watch(self, client, db_session):
         response = await client.post(
-            "/api/v1/watches/00000000000000000000000000/profiles",
+            "/api/v1/watched-items/00000000000000000000000000/profiles",
             json={
                 "profile_type": "event",
                 "reference_date": "2026-04-15",
@@ -51,19 +51,20 @@ class TestCreateProfile:
 
 
 class TestListProfiles:
-    async def test_list_profiles_for_watch(self, client, db_session):
+    async def test_one_profile_per_watched_item(self, client, db_session):
+        """#191: a WatchedItem holds at most one temporal profile."""
         _watch_obj = await make_watch(
             db_session,
-            name="Multi-Profile Watch",
+            name="Single-Profile Watch",
             primary_url="https://example.com",
             content_type="html",
         )
 
         await db_session.commit()
 
-        watch_id = str(_watch_obj.id)
-        await client.post(
-            f"/api/v1/watches/{watch_id}/profiles",
+        watched_item_id = str(_watch_obj.watched_item_id)
+        first = await client.post(
+            f"/api/v1/watched-items/{watched_item_id}/profiles",
             json={
                 "profile_type": "event",
                 "reference_date": "2026-04-15",
@@ -71,8 +72,10 @@ class TestListProfiles:
                 "post_action": "deactivate",
             },
         )
-        await client.post(
-            f"/api/v1/watches/{watch_id}/profiles",
+        assert first.status_code == 201
+        # A second profile is rejected — 1:1.
+        second = await client.post(
+            f"/api/v1/watched-items/{watched_item_id}/profiles",
             json={
                 "profile_type": "seasonal",
                 "date_range_start": "2026-01-15",
@@ -81,9 +84,10 @@ class TestListProfiles:
                 "post_action": "reduce_frequency",
             },
         )
-        response = await client.get(f"/api/v1/watches/{watch_id}/profiles")
+        assert second.status_code == 409
+        response = await client.get(f"/api/v1/watched-items/{watched_item_id}/profiles")
         assert response.status_code == 200
-        assert len(response.json()) == 2
+        assert len(response.json()) == 1
 
 
 class TestUpdateProfile:
@@ -94,9 +98,9 @@ class TestUpdateProfile:
 
         await db_session.commit()
 
-        watch_id = str(_watch_obj.id)
+        watched_item_id = str(_watch_obj.watched_item_id)
         create_resp = await client.post(
-            f"/api/v1/watches/{watch_id}/profiles",
+            f"/api/v1/watched-items/{watched_item_id}/profiles",
             json={
                 "profile_type": "event",
                 "reference_date": "2026-04-15",
@@ -106,7 +110,7 @@ class TestUpdateProfile:
         )
         profile_id = create_resp.json()["id"]
         response = await client.patch(
-            f"/api/v1/watches/{watch_id}/profiles/{profile_id}",
+            f"/api/v1/watched-items/{watched_item_id}/profiles/{profile_id}",
             json={
                 "rules": [
                     {"days_before": 7, "interval": "1h"},
@@ -129,9 +133,9 @@ class TestUpdateProfile:
 
         await db_session.commit()
 
-        watch_id = str(_watch_obj.id)
+        watched_item_id = str(_watch_obj.watched_item_id)
         create_resp = await client.post(
-            f"/api/v1/watches/{watch_id}/profiles",
+            f"/api/v1/watched-items/{watched_item_id}/profiles",
             json={
                 "profile_type": "deadline",
                 "reference_date": "2026-05-01",
@@ -141,7 +145,7 @@ class TestUpdateProfile:
         )
         profile_id = create_resp.json()["id"]
         response = await client.patch(
-            f"/api/v1/watches/{watch_id}/profiles/{profile_id}",
+            f"/api/v1/watched-items/{watched_item_id}/profiles/{profile_id}",
             json={"is_active": False},
         )
         assert response.status_code == 200
@@ -154,9 +158,9 @@ class TestUpdateProfile:
 
         await db_session.commit()
 
-        watch_id = str(_watch_obj.id)
+        watched_item_id = str(_watch_obj.watched_item_id)
         create_resp = await client.post(
-            f"/api/v1/watches/{watch_id}/profiles",
+            f"/api/v1/watched-items/{watched_item_id}/profiles",
             json={
                 "profile_type": "event",
                 "reference_date": "2026-04-15",
@@ -166,7 +170,7 @@ class TestUpdateProfile:
         )
         profile_id = create_resp.json()["id"]
         response = await client.patch(
-            f"/api/v1/watches/{watch_id}/profiles/{profile_id}",
+            f"/api/v1/watched-items/{watched_item_id}/profiles/{profile_id}",
             json={"post_action": "archive"},
         )
         assert response.status_code == 200
@@ -179,9 +183,9 @@ class TestUpdateProfile:
 
         await db_session.commit()
 
-        watch_id = str(_watch_obj.id)
+        watched_item_id = str(_watch_obj.watched_item_id)
         create_resp = await client.post(
-            f"/api/v1/watches/{watch_id}/profiles",
+            f"/api/v1/watched-items/{watched_item_id}/profiles",
             json={
                 "profile_type": "event",
                 "reference_date": "2026-04-15",
@@ -191,7 +195,7 @@ class TestUpdateProfile:
         )
         profile_id = create_resp.json()["id"]
         await client.patch(
-            f"/api/v1/watches/{watch_id}/profiles/{profile_id}",
+            f"/api/v1/watched-items/{watched_item_id}/profiles/{profile_id}",
             json={"is_active": False},
         )
         response = await client.get("/api/v1/audit", params={"event_type": "profile.updated"})
@@ -207,9 +211,9 @@ class TestUpdateProfile:
 
         await db_session.commit()
 
-        watch_id = str(_watch_obj.id)
+        watched_item_id = str(_watch_obj.watched_item_id)
         response = await client.patch(
-            f"/api/v1/watches/{watch_id}/profiles/00000000000000000000000000",
+            f"/api/v1/watched-items/{watched_item_id}/profiles/00000000000000000000000000",
             json={"is_active": False},
         )
         assert response.status_code == 404
@@ -221,9 +225,9 @@ class TestUpdateProfile:
 
         await db_session.commit()
 
-        watch_id = str(_watch_obj.id)
+        watched_item_id = str(_watch_obj.watched_item_id)
         create_resp = await client.post(
-            f"/api/v1/watches/{watch_id}/profiles",
+            f"/api/v1/watched-items/{watched_item_id}/profiles",
             json={
                 "profile_type": "event",
                 "reference_date": "2026-04-15",
@@ -233,7 +237,7 @@ class TestUpdateProfile:
         )
         profile_id = create_resp.json()["id"]
         response = await client.patch(
-            f"/api/v1/watches/{watch_id}/profiles/{profile_id}",
+            f"/api/v1/watched-items/{watched_item_id}/profiles/{profile_id}",
             json={},
         )
         assert response.status_code == 200
@@ -249,9 +253,9 @@ class TestUpdateProfile:
 
         await db_session.commit()
 
-        watch_id = str(_watch_obj.id)
+        watched_item_id = str(_watch_obj.watched_item_id)
         create_resp = await client.post(
-            f"/api/v1/watches/{watch_id}/profiles",
+            f"/api/v1/watched-items/{watched_item_id}/profiles",
             json={
                 "profile_type": "event",
                 "reference_date": "2026-04-15",
@@ -261,7 +265,7 @@ class TestUpdateProfile:
         )
         profile_id = create_resp.json()["id"]
         response = await client.patch(
-            f"/api/v1/watches/{watch_id}/profiles/{profile_id}",
+            f"/api/v1/watched-items/{watched_item_id}/profiles/{profile_id}",
             json={"is_active": False, "post_action": "archive"},
         )
         assert response.status_code == 200
@@ -294,9 +298,9 @@ class TestDeleteProfile:
 
         await db_session.commit()
 
-        watch_id = str(_watch_obj.id)
+        watched_item_id = str(_watch_obj.watched_item_id)
         create_resp = await client.post(
-            f"/api/v1/watches/{watch_id}/profiles",
+            f"/api/v1/watched-items/{watched_item_id}/profiles",
             json={
                 "profile_type": "event",
                 "reference_date": "2026-04-15",
@@ -305,5 +309,7 @@ class TestDeleteProfile:
             },
         )
         profile_id = create_resp.json()["id"]
-        response = await client.delete(f"/api/v1/watches/{watch_id}/profiles/{profile_id}")
+        response = await client.delete(
+            f"/api/v1/watched-items/{watched_item_id}/profiles/{profile_id}"
+        )
         assert response.status_code == 204

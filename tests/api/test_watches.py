@@ -8,7 +8,6 @@ from ulid import ULID
 
 from src.core.models.audit_log import AuditLog, EventType
 from src.core.models.notification_config import WatchNotificationConfig
-from src.core.models.temporal_profile import TemporalProfile
 from src.core.models.watch import Watch
 from src.core.models.watched_item import WatchedItem
 from src.core.notifications.events import WatchEventType
@@ -331,21 +330,20 @@ class TestDeleteWatch:
         assert entry.watch_id is None  # SET NULL after cascade
 
     async def test_delete_cascades_children(self, client, db_session):
-        """Deleting a watch cascades to TemporalProfile and WatchNotificationConfig."""
+        """Deleting a watch cascades to WatchNotificationConfig.
+
+        #191: TemporalProfile is keyed to the WatchedItem now (not the Watch),
+        so it is no longer a watch-delete cascade child.
+        """
         watch_id = await self._create_archived_watch(client, db_session, name="Cascade")
         watch_ulid = ULID.from_str(watch_id)
 
-        profile = TemporalProfile(
-            watch_id=watch_ulid,
-            profile_type="event",
-            post_action="deactivate",
-        )
         config = WatchNotificationConfig(
             watch_id=watch_ulid,
             channel_hint="https",
             remote_channel_id="01HV0000000000000000000099",
         )
-        db_session.add_all([profile, config])
+        db_session.add(config)
         await db_session.flush()
 
         # Delete the watch.
@@ -356,17 +354,6 @@ class TestDeleteWatch:
             (await db_session.execute(select(Watch).where(Watch.id == watch_ulid))).scalars().all()
         )
         assert len(watches) == 0
-
-        profiles = (
-            (
-                await db_session.execute(
-                    select(TemporalProfile).where(TemporalProfile.watch_id == watch_ulid)
-                )
-            )
-            .scalars()
-            .all()
-        )
-        assert len(profiles) == 0
 
         configs = (
             (

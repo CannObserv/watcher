@@ -307,10 +307,12 @@ async def get_watch_timeline_count(
     )
 
 
-async def get_watch_profiles(session: AsyncSession, watch_id: ULID) -> list[TemporalProfile]:
-    """Fetch temporal profiles for a watch."""
+async def get_watched_item_profiles(
+    session: AsyncSession, watched_item_id: ULID
+) -> list[TemporalProfile]:
+    """Fetch the temporal profile(s) for a WatchedItem (#191: 1:1)."""
     result = await session.execute(
-        select(TemporalProfile).where(TemporalProfile.watch_id == watch_id)
+        select(TemporalProfile).where(TemporalProfile.watched_item_id == watched_item_id)
     )
     return list(result.scalars().all())
 

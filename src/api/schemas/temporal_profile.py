@@ -40,7 +40,7 @@ class ProfileResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: ULIDStr
-    watch_id: ULIDStr
+    watched_item_id: ULIDStr
     profile_type: ProfileType
     reference_date: date | None
     date_range_start: date | None

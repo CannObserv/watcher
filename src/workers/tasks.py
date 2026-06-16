@@ -272,16 +272,14 @@ async def schedule_tick(timestamp: int) -> None:
         for watch, _domain in rows:
             children_by_wi.setdefault(watch.watched_item_id, []).append(watch)
 
-        # Batch-load profiles for all relevant Watches.
-        all_watch_ids = [w.id for ws in children_by_wi.values() for w in ws]
-        profiles_by_watch: dict[str, list[TemporalProfile]] = {}
-        if all_watch_ids:
-            tp_stmt = select(TemporalProfile).where(
-                TemporalProfile.is_active.is_(True),
-                TemporalProfile.watch_id.in_(all_watch_ids),
-            )
-            for p in (await session.execute(tp_stmt)).scalars().all():
-                profiles_by_watch.setdefault(str(p.watch_id), []).append(p)
+        # Batch-load the per-WatchedItem temporal profile (#191: 1:1 on WatchedItem).
+        profiles_by_wi: dict[str, list[TemporalProfile]] = {}
+        tp_stmt = select(TemporalProfile).where(
+            TemporalProfile.is_active.is_(True),
+            TemporalProfile.watched_item_id.in_(wi_ids),
+        )
+        for p in (await session.execute(tp_stmt)).scalars().all():
+            profiles_by_wi.setdefault(str(p.watched_item_id), []).append(p)
 
         deferred = 0
         for wi in watched_items:
@@ -294,7 +292,7 @@ async def schedule_tick(timestamp: int) -> None:
             # aggregated interval below.
             for watch in list(children):
                 wid_str = str(watch.id)
-                profiles_orm = profiles_by_watch.get(wid_str, [])
+                profiles_orm = profiles_by_wi.get(str(wi.id), [])
                 if not profiles_orm:
                     continue
                 profiles = [
@@ -368,7 +366,7 @@ async def schedule_tick(timestamp: int) -> None:
                 due_now = True
             else:
                 for watch in active_children:
-                    profiles_orm = profiles_by_watch.get(str(watch.id), [])
+                    profiles_orm = profiles_by_wi.get(str(wi.id), [])
                     profiles = (
                         [
                             {

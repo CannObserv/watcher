@@ -530,7 +530,7 @@ class TestPostActions:
 
         # Expired event profile attached to w_target only — reduce_frequency.
         profile = TemporalProfile(
-            watch_id=w_target.id,
+            watched_item_id=w_target.watched_item_id,
             profile_type=ProfileType.EVENT,
             reference_date=date(2026, 5, 1),  # in the past
             rules=[{"days_before": 7, "interval": "1m"}],
@@ -583,7 +583,7 @@ class TestPostActions:
         w.watched_item.last_checked_at = now - timedelta(hours=25)
 
         profile = TemporalProfile(
-            watch_id=w.id,
+            watched_item_id=w.watched_item_id,
             profile_type=ProfileType.EVENT,
             reference_date=date(2026, 5, 1),
             rules=[{"days_before": 7, "interval": "1h"}],
@@ -618,7 +618,7 @@ class TestPostActions:
         w.watched_item.last_checked_at = now - timedelta(hours=25)
 
         profile = TemporalProfile(
-            watch_id=w.id,
+            watched_item_id=w.watched_item_id,
             profile_type=ProfileType.EVENT,
             reference_date=date(2026, 5, 1),
             rules=[{"days_before": 7, "interval": "1h"}],

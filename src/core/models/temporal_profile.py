@@ -28,12 +28,19 @@ class PostAction(enum.StrEnum):
 
 
 class TemporalProfile(Base, TimestampMixin):
-    """A temporal scheduling rule tied to a specific date or date range."""
+    """A temporal scheduling rule tied to a specific date or date range.
+
+    #191: one profile per WatchedItem (1:1) — ``watched_item_id`` is unique.
+    """
 
     __tablename__ = "temporal_profiles"
 
     id: Mapped[ULID] = mapped_column(ULIDType, primary_key=True, default=generate_ulid)
-    watch_id: Mapped[ULID] = mapped_column(ULIDType, ForeignKey("watches.id", ondelete="CASCADE"))
+    watched_item_id: Mapped[ULID] = mapped_column(
+        ULIDType,
+        ForeignKey("watched_items.id", ondelete="CASCADE"),
+        unique=True,
+    )
     profile_type: Mapped[ProfileType] = mapped_column(String(20))
     reference_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     date_range_start: Mapped[date | None] = mapped_column(Date, nullable=True)

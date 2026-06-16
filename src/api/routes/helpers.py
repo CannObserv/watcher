@@ -5,6 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ulid import ULID
 
 from src.core.models.watch import Watch
+from src.core.models.watched_item import WatchedItem
 
 
 def parse_ulid(value: str, label: str = "Resource") -> ULID:
@@ -32,3 +33,11 @@ async def get_watch_or_404(watch_id: str, session: AsyncSession) -> Watch:
     if not watch:
         raise HTTPException(status_code=404, detail="Watch not found")
     return watch
+
+
+async def get_watched_item_or_404(watched_item_id: str, session: AsyncSession) -> WatchedItem:
+    """Fetch a WatchedItem by ID string, raising 404 if not found."""
+    wi = await session.get(WatchedItem, parse_ulid(watched_item_id, "WatchedItem"))
+    if not wi:
+        raise HTTPException(status_code=404, detail="WatchedItem not found")
+    return wi

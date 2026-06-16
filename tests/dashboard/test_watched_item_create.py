@@ -107,10 +107,11 @@ class TestWatchedItemCreateSubmit:
         assert wi.effective_url == "https://example.com/wi-url"
         assert wi.domain_name == "example.com"
 
-    async def test_defaults_active(self, client, db_session):
+    async def test_checked_checkbox_creates_active(self, client, db_session):
+        """A checked checkbox submits is_active=true (the form's default state) → active."""
         await client.post(
             "/watched-items/new",
-            data={"url": "https://example.com/active-default"},
+            data={"url": "https://example.com/active-default", "is_active": "true"},
             follow_redirects=False,
         )
         wi = (
@@ -123,23 +124,17 @@ class TestWatchedItemCreateSubmit:
         assert wi.is_active is True
 
     async def test_provision_paused_when_is_active_unchecked(self, client, db_session):
-        """Unchecked is_active (absent from form) provisions the item paused."""
+        """Unchecking the box omits the field entirely (browsers don't submit unchecked
+        checkboxes) → the item provisions paused (#190 fix)."""
         await client.post(
             "/watched-items/new",
-            data={"url": "https://example.com/paused-default"},  # no is_active field
-            follow_redirects=False,
-        )
-        # The form always sends is_active=true when checked; an unchecked box omits it.
-        # Simulate the omitted-checkbox case via an explicit non-"true" value.
-        await client.post(
-            "/watched-items/new",
-            data={"url": "https://example.com/paused-explicit", "is_active": "false"},
+            data={"url": "https://example.com/paused-omitted"},  # is_active field absent
             follow_redirects=False,
         )
         wi = (
             await db_session.execute(
                 select(WatchedItem).where(
-                    WatchedItem.effective_url == "https://example.com/paused-explicit"
+                    WatchedItem.effective_url == "https://example.com/paused-omitted"
                 )
             )
         ).scalar_one()
@@ -215,6 +210,47 @@ class TestWatchedItemUrlReprobe:
             data={"url": "https://new.example.org/z"},
         )
         assert resp.status_code == 404
+
+    async def test_reprobe_to_suspended_domain_warns_and_sets_suspended(self, client, db_session):
+        """Re-probing onto a suspended domain re-evaluates domain_suspended and warns (#190 CR3)."""
+        from src.core.models.domain import Domain
+
+        # Pre-existing suspended (deactivated) domain.
+        db_session.add(Domain(name="suspended.example", is_active=False))
+        wi = await self._make_wi(
+            db_session,
+            name="ToSuspended",
+            effective_url="https://ok.example/p",
+            domain_suspended=False,
+        )
+        resp = await client.post(
+            f"/watched-items/{wi.id}/effective-url",
+            data={"url": "https://suspended.example/page"},
+            headers={"HX-Request": "true"},
+        )
+        assert resp.status_code == 200
+        assert b"flash-warning" in resp.content
+        assert b"suspended" in resp.content.lower()
+        await db_session.refresh(wi)
+        assert wi.domain_name == "suspended.example"
+        assert wi.domain_suspended is True
+
+    async def test_reprobe_to_active_domain_clears_suspended(self, client, db_session):
+        """Re-probing onto a healthy domain clears a stale domain_suspended flag."""
+        wi = await self._make_wi(
+            db_session,
+            name="WasSuspended",
+            effective_url="https://old.example/p",
+            domain_suspended=True,
+        )
+        resp = await client.post(
+            f"/watched-items/{wi.id}/effective-url",
+            data={"url": "https://fresh.example/page"},
+            follow_redirects=False,
+        )
+        assert resp.status_code == 303
+        await db_session.refresh(wi)
+        assert wi.domain_suspended is False
 
     async def test_missing_url_shows_flash(self, client):
         response = await client.post("/watched-items/new", data={"name": "X"})

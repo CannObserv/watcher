@@ -52,3 +52,5 @@
     </div>
   </div>
 </div>
+{# Optional OOB flash appended when a guard rejects the toggle (re-renders unchanged state). #}
+{% if flash_oob_message %}{% include "partials/flash_oob.html" %}{% endif %}

@@ -38,6 +38,7 @@
       <summary class="text-xs link cursor-pointer">Change URL</summary>
       <form method="post" action="/watched-items/{{ watched_item.id }}/effective-url"
             hx-post="/watched-items/{{ watched_item.id }}/effective-url"
+            hx-swap="none"
             class="flex flex-wrap items-end gap-2 mt-2">
         <div class="flex-1 min-w-[16rem]">
           <label for="new-url" class="form-label mb-0 text-xs">New URL</label>

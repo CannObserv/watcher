@@ -861,7 +861,7 @@ async def watched_item_create_submit(
     default_schedule_interval: str = Form(""),
     default_content_type: str = Form(""),
     default_tags: str = Form(""),
-    is_active: str = Form("true"),
+    is_active: str = Form(""),
     probe_fn: Callable[[str], Awaitable[ProbeResult]] = Depends(get_probe_fn),
     session: AsyncSession = Depends(get_db_session),
 ):
@@ -1148,27 +1148,32 @@ async def watched_item_toggle_active(
 ):
     """Pause/resume a WatchedItem via the dashboard toggle (#188/#189).
 
-    Mirrors the API PATCH ``is_active`` semantics: 409 on an archived item
-    (restore owns activation), and resume is blocked while the domain is
+    Mirrors the API PATCH ``is_active`` semantics: an archived item rejects the
+    toggle (restore owns activation), and resume is blocked while the domain is
     suspended (kill-switch parity with the Watch toggle). Emits the dedicated
-    ``WATCHED_ITEM_PAUSED`` / ``WATCHED_ITEM_RESUMED`` audit events.
+    ``WATCHED_ITEM_PAUSED`` / ``WATCHED_ITEM_RESUMED`` audit events. Guard
+    rejections re-render the toggle in its true state with an OOB flash (HTMX)
+    or redirect back to detail (non-HTMX).
     """
+    hx = request.headers.get("HX-Request") == "true"
     wi = await get_watched_item_detail(session, watched_item_id)
     if not wi:
         raise HTTPException(status_code=404, detail="WatchedItem not found")
 
+    def _respond(flash: tuple[str, str] | None = None):
+        if not hx:
+            return RedirectResponse(url=f"/watched-items/{watched_item_id}", status_code=303)
+        ctx = {"watched_item": wi, "toggle_id": toggle_id, "compact": bool(compact)}
+        if flash:
+            ctx["flash_oob_level"], ctx["flash_oob_message"] = flash
+        return templates.TemplateResponse(request, "partials/watched_item_status_toggle.html", ctx)
+
     if wi.archived_at is not None:
-        raise HTTPException(
-            status_code=409,
-            detail="WatchedItem is archived; activation is controlled by restore",
-        )
+        return _respond(("error", "Watched Item is archived — restore it to change its status."))
 
     new_active = active == "true"
     if wi.domain_suspended and new_active:
-        raise HTTPException(
-            status_code=409,
-            detail="Cannot resume WatchedItem while its domain is inactive",
-        )
+        return _respond(("warning", "Cannot resume while the domain is suspended."))
 
     if wi.is_active != new_active:
         wi.is_active = new_active
@@ -1181,13 +1186,7 @@ async def watched_item_toggle_active(
         await session.commit()
         await session.refresh(wi)
 
-    if request.headers.get("HX-Request") == "true":
-        return templates.TemplateResponse(
-            request,
-            "partials/watched_item_status_toggle.html",
-            {"watched_item": wi, "toggle_id": toggle_id, "compact": bool(compact)},
-        )
-    return RedirectResponse(url=f"/watched-items/{watched_item_id}", status_code=303)
+    return _respond()
 
 
 @router.post("/watched-items/{watched_item_id}/check-now")
@@ -1199,18 +1198,25 @@ async def watched_item_check_now(
     """Enqueue an immediate check for a WatchedItem (delegates to the API route).
 
     The API enforces the pre-flight guards (409 archived/paused, 422 empty
-    effective_url). Guard failures surface as a flash rather than a raw error.
+    effective_url). For HTMX, success and guard failures surface as an OOB
+    flash; non-HTMX clients get a redirect back to the detail page.
     """
+    hx = request.headers.get("HX-Request") == "true"
+    fallback = RedirectResponse(url=f"/watched-items/{watched_item_id}", status_code=303)
     try:
         await _api_check_now(watched_item_id, session)
     except HTTPException as exc:
         if exc.status_code == 404:
             raise
+        if not hx:
+            return fallback
         return templates.TemplateResponse(
             request,
             "partials/flash_oob.html",
             {"flash_oob_level": "error", "flash_oob_message": str(exc.detail)},
         )
+    if not hx:
+        return fallback
     return templates.TemplateResponse(
         request,
         "partials/flash_oob.html",
@@ -1230,9 +1236,13 @@ async def watched_item_update_url(
 
     Mirrors the create-time probe path: the submitted URL is probed for its
     canonical effective_url and domain, the Domain row is created if new, and
-    ``source_specs`` are left untouched. Rejects archived items. Probe failures
+    ``source_specs`` are left untouched. Rejects archived items. ``domain_suspended``
+    is re-evaluated against the target Domain so a re-probe can't silently re-arm
+    fetching against a suspended domain — and if the target is suspended the
+    operator gets a warning flash instead of the success reload. Probe failures
     surface as a flash.
     """
+    hx = request.headers.get("HX-Request") == "true"
     wi = await get_watched_item_detail(session, watched_item_id)
     if not wi:
         raise HTTPException(status_code=404, detail="WatchedItem not found")
@@ -1257,8 +1267,23 @@ async def watched_item_update_url(
         return _flash(f"URL unreachable: {exc}", "error")
 
     await _ensure_domain_exists(session, probe_result.effective_domain)
+
+    # Re-evaluate suspension against the (possibly new) target domain so moving a
+    # WatchedItem onto a suspended/archived domain doesn't bypass the kill-switch.
+    target_domain = None
+    if probe_result.effective_domain:
+        target_domain = (
+            await session.execute(
+                select(Domain).where(Domain.name == probe_result.effective_domain)
+            )
+        ).scalar_one_or_none()
+    domain_suspended = bool(
+        target_domain and (target_domain.archived_at is not None or not target_domain.is_active)
+    )
+
     wi.effective_url = probe_result.effective_url
     wi.domain_name = probe_result.effective_domain or None
+    wi.domain_suspended = domain_suspended
     audit(
         session,
         EventType.WATCHED_ITEM_UPDATED,
@@ -1268,7 +1293,14 @@ async def watched_item_update_url(
     )
     await session.commit()
 
-    if request.headers.get("HX-Request") == "true":
+    if domain_suspended and hx:
+        return _flash(
+            f"URL updated, but '{probe_result.effective_domain}' is suspended — "
+            "this Watched Item will not be checked until the domain is reactivated.",
+            "warning",
+        )
+
+    if hx:
         return Response(
             status_code=200,
             headers={"HX-Redirect": f"/watched-items/{watched_item_id}"},
@@ -2667,7 +2699,10 @@ async def _render_watch_notifications(
 
     # 4. WatchedItem-default templates — inherited from the parent WatchedItem.
     #    Distinct model from NotificationTemplate (own ids), read-only on the watch
-    #    surface; managed at /watched-items/{id}. Mirrors notify.py dispatch tier 4.
+    #    surface; managed at /watched-items/{id}. Shows the parent's configured
+    #    templates (active + inactive, with a status badge) — the superset that
+    #    notify.py dispatch tier 4 draws from (it additionally filters is_active +
+    #    matching events at send time).
     watched_item_templates = []
     if watch.watched_item_id:
         wi_tpl_result = await session.execute(

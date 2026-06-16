@@ -796,19 +796,49 @@ class TestPauseResume:
         events = [r for r in rows if r.payload.get("watched_item_id") == str(wi.id)]
         assert len(events) == 1
 
-    async def test_toggle_archived_returns_409(self, client, db_session):
+    async def test_toggle_archived_flashes_and_keeps_state(self, client, db_session):
         from datetime import UTC, datetime
 
         wi = await _make_wi(
             db_session, name="ArchToggle", is_active=False, archived_at=datetime.now(UTC)
         )
-        resp = await client.post(f"/watched-items/{wi.id}/toggle-active", data={"active": "true"})
-        assert resp.status_code == 409
+        resp = await client.post(
+            f"/watched-items/{wi.id}/toggle-active",
+            data={"active": "true"},
+            headers={"HX-Request": "true"},
+        )
+        # Guard rejection now re-renders the toggle + OOB flash, not a raw 409.
+        assert resp.status_code == 200
+        assert b"flash-error" in resp.content
+        assert b"archived" in resp.content.lower()
+        await db_session.refresh(wi)
+        assert wi.is_active is False  # state unchanged
 
-    async def test_resume_domain_suspended_returns_409(self, client, db_session):
+    async def test_toggle_archived_non_htmx_redirects(self, client, db_session):
+        from datetime import UTC, datetime
+
+        wi = await _make_wi(
+            db_session, name="ArchToggleRedir", is_active=False, archived_at=datetime.now(UTC)
+        )
+        resp = await client.post(
+            f"/watched-items/{wi.id}/toggle-active",
+            data={"active": "true"},
+            follow_redirects=False,
+        )
+        assert resp.status_code == 303
+
+    async def test_resume_domain_suspended_flashes_and_keeps_state(self, client, db_session):
         wi = await _make_wi(db_session, name="SuspResume", is_active=False, domain_suspended=True)
-        resp = await client.post(f"/watched-items/{wi.id}/toggle-active", data={"active": "true"})
-        assert resp.status_code == 409
+        resp = await client.post(
+            f"/watched-items/{wi.id}/toggle-active",
+            data={"active": "true"},
+            headers={"HX-Request": "true"},
+        )
+        assert resp.status_code == 200
+        assert b"flash-warning" in resp.content
+        assert b"suspended" in resp.content.lower()
+        await db_session.refresh(wi)
+        assert wi.is_active is False  # resume was rejected
 
     async def test_toggle_unknown_returns_404(self, client):
         from ulid import ULID
@@ -854,16 +884,33 @@ class TestCheckNow:
         await db_session.commit()
         with patch("src.api.routes.watched_items.check_watched_item") as mock_task:
             mock_task.configure.return_value.defer_async = AsyncMock()
-            resp = await client.post(f"/watched-items/{wi.id}/check-now")
+            resp = await client.post(
+                f"/watched-items/{wi.id}/check-now", headers={"HX-Request": "true"}
+            )
         assert resp.status_code == 200
         assert b"Check queued" in resp.content
         mock_task.configure.return_value.defer_async.assert_awaited_once()
+
+    async def test_check_now_non_htmx_redirects(self, client, db_session):
+        """Non-HTMX clients get a redirect fallback, not a bare flash fragment."""
+        from unittest.mock import AsyncMock, patch
+
+        wi = await _make_wi(db_session, name="CheckRedir", is_active=True)
+        wi.effective_url = "https://example.com"
+        await db_session.commit()
+        with patch("src.api.routes.watched_items.check_watched_item") as mock_task:
+            mock_task.configure.return_value.defer_async = AsyncMock()
+            resp = await client.post(f"/watched-items/{wi.id}/check-now", follow_redirects=False)
+        assert resp.status_code == 303
+        assert resp.headers["location"] == f"/watched-items/{wi.id}"
 
     async def test_check_now_paused_flashes_error(self, client, db_session):
         wi = await _make_wi(
             db_session, name="CheckPaused", is_active=False, effective_url="https://example.com"
         )
-        resp = await client.post(f"/watched-items/{wi.id}/check-now")
+        resp = await client.post(
+            f"/watched-items/{wi.id}/check-now", headers={"HX-Request": "true"}
+        )
         assert resp.status_code == 200
         assert b"flash-error" in resp.content
         assert b"paused" in resp.content.lower()

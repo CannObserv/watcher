@@ -60,6 +60,8 @@
           </button>
         </th>
         {% endfor %}
+        <th scope="col">Interval</th>
+        <th scope="col">Health</th>
         <th scope="col">Status</th>
       </tr>
     </thead>
@@ -74,6 +76,19 @@
             {{ wi.last_checked_at.strftime("%Y-%m-%d %H:%M") }} UTC
           {% else %}
             <span class="text-gray-400 dark:text-gray-600">Never</span>
+          {% endif %}
+        </td>
+        <td class="text-gray-500 dark:text-gray-400 text-sm">
+          {{ (wi.default_schedule_config or {}).get("interval") or "—" }}
+        </td>
+        <td>
+          {% set health = wi.health_status.value if wi.health_status else "unknown" %}
+          {% if health == "ok" %}
+            <span class="badge badge-active">Healthy</span>
+          {% elif health == "error" %}
+            <span class="badge badge-error">Error</span>
+          {% else %}
+            <span class="badge badge-inactive">Unknown</span>
           {% endif %}
         </td>
         <td>

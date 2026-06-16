@@ -836,6 +836,14 @@ class TestPauseResume:
         assert resp.status_code == 200
         assert b"selector" in resp.content
 
+    async def test_detail_shows_health_when_unknown(self, client, db_session):
+        """Health row renders even when status is the default UNKNOWN (#190)."""
+        wi = await _make_wi(db_session, name="UnknownHealth")
+        resp = await client.get(f"/watched-items/{wi.id}")
+        assert resp.status_code == 200
+        assert b"Health" in resp.content
+        assert b"unknown" in resp.content.lower()
+
 
 class TestCheckNow:
     async def test_check_now_success_queues(self, client, db_session):

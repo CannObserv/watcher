@@ -63,6 +63,9 @@ class TestTemplateCrudRoutes:
         )
         assert response.status_code == 200
         assert b"channel_hint" in response.content
+        # #190: event-name guidance for parity with the NotificationTemplate form
+        assert b"Valid events" in response.content
+        assert b"change_detected" in response.content
 
     async def test_create_inserts_row(self, client, db_session):
         wi = await _seed(db_session)

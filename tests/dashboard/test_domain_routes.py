@@ -43,6 +43,29 @@ class TestDomainsListPage:
         assert b"findme.com" in response.content
         assert b"other.com" not in response.content
 
+    async def test_active_filter_excludes_inactive(self, client, db_session):
+        """The Active filter must not surface deactivated (is_active=False) domains (#190)."""
+        db_session.add(Domain(name="act-on.com", is_active=True))
+        db_session.add(Domain(name="act-off.com", is_active=False))
+        await db_session.flush()
+        response = await client.get("/partials/domains-table?status=active")
+        assert response.status_code == 200
+        assert b"act-on.com" in response.content
+        assert b"act-off.com" not in response.content
+
+    async def test_inactive_filter_includes_only_inactive(self, client, db_session):
+        db_session.add(Domain(name="inact-on.com", is_active=True))
+        db_session.add(Domain(name="inact-off.com", is_active=False))
+        await db_session.flush()
+        response = await client.get("/partials/domains-table?status=inactive")
+        assert response.status_code == 200
+        assert b"inact-off.com" in response.content
+        assert b"inact-on.com" not in response.content
+
+    async def test_inactive_filter_segment_present(self, client):
+        response = await client.get("/domains")
+        assert b'value="inactive"' in response.content
+
     async def test_domains_table_has_edit_button(self, client, db_session):
         db_session.add(Domain(name="editable.com"))
         await db_session.flush()
@@ -172,6 +195,21 @@ class TestDomainWatchedItemsTableDomainInactiveBadge:
         )
         response = await client.get("/domains/mi-tbl.com")
         assert b"Domain Inactive" not in response.content
+
+    async def test_table_has_health_and_interval_columns(self, client, db_session):
+        """Domain WatchedItems table surfaces Health + Interval columns (#190)."""
+        db_session.add(Domain(name="cols.com"))
+        await make_watch(
+            db_session,
+            name="ColsWatch",
+            primary_url="https://cols.com/p",
+            content_type="html",
+            domain_name="cols.com",
+        )
+        response = await client.get("/partials/domain-watched-items/cols.com")
+        assert response.status_code == 200
+        assert b"Health" in response.content
+        assert b"Interval" in response.content
 
 
 class TestDomainInlineUpdate:

@@ -61,18 +61,19 @@
       <dd class="text-gray-700 dark:text-gray-300">{{ watched_item.last_changed_at.strftime("%Y-%m-%d %H:%M UTC") }}</dd>
     </div>
     {% endif %}
-    {% if watched_item.health_status and watched_item.health_status.value != "unknown" %}
     <div>
       <dt class="form-label mb-0 text-xs">Health</dt>
       <dd>
-        {% if watched_item.health_status.value == "error" %}
-        <span class="badge badge-error">{{ watched_item.health_status.value }}</span>
+        {% set health = watched_item.health_status.value if watched_item.health_status else "unknown" %}
+        {% if health == "error" %}
+        <span class="badge badge-error">error</span>
+        {% elif health == "ok" %}
+        <span class="badge badge-active">ok</span>
         {% else %}
-        <span class="badge badge-active">{{ watched_item.health_status.value }}</span>
+        <span class="badge badge-inactive">unknown</span>
         {% endif %}
       </dd>
     </div>
-    {% endif %}
   </dl>
 </div>
 
@@ -146,7 +147,7 @@
 <section class="mb-8">
   <div class="flex items-center justify-between mb-4">
     <h3 class="text-lg font-semibold text-gray-900 dark:text-white">Watches</h3>
-    {% if not watched_item.archived_at and watched_item.effective_url %}
+    {% if not watched_item.archived_at and watched_item.is_active and not watched_item.domain_suspended and watched_item.effective_url %}
     <a href="/watches/new?watched_item_id={{ watched_item.id }}"
        class="btn btn-secondary btn-sm">+ New Watch</a>
     {% endif %}
@@ -167,7 +168,7 @@
   <div class="flex items-center justify-between">
     <div>
       <p class="text-sm font-medium text-gray-900 dark:text-white">Archive this Watched Item</p>
-      <p class="text-xs text-gray-500 dark:text-gray-400">Stops the fetch cycle and cascades to all child Watches.</p>
+      <p class="text-xs text-gray-500 dark:text-gray-400">Pauses it (sets inactive), stops the fetch cycle, and cascade-archives all child Watches. Restore to reactivate.</p>
     </div>
     <form method="post" action="/watched-items/{{ watched_item.id }}/archive">
       <button type="submit"

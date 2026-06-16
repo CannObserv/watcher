@@ -25,7 +25,7 @@
     <form method="get" action="/domains" class="flex gap-1">
       <input type="hidden" name="q" value="{{ search or '' }}">
       <fieldset class="segment-group" role="radiogroup" aria-label="Filter by status">
-        {% for value, label in [("", "All"), ("active", "Active"), ("archived", "Archived"), ("backoff", "Backoff")] %}
+        {% for value, label in [("", "All"), ("active", "Active"), ("inactive", "Inactive"), ("archived", "Archived"), ("backoff", "Backoff")] %}
         <label class="segment">
           <input type="radio" name="status" value="{{ value }}"
             {% if status == value %}checked{% endif %}

@@ -1452,7 +1452,7 @@ async def watched_item_template_new_form(
     return templates.TemplateResponse(
         request,
         "partials/watched_item_template_form.html",
-        {"watched_item": wi, "tpl": None},
+        {"watched_item": wi, "tpl": None, "event_titles": EVENT_TITLES},
     )
 
 
@@ -1513,7 +1513,7 @@ async def watched_item_template_edit_form(
     return templates.TemplateResponse(
         request,
         "partials/watched_item_template_form.html",
-        {"watched_item": wi, "tpl": tpl},
+        {"watched_item": wi, "tpl": tpl, "event_titles": EVENT_TITLES},
     )
 
 

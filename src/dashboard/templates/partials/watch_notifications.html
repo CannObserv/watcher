@@ -3,6 +3,7 @@
 {#          global_templates (list[NotificationTemplate]), #}
 {#          domain_templates (list[NotificationTemplate]), #}
 {#          watch_templates (list[NotificationTemplate]), #}
+{#          watched_item_templates (list[WatchedItemNotificationTemplate]), #}
 {#          unassigned_templates (list[NotificationTemplate]), #}
 {#          optional error (str). #}
 
@@ -138,6 +139,34 @@
                 aria-label="Unassign {{ tpl.title }} from this watch">
                 Unassign
               </button>
+            </div>
+          </td>
+        </tr>
+        {% endfor %}
+
+        {# ── WatchedItem-default rows (read-only; managed on the WatchedItem) ── #}
+        {% for tpl in watched_item_templates %}
+        <tr class="bg-co-purple-50 dark:bg-co-purple-950/20" id="tpl-wi-{{ tpl.id }}">
+          <td class="font-medium text-gray-900 dark:text-white">
+            <span aria-hidden="true">📦</span> {{ tpl.title if tpl.title else tpl.channel_hint }}
+          </td>
+          <td><span class="chip">{{ tpl.channel_hint }}</span></td>
+          <td><span class="chip">WatchedItem</span></td>
+          <td>
+            {% if tpl.is_active %}
+            <span class="badge badge-active">Active</span>
+            {% else %}
+            <span class="badge badge-inactive">Inactive</span>
+            {% endif %}
+          </td>
+          <td>
+            <div class="flex items-center gap-2 justify-end">
+              <a
+                href="/watched-items/{{ watch.watched_item_id }}#notification-templates"
+                class="btn btn-secondary text-xs min-h-[44px]"
+                aria-label="Manage {{ tpl.title if tpl.title else tpl.channel_hint }} on the parent Watched Item">
+                Manage
+              </a>
             </div>
           </td>
         </tr>

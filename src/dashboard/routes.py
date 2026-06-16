@@ -2469,13 +2469,14 @@ async def _render_watch_notifications(
     watch,
     session: AsyncSession,
 ):
-    """Fetch notifications for all four sources and render watch_notifications partial.
+    """Fetch notifications for all five sources and render watch_notifications partial.
 
-    Sources (in display order):
-      global_templates  — NotificationTemplate.is_global_default=True
-      domain_templates  — DomainNcRef for watch.watched_item.domain_name
-      watch_templates   — WatchNcRef for this watch, minus global/domain ids
-      notifications     — WatchNotificationConfig for this watch (local)
+    Sources (in display order, matching dispatch in notify.py):
+      global_templates       — NotificationTemplate.is_global_default=True
+      domain_templates       — DomainNcRef for watch.watched_item.domain_name
+      watch_templates        — WatchNcRef for this watch, minus global/domain ids
+      watched_item_templates — WatchedItemNotificationTemplate for the parent WatchedItem
+      notifications          — WatchNotificationConfig for this watch (local)
     """
     notifications = await get_watch_notifications(session, watch.id)
 
@@ -2512,6 +2513,18 @@ async def _render_watch_notifications(
     )
     watch_templates = [t for t in watch_tpl_result.scalars().all() if str(t.id) not in auto_ids]
 
+    # 4. WatchedItem-default templates — inherited from the parent WatchedItem.
+    #    Distinct model from NotificationTemplate (own ids), read-only on the watch
+    #    surface; managed at /watched-items/{id}. Mirrors notify.py dispatch tier 4.
+    watched_item_templates = []
+    if watch.watched_item_id:
+        wi_tpl_result = await session.execute(
+            select(WatchedItemNotificationTemplate)
+            .where(WatchedItemNotificationTemplate.watched_item_id == watch.watched_item_id)
+            .order_by(WatchedItemNotificationTemplate.created_at)
+        )
+        watched_item_templates = wi_tpl_result.scalars().all()
+
     # Unassigned picker: active templates not global, not domain, not already watch-assigned
     all_watch_ids = auto_ids | {str(t.id) for t in watch_templates}
     all_result = await session.execute(
@@ -2533,6 +2546,7 @@ async def _render_watch_notifications(
             "global_templates": global_templates,
             "domain_templates": domain_templates,
             "watch_templates": watch_templates,
+            "watched_item_templates": watched_item_templates,
             "unassigned_templates": unassigned_templates,
         },
     )

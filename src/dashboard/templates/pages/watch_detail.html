@@ -109,7 +109,7 @@
   <div class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 divide-y divide-gray-200 dark:divide-gray-700">
     {{ watch_field(field_contexts["interval"]) }}
 
-    {# Last Checked (read-only) #}
+    {# Last Checked (read-only) — sourced from the parent WatchedItem (#185 step 6) #}
     <div class="p-4" id="field-last_checked_at">
       <div class="grid grid-cols-[1fr_auto] sm:grid-cols-[min(18rem,40%)_auto_1fr_auto] items-center gap-x-4 gap-y-1">
         <div class="min-w-0">
@@ -117,8 +117,41 @@
         </div>
         <div class="flex items-center gap-2">
           <span class="text-sm text-gray-900 dark:text-gray-100 font-medium">
-            {% if watch.last_checked_at %}{{ watch.last_checked_at.strftime('%Y-%m-%d %H:%M UTC') }}{% else %}Never{% endif %}
+            {% if watch.watched_item and watch.watched_item.last_checked_at %}{{ watch.watched_item.last_checked_at.strftime('%Y-%m-%d %H:%M UTC') }}{% else %}Never{% endif %}
           </span>
+        </div>
+      </div>
+    </div>
+
+    {# Last Changed (read-only) — sourced from the parent WatchedItem #}
+    <div class="p-4" id="field-last_changed_at">
+      <div class="grid grid-cols-[1fr_auto] sm:grid-cols-[min(18rem,40%)_auto_1fr_auto] items-center gap-x-4 gap-y-1">
+        <div class="min-w-0">
+          <span class="form-label mb-0">Last Changed</span>
+        </div>
+        <div class="flex items-center gap-2">
+          <span class="text-sm text-gray-900 dark:text-gray-100 font-medium">
+            {% if watch.watched_item and watch.watched_item.last_changed_at %}{{ watch.watched_item.last_changed_at.strftime('%Y-%m-%d %H:%M UTC') }}{% else %}Never{% endif %}
+          </span>
+        </div>
+      </div>
+    </div>
+
+    {# Health (read-only) — sourced from the parent WatchedItem #}
+    <div class="p-4" id="field-health_status">
+      <div class="grid grid-cols-[1fr_auto] sm:grid-cols-[min(18rem,40%)_auto_1fr_auto] items-center gap-x-4 gap-y-1">
+        <div class="min-w-0">
+          <span class="form-label mb-0">Health</span>
+        </div>
+        <div class="flex items-center gap-2">
+          {% set health = watch.watched_item.health_status.value if watch.watched_item and watch.watched_item.health_status else "unknown" %}
+          {% if health == "ok" %}
+            <span class="badge badge-active">Healthy</span>
+          {% elif health == "error" %}
+            <span class="badge badge-error">Error</span>
+          {% else %}
+            <span class="badge badge-inactive">Unknown</span>
+          {% endif %}
         </div>
       </div>
     </div>

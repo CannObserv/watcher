@@ -1291,8 +1291,8 @@ async def watched_item_update_url(
                 await session.execute(
                     select(Watch).where(
                         Watch.watched_item_id == wi.id,
-                        Watch.is_active == True,  # noqa: E712
-                        Watch.is_archived == False,  # noqa: E712
+                        Watch.is_active.is_(True),
+                        Watch.is_archived.is_(False),
                     )
                 )
             )
@@ -1308,8 +1308,8 @@ async def watched_item_update_url(
                 await session.execute(
                     select(Watch).where(
                         Watch.watched_item_id == wi.id,
-                        Watch.suspended_by_domain == True,  # noqa: E712
-                        Watch.is_archived == False,  # noqa: E712
+                        Watch.suspended_by_domain.is_(True),
+                        Watch.is_archived.is_(False),
                     )
                 )
             )

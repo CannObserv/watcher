@@ -1163,7 +1163,13 @@ async def watched_item_toggle_active(
     def _respond(flash: tuple[str, str] | None = None):
         if not hx:
             return RedirectResponse(url=f"/watched-items/{watched_item_id}", status_code=303)
-        ctx = {"watched_item": wi, "toggle_id": toggle_id, "compact": bool(compact)}
+        # On the detail page (non-compact), OOB-sync the header badge + Check-now.
+        ctx = {
+            "watched_item": wi,
+            "toggle_id": toggle_id,
+            "compact": bool(compact),
+            "oob_header": not bool(compact),
+        }
         if flash:
             ctx["flash_oob_level"], ctx["flash_oob_message"] = flash
         return templates.TemplateResponse(request, "partials/watched_item_status_toggle.html", ctx)

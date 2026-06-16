@@ -54,3 +54,5 @@
 </div>
 {# Optional OOB flash appended when a guard rejects the toggle (re-renders unchanged state). #}
 {% if flash_oob_message %}{% include "partials/flash_oob.html" %}{% endif %}
+{# On the detail page, OOB-sync the header badge + Check-now button with the toggle. #}
+{% if oob_header %}{% set oob = true %}{% include "partials/watched_item_header_status.html" %}{% endif %}

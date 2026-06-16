@@ -9,19 +9,7 @@
     <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">{{ watched_item.description }}</p>
     {% endif %}
   </div>
-  <div class="flex items-center gap-3">
-    {% if watched_item.archived_at %}<span class="badge badge-archived">Archived</span>
-    {% elif watched_item.domain_suspended %}<span class="badge badge-warning">Domain Inactive</span>
-    {% elif watched_item.is_active %}<span class="badge badge-active">Active</span>
-    {% else %}<span class="badge badge-inactive">Paused</span>{% endif %}
-    {% if not watched_item.archived_at and watched_item.is_active and not watched_item.domain_suspended and watched_item.effective_url %}
-    <button
-      hx-post="/watched-items/{{ watched_item.id }}/check-now"
-      hx-swap="none"
-      class="btn btn-secondary btn-sm htmx-request:opacity-60"
-      aria-label="Queue an immediate check for {{ watched_item.name }}">Check now</button>
-    {% endif %}
-  </div>
+  {% include "partials/watched_item_header_status.html" %}
 </div>
 
 {# URL + stats summary card #}

@@ -1,0 +1,17 @@
+{# Header status cluster for the WatchedItem detail page: badge + Check-now.
+   Kept in sync with the Status-section toggle via an OOB swap (see
+   watched_item_status_toggle.html). Expects: watched_item; optional oob. #}
+<div id="wi-header-status" class="flex items-center gap-3"{% if oob %} hx-swap-oob="true"{% endif %}>
+  {% if watched_item.archived_at %}<span class="badge badge-archived">Archived</span>
+  {% elif watched_item.domain_suspended %}<span class="badge badge-warning">Domain Inactive</span>
+  {% elif watched_item.is_active %}<span class="badge badge-active">Active</span>
+  {% else %}<span class="badge badge-inactive">Paused</span>{% endif %}
+  {% if not watched_item.archived_at and watched_item.effective_url %}
+  <button
+    hx-post="/watched-items/{{ watched_item.id }}/check-now"
+    hx-swap="none"
+    {% if not watched_item.is_active or watched_item.domain_suspended %}disabled{% endif %}
+    class="btn btn-secondary btn-sm htmx-request:opacity-60 disabled:opacity-50 disabled:cursor-not-allowed"
+    aria-label="Queue an immediate check for {{ watched_item.name }}">Check now</button>
+  {% endif %}
+</div>

@@ -85,6 +85,30 @@ class TestListPage:
         response = await client.get("/watched-items")
         assert b"data-next-check" in response.content
 
+    async def test_status_column_consolidated(self, client, db_session):
+        """One labeled Status column holds the toggle + badge; no separate Actions column (#190)."""
+        from src.core.models.watched_item import WatchedItem
+        from tests.conftest import make_info_item
+
+        item = await make_info_item(db_session)
+        db_session.add(
+            WatchedItem(
+                archiver_info_item_id=item.info_item_id,
+                name="ConsolidatedRow",
+                effective_url="https://example.com",
+                is_active=True,
+            )
+        )
+        await db_session.flush()
+        await db_session.commit()
+        response = await client.get("/watched-items")
+        body = response.content
+        # Toggle lives in the Status column now…
+        assert b"/toggle-active" in body
+        assert b"Check now" in body
+        # …and the separate unlabeled Actions header is gone.
+        assert b'sr-only">Actions' not in body
+
     async def test_aspect_review_column_removed(self, client, db_session):
         """Aspect Review column removed from list view (#173)."""
         from src.core.models.watched_item import WatchedItem
@@ -839,6 +863,33 @@ class TestPauseResume:
         assert b"suspended" in resp.content.lower()
         await db_session.refresh(wi)
         assert wi.is_active is False  # resume was rejected
+
+    async def test_detail_header_has_sync_region(self, client, db_session):
+        """Detail header status cluster is an OOB-swappable region (#190)."""
+        wi = await _make_wi(
+            db_session, name="HeaderSync", is_active=True, effective_url="https://example.com"
+        )
+        resp = await client.get(f"/watched-items/{wi.id}")
+        assert resp.status_code == 200
+        assert b'id="wi-header-status"' in resp.content
+
+    async def test_detail_toggle_oob_syncs_header_and_disables_check_now(self, client, db_session):
+        """Pausing via the detail toggle OOB-updates the header badge + disables Check-now."""
+        wi = await _make_wi(
+            db_session, name="HeaderOOB", is_active=True, effective_url="https://example.com"
+        )
+        resp = await client.post(
+            f"/watched-items/{wi.id}/toggle-active",
+            data={"active": "false"},  # detail toggle: compact unset
+            headers={"HX-Request": "true"},
+        )
+        assert resp.status_code == 200
+        # Header region is re-sent as an OOB swap…
+        assert b'id="wi-header-status"' in resp.content
+        assert b'hx-swap-oob="true"' in resp.content
+        # …reflecting the paused state with a disabled Check-now button.
+        assert b"Paused" in resp.content
+        assert b"disabled" in resp.content
 
     async def test_compact_list_row_toggle_rejection_echoes_toggle_id(self, client, db_session):
         """List-row (compact) guard rejection re-renders with the per-row toggle_id + flash."""

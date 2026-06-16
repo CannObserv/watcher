@@ -9,7 +9,7 @@ from src.core.models.base import Base, TimestampMixin, ULIDType, generate_ulid
 
 
 class WatchNotificationConfig(Base, TimestampMixin):
-    """A notifier-channel pointer scoped to a specific watch.
+    """A notifier-channel pointer scoped to a WatchedItem (#191).
 
     `remote_channel_id` is the notifier-service channel ULID; the notifier
     owns the actual delivery target. `channel_hint` carries a human-readable
@@ -20,7 +20,9 @@ class WatchNotificationConfig(Base, TimestampMixin):
     __tablename__ = "watch_notification_configs"
 
     id: Mapped[ULID] = mapped_column(ULIDType, primary_key=True, default=generate_ulid)
-    watch_id: Mapped[ULID] = mapped_column(ULIDType, ForeignKey("watches.id", ondelete="CASCADE"))
+    watched_item_id: Mapped[ULID] = mapped_column(
+        ULIDType, ForeignKey("watched_items.id", ondelete="CASCADE")
+    )
     title: Mapped[str | None] = mapped_column(String(100), nullable=True)
     channel_hint: Mapped[str] = mapped_column(String(50), nullable=False)
     events: Mapped[list[str]] = mapped_column(

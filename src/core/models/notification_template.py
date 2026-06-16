@@ -32,12 +32,12 @@ class NotificationTemplate(TimestampMixin, Base):
 
 
 class WatchNcRef(Base):
-    """Junction: NotificationTemplate assigned to a Watch."""
+    """Junction: NotificationTemplate assigned to a WatchedItem (#191)."""
 
     __tablename__ = "watch_nc_refs"
 
-    watch_id: Mapped[ULID] = mapped_column(
-        ULIDType, ForeignKey("watches.id", ondelete="CASCADE"), primary_key=True
+    watched_item_id: Mapped[ULID] = mapped_column(
+        ULIDType, ForeignKey("watched_items.id", ondelete="CASCADE"), primary_key=True
     )
     template_id: Mapped[ULID] = mapped_column(
         ULIDType, ForeignKey("notification_templates.id", ondelete="CASCADE"), primary_key=True

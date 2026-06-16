@@ -25,7 +25,8 @@ from src.core.notifications.events import WatchEvent, WatchEventType
 from src.core.rate_limiter import get_rate_limiter
 from src.core.registry import ServiceRegistry, get_registry
 from src.core.scheduler import compute_next_check, evaluate_post_actions
-from src.core.watches.resolution import resolved_schedule_config, watch_event_base_metadata
+from src.core.utils import watched_item_event_base_metadata
+from src.core.watches.resolution import resolved_schedule_config
 from src.workers import bp
 from src.workers.notify import dispatch_event_notifications
 from src.workers.pipeline import (
@@ -138,27 +139,26 @@ async def check_watched_item(watched_item_id: str, registry: ServiceRegistry | N
                 watched_item_id=str(watched_item.id),
                 status_code=fetch_result.status_code,
             )
-            # Track health transition on WatchedItem; dispatch WATCH_ERROR to
-            # every active child Watch if WatchedItem transitions to ERROR.
+            # Track health transition on WatchedItem; dispatch WATCH_ERROR once
+            # for the WatchedItem if it transitions to ERROR (#191).
             previous_health = watched_item.health_status
             watched_item.health_status = WatchHealthStatus.ERROR
             watched_item.last_checked_at = now
             await session.commit()
 
             if previous_health != WatchHealthStatus.ERROR:
-                for w in children:
-                    error_event = WatchEvent(
-                        event_type=WatchEventType.WATCH_ERROR,
-                        watch_id=str(w.id),
-                        watch_name=w.name,
-                        watch_url=watched_item.effective_url or url,
-                        occurred_at=now,
-                        metadata={
-                            "status_code": fetch_result.status_code,
-                            **watch_event_base_metadata(w),
-                        },
-                    )
-                    await dispatch_event_notifications(session=session, event=error_event)
+                error_event = WatchEvent(
+                    event_type=WatchEventType.WATCH_ERROR,
+                    watch_id=str(watched_item.id),
+                    watch_name=watched_item.name,
+                    watch_url=watched_item.effective_url or url,
+                    occurred_at=now,
+                    metadata={
+                        "status_code": fetch_result.status_code,
+                        **watched_item_event_base_metadata(watched_item),
+                    },
+                )
+                await dispatch_event_notifications(session=session, event=error_event)
                 await session.commit()
             return {"error": f"HTTP {fetch_result.status_code}"}
 
@@ -195,19 +195,18 @@ async def check_watched_item(watched_item_id: str, registry: ServiceRegistry | N
             await _maybe_decay_backoff(rate_limit_domain, _limiter, session)
             await session.commit()
 
-        # Recovery events: dispatch WATCH_RECOVERED per child Watch when
-        # WatchedItem transitions ERROR → OK.
+        # Recovery: dispatch WATCH_RECOVERED once when the WatchedItem
+        # transitions ERROR → OK (#191).
         if previous_health == WatchHealthStatus.ERROR:
-            for w in children:
-                recovery_event = WatchEvent(
-                    event_type=WatchEventType.WATCH_RECOVERED,
-                    watch_id=str(w.id),
-                    watch_name=w.name,
-                    watch_url=watched_item.effective_url or url,
-                    occurred_at=now,
-                    metadata=watch_event_base_metadata(w),
-                )
-                await dispatch_event_notifications(session=session, event=recovery_event)
+            recovery_event = WatchEvent(
+                event_type=WatchEventType.WATCH_RECOVERED,
+                watch_id=str(watched_item.id),
+                watch_name=watched_item.name,
+                watch_url=watched_item.effective_url or url,
+                occurred_at=now,
+                metadata=watched_item_event_base_metadata(watched_item),
+            )
+            await dispatch_event_notifications(session=session, event=recovery_event)
             await session.commit()
 
     return {

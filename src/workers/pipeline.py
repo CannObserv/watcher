@@ -24,13 +24,12 @@ from src.core.logging import get_logger
 from src.core.models.change_revision import ChangeRevision
 from src.core.models.domain import Domain
 from src.core.models.pending_archiver_sync import PendingArchiverSync
-from src.core.models.watch import Watch
 from src.core.models.watched_item import WatchedItem
 from src.core.notifications.events import WatchEvent, WatchEventType
 from src.core.notifications.notify import dispatch_event_notifications
 from src.core.rate_limiter import DomainRateLimiter
 from src.core.sources.scratch import write_scratch_bytes
-from src.core.watches.resolution import watch_event_base_metadata
+from src.core.utils import watched_item_event_base_metadata
 
 logger = get_logger(__name__)
 
@@ -231,43 +230,27 @@ async def process_watched_item(
 
     watched_item.last_changed_at = now
 
-    # Dispatch CHANGE_DETECTED to every active non-archived child Watch.
-    watches = (
-        (
-            await session.execute(
-                select(Watch)
-                .where(Watch.watched_item_id == watched_item.id)
-                .where(Watch.is_active.is_(True))
-                .where(Watch.is_archived.is_(False))
-            )
-        )
-        .scalars()
-        .all()
+    # #191: dispatch CHANGE_DETECTED once for the WatchedItem (the monitored entity).
+    change_meta: dict = {
+        "change_revision_id": str(rev.id),
+        "content_fingerprint": outcome.content_fingerprint,
+        **watched_item_event_base_metadata(watched_item),
+    }
+    if archiver_sync_enqueued:
+        change_meta["archiver_revision_id"] = None  # back-filled by drain worker
+
+    event = WatchEvent(
+        event_type=WatchEventType.CHANGE_DETECTED,
+        watch_id=str(watched_item.id),
+        watch_name=watched_item.name,
+        watch_url=watched_item.effective_url,
+        occurred_at=now,
+        metadata=change_meta,
     )
-
-    notifications = 0
-    for watch in watches:
-        change_meta: dict = {
-            "change_revision_id": str(rev.id),
-            "content_fingerprint": outcome.content_fingerprint,
-            **watch_event_base_metadata(watch),
-        }
-        if archiver_sync_enqueued:
-            change_meta["archiver_revision_id"] = None  # back-filled by drain worker
-
-        event = WatchEvent(
-            event_type=WatchEventType.CHANGE_DETECTED,
-            watch_id=str(watch.id),
-            watch_name=watch.name,
-            watch_url=watched_item.effective_url,
-            occurred_at=now,
-            metadata=change_meta,
-        )
-        await dispatch_event_notifications(session=session, event=event)
-        notifications += 1
+    await dispatch_event_notifications(session=session, event=event)
 
     return WatchedItemResult(
         changed=True,
-        notifications_dispatched=notifications,
+        notifications_dispatched=1,
         archiver_sync_enqueued=archiver_sync_enqueued,
     )

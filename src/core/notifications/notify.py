@@ -19,7 +19,6 @@ from src.core.logging import get_logger
 from src.core.models.audit_log import EventType, audit
 from src.core.models.notification_config import WatchNotificationConfig
 from src.core.models.notification_template import DomainNcRef, NotificationTemplate, WatchNcRef
-from src.core.models.watch import Watch
 from src.core.models.watched_item import WatchedItem
 from src.core.models.watched_item_notification_template import (
     WatchedItemNotificationTemplate,
@@ -135,23 +134,12 @@ async def dispatch_event_notifications(
     computed. Templates receive `unified_diff=""` and diff_snippet/diff_full render
     empty (page-level fingerprint-shift-only notifications).
     """
-    watch_ulid = ULID.from_str(event.watch_id)
+    # #191: the event identifies a WatchedItem (the single monitored entity).
+    watched_item_id = ULID.from_str(event.watch_id)
     event_value = event.event_type.value
 
-    # Resolve domain_name (from WatchedItem) + watched_item_id.
-    watch_row = await session.execute(
-        select(WatchedItem.domain_name, Watch.watched_item_id)
-        .join(WatchedItem, WatchedItem.id == Watch.watched_item_id, isouter=True)
-        .where(Watch.id == watch_ulid)
-    )
-    watch_meta = watch_row.one_or_none()
-    domain_name: str | None
-    watched_item_id: ULID | None
-    if watch_meta is None:
-        domain_name = None
-        watched_item_id = None
-    else:
-        domain_name, watched_item_id = watch_meta
+    wi = await session.get(WatchedItem, watched_item_id)
+    domain_name: str | None = wi.domain_name if wi is not None else None
 
     # 1. Global templates
     global_result = await session.execute(
@@ -177,34 +165,32 @@ async def dispatch_event_notifications(
         )
         domain_templates = domain_result.scalars().all()
 
-    # 3. Watch-assigned templates (WatchNcRef)
+    # 3. WatchedItem-assigned templates (WatchNcRef)
     watch_tpl_result = await session.execute(
         select(NotificationTemplate)
         .join(WatchNcRef, WatchNcRef.template_id == NotificationTemplate.id)
         .where(
-            WatchNcRef.watch_id == watch_ulid,
+            WatchNcRef.watched_item_id == watched_item_id,
             NotificationTemplate.is_active.is_(True),
             NotificationTemplate.events.contains([event_value]),
         )
     )
     watch_templates = watch_tpl_result.scalars().all()
 
-    # 4. WatchedItem templates (Approach B union, #160 Task 9)
-    watched_item_templates: list[WatchedItemNotificationTemplate] = []
-    if watched_item_id is not None:
-        wi_tpl_result = await session.execute(
-            select(WatchedItemNotificationTemplate).where(
-                WatchedItemNotificationTemplate.watched_item_id == watched_item_id,
-                WatchedItemNotificationTemplate.is_active.is_(True),
-                WatchedItemNotificationTemplate.events.contains([event_value]),
-            )
+    # 4. WatchedItem templates
+    wi_tpl_result = await session.execute(
+        select(WatchedItemNotificationTemplate).where(
+            WatchedItemNotificationTemplate.watched_item_id == watched_item_id,
+            WatchedItemNotificationTemplate.is_active.is_(True),
+            WatchedItemNotificationTemplate.events.contains([event_value]),
         )
-        watched_item_templates = list(wi_tpl_result.scalars().all())
+    )
+    watched_item_templates = list(wi_tpl_result.scalars().all())
 
     # 5. Local configs
     local_result = await session.execute(
         select(WatchNotificationConfig).where(
-            WatchNotificationConfig.watch_id == watch_ulid,
+            WatchNotificationConfig.watched_item_id == watched_item_id,
             WatchNotificationConfig.is_active.is_(True),
             WatchNotificationConfig.events.contains([event_value]),
         )
@@ -323,7 +309,7 @@ async def dispatch_event_notifications(
     audit(
         session,
         EventType.NOTIFICATION_DISPATCHED,
-        watch_id=event.watch_id,
+        watched_item_id=event.watch_id,
         watch_event_type=event.event_type,
         results=results,
     )

@@ -21,6 +21,9 @@ from src.api.routes.watched_items import (
     archive_watched_item as _api_archive_watched_item,
 )
 from src.api.routes.watched_items import (
+    check_now as _api_check_now,
+)
+from src.api.routes.watched_items import (
     mark_reviewed as _api_mark_reviewed,
 )
 from src.api.routes.watched_items import (
@@ -829,6 +832,26 @@ async def watched_item_create_form(request: Request):
     )
 
 
+async def _ensure_domain_exists(session: AsyncSession, domain_name: str | None) -> None:
+    """Create the Domain row for ``domain_name`` if it does not already exist."""
+    if not domain_name:
+        return
+    domain_stmt = select(Domain).where(Domain.name == domain_name)
+    if not (await session.execute(domain_stmt)).scalar_one_or_none():
+        try:
+            async with session.begin_nested():
+                session.add(
+                    Domain(
+                        name=domain_name,
+                        min_interval=DEFAULT_MIN_INTERVAL,
+                        max_concurrency=DEFAULT_MAX_CONCURRENCY,
+                        current_interval=DEFAULT_MIN_INTERVAL,
+                    )
+                )
+        except IntegrityError:
+            pass
+
+
 @router.post("/watched-items/new")
 async def watched_item_create_submit(
     request: Request,
@@ -838,13 +861,15 @@ async def watched_item_create_submit(
     default_schedule_interval: str = Form(""),
     default_content_type: str = Form(""),
     default_tags: str = Form(""),
+    is_active: str = Form("true"),
     probe_fn: Callable[[str], Awaitable[ProbeResult]] = Depends(get_probe_fn),
     session: AsyncSession = Depends(get_db_session),
 ):
     """Create a standalone WatchedItem from the dashboard form.
 
     Accepts a URL directly; probes it for effective_url + domain_name.
-    Audit row uses ``source="dashboard"``.
+    Unchecking ``is_active`` provisions the item paused (#188). Audit row uses
+    ``source="dashboard"``.
     """
 
     async def _render_with_flash(message: str, level: str = "error"):
@@ -885,20 +910,7 @@ async def watched_item_create_submit(
     except httpx.HTTPError as exc:
         return await _render_with_flash(f"URL unreachable: {exc}")
 
-    domain_stmt = select(Domain).where(Domain.name == probe_result.effective_domain)
-    if not (await session.execute(domain_stmt)).scalar_one_or_none():
-        try:
-            async with session.begin_nested():
-                session.add(
-                    Domain(
-                        name=probe_result.effective_domain,
-                        min_interval=DEFAULT_MIN_INTERVAL,
-                        max_concurrency=DEFAULT_MAX_CONCURRENCY,
-                        current_interval=DEFAULT_MIN_INTERVAL,
-                    )
-                )
-        except IntegrityError:
-            pass
+    await _ensure_domain_exists(session, probe_result.effective_domain)
 
     wi_name = name.strip() or probe_result.effective_domain or url_raw
     wi = WatchedItem(
@@ -909,6 +921,7 @@ async def watched_item_create_submit(
         default_schedule_config={"interval": interval_raw} if interval_raw else None,
         default_content_type=ct_raw,
         default_tags=tags,
+        is_active=(is_active == "true"),
     )
     session.add(wi)
     await session.flush()
@@ -1116,6 +1129,145 @@ async def watched_item_mark_reviewed(
     that contained the only form). Callable via direct POST or the API route.
     """
     await _api_mark_reviewed(watched_item_id, session)
+    if request.headers.get("HX-Request") == "true":
+        return Response(
+            status_code=200,
+            headers={"HX-Redirect": f"/watched-items/{watched_item_id}"},
+        )
+    return RedirectResponse(url=f"/watched-items/{watched_item_id}", status_code=303)
+
+
+@router.post("/watched-items/{watched_item_id}/toggle-active")
+async def watched_item_toggle_active(
+    request: Request,
+    watched_item_id: str,
+    active: str = Form(""),
+    toggle_id: str = Form("watched-item-status-toggle"),
+    compact: str = Form(""),
+    session: AsyncSession = Depends(get_db_session),
+):
+    """Pause/resume a WatchedItem via the dashboard toggle (#188/#189).
+
+    Mirrors the API PATCH ``is_active`` semantics: 409 on an archived item
+    (restore owns activation), and resume is blocked while the domain is
+    suspended (kill-switch parity with the Watch toggle). Emits the dedicated
+    ``WATCHED_ITEM_PAUSED`` / ``WATCHED_ITEM_RESUMED`` audit events.
+    """
+    wi = await get_watched_item_detail(session, watched_item_id)
+    if not wi:
+        raise HTTPException(status_code=404, detail="WatchedItem not found")
+
+    if wi.archived_at is not None:
+        raise HTTPException(
+            status_code=409,
+            detail="WatchedItem is archived; activation is controlled by restore",
+        )
+
+    new_active = active == "true"
+    if wi.domain_suspended and new_active:
+        raise HTTPException(
+            status_code=409,
+            detail="Cannot resume WatchedItem while its domain is inactive",
+        )
+
+    if wi.is_active != new_active:
+        wi.is_active = new_active
+        audit(
+            session,
+            EventType.WATCHED_ITEM_RESUMED if new_active else EventType.WATCHED_ITEM_PAUSED,
+            watched_item_id=str(wi.id),
+            source="dashboard",
+        )
+        await session.commit()
+        await session.refresh(wi)
+
+    if request.headers.get("HX-Request") == "true":
+        return templates.TemplateResponse(
+            request,
+            "partials/watched_item_status_toggle.html",
+            {"watched_item": wi, "toggle_id": toggle_id, "compact": bool(compact)},
+        )
+    return RedirectResponse(url=f"/watched-items/{watched_item_id}", status_code=303)
+
+
+@router.post("/watched-items/{watched_item_id}/check-now")
+async def watched_item_check_now(
+    request: Request,
+    watched_item_id: str,
+    session: AsyncSession = Depends(get_db_session),
+):
+    """Enqueue an immediate check for a WatchedItem (delegates to the API route).
+
+    The API enforces the pre-flight guards (409 archived/paused, 422 empty
+    effective_url). Guard failures surface as a flash rather than a raw error.
+    """
+    try:
+        await _api_check_now(watched_item_id, session)
+    except HTTPException as exc:
+        if exc.status_code == 404:
+            raise
+        return templates.TemplateResponse(
+            request,
+            "partials/flash_oob.html",
+            {"flash_oob_level": "error", "flash_oob_message": str(exc.detail)},
+        )
+    return templates.TemplateResponse(
+        request,
+        "partials/flash_oob.html",
+        {"flash_oob_level": "success", "flash_oob_message": "Check queued."},
+    )
+
+
+@router.post("/watched-items/{watched_item_id}/effective-url")
+async def watched_item_update_url(
+    request: Request,
+    watched_item_id: str,
+    url: str = Form(""),
+    probe_fn: Callable[[str], Awaitable[ProbeResult]] = Depends(get_probe_fn),
+    session: AsyncSession = Depends(get_db_session),
+):
+    """Re-probe a new URL and update the WatchedItem's effective_url + domain_name.
+
+    Mirrors the create-time probe path: the submitted URL is probed for its
+    canonical effective_url and domain, the Domain row is created if new, and
+    ``source_specs`` are left untouched. Rejects archived items. Probe failures
+    surface as a flash.
+    """
+    wi = await get_watched_item_detail(session, watched_item_id)
+    if not wi:
+        raise HTTPException(status_code=404, detail="WatchedItem not found")
+
+    def _flash(message: str, level: str):
+        return templates.TemplateResponse(
+            request,
+            "partials/flash_oob.html",
+            {"flash_oob_level": level, "flash_oob_message": message},
+        )
+
+    if wi.archived_at is not None:
+        return _flash("Cannot change the URL of an archived item.", "error")
+
+    url_raw = url.strip()
+    if not url_raw:
+        return _flash("URL is required.", "error")
+
+    try:
+        probe_result = await probe_fn(url_raw)
+    except httpx.HTTPError as exc:
+        return _flash(f"URL unreachable: {exc}", "error")
+
+    await _ensure_domain_exists(session, probe_result.effective_domain)
+    wi.effective_url = probe_result.effective_url
+    wi.domain_name = probe_result.effective_domain or None
+    audit(
+        session,
+        EventType.WATCHED_ITEM_UPDATED,
+        watched_item_id=str(wi.id),
+        updated_fields=["effective_url", "domain_name"],
+        source="dashboard",
+    )
+    await session.commit()
+
     if request.headers.get("HX-Request") == "true":
         return Response(
             status_code=200,

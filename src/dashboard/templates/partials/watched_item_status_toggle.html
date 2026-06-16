@@ -1,0 +1,54 @@
+{# WatchedItem pause/resume toggle. Expects: watched_item; optional toggle_id, compact.
+   States: Active (green), Inactive/paused (gray), Archived (amber), Domain Inactive (orange).
+   Toggle disabled when archived or domain-suspended; Restore appears inline when archived.
+   ``toggle_id`` lets the same partial live once on the detail page and once per list row. #}
+{% set tid = toggle_id or "watched-item-status-toggle" %}
+<div class="{% if not compact %}p-4 {% endif %}" id="{{ tid }}">
+  <div class="{% if compact %}flex items-center gap-3{% else %}grid grid-cols-[1fr_auto] sm:grid-cols-[min(18rem,40%)_1fr] items-center gap-x-4 gap-y-1{% endif %}">
+    {% if not compact %}
+    <div class="min-w-0">
+      <span class="form-label mb-0">Status</span>
+    </div>
+    {% endif %}
+    <div class="flex items-center gap-3">
+      <label class="toggle">
+        <input type="checkbox" name="active" value="true"
+          {% if watched_item.is_active %}checked{% endif %}
+          {% if watched_item.archived_at or watched_item.domain_suspended %}disabled{% endif %}
+          hx-post="/watched-items/{{ watched_item.id }}/toggle-active"
+          hx-vals='{"toggle_id": "{{ tid }}", "compact": "{{ '1' if compact else '' }}"}'
+          hx-target="#{{ tid }}"
+          hx-swap="outerHTML">
+        <span class="toggle__track"><span class="toggle__thumb"></span></span>
+        <span class="toggle__label">
+          {% if watched_item.archived_at %}
+          <span class="badge badge-archived">Archived</span>
+          {% elif watched_item.domain_suspended %}
+          <span class="badge badge-warning">Domain Inactive</span>
+          {% elif watched_item.is_active %}
+          <span class="badge badge-active">Active</span>
+          {% else %}
+          <span class="badge badge-inactive">Paused</span>
+          {% endif %}
+        </span>
+      </label>
+      {% if watched_item.archived_at %}
+      <form method="post" action="/watched-items/{{ watched_item.id }}/restore">
+        <button type="submit"
+          hx-post="/watched-items/{{ watched_item.id }}/restore"
+          hx-target="body"
+          class="btn btn-secondary py-1 px-3 text-sm min-h-0">Restore from archive</button>
+      </form>
+      {% endif %}
+      <noscript>
+        <form method="post" action="/watched-items/{{ watched_item.id }}/toggle-active" class="inline">
+          <input type="hidden" name="active" value="{{ 'false' if watched_item.is_active else 'true' }}">
+          <button type="submit" class="btn btn-secondary py-1 px-3 text-sm min-h-0"
+            {% if watched_item.archived_at or watched_item.domain_suspended %}disabled{% endif %}>
+            {{ "Pause" if watched_item.is_active else "Resume" }}
+          </button>
+        </form>
+      </noscript>
+    </div>
+  </div>
+</div>

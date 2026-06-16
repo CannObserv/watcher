@@ -722,3 +722,143 @@ class TestTagsEditor:
         assert response.status_code in (200, 303)
         await db_session.refresh(wi)
         assert wi.last_reviewed_at is not None
+
+
+async def _make_wi(db_session, **kwargs):
+    """Create + commit a WatchedItem; return it."""
+    from src.core.models.watched_item import WatchedItem
+    from tests.conftest import make_info_item
+
+    item = await make_info_item(db_session, name=kwargs.pop("info_name", "PauseWI"))
+    wi = WatchedItem(archiver_info_item_id=item.info_item_id, **kwargs)
+    db_session.add(wi)
+    await db_session.flush()
+    await db_session.commit()
+    return wi
+
+
+class TestPauseResume:
+    async def test_pause_active_item(self, client, db_session):
+        from sqlalchemy import select
+
+        from src.core.models.audit_log import AuditLog, EventType
+
+        wi = await _make_wi(db_session, name="ToPause", is_active=True)
+        resp = await client.post(
+            f"/watched-items/{wi.id}/toggle-active",
+            data={"active": "false"},
+            headers={"HX-Request": "true"},
+        )
+        assert resp.status_code == 200
+        assert b"Paused" in resp.content
+        await db_session.refresh(wi)
+        assert wi.is_active is False
+        rows = (
+            (
+                await db_session.execute(
+                    select(AuditLog).where(AuditLog.event_type == EventType.WATCHED_ITEM_PAUSED)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        events = [r for r in rows if r.payload.get("watched_item_id") == str(wi.id)]
+        assert len(events) == 1
+        assert events[0].payload["source"] == "dashboard"
+
+    async def test_resume_paused_item(self, client, db_session):
+        from sqlalchemy import select
+
+        from src.core.models.audit_log import AuditLog, EventType
+
+        wi = await _make_wi(db_session, name="ToResume", is_active=False)
+        resp = await client.post(
+            f"/watched-items/{wi.id}/toggle-active",
+            data={"active": "true"},
+            headers={"HX-Request": "true"},
+        )
+        assert resp.status_code == 200
+        assert b"Active" in resp.content
+        await db_session.refresh(wi)
+        assert wi.is_active is True
+        rows = (
+            (
+                await db_session.execute(
+                    select(AuditLog).where(AuditLog.event_type == EventType.WATCHED_ITEM_RESUMED)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        events = [r for r in rows if r.payload.get("watched_item_id") == str(wi.id)]
+        assert len(events) == 1
+
+    async def test_toggle_archived_returns_409(self, client, db_session):
+        from datetime import UTC, datetime
+
+        wi = await _make_wi(
+            db_session, name="ArchToggle", is_active=False, archived_at=datetime.now(UTC)
+        )
+        resp = await client.post(f"/watched-items/{wi.id}/toggle-active", data={"active": "true"})
+        assert resp.status_code == 409
+
+    async def test_resume_domain_suspended_returns_409(self, client, db_session):
+        wi = await _make_wi(db_session, name="SuspResume", is_active=False, domain_suspended=True)
+        resp = await client.post(f"/watched-items/{wi.id}/toggle-active", data={"active": "true"})
+        assert resp.status_code == 409
+
+    async def test_toggle_unknown_returns_404(self, client):
+        from ulid import ULID
+
+        resp = await client.post(f"/watched-items/{ULID()}/toggle-active", data={"active": "false"})
+        assert resp.status_code == 404
+
+    async def test_detail_renders_status_toggle_and_check_now(self, client, db_session):
+        wi = await _make_wi(
+            db_session, name="DetailControls", is_active=True, effective_url="https://example.com"
+        )
+        resp = await client.get(f"/watched-items/{wi.id}")
+        assert resp.status_code == 200
+        assert b"/toggle-active" in resp.content
+        assert b"Check now" in resp.content
+        # Change-URL re-probe affordance + read-only source specs panel
+        assert b"/effective-url" in resp.content
+        assert b"Source Specs" in resp.content
+
+    async def test_detail_renders_source_specs_json(self, client, db_session):
+        wi = await _make_wi(
+            db_session, name="SpecsView", source_specs=[{"kind": "css", "selector": ".x"}]
+        )
+        resp = await client.get(f"/watched-items/{wi.id}")
+        assert resp.status_code == 200
+        assert b"selector" in resp.content
+
+
+class TestCheckNow:
+    async def test_check_now_success_queues(self, client, db_session):
+        from unittest.mock import AsyncMock, patch
+
+        wi = await _make_wi(db_session, name="CheckOK", is_active=True)
+        wi.effective_url = "https://example.com"
+        await db_session.commit()
+        with patch("src.api.routes.watched_items.check_watched_item") as mock_task:
+            mock_task.configure.return_value.defer_async = AsyncMock()
+            resp = await client.post(f"/watched-items/{wi.id}/check-now")
+        assert resp.status_code == 200
+        assert b"Check queued" in resp.content
+        mock_task.configure.return_value.defer_async.assert_awaited_once()
+
+    async def test_check_now_paused_flashes_error(self, client, db_session):
+        wi = await _make_wi(
+            db_session, name="CheckPaused", is_active=False, effective_url="https://example.com"
+        )
+        resp = await client.post(f"/watched-items/{wi.id}/check-now")
+        assert resp.status_code == 200
+        assert b"flash-error" in resp.content
+        assert b"paused" in resp.content.lower()
+
+    async def test_check_now_unknown_returns_404(self, client):
+        from ulid import ULID
+
+        resp = await client.post(f"/watched-items/{ULID()}/check-now")
+        assert resp.status_code == 404

@@ -7,6 +7,7 @@
         <th scope="col">Interval</th>
         <th scope="col">Next Check</th>
         <th scope="col">Status</th>
+        <th scope="col"><span class="sr-only">Actions</span></th>
       </tr>
     </thead>
     <tbody class="divide-y divide-gray-100 dark:divide-gray-700">
@@ -36,14 +37,31 @@
           </td>
           <td>
             {% if wi.archived_at %}<span class="badge badge-archived">Archived</span>
+            {% elif wi.domain_suspended %}<span class="badge badge-warning">Domain Inactive</span>
             {% elif wi.is_active %}<span class="badge badge-active">Active</span>
-            {% else %}<span class="badge badge-inactive">Inactive</span>{% endif %}
+            {% else %}<span class="badge badge-inactive">Paused</span>{% endif %}
+          </td>
+          <td>
+            <div class="flex items-center gap-2 justify-end">
+              {% if not wi.archived_at %}
+                {% with watched_item = wi, toggle_id = "wi-status-" ~ wi.id, compact = True %}
+                  {% include "partials/watched_item_status_toggle.html" %}
+                {% endwith %}
+              {% endif %}
+              {% if not wi.archived_at and wi.is_active and not wi.domain_suspended and wi.effective_url %}
+              <button
+                hx-post="/watched-items/{{ wi.id }}/check-now"
+                hx-swap="none"
+                class="btn btn-secondary text-xs min-h-[44px] htmx-request:opacity-60"
+                aria-label="Queue an immediate check for {{ wi.name }}">Check now</button>
+              {% endif %}
+            </div>
           </td>
         </tr>
       {% endfor %}
     {% else %}
       <tr>
-        <td colspan="5" class="text-center py-8 text-gray-500 dark:text-gray-400 text-sm">
+        <td colspan="6" class="text-center py-8 text-gray-500 dark:text-gray-400 text-sm">
           No watched items found.
         </td>
       </tr>

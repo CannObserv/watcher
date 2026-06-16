@@ -323,7 +323,8 @@ async def watch_detail_page(
 ):
     """Watch detail page with profiles and notifications.
 
-    Phase 5 (#156): snapshot_meta removed — Snapshot table dropped.
+    Phase 5 (#156): the Snapshot table was dropped; #190 removed the last
+    snapshot_meta plumbing from this route and the template.
     """
     watch = await get_watch_detail(session, watch_id)
     if not watch:
@@ -354,7 +355,6 @@ async def watch_detail_page(
         "profiles": profiles,
         "notifications": notifications,
         "field_contexts": field_contexts,
-        "snapshot_meta": None,
         "domain_inactive": domain_inactive,
         "timeline": timeline,
         "timeline_total": timeline_total,

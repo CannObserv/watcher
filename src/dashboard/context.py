@@ -189,11 +189,6 @@ async def get_watch_detail(session: AsyncSession, watch_id: str) -> Watch | None
     return await session.get(Watch, parsed)
 
 
-async def get_watch_changes(session: AsyncSession, watch_id: str, limit: int = 50) -> list[dict]:
-    """Return empty list — Change table removed in Phase 5 (#156)."""
-    return []
-
-
 _TIMELINE_SUMMARY: dict[str, str] = {
     EventType.WATCH_CREATED: "Watch created",
     EventType.WATCH_UPDATED: "Watch config updated",

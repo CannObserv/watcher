@@ -14,7 +14,10 @@ class TestListPage:
         response = await client.get("/watched-items")
         body = response.content
         assert b"No watched items yet" in body
-        assert b"/watches/new" in body
+        # CTA is the URL-first WatchedItem create; the stale /watches/new button
+        # (which errored without a watched_item_id) was removed in #190.
+        assert b"/watched-items/new" in body
+        assert b"/watches/new" not in body
 
     async def test_list_renders_items(self, client, db_session):
         from src.core.models.watched_item import WatchedItem

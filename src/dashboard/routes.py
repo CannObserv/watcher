@@ -77,6 +77,7 @@ from src.dashboard.context import (
     get_watch_profiles,
     get_watch_timeline,
     get_watch_timeline_count,
+    get_watched_item_activity,
     get_watched_item_detail,
     get_watched_item_list,
     get_watched_item_templates,
@@ -1063,6 +1064,7 @@ async def watched_item_detail_page(
     )
 
     wi_templates = await get_watched_item_templates(session, wi.id)
+    activity = await get_watched_item_activity(session, watched_item_id)
 
     field_contexts = {
         name: _watched_item_field_context(request, wi, name, mode="view")
@@ -1081,6 +1083,7 @@ async def watched_item_detail_page(
             "flash": None,
             "field_contexts": field_contexts,
             "templates": wi_templates,
+            "activity": activity,
         },
     )
 

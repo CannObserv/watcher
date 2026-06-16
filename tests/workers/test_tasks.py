@@ -231,6 +231,48 @@ class TestCheckWatchedItem:
         fetch_mock.assert_not_called()
         proc_mock.assert_not_called()
 
+    async def _run_success_cycle(self, db_session, monkeypatch, *, changed: bool):
+        watch = await make_watch(db_session, name="Checker")
+        watched_item = watch.watched_item
+        watched_item.effective_url = "https://example.com/page"
+        await db_session.commit()
+
+        mock_fetcher = MagicMock()
+        mock_fetcher.fetch = AsyncMock(return_value=_fake_fetch_result())
+        monkeypatch.setattr(tasks_mod, "process_watched_item", _make_pipeline_stub(changed=changed))
+        monkeypatch.setattr(
+            tasks_mod, "get_session_factory", lambda: _mock_session_factory(db_session)
+        )
+        monkeypatch.setattr(
+            tasks_mod, "get_rate_limiter", lambda: DomainRateLimiter(min_interval=0.0)
+        )
+        reg = ServiceRegistry(fetcher=mock_fetcher)
+        await check_watched_item(str(watched_item.id), registry=reg)
+        return watched_item
+
+    async def _audit_for(self, db_session, event_type, watched_item_id):
+        rows = (
+            (await db_session.execute(select(AuditLog).where(AuditLog.event_type == event_type)))
+            .scalars()
+            .all()
+        )
+        return [r for r in rows if r.payload.get("watched_item_id") == str(watched_item_id)]
+
+    async def test_success_no_change_audits_check_no_change(self, db_session, monkeypatch):
+        """An unchanged successful cycle writes a CHECK_NO_CHANGE audit (#190 — visibility)."""
+        wi = await self._run_success_cycle(db_session, monkeypatch, changed=False)
+        no_change = await self._audit_for(db_session, EventType.CHECK_NO_CHANGE, wi.id)
+        snapshot = await self._audit_for(db_session, EventType.CHECK_SNAPSHOT_CREATED, wi.id)
+        assert len(no_change) == 1
+        assert snapshot == []
+
+    async def test_success_changed_audits_snapshot_created(self, db_session, monkeypatch):
+        """A changed successful cycle writes a CHECK_SNAPSHOT_CREATED audit."""
+        wi = await self._run_success_cycle(db_session, monkeypatch, changed=True)
+        snapshot = await self._audit_for(db_session, EventType.CHECK_SNAPSHOT_CREATED, wi.id)
+        assert len(snapshot) == 1
+        assert snapshot[0].payload.get("changed") is True
+
     async def test_fetch_failure_logs_audit_and_sets_health(self, db_session, monkeypatch):
         """A non-success HTTP response audits CHECK_FETCH_FAILED and marks Watches ERROR."""
         watch = await make_watch(db_session, name="Fails")

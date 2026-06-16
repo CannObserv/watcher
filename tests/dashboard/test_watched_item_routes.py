@@ -930,6 +930,23 @@ class TestPauseResume:
         assert resp.status_code == 200
         assert b"selector" in resp.content
 
+    async def test_detail_shows_check_activity(self, client, db_session):
+        """WatchedItem detail surfaces check audit activity (#190 — execution visibility)."""
+        from src.core.models.audit_log import AuditLog, EventType
+
+        wi = await _make_wi(db_session, name="ActivityWI", effective_url="https://example.com")
+        db_session.add(
+            AuditLog(
+                event_type=EventType.CHECK_NO_CHANGE,
+                payload={"watched_item_id": str(wi.id)},
+            )
+        )
+        await db_session.commit()
+        resp = await client.get(f"/watched-items/{wi.id}")
+        assert resp.status_code == 200
+        assert b"Recent Activity" in resp.content
+        assert b"Checked \xe2\x80\x94 no change" in resp.content  # em-dash
+
     async def test_detail_shows_health_when_unknown(self, client, db_session):
         """Health row renders even when status is the default UNKNOWN (#190)."""
         wi = await _make_wi(db_session, name="UnknownHealth")

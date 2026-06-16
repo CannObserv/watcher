@@ -169,6 +169,19 @@ async def check_watched_item(watched_item_id: str, registry: ServiceRegistry | N
             raw_content=fetch_result.content,
         )
 
+        # Audit the successful check so executions leave a trail (the dashboard
+        # checks_today stat + WatchedItem activity read these). A snapshot event
+        # marks a baseline/changed cycle (a ChangeRevision was written); otherwise
+        # the content was unchanged.
+        snapshot = result.baseline_established or result.changed
+        audit(
+            session,
+            EventType.CHECK_SNAPSHOT_CREATED if snapshot else EventType.CHECK_NO_CHANGE,
+            watched_item_id=str(watched_item.id),
+            changed=result.changed,
+            baseline=result.baseline_established,
+        )
+
         # Track health + timestamp on WatchedItem.
         previous_health = watched_item.health_status
         watched_item.health_status = WatchHealthStatus.OK

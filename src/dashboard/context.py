@@ -508,6 +508,47 @@ async def get_watched_item_detail(
     return await session.get(WatchedItem, wi_ulid)
 
 
+_WI_ACTIVITY_SUMMARY: dict[str, str] = {
+    EventType.CHECK_SNAPSHOT_CREATED: "Checked — change captured",
+    EventType.CHECK_NO_CHANGE: "Checked — no change",
+    EventType.CHECK_FETCH_FAILED: "Fetch failed",
+    EventType.WATCHED_ITEM_CHECK_REQUESTED: "Manual check requested",
+    EventType.WATCHED_ITEM_CREATED: "Watched Item created",
+    EventType.WATCHED_ITEM_UPDATED: "Watched Item updated",
+    EventType.WATCHED_ITEM_PAUSED: "Paused",
+    EventType.WATCHED_ITEM_RESUMED: "Resumed",
+    EventType.WATCHED_ITEM_ARCHIVED: "Archived",
+    EventType.WATCHED_ITEM_RESTORED: "Restored",
+    EventType.WATCHED_ITEM_REVIEWED: "Marked reviewed",
+}
+
+
+async def get_watched_item_activity(
+    session: AsyncSession, watched_item_id: str, limit: int = 20
+) -> list[dict]:
+    """Recent audit activity for a WatchedItem (checks + lifecycle), newest first.
+
+    Check events are WatchedItem-scoped post-#185; their identifier lives in the
+    audit payload (``watched_item_id``), so this filters on the JSONB field.
+    """
+    stmt = (
+        select(AuditLog)
+        .where(AuditLog.payload["watched_item_id"].astext == str(watched_item_id))
+        .order_by(AuditLog.created_at.desc())
+        .limit(limit)
+    )
+    rows = list((await session.execute(stmt)).scalars().all())
+    out: list[dict] = []
+    for row in rows:
+        summary = _WI_ACTIVITY_SUMMARY.get(row.event_type, row.event_type)
+        if row.event_type == EventType.CHECK_FETCH_FAILED:
+            status = (row.payload or {}).get("status_code")
+            if status:
+                summary = f"Fetch failed — HTTP {status}"
+        out.append({"event_type": row.event_type, "timestamp": row.created_at, "summary": summary})
+    return out
+
+
 async def get_watched_item_templates(
     session: AsyncSession, watched_item_id: ULID
 ) -> list[WatchedItemNotificationTemplate]:

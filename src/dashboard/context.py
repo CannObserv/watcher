@@ -189,11 +189,6 @@ async def get_watch_detail(session: AsyncSession, watch_id: str) -> Watch | None
     return await session.get(Watch, parsed)
 
 
-async def get_watch_changes(session: AsyncSession, watch_id: str, limit: int = 50) -> list[dict]:
-    """Return empty list — Change table removed in Phase 5 (#156)."""
-    return []
-
-
 _TIMELINE_SUMMARY: dict[str, str] = {
     EventType.WATCH_CREATED: "Watch created",
     EventType.WATCH_UPDATED: "Watch config updated",
@@ -335,16 +330,24 @@ def _apply_domain_filters(stmt, *, search: str | None = None, status: str | None
     if search:
         escaped = search.replace("%", "\\%").replace("_", "\\_")
         stmt = stmt.where(Domain.name.ilike(f"%{escaped}%"))
+    # Mirror Domain.status precedence: archived > inactive > backoff > active.
     if status == "active":
         stmt = stmt.where(
             Domain.archived_at.is_(None),
+            Domain.is_active.is_(True),
             Domain.current_interval <= Domain.min_interval,
+        )
+    elif status == "inactive":
+        stmt = stmt.where(
+            Domain.archived_at.is_(None),
+            Domain.is_active.is_(False),
         )
     elif status == "archived":
         stmt = stmt.where(Domain.archived_at.isnot(None))
     elif status == "backoff":
         stmt = stmt.where(
             Domain.archived_at.is_(None),
+            Domain.is_active.is_(True),
             Domain.current_interval > Domain.min_interval,
         )
     return stmt

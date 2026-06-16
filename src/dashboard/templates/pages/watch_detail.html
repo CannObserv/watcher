@@ -8,43 +8,6 @@
   <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">{{ resolved_url }}</p>
 </div>
 
-{% if snapshot_meta %}
-<div class="mb-6">
-  {% if snapshot_meta.has_screenshot %}
-  <a href="/watches/{{ watch.id }}/screenshot" target="_blank" rel="noopener">
-    <img
-      src="/watches/{{ watch.id }}/screenshot"
-      alt="Latest snapshot of {{ watch.name }}"
-      class="rounded-lg border border-gray-200 dark:border-gray-700 max-w-sm w-full object-cover shadow-sm hover:opacity-90 transition-opacity"
-    >
-  </a>
-  {% endif %}
-  <p class="mt-2 text-xs text-gray-500 dark:text-gray-400 max-w-sm">
-    {% if snapshot_meta.has_screenshot %}
-    <a href="/watches/{{ watch.id }}/screenshot" target="_blank" rel="noopener" class="link">Screenshot</a> captured at {{ snapshot_meta.fetched_at.strftime('%Y-%m-%d %H:%M UTC') }}{% if snapshot_meta.screenshot_browser %} using {{ snapshot_meta.screenshot_browser }}{% endif %}
-    &middot;
-    {% else %}
-    Snapshot captured at {{ snapshot_meta.fetched_at.strftime('%Y-%m-%d %H:%M UTC') }}
-    &middot;
-    {% endif %}
-    {% if snapshot_meta.raw_bytes is not none %}{{ (snapshot_meta.raw_bytes / 1024) | round(0) | int }} KB raw &middot; {% endif %}{{ (snapshot_meta.text_bytes / 1024) | round(0) | int }} KB text
-    &middot;
-    {{ snapshot_meta.chunk_count }} chunk{{ 's' if snapshot_meta.chunk_count != 1 }}
-    &middot;
-    <a href="/watches/{{ watch.id }}/snapshots/{{ snapshot_meta.snapshot_id }}/content" target="_blank" rel="noopener" class="link">View captured content</a>
-  </p>
-  <div class="mt-2 max-w-sm" id="screenshot-recapture-result" aria-live="polite">
-    <button
-      hx-post="/watches/{{ watch.id }}/screenshot"
-      hx-target="#screenshot-recapture-result"
-      hx-swap="innerHTML"
-      class="btn btn-secondary text-xs min-h-[44px] htmx-request:opacity-60">
-      Re-capture screenshot
-    </button>
-  </div>
-</div>
-{% endif %}
-
 {% include "partials/flash.html" %}
 
 {# Details — status toggle + core fields #}
@@ -109,7 +72,7 @@
   <div class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 divide-y divide-gray-200 dark:divide-gray-700">
     {{ watch_field(field_contexts["interval"]) }}
 
-    {# Last Checked (read-only) #}
+    {# Last Checked (read-only) — sourced from the parent WatchedItem (#185 step 6) #}
     <div class="p-4" id="field-last_checked_at">
       <div class="grid grid-cols-[1fr_auto] sm:grid-cols-[min(18rem,40%)_auto_1fr_auto] items-center gap-x-4 gap-y-1">
         <div class="min-w-0">
@@ -117,8 +80,41 @@
         </div>
         <div class="flex items-center gap-2">
           <span class="text-sm text-gray-900 dark:text-gray-100 font-medium">
-            {% if watch.last_checked_at %}{{ watch.last_checked_at.strftime('%Y-%m-%d %H:%M UTC') }}{% else %}Never{% endif %}
+            {% if watch.watched_item and watch.watched_item.last_checked_at %}{{ watch.watched_item.last_checked_at.strftime('%Y-%m-%d %H:%M UTC') }}{% else %}Never{% endif %}
           </span>
+        </div>
+      </div>
+    </div>
+
+    {# Last Changed (read-only) — sourced from the parent WatchedItem #}
+    <div class="p-4" id="field-last_changed_at">
+      <div class="grid grid-cols-[1fr_auto] sm:grid-cols-[min(18rem,40%)_auto_1fr_auto] items-center gap-x-4 gap-y-1">
+        <div class="min-w-0">
+          <span class="form-label mb-0">Last Changed</span>
+        </div>
+        <div class="flex items-center gap-2">
+          <span class="text-sm text-gray-900 dark:text-gray-100 font-medium">
+            {% if watch.watched_item and watch.watched_item.last_changed_at %}{{ watch.watched_item.last_changed_at.strftime('%Y-%m-%d %H:%M UTC') }}{% else %}Never{% endif %}
+          </span>
+        </div>
+      </div>
+    </div>
+
+    {# Health (read-only) — sourced from the parent WatchedItem #}
+    <div class="p-4" id="field-health_status">
+      <div class="grid grid-cols-[1fr_auto] sm:grid-cols-[min(18rem,40%)_auto_1fr_auto] items-center gap-x-4 gap-y-1">
+        <div class="min-w-0">
+          <span class="form-label mb-0">Health</span>
+        </div>
+        <div class="flex items-center gap-2">
+          {% set health = watch.watched_item.health_status.value if watch.watched_item and watch.watched_item.health_status else "unknown" %}
+          {% if health == "ok" %}
+            <span class="badge badge-active">Healthy</span>
+          {% elif health == "error" %}
+            <span class="badge badge-error">Error</span>
+          {% else %}
+            <span class="badge badge-inactive">Unknown</span>
+          {% endif %}
         </div>
       </div>
     </div>

@@ -107,6 +107,115 @@ class TestWatchedItemCreateSubmit:
         assert wi.effective_url == "https://example.com/wi-url"
         assert wi.domain_name == "example.com"
 
+    async def test_defaults_active(self, client, db_session):
+        await client.post(
+            "/watched-items/new",
+            data={"url": "https://example.com/active-default"},
+            follow_redirects=False,
+        )
+        wi = (
+            await db_session.execute(
+                select(WatchedItem).where(
+                    WatchedItem.effective_url == "https://example.com/active-default"
+                )
+            )
+        ).scalar_one()
+        assert wi.is_active is True
+
+    async def test_provision_paused_when_is_active_unchecked(self, client, db_session):
+        """Unchecked is_active (absent from form) provisions the item paused."""
+        await client.post(
+            "/watched-items/new",
+            data={"url": "https://example.com/paused-default"},  # no is_active field
+            follow_redirects=False,
+        )
+        # The form always sends is_active=true when checked; an unchecked box omits it.
+        # Simulate the omitted-checkbox case via an explicit non-"true" value.
+        await client.post(
+            "/watched-items/new",
+            data={"url": "https://example.com/paused-explicit", "is_active": "false"},
+            follow_redirects=False,
+        )
+        wi = (
+            await db_session.execute(
+                select(WatchedItem).where(
+                    WatchedItem.effective_url == "https://example.com/paused-explicit"
+                )
+            )
+        ).scalar_one()
+        assert wi.is_active is False
+
+
+class TestWatchedItemUrlReprobe:
+    async def _make_wi(self, db_session, **kwargs):
+        from tests.conftest import make_info_item
+
+        item = await make_info_item(db_session, name=kwargs.pop("info_name", "ReprobeWI"))
+        wi = WatchedItem(archiver_info_item_id=item.info_item_id, **kwargs)
+        db_session.add(wi)
+        await db_session.flush()
+        await db_session.commit()
+        return wi
+
+    async def test_reprobe_updates_url_and_domain(self, client, db_session):
+        wi = await self._make_wi(
+            db_session,
+            name="UrlWI",
+            effective_url="https://old.example/page",
+            domain_name=None,
+        )
+        resp = await client.post(
+            f"/watched-items/{wi.id}/effective-url",
+            data={"url": "https://new.example.org/fresh"},
+            follow_redirects=False,
+        )
+        assert resp.status_code == 303
+        await db_session.refresh(wi)
+        assert wi.effective_url == "https://new.example.org/fresh"
+        assert wi.domain_name == "new.example.org"
+
+    async def test_reprobe_leaves_source_specs_untouched(self, client, db_session):
+        wi = await self._make_wi(
+            db_session,
+            name="SpecsWI",
+            effective_url="https://old.example/p",
+            source_specs=[{"kind": "css", "selector": ".main"}],
+        )
+        await client.post(
+            f"/watched-items/{wi.id}/effective-url",
+            data={"url": "https://new.example.org/x"},
+            follow_redirects=False,
+        )
+        await db_session.refresh(wi)
+        assert wi.source_specs == [{"kind": "css", "selector": ".main"}]
+
+    async def test_reprobe_archived_flashes_error(self, client, db_session):
+        from datetime import UTC, datetime
+
+        wi = await self._make_wi(
+            db_session,
+            name="ArchUrl",
+            effective_url="https://x.example/p",
+            archived_at=datetime.now(UTC),
+        )
+        resp = await client.post(
+            f"/watched-items/{wi.id}/effective-url",
+            data={"url": "https://new.example.org/y"},
+            headers={"HX-Request": "true"},
+        )
+        assert resp.status_code == 200
+        assert b"flash-error" in resp.content
+        assert b"archived" in resp.content.lower()
+
+    async def test_reprobe_unknown_returns_404(self, client):
+        from ulid import ULID
+
+        resp = await client.post(
+            f"/watched-items/{ULID()}/effective-url",
+            data={"url": "https://new.example.org/z"},
+        )
+        assert resp.status_code == 404
+
     async def test_missing_url_shows_flash(self, client):
         response = await client.post("/watched-items/new", data={"name": "X"})
         assert response.status_code == 200

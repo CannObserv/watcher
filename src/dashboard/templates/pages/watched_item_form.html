@@ -47,6 +47,14 @@
       placeholder="regulatory, legislative">
   </div>
 
+  <div>
+    <label class="flex items-center gap-2">
+      <input type="checkbox" name="is_active" id="is_active" value="true" checked class="form-checkbox">
+      <span class="form-label mb-0">Active</span>
+    </label>
+    <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">Uncheck to provision paused — no checks run until you resume it.</p>
+  </div>
+
   <div class="flex gap-3">
     <button type="submit" class="btn btn-primary">Create Watched Item</button>
     <a href="/watched-items" class="btn btn-secondary">Cancel</a>

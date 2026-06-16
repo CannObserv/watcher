@@ -1,12 +1,16 @@
 """Integration tests for dashboard routes."""
 
 import re
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, patch
 
 import pytest
 
 from src.core.models.watch import ContentType, Watch, WatchHealthStatus
 from src.core.models.watched_item import WatchedItem
+from src.core.models.watched_item_notification_template import (
+    WatchedItemNotificationTemplate,
+)
 from src.core.notifications.events import WatchEventType
 from tests.conftest import (
     make_info_item,
@@ -90,6 +94,16 @@ class TestWatchList:
         response = await client.get("/watches")
         assert b"Error" in response.content
 
+    async def test_list_shows_parent_last_checked_and_changed(self, client, db_session):
+        """List rows render the parent WatchedItem's timestamps (#185 step 6 moved them)."""
+        w = await make_watch(db_session, name="W", primary_url="https://a.com", content_type="html")
+        w.watched_item.last_checked_at = datetime(2026, 1, 15, 12, 0, tzinfo=UTC)
+        w.watched_item.last_changed_at = datetime(2026, 1, 14, 9, 30, tzinfo=UTC)
+        await db_session.commit()
+        response = await client.get("/watches")
+        assert b"2026-01-15 12:00 UTC" in response.content
+        assert b"2026-01-14 09:30 UTC" in response.content
+
     async def test_health_badge_unknown(self, client, db_session):
         await make_watch(db_session, name="W", primary_url="https://a.com", content_type="html")
         response = await client.get("/watches")
@@ -128,6 +142,44 @@ class TestWatchDetail:
         assert b"https://example.com/x" in response.content
         # No GET endpoint for ``url`` field anymore.
         assert b"/field/url" not in response.content
+
+    async def test_notifications_panel_shows_watched_item_default_tier(self, client, db_session):
+        """The watch notification panel surfaces the parent WatchedItem's default templates.
+
+        Dispatch unions a WatchedItem-default tier (notify.py); the panel must show it.
+        """
+        watch = await make_watch(
+            db_session, name="WI Tier", primary_url="https://example.com", content_type="html"
+        )
+        db_session.add(
+            WatchedItemNotificationTemplate(
+                watched_item_id=watch.watched_item_id,
+                title="WI Default Slack",
+                channel_hint="slack",
+                events=["change_detected"],
+                is_active=True,
+            )
+        )
+        await db_session.commit()
+        response = await client.get(f"/partials/watch-notifications/{watch.id}")
+        assert response.status_code == 200
+        assert b"WI Default Slack" in response.content
+        assert b"WatchedItem" in response.content
+
+    async def test_detail_shows_parent_last_checked_changed_health(self, client, db_session):
+        """Detail surfaces the parent WatchedItem's last_checked/changed + health."""
+        watch = await make_watch(
+            db_session, name="Parent State", primary_url="https://example.com", content_type="html"
+        )
+        watch.watched_item.last_checked_at = datetime(2026, 1, 15, 12, 0, tzinfo=UTC)
+        watch.watched_item.last_changed_at = datetime(2026, 1, 14, 9, 30, tzinfo=UTC)
+        watch.watched_item.health_status = WatchHealthStatus.OK
+        await db_session.commit()
+        response = await client.get(f"/watches/{watch.id}")
+        assert response.status_code == 200
+        assert b"2026-01-15 12:00 UTC" in response.content
+        assert b"2026-01-14 09:30 UTC" in response.content
+        assert b"Healthy" in response.content
 
 
 class TestWatchCreate:

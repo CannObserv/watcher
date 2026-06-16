@@ -17,7 +17,16 @@
                value="{{ tpl.channel_hint if not is_new else '' }}">
       </div>
       <input class="form-input" name="events" placeholder="Comma-separated events"
+             list="wi-tpl-events" aria-describedby="wi-tpl-events-help"
              value="{{ (tpl.events|join(',')) if not is_new else 'change_detected' }}">
+      {% if event_titles %}
+      <datalist id="wi-tpl-events">
+        {% for value in event_titles %}<option value="{{ value }}">{{ event_titles[value] }}</option>{% endfor %}
+      </datalist>
+      <p id="wi-tpl-events-help" class="text-xs text-gray-500 dark:text-gray-400">
+        Valid events: {{ event_titles.keys() | join(", ") }}.
+      </p>
+      {% endif %}
       <div class="flex gap-2 justify-end">
         <button type="button" hx-get="/partials/watched-item-templates/{{ watched_item.id }}"
                 hx-target="#wi-templates" hx-swap="innerHTML"

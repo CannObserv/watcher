@@ -9,10 +9,18 @@
     <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">{{ watched_item.description }}</p>
     {% endif %}
   </div>
-  <div>
+  <div class="flex items-center gap-3">
     {% if watched_item.archived_at %}<span class="badge badge-archived">Archived</span>
+    {% elif watched_item.domain_suspended %}<span class="badge badge-warning">Domain Inactive</span>
     {% elif watched_item.is_active %}<span class="badge badge-active">Active</span>
-    {% else %}<span class="badge badge-inactive">Inactive</span>{% endif %}
+    {% else %}<span class="badge badge-inactive">Paused</span>{% endif %}
+    {% if not watched_item.archived_at and watched_item.is_active and not watched_item.domain_suspended and watched_item.effective_url %}
+    <button
+      hx-post="/watched-items/{{ watched_item.id }}/check-now"
+      hx-swap="none"
+      class="btn btn-secondary btn-sm htmx-request:opacity-60"
+      aria-label="Queue an immediate check for {{ watched_item.name }}">Check now</button>
+    {% endif %}
   </div>
 </div>
 
@@ -24,6 +32,22 @@
       <dt class="form-label mb-0 text-xs">URL</dt>
       <dd><a href="{{ watched_item.effective_url }}" class="link break-all" target="_blank" rel="noopener noreferrer">{{ watched_item.effective_url }}</a></dd>
     </div>
+    {% endif %}
+    {% if not watched_item.archived_at %}
+    <details class="mt-1">
+      <summary class="text-xs link cursor-pointer">Change URL</summary>
+      <form method="post" action="/watched-items/{{ watched_item.id }}/effective-url"
+            hx-post="/watched-items/{{ watched_item.id }}/effective-url"
+            class="flex flex-wrap items-end gap-2 mt-2">
+        <div class="flex-1 min-w-[16rem]">
+          <label for="new-url" class="form-label mb-0 text-xs">New URL</label>
+          <input type="url" name="url" id="new-url" required class="form-input mt-1"
+            placeholder="https://example.gov/page" value="{{ watched_item.effective_url }}">
+        </div>
+        <button type="submit" class="btn btn-secondary btn-sm htmx-request:opacity-60">Re-probe &amp; save</button>
+      </form>
+      <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">Re-probes the URL to update the canonical URL and domain. Source specs are unchanged.</p>
+    </details>
     {% endif %}
     {% if watched_item.last_checked_at %}
     <div>
@@ -37,18 +61,19 @@
       <dd class="text-gray-700 dark:text-gray-300">{{ watched_item.last_changed_at.strftime("%Y-%m-%d %H:%M UTC") }}</dd>
     </div>
     {% endif %}
-    {% if watched_item.health_status and watched_item.health_status.value != "unknown" %}
     <div>
       <dt class="form-label mb-0 text-xs">Health</dt>
       <dd>
-        {% if watched_item.health_status.value == "error" %}
-        <span class="badge badge-error">{{ watched_item.health_status.value }}</span>
+        {% set health = watched_item.health_status.value if watched_item.health_status else "unknown" %}
+        {% if health == "error" %}
+        <span class="badge badge-error">error</span>
+        {% elif health == "ok" %}
+        <span class="badge badge-active">ok</span>
         {% else %}
-        <span class="badge badge-active">{{ watched_item.health_status.value }}</span>
+        <span class="badge badge-inactive">unknown</span>
         {% endif %}
       </dd>
     </div>
-    {% endif %}
   </dl>
 </div>
 
@@ -57,6 +82,13 @@
   Domain Inactive — watches for this item are suspended until the domain is reactivated.
 </div>
 {% endif %}
+
+<section class="mb-8">
+  <h3 class="text-lg font-semibold text-gray-900 dark:text-white mb-4">Status</h3>
+  <div class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700">
+    {% include "partials/watched_item_status_toggle.html" %}
+  </div>
+</section>
 
 <section class="mb-8">
   <h3 class="text-lg font-semibold text-gray-900 dark:text-white mb-4">Defaults</h3>
@@ -82,6 +114,18 @@
 </section>
 
 <section class="mb-8">
+  <h3 class="text-lg font-semibold text-gray-900 dark:text-white mb-4">Source Specs</h3>
+  <div class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-4">
+    <p class="text-xs text-gray-500 dark:text-gray-400 mb-2">Pipeline extraction config (read-only — authored via Archiver tooling).</p>
+    {% if watched_item.source_specs %}
+    <pre class="text-xs overflow-x-auto bg-gray-50 dark:bg-gray-900 rounded p-3 text-gray-800 dark:text-gray-200"><code>{{ watched_item.source_specs | tojson(indent=2) }}</code></pre>
+    {% else %}
+    <p class="text-sm text-gray-500 dark:text-gray-400">No source specs configured.</p>
+    {% endif %}
+  </div>
+</section>
+
+<section class="mb-8">
   <div class="flex items-center justify-between mb-4">
     <h3 class="text-lg font-semibold text-gray-900 dark:text-white">Notification Templates</h3>
     <button
@@ -103,7 +147,7 @@
 <section class="mb-8">
   <div class="flex items-center justify-between mb-4">
     <h3 class="text-lg font-semibold text-gray-900 dark:text-white">Watches</h3>
-    {% if not watched_item.archived_at and watched_item.effective_url %}
+    {% if not watched_item.archived_at and watched_item.is_active and not watched_item.domain_suspended and watched_item.effective_url %}
     <a href="/watches/new?watched_item_id={{ watched_item.id }}"
        class="btn btn-secondary btn-sm">+ New Watch</a>
     {% endif %}
@@ -124,7 +168,7 @@
   <div class="flex items-center justify-between">
     <div>
       <p class="text-sm font-medium text-gray-900 dark:text-white">Archive this Watched Item</p>
-      <p class="text-xs text-gray-500 dark:text-gray-400">Stops the fetch cycle and cascades to all child Watches.</p>
+      <p class="text-xs text-gray-500 dark:text-gray-400">Pauses it (sets inactive), stops the fetch cycle, and cascade-archives all child Watches. Restore to reactivate.</p>
     </div>
     <form method="post" action="/watched-items/{{ watched_item.id }}/archive">
       <button type="submit"

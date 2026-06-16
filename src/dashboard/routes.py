@@ -1202,21 +1202,20 @@ async def watched_item_check_now(
     flash; non-HTMX clients get a redirect back to the detail page.
     """
     hx = request.headers.get("HX-Request") == "true"
-    fallback = RedirectResponse(url=f"/watched-items/{watched_item_id}", status_code=303)
     try:
         await _api_check_now(watched_item_id, session)
     except HTTPException as exc:
         if exc.status_code == 404:
             raise
         if not hx:
-            return fallback
+            return RedirectResponse(url=f"/watched-items/{watched_item_id}", status_code=303)
         return templates.TemplateResponse(
             request,
             "partials/flash_oob.html",
             {"flash_oob_level": "error", "flash_oob_message": str(exc.detail)},
         )
     if not hx:
-        return fallback
+        return RedirectResponse(url=f"/watched-items/{watched_item_id}", status_code=303)
     return templates.TemplateResponse(
         request,
         "partials/flash_oob.html",
@@ -1284,6 +1283,42 @@ async def watched_item_update_url(
     wi.effective_url = probe_result.effective_url
     wi.domain_name = probe_result.effective_domain or None
     wi.domain_suspended = domain_suspended
+    # Cascade the suspension change to this WatchedItem's child Watches, mirroring
+    # the domain suspend/reactivate cascade so child flags don't drift on a move.
+    if domain_suspended:
+        children = (
+            (
+                await session.execute(
+                    select(Watch).where(
+                        Watch.watched_item_id == wi.id,
+                        Watch.is_active == True,  # noqa: E712
+                        Watch.is_archived == False,  # noqa: E712
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        for child in children:
+            child.is_active = False
+            child.suspended_by_domain = True
+    else:
+        children = (
+            (
+                await session.execute(
+                    select(Watch).where(
+                        Watch.watched_item_id == wi.id,
+                        Watch.suspended_by_domain == True,  # noqa: E712
+                        Watch.is_archived == False,  # noqa: E712
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        for child in children:
+            child.is_active = True
+            child.suspended_by_domain = False
     audit(
         session,
         EventType.WATCHED_ITEM_UPDATED,

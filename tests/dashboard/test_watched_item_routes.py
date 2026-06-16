@@ -840,6 +840,19 @@ class TestPauseResume:
         await db_session.refresh(wi)
         assert wi.is_active is False  # resume was rejected
 
+    async def test_compact_list_row_toggle_rejection_echoes_toggle_id(self, client, db_session):
+        """List-row (compact) guard rejection re-renders with the per-row toggle_id + flash."""
+        wi = await _make_wi(db_session, name="RowSusp", is_active=False, domain_suspended=True)
+        toggle_id = f"wi-status-{wi.id}"
+        resp = await client.post(
+            f"/watched-items/{wi.id}/toggle-active",
+            data={"active": "true", "toggle_id": toggle_id, "compact": "1"},
+            headers={"HX-Request": "true"},
+        )
+        assert resp.status_code == 200
+        assert f'id="{toggle_id}"'.encode() in resp.content
+        assert b"flash-warning" in resp.content
+
     async def test_toggle_unknown_returns_404(self, client):
         from ulid import ULID
 

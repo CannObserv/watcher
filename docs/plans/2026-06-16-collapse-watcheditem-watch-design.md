@@ -88,12 +88,15 @@ truncate rather than backfill — the same posture #160 took.
    Watch-create flow; redirect or remove nav.
 6. **Docs** — rewrite the AGENTS.md "Watches" section around the single entity.
 
-## Out of scope / open questions
+## Resolved decisions
 
-- **Naming.** Keep `WatchedItem`, or rename the merged entity to `Watch`? The
-  user-facing noun is "Watched Item"; a rename touches a lot. Default: keep
-  `WatchedItem`, drop `Watch`.
-- **Multiple schedules per URL.** If ever needed, that's a `TemporalProfile`
-  list on the WatchedItem, not a separate entity — note for the future.
+- **Naming.** Keep `WatchedItem` as the single entity; drop `Watch`.
+- **Temporal profiles.** Exactly **one** temporal profile per WatchedItem (1:1,
+  optional), not a list — `temporal_profiles.watch_id` becomes a unique
+  `watched_item_id`. Multiple independent schedules per URL is explicitly not a
+  goal.
+
+## Out of scope
+
 - The historical procrastinate failure backlog (~8.6k) is a separate
   investigation, not part of this collapse.

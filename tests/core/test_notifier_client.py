@@ -56,7 +56,7 @@ class TestBuildIdempotencyKey:
         key = build_idempotency_key(event, source_id)
         assert key == f"watcher:change_detected:{source_id}:{change_id}"
 
-    def test_non_change_event_uses_watch_id_and_timestamp(self):
+    def test_non_change_event_uses_watched_item_id_and_timestamp(self):
         event = _make_event(WatchEventType.WATCH_CREATED)
         source_id = str(ULID())
 

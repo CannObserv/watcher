@@ -102,7 +102,7 @@ class TestDeleteDomain:
         response = await client.delete("/api/v1/domains/nope.com")
         assert response.status_code == 404
 
-    async def test_delete_domain_with_watches_returns_409(self, client, db_session):
+    async def test_delete_domain_with_watched_items_returns_409(self, client, db_session):
         from src.core.models.domain import Domain
         from src.core.models.watched_item import WatchedItem
         from tests.conftest import make_info_item

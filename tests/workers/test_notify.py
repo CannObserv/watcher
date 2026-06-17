@@ -120,7 +120,7 @@ class TestNoDispatch:
 
 
 class TestGlobalDispatch:
-    async def test_global_template_fires_for_any_watch(self):
+    async def test_global_template_fires_for_any_watched_item(self):
         """Global templates dispatch to all WatchedItems regardless of WatchNcRef."""
         session = _setup_session(global_t=[_fake_template()])
 
@@ -144,7 +144,7 @@ class TestGlobalDispatch:
 
 
 class TestDomainDispatch:
-    async def test_domain_template_fires_for_watch_in_domain(self):
+    async def test_domain_template_fires_for_watched_item_in_domain(self):
         """Domain templates dispatch when the WatchedItem has a matching domain_name."""
         session = _setup_session(domain="example.com", domain_t=[_fake_template()])
 

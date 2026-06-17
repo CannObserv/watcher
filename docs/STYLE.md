@@ -201,9 +201,9 @@ Edit forms that replace a row use `hx-swap="outerHTML"` targeting the `<tr>`:
 <!-- data row -->
 <tr id="row-{id}">…</tr>
 
-<!-- edit button -->
+<!-- edit button (real example: WatchedItem notification-template edit-form) -->
 <button
-  hx-get="/watched-items/{id}/notifications/{nc_id}/edit-form"
+  hx-get="/watched-items/{id}/templates/{tpl_id}/edit"
   hx-target="#row-{id}"
   hx-swap="outerHTML">Edit</button>
 
@@ -494,7 +494,7 @@ hx-on:click="…"             <!-- native click event -->
 
 ```html
 <button
-  hx-get="/watched-items/{id}/notifications/add-row"
+  hx-get="/watched-items/{id}/templates/new"
   hx-target="#tbody"
   hx-swap="afterbegin"
   hx-on::before-request="if(document.getElementById('add-row')){event.preventDefault();}">
@@ -518,7 +518,7 @@ When a form validation error should keep the form visible with an inline error m
 
 ```python
 return templates.TemplateResponse(
-    "partials/notification_add_row.html",
+    "partials/watched_item_template_form.html",
     {"request": request, "watched_item": watched_item, "error": str(exc), ...},
     headers={"HX-Retarget": "#add-row", "HX-Reswap": "outerHTML"},
 )

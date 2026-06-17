@@ -139,7 +139,7 @@ class TestDomainDetail:
         response = await client.get("/domains/noted.com")
         assert b"Important note" in response.content
 
-    async def test_detail_page_shows_watches_section(self, client, db_session):
+    async def test_detail_page_shows_watched_items_section(self, client, db_session):
 
         db_session.add(Domain(name="watched.com"))
         await make_watched_item(
@@ -168,7 +168,7 @@ class TestDomainDetail:
 
 
 class TestDomainWatchedItemsTableDomainInactiveBadge:
-    async def test_suspended_watch_shows_domain_inactive_badge(self, client, db_session):
+    async def test_suspended_watched_item_shows_domain_inactive_badge(self, client, db_session):
         db_session.add(Domain(name="ds-tbl.com", is_active=False))
         await make_watched_item(
             db_session,
@@ -182,7 +182,9 @@ class TestDomainWatchedItemsTableDomainInactiveBadge:
         response = await client.get("/domains/ds-tbl.com")
         assert b"Domain Inactive" in response.content
 
-    async def test_manually_inactive_watch_does_not_show_domain_inactive(self, client, db_session):
+    async def test_manually_inactive_watched_item_does_not_show_domain_inactive(
+        self, client, db_session
+    ):
         db_session.add(Domain(name="mi-tbl.com"))
         await make_watched_item(
             db_session,
@@ -329,7 +331,7 @@ class TestDomainDelete:
         response = await client.post("/domains/no-delete.com/delete")
         assert response.status_code == 409
 
-    async def test_delete_domain_with_watches_returns_409(self, client, db_session):
+    async def test_delete_domain_with_watched_items_returns_409(self, client, db_session):
 
         db_session.add(Domain(name="busy-del.com", archived_at=datetime.now(UTC)))
         await make_watched_item(
@@ -440,7 +442,7 @@ class TestDomainToggleActive:
         await db_session.refresh(wi)
         assert wi.domain_suspended is False
 
-    async def test_toggle_active_does_not_restore_manually_inactive_watches(
+    async def test_toggle_active_does_not_restore_manually_inactive_watched_items(
         self, client, db_session
     ):
         db_session.add(Domain(name="manual.com", is_active=False))
@@ -473,8 +475,8 @@ class TestDomainToggleActive:
         assert b"domain-watches" in response.content
         assert b"hx-swap-oob" in response.content
 
-    async def test_toggle_htmx_response_includes_watches_oob(self, client, db_session):
-        """HTMX toggle response must include OOB swap for watches table."""
+    async def test_toggle_htmx_response_includes_watched_items_oob(self, client, db_session):
+        """HTMX toggle response must include OOB swap for the watched-items table."""
         db_session.add(Domain(name="htmx-oob.com"))
         await make_watched_item(
             db_session,
@@ -493,10 +495,10 @@ class TestDomainToggleActive:
         assert response.status_code == 200
         assert b"domain-watches" in response.content
 
-    async def test_toggle_htmx_deactivate_shows_domain_inactive_in_watches(
+    async def test_toggle_htmx_deactivate_shows_domain_inactive_in_watched_items(
         self, client, db_session
     ):
-        """Watches table in OOB response shows Domain Inactive badge after deactivation."""
+        """Watched-items table in OOB response shows Domain Inactive badge after deactivation."""
         db_session.add(Domain(name="htmx-badge.com"))
         await make_watched_item(
             db_session,

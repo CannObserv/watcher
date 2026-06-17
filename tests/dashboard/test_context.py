@@ -25,7 +25,7 @@ class TestGetDashboardStats:
         assert stats["changes_today"] == 0
         assert stats["checks_today"] == 0
 
-    async def test_counts_watches(self, db_session):
+    async def test_counts_watched_items(self, db_session):
         await make_watched_item(
             db_session, name="W1", primary_url="https://a.com", default_content_type="html"
         )
@@ -76,7 +76,7 @@ class TestGetDomainsWithWatchedItemCounts:
         result = await get_domains_with_watched_item_counts(db_session)
         assert result == []
 
-    async def test_domain_with_watches(self, db_session):
+    async def test_domain_with_watched_items(self, db_session):
         domain = Domain(name="example.com", min_interval=1.0, max_concurrency=2)
         db_session.add(domain)
         await make_watched_item(
@@ -109,7 +109,7 @@ class TestGetDomainsWithWatchedItemCounts:
         assert len(result) == 1
         assert result[0]["watched_item_count"] == 1
 
-    async def test_domain_with_no_watches(self, db_session):
+    async def test_domain_with_no_watched_items(self, db_session):
         domain = Domain(name="orphan.com", min_interval=1.0, max_concurrency=2)
         db_session.add(domain)
         await db_session.flush()
@@ -197,7 +197,7 @@ class TestGetDomainsFiltered:
         result = await get_domains_with_watched_item_counts(db_session)
         assert result[0]["last_checked"] == now
 
-    async def test_last_checked_none_when_no_watches(self, db_session):
+    async def test_last_checked_none_when_no_watched_items(self, db_session):
         db_session.add(Domain(name="orphan.com"))
         await db_session.flush()
         result = await get_domains_with_watched_item_counts(db_session)

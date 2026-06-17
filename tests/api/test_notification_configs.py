@@ -113,7 +113,7 @@ class TestCreateNotificationConfig:
         )
         assert resp.status_code == 422
 
-    async def test_invalid_watch_returns_404(self, client, db_session):
+    async def test_invalid_watched_item_returns_404(self, client, db_session):
         resp = await client.post(
             "/api/v1/watched-items/00000000000000000000000000/notifications",
             json=_create_payload(),
@@ -145,7 +145,7 @@ class TestListNotificationConfigs:
         assert resp.status_code == 200
         assert len(resp.json()) == 2
 
-    async def test_list_excludes_other_watch_configs(self, client, db_session):
+    async def test_list_excludes_other_watched_item_configs(self, client, db_session):
         watch_a = await _make_watched_item_id(db_session)
         watch_b = await _make_watched_item_id(db_session)
         await client.post(
@@ -226,7 +226,7 @@ class TestPatchNotificationConfig:
         )
         assert resp.status_code == 422
 
-    async def test_patch_wrong_watch_returns_404(self, client, db_session):
+    async def test_patch_wrong_watched_item_returns_404(self, client, db_session):
         watch_id = await _make_watched_item_id(db_session)
         create_resp = await client.post(
             f"/api/v1/watched-items/{watch_id}/notifications",
@@ -282,7 +282,7 @@ class TestDeleteNotificationConfig:
         resp = await client.delete(f"/api/v1/watched-items/{watch_id}/notifications/{config_id}")
         assert resp.status_code == 204
 
-    async def test_delete_wrong_watch_returns_404(self, client, db_session):
+    async def test_delete_wrong_watched_item_returns_404(self, client, db_session):
         watch_id = await _make_watched_item_id(db_session)
         create_resp = await client.post(
             f"/api/v1/watched-items/{watch_id}/notifications",
@@ -383,7 +383,7 @@ class TestTestNotificationConfig:
         resp = await client.post(f"/api/v1/watched-items/{watch_id}/notifications/{fake_id}/test")
         assert resp.status_code == 404
 
-    async def test_test_returns_404_for_wrong_watch(self, client, db_session):
+    async def test_test_returns_404_for_wrong_watched_item(self, client, db_session):
         from unittest.mock import AsyncMock, patch
 
         watch_id = await _make_watched_item_id(db_session)

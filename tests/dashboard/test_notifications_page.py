@@ -49,14 +49,14 @@ async def test_notification_new_page_link_section_has_change_url_toggle(
     client: AsyncClient,
 ):
     """The Content card's Link section exposes the Change URL toggle. The
-    Watch URL appears unconditionally in the default body — there is no
+    Watched Item URL appears unconditionally in the default body — there is no
     toggle for it, so the section is singular."""
     resp = await client.get("/notifications/new")
     assert resp.status_code == 200
     body = resp.content.decode()
     assert ">Link<" in body
     assert 'name="content_config__include_change_dashboard_url"' in body
-    # No Watch URL toggle — the dashboard link is part of the rich default body.
+    # No Watched Item URL toggle — the dashboard link is part of the rich default body.
     assert 'name="content_config__include_item_url"' not in body
     # Legacy label gone
     assert "Dashboard link (change URL)" not in body
@@ -206,7 +206,7 @@ async def test_delete_succeeds_when_no_refs(client: AsyncClient, db_session):
 
 
 @pytest.mark.integration
-async def test_delete_blocked_when_watch_ref_exists(client: AsyncClient, db_session):
+async def test_delete_blocked_when_watched_item_ref_exists(client: AsyncClient, db_session):
     """DELETE /{id}/delete returns 409 when a WatchNcRef still references the template."""
     wi = await make_watched_item(
         db_session,

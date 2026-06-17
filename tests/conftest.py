@@ -386,15 +386,6 @@ async def make_watched_item(
     return wi
 
 
-# ---------------------------------------------------------------------------
-# Legacy pytest-fixture variants (renamed to avoid name collision with the
-# module-level helpers above). Tests that consume them as fixtures keep
-# working: ``def test_x(default_watch_fixture)``.
-# ---------------------------------------------------------------------------
-# Phase 5 (#156): make_snapshot + default_snapshot_fixture removed.
-# Snapshot table dropped; tests that used them are also removed.
-
-
 @pytest.fixture
 def info_client(db_session, request):
     """Mock ArchiverClient backed by the test DB's ``information.*`` tables.

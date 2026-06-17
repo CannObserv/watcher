@@ -11,7 +11,7 @@ class TestCreateProfile:
     async def test_create_event_profile(self, client, db_session):
         wi = await make_watched_item(
             db_session,
-            name="Profiled Watch",
+            name="Profiled Watched Item",
             primary_url="https://example.com",
         )
 
@@ -36,7 +36,7 @@ class TestCreateProfile:
         assert data["reference_date"] == "2026-04-15"
         assert len(data["rules"]) == 2
 
-    async def test_create_profile_invalid_watch(self, client, db_session):
+    async def test_create_profile_invalid_watched_item(self, client, db_session):
         response = await client.post(
             "/api/v1/watched-items/00000000000000000000000000/profiles",
             json={
@@ -54,7 +54,7 @@ class TestListProfiles:
         """#191: a WatchedItem holds at most one temporal profile."""
         wi = await make_watched_item(
             db_session,
-            name="Single-Profile Watch",
+            name="Single-Profile Watched Item",
             primary_url="https://example.com",
         )
 
@@ -92,7 +92,7 @@ class TestUpdateProfile:
     async def test_update_rules(self, client, db_session):
         wi = await make_watched_item(
             db_session,
-            name="Update Watch",
+            name="Update Watched Item",
             primary_url="https://example.com",
         )
 
@@ -126,7 +126,7 @@ class TestUpdateProfile:
     async def test_update_is_active(self, client, db_session):
         wi = await make_watched_item(
             db_session,
-            name="Deactivate Watch",
+            name="Deactivate Watched Item",
             primary_url="https://example.com",
         )
 
@@ -153,7 +153,7 @@ class TestUpdateProfile:
     async def test_update_post_action(self, client, db_session):
         wi = await make_watched_item(
             db_session,
-            name="Action Watch",
+            name="Action Watched Item",
             primary_url="https://example.com",
         )
 
@@ -180,7 +180,7 @@ class TestUpdateProfile:
     async def test_update_creates_audit_log(self, client, db_session):
         wi = await make_watched_item(
             db_session,
-            name="Audit Watch",
+            name="Audit Watched Item",
             primary_url="https://example.com",
         )
 
@@ -210,7 +210,7 @@ class TestUpdateProfile:
     async def test_update_nonexistent_profile(self, client, db_session):
         wi = await make_watched_item(
             db_session,
-            name="Missing Watch",
+            name="Missing Watched Item",
             primary_url="https://example.com",
         )
 
@@ -226,7 +226,7 @@ class TestUpdateProfile:
     async def test_update_empty_body(self, client, db_session):
         wi = await make_watched_item(
             db_session,
-            name="Empty Watch",
+            name="Empty Watched Item",
             primary_url="https://example.com",
         )
 
@@ -256,7 +256,7 @@ class TestUpdateProfile:
     async def test_update_multiple_fields(self, client, db_session):
         wi = await make_watched_item(
             db_session,
-            name="Multi Watch",
+            name="Multi Watched Item",
             primary_url="https://example.com",
         )
 
@@ -300,7 +300,7 @@ class TestDeleteProfile:
     async def test_delete_profile(self, client, db_session):
         wi = await make_watched_item(
             db_session,
-            name="Delete Profile Watch",
+            name="Delete Profile Watched Item",
             primary_url="https://example.com",
         )
 

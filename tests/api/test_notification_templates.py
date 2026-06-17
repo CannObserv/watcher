@@ -119,8 +119,8 @@ async def test_patch_template_updates_events(client: AsyncClient):
 
 
 @pytest.mark.integration
-async def test_unassign_template_from_watch(client: AsyncClient, db_session):
-    """DELETE /{template_id}/assign/{watch_id} removes the ref."""
+async def test_unassign_template_from_watched_item(client: AsyncClient, db_session):
+    """DELETE /{template_id}/assign/{watched_item_id} removes the ref."""
     wi = await make_watched_item(
         db_session,
         name="Unassign W",
@@ -151,7 +151,7 @@ async def test_unassign_template_from_watch(client: AsyncClient, db_session):
 
 @pytest.mark.integration
 async def test_delete_template_blocked_when_refs_exist(client: AsyncClient, db_session):
-    """Cannot delete a template that is referenced by a watch."""
+    """Cannot delete a template that is referenced by a watched item."""
     wi = await make_watched_item(
         db_session,
         name="W",

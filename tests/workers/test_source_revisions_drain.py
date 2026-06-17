@@ -135,6 +135,64 @@ async def test_drain_back_populates_revision_id_as_ulid(db_session, monkeypatch)
     assert isinstance(rev.archiver_revision_id, ULID)
     assert str(rev.archiver_revision_id) == canonical_id
 
+    # And it survives a DB round-trip as a ULID (not just in memory).
+    await db_session.refresh(rev)
+    assert isinstance(rev.archiver_revision_id, ULID)
+    assert str(rev.archiver_revision_id) == canonical_id
+
+
+@pytest.mark.asyncio
+async def test_drain_isolates_malformed_archiver_id_to_one_row(db_session, monkeypatch):
+    """A malformed server source_revision_id fails only its row; the batch continues.
+
+    Guards against the parse aborting the whole drain run and stalling every
+    other due row (CR round-2 finding #6).
+    """
+    _, rev_bad, pending_bad = await _setup_pending_row(db_session)
+    _, rev_good, pending_good = await _setup_pending_row(db_session)
+
+    good_id = str(generate_ulid())
+
+    def _fake_post(**kwargs):
+        if kwargs["source_revision_id"] == str(rev_bad.id):
+            return MagicMock(source_revision_id="not-a-ulid")
+        return MagicMock(source_revision_id=good_id)
+
+    fake_client = MagicMock()
+    fake_client.post_source_revision = AsyncMock(side_effect=_fake_post)
+
+    from src.workers import source_revisions_drain as mod
+
+    monkeypatch.setattr(
+        mod, "get_session_factory", lambda: _async_session_factory_returning(db_session)
+    )
+    monkeypatch.setattr(mod, "_get_archiver_client", lambda: fake_client)
+
+    result = await drain_pending_archiver_sync(batch_size=10)
+    assert result["drained"] == 1
+    assert result["failed"] == 1
+
+    # Good row drained: revision back-populated, pending deleted.
+    await db_session.refresh(rev_good)
+    assert str(rev_good.archiver_revision_id) == good_id
+    good_remaining = (
+        await db_session.execute(
+            select(PendingArchiverSync).where(PendingArchiverSync.id == pending_good.id)
+        )
+    ).scalar_one_or_none()
+    assert good_remaining is None
+
+    # Bad row isolated: revision untouched, pending retained with a failure.
+    await db_session.refresh(rev_bad)
+    assert rev_bad.archiver_revision_id is None
+    bad_remaining = (
+        await db_session.execute(
+            select(PendingArchiverSync).where(PendingArchiverSync.id == pending_bad.id)
+        )
+    ).scalar_one()
+    assert bad_remaining.attempts == 1
+    assert bad_remaining.last_error
+
 
 @pytest.mark.asyncio
 async def test_drain_marks_failure_on_archiver_error(db_session, monkeypatch):

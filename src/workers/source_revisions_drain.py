@@ -76,7 +76,24 @@ async def drain_pending_archiver_sync(*, batch_size: int = 100, **periodic_kwarg
             # Archiver may mint an id differing from the client-supplied one
             # (idempotency on (source, fingerprint)); store the server's. Coerce
             # to ULID to match the Mapped[ULID] column the sweeper keys on (#194).
-            rev.archiver_revision_id = ULID.from_str(out.source_revision_id)
+            # A malformed id is a server-contract violation — isolate it to this
+            # row via the failure path rather than aborting the whole batch.
+            try:
+                archiver_revision_id = ULID.from_str(out.source_revision_id)
+            except ValueError as e:
+                await mark_failure(session, row, error=f"malformed source_revision_id: {e}")
+                failed += 1
+                logger.warning(
+                    "drain: malformed archiver source_revision_id",
+                    extra={
+                        "id": str(row.id),
+                        "source_revision_id": str(out.source_revision_id),
+                        "error": str(e),
+                    },
+                )
+                continue
+
+            rev.archiver_revision_id = archiver_revision_id
             await delete_pending(session, row.id)
             drained += 1
 

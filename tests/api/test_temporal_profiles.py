@@ -13,7 +13,6 @@ class TestCreateProfile:
             db_session,
             name="Profiled Watch",
             primary_url="https://example.com",
-            default_content_type="html",
         )
 
         await db_session.commit()
@@ -57,7 +56,6 @@ class TestListProfiles:
             db_session,
             name="Single-Profile Watch",
             primary_url="https://example.com",
-            default_content_type="html",
         )
 
         await db_session.commit()
@@ -96,7 +94,6 @@ class TestUpdateProfile:
             db_session,
             name="Update Watch",
             primary_url="https://example.com",
-            default_content_type="html",
         )
 
         await db_session.commit()
@@ -131,7 +128,6 @@ class TestUpdateProfile:
             db_session,
             name="Deactivate Watch",
             primary_url="https://example.com",
-            default_content_type="html",
         )
 
         await db_session.commit()
@@ -159,7 +155,6 @@ class TestUpdateProfile:
             db_session,
             name="Action Watch",
             primary_url="https://example.com",
-            default_content_type="html",
         )
 
         await db_session.commit()
@@ -187,7 +182,6 @@ class TestUpdateProfile:
             db_session,
             name="Audit Watch",
             primary_url="https://example.com",
-            default_content_type="html",
         )
 
         await db_session.commit()
@@ -218,7 +212,6 @@ class TestUpdateProfile:
             db_session,
             name="Missing Watch",
             primary_url="https://example.com",
-            default_content_type="html",
         )
 
         await db_session.commit()
@@ -235,7 +228,6 @@ class TestUpdateProfile:
             db_session,
             name="Empty Watch",
             primary_url="https://example.com",
-            default_content_type="html",
         )
 
         await db_session.commit()
@@ -266,7 +258,6 @@ class TestUpdateProfile:
             db_session,
             name="Multi Watch",
             primary_url="https://example.com",
-            default_content_type="html",
         )
 
         await db_session.commit()
@@ -311,7 +302,6 @@ class TestDeleteProfile:
             db_session,
             name="Delete Profile Watch",
             primary_url="https://example.com",
-            default_content_type="html",
         )
 
         await db_session.commit()

@@ -93,13 +93,13 @@ class TestGetDomainsWithWatchedItemCounts:
         assert result[0]["watched_item_count"] == 1
         assert result[0]["in_backoff"] is False
 
-    async def test_multiple_watches_per_watched_item_counts_as_one(self, db_session):
-        """One WatchedItem with two Watches must report watched_item_count=1, not 2."""
+    async def test_single_watched_item_on_domain_counts_as_one(self, db_session):
+        """A domain with one WatchedItem reports watched_item_count=1."""
         domain = Domain(name="multi.com", min_interval=1.0, max_concurrency=2)
         db_session.add(domain)
         await make_watched_item(
             db_session,
-            name="Watch A",
+            name="Item A",
             primary_url="https://multi.com",
             default_content_type=ContentType.HTML,
             domain_name="multi.com",

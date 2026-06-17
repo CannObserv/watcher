@@ -880,20 +880,6 @@ class TestCheckNow:
 
         assert response.status_code == 202
 
-    async def test_202_when_all_watches_archived(self, client, db_session):
-        """#187: archived-only Watch subscriptions must not block check-now."""
-        from unittest.mock import AsyncMock, patch
-
-        wi = await _make_watched_item(db_session, name="AllArchivedWatches")
-        wi.effective_url = "https://example.com"
-        await db_session.commit()
-
-        with patch("src.api.routes.watched_items.check_watched_item") as mock_task:
-            mock_task.configure.return_value.defer_async = AsyncMock()
-            response = await client.post(f"/api/v1/watched-items/{wi.id}/check-now")
-
-        assert response.status_code == 202
-
     async def test_202_emits_audit_log(self, client, db_session):
         """#3 fix: check-now must write a WATCHED_ITEM_CHECK_REQUESTED audit entry."""
         from unittest.mock import AsyncMock, patch

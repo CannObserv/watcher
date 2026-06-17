@@ -1,8 +1,8 @@
 """Tests for `check_watched_item` and `schedule_tick` (Task 8, #160).
 
 The per-Watch `check_watch` is gone; `check_watched_item` is the new periodic
-task.  `schedule_tick` now enqueues per-WatchedItem jobs, aggregating
-`last_checked_at` across the WatchedItem's child Watches.
+task.  `schedule_tick` enqueues one job per WatchedItem, keyed on the
+WatchedItem's own `last_checked_at`.
 """
 
 from contextlib import asynccontextmanager
@@ -169,8 +169,8 @@ class TestCheckWatchedItem:
         assert watched_item.last_checked_at is not None
         assert watched_item.last_checked_at >= before
 
-    async def test_noop_when_no_active_children(self, db_session, monkeypatch):
-        """A WatchedItem with no active child Watches skips fetcher + pipeline."""
+    async def test_noop_when_watched_item_inactive(self, db_session, monkeypatch):
+        """An inactive WatchedItem skips fetcher + pipeline."""
         watched_item = await make_watched_item(db_session, name="Inactive", is_active=False)
         await db_session.commit()
 
@@ -191,14 +191,14 @@ class TestCheckWatchedItem:
         fetch_mock.assert_not_called()
         proc_mock.assert_not_called()
 
-    async def test_skips_paused_watched_item_with_active_children(self, db_session, monkeypatch):
-        """#188 CR-2: a paused (is_active=False, NOT archived) WatchedItem with an
-        active child Watch is skipped before fetch/pipeline.
+    async def test_skips_paused_watched_item(self, db_session, monkeypatch):
+        """#188 CR-2: a paused (is_active=False, NOT archived) WatchedItem is
+        skipped before fetch/pipeline.
 
         Pre-#188 this state was unreachable (the only path to is_active=False was
-        archive, which cascades children to archived). Now pause/resume makes it a
-        normal state, so the task's `not is_active` guard must be exercised."""
-        watched_item = await make_watched_item(db_session, name="ActiveChild", is_active=True)
+        archive). Now pause/resume makes it a normal state, so the task's
+        `not is_active` guard must be exercised."""
+        watched_item = await make_watched_item(db_session, name="Paused", is_active=True)
         watched_item.is_active = False
         watched_item.effective_url = "https://example.com/page"
         await db_session.commit()
@@ -262,7 +262,7 @@ class TestCheckWatchedItem:
         assert snapshot[0].payload.get("changed") is True
 
     async def test_fetch_failure_logs_audit_and_sets_health(self, db_session, monkeypatch):
-        """A non-success HTTP response audits CHECK_FETCH_FAILED and marks Watches ERROR."""
+        """A non-success HTTP response audits CHECK_FETCH_FAILED and marks the WatchedItem ERROR."""
         watched_item = await make_watched_item(db_session, name="Fails")
         watched_item.effective_url = "https://example.com/page"
         await db_session.commit()
@@ -451,7 +451,7 @@ class TestScheduleTickAggregation:
 class TestScheduleTickInactiveDomain:
     """schedule_tick excludes WatchedItems whose primary domain is inactive."""
 
-    async def test_skips_when_all_children_on_inactive_domain(self, db_session, monkeypatch):
+    async def test_skips_when_watched_item_on_inactive_domain(self, db_session, monkeypatch):
         now = datetime(2026, 5, 17, 12, 0, 0, tzinfo=UTC)
         domain = Domain(name="paused.com", is_active=False)
         db_session.add(domain)
@@ -483,15 +483,15 @@ class TestScheduleTickInactiveDomain:
 
 
 # ---------------------------------------------------------------------------
-# Post-actions: reduce_frequency now mutates the parent WatchedItem.
+# Post-actions: reduce_frequency mutates the WatchedItem's default schedule.
 # ---------------------------------------------------------------------------
 
 
 class TestPostActions:
-    """reduce_frequency must mutate the parent WatchedItem so sibling Watches feel it."""
+    """reduce_frequency must mutate the WatchedItem's default schedule."""
 
     async def test_reduce_frequency_mutates_watched_item_default(self, db_session, monkeypatch):
-        """post_action=reduce_frequency on one Watch slows all siblings via WatchedItem."""
+        """post_action=reduce_frequency slows the WatchedItem's default schedule."""
         now = datetime(2026, 5, 17, 12, 0, 0, tzinfo=UTC)
 
         # WatchedItem starts at 1h interval.
@@ -530,7 +530,7 @@ class TestPostActions:
         # The WatchedItem now resolves to the 1d interval.
         assert resolved_schedule_config(wi).get("interval") == "1d"
 
-        # Audit log: WATCHED_ITEM_THROTTLED for the parent.
+        # Audit log: WATCHED_ITEM_THROTTLED for the WatchedItem.
         audit_rows = (
             (
                 await db_session.execute(
@@ -543,8 +543,8 @@ class TestPostActions:
         assert len(audit_rows) == 1
         assert audit_rows[0].payload["new_interval"] == "1d"
 
-    async def test_deactivate_post_action_deactivates_watch(self, db_session, monkeypatch):
-        """deactivate still flips the triggering Watch is_active off."""
+    async def test_deactivate_post_action_deactivates_watched_item(self, db_session, monkeypatch):
+        """deactivate flips the WatchedItem is_active off."""
         now = datetime(2026, 5, 17, 12, 0, 0, tzinfo=UTC)
         wi = await make_watched_item(db_session, name="Will Deactivate")
         wi.default_schedule_config = {"interval": "1d"}

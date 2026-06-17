@@ -8,6 +8,7 @@ import httpx
 import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from ulid import ULID
 
 from src.core.models.base import generate_ulid
 from src.core.models.change_revision import ChangeRevision
@@ -103,6 +104,36 @@ async def test_drain_success_back_populates_revision_id(db_session, monkeypatch)
         )
     ).scalar_one_or_none()
     assert remaining is None
+
+
+@pytest.mark.asyncio
+async def test_drain_back_populates_revision_id_as_ulid(db_session, monkeypatch):
+    """Back-populated archiver_revision_id is a ULID, matching the column type.
+
+    The sweeper's cache-clear keys on this attribute (#194); a raw str would
+    diverge from the Mapped[ULID] declaration and the round-trip the sweeper
+    relies on.
+    """
+    _, rev, _ = await _setup_pending_row(db_session)
+
+    canonical_id = str(generate_ulid())
+    fake_client = MagicMock()
+    fake_client.post_source_revision = AsyncMock(
+        return_value=MagicMock(source_revision_id=canonical_id)
+    )
+
+    from src.workers import source_revisions_drain as mod
+
+    monkeypatch.setattr(
+        mod, "get_session_factory", lambda: _async_session_factory_returning(db_session)
+    )
+    monkeypatch.setattr(mod, "_get_archiver_client", lambda: fake_client)
+
+    await drain_pending_archiver_sync(batch_size=10)
+
+    # In-memory attribute is a ULID (the column type), not a raw str.
+    assert isinstance(rev.archiver_revision_id, ULID)
+    assert str(rev.archiver_revision_id) == canonical_id
 
 
 @pytest.mark.asyncio

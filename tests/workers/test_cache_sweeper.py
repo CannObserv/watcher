@@ -215,6 +215,50 @@ async def test_sweeper_skips_files_in_pending_archiver_sync(tmp_path, monkeypatc
 
 
 @pytest.mark.asyncio
+async def test_sweeper_skips_reserved_file_even_when_synced(tmp_path, monkeypatch, db_session):
+    """Reserved wins: a pending row short-circuits before the synced PATCH path.
+
+    Guards the loop's precedence — `reserved` is checked before `archiver_ids`,
+    so a file owned by an in-flight drain is left intact with no PATCH even if
+    its ChangeRevision already carries an archiver_revision_id.
+    """
+    from src.workers import cache_sweeper as mod
+    from src.workers.cache_sweeper import sweep_scratch_cache
+
+    monkeypatch.setenv("WATCHER_CACHE_DIR", str(tmp_path))
+    monkeypatch.setenv("WATCHER_CACHE_TTL_SECONDS", "60")
+
+    fake_client = MagicMock()
+    fake_client.patch_source_revision_cache = AsyncMock()
+    _patch_workers(monkeypatch, mod, db_session, fake_client)
+
+    rev_ulid = "01JZZZZZZZZZZZZZZZZZZZZ008"
+    archiver_ulid = "01JZZZZZZZZZZZZZZZZZZZZ009"
+    f = tmp_path / f"{rev_ulid}.bin"
+    f.write_bytes(b"reserved-and-synced")
+    mtime = (datetime.now(UTC) - timedelta(seconds=120)).timestamp()
+    os.utime(f, (mtime, mtime))
+
+    now = datetime.now(UTC)
+    wi, rev = await _make_change_revision(db_session, rev_ulid, archiver_revision_id=archiver_ulid)
+    row = PendingArchiverSync(
+        change_revision_id=rev.id,
+        watched_item_id=wi.id,
+        content_cache_uri=f"file://{f}",
+        content_cache_expires_at=now + timedelta(seconds=600),
+        next_attempt_at=now,
+    )
+    db_session.add(row)
+    await db_session.commit()
+
+    result = await sweep_scratch_cache()
+    assert result["deleted"] == 0
+    assert result["skipped"] == 1
+    assert f.exists()
+    fake_client.patch_source_revision_cache.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_sweeper_returns_zeros_when_cache_dir_absent(tmp_path, monkeypatch, db_session):
     """Non-existent cache dir → no-op with zero counts."""
     from src.workers import cache_sweeper as mod

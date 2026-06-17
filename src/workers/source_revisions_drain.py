@@ -1,5 +1,7 @@
 """Periodic Procrastinate task draining pending_archiver_sync to Archiver."""
 
+from ulid import ULID
+
 from src.core.database import get_session_factory
 from src.core.logging import get_logger
 from src.core.models.change_revision import ChangeRevision
@@ -71,7 +73,10 @@ async def drain_pending_archiver_sync(*, batch_size: int = 100, **periodic_kwarg
                 )
                 continue
 
-            rev.archiver_revision_id = str(out.source_revision_id)
+            # Archiver may mint an id differing from the client-supplied one
+            # (idempotency on (source, fingerprint)); store the server's. Coerce
+            # to ULID to match the Mapped[ULID] column the sweeper keys on (#194).
+            rev.archiver_revision_id = ULID.from_str(out.source_revision_id)
             await delete_pending(session, row.id)
             drained += 1
 

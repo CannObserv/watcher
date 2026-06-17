@@ -93,7 +93,9 @@ class TestAuditPayloadIndex:
         )
         indexdef = result.scalar_one_or_none()
         assert indexdef is not None, "expression index on payload->>'watched_item_id' missing"
-        # Indexes the JSONB text-extraction the queries filter on, then created_at
-        # for the order-by every caller applies.
-        assert "watched_item_id" in indexdef
+        # Assert the indexed *expression*, not just the substring (the index name
+        # itself contains "watched_item_id", so a bare membership check is
+        # tautological and would pass on a wrong key). Then created_at for the
+        # order-by every caller applies.
+        assert "payload ->> 'watched_item_id'" in indexdef
         assert "created_at" in indexdef

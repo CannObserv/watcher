@@ -235,6 +235,44 @@ class TestProcessWatchedItem:
         assert len(syncs) == 1
         assert syncs[0].content_cache_uri.startswith("file://")
 
+    async def test_no_scratch_written_when_archiver_info_source_id_not_set(
+        self, db_session, tmp_path, monkeypatch
+    ):
+        """#194: scratch file is pure churn for un-synced items — don't write it."""
+        monkeypatch.setenv("WATCHER_CACHE_DIR", str(tmp_path))
+
+        wi = await make_watched_item(db_session, name="NoScratch")
+        wi.effective_url = "https://example.com"
+        wi.source_specs = [{"schema_version": 1, "extraction": {"algorithm": "full_page"}}]
+        assert wi.archiver_info_source_id is None
+        await db_session.flush()
+
+        await process_watched_item(db_session, wi, raw_content=_HTML)
+        await db_session.flush()
+        await process_watched_item(db_session, wi, raw_content=_HTML_CHANGED)
+        await db_session.flush()
+
+        assert list(tmp_path.glob("*.bin")) == []
+
+    async def test_scratch_written_when_archiver_id_set(self, db_session, tmp_path, monkeypatch):
+        """Synced items still get a scratch file (consumed by the drain worker)."""
+        from src.core.models.base import generate_ulid
+
+        monkeypatch.setenv("WATCHER_CACHE_DIR", str(tmp_path))
+
+        wi = await make_watched_item(db_session, name="WithScratch")
+        wi.effective_url = "https://example.com"
+        wi.source_specs = [{"schema_version": 1, "extraction": {"algorithm": "full_page"}}]
+        wi.archiver_info_source_id = str(generate_ulid())
+        await db_session.flush()
+
+        await process_watched_item(db_session, wi, raw_content=_HTML)
+        await db_session.flush()
+        await process_watched_item(db_session, wi, raw_content=_HTML_CHANGED)
+        await db_session.flush()
+
+        assert len(list(tmp_path.glob("*.bin"))) == 1
+
     async def test_dispatches_once_per_watched_item(self, db_session):
         """#191: CHANGE_DETECTED fires exactly once for the WatchedItem (the entity)."""
         wi = await make_watched_item(db_session, name="Item1")

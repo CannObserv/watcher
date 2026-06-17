@@ -211,12 +211,15 @@ async def process_watched_item(
     session.add(rev)
     await session.flush()  # populate rev.id before scratch write
 
-    scratch_path = write_scratch_bytes(str(rev.id), outcome.content_bytes)
-    expires_at = now + timedelta(seconds=WATCHER_CACHE_TTL_SECONDS)
-    cache_uri = f"file://{scratch_path}"
-
+    # Scratch bytes exist only to feed the Archiver sync (drain worker reads
+    # them via content_cache_uri). For un-synced items they are pure local
+    # churn — and an orphaned scratch with no pending row, which the sweeper
+    # would otherwise 404 on (#194). Gate the write on the same condition.
     archiver_sync_enqueued = False
     if watched_item.archiver_info_source_id:
+        scratch_path = write_scratch_bytes(str(rev.id), outcome.content_bytes)
+        expires_at = now + timedelta(seconds=WATCHER_CACHE_TTL_SECONDS)
+        cache_uri = f"file://{scratch_path}"
         session.add(
             PendingArchiverSync(
                 change_revision_id=rev.id,

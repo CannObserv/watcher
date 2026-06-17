@@ -10,6 +10,7 @@ from ulid import ULID
 
 from src.core.database import get_session_factory
 from src.core.logging import get_logger
+from src.core.models.change_revision import ChangeRevision
 from src.core.models.pending_archiver_sync import PendingArchiverSync
 from src.core.registry import get_registry
 from src.workers import bp
@@ -36,11 +37,14 @@ async def sweep_scratch_cache(**periodic_kwargs) -> dict:
 
     Candidates are files whose names match ``<ULID>.bin``. Files whose ULID
     appears as a ``change_revision_id`` in ``pending_archiver_sync`` are
-    skipped — those rows own the scratch file and the drain worker will remove
-    it upon success.
+    skipped — those rows own the scratch file and the drain worker drops the
+    row on a successful POST, after which the file becomes a sweep candidate.
 
-    After deletion, sends a best-effort PATCH to Archiver to clear the cache
-    URI so Archiver knows the file is gone.
+    After deletion, a best-effort cache-clear PATCH is sent to Archiver **only**
+    for revisions Archiver actually received — those whose ``ChangeRevision``
+    has a non-null ``archiver_revision_id`` — and is keyed on that ID (the one
+    Archiver assigned), not the scratch filename. Orphaned or un-synced scratch
+    files are deleted locally with no Archiver call (#194).
 
     Returns:
         dict with keys ``deleted``, ``skipped``, ``patch_failures``.
@@ -75,6 +79,17 @@ async def sweep_scratch_cache(**periodic_kwargs) -> dict:
         )
         reserved = {str(rid) for (rid,) in result.all()}
 
+        # Scratch filename (== ChangeRevision.id) → archiver_revision_id, only
+        # for revisions Archiver received. Absent here ⟺ orphaned/un-synced:
+        # delete locally, no PATCH (#194).
+        rev_result = await session.execute(
+            select(ChangeRevision.id, ChangeRevision.archiver_revision_id).where(
+                ChangeRevision.id.in_(candidate_ulids),
+                ChangeRevision.archiver_revision_id.isnot(None),
+            )
+        )
+        archiver_ids = {str(rid): str(arid) for rid, arid in rev_result.all()}
+
     deleted = 0
     skipped = 0
     patch_failures = 0
@@ -92,9 +107,12 @@ async def sweep_scratch_cache(**periodic_kwargs) -> dict:
             )
             continue
         deleted += 1
+        archiver_revision_id = archiver_ids.get(revision_id)
+        if archiver_revision_id is None:
+            continue  # Archiver never received this revision — nothing to clear.
         try:
             await client.patch_source_revision_cache(
-                revision_id,
+                archiver_revision_id,
                 content_cache_uri=None,
                 content_cache_expires_at=None,
             )
@@ -102,7 +120,7 @@ async def sweep_scratch_cache(**periodic_kwargs) -> dict:
             patch_failures += 1
             logger.warning(
                 "patch cache-clear failed",
-                extra={"revision_id": revision_id, "error": str(e)},
+                extra={"archiver_revision_id": archiver_revision_id, "error": str(e)},
             )
 
     logger.info(

@@ -1,5 +1,6 @@
 """Notification config CRUD API endpoints (remote-channel only).
 
+#191: configs are scoped to a WatchedItem (the single monitored entity).
 After Phase 5 (#137), notification configs are pure remote-channel pointers:
 no Apprise URL is stored or validated here. The notifier service owns the
 actual delivery target.
@@ -13,7 +14,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.api.deps import get_db_session
-from src.api.routes.helpers import get_watch_or_404, parse_ulid
+from src.api.routes.helpers import get_watched_item_or_404, parse_ulid
 from src.api.schemas.notification_config import (
     WatchNotificationConfigCreate,
     WatchNotificationConfigResponse,
@@ -28,19 +29,21 @@ from src.core.notifier_client import get_notifier_client
 
 logger = get_logger(__name__)
 
-router = APIRouter(prefix="/watches/{watch_id}/notifications", tags=["notification-configs"])
+router = APIRouter(
+    prefix="/watched-items/{watched_item_id}/notifications", tags=["notification-configs"]
+)
 
 
 @router.post("", status_code=201, response_model=WatchNotificationConfigResponse)
 async def create_notification_config(
-    watch_id: str,
+    watched_item_id: str,
     data: WatchNotificationConfigCreate,
     session: AsyncSession = Depends(get_db_session),
 ):
-    """Create a notification config for a watch."""
-    watch = await get_watch_or_404(watch_id, session)
+    """Create a notification config for a WatchedItem."""
+    wi = await get_watched_item_or_404(watched_item_id, session)
     config = WatchNotificationConfig(
-        watch_id=watch.id,
+        watched_item_id=wi.id,
         title=data.title,
         channel_hint=data.channel_hint,
         events=data.events,
@@ -51,7 +54,7 @@ async def create_notification_config(
     audit(
         session,
         EventType.NOTIFICATION_CONFIG_CREATED,
-        watch_id=watch.id,
+        watched_item_id=str(wi.id),
         config_id=str(config.id),
         channel_hint=config.channel_hint,
     )
@@ -62,14 +65,14 @@ async def create_notification_config(
 
 @router.get("", response_model=list[WatchNotificationConfigResponse])
 async def list_notification_configs(
-    watch_id: str,
+    watched_item_id: str,
     session: AsyncSession = Depends(get_db_session),
 ):
-    """List notification configs for a watch."""
-    watch = await get_watch_or_404(watch_id, session)
+    """List notification configs for a WatchedItem."""
+    wi = await get_watched_item_or_404(watched_item_id, session)
     stmt = (
         select(WatchNotificationConfig)
-        .where(WatchNotificationConfig.watch_id == watch.id)
+        .where(WatchNotificationConfig.watched_item_id == wi.id)
         .order_by(WatchNotificationConfig.created_at.desc())
     )
     result = await session.execute(stmt)
@@ -78,15 +81,15 @@ async def list_notification_configs(
 
 @router.patch("/{config_id}", response_model=WatchNotificationConfigResponse)
 async def update_notification_config(
-    watch_id: str,
+    watched_item_id: str,
     config_id: str,
     data: WatchNotificationConfigUpdate,
     session: AsyncSession = Depends(get_db_session),
 ):
     """Update is_active, events, channel_hint, or remote_channel_id on a notification config."""
-    watch = await get_watch_or_404(watch_id, session)
+    wi = await get_watched_item_or_404(watched_item_id, session)
     nc = await session.get(WatchNotificationConfig, parse_ulid(config_id, "Config"))
-    if not nc or nc.watch_id != watch.id:
+    if not nc or nc.watched_item_id != wi.id:
         raise HTTPException(status_code=404, detail="Config not found")
     if data.is_active is not None:
         nc.is_active = data.is_active
@@ -103,7 +106,7 @@ async def update_notification_config(
     audit(
         session,
         EventType.NOTIFICATION_CONFIG_UPDATED,
-        watch_id=watch.id,
+        watched_item_id=str(wi.id),
         config_id=str(nc.id),
     )
     await session.commit()
@@ -113,19 +116,19 @@ async def update_notification_config(
 
 @router.delete("/{config_id}", status_code=204)
 async def delete_notification_config(
-    watch_id: str,
+    watched_item_id: str,
     config_id: str,
     session: AsyncSession = Depends(get_db_session),
 ):
     """Delete a notification config."""
-    watch = await get_watch_or_404(watch_id, session)
+    wi = await get_watched_item_or_404(watched_item_id, session)
     nc = await session.get(WatchNotificationConfig, parse_ulid(config_id, "Config"))
-    if not nc or nc.watch_id != watch.id:
+    if not nc or nc.watched_item_id != wi.id:
         raise HTTPException(status_code=404, detail="Config not found")
     audit(
         session,
         EventType.NOTIFICATION_CONFIG_DELETED,
-        watch_id=watch.id,
+        watched_item_id=str(wi.id),
         config_id=str(nc.id),
     )
     await session.delete(nc)
@@ -134,7 +137,7 @@ async def delete_notification_config(
 
 @router.post("/{config_id}/test")
 async def test_notification_config(
-    watch_id: str,
+    watched_item_id: str,
     config_id: str,
     session: AsyncSession = Depends(get_db_session),
 ):
@@ -142,22 +145,21 @@ async def test_notification_config(
 
     Returns {success, reason}, never 5xx.
     """
-    watch = await get_watch_or_404(watch_id, session)
+    wi = await get_watched_item_or_404(watched_item_id, session)
     nc = await session.get(WatchNotificationConfig, parse_ulid(config_id, "Config"))
-    if not nc or nc.watch_id != watch.id:
+    if not nc or nc.watched_item_id != wi.id:
         raise HTTPException(status_code=404, detail="Config not found")
     success = False
     reason = "Internal error during dispatch"
     try:
-        wi_url = watch.watched_item and watch.watched_item.effective_url
-        resolved_url = wi_url or f"watch:{watch.id}"
+        resolved_url = wi.effective_url or f"watched-item:{wi.id}"
         if not nc.remote_channel_id:
             reason = "no remote_channel_id configured"
         else:
             event = WatchEvent(
                 event_type=WatchEventType.CHANGE_DETECTED,
-                watch_id=str(watch.id),
-                watch_name=watch.name,
+                watch_id=str(wi.id),
+                watch_name=wi.name,
                 watch_url=resolved_url,
                 occurred_at=datetime.now(UTC),
                 metadata={"test": True},
@@ -174,8 +176,8 @@ async def test_notification_config(
                         client,
                         candidate,
                         event,
-                        rendered_title="[Test] Watch notification",
-                        rendered_body=f"Test from watch '{watch.name}'.",
+                        rendered_title="[Test] WatchedItem notification",
+                        rendered_body=f"Test from '{wi.name}'.",
                     )
                 success = outcome.success
                 reason = outcome.reason
@@ -186,7 +188,7 @@ async def test_notification_config(
     audit(
         session,
         EventType.NOTIFICATION_TEST,
-        watch_id=watch.id,
+        watched_item_id=str(wi.id),
         config_id=str(nc.id),
         channel_hint=nc.channel_hint,
         success=success,

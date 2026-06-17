@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ulid import ULID
 
 from src.api.deps import get_db_session
-from src.api.routes.helpers import get_watch_or_404
+from src.api.routes.helpers import get_watched_item_or_404
 from src.api.schemas.notification_template import (
     NotificationTemplateCreate,
     NotificationTemplateResponse,
@@ -173,46 +173,56 @@ async def delete_template(
     await session.commit()
 
 
-@router.post("/{template_id}/assign/{watch_id}", status_code=201)
-async def assign_template_to_watch(
+@router.post("/{template_id}/assign/{watched_item_id}", status_code=201)
+async def assign_template_to_watched_item(
     template_id: str,
-    watch_id: str,
+    watched_item_id: str,
     session: AsyncSession = Depends(get_db_session),
 ) -> dict:
-    """Assign a notification template to a watch (idempotent)."""
+    """Assign a notification template to a WatchedItem (idempotent)."""
     tpl = await _get_template_or_404(template_id, session)
-    watch = await get_watch_or_404(watch_id, session)
+    wi = await get_watched_item_or_404(watched_item_id, session)
     existing = await session.scalar(
         select(WatchNcRef).where(
-            WatchNcRef.watch_id == watch.id,
+            WatchNcRef.watched_item_id == wi.id,
             WatchNcRef.template_id == tpl.id,
         )
     )
     if not existing:
-        session.add(WatchNcRef(watch_id=watch.id, template_id=tpl.id))
-        audit(session, EventType.WATCH_NC_ASSIGNED, watch_id=watch_id, template_id=template_id)
+        session.add(WatchNcRef(watched_item_id=wi.id, template_id=tpl.id))
+        audit(
+            session,
+            EventType.WATCH_NC_ASSIGNED,
+            watched_item_id=watched_item_id,
+            template_id=template_id,
+        )
         await session.commit()
     return {"assigned": True}
 
 
-@router.delete("/{template_id}/assign/{watch_id}", status_code=204)
-async def unassign_template_from_watch(
+@router.delete("/{template_id}/assign/{watched_item_id}", status_code=204)
+async def unassign_template_from_watched_item(
     template_id: str,
-    watch_id: str,
+    watched_item_id: str,
     session: AsyncSession = Depends(get_db_session),
 ) -> None:
-    """Unassign a notification template from a watch."""
-    watch = await get_watch_or_404(watch_id, session)
+    """Unassign a notification template from a WatchedItem."""
+    wi = await get_watched_item_or_404(watched_item_id, session)
     result = await session.execute(
         select(WatchNcRef).where(
-            WatchNcRef.watch_id == watch.id,
+            WatchNcRef.watched_item_id == wi.id,
             WatchNcRef.template_id == template_id,  # type: ignore[arg-type]
         )
     )
     ref = result.scalar_one_or_none()
     if ref:
         await session.delete(ref)
-        audit(session, EventType.WATCH_NC_UNASSIGNED, watch_id=watch_id, template_id=template_id)
+        audit(
+            session,
+            EventType.WATCH_NC_UNASSIGNED,
+            watched_item_id=watched_item_id,
+            template_id=template_id,
+        )
         await session.commit()
 
 

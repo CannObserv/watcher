@@ -4,13 +4,24 @@ Monitors cannabis industry activity: licenses, regulatory filings, compliance ev
 
 ## Architecture
 
-Watcher is **InfoItem-native** as of Phase 2c (issue #138). A `Watch` references an `info_item_id` managed by the sibling **Information service** (`src/information/`, port 8020), which owns the canonical URL + extraction config in a versioned `InfoSpec` document. Watch detection lookups, screenshot captures, and notification events all resolve the URL via the `InformationClient` SDK at request time.
+The **`WatchedItem` is the single monitored entity** (#191): one row = one URL = one
+fingerprint = one change signal. It owns its `effective_url`, `source_specs`, schedule
+(`default_schedule_config` + an optional 1:1 `TemporalProfile`), `domain_name` /
+`domain_suspended`, health/timestamps, and its notification surface. A periodic
+`schedule_tick` enqueues `check_watched_item` for each due item; the pipeline extracts,
+fingerprints, writes a `ChangeRevision`, and dispatches `CHANGE_DETECTED` once per item.
 
-Detected changes flow onto a Redis Stream (`info.changes`, envelope `schema_version: 2`, partitioned by `info_item_id`) for downstream consumers (Archive in Phase 3+). The drain task runs every minute via Procrastinate's `@bp.periodic` decorator.
+Canonical content provenance (InfoItem / InfoSource / SourceRevision) lives in the sibling
+**Archiver service** (`/home/exedev/archiver`, port 8020), consumed via the `archiver-client`
+SDK. `archiver_info_item_id` on a WatchedItem is an optional cross-schema reference; URL-only
+WatchedItems leave it null. SourceRevisions are POSTed to Archiver on every detected change,
+with a local `pending_archiver_sync` outbox + drain worker guaranteeing delivery during
+Archiver outages. Notifications dispatch through the sibling **Notifier service** via the
+`NotifierClient` SDK.
 
-Authoring tools live on the Information service at `/api/v1/tools/*` (Phase 3a) — `validate_info_spec`, `find_info_item`, `fetch_and_render`, `preview_extraction`, `propose_selectors`, plus an atomic `create_info_item` that takes an optional `initial_info_spec`. Smoke: `bash scripts/smoke_phase3a.sh`.
-
-Full design: [docs/plans/2026-05-04-watcher-phase2c-cutover-plan.md](docs/plans/2026-05-04-watcher-phase2c-cutover-plan.md). Operator install (incl. `INFORMATION_API_KEY`): [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).
+Operate WatchedItems at `/api/v1/watched-items` (API) and `/watched-items` (dashboard).
+Full conventions: [AGENTS.md](AGENTS.md). Operator install: [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).
+Collapse design: [docs/plans/2026-06-16-collapse-watcheditem-watch-design.md](docs/plans/2026-06-16-collapse-watcheditem-watch-design.md).
 
 ## Setup
 

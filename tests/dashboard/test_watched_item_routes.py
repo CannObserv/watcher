@@ -190,6 +190,76 @@ class TestDetailPage:
         assert b"Danger Zone" in response.content
         assert b"Archive" in response.content
 
+    async def test_notification_configs_panel_renders_config(self, client, db_session):
+        """#191 CR-4/6: the folded notification-configs panel renders a config's label + badge."""
+        from ulid import ULID
+
+        from src.core.models.notification_config import WatchNotificationConfig
+        from src.core.models.watched_item import WatchedItem
+        from tests.conftest import make_info_item
+
+        item = await make_info_item(db_session)
+        wi = WatchedItem(archiver_info_item_id=item.info_item_id, name="WithConfig")
+        db_session.add(wi)
+        await db_session.flush()
+        db_session.add(
+            WatchNotificationConfig(
+                watched_item_id=wi.id,
+                title="Ops Slack",
+                channel_hint="slack",
+                events=["change_detected"],
+                remote_channel_id=str(ULID()),
+                is_active=True,
+            )
+        )
+        await db_session.commit()
+        response = await client.get(f"/watched-items/{wi.id}")
+        body = response.content
+        assert b"Notification Configs" in body
+        # Label uses title (not a non-existent .name attr) and the active badge renders.
+        assert b"Ops Slack" in body
+        assert b"badge-active" in body
+
+    async def test_temporal_profile_panel_renders(self, client, db_session):
+        """#191 CR-5: the WatchedItem detail surfaces its 1:1 temporal profile."""
+        from datetime import date
+
+        from src.core.models.temporal_profile import PostAction, ProfileType, TemporalProfile
+        from src.core.models.watched_item import WatchedItem
+        from tests.conftest import make_info_item
+
+        item = await make_info_item(db_session)
+        wi = WatchedItem(archiver_info_item_id=item.info_item_id, name="WithProfile")
+        db_session.add(wi)
+        await db_session.flush()
+        db_session.add(
+            TemporalProfile(
+                watched_item_id=wi.id,
+                profile_type=ProfileType.EVENT,
+                reference_date=date(2026, 7, 1),
+                rules=[{"days_before": 7, "interval": "1h"}],
+                post_action=PostAction.REDUCE_FREQUENCY,
+            )
+        )
+        await db_session.commit()
+        response = await client.get(f"/watched-items/{wi.id}")
+        body = response.content
+        assert b"Temporal Profile" in body
+        assert b"2026-07-01" in body
+
+    async def test_temporal_profile_panel_empty_state(self, client, db_session):
+        """No profile → the panel shows the default-interval hint."""
+        from src.core.models.watched_item import WatchedItem
+        from tests.conftest import make_info_item
+
+        item = await make_info_item(db_session)
+        wi = WatchedItem(archiver_info_item_id=item.info_item_id, name="NoProfile")
+        db_session.add(wi)
+        await db_session.flush()
+        await db_session.commit()
+        response = await client.get(f"/watched-items/{wi.id}")
+        assert b"No temporal profile" in response.content
+
     async def test_domain_suspended_banner_renders(self, client, db_session):
         """Domain Inactive alert shows when watched_item.domain_suspended=True."""
         from src.core.models.watched_item import WatchedItem

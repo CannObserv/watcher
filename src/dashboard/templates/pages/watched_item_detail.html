@@ -103,6 +103,26 @@
 </section>
 
 <section class="mb-8">
+  <h3 class="text-lg font-semibold text-gray-900 dark:text-white mb-4">Temporal Profile</h3>
+  <div class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 divide-y divide-gray-200 dark:divide-gray-700">
+    {% if profiles %}
+      {% for profile in profiles %}
+      <div class="p-3 flex items-center justify-between gap-4 text-sm">
+        <span class="text-gray-900 dark:text-gray-100">{{ profile.profile_type }}{% if profile.reference_date %} · {{ profile.reference_date }}{% endif %}</span>
+        {% if profile.is_active %}
+        <span class="badge badge-active">active</span>
+        {% else %}
+        <span class="badge badge-inactive">inactive</span>
+        {% endif %}
+      </div>
+      {% endfor %}
+    {% else %}
+      <p class="p-4 text-sm text-gray-500 dark:text-gray-400">No temporal profile — scheduling uses the default interval. Manage via the API.</p>
+    {% endif %}
+  </div>
+</section>
+
+<section class="mb-8">
   <h3 class="text-lg font-semibold text-gray-900 dark:text-white mb-4">Source Specs</h3>
   <div class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-4">
     <p class="text-xs text-gray-500 dark:text-gray-400 mb-2">Pipeline extraction config (read-only — authored via Archiver tooling).</p>
@@ -155,7 +175,7 @@
     {% if notifications %}
       {% for config in notifications %}
       <div class="p-3 flex items-center justify-between gap-4 text-sm">
-        <span class="text-gray-900 dark:text-gray-100">{{ config.name or config.id }}</span>
+        <span class="text-gray-900 dark:text-gray-100">{{ config.title or config.channel_hint or config.id }}</span>
         {% if config.is_active %}
         <span class="badge badge-active">active</span>
         {% else %}

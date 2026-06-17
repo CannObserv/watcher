@@ -67,6 +67,7 @@ from src.dashboard.context import (
     get_watched_item_detail,
     get_watched_item_list,
     get_watched_item_notifications,
+    get_watched_item_profiles,
     get_watched_item_templates,
     get_watched_items_total_count,
 )
@@ -502,6 +503,7 @@ async def watched_item_detail_page(
 
     wi_templates = await get_watched_item_templates(session, wi.id)
     notifications = await get_watched_item_notifications(session, wi.id)
+    profiles = await get_watched_item_profiles(session, wi.id)
     activity = await get_watched_item_activity(session, watched_item_id)
 
     field_contexts = {
@@ -520,6 +522,7 @@ async def watched_item_detail_page(
             "field_contexts": field_contexts,
             "templates": wi_templates,
             "notifications": notifications,
+            "profiles": profiles,
             "activity": activity,
         },
     )

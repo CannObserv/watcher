@@ -487,6 +487,32 @@ class TestCreateWatchedItem:
         assert response.status_code == 201, response.text
         assert response.json()["archiver_info_source_id"] == src_id
 
+    async def test_url_create_on_inactive_domain_sets_domain_suspended(self, client, db_session):
+        """#191 CR-1: creating on an already-inactive domain marks domain_suspended.
+
+        schedule_tick gates solely on WatchedItem.domain_suspended now (no live
+        Domain join), so the flag must be seeded from the domain's state at create.
+        """
+        from src.core.models.domain import Domain
+
+        db_session.add(Domain(name="inactive-create.example", is_active=False))
+        await db_session.commit()
+        response = await client.post(
+            "/api/v1/watched-items",
+            json={"url": "https://inactive-create.example/page", "name": "On Inactive Domain"},
+        )
+        assert response.status_code == 201, response.text
+        assert response.json()["domain_suspended"] is True
+
+    async def test_url_create_on_active_domain_not_suspended(self, client, db_session):
+        """Items created on a healthy (or fresh) domain are not domain-suspended."""
+        response = await client.post(
+            "/api/v1/watched-items",
+            json={"url": "https://active-create.example/page", "name": "On Active Domain"},
+        )
+        assert response.status_code == 201, response.text
+        assert response.json()["domain_suspended"] is False
+
     async def test_create_stores_archiver_info_source_id(self, client, db_session, info_client):
         """archiver_info_source_id is persisted when supplied on create."""
         item = await make_info_item(db_session, name="SrcId")

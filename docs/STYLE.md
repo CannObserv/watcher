@@ -137,7 +137,7 @@ All component classes defined in `@layer components` in `src/dashboard/static/cs
 ### Navigation
 
 ```html
-<a href="/watches" class="nav-link nav-link-active">Watches</a>
+<a href="/watched-items" class="nav-link nav-link-active">Watched Items</a>
 ```
 
 `.nav-link-active` adds purple background/text tinting.
@@ -203,7 +203,7 @@ Edit forms that replace a row use `hx-swap="outerHTML"` targeting the `<tr>`:
 
 <!-- edit button -->
 <button
-  hx-get="/watches/{id}/notifications/{nc_id}/edit-form"
+  hx-get="/watched-items/{id}/notifications/{nc_id}/edit-form"
   hx-target="#row-{id}"
   hx-swap="outerHTML">Edit</button>
 
@@ -299,9 +299,9 @@ Used in: audit log.
 
 | Class | Color scheme | Semantic use |
 |---|---|---|
-| `.badge-active` | Green | Watch/domain is actively monitored |
-| `.badge-inactive` | Gray | Watch/domain exists but is paused |
-| `.badge-archived` | Amber | Watch is archived (soft-deleted, restorable) |
+| `.badge-active` | Green | Watched item/domain is actively monitored |
+| `.badge-inactive` | Gray | Watched item/domain exists but is paused |
+| `.badge-archived` | Amber | Watched item is archived (soft-deleted, restorable) |
 | `.badge-error` | Red | Processing error state |
 | `.badge-warning` | Orange | Non-blocking warning |
 | `.badge-info` | Blue | Informational |
@@ -311,7 +311,7 @@ Used in: audit log.
 ```html
 <div class="flash flash-success flex items-center justify-between mb-4"
      data-auto-dismiss role="alert">
-  <span>Watch created.</span>
+  <span>Watched item created.</span>
   <button type="button" class="ms-4 text-current opacity-60 hover:opacity-100"
           aria-label="Dismiss" onclick="this.parentElement.remove()">
     <span aria-hidden="true">&times;</span>
@@ -336,14 +336,14 @@ The `.danger-zone` component provides a row with label+description on the left a
 ```html
 <div class="danger-zone">
   <div>
-    <div class="danger-zone__label">Archive this watch</div>
+    <div class="danger-zone__label">Archive this watched item</div>
     <div class="danger-zone__desc">Deactivates and marks as archived. Can be restored.</div>
   </div>
   <button class="btn btn-danger-outline">Archive</button>
 </div>
 ```
 
-**Archive → Delete workflow:** The watch detail page wraps one or more `.danger-zone` rows in a `<section>` with a red `<h3>`. The API enforces archive-before-delete: `DELETE /watches/{id}` returns `409` if `is_archived` is false. UI progression: Archive button (`btn-danger-outline`) appears first; once archived, Restore (`btn-secondary`) and Delete permanently (`btn-danger`) appear together.
+**Archive / Restore workflow:** The watched-item detail page wraps the `.danger-zone` row in a `<section>` with a red `<h3>`. Archive (`btn-danger-outline`) sets `archived_at` and flips `is_active=False`; once archived, Restore (`btn-secondary`) clears the flag and re-activates. (There is no hard-delete UI — the single-entity WatchedItem uses archive/restore only, #191.)
 
 ### Detail grid
 
@@ -364,7 +364,7 @@ Boolean toggle that auto-saves on change (no Edit/Save step).
 <label class="toggle">
   <input type="hidden" name="value" value="false">
   <input type="checkbox" name="value" value="true" checked
-    hx-post="/watches/{id}/field/{field}"
+    hx-post="/watched-items/{id}/field/{field}"
     hx-target="#field-{field}"
     hx-swap="outerHTML"
     hx-include="closest form">
@@ -418,9 +418,9 @@ Two-column grid `[label+hint(1fr) | buttons(auto)]` on the header row; textarea/
 Buttons use `self-start pt-0.5` to align with the top of the label+hint stack.
 
 **Route conventions:**
-- `GET /watches/{id}/field/{name}` — returns field partial in view mode (cancel).
-- `GET /watches/{id}/field/{name}?mode=edit` — returns field partial in edit mode.
-- `POST /watches/{id}/field/{name}` — saves and returns field partial in view mode.
+- `GET /watched-items/{id}/field/{name}` — returns field partial in view mode (cancel).
+- `GET /watched-items/{id}/field/{name}?mode=edit` — returns field partial in edit mode.
+- `POST /watched-items/{id}/field/{name}` — saves and returns field partial in view mode.
 
 ### Form controls
 
@@ -448,7 +448,7 @@ Buttons use `self-start pt-0.5` to align with the top of the label+hint stack.
 ### Links
 
 ```html
-<a href="/watches/1" class="link">View details</a>
+<a href="/watched-items/1" class="link">View details</a>
 ```
 
 Purple with underline on hover.
@@ -494,7 +494,7 @@ hx-on:click="…"             <!-- native click event -->
 
 ```html
 <button
-  hx-get="/watches/{id}/notifications/add-row"
+  hx-get="/watched-items/{id}/notifications/add-row"
   hx-target="#tbody"
   hx-swap="afterbegin"
   hx-on::before-request="if(document.getElementById('add-row')){event.preventDefault();}">
@@ -519,7 +519,7 @@ When a form validation error should keep the form visible with an inline error m
 ```python
 return templates.TemplateResponse(
     "partials/notification_add_row.html",
-    {"request": request, "watch": watch, "error": str(exc), ...},
+    {"request": request, "watched_item": watched_item, "error": str(exc), ...},
     headers={"HX-Retarget": "#add-row", "HX-Reswap": "outerHTML"},
 )
 ```
@@ -554,7 +554,7 @@ Use this pattern instead of OOB flash for validation errors that are specific to
 - **Decorative emoji**: Wrapped in `<span aria-hidden="true">`.
 - **Focus rings**: `focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-co-purple-600` (light) / `dark:focus-visible:outline-co-purple-400` (dark). Applied on `.btn`, `.form-input`, `.skip-link`.
 - **Icon-only buttons**: Must have `aria-label` (e.g., theme toggle, hamburger, close, dismiss).
-- **Contextual action buttons**: Table row action buttons include `aria-label` with the entity name for screen reader context (e.g., `aria-label="Deactivate {{ watch.name }}"`).
+- **Contextual action buttons**: Table row action buttons include `aria-label` with the entity name for screen reader context (e.g., `aria-label="Deactivate {{ watched_item.name }}"`).
 - **Table rows are not clickable**: Rows contain discrete `<a>` and `<button>` elements — no `tabindex="0"` or `role="link"` on `<tr>`. This avoids the nested interactive elements anti-pattern (buttons/links inside a link-role container). Keyboard users tab through the individual interactive elements within each row.
 - **HTMX live regions**: `#flash-region` has `aria-live="polite" aria-atomic="false"`. `aria-busy` auto-managed by `htmx-a11y.js`.
 - **Skip link**: `.skip-link` — first element in `<body>`, targets `#main-content`.

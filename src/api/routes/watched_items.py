@@ -130,10 +130,16 @@ async def create_watched_item(
             raise HTTPException(status_code=422, detail=f"URL unreachable: {exc}") from exc
 
         domain = probe_result.effective_domain
+        # #191: schedule_tick gates solely on WatchedItem.domain_suspended (no live
+        # Domain join), so initialize it from the existing domain's state here —
+        # otherwise an item created on an already-inactive/archived domain would be
+        # scheduled. Mirrors the re-probe route's cascade.
+        domain_suspended = False
         if domain:
-            if not (
+            existing_domain = (
                 await session.execute(select(Domain).where(Domain.name == domain))
-            ).scalar_one_or_none():
+            ).scalar_one_or_none()
+            if existing_domain is None:
                 try:
                     async with session.begin_nested():
                         session.add(
@@ -145,11 +151,18 @@ async def create_watched_item(
                             )
                         )
                 except IntegrityError:
-                    pass
+                    existing_domain = (
+                        await session.execute(select(Domain).where(Domain.name == domain))
+                    ).scalar_one_or_none()
+            if existing_domain is not None:
+                domain_suspended = bool(
+                    existing_domain.archived_at is not None or not existing_domain.is_active
+                )
 
         wi = WatchedItem(
             effective_url=probe_result.effective_url,
             domain_name=domain or None,
+            domain_suspended=domain_suspended,
             name=data.name or domain or data.url,
             description=data.description,
             is_active=data.is_active,

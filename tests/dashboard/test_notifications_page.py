@@ -11,7 +11,7 @@ from ulid import ULID
 from src.core.models.notification_template import NotificationTemplate, WatchNcRef
 from src.core.models.watched_item import ContentType
 from src.core.notifications.notify import DispatchResult
-from tests.conftest import make_watch
+from tests.conftest import make_watched_item
 
 VALID_CHANNEL_ID = str(ULID())
 
@@ -208,11 +208,14 @@ async def test_delete_succeeds_when_no_refs(client: AsyncClient, db_session):
 @pytest.mark.integration
 async def test_delete_blocked_when_watch_ref_exists(client: AsyncClient, db_session):
     """DELETE /{id}/delete returns 409 when a WatchNcRef still references the template."""
-    watch = await make_watch(
-        db_session, name="W", primary_url="https://example.com", content_type=ContentType.HTML
+    wi = await make_watched_item(
+        db_session,
+        name="W",
+        primary_url="https://example.com",
+        default_content_type=ContentType.HTML,
     )
     tpl = await _make_template(db_session, "Referenced")
-    db_session.add(WatchNcRef(watched_item_id=watch.id, template_id=tpl.id))
+    db_session.add(WatchNcRef(watched_item_id=wi.id, template_id=tpl.id))
     await db_session.flush()
 
     resp = await client.delete(f"/notifications/{tpl.id}/delete", headers={"HX-Request": "true"})

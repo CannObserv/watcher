@@ -2,23 +2,23 @@
 
 import pytest
 
-from tests.conftest import make_watch
+from tests.conftest import make_watched_item
 
 pytestmark = pytest.mark.integration
 
 
 class TestCreateProfile:
     async def test_create_event_profile(self, client, db_session):
-        _watch_obj = await make_watch(
+        wi = await make_watched_item(
             db_session,
             name="Profiled Watch",
             primary_url="https://example.com",
-            content_type="html",
+            default_content_type="html",
         )
 
         await db_session.commit()
 
-        watched_item_id = str(_watch_obj.watched_item_id)
+        watched_item_id = str(wi.id)
         response = await client.post(
             f"/api/v1/watched-items/{watched_item_id}/profiles",
             json={
@@ -53,16 +53,16 @@ class TestCreateProfile:
 class TestListProfiles:
     async def test_one_profile_per_watched_item(self, client, db_session):
         """#191: a WatchedItem holds at most one temporal profile."""
-        _watch_obj = await make_watch(
+        wi = await make_watched_item(
             db_session,
             name="Single-Profile Watch",
             primary_url="https://example.com",
-            content_type="html",
+            default_content_type="html",
         )
 
         await db_session.commit()
 
-        watched_item_id = str(_watch_obj.watched_item_id)
+        watched_item_id = str(wi.id)
         first = await client.post(
             f"/api/v1/watched-items/{watched_item_id}/profiles",
             json={
@@ -92,13 +92,16 @@ class TestListProfiles:
 
 class TestUpdateProfile:
     async def test_update_rules(self, client, db_session):
-        _watch_obj = await make_watch(
-            db_session, name="Update Watch", primary_url="https://example.com", content_type="html"
+        wi = await make_watched_item(
+            db_session,
+            name="Update Watch",
+            primary_url="https://example.com",
+            default_content_type="html",
         )
 
         await db_session.commit()
 
-        watched_item_id = str(_watch_obj.watched_item_id)
+        watched_item_id = str(wi.id)
         create_resp = await client.post(
             f"/api/v1/watched-items/{watched_item_id}/profiles",
             json={
@@ -124,16 +127,16 @@ class TestUpdateProfile:
         assert data["rules"][0]["days_before"] == 7
 
     async def test_update_is_active(self, client, db_session):
-        _watch_obj = await make_watch(
+        wi = await make_watched_item(
             db_session,
             name="Deactivate Watch",
             primary_url="https://example.com",
-            content_type="html",
+            default_content_type="html",
         )
 
         await db_session.commit()
 
-        watched_item_id = str(_watch_obj.watched_item_id)
+        watched_item_id = str(wi.id)
         create_resp = await client.post(
             f"/api/v1/watched-items/{watched_item_id}/profiles",
             json={
@@ -152,13 +155,16 @@ class TestUpdateProfile:
         assert response.json()["is_active"] is False
 
     async def test_update_post_action(self, client, db_session):
-        _watch_obj = await make_watch(
-            db_session, name="Action Watch", primary_url="https://example.com", content_type="html"
+        wi = await make_watched_item(
+            db_session,
+            name="Action Watch",
+            primary_url="https://example.com",
+            default_content_type="html",
         )
 
         await db_session.commit()
 
-        watched_item_id = str(_watch_obj.watched_item_id)
+        watched_item_id = str(wi.id)
         create_resp = await client.post(
             f"/api/v1/watched-items/{watched_item_id}/profiles",
             json={
@@ -177,13 +183,16 @@ class TestUpdateProfile:
         assert response.json()["post_action"] == "archive"
 
     async def test_update_creates_audit_log(self, client, db_session):
-        _watch_obj = await make_watch(
-            db_session, name="Audit Watch", primary_url="https://example.com", content_type="html"
+        wi = await make_watched_item(
+            db_session,
+            name="Audit Watch",
+            primary_url="https://example.com",
+            default_content_type="html",
         )
 
         await db_session.commit()
 
-        watched_item_id = str(_watch_obj.watched_item_id)
+        watched_item_id = str(wi.id)
         create_resp = await client.post(
             f"/api/v1/watched-items/{watched_item_id}/profiles",
             json={
@@ -205,13 +214,16 @@ class TestUpdateProfile:
         assert events[0]["payload"]["updated_fields"] == ["is_active"]
 
     async def test_update_nonexistent_profile(self, client, db_session):
-        _watch_obj = await make_watch(
-            db_session, name="Missing Watch", primary_url="https://example.com", content_type="html"
+        wi = await make_watched_item(
+            db_session,
+            name="Missing Watch",
+            primary_url="https://example.com",
+            default_content_type="html",
         )
 
         await db_session.commit()
 
-        watched_item_id = str(_watch_obj.watched_item_id)
+        watched_item_id = str(wi.id)
         response = await client.patch(
             f"/api/v1/watched-items/{watched_item_id}/profiles/00000000000000000000000000",
             json={"is_active": False},
@@ -219,13 +231,16 @@ class TestUpdateProfile:
         assert response.status_code == 404
 
     async def test_update_empty_body(self, client, db_session):
-        _watch_obj = await make_watch(
-            db_session, name="Empty Watch", primary_url="https://example.com", content_type="html"
+        wi = await make_watched_item(
+            db_session,
+            name="Empty Watch",
+            primary_url="https://example.com",
+            default_content_type="html",
         )
 
         await db_session.commit()
 
-        watched_item_id = str(_watch_obj.watched_item_id)
+        watched_item_id = str(wi.id)
         create_resp = await client.post(
             f"/api/v1/watched-items/{watched_item_id}/profiles",
             json={
@@ -247,13 +262,16 @@ class TestUpdateProfile:
         assert data["rules"] == []
 
     async def test_update_multiple_fields(self, client, db_session):
-        _watch_obj = await make_watch(
-            db_session, name="Multi Watch", primary_url="https://example.com", content_type="html"
+        wi = await make_watched_item(
+            db_session,
+            name="Multi Watch",
+            primary_url="https://example.com",
+            default_content_type="html",
         )
 
         await db_session.commit()
 
-        watched_item_id = str(_watch_obj.watched_item_id)
+        watched_item_id = str(wi.id)
         create_resp = await client.post(
             f"/api/v1/watched-items/{watched_item_id}/profiles",
             json={
@@ -289,16 +307,16 @@ class TestUpdateProfile:
 
 class TestDeleteProfile:
     async def test_delete_profile(self, client, db_session):
-        _watch_obj = await make_watch(
+        wi = await make_watched_item(
             db_session,
             name="Delete Profile Watch",
             primary_url="https://example.com",
-            content_type="html",
+            default_content_type="html",
         )
 
         await db_session.commit()
 
-        watched_item_id = str(_watch_obj.watched_item_id)
+        watched_item_id = str(wi.id)
         create_resp = await client.post(
             f"/api/v1/watched-items/{watched_item_id}/profiles",
             json={

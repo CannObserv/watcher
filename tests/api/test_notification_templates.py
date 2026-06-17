@@ -11,7 +11,7 @@ from httpx import AsyncClient
 from ulid import ULID
 
 from src.core.notifications.notify import DispatchResult
-from tests.conftest import make_watch
+from tests.conftest import make_watched_item
 
 
 def _payload(**overrides):
@@ -121,12 +121,15 @@ async def test_patch_template_updates_events(client: AsyncClient):
 @pytest.mark.integration
 async def test_unassign_template_from_watch(client: AsyncClient, db_session):
     """DELETE /{template_id}/assign/{watch_id} removes the ref."""
-    _watch_obj = await make_watch(
-        db_session, name="Unassign W", primary_url="https://example.com", content_type="html"
+    wi = await make_watched_item(
+        db_session,
+        name="Unassign W",
+        primary_url="https://example.com",
+        default_content_type="html",
     )
     await db_session.commit()
 
-    watch_id = str(_watch_obj.id)
+    watch_id = str(wi.id)
     tpl_resp = await client.post(
         "/api/v1/notifications/templates",
         json=_payload(title="Unassign T"),
@@ -149,12 +152,15 @@ async def test_unassign_template_from_watch(client: AsyncClient, db_session):
 @pytest.mark.integration
 async def test_delete_template_blocked_when_refs_exist(client: AsyncClient, db_session):
     """Cannot delete a template that is referenced by a watch."""
-    _watch_obj = await make_watch(
-        db_session, name="W", primary_url="https://example.com", content_type="html"
+    wi = await make_watched_item(
+        db_session,
+        name="W",
+        primary_url="https://example.com",
+        default_content_type="html",
     )
     await db_session.commit()
 
-    watch_id = str(_watch_obj.id)
+    watch_id = str(wi.id)
     tpl_resp = await client.post(
         "/api/v1/notifications/templates",
         json=_payload(),

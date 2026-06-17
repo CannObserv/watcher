@@ -23,7 +23,7 @@ from src.core.registry import ServiceRegistry
 from src.core.watches.resolution import resolved_schedule_config
 from src.workers.pipeline import WatchedItemResult, _maybe_decay_backoff, _persist_backoff
 from src.workers.tasks import check_watched_item, schedule_tick
-from tests.conftest import make_watch
+from tests.conftest import make_watched_item
 
 pytestmark = pytest.mark.integration
 
@@ -142,16 +142,7 @@ class TestCheckWatchedItem:
 
         #185 Phase A step 6: last_checked_at moved from per-Watch to WatchedItem.
         """
-        wi_watch = await make_watch(db_session, name="Primary")
-        watched_item = wi_watch.watched_item
-
-        # Sibling Watch under the same WatchedItem.
-        await make_watch(
-            db_session,
-            name="Sibling",
-            archiver_info_item_id=watched_item.archiver_info_item_id,
-            watched_item=watched_item,
-        )
+        watched_item = await make_watched_item(db_session, name="Primary")
         await db_session.commit()
 
         watched_item.effective_url = "https://example.com/page"
@@ -180,8 +171,7 @@ class TestCheckWatchedItem:
 
     async def test_noop_when_no_active_children(self, db_session, monkeypatch):
         """A WatchedItem with no active child Watches skips fetcher + pipeline."""
-        watch = await make_watch(db_session, name="Inactive", is_active=False)
-        watched_item = watch.watched_item
+        watched_item = await make_watched_item(db_session, name="Inactive", is_active=False)
         await db_session.commit()
 
         fetch_mock = AsyncMock(return_value=_fake_fetch_result())
@@ -208,8 +198,7 @@ class TestCheckWatchedItem:
         Pre-#188 this state was unreachable (the only path to is_active=False was
         archive, which cascades children to archived). Now pause/resume makes it a
         normal state, so the task's `not is_active` guard must be exercised."""
-        watch = await make_watch(db_session, name="ActiveChild", is_active=True)
-        watched_item = watch.watched_item
+        watched_item = await make_watched_item(db_session, name="ActiveChild", is_active=True)
         watched_item.is_active = False
         watched_item.effective_url = "https://example.com/page"
         await db_session.commit()
@@ -232,8 +221,7 @@ class TestCheckWatchedItem:
         proc_mock.assert_not_called()
 
     async def _run_success_cycle(self, db_session, monkeypatch, *, changed: bool):
-        watch = await make_watch(db_session, name="Checker")
-        watched_item = watch.watched_item
+        watched_item = await make_watched_item(db_session, name="Checker")
         watched_item.effective_url = "https://example.com/page"
         await db_session.commit()
 
@@ -275,8 +263,7 @@ class TestCheckWatchedItem:
 
     async def test_fetch_failure_logs_audit_and_sets_health(self, db_session, monkeypatch):
         """A non-success HTTP response audits CHECK_FETCH_FAILED and marks Watches ERROR."""
-        watch = await make_watch(db_session, name="Fails")
-        watched_item = watch.watched_item
+        watched_item = await make_watched_item(db_session, name="Fails")
         watched_item.effective_url = "https://example.com/page"
         await db_session.commit()
 
@@ -318,8 +305,7 @@ class TestCheckWatchedItem:
         """WatchedItem.last_checked_at is stamped even when the HTTP fetch fails."""
         from datetime import UTC, datetime
 
-        watch = await make_watch(db_session, name="FailStamp")
-        watched_item = watch.watched_item
+        watched_item = await make_watched_item(db_session, name="FailStamp")
         watched_item.effective_url = "https://example.com/"
         assert watched_item.last_checked_at is None
         await db_session.commit()
@@ -359,16 +345,9 @@ class TestScheduleTickAggregation:
         """A WatchedItem whose last_checked_at is older than the interval is due."""
         now = datetime(2026, 5, 17, 12, 0, 0, tzinfo=UTC)
         # Default schedule on the WatchedItem = 1h.
-        watch_a = await make_watch(db_session, name="A")
-        wi = watch_a.watched_item
+        wi = await make_watched_item(db_session, name="A")
         wi.default_schedule_config = {"interval": "1h"}
         wi.last_checked_at = now - timedelta(hours=2)
-        await make_watch(
-            db_session,
-            name="B",
-            archiver_info_item_id=wi.archiver_info_item_id,
-            watched_item=wi,
-        )
         await db_session.commit()
 
         monkeypatch.setattr(
@@ -393,8 +372,7 @@ class TestScheduleTickAggregation:
     async def test_does_not_enqueue_when_watched_item_fresh(self, db_session, monkeypatch):
         """If the WatchedItem was checked recently, it is not due."""
         now = datetime(2026, 5, 17, 12, 0, 0, tzinfo=UTC)
-        w = await make_watch(db_session, name="Fresh")
-        wi = w.watched_item
+        wi = await make_watched_item(db_session, name="Fresh")
         wi.default_schedule_config = {"interval": "1h"}
         wi.last_checked_at = now - timedelta(minutes=5)
         await db_session.commit()
@@ -417,8 +395,7 @@ class TestScheduleTickAggregation:
     async def test_null_last_checked_at_is_due_immediately(self, db_session, monkeypatch):
         """A WatchedItem with NULL last_checked_at is always overdue."""
         now = datetime(2026, 5, 17, 12, 0, 0, tzinfo=UTC)
-        w = await make_watch(db_session, name="Never")
-        wi = w.watched_item
+        wi = await make_watched_item(db_session, name="Never")
         wi.default_schedule_config = {"interval": "1h"}
         # explicitly leave wi.last_checked_at as None.
         await db_session.commit()
@@ -445,14 +422,14 @@ class TestScheduleTickAggregation:
     async def test_skips_inactive_or_archived_watched_items(self, db_session, monkeypatch):
         """is_active=False and archived_at IS NOT NULL exclude a WatchedItem."""
         now = datetime(2026, 5, 17, 12, 0, 0, tzinfo=UTC)
-        w_inactive = await make_watch(
+        wi_inactive = await make_watched_item(
             db_session, name="Inactive WI", primary_url="https://inactive.example.com"
         )
-        w_inactive.watched_item.is_active = False
-        w_archived = await make_watch(
+        wi_inactive.is_active = False
+        wi_archived = await make_watched_item(
             db_session, name="Archived WI", primary_url="https://archived.example.com"
         )
-        w_archived.watched_item.archived_at = now - timedelta(days=1)
+        wi_archived.archived_at = now - timedelta(days=1)
         await db_session.commit()
 
         monkeypatch.setattr(
@@ -480,7 +457,7 @@ class TestScheduleTickInactiveDomain:
         db_session.add(domain)
         # #191: schedule_tick skips on WatchedItem.domain_suspended (the flag the
         # domain-deactivation cascade sets), not via a live Domain join.
-        await make_watch(
+        await make_watched_item(
             db_session,
             name="On Paused Domain",
             domain_name="paused.com",
@@ -518,22 +495,13 @@ class TestPostActions:
         now = datetime(2026, 5, 17, 12, 0, 0, tzinfo=UTC)
 
         # WatchedItem starts at 1h interval.
-        w_target = await make_watch(db_session, name="Profiled")
-        wi = w_target.watched_item
+        wi = await make_watched_item(db_session, name="Profiled")
         wi.default_schedule_config = {"interval": "1h"}
         wi.last_checked_at = now - timedelta(hours=25)
 
-        # Sibling sharing the same WatchedItem.
-        sibling = await make_watch(
-            db_session,
-            name="Sibling",
-            archiver_info_item_id=wi.archiver_info_item_id,
-            watched_item=wi,
-        )
-
-        # Expired event profile attached to w_target only — reduce_frequency.
+        # Expired event profile attached to the WatchedItem — reduce_frequency.
         profile = TemporalProfile(
-            watched_item_id=w_target.watched_item_id,
+            watched_item_id=wi.id,
             profile_type=ProfileType.EVENT,
             reference_date=date(2026, 5, 1),  # in the past
             rules=[{"days_before": 7, "interval": "1m"}],
@@ -559,11 +527,8 @@ class TestPostActions:
         await db_session.refresh(wi)
         assert wi.default_schedule_config.get("interval") == "1d"
 
-        # Both siblings now resolve to the 1d interval (via inheritance).
-        await db_session.refresh(w_target)
-        await db_session.refresh(sibling)
-        assert resolved_schedule_config(w_target).get("interval") == "1d"
-        assert resolved_schedule_config(sibling).get("interval") == "1d"
+        # The WatchedItem now resolves to the 1d interval.
+        assert resolved_schedule_config(wi).get("interval") == "1d"
 
         # Audit log: WATCHED_ITEM_THROTTLED for the parent.
         audit_rows = (
@@ -581,12 +546,12 @@ class TestPostActions:
     async def test_deactivate_post_action_deactivates_watch(self, db_session, monkeypatch):
         """deactivate still flips the triggering Watch is_active off."""
         now = datetime(2026, 5, 17, 12, 0, 0, tzinfo=UTC)
-        w = await make_watch(db_session, name="Will Deactivate")
-        w.watched_item.default_schedule_config = {"interval": "1d"}
-        w.watched_item.last_checked_at = now - timedelta(hours=25)
+        wi = await make_watched_item(db_session, name="Will Deactivate")
+        wi.default_schedule_config = {"interval": "1d"}
+        wi.last_checked_at = now - timedelta(hours=25)
 
         profile = TemporalProfile(
-            watched_item_id=w.watched_item_id,
+            watched_item_id=wi.id,
             profile_type=ProfileType.EVENT,
             reference_date=date(2026, 5, 1),
             rules=[{"days_before": 7, "interval": "1h"}],
@@ -608,20 +573,20 @@ class TestPostActions:
             mock_dt.side_effect = lambda *a, **kw: datetime(*a, **kw)
             await schedule_tick(int(now.timestamp()))
 
-        await db_session.refresh(w)
-        assert w.is_active is False
+        await db_session.refresh(wi)
+        assert wi.is_active is False
         await db_session.refresh(profile)
         assert profile.is_active is False
 
     async def test_archive_post_action_archives_watched_item(self, db_session, monkeypatch):
         """#191: archive post-action flips is_active=False AND stamps archived_at."""
         now = datetime(2026, 5, 17, 12, 0, 0, tzinfo=UTC)
-        w = await make_watch(db_session, name="Will Archive")
-        w.watched_item.default_schedule_config = {"interval": "1d"}
-        w.watched_item.last_checked_at = now - timedelta(hours=25)
+        wi = await make_watched_item(db_session, name="Will Archive")
+        wi.default_schedule_config = {"interval": "1d"}
+        wi.last_checked_at = now - timedelta(hours=25)
 
         profile = TemporalProfile(
-            watched_item_id=w.watched_item_id,
+            watched_item_id=wi.id,
             profile_type=ProfileType.EVENT,
             reference_date=date(2026, 5, 1),
             rules=[{"days_before": 7, "interval": "1h"}],
@@ -643,9 +608,9 @@ class TestPostActions:
             mock_dt.side_effect = lambda *a, **kw: datetime(*a, **kw)
             await schedule_tick(int(now.timestamp()))
 
-        await db_session.refresh(w)
-        assert w.is_active is False
-        assert w.archived_at is not None
+        await db_session.refresh(wi)
+        assert wi.is_active is False
+        assert wi.archived_at is not None
 
 
 # ---------------------------------------------------------------------------

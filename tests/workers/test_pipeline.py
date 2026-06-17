@@ -18,7 +18,7 @@ from src.workers.pipeline import (
     _extraction_config_from_spec,
     process_watched_item,
 )
-from tests.conftest import make_watch, make_watched_item
+from tests.conftest import make_watched_item
 
 
 class TestExtractionConfigFromSpec:
@@ -68,8 +68,7 @@ _HTML_CHANGED = b"<html><body><p>Content changed</p></body></html>"
 class TestProcessWatchedItem:
     async def test_first_run_establishes_baseline_no_notification(self, db_session):
         """First run: ChangeRevision inserted, no CHANGE_DETECTED notification."""
-        watch = await make_watch(db_session, name="Baseline")
-        wi = watch.watched_item
+        wi = await make_watched_item(db_session, name="Baseline")
         wi.effective_url = "https://example.com"
         wi.source_specs = [{"schema_version": 1, "extraction": {"algorithm": "full_page"}}]
         await db_session.flush()
@@ -100,8 +99,7 @@ class TestProcessWatchedItem:
 
     async def test_same_fingerprint_is_cache_hit_no_new_revision(self, db_session):
         """Second run with same content: cache hit, no new ChangeRevision."""
-        watch = await make_watch(db_session, name="CacheHit")
-        wi = watch.watched_item
+        wi = await make_watched_item(db_session, name="CacheHit")
         wi.effective_url = "https://example.com"
         wi.source_specs = [{"schema_version": 1, "extraction": {"algorithm": "full_page"}}]
         await db_session.flush()
@@ -133,9 +131,8 @@ class TestProcessWatchedItem:
         assert len(revs) == 1  # only the baseline
 
     async def test_changed_fingerprint_inserts_revision_and_notifies(self, db_session):
-        """Content change: new ChangeRevision + CHANGE_DETECTED per active Watch."""
-        watch = await make_watch(db_session, name="Changed")
-        wi = watch.watched_item
+        """Content change: new ChangeRevision + CHANGE_DETECTED for the WatchedItem."""
+        wi = await make_watched_item(db_session, name="Changed")
         wi.effective_url = "https://example.com"
         wi.source_specs = [{"schema_version": 1, "extraction": {"algorithm": "full_page"}}]
         await db_session.flush()
@@ -154,7 +151,7 @@ class TestProcessWatchedItem:
 
         event = mock_dispatch.call_args.kwargs["event"]
         assert event.event_type.value == "change_detected"
-        assert event.watched_item_id == str(watch.id)
+        assert event.watched_item_id == str(wi.id)
         assert event.item_url == "https://example.com"
         assert "change_revision_id" in event.metadata
 
@@ -171,8 +168,7 @@ class TestProcessWatchedItem:
 
     async def test_change_updates_last_changed_at(self, db_session):
         """last_changed_at is set on WatchedItem when fingerprint changes."""
-        watch = await make_watch(db_session, name="Timestamps")
-        wi = watch.watched_item
+        wi = await make_watched_item(db_session, name="Timestamps")
         wi.effective_url = "https://example.com"
         wi.source_specs = [{"schema_version": 1, "extraction": {"algorithm": "full_page"}}]
         await db_session.flush()
@@ -188,8 +184,7 @@ class TestProcessWatchedItem:
 
     async def test_no_archiver_sync_when_archiver_info_source_id_not_set(self, db_session):
         """No PendingArchiverSync inserted when archiver_info_source_id is NULL."""
-        watch = await make_watch(db_session, name="NoSync")
-        wi = watch.watched_item
+        wi = await make_watched_item(db_session, name="NoSync")
         wi.effective_url = "https://example.com"
         wi.source_specs = [{"schema_version": 1, "extraction": {"algorithm": "full_page"}}]
         assert wi.archiver_info_source_id is None
@@ -216,8 +211,7 @@ class TestProcessWatchedItem:
         """PendingArchiverSync inserted when archiver_info_source_id is set + content changed."""
         from src.core.models.base import generate_ulid
 
-        watch = await make_watch(db_session, name="WithSync")
-        wi = watch.watched_item
+        wi = await make_watched_item(db_session, name="WithSync")
         wi.effective_url = "https://example.com"
         wi.source_specs = [{"schema_version": 1, "extraction": {"algorithm": "full_page"}}]
         wi.archiver_info_source_id = str(generate_ulid())

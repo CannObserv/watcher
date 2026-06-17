@@ -6,7 +6,7 @@ import pytest
 from sqlalchemy import select
 
 from src.core.models.domain import Domain
-from tests.conftest import make_watch, make_watched_item
+from tests.conftest import make_watched_item
 
 pytestmark = pytest.mark.integration
 
@@ -142,11 +142,11 @@ class TestDomainDetail:
     async def test_detail_page_shows_watches_section(self, client, db_session):
 
         db_session.add(Domain(name="watched.com"))
-        await make_watch(
+        await make_watched_item(
             db_session,
             name="My Watch",
             primary_url="https://watched.com/page",
-            content_type="html",
+            default_content_type="html",
             domain_name="watched.com",
         )
         response = await client.get("/domains/watched.com")
@@ -170,11 +170,11 @@ class TestDomainDetail:
 class TestDomainWatchedItemsTableDomainInactiveBadge:
     async def test_suspended_watch_shows_domain_inactive_badge(self, client, db_session):
         db_session.add(Domain(name="ds-tbl.com", is_active=False))
-        await make_watch(
+        await make_watched_item(
             db_session,
             name="Suspended",
             primary_url="https://ds-tbl.com/p",
-            content_type="html",
+            default_content_type="html",
             domain_name="ds-tbl.com",
             is_active=False,
             domain_suspended=True,
@@ -184,11 +184,11 @@ class TestDomainWatchedItemsTableDomainInactiveBadge:
 
     async def test_manually_inactive_watch_does_not_show_domain_inactive(self, client, db_session):
         db_session.add(Domain(name="mi-tbl.com"))
-        await make_watch(
+        await make_watched_item(
             db_session,
             name="Manual Off",
             primary_url="https://mi-tbl.com/p",
-            content_type="html",
+            default_content_type="html",
             domain_name="mi-tbl.com",
             is_active=False,
             domain_suspended=False,
@@ -199,11 +199,11 @@ class TestDomainWatchedItemsTableDomainInactiveBadge:
     async def test_table_has_health_and_interval_columns(self, client, db_session):
         """Domain WatchedItems table surfaces Health + Interval columns (#190)."""
         db_session.add(Domain(name="cols.com"))
-        await make_watch(
+        await make_watched_item(
             db_session,
             name="ColsWatch",
             primary_url="https://cols.com/p",
-            content_type="html",
+            default_content_type="html",
             domain_name="cols.com",
         )
         response = await client.get("/partials/domain-watched-items/cols.com")
@@ -332,11 +332,11 @@ class TestDomainDelete:
     async def test_delete_domain_with_watches_returns_409(self, client, db_session):
 
         db_session.add(Domain(name="busy-del.com", archived_at=datetime.now(UTC)))
-        await make_watch(
+        await make_watched_item(
             db_session,
             name="W",
             primary_url="https://busy-del.com/p",
-            content_type="html",
+            default_content_type="html",
             domain_name="busy-del.com",
         )
         response = await client.post("/domains/busy-del.com/delete")
@@ -444,11 +444,11 @@ class TestDomainToggleActive:
         self, client, db_session
     ):
         db_session.add(Domain(name="manual.com", is_active=False))
-        watch = await make_watch(
+        wi = await make_watched_item(
             db_session,
             name="Manual Inactive",
             primary_url="https://manual.com/p",
-            content_type="html",
+            default_content_type="html",
             domain_name="manual.com",
             is_active=False,
             domain_suspended=False,
@@ -456,8 +456,8 @@ class TestDomainToggleActive:
 
         await client.post("/domains/manual.com/toggle-active", data={"active": "true"})
 
-        await db_session.refresh(watch)
-        assert watch.is_active is False
+        await db_session.refresh(wi)
+        assert wi.is_active is False
 
     async def test_toggle_htmx_returns_partial(self, client, db_session):
         """Response includes both the toggle partial and an OOB watches table."""
@@ -476,11 +476,11 @@ class TestDomainToggleActive:
     async def test_toggle_htmx_response_includes_watches_oob(self, client, db_session):
         """HTMX toggle response must include OOB swap for watches table."""
         db_session.add(Domain(name="htmx-oob.com"))
-        await make_watch(
+        await make_watched_item(
             db_session,
             name="OOB Watch",
             primary_url="https://htmx-oob.com/p",
-            content_type="html",
+            default_content_type="html",
             domain_name="htmx-oob.com",
             is_active=True,
         )
@@ -498,11 +498,11 @@ class TestDomainToggleActive:
     ):
         """Watches table in OOB response shows Domain Inactive badge after deactivation."""
         db_session.add(Domain(name="htmx-badge.com"))
-        await make_watch(
+        await make_watched_item(
             db_session,
             name="Badge Watch",
             primary_url="https://htmx-badge.com/p",
-            content_type="html",
+            default_content_type="html",
             domain_name="htmx-badge.com",
             is_active=True,
         )

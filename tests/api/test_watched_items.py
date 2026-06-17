@@ -884,13 +884,8 @@ class TestCheckNow:
         """#187: archived-only Watch subscriptions must not block check-now."""
         from unittest.mock import AsyncMock, patch
 
-        from tests.conftest import make_watch
-
         wi = await _make_watched_item(db_session, name="AllArchivedWatches")
         wi.effective_url = "https://example.com"
-        await make_watch(
-            db_session, name="Archived", watched_item=wi, is_archived=True, is_active=False
-        )
         await db_session.commit()
 
         with patch("src.api.routes.watched_items.check_watched_item") as mock_task:

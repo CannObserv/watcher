@@ -7,7 +7,7 @@ Apprise URLs are no longer accepted, validated, or stored.
 import pytest
 from ulid import ULID
 
-from tests.conftest import make_watch
+from tests.conftest import make_watched_item
 
 pytestmark = pytest.mark.integration
 
@@ -20,14 +20,14 @@ _watch_counter = 0
 async def _make_watch(client, db_session):
     global _watch_counter
     _watch_counter += 1
-    watch = await make_watch(
+    wi = await make_watched_item(
         db_session,
         name=f"Test Watch {_watch_counter}",
         primary_url=f"https://example-{_watch_counter}.com",
-        content_type="html",
+        default_content_type="html",
     )
     await db_session.commit()
-    return str(watch.id)
+    return str(wi.id)
 
 
 def _create_payload(**overrides):
@@ -299,9 +299,9 @@ async def test_notification_config_has_content_config_column(db_session):
     """ORM model exposes content_config field."""
     from src.core.models.notification_config import WatchNotificationConfig
 
-    watch = await make_watch(db_session)
+    wi = await make_watched_item(db_session, name="Test Watch")
     config = WatchNotificationConfig(
-        watched_item_id=watch.id,
+        watched_item_id=wi.id,
         channel_hint="slack",
         events=["change_detected"],
         remote_channel_id=str(ULID()),
@@ -406,10 +406,10 @@ class TestTestNotificationConfig:
         """When watched_item.effective_url is empty, test notification uses watch:id sentinel."""
         from src.core.models.notification_config import WatchNotificationConfig
 
-        watch = await make_watch(db_session, name="NoURL", primary_url="https://example.com")
-        watch.watched_item.effective_url = ""
+        wi = await make_watched_item(db_session, name="NoURL", primary_url="https://example.com")
+        wi.effective_url = ""
         nc = WatchNotificationConfig(
-            watched_item_id=watch.id,
+            watched_item_id=wi.id,
             channel_hint="json",
             events=["change_detected"],
             remote_channel_id=str(ULID()),
@@ -417,7 +417,7 @@ class TestTestNotificationConfig:
         db_session.add(nc)
         await db_session.commit()
 
-        resp = await client.post(f"/api/v1/watched-items/{watch.id}/notifications/{nc.id}/test")
+        resp = await client.post(f"/api/v1/watched-items/{wi.id}/notifications/{nc.id}/test")
         assert resp.status_code == 200
         data = resp.json()
         assert "success" in data

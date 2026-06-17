@@ -332,10 +332,9 @@ class TestDetailPage:
 
     async def test_detail_page_with_child_watch_renders_200(self, client, db_session):
         """Regression: health_map must be passed when the WI has child watches."""
-        from tests.conftest import make_watch
+        from tests.conftest import make_watched_item
 
-        watch = await make_watch(db_session, name="Child Watch")
-        wi = watch.watched_item
+        wi = await make_watched_item(db_session, name="Child Watch")
         await db_session.commit()
 
         response = await client.get(f"/watched-items/{wi.id}")
@@ -346,10 +345,9 @@ class TestDetailPage:
         self, client, db_session
     ):
         """Regression #182: sort buttons must NOT point at /partials/watch-table."""
-        from tests.conftest import make_watch
+        from tests.conftest import make_watched_item
 
-        watch = await make_watch(db_session, name="Scoped Watch")
-        wi = watch.watched_item
+        wi = await make_watched_item(db_session, name="Scoped Watch")
         await db_session.commit()
 
         response = await client.get(f"/watched-items/{wi.id}")

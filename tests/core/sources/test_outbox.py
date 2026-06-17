@@ -9,7 +9,7 @@ from src.core.models.base import generate_ulid
 from src.core.models.change_revision import ChangeRevision
 from src.core.models.pending_archiver_sync import PendingArchiverSync
 from src.core.sources.outbox import delete_pending, mark_failure, select_due
-from tests.conftest import make_watch
+from tests.conftest import make_watched_item
 
 pytestmark = pytest.mark.integration
 
@@ -19,8 +19,7 @@ FP = "sha256:" + "a" * 64
 async def _make_pending(session, *, offset_seconds: int = 0) -> tuple:
     """Create WatchedItem + ChangeRevision + PendingArchiverSync."""
     now = datetime.now(UTC)
-    watch = await make_watch(session, name=f"OutboxTest-{generate_ulid()}")
-    wi = watch.watched_item
+    wi = await make_watched_item(session, name=f"OutboxTest-{generate_ulid()}")
 
     rev = ChangeRevision(
         watched_item_id=wi.id,

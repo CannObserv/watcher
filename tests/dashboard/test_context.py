@@ -13,7 +13,7 @@ from src.dashboard.context import (
     get_queue_health,
     get_rate_limiter_state,
 )
-from tests.conftest import make_info_item, make_watch
+from tests.conftest import make_info_item, make_watched_item
 
 
 @pytest.mark.integration
@@ -26,12 +26,14 @@ class TestGetDashboardStats:
         assert stats["checks_today"] == 0
 
     async def test_counts_watches(self, db_session):
-        await make_watch(db_session, name="W1", primary_url="https://a.com", content_type="html")
-        await make_watch(
+        await make_watched_item(
+            db_session, name="W1", primary_url="https://a.com", default_content_type="html"
+        )
+        await make_watched_item(
             db_session,
             name="W2",
             primary_url="https://b.com",
-            content_type="html",
+            default_content_type="html",
             is_active=False,
         )
         await db_session.flush()
@@ -77,11 +79,11 @@ class TestGetDomainsWithWatchedItemCounts:
     async def test_domain_with_watches(self, db_session):
         domain = Domain(name="example.com", min_interval=1.0, max_concurrency=2)
         db_session.add(domain)
-        await make_watch(
+        await make_watched_item(
             db_session,
             name="Test",
             primary_url="https://example.com",
-            content_type=ContentType.HTML,
+            default_content_type=ContentType.HTML,
             domain_name="example.com",
         )
 
@@ -95,18 +97,12 @@ class TestGetDomainsWithWatchedItemCounts:
         """One WatchedItem with two Watches must report watched_item_count=1, not 2."""
         domain = Domain(name="multi.com", min_interval=1.0, max_concurrency=2)
         db_session.add(domain)
-        first_watch = await make_watch(
+        await make_watched_item(
             db_session,
             name="Watch A",
             primary_url="https://multi.com",
-            content_type=ContentType.HTML,
+            default_content_type=ContentType.HTML,
             domain_name="multi.com",
-        )
-        await make_watch(
-            db_session,
-            name="Watch B",
-            watched_item=first_watch.watched_item,
-            content_type=ContentType.HTML,
         )
 
         result = await get_domains_with_watched_item_counts(db_session)
@@ -189,14 +185,14 @@ class TestGetDomainsFiltered:
         domain = Domain(name="checked.com")
         db_session.add(domain)
         now = datetime.now(UTC)
-        w = await make_watch(
+        wi = await make_watched_item(
             db_session,
             name="W",
             primary_url="https://checked.com",
-            content_type="html",
+            default_content_type="html",
             domain_name="checked.com",
         )
-        w.watched_item.last_checked_at = now
+        wi.last_checked_at = now
         await db_session.flush()
         result = await get_domains_with_watched_item_counts(db_session)
         assert result[0]["last_checked"] == now

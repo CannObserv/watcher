@@ -13,7 +13,7 @@ from src.core.models.base import generate_ulid
 from src.core.models.change_revision import ChangeRevision
 from src.core.models.pending_archiver_sync import PendingArchiverSync
 from src.workers.source_revisions_drain import drain_pending_archiver_sync
-from tests.conftest import make_watch
+from tests.conftest import make_watched_item
 
 pytestmark = pytest.mark.integration
 
@@ -36,8 +36,7 @@ def _async_session_factory_returning(db_session: AsyncSession):
 async def _setup_pending_row(db_session: AsyncSession, *, with_archiver_id: bool = True) -> tuple:
     """Create WatchedItem + ChangeRevision + PendingArchiverSync."""
     now = datetime.now(UTC)
-    watch = await make_watch(db_session, name="DrainTest")
-    wi = watch.watched_item
+    wi = await make_watched_item(db_session, name="DrainTest")
     if with_archiver_id:
         wi.archiver_info_source_id = ARCHIVER_SOURCE_ID
     await db_session.flush()
@@ -62,13 +61,13 @@ async def _setup_pending_row(db_session: AsyncSession, *, with_archiver_id: bool
     db_session.add(pending)
     await db_session.commit()
 
-    return watch, wi, rev, pending
+    return wi, rev, pending
 
 
 @pytest.mark.asyncio
 async def test_drain_success_back_populates_revision_id(db_session, monkeypatch):
     """Successful POST: ChangeRevision.archiver_revision_id set, pending row deleted."""
-    _, _, rev, pending = await _setup_pending_row(db_session)
+    _, rev, pending = await _setup_pending_row(db_session)
 
     canonical_id = str(generate_ulid())
     fake_client = MagicMock()
@@ -109,7 +108,7 @@ async def test_drain_success_back_populates_revision_id(db_session, monkeypatch)
 @pytest.mark.asyncio
 async def test_drain_marks_failure_on_archiver_error(db_session, monkeypatch):
     """ConnectError → row.attempts++, last_error set, row remains."""
-    _, _, _, pending = await _setup_pending_row(db_session)
+    _, _, pending = await _setup_pending_row(db_session)
     now = datetime.now(UTC)
 
     fake_client = MagicMock()
@@ -141,7 +140,7 @@ async def test_drain_drops_row_when_archiver_info_source_id_missing(
     db_session, monkeypatch, caplog
 ):
     """Row dropped (logged + deleted) when WatchedItem has no archiver_info_source_id."""
-    _, _, _, pending = await _setup_pending_row(db_session, with_archiver_id=False)
+    _, _, pending = await _setup_pending_row(db_session, with_archiver_id=False)
 
     fake_client = MagicMock()
     fake_client.post_source_revision = AsyncMock()

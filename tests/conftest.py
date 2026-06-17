@@ -4,14 +4,16 @@ tests/fixtures/ holds static sample files used by extractor tests (e.g. sample.h
 
 Factory contract (#185 Phase A)
 --------------------------------
-The module-level async helpers ``make_watch``, ``make_info_item``,
+The module-level async helpers ``make_watched_item``, ``make_info_item``,
 ``make_info_source``, and ``bind_primary_source`` are NOT pytest fixtures —
 they are awaitable factory functions test code can call directly.
 
-``make_watch`` takes an optional ``archiver_info_item_id`` and ``watched_item``.
-A parent ``WatchedItem`` is auto-created (or attached) to honour the 1:1
-``watched_items.archiver_info_item_id`` uniqueness constraint. The legacy
-``target_info_source_id`` / ``schedule_config`` columns are gone.
+``make_watched_item`` is the single WatchedItem factory (#191 collapse). It
+takes an optional ``archiver_info_item_id``; when omitted (and
+``auto_info_item=True``) an InfoItem + primary InfoSource + binding are
+auto-created to honour the 1:1 ``watched_items.archiver_info_item_id``
+uniqueness constraint. The legacy ``target_info_source_id`` /
+``schedule_config`` columns are gone.
 
 Archiver v4.0.0: sub_aspect concept removed — ``bind_sub_aspect`` deleted;
 ``make_info_source`` no longer accepts ``parent_info_source_id``.
@@ -280,7 +282,7 @@ async def db_session(test_engine) -> AsyncGenerator[AsyncSession]:
 # ---------------------------------------------------------------------------
 # Module-level async factories (NOT pytest fixtures).
 #
-# Tests call these directly:  ``watch = await make_watch(db_session, name="X")``
+# Tests call these directly:  ``wi = await make_watched_item(db_session, name="X")``
 # ---------------------------------------------------------------------------
 
 
@@ -381,57 +383,6 @@ async def make_watched_item(
     )
     session.add(wi)
     await session.flush()
-    return wi
-
-
-async def make_watch(
-    session,
-    *,
-    name="Test Watch",
-    archiver_info_item_id=None,
-    watched_item=None,
-    primary_url="https://example.com",
-    **kwargs,
-):
-    """Compatibility shim — post-#191 a "watch" *is* a WatchedItem.
-
-    Returns a WatchedItem so legacy call sites keep working: ``watch.id``,
-    ``watch.name``, ``watch.is_active`` map directly, and convenience aliases
-    (``watch.watched_item`` → self, ``watch.watched_item_id`` → id) cover the
-    former parent reference. Legacy per-Watch kwargs are mapped onto WatchedItem
-    defaults (``content_type`` → ``default_content_type``, ``tags`` →
-    ``default_tags``, ``is_archived`` → ``archived_at``).
-
-    Prefer ``make_watched_item`` in new tests.
-    """
-    if watched_item is not None:
-        wi = watched_item
-    else:
-        # Map legacy per-Watch kwargs onto WatchedItem fields.
-        if "content_type" in kwargs:
-            kwargs["default_content_type"] = kwargs.pop("content_type")
-        if "tags" in kwargs:
-            kwargs["default_tags"] = kwargs.pop("tags")
-        suspended = kwargs.pop("suspended_by_domain", kwargs.pop("domain_suspended", False))
-        archived = kwargs.pop("is_archived", False)
-        domain_name = kwargs.pop("domain_name", None)
-        wi = await make_watched_item(
-            session,
-            name=name,
-            archiver_info_item_id=archiver_info_item_id,
-            primary_url=primary_url,
-            domain_name=domain_name,
-            domain_suspended=suspended,
-            **kwargs,
-        )
-        if archived:
-            wi.is_active = False
-            wi.archived_at = datetime.now(UTC)
-            await session.flush()
-
-    # Legacy attribute aliases (unmapped instance attrs survive refresh).
-    wi.watched_item = wi
-    wi.watched_item_id = wi.id
     return wi
 
 

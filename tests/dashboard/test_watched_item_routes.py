@@ -1,6 +1,22 @@
 """Integration tests for WatchedItem dashboard routes (#185 Phase A step 7)."""
 
+from datetime import UTC, date, datetime
+from unittest.mock import AsyncMock, MagicMock, patch
+
 import pytest
+from sqlalchemy import select
+from ulid import ULID
+
+from src.core.models.audit_log import AuditLog, EventType
+from src.core.models.domain import Domain
+from src.core.models.notification_config import WatchNotificationConfig
+from src.core.models.temporal_profile import PostAction, ProfileType, TemporalProfile
+from src.core.models.watched_item import WatchedItem
+from src.dashboard.routes import (
+    _apply_watched_item_field_update,
+    _watched_item_field_context,
+)
+from tests.conftest import make_info_item, make_watched_item
 
 pytestmark = pytest.mark.integration
 
@@ -20,9 +36,6 @@ class TestListPage:
         assert b"/watches/new" not in body
 
     async def test_list_renders_items(self, client, db_session):
-        from src.core.models.watched_item import WatchedItem
-        from tests.conftest import make_info_item
-
         item = await make_info_item(db_session)
         db_session.add(WatchedItem(archiver_info_item_id=item.info_item_id, name="Listed"))
         await db_session.flush()
@@ -36,8 +49,6 @@ class TestListPage:
 
     async def test_removed_columns_absent(self, client, db_session):
         """Information Item, Content Type, Tags, Last Reviewed columns are gone."""
-        from src.core.models.watched_item import WatchedItem
-        from tests.conftest import make_info_item
 
         item = await make_info_item(db_session)
         db_session.add(WatchedItem(archiver_info_item_id=item.info_item_id, name="ColTest"))
@@ -52,8 +63,6 @@ class TestListPage:
 
     async def test_new_column_headers_present(self, client, db_session):
         """Last Check, Next Check, Status headers appear; Aspect Review removed."""
-        from src.core.models.watched_item import WatchedItem
-        from tests.conftest import make_info_item
 
         item = await make_info_item(db_session)
         db_session.add(WatchedItem(archiver_info_item_id=item.info_item_id, name="ColTest2"))
@@ -67,10 +76,6 @@ class TestListPage:
 
     async def test_next_check_has_data_attribute_when_last_checked(self, client, db_session):
         """Rows with last_checked_at render a data-next-check ISO timestamp."""
-        from datetime import UTC, datetime
-
-        from src.core.models.watched_item import WatchedItem
-        from tests.conftest import make_info_item
 
         item = await make_info_item(db_session)
         wi = WatchedItem(
@@ -87,8 +92,6 @@ class TestListPage:
 
     async def test_status_column_consolidated(self, client, db_session):
         """One labeled Status column holds the toggle + badge; no separate Actions column (#190)."""
-        from src.core.models.watched_item import WatchedItem
-        from tests.conftest import make_info_item
 
         item = await make_info_item(db_session)
         db_session.add(
@@ -111,8 +114,6 @@ class TestListPage:
 
     async def test_aspect_review_column_removed(self, client, db_session):
         """Aspect Review column removed from list view (#173)."""
-        from src.core.models.watched_item import WatchedItem
-        from tests.conftest import make_info_item
 
         item = await make_info_item(db_session)
         wi = WatchedItem(archiver_info_item_id=item.info_item_id, name="HtmxRow")
@@ -125,9 +126,6 @@ class TestListPage:
 
 class TestDetailPage:
     async def test_returns_200(self, client, db_session):
-        from src.core.models.watched_item import WatchedItem
-        from tests.conftest import make_info_item
-
         item = await make_info_item(db_session)
         wi = WatchedItem(archiver_info_item_id=item.info_item_id, name="Detail Test")
         db_session.add(wi)
@@ -139,15 +137,10 @@ class TestDetailPage:
         assert b"Detail Test" in response.content
 
     async def test_404_unknown(self, client):
-        from ulid import ULID
-
         response = await client.get(f"/watched-items/{ULID()}")
         assert response.status_code == 404
 
     async def test_shows_effective_url(self, client, db_session):
-        from src.core.models.watched_item import WatchedItem
-        from tests.conftest import make_info_item
-
         item = await make_info_item(db_session)
         wi = WatchedItem(
             archiver_info_item_id=item.info_item_id,
@@ -162,8 +155,6 @@ class TestDetailPage:
 
     async def test_no_binding_tree(self, client, db_session):
         """Binding tree removed in step 7 — no info_item_picker partials."""
-        from src.core.models.watched_item import WatchedItem
-        from tests.conftest import make_info_item
 
         item = await make_info_item(db_session)
         wi = WatchedItem(archiver_info_item_id=item.info_item_id, name="No Tree WI")
@@ -178,9 +169,6 @@ class TestDetailPage:
         assert b'type="radio"' not in body
 
     async def test_renders_danger_zone(self, client, db_session):
-        from src.core.models.watched_item import WatchedItem
-        from tests.conftest import make_info_item
-
         item = await make_info_item(db_session)
         wi = WatchedItem(archiver_info_item_id=item.info_item_id, name="Danger")
         db_session.add(wi)
@@ -192,11 +180,6 @@ class TestDetailPage:
 
     async def test_notification_configs_panel_renders_config(self, client, db_session):
         """#191 CR-4/6: the folded notification-configs panel renders a config's label + badge."""
-        from ulid import ULID
-
-        from src.core.models.notification_config import WatchNotificationConfig
-        from src.core.models.watched_item import WatchedItem
-        from tests.conftest import make_info_item
 
         item = await make_info_item(db_session)
         wi = WatchedItem(archiver_info_item_id=item.info_item_id, name="WithConfig")
@@ -222,11 +205,6 @@ class TestDetailPage:
 
     async def test_temporal_profile_panel_renders(self, client, db_session):
         """#191 CR-5: the WatchedItem detail surfaces its 1:1 temporal profile."""
-        from datetime import date
-
-        from src.core.models.temporal_profile import PostAction, ProfileType, TemporalProfile
-        from src.core.models.watched_item import WatchedItem
-        from tests.conftest import make_info_item
 
         item = await make_info_item(db_session)
         wi = WatchedItem(archiver_info_item_id=item.info_item_id, name="WithProfile")
@@ -249,8 +227,6 @@ class TestDetailPage:
 
     async def test_temporal_profile_panel_empty_state(self, client, db_session):
         """No profile → the panel shows the default-interval hint."""
-        from src.core.models.watched_item import WatchedItem
-        from tests.conftest import make_info_item
 
         item = await make_info_item(db_session)
         wi = WatchedItem(archiver_info_item_id=item.info_item_id, name="NoProfile")
@@ -262,8 +238,6 @@ class TestDetailPage:
 
     async def test_domain_suspended_banner_renders(self, client, db_session):
         """Domain Inactive alert shows when watched_item.domain_suspended=True."""
-        from src.core.models.watched_item import WatchedItem
-        from tests.conftest import make_info_item
 
         item = await make_info_item(db_session)
         wi = WatchedItem(
@@ -278,9 +252,6 @@ class TestDetailPage:
 
     async def test_domain_name_link_renders(self, client, db_session):
         """Domain link appears and points to /domains/<name> when domain_name is set."""
-        from src.core.models.domain import Domain
-        from src.core.models.watched_item import WatchedItem
-        from tests.conftest import make_info_item
 
         db_session.add(Domain(name="detail-domain.com"))
         item = await make_info_item(db_session)
@@ -299,10 +270,6 @@ class TestDetailPage:
 
     async def test_new_watch_button_hidden_when_archived(self, client, db_session):
         """New Watch button absent on archived WI."""
-        from datetime import UTC, datetime
-
-        from src.core.models.watched_item import WatchedItem
-        from tests.conftest import make_info_item
 
         item = await make_info_item(db_session)
         wi = WatchedItem(
@@ -319,8 +286,6 @@ class TestDetailPage:
 
     async def test_new_watch_button_hidden_when_no_effective_url(self, client, db_session):
         """New Watch button absent when WatchedItem has no effective_url."""
-        from src.core.models.watched_item import WatchedItem
-        from tests.conftest import make_info_item
 
         item = await make_info_item(db_session)
         wi = WatchedItem(archiver_info_item_id=item.info_item_id, name="NoPrimary")
@@ -330,35 +295,27 @@ class TestDetailPage:
         response = await client.get(f"/watched-items/{wi.id}")
         assert b"+ New Watch" not in response.content
 
-    async def test_detail_page_with_child_watch_renders_200(self, client, db_session):
-        """Regression: health_map must be passed when the WI has child watches."""
-        from tests.conftest import make_watched_item
-
-        wi = await make_watched_item(db_session, name="Child Watch")
+    async def test_detail_page_renders_200(self, client, db_session):
+        """Regression: health_map must be passed when rendering the detail page."""
+        wi = await make_watched_item(db_session, name="Detail Item")
         await db_session.commit()
 
         response = await client.get(f"/watched-items/{wi.id}")
         assert response.status_code == 200
-        assert b"Child Watch" in response.content
+        assert b"Detail Item" in response.content
 
-    async def test_child_watch_table_uses_static_headers_not_global_partial(
-        self, client, db_session
-    ):
+    async def test_detail_table_uses_static_headers_not_global_partial(self, client, db_session):
         """Regression #182: sort buttons must NOT point at /partials/watch-table."""
-        from tests.conftest import make_watched_item
-
-        wi = await make_watched_item(db_session, name="Scoped Watch")
+        wi = await make_watched_item(db_session, name="Scoped Item")
         await db_session.commit()
 
         response = await client.get(f"/watched-items/{wi.id}")
         assert response.status_code == 200
-        assert b"Scoped Watch" in response.content
+        assert b"Scoped Item" in response.content
         assert b'hx-get="/partials/watch-table"' not in response.content
 
     async def test_aspect_review_status_route_gone(self, client, db_session):
         """The /aspect-review-status route was removed in step 7."""
-        from src.core.models.watched_item import WatchedItem
-        from tests.conftest import make_info_item
 
         item = await make_info_item(db_session)
         wi = WatchedItem(archiver_info_item_id=item.info_item_id, name="Review Gone")
@@ -377,9 +334,6 @@ class TestListPageSearchAndPagination:
         assert response.status_code == 200
 
     async def test_search_filters_by_name(self, client, db_session):
-        from src.core.models.watched_item import WatchedItem
-        from tests.conftest import make_info_item
-
         item_a = await make_info_item(db_session, name="Alpha Item")
         item_b = await make_info_item(db_session, name="Beta Item")
         db_session.add(WatchedItem(archiver_info_item_id=item_a.info_item_id, name="Alpha WI"))
@@ -393,9 +347,6 @@ class TestListPageSearchAndPagination:
         assert b"Beta WI" not in body
 
     async def test_search_is_case_insensitive(self, client, db_session):
-        from src.core.models.watched_item import WatchedItem
-        from tests.conftest import make_info_item
-
         item = await make_info_item(db_session)
         db_session.add(
             WatchedItem(archiver_info_item_id=item.info_item_id, name="Cannabis Observer")
@@ -407,9 +358,6 @@ class TestListPageSearchAndPagination:
         assert b"Cannabis Observer" in response.content
 
     async def test_pagination_returns_page_two(self, client, db_session):
-        from src.core.models.watched_item import WatchedItem
-        from tests.conftest import make_info_item
-
         for name in ("AAA", "BBB", "CCC"):
             item = await make_info_item(db_session, name=name)
             db_session.add(WatchedItem(archiver_info_item_id=item.info_item_id, name=name))
@@ -423,11 +371,6 @@ class TestListPageSearchAndPagination:
         assert b"BBB" not in body
 
     async def test_include_archived_false_hides_archived(self, client, db_session):
-        from datetime import UTC, datetime
-
-        from src.core.models.watched_item import WatchedItem
-        from tests.conftest import make_info_item
-
         item = await make_info_item(db_session)
         db_session.add(
             WatchedItem(
@@ -443,11 +386,6 @@ class TestListPageSearchAndPagination:
         assert b"Archived WI" not in response.content
 
     async def test_include_archived_true_shows_archived(self, client, db_session):
-        from datetime import UTC, datetime
-
-        from src.core.models.watched_item import WatchedItem
-        from tests.conftest import make_info_item
-
         item = await make_info_item(db_session)
         db_session.add(
             WatchedItem(
@@ -463,11 +401,6 @@ class TestListPageSearchAndPagination:
         assert b"ShowArchived WI" in response.content
 
     async def test_include_archived_false_explicit_param(self, client, db_session):
-        from datetime import UTC, datetime
-
-        from src.core.models.watched_item import WatchedItem
-        from tests.conftest import make_info_item
-
         item = await make_info_item(db_session)
         db_session.add(
             WatchedItem(
@@ -484,9 +417,6 @@ class TestListPageSearchAndPagination:
         assert b"HiddenArchived" not in response.content
 
     async def test_full_page_hx_target_and_include_in_pagination_context(self, client, db_session):
-        from src.core.models.watched_item import WatchedItem
-        from tests.conftest import make_info_item
-
         for name in ("PA", "PB", "PC"):
             item = await make_info_item(db_session, name=name)
             db_session.add(WatchedItem(archiver_info_item_id=item.info_item_id, name=name))
@@ -510,9 +440,6 @@ class TestListPageSearchAndPagination:
         assert b"Filter by name" in body
 
     async def test_no_aspect_review_column(self, client, db_session):
-        from src.core.models.watched_item import WatchedItem
-        from tests.conftest import make_info_item
-
         item = await make_info_item(db_session)
         db_session.add(WatchedItem(archiver_info_item_id=item.info_item_id, name="NoAR"))
         await db_session.flush()
@@ -526,9 +453,6 @@ class TestListPageSearchAndPagination:
 
 class TestArchiveRestore:
     async def test_archive_redirects_back(self, client, db_session):
-        from src.core.models.watched_item import WatchedItem
-        from tests.conftest import make_info_item
-
         item = await make_info_item(db_session)
         wi = WatchedItem(archiver_info_item_id=item.info_item_id, name="ToArchive")
         db_session.add(wi)
@@ -540,8 +464,6 @@ class TestArchiveRestore:
 
     async def test_archive_marks_watched_item(self, client, db_session):
         """#191: archiving the single-entity WatchedItem stamps archived_at + inactive."""
-        from src.core.models.watched_item import WatchedItem
-        from tests.conftest import make_info_item
 
         item = await make_info_item(db_session)
         wi = WatchedItem(archiver_info_item_id=item.info_item_id, name="Parent")
@@ -555,11 +477,6 @@ class TestArchiveRestore:
         assert wi.is_active is False
 
     async def test_restore_clears_archived_at(self, client, db_session):
-        from datetime import UTC, datetime
-
-        from src.core.models.watched_item import WatchedItem
-        from tests.conftest import make_info_item
-
         item = await make_info_item(db_session)
         wi = WatchedItem(
             archiver_info_item_id=item.info_item_id,
@@ -578,52 +495,28 @@ class TestArchiveRestore:
 
 class TestFieldHelpers:
     def test_interval_format(self):
-        from unittest.mock import MagicMock
-
-        from src.dashboard.routes import _watched_item_field_context
-
         wi = MagicMock()
         wi.default_schedule_config = {"interval": "15m"}
         ctx = _watched_item_field_context(MagicMock(), wi, "default_schedule_interval", mode="view")
         assert ctx["field_value"] == "15m"
 
     def test_interval_empty_renders_blank(self):
-        from unittest.mock import MagicMock
-
-        from src.dashboard.routes import _watched_item_field_context
-
         wi = MagicMock()
         wi.default_schedule_config = None
         ctx = _watched_item_field_context(MagicMock(), wi, "default_schedule_interval", mode="view")
         assert ctx["field_value"] == ""
 
     def test_apply_interval_writes_into_dict(self):
-        from ulid import ULID
-
-        from src.core.models.watched_item import WatchedItem
-        from src.dashboard.routes import _apply_watched_item_field_update
-
         wi = WatchedItem(archiver_info_item_id=ULID(), name="x")
         _apply_watched_item_field_update(wi, "default_schedule_interval", "30m")
         assert wi.default_schedule_config == {"interval": "30m"}
 
     def test_apply_interval_rejects_invalid(self):
-        import pytest
-        from ulid import ULID
-
-        from src.core.models.watched_item import WatchedItem
-        from src.dashboard.routes import _apply_watched_item_field_update
-
         wi = WatchedItem(archiver_info_item_id=ULID(), name="x")
         with pytest.raises(ValueError):
             _apply_watched_item_field_update(wi, "default_schedule_interval", "bogus")
 
     def test_apply_interval_empty_clears(self):
-        from ulid import ULID
-
-        from src.core.models.watched_item import WatchedItem
-        from src.dashboard.routes import _apply_watched_item_field_update
-
         wi = WatchedItem(
             archiver_info_item_id=ULID(),
             name="x",
@@ -635,9 +528,6 @@ class TestFieldHelpers:
 
 class TestFieldRoutes:
     async def test_get_field_partial_view_mode(self, client, db_session):
-        from src.core.models.watched_item import WatchedItem
-        from tests.conftest import make_info_item
-
         item = await make_info_item(db_session)
         wi = WatchedItem(archiver_info_item_id=item.info_item_id, name="FieldTest")
         db_session.add(wi)
@@ -651,9 +541,6 @@ class TestFieldRoutes:
         assert b"FieldTest" in response.content
 
     async def test_post_field_updates(self, client, db_session):
-        from src.core.models.watched_item import WatchedItem
-        from tests.conftest import make_info_item
-
         item = await make_info_item(db_session)
         wi = WatchedItem(archiver_info_item_id=item.info_item_id, name="Old")
         db_session.add(wi)
@@ -669,9 +556,6 @@ class TestFieldRoutes:
         assert wi.name == "New"
 
     async def test_post_interval_updates_jsonb(self, client, db_session):
-        from src.core.models.watched_item import WatchedItem
-        from tests.conftest import make_info_item
-
         item = await make_info_item(db_session)
         wi = WatchedItem(archiver_info_item_id=item.info_item_id, name="Sched")
         db_session.add(wi)
@@ -687,9 +571,6 @@ class TestFieldRoutes:
         assert wi.default_schedule_config == {"interval": "45m"}
 
     async def test_invalid_interval_rejected(self, client, db_session):
-        from src.core.models.watched_item import WatchedItem
-        from tests.conftest import make_info_item
-
         item = await make_info_item(db_session)
         wi = WatchedItem(archiver_info_item_id=item.info_item_id, name="Sched")
         db_session.add(wi)
@@ -703,9 +584,6 @@ class TestFieldRoutes:
         assert response.status_code == 400
 
     async def test_unknown_field_400(self, client, db_session):
-        from src.core.models.watched_item import WatchedItem
-        from tests.conftest import make_info_item
-
         item = await make_info_item(db_session)
         wi = WatchedItem(archiver_info_item_id=item.info_item_id, name="X")
         db_session.add(wi)
@@ -720,9 +598,6 @@ class TestFieldRoutes:
 
 class TestTagsEditor:
     async def test_get_tags_partial(self, client, db_session):
-        from src.core.models.watched_item import WatchedItem
-        from tests.conftest import make_info_item
-
         item = await make_info_item(db_session)
         wi = WatchedItem(archiver_info_item_id=item.info_item_id, name="T", default_tags=["a", "b"])
         db_session.add(wi)
@@ -734,9 +609,6 @@ class TestTagsEditor:
         assert b'<span class="chip"><span>' in response.content
 
     async def test_add_tag(self, client, db_session):
-        from src.core.models.watched_item import WatchedItem
-        from tests.conftest import make_info_item
-
         item = await make_info_item(db_session)
         wi = WatchedItem(archiver_info_item_id=item.info_item_id, name="T")
         db_session.add(wi)
@@ -752,9 +624,6 @@ class TestTagsEditor:
         assert "newtag" in (wi.default_tags or [])
 
     async def test_remove_tag(self, client, db_session):
-        from src.core.models.watched_item import WatchedItem
-        from tests.conftest import make_info_item
-
         item = await make_info_item(db_session)
         wi = WatchedItem(
             archiver_info_item_id=item.info_item_id, name="T", default_tags=["x", "y", "z"]
@@ -771,9 +640,6 @@ class TestTagsEditor:
         assert wi.default_tags == ["x", "z"]
 
     async def test_mark_reviewed_stamps_now(self, client, db_session):
-        from src.core.models.watched_item import WatchedItem
-        from tests.conftest import make_info_item
-
         item = await make_info_item(db_session)
         wi = WatchedItem(archiver_info_item_id=item.info_item_id, name="Stamp")
         db_session.add(wi)
@@ -789,8 +655,6 @@ class TestTagsEditor:
 
 async def _make_wi(db_session, **kwargs):
     """Create + commit a WatchedItem; return it."""
-    from src.core.models.watched_item import WatchedItem
-    from tests.conftest import make_info_item
 
     item = await make_info_item(db_session, name=kwargs.pop("info_name", "PauseWI"))
     wi = WatchedItem(archiver_info_item_id=item.info_item_id, **kwargs)
@@ -802,10 +666,6 @@ async def _make_wi(db_session, **kwargs):
 
 class TestPauseResume:
     async def test_pause_active_item(self, client, db_session):
-        from sqlalchemy import select
-
-        from src.core.models.audit_log import AuditLog, EventType
-
         wi = await _make_wi(db_session, name="ToPause", is_active=True)
         resp = await client.post(
             f"/watched-items/{wi.id}/toggle-active",
@@ -830,10 +690,6 @@ class TestPauseResume:
         assert events[0].payload["source"] == "dashboard"
 
     async def test_resume_paused_item(self, client, db_session):
-        from sqlalchemy import select
-
-        from src.core.models.audit_log import AuditLog, EventType
-
         wi = await _make_wi(db_session, name="ToResume", is_active=False)
         resp = await client.post(
             f"/watched-items/{wi.id}/toggle-active",
@@ -857,8 +713,6 @@ class TestPauseResume:
         assert len(events) == 1
 
     async def test_toggle_archived_flashes_and_keeps_state(self, client, db_session):
-        from datetime import UTC, datetime
-
         wi = await _make_wi(
             db_session, name="ArchToggle", is_active=False, archived_at=datetime.now(UTC)
         )
@@ -875,8 +729,6 @@ class TestPauseResume:
         assert wi.is_active is False  # state unchanged
 
     async def test_toggle_archived_non_htmx_redirects(self, client, db_session):
-        from datetime import UTC, datetime
-
         wi = await _make_wi(
             db_session, name="ArchToggleRedir", is_active=False, archived_at=datetime.now(UTC)
         )
@@ -941,8 +793,6 @@ class TestPauseResume:
         assert b"flash-warning" in resp.content
 
     async def test_toggle_unknown_returns_404(self, client):
-        from ulid import ULID
-
         resp = await client.post(f"/watched-items/{ULID()}/toggle-active", data={"active": "false"})
         assert resp.status_code == 404
 
@@ -968,7 +818,6 @@ class TestPauseResume:
 
     async def test_detail_shows_check_activity(self, client, db_session):
         """WatchedItem detail surfaces check audit activity (#190 — execution visibility)."""
-        from src.core.models.audit_log import AuditLog, EventType
 
         wi = await _make_wi(db_session, name="ActivityWI", effective_url="https://example.com")
         db_session.add(
@@ -994,8 +843,6 @@ class TestPauseResume:
 
 class TestCheckNow:
     async def test_check_now_success_queues(self, client, db_session):
-        from unittest.mock import AsyncMock, patch
-
         wi = await _make_wi(db_session, name="CheckOK", is_active=True)
         wi.effective_url = "https://example.com"
         await db_session.commit()
@@ -1010,7 +857,6 @@ class TestCheckNow:
 
     async def test_check_now_non_htmx_redirects(self, client, db_session):
         """Non-HTMX clients get a redirect fallback, not a bare flash fragment."""
-        from unittest.mock import AsyncMock, patch
 
         wi = await _make_wi(db_session, name="CheckRedir", is_active=True)
         wi.effective_url = "https://example.com"
@@ -1033,7 +879,5 @@ class TestCheckNow:
         assert b"paused" in resp.content.lower()
 
     async def test_check_now_unknown_returns_404(self, client):
-        from ulid import ULID
-
         resp = await client.post(f"/watched-items/{ULID()}/check-now")
         assert resp.status_code == 404

@@ -866,11 +866,11 @@ class TestCheckNow:
         assert response.status_code == 422
         assert "url" in response.json()["detail"].lower()
 
-    async def test_202_when_no_active_watches(self, client, db_session):
-        """#187: check-now must succeed even with zero active Watch subscriptions."""
+    async def test_check_now_returns_202(self, client, db_session):
+        """#187: check-now on an active WatchedItem returns 202 Accepted."""
         from unittest.mock import AsyncMock, patch
 
-        wi = await _make_watched_item(db_session, name="NoActiveWatches")
+        wi = await _make_watched_item(db_session, name="CheckNow202")
         wi.effective_url = "https://example.com"
         await db_session.commit()
 

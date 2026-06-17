@@ -3,7 +3,7 @@
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import DateTime, String, func
+from sqlalchemy import DateTime, Index, String, func, text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Mapped, mapped_column
@@ -73,6 +73,18 @@ class AuditLog(Base):
         DateTime(timezone=True),
         default=lambda: datetime.now(UTC),
         server_default=func.now(),
+    )
+
+    # The WatchedItem association lives in ``payload`` (the ``watch_id`` FK was
+    # retired in #191), and ``audit_log`` grows unbounded. Index the JSONB
+    # text-extraction the filter queries use, plus ``created_at`` for the
+    # order-by every caller applies, so the lookup never degrades to a seq scan.
+    __table_args__ = (
+        Index(
+            "ix_audit_log_payload_watched_item_id",
+            text("(payload->>'watched_item_id')"),
+            created_at.desc(),
+        ),
     )
 
     def __init__(self, **kwargs: object) -> None:

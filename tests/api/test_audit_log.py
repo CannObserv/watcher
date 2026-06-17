@@ -1,6 +1,7 @@
 """Integration tests for audit log API endpoints."""
 
 import pytest
+from sqlalchemy import text
 
 from src.core.models.audit_log import EventType
 from tests.conftest import make_info_item
@@ -76,3 +77,23 @@ class TestWatchedItemEventTypes:
 
 def test_watched_item_created_event_exists():
     assert EventType.WATCHED_ITEM_CREATED == "watched_item.created"
+
+
+class TestAuditPayloadIndex:
+    """The WatchedItem-association filter (#193) must hit an expression index,
+    not a seq scan, since ``audit_log`` grows unbounded."""
+
+    async def test_payload_watched_item_id_index_exists(self, db_session):
+        result = await db_session.execute(
+            text(
+                "SELECT indexdef FROM pg_indexes "
+                "WHERE tablename = 'audit_log' "
+                "AND indexname = 'ix_audit_log_payload_watched_item_id'"
+            )
+        )
+        indexdef = result.scalar_one_or_none()
+        assert indexdef is not None, "expression index on payload->>'watched_item_id' missing"
+        # Indexes the JSONB text-extraction the queries filter on, then created_at
+        # for the order-by every caller applies.
+        assert "watched_item_id" in indexdef
+        assert "created_at" in indexdef

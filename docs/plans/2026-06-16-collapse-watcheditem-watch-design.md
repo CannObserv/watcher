@@ -96,6 +96,24 @@ truncate rather than backfill — the same posture #160 took.
   `watched_item_id`. Multiple independent schedules per URL is explicitly not a
   goal.
 
+## CR decisions folded into Phases 4–6 (#191 review round 1)
+
+- **Rename the `WatchEvent` identity fields** (#3): `watch_id` → `watched_item_id`,
+  `watch_name` → `item_name`, `watch_url` → `item_url`. Update all producers
+  (pipeline, tasks) and consumers (content.py template vars, notifier_client
+  idempotency key, tests).
+- **Refactor *all* `watch_id` references → `watched_item_id`** (#4): audit calls,
+  event metadata, dashboard/context filters, API params — everywhere the id now
+  denotes a WatchedItem. Audit dispatch/check events key the WatchedItem in the
+  payload (the `AuditLog.watch_id` FK column is retired with `Watch`).
+- **Fix `change_url`** (#2/#6): build `{APP_URL}/watched-items/{id}/...` (not
+  `/watches/...`), and key it off the real metadata field (`change_revision_id`,
+  not the dead `change_id`) — or drop `change_url` if no per-change page exists.
+- Behavior change accepted (#5): one dispatch per WatchedItem;
+  `notifications_dispatched ≤ 1`; per-Watch tags/description give way to
+  WatchedItem defaults. Rewrite the obsolete fan-out tests red→green.
+- Red tree (#1) stays until Phases 4–5 complete; not mergeable before green.
+
 ## Out of scope
 
 - The historical procrastinate failure backlog (~8.6k) is a separate

@@ -3,24 +3,22 @@
 import pytest
 
 from src.core.models.audit_log import EventType
-from src.core.models.watched_item import WatchedItem
 from tests.conftest import make_info_item
 
 pytestmark = pytest.mark.integration
 
 
-async def _create_watch_via_api(client, db_session, *, name="W"):
-    """Create a WatchedItem and then a Watch via the API."""
+async def _create_watched_item_via_api(client, db_session, *, name="W"):
+    """Create a WatchedItem via the API; returns its id.
+
+    The create route emits a ``WATCHED_ITEM_CREATED`` audit entry keyed by
+    ``watched_item_id`` in the payload (#191 — the dedicated FK column is gone).
+    """
     item = await make_info_item(db_session, name=name)
-    wi = WatchedItem(
-        archiver_info_item_id=item.info_item_id, name=name, effective_url="https://example.com"
-    )
-    db_session.add(wi)
-    await db_session.flush()
     await db_session.commit()
     resp = await client.post(
-        "/api/v1/watches",
-        json={"name": name, "watched_item_id": str(wi.id), "content_type": "html"},
+        "/api/v1/watched-items",
+        json={"archiver_info_item_id": str(item.info_item_id), "name": name},
     )
     assert resp.status_code == 201, resp.text
     return resp.json()["id"]
@@ -28,33 +26,37 @@ async def _create_watch_via_api(client, db_session, *, name="W"):
 
 class TestListAuditLog:
     async def test_list_audit_entries(self, client, db_session):
-        await _create_watch_via_api(client, db_session, name="Audit Test")
+        await _create_watched_item_via_api(client, db_session, name="Audit Test")
         response = await client.get("/api/v1/audit")
         assert response.status_code == 200
         data = response.json()
         assert len(data) >= 1
-        assert any(e["event_type"] == EventType.WATCH_CREATED for e in data)
+        assert any(e["event_type"] == EventType.WATCHED_ITEM_CREATED for e in data)
 
     async def test_filter_by_event_type(self, client, db_session):
-        await _create_watch_via_api(client, db_session, name="Event Filter")
-        response = await client.get(f"/api/v1/audit?event_type={EventType.WATCH_CREATED}")
+        await _create_watched_item_via_api(client, db_session, name="Event Filter")
+        response = await client.get(f"/api/v1/audit?event_type={EventType.WATCHED_ITEM_CREATED}")
         assert response.status_code == 200
-        assert all(e["event_type"] == EventType.WATCH_CREATED for e in response.json())
+        assert all(e["event_type"] == EventType.WATCHED_ITEM_CREATED for e in response.json())
 
-    async def test_filter_by_watch_id(self, client, db_session):
-        watch_id = await _create_watch_via_api(client, db_session, name="Watch Filter")
-        response = await client.get(f"/api/v1/audit?watch_id={watch_id}")
+    async def test_filter_by_watched_item_id(self, client, db_session):
+        wi_id = await _create_watched_item_via_api(client, db_session, name="WI Filter")
+        response = await client.get(f"/api/v1/audit?watched_item_id={wi_id}")
         assert response.status_code == 200
-        assert all(e["watch_id"] == watch_id for e in response.json())
+        entries = response.json()
+        assert entries
+        assert all(e["payload"].get("watched_item_id") == wi_id for e in entries)
 
     async def test_pagination(self, client):
         response = await client.get("/api/v1/audit?limit=1")
         assert response.status_code == 200
         assert len(response.json()) <= 1
 
-    async def test_filter_by_invalid_watch_id_returns_400(self, client):
-        response = await client.get("/api/v1/audit?watch_id=not-a-ulid")
-        assert response.status_code == 400
+    async def test_filter_by_unknown_watched_item_id_returns_empty(self, client):
+        """No ULID validation on the payload filter — unknown id just matches nothing."""
+        response = await client.get("/api/v1/audit?watched_item_id=not-a-ulid")
+        assert response.status_code == 200
+        assert response.json() == []
 
 
 class TestWatchedItemEventTypes:

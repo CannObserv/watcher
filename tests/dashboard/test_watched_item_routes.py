@@ -227,25 +227,6 @@ class TestDetailPage:
         assert b"/domains/detail-domain.com" in response.content
         assert b"detail-domain.com" in response.content
 
-    async def test_new_watch_button_visible_when_active_with_effective_url(
-        self, client, db_session
-    ):
-        """New Watch button appears on active WI that has effective_url set."""
-        from src.core.models.watched_item import WatchedItem
-        from tests.conftest import make_info_item
-
-        item = await make_info_item(db_session)
-        wi = WatchedItem(
-            archiver_info_item_id=item.info_item_id,
-            name="Active",
-            effective_url="https://example.com/target",
-        )
-        db_session.add(wi)
-        await db_session.flush()
-        await db_session.commit()
-        response = await client.get(f"/watched-items/{wi.id}")
-        assert b"+ New Watch" in response.content
-
     async def test_new_watch_button_hidden_when_archived(self, client, db_session):
         """New Watch button absent on archived WI."""
         from datetime import UTC, datetime
@@ -305,19 +286,6 @@ class TestDetailPage:
         assert response.status_code == 200
         assert b"Scoped Watch" in response.content
         assert b'hx-get="/partials/watch-table"' not in response.content
-
-    async def test_detail_page_with_no_child_watches_shows_empty_state(self, client, db_session):
-        from src.core.models.watched_item import WatchedItem
-        from tests.conftest import make_info_item
-
-        item = await make_info_item(db_session)
-        wi = WatchedItem(archiver_info_item_id=item.info_item_id, name="Empty WI")
-        db_session.add(wi)
-        await db_session.commit()
-
-        response = await client.get(f"/watched-items/{wi.id}")
-        assert response.status_code == 200
-        assert b"No watches under this Watched Item" in response.content
 
     async def test_aspect_review_status_route_gone(self, client, db_session):
         """The /aspect-review-status route was removed in step 7."""
@@ -502,21 +470,21 @@ class TestArchiveRestore:
         response = await client.post(f"/watched-items/{wi.id}/archive", follow_redirects=False)
         assert response.status_code in (200, 303)
 
-    async def test_archive_cascades_to_child_watches(self, client, db_session):
+    async def test_archive_marks_watched_item(self, client, db_session):
+        """#191: archiving the single-entity WatchedItem stamps archived_at + inactive."""
         from src.core.models.watched_item import WatchedItem
-        from tests.conftest import make_info_item, make_watch
+        from tests.conftest import make_info_item
 
         item = await make_info_item(db_session)
         wi = WatchedItem(archiver_info_item_id=item.info_item_id, name="Parent")
         db_session.add(wi)
-        await db_session.flush()
-        w = await make_watch(db_session, name="Child", watched_item=wi)
         await db_session.commit()
 
         await client.post(f"/watched-items/{wi.id}/archive", follow_redirects=False)
 
-        await db_session.refresh(w)
-        assert w.is_archived is True
+        await db_session.refresh(wi)
+        assert wi.archived_at is not None
+        assert wi.is_active is False
 
     async def test_restore_clears_archived_at(self, client, db_session):
         from datetime import UTC, datetime

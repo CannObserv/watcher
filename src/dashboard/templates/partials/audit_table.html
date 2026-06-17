@@ -5,7 +5,7 @@
       <tr>
         <th scope="col">Time</th>
         <th scope="col">Event</th>
-        <th scope="col">Watch</th>
+        <th scope="col">Watched Item</th>
         <th scope="col">Details</th>
       </tr>
     </thead>
@@ -23,8 +23,9 @@
           </span>
         </td>
         <td>
-          {% if entry.watch_id %}
-          <a href="/watches/{{ entry.watch_id }}" class="link text-sm">{{ entry.watch_id | string | truncate(12, True, '…') }}</a>
+          {% set wi_id = entry.payload.get('watched_item_id') if entry.payload else None %}
+          {% if wi_id %}
+          <a href="/watched-items/{{ wi_id }}" class="link text-sm">{{ wi_id | string | truncate(12, True, '…') }}</a>
           {% else %}—{% endif %}
         </td>
         <td class="text-xs text-gray-500 dark:text-gray-400 max-w-[300px] truncate">

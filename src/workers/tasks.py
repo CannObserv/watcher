@@ -11,16 +11,14 @@ from urllib.parse import urlparse
 
 import httpx
 import procrastinate
-from sqlalchemy import or_, select
+from sqlalchemy import select
 from ulid import ULID
 
 from src.core.database import get_session_factory
 from src.core.logging import get_logger
 from src.core.models.audit_log import EventType, audit
-from src.core.models.domain import Domain
 from src.core.models.temporal_profile import TemporalProfile
-from src.core.models.watch import Watch, WatchHealthStatus
-from src.core.models.watched_item import WatchedItem
+from src.core.models.watched_item import WatchedItem, WatchHealthStatus
 from src.core.notifications.events import WatchEvent, WatchEventType
 from src.core.rate_limiter import get_rate_limiter
 from src.core.registry import ServiceRegistry, get_registry
@@ -61,9 +59,9 @@ async def check_watched_item(watched_item_id: str, registry: ServiceRegistry | N
     """Fetch the WatchedItem's URL and run the pipeline.
 
     Updates ``last_checked_at`` and ``health_status`` on the WatchedItem
-    (both success and fetch-failure paths). Individual Watches receive
-    WATCH_ERROR / WATCH_RECOVERED events when the WatchedItem's health
-    transitions; CHANGE_DETECTED is dispatched inline by the pipeline.
+    (both success and fetch-failure paths). WATCH_ERROR / WATCH_RECOVERED
+    events are dispatched once per WatchedItem when its health transitions;
+    CHANGE_DETECTED is dispatched inline by the pipeline.
     """
     reg = registry if registry is not None else get_registry()
     async with get_session_factory()() as session:
@@ -72,35 +70,16 @@ async def check_watched_item(watched_item_id: str, registry: ServiceRegistry | N
             logger.warning("watched_item not found", extra={"watched_item_id": watched_item_id})
             return {"skipped": True}
 
-        if not watched_item.is_active or watched_item.archived_at is not None:
+        if (
+            not watched_item.is_active
+            or watched_item.archived_at is not None
+            or watched_item.domain_suspended
+        ):
             logger.info(
-                "watched_item inactive or archived",
+                "watched_item inactive, archived, or domain-suspended",
                 extra={"watched_item_id": watched_item_id},
             )
             return {"skipped": True}
-
-        # Load active+non-archived child Watches up-front so we know whether
-        # there's any work to do and so we can dispatch events after the
-        # pipeline. The pipeline reloads these itself for CHANGE_DETECTED
-        # dispatch — duplicate query is cheap and keeps surfaces decoupled.
-        children = (
-            (
-                await session.execute(
-                    select(Watch)
-                    .where(Watch.watched_item_id == watched_item.id)
-                    .where(Watch.is_active.is_(True))
-                    .where(Watch.is_archived.is_(False))
-                )
-            )
-            .scalars()
-            .all()
-        )
-        if not children:
-            logger.info(
-                "watched_item has no active children",
-                extra={"watched_item_id": watched_item_id},
-            )
-            return {"skipped": True, "reason": "no_active_children"}
 
         url = watched_item.effective_url
         if not url:
@@ -229,22 +208,42 @@ async def schedule_tick(timestamp: int) -> None:
     """Enqueue ``check_watched_item`` jobs for every WatchedItem due now.
 
     A WatchedItem is "due" when ``last_checked_at`` is NULL (never checked) or
-    when any child Watch's resolved schedule says the next check is overdue.
-    Temporal profiles live on Watch; the tightest applicable interval wins.
+    when its resolved schedule (with its optional 1:1 temporal profile applied)
+    says the next check is overdue.
 
-    Post-actions:
-    * ``deactivate`` / ``archive`` flip the individual triggering Watch off.
-    * ``reduce_frequency`` mutates the parent WatchedItem's
-      ``default_schedule_config`` so all siblings feel the slowdown.
-      Audited as ``WATCHED_ITEM_THROTTLED``.
+    Post-actions on the WatchedItem's temporal profile:
+    * ``deactivate`` flips the WatchedItem inactive.
+    * ``archive`` flips it inactive and stamps ``archived_at``.
+    * ``reduce_frequency`` slows ``default_schedule_config`` to ``1d``;
+      audited as ``WATCHED_ITEM_THROTTLED``.
     """
     now = datetime.now(UTC)
 
+    def _profile_dicts(profiles_orm: list[TemporalProfile]) -> list[dict] | None:
+        if not profiles_orm:
+            return None
+        return [
+            {
+                "id": str(p.id),
+                "profile_type": p.profile_type,
+                "reference_date": p.reference_date,
+                "date_range_start": p.date_range_start,
+                "date_range_end": p.date_range_end,
+                "rules": p.rules,
+                "post_action": p.post_action,
+                "is_active": p.is_active,
+            }
+            for p in profiles_orm
+        ]
+
     async with get_session_factory()() as session:
-        # Load active+non-archived WatchedItems.
+        # Load active, non-archived, non-domain-suspended WatchedItems — the
+        # single monitored entity (#191). domain_suspended cascades from domain
+        # deactivation and gates scheduling directly.
         wi_stmt = select(WatchedItem).where(
             WatchedItem.is_active.is_(True),
             WatchedItem.archived_at.is_(None),
+            WatchedItem.domain_suspended.is_(False),
         )
         watched_items = list((await session.execute(wi_stmt)).scalars().all())
 
@@ -253,25 +252,7 @@ async def schedule_tick(timestamp: int) -> None:
 
         wi_ids = [wi.id for wi in watched_items]
 
-        # Load all active+non-archived child Watches for those WatchedItems,
-        # filtered to active domains. Join Domain via WatchedItem.domain_name.
-        w_stmt = (
-            select(Watch, Domain)
-            .join(WatchedItem, WatchedItem.id == Watch.watched_item_id)
-            .outerjoin(Domain, Domain.name == WatchedItem.domain_name)
-            .where(
-                Watch.watched_item_id.in_(wi_ids),
-                Watch.is_active.is_(True),
-                Watch.is_archived.is_(False),
-                or_(Domain.id.is_(None), Domain.is_active.is_(True)),
-            )
-        )
-        rows = (await session.execute(w_stmt)).all()
-        children_by_wi: dict[ULID, list[Watch]] = {}
-        for watch, _domain in rows:
-            children_by_wi.setdefault(watch.watched_item_id, []).append(watch)
-
-        # Batch-load the per-WatchedItem temporal profile (#191: 1:1 on WatchedItem).
+        # Batch-load each WatchedItem's temporal profile (#191: 1:1 on WatchedItem).
         profiles_by_wi: dict[str, list[TemporalProfile]] = {}
         tp_stmt = select(TemporalProfile).where(
             TemporalProfile.is_active.is_(True),
@@ -282,32 +263,12 @@ async def schedule_tick(timestamp: int) -> None:
 
         deferred = 0
         for wi in watched_items:
-            children = children_by_wi.get(wi.id, [])
-            if not children:
-                continue
+            profiles_orm = profiles_by_wi.get(str(wi.id), [])
 
-            # Apply per-Watch post-actions first; a reduce_frequency action
-            # mutates the WatchedItem itself, which then affects the
-            # aggregated interval below.
-            for watch in list(children):
-                wid_str = str(watch.id)
-                profiles_orm = profiles_by_wi.get(str(wi.id), [])
-                if not profiles_orm:
-                    continue
-                profiles = [
-                    {
-                        "id": str(p.id),
-                        "profile_type": p.profile_type,
-                        "reference_date": p.reference_date,
-                        "date_range_start": p.date_range_start,
-                        "date_range_end": p.date_range_end,
-                        "rules": p.rules,
-                        "post_action": p.post_action,
-                        "is_active": p.is_active,
-                    }
-                    for p in profiles_orm
-                ]
-                actions = evaluate_post_actions(profiles, today=now.date())
+            # Apply the WatchedItem's temporal post-actions first; a
+            # reduce_frequency action mutates the schedule used for the due check.
+            if profiles_orm:
+                actions = evaluate_post_actions(_profile_dicts(profiles_orm), today=now.date())
                 for action_info in actions:
                     action = action_info["action"]
                     profile_dict = action_info["profile"]
@@ -316,82 +277,51 @@ async def schedule_tick(timestamp: int) -> None:
                         None,
                     )
                     if action == "deactivate":
-                        watch.is_active = False
+                        wi.is_active = False
                         logger.info(
-                            "post-action: deactivate watch",
-                            extra={"watch_id": wid_str, "profile_id": profile_dict["id"]},
+                            "post-action: deactivate watched_item",
+                            extra={"watched_item_id": str(wi.id), "profile_id": profile_dict["id"]},
                         )
                     elif action == "archive":
-                        watch.is_active = False
-                        watch.is_archived = True
+                        wi.is_active = False
+                        wi.archived_at = now
                         logger.info(
-                            "post-action: archive watch",
-                            extra={"watch_id": wid_str, "profile_id": profile_dict["id"]},
+                            "post-action: archive watched_item",
+                            extra={"watched_item_id": str(wi.id), "profile_id": profile_dict["id"]},
                         )
                     elif action == "reduce_frequency":
-                        new_cfg = {
+                        wi.default_schedule_config = {
                             **(wi.default_schedule_config or {}),
                             "interval": "1d",
                         }
-                        wi.default_schedule_config = new_cfg
                         audit(
                             session,
                             EventType.WATCHED_ITEM_THROTTLED,
                             watched_item_id=str(wi.id),
-                            triggering_watch_id=wid_str,
                             new_interval="1d",
                         )
                         logger.info(
-                            "post-action: reduce frequency on WatchedItem",
-                            extra={
-                                "watched_item_id": str(wi.id),
-                                "triggering_watch_id": wid_str,
-                                "profile_id": profile_dict["id"],
-                            },
+                            "post-action: reduce frequency on watched_item",
+                            extra={"watched_item_id": str(wi.id), "profile_id": profile_dict["id"]},
                         )
                     if orm_profile is not None:
                         orm_profile.is_active = False
 
-            # Re-filter children to those still active+non-archived after
-            # per-Watch post-actions.
-            active_children = [w for w in children if w.is_active and not w.is_archived]
-            if not active_children:
+            # Skip if a post-action just turned this WatchedItem off.
+            if not wi.is_active or wi.archived_at is not None:
                 continue
 
-            # A WatchedItem is due iff its last_checked_at is NULL (never checked)
-            # or any child Watch's resolved schedule is overdue.
-            due_now = False
+            # Due iff never checked, or the resolved schedule is overdue.
             if wi.last_checked_at is None:
                 due_now = True
             else:
-                for watch in active_children:
-                    profiles_orm = profiles_by_wi.get(str(wi.id), [])
-                    profiles = (
-                        [
-                            {
-                                "id": str(p.id),
-                                "profile_type": p.profile_type,
-                                "reference_date": p.reference_date,
-                                "date_range_start": p.date_range_start,
-                                "date_range_end": p.date_range_end,
-                                "rules": p.rules,
-                                "post_action": p.post_action,
-                                "is_active": p.is_active,
-                            }
-                            for p in profiles_orm
-                        ]
-                        if profiles_orm
-                        else None
-                    )
-                    next_due = compute_next_check(
-                        schedule_config=resolved_schedule_config(watch),
-                        last_checked_at=wi.last_checked_at,
-                        now=now,
-                        profiles=profiles,
-                    )
-                    if next_due <= now:
-                        due_now = True
-                        break
+                next_due = compute_next_check(
+                    schedule_config=resolved_schedule_config(wi),
+                    last_checked_at=wi.last_checked_at,
+                    now=now,
+                    profiles=_profile_dicts(profiles_orm),
+                )
+                due_now = next_due <= now
 
             if due_now:
                 logger.info(

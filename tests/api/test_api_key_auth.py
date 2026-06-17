@@ -43,7 +43,7 @@ class TestRequireApiKey:
 
         app.dependency_overrides.pop(require_api_key, None)
         try:
-            r = await client.get("/api/v1/watches", headers={"X-API-Key": raw_api_key})
+            r = await client.get("/api/v1/watched-items", headers={"X-API-Key": raw_api_key})
             assert r.status_code == 200
         finally:
             app.dependency_overrides[require_api_key] = lambda: "test-user-id"
@@ -54,7 +54,7 @@ class TestRequireApiKey:
 
         app.dependency_overrides.pop(require_api_key, None)
         try:
-            r = await client.get("/api/v1/watches")
+            r = await client.get("/api/v1/watched-items")
             assert r.status_code == 403
         finally:
             app.dependency_overrides[require_api_key] = lambda: "test-user-id"
@@ -65,7 +65,7 @@ class TestRequireApiKey:
 
         app.dependency_overrides.pop(require_api_key, None)
         try:
-            r = await client.get("/api/v1/watches", headers={"X-API-Key": "co_notvalid"})
+            r = await client.get("/api/v1/watched-items", headers={"X-API-Key": "co_notvalid"})
             assert r.status_code == 401
         finally:
             app.dependency_overrides[require_api_key] = lambda: "test-user-id"
@@ -78,7 +78,7 @@ class TestRequireApiKey:
 
         app.dependency_overrides.pop(require_api_key, None)
         try:
-            await client.get("/api/v1/watches", headers={"X-API-Key": raw_api_key})
+            await client.get("/api/v1/watched-items", headers={"X-API-Key": raw_api_key})
             key_hash = hashlib.sha256(raw_api_key.encode()).hexdigest()
             result = await db_session.execute(select(ApiKey).where(ApiKey.key_hash == key_hash))
             key = result.scalar_one()

@@ -12,17 +12,10 @@ from src.core.models.audit_log import AuditLog, EventType
 from src.core.models.domain import Domain
 from src.core.models.notification_config import WatchNotificationConfig
 from src.core.models.temporal_profile import TemporalProfile
-from src.core.models.watch import Watch
 from src.core.models.watched_item import WatchedItem
 from src.core.models.watched_item_notification_template import (
     WatchedItemNotificationTemplate,
 )
-
-_WATCH_SORT_COLS: dict[str, Any] = {
-    "name": Watch.name,
-    "status": Watch.is_active,
-    "created_at": Watch.created_at,
-}
 
 _DOMAIN_WI_SORT_COLS: dict[str, Any] = {
     "name": WatchedItem.name,
@@ -30,59 +23,22 @@ _DOMAIN_WI_SORT_COLS: dict[str, Any] = {
 }
 
 
-def _wi_subq(col):
-    """Correlated subquery: SELECT col FROM watched_items WHERE id = watches.watched_item_id."""
-    return select(col).where(WatchedItem.id == Watch.watched_item_id).scalar_subquery()
-
-
-async def get_watch_list(
-    session: AsyncSession,
-    is_active: bool | None = None,
-    include_archived: bool = False,
-    search: str | None = None,
-    domain: str | None = None,
-    sort: str = "last_checked_at",
-    order: str = "desc",
-) -> list[Watch]:
-    """Fetch watches for list display with optional filtering and sorting.
-
-    Sorting by health/last_checked_at/last_changed_at uses correlated subqueries
-    against the parent WatchedItem (these columns moved from Watch in #185 Phase A
-    step 6). Default sort is ``last_checked_at desc``.
-    """
-    wi_sort: dict[str, Any] = {
-        "health": _wi_subq(WatchedItem.health_status),
-        "last_checked_at": _wi_subq(WatchedItem.last_checked_at),
-        "last_changed_at": _wi_subq(WatchedItem.last_changed_at),
-    }
-    col = _WATCH_SORT_COLS.get(sort) or wi_sort.get(sort, _wi_subq(WatchedItem.last_checked_at))
-    order_expr = col.asc().nulls_first() if order == "asc" else col.desc().nulls_last()
-    stmt = select(Watch).order_by(order_expr)
-    if is_active is not None:
-        stmt = stmt.where(Watch.is_active == is_active)
-    if not include_archived:
-        stmt = stmt.where(Watch.is_archived.is_(False))
-    if search:
-        escaped = search.replace("%", "\\%").replace("_", "\\_")
-        stmt = stmt.where(Watch.name.ilike(f"%{escaped}%"))
-    if domain:
-        escaped = domain.replace("%", "\\%").replace("_", "\\_")
-        stmt = stmt.where(
-            Watch.watched_item_id.in_(
-                select(WatchedItem.id).where(WatchedItem.domain_name.ilike(f"%{escaped}%"))
-            )
-        )
-    result = await session.execute(stmt)
-    return list(result.scalars().all())
-
-
 async def get_dashboard_stats(session: AsyncSession) -> dict:
     """Aggregate counts for dashboard stat cards.
 
-    Phase 5 (#156): changes_today is always 0 — Change table dropped.
+    Post-#191 the WatchedItem is the single monitored entity, so the "watches"
+    stats count WatchedItems. ``changes_today`` is always 0 — Change table
+    dropped in Phase 5 (#156).
     """
-    total = await session.scalar(select(func.count(Watch.id)))
-    active = await session.scalar(select(func.count(Watch.id)).where(Watch.is_active.is_(True)))
+    total = await session.scalar(
+        select(func.count(WatchedItem.id)).where(WatchedItem.archived_at.is_(None))
+    )
+    active = await session.scalar(
+        select(func.count(WatchedItem.id)).where(
+            WatchedItem.archived_at.is_(None),
+            WatchedItem.is_active.is_(True),
+        )
+    )
 
     today_start = datetime.now(UTC).replace(hour=0, minute=0, second=0, microsecond=0)
 
@@ -161,150 +117,23 @@ def get_rate_limiter_state(limiter=None) -> list[dict]:
 async def get_audit_entries(
     session: AsyncSession,
     event_type: str | None = None,
-    watch_id: str | None = None,
+    watched_item_id: str | None = None,
     limit: int = 100,
     offset: int = 0,
 ) -> list[AuditLog]:
-    """Fetch audit log entries with optional filters."""
+    """Fetch audit log entries with optional filters.
+
+    The WatchedItem association lives in the JSONB ``payload`` (the ``watch_id``
+    FK column was retired with the Watch table in #191).
+    """
     stmt = select(AuditLog).order_by(AuditLog.created_at.desc())
     if event_type:
         stmt = stmt.where(AuditLog.event_type == event_type)
-    if watch_id:
-        try:
-            parsed = ULID.from_str(watch_id)
-            stmt = stmt.where(AuditLog.watch_id == parsed)
-        except ValueError:
-            pass
+    if watched_item_id:
+        stmt = stmt.where(AuditLog.payload["watched_item_id"].astext == watched_item_id)
     stmt = stmt.limit(limit).offset(offset)
     result = await session.execute(stmt)
     return list(result.scalars().all())
-
-
-async def get_watch_detail(session: AsyncSession, watch_id: str) -> Watch | None:
-    """Fetch a single watch by ID string. Returns None if not found or invalid."""
-    try:
-        parsed = ULID.from_str(watch_id)
-    except ValueError:
-        return None
-    return await session.get(Watch, parsed)
-
-
-_TIMELINE_SUMMARY: dict[str, str] = {
-    EventType.WATCH_CREATED: "Watch created",
-    EventType.WATCH_UPDATED: "Watch config updated",
-    EventType.WATCH_DEACTIVATED: "Watch deactivated",
-    EventType.WATCH_ARCHIVED: "Watch archived",
-    EventType.WATCH_RESTORED: "Watch restored",
-    EventType.WATCH_DELETED: "Watch deleted",
-    EventType.CHECK_SNAPSHOT_CREATED: "Snapshot fetched",
-    EventType.CHECK_NO_CHANGE: "Checked — no change",
-    EventType.CHECK_FETCH_FAILED: "Fetch failed",
-    EventType.NOTIFICATION_DISPATCHED: "Notification dispatched",
-    EventType.NOTIFICATION_CONFIG_CREATED: "Notification config added",
-    EventType.NOTIFICATION_CONFIG_DELETED: "Notification config removed",
-    EventType.PROFILE_CREATED: "Temporal profile added",
-    EventType.PROFILE_UPDATED: "Temporal profile updated",
-    EventType.PROFILE_DELETED: "Temporal profile removed",
-}
-
-_TIMELINE_CATEGORY: dict[str, str] = {
-    EventType.WATCH_CREATED: "config",
-    EventType.WATCH_UPDATED: "config",
-    EventType.WATCH_DEACTIVATED: "config",
-    EventType.WATCH_ARCHIVED: "config",
-    EventType.WATCH_RESTORED: "config",
-    EventType.WATCH_DELETED: "config",
-    EventType.CHECK_SNAPSHOT_CREATED: "run",
-    EventType.CHECK_NO_CHANGE: "run",
-    EventType.CHECK_FETCH_FAILED: "error",
-    EventType.NOTIFICATION_DISPATCHED: "run",
-    EventType.NOTIFICATION_CONFIG_CREATED: "config",
-    EventType.NOTIFICATION_CONFIG_DELETED: "config",
-    EventType.PROFILE_CREATED: "config",
-    EventType.PROFILE_UPDATED: "config",
-    EventType.PROFILE_DELETED: "config",
-}
-
-
-async def get_watch_timeline(
-    session: AsyncSession,
-    watch_id: str,
-    offset: int = 0,
-    limit: int = 50,
-) -> list[dict]:
-    """Return lifecycle event timeline for a watch.
-
-    Sources AuditLog entries into a chronological list sorted newest-first.
-    Supports offset-based pagination.
-
-    Phase 5 (#156): Snapshot + Change tables dropped — timeline is AuditLog-only.
-
-    Each entry is a dict with keys:
-    - ``event_type`` — string identifier for the event
-    - ``timestamp`` — timezone-aware datetime
-    - ``summary`` — short human-readable description
-    - ``detail_url`` — optional URL for a detail page (or ``None``)
-    - ``category`` — one of ``"error"``, ``"config"``, ``"run"``
-    """
-    try:
-        parsed = ULID.from_str(watch_id)
-    except ValueError:
-        return []
-
-    # Phase 5 (#156): Snapshot table dropped. Timeline now sourced from AuditLog only.
-    audit_stmt = select(
-        AuditLog.event_type.label("event_type"),
-        AuditLog.created_at.label("timestamp"),
-        AuditLog.payload.label("payload"),
-        AuditLog.id.label("source_id"),
-    ).where(AuditLog.watch_id == parsed)
-
-    audit_rows = list((await session.execute(audit_stmt)).all())
-
-    entries: list[dict] = []
-
-    for row in audit_rows:
-        et = row.event_type
-        category = _TIMELINE_CATEGORY.get(et, "config")
-        summary = _TIMELINE_SUMMARY.get(et, et)
-        # Enrich fetch-failed summary with error detail from payload
-        if et == EventType.CHECK_FETCH_FAILED:
-            payload = row.payload or {}
-            error_msg = payload.get("error") or payload.get("message") or ""
-            if error_msg:
-                summary = f"Fetch failed — {error_msg[:80]}"
-        entries.append(
-            {
-                "event_type": et,
-                "timestamp": row.timestamp,
-                "summary": summary,
-                "detail_url": None,
-                "category": category,
-            }
-        )
-
-    # Sort all entries newest-first, then apply pagination
-    entries.sort(key=lambda e: e["timestamp"], reverse=True)
-    return entries[offset : offset + limit]
-
-
-async def get_watch_timeline_count(
-    session: AsyncSession,
-    watch_id: str,
-) -> int:
-    """Return total number of timeline entries for a watch (for pagination).
-
-    Phase 5 (#156): Snapshot table dropped — count is AuditLog rows only.
-    """
-    try:
-        parsed = ULID.from_str(watch_id)
-    except ValueError:
-        return 0
-
-    return (
-        await session.scalar(select(func.count(AuditLog.id)).where(AuditLog.watch_id == parsed))
-        or 0
-    )
 
 
 async def get_watched_item_profiles(
@@ -317,12 +146,14 @@ async def get_watched_item_profiles(
     return list(result.scalars().all())
 
 
-async def get_watch_notifications(
-    session: AsyncSession, watch_id: ULID
+async def get_watched_item_notifications(
+    session: AsyncSession, watched_item_id: ULID
 ) -> list[WatchNotificationConfig]:
-    """Fetch notification configs for a watch."""
+    """Fetch notification configs for a WatchedItem (#191: re-keyed from Watch)."""
     result = await session.execute(
-        select(WatchNotificationConfig).where(WatchNotificationConfig.watch_id == watch_id)
+        select(WatchNotificationConfig).where(
+            WatchNotificationConfig.watched_item_id == watched_item_id
+        )
     )
     return list(result.scalars().all())
 
@@ -378,7 +209,6 @@ async def get_domains_with_watched_item_counts(
             func.max(WatchedItem.last_checked_at).label("last_checked"),
         )
         .outerjoin(WatchedItem, WatchedItem.domain_name == Domain.name)
-        .outerjoin(Watch, Watch.watched_item_id == WatchedItem.id)
         .group_by(Domain.id)
     )
 

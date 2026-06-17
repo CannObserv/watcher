@@ -3,8 +3,8 @@
 #185 Phase A. The pipeline reads effective_url and source_specs directly from
 the WatchedItem (set at Watch-create time), removing the per-cycle Archiver SDK
 call. ChangeRevision rows serve as the local fingerprint history; the first row
-is a baseline (no notification); subsequent changes dispatch CHANGE_DETECTED to
-all active non-archived child Watches.
+is a baseline (no notification); subsequent changes dispatch CHANGE_DETECTED
+once for the WatchedItem (the single monitored entity, #191).
 """
 
 import hashlib
@@ -165,7 +165,7 @@ async def process_watched_item(
     3. First run: insert baseline ChangeRevision, no notification.
     4. Same fingerprint: cache hit, no action.
     5. Changed: insert new ChangeRevision, optionally enqueue PendingArchiverSync,
-       dispatch CHANGE_DETECTED to all active non-archived child Watches.
+       dispatch CHANGE_DETECTED once for the WatchedItem.
 
     `watched_item.last_changed_at` is updated on change.
     `last_checked_at` and `health_status` are managed by the caller (tasks.py).

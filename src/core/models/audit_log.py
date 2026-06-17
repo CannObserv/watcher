@@ -3,7 +3,7 @@
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import DateTime, ForeignKey, String, func
+from sqlalchemy import DateTime, String, func
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Mapped, mapped_column
@@ -68,9 +68,6 @@ class AuditLog(Base):
 
     id: Mapped[ULID] = mapped_column(ULIDType, primary_key=True, default=generate_ulid)
     event_type: Mapped[str] = mapped_column(String(100))
-    watch_id: Mapped[ULID | None] = mapped_column(
-        ULIDType, ForeignKey("watches.id", ondelete="SET NULL"), nullable=True
-    )
     payload: Mapped[dict] = mapped_column(JSONB, default=dict, server_default="{}")
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
@@ -87,7 +84,6 @@ class AuditLog(Base):
 def audit(
     session: AsyncSession,
     event_type: str,
-    watch_id: Any = None,
     **payload: Any,
 ) -> "AuditLog":
     """Create an AuditLog entry and add it to the session.
@@ -95,12 +91,12 @@ def audit(
     Args:
         session: The active database session.
         event_type: The event type string (use EventType constants).
-        watch_id: Optional watch ULID to associate with the entry.
         **payload: Arbitrary keyword arguments stored as the entry payload.
+            The associated WatchedItem is carried as ``watched_item_id`` here.
 
     Returns:
         The newly created AuditLog instance (already added to session).
     """
-    entry = AuditLog(event_type=event_type, watch_id=watch_id, payload=payload)
+    entry = AuditLog(event_type=event_type, payload=payload)
     session.add(entry)
     return entry

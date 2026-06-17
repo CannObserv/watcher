@@ -1,19 +1,18 @@
 """Dashboard page routes — server-rendered HTML via Jinja2 + HTMX."""
 
 import html as html_lib
-import json
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from typing import Literal
 
 import httpx
-from fastapi import APIRouter, BackgroundTasks, Depends, Form, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, Form, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from jinja2 import TemplateError
 from notifier_client.errors import NotifierError
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.api.deps import get_db_session, get_probe_fn
 from src.api.routes.helpers import parse_ulid
@@ -29,17 +28,13 @@ from src.api.routes.watched_items import (
 from src.api.routes.watched_items import (
     restore_watched_item as _api_restore_watched_item,
 )
-from src.api.routes.watches import delete_watch as api_delete_watch
 from src.api.schemas.content_config import ContentConfig, ContentOptions
 from src.api.schemas.validators import validate_event_list
-from src.core.database import get_session_factory
 from src.core.logging import get_logger
 from src.core.models.audit_log import EventType, audit
 from src.core.models.domain import DEFAULT_MAX_CONCURRENCY, DEFAULT_MIN_INTERVAL, Domain
-from src.core.models.notification_config import WatchNotificationConfig
 from src.core.models.notification_template import DomainNcRef, NotificationTemplate, WatchNcRef
-from src.core.models.watch import ContentType, Watch
-from src.core.models.watched_item import WatchedItem
+from src.core.models.watched_item import ContentType, WatchedItem
 from src.core.models.watched_item_notification_template import (
     WatchedItemNotificationTemplate,
 )
@@ -51,7 +46,6 @@ from src.core.notifications.default_templates import (
 from src.core.notifications.events import EVENT_TITLES, WatchEvent, WatchEventType
 from src.core.notifications.notify import (
     DispatchCandidate,
-    dispatch_event_notifications,
     dispatch_via_notifier,
 )
 from src.core.notifications.preview_fixtures import (
@@ -61,8 +55,6 @@ from src.core.notifications.preview_fixtures import (
 from src.core.notifier_client import get_notifier_client
 from src.core.probe import ProbeResult
 from src.core.scheduler import compute_next_check, parse_interval
-from src.core.watches import create_watch as _create_watch
-from src.core.watches.resolution import resolved_schedule_config
 from src.dashboard import templates
 from src.dashboard.context import (
     get_audit_entries,
@@ -71,15 +63,10 @@ from src.dashboard.context import (
     get_domains_total_count,
     get_domains_with_watched_item_counts,
     get_queue_health,
-    get_watch_detail,
-    get_watch_list,
-    get_watch_notifications,
-    get_watch_timeline,
-    get_watch_timeline_count,
     get_watched_item_activity,
     get_watched_item_detail,
     get_watched_item_list,
-    get_watched_item_profiles,
+    get_watched_item_notifications,
     get_watched_item_templates,
     get_watched_items_total_count,
 )
@@ -195,313 +182,6 @@ async def dashboard_home(
     return templates.TemplateResponse(request, "pages/dashboard.html", context)
 
 
-def _attach_resolved_interval(watches: list[Watch]) -> None:
-    """Attach `resolved_interval` to each Watch for read-only display in the list.
-
-    Pinned v1 behavior (#160 Task 11.5): Watch rows surface the inherited
-    interval string from WatchedItem.default_schedule_config (falling back to
-    the system default). The attribute lives only on the in-memory object; the
-    full WatchedItem-level edit UI is a follow-up plan.
-    """
-    for w in watches:
-        w.resolved_interval = resolved_schedule_config(w).get("interval", "1d")
-
-
-@router.get("/watches")
-async def watches_page(
-    request: Request,
-    q: str | None = None,
-    status: str | None = None,
-    domain: str | None = None,
-    sort: str = "last_checked_at",
-    order: str = "desc",
-    session: AsyncSession = Depends(get_db_session),
-):
-    """Watch list page."""
-    is_active = _status_to_is_active(status)
-    watches = await get_watch_list(
-        session, is_active=is_active, search=q, domain=domain, sort=sort, order=order
-    )
-    _attach_resolved_interval(watches)
-    health_map = {w.id: w.watched_item.health_status for w in watches if w.watched_item}
-    context = {
-        "active_page": "watches",
-        "watches": watches,
-        "q": q or "",
-        "status": status or "",
-        "domain": domain or "",
-        "sort": sort,
-        "order": order,
-        "health_map": health_map,
-    }
-    return templates.TemplateResponse(request, "pages/watches.html", context)
-
-
-@router.get("/watches/new")
-async def watch_create_form(
-    request: Request,
-    watched_item_id: str | None = Query(None),
-    session: AsyncSession = Depends(get_db_session),
-):
-    """Watch creation form. Requires ?watched_item_id=<id> to identify the parent."""
-    wi: WatchedItem | None = None
-    if watched_item_id is not None:
-        wi = await get_watched_item_detail(session, watched_item_id)
-    return templates.TemplateResponse(
-        request,
-        "pages/watch_form.html",
-        {
-            "active_page": "watches",
-            "watch": None,
-            "flash": None,
-            "content_types": list(ContentType),
-            "watched_item": wi,
-        },
-    )
-
-
-@router.post("/watches/new")
-async def watch_create_submit(
-    request: Request,
-    name: str = Form(""),
-    watched_item_id: str = Form(""),
-    content_type: str = Form("html"),
-    description: str = Form(""),
-    session: AsyncSession = Depends(get_db_session),
-):
-    """Handle watch creation form submission.
-
-    Requires ``watched_item_id`` (hidden form field set from the URL param or
-    submitted explicitly). The WatchedItem must already exist.
-    """
-    errors = []
-    if not name.strip():
-        errors.append("Name is required")
-    if not watched_item_id.strip():
-        errors.append("Watched Item is required")
-
-    async def _render_with_flash(flash_message: str, wi=None):
-        return templates.TemplateResponse(
-            request,
-            "pages/watch_form.html",
-            {
-                "active_page": "watches",
-                "watch": None,
-                "flash": {"type": "error", "message": flash_message},
-                "content_types": list(ContentType),
-                "watched_item": wi,
-            },
-        )
-
-    if errors:
-        wi_id = watched_item_id.strip()
-        wi = await get_watched_item_detail(session, wi_id) if wi_id else None
-        return await _render_with_flash(". ".join(errors), wi=wi)
-
-    wi = await get_watched_item_detail(session, watched_item_id.strip())
-    if wi is None:
-        return await _render_with_flash(f"Watched Item {watched_item_id.strip()} does not exist")
-
-    try:
-        watch = await _create_watch(
-            session=session,
-            name=name.strip(),
-            watched_item_id=str(wi.id),
-            content_type=content_type,
-            description=description.strip() or None,
-        )
-    except ValueError as exc:
-        return await _render_with_flash(str(exc), wi=wi)
-
-    return RedirectResponse(url=f"/watches/{watch.id}", status_code=303)
-
-
-@router.get("/watches/{watch_id}")
-async def watch_detail_page(
-    request: Request,
-    watch_id: str,
-    session: AsyncSession = Depends(get_db_session),
-):
-    """Watch detail page with profiles and notifications.
-
-    Phase 5 (#156): the Snapshot table was dropped; #190 removed the last
-    snapshot_meta plumbing from this route and the template.
-    """
-    watch = await get_watch_detail(session, watch_id)
-    if not watch:
-        return templates.TemplateResponse(request, "pages/404.html", status_code=404)
-    wi_url = watch.watched_item.effective_url if watch.watched_item else None
-    resolved_url = wi_url or f"watch:{watch.id}"
-    profiles = await get_watched_item_profiles(session, watch.watched_item_id)
-    notifications = await get_watch_notifications(session, watch.id)
-
-    # Build field contexts for content-type-aware rendering
-    applicable_fields = _watch_fields_for_content_type(watch.content_type)
-    field_contexts = {
-        name: _watch_field_context(request, watch, name, mode="view") for name in applicable_fields
-    }
-
-    # Check if the watch's domain is inactive (disables the status toggle)
-    domain_inactive = bool(watch.watched_item and watch.watched_item.domain_suspended)
-
-    # Initial timeline page (page 1, no category filter)
-    timeline_page_size = 25
-    timeline = await get_watch_timeline(session, watch_id, offset=0, limit=timeline_page_size)
-    timeline_total = await get_watch_timeline_count(session, watch_id)
-
-    context = {
-        "active_page": "watches",
-        "watch": watch,
-        "resolved_url": resolved_url,
-        "profiles": profiles,
-        "notifications": notifications,
-        "field_contexts": field_contexts,
-        "domain_inactive": domain_inactive,
-        "timeline": timeline,
-        "timeline_total": timeline_total,
-        "timeline_page": 1,
-        "timeline_page_size": timeline_page_size,
-        "timeline_category": None,
-        # Pagination vars for partials/pagination.html (used inside the timeline include)
-        "page": 1,
-        "page_size": timeline_page_size,
-        "total_count": timeline_total,
-        "base_url": f"/partials/watch-timeline/{watch_id}",
-        "extra_params": {},
-    }
-    return templates.TemplateResponse(request, "pages/watch_detail.html", context)
-
-
-@router.delete("/watches/{watch_id}")
-async def watch_delete(
-    request: Request,
-    watch_id: str,
-    session: AsyncSession = Depends(get_db_session),
-):
-    """Delete an archived watch — requires is_archived=True.
-
-    Delegates to the API layer for business logic and translates the outcome
-    into an HTMX-compatible response.
-    """
-    watch = await get_watch_detail(session, watch_id)
-    if not watch:
-        return templates.TemplateResponse(request, "pages/404.html", status_code=404)
-    if not watch.is_archived:
-        msg = '<p class="text-red-600 text-sm mt-2">Archive the watch before deleting it.</p>'
-        return HTMLResponse(status_code=409, content=msg)
-    try:
-        await api_delete_watch(watch_id=watch_id, session=session)
-    except HTTPException as exc:
-        if exc.status_code == 409:
-            # API returns {"kind": <discriminator>, "message": <human>} for 409s.
-            # Fall through to the generic "archive first" message if the shape
-            # is unexpected (defensive — older callers, or future discriminators).
-            detail = exc.detail
-            kind = detail.get("kind") if isinstance(detail, dict) else None
-            if kind == "primary_has_sub_aspect_siblings":
-                msg = (
-                    '<p class="text-red-600 text-sm mt-2">'
-                    "Cannot delete: this primary Watch has dependent sub_aspect Watches. "
-                    "Archive or delete the sub_aspect Watches first, or archive the WatchedItem."
-                    "</p>"
-                )
-            else:
-                msg = (
-                    '<p class="text-red-600 text-sm mt-2">Archive the watch before deleting it.</p>'
-                )
-            return HTMLResponse(status_code=409, content=msg)
-        raise
-    return HTMLResponse(status_code=200, content="", headers={"HX-Redirect": "/watches"})
-
-
-# --- Watch inline field editing ---
-
-
-WATCH_FIELD_META: dict[str, dict] = {
-    # Phase 2c — fetch_config / url no longer live on the Watch row; the
-    # InfoSource is the canonical source.
-    # #160 — schedule_config moved to WatchedItem.default_schedule_config; the
-    # `interval` row is rendered read-only on the detail page (the resolved
-    # value flows from `resolved_schedule_config`). Per-Watch override UI is a
-    # follow-up plan; only column-backed fields stay editable here.
-    # -- Details section --
-    "name": {
-        "label": "Name",
-        "hint": None,
-        "type": "text",
-        "source": "column",
-        "cast": lambda v: v.strip(),
-        "format": lambda w: w.name,
-        "content_types": None,
-    },
-    "description": {
-        "label": "Description",
-        "hint": "Optional notes shown on the watch detail page",
-        "type": "textarea",
-        "source": "column",
-        "cast": lambda v: v.strip() or None,
-        "format": lambda w: w.description or "",
-        "content_types": None,
-    },
-    # -- Schedule section (read-only resolved view) --
-    "interval": {
-        "label": "Check Interval",
-        "hint": "Inherited from the parent WatchedItem.",
-        "type": "readonly",
-        "source": "readonly",
-        "cast": lambda v: v,
-        "format": lambda w: resolved_schedule_config(w).get("interval", "1d"),
-        "content_types": None,
-    },
-}
-# Inline-editable fields: `interval` is read-only so it is excluded.
-EDITABLE_WATCH_FIELDS = {
-    name for name, meta in WATCH_FIELD_META.items() if meta["source"] != "readonly"
-}
-
-
-def _watch_fields_for_content_type(content_type: str) -> list[str]:
-    """Return field names applicable to a given content type."""
-    ct = str(content_type).lower()
-    return [
-        name
-        for name, meta in WATCH_FIELD_META.items()
-        if meta["content_types"] is None or ct in meta["content_types"]
-    ]
-
-
-def _watch_field_context(
-    request: Request, watch: Watch, field_name: str, mode: str = "view"
-) -> dict:
-    """Build template context for a single watch field partial."""
-    meta = WATCH_FIELD_META[field_name]
-    ctx = {
-        "watch": watch,
-        "field_name": field_name,
-        "field_label": meta["label"],
-        "field_hint": meta.get("hint"),
-        "field_value": meta["format"](watch),
-        "field_type": meta["type"],
-        "field_step": meta.get("step"),
-        "field_min": meta.get("min"),
-        "field_unit": meta.get("unit"),
-        "field_options": meta.get("options"),
-        "field_mode": mode,
-    }
-    return ctx
-
-
-def _apply_watch_field_update(watch: Watch, field_name: str, raw_value: str) -> None:
-    """Apply a single field update to a Watch object."""
-    meta = WATCH_FIELD_META[field_name]
-    cast_fn = meta["cast"]
-    typed_value = cast_fn(raw_value)
-
-    source = meta["source"]
-    if source == "column":
-        setattr(watch, field_name, typed_value)
-
-
 # --- WatchedItem inline field editing ---
 
 
@@ -584,239 +264,6 @@ def _apply_watched_item_field_update(wi, field_name: str, raw_value: str) -> Non
                 **(wi.default_schedule_config or {}),
                 "interval": typed_value,
             }
-
-
-@router.get("/watches/{watch_id}/field/{field_name}")
-async def watch_field_partial(
-    request: Request,
-    watch_id: str,
-    field_name: str,
-    mode: Literal["view", "edit"] = "view",
-    session: AsyncSession = Depends(get_db_session),
-):
-    """Serve a single watch field partial in view or edit mode."""
-    if field_name not in EDITABLE_WATCH_FIELDS:
-        raise HTTPException(status_code=400, detail=f"Field '{field_name}' is not editable")
-
-    watch = await get_watch_detail(session, watch_id)
-    if not watch:
-        raise HTTPException(status_code=404, detail="Watch not found")
-
-    if request.headers.get("HX-Request") != "true":
-        return RedirectResponse(url=f"/watches/{watch_id}", status_code=303)
-
-    ctx = _watch_field_context(request, watch, field_name, mode=mode)
-    return templates.TemplateResponse(request, "partials/watch_field.html", ctx)
-
-
-@router.post("/watches/{watch_id}/field/{field_name}")
-async def watch_field_update(
-    request: Request,
-    watch_id: str,
-    field_name: str,
-    value: str = Form(""),
-    session: AsyncSession = Depends(get_db_session),
-):
-    """Update a single watch field (inline edit from detail view)."""
-    if field_name not in EDITABLE_WATCH_FIELDS:
-        raise HTTPException(status_code=400, detail=f"Field '{field_name}' is not editable")
-
-    watch = await get_watch_detail(session, watch_id)
-    if not watch:
-        raise HTTPException(status_code=404, detail="Watch not found")
-
-    if field_name == "name" and not value.strip():
-        raise HTTPException(status_code=400, detail=f"{field_name.title()} cannot be empty")
-
-    try:
-        _apply_watch_field_update(watch, field_name, value)
-    except (ValueError, TypeError, json.JSONDecodeError):
-        raise HTTPException(status_code=400, detail=f"Invalid value for {field_name}")
-
-    audit(
-        session,
-        EventType.WATCH_UPDATED,
-        watch_id=watch.id,
-        updated_fields=[field_name],
-        source="dashboard",
-    )
-    await session.commit()
-    await session.refresh(watch)
-
-    if request.headers.get("HX-Request") == "true":
-        ctx = _watch_field_context(request, watch, field_name, mode="view")
-        return templates.TemplateResponse(request, "partials/watch_field.html", ctx)
-    return RedirectResponse(url=f"/watches/{watch_id}", status_code=303)
-
-
-@router.post("/watches/{watch_id}/toggle-active")
-async def watch_toggle_active(
-    request: Request,
-    watch_id: str,
-    active: str = Form(""),
-    session: AsyncSession = Depends(get_db_session),
-):
-    """Toggle watch active status via HTMX checkbox."""
-    watch = await get_watch_detail(session, watch_id)
-    if not watch:
-        raise HTTPException(status_code=404, detail="Watch not found")
-
-    if watch.is_archived:
-        raise HTTPException(status_code=409, detail="Cannot toggle archived watch")
-
-    new_active = active == "true"
-
-    # Block activation while the watch's domain is suspended (kill-switch)
-    domain_inactive = bool(watch.watched_item and watch.watched_item.domain_suspended)
-    if domain_inactive and new_active:
-        raise HTTPException(
-            status_code=409,
-            detail="Cannot activate watch while its domain is inactive",
-        )
-
-    watch.is_active = new_active
-
-    event = EventType.WATCH_UPDATED if new_active else EventType.WATCH_DEACTIVATED
-    audit(session, event, watch_id=watch.id, name=watch.name, source="dashboard")
-    await session.commit()
-    await session.refresh(watch)
-
-    if request.headers.get("HX-Request") == "true":
-        return templates.TemplateResponse(
-            request,
-            "partials/watch_status_toggle.html",
-            {"watch": watch, "domain_inactive": domain_inactive},
-        )
-    return RedirectResponse(url=f"/watches/{watch_id}", status_code=303)
-
-
-async def _dispatch_archive_notification(
-    watch_id: str,
-    watch_name: str,
-    watch_url: str,
-    occurred_at: datetime,
-    *,
-    session_factory: async_sessionmaker[AsyncSession] | None = None,
-) -> None:
-    """Dispatch WATCH_ARCHIVED notification in a background task with its own session.
-
-    Best-effort: exceptions are logged and swallowed so notification failure never
-    blocks or rolls back the archive action.
-
-    ``session_factory`` is injected explicitly so tests can supply a factory
-    scoped to the test database rather than the global production factory.
-    """
-    factory = session_factory if session_factory is not None else get_session_factory()
-    try:
-        async with factory() as session:
-            await dispatch_event_notifications(
-                session=session,
-                event=WatchEvent(
-                    event_type=WatchEventType.WATCH_ARCHIVED,
-                    watch_id=watch_id,
-                    watch_name=watch_name,
-                    watch_url=watch_url,
-                    occurred_at=occurred_at,
-                ),
-            )
-    except Exception:
-        logger.exception("failed to dispatch archive notification for watch %s", watch_id)
-
-
-@router.post("/watches/{watch_id}/archive")
-async def watch_archive(
-    request: Request,
-    watch_id: str,
-    background_tasks: BackgroundTasks,
-    session: AsyncSession = Depends(get_db_session),
-):
-    """Archive a watch — sets is_archived=True and is_active=False."""
-    watch = await get_watch_detail(session, watch_id)
-    if not watch:
-        return templates.TemplateResponse(request, "pages/404.html", status_code=404)
-
-    if watch.is_archived:
-        return RedirectResponse(url=f"/watches/{watch_id}", status_code=303)
-
-    watch.is_archived = True
-    watch.is_active = False
-    audit(session, EventType.WATCH_ARCHIVED, watch_id=watch.id, name=watch.name, source="dashboard")
-    await session.commit()
-
-    wi_url = watch.watched_item.effective_url if watch.watched_item else None
-    resolved_url = wi_url or f"watch:{watch.id}"
-    background_tasks.add_task(
-        _dispatch_archive_notification,
-        watch_id=str(watch.id),
-        watch_name=watch.name,
-        watch_url=resolved_url,
-        occurred_at=datetime.now(UTC),
-        session_factory=get_session_factory(),
-    )
-
-    return RedirectResponse(url=f"/watches/{watch_id}", status_code=303)
-
-
-@router.post("/watches/{watch_id}/restore")
-async def watch_restore(
-    request: Request,
-    watch_id: str,
-    session: AsyncSession = Depends(get_db_session),
-):
-    """Restore an archived watch — clears is_archived, stays inactive."""
-    watch = await get_watch_detail(session, watch_id)
-    if not watch:
-        return templates.TemplateResponse(request, "pages/404.html", status_code=404)
-
-    watch.is_archived = False
-    # Watch stays inactive after restore — user re-activates via toggle
-    audit(session, EventType.WATCH_RESTORED, watch_id=watch.id, name=watch.name, source="dashboard")
-    await session.commit()
-
-    return RedirectResponse(url=f"/watches/{watch_id}", status_code=303)
-
-
-@router.post("/watches/{watch_id}/deactivate")
-async def watch_deactivate(
-    request: Request,
-    watch_id: str,
-    session: AsyncSession = Depends(get_db_session),
-):
-    """Deactivate a watch from the watch-list table row.
-
-    Dedicated endpoint for the inline Deactivate button in watch_row.html.
-    Returns the updated table row partial for HTMX outerHTML swap; falls back
-    to a 303 redirect for non-HTMX (native form) requests.
-    """
-    watch = await get_watch_detail(session, watch_id)
-    if not watch:
-        raise HTTPException(status_code=404, detail="Watch not found")
-
-    if watch.is_archived:
-        raise HTTPException(status_code=409, detail="Cannot deactivate archived watch")
-
-    if watch.is_active:
-        watch.is_active = False
-        audit(
-            session,
-            EventType.WATCH_DEACTIVATED,
-            watch_id=watch.id,
-            name=watch.name,
-            source="dashboard",
-        )
-        await session.commit()
-        await session.refresh(watch)
-
-    if request.headers.get("HX-Request") == "true":
-        _attach_resolved_interval([watch])
-        wi_health = watch.watched_item.health_status if watch.watched_item else None
-        health_map = {watch.id: wi_health}
-        return templates.TemplateResponse(
-            request,
-            "partials/watch_row.html",
-            {"watch": watch, "health_map": health_map},
-        )
-    return RedirectResponse(url="/watches", status_code=303)
 
 
 @router.get("/watched-items/new")
@@ -1053,17 +500,8 @@ async def watched_item_detail_page(
             request, "pages/404.html", {"request": request}, status_code=404
         )
 
-    children = (
-        (
-            await session.execute(
-                select(Watch).where(Watch.watched_item_id == wi.id).order_by(Watch.name)
-            )
-        )
-        .scalars()
-        .all()
-    )
-
     wi_templates = await get_watched_item_templates(session, wi.id)
+    notifications = await get_watched_item_notifications(session, wi.id)
     activity = await get_watched_item_activity(session, watched_item_id)
 
     field_contexts = {
@@ -1078,11 +516,10 @@ async def watched_item_detail_page(
             "request": request,
             "active_page": "watched-items",
             "watched_item": wi,
-            "watches": children,
-            "health_map": {w.id: wi.health_status for w in children},
             "flash": None,
             "field_contexts": field_contexts,
             "templates": wi_templates,
+            "notifications": notifications,
             "activity": activity,
         },
     )
@@ -1292,42 +729,6 @@ async def watched_item_update_url(
     wi.effective_url = probe_result.effective_url
     wi.domain_name = probe_result.effective_domain or None
     wi.domain_suspended = domain_suspended
-    # Cascade the suspension change to this WatchedItem's child Watches, mirroring
-    # the domain suspend/reactivate cascade so child flags don't drift on a move.
-    if domain_suspended:
-        children = (
-            (
-                await session.execute(
-                    select(Watch).where(
-                        Watch.watched_item_id == wi.id,
-                        Watch.is_active.is_(True),
-                        Watch.is_archived.is_(False),
-                    )
-                )
-            )
-            .scalars()
-            .all()
-        )
-        for child in children:
-            child.is_active = False
-            child.suspended_by_domain = True
-    else:
-        children = (
-            (
-                await session.execute(
-                    select(Watch).where(
-                        Watch.watched_item_id == wi.id,
-                        Watch.suspended_by_domain.is_(True),
-                        Watch.is_archived.is_(False),
-                    )
-                )
-            )
-            .scalars()
-            .all()
-        )
-        for child in children:
-            child.is_active = True
-            child.suspended_by_domain = False
     audit(
         session,
         EventType.WATCHED_ITEM_UPDATED,
@@ -1841,7 +1242,9 @@ async def domain_toggle_active(
 ):
     """Toggle domain active status.
 
-    Deactivating suspends all active watches; reactivating restores them.
+    Deactivating suspends every WatchedItem on the domain (``domain_suspended``);
+    reactivating clears the flag. ``domain_suspended`` gates scheduling and the
+    pause/resume toggle directly — the WatchedItem is the single monitored entity.
     """
     result = await session.execute(select(Domain).where(Domain.name == name))
     domain = result.scalar_one_or_none()
@@ -1854,46 +1257,15 @@ async def domain_toggle_active(
     new_active = active == "true"
     domain.is_active = new_active
 
-    if not new_active:
-        # Cascade: mark WatchedItem suspended, then suspend all active child watches.
-        wi_result = await session.execute(
-            select(WatchedItem).where(WatchedItem.domain_name == name)
-        )
-        for wi in wi_result.scalars().all():
-            wi.domain_suspended = True
-        watches_result = await session.execute(
-            select(Watch)
-            .join(WatchedItem, WatchedItem.id == Watch.watched_item_id)
-            .where(
-                WatchedItem.domain_name == name,
-                Watch.is_active == True,  # noqa: E712
-                Watch.is_archived == False,  # noqa: E712
-            )
-        )
-        for watch in watches_result.scalars().all():
-            watch.is_active = False
-            watch.suspended_by_domain = True
-        audit(session, EventType.DOMAIN_DEACTIVATED, domain_name=name, source="dashboard")
-    else:
-        # Restore: clear WatchedItem suspended flag, reactivate domain-suspended watches.
-        wi_result = await session.execute(
-            select(WatchedItem).where(WatchedItem.domain_name == name)
-        )
-        for wi in wi_result.scalars().all():
-            wi.domain_suspended = False
-        watches_result = await session.execute(
-            select(Watch)
-            .join(WatchedItem, WatchedItem.id == Watch.watched_item_id)
-            .where(
-                WatchedItem.domain_name == name,
-                Watch.suspended_by_domain == True,  # noqa: E712
-                Watch.is_archived == False,  # noqa: E712
-            )
-        )
-        for watch in watches_result.scalars().all():
-            watch.is_active = True
-            watch.suspended_by_domain = False
-        audit(session, EventType.DOMAIN_ACTIVATED, domain_name=name, source="dashboard")
+    wi_result = await session.execute(select(WatchedItem).where(WatchedItem.domain_name == name))
+    for wi in wi_result.scalars().all():
+        wi.domain_suspended = not new_active
+    audit(
+        session,
+        EventType.DOMAIN_ACTIVATED if new_active else EventType.DOMAIN_DEACTIVATED,
+        domain_name=name,
+        source="dashboard",
+    )
 
     await session.commit()
     await session.refresh(domain)
@@ -2385,38 +1757,6 @@ async def partial_system_health(
     )
 
 
-@router.get("/partials/watch-table")
-async def partial_watch_table(
-    request: Request,
-    q: str | None = None,
-    status: str | None = None,
-    domain: str | None = None,
-    sort: str = "last_checked_at",
-    order: str = "desc",
-    session: AsyncSession = Depends(get_db_session),
-):
-    """HTMX partial: watch table with filter, search, and sort."""
-    is_active = _status_to_is_active(status)
-    watches = await get_watch_list(
-        session, is_active=is_active, search=q, domain=domain, sort=sort, order=order
-    )
-    _attach_resolved_interval(watches)
-    health_map = {w.id: w.watched_item.health_status for w in watches if w.watched_item}
-    return templates.TemplateResponse(
-        request,
-        "partials/watch_table.html",
-        {
-            "watches": watches,
-            "health_map": health_map,
-            "q": q or "",
-            "status": status or "",
-            "domain": domain or "",
-            "sort": sort,
-            "order": order,
-        },
-    )
-
-
 @router.get("/partials/domain-watched-items/{name}")
 async def partial_domain_watched_items(
     request: Request,
@@ -2449,608 +1789,18 @@ async def partial_domain_watched_items(
     )
 
 
-@router.get("/partials/watch-timeline/{watch_id}")
-async def partial_watch_timeline(
-    request: Request,
-    watch_id: str,
-    page: int = 1,
-    page_size: int = 25,
-    category: str | None = None,
-    session: AsyncSession = Depends(get_db_session),
-):
-    """HTMX partial: unified lifecycle event timeline for a watch."""
-    watch = await get_watch_detail(session, watch_id)
-    if not watch:
-        raise HTTPException(status_code=404, detail="Watch not found")
-
-    offset = (page - 1) * page_size
-    timeline = await get_watch_timeline(session, watch_id, offset=offset, limit=page_size)
-    timeline_total = await get_watch_timeline_count(session, watch_id)
-
-    # Client-side category filter (applied after DB fetch)
-    if category and category != "all":
-        timeline = [e for e in timeline if e["category"] == category]
-
-    return templates.TemplateResponse(
-        request,
-        "partials/watch_timeline.html",
-        {
-            "watch": watch,
-            "timeline": timeline,
-            "timeline_total": timeline_total,
-            "timeline_page": page,
-            "timeline_page_size": page_size,
-            "timeline_category": category,
-            "page": page,
-            "page_size": page_size,
-            "total_count": timeline_total,
-            "base_url": f"/partials/watch-timeline/{watch_id}",
-            "extra_params": {k: v for k, v in {"category": category}.items() if v and v != "all"},
-        },
-    )
-
-
-@router.get("/partials/watch-notifications/{watch_id}")
-async def partial_watch_notifications(
-    request: Request,
-    watch_id: str,
-    session: AsyncSession = Depends(get_db_session),
-):
-    """HTMX partial: notification config table for a watch."""
-    watch = await get_watch_detail(session, watch_id)
-    if not watch:
-        raise HTTPException(status_code=404, detail="Watch not found")
-    return await _render_watch_notifications(request, watch, session)
-
-
-@router.get("/watches/{watch_id}/notifications/new")
-async def watch_notification_new_page(
-    request: Request,
-    watch_id: str,
-    session: AsyncSession = Depends(get_db_session),
-):
-    """Full page: add a new local notification config for a watch."""
-    watch = await get_watch_detail(session, watch_id)
-    if not watch:
-        raise HTTPException(status_code=404, detail="Watch not found")
-    return templates.TemplateResponse(
-        request,
-        "pages/watch_notification_new.html",
-        {
-            "watch": watch,
-            "title": None,
-            "events": None,
-            "content_config": None,
-            "error": None,
-        },
-    )
-
-
-@router.post("/watches/{watch_id}/notifications/new")
-async def watch_notification_create(
-    request: Request,
-    watch_id: str,
-    session: AsyncSession = Depends(get_db_session),
-):
-    """Create a notification config from dashboard form. Returns refreshed partial."""
-    watch = await get_watch_detail(session, watch_id)
-    if not watch:
-        raise HTTPException(status_code=404, detail="Watch not found")
-
-    form = await request.form()
-    events = form.getlist("events")
-    title = str(form.get("title") or "").strip() or None
-    remote_channel_id = str(form.get("remote_channel_id") or "").strip()
-    channel_hint = str(form.get("channel_hint") or "").strip() or "remote"
-
-    def _page_error(msg: str):
-        _cc = _parse_content_config_from_form(form)
-        return templates.TemplateResponse(
-            request,
-            "pages/watch_notification_new.html",
-            {
-                "watch": watch,
-                "title": str(form.get("title") or ""),
-                "events": form.getlist("events"),
-                "content_config": ContentConfig.model_validate(_cc) if _cc else None,
-                "error": msg,
-            },
-        )
-
-    if not remote_channel_id:
-        return _page_error("Remote channel ID is required.")
-
-    try:
-        validate_event_list(events)
-    except ValueError as exc:
-        return _page_error(str(exc))
-
-    config = WatchNotificationConfig(
-        watch_id=watch.id,
-        title=title,
-        channel_hint=channel_hint,
-        events=events,
-        content_config=_parse_content_config_from_form(form),
-        remote_channel_id=remote_channel_id,
-    )
-    session.add(config)
-    audit(
-        session,
-        EventType.NOTIFICATION_CONFIG_CREATED,
-        watch_id=watch.id,
-        config_id=str(config.id),
-        channel_hint=config.channel_hint,
-    )
-    await session.commit()
-    return RedirectResponse(url=f"/watches/{watch_id}#watch-notifications", status_code=303)
-
-
-@router.post("/watches/{watch_id}/notifications/{config_id}/toggle")
-async def watch_notification_toggle(
-    request: Request,
-    watch_id: str,
-    config_id: str,
-    session: AsyncSession = Depends(get_db_session),
-):
-    """Toggle is_active on a notification config. Returns refreshed partial."""
-    watch = await get_watch_detail(session, watch_id)
-    if not watch:
-        raise HTTPException(status_code=404, detail="Watch not found")
-    nc = await session.get(WatchNotificationConfig, parse_ulid(config_id, "Config"))
-    if not nc or nc.watch_id != watch.id:
-        raise HTTPException(status_code=404, detail="Config not found")
-    nc.is_active = not nc.is_active
-    audit(session, EventType.NOTIFICATION_CONFIG_UPDATED, watch_id=watch.id, config_id=str(nc.id))
-    await session.commit()
-    return await _render_watch_notifications(request, watch, session)
-
-
-@router.get("/watches/{watch_id}/notifications/{config_id}/edit")
-async def watch_notification_edit_page(
-    request: Request,
-    watch_id: str,
-    config_id: str,
-    session: AsyncSession = Depends(get_db_session),
-):
-    """Full page: edit an existing watch notification config."""
-    watch = await get_watch_detail(session, watch_id)
-    if not watch:
-        raise HTTPException(status_code=404, detail="Watch not found")
-    nc = await session.get(WatchNotificationConfig, parse_ulid(config_id, "Config"))
-    if not nc or nc.watch_id != watch.id:
-        raise HTTPException(status_code=404, detail="Config not found")
-    content_config = ContentConfig.model_validate(nc.content_config) if nc.content_config else None
-    return templates.TemplateResponse(
-        request,
-        "pages/watch_notification_edit.html",
-        {
-            "watch": watch,
-            "nc": nc,
-            "content_config": content_config,
-            "error": None,
-        },
-    )
-
-
-@router.post("/watches/{watch_id}/notifications/{config_id}/edit")
-async def watch_notification_edit(
-    request: Request,
-    watch_id: str,
-    config_id: str,
-    session: AsyncSession = Depends(get_db_session),
-):
-    """Update remote_channel_id and/or events for a notification config."""
-    watch = await get_watch_detail(session, watch_id)
-    if not watch:
-        raise HTTPException(status_code=404, detail="Watch not found")
-    nc = await session.get(WatchNotificationConfig, parse_ulid(config_id, "Config"))
-    if not nc or nc.watch_id != watch.id:
-        raise HTTPException(status_code=404, detail="Config not found")
-
-    form = await request.form()
-    remote_channel_id = str(form.get("remote_channel_id") or "").strip()
-    channel_hint = str(form.get("channel_hint") or "").strip() or nc.channel_hint
-    events = form.getlist("events")
-    title = str(form.get("title") or "").strip() or None
-
-    def _page_error(msg: str):
-        _cc = _parse_content_config_from_form(form)
-        return templates.TemplateResponse(
-            request,
-            "pages/watch_notification_edit.html",
-            {
-                "watch": watch,
-                "nc": nc,
-                "submitted_title": title,
-                "submitted_events": events,
-                "content_config": ContentConfig.model_validate(_cc) if _cc else None,
-                "error": msg,
-            },
-        )
-
-    if not remote_channel_id:
-        return _page_error("Remote channel ID is required.")
-
-    try:
-        validate_event_list(events)
-    except ValueError as exc:
-        return _page_error(str(exc))
-
-    nc.remote_channel_id = remote_channel_id
-    nc.channel_hint = channel_hint
-    nc.events = events
-    nc.title = title
-    nc.content_config = _parse_content_config_from_form(form)
-    audit(
-        session,
-        EventType.NOTIFICATION_CONFIG_UPDATED,
-        watch_id=watch.id,
-        config_id=str(nc.id),
-        channel_hint=nc.channel_hint,
-    )
-    await session.commit()
-    return RedirectResponse(url=f"/watches/{watch_id}#watch-notifications", status_code=303)
-
-
-async def _render_watch_notifications(
-    request: Request,
-    watch,
-    session: AsyncSession,
-):
-    """Fetch notifications for all five sources and render watch_notifications partial.
-
-    Sources (in display order, matching dispatch in notify.py):
-      global_templates       — NotificationTemplate.is_global_default=True
-      domain_templates       — DomainNcRef for watch.watched_item.domain_name
-      watch_templates        — WatchNcRef for this watch, minus global/domain ids
-      watched_item_templates — WatchedItemNotificationTemplate for the parent WatchedItem
-      notifications          — WatchNotificationConfig for this watch (local)
-    """
-    notifications = await get_watch_notifications(session, watch.id)
-
-    # 1. Global templates
-    global_result = await session.execute(
-        select(NotificationTemplate)
-        .where(NotificationTemplate.is_global_default.is_(True))
-        .order_by(NotificationTemplate.title)
-    )
-    global_templates = global_result.scalars().all()
-    global_ids = {str(t.id) for t in global_templates}
-
-    # 2. Domain templates
-    domain_templates = []
-    domain_ids: set[str] = set()
-    _watch_domain = watch.watched_item.domain_name if watch.watched_item else None
-    if _watch_domain:
-        domain_result = await session.execute(
-            select(NotificationTemplate)
-            .join(DomainNcRef, DomainNcRef.template_id == NotificationTemplate.id)
-            .where(DomainNcRef.domain_name == _watch_domain)
-            .order_by(NotificationTemplate.title)
-        )
-        domain_templates = domain_result.scalars().all()
-        domain_ids = {str(t.id) for t in domain_templates}
-
-    # 3. Watch-assigned templates — exclude any already shown as global/domain
-    auto_ids = global_ids | domain_ids
-    watch_tpl_result = await session.execute(
-        select(NotificationTemplate)
-        .join(WatchNcRef, WatchNcRef.template_id == NotificationTemplate.id)
-        .where(WatchNcRef.watch_id == watch.id)
-        .order_by(NotificationTemplate.title)
-    )
-    watch_templates = [t for t in watch_tpl_result.scalars().all() if str(t.id) not in auto_ids]
-
-    # 4. WatchedItem-default templates — inherited from the parent WatchedItem.
-    #    Distinct model from NotificationTemplate (own ids), read-only on the watch
-    #    surface; managed at /watched-items/{id}. Shows the parent's configured
-    #    templates (active + inactive, with a status badge) — the superset that
-    #    notify.py dispatch tier 4 draws from (it additionally filters is_active +
-    #    matching events at send time).
-    watched_item_templates = []
-    if watch.watched_item_id:
-        wi_tpl_result = await session.execute(
-            select(WatchedItemNotificationTemplate)
-            .where(WatchedItemNotificationTemplate.watched_item_id == watch.watched_item_id)
-            .order_by(WatchedItemNotificationTemplate.created_at)
-        )
-        watched_item_templates = wi_tpl_result.scalars().all()
-
-    # Unassigned picker: active templates not global, not domain, not already watch-assigned
-    all_watch_ids = auto_ids | {str(t.id) for t in watch_templates}
-    all_result = await session.execute(
-        select(NotificationTemplate)
-        .where(
-            NotificationTemplate.is_active.is_(True),
-            NotificationTemplate.is_global_default.is_(False),
-        )
-        .order_by(NotificationTemplate.title)
-    )
-    unassigned_templates = [t for t in all_result.scalars().all() if str(t.id) not in all_watch_ids]
-
-    return templates.TemplateResponse(
-        request,
-        "partials/watch_notifications.html",
-        {
-            "watch": watch,
-            "notifications": notifications,
-            "global_templates": global_templates,
-            "domain_templates": domain_templates,
-            "watch_templates": watch_templates,
-            "watched_item_templates": watched_item_templates,
-            "unassigned_templates": unassigned_templates,
-        },
-    )
-
-
-@router.get("/watches/{watch_id}/notifications/assign-row")
-async def watch_nc_assign_row(
-    request: Request,
-    watch_id: str,
-    session: AsyncSession = Depends(get_db_session),
-):
-    """HTMX partial: inline assign-row form with picker of assignable templates.
-
-    Excludes: global defaults (auto-dispatched), domain defaults for this watch's
-    domain (auto-dispatched), and templates already assigned via WatchNcRef.
-    """
-    watch = await get_watch_detail(session, watch_id)
-    if not watch:
-        raise HTTPException(status_code=404, detail="Watch not found")
-
-    # Already-assigned watch templates
-    assigned_result = await session.execute(
-        select(NotificationTemplate.id)
-        .join(WatchNcRef, WatchNcRef.template_id == NotificationTemplate.id)
-        .where(WatchNcRef.watch_id == watch.id)
-    )
-    excluded_ids = {str(row[0]) for row in assigned_result}
-
-    # Domain templates for this watch's domain (auto-dispatched, don't show in picker)
-    _watch_domain = watch.watched_item.domain_name if watch.watched_item else None
-    if _watch_domain:
-        domain_result = await session.execute(
-            select(DomainNcRef.template_id).where(DomainNcRef.domain_name == _watch_domain)
-        )
-        excluded_ids.update(str(row[0]) for row in domain_result)
-
-    # Active, non-global templates not already excluded
-    all_result = await session.execute(
-        select(NotificationTemplate)
-        .where(
-            NotificationTemplate.is_active.is_(True),
-            NotificationTemplate.is_global_default.is_(False),
-        )
-        .order_by(NotificationTemplate.title)
-    )
-    unassigned = [t for t in all_result.scalars().all() if str(t.id) not in excluded_ids]
-    return templates.TemplateResponse(
-        request,
-        "partials/watch_nc_assign_row.html",
-        {
-            "watch": watch,
-            "unassigned_templates": unassigned,
-        },
-    )
-
-
-@router.post("/watches/{watch_id}/notifications/assign/{template_id}")
-async def watch_nc_assign(
-    request: Request,
-    watch_id: str,
-    template_id: str,
-    session: AsyncSession = Depends(get_db_session),
-):
-    """Assign a library template to a watch. Returns refreshed notifications partial."""
-    if request.headers.get("HX-Request") != "true":
-        return RedirectResponse(url=f"/watches/{watch_id}", status_code=303)
-    watch = await get_watch_detail(session, watch_id)
-    if not watch:
-        raise HTTPException(status_code=404, detail="Watch not found")
-    existing = await session.scalar(
-        select(WatchNcRef).where(
-            WatchNcRef.watch_id == watch.id,
-            WatchNcRef.template_id == template_id,  # type: ignore[arg-type]
-        )
-    )
-    if not existing:
-        session.add(WatchNcRef(watch_id=watch.id, template_id=template_id))  # type: ignore[arg-type]
-        audit(session, EventType.WATCH_NC_ASSIGNED, watch_id=str(watch.id), template_id=template_id)
-        await session.commit()
-    return await _render_watch_notifications(request, watch, session)
-
-
-@router.post("/watches/{watch_id}/notifications/unassign/{template_id}")
-async def watch_nc_unassign(
-    request: Request,
-    watch_id: str,
-    template_id: str,
-    session: AsyncSession = Depends(get_db_session),
-):
-    """Remove a library template assignment from a watch. Returns refreshed partial."""
-    if request.headers.get("HX-Request") != "true":
-        return RedirectResponse(url=f"/watches/{watch_id}", status_code=303)
-    watch = await get_watch_detail(session, watch_id)
-    if not watch:
-        raise HTTPException(status_code=404, detail="Watch not found")
-    ref = await session.scalar(
-        select(WatchNcRef).where(
-            WatchNcRef.watch_id == watch.id,
-            WatchNcRef.template_id == template_id,  # type: ignore[arg-type]
-        )
-    )
-    if ref:
-        await session.delete(ref)
-        audit(
-            session,
-            EventType.WATCH_NC_UNASSIGNED,
-            watch_id=str(watch.id),
-            template_id=template_id,
-        )
-        await session.commit()
-    return await _render_watch_notifications(request, watch, session)
-
-
-@router.post("/watches/{watch_id}/notifications/copy-template/{template_id}")
-async def watch_nc_copy_template(
-    request: Request,
-    watch_id: str,
-    template_id: str,
-    session: AsyncSession = Depends(get_db_session),
-):
-    """Copy a library template ref to a local WatchNotificationConfig, removing the ref."""
-    if request.headers.get("HX-Request") != "true":
-        return RedirectResponse(url=f"/watches/{watch_id}", status_code=303)
-    watch = await get_watch_detail(session, watch_id)
-    if not watch:
-        raise HTTPException(status_code=404, detail="Watch not found")
-    tpl = await session.scalar(
-        select(NotificationTemplate).where(NotificationTemplate.id == template_id)  # type: ignore[arg-type]
-    )
-    if not tpl:
-        raise HTTPException(status_code=404, detail="Template not found")
-    local = WatchNotificationConfig(
-        watch_id=watch.id,
-        title=tpl.title,
-        channel_hint=tpl.channel_hint,
-        events=tpl.events,
-        content_config=tpl.content_config,
-        remote_channel_id=tpl.remote_channel_id,
-    )
-    session.add(local)
-    ref = await session.scalar(
-        select(WatchNcRef).where(
-            WatchNcRef.watch_id == watch.id,
-            WatchNcRef.template_id == template_id,  # type: ignore[arg-type]
-        )
-    )
-    if ref:
-        await session.delete(ref)
-    audit(session, EventType.NOTIFICATION_CONFIG_CREATED, watch_id=str(watch.id))
-    await session.commit()
-    return await _render_watch_notifications(request, watch, session)
-
-
-@router.post("/watches/{watch_id}/notifications/{config_id}/copy")
-async def watch_nc_copy_local(
-    request: Request,
-    watch_id: str,
-    config_id: str,
-    session: AsyncSession = Depends(get_db_session),
-):
-    """Duplicate a local WatchNotificationConfig on the same watch."""
-    if request.headers.get("HX-Request") != "true":
-        return RedirectResponse(url=f"/watches/{watch_id}", status_code=303)
-    watch = await get_watch_detail(session, watch_id)
-    if not watch:
-        raise HTTPException(status_code=404, detail="Watch not found")
-    orig = await session.scalar(
-        select(WatchNotificationConfig).where(
-            WatchNotificationConfig.id == config_id,  # type: ignore[arg-type]
-            WatchNotificationConfig.watch_id == watch.id,
-        )
-    )
-    if not orig:
-        raise HTTPException(status_code=404)
-    copy = WatchNotificationConfig(
-        watch_id=watch.id,
-        title=f"{orig.title} (copy)" if orig.title else None,
-        channel_hint=orig.channel_hint,
-        events=orig.events,
-        content_config=orig.content_config,
-        remote_channel_id=orig.remote_channel_id,
-    )
-    session.add(copy)
-    audit(session, EventType.NOTIFICATION_CONFIG_CREATED, watch_id=str(watch.id))
-    await session.commit()
-    return await _render_watch_notifications(request, watch, session)
-
-
-@router.post("/watches/{watch_id}/notifications/{config_id}/test-result")
-async def watch_notification_test_result(
-    request: Request,
-    watch_id: str,
-    config_id: str,
-    session: AsyncSession = Depends(get_db_session),
-):
-    """Send a test notification and return an OOB flash with the result."""
-    watch = await get_watch_detail(session, watch_id)
-    if not watch:
-        raise HTTPException(status_code=404, detail="Watch not found")
-    nc = await session.get(WatchNotificationConfig, parse_ulid(config_id, "Config"))
-    if not nc or nc.watch_id != watch.id:
-        raise HTTPException(status_code=404, detail="Config not found")
-    success = False
-    reason = "Internal error during dispatch"
-    wi_url = watch.watched_item.effective_url if watch.watched_item else None
-    resolved_url = wi_url or f"watch:{watch.id}"
-    try:
-        if not nc.remote_channel_id:
-            reason = "no remote_channel_id configured"
-        else:
-            event = WatchEvent(
-                event_type=WatchEventType.CHANGE_DETECTED,
-                watch_id=str(watch.id),
-                watch_name=watch.name,
-                watch_url=resolved_url,
-                occurred_at=datetime.now(UTC),
-                metadata={"test": True},
-            )
-            cc = ContentConfig.model_validate(nc.content_config) if nc.content_config else None
-            opts = resolve_options(cc, WatchEventType.CHANGE_DETECTED.value)
-            candidate = DispatchCandidate(
-                source="local",
-                source_id=str(nc.id),
-                content_config=nc.content_config,
-                remote_channel_id=nc.remote_channel_id,
-            )
-            try:
-                async with get_notifier_client() as client:
-                    outcome = await dispatch_via_notifier(
-                        client,
-                        candidate,
-                        event,
-                        rendered_title=build_title(event, opts),
-                        rendered_body=build_body(event, opts),
-                    )
-                success = outcome.success
-                reason = outcome.reason
-            except NotifierError as exc:
-                reason = f"notifier error: {exc}"
-    except Exception:
-        logger.exception("test notification error", extra={"config_id": config_id})
-    audit(
-        session,
-        EventType.NOTIFICATION_TEST,
-        watch_id=watch.id,
-        config_id=str(nc.id),
-        channel_hint=nc.channel_hint,
-        success=success,
-        reason=reason,
-    )
-    await session.commit()
-    level = "success" if success else "error"
-    message = f"Test notification: {reason}"
-    return templates.TemplateResponse(
-        request,
-        "partials/flash_oob.html",
-        {
-            "flash_oob_level": level,
-            "flash_oob_message": message,
-        },
-    )
-
-
 @router.get("/audit")
 async def audit_log_page(
     request: Request,
     event_type: str | None = None,
-    watch_id: str | None = None,
+    watched_item_id: str | None = None,
     session: AsyncSession = Depends(get_db_session),
 ):
     """Audit log page with filtering."""
     event_type = event_type or None
-    entries = await get_audit_entries(session, event_type=event_type, watch_id=watch_id)
+    entries = await get_audit_entries(
+        session, event_type=event_type, watched_item_id=watched_item_id
+    )
     context = {
         "active_page": "audit",
         "entries": entries,
@@ -3063,12 +1813,14 @@ async def audit_log_page(
 async def partial_audit_table(
     request: Request,
     event_type: str | None = None,
-    watch_id: str | None = None,
+    watched_item_id: str | None = None,
     session: AsyncSession = Depends(get_db_session),
 ):
     """HTMX partial: filtered audit log table."""
     event_type = event_type or None
-    entries = await get_audit_entries(session, event_type=event_type, watch_id=watch_id)
+    entries = await get_audit_entries(
+        session, event_type=event_type, watched_item_id=watched_item_id
+    )
     return templates.TemplateResponse(request, "partials/audit_table.html", {"entries": entries})
 
 

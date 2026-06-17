@@ -6,7 +6,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 from src.api.schemas.types import HttpUrlStr, ULIDStr
 from src.api.schemas.validators import validate_event_list
-from src.core.models.watch import ContentType, WatchHealthStatus
+from src.core.models.watched_item import ContentType, WatchHealthStatus
 
 
 class WatchedItemCreate(BaseModel):

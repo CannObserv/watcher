@@ -4,7 +4,6 @@ from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from ulid import ULID
 
-from src.core.models.watch import Watch
 from src.core.models.watched_item import WatchedItem
 
 
@@ -25,14 +24,6 @@ def parse_filter_ulid(value: str, field: str = "id") -> ULID:
         return ULID.from_str(value)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=f"Invalid {field} format") from exc
-
-
-async def get_watch_or_404(watch_id: str, session: AsyncSession) -> Watch:
-    """Fetch a watch by ID string, raising 404 if not found."""
-    watch = await session.get(Watch, parse_ulid(watch_id, "Watch"))
-    if not watch:
-        raise HTTPException(status_code=404, detail="Watch not found")
-    return watch
 
 
 async def get_watched_item_or_404(watched_item_id: str, session: AsyncSession) -> WatchedItem:

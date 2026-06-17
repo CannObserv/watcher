@@ -68,7 +68,7 @@
 
 {% if watched_item.domain_suspended %}
 <div class="mb-4 p-4 rounded-lg bg-orange-50 dark:bg-orange-950 border border-orange-200 dark:border-orange-800 text-sm text-orange-800 dark:text-orange-200" role="alert">
-  Domain Inactive — watches for this item are suspended until the domain is reactivated.
+  Domain Inactive — this item is suspended until the domain is reactivated.
 </div>
 {% endif %}
 
@@ -148,16 +148,25 @@
   </div>
 </section>
 
-{# Child Watches table — reuse partial scoped by watched_item_id #}
+{# Local notification configs (folded from the per-Watch tier, #191) #}
 <section class="mb-8">
-  <div class="flex items-center justify-between mb-4">
-    <h3 class="text-lg font-semibold text-gray-900 dark:text-white">Watches</h3>
-    {% if not watched_item.archived_at and watched_item.is_active and not watched_item.domain_suspended and watched_item.effective_url %}
-    <a href="/watches/new?watched_item_id={{ watched_item.id }}"
-       class="btn btn-secondary btn-sm">+ New Watch</a>
+  <h3 class="text-lg font-semibold text-gray-900 dark:text-white mb-4">Notification Configs</h3>
+  <div class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 divide-y divide-gray-200 dark:divide-gray-700">
+    {% if notifications %}
+      {% for config in notifications %}
+      <div class="p-3 flex items-center justify-between gap-4 text-sm">
+        <span class="text-gray-900 dark:text-gray-100">{{ config.name or config.id }}</span>
+        {% if config.is_active %}
+        <span class="badge badge-active">active</span>
+        {% else %}
+        <span class="badge badge-inactive">inactive</span>
+        {% endif %}
+      </div>
+      {% endfor %}
+    {% else %}
+      <p class="p-4 text-sm text-gray-500 dark:text-gray-400">No notification configs — add templates above or via the API.</p>
     {% endif %}
   </div>
-  {% include "partials/wi_watches_table.html" %}
 </section>
 
 {# Metadata #}
@@ -173,12 +182,12 @@
   <div class="flex items-center justify-between">
     <div>
       <p class="text-sm font-medium text-gray-900 dark:text-white">Archive this Watched Item</p>
-      <p class="text-xs text-gray-500 dark:text-gray-400">Pauses it (sets inactive), stops the fetch cycle, and cascade-archives all child Watches. Restore to reactivate.</p>
+      <p class="text-xs text-gray-500 dark:text-gray-400">Pauses it (sets inactive) and stops the fetch cycle. Restore to reactivate.</p>
     </div>
     <form method="post" action="/watched-items/{{ watched_item.id }}/archive">
       <button type="submit"
         hx-post="/watched-items/{{ watched_item.id }}/archive"
-        hx-confirm="Archive {{ watched_item.name }}? All child Watches will also be archived."
+        hx-confirm="Archive {{ watched_item.name }}?"
         hx-target="body"
         hx-push-url="true"
         class="btn btn-danger-outline min-h-[44px]">Archive</button>
@@ -188,7 +197,7 @@
   <div class="flex items-center justify-between">
     <div>
       <p class="text-sm font-medium text-gray-900 dark:text-white">Restore this Watched Item</p>
-      <p class="text-xs text-gray-500 dark:text-gray-400">Child Watches stay archived; restore them individually.</p>
+      <p class="text-xs text-gray-500 dark:text-gray-400">Clears the archive flag and re-activates the fetch cycle.</p>
     </div>
     <form method="post" action="/watched-items/{{ watched_item.id }}/restore">
       <button type="submit"

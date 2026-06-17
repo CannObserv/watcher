@@ -4,7 +4,6 @@ from datetime import UTC, datetime
 
 import pytest
 from pydantic import BaseModel, ValidationError
-from ulid import ULID
 
 from src.api.schemas.audit_log import AuditLogResponse
 from src.api.schemas.content_config import ContentConfig, ContentOptions
@@ -17,10 +16,8 @@ from src.api.schemas.notification_template import (
     NotificationTemplateResponse,
 )
 from src.api.schemas.types import HttpUrlStr
-from src.api.schemas.watch import WatchCreate, WatchResponse, WatchUpdate
 from src.api.schemas.watched_item import WatchedItemCreate
 from src.core.models.audit_log import EventType
-from src.core.models.watch import ContentType, Watch
 
 
 class TestHttpUrlStr:
@@ -87,183 +84,33 @@ class TestHttpUrlStr:
             M(url="not-a-url")
 
 
-class TestWatchCreate:
-    def test_valid_watch_create(self):
-        wi_id = str(ULID())
-        data = WatchCreate(
-            name="Test Watch",
-            watched_item_id=wi_id,
-            content_type="html",
-        )
-        assert data.name == "Test Watch"
-        assert data.watched_item_id == wi_id
-        assert data.content_type == "html"
-
-    def test_watch_create_content_type_optional(self):
-        data = WatchCreate(
-            name="Untyped",
-            watched_item_id=str(ULID()),
-        )
-        assert data.content_type is None
-
-    def test_watch_create_requires_name(self):
-        with pytest.raises(ValidationError):
-            WatchCreate(watched_item_id=str(ULID()), content_type="html")
-
-    def test_watch_create_requires_watched_item_id(self):
-        with pytest.raises(ValidationError):
-            WatchCreate(name="Test", content_type="html")
-
-    def test_watch_create_validates_content_type(self):
-        with pytest.raises(ValidationError):
-            WatchCreate(
-                name="Test",
-                watched_item_id=str(ULID()),
-                content_type="invalid",
-            )
-
-    def test_watch_create_no_legacy_fields(self):
-        """``url``, ``fetch_config``, ``info_source_id``, ``schedule_config``,
-        ``target_info_source_id``, and ``info_item_id`` are gone from the create shape."""
-        data = WatchCreate(
-            name="Silent",
-            watched_item_id=str(ULID()),
-            content_type="html",
-        )
-        assert not hasattr(data, "url")
-        assert not hasattr(data, "fetch_config")
-        assert not hasattr(data, "info_item_id")
-        assert not hasattr(data, "info_source_id")
-        assert not hasattr(data, "schedule_config")
-        assert not hasattr(data, "target_info_source_id")
-
-
-class TestWatchUpdate:
-    def test_update_partial(self):
-        data = WatchUpdate(name="New Name")
-        assert data.name == "New Name"
-        assert data.is_active is None
-
-    def test_update_empty_is_valid(self):
-        data = WatchUpdate()
-        assert data.name is None
-
-    def test_update_no_url_or_effective_url(self):
-        """URL lives on WatchedItem; not mutable via WatchUpdate."""
-        data = WatchUpdate(name="No URL change")
-        assert not hasattr(data, "url")
-        assert not hasattr(data, "effective_url")
-
-    def test_update_no_fetch_config_field(self):
-        """fetch_config is owned by the InfoSource; never on the Watch row."""
-        data = WatchUpdate(name="X")
-        assert not hasattr(data, "fetch_config")
-
-    def test_update_no_schedule_config(self):
-        """schedule_config moved to WatchedItem; never on the WatchUpdate shape."""
-        data = WatchUpdate(name="X")
-        assert not hasattr(data, "schedule_config")
-
-    def test_update_no_info_item_id(self):
-        """info_item_id is immutable after creation — not on WatchUpdate."""
-        data = WatchUpdate(name="X")
-        assert not hasattr(data, "info_item_id")
-
-    def test_update_no_target_info_source_id(self):
-        """target_info_source_id removed in Archiver v4.0.0 — not on WatchUpdate."""
-        data = WatchUpdate(name="X")
-        assert not hasattr(data, "target_info_source_id")
-
-
-# Phase 5 (#156): TestSnapshotChunkResponse, TestSnapshotResponse, TestChangeResponse,
-# TestSnapshotWithChunksResponse, TestChangeDetailResponse removed.
-# src/api/schemas/change.py deleted; Snapshot/Change tables dropped.
-
-
-class TestWatchResponse:
-    def _build_watch(self, **overrides):
-        watch = Watch(
-            name=overrides.pop("name", "Test"),
-            watched_item_id=overrides.pop("watched_item_id", ULID()),
-            content_type=overrides.pop("content_type", ContentType.HTML),
-            **overrides,
-        )
-        watch.id = ULID()
-        watch.created_at = datetime(2026, 3, 20, 0, 0, 0, tzinfo=UTC)
-        watch.updated_at = datetime(2026, 3, 20, 0, 0, 0, tzinfo=UTC)
-        return watch
-
-    def test_watch_response_includes_is_archived(self):
-        watch = self._build_watch()
-        response = WatchResponse.model_validate(watch)
-        assert response.is_archived is False
-
-    def test_watch_response_is_archived_true(self):
-        watch = self._build_watch(name="Archived", is_archived=True)
-        response = WatchResponse.model_validate(watch)
-        assert response.is_archived is True
-
-    def test_watch_response_has_watched_item_id(self):
-        """WatchResponse exposes watched_item_id."""
-        wi_id = ULID()
-        watch = self._build_watch(watched_item_id=wi_id)
-        response = WatchResponse.model_validate(watch)
-        assert response.watched_item_id == str(wi_id)
-
-    def test_watch_response_has_suspended_by_domain(self):
-        """Watch.domain_suspended renamed suspended_by_domain (#185 step 6)."""
-        watch = self._build_watch(suspended_by_domain=True)
-        response = WatchResponse.model_validate(watch)
-        assert response.suspended_by_domain is True
-
-    def test_watch_response_has_no_legacy_fields(self):
-        """WatchResponse must not expose dropped columns."""
-        watch = self._build_watch()
-        response = WatchResponse.model_validate(watch)
-        dumped = response.model_dump()
-        assert "url" not in dumped
-        assert "effective_url" not in dumped
-        assert "info_item_id" not in dumped
-        assert "target_info_source_id" not in dumped
-        assert "last_checked_at" not in dumped
-        assert "last_changed_at" not in dumped
-        assert "health_status" not in dumped
-        assert "domain_suspended" not in dumped
-        assert "fetch_config" not in dumped
-        assert "info_source_id" not in dumped
-        assert "schedule_config" not in dumped
-
-
 class TestAuditLogResponse:
     def test_from_dict(self):
         ts = datetime(2026, 3, 21, 12, 0, 0, tzinfo=UTC)
         data = AuditLogResponse.model_validate(
             {
                 "id": "01KM7A9TP2B0BQCNZ5PZX4MH8B",
-                "event_type": EventType.WATCH_CREATED,
-                "watch_id": "01KM7A9TP2B0BQCNZ5PZX4MH89",
-                "payload": {"name": "Test Watch"},
+                "event_type": EventType.WATCHED_ITEM_CREATED,
+                "payload": {"watched_item_id": "01KM7A9TP2B0BQCNZ5PZX4MH89", "name": "Test Item"},
                 "created_at": ts,
             }
         )
         assert data.id == "01KM7A9TP2B0BQCNZ5PZX4MH8B"
-        assert data.event_type == EventType.WATCH_CREATED
-        assert data.watch_id == "01KM7A9TP2B0BQCNZ5PZX4MH89"
-        assert data.payload == {"name": "Test Watch"}
+        assert data.event_type == EventType.WATCHED_ITEM_CREATED
+        assert data.payload["watched_item_id"] == "01KM7A9TP2B0BQCNZ5PZX4MH89"
         assert data.created_at == ts
 
-    def test_nullable_watch_id(self):
+    def test_empty_payload(self):
         ts = datetime(2026, 3, 21, 12, 0, 0, tzinfo=UTC)
         data = AuditLogResponse.model_validate(
             {
                 "id": "01KM7A9TP2B0BQCNZ5Q0000000",
                 "event_type": "system.startup",
-                "watch_id": None,
                 "payload": {},
                 "created_at": ts,
             }
         )
-        assert data.watch_id is None
+        assert data.payload == {}
 
 
 class TestWatchNotificationConfigCreate:
@@ -290,7 +137,7 @@ class TestWatchNotificationConfigResponse:
         resp = WatchNotificationConfigResponse.model_validate(
             {
                 "id": "01HV0000000000000000000001",
-                "watch_id": "01HV0000000000000000000002",
+                "watched_item_id": "01HV0000000000000000000002",
                 "title": None,
                 "channel_hint": "slack",
                 "events": ["change_detected"],
@@ -308,7 +155,7 @@ class TestWatchNotificationConfigResponse:
         resp = WatchNotificationConfigResponse.model_validate(
             {
                 "id": "01HV0000000000000000000001",
-                "watch_id": "01HV0000000000000000000002",
+                "watched_item_id": "01HV0000000000000000000002",
                 "title": None,
                 "channel_hint": "slack",
                 "events": ["change_detected"],

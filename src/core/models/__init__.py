@@ -10,8 +10,7 @@ from src.core.models.notification_config import WatchNotificationConfig
 from src.core.models.notification_template import DomainNcRef, NotificationTemplate, WatchNcRef
 from src.core.models.pending_archiver_sync import PendingArchiverSync
 from src.core.models.temporal_profile import PostAction, ProfileType, TemporalProfile
-from src.core.models.watch import ContentType, Watch
-from src.core.models.watched_item import WatchedItem
+from src.core.models.watched_item import ContentType, WatchedItem, WatchHealthStatus
 from src.core.models.watched_item_notification_template import WatchedItemNotificationTemplate
 
 __all__ = [
@@ -34,7 +33,7 @@ __all__ = [
     "TemporalProfile",
     "TimestampMixin",
     "ULIDType",
-    "Watch",
+    "WatchHealthStatus",
     "WatchedItem",
     "WatchedItemNotificationTemplate",
     "generate_ulid",

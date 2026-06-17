@@ -42,7 +42,6 @@ from src.api.deps import get_db_session, get_probe_fn, require_api_key
 from src.core.models import Base
 from src.core.models.app_user import AppUser
 from src.core.models.domain import Domain
-from src.core.models.watch import Watch
 from src.core.models.watched_item import WatchedItem
 from src.core.probe import ProbeResult
 from src.core.registry import ServiceRegistry, set_registry_for_testing
@@ -330,40 +329,31 @@ async def bind_primary_source(session, *, info_item_id, info_source_id):
     await session.flush()
 
 
-async def make_watch(
+async def make_watched_item(
     session,
     *,
-    name="Test Watch",
+    name="Test Watched Item",
     archiver_info_item_id=None,
-    watched_item=None,
     primary_url="https://example.com",
+    domain_name=None,
+    auto_info_item=True,
     **kwargs,
 ):
-    """Construct a Watch tied to a WatchedItem + InfoItem (#185 Phase A shape).
+    """Construct a WatchedItem — the single monitored entity (#191 collapse).
 
-    When ``archiver_info_item_id`` is not supplied, an InfoItem + primary InfoSource +
-    binding are auto-created — except when ``watched_item`` is supplied, in
-    which case ``archiver_info_item_id`` defaults to ``watched_item.archiver_info_item_id``
-    so callers don't have to repeat it. When ``watched_item`` is not supplied,
-    a fresh WatchedItem is auto-created (or attaches to an existing one for
-    the same archiver_info_item_id).
+    When ``archiver_info_item_id`` is not supplied and ``auto_info_item`` is
+    True, an InfoItem + primary InfoSource + binding are auto-created so the
+    WatchedItem references a real Archiver InfoItem. Pass ``auto_info_item=False``
+    for a URL-only WatchedItem (``archiver_info_item_id`` stays NULL).
 
-    Extra ``**kwargs`` flow into the Watch constructor (tags, description,
-    content_type, etc.). Pass ``domain_name=`` to set WatchedItem.domain_name.
-    Note: ``schedule_config`` no longer lives on Watch (moved to
-    WatchedItem.default_schedule_config). Use ``primary_url=`` to seed the
-    auto-created InfoSource's URL. ``target_info_source_id`` removed (Archiver
-    v4.0.0: sub_aspect concept eliminated).
+    Extra ``**kwargs`` flow into the WatchedItem constructor — e.g.
+    ``is_active``, ``default_content_type``, ``default_tags``, ``description``,
+    ``default_schedule_config``, ``domain_suspended``, ``archived_at``.
+    ``primary_url`` seeds ``effective_url`` (and the auto-created InfoSource URL).
+    Pass ``domain_name=`` to set ``WatchedItem.domain_name`` (auto-creating the
+    Domain row).
     """
-    # domain_name lives on WatchedItem, not Watch — extract before passing to Watch.
-    domain_name = kwargs.pop("domain_name", None)
-
-    if archiver_info_item_id is None and watched_item is not None:
-        # Default to the WatchedItem's InfoItem so the assertion below can't
-        # trip on an auto-created mismatch.
-        archiver_info_item_id = watched_item.archiver_info_item_id
-
-    if archiver_info_item_id is None:
+    if archiver_info_item_id is None and auto_info_item:
         item = await make_info_item(session)
         archiver_info_item_id = item.info_item_id
         primary = await make_info_source(session, url=primary_url)
@@ -373,73 +363,76 @@ async def make_watch(
             info_source_id=primary.info_source_id,
         )
 
-    if watched_item is None:
-        # Attach to existing WatchedItem for this archiver_info_item_id if present;
-        # otherwise create a fresh one. The 1:1 uniqueness on archiver_info_item_id
-        # would otherwise fail when two Watches share an InfoItem.
-        existing = (
-            await session.execute(
-                select(WatchedItem).where(
-                    WatchedItem.archiver_info_item_id == archiver_info_item_id
-                )
-            )
-        ).scalar_one_or_none()
-        if existing is not None:
-            watched_item = existing
-            if not watched_item.effective_url and primary_url:
-                watched_item.effective_url = primary_url
-                await session.flush()
-        else:
-            watched_item = WatchedItem(
-                archiver_info_item_id=archiver_info_item_id,
-                name=f"WI for {name}",
-                effective_url=primary_url,
-            )
-            session.add(watched_item)
-            await session.flush()
-    elif watched_item.archiver_info_item_id != archiver_info_item_id:
-        raise AssertionError(
-            f"watched_item.archiver_info_item_id ({watched_item.archiver_info_item_id}) "
-            f"must match archiver_info_item_id ({archiver_info_item_id})"
-        )
-
-    # Extract cascade-suspend flag before passing kwargs to Watch constructor.
-    # Accepts both "domain_suspended" (legacy) and "suspended_by_domain" (current).
-    suspended = kwargs.pop("suspended_by_domain", kwargs.pop("domain_suspended", False))
-
-    watch_kwargs = {
-        "name": name,
-        "watched_item_id": watched_item.id,
-        **kwargs,
-    }
-    if suspended:
-        watch_kwargs["suspended_by_domain"] = True
-    watch = Watch(**watch_kwargs)
-    session.add(watch)
-    await session.flush()
-
-    # Apply domain_name to the WatchedItem if provided (and not already set).
-    # Auto-create the Domain row if it doesn't exist (FK requires it).
-    if domain_name is not None and watched_item.domain_name is None:
+    # Auto-create the Domain row first if a domain_name is requested (FK).
+    if domain_name is not None:
         existing_domain = (
             await session.execute(select(Domain).where(Domain.name == domain_name))
         ).scalar_one_or_none()
         if existing_domain is None:
             session.add(Domain(name=domain_name))
             await session.flush()
-        watched_item.domain_name = domain_name
-        await session.flush()
 
-    # Propagate cascade-suspend to WatchedItem (mirrors domain-deactivation cascade).
-    if suspended and not watched_item.domain_suspended:
-        watched_item.domain_suspended = True
-        await session.flush()
+    wi = WatchedItem(
+        archiver_info_item_id=archiver_info_item_id,
+        name=name,
+        effective_url=primary_url,
+        domain_name=domain_name,
+        **kwargs,
+    )
+    session.add(wi)
+    await session.flush()
+    return wi
 
-    # Eager-populate the watched_item relationship so callers can read
-    # watch.watched_item without a separate await. The model declares
-    # lazy="joined" but `flush()` alone doesn't trigger the join.
-    await session.refresh(watch, ["watched_item"])
-    return watch
+
+async def make_watch(
+    session,
+    *,
+    name="Test Watch",
+    archiver_info_item_id=None,
+    watched_item=None,
+    primary_url="https://example.com",
+    **kwargs,
+):
+    """Compatibility shim — post-#191 a "watch" *is* a WatchedItem.
+
+    Returns a WatchedItem so legacy call sites keep working: ``watch.id``,
+    ``watch.name``, ``watch.is_active`` map directly, and convenience aliases
+    (``watch.watched_item`` → self, ``watch.watched_item_id`` → id) cover the
+    former parent reference. Legacy per-Watch kwargs are mapped onto WatchedItem
+    defaults (``content_type`` → ``default_content_type``, ``tags`` →
+    ``default_tags``, ``is_archived`` → ``archived_at``).
+
+    Prefer ``make_watched_item`` in new tests.
+    """
+    if watched_item is not None:
+        wi = watched_item
+    else:
+        # Map legacy per-Watch kwargs onto WatchedItem fields.
+        if "content_type" in kwargs:
+            kwargs["default_content_type"] = kwargs.pop("content_type")
+        if "tags" in kwargs:
+            kwargs["default_tags"] = kwargs.pop("tags")
+        suspended = kwargs.pop("suspended_by_domain", kwargs.pop("domain_suspended", False))
+        archived = kwargs.pop("is_archived", False)
+        domain_name = kwargs.pop("domain_name", None)
+        wi = await make_watched_item(
+            session,
+            name=name,
+            archiver_info_item_id=archiver_info_item_id,
+            primary_url=primary_url,
+            domain_name=domain_name,
+            domain_suspended=suspended,
+            **kwargs,
+        )
+        if archived:
+            wi.is_active = False
+            wi.archived_at = datetime.now(UTC)
+            await session.flush()
+
+    # Legacy attribute aliases (unmapped instance attrs survive refresh).
+    wi.watched_item = wi
+    wi.watched_item_id = wi.id
+    return wi
 
 
 # ---------------------------------------------------------------------------

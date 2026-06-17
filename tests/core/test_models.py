@@ -12,8 +12,7 @@ from src.core.models.base import ULIDType
 from src.core.models.domain import Domain
 from src.core.models.notification_config import WatchNotificationConfig
 from src.core.models.temporal_profile import PostAction, ProfileType, TemporalProfile
-from src.core.models.watch import ContentType, Watch, WatchHealthStatus
-from src.core.models.watched_item import WatchedItem
+from src.core.models.watched_item import ContentType, WatchedItem, WatchHealthStatus
 
 
 class TestULIDType:
@@ -42,66 +41,31 @@ class TestULIDType:
         assert result is None
 
 
-class TestWatchModel:
-    def test_create_watch_with_defaults(self):
-        watch = Watch(
-            name="Test Watch",
-            content_type=ContentType.HTML,
-        )
-        assert watch.name == "Test Watch"
-        assert watch.content_type == ContentType.HTML
-        assert watch.is_active is True
-        assert watch.suspended_by_domain is False
+class TestWatchedItemContentType:
+    """ContentType + health enums now live on WatchedItem (#191 collapse)."""
 
-    def test_create_watch_with_all_fields(self):
-        watch = Watch(
-            name="PDF Watch",
-            content_type=ContentType.PDF,
-            is_active=False,
-        )
-        assert watch.content_type == ContentType.PDF
-        assert watch.is_active is False
+    def test_default_content_type(self):
+        wi = WatchedItem(name="Test", default_content_type=ContentType.HTML)
+        assert wi.default_content_type == ContentType.HTML
 
     def test_content_type_enum_values(self):
         assert ContentType.HTML.value == "html"
         assert ContentType.PDF.value == "pdf"
         assert ContentType.FILE.value == "file"
 
-    def test_content_type_coerces_string(self):
-        watch = Watch(
-            name="Coerce Test",
-            content_type="pdf",
-        )
-        assert watch.content_type is ContentType.PDF
+    def test_default_content_type_coerces_string(self):
+        wi = WatchedItem(name="Coerce Test", default_content_type="pdf")
+        assert wi.default_content_type is ContentType.PDF
 
-    def test_content_type_rejects_invalid(self):
-        with pytest.raises(ValueError, match="Invalid content_type"):
-            Watch(
-                name="Bad Type",
-                content_type="invalid",
-            )
+    def test_default_content_type_rejects_invalid(self):
+        with pytest.raises(ValueError, match="Invalid default_content_type"):
+            WatchedItem(name="Bad Type", default_content_type="invalid")
 
-    def test_watch_is_archived_defaults_false(self):
-        watch = Watch(
-            name="Test",
-            content_type=ContentType.HTML,
-        )
-        assert watch.is_archived is False
-
-    def test_watch_can_set_is_archived_true(self):
-        watch = Watch(
-            name="Archived",
-            content_type=ContentType.HTML,
-            is_archived=True,
-        )
-        assert watch.is_archived is True
-
-    def test_health_status_on_watched_item(self):
-        """health_status lives on WatchedItem (#185 step 6), not Watch."""
+    def test_health_status_default(self):
         wi = WatchedItem(name="T")
         assert wi.health_status == WatchHealthStatus.UNKNOWN
 
-    def test_health_status_coercion_from_string_on_watched_item(self):
+    def test_health_status_coercion_from_string(self):
         wi = WatchedItem(name="T", health_status="ok")
         assert wi.health_status == WatchHealthStatus.OK
 
@@ -111,32 +75,30 @@ class TestAuditHelper:
 
     def test_audit_creates_entry_with_correct_fields(self):
         mock_session = MagicMock()
-        watch_id = ULID()
+        wi_id = str(ULID())
 
         entry = audit(
             mock_session,
-            EventType.WATCH_CREATED,
-            watch_id=watch_id,
-            name="Test Watch",
+            EventType.WATCHED_ITEM_CREATED,
+            watched_item_id=wi_id,
+            name="Test Item",
         )
 
         assert isinstance(entry, AuditLog)
-        assert entry.event_type == EventType.WATCH_CREATED
-        assert entry.watch_id == watch_id
-        assert entry.payload == {"name": "Test Watch"}
+        assert entry.event_type == EventType.WATCHED_ITEM_CREATED
+        assert entry.payload == {"watched_item_id": wi_id, "name": "Test Item"}
         mock_session.add.assert_called_once_with(entry)
 
-    def test_audit_without_watch_id(self):
+    def test_audit_minimal_payload(self):
         mock_session = MagicMock()
         entry = audit(mock_session, EventType.CHECK_FETCH_FAILED, status_code=500)
 
-        assert entry.watch_id is None
         assert entry.payload == {"status_code": 500}
         mock_session.add.assert_called_once_with(entry)
 
     def test_audit_adds_to_session(self):
         mock_session = MagicMock()
-        entry = audit(mock_session, EventType.WATCH_DELETED)
+        entry = audit(mock_session, EventType.WATCHED_ITEM_ARCHIVED)
         mock_session.add.assert_called_once_with(entry)
 
 
@@ -176,21 +138,19 @@ class TestEventType:
 class TestAuditLogModel:
     def test_create_audit_log_entry(self):
         entry = AuditLog(
-            event_type=EventType.WATCH_CREATED,
-            payload={"watch_name": "Test Watch"},
+            event_type=EventType.WATCHED_ITEM_CREATED,
+            payload={"name": "Test Item"},
         )
-        assert entry.event_type == EventType.WATCH_CREATED
-        assert entry.payload == {"watch_name": "Test Watch"}
-        assert entry.watch_id is None
+        assert entry.event_type == EventType.WATCHED_ITEM_CREATED
+        assert entry.payload == {"name": "Test Item"}
 
-    def test_create_audit_log_with_watch_id(self):
-        watch_id = ULID()
+    def test_create_audit_log_with_watched_item_id(self):
+        wi_id = str(ULID())
         entry = AuditLog(
             event_type="check.started",
-            watch_id=watch_id,
-            payload={"url": "https://example.com"},
+            payload={"watched_item_id": wi_id, "url": "https://example.com"},
         )
-        assert entry.watch_id == watch_id
+        assert entry.payload["watched_item_id"] == wi_id
 
 
 class TestDatabase:
@@ -284,7 +244,7 @@ class TestDomainModel:
 class TestNotificationConfigModel:
     def test_create_remote_channel_config(self):
         config = WatchNotificationConfig(
-            watch_id=ULID(),
+            watched_item_id=ULID(),
             channel_hint="slack",
             remote_channel_id=str(ULID()),
         )
@@ -293,7 +253,7 @@ class TestNotificationConfigModel:
 
     def test_default_events(self):
         config = WatchNotificationConfig(
-            watch_id=ULID(),
+            watched_item_id=ULID(),
             channel_hint="mailto",
             remote_channel_id=str(ULID()),
         )
@@ -301,7 +261,7 @@ class TestNotificationConfigModel:
 
     def test_custom_events(self):
         config = WatchNotificationConfig(
-            watch_id=ULID(),
+            watched_item_id=ULID(),
             channel_hint="slack",
             remote_channel_id=str(ULID()),
             events=["change_detected", "watch_error"],

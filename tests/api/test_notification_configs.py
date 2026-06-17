@@ -44,7 +44,7 @@ class TestCreateNotificationConfig:
     async def test_create_with_valid_channel_id(self, client, db_session):
         watch_id = await _make_watch(client, db_session)
         resp = await client.post(
-            f"/api/v1/watches/{watch_id}/notifications",
+            f"/api/v1/watched-items/{watch_id}/notifications",
             json=_create_payload(),
         )
         assert resp.status_code == 201
@@ -57,7 +57,7 @@ class TestCreateNotificationConfig:
     async def test_create_with_title(self, client, db_session):
         watch_id = await _make_watch(client, db_session)
         resp = await client.post(
-            f"/api/v1/watches/{watch_id}/notifications",
+            f"/api/v1/watched-items/{watch_id}/notifications",
             json=_create_payload(title="Slack ops"),
         )
         assert resp.status_code == 201
@@ -66,7 +66,7 @@ class TestCreateNotificationConfig:
     async def test_create_without_title_defaults_to_null(self, client, db_session):
         watch_id = await _make_watch(client, db_session)
         resp = await client.post(
-            f"/api/v1/watches/{watch_id}/notifications",
+            f"/api/v1/watched-items/{watch_id}/notifications",
             json=_create_payload(),
         )
         assert resp.status_code == 201
@@ -75,7 +75,7 @@ class TestCreateNotificationConfig:
     async def test_create_title_max_100_chars(self, client, db_session):
         watch_id = await _make_watch(client, db_session)
         resp = await client.post(
-            f"/api/v1/watches/{watch_id}/notifications",
+            f"/api/v1/watched-items/{watch_id}/notifications",
             json=_create_payload(title="x" * 101),
         )
         assert resp.status_code == 422
@@ -83,7 +83,7 @@ class TestCreateNotificationConfig:
     async def test_create_default_event(self, client, db_session):
         watch_id = await _make_watch(client, db_session)
         resp = await client.post(
-            f"/api/v1/watches/{watch_id}/notifications",
+            f"/api/v1/watched-items/{watch_id}/notifications",
             json={"remote_channel_id": str(ULID())},
         )
         assert resp.status_code == 201
@@ -92,7 +92,7 @@ class TestCreateNotificationConfig:
     async def test_missing_remote_channel_id_returns_422(self, client, db_session):
         watch_id = await _make_watch(client, db_session)
         resp = await client.post(
-            f"/api/v1/watches/{watch_id}/notifications",
+            f"/api/v1/watched-items/{watch_id}/notifications",
             json={"events": ["change_detected"]},
         )
         assert resp.status_code == 422
@@ -100,7 +100,7 @@ class TestCreateNotificationConfig:
     async def test_empty_events_returns_422(self, client, db_session):
         watch_id = await _make_watch(client, db_session)
         resp = await client.post(
-            f"/api/v1/watches/{watch_id}/notifications",
+            f"/api/v1/watched-items/{watch_id}/notifications",
             json=_create_payload(events=[]),
         )
         assert resp.status_code == 422
@@ -108,14 +108,14 @@ class TestCreateNotificationConfig:
     async def test_unknown_event_returns_422(self, client, db_session):
         watch_id = await _make_watch(client, db_session)
         resp = await client.post(
-            f"/api/v1/watches/{watch_id}/notifications",
+            f"/api/v1/watched-items/{watch_id}/notifications",
             json=_create_payload(events=["nonexistent_event"]),
         )
         assert resp.status_code == 422
 
     async def test_invalid_watch_returns_404(self, client, db_session):
         resp = await client.post(
-            "/api/v1/watches/00000000000000000000000000/notifications",
+            "/api/v1/watched-items/00000000000000000000000000/notifications",
             json=_create_payload(),
         )
         assert resp.status_code == 404
@@ -123,7 +123,7 @@ class TestCreateNotificationConfig:
     async def test_multiple_events(self, client, db_session):
         watch_id = await _make_watch(client, db_session)
         resp = await client.post(
-            f"/api/v1/watches/{watch_id}/notifications",
+            f"/api/v1/watched-items/{watch_id}/notifications",
             json=_create_payload(events=["change_detected", "watch_error"]),
         )
         assert resp.status_code == 201
@@ -134,14 +134,14 @@ class TestListNotificationConfigs:
     async def test_list_returns_all_configs(self, client, db_session):
         watch_id = await _make_watch(client, db_session)
         await client.post(
-            f"/api/v1/watches/{watch_id}/notifications",
+            f"/api/v1/watched-items/{watch_id}/notifications",
             json=_create_payload(events=["change_detected"]),
         )
         await client.post(
-            f"/api/v1/watches/{watch_id}/notifications",
+            f"/api/v1/watched-items/{watch_id}/notifications",
             json=_create_payload(events=["watch_error"]),
         )
-        resp = await client.get(f"/api/v1/watches/{watch_id}/notifications")
+        resp = await client.get(f"/api/v1/watched-items/{watch_id}/notifications")
         assert resp.status_code == 200
         assert len(resp.json()) == 2
 
@@ -149,10 +149,10 @@ class TestListNotificationConfigs:
         watch_a = await _make_watch(client, db_session)
         watch_b = await _make_watch(client, db_session)
         await client.post(
-            f"/api/v1/watches/{watch_a}/notifications",
+            f"/api/v1/watched-items/{watch_a}/notifications",
             json=_create_payload(),
         )
-        resp = await client.get(f"/api/v1/watches/{watch_b}/notifications")
+        resp = await client.get(f"/api/v1/watched-items/{watch_b}/notifications")
         assert resp.json() == []
 
 
@@ -160,12 +160,12 @@ class TestPatchNotificationConfig:
     async def test_patch_title(self, client, db_session):
         watch_id = await _make_watch(client, db_session)
         create_resp = await client.post(
-            f"/api/v1/watches/{watch_id}/notifications",
+            f"/api/v1/watched-items/{watch_id}/notifications",
             json=_create_payload(title="Original"),
         )
         config_id = create_resp.json()["id"]
         resp = await client.patch(
-            f"/api/v1/watches/{watch_id}/notifications/{config_id}",
+            f"/api/v1/watched-items/{watch_id}/notifications/{config_id}",
             json={"title": "Updated"},
         )
         assert resp.status_code == 200
@@ -174,12 +174,12 @@ class TestPatchNotificationConfig:
     async def test_patch_title_to_null(self, client, db_session):
         watch_id = await _make_watch(client, db_session)
         create_resp = await client.post(
-            f"/api/v1/watches/{watch_id}/notifications",
+            f"/api/v1/watched-items/{watch_id}/notifications",
             json=_create_payload(title="Remove me"),
         )
         config_id = create_resp.json()["id"]
         resp = await client.patch(
-            f"/api/v1/watches/{watch_id}/notifications/{config_id}",
+            f"/api/v1/watched-items/{watch_id}/notifications/{config_id}",
             json={"title": None},
         )
         assert resp.status_code == 200
@@ -188,12 +188,12 @@ class TestPatchNotificationConfig:
     async def test_toggle_is_active(self, client, db_session):
         watch_id = await _make_watch(client, db_session)
         create_resp = await client.post(
-            f"/api/v1/watches/{watch_id}/notifications",
+            f"/api/v1/watched-items/{watch_id}/notifications",
             json=_create_payload(),
         )
         config_id = create_resp.json()["id"]
         resp = await client.patch(
-            f"/api/v1/watches/{watch_id}/notifications/{config_id}",
+            f"/api/v1/watched-items/{watch_id}/notifications/{config_id}",
             json={"is_active": False},
         )
         assert resp.status_code == 200
@@ -202,12 +202,12 @@ class TestPatchNotificationConfig:
     async def test_update_events(self, client, db_session):
         watch_id = await _make_watch(client, db_session)
         create_resp = await client.post(
-            f"/api/v1/watches/{watch_id}/notifications",
+            f"/api/v1/watched-items/{watch_id}/notifications",
             json=_create_payload(),
         )
         config_id = create_resp.json()["id"]
         resp = await client.patch(
-            f"/api/v1/watches/{watch_id}/notifications/{config_id}",
+            f"/api/v1/watched-items/{watch_id}/notifications/{config_id}",
             json={"events": ["watch_error", "watch_recovered"]},
         )
         assert resp.status_code == 200
@@ -216,12 +216,12 @@ class TestPatchNotificationConfig:
     async def test_patch_invalid_event_type_returns_422(self, client, db_session):
         watch_id = await _make_watch(client, db_session)
         create_resp = await client.post(
-            f"/api/v1/watches/{watch_id}/notifications",
+            f"/api/v1/watched-items/{watch_id}/notifications",
             json=_create_payload(),
         )
         config_id = create_resp.json()["id"]
         resp = await client.patch(
-            f"/api/v1/watches/{watch_id}/notifications/{config_id}",
+            f"/api/v1/watched-items/{watch_id}/notifications/{config_id}",
             json={"events": ["bad_event"]},
         )
         assert resp.status_code == 422
@@ -229,13 +229,13 @@ class TestPatchNotificationConfig:
     async def test_patch_wrong_watch_returns_404(self, client, db_session):
         watch_id = await _make_watch(client, db_session)
         create_resp = await client.post(
-            f"/api/v1/watches/{watch_id}/notifications",
+            f"/api/v1/watched-items/{watch_id}/notifications",
             json=_create_payload(),
         )
         config_id = create_resp.json()["id"]
         other_watch_id = await _make_watch(client, db_session)
         resp = await client.patch(
-            f"/api/v1/watches/{other_watch_id}/notifications/{config_id}",
+            f"/api/v1/watched-items/{other_watch_id}/notifications/{config_id}",
             json={"is_active": False},
         )
         assert resp.status_code == 404
@@ -243,13 +243,13 @@ class TestPatchNotificationConfig:
     async def test_patch_remote_channel_id(self, client, db_session):
         watch_id = await _make_watch(client, db_session)
         create_resp = await client.post(
-            f"/api/v1/watches/{watch_id}/notifications",
+            f"/api/v1/watched-items/{watch_id}/notifications",
             json=_create_payload(),
         )
         config_id = create_resp.json()["id"]
         new_channel_id = str(ULID())
         resp = await client.patch(
-            f"/api/v1/watches/{watch_id}/notifications/{config_id}",
+            f"/api/v1/watched-items/{watch_id}/notifications/{config_id}",
             json={"remote_channel_id": new_channel_id, "channel_hint": "slack"},
         )
         assert resp.status_code == 200
@@ -260,12 +260,12 @@ class TestPatchNotificationConfig:
     async def test_patch_empty_events_returns_422(self, client, db_session):
         watch_id = await _make_watch(client, db_session)
         create_resp = await client.post(
-            f"/api/v1/watches/{watch_id}/notifications",
+            f"/api/v1/watched-items/{watch_id}/notifications",
             json=_create_payload(),
         )
         config_id = create_resp.json()["id"]
         resp = await client.patch(
-            f"/api/v1/watches/{watch_id}/notifications/{config_id}",
+            f"/api/v1/watched-items/{watch_id}/notifications/{config_id}",
             json={"events": []},
         )
         assert resp.status_code == 422
@@ -275,22 +275,22 @@ class TestDeleteNotificationConfig:
     async def test_delete_config(self, client, db_session):
         watch_id = await _make_watch(client, db_session)
         create_resp = await client.post(
-            f"/api/v1/watches/{watch_id}/notifications",
+            f"/api/v1/watched-items/{watch_id}/notifications",
             json=_create_payload(),
         )
         config_id = create_resp.json()["id"]
-        resp = await client.delete(f"/api/v1/watches/{watch_id}/notifications/{config_id}")
+        resp = await client.delete(f"/api/v1/watched-items/{watch_id}/notifications/{config_id}")
         assert resp.status_code == 204
 
     async def test_delete_wrong_watch_returns_404(self, client, db_session):
         watch_id = await _make_watch(client, db_session)
         create_resp = await client.post(
-            f"/api/v1/watches/{watch_id}/notifications",
+            f"/api/v1/watched-items/{watch_id}/notifications",
             json=_create_payload(),
         )
         config_id = create_resp.json()["id"]
         other = await _make_watch(client, db_session)
-        resp = await client.delete(f"/api/v1/watches/{other}/notifications/{config_id}")
+        resp = await client.delete(f"/api/v1/watched-items/{other}/notifications/{config_id}")
         assert resp.status_code == 404
 
 
@@ -301,7 +301,7 @@ async def test_notification_config_has_content_config_column(db_session):
 
     watch = await make_watch(db_session)
     config = WatchNotificationConfig(
-        watch_id=watch.id,
+        watched_item_id=watch.id,
         channel_hint="slack",
         events=["change_detected"],
         remote_channel_id=str(ULID()),
@@ -314,7 +314,7 @@ async def test_notification_config_has_content_config_column(db_session):
 class TestTestNotificationConfig:
     async def _make_config(self, client, watch_id):
         resp = await client.post(
-            f"/api/v1/watches/{watch_id}/notifications",
+            f"/api/v1/watched-items/{watch_id}/notifications",
             json=_create_payload(),
         )
         return resp.json()["id"]
@@ -348,7 +348,9 @@ class TestTestNotificationConfig:
             ),
             self._patch_notifier_client(),
         ):
-            resp = await client.post(f"/api/v1/watches/{watch_id}/notifications/{config_id}/test")
+            resp = await client.post(
+                f"/api/v1/watched-items/{watch_id}/notifications/{config_id}/test"
+            )
         assert resp.status_code == 200
         data = resp.json()
         assert data["success"] is True
@@ -367,7 +369,9 @@ class TestTestNotificationConfig:
             ),
             self._patch_notifier_client(),
         ):
-            resp = await client.post(f"/api/v1/watches/{watch_id}/notifications/{config_id}/test")
+            resp = await client.post(
+                f"/api/v1/watched-items/{watch_id}/notifications/{config_id}/test"
+            )
         assert resp.status_code == 200
         data = resp.json()
         assert data["success"] is False
@@ -376,7 +380,7 @@ class TestTestNotificationConfig:
     async def test_test_returns_404_for_unknown_config(self, client, db_session):
         watch_id = await _make_watch(client, db_session)
         fake_id = "01JNVAJNVAJNVAJNVAJNVAJNVA"
-        resp = await client.post(f"/api/v1/watches/{watch_id}/notifications/{fake_id}/test")
+        resp = await client.post(f"/api/v1/watched-items/{watch_id}/notifications/{fake_id}/test")
         assert resp.status_code == 404
 
     async def test_test_returns_404_for_wrong_watch(self, client, db_session):
@@ -393,7 +397,9 @@ class TestTestNotificationConfig:
             ),
             self._patch_notifier_client(),
         ):
-            resp = await client.post(f"/api/v1/watches/{other_id}/notifications/{config_id}/test")
+            resp = await client.post(
+                f"/api/v1/watched-items/{other_id}/notifications/{config_id}/test"
+            )
         assert resp.status_code == 404
 
     async def test_test_uses_sentinel_url_when_no_effective_url(self, client, db_session):
@@ -403,7 +409,7 @@ class TestTestNotificationConfig:
         watch = await make_watch(db_session, name="NoURL", primary_url="https://example.com")
         watch.watched_item.effective_url = ""
         nc = WatchNotificationConfig(
-            watch_id=watch.id,
+            watched_item_id=watch.id,
             channel_hint="json",
             events=["change_detected"],
             remote_channel_id=str(ULID()),
@@ -411,7 +417,7 @@ class TestTestNotificationConfig:
         db_session.add(nc)
         await db_session.commit()
 
-        resp = await client.post(f"/api/v1/watches/{watch.id}/notifications/{nc.id}/test")
+        resp = await client.post(f"/api/v1/watched-items/{watch.id}/notifications/{nc.id}/test")
         assert resp.status_code == 200
         data = resp.json()
         assert "success" in data
@@ -422,7 +428,7 @@ async def test_create_config_with_content_config(client, db_session):
     """content_config round-trips through create → response."""
     watch_id = await _make_watch(client, db_session)
     resp = await client.post(
-        f"/api/v1/watches/{watch_id}/notifications",
+        f"/api/v1/watched-items/{watch_id}/notifications",
         json=_create_payload(
             content_config={
                 "default": {"include_diff_snippet": True, "diff_snippet_lines": 5},
@@ -440,14 +446,14 @@ async def test_patch_config_updates_content_config(client, db_session):
     """PATCH with content_config updates the stored value."""
     watch_id = await _make_watch(client, db_session)
     create_resp = await client.post(
-        f"/api/v1/watches/{watch_id}/notifications",
+        f"/api/v1/watched-items/{watch_id}/notifications",
         json=_create_payload(),
     )
     assert create_resp.status_code == 201
     config_id = create_resp.json()["id"]
 
     resp = await client.patch(
-        f"/api/v1/watches/{watch_id}/notifications/{config_id}",
+        f"/api/v1/watched-items/{watch_id}/notifications/{config_id}",
         json={
             "content_config": {
                 "default": {"include_diff_full": True},

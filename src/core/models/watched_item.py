@@ -1,5 +1,6 @@
 """WatchedItem model — monitored content target, optionally linked to an Archiver InfoItem."""
 
+import enum
 from datetime import datetime
 
 from sqlalchemy import Boolean, DateTime, ForeignKey, Index, String, Text, text
@@ -8,7 +9,22 @@ from sqlalchemy.orm import Mapped, mapped_column, validates
 from ulid import ULID
 
 from src.core.models.base import Base, TimestampMixin, ULIDType, generate_ulid
-from src.core.models.watch import ContentType, WatchHealthStatus
+
+
+class ContentType(enum.StrEnum):
+    """Supported content types for monitoring."""
+
+    HTML = "html"
+    PDF = "pdf"
+    FILE = "file"
+
+
+class WatchHealthStatus(enum.StrEnum):
+    """Health state of a WatchedItem, updated after each check cycle."""
+
+    UNKNOWN = "unknown"
+    OK = "ok"
+    ERROR = "error"
 
 
 class WatchedItem(Base, TimestampMixin):

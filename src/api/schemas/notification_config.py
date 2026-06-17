@@ -73,7 +73,7 @@ class WatchNotificationConfigResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: ULIDStr
-    watch_id: ULIDStr
+    watched_item_id: ULIDStr
     title: str | None
     channel_hint: str
     events: list[str]

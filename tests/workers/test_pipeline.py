@@ -18,7 +18,7 @@ from src.workers.pipeline import (
     _extraction_config_from_spec,
     process_watched_item,
 )
-from tests.conftest import make_watch
+from tests.conftest import make_watch, make_watched_item
 
 
 class TestExtractionConfigFromSpec:
@@ -241,18 +241,11 @@ class TestProcessWatchedItem:
         assert len(syncs) == 1
         assert syncs[0].content_cache_uri.startswith("file://")
 
-    async def test_dispatches_to_multiple_active_watches(self, db_session):
-        """CHANGE_DETECTED fires once per active Watch on the same WatchedItem."""
-        w1 = await make_watch(db_session, name="Watch1")
-        wi = w1.watched_item
+    async def test_dispatches_once_per_watched_item(self, db_session):
+        """#191: CHANGE_DETECTED fires exactly once for the WatchedItem (the entity)."""
+        wi = await make_watched_item(db_session, name="Item1")
         wi.effective_url = "https://example.com"
         wi.source_specs = [{"schema_version": 1, "extraction": {"algorithm": "full_page"}}]
-        w2 = await make_watch(
-            db_session,
-            name="Watch2",
-            watched_item=wi,
-            archiver_info_item_id=wi.archiver_info_item_id,
-        )
         await db_session.flush()
 
         await process_watched_item(db_session, wi, raw_content=_HTML)
@@ -266,26 +259,6 @@ class TestProcessWatchedItem:
         with patch("src.workers.pipeline.dispatch_event_notifications", side_effect=capture):
             result = await process_watched_item(db_session, wi, raw_content=_HTML_CHANGED)
 
-        assert result.notifications_dispatched == 2
-        watch_ids = {e.watch_id for e in dispatched_events}
-        assert str(w1.id) in watch_ids
-        assert str(w2.id) in watch_ids
-
-    async def test_archived_watch_skipped_on_change(self, db_session):
-        """Archived Watches receive no CHANGE_DETECTED."""
-        watch = await make_watch(db_session, name="Archived", is_archived=True)
-        wi = watch.watched_item
-        wi.effective_url = "https://example.com"
-        wi.source_specs = [{"schema_version": 1, "extraction": {"algorithm": "full_page"}}]
-        await db_session.flush()
-
-        await process_watched_item(db_session, wi, raw_content=_HTML)
-        await db_session.flush()
-
-        with patch(
-            "src.workers.pipeline.dispatch_event_notifications", new_callable=AsyncMock
-        ) as mock_dispatch:
-            result = await process_watched_item(db_session, wi, raw_content=_HTML_CHANGED)
-
-        assert result.notifications_dispatched == 0
-        mock_dispatch.assert_not_awaited()
+        assert result.notifications_dispatched == 1
+        assert len(dispatched_events) == 1
+        assert dispatched_events[0].watch_id == str(wi.id)

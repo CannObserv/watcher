@@ -118,11 +118,6 @@ class TestDeleteDomain:
         db_session.add(wi)
         await db_session.flush()
         await db_session.commit()
-        resp = await client.post(
-            "/api/v1/watches",
-            json={"name": "W", "watched_item_id": str(wi.id), "content_type": "html"},
-        )
-        assert resp.status_code == 201, resp.text
         response = await client.delete("/api/v1/domains/example.com")
         assert response.status_code == 409
         assert "watched items" in response.json()["detail"].lower()

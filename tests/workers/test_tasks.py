@@ -17,7 +17,7 @@ import src.workers.tasks as tasks_mod
 from src.core.models.audit_log import AuditLog, EventType
 from src.core.models.domain import Domain
 from src.core.models.temporal_profile import PostAction, ProfileType, TemporalProfile
-from src.core.models.watch import ContentType, WatchHealthStatus
+from src.core.models.watched_item import ContentType, WatchHealthStatus
 from src.core.rate_limiter import DomainRateLimiter
 from src.core.registry import ServiceRegistry
 from src.core.watches.resolution import resolved_schedule_config
@@ -478,11 +478,14 @@ class TestScheduleTickInactiveDomain:
         now = datetime(2026, 5, 17, 12, 0, 0, tzinfo=UTC)
         domain = Domain(name="paused.com", is_active=False)
         db_session.add(domain)
+        # #191: schedule_tick skips on WatchedItem.domain_suspended (the flag the
+        # domain-deactivation cascade sets), not via a live Domain join.
         await make_watch(
             db_session,
             name="On Paused Domain",
             domain_name="paused.com",
             is_active=True,
+            domain_suspended=True,
         )
         await db_session.commit()
 
@@ -610,8 +613,8 @@ class TestPostActions:
         await db_session.refresh(profile)
         assert profile.is_active is False
 
-    async def test_archive_post_action_sets_is_archived(self, db_session, monkeypatch):
-        """archive flips is_active=False AND is_archived=True on the Watch."""
+    async def test_archive_post_action_archives_watched_item(self, db_session, monkeypatch):
+        """#191: archive post-action flips is_active=False AND stamps archived_at."""
         now = datetime(2026, 5, 17, 12, 0, 0, tzinfo=UTC)
         w = await make_watch(db_session, name="Will Archive")
         w.watched_item.default_schedule_config = {"interval": "1d"}
@@ -642,7 +645,7 @@ class TestPostActions:
 
         await db_session.refresh(w)
         assert w.is_active is False
-        assert w.is_archived is True
+        assert w.archived_at is not None
 
 
 # ---------------------------------------------------------------------------

@@ -9,7 +9,7 @@ from sqlalchemy import select
 from ulid import ULID
 
 from src.core.models.notification_template import NotificationTemplate, WatchNcRef
-from src.core.models.watch import ContentType
+from src.core.models.watched_item import ContentType
 from src.core.notifications.notify import DispatchResult
 from tests.conftest import make_watch
 
@@ -212,7 +212,7 @@ async def test_delete_blocked_when_watch_ref_exists(client: AsyncClient, db_sess
         db_session, name="W", primary_url="https://example.com", content_type=ContentType.HTML
     )
     tpl = await _make_template(db_session, "Referenced")
-    db_session.add(WatchNcRef(watch_id=watch.id, template_id=tpl.id))
+    db_session.add(WatchNcRef(watched_item_id=watch.id, template_id=tpl.id))
     await db_session.flush()
 
     resp = await client.delete(f"/notifications/{tpl.id}/delete", headers={"HX-Request": "true"})

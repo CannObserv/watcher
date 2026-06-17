@@ -6,7 +6,7 @@ import pytest
 from sqlalchemy import select
 
 from src.core.models.domain import Domain
-from tests.conftest import make_watch
+from tests.conftest import make_watch, make_watched_item
 
 pytestmark = pytest.mark.integration
 
@@ -374,65 +374,62 @@ class TestDomainToggleActive:
         domain = result.scalar_one()
         assert domain.is_active is True
 
-    async def test_toggle_inactive_suspends_active_watches(self, client, db_session):
+    async def test_toggle_inactive_suspends_watched_items(self, client, db_session):
+        """#191: domain deactivation sets ``domain_suspended`` on the WatchedItem."""
         db_session.add(Domain(name="suspend.com"))
-        watch = await make_watch(
+        wi = await make_watched_item(
             db_session,
-            name="Active Watch",
+            name="Active Item",
             primary_url="https://suspend.com/p",
-            content_type="html",
             domain_name="suspend.com",
             is_active=True,
         )
 
         await client.post("/domains/suspend.com/toggle-active", data={"active": "false"})
 
-        await db_session.refresh(watch)
-        await db_session.refresh(watch.watched_item)
-        assert watch.is_active is False
-        assert watch.suspended_by_domain is True
-        assert watch.watched_item.domain_suspended is True
+        await db_session.refresh(wi)
+        assert wi.domain_suspended is True
 
-    async def test_toggle_inactive_skips_already_inactive_watches(self, client, db_session):
+    async def test_toggle_inactive_suspends_regardless_of_active_state(self, client, db_session):
+        """domain_suspended is set on every WatchedItem on the domain, active or not."""
         db_session.add(Domain(name="skip-inactive.com"))
-        watch = await make_watch(
+        wi = await make_watched_item(
             db_session,
             name="Already Inactive",
             primary_url="https://skip-inactive.com/p",
-            content_type="html",
             domain_name="skip-inactive.com",
             is_active=False,
         )
 
         await client.post("/domains/skip-inactive.com/toggle-active", data={"active": "false"})
 
-        await db_session.refresh(watch)
-        assert watch.suspended_by_domain is False
+        await db_session.refresh(wi)
+        assert wi.domain_suspended is True
 
-    async def test_toggle_inactive_skips_archived_watches(self, client, db_session):
+    async def test_toggle_inactive_suspends_archived_items_too(self, client, db_session):
+        from datetime import UTC, datetime
+
         db_session.add(Domain(name="skip-archived.com"))
-        watch = await make_watch(
+        wi = await make_watched_item(
             db_session,
-            name="Archived Watch",
+            name="Archived Item",
             primary_url="https://skip-archived.com/p",
-            content_type="html",
             domain_name="skip-archived.com",
             is_active=False,
-            is_archived=True,
+            archived_at=datetime.now(UTC),
         )
 
         await client.post("/domains/skip-archived.com/toggle-active", data={"active": "false"})
 
-        await db_session.refresh(watch)
-        assert watch.suspended_by_domain is False
+        await db_session.refresh(wi)
+        assert wi.domain_suspended is True
 
-    async def test_toggle_active_restores_suspended_watches(self, client, db_session):
+    async def test_toggle_active_clears_suspension(self, client, db_session):
         db_session.add(Domain(name="restore.com", is_active=False))
-        watch = await make_watch(
+        wi = await make_watched_item(
             db_session,
-            name="Suspended Watch",
+            name="Suspended Item",
             primary_url="https://restore.com/p",
-            content_type="html",
             domain_name="restore.com",
             is_active=False,
             domain_suspended=True,
@@ -440,11 +437,8 @@ class TestDomainToggleActive:
 
         await client.post("/domains/restore.com/toggle-active", data={"active": "true"})
 
-        await db_session.refresh(watch)
-        await db_session.refresh(watch.watched_item)
-        assert watch.is_active is True
-        assert watch.suspended_by_domain is False
-        assert watch.watched_item.domain_suspended is False
+        await db_session.refresh(wi)
+        assert wi.domain_suspended is False
 
     async def test_toggle_active_does_not_restore_manually_inactive_watches(
         self, client, db_session

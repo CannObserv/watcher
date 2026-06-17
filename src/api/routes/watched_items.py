@@ -26,7 +26,6 @@ from src.core.logging import get_logger
 from src.core.models.audit_log import EventType, audit
 from src.core.models.change_revision import ChangeRevision
 from src.core.models.domain import DEFAULT_MAX_CONCURRENCY, DEFAULT_MIN_INTERVAL, Domain
-from src.core.models.watch import Watch
 from src.core.models.watched_item import WatchedItem
 from src.core.models.watched_item_notification_template import (
     WatchedItemNotificationTemplate,
@@ -248,12 +247,11 @@ async def patch_watched_item(
 async def archive_watched_item(
     watched_item_id: str, session: AsyncSession = Depends(get_db_session)
 ):
-    """Archive a WatchedItem and cascade-archive all child Watches.
+    """Archive a WatchedItem (the single monitored entity, #191).
 
-    The cascade flips ``is_active`` to False and ``is_archived`` to True on
-    every child Watch in a single transaction; the WatchedItem's fetch
-    cycle stops within one ``schedule_tick`` interval because the tick
-    filters on ``WatchedItem.archived_at IS NULL``.
+    Sets ``archived_at`` and flips ``is_active`` to False; the fetch cycle stops
+    within one ``schedule_tick`` interval because the tick filters on
+    ``WatchedItem.archived_at IS NULL``.
     """
     wi = await _get_or_404(session, watched_item_id)
     now = datetime.now(UTC)
@@ -267,18 +265,6 @@ async def archive_watched_item(
             watched_item_id=str(wi.id),
             source="api",
         )
-        result = await session.execute(select(Watch).where(Watch.watched_item_id == wi.id))
-        for child in result.scalars().all():
-            if not child.is_archived:
-                child.is_active = False
-                child.is_archived = True
-                audit(
-                    session,
-                    EventType.WATCH_ARCHIVED,
-                    watch_id=child.id,
-                    cascade_from_watched_item_id=str(wi.id),
-                    source="api",
-                )
 
     await session.commit()
     await session.refresh(wi)
@@ -289,7 +275,7 @@ async def archive_watched_item(
 async def restore_watched_item(
     watched_item_id: str, session: AsyncSession = Depends(get_db_session)
 ):
-    """Restore the WatchedItem only. Child Watches stay archived."""
+    """Restore the WatchedItem — clears ``archived_at`` and re-activates."""
     wi = await _get_or_404(session, watched_item_id)
     if wi.archived_at is not None:
         wi.archived_at = None

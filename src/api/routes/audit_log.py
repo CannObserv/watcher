@@ -5,7 +5,6 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.api.deps import get_db_session
-from src.api.routes.helpers import parse_filter_ulid
 from src.api.schemas.audit_log import AuditLogResponse
 from src.core.models.audit_log import AuditLog
 
@@ -15,17 +14,21 @@ router = APIRouter(prefix="/audit", tags=["audit-log"])
 @router.get("", response_model=list[AuditLogResponse])
 async def list_audit_entries(
     event_type: str | None = Query(None),
-    watch_id: str | None = Query(None),
+    watched_item_id: str | None = Query(None),
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
     session: AsyncSession = Depends(get_db_session),
 ):
-    """List audit log entries with optional filters and pagination."""
+    """List audit log entries with optional filters and pagination.
+
+    The WatchedItem association lives in the JSONB ``payload`` (the dedicated
+    ``watch_id`` FK column was retired with the Watch table in #191).
+    """
     stmt = select(AuditLog).order_by(AuditLog.created_at.desc())
     if event_type:
         stmt = stmt.where(AuditLog.event_type == event_type)
-    if watch_id:
-        stmt = stmt.where(AuditLog.watch_id == parse_filter_ulid(watch_id, "watch_id"))
+    if watched_item_id:
+        stmt = stmt.where(AuditLog.payload["watched_item_id"].astext == watched_item_id)
     stmt = stmt.limit(limit).offset(offset)
     result = await session.execute(stmt)
     return result.scalars().all()

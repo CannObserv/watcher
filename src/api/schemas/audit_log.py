@@ -13,6 +13,5 @@ class AuditLogResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: ULIDStr
     event_type: str
-    watch_id: ULIDStr | None
     payload: dict
     created_at: datetime

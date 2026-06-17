@@ -252,55 +252,48 @@ class TestWatchedItemUrlReprobe:
         await db_session.refresh(wi)
         assert wi.domain_suspended is False
 
-    async def test_reprobe_to_suspended_cascades_to_child_watches(self, client, db_session):
-        """Moving onto a suspended domain suspends this WI's active child Watches (#190 CR2)."""
+    async def test_reprobe_to_suspended_suspends_watched_item(self, client, db_session):
+        """Moving onto a suspended domain sets domain_suspended on the WatchedItem (#191)."""
         from src.core.models.domain import Domain
-        from tests.conftest import make_watch
+        from tests.conftest import make_watched_item
 
         db_session.add(Domain(name="susp-cascade.example", is_active=False))
-        watch = await make_watch(
+        wi = await make_watched_item(
             db_session,
-            name="ChildA",
+            name="ItemA",
             primary_url="https://ok.example/p",
-            content_type="html",
             is_active=True,
         )
         await db_session.commit()
         resp = await client.post(
-            f"/watched-items/{watch.watched_item_id}/effective-url",
+            f"/watched-items/{wi.id}/effective-url",
             data={"url": "https://susp-cascade.example/page"},
             headers={"HX-Request": "true"},
         )
         assert resp.status_code == 200
-        await db_session.refresh(watch)
-        assert watch.is_active is False
-        assert watch.suspended_by_domain is True
+        await db_session.refresh(wi)
+        assert wi.domain_suspended is True
 
-    async def test_reprobe_to_active_reactivates_domain_suspended_children(
-        self, client, db_session
-    ):
-        """Moving onto a healthy domain reactivates Watches suspended by the old domain."""
-        from tests.conftest import make_watch
+    async def test_reprobe_to_active_clears_suspension(self, client, db_session):
+        """Moving onto a healthy domain clears domain_suspended on the WatchedItem."""
+        from tests.conftest import make_watched_item
 
-        watch = await make_watch(
+        wi = await make_watched_item(
             db_session,
-            name="ChildB",
+            name="ItemB",
             primary_url="https://old.example/p",
-            content_type="html",
             is_active=False,
             domain_suspended=True,
         )
-        watch.watched_item.domain_suspended = True
         await db_session.commit()
         resp = await client.post(
-            f"/watched-items/{watch.watched_item_id}/effective-url",
+            f"/watched-items/{wi.id}/effective-url",
             data={"url": "https://healthy.example/page"},
             follow_redirects=False,
         )
         assert resp.status_code == 303
-        await db_session.refresh(watch)
-        assert watch.is_active is True
-        assert watch.suspended_by_domain is False
+        await db_session.refresh(wi)
+        assert wi.domain_suspended is False
 
     async def test_missing_url_shows_flash(self, client):
         response = await client.post("/watched-items/new", data={"name": "X"})

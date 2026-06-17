@@ -78,7 +78,7 @@ async def dispatch_via_notifier(
             idempotency_key=idem_key,
             metadata={
                 "event_type": event.event_type.value,
-                "watch_id": event.watch_id,
+                "watched_item_id": event.watched_item_id,
                 "source": candidate.source,
                 "source_id": candidate.source_id,
             },
@@ -97,7 +97,7 @@ async def dispatch_via_notifier(
             extra={
                 "source": candidate.source,
                 "source_id": candidate.source_id,
-                "watch_id": event.watch_id,
+                "watched_item_id": event.watched_item_id,
             },
             exc_info=True,
         )
@@ -135,7 +135,7 @@ async def dispatch_event_notifications(
     empty (page-level fingerprint-shift-only notifications).
     """
     # #191: the event identifies a WatchedItem (the single monitored entity).
-    watched_item_id = ULID.from_str(event.watch_id)
+    watched_item_id = ULID.from_str(event.watched_item_id)
     event_value = event.event_type.value
 
     wi = await session.get(WatchedItem, watched_item_id)
@@ -285,7 +285,7 @@ async def dispatch_event_notifications(
                 extra = {
                     "source": candidate.source,
                     "source_id": candidate.source_id,
-                    "watch_id": event.watch_id,
+                    "watched_item_id": event.watched_item_id,
                     "event_type": event.event_type,
                 }
                 if result.success:
@@ -309,7 +309,7 @@ async def dispatch_event_notifications(
     audit(
         session,
         EventType.NOTIFICATION_DISPATCHED,
-        watched_item_id=event.watch_id,
+        watched_item_id=event.watched_item_id,
         watch_event_type=event.event_type,
         results=results,
     )

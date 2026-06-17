@@ -27,10 +27,10 @@ from src.core.notifier_client import get_notifier_client
 router = APIRouter(prefix="/notifications/templates", tags=["notification-templates"])
 logger = get_logger(__name__)
 
-# Sentinel watch_id for "[Test]" dispatch events that aren't tied to a real
-# watch. ``ULID.from_int(0)`` renders as 26 zero-base32 chars and stays inside
-# the strict 26-char ULID validation the schemas enforce on real watch_ids.
-_TEST_SENTINEL_WATCH_ID = str(ULID.from_int(0))
+# Sentinel watched_item_id for "[Test]" dispatch events that aren't tied to a
+# real WatchedItem. ``ULID.from_int(0)`` renders as 26 zero-base32 chars and
+# stays inside the strict 26-char ULID validation the schemas enforce.
+_TEST_SENTINEL_WATCHED_ITEM_ID = str(ULID.from_int(0))
 
 
 async def _get_template_or_404(template_id: str, session: AsyncSession) -> NotificationTemplate:
@@ -237,9 +237,9 @@ async def test_template(
         return {"success": False, "reason": "no remote_channel_id configured"}
     event = WatchEvent(
         event_type=WatchEventType.CHANGE_DETECTED,
-        watch_id=_TEST_SENTINEL_WATCH_ID,
-        watch_name="[Test]",
-        watch_url="https://example.com",
+        watched_item_id=_TEST_SENTINEL_WATCHED_ITEM_ID,
+        item_name="[Test]",
+        item_url="https://example.com",
         occurred_at=datetime.now(UTC),
     )
     candidate = DispatchCandidate(

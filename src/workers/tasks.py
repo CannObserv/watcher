@@ -128,9 +128,9 @@ async def check_watched_item(watched_item_id: str, registry: ServiceRegistry | N
             if previous_health != WatchHealthStatus.ERROR:
                 error_event = WatchEvent(
                     event_type=WatchEventType.WATCH_ERROR,
-                    watch_id=str(watched_item.id),
-                    watch_name=watched_item.name,
-                    watch_url=watched_item.effective_url or url,
+                    watched_item_id=str(watched_item.id),
+                    item_name=watched_item.name,
+                    item_url=watched_item.effective_url or url,
                     occurred_at=now,
                     metadata={
                         "status_code": fetch_result.status_code,
@@ -179,9 +179,9 @@ async def check_watched_item(watched_item_id: str, registry: ServiceRegistry | N
         if previous_health == WatchHealthStatus.ERROR:
             recovery_event = WatchEvent(
                 event_type=WatchEventType.WATCH_RECOVERED,
-                watch_id=str(watched_item.id),
-                watch_name=watched_item.name,
-                watch_url=watched_item.effective_url or url,
+                watched_item_id=str(watched_item.id),
+                item_name=watched_item.name,
+                item_url=watched_item.effective_url or url,
                 occurred_at=now,
                 metadata=watched_item_event_base_metadata(watched_item),
             )

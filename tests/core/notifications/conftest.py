@@ -14,9 +14,9 @@ def make_event():
     def _make(event_type=WatchEventType.CHANGE_DETECTED, **overrides):
         defaults = {
             "event_type": event_type,
-            "watch_id": "01HV0000000000000000000001",
-            "watch_name": "Test Watch",
-            "watch_url": "https://example.com",
+            "watched_item_id": "01HV0000000000000000000001",
+            "item_name": "Test Watch",
+            "item_url": "https://example.com",
             "occurred_at": datetime(2026, 1, 1, tzinfo=UTC),
             "metadata": {
                 "added": ["Page 2", "Page 3"],

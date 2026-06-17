@@ -43,7 +43,7 @@ class TestPreviewEndpoint:
             "/notifications/preview",
             data={
                 "preview_event": "change_detected",
-                "content_config__body_template": "Hi {{ watch_name }}!",
+                "content_config__body_template": "Hi {{ item_name }}!",
             },
         )
         assert resp.status_code == 200
@@ -54,7 +54,7 @@ class TestPreviewEndpoint:
             "/notifications/preview",
             data={
                 "preview_event": "change_detected",
-                "content_config__title_template": "[{{ watch_name }}]",
+                "content_config__title_template": "[{{ item_name }}]",
             },
         )
         assert resp.status_code == 200

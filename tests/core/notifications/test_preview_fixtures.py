@@ -35,10 +35,10 @@ class TestBuildPreviewEvent:
             assert isinstance(ev, WatchEvent)
             assert ev.event_type == et
 
-    def test_event_has_watch_name_and_url(self):
+    def test_event_has_item_name_and_url(self):
         ev = build_preview_event("change_detected")
-        assert ev.watch_name
-        assert ev.watch_url.startswith("http")
+        assert ev.item_name
+        assert ev.item_url.startswith("http")
 
     def test_event_has_occurred_at(self):
         ev = build_preview_event("change_detected")

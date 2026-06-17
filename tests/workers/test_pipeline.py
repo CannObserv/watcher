@@ -154,8 +154,8 @@ class TestProcessWatchedItem:
 
         event = mock_dispatch.call_args.kwargs["event"]
         assert event.event_type.value == "change_detected"
-        assert event.watch_id == str(watch.id)
-        assert event.watch_url == "https://example.com"
+        assert event.watched_item_id == str(watch.id)
+        assert event.item_url == "https://example.com"
         assert "change_revision_id" in event.metadata
 
         revs = (
@@ -261,4 +261,4 @@ class TestProcessWatchedItem:
 
         assert result.notifications_dispatched == 1
         assert len(dispatched_events) == 1
-        assert dispatched_events[0].watch_id == str(wi.id)
+        assert dispatched_events[0].watched_item_id == str(wi.id)

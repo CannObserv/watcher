@@ -158,9 +158,9 @@ async def test_notification_config(
         else:
             event = WatchEvent(
                 event_type=WatchEventType.CHANGE_DETECTED,
-                watch_id=str(wi.id),
-                watch_name=wi.name,
-                watch_url=resolved_url,
+                watched_item_id=str(wi.id),
+                item_name=wi.name,
+                item_url=resolved_url,
                 occurred_at=datetime.now(UTC),
                 metadata={"test": True},
             )

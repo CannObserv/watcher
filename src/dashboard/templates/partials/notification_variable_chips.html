@@ -10,8 +10,8 @@
 
   Uses Jinja globals: template_variables (list[TemplateVariable])
 #}
-{% set _primary_body = ["watch_name", "watch_url", "event_label", "change_summary", "diff_snippet", "chunks_changed", "change_url", "significance", "domain_name"] %}
-{% set _primary_title = ["watch_name", "watch_url", "event_label", "event_type"] %}
+{% set _primary_body = ["item_name", "item_url", "event_label", "change_summary", "diff_snippet", "chunks_changed", "change_url", "significance", "domain_name"] %}
+{% set _primary_title = ["item_name", "item_url", "event_label", "event_type"] %}
 {% set _primary = _primary_body if scope == "body" else _primary_title %}
 {% set drawer_id = target_id ~ "-var-drawer" %}
 

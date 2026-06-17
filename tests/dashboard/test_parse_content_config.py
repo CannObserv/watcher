@@ -79,17 +79,17 @@ _BODY_TMPL = "content_config__body_template"
 class TestTemplateStrings:
     def test_title_template_round_trip(self):
         result = _parse_content_config_from_form(
-            _form(**{_SNIPPET: "1", _TITLE_TMPL: "{{ event_type }}: {{ watch_name }}"})
+            _form(**{_SNIPPET: "1", _TITLE_TMPL: "{{ event_type }}: {{ item_name }}"})
         )
         assert result is not None
-        assert result["default"]["title_template"] == "{{ event_type }}: {{ watch_name }}"
+        assert result["default"]["title_template"] == "{{ event_type }}: {{ item_name }}"
 
     def test_body_template_round_trip(self):
         result = _parse_content_config_from_form(
-            _form(**{_SNIPPET: "1", _BODY_TMPL: "URL: {{ watch_url }}"})
+            _form(**{_SNIPPET: "1", _BODY_TMPL: "URL: {{ item_url }}"})
         )
         assert result is not None
-        assert result["default"]["body_template"] == "URL: {{ watch_url }}"
+        assert result["default"]["body_template"] == "URL: {{ item_url }}"
 
     def test_empty_title_template_stored_as_none(self):
         result = _parse_content_config_from_form(_form(**{_SNIPPET: "1", _TITLE_TMPL: "   "}))

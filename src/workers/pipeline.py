@@ -241,9 +241,9 @@ async def process_watched_item(
 
     event = WatchEvent(
         event_type=WatchEventType.CHANGE_DETECTED,
-        watch_id=str(watched_item.id),
-        watch_name=watched_item.name,
-        watch_url=watched_item.effective_url,
+        watched_item_id=str(watched_item.id),
+        item_name=watched_item.name,
+        item_url=watched_item.effective_url,
         occurred_at=now,
         metadata=change_meta,
     )

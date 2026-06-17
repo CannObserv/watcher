@@ -23,9 +23,9 @@ from src.core.notifications.notify import DispatchCandidate, dispatch_event_noti
 def _make_event(event_type=WatchEventType.CHANGE_DETECTED):
     return WatchEvent(
         event_type=event_type,
-        watch_id=str(ULID()),
-        watch_name="Test Watch",
-        watch_url="https://example.com",
+        watched_item_id=str(ULID()),
+        item_name="Test Watch",
+        item_url="https://example.com",
         occurred_at=datetime(2026, 5, 7, 12, 0, 0, tzinfo=UTC),
         metadata={},
     )

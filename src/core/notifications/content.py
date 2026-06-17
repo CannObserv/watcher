@@ -83,7 +83,8 @@ def build_template_context(
       - `event_label` — human-readable event title (always set)
       - `occurred_at_iso` — ISO 8601 UTC timestamp (`...Z`), AGENTS.md format
       - `change_summary` — counts string for change_detected; empty otherwise
-      - `change_url` — dashboard URL when `change_id` is in metadata; empty otherwise
+      - `change_url` — WatchedItem dashboard URL when `change_revision_id` is in
+        metadata; empty otherwise
       - `diff_snippet` — Markdown ```diff fenced unified diff, capped at
         `diff_snippet_cap` lines (hunk-boundary aware); empty when no
         `unified_diff` is provided.
@@ -103,9 +104,9 @@ def build_template_context(
     template builder computed.
     """
     ctx = {
-        "watch_id": event.watch_id,
-        "watch_name": event.watch_name,
-        "watch_url": event.watch_url,
+        "watched_item_id": event.watched_item_id,
+        "item_name": event.item_name,
+        "item_url": event.item_url,
         "event_type": event.event_type,
         "occurred_at": event.occurred_at,
     }
@@ -114,7 +115,9 @@ def build_template_context(
     ctx["event_label"] = EVENT_TITLES[event.event_type.value]
     ctx["occurred_at_iso"] = format_utc_iso(event.occurred_at)
     ctx["change_summary"] = _compute_change_summary(event)
-    ctx["change_url"] = _format_change_url(event.watch_id, event.metadata.get("change_id"))
+    ctx["change_url"] = _format_change_url(
+        event.watched_item_id, event.metadata.get("change_revision_id")
+    )
     ctx["diff_snippet"] = _render_unified_diff_block(unified_diff, max_lines=diff_snippet_cap)
     ctx["diff_full"] = _render_unified_diff_block(unified_diff, max_lines=None)
     ctx["chunks_changed"] = _format_chunks_changed(event.metadata)
@@ -207,7 +210,7 @@ def _build_change_detected_body(
     template returned by `compose_body_prefill`.
 
     Toggle-driven section anchors (header):
-      - DOMAIN: after watch_name
+      - DOMAIN: after item_name
       - LAST CHANGED, INTERVAL: before TIMESTAMP (in that order)
       - CHANGE: after WATCH (the last canonical header line)
       - SIGNIFICANCE: after CHANGE (or after WATCH when CHANGE is off)
@@ -239,7 +242,7 @@ def _build_change_detected_body(
     for offset, line in enumerate(pre_timestamp):
         header.insert(timestamp_idx + offset, line)
 
-    if options.include_change_dashboard_url and metadata.get("change_id"):
+    if options.include_change_dashboard_url and metadata.get("change_revision_id"):
         header.append(f"CHANGE: {ctx['change_url']}")
     if options.include_significance and metadata.get("significance") is not None:
         header.append(f"SIGNIFICANCE: {int(metadata['significance'] * 100)}%")
@@ -386,12 +389,16 @@ def _format_chunks_changed(metadata: dict) -> list[dict]:
     return out
 
 
-def _format_change_url(watch_id: str, change_id: str | None) -> str:
-    """Build the dashboard URL for a specific change, or empty string if no change_id.
+def _format_change_url(watched_item_id: str, change_revision_id: str | None) -> str:
+    """Build the WatchedItem dashboard URL for a change, or "" when not a change event.
+
+    #191: there is no per-change page (the `/watches/{id}/changes/...` route was
+    retired with the Watch entity), so the link points at the WatchedItem detail
+    page. Gated on `change_revision_id` so only change events surface a URL.
 
     Used by `build_template_context` to expose the URL as the `change_url`
     template variable, and by `_build_change_detected_body` for the CHANGE: line.
     """
-    if not change_id:
+    if not change_revision_id:
         return ""
-    return f"{APP_URL}/watches/{watch_id}/changes/{change_id}"
+    return f"{APP_URL}/watched-items/{watched_item_id}"

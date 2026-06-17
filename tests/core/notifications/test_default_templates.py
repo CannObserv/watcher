@@ -23,10 +23,10 @@ class TestDefaultTitleTemplates:
             assert isinstance(value, str)
             assert "{{" in value  # at least one variable
 
-    def test_references_event_label_and_watch_name(self):
+    def test_references_event_label_and_item_name(self):
         for et, tmpl in DEFAULT_TITLE_TEMPLATES.items():
             assert "event_label" in tmpl, f"{et} default title missing event_label"
-            assert "watch_name" in tmpl, f"{et} default title missing watch_name"
+            assert "item_name" in tmpl, f"{et} default title missing item_name"
 
     def test_all_titles_prefixed_watcher(self):
         """The [Watcher] prefix lets users filter watcher notifications by
@@ -53,10 +53,10 @@ class TestDefaultBodyTemplates:
         (header + body block). Toggle-driven sections are interleaved in
         Python by `build_body`, not in the Jinja template."""
         tmpl = DEFAULT_BODY_TEMPLATES["change_detected"]
-        assert "{{ watch_name }}" in tmpl
-        assert "URL: {{ watch_url }}" in tmpl
+        assert "{{ item_name }}" in tmpl
+        assert "URL: {{ item_url }}" in tmpl
         assert "TIMESTAMP: {{ occurred_at_iso }}" in tmpl
-        assert "WATCH: https://watcher.exe.xyz/watches/{{ watch_id }}" in tmpl
+        assert "WATCH: https://watcher.exe.xyz/watched-items/{{ watched_item_id }}" in tmpl
         assert "{{ event_label }}" in tmpl
         assert "{{ change_summary }}" in tmpl
 
@@ -70,7 +70,7 @@ class TestDefaultBodyTemplates:
     def test_watch_error_references_status_code(self):
         tmpl = DEFAULT_BODY_TEMPLATES["watch_error"]
         assert "status_code" in tmpl
-        assert "watch_url" in tmpl
+        assert "item_url" in tmpl
 
 
 class TestComposeTitlePrefill:
@@ -99,9 +99,9 @@ class TestTemplateVariables:
     def test_core_variables_present(self):
         names = {v.name for v in TEMPLATE_VARIABLES}
         for required in (
-            "watch_id",
-            "watch_name",
-            "watch_url",
+            "watched_item_id",
+            "item_name",
+            "item_url",
             "event_type",
             "event_label",
             "occurred_at_iso",

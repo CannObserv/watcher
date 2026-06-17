@@ -23,9 +23,9 @@ WATCH_ID = "01HV0000000000000000000001"
 def make_event(event_type=WatchEventType.CHANGE_DETECTED, metadata=None):
     return WatchEvent(
         event_type=event_type,
-        watch_id=WATCH_ID,
-        watch_name="Test Watch",
-        watch_url="https://example.com",
+        watched_item_id=WATCH_ID,
+        item_name="Test Watch",
+        item_url="https://example.com",
         occurred_at=OCCURRED_AT,
         metadata=metadata or {},
     )
@@ -106,7 +106,7 @@ class TestChangeDetectedDefaultBody:
             "Test Watch\n"
             "URL: https://example.com\n"
             "TIMESTAMP: 2026-04-14T12:00:00Z\n"
-            f"WATCH: https://watcher.exe.xyz/watches/{WATCH_ID}"
+            f"WATCH: https://watcher.exe.xyz/watched-items/{WATCH_ID}"
             "\n\n"
             "Change Detected\n"
             "1 added, 1 modified, 1 removed"
@@ -119,18 +119,18 @@ class TestChangeDetectedDefaultBody:
         interview)."""
         event = make_event(metadata={})
         body = build_body(event, ContentOptions())
-        assert f"WATCH: https://watcher.exe.xyz/watches/{WATCH_ID}" in body
+        assert f"WATCH: https://watcher.exe.xyz/watched-items/{WATCH_ID}" in body
 
     def test_full_layout_with_every_toggle_on_matches_issue_format(self):
         """With every toggle on and full metadata, the body matches the issue
-        #155 layout exactly: DOMAIN between watch_name and URL; LAST CHANGED
+        #155 layout exactly: DOMAIN between item_name and URL; LAST CHANGED
         + INTERVAL between URL and TIMESTAMP; CHANGE after WATCH;
         SIGNIFICANCE below CHANGE; diff after the body block; DESCRIPTION +
         TAGS last."""
         event = make_event(
             metadata={
                 **CHANGE_META,
-                "change_id": "01HV0000000000000000000099",
+                "change_revision_id": "01HV0000000000000000000099",
                 "domain_name": "example.com",
                 "check_interval": "1h",
                 "last_changed_at": "2026-04-09",
@@ -157,8 +157,8 @@ class TestChangeDetectedDefaultBody:
             "LAST CHANGED: 2026-04-09\n"
             "INTERVAL: 1h\n"
             "TIMESTAMP: 2026-04-14T12:00:00Z\n"
-            f"WATCH: https://watcher.exe.xyz/watches/{WATCH_ID}\n"
-            f"CHANGE: https://watcher.exe.xyz/watches/{WATCH_ID}/changes/01HV0000000000000000000099\n"
+            f"WATCH: https://watcher.exe.xyz/watched-items/{WATCH_ID}\n"
+            f"CHANGE: https://watcher.exe.xyz/watched-items/{WATCH_ID}\n"
             "SIGNIFICANCE: 50%"
             "\n\n"
             "Change Detected\n"
@@ -213,7 +213,7 @@ class TestDomainSlot:
     def test_renders_between_name_and_url_when_toggle_on_and_metadata_present(self):
         event = make_event(metadata={"domain_name": "example.com"})
         body = build_body(event, ContentOptions(include_domain=True))
-        # DOMAIN appears between watch_name (line 0) and URL (line 2).
+        # DOMAIN appears between item_name (line 0) and URL (line 2).
         lines = body.split("\n")
         assert lines[0] == "Test Watch"
         assert lines[1] == "DOMAIN: example.com"
@@ -234,18 +234,16 @@ class TestChangeUrlSlot:
     CHANGE_ID = "01HV0000000000000000000099"
 
     def test_renders_after_watch_when_toggle_on_and_change_id_present(self):
-        event = make_event(metadata={"change_id": self.CHANGE_ID})
+        event = make_event(metadata={"change_revision_id": self.CHANGE_ID})
         body = build_body(event, ContentOptions(include_change_dashboard_url=True))
         # CHANGE appears immediately after WATCH (issue layout).
         watch_idx = body.index("WATCH:")
         change_idx = body.index("CHANGE:")
         assert change_idx > watch_idx
-        assert (
-            f"CHANGE: https://watcher.exe.xyz/watches/{WATCH_ID}/changes/{self.CHANGE_ID}" in body
-        )
+        assert f"CHANGE: https://watcher.exe.xyz/watched-items/{WATCH_ID}" in body
 
     def test_omitted_when_toggle_off(self):
-        event = make_event(metadata={"change_id": self.CHANGE_ID})
+        event = make_event(metadata={"change_revision_id": self.CHANGE_ID})
         body = build_body(event, ContentOptions(include_change_dashboard_url=False))
         assert "CHANGE:" not in body
 
@@ -365,7 +363,7 @@ class TestStatsSlots:
     def test_significance_renders_below_change(self):
         """Per #155, SIGNIFICANCE sits in the header immediately after CHANGE."""
         change_id = "01HV0000000000000000000099"
-        event = make_event(metadata={"change_id": change_id, "significance": 0.5})
+        event = make_event(metadata={"change_revision_id": change_id, "significance": 0.5})
         body = build_body(
             event,
             ContentOptions(include_change_dashboard_url=True, include_significance=True),
@@ -373,8 +371,7 @@ class TestStatsSlots:
         # Header order: WATCH, CHANGE, SIGNIFICANCE — all consecutive, no
         # blank lines between them.
         assert (
-            f"CHANGE: https://watcher.exe.xyz/watches/{WATCH_ID}/changes/{change_id}\n"
-            "SIGNIFICANCE: 50%"
+            f"CHANGE: https://watcher.exe.xyz/watched-items/{WATCH_ID}\nSIGNIFICANCE: 50%"
         ) in body
 
     def test_significance_renders_below_watch_when_change_off(self):
@@ -382,7 +379,9 @@ class TestStatsSlots:
         directly after WATCH (the last unconditional header line)."""
         event = make_event(metadata={"significance": 0.5})
         body = build_body(event, ContentOptions(include_significance=True))
-        assert (f"WATCH: https://watcher.exe.xyz/watches/{WATCH_ID}\nSIGNIFICANCE: 50%") in body
+        assert (
+            f"WATCH: https://watcher.exe.xyz/watched-items/{WATCH_ID}\nSIGNIFICANCE: 50%"
+        ) in body
 
     def test_stats_omitted_when_toggles_off(self):
         event = make_event(
@@ -489,27 +488,27 @@ class TestRenderTemplate:
 
 class TestBuildTemplateContext:
     def test_context_has_all_watch_event_fields(self):
-        event = make_event(metadata={"significance": 0.5, "change_id": "abc"})
+        event = make_event(metadata={"significance": 0.5, "change_revision_id": "abc"})
         ctx = build_template_context(event)
-        assert ctx["watch_id"] == event.watch_id
-        assert ctx["watch_name"] == event.watch_name
-        assert ctx["watch_url"] == event.watch_url
+        assert ctx["watched_item_id"] == event.watched_item_id
+        assert ctx["item_name"] == event.item_name
+        assert ctx["item_url"] == event.item_url
         assert ctx["event_type"] == event.event_type
         assert ctx["occurred_at"] == event.occurred_at
 
     def test_metadata_keys_flattened_into_context(self):
-        event = make_event(metadata={"significance": 0.75, "change_id": "xyz"})
+        event = make_event(metadata={"significance": 0.75, "change_revision_id": "xyz"})
         ctx = build_template_context(event)
         assert ctx["significance"] == 0.75
-        assert ctx["change_id"] == "xyz"
+        assert ctx["change_revision_id"] == "xyz"
 
     def test_empty_metadata_produces_base_keys_only(self):
         event = make_event(metadata={})
         ctx = build_template_context(event)
         assert set(ctx.keys()) == {
-            "watch_id",
-            "watch_name",
-            "watch_url",
+            "watched_item_id",
+            "item_name",
+            "item_url",
             "event_type",
             "occurred_at",
             "occurred_at_iso",
@@ -536,9 +535,9 @@ class TestBuildTemplateContext:
         event = make_event()
         event = WatchEvent(
             event_type=event.event_type,
-            watch_id=event.watch_id,
-            watch_name=event.watch_name,
-            watch_url=event.watch_url,
+            watched_item_id=event.watched_item_id,
+            item_name=event.item_name,
+            item_url=event.item_url,
             occurred_at=datetime(2026, 4, 23, 0, 38, 33, 123456, tzinfo=UTC),
             metadata=event.metadata,
         )
@@ -552,9 +551,9 @@ class TestBuildTemplateContext:
         event = make_event()
         event = WatchEvent(
             event_type=event.event_type,
-            watch_id=event.watch_id,
-            watch_name=event.watch_name,
-            watch_url=event.watch_url,
+            watched_item_id=event.watched_item_id,
+            item_name=event.item_name,
+            item_url=event.item_url,
             occurred_at=datetime(2026, 4, 14, 12, 0, 0),  # naive
             metadata=event.metadata,
         )
@@ -577,12 +576,9 @@ class TestBuildTemplateContext:
         assert ctx["change_summary"] == ""
 
     def test_change_url_populated_when_change_id_present(self):
-        event = make_event(metadata={"change_id": "01HV0000000000000000000099"})
+        event = make_event(metadata={"change_revision_id": "01HV0000000000000000000099"})
         ctx = build_template_context(event)
-        assert (
-            ctx["change_url"]
-            == f"https://watcher.exe.xyz/watches/{event.watch_id}/changes/01HV0000000000000000000099"
-        )
+        assert ctx["change_url"] == f"https://watcher.exe.xyz/watched-items/{event.watched_item_id}"
 
     def test_change_url_empty_when_change_id_absent(self):
         event = make_event(metadata={})
@@ -656,7 +652,7 @@ class TestBuildTemplateContext:
         """Hostile metadata keys must not clobber derived fields."""
         event = make_event(
             metadata={
-                "change_id": "01HV0000000000000000000099",
+                "change_revision_id": "01HV0000000000000000000099",
                 "event_label": "BOGUS",
                 "occurred_at_iso": "BOGUS",
                 "change_summary": "BOGUS",
@@ -671,7 +667,7 @@ class TestBuildTemplateContext:
         assert ctx["occurred_at_iso"] == "2026-04-14T12:00:00Z"
         assert ctx["change_summary"] == "details pending"
         assert ctx["change_url"] == (
-            f"https://watcher.exe.xyz/watches/{event.watch_id}/changes/01HV0000000000000000000099"
+            f"https://watcher.exe.xyz/watched-items/{event.watched_item_id}"
         )
         assert ctx["diff_snippet"] == ""
         assert ctx["diff_full"] == ""
@@ -683,7 +679,7 @@ class TestBuildBodyWithTemplates:
         """Custom body_template replaces the entire default body — toggles
         are not applied. This is the power-user escape hatch."""
         event = make_event(metadata={"domain_name": "example.com"})
-        opts = ContentOptions(include_domain=True, body_template="custom: {{ watch_name }}")
+        opts = ContentOptions(include_domain=True, body_template="custom: {{ item_name }}")
         body = build_body(event, opts)
         assert body == "custom: Test Watch"
         assert "DOMAIN" not in body
@@ -731,7 +727,7 @@ class TestBuildTitle:
 
     def test_user_title_template_overrides_default(self):
         event = make_event(event_type=WatchEventType.CHANGE_DETECTED)
-        opts = ContentOptions(title_template="[{{ watch_name }}] custom")
+        opts = ContentOptions(title_template="[{{ item_name }}] custom")
         title = build_title(event, opts)
         assert title == "[Test Watch] custom"
 

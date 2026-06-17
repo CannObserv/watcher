@@ -49,8 +49,8 @@ class WatchEvent:
     """
 
     event_type: WatchEventType
-    watch_id: str
-    watch_name: str
-    watch_url: str
+    watched_item_id: str
+    item_name: str
+    item_url: str
     occurred_at: datetime
     metadata: dict = field(default_factory=dict)

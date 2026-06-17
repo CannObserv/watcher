@@ -119,9 +119,9 @@ def build_preview_event(event_type: str) -> WatchEvent:
     metadata = MOCK_EVENT_FIXTURES[event_type]
     return WatchEvent(
         event_type=WatchEventType(event_type),
-        watch_id=_PREVIEW_WATCH_ID,
-        watch_name=_PREVIEW_WATCH_NAME,
-        watch_url=_PREVIEW_WATCH_URL,
+        watched_item_id=_PREVIEW_WATCH_ID,
+        item_name=_PREVIEW_WATCH_NAME,
+        item_url=_PREVIEW_WATCH_URL,
         occurred_at=_PREVIEW_OCCURRED_AT,
         metadata=metadata,
     )

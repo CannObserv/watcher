@@ -57,7 +57,7 @@ async def test_notification_new_page_link_section_has_change_url_toggle(
     assert ">Link<" in body
     assert 'name="content_config__include_change_dashboard_url"' in body
     # No Watch URL toggle — the dashboard link is part of the rich default body.
-    assert 'name="content_config__include_watch_url"' not in body
+    assert 'name="content_config__include_item_url"' not in body
     # Legacy label gone
     assert "Dashboard link (change URL)" not in body
 
@@ -257,7 +257,7 @@ async def test_test_result_uses_template_content_config(client: AsyncClient, db_
     tpl = await _make_template(
         db_session,
         "ConfigTest",
-        content_config={"default": {"title_template": "Custom: {{ watch_name }}"}},
+        content_config={"default": {"title_template": "Custom: {{ item_name }}"}},
     )
     dispatch_result = DispatchResult(success=True, reason="sent")
     with (

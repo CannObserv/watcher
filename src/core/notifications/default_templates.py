@@ -41,9 +41,9 @@ class TemplateVariable:
 
 TEMPLATE_VARIABLES: list[TemplateVariable] = [
     # Always available
-    TemplateVariable("watch_id", "str", "ULID of the watch", "always"),
-    TemplateVariable("watch_name", "str", "Display name of the watch", "always"),
-    TemplateVariable("watch_url", "str", "Monitored URL", "always"),
+    TemplateVariable("watched_item_id", "str", "ULID of the watched item", "always"),
+    TemplateVariable("item_name", "str", "Display name of the watched item", "always"),
+    TemplateVariable("item_url", "str", "Monitored URL", "always"),
     TemplateVariable("event_type", "str", 'Event code (e.g. "change_detected")', "always"),
     TemplateVariable("event_label", "str", 'Human label (e.g. "Change Detected")', "always"),
     TemplateVariable("occurred_at", "datetime", "When the event occurred (UTC)", "always"),
@@ -109,7 +109,7 @@ expandable [See all variables] reference drawer. Keep in sync with
 `src.core.notifications.content.build_template_context`.
 """
 
-_TITLE = "[Watcher] {{ event_label }}: {{ watch_name }}"
+_TITLE = "[Watcher] {{ event_label }}: {{ item_name }}"
 
 
 DEFAULT_TITLE_TEMPLATES: dict[str, str] = {
@@ -132,16 +132,16 @@ DEFAULT_TITLE_TEMPLATES: dict[str, str] = {
 # part of the unconditional skeleton.
 #
 # Composer insertion anchors in HEADER (see `_build_change_detected_body`):
-#   - DOMAIN: immediately after watch_name (index 1)
+#   - DOMAIN: immediately after item_name (index 1)
 #   - LAST CHANGED, INTERVAL: immediately before TIMESTAMP (in that order)
 #   - CHANGE: immediately after WATCH
 #   - SIGNIFICANCE: immediately after CHANGE (or after WATCH when CHANGE off)
 # Reorder these tuples and the composer's index/append calls must follow.
 CHANGE_DETECTED_HEADER_LINES: tuple[str, ...] = (
-    "{{ watch_name }}",
-    "URL: {{ watch_url }}",
+    "{{ item_name }}",
+    "URL: {{ item_url }}",
     "TIMESTAMP: {{ occurred_at_iso }}",
-    f"WATCH: {APP_URL}" + "/watches/{{ watch_id }}",
+    f"WATCH: {APP_URL}" + "/watched-items/{{ watched_item_id }}",
 )
 CHANGE_DETECTED_BODY_BLOCK_LINES: tuple[str, ...] = (
     "{{ event_label }}",
@@ -156,14 +156,14 @@ _CHANGE_DETECTED_BODY = (
 DEFAULT_BODY_TEMPLATES: dict[str, str] = {
     WatchEventType.CHANGE_DETECTED.value: _CHANGE_DETECTED_BODY,
     WatchEventType.WATCH_ERROR.value: (
-        "{{ watch_url }} returned HTTP {{ status_code | default('unknown') }}"
+        "{{ item_url }} returned HTTP {{ status_code | default('unknown') }}"
     ),
-    WatchEventType.WATCH_RECOVERED.value: "{{ watch_url }} is responding normally again",
-    WatchEventType.WATCH_CREATED.value: "Now monitoring {{ watch_url }}",
-    WatchEventType.WATCH_PAUSED.value: "Watch paused: {{ watch_url }}",
-    WatchEventType.WATCH_RESUMED.value: "Watch resumed: {{ watch_url }}",
-    WatchEventType.WATCH_ARCHIVED.value: "Watch archived: {{ watch_url }}",
-    WatchEventType.WATCH_DELETED.value: "Watch deleted: {{ watch_url }}",
+    WatchEventType.WATCH_RECOVERED.value: "{{ item_url }} is responding normally again",
+    WatchEventType.WATCH_CREATED.value: "Now monitoring {{ item_url }}",
+    WatchEventType.WATCH_PAUSED.value: "Watch paused: {{ item_url }}",
+    WatchEventType.WATCH_RESUMED.value: "Watch resumed: {{ item_url }}",
+    WatchEventType.WATCH_ARCHIVED.value: "Watch archived: {{ item_url }}",
+    WatchEventType.WATCH_DELETED.value: "Watch deleted: {{ item_url }}",
 }
 
 

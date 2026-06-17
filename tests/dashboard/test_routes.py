@@ -106,7 +106,7 @@ class TestDomainsPage:
 
 
 class TestDomainDetailFilters:
-    async def _create_domain_with_watch(self, client, db_session, watch_name="Filter Watch"):
+    async def _create_domain_with_watch(self, client, db_session, item_name="Filter Watch"):
         """Create a domain and a WatchedItem whose domain_name matches it."""
         resp = await client.post(
             "/domains",
@@ -114,7 +114,7 @@ class TestDomainDetailFilters:
             follow_redirects=False,
         )
         name = resp.headers["location"].rstrip("/").split("/")[-1]
-        wi = await _make_wi(db_session, name=watch_name, url=f"https://{name}/page")
+        wi = await _make_wi(db_session, name=item_name, url=f"https://{name}/page")
         wi.domain_name = name
         await db_session.flush()
         await db_session.commit()

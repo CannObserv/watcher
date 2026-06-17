@@ -17,9 +17,9 @@ OCCURRED_AT = datetime(2026, 4, 4, 12, 0, 0, tzinfo=UTC)
 def make_event(event_type, metadata=None):
     return WatchEvent(
         event_type=event_type,
-        watch_id="01HV0000000000000000000001",
-        watch_name="Test Watch",
-        watch_url="https://example.com",
+        watched_item_id="01HV0000000000000000000001",
+        item_name="Test Watch",
+        item_url="https://example.com",
         occurred_at=OCCURRED_AT,
         metadata=metadata or {},
     )
@@ -76,4 +76,4 @@ class TestWatchEventImmutable:
     def test_frozen(self):
         event = make_event(WatchEventType.CHANGE_DETECTED)
         with pytest.raises(Exception):
-            event.watch_id = "other"
+            event.watched_item_id = "other"

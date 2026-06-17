@@ -43,7 +43,8 @@ class ContentOptions(BaseModel):
 
     title_template: str | None = None
     """Jinja2 template string for the notification title. Overrides the default title when set.
-    Context: watch_id, watch_name, watch_url, event_type, occurred_at, plus all metadata keys."""
+    Context: watched_item_id, item_name, item_url, event_type, occurred_at, plus all metadata
+    keys."""
 
     body_template: str | None = None
     """Jinja2 template string for the notification body. Overrides build_body() output when set.

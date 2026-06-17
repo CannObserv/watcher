@@ -13,9 +13,9 @@ from src.core.notifier_client.client import build_idempotency_key, get_notifier_
 def _make_event(event_type=WatchEventType.CHANGE_DETECTED, *, metadata=None):
     return WatchEvent(
         event_type=event_type,
-        watch_id=str(ULID()),
-        watch_name="Test Watch",
-        watch_url="https://example.com",
+        watched_item_id=str(ULID()),
+        item_name="Test Watch",
+        item_url="https://example.com",
         occurred_at=datetime(2026, 5, 1, 12, 0, 0, tzinfo=UTC),
         metadata=metadata or {},
     )
@@ -62,7 +62,7 @@ class TestBuildIdempotencyKey:
 
         key = build_idempotency_key(event, source_id)
         occurred_ms = int(event.occurred_at.timestamp() * 1000)
-        assert key == f"watcher:watch_created:{source_id}:{event.watch_id}:{occurred_ms}"
+        assert key == f"watcher:watch_created:{source_id}:{event.watched_item_id}:{occurred_ms}"
 
     def test_key_is_stable_for_same_inputs(self):
         change_id = str(ULID())

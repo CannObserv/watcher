@@ -38,7 +38,7 @@ class TestDomainNcCreatePersistsContentConfig:
                 "channel_hint": "json",
                 "events": ["change_detected"],
                 "content_config__include_domain": "1",
-                "content_config__body_template": "Custom: {{ watch_url }}",
+                "content_config__body_template": "Custom: {{ item_url }}",
             },
             follow_redirects=False,
         )
@@ -49,7 +49,7 @@ class TestDomainNcCreatePersistsContentConfig:
         assert tpl is not None
         assert tpl.content_config is not None
         assert tpl.content_config["default"]["include_domain"] is True
-        assert tpl.content_config["default"]["body_template"] == "Custom: {{ watch_url }}"
+        assert tpl.content_config["default"]["body_template"] == "Custom: {{ item_url }}"
 
     async def test_create_without_toggles_stores_null_content_config(
         self, client: AsyncClient, db_session

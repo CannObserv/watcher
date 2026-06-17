@@ -22,9 +22,9 @@ def _make_event(event_type=WatchEventType.CHANGE_DETECTED, *, change_id=None):
         metadata["change_id"] = change_id
     return WatchEvent(
         event_type=event_type,
-        watch_id=str(ULID()),
-        watch_name="Test Watch",
-        watch_url="https://example.com",
+        watched_item_id=str(ULID()),
+        item_name="Test Watch",
+        item_url="https://example.com",
         occurred_at=datetime(2026, 5, 1, 12, 0, 0, tzinfo=UTC),
         metadata=metadata,
     )

@@ -2380,9 +2380,9 @@ async def notification_template_test_result(
     else:
         event = WatchEvent(
             event_type=WatchEventType.CHANGE_DETECTED,
-            watch_id="00000000000000000000000000",
-            watch_name="Test Notification",
-            watch_url="https://example.com",
+            watched_item_id="00000000000000000000000000",
+            item_name="Test Notification",
+            item_url="https://example.com",
             occurred_at=datetime.now(UTC),
             metadata={"test": True},
         )

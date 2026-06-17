@@ -117,40 +117,59 @@ export $(cat /etc/watcher/.env .env 2>/dev/null | xargs)
 
 Full variable reference: `docs/DEPLOYMENT.md`.
 
-## Watches
+## Watched Items
 
-Watches are WatchedItem-first (#185 Phase A): each Watch belongs to a
-`WatchedItem` that owns the canonical `effective_url` and `source_specs` used
-by the pipeline. `WatchedItem` also owns shared defaults: `default_schedule_config`,
-`default_content_type`, `default_tags`, `domain_name` (FK → `Domain.name`, set
-at WatchedItem-create time), `domain_suspended` (cascaded True/False by domain
-deactivation/reactivation), plus `WatchedItemNotificationTemplate` rows.
-Live inheritance: per-Watch override → WatchedItem default → system
-default (see `src/core/watches/resolution.py`).
+**The `WatchedItem` is the single monitored entity (#191).** The earlier
+`WatchedItem → Watch` one-to-many was collapsed: `Watch` (the model, table,
+`/watches*` routes, the override resolution chain, and the per-Watch
+notification tier) is gone. One `WatchedItem` = one URL = one fingerprint = one
+change signal. The user-facing noun is "Watched Item".
+
+A `WatchedItem` owns everything: the canonical `effective_url` and `source_specs`
+used by the pipeline; `default_schedule_config`, `default_content_type`,
+`default_tags`; `domain_name` (FK → `Domain.name`, set at create time);
+`domain_suspended` (set True/False by domain deactivation/reactivation — it
+gates scheduling directly, no live Domain join); a single optional
+`TemporalProfile` (1:1, `temporal_profiles.watched_item_id`); `health_status`,
+`last_checked_at`, `last_changed_at`; and its notification surface
+(`WatchedItemNotificationTemplate` rows + `watch_notification_configs` /
+`watch_nc_refs`, both re-keyed to `watched_item_id`). Schedule resolution is
+just WatchedItem default → system default (`src/core/watches/resolution.py`).
 
 `archiver_info_item_id` on `WatchedItem` is nullable — WatchedItems created via the
 dashboard (`POST /watched-items/new`) have no InfoItem reference; API-created ones
 may also omit it when using the URL-only path. `effective_url`
-and `domain_name` are set at WatchedItem-create time by probing the URL (no
+and `domain_name` are set at create time by probing the URL (no
 Archiver SDK call per cycle). SourceRevisions are POSTed to Archiver via the
 `archiver-client` SDK on every detected change; the local
 `pending_archiver_sync` outbox + drain worker guarantees delivery during
-Archiver outages. Notifications dispatch inline from the pipeline on change
-detection, with `change_revision_id` in WatchEvent metadata.
+Archiver outages. Notifications dispatch inline from the pipeline **once per
+WatchedItem** on change detection (`notifications_dispatched ≤ 1`), with
+`change_revision_id` in WatchEvent metadata. `schedule_tick` skips items that
+are paused (`is_active=false`), archived, or `domain_suspended`, and applies the
+temporal profile's post-actions (deactivate / archive / reduce_frequency) to the
+WatchedItem itself.
+
+**WatchEvent identity fields** are `watched_item_id`, `item_name`, `item_url`
+(renamed from `watch_*` in #191). The same names are the user-facing notification
+template variables; the default-template "WATCH:" link and `change_url` point at
+`/watched-items/{watched_item_id}`. The `AuditLog.watch_id` FK column was retired —
+audits carry the WatchedItem as `watched_item_id` inside the JSONB `payload`
+(filter via `GET /api/v1/audit?watched_item_id=<ulid>`).
 
 Fresh hosts need the scratch directory: `sudo mkdir -p /var/cache/watcher/scratch && sudo chown watcher:watcher /var/cache/watcher/scratch` (or override via `WATCHER_CACHE_DIR`). The Archiver service must also be installed first — see its own `docs/DEPLOYMENT.md`. Archiver authoring tools (`validate_source_spec`, `fetch_and_render`, `preview_extraction`, `propose_selectors`, `find_info_item`, atomic `create_info_item`) are documented in `/home/exedev/archiver/AGENTS.md`.
 
-Operators manage WatchedItem defaults (`name`, `description`, `default_schedule_config`, `default_content_type`, `default_tags`), archive/restore lifecycle, and notification-template CRUD via the `/watched-items` dashboard. Same surface is exposed at `/api/v1/watched-items`. WatchedItems are created at `POST /api/v1/watched-items` (accepts `archiver_info_item_id` or `url`; both optional but at least one required) or `GET/POST /watched-items/new` (dashboard — URL-first; an `is_active` checkbox provisions paused). Create and PATCH accept `is_active` (#188): create defaults `true`; pass `false` to provision paused. `is_active` is the **pause/resume** toggle (distinct from archive) — paused (`is_active=false`, not archived) items are skipped by `schedule_tick` and short-circuited by the `check_watched_item` task, but stay editable. PATCH `is_active` on an archived item is rejected (409 — restore first); activation while archived is owned by archive/restore. Archive cascades to all child Watches and also flips `is_active`; restore is parent-only and re-activates. Filter by InfoItem with `GET /api/v1/watched-items?archiver_info_item_id=<ulid>`. Trigger an immediate check with `POST /api/v1/watched-items/{id}/check-now` (202; pre-flight: not archived, not paused, has `effective_url`).
+Operators manage WatchedItem defaults (`name`, `description`, `default_schedule_config`, `default_content_type`, `default_tags`), archive/restore lifecycle, and notification-template CRUD via the `/watched-items` dashboard. Same surface is exposed at `/api/v1/watched-items`. WatchedItems are created at `POST /api/v1/watched-items` (accepts `archiver_info_item_id` or `url`; both optional but at least one required) or `GET/POST /watched-items/new` (dashboard — URL-first; an `is_active` checkbox provisions paused). Create and PATCH accept `is_active` (#188): create defaults `true`; pass `false` to provision paused. `is_active` is the **pause/resume** toggle (distinct from archive) — paused (`is_active=false`, not archived) items are skipped by `schedule_tick` and short-circuited by the `check_watched_item` task, but stay editable. PATCH `is_active` on an archived item is rejected (409 — restore first); activation while archived is owned by archive/restore. Archive stamps `archived_at` and flips `is_active` (single entity — no child cascade since #191); restore clears `archived_at` and re-activates. Filter by InfoItem with `GET /api/v1/watched-items?archiver_info_item_id=<ulid>`. Trigger an immediate check with `POST /api/v1/watched-items/{id}/check-now` (202; pre-flight: not archived, not paused, has `effective_url`).
 
-**Dashboard parity (#190):** the dashboard surfaces pause/resume (`POST /watched-items/{id}/toggle-active` — mirrors the API 409 guards, blocks resume while `domain_suspended`, emits the `WATCHED_ITEM_PAUSED`/`RESUMED` events), check-now (`POST /watched-items/{id}/check-now` — delegates to the API route, guard failures flash), and effective_url editing (`POST /watched-items/{id}/effective-url` — re-probes to re-derive `domain_name`, leaves `source_specs` untouched). Pause/resume + check-now controls appear on the WatchedItem detail page and in the list rows. `source_specs` is shown read-only on detail (authoring stays in Archiver tooling). The child-Watch notification panel renders all five dispatch tiers including the WatchedItem-default templates.
+**Dashboard parity (#190):** the dashboard surfaces pause/resume (`POST /watched-items/{id}/toggle-active` — mirrors the API 409 guards, blocks resume while `domain_suspended`, emits the `WATCHED_ITEM_PAUSED`/`RESUMED` events), check-now (`POST /watched-items/{id}/check-now` — delegates to the API route, guard failures flash), and effective_url editing (`POST /watched-items/{id}/effective-url` — re-probes to re-derive `domain_name`, leaves `source_specs` untouched). Pause/resume + check-now controls appear on the WatchedItem detail page and in the list rows. `source_specs` is shown read-only on detail (authoring stays in Archiver tooling). The detail page surfaces a notification-configs panel and a WatchedItem-template panel (the per-Watch tier was folded into the WatchedItem in #191; richer notification-config CRUD on the dashboard is a follow-up — the full surface lives at `/api/v1/watched-items/{id}/notifications`).
 
 **Watched Items list view** (`#172`, `#173`, `#190`): columns are Name → Last Check → Interval → Next Check → Status → Actions (per-row pause/resume toggle + check-now). The Status badge distinguishes Active / Paused / Domain Inactive / Archived. Next Check is a live countdown rendered by `src/dashboard/static/js/next-check-countdown.js` (loaded globally via `base.html`; reads `data-next-check` ISO timestamp attributes, refreshes every 60 s). List has server-side name search and pagination: `GET /partials/watched-items-table?q=&page=&page_size=&include_archived=` is the HTMX partial; the full page (`GET /watched-items`) accepts the same params and SSR-includes the partial on first load. Active/All archived toggle is a segment-group that cross-includes the search input. Aspect Review column removed (#173) — too expensive per-row; will surface on WatchedItem detail page behind a Redis cache (tracked in #163).
 
-**InfoItem picker removed** (`#185 Phase A step 7`): the InfoItem typeahead picker (routes `GET /info-items/search`, `GET /info-items/{id}/binding-tree`; JS `info-item-picker.js`; templates `partials/info_item_picker/`) was removed. Watch-create now requires a pre-existing WatchedItem (`?watched_item_id=<ulid>`); WatchedItem-create accepts a URL directly and probes it for `effective_url` + `domain_name`.
+**InfoItem picker removed** (`#185 Phase A step 7`): the InfoItem typeahead picker (routes `GET /info-items/search`, `GET /info-items/{id}/binding-tree`; JS `info-item-picker.js`; templates `partials/info_item_picker/`) was removed. WatchedItem-create accepts a URL directly and probes it for `effective_url` + `domain_name` (the separate Watch-create flow no longer exists — #191).
 
-**Watched Item detail** (`#174`, updated `#185`, `#190`): shows `effective_url` (with a re-probe edit affordance), `last_checked_at`, `last_changed_at`, and `health_status` (shown even when UNKNOWN) from local WatchedItem columns — no Archiver SDK calls. Includes a Status pause/resume toggle, a Check-now button, and a read-only `source_specs` panel. The `+ New Watch` button is guarded by `not watched_item.archived_at and watched_item.is_active and not watched_item.domain_suspended and watched_item.effective_url`. `POST /watched-items/{id}/mark-reviewed` (stamps `last_reviewed_at`) remains API-only — the dashboard route exists but is intentionally unwired; no dashboard UI until a replacement is designed.
+**Watched Item detail** (`#174`, updated `#185`, `#190`, `#191`): shows `effective_url` (with a re-probe edit affordance), `last_checked_at`, `last_changed_at`, and `health_status` (shown even when UNKNOWN) from local WatchedItem columns — no Archiver SDK calls. Includes a Status pause/resume toggle, a Check-now button, a read-only `source_specs` panel, a notification-configs panel, and a notification-template panel. `POST /watched-items/{id}/mark-reviewed` (stamps `last_reviewed_at`) remains API-only — the dashboard route exists but is intentionally unwired; no dashboard UI until a replacement is designed.
 
-Plans: design at [docs/plans/2026-05-15-watched-item-infoitem-first-design.md](docs/plans/2026-05-15-watched-item-infoitem-first-design.md); #160 reshape at [docs/plans/2026-05-17-watched-item-watch-reshape.md](docs/plans/2026-05-17-watched-item-watch-reshape.md); #161 CRUD UI at [docs/plans/2026-05-17-watched-item-crud-ui-plan.md](docs/plans/2026-05-17-watched-item-crud-ui-plan.md). The Phase 5 cutover design ([docs/plans/2026-05-13-phase-5-watcher-v2-cutover.md](docs/plans/2026-05-13-phase-5-watcher-v2-cutover.md)) is historical and was superseded by #160.
+Plans: the #191 collapse design is at [docs/plans/2026-06-16-collapse-watcheditem-watch-design.md](docs/plans/2026-06-16-collapse-watcheditem-watch-design.md). Historical: design at [docs/plans/2026-05-15-watched-item-infoitem-first-design.md](docs/plans/2026-05-15-watched-item-infoitem-first-design.md); #160 reshape at [docs/plans/2026-05-17-watched-item-watch-reshape.md](docs/plans/2026-05-17-watched-item-watch-reshape.md); #161 CRUD UI at [docs/plans/2026-05-17-watched-item-crud-ui-plan.md](docs/plans/2026-05-17-watched-item-crud-ui-plan.md). The Phase 5 cutover design ([docs/plans/2026-05-13-phase-5-watcher-v2-cutover.md](docs/plans/2026-05-13-phase-5-watcher-v2-cutover.md)) is historical and was superseded by #160.
 
 ## Common Commands
 
@@ -245,7 +264,7 @@ Entry points only: call `configure_logging()` once.
 
 **ULID format errors:** Treatment depends on whether the ULID is a path parameter or a filter query parameter.
 
-- **Path parameters** (e.g. `/watches/{id}`) → 404. Use `parse_ulid` from [src/api/routes/helpers.py](src/api/routes/helpers.py), which raises `HTTPException(404)`. Dashboard helpers (`get_watch_detail`, `get_watched_item_detail` in [src/dashboard/context.py](src/dashboard/context.py)) return `None` and the route renders a 404 page.
+- **Path parameters** (e.g. `/watched-items/{id}`) → 404. Use `parse_ulid` from [src/api/routes/helpers.py](src/api/routes/helpers.py), which raises `HTTPException(404)`. The dashboard helper (`get_watched_item_detail` in [src/dashboard/context.py](src/dashboard/context.py)) returns `None` and the route renders a 404 page.
 - **Filter query parameters** on list endpoints (e.g. `?watch_id=<value>`) → 400. Use `parse_filter_ulid` from [src/api/routes/helpers.py](src/api/routes/helpers.py), which raises `HTTPException(400, "Invalid <field> format")`. Pass the parameter name as `field` (e.g. `parse_filter_ulid(watch_id, "watch_id")`).
 
 Do not use `parse_ulid` for filter query params — the endpoint itself exists; an unparseable filter value is a bad request, not a missing resource.

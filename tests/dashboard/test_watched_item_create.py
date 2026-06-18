@@ -140,6 +140,47 @@ class TestWatchedItemCreateSubmit:
         ).scalar_one()
         assert wi.is_active is False
 
+    async def test_create_on_inactive_domain_sets_domain_suspended(self, client, db_session):
+        """#196 Finding 1: creating on an already-inactive domain marks domain_suspended.
+
+        schedule_tick gates solely on WatchedItem.domain_suspended (no live Domain
+        join), so a dashboard create on a suspended domain must seed the flag — else
+        the item is scheduled against the kill-switched domain.
+        """
+        from src.core.models.domain import Domain
+
+        db_session.add(Domain(name="inactive-dash.example", is_active=False))
+        await db_session.commit()
+        await client.post(
+            "/watched-items/new",
+            data={"url": "https://inactive-dash.example/page", "name": "Dash On Inactive"},
+            follow_redirects=False,
+        )
+        wi = (
+            await db_session.execute(
+                select(WatchedItem).where(
+                    WatchedItem.effective_url == "https://inactive-dash.example/page"
+                )
+            )
+        ).scalar_one()
+        assert wi.domain_suspended is True
+
+    async def test_create_on_active_domain_not_suspended(self, client, db_session):
+        """A dashboard create on a healthy/fresh domain is not domain_suspended."""
+        await client.post(
+            "/watched-items/new",
+            data={"url": "https://active-dash.example/page", "name": "Dash On Active"},
+            follow_redirects=False,
+        )
+        wi = (
+            await db_session.execute(
+                select(WatchedItem).where(
+                    WatchedItem.effective_url == "https://active-dash.example/page"
+                )
+            )
+        ).scalar_one()
+        assert wi.domain_suspended is False
+
 
 class TestWatchedItemUrlReprobe:
     async def _make_wi(self, db_session, **kwargs):

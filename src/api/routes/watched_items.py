@@ -241,7 +241,7 @@ async def patch_watched_item(
     other_fields = sorted(k for k in updates if k != "is_active")
     # domain_name is derived (not a PATCH input) but changes with effective_url;
     # surface it in the audit so the trail matches the re-probe route (#196).
-    if "effective_url" in updates and "domain_name" not in other_fields:
+    if "effective_url" in updates:
         other_fields = sorted([*other_fields, "domain_name"])
     if other_fields:
         audit(

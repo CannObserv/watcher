@@ -895,6 +895,30 @@ class TestPatchDerivesDomainName:
         assert "effective_url" in fields
         assert "domain_name" in fields
 
+    async def test_patch_url_succession_moves_to_new_domain(self, client, db_session):
+        """#196 Finding 3: PATCH effective_url on an item that already has a domain_name
+        moves it to the new host — exercises the autoflush path with an existing valid FK
+        (URL succession, the realistic Archiver scenario)."""
+        from src.core.models.domain import Domain
+
+        db_session.add(Domain(name="old-succession.example"))
+        await db_session.flush()
+        wi = await _make_watched_item(
+            db_session,
+            domain_name="old-succession.example",
+            effective_url="https://old-succession.example/p",
+        )
+        response = await client.patch(
+            f"/api/v1/watched-items/{wi.id}",
+            json={"effective_url": "https://new-succession.example/p"},
+        )
+        assert response.status_code == 200
+        assert response.json()["domain_name"] == "new-succession.example"
+        new_domain = (
+            await db_session.execute(select(Domain).where(Domain.name == "new-succession.example"))
+        ).scalar_one_or_none()
+        assert new_domain is not None
+
     async def test_patch_without_effective_url_leaves_domain_name(self, client, db_session):
         """A PATCH that does not touch effective_url must not clobber domain_name."""
         from src.core.models.domain import Domain

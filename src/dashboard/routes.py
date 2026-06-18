@@ -11,7 +11,6 @@ from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from jinja2 import TemplateError
 from notifier_client.errors import NotifierError
 from sqlalchemy import func, select
-from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.api.deps import get_db_session, get_probe_fn
@@ -33,7 +32,7 @@ from src.api.schemas.validators import validate_event_list
 from src.core.domains import ensure_domain_and_resolve_suspension
 from src.core.logging import get_logger
 from src.core.models.audit_log import EventType, audit
-from src.core.models.domain import DEFAULT_MAX_CONCURRENCY, DEFAULT_MIN_INTERVAL, Domain
+from src.core.models.domain import Domain
 from src.core.models.notification_template import DomainNcRef, NotificationTemplate, WatchNcRef
 from src.core.models.watched_item import ContentType, WatchedItem
 from src.core.models.watched_item_notification_template import (
@@ -282,26 +281,6 @@ async def watched_item_create_form(request: Request):
     )
 
 
-async def _ensure_domain_exists(session: AsyncSession, domain_name: str | None) -> None:
-    """Create the Domain row for ``domain_name`` if it does not already exist."""
-    if not domain_name:
-        return
-    domain_stmt = select(Domain).where(Domain.name == domain_name)
-    if not (await session.execute(domain_stmt)).scalar_one_or_none():
-        try:
-            async with session.begin_nested():
-                session.add(
-                    Domain(
-                        name=domain_name,
-                        min_interval=DEFAULT_MIN_INTERVAL,
-                        max_concurrency=DEFAULT_MAX_CONCURRENCY,
-                        current_interval=DEFAULT_MIN_INTERVAL,
-                    )
-                )
-        except IntegrityError:
-            pass
-
-
 @router.post("/watched-items/new")
 async def watched_item_create_submit(
     request: Request,
@@ -360,12 +339,18 @@ async def watched_item_create_submit(
     except httpx.HTTPError as exc:
         return await _render_with_flash(f"URL unreachable: {exc}")
 
-    await _ensure_domain_exists(session, probe_result.effective_domain)
+    # #196 Finding 1: upsert the domain and seed domain_suspended from its state —
+    # schedule_tick gates solely on WatchedItem.domain_suspended, so a create on an
+    # already-suspended domain must not silently arm fetching. Shared with the API paths.
+    domain_suspended = await ensure_domain_and_resolve_suspension(
+        session, probe_result.effective_domain or None
+    )
 
     wi_name = name.strip() or probe_result.effective_domain or url_raw
     wi = WatchedItem(
         effective_url=probe_result.effective_url,
         domain_name=probe_result.effective_domain or None,
+        domain_suspended=domain_suspended,
         name=wi_name,
         description=description.strip() or None,
         default_schedule_config={"interval": interval_raw} if interval_raw else None,

@@ -30,6 +30,7 @@ from src.api.routes.watched_items import (
 )
 from src.api.schemas.content_config import ContentConfig, ContentOptions
 from src.api.schemas.validators import validate_event_list
+from src.core.domains import ensure_domain_and_resolve_suspension
 from src.core.logging import get_logger
 from src.core.models.audit_log import EventType, audit
 from src.core.models.domain import DEFAULT_MAX_CONCURRENCY, DEFAULT_MIN_INTERVAL, Domain
@@ -714,19 +715,11 @@ async def watched_item_update_url(
     except httpx.HTTPError as exc:
         return _flash(f"URL unreachable: {exc}", "error")
 
-    await _ensure_domain_exists(session, probe_result.effective_domain)
-
-    # Re-evaluate suspension against the (possibly new) target domain so moving a
-    # WatchedItem onto a suspended/archived domain doesn't bypass the kill-switch.
-    target_domain = None
-    if probe_result.effective_domain:
-        target_domain = (
-            await session.execute(
-                select(Domain).where(Domain.name == probe_result.effective_domain)
-            )
-        ).scalar_one_or_none()
-    domain_suspended = bool(
-        target_domain and (target_domain.archived_at is not None or not target_domain.is_active)
+    # Upsert the domain and re-evaluate suspension against the (possibly new) target
+    # so moving a WatchedItem onto a suspended/archived domain doesn't bypass the
+    # kill-switch. Shared with the API create/PATCH paths (#196).
+    domain_suspended = await ensure_domain_and_resolve_suspension(
+        session, probe_result.effective_domain or None
     )
 
     wi.effective_url = probe_result.effective_url

@@ -821,6 +821,163 @@ class TestPatchEffectiveUrlAndSourceSpecs:
         assert response.status_code == 422
 
 
+class TestPatchDerivesDomainName:
+    """#196 — PATCH effective_url must derive domain_name + upsert Domain + suspension."""
+
+    async def test_patch_effective_url_derives_domain_name(self, client, db_session):
+        """Setting effective_url via PATCH derives domain_name from its hostname."""
+        wi = await _make_watched_item(db_session)
+        response = await client.patch(
+            f"/api/v1/watched-items/{wi.id}",
+            json={"effective_url": "https://patched.example/some/path"},
+        )
+        assert response.status_code == 200
+        assert response.json()["domain_name"] == "patched.example"
+
+    async def test_patch_effective_url_upserts_domain(self, client, db_session):
+        """PATCH effective_url creates the Domain row if it does not exist."""
+        from src.core.models.domain import Domain
+
+        wi = await _make_watched_item(db_session)
+        await client.patch(
+            f"/api/v1/watched-items/{wi.id}",
+            json={"effective_url": "https://fresh-patch-domain.example/x"},
+        )
+        domain = (
+            await db_session.execute(
+                select(Domain).where(Domain.name == "fresh-patch-domain.example")
+            )
+        ).scalar_one_or_none()
+        assert domain is not None
+
+    async def test_patch_onto_inactive_domain_sets_domain_suspended(self, client, db_session):
+        """PATCH onto an already-inactive domain marks the item domain_suspended."""
+        from src.core.models.domain import Domain
+
+        db_session.add(Domain(name="inactive-patch.example", is_active=False))
+        wi = await _make_watched_item(db_session)
+        await db_session.commit()
+        response = await client.patch(
+            f"/api/v1/watched-items/{wi.id}",
+            json={"effective_url": "https://inactive-patch.example/p"},
+        )
+        assert response.status_code == 200
+        assert response.json()["domain_suspended"] is True
+
+    async def test_patch_onto_active_domain_clears_stale_suspension(self, client, db_session):
+        """PATCH onto a healthy domain clears a stale domain_suspended=True."""
+        wi = await _make_watched_item(db_session, domain_suspended=True)
+        response = await client.patch(
+            f"/api/v1/watched-items/{wi.id}",
+            json={"effective_url": "https://healthy-patch.example/p"},
+        )
+        assert response.status_code == 200
+        assert response.json()["domain_suspended"] is False
+
+    async def test_patch_effective_url_audits_domain_name(self, client, db_session):
+        """The UPDATED audit reflects domain_name alongside effective_url."""
+        wi = await _make_watched_item(db_session)
+        await client.patch(
+            f"/api/v1/watched-items/{wi.id}",
+            json={"effective_url": "https://audited-patch.example/p"},
+        )
+        events = (
+            (
+                await db_session.execute(
+                    select(AuditLog).where(AuditLog.event_type == EventType.WATCHED_ITEM_UPDATED)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert len(events) == 1
+        fields = events[0].payload["updated_fields"]
+        assert "effective_url" in fields
+        assert "domain_name" in fields
+
+    async def test_patch_without_effective_url_leaves_domain_name(self, client, db_session):
+        """A PATCH that does not touch effective_url must not clobber domain_name."""
+        from src.core.models.domain import Domain
+
+        db_session.add(Domain(name="kept.example"))
+        await db_session.flush()
+        wi = await _make_watched_item(db_session, domain_name="kept.example")
+        response = await client.patch(
+            f"/api/v1/watched-items/{wi.id}",
+            json={"description": "just a description change"},
+        )
+        assert response.status_code == 200
+        assert response.json()["domain_name"] == "kept.example"
+
+
+class TestCreateInfoItemLinkedDomainDerivation:
+    """#196 — InfoItem-linked create with a url must derive domain_name + suspension."""
+
+    async def test_infoitem_linked_create_with_url_derives_domain_name(
+        self, client, db_session, info_client
+    ):
+        item = await make_info_item(db_session, name="LinkedWithUrl")
+        await db_session.commit()
+        response = await client.post(
+            "/api/v1/watched-items",
+            json={
+                "archiver_info_item_id": str(item.info_item_id),
+                "url": "https://linked-create.example/page",
+            },
+        )
+        assert response.status_code == 201, response.text
+        assert response.json()["domain_name"] == "linked-create.example"
+
+    async def test_infoitem_linked_create_with_url_upserts_domain(
+        self, client, db_session, info_client
+    ):
+        from src.core.models.domain import Domain
+
+        item = await make_info_item(db_session, name="LinkedUpsert")
+        await db_session.commit()
+        await client.post(
+            "/api/v1/watched-items",
+            json={
+                "archiver_info_item_id": str(item.info_item_id),
+                "url": "https://linked-upsert.example/page",
+            },
+        )
+        domain = (
+            await db_session.execute(select(Domain).where(Domain.name == "linked-upsert.example"))
+        ).scalar_one_or_none()
+        assert domain is not None
+
+    async def test_infoitem_linked_create_with_url_on_inactive_domain_suspends(
+        self, client, db_session, info_client
+    ):
+        from src.core.models.domain import Domain
+
+        db_session.add(Domain(name="linked-inactive.example", is_active=False))
+        item = await make_info_item(db_session, name="LinkedInactive")
+        await db_session.commit()
+        response = await client.post(
+            "/api/v1/watched-items",
+            json={
+                "archiver_info_item_id": str(item.info_item_id),
+                "url": "https://linked-inactive.example/page",
+            },
+        )
+        assert response.status_code == 201, response.text
+        assert response.json()["domain_suspended"] is True
+
+    async def test_infoitem_linked_create_without_url_leaves_domain_name_null(
+        self, client, db_session, info_client
+    ):
+        item = await make_info_item(db_session, name="LinkedNoUrl")
+        await db_session.commit()
+        response = await client.post(
+            "/api/v1/watched-items",
+            json={"archiver_info_item_id": str(item.info_item_id)},
+        )
+        assert response.status_code == 201, response.text
+        assert response.json()["domain_name"] is None
+
+
 class TestCheckNow:
     async def test_202_enqueues_task(self, client, db_session):
         """POST /check-now returns 202 with WatchedItem body and defers a task."""

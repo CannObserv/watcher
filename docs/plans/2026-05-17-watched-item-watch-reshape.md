@@ -1050,6 +1050,10 @@ async def process_watched_item(
     ...
 ```
 
+<!-- Superseded note (#195): `allocate_revision_id` was removed as dead code —
+the shipped pipeline uses the `ChangeRevision` PK as the scratch filename, not a
+pre-allocated id. This plan predates #191 (still assumes the `Watch` model) and
+is historical. -->
 Re-use existing helpers (`allocate_revision_id`, `write_scratch_bytes`, `get_last_fingerprint`, `upsert_last_known`, `enqueue_pending`, `dispatch_event_notifications`). For per-Watch dispatch, build the same `change_meta` shape today's pipeline emits (`source_revision_id`, `info_source_id`, `content_fingerprint`, etc.), but with the per-binding info_source_id. **Interval / metadata enrichment uses `resolved_schedule_config(watch).get("interval")` — never `watch.schedule_config`.**
 
 Delete `process_watch` and its private helpers that are no longer reachable. Keep `_extract_with_spec` (used by both old and new flow's extraction step).

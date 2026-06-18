@@ -30,18 +30,19 @@ class WatchHealthStatus(enum.StrEnum):
 class WatchedItem(Base, TimestampMixin):
     """Operator's subscription to a monitored content target.
 
-    Owns shared defaults that child Watches inherit at read time via the
-    resolution chain (Watch override → WatchedItem default → system default).
+    Owns the schedule/content defaults applied at read time via the resolution
+    chain (WatchedItem default → system default). Post-#191 the WatchedItem is
+    the single monitored entity; there is no per-Watch override layer.
 
     `archiver_info_item_id` links to an Archiver InfoItem (cross-schema reference to
     `information.info_items.info_item_id`). Nullable — standalone WatchedItems
     with no InfoItem reference are allowed; partial unique index enforces
     uniqueness when set.
 
-    `effective_url` and `source_specs` are set at Watch-create time and drive
+    `effective_url` and `source_specs` are set at create time and drive
     the pipeline directly, without an Archiver SDK call per cycle.
 
-    `domain_name` is the hostname of the primary URL, set at Watch-create time.
+    `domain_name` is the hostname of the primary URL, set at create time.
     `domain_suspended` is set True when the parent Domain is deactivated.
     """
 
@@ -85,7 +86,7 @@ class WatchedItem(Base, TimestampMixin):
         Boolean, nullable=False, default=False, server_default="false"
     )
 
-    # Pipeline state — populated at Watch-create time; updated by pipeline.
+    # Pipeline state — populated at create time; updated by pipeline.
     effective_url: Mapped[str] = mapped_column(Text, nullable=False, default="", server_default="")
     source_specs: Mapped[list] = mapped_column(
         ARRAY(JSONB(astext_type=Text())),

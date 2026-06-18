@@ -266,6 +266,7 @@ Entry points only: call `configure_logging()` once.
 - Test structure mirrors source (`src/foo.py` → `tests/test_foo.py`)
 - Explicit imports only
 - Small, focused functions
+- Optional JSONB columns: declare as `JSONB(none_as_null=True)` so Python `None` persists as SQL `NULL`, not a JSONB `'null'` literal (otherwise `WHERE col IS NULL` silently misses those rows — #198)
 
 **ULID format errors:** Treatment depends on whether the ULID is a path parameter or a filter query parameter.
 

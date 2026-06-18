@@ -42,9 +42,7 @@ _NORMALIZE: tuple[tuple[str, str], ...] = (
 
 def upgrade() -> None:
     for table, column in _NORMALIZE:
-        op.execute(
-            f"UPDATE {table} SET {column} = NULL WHERE {column} = 'null'::jsonb"  # noqa: S608
-        )
+        op.execute(f"UPDATE {table} SET {column} = NULL WHERE {column} = 'null'::jsonb")
 
 
 def downgrade() -> None:

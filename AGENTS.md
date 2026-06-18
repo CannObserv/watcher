@@ -144,9 +144,8 @@ Archiver SDK call per cycle). On the InfoItem-linked create and on any PATCH
 that sets `effective_url` (the Archiver "Begin Watching" / URL-succession
 paths), `domain_name` is re-derived from the URL **without** re-probing —
 Archiver is authoritative for `effective_url` — and `domain_suspended` is
-re-evaluated; all four paths (URL-only create, InfoItem-linked create, PATCH,
-dashboard re-probe) share `ensure_domain_and_resolve_suspension` in
-`src/core/domains.py` (#196). SourceRevisions are POSTed to Archiver via the
+re-evaluated; every create/PATCH/re-probe path (API and dashboard) shares
+`ensure_domain_and_resolve_suspension` in `src/core/domains.py` (#196). SourceRevisions are POSTed to Archiver via the
 `archiver-client` SDK on every detected change; the local
 `pending_archiver_sync` outbox + drain worker guarantees delivery during
 Archiver outages. Notifications dispatch inline from the pipeline **once per

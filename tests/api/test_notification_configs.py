@@ -5,6 +5,7 @@ Apprise URLs are no longer accepted, validated, or stored.
 """
 
 import pytest
+from sqlalchemy import text
 from ulid import ULID
 
 from tests.conftest import make_watched_item
@@ -53,6 +54,25 @@ class TestCreateNotificationConfig:
         assert data["events"] == ["change_detected"]
         assert data["is_active"] is True
         assert "apprise_url" not in data
+
+    async def test_omitted_content_config_persists_sql_null(self, client, db_session):
+        """Omitting content_config stores SQL NULL, not JSONB 'null' (#198)."""
+        watch_id = await _make_watched_item_id(db_session)
+        resp = await client.post(
+            f"/api/v1/watched-items/{watch_id}/notifications",
+            json=_create_payload(),
+        )
+        assert resp.status_code == 201, resp.text
+        config_id = resp.json()["id"]
+        is_sql_null = (
+            await db_session.execute(
+                text(
+                    "SELECT content_config IS NULL FROM watch_notification_configs WHERE id = :id"
+                ),
+                {"id": config_id},
+            )
+        ).scalar_one()
+        assert is_sql_null is True
 
     async def test_create_with_title(self, client, db_session):
         watch_id = await _make_watched_item_id(db_session)

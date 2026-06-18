@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 from archiver_client import NotFound, ServerError
-from sqlalchemy import select
+from sqlalchemy import select, text
 
 from src.core.models.audit_log import AuditLog, EventType
 from tests.conftest import make_info_item
@@ -218,6 +218,26 @@ class TestTemplateCrud:
         assert data["title"] == "Email Greg"
         assert data["watched_item_id"] == str(wi.id)
 
+    async def test_omitted_content_config_persists_sql_null(self, client, db_session):
+        """Omitting content_config stores SQL NULL, not JSONB 'null' (#198)."""
+        wi = await _make_watched_item(db_session)
+        response = await client.post(
+            f"/api/v1/watched-items/{wi.id}/notification-templates",
+            json={"channel_hint": "mailto://x:y@z"},
+        )
+        assert response.status_code == 201, response.text
+        tpl_id = response.json()["id"]
+        is_sql_null = (
+            await db_session.execute(
+                text(
+                    "SELECT content_config IS NULL "
+                    "FROM watched_item_notification_templates WHERE id = :id"
+                ),
+                {"id": tpl_id},
+            )
+        ).scalar_one()
+        assert is_sql_null is True
+
     async def test_create_404_unknown_parent(self, client):
         from ulid import ULID
 
@@ -342,6 +362,30 @@ class TestCreateWatchedItem:
         assert body["name"] == "Source Item"
         assert body["default_schedule_config"] is None
         assert body["archived_at"] is None
+
+    async def test_omitted_default_schedule_config_persists_sql_null(
+        self, client, db_session, info_client
+    ):
+        """Omitting default_schedule_config stores SQL NULL, not JSONB 'null' (#198).
+
+        Both representations read back as Python None, so the route response is no
+        guard — assert the on-disk value matches ``IS NULL``.
+        """
+        item = await make_info_item(db_session, name="NullCfg")
+        await db_session.commit()
+        response = await client.post(
+            "/api/v1/watched-items",
+            json={"archiver_info_item_id": str(item.info_item_id)},
+        )
+        assert response.status_code == 201, response.text
+        wi_id = response.json()["id"]
+        is_sql_null = (
+            await db_session.execute(
+                text("SELECT default_schedule_config IS NULL FROM watched_items WHERE id = :id"),
+                {"id": wi_id},
+            )
+        ).scalar_one()
+        assert is_sql_null is True
 
     async def test_uses_supplied_name(self, client, db_session, info_client):
         item = await make_info_item(db_session, name="Source")

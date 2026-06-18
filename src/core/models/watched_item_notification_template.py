@@ -36,7 +36,10 @@ class WatchedItemNotificationTemplate(Base, TimestampMixin):
         server_default="{change_detected}",
     )
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
-    content_config: Mapped[dict | None] = mapped_column(JSONB, nullable=True, default=None)
+    # none_as_null=True: None persists as SQL NULL, not JSONB 'null' (#198).
+    content_config: Mapped[dict | None] = mapped_column(
+        JSONB(none_as_null=True), nullable=True, default=None
+    )
     remote_channel_id: Mapped[str | None] = mapped_column(String(26), nullable=True, default=None)
 
     def __init__(self, **kwargs: object) -> None:

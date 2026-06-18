@@ -8,6 +8,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 from httpx import AsyncClient
+from sqlalchemy import text
 from ulid import ULID
 
 from src.core.notifications.notify import DispatchResult
@@ -47,6 +48,24 @@ async def test_create_template(client: AsyncClient):
     assert data["title"] == "Ops Slack"
     assert "id" in data
     assert "apprise_url" not in data
+
+
+@pytest.mark.integration
+async def test_omitted_content_config_persists_sql_null(client: AsyncClient, db_session):
+    """Omitting content_config stores SQL NULL, not JSONB 'null' (#198)."""
+    resp = await client.post(
+        "/api/v1/notifications/templates",
+        json=_payload(title="NullCfg"),
+    )
+    assert resp.status_code == 201, resp.text
+    tpl_id = resp.json()["id"]
+    is_sql_null = (
+        await db_session.execute(
+            text("SELECT content_config IS NULL FROM notification_templates WHERE id = :id"),
+            {"id": tpl_id},
+        )
+    ).scalar_one()
+    assert is_sql_null is True
 
 
 @pytest.mark.integration

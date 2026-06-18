@@ -63,7 +63,11 @@ class WatchedItem(Base, TimestampMixin):
     last_checked_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True, default=None
     )
-    default_schedule_config: Mapped[dict | None] = mapped_column(JSONB, nullable=True, default=None)
+    # none_as_null=True so an omitted/None config persists as SQL NULL, not the
+    # JSONB 'null' literal — keeps `IS NULL` queries correct (#198).
+    default_schedule_config: Mapped[dict | None] = mapped_column(
+        JSONB(none_as_null=True), nullable=True, default=None
+    )
     default_content_type: Mapped[ContentType | None] = mapped_column(
         String(20), nullable=True, default=None
     )

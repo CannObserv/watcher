@@ -22,10 +22,10 @@ from src.api.schemas.watched_item import (
     WatchedItemTemplatePatch,
     WatchedItemTemplateResponse,
 )
+from src.core.domains import domain_name_for_url, ensure_domain_and_resolve_suspension
 from src.core.logging import get_logger
 from src.core.models.audit_log import EventType, audit
 from src.core.models.change_revision import ChangeRevision
-from src.core.models.domain import DEFAULT_MAX_CONCURRENCY, DEFAULT_MIN_INTERVAL, Domain
 from src.core.models.watched_item import WatchedItem
 from src.core.models.watched_item_notification_template import (
     WatchedItemNotificationTemplate,
@@ -111,6 +111,11 @@ async def create_watched_item(
                 headers={"Retry-After": "30"},
             ) from exc
 
+        # Derive the domain from the supplied URL without re-probing — Archiver is
+        # authoritative for the URL. Mirrors the URL-only branch so an InfoItem-linked
+        # create (the Archiver "Begin Watching" path) doesn't leave domain_name NULL (#196).
+        domain_name = domain_name_for_url(data.url)
+        domain_suspended = await ensure_domain_and_resolve_suspension(session, domain_name)
         wi = WatchedItem(
             archiver_info_item_id=ULID.from_str(data.archiver_info_item_id),
             name=data.name or info_item.name,
@@ -120,6 +125,8 @@ async def create_watched_item(
             default_content_type=data.default_content_type,
             default_tags=data.default_tags,
             effective_url=data.url or "",
+            domain_name=domain_name,
+            domain_suspended=domain_suspended,
             source_specs=data.source_specs or [],
             archiver_info_source_id=data.archiver_info_source_id,
         )
@@ -129,39 +136,16 @@ async def create_watched_item(
         except httpx.HTTPError as exc:
             raise HTTPException(status_code=422, detail=f"URL unreachable: {exc}") from exc
 
-        domain = probe_result.effective_domain
+        domain = probe_result.effective_domain or None
         # #191: schedule_tick gates solely on WatchedItem.domain_suspended (no live
         # Domain join), so initialize it from the existing domain's state here —
         # otherwise an item created on an already-inactive/archived domain would be
-        # scheduled. Mirrors the re-probe route's cascade.
-        domain_suspended = False
-        if domain:
-            existing_domain = (
-                await session.execute(select(Domain).where(Domain.name == domain))
-            ).scalar_one_or_none()
-            if existing_domain is None:
-                try:
-                    async with session.begin_nested():
-                        session.add(
-                            Domain(
-                                name=domain,
-                                min_interval=DEFAULT_MIN_INTERVAL,
-                                max_concurrency=DEFAULT_MAX_CONCURRENCY,
-                                current_interval=DEFAULT_MIN_INTERVAL,
-                            )
-                        )
-                except IntegrityError:
-                    existing_domain = (
-                        await session.execute(select(Domain).where(Domain.name == domain))
-                    ).scalar_one_or_none()
-            if existing_domain is not None:
-                domain_suspended = bool(
-                    existing_domain.archived_at is not None or not existing_domain.is_active
-                )
+        # scheduled. Mirrors the re-probe route's cascade (#196: shared helper).
+        domain_suspended = await ensure_domain_and_resolve_suspension(session, domain)
 
         wi = WatchedItem(
             effective_url=probe_result.effective_url,
-            domain_name=domain or None,
+            domain_name=domain,
             domain_suspended=domain_suspended,
             name=data.name or domain or data.url,
             description=data.description,
@@ -231,6 +215,18 @@ async def patch_watched_item(
     for field, value in updates.items():
         setattr(wi, field, value)
 
+    # #196: a PATCH that sets effective_url must re-derive domain_name (no re-probe;
+    # Archiver is authoritative for the URL), upsert the Domain, and re-evaluate
+    # domain_suspended — otherwise the Archiver "Begin Watching" PATCH leaves the
+    # item unassociated from its Domain (kill-switch + domain notifications miss it).
+    if "effective_url" in updates:
+        derived_domain = domain_name_for_url(wi.effective_url)
+        # Upsert the Domain before assigning wi.domain_name so the helper's internal
+        # SELECT (which autoflushes the dirty WatchedItem) can't trip the FK.
+        domain_suspended = await ensure_domain_and_resolve_suspension(session, derived_domain)
+        wi.domain_name = derived_domain
+        wi.domain_suspended = domain_suspended
+
     # #189: an is_active transition gets a dedicated pause/resume audit event
     # (mirroring archive/restore), kept out of the generic UPDATED entry so
     # operators can filter by event type. A no-op (same value) emits nothing.
@@ -243,6 +239,10 @@ async def patch_watched_item(
         )
 
     other_fields = sorted(k for k in updates if k != "is_active")
+    # domain_name is derived (not a PATCH input) but changes with effective_url;
+    # surface it in the audit so the trail matches the re-probe route (#196).
+    if "effective_url" in updates and "domain_name" not in other_fields:
+        other_fields = sorted([*other_fields, "domain_name"])
     if other_fields:
         audit(
             session,

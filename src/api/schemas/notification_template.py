@@ -36,7 +36,7 @@ class NotificationTemplateCreate(BaseModel):
     title: str = Field(..., max_length=100)
     remote_channel_id: str = Field(..., min_length=26, max_length=26)
     channel_hint: str = Field(default="remote", min_length=1, max_length=50)
-    events: list[str] = ["change_detected"]
+    events: list[str] = Field(default_factory=lambda: ["change_detected"])
     visibility: str = VISIBILITY_GLOBAL
     domain_name: str | None = Field(default=None, max_length=253)
     watched_item_id: ULIDStr | None = None
@@ -106,7 +106,7 @@ class ItemNotificationTemplateCreate(BaseModel):
     title: str = Field(..., max_length=100)
     remote_channel_id: str = Field(..., min_length=26, max_length=26)
     channel_hint: str = Field(default="remote", min_length=1, max_length=50)
-    events: list[str] = ["change_detected"]
+    events: list[str] = Field(default_factory=lambda: ["change_detected"])
     content_config: ContentConfig | None = None
 
     @field_validator("events")

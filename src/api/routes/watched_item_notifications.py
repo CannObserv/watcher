@@ -16,6 +16,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from notifier_client.errors import NotifierError
 from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from ulid import ULID
 
 from src.api.deps import get_db_session
 from src.api.routes.helpers import get_watched_item_or_404, parse_ulid
@@ -44,7 +45,7 @@ router = APIRouter(
 
 
 async def _item_template_or_404(
-    session: AsyncSession, watched_item_id, template_id: str
+    session: AsyncSession, watched_item_id: ULID, template_id: str
 ) -> NotificationTemplate:
     """Fetch a watched-item-scoped template, raising 404 if absent or not on this item."""
     tpl = await session.get(NotificationTemplate, parse_ulid(template_id, "Template"))

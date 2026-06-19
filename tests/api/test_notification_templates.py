@@ -129,6 +129,27 @@ async def test_create_watched_item_template(client: AsyncClient, db_session):
 
 
 @pytest.mark.integration
+async def test_create_domain_template_unknown_domain_404(client: AsyncClient):
+    """Schema shape is valid but the Domain doesn't exist → 404, not a 500 FK violation."""
+    resp = await client.post(
+        "/api/v1/notifications/templates",
+        json=_payload(title="Domain T", visibility="domain", domain_name="nope.example.com"),
+    )
+    assert resp.status_code == 404, resp.text
+    assert resp.json()["detail"] == "Domain not found"
+
+
+@pytest.mark.integration
+async def test_create_watched_item_template_unknown_item_404(client: AsyncClient):
+    """Schema shape is valid but the WatchedItem doesn't exist → 404, not a 500 FK violation."""
+    resp = await client.post(
+        "/api/v1/notifications/templates",
+        json=_payload(title="Item T", visibility="watched_item", watched_item_id=str(ULID())),
+    )
+    assert resp.status_code == 404, resp.text
+
+
+@pytest.mark.integration
 async def test_create_global_with_ref_rejected(client: AsyncClient):
     """model_validator: global must not carry a domain_name/watched_item_id (422)."""
     resp = await client.post(

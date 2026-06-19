@@ -886,7 +886,9 @@ async def watched_item_tag_remove(
     )
 
 
-async def _item_template_or_404(session: AsyncSession, wi, tpl_id: str) -> NotificationTemplate:
+async def _item_template_or_404(
+    session: AsyncSession, wi: WatchedItem, tpl_id: str
+) -> NotificationTemplate:
     """Fetch an item-scoped NotificationTemplate, 404 if absent or not on this item."""
     tpl = await session.get(NotificationTemplate, parse_ulid(tpl_id))
     if not tpl or tpl.visibility != VISIBILITY_WATCHED_ITEM or tpl.watched_item_id != wi.id:

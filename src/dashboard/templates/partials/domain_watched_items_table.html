@@ -82,7 +82,8 @@
           {{ (wi.default_schedule_config or {}).get("interval") or "—" }}
         </td>
         <td>
-          {% set health = wi.health_status.value if wi.health_status else "unknown" %}
+          {# health_status loads from the DB as a plain str — compare directly. #}
+          {% set health = wi.health_status or "unknown" %}
           {% if health == "ok" %}
             <span class="badge badge-active">Healthy</span>
           {% elif health == "error" %}

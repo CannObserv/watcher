@@ -3,6 +3,7 @@
 {% block title %}{{ watched_item.name }} — watcher{% endblock %}
 {% block content %}
 <div class="mb-6">
+  <p class="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-1">Watched Item</p>
   <h2 class="text-2xl font-semibold text-gray-900 dark:text-white">{{ watched_item.name }}</h2>
   {% if watched_item.description %}
   <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">{{ watched_item.description }}</p>
@@ -18,8 +19,8 @@
 <section class="mb-8">
   <h3 class="text-lg font-semibold text-gray-900 dark:text-white mb-4">Details</h3>
   <div class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 divide-y divide-gray-200 dark:divide-gray-700">
-    {# Status pause/resume toggle (carries the single status badge) #}
-    {% include "partials/watched_item_status_toggle.html" %}
+    {# Name #}
+    {{ watched_item_field(field_contexts["name"]) }}
     {# URL — field/value/actions row with an inline re-probe Edit affordance #}
     {% include "partials/watched_item_url_field.html" %}
     {# Domain — field/value #}
@@ -33,17 +34,10 @@
       </div>
     </div>
     {% endif %}
-    {{ watched_item_field(field_contexts["name"]) }}
-    {{ watched_item_field(field_contexts["description"]) }}
-    {{ watched_item_field(field_contexts["default_schedule_interval"]) }}
-    {{ watched_item_field(field_contexts["default_content_type"]) }}
-    {# Tags #}
-    <div class="p-4">
-      <span class="form-label mb-1 block">Tags</span>
-      <p class="text-xs text-gray-500 dark:text-gray-400 mb-2">Separate multiple tags with commas.</p>
-      {% include "partials/watched_item_tags_editor.html" %}
-    </div>
-    {# Last Checked — field/value with the Check-now action #}
+    {# Status pause/resume toggle (carries the single status badge) #}
+    {% include "partials/watched_item_status_toggle.html" %}
+    {# Last Checked — field/value with the Health badge inline (it's the result of
+       that check) plus the Check-now action. #}
     <div class="p-4">
       <div class="grid grid-cols-[1fr_auto] sm:grid-cols-[min(18rem,40%)_1fr_auto] items-center gap-x-4 gap-y-2">
         <div class="min-w-0"><span class="form-label mb-0">Last Checked</span></div>
@@ -52,6 +46,25 @@
         </div>
         <div class="col-span-2 sm:col-span-1 sm:col-start-2 sm:row-start-1 flex items-center gap-2 min-w-0">
           <span class="text-sm text-gray-700 dark:text-gray-300">{% if watched_item.last_checked_at %}{{ watched_item.last_checked_at.strftime("%Y-%m-%d %H:%M UTC") }}{% else %}Never checked{% endif %}</span>
+          {# health_status loads from the DB as a plain str (StrEnum-backed String
+             column), so compare/render it directly — `.value` would be Undefined. #}
+          {% set health = watched_item.health_status or "unknown" %}
+          {% if health == "error" %}{% set health_badge, health_tip = "badge-error", "The last check failed — see Recent Activity for details." %}
+          {% elif health == "ok" %}{% set health_badge, health_tip = "badge-active", "The last check completed successfully." %}
+          {% else %}{% set health_badge, health_tip = "badge-inactive", "No successful check has been recorded yet." %}{% endif %}
+          {# Accessible tooltip (no `title` attribute — AGENTS.md a11y rule). The
+             badge names itself "Health: <state>" and points aria-describedby at an
+             always-present sr-only element so AT announces the detail. The visible
+             bubble is a sighted-only enhancement on hover/keyboard-focus; it toggles
+             display:none, so it can't carry the description reliably. #}
+          {% set health_tip_id = "wi-health-tip-" ~ watched_item.id %}
+          <span class="relative inline-flex group">
+            <span class="badge {{ health_badge }} cursor-help" tabindex="0"
+              aria-label="Health: {{ health }}" aria-describedby="{{ health_tip_id }}">{{ health }}</span>
+            <span aria-hidden="true"
+              class="pointer-events-none absolute bottom-full start-1/2 -translate-x-1/2 mb-1.5 hidden group-hover:block group-focus-within:block w-max max-w-xs rounded-md bg-gray-900 dark:bg-gray-700 px-2 py-1 text-xs font-normal text-white shadow-lg z-20">{{ health_tip }}</span>
+            <span id="{{ health_tip_id }}" class="sr-only">{{ health_tip }}</span>
+          </span>
         </div>
       </div>
     </div>
@@ -64,21 +77,17 @@
         </div>
       </div>
     </div>
-    {# Health — field/value #}
+    {# Interval #}
+    {{ watched_item_field(field_contexts["default_schedule_interval"]) }}
+    {# Content Type #}
+    {{ watched_item_field(field_contexts["default_content_type"]) }}
+    {# Description #}
+    {{ watched_item_field(field_contexts["description"]) }}
+    {# Tags #}
     <div class="p-4">
-      <div class="grid grid-cols-[1fr_auto] sm:grid-cols-[min(18rem,40%)_1fr_auto] items-center gap-x-4 gap-y-2">
-        <div class="min-w-0"><span class="form-label mb-0">Health</span></div>
-        <div class="col-span-2 sm:col-span-1 sm:col-start-2 sm:row-start-1 flex items-center gap-2 min-w-0">
-          {% set health = watched_item.health_status.value if watched_item.health_status else "unknown" %}
-          {% if health == "error" %}
-          <span class="badge badge-error">error</span>
-          {% elif health == "ok" %}
-          <span class="badge badge-active">ok</span>
-          {% else %}
-          <span class="badge badge-inactive">unknown</span>
-          {% endif %}
-        </div>
-      </div>
+      <span class="form-label mb-1 block">Tags</span>
+      <p class="text-xs text-gray-500 dark:text-gray-400 mb-2">Separate multiple tags with commas.</p>
+      {% include "partials/watched_item_tags_editor.html" %}
     </div>
   </div>
 </section>

@@ -213,6 +213,25 @@ class TestDomainWatchedItemsTableDomainInactiveBadge:
         assert b"Health" in response.content
         assert b"Interval" in response.content
 
+    async def test_table_health_badge_resolves_string_status(self, client, db_session):
+        """#202 CR: health_status loads as a plain str — the badge must reflect it.
+
+        The prior `wi.health_status.value` access yielded Jinja Undefined and the
+        column always rendered the 'Unknown' fallback, regardless of real health.
+        """
+        db_session.add(Domain(name="health-tbl.com"))
+        await make_watched_item(
+            db_session,
+            name="HealthyWatch",
+            primary_url="https://health-tbl.com/p",
+            domain_name="health-tbl.com",
+            health_status="ok",
+        )
+        response = await client.get("/partials/domain-watched-items/health-tbl.com")
+        assert response.status_code == 200
+        assert b"Healthy" in response.content
+        assert b"badge-active" in response.content
+
 
 class TestDomainInlineUpdate:
     async def test_update_min_interval_htmx(self, client, db_session):

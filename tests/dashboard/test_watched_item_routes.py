@@ -313,6 +313,57 @@ class TestDetailPage:
         assert response.status_code == 200
         assert b"Detail Item" in response.content
 
+    async def test_detail_heading_has_watched_item_eyebrow(self, client, db_session):
+        """#202: page heading shows a subdued 'Watched Item' kicker above the name."""
+        wi = await _make_wi(db_session, name="EyebrowItem")
+        body = (await client.get(f"/watched-items/{wi.id}")).content
+        assert b">Watched Item</p>" in body
+
+    async def test_detail_health_inline_with_last_checked(self, client, db_session):
+        """#202: Health badge moves inline after the Last Checked value (no standalone row).
+
+        Uses the string health_status the DB actually loads (StrEnum-backed String
+        column) — the prior `.value` access yielded Undefined and always rendered
+        'unknown' in production.
+        """
+        wi = await _make_wi(db_session, name="HealthInline", health_status="ok")
+        body = (await client.get(f"/watched-items/{wi.id}")).content.decode()
+        # No standalone Health row label anymore…
+        assert ">Health</span>" not in body
+        # …badge names itself + describes the detail via aria-describedby → sr-only span.
+        tip_id = f"wi-health-tip-{wi.id}"
+        assert 'aria-label="Health: ok"' in body
+        assert f'aria-describedby="{tip_id}"' in body
+        assert f'id="{tip_id}"' in body
+        assert "The last check completed successfully." in body
+        assert body.index("Last Checked") < body.index('aria-label="Health: ok"')
+
+    async def test_detail_row_order(self, client, db_session):
+        """#202: Details rows render Name, URL, Domain, Status, Last Checked,
+        Last Changed, Interval, Content Type, Description, Tags — in that order."""
+        db_session.add(Domain(name="order-domain.com"))
+        wi = await _make_wi(
+            db_session,
+            name="OrderItem",
+            effective_url="https://example.com",
+            domain_name="order-domain.com",
+        )
+        body = (await client.get(f"/watched-items/{wi.id}")).content.decode()
+        labels = [
+            ">Name</span>",
+            ">URL</span>",
+            ">Domain</span>",
+            ">Status</span>",
+            ">Last Checked</span>",
+            ">Last Changed</span>",
+            ">Interval</span>",
+            ">Content Type</span>",
+            ">Description</span>",
+            ">Tags</span>",
+        ]
+        positions = [body.index(s) for s in labels]
+        assert positions == sorted(positions), positions
+
     async def test_detail_consolidates_into_details_panel(self, client, db_session):
         """#202: the top panels merge into one 'Details' panel; 'Defaults' is gone."""
         wi = await _make_wi(db_session, name="PanelMerge", effective_url="https://example.com")
@@ -899,12 +950,14 @@ class TestPauseResume:
         assert b"Checked \xe2\x80\x94 no change" in resp.content  # em-dash
 
     async def test_detail_shows_health_when_unknown(self, client, db_session):
-        """Health row renders even when status is the default UNKNOWN (#190)."""
+        """Health badge + tooltip render inline (bound to Last Checked) even when UNKNOWN (#202)."""
         wi = await _make_wi(db_session, name="UnknownHealth")
         resp = await client.get(f"/watched-items/{wi.id}")
         assert resp.status_code == 200
-        assert b"Health" in resp.content
-        assert b"unknown" in resp.content.lower()
+        body = resp.content
+        assert b'aria-label="Health: unknown' in body
+        assert b'class="badge badge-inactive cursor-help"' in body
+        assert b"No successful check has been recorded yet." in body  # tooltip text
 
 
 class TestCheckNow:

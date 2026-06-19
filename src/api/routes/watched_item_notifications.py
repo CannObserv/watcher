@@ -39,7 +39,7 @@ from src.core.notifier_client import get_notifier_client
 logger = get_logger(__name__)
 
 router = APIRouter(
-    prefix="/watched-items/{watched_item_id}/notifications", tags=["notification-configs"]
+    prefix="/watched-items/{watched_item_id}/notifications", tags=["watched-item-notifications"]
 )
 
 

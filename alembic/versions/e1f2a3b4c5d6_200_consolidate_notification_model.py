@@ -20,6 +20,7 @@ from collections.abc import Sequence
 
 import sqlalchemy as sa
 from alembic import op
+from sqlalchemy.dialects import postgresql
 from ulid import ULID
 
 revision: str = "e1f2a3b4c5d6"
@@ -204,7 +205,7 @@ def _recreate_legacy_tables() -> None:
             sa.Column("channel_hint", sa.String(length=50), nullable=False),
             sa.Column("events", sa.ARRAY(sa.String(length=50)), nullable=False),
             sa.Column("is_active", sa.Boolean(), server_default="true", nullable=False),
-            sa.Column("content_config", sa.dialects.postgresql.JSONB(), nullable=True),
+            sa.Column("content_config", postgresql.JSONB(astext_type=sa.Text()), nullable=True),
             sa.Column("remote_channel_id", sa.String(length=26), nullable=True),
             sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("now()")),
             sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.text("now()")),
@@ -255,10 +256,12 @@ def downgrade() -> None:
             ),
             {"nid": str(ULID()), "sid": sid},
         )
-    # Domain + watched_item rows existed only as scoped copies post-#200; remove them so the
-    # library returns to global-only library templates.
+    # Watched-item rows moved into watched_item_notification_templates above, so remove them
+    # from the library. Domain rows STAY in notification_templates (pre-#200 they were library
+    # templates pointed at by domain_nc_refs) — deleting them would cascade-delete the
+    # domain_nc_refs rows just re-inserted (FK ondelete=CASCADE).
     conn.execute(
-        sa.text("DELETE FROM notification_templates WHERE visibility IN ('domain','watched_item')")
+        sa.text("DELETE FROM notification_templates WHERE visibility = 'watched_item'")
     )
 
     op.drop_index("ix_notification_templates_watched_item_id", "notification_templates")

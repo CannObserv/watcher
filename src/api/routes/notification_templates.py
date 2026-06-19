@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ulid import ULID
 
 from src.api.deps import get_db_session
+from src.api.routes.helpers import get_watched_item_or_404
 from src.api.schemas.notification_template import (
     NotificationTemplateCreate,
     NotificationTemplateResponse,
@@ -24,7 +25,12 @@ from src.api.schemas.notification_template import (
 )
 from src.core.logging import get_logger
 from src.core.models.audit_log import EventType, audit
-from src.core.models.notification_template import NotificationTemplate
+from src.core.models.domain import Domain
+from src.core.models.notification_template import (
+    VISIBILITY_DOMAIN,
+    VISIBILITY_WATCHED_ITEM,
+    NotificationTemplate,
+)
 from src.core.notifications.events import WatchEvent, WatchEventType
 from src.core.notifications.notify import DispatchCandidate, dispatch_via_notifier
 from src.core.notifier_client import get_notifier_client
@@ -54,7 +60,18 @@ async def create_template(
     data: NotificationTemplateCreate,
     session: AsyncSession = Depends(get_db_session),
 ) -> NotificationTemplate:
-    """Create a notification template at the requested visibility scope."""
+    """Create a notification template at the requested visibility scope.
+
+    The scope/ref shape is validated by the schema; here we confirm the
+    referenced Domain/WatchedItem actually exists so a bad ref returns 404
+    rather than a 500 from the FK violation.
+    """
+    if data.visibility == VISIBILITY_DOMAIN:
+        # Domain PK is `id`; `name` is the FK target, so look it up by name.
+        if await session.scalar(select(Domain).where(Domain.name == data.domain_name)) is None:
+            raise HTTPException(status_code=404, detail="Domain not found")
+    elif data.visibility == VISIBILITY_WATCHED_ITEM:
+        await get_watched_item_or_404(data.watched_item_id, session)
     tpl = NotificationTemplate(
         title=data.title,
         channel_hint=data.channel_hint,

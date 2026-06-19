@@ -1,4 +1,4 @@
-"""Pydantic schemas for WatchedItem, WatchedItemNotificationTemplate, and ChangeRevision."""
+"""Pydantic schemas for WatchedItem and ChangeRevision."""
 
 from datetime import datetime
 

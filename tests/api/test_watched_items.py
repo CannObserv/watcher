@@ -196,86 +196,13 @@ class TestMarkReviewed:
         assert response.status_code == 404
 
 
-class TestTemplateCrud:
-    async def test_list_empty(self, client, db_session):
-        wi = await _make_watched_item(db_session)
-        response = await client.get(f"/api/v1/watched-items/{wi.id}/notification-templates")
-        assert response.status_code == 200
-        assert response.json() == []
-
-    async def test_create_returns_record(self, client, db_session):
-        wi = await _make_watched_item(db_session)
-        response = await client.post(
-            f"/api/v1/watched-items/{wi.id}/notification-templates",
-            json={
-                "title": "Email Greg",
-                "channel_hint": "mailto://x:y@z",
-                "events": ["change_detected"],
-            },
-        )
-        assert response.status_code == 201
-        data = response.json()
-        assert data["title"] == "Email Greg"
-        assert data["watched_item_id"] == str(wi.id)
-
-    async def test_omitted_content_config_persists_sql_null(self, client, db_session):
-        """Omitting content_config stores SQL NULL, not JSONB 'null' (#198)."""
-        wi = await _make_watched_item(db_session)
-        response = await client.post(
-            f"/api/v1/watched-items/{wi.id}/notification-templates",
-            json={"channel_hint": "mailto://x:y@z"},
-        )
-        assert response.status_code == 201, response.text
-        tpl_id = response.json()["id"]
-        is_sql_null = (
-            await db_session.execute(
-                text(
-                    "SELECT content_config IS NULL "
-                    "FROM watched_item_notification_templates WHERE id = :id"
-                ),
-                {"id": tpl_id},
-            )
-        ).scalar_one()
-        assert is_sql_null is True
-
-    async def test_create_404_unknown_parent(self, client):
-        from ulid import ULID
-
-        response = await client.post(
-            f"/api/v1/watched-items/{ULID()}/notification-templates",
-            json={"channel_hint": "mailto://x:y@z"},
-        )
-        assert response.status_code == 404
-
-    async def test_patch_updates(self, client, db_session):
-        wi = await _make_watched_item(db_session)
-        create = await client.post(
-            f"/api/v1/watched-items/{wi.id}/notification-templates",
-            json={"channel_hint": "mailto://x:y@z"},
-        )
-        tpl_id = create.json()["id"]
-        response = await client.patch(
-            f"/api/v1/watched-items/{wi.id}/notification-templates/{tpl_id}",
-            json={"is_active": False, "title": "Renamed"},
-        )
-        assert response.status_code == 200
-        assert response.json()["is_active"] is False
-        assert response.json()["title"] == "Renamed"
-
-    async def test_delete(self, client, db_session):
-        wi = await _make_watched_item(db_session)
-        create = await client.post(
-            f"/api/v1/watched-items/{wi.id}/notification-templates",
-            json={"channel_hint": "mailto://x:y@z"},
-        )
-        tpl_id = create.json()["id"]
-        response = await client.delete(
-            f"/api/v1/watched-items/{wi.id}/notification-templates/{tpl_id}"
-        )
-        assert response.status_code == 204
-        # Verify gone
-        listing = await client.get(f"/api/v1/watched-items/{wi.id}/notification-templates")
-        assert listing.json() == []
+# TestTemplateCrud removed (#200): the per-WatchedItem
+# /api/v1/watched-items/{id}/notification-templates endpoints (list/create/patch/
+# delete of WatchedItemNotificationTemplate rows) were deleted in the notification-
+# model consolidation. Item-scoped notifications are now NotificationTemplate rows
+# with visibility='watched_item', managed via the
+# /api/v1/watched-items/{id}/notifications API surface and the dashboard item-
+# template routes (tests/dashboard/test_watched_item_templates.py).
 
 
 class TestWatchedItemRevisions:

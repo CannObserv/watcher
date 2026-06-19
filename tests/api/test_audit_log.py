@@ -70,9 +70,11 @@ class TestWatchedItemEventTypes:
         assert EventType.WATCHED_ITEM_PAUSED == "watched_item.paused"
         assert EventType.WATCHED_ITEM_RESUMED == "watched_item.resumed"
         assert EventType.WATCHED_ITEM_REVIEWED == "watched_item.reviewed"
-        assert EventType.WATCHED_ITEM_TEMPLATE_CREATED == "watched_item_template.created"
-        assert EventType.WATCHED_ITEM_TEMPLATE_UPDATED == "watched_item_template.updated"
-        assert EventType.WATCHED_ITEM_TEMPLATE_DELETED == "watched_item_template.deleted"
+        # #200: the five legacy notification sources (incl. watched_item_template.*)
+        # collapsed into one NotificationTemplate set with these unified events.
+        assert EventType.NOTIFICATION_TEMPLATE_CREATED == "notification_template.created"
+        assert EventType.NOTIFICATION_TEMPLATE_UPDATED == "notification_template.updated"
+        assert EventType.NOTIFICATION_TEMPLATE_DELETED == "notification_template.deleted"
 
 
 def test_watched_item_created_event_exists():

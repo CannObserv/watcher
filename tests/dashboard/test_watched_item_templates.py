@@ -1,4 +1,11 @@
-"""Integration tests for WatchedItem notification-template UI."""
+"""Integration tests for WatchedItem notification-template UI (#200).
+
+Post-#200 item notifications are ``NotificationTemplate`` rows with
+``visibility='watched_item'`` (the five legacy dispatch sources collapsed into
+one scoped table). The dashboard item-template routes operate on those rows; the
+panel also surfaces read-only Global (``visibility='global'``) and Domain
+(``visibility='domain'``) inherited sections.
+"""
 
 import pytest
 
@@ -18,14 +25,17 @@ async def _seed(db_session, name="WI"):
 
 
 async def _seed_tpl(db_session, watched_item):
-    from src.core.models.watched_item_notification_template import (
-        WatchedItemNotificationTemplate,
+    from src.core.models.notification_template import (
+        VISIBILITY_WATCHED_ITEM,
+        NotificationTemplate,
     )
 
-    tpl = WatchedItemNotificationTemplate(
+    tpl = NotificationTemplate(
+        visibility=VISIBILITY_WATCHED_ITEM,
         watched_item_id=watched_item.id,
         title="Email",
         channel_hint="mailto://x:y@z",
+        events=["change_detected"],
     )
     db_session.add(tpl)
     await db_session.flush()
@@ -69,23 +79,50 @@ class TestTemplatesPartial:
 
 
 class TestInheritedNotificationSections:
-    """#199: global + domain templates that fire for an item are surfaced read-only.
+    """#199/#200: global + domain templates that fire for an item are surfaced read-only.
 
     These sources dispatch for the item (``dispatch_event_notifications``) but
     are not item-owned, so the panel shows them above the item-template table
-    with no assign/remove — Edit/Test link back to the global library.
+    with no assign/remove — Edit/Test link back to the global library. Post-#200
+    they are simply ``NotificationTemplate`` rows with ``visibility='global'`` /
+    ``'domain'`` (no separate ref tables).
     """
 
-    async def _global_tpl(self, db_session, title, *, is_global_default=True, is_active=True):
+    async def _global_tpl(self, db_session, title, *, is_active=True):
         from ulid import ULID
 
-        from src.core.models.notification_template import NotificationTemplate
+        from src.core.models.notification_template import (
+            VISIBILITY_GLOBAL,
+            NotificationTemplate,
+        )
 
         tpl = NotificationTemplate(
             title=title,
             channel_hint="mailto",
             events=["change_detected"],
-            is_global_default=is_global_default,
+            visibility=VISIBILITY_GLOBAL,
+            is_active=is_active,
+            remote_channel_id=str(ULID()),
+        )
+        db_session.add(tpl)
+        await db_session.flush()
+        await db_session.commit()
+        return tpl
+
+    async def _domain_tpl(self, db_session, title, domain_name, *, is_active=True):
+        from ulid import ULID
+
+        from src.core.models.notification_template import (
+            VISIBILITY_DOMAIN,
+            NotificationTemplate,
+        )
+
+        tpl = NotificationTemplate(
+            title=title,
+            channel_hint="slack",
+            events=["change_detected"],
+            visibility=VISIBILITY_DOMAIN,
+            domain_name=domain_name,
             is_active=is_active,
             remote_channel_id=str(ULID()),
         )
@@ -115,8 +152,17 @@ class TestInheritedNotificationSections:
         assert b"No global templates" in response.content
 
     async def test_non_global_absent_from_global_section(self, client, db_session):
-        wi = await _seed(db_session)
-        await self._global_tpl(db_session, "NotGlobalTpl", is_global_default=False)
+        """A domain-scoped template (visibility != 'global') must not leak into the Global section.
+
+        Replaces the pre-#200 ``is_global_default=False`` case — non-global is now
+        expressed by a different ``visibility`` rather than a flag.
+        """
+        from tests.conftest import make_watched_item
+
+        wi = await make_watched_item(db_session, name="WI-NoLeak", domain_name="leak.example.com")
+        # Domain-scoped on a *different* domain so it is neither global nor this item's domain.
+        await make_watched_item(db_session, name="OtherDom", domain_name="other.example.com")
+        await self._domain_tpl(db_session, "NotGlobalTpl", "other.example.com")
         response = await client.get(
             f"/partials/watched-item-templates/{wi.id}",
             headers={"HX-Request": "true"},
@@ -124,14 +170,10 @@ class TestInheritedNotificationSections:
         assert b"NotGlobalTpl" not in response.content
 
     async def test_domain_section_lists_domain_templates(self, client, db_session):
-        from src.core.models.notification_template import DomainNcRef
         from tests.conftest import make_watched_item
 
         wi = await make_watched_item(db_session, name="WI-Domain", domain_name="dom-nc.example.com")
-        tpl = await self._global_tpl(db_session, "DomainSlackTpl", is_global_default=False)
-        db_session.add(DomainNcRef(domain_name="dom-nc.example.com", template_id=tpl.id))
-        await db_session.flush()
-        await db_session.commit()
+        await self._domain_tpl(db_session, "DomainSlackTpl", "dom-nc.example.com")
 
         response = await client.get(
             f"/partials/watched-item-templates/{wi.id}",
@@ -184,6 +226,41 @@ class TestTemplateCrudRoutes:
             headers={"HX-Request": "true"},
         )
         assert b"T1" in listing.content
+
+    async def test_create_persists_watched_item_visibility(self, client, db_session):
+        """#200: the create route persists a visibility='watched_item' row keyed to the item."""
+        from sqlalchemy import select
+
+        from src.core.models.notification_template import (
+            VISIBILITY_WATCHED_ITEM,
+            NotificationTemplate,
+        )
+
+        wi = await _seed(db_session)
+        response = await client.post(
+            f"/watched-items/{wi.id}/templates",
+            data={
+                "title": "Persisted",
+                "channel_hint": "mailto://a:b@c",
+                "events": "change_detected",
+            },
+            headers={"HX-Request": "true"},
+        )
+        assert response.status_code == 200
+        rows = (
+            (
+                await db_session.execute(
+                    select(NotificationTemplate).where(
+                        NotificationTemplate.watched_item_id == wi.id
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert len(rows) == 1
+        assert rows[0].visibility == VISIBILITY_WATCHED_ITEM
+        assert rows[0].title == "Persisted"
 
     async def test_edit_form_renders(self, client, db_session):
         wi = await _seed(db_session)

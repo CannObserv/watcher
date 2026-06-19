@@ -31,35 +31,31 @@ def _make_event(event_type=WatchEventType.CHANGE_DETECTED):
     )
 
 
-def _watch_meta_result(domain=None, watched_item_id=None, *, missing=False):
-    """Default: a watch exists with the given domain + a synthetic watched_item_id.
-
-    Pass ``missing=True`` to simulate Watch.one_or_none() returning None (no row).
-    """
-    r = MagicMock()
-    if missing:
-        r.one_or_none.return_value = None
-    else:
-        wid = watched_item_id if watched_item_id is not None else ULID()
-        r.one_or_none.return_value = (domain, wid)
-    return r
-
-
-def _empty_result():
-    r = MagicMock()
-    r.scalars.return_value.all.return_value = []
-    return r
-
-
 def _result_with(*items):
     r = MagicMock()
     r.scalars.return_value.all.return_value = list(items)
     return r
 
 
+def _wi(domain_name=None):
+    """Mock the WatchedItem returned by ``session.get`` in the dispatcher."""
+    wi = MagicMock()
+    wi.domain_name = domain_name
+    return wi
+
+
+def _setup_session(*, templates=()):
+    """AsyncMock session for the post-#200 dispatcher: ``session.get`` then one ``execute``."""
+    session = AsyncMock()
+    session.get = AsyncMock(return_value=_wi())
+    session.execute = AsyncMock(return_value=_result_with(*templates))
+    return session
+
+
 def _fake_local_config(remote_channel_id=None):
     c = MagicMock()
     c.id = ULID()
+    c.visibility = "watched_item"
     c.events = ["change_detected"]
     c.content_config = None
     c.remote_channel_id = remote_channel_id
@@ -106,16 +102,7 @@ class TestRemoteOnlyDispatch:
         local_cfg = _fake_local_config(remote_channel_id=remote_id)
         event = _make_event()
 
-        session = AsyncMock()
-        session.execute = AsyncMock(
-            side_effect=[
-                _watch_meta_result(None),
-                _empty_result(),  # global
-                _empty_result(),  # watch templates
-                _empty_result(),  # watched_item templates
-                _result_with(local_cfg),  # local
-            ]
-        )
+        session = _setup_session(templates=[local_cfg])
 
         mock_client = _mock_notifier_client()
 
@@ -151,16 +138,7 @@ class TestRemoteOnlyDispatch:
         local_cfg = _fake_local_config(remote_channel_id=None)
         event = _make_event()
 
-        session = AsyncMock()
-        session.execute = AsyncMock(
-            side_effect=[
-                _watch_meta_result(None),
-                _empty_result(),
-                _empty_result(),
-                _empty_result(),
-                _result_with(local_cfg),
-            ]
-        )
+        session = _setup_session(templates=[local_cfg])
 
         mock_client = _mock_notifier_client()
 

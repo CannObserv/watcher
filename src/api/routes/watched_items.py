@@ -18,18 +18,12 @@ from src.api.schemas.watched_item import (
     WatchedItemCreate,
     WatchedItemPatch,
     WatchedItemResponse,
-    WatchedItemTemplateCreate,
-    WatchedItemTemplatePatch,
-    WatchedItemTemplateResponse,
 )
 from src.core.domains import domain_name_for_url, ensure_domain_and_resolve_suspension
 from src.core.logging import get_logger
 from src.core.models.audit_log import EventType, audit
 from src.core.models.change_revision import ChangeRevision
 from src.core.models.watched_item import WatchedItem
-from src.core.models.watched_item_notification_template import (
-    WatchedItemNotificationTemplate,
-)
 from src.core.probe import ProbeResult
 from src.core.registry import get_registry
 from src.workers.tasks import check_watched_item
@@ -360,106 +354,3 @@ async def list_revisions(watched_item_id: str, session: AsyncSession = Depends(g
         .order_by(ChangeRevision.captured_at.desc())
     )
     return list(result.scalars().all())
-
-
-async def _template_or_404(
-    session: AsyncSession, wi: WatchedItem, tpl_id: str
-) -> WatchedItemNotificationTemplate:
-    """Fetch a WatchedItemNotificationTemplate, raising 404 if absent or mismatched."""
-    tpl = await session.get(WatchedItemNotificationTemplate, parse_ulid(tpl_id))
-    if tpl is None or tpl.watched_item_id != wi.id:
-        raise HTTPException(status_code=404, detail="Template not found")
-    return tpl
-
-
-@router.get(
-    "/{watched_item_id}/notification-templates",
-    response_model=list[WatchedItemTemplateResponse],
-)
-async def list_templates(watched_item_id: str, session: AsyncSession = Depends(get_db_session)):
-    """List notification templates under a WatchedItem."""
-    wi = await _get_or_404(session, watched_item_id)
-    result = await session.execute(
-        select(WatchedItemNotificationTemplate)
-        .where(WatchedItemNotificationTemplate.watched_item_id == wi.id)
-        .order_by(WatchedItemNotificationTemplate.created_at)
-    )
-    return list(result.scalars().all())
-
-
-@router.post(
-    "/{watched_item_id}/notification-templates",
-    response_model=WatchedItemTemplateResponse,
-    status_code=201,
-)
-async def create_template(
-    watched_item_id: str,
-    data: WatchedItemTemplateCreate,
-    session: AsyncSession = Depends(get_db_session),
-):
-    """Create a notification template under a WatchedItem."""
-    wi = await _get_or_404(session, watched_item_id)
-    tpl = WatchedItemNotificationTemplate(
-        watched_item_id=wi.id,
-        **data.model_dump(),
-    )
-    session.add(tpl)
-    audit(
-        session,
-        EventType.WATCHED_ITEM_TEMPLATE_CREATED,
-        watched_item_id=str(wi.id),
-        source="api",
-    )
-    await session.commit()
-    await session.refresh(tpl)
-    return tpl
-
-
-@router.patch(
-    "/{watched_item_id}/notification-templates/{tpl_id}",
-    response_model=WatchedItemTemplateResponse,
-)
-async def patch_template(
-    watched_item_id: str,
-    tpl_id: str,
-    data: WatchedItemTemplatePatch,
-    session: AsyncSession = Depends(get_db_session),
-):
-    """Update fields on an existing template."""
-    wi = await _get_or_404(session, watched_item_id)
-    tpl = await _template_or_404(session, wi, tpl_id)
-    updates = data.model_dump(exclude_unset=True)
-    for field, value in updates.items():
-        setattr(tpl, field, value)
-    if updates:
-        audit(
-            session,
-            EventType.WATCHED_ITEM_TEMPLATE_UPDATED,
-            watched_item_id=str(wi.id),
-            template_id=str(tpl.id),
-            updated_fields=sorted(updates.keys()),
-            source="api",
-        )
-    await session.commit()
-    await session.refresh(tpl)
-    return tpl
-
-
-@router.delete("/{watched_item_id}/notification-templates/{tpl_id}", status_code=204)
-async def delete_template(
-    watched_item_id: str,
-    tpl_id: str,
-    session: AsyncSession = Depends(get_db_session),
-):
-    """Delete a template."""
-    wi = await _get_or_404(session, watched_item_id)
-    tpl = await _template_or_404(session, wi, tpl_id)
-    audit(
-        session,
-        EventType.WATCHED_ITEM_TEMPLATE_DELETED,
-        watched_item_id=str(wi.id),
-        template_id=str(tpl.id),
-        source="api",
-    )
-    await session.delete(tpl)
-    await session.commit()

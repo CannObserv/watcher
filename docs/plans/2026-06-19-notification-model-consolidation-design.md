@@ -1,7 +1,7 @@
 ---
 title: Consolidate the notification template/config model onto a single scoped table (#200)
 date: 2026-06-19
-status: draft
+status: implemented
 ---
 
 # Notification model consolidation (post-#191)

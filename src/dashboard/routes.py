@@ -33,11 +33,13 @@ from src.core.domains import ensure_domain_and_resolve_suspension
 from src.core.logging import get_logger
 from src.core.models.audit_log import EventType, audit
 from src.core.models.domain import Domain
-from src.core.models.notification_template import DomainNcRef, NotificationTemplate, WatchNcRef
-from src.core.models.watched_item import ContentType, WatchedItem
-from src.core.models.watched_item_notification_template import (
-    WatchedItemNotificationTemplate,
+from src.core.models.notification_template import (
+    VISIBILITY_DOMAIN,
+    VISIBILITY_GLOBAL,
+    VISIBILITY_WATCHED_ITEM,
+    NotificationTemplate,
 )
+from src.core.models.watched_item import ContentType, WatchedItem
 from src.core.notifications.content import build_body, build_title, resolve_options
 from src.core.notifications.default_templates import (
     compose_body_prefill,
@@ -70,7 +72,6 @@ from src.dashboard.context import (
     get_watched_item_list,
     get_watched_item_notifications,
     get_watched_item_profiles,
-    get_watched_item_templates,
     get_watched_items_total_count,
 )
 from src.dashboard.deps import get_dashboard_user
@@ -489,10 +490,9 @@ async def watched_item_detail_page(
             request, "pages/404.html", {"request": request}, status_code=404
         )
 
-    wi_templates = await get_watched_item_templates(session, wi.id)
+    item_templates = await get_watched_item_notifications(session, wi.id)
     global_templates = await get_global_default_templates(session)
     domain_templates = await get_domain_default_templates(session, wi.domain_name)
-    notifications = await get_watched_item_notifications(session, wi.id)
     profiles = await get_watched_item_profiles(session, wi.id)
     activity = await get_watched_item_activity(session, watched_item_id)
 
@@ -510,10 +510,9 @@ async def watched_item_detail_page(
             "watched_item": wi,
             "flash": None,
             "field_contexts": field_contexts,
-            "templates": wi_templates,
+            "templates": item_templates,
             "global_templates": global_templates,
             "domain_templates": domain_templates,
-            "notifications": notifications,
             "profiles": profiles,
             "activity": activity,
         },
@@ -887,6 +886,14 @@ async def watched_item_tag_remove(
     )
 
 
+async def _item_template_or_404(session: AsyncSession, wi, tpl_id: str) -> NotificationTemplate:
+    """Fetch an item-scoped NotificationTemplate, 404 if absent or not on this item."""
+    tpl = await session.get(NotificationTemplate, parse_ulid(tpl_id))
+    if not tpl or tpl.visibility != VISIBILITY_WATCHED_ITEM or tpl.watched_item_id != wi.id:
+        raise HTTPException(status_code=404)
+    return tpl
+
+
 @router.get("/partials/watched-item-templates/{watched_item_id}")
 async def watched_item_templates_partial(
     request: Request,
@@ -896,7 +903,7 @@ async def watched_item_templates_partial(
     wi = await get_watched_item_detail(session, watched_item_id)
     if not wi:
         raise HTTPException(status_code=404, detail="WatchedItem not found")
-    wi_templates = await get_watched_item_templates(session, wi.id)
+    item_templates = await get_watched_item_notifications(session, wi.id)
     global_templates = await get_global_default_templates(session)
     domain_templates = await get_domain_default_templates(session, wi.domain_name)
     return templates.TemplateResponse(
@@ -904,7 +911,7 @@ async def watched_item_templates_partial(
         "partials/watched_item_templates.html",
         {
             "watched_item": wi,
-            "templates": wi_templates,
+            "templates": item_templates,
             "global_templates": global_templates,
             "domain_templates": domain_templates,
         },
@@ -945,22 +952,25 @@ async def watched_item_template_create(
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-    tpl = WatchedItemNotificationTemplate(
+    tpl = NotificationTemplate(
+        visibility=VISIBILITY_WATCHED_ITEM,
         watched_item_id=wi.id,
-        title=title.strip() or None,
+        title=title.strip() or channel_hint.strip(),
         channel_hint=channel_hint.strip(),
         events=event_list,
     )
     session.add(tpl)
+    await session.flush()
     audit(
         session,
-        EventType.WATCHED_ITEM_TEMPLATE_CREATED,
+        EventType.NOTIFICATION_TEMPLATE_CREATED,
         watched_item_id=str(wi.id),
+        template_id=str(tpl.id),
         source="dashboard",
     )
     await session.commit()
 
-    refreshed = await get_watched_item_templates(session, wi.id)
+    refreshed = await get_watched_item_notifications(session, wi.id)
     return templates.TemplateResponse(
         request,
         "partials/watched_item_template_rows.html",
@@ -978,9 +988,7 @@ async def watched_item_template_edit_form(
     wi = await get_watched_item_detail(session, watched_item_id)
     if not wi:
         raise HTTPException(status_code=404)
-    tpl = await session.get(WatchedItemNotificationTemplate, parse_ulid(tpl_id))
-    if not tpl or tpl.watched_item_id != wi.id:
-        raise HTTPException(status_code=404)
+    tpl = await _item_template_or_404(session, wi, tpl_id)
     return templates.TemplateResponse(
         request,
         "partials/watched_item_template_form.html",
@@ -1001,27 +1009,25 @@ async def watched_item_template_update(
     wi = await get_watched_item_detail(session, watched_item_id)
     if not wi:
         raise HTTPException(status_code=404)
-    tpl = await session.get(WatchedItemNotificationTemplate, parse_ulid(tpl_id))
-    if not tpl or tpl.watched_item_id != wi.id:
-        raise HTTPException(status_code=404)
+    tpl = await _item_template_or_404(session, wi, tpl_id)
     event_list = [e.strip() for e in events.split(",") if e.strip()]
     try:
         event_list = validate_event_list(event_list)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    tpl.title = title.strip() or None
+    tpl.title = title.strip() or channel_hint.strip()
     tpl.channel_hint = channel_hint.strip()
     tpl.events = event_list
     audit(
         session,
-        EventType.WATCHED_ITEM_TEMPLATE_UPDATED,
+        EventType.NOTIFICATION_TEMPLATE_UPDATED,
         watched_item_id=str(wi.id),
         template_id=str(tpl.id),
         source="dashboard",
     )
     await session.commit()
 
-    refreshed = await get_watched_item_templates(session, wi.id)
+    refreshed = await get_watched_item_notifications(session, wi.id)
     return templates.TemplateResponse(
         request,
         "partials/watched_item_template_rows.html",
@@ -1039,12 +1045,10 @@ async def watched_item_template_delete(
     wi = await get_watched_item_detail(session, watched_item_id)
     if not wi:
         raise HTTPException(status_code=404)
-    tpl = await session.get(WatchedItemNotificationTemplate, parse_ulid(tpl_id))
-    if not tpl or tpl.watched_item_id != wi.id:
-        raise HTTPException(status_code=404)
+    tpl = await _item_template_or_404(session, wi, tpl_id)
     audit(
         session,
-        EventType.WATCHED_ITEM_TEMPLATE_DELETED,
+        EventType.NOTIFICATION_TEMPLATE_DELETED,
         watched_item_id=str(wi.id),
         template_id=str(tpl.id),
         source="dashboard",
@@ -1052,7 +1056,7 @@ async def watched_item_template_delete(
     await session.delete(tpl)
     await session.commit()
 
-    refreshed = await get_watched_item_templates(session, wi.id)
+    refreshed = await get_watched_item_notifications(session, wi.id)
     return templates.TemplateResponse(
         request,
         "partials/watched_item_template_rows.html",
@@ -1486,32 +1490,28 @@ async def domain_detail_page(
 
 
 async def _render_domain_nc_defaults(request: Request, domain_name: str, session: AsyncSession):
-    """Render the domain_nc_defaults partial for *domain_name*."""
+    """Render the domain_nc_defaults partial for *domain_name* (#200).
+
+    Post-#200 a domain's templates are ``NotificationTemplate`` rows with
+    ``visibility='domain'`` — there is no assign-existing flow (a template has one
+    intrinsic scope). Globals are shown read-only as inherited context.
+    """
     assigned_result = await session.execute(
         select(NotificationTemplate)
-        .join(DomainNcRef, DomainNcRef.template_id == NotificationTemplate.id)
-        .where(DomainNcRef.domain_name == domain_name)
+        .where(
+            NotificationTemplate.visibility == VISIBILITY_DOMAIN,
+            NotificationTemplate.domain_name == domain_name,
+        )
         .order_by(NotificationTemplate.title)
     )
     assigned = assigned_result.scalars().all()
-    assigned_ids = {str(t.id) for t in assigned}
 
     global_result = await session.execute(
         select(NotificationTemplate)
-        .where(NotificationTemplate.is_global_default.is_(True))
+        .where(NotificationTemplate.visibility == VISIBILITY_GLOBAL)
         .order_by(NotificationTemplate.title)
     )
     global_templates = global_result.scalars().all()
-
-    # Count assignable templates: active, non-global, not already assigned to this domain.
-    # Used to disable the + Assign Existing button when empty.
-    assignable_result = await session.execute(
-        select(NotificationTemplate).where(
-            NotificationTemplate.is_active.is_(True),
-            NotificationTemplate.is_global_default.is_(False),
-        )
-    )
-    has_assignable = any(str(t.id) not in assigned_ids for t in assignable_result.scalars().all())
 
     return templates.TemplateResponse(
         request,
@@ -1520,40 +1520,7 @@ async def _render_domain_nc_defaults(request: Request, domain_name: str, session
             "domain_name": domain_name,
             "assigned": assigned,
             "global_templates": global_templates,
-            "has_assignable": has_assignable,
         },
-    )
-
-
-@router.get("/domains/{domain_name}/nc-defaults/assign-row")
-async def domain_nc_defaults_assign_row(
-    request: Request,
-    domain_name: str,
-    session: AsyncSession = Depends(get_db_session),
-):
-    """HTMX: inline assign-row form for adding a domain NC default."""
-    assigned_result = await session.execute(
-        select(NotificationTemplate)
-        .join(DomainNcRef, DomainNcRef.template_id == NotificationTemplate.id)
-        .where(DomainNcRef.domain_name == domain_name)
-    )
-    assigned = assigned_result.scalars().all()
-    assigned_ids = {str(t.id) for t in assigned}
-
-    all_result = await session.execute(
-        select(NotificationTemplate)
-        .where(
-            NotificationTemplate.is_active.is_(True),
-            NotificationTemplate.is_global_default.is_(False),
-        )
-        .order_by(NotificationTemplate.title)
-    )
-    all_templates = all_result.scalars().all()
-    unassigned = [t for t in all_templates if str(t.id) not in assigned_ids]
-    return templates.TemplateResponse(
-        request,
-        "partials/domain_nc_assign_row.html",
-        {"domain_name": domain_name, "unassigned": unassigned},
     )
 
 
@@ -1627,14 +1594,14 @@ async def domain_notification_create(
         title=title,
         channel_hint=channel_hint,
         events=events,
-        is_global_default=False,
+        visibility=VISIBILITY_DOMAIN,
+        domain_name=domain_name,
         is_active=True,
         content_config=_cc,
         remote_channel_id=remote_channel_id,
     )
     session.add(tpl)
     await session.flush()
-    session.add(DomainNcRef(domain_name=domain_name, template_id=tpl.id))
     audit(
         session,
         EventType.NOTIFICATION_TEMPLATE_CREATED,
@@ -1643,12 +1610,6 @@ async def domain_notification_create(
         channel_hint=channel_hint,
         source="domain_dashboard",
         domain_name=domain_name,
-    )
-    audit(
-        session,
-        EventType.DOMAIN_NC_DEFAULT_ADDED,
-        domain_name=domain_name,
-        template_id=str(tpl.id),
     )
     await session.commit()
     return RedirectResponse(url=f"/domains/{domain_name}", status_code=303)
@@ -1664,39 +1625,6 @@ async def domain_nc_defaults_partial(
     return await _render_domain_nc_defaults(request, domain_name, session)
 
 
-@router.post("/domains/{domain_name}/nc-defaults/add/{template_id}")
-async def domain_nc_default_add(
-    request: Request,
-    domain_name: str,
-    template_id: str,
-    session: AsyncSession = Depends(get_db_session),
-):
-    """Add a notification template as a default for a domain."""
-    if request.headers.get("HX-Request") != "true":
-        return RedirectResponse(url=f"/domains/{domain_name}", status_code=303)
-    domain = await session.scalar(select(Domain).where(Domain.name == domain_name))
-    if not domain:
-        raise HTTPException(status_code=404, detail="Domain not found")
-    existing = await session.scalar(
-        select(DomainNcRef).where(
-            DomainNcRef.domain_name == domain_name,
-            DomainNcRef.template_id == template_id,  # type: ignore[arg-type]
-        )
-    )
-    if not existing:
-        session.add(
-            DomainNcRef(domain_name=domain_name, template_id=template_id)  # type: ignore[arg-type]
-        )
-        audit(
-            session,
-            EventType.DOMAIN_NC_DEFAULT_ADDED,
-            domain_name=domain_name,
-            template_id=template_id,
-        )
-        await session.commit()
-    return await _render_domain_nc_defaults(request, domain_name, session)
-
-
 @router.post("/domains/{domain_name}/nc-defaults/remove/{template_id}")
 async def domain_nc_default_remove(
     request: Request,
@@ -1704,21 +1632,15 @@ async def domain_nc_default_remove(
     template_id: str,
     session: AsyncSession = Depends(get_db_session),
 ):
-    """Remove a notification template default from a domain."""
+    """Delete a domain-scoped notification template (#200: removal = delete the row)."""
     if request.headers.get("HX-Request") != "true":
         return RedirectResponse(url=f"/domains/{domain_name}", status_code=303)
-    result = await session.execute(
-        select(DomainNcRef).where(
-            DomainNcRef.domain_name == domain_name,
-            DomainNcRef.template_id == template_id,  # type: ignore[arg-type]
-        )
-    )
-    ref = result.scalar_one_or_none()
-    if ref:
-        await session.delete(ref)
+    tpl = await session.get(NotificationTemplate, parse_ulid(template_id, "Template"))
+    if tpl and tpl.visibility == VISIBILITY_DOMAIN and tpl.domain_name == domain_name:
+        await session.delete(tpl)
         audit(
             session,
-            EventType.DOMAIN_NC_DEFAULT_REMOVED,
+            EventType.NOTIFICATION_TEMPLATE_DELETED,
             domain_name=domain_name,
             template_id=template_id,
         )
@@ -2018,7 +1940,11 @@ async def notifications_page(
 async def notification_template_new_page(
     request: Request,
 ):
-    """Full page: create a new notification template."""
+    """Full page: create a new global notification template.
+
+    The library page creates ``visibility='global'`` templates; domain- and
+    item-scoped templates are created from the domain and item detail pages (#200).
+    """
     return templates.TemplateResponse(
         request,
         "pages/notification_new.html",
@@ -2026,7 +1952,6 @@ async def notification_template_new_page(
             "active_page": "settings",
             "title": None,
             "events": None,
-            "is_global_default": False,
             "content_config": None,
             "error": None,
         },
@@ -2045,7 +1970,6 @@ async def notification_template_create(
     form = await request.form()
     events = form.getlist("events")
     title = str(form.get("title") or "").strip()
-    is_global_default = bool(form.get("is_global_default"))
     remote_channel_id = str(form.get("remote_channel_id") or "").strip()
     channel_hint = str(form.get("channel_hint") or "").strip() or "remote"
 
@@ -2058,7 +1982,6 @@ async def notification_template_create(
                 "active_page": "settings",
                 "title": str(form.get("title") or ""),
                 "events": form.getlist("events"),
-                "is_global_default": bool(form.get("is_global_default")),
                 "content_config": ContentConfig.model_validate(_cc) if _cc else None,
                 "error": error_msg,
             },
@@ -2078,7 +2001,7 @@ async def notification_template_create(
         title=title,
         channel_hint=channel_hint,
         events=events,
-        is_global_default=is_global_default,
+        visibility=VISIBILITY_GLOBAL,
         content_config=_parse_content_config_from_form(form),
         remote_channel_id=remote_channel_id,
     )
@@ -2110,12 +2033,6 @@ async def notification_template_edit_page(
     tpl = result.scalar_one_or_none()
     if not tpl:
         raise HTTPException(status_code=404, detail="Template not found")
-    watch_count = (
-        await session.scalar(select(func.count()).where(WatchNcRef.template_id == tpl.id)) or 0
-    )
-    domain_count = (
-        await session.scalar(select(func.count()).where(DomainNcRef.template_id == tpl.id)) or 0
-    )
     content_config = (
         ContentConfig.model_validate(tpl.content_config) if tpl.content_config else None
     )
@@ -2126,8 +2043,6 @@ async def notification_template_edit_page(
             "active_page": "settings",
             "tpl": tpl,
             "submitted_title": tpl.title,
-            "watch_count": watch_count,
-            "domain_count": domain_count,
             "content_config": content_config,
             "error": None,
         },
@@ -2155,15 +2070,8 @@ async def notification_template_edit(
     channel_hint = str(form.get("channel_hint") or "").strip() or tpl.channel_hint
     events = form.getlist("events")
     title = str(form.get("title") or "").strip() or tpl.title
-    is_global_default = bool(form.get("is_global_default"))
 
     async def _edit_error(error_msg: str) -> Response:
-        watch_count = (
-            await session.scalar(select(func.count()).where(WatchNcRef.template_id == tpl.id)) or 0
-        )
-        domain_count = (
-            await session.scalar(select(func.count()).where(DomainNcRef.template_id == tpl.id)) or 0
-        )
         # Re-derive content_config from submitted form so checkboxes stay checked on error
         _content_config_err = _parse_content_config_from_form(form)
         content_config_err = (
@@ -2177,8 +2085,6 @@ async def notification_template_edit(
                 "tpl": tpl,
                 "submitted_title": title,
                 "submitted_events": events,
-                "watch_count": watch_count,
-                "domain_count": domain_count,
                 "content_config": content_config_err,
                 "error": error_msg,
             },
@@ -2196,7 +2102,6 @@ async def notification_template_edit(
     tpl.remote_channel_id = remote_channel_id
     tpl.channel_hint = channel_hint
     tpl.events = events
-    tpl.is_global_default = is_global_default
     tpl.content_config = _parse_content_config_from_form(form)
     audit(
         session,
@@ -2256,7 +2161,10 @@ async def notification_template_delete(
     template_id: str,
     session: AsyncSession = Depends(get_db_session),
 ):
-    """Delete a notification template (reject if refs exist). Returns refreshed list."""
+    """Delete a notification template. Returns refreshed list.
+
+    Templates are standalone post-#200 — no junction refs to block deletion.
+    """
     if request.headers.get("HX-Request") != "true":
         return RedirectResponse(url="/notifications", status_code=303)
     result = await session.execute(
@@ -2267,21 +2175,6 @@ async def notification_template_delete(
     tpl = result.scalar_one_or_none()
     if not tpl:
         raise HTTPException(status_code=404, detail="Template not found")
-
-    watch_count = (
-        await session.scalar(select(func.count()).where(WatchNcRef.template_id == tpl.id)) or 0
-    )
-    domain_count = (
-        await session.scalar(select(func.count()).where(DomainNcRef.template_id == tpl.id)) or 0
-    )
-    if watch_count or domain_count:
-        raise HTTPException(
-            status_code=409,
-            detail=(
-                f"Template is still referenced by {watch_count} watch(es)"
-                f" and {domain_count} domain(s)."
-            ),
-        )
 
     audit(
         session,
@@ -2326,7 +2219,9 @@ async def notification_template_duplicate(
         title=f"{tpl.title} (copy)",
         channel_hint=tpl.channel_hint,
         events=list(tpl.events),
-        is_global_default=False,
+        visibility=tpl.visibility,
+        domain_name=tpl.domain_name,
+        watched_item_id=tpl.watched_item_id,
         content_config=tpl.content_config,
         remote_channel_id=tpl.remote_channel_id,
     )

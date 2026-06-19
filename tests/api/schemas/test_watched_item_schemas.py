@@ -214,15 +214,42 @@ class TestIssue188IsActive:
 
 
 class TestTemplateSchemas:
+    """#200 — WatchedItemTemplate* schemas folded into ItemNotificationTemplateCreate.
+
+    The watched-item-scoped create body moved out of src.api.schemas.watched_item into
+    src.api.schemas.notification_template.ItemNotificationTemplateCreate. ``visibility`` and
+    ``watched_item_id`` are pinned by the route path, so the body omits them; ``title`` and
+    ``remote_channel_id`` are now required and there is no body-level ``is_active``.
+    """
+
     def test_template_create_defaults(self):
-        from src.api.schemas.watched_item import WatchedItemTemplateCreate
+        from src.api.schemas.notification_template import ItemNotificationTemplateCreate
 
-        c = WatchedItemTemplateCreate(channel_hint="mailto://x@y.z")
+        c = ItemNotificationTemplateCreate(
+            title="Item Template",
+            remote_channel_id="01HV0000000000000000000099",
+        )
         assert c.events == ["change_detected"]
-        assert c.is_active is True
+        assert c.channel_hint == "remote"
 
-    def test_template_create_rejects_empty_channel(self):
-        from src.api.schemas.watched_item import WatchedItemTemplateCreate
+    def test_template_create_rejects_empty_channel_hint(self):
+        from src.api.schemas.notification_template import ItemNotificationTemplateCreate
 
         with pytest.raises(ValidationError):
-            WatchedItemTemplateCreate(channel_hint="")
+            ItemNotificationTemplateCreate(
+                title="Item Template",
+                remote_channel_id="01HV0000000000000000000099",
+                channel_hint="",
+            )
+
+    def test_template_create_requires_title(self):
+        from src.api.schemas.notification_template import ItemNotificationTemplateCreate
+
+        with pytest.raises(ValidationError):
+            ItemNotificationTemplateCreate(remote_channel_id="01HV0000000000000000000099")
+
+    def test_template_create_requires_remote_channel_id(self):
+        from src.api.schemas.notification_template import ItemNotificationTemplateCreate
+
+        with pytest.raises(ValidationError):
+            ItemNotificationTemplateCreate(title="Item Template")

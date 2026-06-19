@@ -1,12 +1,13 @@
-"""Tests for dispatch_event_notifications — 5-source dispatch via notifier.
+"""Tests for dispatch_event_notifications — single visibility-scoped dispatch (#200).
 
-After Phase 5 (#137), every candidate goes through the notifier service — the
-local Apprise dispatcher is gone. After #191 the event identifies a WatchedItem
-(the single monitored entity); the dispatcher resolves the WatchedItem directly
-via ``session.get`` and queries five sources in order: global templates, domain
-templates, WatchedItem-assigned templates (WatchNcRef), WatchedItem templates,
-and local configs. These tests assert source resolution, dedup, content_config
-threading, and that dispatch never raises.
+Post-#200 every notification target is one ``NotificationTemplate`` row with an
+intrinsic ``visibility`` (global / domain / watched_item). The dispatcher
+resolves the WatchedItem via ``session.get`` and runs a single query selecting
+the active templates whose ``events`` include the event and whose visibility
+matches. One query → each row fires once (id-dedup is automatic); multiple
+templates may target the same channel and all fire (#200 F2). These tests assert
+visibility resolution, source labels, content_config threading, and that
+dispatch never raises.
 """
 
 from datetime import UTC, datetime
@@ -39,12 +40,6 @@ def make_event(event_type=WatchEventType.CHANGE_DETECTED, watched_item_id=None):
     )
 
 
-def _empty_result():
-    r = MagicMock()
-    r.scalars.return_value.all.return_value = []
-    return r
-
-
 def _result_with(*items):
     r = MagicMock()
     r.scalars.return_value.all.return_value = list(items)
@@ -58,41 +53,21 @@ def _wi(domain_name=None):
     return wi
 
 
-def _setup_session(*, domain=None, global_t=(), domain_t=(), watch_t=(), wi_t=(), local=()):
-    """Build an AsyncMock session for the dispatcher's query sequence.
-
-    Query order in notify.py: ``session.get(WatchedItem)`` then execute() for
-    global → [domain if domain] → watch_templates → wi_templates → local.
-    """
+def _setup_session(*, domain=None, templates=()):
+    """Build an AsyncMock session: ``session.get(WatchedItem)`` then one ``execute``."""
     session = AsyncMock(spec=AsyncSession)
     session.get = AsyncMock(return_value=_wi(domain))
-    side_effects = [_result_with(*global_t)]
-    if domain:
-        side_effects.append(_result_with(*domain_t))
-    side_effects.append(_result_with(*watch_t))
-    side_effects.append(_result_with(*wi_t))
-    side_effects.append(_result_with(*local))
-    session.execute = AsyncMock(side_effect=side_effects)
+    session.execute = AsyncMock(return_value=_result_with(*templates))
     return session
 
 
-def _fake_template(tid=None, *, remote_channel_id=None):
+def _fake_template(visibility="global", *, tid=None, remote_channel_id=None, content_config=None):
     t = MagicMock()
     t.id = tid or str(ULID())
-    t.content_config = None
+    t.visibility = visibility
+    t.content_config = content_config
     t.remote_channel_id = remote_channel_id or str(ULID())
     return t
-
-
-def _fake_local(cid=None, *, remote_channel_id=None):
-    from src.core.models.notification_config import WatchNotificationConfig
-
-    c = MagicMock(spec=WatchNotificationConfig)
-    c.id = cid or ULID()
-    c.events = ["change_detected"]
-    c.content_config = None
-    c.remote_channel_id = remote_channel_id or str(ULID())
-    return c
 
 
 def _make_dispatch_out(status="succeeded"):
@@ -113,193 +88,106 @@ def _mock_notifier_client(dispatch_return=None):
 
 class TestNoDispatch:
     async def test_no_candidates_is_noop(self):
-        """No sources → no dispatch, no audit."""
+        """No matching templates → no dispatch, no audit."""
         session = _setup_session()
         await dispatch_event_notifications(session, make_event())
         session.add.assert_not_called()
 
+    async def test_single_query_regardless_of_domain(self):
+        """Exactly one execute() runs whether or not the WatchedItem has a domain."""
+        session = _setup_session(domain="example.com")
+        await dispatch_event_notifications(session, make_event())
+        assert session.execute.call_count == 1
 
-class TestGlobalDispatch:
-    async def test_global_template_fires_for_any_watched_item(self):
-        """Global templates dispatch to all WatchedItems regardless of WatchNcRef."""
-        session = _setup_session(global_t=[_fake_template()])
 
+class TestVisibilityDispatch:
+    async def test_global_template_fires(self):
+        session = _setup_session(templates=[_fake_template("global")])
         client = _mock_notifier_client()
         with patch("src.core.notifications.notify.get_notifier_client", return_value=client):
             await dispatch_event_notifications(session, make_event())
-
         client.dispatch.assert_called_once()
         session.add.assert_called_once()  # audit
 
     async def test_global_source_label_in_audit(self):
-        """Audit log records source as 'global'."""
-        session = _setup_session(global_t=[_fake_template(tid="GLOBALID")])
-
+        session = _setup_session(templates=[_fake_template("global", tid="GLOBALID")])
         client = _mock_notifier_client()
         with patch("src.core.notifications.notify.get_notifier_client", return_value=client):
             await dispatch_event_notifications(session, make_event())
+        audit_row = session.add.call_args[0][0]
+        assert audit_row.payload["results"][0]["source"] == "global"
 
-        call_kwargs = session.add.call_args[0][0]
-        assert call_kwargs.payload["results"][0]["source"] == "global"
-
-
-class TestDomainDispatch:
-    async def test_domain_template_fires_for_watched_item_in_domain(self):
-        """Domain templates dispatch when the WatchedItem has a matching domain_name."""
-        session = _setup_session(domain="example.com", domain_t=[_fake_template()])
-
+    async def test_domain_template_fires_with_domain_source_label(self):
+        session = _setup_session(domain="example.com", templates=[_fake_template("domain")])
         client = _mock_notifier_client()
         with patch("src.core.notifications.notify.get_notifier_client", return_value=client):
             await dispatch_event_notifications(session, make_event())
+        audit_row = session.add.call_args[0][0]
+        assert audit_row.payload["results"][0]["source"] == "domain"
 
-        session.add.assert_called_once()
-
-    async def test_domain_template_not_queried_when_no_domain(self):
-        """Domain query is skipped entirely when domain_name is None."""
-        session = _setup_session()
-        await dispatch_event_notifications(session, make_event())
-        # 4 execute calls (global, watch_templates, wi_templates, local), not 5.
-        assert session.execute.call_count == 4
-
-    async def test_domain_source_label_in_audit(self):
-        session = _setup_session(domain="example.com", domain_t=[_fake_template()])
-
+    async def test_watched_item_template_fires_with_watched_item_source_label(self):
+        session = _setup_session(templates=[_fake_template("watched_item")])
         client = _mock_notifier_client()
         with patch("src.core.notifications.notify.get_notifier_client", return_value=client):
             await dispatch_event_notifications(session, make_event())
-
-        call_kwargs = session.add.call_args[0][0]
-        assert call_kwargs.payload["results"][0]["source"] == "domain"
-
-
-class TestWatchTemplateDispatch:
-    async def test_watch_assigned_template_fires(self):
-        """WatchNcRef-assigned templates dispatch for the specific WatchedItem."""
-        session = _setup_session(watch_t=[_fake_template()])
-
-        client = _mock_notifier_client()
-        with patch("src.core.notifications.notify.get_notifier_client", return_value=client):
-            await dispatch_event_notifications(session, make_event())
-
-        session.add.assert_called_once()
-
-    async def test_watch_template_source_label(self):
-        session = _setup_session(watch_t=[_fake_template()])
-
-        client = _mock_notifier_client()
-        with patch("src.core.notifications.notify.get_notifier_client", return_value=client):
-            await dispatch_event_notifications(session, make_event())
-
-        call_kwargs = session.add.call_args[0][0]
-        assert call_kwargs.payload["results"][0]["source"] == "watch_template"
+        audit_row = session.add.call_args[0][0]
+        assert audit_row.payload["results"][0]["source"] == "watched_item"
 
 
-class TestLocalDispatch:
-    async def test_local_config_fires(self):
-        session = _setup_session(local=[_fake_local()])
-
-        client = _mock_notifier_client()
-        with patch("src.core.notifications.notify.get_notifier_client", return_value=client):
-            await dispatch_event_notifications(session, make_event())
-
-        session.add.assert_called_once()
-
-    async def test_local_source_label(self):
-        session = _setup_session(local=[_fake_local()])
-
-        client = _mock_notifier_client()
-        with patch("src.core.notifications.notify.get_notifier_client", return_value=client):
-            await dispatch_event_notifications(session, make_event())
-
-        call_kwargs = session.add.call_args[0][0]
-        assert call_kwargs.payload["results"][0]["source"] == "local"
-
-
-class TestDeduplication:
-    async def test_template_in_global_and_watch_nc_fires_once(self):
-        """A template appearing in both global and WatchNcRef dispatches exactly once."""
-        shared_id = str(ULID())
-        session = _setup_session(
-            global_t=[_fake_template(tid=shared_id)],
-            watch_t=[_fake_template(tid=shared_id)],
-        )
-
-        client = _mock_notifier_client()
-        with patch("src.core.notifications.notify.get_notifier_client", return_value=client):
-            await dispatch_event_notifications(session, make_event())
-
-        assert client.dispatch.call_count == 1
-
-    async def test_template_in_domain_and_watch_nc_fires_once(self):
-        """Domain template also in WatchNcRef dispatches once."""
-        shared_id = str(ULID())
+class TestMultipleTemplates:
+    async def test_distinct_templates_each_fire(self):
+        """Three matching templates across visibilities → three dispatches."""
         session = _setup_session(
             domain="example.com",
-            domain_t=[_fake_template(tid=shared_id)],
-            watch_t=[_fake_template(tid=shared_id)],
+            templates=[
+                _fake_template("global"),
+                _fake_template("domain"),
+                _fake_template("watched_item"),
+            ],
         )
-
         client = _mock_notifier_client()
         with patch("src.core.notifications.notify.get_notifier_client", return_value=client):
             await dispatch_event_notifications(session, make_event())
+        assert client.dispatch.call_count == 3
 
-        assert client.dispatch.call_count == 1
-
-    async def test_all_four_sources_distinct_fire_four_times(self):
-        """Four distinct candidates (global, domain, watch, local) → 4 dispatches."""
+    async def test_two_templates_same_channel_both_fire(self):
+        """F2 ratified: two templates targeting one channel are NOT suppressed."""
+        shared_channel = str(ULID())
         session = _setup_session(
-            domain="example.com",
-            global_t=[_fake_template()],
-            domain_t=[_fake_template()],
-            watch_t=[_fake_template()],
-            local=[_fake_local()],
+            templates=[
+                _fake_template("global", remote_channel_id=shared_channel),
+                _fake_template("watched_item", remote_channel_id=shared_channel),
+            ],
         )
-
         client = _mock_notifier_client()
         with patch("src.core.notifications.notify.get_notifier_client", return_value=client):
             await dispatch_event_notifications(session, make_event())
-
-        assert client.dispatch.call_count == 4
+        assert client.dispatch.call_count == 2
+        channels = {c.kwargs["channel_ids"][0] for c in client.dispatch.call_args_list}
+        assert channels == {shared_channel}
 
 
 class TestContentConfig:
-    @pytest.mark.asyncio
     async def test_content_config_body_used_in_dispatch(self):
-        """When a config has content_config, build_body is called and the result forwarded."""
-        event = make_event(WatchEventType.CHANGE_DETECTED)
-
+        """When a template has content_config, build_body uses it and forwards the result."""
         content_cfg = ContentConfig(default=ContentOptions(include_domain=True))
-        mock_config = MagicMock()
-        mock_config.content_config = content_cfg.model_dump()
-        mock_config.remote_channel_id = str(ULID())
-
-        session = _setup_session(local=[mock_config])
-
+        template = _fake_template("global", content_config=content_cfg.model_dump())
+        session = _setup_session(templates=[template])
         client = _mock_notifier_client()
         with patch("src.core.notifications.notify.get_notifier_client", return_value=client):
-            await dispatch_event_notifications(session, event)
-
+            await dispatch_event_notifications(session, make_event(WatchEventType.CHANGE_DETECTED))
         client.dispatch.assert_called_once()
         body = client.dispatch.call_args.kwargs["body_template"]
         # include_domain=True but no domain_name in metadata → no domain section added
         assert "example.com" in body
         assert "Domain:" not in body
 
-    @pytest.mark.asyncio
     async def test_null_content_config_renders_default_body(self):
-        """content_config=None — body is rendered from the default template."""
-        event = make_event(WatchEventType.CHANGE_DETECTED)
-
-        mock_config = MagicMock()
-        mock_config.content_config = None
-        mock_config.remote_channel_id = str(ULID())
-
-        session = _setup_session(local=[mock_config])
-
+        template = _fake_template("global", content_config=None)
+        session = _setup_session(templates=[template])
         client = _mock_notifier_client()
         with patch("src.core.notifications.notify.get_notifier_client", return_value=client):
-            await dispatch_event_notifications(session, event)
-
+            await dispatch_event_notifications(session, make_event(WatchEventType.CHANGE_DETECTED))
         client.dispatch.assert_called_once()
         body = client.dispatch.call_args.kwargs["body_template"]
         assert body
@@ -309,10 +197,8 @@ class TestContentConfig:
 class TestErrorHandling:
     async def test_dispatch_failure_does_not_raise(self):
         """An exception inside dispatch_via_notifier is caught and recorded."""
-        session = _setup_session(global_t=[_fake_template()])
-
+        session = _setup_session(templates=[_fake_template("global")])
         client = _mock_notifier_client()
         client.dispatch = AsyncMock(side_effect=Exception("boom"))
-
         with patch("src.core.notifications.notify.get_notifier_client", return_value=client):
             await dispatch_event_notifications(session, make_event())

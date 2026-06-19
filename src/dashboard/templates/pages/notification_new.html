@@ -59,16 +59,10 @@
     </div>
   </fieldset>
 
-  {# Global default toggle #}
-  <div class="flex items-center gap-3 min-h-[44px]">
-    <label class="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300 cursor-pointer">
-      <input type="checkbox" name="is_global_default" value="1"
-             {% if is_global_default %}checked{% endif %}
-             class="rounded border-gray-300 dark:border-gray-600">
-      Mark as global default
-    </label>
-    <span class="text-xs text-gray-500 dark:text-gray-400">(auto-applied to all new watches)</span>
-  </div>
+  <p class="text-xs text-gray-500 dark:text-gray-400">
+    Templates created here are <strong>global</strong> — they fire for every watched item.
+    Create domain- or item-scoped templates from a domain or watched-item detail page.
+  </p>
 
   {% with form_id="tpl-new", content_config=content_config %}
   {% include "partials/notification_form_content_card.html" %}

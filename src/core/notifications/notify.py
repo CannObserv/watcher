@@ -10,19 +10,20 @@ from dataclasses import dataclass
 from notifier_client import NotifierClient
 from notifier_client.errors import NotifierError
 from notifier_client.types import DispatchOutStatus
-from sqlalchemy import select
+from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from ulid import ULID
 
 from src.api.schemas.content_config import ContentConfig
 from src.core.logging import get_logger
 from src.core.models.audit_log import EventType, audit
-from src.core.models.notification_config import WatchNotificationConfig
-from src.core.models.notification_template import DomainNcRef, NotificationTemplate, WatchNcRef
-from src.core.models.watched_item import WatchedItem
-from src.core.models.watched_item_notification_template import (
-    WatchedItemNotificationTemplate,
+from src.core.models.notification_template import (
+    VISIBILITY_DOMAIN,
+    VISIBILITY_GLOBAL,
+    VISIBILITY_WATCHED_ITEM,
+    NotificationTemplate,
 )
+from src.core.models.watched_item import WatchedItem
 from src.core.notifications.content import (
     build_body,
     build_title,
@@ -44,9 +45,12 @@ class DispatchResult:
 
 @dataclass
 class DispatchCandidate:
-    """A single notification target, drawn from any of the live config sources."""
+    """A single notification target — one NotificationTemplate row.
 
-    # "global" | "domain" | "watch_template" | "watched_item_template" | "local"
+    ``source`` is the template's ``visibility``: "global" | "domain" |
+    "watched_item".
+    """
+
     source: str
     source_id: str
     content_config: dict | None = None
@@ -108,21 +112,21 @@ async def dispatch_event_notifications(
     session: AsyncSession,
     event: WatchEvent,
 ) -> None:
-    """Dispatch a WatchEvent to all active, opted-in notification targets.
+    """Dispatch a WatchEvent to all active, opted-in notification templates.
 
-    Queries five live sources in priority order:
-      1. Global templates (NotificationTemplate.is_global_default=True) — all watches
-      2. Domain templates (DomainNcRef) — watches whose domain_name (via WatchedItem) matches
-      3. Watch-assigned templates (WatchNcRef) — this watch only, deduped vs. 1+2
-      4. WatchedItem templates (WatchedItemNotificationTemplate) — Approach B union
-         from this watch's parent WatchedItem (#160 Task 9)
-      5. Local configs (WatchNotificationConfig) — this watch only
+    Post-#200 every notification target is a single ``NotificationTemplate`` row
+    with an intrinsic ``visibility``. One query selects the active templates whose
+    ``events`` include this event and whose visibility matches the WatchedItem:
 
-    Template sources 1-3 are deduplicated by template_id so a template that appears
-    in multiple sources (e.g. global AND manually assigned via WatchNcRef) fires once.
-    WatchedItem templates and local configs live in disjoint tables and are never
-    deduped against each other — Approach B per design Section 4.3 explicitly allows
-    a Watch to add its own channels on top of inherited ones, with no suppression.
+      * ``global`` — every WatchedItem
+      * ``domain`` — WatchedItems whose ``domain_name`` matches
+      * ``watched_item`` — this WatchedItem only
+
+    **Dedup rule:** one notification fires per matching template row. Because a
+    single query returns each row once, id-dedup is automatic — no row appears
+    twice. Multiple templates may target the same ``remote_channel_id`` and all
+    fire; there is no channel-level suppression (ratified in #200, F2).
+
     Failures are logged but never raise. Writes a single audit log entry. Does not
     commit; caller is responsible.
 
@@ -141,105 +145,39 @@ async def dispatch_event_notifications(
     wi = await session.get(WatchedItem, watched_item_id)
     domain_name: str | None = wi.domain_name if wi is not None else None
 
-    # 1. Global templates
-    global_result = await session.execute(
-        select(NotificationTemplate).where(
-            NotificationTemplate.is_global_default.is_(True),
-            NotificationTemplate.is_active.is_(True),
-            NotificationTemplate.events.contains([event_value]),
-        )
-    )
-    global_templates = global_result.scalars().all()
-
-    # 2. Domain templates
-    domain_templates = []
+    visibility_clauses = [
+        NotificationTemplate.visibility == VISIBILITY_GLOBAL,
+        and_(
+            NotificationTemplate.visibility == VISIBILITY_WATCHED_ITEM,
+            NotificationTemplate.watched_item_id == watched_item_id,
+        ),
+    ]
     if domain_name:
-        domain_result = await session.execute(
-            select(NotificationTemplate)
-            .join(DomainNcRef, DomainNcRef.template_id == NotificationTemplate.id)
-            .where(
-                DomainNcRef.domain_name == domain_name,
-                NotificationTemplate.is_active.is_(True),
-                NotificationTemplate.events.contains([event_value]),
+        visibility_clauses.append(
+            and_(
+                NotificationTemplate.visibility == VISIBILITY_DOMAIN,
+                NotificationTemplate.domain_name == domain_name,
             )
         )
-        domain_templates = domain_result.scalars().all()
 
-    # 3. WatchedItem-assigned templates (WatchNcRef)
-    watch_tpl_result = await session.execute(
-        select(NotificationTemplate)
-        .join(WatchNcRef, WatchNcRef.template_id == NotificationTemplate.id)
-        .where(
-            WatchNcRef.watched_item_id == watched_item_id,
+    result = await session.execute(
+        select(NotificationTemplate).where(
             NotificationTemplate.is_active.is_(True),
             NotificationTemplate.events.contains([event_value]),
+            or_(*visibility_clauses),
         )
     )
-    watch_templates = watch_tpl_result.scalars().all()
+    templates = result.scalars().all()
 
-    # 4. WatchedItem templates
-    wi_tpl_result = await session.execute(
-        select(WatchedItemNotificationTemplate).where(
-            WatchedItemNotificationTemplate.watched_item_id == watched_item_id,
-            WatchedItemNotificationTemplate.is_active.is_(True),
-            WatchedItemNotificationTemplate.events.contains([event_value]),
+    candidates: list[DispatchCandidate] = [
+        DispatchCandidate(
+            source=tpl.visibility,
+            source_id=str(tpl.id),
+            content_config=tpl.content_config,
+            remote_channel_id=tpl.remote_channel_id,
         )
-    )
-    watched_item_templates = list(wi_tpl_result.scalars().all())
-
-    # 5. Local configs
-    local_result = await session.execute(
-        select(WatchNotificationConfig).where(
-            WatchNotificationConfig.watched_item_id == watched_item_id,
-            WatchNotificationConfig.is_active.is_(True),
-            WatchNotificationConfig.events.contains([event_value]),
-        )
-    )
-    local_configs = local_result.scalars().all()
-
-    # Build deduped candidate list: templates first (global → domain → watch), then local
-    seen_template_ids: set[str] = set()
-    candidates: list[DispatchCandidate] = []
-
-    for source, tpl_list in [
-        ("global", global_templates),
-        ("domain", domain_templates),
-        ("watch_template", watch_templates),
-    ]:
-        for tpl in tpl_list:
-            tpl_id = str(tpl.id)
-            if tpl_id not in seen_template_ids:
-                seen_template_ids.add(tpl_id)
-                candidates.append(
-                    DispatchCandidate(
-                        source=source,
-                        source_id=tpl_id,
-                        content_config=tpl.content_config,
-                        remote_channel_id=tpl.remote_channel_id,
-                    )
-                )
-
-    # WatchedItem templates: separate table from NotificationTemplate; no id
-    # collision risk, so no dedup. Approach B never suppresses inherited rows.
-    for wi_tpl in watched_item_templates:
-        candidates.append(
-            DispatchCandidate(
-                source="watched_item_template",
-                source_id=str(wi_tpl.id),
-                content_config=wi_tpl.content_config,
-                remote_channel_id=wi_tpl.remote_channel_id,
-            )
-        )
-
-    for c in local_configs:
-        candidates.append(
-            DispatchCandidate(
-                source="local",
-                source_id=str(c.id),
-                content_config=c.content_config,
-                remote_channel_id=c.remote_channel_id,
-            )
-        )
+        for tpl in templates
+    ]
 
     if not candidates:
         return

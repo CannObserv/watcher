@@ -10,7 +10,13 @@ from src.core.database import get_database_url, get_engine, reset_engine
 from src.core.models.audit_log import AuditLog, EventType, audit
 from src.core.models.base import ULIDType
 from src.core.models.domain import Domain
-from src.core.models.notification_config import WatchNotificationConfig
+from src.core.models.notification_template import (
+    VISIBILITIES,
+    VISIBILITY_DOMAIN,
+    VISIBILITY_GLOBAL,
+    VISIBILITY_WATCHED_ITEM,
+    NotificationTemplate,
+)
 from src.core.models.temporal_profile import PostAction, ProfileType, TemporalProfile
 from src.core.models.watched_item import ContentType, WatchedItem, WatchHealthStatus
 
@@ -114,8 +120,6 @@ class TestEventType:
         assert EventType.CHECK_NO_CHANGE == "check.no_change"
         assert EventType.CHECK_FETCH_FAILED == "check.fetch_failed"
         assert EventType.NOTIFICATION_DISPATCHED == "notification.dispatched"
-        assert EventType.NOTIFICATION_CONFIG_CREATED == "notification_config.created"
-        assert EventType.NOTIFICATION_CONFIG_DELETED == "notification_config.deleted"
         assert EventType.PROFILE_CREATED == "profile.created"
         assert EventType.PROFILE_UPDATED == "profile.updated"
         assert EventType.PROFILE_DELETED == "profile.deleted"
@@ -125,14 +129,12 @@ class TestEventType:
         assert len(values) == len(set(values)), "EventType constants must be unique"
 
     def test_notification_template_constants_have_expected_values(self):
+        # #200: legacy watch_nc.* / domain_nc_default.* events folded into the
+        # unified notification_template.* set (every target is a NotificationTemplate).
         assert EventType.NOTIFICATION_TEMPLATE_CREATED == "notification_template.created"
         assert EventType.NOTIFICATION_TEMPLATE_UPDATED == "notification_template.updated"
         assert EventType.NOTIFICATION_TEMPLATE_DELETED == "notification_template.deleted"
         assert EventType.NOTIFICATION_TEMPLATE_TESTED == "notification_template.tested"
-        assert EventType.WATCH_NC_ASSIGNED == "watch_nc.assigned"
-        assert EventType.WATCH_NC_UNASSIGNED == "watch_nc.unassigned"
-        assert EventType.DOMAIN_NC_DEFAULT_ADDED == "domain_nc_default.added"
-        assert EventType.DOMAIN_NC_DEFAULT_REMOVED == "domain_nc_default.removed"
 
 
 class TestAuditLogModel:
@@ -241,29 +243,79 @@ class TestDomainModel:
         assert d.current_interval == 3.0
 
 
-class TestNotificationConfigModel:
-    def test_create_remote_channel_config(self):
-        config = WatchNotificationConfig(
-            watched_item_id=ULID(),
-            channel_hint="slack",
-            remote_channel_id=str(ULID()),
-        )
-        assert config.channel_hint == "slack"
-        assert config.is_active is True
+class TestNotificationTemplateModel:
+    """Unified NotificationTemplate replaces the five legacy dispatch sources (#200).
 
-    def test_default_events(self):
-        config = WatchNotificationConfig(
-            watched_item_id=ULID(),
-            channel_hint="mailto",
+    One scoped table; the row's ``visibility`` decides where it fires. The
+    visibility/ref CHECK constraint is exercised against a real session in
+    ``test_watched_item.py``; these are ORM-construction unit checks.
+    """
+
+    def test_create_global_template(self):
+        tmpl = NotificationTemplate(
+            title="Global Alert",
+            channel_hint="slack",
+            events=["change_detected"],
             remote_channel_id=str(ULID()),
+            visibility=VISIBILITY_GLOBAL,
         )
-        assert config.events == ["change_detected"]
+        assert tmpl.visibility == VISIBILITY_GLOBAL
+        assert tmpl.title == "Global Alert"
+        assert tmpl.channel_hint == "slack"
+        assert tmpl.domain_name is None
+        assert tmpl.watched_item_id is None
+
+    def test_create_domain_template(self):
+        tmpl = NotificationTemplate(
+            title="Domain Alert",
+            channel_hint="mailto",
+            events=["change_detected"],
+            remote_channel_id=str(ULID()),
+            visibility=VISIBILITY_DOMAIN,
+            domain_name="example.com",
+        )
+        assert tmpl.visibility == VISIBILITY_DOMAIN
+        assert tmpl.domain_name == "example.com"
+        assert tmpl.watched_item_id is None
+
+    def test_create_watched_item_template(self):
+        wi_id = ULID()
+        tmpl = NotificationTemplate(
+            title="Item Alert",
+            channel_hint="slack",
+            events=["change_detected"],
+            remote_channel_id=str(ULID()),
+            visibility=VISIBILITY_WATCHED_ITEM,
+            watched_item_id=wi_id,
+        )
+        assert tmpl.visibility == VISIBILITY_WATCHED_ITEM
+        assert tmpl.watched_item_id == wi_id
+        assert tmpl.domain_name is None
 
     def test_custom_events(self):
-        config = WatchNotificationConfig(
-            watched_item_id=ULID(),
+        tmpl = NotificationTemplate(
+            title="Multi-event",
             channel_hint="slack",
-            remote_channel_id=str(ULID()),
             events=["change_detected", "watch_error"],
+            visibility=VISIBILITY_GLOBAL,
         )
-        assert config.events == ["change_detected", "watch_error"]
+        assert tmpl.events == ["change_detected", "watch_error"]
+
+    def test_content_config_defaults_none(self):
+        tmpl = NotificationTemplate(
+            title="No config",
+            channel_hint="mailto",
+            events=["change_detected"],
+            visibility=VISIBILITY_GLOBAL,
+        )
+        assert tmpl.content_config is None
+
+    def test_visibility_constants(self):
+        assert VISIBILITY_GLOBAL == "global"
+        assert VISIBILITY_DOMAIN == "domain"
+        assert VISIBILITY_WATCHED_ITEM == "watched_item"
+        assert VISIBILITIES == (
+            VISIBILITY_GLOBAL,
+            VISIBILITY_DOMAIN,
+            VISIBILITY_WATCHED_ITEM,
+        )

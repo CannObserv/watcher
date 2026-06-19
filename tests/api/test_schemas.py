@@ -7,10 +7,6 @@ from pydantic import BaseModel, ValidationError
 
 from src.api.schemas.audit_log import AuditLogResponse
 from src.api.schemas.content_config import ContentConfig, ContentOptions
-from src.api.schemas.notification_config import (
-    WatchNotificationConfigCreate,
-    WatchNotificationConfigResponse,
-)
 from src.api.schemas.notification_template import (
     NotificationTemplateCreate,
     NotificationTemplateResponse,
@@ -18,6 +14,11 @@ from src.api.schemas.notification_template import (
 from src.api.schemas.types import HttpUrlStr
 from src.api.schemas.watched_item import WatchedItemCreate
 from src.core.models.audit_log import EventType
+from src.core.models.notification_template import (
+    VISIBILITY_DOMAIN,
+    VISIBILITY_GLOBAL,
+    VISIBILITY_WATCHED_ITEM,
+)
 
 
 class TestHttpUrlStr:
@@ -113,59 +114,9 @@ class TestAuditLogResponse:
         assert data.payload == {}
 
 
-class TestWatchNotificationConfigCreate:
-    def test_content_config_accepted(self):
-        """WatchNotificationConfigCreate accepts content_config and it's accessible."""
-        schema = WatchNotificationConfigCreate(
-            remote_channel_id="01HV0000000000000000000099",
-            content_config=ContentConfig(default=ContentOptions(include_domain=True)),
-        )
-        assert schema.content_config is not None
-        assert schema.content_config.default.include_domain is True
-
-    def test_content_config_optional(self):
-        """content_config defaults to None."""
-        schema = WatchNotificationConfigCreate(
-            remote_channel_id="01HV0000000000000000000099",
-        )
-        assert schema.content_config is None
-
-
-class TestWatchNotificationConfigResponse:
-    def test_content_config_deserializes_from_dict(self):
-        """WatchNotificationConfigResponse deserialises content_config from dict (ORM output)."""
-        resp = WatchNotificationConfigResponse.model_validate(
-            {
-                "id": "01HV0000000000000000000001",
-                "watched_item_id": "01HV0000000000000000000002",
-                "title": None,
-                "channel_hint": "slack",
-                "events": ["change_detected"],
-                "is_active": True,
-                "created_at": datetime.now(UTC),
-                "updated_at": datetime.now(UTC),
-                "content_config": {"default": {"include_domain": True}, "overrides": {}},
-            }
-        )
-        assert resp.content_config is not None
-        assert resp.content_config.default.include_domain is True
-
-    def test_content_config_null(self):
-        """content_config can be null in response."""
-        resp = WatchNotificationConfigResponse.model_validate(
-            {
-                "id": "01HV0000000000000000000001",
-                "watched_item_id": "01HV0000000000000000000002",
-                "title": None,
-                "channel_hint": "slack",
-                "events": ["change_detected"],
-                "is_active": True,
-                "created_at": datetime.now(UTC),
-                "updated_at": datetime.now(UTC),
-                "content_config": None,
-            }
-        )
-        assert resp.content_config is None
+# TestWatchNotificationConfigCreate / TestWatchNotificationConfigResponse removed (#200):
+# src.api.schemas.notification_config (WatchNotificationConfig* schemas) was deleted when the
+# five legacy dispatch sources collapsed into the single visibility-scoped NotificationTemplate.
 
 
 class TestNotificationTemplateCreate:
@@ -187,6 +138,110 @@ class TestNotificationTemplateCreate:
         )
         assert schema.content_config is None
 
+    def test_defaults_to_global_visibility(self):
+        """visibility defaults to 'global' with no scope refs (#200)."""
+        schema = NotificationTemplateCreate(
+            title="My Template",
+            remote_channel_id="01HV0000000000000000000099",
+        )
+        assert schema.visibility == VISIBILITY_GLOBAL
+        assert schema.domain_name is None
+        assert schema.watched_item_id is None
+
+    def test_title_required(self):
+        """title is mandatory post-#200."""
+        with pytest.raises(ValidationError):
+            NotificationTemplateCreate(remote_channel_id="01HV0000000000000000000099")
+
+    def test_title_rejects_over_100_chars(self):
+        with pytest.raises(ValidationError):
+            NotificationTemplateCreate(
+                title="x" * 101,
+                remote_channel_id="01HV0000000000000000000099",
+            )
+
+    def test_remote_channel_id_required_len26(self):
+        with pytest.raises(ValidationError):
+            NotificationTemplateCreate(title="T", remote_channel_id="too-short")
+
+    def test_global_rejects_scope_refs(self):
+        """global visibility must not set domain_name or watched_item_id (#200)."""
+        with pytest.raises(ValidationError):
+            NotificationTemplateCreate(
+                title="T",
+                remote_channel_id="01HV0000000000000000000099",
+                visibility=VISIBILITY_GLOBAL,
+                domain_name="example.com",
+            )
+
+    def test_domain_visibility_valid(self):
+        """domain visibility requires domain_name and no watched_item_id (#200)."""
+        schema = NotificationTemplateCreate(
+            title="T",
+            remote_channel_id="01HV0000000000000000000099",
+            visibility=VISIBILITY_DOMAIN,
+            domain_name="example.com",
+        )
+        assert schema.visibility == VISIBILITY_DOMAIN
+        assert schema.domain_name == "example.com"
+        assert schema.watched_item_id is None
+
+    def test_domain_visibility_requires_domain_name(self):
+        with pytest.raises(ValidationError):
+            NotificationTemplateCreate(
+                title="T",
+                remote_channel_id="01HV0000000000000000000099",
+                visibility=VISIBILITY_DOMAIN,
+            )
+
+    def test_domain_visibility_rejects_watched_item_id(self):
+        with pytest.raises(ValidationError):
+            NotificationTemplateCreate(
+                title="T",
+                remote_channel_id="01HV0000000000000000000099",
+                visibility=VISIBILITY_DOMAIN,
+                domain_name="example.com",
+                watched_item_id="01HV0000000000000000000002",
+            )
+
+    def test_watched_item_visibility_valid(self):
+        """watched_item visibility requires watched_item_id and no domain_name (#200)."""
+        schema = NotificationTemplateCreate(
+            title="T",
+            remote_channel_id="01HV0000000000000000000099",
+            visibility=VISIBILITY_WATCHED_ITEM,
+            watched_item_id="01HV0000000000000000000002",
+        )
+        assert schema.visibility == VISIBILITY_WATCHED_ITEM
+        assert schema.watched_item_id == "01HV0000000000000000000002"
+        assert schema.domain_name is None
+
+    def test_watched_item_visibility_requires_watched_item_id(self):
+        with pytest.raises(ValidationError):
+            NotificationTemplateCreate(
+                title="T",
+                remote_channel_id="01HV0000000000000000000099",
+                visibility=VISIBILITY_WATCHED_ITEM,
+            )
+
+    def test_watched_item_visibility_rejects_domain_name(self):
+        with pytest.raises(ValidationError):
+            NotificationTemplateCreate(
+                title="T",
+                remote_channel_id="01HV0000000000000000000099",
+                visibility=VISIBILITY_WATCHED_ITEM,
+                watched_item_id="01HV0000000000000000000002",
+                domain_name="example.com",
+            )
+
+    def test_rejects_unknown_visibility(self):
+        with pytest.raises(ValidationError):
+            NotificationTemplateCreate(
+                title="T",
+                remote_channel_id="01HV0000000000000000000099",
+                visibility="bogus",
+            )
+
 
 class TestNotificationTemplateResponse:
     def test_content_config_deserializes_from_dict(self):
@@ -197,12 +252,10 @@ class TestNotificationTemplateResponse:
                 "title": "Template",
                 "channel_hint": "slack",
                 "events": ["change_detected"],
-                "is_global_default": False,
+                "visibility": VISIBILITY_GLOBAL,
                 "is_active": True,
                 "created_at": datetime.now(UTC),
                 "updated_at": datetime.now(UTC),
-                "watch_ref_count": 0,
-                "domain_ref_count": 0,
                 "content_config": {
                     "default": {"include_diff_snippet": True, "diff_snippet_lines": 5},
                     "overrides": {},
@@ -221,16 +274,41 @@ class TestNotificationTemplateResponse:
                 "title": "Template",
                 "channel_hint": "slack",
                 "events": ["change_detected"],
-                "is_global_default": False,
+                "visibility": VISIBILITY_GLOBAL,
                 "is_active": True,
                 "created_at": datetime.now(UTC),
                 "updated_at": datetime.now(UTC),
-                "watch_ref_count": 0,
-                "domain_ref_count": 0,
                 "content_config": None,
             }
         )
         assert resp.content_config is None
+
+    def test_exposes_visibility_and_scope_refs(self):
+        """visibility/domain_name/watched_item_id replace is_global_default + ref counts (#200)."""
+        resp = NotificationTemplateResponse.model_validate(
+            {
+                "id": "01HV0000000000000000000001",
+                "title": "Template",
+                "channel_hint": "slack",
+                "events": ["change_detected"],
+                "visibility": VISIBILITY_DOMAIN,
+                "domain_name": "example.com",
+                "watched_item_id": None,
+                "is_active": True,
+                "created_at": datetime.now(UTC),
+                "updated_at": datetime.now(UTC),
+                "content_config": None,
+                "remote_channel_id": "01HV0000000000000000000099",
+            }
+        )
+        assert resp.visibility == VISIBILITY_DOMAIN
+        assert resp.domain_name == "example.com"
+        assert resp.watched_item_id is None
+        assert resp.remote_channel_id == "01HV0000000000000000000099"
+        # Removed fields must no longer be model fields.
+        assert "is_global_default" not in NotificationTemplateResponse.model_fields
+        assert "watch_ref_count" not in NotificationTemplateResponse.model_fields
+        assert "domain_ref_count" not in NotificationTemplateResponse.model_fields
 
 
 class TestWatchedItemCreate:

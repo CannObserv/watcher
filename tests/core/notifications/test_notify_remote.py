@@ -1,8 +1,10 @@
 """Tests for the remote dispatch path in dispatch_event_notifications.
 
 After Phase 5 (#137), this is the only dispatch path — there is no local
-Apprise fallback. These tests assert notifier-API integration behaviour
-(idempotency keys, FAILED-status handling, error catching).
+Apprise fallback. Post-#200 every target is one ``NotificationTemplate`` row
+selected by a single visibility-scoped query. These tests assert notifier-API
+integration behaviour (idempotency keys, FAILED-status handling, error catching,
+missing-channel handling) per candidate.
 """
 
 from datetime import UTC, datetime
@@ -10,6 +12,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 from notifier_client.errors import NotifierError
 from notifier_client.generated.models.dispatch_out_status import DispatchOutStatus
+from sqlalchemy.ext.asyncio import AsyncSession
 from ulid import ULID
 
 from src.core.notifications.events import WatchEvent, WatchEventType
@@ -30,46 +33,30 @@ def _make_event(event_type=WatchEventType.CHANGE_DETECTED, *, change_id=None):
     )
 
 
-def _watch_meta_result(domain=None, watched_item_id=None, *, missing=False):
-    """Default: a watch exists with the given domain + a synthetic watched_item_id.
-
-    Pass ``missing=True`` to simulate Watch.one_or_none() returning None (no row).
-    """
-    r = MagicMock()
-    if missing:
-        r.one_or_none.return_value = None
-    else:
-        wid = watched_item_id if watched_item_id is not None else ULID()
-        r.one_or_none.return_value = (domain, wid)
-    return r
-
-
-def _empty_result():
-    r = MagicMock()
-    r.scalars.return_value.all.return_value = []
-    return r
-
-
 def _result_with(*items):
     r = MagicMock()
     r.scalars.return_value.all.return_value = list(items)
     return r
 
 
-def _fake_local_config(remote_channel_id=None):
-    c = MagicMock()
-    c.id = ULID()
-    c.events = ["change_detected"]
-    c.content_config = None
-    c.remote_channel_id = remote_channel_id
-    return c
+def _wi(domain_name=None):
+    wi = MagicMock()
+    wi.domain_name = domain_name
+    return wi
 
 
-def _fake_template(remote_channel_id=None):
-    """Fake WatchedItemNotificationTemplate row (same shape as local config)."""
+def _setup_session(*, domain=None, templates=()):
+    """Build an AsyncMock session: ``session.get(WatchedItem)`` then one ``execute``."""
+    session = AsyncMock(spec=AsyncSession)
+    session.get = AsyncMock(return_value=_wi(domain))
+    session.execute = AsyncMock(return_value=_result_with(*templates))
+    return session
+
+
+def _fake_template(visibility="watched_item", *, remote_channel_id=None):
     t = MagicMock()
     t.id = ULID()
-    t.events = ["change_detected"]
+    t.visibility = visibility
     t.content_config = None
     t.remote_channel_id = remote_channel_id
     return t
@@ -112,20 +99,10 @@ class TestRemoteDispatchPath:
         monkeypatch.setenv("NOTIFIER_API_KEY", "nk_test")
 
         remote_id = str(ULID())
-        local_cfg = _fake_local_config(remote_channel_id=remote_id)
+        template = _fake_template(remote_channel_id=remote_id)
         event = _make_event(change_id=str(ULID()))
 
-        session = AsyncMock()
-        session.execute = AsyncMock(
-            side_effect=[
-                _watch_meta_result(None),
-                _empty_result(),  # global
-                _empty_result(),  # watch templates
-                _empty_result(),  # watched_item templates
-                _result_with(local_cfg),  # local
-            ]
-        )
-
+        session = _setup_session(templates=[template])
         mock_client = _mock_notifier_client(dispatch_return=_make_dispatch_out("succeeded"))
 
         with (
@@ -147,22 +124,11 @@ class TestRemoteDispatchPath:
         monkeypatch.setenv("NOTIFIER_BASE_URL", "http://localhost:9000")
         monkeypatch.setenv("NOTIFIER_API_KEY", "nk_test")
 
-        local_cfg = _fake_local_config(remote_channel_id=None)
+        template = _fake_template(remote_channel_id=None)
         event = _make_event()
 
-        session = AsyncMock()
-        session.execute = AsyncMock(
-            side_effect=[
-                _watch_meta_result(None),
-                _empty_result(),
-                _empty_result(),
-                _empty_result(),
-                _result_with(local_cfg),
-            ]
-        )
-
+        session = _setup_session(templates=[template])
         mock_client = _mock_notifier_client()
-
         capture_audit, results_captured = _make_audit_capture()
 
         with (
@@ -181,27 +147,15 @@ class TestRemoteDispatchPath:
         monkeypatch.setenv("NOTIFIER_BASE_URL", "http://localhost:9000")
         monkeypatch.setenv("NOTIFIER_API_KEY", "nk_test")
 
-        remote_id = str(ULID())
-        local_cfg = _fake_local_config(remote_channel_id=remote_id)
+        template = _fake_template(remote_channel_id=str(ULID()))
         event = _make_event()
 
-        session = AsyncMock()
-        session.execute = AsyncMock(
-            side_effect=[
-                _watch_meta_result(None),
-                _empty_result(),
-                _empty_result(),
-                _empty_result(),
-                _result_with(local_cfg),
-            ]
-        )
-
+        session = _setup_session(templates=[template])
         mock_client = _mock_notifier_client(
             dispatch_side_effect=NotifierError(
                 "server error", status_code=500, response=MagicMock()
             )
         )
-
         capture_audit, results_captured = _make_audit_capture()
 
         with (
@@ -215,25 +169,14 @@ class TestRemoteDispatchPath:
         assert "notifier" in results_captured[0]["reason"].lower()
 
     async def test_metadata_includes_event_type_and_source(self, monkeypatch):
-        """dispatch() is called with metadata containing event_type and source fields."""
+        """dispatch() is called with metadata containing event_type and the visibility source."""
         monkeypatch.setenv("NOTIFIER_BASE_URL", "http://localhost:9000")
         monkeypatch.setenv("NOTIFIER_API_KEY", "nk_test")
 
-        remote_id = str(ULID())
-        local_cfg = _fake_local_config(remote_channel_id=remote_id)
+        template = _fake_template("watched_item", remote_channel_id=str(ULID()))
         event = _make_event(WatchEventType.WATCH_CREATED)
 
-        session = AsyncMock()
-        session.execute = AsyncMock(
-            side_effect=[
-                _watch_meta_result(None),
-                _empty_result(),
-                _empty_result(),
-                _empty_result(),
-                _result_with(local_cfg),
-            ]
-        )
-
+        session = _setup_session(templates=[template])
         mock_client = _mock_notifier_client(dispatch_return=_make_dispatch_out("succeeded"))
 
         with (
@@ -245,15 +188,14 @@ class TestRemoteDispatchPath:
         call_kwargs = mock_client.dispatch.call_args.kwargs
         metadata = call_kwargs["metadata"]
         assert metadata["event_type"] == "watch_created"
-        assert metadata["source"] == "local"
+        assert metadata["source"] == "watched_item"
 
     async def test_notifier_failed_status_recorded_as_failure(self, monkeypatch):
         """FAILED status from notifier API is success=False; reason taken from attempts."""
         monkeypatch.setenv("NOTIFIER_BASE_URL", "http://localhost:9000")
         monkeypatch.setenv("NOTIFIER_API_KEY", "nk_test")
 
-        remote_id = str(ULID())
-        local_cfg = _fake_local_config(remote_channel_id=remote_id)
+        template = _fake_template(remote_channel_id=str(ULID()))
         event = _make_event()
 
         failed_out = _make_dispatch_out("failed")
@@ -261,19 +203,8 @@ class TestRemoteDispatchPath:
         attempt.reason = "channel unreachable"
         failed_out.attempts = [attempt]
 
-        session = AsyncMock()
-        session.execute = AsyncMock(
-            side_effect=[
-                _watch_meta_result(None),
-                _empty_result(),
-                _empty_result(),
-                _empty_result(),
-                _result_with(local_cfg),
-            ]
-        )
-
+        session = _setup_session(templates=[template])
         mock_client = _mock_notifier_client(dispatch_return=failed_out)
-
         capture_audit, results_captured = _make_audit_capture()
 
         with (
@@ -291,23 +222,11 @@ class TestRemoteDispatchPath:
         monkeypatch.setenv("NOTIFIER_BASE_URL", "http://localhost:9000")
         monkeypatch.setenv("NOTIFIER_API_KEY", "nk_test")
 
-        remote_id = str(ULID())
-        local_cfg = _fake_local_config(remote_channel_id=remote_id)
+        template = _fake_template(remote_channel_id=str(ULID()))
         event = _make_event()
 
-        session = AsyncMock()
-        session.execute = AsyncMock(
-            side_effect=[
-                _watch_meta_result(None),
-                _empty_result(),
-                _empty_result(),
-                _empty_result(),
-                _result_with(local_cfg),
-            ]
-        )
-
+        session = _setup_session(templates=[template])
         mock_client = _mock_notifier_client(dispatch_return=_make_dispatch_out("failed"))
-
         capture_audit, results_captured = _make_audit_capture()
 
         with (
@@ -320,59 +239,18 @@ class TestRemoteDispatchPath:
         assert results_captured[0]["success"] is False
         assert results_captured[0]["reason"] == "Delivery failed via notifier"
 
-    async def test_watched_item_template_is_dispatched(self, monkeypatch):
-        """A WatchedItemNotificationTemplate row reaches the notifier (#160 Task 9)."""
+    async def test_two_visibilities_both_dispatched(self, monkeypatch):
+        """A global template + a watched_item template → 2 dispatches with distinct sources."""
         monkeypatch.setenv("NOTIFIER_BASE_URL", "http://localhost:9000")
         monkeypatch.setenv("NOTIFIER_API_KEY", "nk_test")
 
-        remote_id = str(ULID())
-        template = _fake_template(remote_channel_id=remote_id)
+        templates = [
+            _fake_template("global", remote_channel_id=str(ULID())),
+            _fake_template("watched_item", remote_channel_id=str(ULID())),
+        ]
         event = _make_event()
 
-        session = AsyncMock()
-        session.execute = AsyncMock(
-            side_effect=[
-                _watch_meta_result(None),
-                _empty_result(),  # global
-                _empty_result(),  # watch templates (WatchNcRef)
-                _result_with(template),  # watched_item templates
-                _empty_result(),  # local
-            ]
-        )
-
-        mock_client = _mock_notifier_client(dispatch_return=_make_dispatch_out("succeeded"))
-
-        with (
-            patch("src.core.notifications.notify.get_notifier_client", return_value=mock_client),
-            patch("src.core.notifications.notify.audit"),
-        ):
-            await dispatch_event_notifications(session=session, event=event)
-
-        mock_client.dispatch.assert_called_once()
-        call_kwargs = mock_client.dispatch.call_args.kwargs
-        assert call_kwargs["channel_ids"] == [remote_id]
-        assert call_kwargs["metadata"]["source"] == "watched_item_template"
-
-    async def test_watched_item_template_and_local_both_dispatched(self, monkeypatch):
-        """Union: 1 WatchedItem template + 1 local config = 2 dispatches (#160 Task 9)."""
-        monkeypatch.setenv("NOTIFIER_BASE_URL", "http://localhost:9000")
-        monkeypatch.setenv("NOTIFIER_API_KEY", "nk_test")
-
-        template = _fake_template(remote_channel_id=str(ULID()))
-        local_cfg = _fake_local_config(remote_channel_id=str(ULID()))
-        event = _make_event()
-
-        session = AsyncMock()
-        session.execute = AsyncMock(
-            side_effect=[
-                _watch_meta_result(None),
-                _empty_result(),  # global
-                _empty_result(),  # watch templates (WatchNcRef)
-                _result_with(template),  # watched_item templates
-                _result_with(local_cfg),  # local
-            ]
-        )
-
+        session = _setup_session(templates=templates)
         mock_client = _mock_notifier_client(dispatch_return=_make_dispatch_out("succeeded"))
 
         with (
@@ -382,10 +260,8 @@ class TestRemoteDispatchPath:
             await dispatch_event_notifications(session=session, event=event)
 
         assert mock_client.dispatch.call_count == 2
-        sources = {
-            call.kwargs["metadata"]["source"] for call in mock_client.dispatch.call_args_list
-        }
-        assert sources == {"watched_item_template", "local"}
+        sources = {c.kwargs["metadata"]["source"] for c in mock_client.dispatch.call_args_list}
+        assert sources == {"global", "watched_item"}
 
     async def test_notifier_failed_status_uses_default_reason_when_attempt_reason_is_none(
         self, monkeypatch
@@ -394,8 +270,7 @@ class TestRemoteDispatchPath:
         monkeypatch.setenv("NOTIFIER_BASE_URL", "http://localhost:9000")
         monkeypatch.setenv("NOTIFIER_API_KEY", "nk_test")
 
-        remote_id = str(ULID())
-        local_cfg = _fake_local_config(remote_channel_id=remote_id)
+        template = _fake_template(remote_channel_id=str(ULID()))
         event = _make_event()
 
         failed_out = _make_dispatch_out("failed")
@@ -403,19 +278,8 @@ class TestRemoteDispatchPath:
         attempt.reason = None
         failed_out.attempts = [attempt]
 
-        session = AsyncMock()
-        session.execute = AsyncMock(
-            side_effect=[
-                _watch_meta_result(None),
-                _empty_result(),
-                _empty_result(),
-                _empty_result(),
-                _result_with(local_cfg),
-            ]
-        )
-
+        session = _setup_session(templates=[template])
         mock_client = _mock_notifier_client(dispatch_return=failed_out)
-
         capture_audit, results_captured = _make_audit_capture()
 
         with (

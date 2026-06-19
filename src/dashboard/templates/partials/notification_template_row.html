@@ -3,7 +3,7 @@
 
 <tr id="tpl-{{ tpl.id }}">
   <td class="font-medium text-gray-900 dark:text-white">
-    {% if tpl.is_global_default %}
+    {% if tpl.visibility == 'global' %}
     <span aria-hidden="true">🔒</span>
     {% endif %}
     {{ tpl.title }}
@@ -12,8 +12,12 @@
     <span class="chip">{{ tpl.channel_hint }}</span>
   </td>
   <td>
-    {% if tpl.is_global_default %}
+    {% if tpl.visibility == 'global' %}
     <span class="badge badge-info">Global</span>
+    {% elif tpl.visibility == 'domain' %}
+    <span class="badge badge-info">Domain</span>
+    {% elif tpl.visibility == 'watched_item' %}
+    <span class="badge badge-info">Item</span>
     {% else %}
     <span class="text-gray-400 dark:text-gray-600 text-sm">—</span>
     {% endif %}

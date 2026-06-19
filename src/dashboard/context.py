@@ -10,13 +10,14 @@ from ulid import ULID
 
 from src.core.models.audit_log import AuditLog, EventType
 from src.core.models.domain import Domain
-from src.core.models.notification_config import WatchNotificationConfig
-from src.core.models.notification_template import DomainNcRef, NotificationTemplate
+from src.core.models.notification_template import (
+    VISIBILITY_DOMAIN,
+    VISIBILITY_GLOBAL,
+    VISIBILITY_WATCHED_ITEM,
+    NotificationTemplate,
+)
 from src.core.models.temporal_profile import TemporalProfile
 from src.core.models.watched_item import WatchedItem
-from src.core.models.watched_item_notification_template import (
-    WatchedItemNotificationTemplate,
-)
 
 _DOMAIN_WI_SORT_COLS: dict[str, Any] = {
     "name": WatchedItem.name,
@@ -149,12 +150,15 @@ async def get_watched_item_profiles(
 
 async def get_watched_item_notifications(
     session: AsyncSession, watched_item_id: ULID
-) -> list[WatchNotificationConfig]:
-    """Fetch notification configs for a WatchedItem (#191: re-keyed from Watch)."""
+) -> list[NotificationTemplate]:
+    """Fetch the item-scoped notification templates for a WatchedItem (#200)."""
     result = await session.execute(
-        select(WatchNotificationConfig).where(
-            WatchNotificationConfig.watched_item_id == watched_item_id
+        select(NotificationTemplate)
+        .where(
+            NotificationTemplate.visibility == VISIBILITY_WATCHED_ITEM,
+            NotificationTemplate.watched_item_id == watched_item_id,
         )
+        .order_by(NotificationTemplate.created_at)
     )
     return list(result.scalars().all())
 
@@ -382,30 +386,18 @@ async def get_watched_item_activity(
     return out
 
 
-async def get_watched_item_templates(
-    session: AsyncSession, watched_item_id: ULID
-) -> list[WatchedItemNotificationTemplate]:
-    """Load notification templates under a WatchedItem (created_at asc)."""
-    result = await session.execute(
-        select(WatchedItemNotificationTemplate)
-        .where(WatchedItemNotificationTemplate.watched_item_id == watched_item_id)
-        .order_by(WatchedItemNotificationTemplate.created_at)
-    )
-    return list(result.scalars().all())
-
-
 async def get_global_default_templates(
     session: AsyncSession,
 ) -> list[NotificationTemplate]:
-    """Library templates flagged ``is_global_default`` — they fire for every item (#199).
+    """Global templates (``visibility='global'``) — they fire for every item (#200).
 
-    Mirrors the domain detail page's global section: not filtered by ``is_active``,
-    so an operator can see an inactive global (status badge shows it won't fire).
-    Dispatch additionally filters on ``is_active`` and per-event membership.
+    Not filtered by ``is_active``, so an operator can see an inactive global
+    (status badge shows it won't fire). Dispatch additionally filters on
+    ``is_active`` and per-event membership.
     """
     result = await session.execute(
         select(NotificationTemplate)
-        .where(NotificationTemplate.is_global_default.is_(True))
+        .where(NotificationTemplate.visibility == VISIBILITY_GLOBAL)
         .order_by(NotificationTemplate.title)
     )
     return list(result.scalars().all())
@@ -414,23 +406,19 @@ async def get_global_default_templates(
 async def get_domain_default_templates(
     session: AsyncSession, domain_name: str | None
 ) -> list[NotificationTemplate]:
-    """Library templates assigned to the item's domain via ``DomainNcRef`` (#199).
+    """Domain templates (``visibility='domain'``) for the item's domain (#200).
 
-    These also fire at dispatch for items whose ``domain_name`` matches. Returns
-    an empty list when the item has no domain.
-
-    Not deduped against globals: a template that is both ``is_global_default`` and
-    domain-assigned would render in both panel sections though dispatch sends it
-    once (deduped by ``template_id``). Currently unreachable via UI (the domain
-    assign-row excludes globals) but not DB-enforced — folded into the channel-keyed
-    dedup rework in #200.
+    These fire at dispatch for items whose ``domain_name`` matches. Returns an
+    empty list when the item has no domain.
     """
     if not domain_name:
         return []
     result = await session.execute(
         select(NotificationTemplate)
-        .join(DomainNcRef, DomainNcRef.template_id == NotificationTemplate.id)
-        .where(DomainNcRef.domain_name == domain_name)
+        .where(
+            NotificationTemplate.visibility == VISIBILITY_DOMAIN,
+            NotificationTemplate.domain_name == domain_name,
+        )
         .order_by(NotificationTemplate.title)
     )
     return list(result.scalars().all())

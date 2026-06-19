@@ -9,8 +9,6 @@
     channel_hint:         str — display hint (e.g. "slack", "ntfy")
     events:               list[str] — currently-subscribed event type values
     content_config:       ContentConfig | None
-    show_global_default:  bool — render Global default toggle (templates only)
-    is_global_default:    bool
     show_preview:         bool — render right-column sticky preview
   Uses Jinja globals: event_titles, template_variables.
 #}
@@ -58,15 +56,6 @@
                  placeholder="slack, email, ntfy..."
                  class="form-input mt-1">
         </div>
-
-        {% if show_global_default %}
-        <label class="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300 cursor-pointer min-h-[44px]">
-          <input type="checkbox" name="is_global_default" value="1"
-                 {% if is_global_default %}checked{% endif %}
-                 class="rounded border-gray-300 dark:border-gray-600">
-          Mark as global default
-        </label>
-        {% endif %}
       </div>
     </section>
 

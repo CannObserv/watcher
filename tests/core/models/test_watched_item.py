@@ -1,4 +1,4 @@
-"""Tests for WatchedItem + WatchedItemNotificationTemplate models."""
+"""Tests for WatchedItem + the unified NotificationTemplate model (#200)."""
 
 import pytest
 from sqlalchemy import select
@@ -6,7 +6,13 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from ulid import ULID
 
-from src.core.models import ContentType, WatchedItem, WatchedItemNotificationTemplate
+from src.core.models import (
+    VISIBILITY_GLOBAL,
+    VISIBILITY_WATCHED_ITEM,
+    ContentType,
+    NotificationTemplate,
+    WatchedItem,
+)
 
 pytestmark = pytest.mark.integration
 
@@ -58,41 +64,47 @@ async def test_watched_item_default_content_type_none_allowed(db_session: AsyncS
 
 
 async def test_notification_template_defaults(db_session: AsyncSession) -> None:
+    """A watched_item-visibility NotificationTemplate persists and uses server defaults."""
     wi = WatchedItem(archiver_info_item_id=ULID(), name="W")
     db_session.add(wi)
     await db_session.flush()
 
-    tmpl = WatchedItemNotificationTemplate(
+    tmpl = NotificationTemplate(
+        title="Item template",
         watched_item_id=wi.id,
         channel_hint="slack",
         remote_channel_id="01ABCDEFGHJKMNPQRSTVWXYZ12",
+        visibility=VISIBILITY_WATCHED_ITEM,
     )
     db_session.add(tmpl)
     await db_session.flush()
 
     fetched = (
         await db_session.execute(
-            select(WatchedItemNotificationTemplate).where(
-                WatchedItemNotificationTemplate.watched_item_id == wi.id
-            )
+            select(NotificationTemplate).where(NotificationTemplate.watched_item_id == wi.id)
         )
     ).scalar_one()
     assert fetched.channel_hint == "slack"
     assert fetched.is_active is True
     assert fetched.events == ["change_detected"]
-    assert fetched.title is None
+    assert fetched.title == "Item template"
+    assert fetched.visibility == VISIBILITY_WATCHED_ITEM
+    assert fetched.domain_name is None
     assert fetched.content_config is None
 
 
 async def test_notification_template_cascade_delete(db_session: AsyncSession) -> None:
+    """Deleting a WatchedItem cascades to its watched_item-visibility templates."""
     wi = WatchedItem(archiver_info_item_id=ULID(), name="W")
     db_session.add(wi)
     await db_session.flush()
     tmpl_id = ULID()
-    tmpl = WatchedItemNotificationTemplate(
+    tmpl = NotificationTemplate(
         id=tmpl_id,
+        title="Item template",
         watched_item_id=wi.id,
         channel_hint="mailto",
+        visibility=VISIBILITY_WATCHED_ITEM,
     )
     db_session.add(tmpl)
     await db_session.flush()
@@ -101,6 +113,29 @@ async def test_notification_template_cascade_delete(db_session: AsyncSession) ->
     await db_session.flush()
 
     result = await db_session.execute(
-        select(WatchedItemNotificationTemplate).where(WatchedItemNotificationTemplate.id == tmpl_id)
+        select(NotificationTemplate).where(NotificationTemplate.id == tmpl_id)
     )
     assert result.scalar_one_or_none() is None
+
+
+async def test_notification_template_visibility_check_rejects_mismatch(
+    db_session: AsyncSession,
+) -> None:
+    """ck_notification_templates_visibility_refs rejects a ref/visibility mismatch (#200).
+
+    A global-visibility template must have both refs NULL; supplying a
+    watched_item_id violates the CHECK constraint.
+    """
+    wi = WatchedItem(archiver_info_item_id=ULID(), name="W")
+    db_session.add(wi)
+    await db_session.flush()
+
+    bad = NotificationTemplate(
+        title="Inconsistent",
+        channel_hint="slack",
+        visibility=VISIBILITY_GLOBAL,
+        watched_item_id=wi.id,  # not allowed for global visibility
+    )
+    db_session.add(bad)
+    with pytest.raises(IntegrityError):
+        await db_session.flush()

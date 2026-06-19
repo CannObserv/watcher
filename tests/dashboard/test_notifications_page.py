@@ -8,15 +8,16 @@ from httpx import AsyncClient
 from sqlalchemy import select
 from ulid import ULID
 
-from src.core.models.notification_template import NotificationTemplate, WatchNcRef
-from src.core.models.watched_item import ContentType
+from src.core.models.notification_template import VISIBILITY_GLOBAL, NotificationTemplate
 from src.core.notifications.notify import DispatchResult
-from tests.conftest import make_watched_item
 
 VALID_CHANNEL_ID = str(ULID())
 
 
 async def _make_template(db_session, title: str = "T", **kwargs) -> NotificationTemplate:
+    """Build a NotificationTemplate (#200). Defaults to visibility='global' so the
+    visibility/ref CHECK constraint is satisfied; callers override via kwargs."""
+    kwargs.setdefault("visibility", VISIBILITY_GLOBAL)
     tpl = NotificationTemplate(
         title=title,
         remote_channel_id=str(ULID()),
@@ -76,6 +77,55 @@ async def test_create_template_redirects_on_success(client: AsyncClient, db_sess
     )
     assert resp.status_code == 303
     assert resp.headers["location"] == "/notifications"
+
+
+@pytest.mark.integration
+async def test_create_from_library_makes_global_template(client: AsyncClient, db_session):
+    """The library create flow always produces a visibility='global' template (#200).
+
+    There is no is_global_default checkbox anymore — global is intrinsic to the
+    library page (domain/item templates are created from their detail pages)."""
+    resp = await client.post(
+        "/notifications/new",
+        data={
+            "title": "LibraryGlobal",
+            "remote_channel_id": VALID_CHANNEL_ID,
+            "channel_hint": "json",
+            "events": ["change_detected"],
+        },
+        follow_redirects=False,
+    )
+    assert resp.status_code == 303
+
+    tpl = await db_session.scalar(
+        select(NotificationTemplate).where(NotificationTemplate.title == "LibraryGlobal")
+    )
+    assert tpl is not None
+    assert tpl.visibility == VISIBILITY_GLOBAL
+    assert tpl.domain_name is None
+    assert tpl.watched_item_id is None
+
+
+@pytest.mark.integration
+async def test_create_form_has_no_global_default_field(client: AsyncClient):
+    """The new-template form no longer carries an is_global_default checkbox (#200)."""
+    resp = await client.get("/notifications/new")
+    assert resp.status_code == 200
+    assert b"is_global_default" not in resp.content
+
+
+@pytest.mark.integration
+async def test_library_page_shows_scope_badge(client: AsyncClient, db_session):
+    """The library row renders a scope badge derived from tpl.visibility (#200)."""
+    await _make_template(db_session, "GlobalScoped", visibility=VISIBILITY_GLOBAL)
+    await db_session.commit()
+
+    resp = await client.get("/notifications")
+    assert resp.status_code == 200
+    body = resp.text
+    assert "GlobalScoped" in body
+    # Scope badge for a global template.
+    assert re.search(r'class="badge badge-info"[^>]*>\s*Global\s*<', body)
 
 
 @pytest.mark.integration
@@ -205,21 +255,10 @@ async def test_delete_succeeds_when_no_refs(client: AsyncClient, db_session):
     assert result.scalar_one_or_none() is None
 
 
-@pytest.mark.integration
-async def test_delete_blocked_when_watched_item_ref_exists(client: AsyncClient, db_session):
-    """DELETE /{id}/delete returns 409 when a WatchNcRef still references the template."""
-    wi = await make_watched_item(
-        db_session,
-        name="W",
-        primary_url="https://example.com",
-        default_content_type=ContentType.HTML,
-    )
-    tpl = await _make_template(db_session, "Referenced")
-    db_session.add(WatchNcRef(watched_item_id=wi.id, template_id=tpl.id))
-    await db_session.flush()
-
-    resp = await client.delete(f"/notifications/{tpl.id}/delete", headers={"HX-Request": "true"})
-    assert resp.status_code == 409
+# Removed: test_delete_blocked_when_watched_item_ref_exists.
+# Post-#200 templates are standalone (no WatchNcRef/DomainNcRef junctions), so
+# there is no ref-count 409 — delete always succeeds. Covered by
+# test_delete_succeeds_when_no_refs.
 
 
 @pytest.mark.integration
@@ -322,7 +361,8 @@ async def test_duplicate_creates_copy(client: AsyncClient, db_session):
     assert copy is not None
     assert copy.channel_hint == tpl.channel_hint
     assert copy.events == tpl.events
-    assert copy.is_global_default is False
+    # Duplicate copies the source's visibility/refs (#200).
+    assert copy.visibility == tpl.visibility
 
 
 @pytest.mark.integration

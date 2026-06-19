@@ -26,9 +26,10 @@ class EventType:
     CHECK_FETCH_FAILED = "check.fetch_failed"
     NOTIFICATION_DISPATCHED = "notification.dispatched"
     NOTIFICATION_TEST = "notification.test"
-    NOTIFICATION_CONFIG_CREATED = "notification_config.created"
-    NOTIFICATION_CONFIG_UPDATED = "notification_config.updated"
-    NOTIFICATION_CONFIG_DELETED = "notification_config.deleted"
+    # #200: every notification target is a NotificationTemplate (any visibility);
+    # the legacy notification_config.*, watch_nc.*, watched_item_template.*, and
+    # domain_nc_default.* events were unified into this single set. Historical
+    # audit_log rows keep their old event_type strings.
     NOTIFICATION_TEMPLATE_CREATED = "notification_template.created"
     NOTIFICATION_TEMPLATE_UPDATED = "notification_template.updated"
     NOTIFICATION_TEMPLATE_DELETED = "notification_template.deleted"
@@ -43,8 +44,6 @@ class EventType:
     DOMAIN_ARCHIVED = "domain.archived"
     DOMAIN_RESTORED = "domain.restored"
     DOMAIN_DELETED = "domain.deleted"
-    WATCH_NC_ASSIGNED = "watch_nc.assigned"
-    WATCH_NC_UNASSIGNED = "watch_nc.unassigned"
     WATCHED_ITEM_THROTTLED = "watched_item.throttled"
     WATCHED_ITEM_CREATED = "watched_item.created"
     WATCHED_ITEM_UPDATED = "watched_item.updated"
@@ -54,11 +53,6 @@ class EventType:
     WATCHED_ITEM_RESUMED = "watched_item.resumed"
     WATCHED_ITEM_REVIEWED = "watched_item.reviewed"
     WATCHED_ITEM_CHECK_REQUESTED = "watched_item.check_requested"
-    WATCHED_ITEM_TEMPLATE_CREATED = "watched_item_template.created"
-    WATCHED_ITEM_TEMPLATE_UPDATED = "watched_item_template.updated"
-    WATCHED_ITEM_TEMPLATE_DELETED = "watched_item_template.deleted"
-    DOMAIN_NC_DEFAULT_ADDED = "domain_nc_default.added"
-    DOMAIN_NC_DEFAULT_REMOVED = "domain_nc_default.removed"
 
 
 class AuditLog(Base):

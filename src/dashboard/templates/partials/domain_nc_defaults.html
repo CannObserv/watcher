@@ -1,6 +1,6 @@
-{# Notification defaults for a domain — global templates + domain-assigned templates. #}
-{# Expects: domain_name (str), assigned (list[NotificationTemplate]), #}
-{#          global_templates (list[NotificationTemplate]), has_assignable (bool). #}
+{# Notification defaults for a domain — inherited globals (read-only) + domain templates. #}
+{# Expects: domain_name (str), assigned (list[NotificationTemplate] visibility='domain'), #}
+{#          global_templates (list[NotificationTemplate] visibility='global'). #}
 
 <div id="domain-nc-defaults" class="space-y-6" aria-live="polite">
 
@@ -57,7 +57,7 @@
           {% if not global_templates %}
           <tr id="global-nc-empty-state">
             <td colspan="4" class="px-4 py-3 text-sm text-gray-500 dark:text-gray-400">
-              No global templates defined. <a href="/notifications" class="link">Create a template</a> and mark it as Global Default.
+              No global templates defined. <a href="/notifications" class="link">Create one</a> in the template library.
             </td>
           </tr>
           {% endif %}
@@ -77,17 +77,6 @@
            class="btn btn-secondary text-xs min-h-[44px]">
           + Create New
         </a>
-        <button
-          {% if has_assignable %}
-          hx-get="/domains/{{ domain_name }}/nc-defaults/assign-row"
-          hx-target="#domain-nc-tbody"
-          hx-swap="afterbegin"
-          hx-on::before-request="if(document.getElementById('nc-domain-assign-row')){event.preventDefault();}"
-          {% endif %}
-          class="btn btn-secondary text-xs min-h-[44px] htmx-request:opacity-60"
-          {% if not has_assignable %}disabled aria-disabled="true" title="No templates available to assign"{% endif %}>
-          + Assign Existing
-        </button>
       </div>
     </div>
     <div class="rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden">
@@ -132,10 +121,10 @@
                   hx-post="/domains/{{ domain_name }}/nc-defaults/remove/{{ tpl.id }}"
                   hx-target="#domain-nc-defaults"
                   hx-swap="outerHTML"
-                  hx-confirm="Remove {{ tpl.title }} as a default for this domain?"
+                  hx-confirm="Delete the domain template &quot;{{ tpl.title }}&quot;? This cannot be undone."
                   class="btn btn-danger-outline text-xs min-h-[44px] htmx-request:opacity-60"
-                  aria-label="Remove {{ tpl.title }} from domain defaults">
-                  Remove
+                  aria-label="Delete {{ tpl.title }} domain template">
+                  Delete
                 </button>
               </div>
             </td>

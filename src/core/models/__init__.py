@@ -6,12 +6,16 @@ from src.core.models.audit_log import AuditLog
 from src.core.models.base import Base, TimestampMixin, ULIDType, generate_ulid
 from src.core.models.change_revision import ChangeRevision
 from src.core.models.domain import DEFAULT_MAX_CONCURRENCY, DEFAULT_MIN_INTERVAL, Domain
-from src.core.models.notification_config import WatchNotificationConfig
-from src.core.models.notification_template import DomainNcRef, NotificationTemplate, WatchNcRef
+from src.core.models.notification_template import (
+    VISIBILITIES,
+    VISIBILITY_DOMAIN,
+    VISIBILITY_GLOBAL,
+    VISIBILITY_WATCHED_ITEM,
+    NotificationTemplate,
+)
 from src.core.models.pending_archiver_sync import PendingArchiverSync
 from src.core.models.temporal_profile import PostAction, ProfileType, TemporalProfile
 from src.core.models.watched_item import ContentType, WatchedItem, WatchHealthStatus
-from src.core.models.watched_item_notification_template import WatchedItemNotificationTemplate
 
 __all__ = [
     "ApiKey",
@@ -23,11 +27,12 @@ __all__ = [
     "DEFAULT_MAX_CONCURRENCY",
     "DEFAULT_MIN_INTERVAL",
     "Domain",
-    "WatchNotificationConfig",
     "PendingArchiverSync",
     "NotificationTemplate",
-    "WatchNcRef",
-    "DomainNcRef",
+    "VISIBILITIES",
+    "VISIBILITY_GLOBAL",
+    "VISIBILITY_DOMAIN",
+    "VISIBILITY_WATCHED_ITEM",
     "PostAction",
     "ProfileType",
     "TemporalProfile",
@@ -35,6 +40,5 @@ __all__ = [
     "ULIDType",
     "WatchHealthStatus",
     "WatchedItem",
-    "WatchedItemNotificationTemplate",
     "generate_ulid",
 ]

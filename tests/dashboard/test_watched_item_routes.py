@@ -9,7 +9,10 @@ from ulid import ULID
 
 from src.core.models.audit_log import AuditLog, EventType
 from src.core.models.domain import Domain
-from src.core.models.notification_config import WatchNotificationConfig
+from src.core.models.notification_template import (
+    VISIBILITY_WATCHED_ITEM,
+    NotificationTemplate,
+)
 from src.core.models.temporal_profile import PostAction, ProfileType, TemporalProfile
 from src.core.models.watched_item import WatchedItem
 from src.dashboard.routes import (
@@ -178,28 +181,34 @@ class TestDetailPage:
         assert b"Danger Zone" in response.content
         assert b"Archive" in response.content
 
-    async def test_notification_configs_panel_renders_config(self, client, db_session):
-        """#191 CR-4/6: the folded notification-configs panel renders a config's label + badge."""
+    async def test_notification_templates_panel_renders_item_template(self, client, db_session):
+        """#200: the item-template panel renders an item-scoped template's title + badge.
+
+        Post-#200 item notifications are NotificationTemplate rows with
+        visibility='watched_item'; the detail page surfaces them in the
+        "Notification Templates" panel (the separate "Notification Configs" panel
+        is gone — the per-Watch tier folded in #191, the model unified in #200).
+        """
 
         item = await make_info_item(db_session)
         wi = WatchedItem(archiver_info_item_id=item.info_item_id, name="WithConfig")
         db_session.add(wi)
         await db_session.flush()
         db_session.add(
-            WatchNotificationConfig(
+            NotificationTemplate(
+                visibility=VISIBILITY_WATCHED_ITEM,
                 watched_item_id=wi.id,
                 title="Ops Slack",
                 channel_hint="slack",
                 events=["change_detected"],
-                remote_channel_id=str(ULID()),
                 is_active=True,
             )
         )
         await db_session.commit()
         response = await client.get(f"/watched-items/{wi.id}")
         body = response.content
-        assert b"Notification Configs" in body
-        # Label uses title (not a non-existent .name attr) and the active badge renders.
+        assert b"Notification Templates" in body
+        # Label uses title and the active badge renders.
         assert b"Ops Slack" in body
         assert b"badge-active" in body
 

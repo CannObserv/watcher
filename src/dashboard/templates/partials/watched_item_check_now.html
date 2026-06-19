@@ -1,0 +1,15 @@
+{# Check-now button for the WatchedItem detail page's "Last Checked" row.
+   Wrapped in a stable #wi-check-now span so the status toggle can OOB-swap it
+   and keep its disabled state in sync with pause/resume. Disabled while paused,
+   domain-suspended, or with no effective_url; hidden when archived.
+   Expects: watched_item; optional oob. #}
+<span id="wi-check-now"{% if oob %} hx-swap-oob="true"{% endif %}>
+{% if not watched_item.archived_at and watched_item.effective_url %}
+  <button
+    hx-post="/watched-items/{{ watched_item.id }}/check-now"
+    hx-swap="none"
+    {% if not watched_item.is_active or watched_item.domain_suspended %}disabled{% endif %}
+    class="btn btn-secondary py-1 px-3 text-sm min-h-[44px] htmx-request:opacity-60 disabled:opacity-50 disabled:cursor-not-allowed"
+    aria-label="Queue an immediate check for {{ watched_item.name }}">Check now</button>
+{% endif %}
+</span>

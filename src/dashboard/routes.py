@@ -57,6 +57,7 @@ from src.core.notifications.preview_fixtures import (
 from src.core.notifier_client import get_notifier_client
 from src.core.probe import ProbeResult
 from src.core.scheduler import compute_next_check, parse_interval
+from src.core.watches.resolution import resolved_schedule_config
 from src.dashboard import templates
 from src.dashboard.context import (
     get_audit_entries,
@@ -189,13 +190,28 @@ async def dashboard_home(
 # --- WatchedItem inline field editing ---
 
 
-def _format_interval(wi) -> str:
+def _format_interval(wi: WatchedItem) -> str:
     cfg = wi.default_schedule_config or {}
     return cfg.get("interval") or ""
 
 
-def _format_content_type(wi) -> str:
+def _format_content_type(wi: WatchedItem) -> str:
     return wi.default_content_type or ""
+
+
+def _interval_display(wi: WatchedItem, value: str) -> tuple[str, bool]:
+    """View-mode display for the interval field; returns ``(display, inherited)``.
+
+    An explicit interval shows verbatim. No config at all (``None``) shows the
+    resolved system default, flagged inherited. A non-None config that carries no
+    interval (e.g. ``{}``) shows a literal empty-config marker rather than a blank
+    value beside an "inherited" tag — that pairing read as confusing UX (#202 CR).
+    """
+    if value:
+        return value, False
+    if wi.default_schedule_config is None:
+        return resolved_schedule_config(wi).get("interval", ""), True
+    return "{ }", False
 
 
 WATCHED_ITEM_FIELD_META: dict[str, dict] = {
@@ -216,16 +232,18 @@ WATCHED_ITEM_FIELD_META: dict[str, dict] = {
         "format": lambda wi: wi.description or "",
     },
     "default_schedule_interval": {
-        "label": "Default Interval",
-        "hint": "e.g. 30s, 15m, 6h, 1d. reduce_frequency post-actions may slow this independently.",
+        "label": "Interval",
+        "hint": "e.g. 30s, 15m, 6h, 1d. Leave blank to inherit the system default. "
+        "reduce_frequency post-actions may slow this independently.",
         "type": "text",
         "source": "schedule_interval",
         "cast": lambda v: v.strip(),
         "format": _format_interval,
+        "display": _interval_display,
     },
     "default_content_type": {
-        "label": "Default Content Type",
-        "hint": "Applied to child Watches that don't override.",
+        "label": "Content Type",
+        "hint": None,
         "type": "select",
         "source": "column",
         "cast": lambda v: v.strip() or None,
@@ -237,21 +255,31 @@ WATCHED_ITEM_FIELD_META: dict[str, dict] = {
 EDITABLE_WATCHED_ITEM_FIELDS = set(WATCHED_ITEM_FIELD_META.keys())
 
 
-def _watched_item_field_context(request: Request, wi, field_name: str, mode: str = "view") -> dict:
+def _watched_item_field_context(
+    request: Request, wi: WatchedItem, field_name: str, mode: str = "view"
+) -> dict:
     meta = WATCHED_ITEM_FIELD_META[field_name]
+    value = meta["format"](wi)
+    # A field may supply a "display" callable returning (view_value, inherited) —
+    # e.g. the interval field resolves the inherited system default for view mode
+    # while edit mode still binds the explicit override. Others view == edit.
+    display_fn = meta.get("display")
+    display_value, inherited = display_fn(wi, value) if display_fn else (value, False)
     return {
         "watched_item": wi,
         "field_name": field_name,
         "field_label": meta["label"],
         "field_hint": meta.get("hint"),
-        "field_value": meta["format"](wi),
+        "field_value": value,
+        "field_display_value": display_value,
+        "field_inherited": inherited,
         "field_type": meta["type"],
         "field_options": meta.get("options"),
         "field_mode": mode,
     }
 
 
-def _apply_watched_item_field_update(wi, field_name: str, raw_value: str) -> None:
+def _apply_watched_item_field_update(wi: WatchedItem, field_name: str, raw_value: str) -> None:
     meta = WATCHED_ITEM_FIELD_META[field_name]
     cast_fn = meta["cast"]
     typed_value = cast_fn(raw_value)
@@ -597,12 +625,13 @@ async def watched_item_toggle_active(
     def _respond(flash: tuple[str, str] | None = None):
         if not hx:
             return RedirectResponse(url=f"/watched-items/{watched_item_id}", status_code=303)
-        # On the detail page (non-compact), OOB-sync the header badge + Check-now.
+        # On the detail page (non-compact), OOB-sync the Check-now button so its
+        # disabled state tracks the new pause/resume status.
         ctx = {
             "watched_item": wi,
             "toggle_id": toggle_id,
             "compact": bool(compact),
-            "oob_header": not bool(compact),
+            "oob_check_now": not bool(compact),
         }
         if flash:
             ctx["flash_oob_level"], ctx["flash_oob_message"] = flash
@@ -660,6 +689,30 @@ async def watched_item_check_now(
         request,
         "partials/flash_oob.html",
         {"flash_oob_level": "success", "flash_oob_message": "Check queued."},
+    )
+
+
+@router.get("/watched-items/{watched_item_id}/effective-url/field")
+async def watched_item_url_field_partial(
+    request: Request,
+    watched_item_id: str,
+    mode: Literal["view", "edit"] = "view",
+    session: AsyncSession = Depends(get_db_session),
+):
+    """Serve the WatchedItem URL field partial in view or edit mode.
+
+    Powers the inline Edit affordance on the detail page's URL row; the edit
+    form posts to the sibling ``/effective-url`` route which re-probes.
+    """
+    wi = await get_watched_item_detail(session, watched_item_id)
+    if not wi:
+        raise HTTPException(status_code=404, detail="WatchedItem not found")
+    if request.headers.get("HX-Request") != "true":
+        return RedirectResponse(url=f"/watched-items/{watched_item_id}", status_code=303)
+    return templates.TemplateResponse(
+        request,
+        "partials/watched_item_url_field.html",
+        {"watched_item": wi, "url_mode": mode},
     )
 
 

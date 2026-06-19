@@ -313,6 +313,63 @@ class TestDetailPage:
         assert response.status_code == 200
         assert b"Detail Item" in response.content
 
+    async def test_detail_consolidates_into_details_panel(self, client, db_session):
+        """#202: the top panels merge into one 'Details' panel; 'Defaults' is gone."""
+        wi = await _make_wi(db_session, name="PanelMerge", effective_url="https://example.com")
+        resp = await client.get(f"/watched-items/{wi.id}")
+        body = resp.content
+        assert b">Details</h3>" in body
+        assert b">Defaults</h3>" not in body
+
+    async def test_detail_field_labels_drop_default_prefix(self, client, db_session):
+        """#202: rows read Interval / Content Type / Tags, not 'Default …'."""
+        wi = await _make_wi(db_session, name="LabelRename", effective_url="https://example.com")
+        body = (await client.get(f"/watched-items/{wi.id}")).content
+        assert b">Interval</" in body
+        assert b">Content Type</" in body
+        assert b">Tags</" in body
+        assert b"Default Interval" not in body
+        assert b"Default Content Type" not in body
+        assert b"Default Tags" not in body
+
+    async def test_detail_interval_shows_inherited_system_default(self, client, db_session):
+        """#202: an item with no schedule config shows the inherited system default."""
+        wi = await _make_wi(db_session, name="InheritInterval")  # default_schedule_config=None
+        body = (await client.get(f"/watched-items/{wi.id}")).content
+        assert b"1d" in body  # SYSTEM_DEFAULT_SCHEDULE_CONFIG interval
+        assert "· default".encode() in body
+
+    async def test_detail_interval_empty_config_shows_braces_not_marker(self, client, db_session):
+        """#202 CR: an explicit empty schedule config shows '{ }', not a blank '· default'."""
+        wi = await _make_wi(db_session, name="EmptyConfig", default_schedule_config={})
+        body = (await client.get(f"/watched-items/{wi.id}")).content
+        assert b"{ }" in body
+        assert "· default".encode() not in body
+
+    async def test_detail_url_row_has_edit_affordance(self, client, db_session):
+        """#202: URL row exposes an inline Edit button (no 'Change URL' details)."""
+        wi = await _make_wi(db_session, name="UrlEdit", effective_url="https://example.com")
+        body = (await client.get(f"/watched-items/{wi.id}")).content
+        assert b"Change URL" not in body
+        assert b"/effective-url/field?mode=edit" in body
+
+    async def test_url_field_partial_edit_mode(self, client, db_session):
+        """#202: the URL field GET route serves an edit form posting to /effective-url."""
+        wi = await _make_wi(db_session, name="UrlField", effective_url="https://example.com")
+        resp = await client.get(
+            f"/watched-items/{wi.id}/effective-url/field?mode=edit",
+            headers={"HX-Request": "true"},
+        )
+        assert resp.status_code == 200
+        assert b'name="url"' in resp.content
+        assert f"/watched-items/{wi.id}/effective-url".encode() in resp.content
+
+    async def test_detail_activity_after_notification_templates(self, client, db_session):
+        """#202: Recent Activity renders below the Notification Templates panel."""
+        wi = await _make_wi(db_session, name="OrderCheck")
+        body = (await client.get(f"/watched-items/{wi.id}")).content.decode()
+        assert body.index("Notification Templates") < body.index("Recent Activity")
+
     async def test_detail_table_uses_static_headers_not_global_partial(self, client, db_session):
         """Regression #182: sort buttons must NOT point at /partials/watch-table."""
         wi = await make_watched_item(db_session, name="Scoped Item")
@@ -761,19 +818,19 @@ class TestPauseResume:
         await db_session.refresh(wi)
         assert wi.is_active is False  # resume was rejected
 
-    async def test_detail_header_has_sync_region(self, client, db_session):
-        """Detail header status cluster is an OOB-swappable region (#190)."""
+    async def test_detail_has_check_now_sync_region(self, client, db_session):
+        """Detail Check-now button is an OOB-swappable region (#202)."""
         wi = await _make_wi(
-            db_session, name="HeaderSync", is_active=True, effective_url="https://example.com"
+            db_session, name="CheckSync", is_active=True, effective_url="https://example.com"
         )
         resp = await client.get(f"/watched-items/{wi.id}")
         assert resp.status_code == 200
-        assert b'id="wi-header-status"' in resp.content
+        assert b'id="wi-check-now"' in resp.content
 
-    async def test_detail_toggle_oob_syncs_header_and_disables_check_now(self, client, db_session):
-        """Pausing via the detail toggle OOB-updates the header badge + disables Check-now."""
+    async def test_detail_toggle_oob_syncs_and_disables_check_now(self, client, db_session):
+        """Pausing via the detail toggle OOB-disables the Check-now button (#202)."""
         wi = await _make_wi(
-            db_session, name="HeaderOOB", is_active=True, effective_url="https://example.com"
+            db_session, name="CheckOOB", is_active=True, effective_url="https://example.com"
         )
         resp = await client.post(
             f"/watched-items/{wi.id}/toggle-active",
@@ -781,10 +838,10 @@ class TestPauseResume:
             headers={"HX-Request": "true"},
         )
         assert resp.status_code == 200
-        # Header region is re-sent as an OOB swap…
-        assert b'id="wi-header-status"' in resp.content
+        # Check-now region is re-sent as an OOB swap…
+        assert b'id="wi-check-now"' in resp.content
         assert b'hx-swap-oob="true"' in resp.content
-        # …reflecting the paused state with a disabled Check-now button.
+        # …the toggle body reflects the paused state, Check-now is disabled.
         assert b"Paused" in resp.content
         assert b"disabled" in resp.content
 

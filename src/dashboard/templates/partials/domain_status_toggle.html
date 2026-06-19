@@ -31,13 +31,13 @@
         <button type="submit"
           hx-post="/domains/{{ domain.name }}/restore"
           hx-target="body"
-          class="btn btn-secondary py-1 px-3 text-sm min-h-0">Restore from archive</button>
+          class="btn btn-secondary py-1 px-3 text-sm min-h-[44px]">Restore from archive</button>
       </form>
       {% endif %}
       <noscript>
         <form method="post" action="/domains/{{ domain.name }}/toggle-active" class="inline">
           <input type="hidden" name="active" value="{{ 'false' if domain.is_active else 'true' }}">
-          <button type="submit" class="btn btn-secondary py-1 px-3 text-sm min-h-0">
+          <button type="submit" class="btn btn-secondary py-1 px-3 text-sm min-h-[44px]">
             {{ "Deactivate" if domain.is_active else "Activate" }}
           </button>
         </form>

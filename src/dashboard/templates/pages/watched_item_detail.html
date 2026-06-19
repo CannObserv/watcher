@@ -2,68 +2,11 @@
 {% from "macros/fields.html" import watched_item_field with context %}
 {% block title %}{{ watched_item.name }} — watcher{% endblock %}
 {% block content %}
-<div class="flex justify-between items-center mb-6 flex-wrap gap-4">
-  <div>
-    <h2 class="text-2xl font-semibold text-gray-900 dark:text-white">{{ watched_item.name }}</h2>
-    {% if watched_item.description %}
-    <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">{{ watched_item.description }}</p>
-    {% endif %}
-  </div>
-  {% include "partials/watched_item_header_status.html" %}
-</div>
-
-{# URL + stats summary card #}
-<div class="stat-card mb-6">
-  <dl class="space-y-2 text-sm">
-    {% if watched_item.effective_url %}
-    <div>
-      <dt class="form-label mb-0 text-xs">URL</dt>
-      <dd><a href="{{ watched_item.effective_url }}" class="link break-all" target="_blank" rel="noopener noreferrer">{{ watched_item.effective_url }}</a></dd>
-    </div>
-    {% endif %}
-    {% if not watched_item.archived_at %}
-    <details class="mt-1">
-      <summary class="text-xs link cursor-pointer">Change URL</summary>
-      <form method="post" action="/watched-items/{{ watched_item.id }}/effective-url"
-            hx-post="/watched-items/{{ watched_item.id }}/effective-url"
-            hx-swap="none"
-            class="flex flex-wrap items-end gap-2 mt-2">
-        <div class="flex-1 min-w-[16rem]">
-          <label for="new-url" class="form-label mb-0 text-xs">New URL</label>
-          <input type="url" name="url" id="new-url" required class="form-input mt-1"
-            placeholder="https://example.gov/page" value="{{ watched_item.effective_url }}">
-        </div>
-        <button type="submit" class="btn btn-secondary btn-sm htmx-request:opacity-60">Re-probe &amp; save</button>
-      </form>
-      <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">Re-probes the URL to update the canonical URL and domain. Source specs are unchanged.</p>
-    </details>
-    {% endif %}
-    {% if watched_item.last_checked_at %}
-    <div>
-      <dt class="form-label mb-0 text-xs">Last checked</dt>
-      <dd class="text-gray-700 dark:text-gray-300">{{ watched_item.last_checked_at.strftime("%Y-%m-%d %H:%M UTC") }}</dd>
-    </div>
-    {% endif %}
-    {% if watched_item.last_changed_at %}
-    <div>
-      <dt class="form-label mb-0 text-xs">Last changed</dt>
-      <dd class="text-gray-700 dark:text-gray-300">{{ watched_item.last_changed_at.strftime("%Y-%m-%d %H:%M UTC") }}</dd>
-    </div>
-    {% endif %}
-    <div>
-      <dt class="form-label mb-0 text-xs">Health</dt>
-      <dd>
-        {% set health = watched_item.health_status.value if watched_item.health_status else "unknown" %}
-        {% if health == "error" %}
-        <span class="badge badge-error">error</span>
-        {% elif health == "ok" %}
-        <span class="badge badge-active">ok</span>
-        {% else %}
-        <span class="badge badge-inactive">unknown</span>
-        {% endif %}
-      </dd>
-    </div>
-  </dl>
+<div class="mb-6">
+  <h2 class="text-2xl font-semibold text-gray-900 dark:text-white">{{ watched_item.name }}</h2>
+  {% if watched_item.description %}
+  <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">{{ watched_item.description }}</p>
+  {% endif %}
 </div>
 
 {% if watched_item.domain_suspended %}
@@ -73,20 +16,20 @@
 {% endif %}
 
 <section class="mb-8">
-  <h3 class="text-lg font-semibold text-gray-900 dark:text-white mb-4">Status</h3>
-  <div class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700">
-    {% include "partials/watched_item_status_toggle.html" %}
-  </div>
-</section>
-
-<section class="mb-8">
-  <h3 class="text-lg font-semibold text-gray-900 dark:text-white mb-4">Defaults</h3>
+  <h3 class="text-lg font-semibold text-gray-900 dark:text-white mb-4">Details</h3>
   <div class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 divide-y divide-gray-200 dark:divide-gray-700">
+    {# Status pause/resume toggle (carries the single status badge) #}
+    {% include "partials/watched_item_status_toggle.html" %}
+    {# URL — field/value/actions row with an inline re-probe Edit affordance #}
+    {% include "partials/watched_item_url_field.html" %}
+    {# Domain — field/value #}
     {% if watched_item.domain_name %}
     <div class="p-4">
-      <span class="form-label mb-0">Domain</span>
-      <div class="mt-1">
-        <a href="/domains/{{ watched_item.domain_name }}" class="link text-sm">{{ watched_item.domain_name }}</a>
+      <div class="grid grid-cols-[1fr_auto] sm:grid-cols-[min(18rem,40%)_1fr_auto] items-center gap-x-4 gap-y-2">
+        <div class="min-w-0"><span class="form-label mb-0">Domain</span></div>
+        <div class="col-span-2 sm:col-span-1 sm:col-start-2 sm:row-start-1 flex items-center gap-2 min-w-0">
+          <a href="/domains/{{ watched_item.domain_name }}" class="link text-sm">{{ watched_item.domain_name }}</a>
+        </div>
       </div>
     </div>
     {% endif %}
@@ -94,10 +37,48 @@
     {{ watched_item_field(field_contexts["description"]) }}
     {{ watched_item_field(field_contexts["default_schedule_interval"]) }}
     {{ watched_item_field(field_contexts["default_content_type"]) }}
+    {# Tags #}
     <div class="p-4">
-      <span class="form-label mb-1 block">Default Tags</span>
+      <span class="form-label mb-1 block">Tags</span>
       <p class="text-xs text-gray-500 dark:text-gray-400 mb-2">Separate multiple tags with commas.</p>
       {% include "partials/watched_item_tags_editor.html" %}
+    </div>
+    {# Last Checked — field/value with the Check-now action #}
+    <div class="p-4">
+      <div class="grid grid-cols-[1fr_auto] sm:grid-cols-[min(18rem,40%)_1fr_auto] items-center gap-x-4 gap-y-2">
+        <div class="min-w-0"><span class="form-label mb-0">Last Checked</span></div>
+        <div class="flex items-center gap-1 justify-self-end sm:col-start-3 sm:row-start-1">
+          {% include "partials/watched_item_check_now.html" %}
+        </div>
+        <div class="col-span-2 sm:col-span-1 sm:col-start-2 sm:row-start-1 flex items-center gap-2 min-w-0">
+          <span class="text-sm text-gray-700 dark:text-gray-300">{% if watched_item.last_checked_at %}{{ watched_item.last_checked_at.strftime("%Y-%m-%d %H:%M UTC") }}{% else %}Never checked{% endif %}</span>
+        </div>
+      </div>
+    </div>
+    {# Last Changed — field/value #}
+    <div class="p-4">
+      <div class="grid grid-cols-[1fr_auto] sm:grid-cols-[min(18rem,40%)_1fr_auto] items-center gap-x-4 gap-y-2">
+        <div class="min-w-0"><span class="form-label mb-0">Last Changed</span></div>
+        <div class="col-span-2 sm:col-span-1 sm:col-start-2 sm:row-start-1 flex items-center gap-2 min-w-0">
+          <span class="text-sm text-gray-700 dark:text-gray-300">{% if watched_item.last_changed_at %}{{ watched_item.last_changed_at.strftime("%Y-%m-%d %H:%M UTC") }}{% else %}—{% endif %}</span>
+        </div>
+      </div>
+    </div>
+    {# Health — field/value #}
+    <div class="p-4">
+      <div class="grid grid-cols-[1fr_auto] sm:grid-cols-[min(18rem,40%)_1fr_auto] items-center gap-x-4 gap-y-2">
+        <div class="min-w-0"><span class="form-label mb-0">Health</span></div>
+        <div class="col-span-2 sm:col-span-1 sm:col-start-2 sm:row-start-1 flex items-center gap-2 min-w-0">
+          {% set health = watched_item.health_status.value if watched_item.health_status else "unknown" %}
+          {% if health == "error" %}
+          <span class="badge badge-error">error</span>
+          {% elif health == "ok" %}
+          <span class="badge badge-active">ok</span>
+          {% else %}
+          <span class="badge badge-inactive">unknown</span>
+          {% endif %}
+        </div>
+      </div>
     </div>
   </div>
 </section>
@@ -135,6 +116,20 @@
 </section>
 
 <section class="mb-8">
+  {# "+ Add" lives in the partial's "This Item" section header (it adds an
+     item-owned template); keeping it here would dissociate it from its target
+     and read as adding a Global template (#199 CR-2). #}
+  <h3 class="text-lg font-semibold text-gray-900 dark:text-white mb-4">Notification Templates</h3>
+  <div
+    id="wi-templates"
+    hx-get="/partials/watched-item-templates/{{ watched_item.id }}"
+    hx-trigger="load"
+    hx-swap="innerHTML">
+    {% include "partials/watched_item_templates.html" %}
+  </div>
+</section>
+
+<section class="mb-8">
   <h3 class="text-lg font-semibold text-gray-900 dark:text-white mb-4">Recent Activity</h3>
   <div class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 divide-y divide-gray-200 dark:divide-gray-700">
     {% if activity %}
@@ -147,20 +142,6 @@
     {% else %}
       <p class="p-4 text-sm text-gray-500 dark:text-gray-400">No activity yet — checks and lifecycle events will appear here.</p>
     {% endif %}
-  </div>
-</section>
-
-<section class="mb-8">
-  {# "+ Add" lives in the partial's "This Item" section header (it adds an
-     item-owned template); keeping it here would dissociate it from its target
-     and read as adding a Global template (#199 CR-2). #}
-  <h3 class="text-lg font-semibold text-gray-900 dark:text-white mb-4">Notification Templates</h3>
-  <div
-    id="wi-templates"
-    hx-get="/partials/watched-item-templates/{{ watched_item.id }}"
-    hx-trigger="load"
-    hx-swap="innerHTML">
-    {% include "partials/watched_item_templates.html" %}
   </div>
 </section>
 

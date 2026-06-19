@@ -1,0 +1,58 @@
+{# WatchedItem effective_url field — standard field/value/actions row with an
+   inline re-probe edit form. Mirrors watched_item_field.html's url layout but
+   posts to the dedicated /effective-url route (which re-probes for the canonical
+   URL + domain). Expects: watched_item; optional url_mode ("view"|"edit"). #}
+{% set url_mode = url_mode|default("view") %}
+<div class="p-4" id="field-effective-url">
+  {% if url_mode == "edit" %}
+  <form method="post" action="/watched-items/{{ watched_item.id }}/effective-url"
+        hx-post="/watched-items/{{ watched_item.id }}/effective-url"
+        hx-swap="none">
+    <div class="grid grid-cols-[1fr_auto] sm:grid-cols-[min(18rem,40%)_1fr_auto] items-center gap-x-4 gap-y-2">
+      <div class="min-w-0">
+        <label for="effective-url-input" class="form-label mb-0">URL</label>
+        <p class="text-xs text-gray-500 dark:text-gray-400" id="effective-url-hint">Re-probes the URL to update the canonical URL and domain. Source specs are unchanged.</p>
+      </div>
+      <div class="flex items-center gap-1 justify-self-end sm:col-start-3 sm:row-start-1">
+        <button type="submit" class="btn btn-primary py-1 px-3 text-sm min-h-[44px]">Save</button>
+        <button type="button" class="btn btn-secondary py-1 px-3 text-sm min-h-[44px]"
+          hx-get="/watched-items/{{ watched_item.id }}/effective-url/field"
+          hx-target="#field-effective-url"
+          hx-swap="outerHTML">Cancel</button>
+      </div>
+      <div class="col-span-2 sm:col-span-1 sm:col-start-2 sm:row-start-1 flex items-center gap-2 min-w-0">
+        <input type="url" name="url" id="effective-url-input" required
+          value="{{ watched_item.effective_url }}"
+          placeholder="https://example.gov/page"
+          aria-describedby="effective-url-hint" class="form-input text-sm">
+      </div>
+    </div>
+  </form>
+  {% else %}
+  <div class="grid grid-cols-[1fr_auto] sm:grid-cols-[min(18rem,40%)_1fr_auto] items-center gap-x-4 gap-y-2">
+    <div class="min-w-0">
+      <span class="form-label mb-0">URL</span>
+    </div>
+    <div class="flex items-center gap-1 justify-self-end sm:col-start-3 sm:row-start-1">
+      {% if watched_item.effective_url %}
+      <button type="button" class="btn btn-secondary py-1 px-3 text-sm min-h-[44px]"
+        data-copy-url="{{ watched_item.effective_url }}"
+        aria-label="Copy URL to clipboard">Copy</button>
+      {% endif %}
+      {% if not watched_item.archived_at %}
+      <button type="button" class="btn btn-edit py-1 px-3 text-sm min-h-[44px]"
+        hx-get="/watched-items/{{ watched_item.id }}/effective-url/field?mode=edit"
+        hx-target="#field-effective-url"
+        hx-swap="outerHTML">Edit</button>
+      {% endif %}
+    </div>
+    <div class="col-span-2 sm:col-span-1 sm:col-start-2 sm:row-start-1 flex items-center gap-2 min-w-0">
+      {% if watched_item.effective_url %}
+      <a href="{{ watched_item.effective_url }}" class="link text-sm break-all" target="_blank" rel="noopener noreferrer">{{ watched_item.effective_url }}</a>
+      {% else %}
+      <span class="text-sm text-gray-500 dark:text-gray-400">No URL set.</span>
+      {% endif %}
+    </div>
+  </div>
+  {% endif %}
+</div>

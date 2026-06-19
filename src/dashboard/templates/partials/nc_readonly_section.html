@@ -1,0 +1,72 @@
+{# Read-only notification section — templates that fire for this scope but are
+   managed elsewhere (the global library / the domain detail page). Mirrors the
+   domain detail "Global" idiom (#199): 🔒 heading, Edit/Test link back to the
+   library, no assign/remove. Item-owned editing stays in the table below.
+   Expects: heading (str), section_templates (list[NotificationTemplate]),
+            empty_text (str). #}
+<section>
+  <div class="flex items-center mb-2">
+    <h4 class="text-sm font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide">
+      <span aria-hidden="true">🔒</span> {{ heading }}
+    </h4>
+  </div>
+  <div class="rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden">
+    <table class="data-table w-full">
+      <thead>
+        <tr>
+          <th scope="col" class="w-full">Title</th>
+          <th scope="col" class="w-28">Channel</th>
+          <th scope="col">Events</th>
+          <th scope="col" class="w-24">Status</th>
+          <th scope="col"><span class="sr-only">Actions</span></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for tpl in section_templates %}
+        <tr class="bg-co-purple-50 dark:bg-co-purple-950/20">
+          <td class="font-medium text-gray-900 dark:text-white">
+            <span aria-hidden="true">🔒</span> {{ tpl.title }}
+          </td>
+          <td><span class="chip">{{ tpl.channel_hint }}</span></td>
+          <td>
+            <div class="chip-group">
+              {% for ev in tpl.events %}<span class="chip">{{ ev }}</span>{% endfor %}
+            </div>
+          </td>
+          <td>
+            {% if tpl.is_active %}
+            <span class="badge badge-active">Active</span>
+            {% else %}
+            <span class="badge badge-inactive">Inactive</span>
+            {% endif %}
+          </td>
+          <td>
+            <div class="flex items-center gap-2 justify-end">
+              <a
+                href="/notifications/{{ tpl.id }}/edit"
+                class="btn btn-secondary text-xs min-h-[44px]"
+                aria-label="Edit {{ tpl.title }} in the global template library">
+                Edit
+              </a>
+              <button
+                hx-post="/notifications/{{ tpl.id }}/test-result"
+                hx-swap="none"
+                class="btn btn-secondary text-xs min-h-[44px] htmx-request:opacity-60"
+                aria-label="Send test notification for {{ tpl.channel_hint }}">
+                Test
+              </button>
+            </div>
+          </td>
+        </tr>
+        {% endfor %}
+        {% if not section_templates %}
+        <tr>
+          <td colspan="5" class="px-4 py-3 text-sm text-gray-500 dark:text-gray-400">
+            {{ empty_text }}
+          </td>
+        </tr>
+        {% endif %}
+      </tbody>
+    </table>
+  </div>
+</section>

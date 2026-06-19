@@ -59,9 +59,11 @@ from src.dashboard import templates
 from src.dashboard.context import (
     get_audit_entries,
     get_dashboard_stats,
+    get_domain_default_templates,
     get_domain_watched_items,
     get_domains_total_count,
     get_domains_with_watched_item_counts,
+    get_global_default_templates,
     get_queue_health,
     get_watched_item_activity,
     get_watched_item_detail,
@@ -488,6 +490,8 @@ async def watched_item_detail_page(
         )
 
     wi_templates = await get_watched_item_templates(session, wi.id)
+    global_templates = await get_global_default_templates(session)
+    domain_templates = await get_domain_default_templates(session, wi.domain_name)
     notifications = await get_watched_item_notifications(session, wi.id)
     profiles = await get_watched_item_profiles(session, wi.id)
     activity = await get_watched_item_activity(session, watched_item_id)
@@ -507,6 +511,8 @@ async def watched_item_detail_page(
             "flash": None,
             "field_contexts": field_contexts,
             "templates": wi_templates,
+            "global_templates": global_templates,
+            "domain_templates": domain_templates,
             "notifications": notifications,
             "profiles": profiles,
             "activity": activity,
@@ -891,10 +897,17 @@ async def watched_item_templates_partial(
     if not wi:
         raise HTTPException(status_code=404, detail="WatchedItem not found")
     wi_templates = await get_watched_item_templates(session, wi.id)
+    global_templates = await get_global_default_templates(session)
+    domain_templates = await get_domain_default_templates(session, wi.domain_name)
     return templates.TemplateResponse(
         request,
         "partials/watched_item_templates.html",
-        {"watched_item": wi, "templates": wi_templates},
+        {
+            "watched_item": wi,
+            "templates": wi_templates,
+            "global_templates": global_templates,
+            "domain_templates": domain_templates,
+        },
     )
 
 

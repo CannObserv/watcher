@@ -1,19 +1,50 @@
-{# Expects: watched_item, templates. Full table — used for initial page load (via the
-   detail page's #wi-templates container). The mutation handlers return the rows-only
-   partial (watched_item_template_rows.html) instead. #}
-<div class="overflow-x-auto">
-  <table class="data-table" id="wi-templates-table">
-    <thead>
-      <tr>
-        <th scope="col">Title</th>
-        <th scope="col">Channel</th>
-        <th scope="col">Events</th>
-        <th scope="col">Status</th>
-        <th scope="col"><span class="sr-only">Actions</span></th>
-      </tr>
-    </thead>
-    <tbody id="wi-templates-tbody" class="divide-y divide-gray-100 dark:divide-gray-700">
-      {% include "partials/watched_item_template_rows.html" %}
-    </tbody>
-  </table>
+{# Expects: watched_item, templates, global_templates, domain_templates. Full panel —
+   used for initial page load (via the detail page's #wi-templates container) and the
+   HTMX self-reload (GET /partials/watched-item-templates/{id}). The Global + Domain
+   sections show inherited templates that also fire at dispatch (#199); they sit
+   outside #wi-templates-tbody, so row mutations (which return the rows-only partial
+   watched_item_template_rows.html targeting #wi-templates-tbody) leave them intact. #}
+<div class="space-y-6" aria-live="polite">
+
+  {% with heading="Global",
+          section_templates=global_templates,
+          empty_text="No global templates — none fire for every Watched Item." %}
+    {% include "partials/nc_readonly_section.html" %}
+  {% endwith %}
+
+  {% with heading="Domain",
+          section_templates=domain_templates,
+          empty_text="No domain notification defaults apply to this item." %}
+    {% include "partials/nc_readonly_section.html" %}
+  {% endwith %}
+
+  <section>
+    <div class="flex items-center justify-between mb-2">
+      <h4 class="text-sm font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide">
+        This Item
+      </h4>
+      <button
+        hx-get="/watched-items/{{ watched_item.id }}/templates/new"
+        hx-target="#wi-templates-tbody"
+        hx-swap="afterbegin"
+        class="btn btn-secondary btn-sm">+ Add</button>
+    </div>
+    <div class="overflow-x-auto">
+      <table class="data-table" id="wi-templates-table">
+        <thead>
+          <tr>
+            <th scope="col">Title</th>
+            <th scope="col">Channel</th>
+            <th scope="col">Events</th>
+            <th scope="col">Status</th>
+            <th scope="col"><span class="sr-only">Actions</span></th>
+          </tr>
+        </thead>
+        <tbody id="wi-templates-tbody" class="divide-y divide-gray-100 dark:divide-gray-700">
+          {% include "partials/watched_item_template_rows.html" %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+
 </div>

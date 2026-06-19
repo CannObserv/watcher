@@ -24,7 +24,15 @@
               <span class="text-gray-400">—</span>
             {% endif %}
           </td>
-          <td>{{ (wi.default_schedule_config or {}).get("interval") or "—" }}</td>
+          {% set interval = interval_map[wi.id | string] %}
+          <td>
+            {% if interval[0] %}
+              {# inherited values rendered muted to distinguish from an explicit interval (#204) #}
+              <span class="text-sm{% if interval[1] %} text-gray-400 dark:text-gray-500{% endif %}">{{ interval[0] }}</span>
+            {% else %}
+              <span class="text-gray-400">—</span>
+            {% endif %}
+          </td>
           <td>
             {% if next_check %}
               <span class="tabular-nums text-sm" data-next-check="{{ next_check.strftime('%Y-%m-%dT%H:%M:%SZ') }}">

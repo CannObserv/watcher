@@ -1,6 +1,6 @@
 """Integration tests for WatchedItem dashboard routes (#185 Phase A step 7)."""
 
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -17,6 +17,8 @@ from src.core.models.temporal_profile import PostAction, ProfileType, TemporalPr
 from src.core.models.watched_item import WatchedItem
 from src.dashboard.routes import (
     _apply_watched_item_field_update,
+    _build_interval_map,
+    _build_next_check_map,
     _watched_item_field_context,
 )
 from tests.conftest import make_info_item, make_watched_item
@@ -86,6 +88,39 @@ class TestListPage:
             name="WithCheck",
             last_checked_at=datetime.now(UTC),
             default_schedule_config={"interval": "1h"},
+        )
+        db_session.add(wi)
+        await db_session.flush()
+        await db_session.commit()
+        response = await client.get("/watched-items")
+        assert b"data-next-check" in response.content
+
+    async def test_interval_column_shows_inherited_system_default(self, client, db_session):
+        """#204: an item with no schedule config shows the inherited system default
+        (1d) in the Interval column, not a blank em dash."""
+
+        item = await make_info_item(db_session)
+        wi = WatchedItem(
+            archiver_info_item_id=item.info_item_id,
+            name="InheritInterval",
+            default_schedule_config=None,
+        )
+        db_session.add(wi)
+        await db_session.flush()
+        await db_session.commit()
+        response = await client.get("/watched-items")
+        assert b"1d" in response.content  # SYSTEM_DEFAULT_SCHEDULE_CONFIG interval
+
+    async def test_next_check_computed_for_inherited_schedule(self, client, db_session):
+        """#204: a checked item with no schedule config still renders a Next Check —
+        the interval resolves to the system default, so next check is computable."""
+
+        item = await make_info_item(db_session)
+        wi = WatchedItem(
+            archiver_info_item_id=item.info_item_id,
+            name="InheritNextCheck",
+            last_checked_at=datetime.now(UTC),
+            default_schedule_config=None,
         )
         db_session.add(wi)
         await db_session.flush()
@@ -711,6 +746,52 @@ class TestFieldRoutes:
             headers={"HX-Request": "true"},
         )
         assert response.status_code == 400
+
+
+class TestListScheduleMaps:
+    """Unit tests for the list-view Interval / Next Check resolution maps (#204)."""
+
+    def test_interval_map_resolves_inherited_default(self):
+        wi = MagicMock()
+        wi.id = ULID()
+        wi.default_schedule_config = None
+        display, inherited = _build_interval_map([wi])[str(wi.id)]
+        assert display == "1d"  # SYSTEM_DEFAULT_SCHEDULE_CONFIG
+        assert inherited is True
+
+    def test_interval_map_explicit_not_inherited(self):
+        wi = MagicMock()
+        wi.id = ULID()
+        wi.default_schedule_config = {"interval": "6h"}
+        display, inherited = _build_interval_map([wi])[str(wi.id)]
+        assert display == "6h"
+        assert inherited is False
+
+    def test_interval_map_empty_config_shows_braces(self):
+        wi = MagicMock()
+        wi.id = ULID()
+        wi.default_schedule_config = {}
+        display, inherited = _build_interval_map([wi])[str(wi.id)]
+        assert display == "{ }"
+        assert inherited is False
+
+    def test_next_check_map_resolves_inherited_default(self):
+        now = datetime(2026, 6, 19, 12, 0, tzinfo=UTC)
+        last = now - timedelta(hours=3)
+        wi = MagicMock()
+        wi.id = ULID()
+        wi.default_schedule_config = None
+        wi.last_checked_at = last
+        # Inherited interval is 1d → next check = last + 1d.
+        assert _build_next_check_map([wi], now)[str(wi.id)] == last + timedelta(days=1)
+
+    def test_next_check_map_none_when_never_checked(self):
+        now = datetime(2026, 6, 19, 12, 0, tzinfo=UTC)
+        wi = MagicMock()
+        wi.id = ULID()
+        wi.default_schedule_config = None
+        wi.last_checked_at = None
+        assert _build_next_check_map([wi], now)[str(wi.id)] is None
 
 
 class TestTagsEditor:

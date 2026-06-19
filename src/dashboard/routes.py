@@ -413,15 +413,33 @@ def _watched_item_extra_params(q: str | None, include_archived: bool) -> dict[st
 def _build_next_check_map(
     watched_items: list[WatchedItem], now: datetime
 ) -> dict[str, datetime | None]:
+    """Next-check datetime per item, or None when never checked (#204).
+
+    Resolves the schedule through ``resolved_schedule_config`` (WatchedItem
+    default → system default) so an item with no explicit config still yields a
+    next-check time instead of a blank — matching the detail page.
+    """
     result: dict[str, datetime | None] = {}
     for wi in watched_items:
-        if wi.last_checked_at is not None and wi.default_schedule_config:
+        if wi.last_checked_at is not None:
             result[str(wi.id)] = compute_next_check(
-                wi.default_schedule_config, wi.last_checked_at, now=now
+                resolved_schedule_config(wi), wi.last_checked_at, now=now
             )
         else:
             result[str(wi.id)] = None
     return result
+
+
+def _build_interval_map(
+    watched_items: list[WatchedItem],
+) -> dict[str, tuple[str, bool]]:
+    """Resolved interval display per item as ``(text, inherited)`` (#204).
+
+    Routes through the same resolution + display logic as the detail page
+    (``_interval_display``) so the list shows the inherited system default
+    rather than a blank when an item carries no explicit schedule config.
+    """
+    return {str(wi.id): _interval_display(wi, _format_interval(wi)) for wi in watched_items}
 
 
 @router.get("/watched-items")
@@ -453,6 +471,7 @@ async def watched_items_page(
             "active_page": "watched-items",
             "watched_items": watched_items,
             "next_check_map": _build_next_check_map(watched_items, now),
+            "interval_map": _build_interval_map(watched_items),
             "include_archived": include_archived,
             "q": q or "",
             "page": page,
@@ -494,6 +513,7 @@ async def partial_watched_items_table(
         {
             "watched_items": watched_items,
             "next_check_map": _build_next_check_map(watched_items, now),
+            "interval_map": _build_interval_map(watched_items),
             "page": page,
             "page_size": page_size,
             "total_count": total_count,

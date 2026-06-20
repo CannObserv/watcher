@@ -236,7 +236,7 @@ class TestDomainDefaultScheduleConfigDashboard:
         )
         assert response.status_code == 400
         body = response.content.decode()
-        assert "Invalid cadence" in body  # friendly flash, not a raw error page
+        assert "Invalid interval" in body  # friendly flash from the validator, not a raw error page
         assert "Check Cadence" in body  # the detail page was re-rendered
 
     async def test_post_unchanged_on_bad_interval(self, client, db_session):

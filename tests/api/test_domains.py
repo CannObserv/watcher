@@ -164,6 +164,83 @@ class TestPatchDomainDefaultScheduleConfig:
         )
         assert resp.status_code == 422
 
+    async def test_patch_cadence_persists_and_returns_in_response(self, client, db_session):
+        """End-to-end: a set cadence survives commit and round-trips via GET."""
+        await client.patch(
+            "/api/v1/domains/roundtrip.example",
+            json={"default_schedule_config": {"interval": "12h"}},
+        )
+        resp = await client.get("/api/v1/domains/roundtrip.example")
+        assert resp.status_code == 200
+        assert resp.json()["default_schedule_config"] == {"interval": "12h"}
+
+
+class TestApplyDomainUpdates:
+    """#205 CR finding 5: the field-merge helper used by the update + race paths."""
+
+    def test_sets_provided_fields_and_skips_absent(self):
+        from src.api.routes.domains import _apply_domain_updates
+        from src.core.models.domain import Domain
+
+        domain = Domain(name="x.example", min_interval=1.0, max_concurrency=2)
+        _apply_domain_updates(
+            domain, {"min_interval": 5.0, "default_schedule_config": {"interval": "7d"}}
+        )
+        assert domain.min_interval == 5.0
+        assert domain.default_schedule_config == {"interval": "7d"}
+        assert domain.max_concurrency == 2  # absent from updates → unchanged
+
+    def test_clearing_cadence_to_none_applies(self):
+        from src.api.routes.domains import _apply_domain_updates
+        from src.core.models.domain import Domain
+
+        domain = Domain(name="y.example", default_schedule_config={"interval": "6h"})
+        _apply_domain_updates(domain, {"default_schedule_config": None})
+        assert domain.default_schedule_config is None
+
+
+class TestUpsertDomainRaceReapply:
+    """#205 CR finding 5: on a concurrent-create IntegrityError, the PATCH's fields
+    must be re-applied onto the winning row (not silently dropped)."""
+
+    async def test_race_reapplies_provided_fields_onto_winner(self):
+        from unittest.mock import AsyncMock, MagicMock
+
+        from sqlalchemy.exc import IntegrityError
+
+        from src.api.routes.domains import upsert_domain
+        from src.api.schemas.domain import DomainPatch
+        from src.core.models.domain import Domain
+
+        # The concurrent "winner" row, carrying a different min_interval.
+        winner = Domain(name="race.example", min_interval=9.0)
+
+        first = MagicMock()
+        first.scalar_one_or_none.return_value = None  # initial select: not found → create branch
+        refetch = MagicMock()
+        refetch.scalar_one.return_value = winner  # post-rollback re-fetch finds the winner
+        backfill_result = MagicMock()
+
+        session = MagicMock()
+        session.execute = AsyncMock(side_effect=[first, refetch, backfill_result])
+        session.flush = AsyncMock(
+            side_effect=IntegrityError("INSERT", {}, Exception("duplicate key"))
+        )
+        session.rollback = AsyncMock()
+        session.commit = AsyncMock()
+        session.refresh = AsyncMock()
+        session.add = MagicMock()
+
+        data = DomainPatch(min_interval=3.0, default_schedule_config={"interval": "6h"})
+        result = await upsert_domain("race.example", data, session)
+
+        # The PATCH's fields landed on the winning row rather than no-op'ing.
+        assert result is winner
+        assert winner.min_interval == 3.0
+        assert winner.default_schedule_config == {"interval": "6h"}
+        session.rollback.assert_awaited_once()
+        session.commit.assert_awaited_once()
+
 
 class TestDecayWindow:
     async def test_patch_creates_domain_with_default_decay_window(self, client):

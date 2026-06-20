@@ -1606,7 +1606,7 @@ async def domain_default_schedule_config_update(
             request,
             domain,
             session,
-            flash={"type": "error", "message": f"Invalid cadence: {exc}"},
+            flash={"type": "error", "message": str(exc)},
             status_code=400,
         )
 

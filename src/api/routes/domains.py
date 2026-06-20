@@ -9,6 +9,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.api.deps import get_db_session
 from src.api.schemas.domain import DomainPatch, DomainResponse
+from src.core.domains import backfill_domain_schedule_config
+from src.core.models.audit_log import EventType, audit
 from src.core.models.domain import (
     DEFAULT_DECAY_WINDOW,
     DEFAULT_MAX_CONCURRENCY,
@@ -69,6 +71,7 @@ async def upsert_domain(
             current_interval=min_iv,
             decay_window=updates.get("decay_window", DEFAULT_DECAY_WINDOW),
             notes=updates.get("notes"),
+            default_schedule_config=updates.get("default_schedule_config"),
         )
         session.add(domain)
         try:
@@ -87,6 +90,21 @@ async def upsert_domain(
             domain.decay_window = updates["decay_window"]
         if "notes" in updates:
             domain.notes = updates["notes"]
+        if "default_schedule_config" in updates:
+            domain.default_schedule_config = updates["default_schedule_config"]
+
+    # #205: editing the domain cadence re-denormalizes it onto every WatchedItem
+    # on the domain (mirrors the domain_suspended back-fill), so the resolver
+    # never needs a live Domain join. Rare operator action; one bounded UPDATE.
+    if "default_schedule_config" in updates:
+        await backfill_domain_schedule_config(session, name, updates["default_schedule_config"])
+        audit(
+            session,
+            EventType.DOMAIN_UPDATED,
+            domain_name=name,
+            default_schedule_config=updates["default_schedule_config"],
+            source="api",
+        )
 
     await session.commit()
     await session.refresh(domain)

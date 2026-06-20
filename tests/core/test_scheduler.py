@@ -9,7 +9,31 @@ from src.core.scheduler import (
     evaluate_post_actions,
     parse_interval,
     resolve_effective_interval,
+    validate_optional_schedule_config,
 )
+
+
+class TestValidateOptionalScheduleConfig:
+    """#205: write-boundary cadence validation shared by the domain API + dashboard."""
+
+    def test_none_passes_through(self):
+        assert validate_optional_schedule_config(None) is None
+
+    def test_valid_interval_returned_unchanged(self):
+        cfg = {"interval": "7d"}
+        assert validate_optional_schedule_config(cfg) == cfg
+
+    def test_empty_dict_rejected(self):
+        with pytest.raises(ValueError, match="non-empty 'interval'"):
+            validate_optional_schedule_config({})
+
+    def test_blank_interval_rejected(self):
+        with pytest.raises(ValueError, match="non-empty 'interval'"):
+            validate_optional_schedule_config({"interval": ""})
+
+    def test_malformed_interval_rejected(self):
+        with pytest.raises(ValueError, match="Invalid interval"):
+            validate_optional_schedule_config({"interval": "soon"})
 
 
 class TestParseInterval:

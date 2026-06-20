@@ -68,6 +68,95 @@ class TestGetDomainByName:
         assert response.json()["name"] == "example.com"
 
 
+class TestPatchDomainDefaultScheduleConfig:
+    """#205: domain cadence edit, back-fill onto items, and write-boundary validation."""
+
+    async def test_patch_sets_domain_cadence(self, client):
+        response = await client.patch(
+            "/api/v1/domains/cadence.example",
+            json={"default_schedule_config": {"interval": "7d"}},
+        )
+        assert response.status_code == 200, response.text
+        assert response.json()["default_schedule_config"] == {"interval": "7d"}
+
+    async def test_patch_backfills_existing_items(self, client, db_session):
+        from sqlalchemy import select
+        from ulid import ULID
+
+        from src.core.models.watched_item import WatchedItem
+
+        # Item on the domain with no explicit cadence (inherits).
+        wi = WatchedItem(
+            archiver_info_item_id=ULID(),
+            name="OnDomain",
+            domain_name="backfill.example",
+            effective_url="https://backfill.example/p",
+        )
+        # Domain row must exist first (FK).
+        await client.patch("/api/v1/domains/backfill.example", json={"min_interval": 1.0})
+        db_session.add(wi)
+        await db_session.commit()
+
+        resp = await client.patch(
+            "/api/v1/domains/backfill.example",
+            json={"default_schedule_config": {"interval": "6h"}},
+        )
+        assert resp.status_code == 200, resp.text
+
+        refreshed = (
+            await db_session.execute(select(WatchedItem).where(WatchedItem.id == wi.id))
+        ).scalar_one()
+        await db_session.refresh(refreshed)
+        assert refreshed.domain_default_schedule_config == {"interval": "6h"}
+
+    async def test_patch_clearing_cadence_backfills_null(self, client, db_session):
+        from sqlalchemy import select
+        from ulid import ULID
+
+        from src.core.models.watched_item import WatchedItem
+
+        await client.patch(
+            "/api/v1/domains/clear.example",
+            json={"default_schedule_config": {"interval": "6h"}},
+        )
+        wi = WatchedItem(
+            archiver_info_item_id=ULID(),
+            name="ToClear",
+            domain_name="clear.example",
+            effective_url="https://clear.example/p",
+            domain_default_schedule_config={"interval": "6h"},
+        )
+        db_session.add(wi)
+        await db_session.commit()
+
+        resp = await client.patch(
+            "/api/v1/domains/clear.example",
+            json={"default_schedule_config": None},
+        )
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["default_schedule_config"] is None
+
+        refreshed = (
+            await db_session.execute(select(WatchedItem).where(WatchedItem.id == wi.id))
+        ).scalar_one()
+        await db_session.refresh(refreshed)
+        assert refreshed.domain_default_schedule_config is None
+
+    async def test_patch_empty_dict_rejected(self, client):
+        resp = await client.patch(
+            "/api/v1/domains/empty.example",
+            json={"default_schedule_config": {}},
+        )
+        assert resp.status_code == 422
+
+    async def test_patch_bad_interval_rejected(self, client):
+        resp = await client.patch(
+            "/api/v1/domains/bad.example",
+            json={"default_schedule_config": {"interval": "soon"}},
+        )
+        assert resp.status_code == 422
+
+
 class TestDecayWindow:
     async def test_patch_creates_domain_with_default_decay_window(self, client):
         response = await client.patch("/api/v1/domains/decay-test.com", json={"min_interval": 2.0})

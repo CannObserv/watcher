@@ -10,11 +10,12 @@ route from drifting (#196).
 from typing import NamedTuple
 from urllib.parse import urlparse
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.models.domain import DEFAULT_MAX_CONCURRENCY, DEFAULT_MIN_INTERVAL, Domain
+from src.core.models.watched_item import WatchedItem
 
 
 class DomainResolution(NamedTuple):
@@ -79,3 +80,20 @@ async def ensure_domain_and_resolve_suspension(
             default_schedule_config=existing.default_schedule_config,
         )
     return DomainResolution(suspended=False, default_schedule_config=None)
+
+
+async def backfill_domain_schedule_config(
+    session: AsyncSession, domain_name: str, config: dict | None
+) -> None:
+    """Propagate a domain's cadence to every WatchedItem on it (#205).
+
+    Mirrors the ``domain_suspended`` back-fill (``domain_toggle_active``): the
+    denormalized ``WatchedItem.domain_default_schedule_config`` is kept in sync
+    when an operator edits the domain cadence, so the resolver never needs a live
+    Domain join. One bounded UPDATE on a rare operator action. Does not commit.
+    """
+    await session.execute(
+        update(WatchedItem)
+        .where(WatchedItem.domain_name == domain_name)
+        .values(domain_default_schedule_config=config)
+    )

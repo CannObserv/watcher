@@ -23,6 +23,25 @@ def parse_interval(value: str | None) -> timedelta:
     return timedelta(**{unit: amount})
 
 
+def validate_optional_schedule_config(config: dict | None) -> dict | None:
+    """Validate an optional cadence schedule_config at a write boundary (#205).
+
+    ``None`` means "inherit / clear" and passes through. A non-``None`` config
+    must carry a parseable ``interval`` — an empty dict (or a missing/blank
+    interval) is rejected so it can't create a meaningless intervalless tier,
+    and a malformed interval string is caught here instead of crashing the
+    scheduler. Returns the config unchanged on success; raises ``ValueError``
+    otherwise.
+    """
+    if config is None:
+        return None
+    interval = config.get("interval")
+    if not interval:
+        raise ValueError("schedule config must include a non-empty 'interval'")
+    parse_interval(interval)  # raises ValueError on a malformed interval string
+    return config
+
+
 def _to_date(value: str | date) -> date:
     """Coerce string or date to date object."""
     if isinstance(value, date):

@@ -825,6 +825,21 @@ async def watched_item_update_url(
     return RedirectResponse(url=f"/watched-items/{watched_item_id}", status_code=303)
 
 
+async def _interval_field_profiles(
+    session: AsyncSession, wi: WatchedItem, field_name: str
+) -> list[dict] | None:
+    """Active profile dicts for the interval field's profile-aware display (#206).
+
+    Only the interval field consults profiles, so other fields skip the query and
+    get ``None``. Keeps the inline-edit re-render consistent with the full detail
+    page (both show ``· profile`` when a profile overrides the base cadence).
+    """
+    if field_name != "default_schedule_interval":
+        return None
+    profiles = await get_watched_item_profiles(session, wi.id)
+    return [p.to_resolution_dict() for p in profiles if p.is_active]
+
+
 @router.get("/watched-items/{watched_item_id}/field/{field_name}")
 async def watched_item_field_partial(
     request: Request,
@@ -844,7 +859,8 @@ async def watched_item_field_partial(
     if request.headers.get("HX-Request") != "true":
         return RedirectResponse(url=f"/watched-items/{watched_item_id}", status_code=303)
 
-    ctx = _watched_item_field_context(request, wi, field_name, mode=mode)
+    profiles = await _interval_field_profiles(session, wi, field_name)
+    ctx = _watched_item_field_context(request, wi, field_name, mode=mode, profiles=profiles)
     return templates.TemplateResponse(request, "partials/watched_item_field.html", ctx)
 
 
@@ -883,7 +899,8 @@ async def watched_item_field_update(
     await session.refresh(wi)
 
     if request.headers.get("HX-Request") == "true":
-        ctx = _watched_item_field_context(request, wi, field_name, mode="view")
+        profiles = await _interval_field_profiles(session, wi, field_name)
+        ctx = _watched_item_field_context(request, wi, field_name, mode="view", profiles=profiles)
         return templates.TemplateResponse(request, "partials/watched_item_field.html", ctx)
     return RedirectResponse(url=f"/watched-items/{watched_item_id}", status_code=303)
 

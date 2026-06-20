@@ -283,6 +283,23 @@ class TestComputeNextCheckWithProfiles:
         expected = last + timedelta(days=1)
         assert result == expected
 
+    def test_pre_resolved_profile_interval_used_without_profiles(self):
+        """#206 CR-3: a caller that already resolved the override passes it via
+        ``profile_interval``; compute_next_check uses it without touching profiles."""
+        now = datetime(2026, 4, 10, 12, 0, 0, tzinfo=UTC)
+        last = now - timedelta(minutes=20)
+        cfg = {"interval": "1d"}
+        result = compute_next_check(cfg, last, now=now, profile_interval=timedelta(hours=1))
+        assert result == last + timedelta(hours=1)
+
+    def test_pre_resolved_none_falls_back_to_base(self):
+        """A ``None`` pre-resolved interval (no active profile) falls to the base cadence."""
+        now = datetime(2026, 4, 10, 12, 0, 0, tzinfo=UTC)
+        last = now - timedelta(hours=2)
+        cfg = {"interval": "6h"}
+        result = compute_next_check(cfg, last, now=now, profile_interval=None)
+        assert result == last + timedelta(hours=6)
+
 
 class TestEvaluatePostActions:
     def test_no_profiles_no_actions(self):

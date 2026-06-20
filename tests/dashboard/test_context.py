@@ -5,8 +5,10 @@ from datetime import UTC, datetime
 import pytest
 
 from src.core.models.domain import Domain
+from src.core.models.temporal_profile import PostAction, ProfileType, TemporalProfile
 from src.core.models.watched_item import ContentType, WatchedItem
 from src.dashboard.context import (
+    get_active_profiles_by_item,
     get_dashboard_stats,
     get_domain_watched_items,
     get_domains_with_watched_item_counts,
@@ -570,3 +572,54 @@ class TestGetWatchedItemDetail:
         from src.dashboard.context import get_watched_item_detail
 
         assert await get_watched_item_detail(db_session, str(ULID())) is None
+
+
+@pytest.mark.integration
+class TestGetActiveProfilesByItem:
+    """#206 CR-5: the batch loader feeding resolve_schedule_display(profiles=…)."""
+
+    async def _add_profile(self, db_session, wi_id, *, interval="1h", is_active=True):
+        db_session.add(
+            TemporalProfile(
+                watched_item_id=wi_id,
+                profile_type=ProfileType.EVENT,
+                reference_date=datetime.now(UTC).date(),
+                rules=[{"days_before": 30, "interval": interval}],
+                post_action=PostAction.DEACTIVATE,
+                is_active=is_active,
+            )
+        )
+
+    async def test_empty_ids_returns_empty_map(self, db_session):
+        assert await get_active_profiles_by_item(db_session, []) == {}
+
+    async def test_keys_by_item_id_as_resolution_dicts(self, db_session):
+        wi = await make_watched_item(db_session, name="HasProfile", primary_url="https://a.com")
+        await self._add_profile(db_session, wi.id, interval="1h")
+        await db_session.flush()
+
+        result = await get_active_profiles_by_item(db_session, [wi.id])
+
+        assert set(result) == {str(wi.id)}
+        (profile_dict,) = result[str(wi.id)]
+        assert profile_dict["rules"] == [{"days_before": 30, "interval": "1h"}]
+        assert profile_dict["is_active"] is True  # resolution-dict shape
+
+    async def test_inactive_profiles_excluded(self, db_session):
+        wi = await make_watched_item(
+            db_session, name="InactiveProfile", primary_url="https://b.com"
+        )
+        await self._add_profile(db_session, wi.id, is_active=False)
+        await db_session.flush()
+
+        result = await get_active_profiles_by_item(db_session, [wi.id])
+
+        assert result == {}  # is_active filter mirrors schedule_tick
+
+    async def test_item_without_profile_absent_from_map(self, db_session):
+        wi = await make_watched_item(db_session, name="NoProfile", primary_url="https://c.com")
+        await db_session.flush()
+
+        result = await get_active_profiles_by_item(db_session, [wi.id])
+
+        assert str(wi.id) not in result

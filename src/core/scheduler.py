@@ -133,11 +133,17 @@ def compute_next_check(
     last_checked_at: datetime | None,
     now: datetime | None = None,
     profiles: list[dict] | None = None,
+    profile_interval: timedelta | None = None,
 ) -> datetime:
-    """Compute when a watch should next be checked."""
+    """Compute when a watch should next be checked.
+
+    The active-profile override may be supplied pre-resolved via
+    ``profile_interval`` (so a caller that already ran ``resolve_effective_interval``
+    — e.g. ``resolve_schedule_display`` — need not recompute it); otherwise it is
+    derived from ``profiles`` when given. Pass one or the other, not both.
+    """
     now = now or datetime.now(UTC)
-    profile_interval = None
-    if profiles:
+    if profile_interval is None and profiles:
         profile_interval = resolve_effective_interval(profiles, today=now.date())
     interval = profile_interval or parse_interval(schedule_config.get("interval"))
     if last_checked_at is None:

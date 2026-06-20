@@ -33,20 +33,15 @@ class ScheduleDisplay:
     """Resolved schedule facts for one WatchedItem, ready to render.
 
     ``interval_text`` is the cadence to show — the profile cadence when
-    ``profile_active`` is True, otherwise the base 3-tier resolution.
-    ``source`` is where the *base* interval came from; ``inherited`` is the
-    convenience predicate ``source != "item"``. ``next_check`` is ``None`` only
-    when the item has never been checked.
+    ``profile_active`` is True, otherwise the base 3-tier resolution. ``source`` is
+    where the *base* interval came from (``item``/``domain``/``default``).
+    ``next_check`` is ``None`` only when the item has never been checked.
     """
 
     interval_text: str
     source: ScheduleSource
     profile_active: bool
     next_check: datetime | None
-
-    @property
-    def inherited(self) -> bool:
-        return self.source != "item"
 
     @property
     def marker(self) -> str | None:
@@ -70,13 +65,15 @@ def _base_interval(watched_item: WatchedItem) -> tuple[str, ScheduleSource]:
     item_cfg = watched_item.default_schedule_config
     if item_cfg is not None:
         interval = item_cfg.get("interval")
-        if interval:
-            return interval, "item"
-        return "{ }", "item"
+        return (interval, "item") if interval else ("{ }", "item")
     source: ScheduleSource = (
         "domain" if watched_item.domain_default_schedule_config is not None else "default"
     )
-    return resolved_schedule_config(watched_item).get("interval", ""), source
+    # An intervalless inherited config (a stray domain ``{}``) shows the literal
+    # rather than a blank beside the marker — symmetric with the item tier. The
+    # write boundary rejects empty domain defaults, so this is defensive only.
+    interval = resolved_schedule_config(watched_item).get("interval")
+    return (interval, source) if interval else ("{ }", source)
 
 
 def resolve_schedule_display(
@@ -105,11 +102,13 @@ def resolve_schedule_display(
     if watched_item.last_checked_at is None:
         next_check = None
     else:
+        # Reuse the profile interval already resolved above — no second
+        # resolve_effective_interval pass inside compute_next_check.
         next_check = compute_next_check(
             resolved_schedule_config(watched_item),
             watched_item.last_checked_at,
             now=now,
-            profiles=profiles,
+            profile_interval=profile_interval,
         )
 
     return ScheduleDisplay(

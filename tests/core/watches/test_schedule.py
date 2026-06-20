@@ -31,19 +31,19 @@ class TestSource:
         d = resolve_schedule_display(_wi(item={"interval": "6h"}), now=NOW)
         assert d.interval_text == "6h"
         assert d.source == "item"
-        assert d.inherited is False
+        assert d.marker is None
 
     def test_domain_inherited_is_source_domain(self):
         d = resolve_schedule_display(_wi(item=None, domain={"interval": "7d"}), now=NOW)
         assert d.interval_text == "7d"
         assert d.source == "domain"
-        assert d.inherited is True
+        assert d.marker == "domain"
 
     def test_system_default_is_source_default(self):
         d = resolve_schedule_display(_wi(item=None, domain=None), now=NOW)
         assert d.interval_text == "1d"
         assert d.source == "default"
-        assert d.inherited is True
+        assert d.marker == "default"
 
     def test_empty_item_config_shows_braces_source_item(self):
         # A non-None intervalless item config wins at its tier; show the literal
@@ -51,7 +51,15 @@ class TestSource:
         d = resolve_schedule_display(_wi(item={}, domain={"interval": "7d"}), now=NOW)
         assert d.interval_text == "{ }"
         assert d.source == "item"
-        assert d.inherited is False
+        assert d.marker is None
+
+    def test_empty_domain_config_shows_braces_source_domain(self):
+        # CR finding 2: a stray intervalless domain config shows the literal beside
+        # the marker, symmetric with the item tier (not a blank "· domain").
+        d = resolve_schedule_display(_wi(item=None, domain={}), now=NOW)
+        assert d.interval_text == "{ }"
+        assert d.source == "domain"
+        assert d.marker == "domain"
 
 
 class TestNextCheck:

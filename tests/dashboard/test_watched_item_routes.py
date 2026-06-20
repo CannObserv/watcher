@@ -809,6 +809,34 @@ class TestFieldRoutes:
         await db_session.refresh(wi)
         assert wi.name == "New"
 
+    async def test_interval_field_partial_shows_active_profile_cadence(self, client, db_session):
+        """#206 CR-1: the inline interval field partial honors an active profile
+        (· profile), matching the full detail page — not the base cadence."""
+        item = await make_info_item(db_session)
+        wi = WatchedItem(
+            archiver_info_item_id=item.info_item_id,
+            name="FieldProfile",
+            default_schedule_config={"interval": "1d"},
+        )
+        db_session.add(wi)
+        await db_session.flush()
+        db_session.add(
+            TemporalProfile(
+                watched_item_id=wi.id,
+                profile_type=ProfileType.EVENT,
+                reference_date=date.today() + timedelta(days=10),
+                rules=[{"days_before": 3650, "interval": "1h"}],
+                post_action=PostAction.DEACTIVATE,
+            )
+        )
+        await db_session.commit()
+        response = await client.get(
+            f"/watched-items/{wi.id}/field/default_schedule_interval",
+            headers={"HX-Request": "true"},
+        )
+        assert response.status_code == 200
+        assert "· profile".encode() in response.content
+
     async def test_post_interval_updates_jsonb(self, client, db_session):
         item = await make_info_item(db_session)
         wi = WatchedItem(archiver_info_item_id=item.info_item_id, name="Sched")

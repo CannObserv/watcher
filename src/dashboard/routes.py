@@ -206,19 +206,22 @@ def _format_content_type(wi: WatchedItem) -> str:
     return wi.default_content_type or ""
 
 
-def _interval_display(wi: WatchedItem, value: str) -> tuple[str, bool]:
-    """View-mode display for the interval field; returns ``(display, inherited)``.
+def _interval_display(wi: WatchedItem, value: str) -> tuple[str, str | None]:
+    """View-mode display for the interval field; returns ``(display, marker)``.
 
-    An explicit interval shows verbatim. No config at all (``None``) shows the
-    resolved system default, flagged inherited. A non-None config that carries no
-    interval (e.g. ``{}``) shows a literal empty-config marker rather than a blank
-    value beside an "inherited" tag — that pairing read as confusing UX (#202 CR).
+    ``marker`` is the inheritance source word rendered after a "·" — ``None`` for
+    an explicit item interval (no marker), ``"domain"`` when the value is inherited
+    from the Domain cadence tier, or ``"default"`` from the system default (#205).
+    An explicit interval shows verbatim with no marker. A non-None config that
+    carries no interval (e.g. ``{}``) shows a literal empty-config marker rather
+    than a blank value beside an inherited tag — confusing UX (#202 CR).
     """
     if value:
-        return value, False
+        return value, None
     if wi.default_schedule_config is None:
-        return resolved_schedule_config(wi).get("interval", ""), True
-    return "{ }", False
+        marker = "domain" if wi.domain_default_schedule_config is not None else "default"
+        return resolved_schedule_config(wi).get("interval", ""), marker
+    return "{ }", None
 
 
 WATCHED_ITEM_FIELD_META: dict[str, dict] = {
@@ -271,7 +274,9 @@ def _watched_item_field_context(
     # e.g. the interval field resolves the inherited system default for view mode
     # while edit mode still binds the explicit override. Others view == edit.
     display_fn = meta.get("display")
-    display_value, inherited = display_fn(wi, value) if display_fn else (value, False)
+    # display_fn returns (view_value, marker) where marker is None or the
+    # inheritance source word ("domain"/"default") rendered after a "·" (#205).
+    display_value, inherited = display_fn(wi, value) if display_fn else (value, None)
     return {
         "watched_item": wi,
         "field_name": field_name,
@@ -440,12 +445,13 @@ def _build_next_check_map(
 
 def _build_interval_map(
     watched_items: list[WatchedItem],
-) -> dict[str, tuple[str, bool]]:
-    """Resolved interval display per item as ``(text, inherited)`` (#204).
+) -> dict[str, tuple[str, str | None]]:
+    """Resolved interval display per item as ``(text, marker)`` (#204, #205).
 
     Routes through the same resolution + display logic as the detail page
-    (``_interval_display``) so the list shows the inherited system default
-    rather than a blank when an item carries no explicit schedule config.
+    (``_interval_display``) so the list shows the inherited cadence (with a
+    ``domain``/``default`` source marker) rather than a blank when an item carries
+    no explicit schedule config.
     """
     return {str(wi.id): _interval_display(wi, _format_interval(wi)) for wi in watched_items}
 

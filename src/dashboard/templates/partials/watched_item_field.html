@@ -156,7 +156,7 @@
       {{ action_buttons() }}
     </div>
     <div class="col-span-2 sm:col-span-1 sm:col-start-2 sm:row-start-1 flex items-center gap-2 min-w-0">
-      <span class="text-sm text-gray-900 dark:text-gray-100 font-medium">{{ field_display_value }}{% if field_unit %} <span class="text-gray-500 dark:text-gray-400 font-normal">{{ field_unit }}</span>{% endif %}{% if field_inherited %} <span class="text-gray-400 dark:text-gray-500 font-normal">· default</span>{% endif %}</span>
+      <span class="text-sm text-gray-900 dark:text-gray-100 font-medium">{{ field_display_value }}{% if field_unit %} <span class="text-gray-500 dark:text-gray-400 font-normal">{{ field_unit }}</span>{% endif %}{% if field_inherited %} <span class="text-gray-400 dark:text-gray-500 font-normal">· {{ field_inherited }}</span>{% endif %}</span>
     </div>
   </div>
   {% endif %}

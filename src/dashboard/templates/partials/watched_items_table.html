@@ -26,8 +26,8 @@
           </td>
           {% set interval = interval_map[wi.id | string] %}
           <td>
-            {# inherited schedule shows the resolved value + a "· default" marker, mirroring the detail page (#204) #}
-            <span class="text-sm">{{ interval[0] }}{% if interval[1] %} <span class="text-gray-400 dark:text-gray-500">· default</span>{% endif %}</span>
+            {# inherited schedule shows the resolved value + a "· domain"/"· default" source marker, mirroring the detail page (#204, #205) #}
+            <span class="text-sm">{{ interval[0] }}{% if interval[1] %} <span class="text-gray-400 dark:text-gray-500">· {{ interval[1] }}</span>{% endif %}</span>
           </td>
           <td>
             {% if next_check %}

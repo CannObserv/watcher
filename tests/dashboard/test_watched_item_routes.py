@@ -150,6 +150,23 @@ class TestListPage:
         assert ">6h<" in body  # value rendered in the Interval cell span
         assert "· default" not in body  # no inherited marker for an explicit interval
 
+    async def test_domain_inherited_interval_shows_domain_marker(self, client, db_session):
+        """#205: an item inheriting its domain's cadence shows '7d · domain', not '· default'."""
+        item = await make_info_item(db_session)
+        wi = WatchedItem(
+            archiver_info_item_id=item.info_item_id,
+            name="InheritDomain",
+            default_schedule_config=None,
+            domain_default_schedule_config={"interval": "7d"},
+        )
+        db_session.add(wi)
+        await db_session.flush()
+        await db_session.commit()
+        body = (await client.get("/watched-items")).content.decode()
+        assert ">7d <span" in body
+        assert "· domain" in body
+        assert "· default" not in body
+
     async def test_status_column_consolidated(self, client, db_session):
         """One labeled Status column holds the toggle + badge; no separate Actions column (#190)."""
 
@@ -452,6 +469,19 @@ class TestDetailPage:
         wi = await _make_wi(db_session, name="EmptyConfig", default_schedule_config={})
         body = (await client.get(f"/watched-items/{wi.id}")).content
         assert b"{ }" in body
+        assert "· default".encode() not in body
+
+    async def test_detail_interval_shows_domain_marker(self, client, db_session):
+        """#205: detail shows '7d · domain' for an item inheriting its domain cadence."""
+        wi = await _make_wi(
+            db_session,
+            name="InheritDomainDetail",
+            default_schedule_config=None,
+            domain_default_schedule_config={"interval": "7d"},
+        )
+        body = (await client.get(f"/watched-items/{wi.id}")).content
+        assert b"7d" in body
+        assert "· domain".encode() in body
         assert "· default".encode() not in body
 
     async def test_detail_url_row_has_edit_affordance(self, client, db_session):
@@ -778,25 +808,37 @@ class TestListScheduleMaps:
         wi.id = ULID()
         wi.default_schedule_config = None
         wi.domain_default_schedule_config = None
-        display, inherited = _build_interval_map([wi])[str(wi.id)]
+        display, marker = _build_interval_map([wi])[str(wi.id)]
         assert display == "1d"  # SYSTEM_DEFAULT_SCHEDULE_CONFIG
-        assert inherited is True
+        assert marker == "default"  # source label (#205)
+
+    def test_interval_map_resolves_domain_default(self):
+        """#205: an item inheriting a domain cadence is marked '· domain', not '· default'."""
+        wi = MagicMock()
+        wi.id = ULID()
+        wi.default_schedule_config = None
+        wi.domain_default_schedule_config = {"interval": "7d"}
+        display, marker = _build_interval_map([wi])[str(wi.id)]
+        assert display == "7d"
+        assert marker == "domain"
 
     def test_interval_map_explicit_not_inherited(self):
         wi = MagicMock()
         wi.id = ULID()
         wi.default_schedule_config = {"interval": "6h"}
-        display, inherited = _build_interval_map([wi])[str(wi.id)]
+        wi.domain_default_schedule_config = None
+        display, marker = _build_interval_map([wi])[str(wi.id)]
         assert display == "6h"
-        assert inherited is False
+        assert marker is None
 
     def test_interval_map_empty_config_shows_braces(self):
         wi = MagicMock()
         wi.id = ULID()
         wi.default_schedule_config = {}
-        display, inherited = _build_interval_map([wi])[str(wi.id)]
+        wi.domain_default_schedule_config = None
+        display, marker = _build_interval_map([wi])[str(wi.id)]
         assert display == "{ }"
-        assert inherited is False
+        assert marker is None
 
     def test_next_check_map_resolves_inherited_default(self):
         now = datetime(2026, 6, 19, 12, 0, tzinfo=UTC)

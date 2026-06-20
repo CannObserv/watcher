@@ -543,6 +543,62 @@ class TestPostActions:
         assert len(audit_rows) == 1
         assert audit_rows[0].payload["new_interval"] == "1d"
 
+    async def test_reduce_frequency_noop_when_cadence_already_slower_than_1d(
+        self, db_session, monkeypatch
+    ):
+        """#205: reduce_frequency must not *speed up* an item slower than 1d.
+
+        An item inheriting a 7d domain cadence (no own interval) must stay at 7d —
+        reduce_frequency is a no-op, the item config is left untouched (inheritance
+        preserved), and no WATCHED_ITEM_THROTTLED audit is written.
+        """
+        now = datetime(2026, 5, 17, 12, 0, 0, tzinfo=UTC)
+
+        # Inherits a 7d domain cadence — no item-level interval.
+        wi = await make_watched_item(db_session, name="SlowDomain")
+        wi.default_schedule_config = None
+        wi.domain_default_schedule_config = {"interval": "7d"}
+        wi.last_checked_at = now - timedelta(days=8)
+
+        profile = TemporalProfile(
+            watched_item_id=wi.id,
+            profile_type=ProfileType.EVENT,
+            reference_date=date(2026, 5, 1),  # past → reduce_frequency fires
+            rules=[{"days_before": 7, "interval": "1m"}],
+            post_action=PostAction.REDUCE_FREQUENCY,
+        )
+        db_session.add(profile)
+        await db_session.commit()
+
+        monkeypatch.setattr(
+            tasks_mod, "get_session_factory", lambda: _mock_session_factory(db_session)
+        )
+        mock_configure = MagicMock()
+        mock_configure.return_value.defer_async = AsyncMock()
+        monkeypatch.setattr(check_watched_item, "configure", mock_configure)
+
+        with patch("src.workers.tasks.datetime") as mock_dt:
+            mock_dt.now.return_value = now
+            mock_dt.side_effect = lambda *a, **kw: datetime(*a, **kw)
+            await schedule_tick(int(now.timestamp()))
+
+        await db_session.refresh(wi)
+        # Item config untouched → still inheriting the 7d domain cadence.
+        assert wi.default_schedule_config is None
+        assert resolved_schedule_config(wi).get("interval") == "7d"
+
+        # No throttle audit — nothing was slowed.
+        throttle_rows = (
+            (
+                await db_session.execute(
+                    select(AuditLog).where(AuditLog.event_type == EventType.WATCHED_ITEM_THROTTLED)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert throttle_rows == []
+
     async def test_deactivate_post_action_deactivates_watched_item(self, db_session, monkeypatch):
         """deactivate flips the WatchedItem is_active off."""
         now = datetime(2026, 5, 17, 12, 0, 0, tzinfo=UTC)

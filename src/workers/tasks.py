@@ -22,7 +22,7 @@ from src.core.models.watched_item import WatchedItem, WatchHealthStatus
 from src.core.notifications.events import WatchEvent, WatchEventType
 from src.core.rate_limiter import get_rate_limiter
 from src.core.registry import ServiceRegistry, get_registry
-from src.core.scheduler import compute_next_check, evaluate_post_actions
+from src.core.scheduler import compute_next_check, evaluate_post_actions, parse_interval
 from src.core.utils import watched_item_event_base_metadata
 from src.core.watches.resolution import resolved_schedule_config
 from src.workers import bp
@@ -290,20 +290,32 @@ async def schedule_tick(timestamp: int) -> None:
                             extra={"watched_item_id": str(wi.id), "profile_id": profile_dict["id"]},
                         )
                     elif action == "reduce_frequency":
-                        wi.default_schedule_config = {
-                            **(wi.default_schedule_config or {}),
-                            "interval": "1d",
-                        }
-                        audit(
-                            session,
-                            EventType.WATCHED_ITEM_THROTTLED,
-                            watched_item_id=str(wi.id),
-                            new_interval="1d",
-                        )
-                        logger.info(
-                            "post-action: reduce frequency on watched_item",
-                            extra={"watched_item_id": str(wi.id), "profile_id": profile_dict["id"]},
-                        )
+                        # Throttle to 1d only when the currently-effective cadence is
+                        # faster than 1d. With the Domain cadence tier (#205) an item
+                        # may already resolve to a slower interval (e.g. a 7d domain);
+                        # pinning it to 1d would *speed it up*, the opposite of
+                        # "reduce frequency". When already ≥1d this is a no-op and the
+                        # item config is left untouched, preserving domain inheritance.
+                        if parse_interval(
+                            resolved_schedule_config(wi).get("interval")
+                        ) < parse_interval("1d"):
+                            wi.default_schedule_config = {
+                                **(wi.default_schedule_config or {}),
+                                "interval": "1d",
+                            }
+                            audit(
+                                session,
+                                EventType.WATCHED_ITEM_THROTTLED,
+                                watched_item_id=str(wi.id),
+                                new_interval="1d",
+                            )
+                            logger.info(
+                                "post-action: reduce frequency on watched_item",
+                                extra={
+                                    "watched_item_id": str(wi.id),
+                                    "profile_id": profile_dict["id"],
+                                },
+                            )
                     if orm_profile is not None:
                         orm_profile.is_active = False
 

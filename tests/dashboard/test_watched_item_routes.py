@@ -109,7 +109,11 @@ class TestListPage:
         await db_session.flush()
         await db_session.commit()
         response = await client.get("/watched-items")
-        assert b"1d" in response.content  # SYSTEM_DEFAULT_SCHEDULE_CONFIG interval
+        body = response.content.decode()
+        # Cell-level: the resolved value sits in the Interval cell span followed by
+        # the "· default" inherited marker — not a bare "1d" matching incidentally.
+        assert ">1d <span" in body
+        assert "· default" in body  # SYSTEM_DEFAULT_SCHEDULE_CONFIG, flagged inherited
 
     async def test_next_check_computed_for_inherited_schedule(self, client, db_session):
         """#204: a checked item with no schedule config still renders a Next Check —

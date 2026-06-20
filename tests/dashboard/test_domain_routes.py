@@ -309,6 +309,39 @@ class TestDomainWatchedItemsTableDomainInactiveBadge:
         assert b"Health" in response.content
         assert b"Interval" in response.content
 
+    async def test_table_interval_shows_inherited_domain_cadence(self, client, db_session):
+        """#206: an item with no own interval shows the resolved domain cadence +
+        '· domain' in the Interval column (routed through resolve_schedule_display),
+        not a raw blank em dash like the pre-helper template rendered."""
+        db_session.add(Domain(name="inh-tbl.com", default_schedule_config={"interval": "7d"}))
+        await make_watched_item(
+            db_session,
+            name="InhWatch",
+            primary_url="https://inh-tbl.com/p",
+            domain_name="inh-tbl.com",
+            default_schedule_config=None,
+            domain_default_schedule_config={"interval": "7d"},
+        )
+        body = (await client.get("/partials/domain-watched-items/inh-tbl.com")).content
+        assert b"7d" in body
+        assert "· domain".encode() in body
+
+    async def test_table_has_next_check_column(self, client, db_session):
+        """#206: the domain table renders a Next Check column from the helper (parity
+        with the main list); a checked item carries a data-next-check countdown."""
+        db_session.add(Domain(name="nc-tbl.com"))
+        await make_watched_item(
+            db_session,
+            name="NcWatch",
+            primary_url="https://nc-tbl.com/p",
+            domain_name="nc-tbl.com",
+            default_schedule_config={"interval": "1d"},
+            last_checked_at=datetime.now(UTC),
+        )
+        body = (await client.get("/partials/domain-watched-items/nc-tbl.com")).content
+        assert b"Next Check" in body
+        assert b"data-next-check" in body
+
     async def test_table_health_badge_resolves_string_status(self, client, db_session):
         """#202 CR: health_status loads as a plain str — the badge must reflect it.
 

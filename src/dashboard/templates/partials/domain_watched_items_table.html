@@ -61,12 +61,14 @@
         </th>
         {% endfor %}
         <th scope="col">Interval</th>
+        <th scope="col">Next Check</th>
         <th scope="col">Health</th>
         <th scope="col">Status</th>
       </tr>
     </thead>
     <tbody class="divide-y divide-gray-100 dark:divide-gray-700">
       {% for wi in watched_items %}
+      {% set schedule = schedule_map[wi.id | string] %}
       <tr class="hover:bg-gray-50 dark:hover:bg-gray-800">
         <td class="font-medium text-gray-900 dark:text-white">
           <a href="/watched-items/{{ wi.id }}" class="link">{{ wi.name }}</a>
@@ -79,7 +81,17 @@
           {% endif %}
         </td>
         <td class="text-gray-500 dark:text-gray-400 text-sm">
-          {{ (wi.default_schedule_config or {}).get("interval") or "—" }}
+          {# resolved cadence + "· domain"/"· default"/"· profile" source marker, via the shared helper (#206) #}
+          {{ schedule.interval_text }}{% if schedule.marker %} <span class="text-gray-400 dark:text-gray-500">· {{ schedule.marker }}</span>{% endif %}
+        </td>
+        <td class="text-gray-500 dark:text-gray-400 text-sm">
+          {% if schedule.next_check %}
+            <span class="tabular-nums" data-next-check="{{ schedule.next_check.strftime('%Y-%m-%dT%H:%M:%SZ') }}">
+              {{- schedule.next_check.strftime("%Y-%m-%d %H:%M") }} UTC
+            </span>
+          {% else %}
+            <span class="text-gray-400 dark:text-gray-600">—</span>
+          {% endif %}
         </td>
         <td>
           {# health_status loads from the DB as a plain str — compare directly. #}

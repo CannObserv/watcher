@@ -148,6 +148,30 @@ async def get_watched_item_profiles(
     return list(result.scalars().all())
 
 
+async def get_active_profiles_by_item(
+    session: AsyncSession, watched_item_ids: list[ULID]
+) -> dict[str, list[dict]]:
+    """Batch-load active temporal profiles for the given items, keyed by item id.
+
+    Returns the same ``{item_id: [resolution_dict, …]}`` shape the schedule-display
+    helper expects (``resolve_schedule_display(profiles=…)``), mirroring the
+    ``schedule_tick`` batch load so list/table display honors the profile override
+    the scheduler actually applies (#206). Empty input → empty map.
+    """
+    if not watched_item_ids:
+        return {}
+    result = await session.execute(
+        select(TemporalProfile).where(
+            TemporalProfile.is_active.is_(True),
+            TemporalProfile.watched_item_id.in_(watched_item_ids),
+        )
+    )
+    by_item: dict[str, list[dict]] = {}
+    for p in result.scalars().all():
+        by_item.setdefault(str(p.watched_item_id), []).append(p.to_resolution_dict())
+    return by_item
+
+
 async def get_watched_item_notifications(
     session: AsyncSession, watched_item_id: ULID
 ) -> list[NotificationTemplate]:

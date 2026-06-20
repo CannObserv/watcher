@@ -66,6 +66,7 @@ from src.core.scheduler import (
 from src.core.watches.schedule import ScheduleDisplay, resolve_schedule_display
 from src.dashboard import templates
 from src.dashboard.context import (
+    get_active_profiles_by_item,
     get_audit_entries,
     get_dashboard_stats,
     get_domain_default_templates,
@@ -264,7 +265,11 @@ EDITABLE_WATCHED_ITEM_FIELDS = set(WATCHED_ITEM_FIELD_META.keys())
 
 
 def _watched_item_field_context(
-    request: Request, wi: WatchedItem, field_name: str, mode: str = "view"
+    request: Request,
+    wi: WatchedItem,
+    field_name: str,
+    mode: str = "view",
+    profiles: list[dict] | None = None,
 ) -> dict:
     meta = WATCHED_ITEM_FIELD_META[field_name]
     value = meta["format"](wi)
@@ -272,9 +277,12 @@ def _watched_item_field_context(
     # e.g. the interval field resolves the inherited system default for view mode
     # while edit mode still binds the explicit override. Others view == edit.
     display_fn = meta.get("display")
-    # display_fn returns (view_value, marker) where marker is None or the
-    # inheritance source word ("domain"/"default") rendered after a "·" (#205).
-    display_value, inherited = display_fn(wi, value) if display_fn else (value, None)
+    # display_fn returns (view_value, marker) where marker is None or the source
+    # word ("domain"/"default"/"profile") rendered after a "·" (#205, #206).
+    # ``profiles`` lets the interval field honor an active temporal-profile override.
+    display_value, inherited = (
+        display_fn(wi, value, profiles=profiles) if display_fn else (value, None)
+    )
     return {
         "watched_item": wi,
         "field_name": field_name,
@@ -464,6 +472,7 @@ async def watched_items_page(
         session, search=q, include_archived=include_archived
     )
     now = datetime.now(UTC)
+    profiles_by_wi = await get_active_profiles_by_item(session, [wi.id for wi in watched_items])
     return templates.TemplateResponse(
         request,
         "pages/watched_items.html",
@@ -471,7 +480,7 @@ async def watched_items_page(
             "request": request,
             "active_page": "watched-items",
             "watched_items": watched_items,
-            "schedule_map": _build_schedule_map(watched_items, now),
+            "schedule_map": _build_schedule_map(watched_items, now, profiles_by_wi),
             "include_archived": include_archived,
             "q": q or "",
             "page": page,
@@ -507,12 +516,13 @@ async def partial_watched_items_table(
         session, search=q, include_archived=include_archived
     )
     now = datetime.now(UTC)
+    profiles_by_wi = await get_active_profiles_by_item(session, [wi.id for wi in watched_items])
     return templates.TemplateResponse(
         request,
         "partials/watched_items_table.html",
         {
             "watched_items": watched_items,
-            "schedule_map": _build_schedule_map(watched_items, now),
+            "schedule_map": _build_schedule_map(watched_items, now, profiles_by_wi),
             "page": page,
             "page_size": page_size,
             "total_count": total_count,
@@ -543,8 +553,11 @@ async def watched_item_detail_page(
     profiles = await get_watched_item_profiles(session, wi.id)
     activity = await get_watched_item_activity(session, watched_item_id)
 
+    # Resolution dicts for the active profiles drive the interval field's
+    # profile-aware display (#206) — same shape schedule_tick consumes.
+    profile_dicts = [p.to_resolution_dict() for p in profiles if p.is_active]
     field_contexts = {
-        name: _watched_item_field_context(request, wi, name, mode="view")
+        name: _watched_item_field_context(request, wi, name, mode="view", profiles=profile_dicts)
         for name in ("name", "description", "default_schedule_interval", "default_content_type")
     }
 
@@ -1347,12 +1360,15 @@ async def domain_toggle_active(
         watched_items = await get_domain_watched_items(
             session, name, search=q, sort=sort, order=order, status=status
         )
+        now = datetime.now(UTC)
+        profiles_by_wi = await get_active_profiles_by_item(session, [wi.id for wi in watched_items])
         return templates.TemplateResponse(
             request,
             "partials/domain_toggle_oob.html",
             {
                 "domain": domain,
                 "watched_items": watched_items,
+                "schedule_map": _build_schedule_map(watched_items, now, profiles_by_wi),
                 "q": q or "",
                 "sort": sort,
                 "order": order,
@@ -1542,6 +1558,8 @@ async def _render_domain_detail(
             select(func.count(WatchedItem.id)).where(WatchedItem.domain_name == domain.name)
         )
     ).scalar_one()
+    now = datetime.now(UTC)
+    profiles_by_wi = await get_active_profiles_by_item(session, [wi.id for wi in watched_items])
     field_contexts = {
         fname: _field_context(request, domain, fname, mode="view") for fname in DOMAIN_FIELD_META
     }
@@ -1549,6 +1567,7 @@ async def _render_domain_detail(
         "active_page": "domains",
         "domain": domain,
         "watched_items": watched_items,
+        "schedule_map": _build_schedule_map(watched_items, now, profiles_by_wi),
         "all_watched_items_count": all_watched_items_count,
         "q": q or "",
         "sort": sort,
@@ -1831,12 +1850,15 @@ async def partial_domain_watched_items(
     watched_items = await get_domain_watched_items(
         session, name, search=q, sort=sort, order=order, status=status
     )
+    now = datetime.now(UTC)
+    profiles_by_wi = await get_active_profiles_by_item(session, [wi.id for wi in watched_items])
     return templates.TemplateResponse(
         request,
         "partials/domain_watched_items_table.html",
         {
             "domain": domain,
             "watched_items": watched_items,
+            "schedule_map": _build_schedule_map(watched_items, now, profiles_by_wi),
             "q": q or "",
             "sort": sort,
             "order": order,

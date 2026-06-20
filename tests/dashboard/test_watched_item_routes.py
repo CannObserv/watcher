@@ -166,6 +166,33 @@ class TestListPage:
         assert "· domain" in body
         assert "· default" not in body
 
+    async def test_active_profile_shows_profile_cadence(self, client, db_session):
+        """#206 (the #204 CR finding-2 fix): a list item whose temporal profile is
+        currently active shows the profile cadence + '· profile', matching
+        schedule_tick — not the base 1d the UI used to display."""
+        item = await make_info_item(db_session)
+        wi = WatchedItem(
+            archiver_info_item_id=item.info_item_id,
+            name="ProfileRamp",
+            default_schedule_config={"interval": "1d"},
+            last_checked_at=datetime.now(UTC) - timedelta(minutes=5),
+        )
+        db_session.add(wi)
+        await db_session.flush()
+        db_session.add(
+            TemporalProfile(
+                watched_item_id=wi.id,
+                profile_type=ProfileType.EVENT,
+                reference_date=date.today() + timedelta(days=10),
+                rules=[{"days_before": 3650, "interval": "1h"}],
+                post_action=PostAction.DEACTIVATE,
+            )
+        )
+        await db_session.commit()
+        body = (await client.get("/watched-items")).content.decode()
+        assert ">1h <span" in body  # profile cadence in the Interval cell
+        assert "· profile" in body
+
     async def test_status_column_consolidated(self, client, db_session):
         """One labeled Status column holds the toggle + badge; no separate Actions column (#190)."""
 
@@ -469,6 +496,26 @@ class TestDetailPage:
         body = (await client.get(f"/watched-items/{wi.id}")).content
         assert b"{ }" in body
         assert "· default".encode() not in body
+
+    async def test_detail_interval_shows_active_profile_cadence(self, client, db_session):
+        """#206 (the #204 CR finding-2 fix): an item whose temporal profile is
+        currently active shows the profile cadence + '· profile' on the detail
+        interval row, matching what schedule_tick actually does — not the base 1d."""
+        wi = await _make_wi(
+            db_session, name="ProfileDetail", default_schedule_config={"interval": "1d"}
+        )
+        db_session.add(
+            TemporalProfile(
+                watched_item_id=wi.id,
+                profile_type=ProfileType.EVENT,
+                reference_date=date.today() + timedelta(days=10),
+                rules=[{"days_before": 3650, "interval": "1h"}],
+                post_action=PostAction.DEACTIVATE,
+            )
+        )
+        await db_session.commit()
+        body = (await client.get(f"/watched-items/{wi.id}")).content
+        assert "· profile".encode() in body
 
     async def test_detail_interval_shows_domain_marker(self, client, db_session):
         """#205: detail shows '7d · domain' for an item inheriting its domain cadence."""

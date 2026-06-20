@@ -23,6 +23,22 @@ def parse_interval(value: str | None) -> timedelta:
     return timedelta(**{unit: amount})
 
 
+def format_interval(delta: timedelta) -> str:
+    """Render a timedelta as the largest interval unit that divides it evenly.
+
+    Inverse of :func:`parse_interval` (#206): used to display a profile-resolved
+    cadence (a timedelta) back as a '30s'/'15m'/'6h'/'1d' string. A non-positive
+    delta renders ``"0s"``.
+    """
+    total = int(delta.total_seconds())
+    if total <= 0:
+        return "0s"
+    for unit_seconds, suffix in ((86400, "d"), (3600, "h"), (60, "m"), (1, "s")):
+        if total % unit_seconds == 0:
+            return f"{total // unit_seconds}{suffix}"
+    return f"{total}s"
+
+
 def validate_optional_schedule_config(config: dict | None) -> dict | None:
     """Validate an optional cadence schedule_config at a write boundary (#205).
 

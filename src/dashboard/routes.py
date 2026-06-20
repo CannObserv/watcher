@@ -60,11 +60,10 @@ from src.core.notifications.preview_fixtures import (
 from src.core.notifier_client import get_notifier_client
 from src.core.probe import ProbeResult
 from src.core.scheduler import (
-    compute_next_check,
     parse_interval,
     validate_optional_schedule_config,
 )
-from src.core.watches.resolution import resolved_schedule_config
+from src.core.watches.schedule import ScheduleDisplay, resolve_schedule_display
 from src.dashboard import templates
 from src.dashboard.context import (
     get_audit_entries,
@@ -206,22 +205,21 @@ def _format_content_type(wi: WatchedItem) -> str:
     return wi.default_content_type or ""
 
 
-def _interval_display(wi: WatchedItem, value: str) -> tuple[str, str | None]:
+def _interval_display(
+    wi: WatchedItem, value: str, *, profiles: list[dict] | None = None
+) -> tuple[str, str | None]:
     """View-mode display for the interval field; returns ``(display, marker)``.
 
-    ``marker`` is the inheritance source word rendered after a "·" — ``None`` for
-    an explicit item interval (no marker), ``"domain"`` when the value is inherited
-    from the Domain cadence tier, or ``"default"`` from the system default (#205).
-    An explicit interval shows verbatim with no marker. A non-None config that
-    carries no interval (e.g. ``{}``) shows a literal empty-config marker rather
-    than a blank value beside an inherited tag — confusing UX (#202 CR).
+    Thin adapter over ``resolve_schedule_display`` (#206). ``marker`` is the source
+    word rendered after a "·" — ``None`` for an explicit item interval (no marker),
+    ``"domain"``/``"default"`` for an inherited tier (#205), or ``"profile"`` when a
+    temporal profile is currently overriding the base cadence. Pass ``profiles`` to
+    honor the profile override; omit for a base-cadence-only view. ``value`` is
+    accepted for the field-meta ``display`` contract but the resolution is
+    authoritative.
     """
-    if value:
-        return value, None
-    if wi.default_schedule_config is None:
-        marker = "domain" if wi.domain_default_schedule_config is not None else "default"
-        return resolved_schedule_config(wi).get("interval", ""), marker
-    return "{ }", None
+    d = resolve_schedule_display(wi, now=datetime.now(UTC), profiles=profiles)
+    return d.interval_text, d.marker
 
 
 WATCHED_ITEM_FIELD_META: dict[str, dict] = {
@@ -423,37 +421,26 @@ def _watched_item_extra_params(q: str | None, include_archived: bool) -> dict[st
     }
 
 
-def _build_next_check_map(
-    watched_items: list[WatchedItem], now: datetime
-) -> dict[str, datetime | None]:
-    """Next-check datetime per item, or None when never checked (#204).
-
-    Resolves the schedule through ``resolved_schedule_config`` (WatchedItem
-    default → system default) so an item with no explicit config still yields a
-    next-check time instead of a blank — matching the detail page.
-    """
-    result: dict[str, datetime | None] = {}
-    for wi in watched_items:
-        if wi.last_checked_at is not None:
-            result[str(wi.id)] = compute_next_check(
-                resolved_schedule_config(wi), wi.last_checked_at, now=now
-            )
-        else:
-            result[str(wi.id)] = None
-    return result
-
-
-def _build_interval_map(
+def _build_schedule_map(
     watched_items: list[WatchedItem],
-) -> dict[str, tuple[str, str | None]]:
-    """Resolved interval display per item as ``(text, marker)`` (#204, #205).
+    now: datetime,
+    profiles_by_wi: dict[str, list[dict]] | None = None,
+) -> dict[str, ScheduleDisplay]:
+    """Resolved schedule display per item, keyed by id (#204, #205, #206).
 
-    Routes through the same resolution + display logic as the detail page
-    (``_interval_display``) so the list shows the inherited cadence (with a
-    ``domain``/``default`` source marker) rather than a blank when an item carries
-    no explicit schedule config.
+    One ``ScheduleDisplay`` per item — carrying the interval text, inheritance
+    source marker, profile-active flag, and next-check datetime — computed once and
+    read by the list template for both the Interval and Next Check columns. Routes
+    through the same ``resolve_schedule_display`` helper as the detail page and
+    ``schedule_tick``, so the list shows the inherited cadence (with a
+    ``domain``/``default``/``profile`` marker) rather than a blank. Pass
+    ``profiles_by_wi`` (item id → active profile dicts) to honor profile overrides.
     """
-    return {str(wi.id): _interval_display(wi, _format_interval(wi)) for wi in watched_items}
+    profiles_by_wi = profiles_by_wi or {}
+    return {
+        str(wi.id): resolve_schedule_display(wi, now=now, profiles=profiles_by_wi.get(str(wi.id)))
+        for wi in watched_items
+    }
 
 
 @router.get("/watched-items")
@@ -484,8 +471,7 @@ async def watched_items_page(
             "request": request,
             "active_page": "watched-items",
             "watched_items": watched_items,
-            "next_check_map": _build_next_check_map(watched_items, now),
-            "interval_map": _build_interval_map(watched_items),
+            "schedule_map": _build_schedule_map(watched_items, now),
             "include_archived": include_archived,
             "q": q or "",
             "page": page,
@@ -526,8 +512,7 @@ async def partial_watched_items_table(
         "partials/watched_items_table.html",
         {
             "watched_items": watched_items,
-            "next_check_map": _build_next_check_map(watched_items, now),
-            "interval_map": _build_interval_map(watched_items),
+            "schedule_map": _build_schedule_map(watched_items, now),
             "page": page,
             "page_size": page_size,
             "total_count": total_count,

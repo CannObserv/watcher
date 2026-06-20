@@ -1,7 +1,7 @@
 ---
 title: Per-domain default check interval (3-tier schedule resolution)
 date: 2026-06-20
-status: draft
+status: complete
 ---
 
 # Per-domain default check interval (3-tier schedule resolution)

@@ -159,6 +159,81 @@ class TestDomainDetail:
         response = await client.get("/domains/meta.com")
         assert b"Metadata" in response.content
 
+
+class TestDomainDefaultScheduleConfigDashboard:
+    """#205: dashboard cadence edit on the domain detail page + back-fill."""
+
+    async def test_detail_page_shows_cadence_field(self, client, db_session):
+        db_session.add(Domain(name="cadence-ui.com", default_schedule_config={"interval": "7d"}))
+        await db_session.flush()
+        response = await client.get("/domains/cadence-ui.com")
+        assert b"Check Cadence" in response.content
+        assert b"7d" in response.content
+
+    async def test_post_sets_cadence_and_redirects(self, client, db_session):
+        db_session.add(Domain(name="set-cadence.com"))
+        await db_session.flush()
+        await db_session.commit()
+        response = await client.post(
+            "/domains/set-cadence.com/default-schedule-config",
+            data={"interval": "6h"},
+            follow_redirects=False,
+        )
+        assert response.status_code == 303
+        domain = (
+            await db_session.execute(select(Domain).where(Domain.name == "set-cadence.com"))
+        ).scalar_one()
+        await db_session.refresh(domain)
+        assert domain.default_schedule_config == {"interval": "6h"}
+
+    async def test_post_backfills_items(self, client, db_session):
+        db_session.add(Domain(name="ui-backfill.com"))
+        wi = await make_watched_item(
+            db_session,
+            name="OnUiDomain",
+            primary_url="https://ui-backfill.com/p",
+            domain_name="ui-backfill.com",
+        )
+        await db_session.commit()
+        await client.post(
+            "/domains/ui-backfill.com/default-schedule-config",
+            data={"interval": "6h"},
+            follow_redirects=False,
+        )
+        from src.core.models.watched_item import WatchedItem
+
+        refreshed = (
+            await db_session.execute(select(WatchedItem).where(WatchedItem.id == wi.id))
+        ).scalar_one()
+        await db_session.refresh(refreshed)
+        assert refreshed.domain_default_schedule_config == {"interval": "6h"}
+
+    async def test_post_blank_clears_cadence(self, client, db_session):
+        db_session.add(Domain(name="clear-ui.com", default_schedule_config={"interval": "6h"}))
+        await db_session.flush()
+        await db_session.commit()
+        await client.post(
+            "/domains/clear-ui.com/default-schedule-config",
+            data={"interval": ""},
+            follow_redirects=False,
+        )
+        domain = (
+            await db_session.execute(select(Domain).where(Domain.name == "clear-ui.com"))
+        ).scalar_one()
+        await db_session.refresh(domain)
+        assert domain.default_schedule_config is None
+
+    async def test_post_bad_interval_rejected(self, client, db_session):
+        db_session.add(Domain(name="bad-ui.com"))
+        await db_session.flush()
+        await db_session.commit()
+        response = await client.post(
+            "/domains/bad-ui.com/default-schedule-config",
+            data={"interval": "soon"},
+            follow_redirects=False,
+        )
+        assert response.status_code == 400
+
     async def test_detail_page_shows_danger_zone(self, client, db_session):
         db_session.add(Domain(name="danger.com"))
         await db_session.flush()

@@ -20,6 +20,26 @@
     {{ domain_field(field_contexts["max_concurrency"]) }}
     {{ domain_field(field_contexts["decay_window"]) }}
     {{ domain_field(field_contexts["notes"]) }}
+
+    {# Check Cadence (#205) — domain default check interval; the Domain tier of
+       schedule resolution. Distinct from Min Interval (rate-limiter floor). #}
+    <div class="px-4 py-3 sm:px-6">
+      <form method="post"
+        action="/domains/{{ domain.name }}/default-schedule-config"
+        class="flex flex-wrap items-center gap-3">
+        <label for="domain-cadence"
+          class="w-40 text-sm font-medium text-gray-700 dark:text-gray-300">Check Cadence</label>
+        <input id="domain-cadence" name="interval" type="text"
+          value="{{ cadence_interval }}"
+          placeholder="e.g. 6h, 1d, 7d"
+          class="form-input flex-1 min-w-[12rem]">
+        <button type="submit" class="btn btn-secondary min-h-[44px]">Save</button>
+      </form>
+      <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+        Default check interval inherited by items on this domain that set no interval of
+        their own. Blank inherits the system default. Distinct from Min Interval.
+      </p>
+    </div>
   </div>
 </section>
 

@@ -29,7 +29,10 @@ from src.api.routes.watched_items import (
 )
 from src.api.schemas.content_config import ContentConfig, ContentOptions
 from src.api.schemas.validators import validate_event_list
-from src.core.domains import ensure_domain_and_resolve_suspension
+from src.core.domains import (
+    backfill_domain_schedule_config,
+    ensure_domain_and_resolve_suspension,
+)
 from src.core.logging import get_logger
 from src.core.models.audit_log import EventType, audit
 from src.core.models.domain import Domain
@@ -56,7 +59,11 @@ from src.core.notifications.preview_fixtures import (
 )
 from src.core.notifier_client import get_notifier_client
 from src.core.probe import ProbeResult
-from src.core.scheduler import compute_next_check, parse_interval
+from src.core.scheduler import (
+    compute_next_check,
+    parse_interval,
+    validate_optional_schedule_config,
+)
 from src.core.watches.resolution import resolved_schedule_config
 from src.dashboard import templates
 from src.dashboard.context import (
@@ -1523,6 +1530,44 @@ async def domain_inline_update(
     return RedirectResponse(url=f"/domains/{name}", status_code=303)
 
 
+@router.post("/domains/{name}/default-schedule-config")
+async def domain_default_schedule_config_update(
+    name: str,
+    interval: str = Form(""),
+    session: AsyncSession = Depends(get_db_session),
+):
+    """Set or clear a domain's default check cadence and back-fill its items (#205).
+
+    A blank ``interval`` clears the cadence (items fall back to the system
+    default). A non-blank value is stored as ``{"interval": <value>}`` after
+    validation; a malformed interval returns 400 (mirrors the inline-edit casts).
+    Re-denormalizes onto every WatchedItem on the domain.
+    """
+    result = await session.execute(select(Domain).where(Domain.name == name))
+    domain = result.scalar_one_or_none()
+    if not domain:
+        raise HTTPException(status_code=404, detail="Domain not found")
+
+    interval = interval.strip()
+    config = {"interval": interval} if interval else None
+    try:
+        config = validate_optional_schedule_config(config)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    domain.default_schedule_config = config
+    await backfill_domain_schedule_config(session, name, config)
+    audit(
+        session,
+        EventType.DOMAIN_UPDATED,
+        domain_name=name,
+        default_schedule_config=config,
+        source="dashboard",
+    )
+    await session.commit()
+    return RedirectResponse(url=f"/domains/{name}", status_code=303)
+
+
 @router.get("/domains/{name}")
 async def domain_detail_page(
     request: Request,
@@ -1562,6 +1607,7 @@ async def domain_detail_page(
         "status": status or "",
         "flash": None,
         "field_contexts": field_contexts,
+        "cadence_interval": (domain.default_schedule_config or {}).get("interval", ""),
     }
     return templates.TemplateResponse(request, "pages/domain_detail.html", context)
 

@@ -1536,8 +1536,51 @@ async def domain_inline_update(
     return RedirectResponse(url=f"/domains/{name}", status_code=303)
 
 
+async def _render_domain_detail(
+    request: Request,
+    domain: Domain,
+    session: AsyncSession,
+    *,
+    flash: dict | None = None,
+    q: str | None = None,
+    status: str | None = None,
+    sort: str = "name",
+    order: str = "asc",
+    status_code: int = 200,
+):
+    """Render the domain detail page. Shared by the GET route and error re-renders."""
+    watched_items = await get_domain_watched_items(
+        session, domain.name, search=q, sort=sort, order=order, status=status
+    )
+    all_watched_items_count = (
+        await session.execute(
+            select(func.count(WatchedItem.id)).where(WatchedItem.domain_name == domain.name)
+        )
+    ).scalar_one()
+    field_contexts = {
+        fname: _field_context(request, domain, fname, mode="view") for fname in DOMAIN_FIELD_META
+    }
+    context = {
+        "active_page": "domains",
+        "domain": domain,
+        "watched_items": watched_items,
+        "all_watched_items_count": all_watched_items_count,
+        "q": q or "",
+        "sort": sort,
+        "order": order,
+        "status": status or "",
+        "flash": flash,
+        "field_contexts": field_contexts,
+        "cadence_interval": (domain.default_schedule_config or {}).get("interval", ""),
+    }
+    return templates.TemplateResponse(
+        request, "pages/domain_detail.html", context, status_code=status_code
+    )
+
+
 @router.post("/domains/{name}/default-schedule-config")
 async def domain_default_schedule_config_update(
+    request: Request,
     name: str,
     interval: str = Form(""),
     session: AsyncSession = Depends(get_db_session),
@@ -1546,8 +1589,8 @@ async def domain_default_schedule_config_update(
 
     A blank ``interval`` clears the cadence (items fall back to the system
     default). A non-blank value is stored as ``{"interval": <value>}`` after
-    validation; a malformed interval returns 400 (mirrors the inline-edit casts).
-    Re-denormalizes onto every WatchedItem on the domain.
+    validation; a malformed interval re-renders the detail page with an error
+    flash (status 400). Re-denormalizes onto every WatchedItem on the domain.
     """
     result = await session.execute(select(Domain).where(Domain.name == name))
     domain = result.scalar_one_or_none()
@@ -1559,7 +1602,13 @@ async def domain_default_schedule_config_update(
     try:
         config = validate_optional_schedule_config(config)
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return await _render_domain_detail(
+            request,
+            domain,
+            session,
+            flash={"type": "error", "message": f"Invalid cadence: {exc}"},
+            status_code=400,
+        )
 
     domain.default_schedule_config = config
     await backfill_domain_schedule_config(session, name, config)
@@ -1590,32 +1639,9 @@ async def domain_detail_page(
     if not domain:
         return templates.TemplateResponse(request, "pages/404.html", status_code=404)
 
-    watched_items = await get_domain_watched_items(
-        session, name, search=q, sort=sort, order=order, status=status
+    return await _render_domain_detail(
+        request, domain, session, q=q, status=status, sort=sort, order=order
     )
-    all_wi_count_result = await session.execute(
-        select(func.count(WatchedItem.id)).where(WatchedItem.domain_name == name)
-    )
-    all_watched_items_count = all_wi_count_result.scalar_one()
-
-    field_contexts = {
-        fname: _field_context(request, domain, fname, mode="view") for fname in DOMAIN_FIELD_META
-    }
-
-    context = {
-        "active_page": "domains",
-        "domain": domain,
-        "watched_items": watched_items,
-        "all_watched_items_count": all_watched_items_count,
-        "q": q or "",
-        "sort": sort,
-        "order": order,
-        "status": status or "",
-        "flash": None,
-        "field_contexts": field_contexts,
-        "cadence_interval": (domain.default_schedule_config or {}).get("interval", ""),
-    }
-    return templates.TemplateResponse(request, "pages/domain_detail.html", context)
 
 
 async def _render_domain_nc_defaults(request: Request, domain_name: str, session: AsyncSession):

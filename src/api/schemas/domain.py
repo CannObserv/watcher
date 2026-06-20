@@ -22,11 +22,12 @@ class DomainPatch(BaseModel):
     @field_validator("default_schedule_config")
     @classmethod
     def _cadence(cls, v: dict | None) -> dict | None:
-        """Reject an empty/intervalless or malformed cadence at the write boundary."""
-        try:
-            return validate_optional_schedule_config(v)
-        except ValueError as exc:
-            raise ValueError(str(exc)) from exc
+        """Reject an empty/intervalless or malformed cadence at the write boundary.
+
+        ``validate_optional_schedule_config`` raises ``ValueError``, which Pydantic
+        surfaces as a 422 — no wrapping needed.
+        """
+        return validate_optional_schedule_config(v)
 
 
 class DomainResponse(BaseModel):

@@ -35,6 +35,12 @@ class TestValidateOptionalScheduleConfig:
         with pytest.raises(ValueError, match="Invalid interval"):
             validate_optional_schedule_config({"interval": "soon"})
 
+    @pytest.mark.parametrize("bad", [123, ["6h"], True, {"nested": 1}])
+    def test_non_string_interval_raises_valueerror_not_typeerror(self, bad):
+        """#205 CR: a non-string interval must raise ValueError (→ 422), not TypeError (→ 500)."""
+        with pytest.raises(ValueError, match="must be a string"):
+            validate_optional_schedule_config({"interval": bad})
+
 
 class TestParseInterval:
     def test_parse_seconds(self):

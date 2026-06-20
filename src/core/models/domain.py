@@ -1,4 +1,4 @@
-"""Domain model — per-domain rate limiter configuration."""
+"""Domain model — per-domain rate-limiter config and default check cadence."""
 
 from datetime import datetime
 
@@ -15,7 +15,14 @@ DEFAULT_DECAY_WINDOW = 1800.0
 
 
 class Domain(Base, TimestampMixin):
-    """Per-domain rate limiter configuration and backoff state."""
+    """Per-domain rate-limiter configuration, backoff state, and check cadence.
+
+    Two distinct interval concerns live here: ``min_interval``/``current_interval``
+    are the request-level rate-limiter floor/backoff (float seconds), while
+    ``default_schedule_config`` is the operator's desired check *cadence* for items
+    on this domain (a schedule_config interval string) — the Domain tier of the
+    3-tier schedule resolution (#205).
+    """
 
     __tablename__ = "domains"
 

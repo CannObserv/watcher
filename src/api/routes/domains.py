@@ -32,6 +32,20 @@ async def _get_domain_or_404(name: str, session: AsyncSession) -> Domain:
     return domain
 
 
+def _apply_domain_updates(domain: Domain, updates: dict) -> None:
+    """Apply provided ``DomainPatch`` fields onto an existing Domain row."""
+    if "min_interval" in updates:
+        domain.min_interval = updates["min_interval"]
+    if "max_concurrency" in updates:
+        domain.max_concurrency = updates["max_concurrency"]
+    if "decay_window" in updates:
+        domain.decay_window = updates["decay_window"]
+    if "notes" in updates:
+        domain.notes = updates["notes"]
+    if "default_schedule_config" in updates:
+        domain.default_schedule_config = updates["default_schedule_config"]
+
+
 @router.get("", response_model=list[DomainResponse])
 async def list_domains(session: AsyncSession = Depends(get_db_session)):
     """List all domain configs."""
@@ -78,20 +92,15 @@ async def upsert_domain(
             await session.flush()
         except IntegrityError:
             # Concurrent request created the domain between our select and insert.
+            # The constructor's field values were rolled back, so re-apply the
+            # provided fields onto the winning row — otherwise this PATCH would
+            # silently no-op against the concurrent default.
             await session.rollback()
             result = await session.execute(select(Domain).where(Domain.name == name))
             domain = result.scalar_one()
+            _apply_domain_updates(domain, updates)
     else:
-        if "min_interval" in updates:
-            domain.min_interval = updates["min_interval"]
-        if "max_concurrency" in updates:
-            domain.max_concurrency = updates["max_concurrency"]
-        if "decay_window" in updates:
-            domain.decay_window = updates["decay_window"]
-        if "notes" in updates:
-            domain.notes = updates["notes"]
-        if "default_schedule_config" in updates:
-            domain.default_schedule_config = updates["default_schedule_config"]
+        _apply_domain_updates(domain, updates)
 
     # #205: editing the domain cadence re-denormalizes it onto every WatchedItem
     # on the domain (mirrors the domain_suspended back-fill), so the resolver

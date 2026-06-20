@@ -223,7 +223,9 @@ class TestDomainDefaultScheduleConfigDashboard:
         await db_session.refresh(domain)
         assert domain.default_schedule_config is None
 
-    async def test_post_bad_interval_rejected(self, client, db_session):
+    async def test_post_bad_interval_rerenders_with_flash(self, client, db_session):
+        """#205 CR: a malformed interval re-renders the detail page with an error flash (400),
+        not a bare error response."""
         db_session.add(Domain(name="bad-ui.com"))
         await db_session.flush()
         await db_session.commit()
@@ -233,6 +235,25 @@ class TestDomainDefaultScheduleConfigDashboard:
             follow_redirects=False,
         )
         assert response.status_code == 400
+        body = response.content.decode()
+        assert "Invalid cadence" in body  # friendly flash, not a raw error page
+        assert "Check Cadence" in body  # the detail page was re-rendered
+
+    async def test_post_unchanged_on_bad_interval(self, client, db_session):
+        """A rejected cadence leaves the domain's stored value untouched."""
+        db_session.add(Domain(name="keep-ui.com", default_schedule_config={"interval": "6h"}))
+        await db_session.flush()
+        await db_session.commit()
+        await client.post(
+            "/domains/keep-ui.com/default-schedule-config",
+            data={"interval": "soon"},
+            follow_redirects=False,
+        )
+        domain = (
+            await db_session.execute(select(Domain).where(Domain.name == "keep-ui.com"))
+        ).scalar_one()
+        await db_session.refresh(domain)
+        assert domain.default_schedule_config == {"interval": "6h"}
 
     async def test_detail_page_shows_danger_zone(self, client, db_session):
         db_session.add(Domain(name="danger.com"))

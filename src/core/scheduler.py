@@ -38,6 +38,11 @@ def validate_optional_schedule_config(config: dict | None) -> dict | None:
     interval = config.get("interval")
     if not interval:
         raise ValueError("schedule config must include a non-empty 'interval'")
+    if not isinstance(interval, str):
+        # Guard before parse_interval — a non-str (e.g. a JSON number) would raise
+        # TypeError there, which Pydantic does not convert to a 422 (it escapes as
+        # a 500). Raising ValueError keeps the write boundary returning 422/400.
+        raise ValueError("schedule config 'interval' must be a string (e.g. '6h', '1d')")
     parse_interval(interval)  # raises ValueError on a malformed interval string
     return config
 

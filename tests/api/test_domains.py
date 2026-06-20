@@ -156,6 +156,14 @@ class TestPatchDomainDefaultScheduleConfig:
         )
         assert resp.status_code == 422
 
+    async def test_patch_non_string_interval_rejected_422(self, client):
+        """#205 CR: a numeric interval must be a clean 422, not a 500 (TypeError escape)."""
+        resp = await client.patch(
+            "/api/v1/domains/numeric.example",
+            json={"default_schedule_config": {"interval": 86400}},
+        )
+        assert resp.status_code == 422
+
 
 class TestDecayWindow:
     async def test_patch_creates_domain_with_default_decay_window(self, client):

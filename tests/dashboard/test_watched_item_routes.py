@@ -132,6 +132,24 @@ class TestListPage:
         response = await client.get("/watched-items")
         assert b"data-next-check" in response.content
 
+    async def test_explicit_interval_has_no_default_marker(self, client, db_session):
+        """#204: an explicit interval renders the value with no '· default' marker —
+        the inherited marker is reserved for items that fall back to a default."""
+
+        item = await make_info_item(db_session)
+        wi = WatchedItem(
+            archiver_info_item_id=item.info_item_id,
+            name="ExplicitInterval",
+            default_schedule_config={"interval": "6h"},
+        )
+        db_session.add(wi)
+        await db_session.flush()
+        await db_session.commit()
+        response = await client.get("/watched-items")
+        body = response.content.decode()
+        assert ">6h<" in body  # value rendered in the Interval cell span
+        assert "· default" not in body  # no inherited marker for an explicit interval
+
     async def test_status_column_consolidated(self, client, db_session):
         """One labeled Status column holds the toggle + badge; no separate Actions column (#190)."""
 

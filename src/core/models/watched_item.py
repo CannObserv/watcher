@@ -85,6 +85,14 @@ class WatchedItem(Base, TimestampMixin):
     domain_suspended: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False, server_default="false"
     )
+    # Denormalized copy of the parent Domain's default cadence — the Domain tier of
+    # the 3-tier schedule resolution (#205). Maintained on every create/PATCH path
+    # via ensure_domain_and_resolve_suspension and back-filled on domain-default
+    # edit, mirroring domain_suspended so the scheduler needs no live Domain join.
+    # none_as_null=True so an unset/inherited value persists as SQL NULL (#198).
+    domain_default_schedule_config: Mapped[dict | None] = mapped_column(
+        JSONB(none_as_null=True), nullable=True, default=None
+    )
 
     # Pipeline state — populated at create time; updated by pipeline.
     effective_url: Mapped[str] = mapped_column(Text, nullable=False, default="", server_default="")

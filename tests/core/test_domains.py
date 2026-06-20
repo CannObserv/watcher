@@ -28,6 +28,42 @@ class TestDomainNameForUrl:
 
 
 @pytest.mark.integration
+class TestDomainDefaultScheduleConfig:
+    """#205: Domain.default_schedule_config — operator cadence, not the rate-limiter floor."""
+
+    async def test_defaults_null_and_matches_is_null(self, db_session):
+        from sqlalchemy import select
+
+        from src.core.models.domain import Domain
+
+        db_session.add(Domain(name="dom-null.example"))
+        await db_session.flush()
+        found = (
+            await db_session.execute(
+                select(Domain).where(
+                    Domain.name == "dom-null.example",
+                    Domain.default_schedule_config.is_(None),
+                )
+            )
+        ).scalar_one()
+        assert found.default_schedule_config is None
+
+    async def test_round_trips(self, db_session):
+        from sqlalchemy import select
+
+        from src.core.models.domain import Domain
+
+        db_session.add(
+            Domain(name="dom-cadence.example", default_schedule_config={"interval": "6h"})
+        )
+        await db_session.flush()
+        found = (
+            await db_session.execute(select(Domain).where(Domain.name == "dom-cadence.example"))
+        ).scalar_one()
+        assert found.default_schedule_config == {"interval": "6h"}
+
+
+@pytest.mark.integration
 class TestEnsureDomainAndResolveSuspension:
     async def test_creates_missing_domain_and_returns_not_suspended(self, db_session):
         from sqlalchemy import select

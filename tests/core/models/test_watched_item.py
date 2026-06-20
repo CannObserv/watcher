@@ -37,6 +37,43 @@ async def test_watched_item_defaults(db_session: AsyncSession) -> None:
     assert fetched.updated_at is not None
 
 
+async def test_watched_item_domain_default_schedule_config_defaults_null(
+    db_session: AsyncSession,
+) -> None:
+    """#205: domain_default_schedule_config defaults to None and persists as SQL NULL."""
+    wi = WatchedItem(archiver_info_item_id=ULID(), name="DomDefaultNull")
+    db_session.add(wi)
+    await db_session.flush()
+
+    # Round-trips as None, and `IS NULL` matches (none_as_null=True, not JSONB 'null').
+    found = (
+        await db_session.execute(
+            select(WatchedItem).where(
+                WatchedItem.id == wi.id,
+                WatchedItem.domain_default_schedule_config.is_(None),
+            )
+        )
+    ).scalar_one()
+    assert found.domain_default_schedule_config is None
+
+
+async def test_watched_item_domain_default_schedule_config_round_trips(
+    db_session: AsyncSession,
+) -> None:
+    """#205: a denormalized domain default round-trips intact."""
+    wi = WatchedItem(
+        archiver_info_item_id=ULID(),
+        name="DomDefault",
+        domain_default_schedule_config={"interval": "7d"},
+    )
+    db_session.add(wi)
+    await db_session.flush()
+    fetched = (
+        await db_session.execute(select(WatchedItem).where(WatchedItem.id == wi.id))
+    ).scalar_one()
+    assert fetched.domain_default_schedule_config == {"interval": "7d"}
+
+
 async def test_watched_item_archiver_info_item_id_unique(db_session: AsyncSession) -> None:
     archiver_info_item_id = ULID()
     db_session.add(WatchedItem(archiver_info_item_id=archiver_info_item_id, name="A"))

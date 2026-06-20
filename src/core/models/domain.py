@@ -3,6 +3,7 @@
 from datetime import datetime
 
 from sqlalchemy import Boolean, DateTime, Float, Integer, String, Text
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 from ulid import ULID
 
@@ -36,6 +37,14 @@ class Domain(Base, TimestampMixin):
         Float, nullable=False, default=DEFAULT_DECAY_WINDOW, server_default="1800.0"
     )
     notes: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
+    # Operator's desired check *cadence* for items on this domain — a
+    # schedule_config interval string ({"interval": "6h"}), the Domain tier of the
+    # 3-tier resolution chain (#205). Distinct from min_interval/current_interval,
+    # which are the request-level rate-limiter floor/backoff. none_as_null=True so
+    # an unset cadence persists as SQL NULL, not the JSONB 'null' literal (#198).
+    default_schedule_config: Mapped[dict | None] = mapped_column(
+        JSONB(none_as_null=True), nullable=True, default=None
+    )
     is_active: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=True, server_default="true"
     )

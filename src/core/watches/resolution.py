@@ -1,8 +1,10 @@
 """Schedule resolution for a WatchedItem.
 
-Post-#191 the WatchedItem is the single monitored entity; there is no per-Watch
-override layer. Schedule resolution reduces to: WatchedItem default → system
-default. Kept as a function so the system default lives in one place.
+Three tiers (#205): WatchedItem default → Domain default → system default. The
+Domain tier is read from ``WatchedItem.domain_default_schedule_config``, a
+denormalized copy maintained on every create/PATCH path and back-filled on
+domain-default edit (mirrors ``domain_suspended``), so the resolver stays
+single-arg and the scheduler needs no live Domain join.
 """
 
 from src.core.models.watched_item import WatchedItem
@@ -11,11 +13,16 @@ SYSTEM_DEFAULT_SCHEDULE_CONFIG: dict = {"interval": "1d"}
 
 
 def resolved_schedule_config(watched_item: WatchedItem) -> dict:
-    """Resolve a WatchedItem's schedule config, falling back to the system default.
+    """Resolve a WatchedItem's schedule config across the 3-tier chain.
 
-    Distinguishes `None` (no config set) from `{}` (explicitly empty config).
-    Empty dict passes through; `None` falls back to the system default.
+    Order: item ``default_schedule_config`` → denormalized
+    ``domain_default_schedule_config`` → system default. At each tier `None`
+    means "inherit" and falls through; a non-`None` config (including an explicit
+    `{}`) wins at its tier — `{}` passes through as "no interval" rather than
+    falling to the next tier, consistent across the item and domain tiers.
     """
     if watched_item.default_schedule_config is not None:
         return watched_item.default_schedule_config
+    if watched_item.domain_default_schedule_config is not None:
+        return watched_item.domain_default_schedule_config
     return SYSTEM_DEFAULT_SCHEDULE_CONFIG

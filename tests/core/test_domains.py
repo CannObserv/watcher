@@ -70,8 +70,8 @@ class TestEnsureDomainAndResolveSuspension:
 
         from src.core.models.domain import Domain
 
-        suspended = await ensure_domain_and_resolve_suspension(db_session, "fresh-core.example")
-        assert suspended is False
+        result = await ensure_domain_and_resolve_suspension(db_session, "fresh-core.example")
+        assert result.suspended is False
         domain = (
             await db_session.execute(select(Domain).where(Domain.name == "fresh-core.example"))
         ).scalar_one_or_none()
@@ -82,16 +82,35 @@ class TestEnsureDomainAndResolveSuspension:
 
         db_session.add(Domain(name="inactive-core.example", is_active=False))
         await db_session.flush()
-        suspended = await ensure_domain_and_resolve_suspension(db_session, "inactive-core.example")
-        assert suspended is True
+        result = await ensure_domain_and_resolve_suspension(db_session, "inactive-core.example")
+        assert result.suspended is True
 
     async def test_active_domain_returns_not_suspended(self, db_session):
         from src.core.models.domain import Domain
 
         db_session.add(Domain(name="active-core.example", is_active=True))
         await db_session.flush()
-        suspended = await ensure_domain_and_resolve_suspension(db_session, "active-core.example")
-        assert suspended is False
+        result = await ensure_domain_and_resolve_suspension(db_session, "active-core.example")
+        assert result.suspended is False
 
     async def test_none_domain_returns_not_suspended(self, db_session):
-        assert await ensure_domain_and_resolve_suspension(db_session, None) is False
+        result = await ensure_domain_and_resolve_suspension(db_session, None)
+        assert result.suspended is False
+        assert result.default_schedule_config is None
+
+    async def test_returns_domain_default_schedule_config(self, db_session):
+        """#205: the helper surfaces the domain's cadence for denormalization."""
+        from src.core.models.domain import Domain
+
+        db_session.add(
+            Domain(name="cadence-core.example", default_schedule_config={"interval": "7d"})
+        )
+        await db_session.flush()
+        result = await ensure_domain_and_resolve_suspension(db_session, "cadence-core.example")
+        assert result.suspended is False
+        assert result.default_schedule_config == {"interval": "7d"}
+
+    async def test_fresh_domain_has_no_default(self, db_session):
+        """#205: a freshly-upserted domain has a NULL cadence (system default applies)."""
+        result = await ensure_domain_and_resolve_suspension(db_session, "fresh-cadence.example")
+        assert result.default_schedule_config is None

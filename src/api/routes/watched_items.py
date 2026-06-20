@@ -109,7 +109,7 @@ async def create_watched_item(
         # authoritative for the URL. Mirrors the URL-only branch so an InfoItem-linked
         # create (the Archiver "Begin Watching" path) doesn't leave domain_name NULL (#196).
         domain_name = domain_name_for_url(data.url)
-        domain_suspended = await ensure_domain_and_resolve_suspension(session, domain_name)
+        domain_state = await ensure_domain_and_resolve_suspension(session, domain_name)
         wi = WatchedItem(
             archiver_info_item_id=ULID.from_str(data.archiver_info_item_id),
             name=data.name or info_item.name,
@@ -120,7 +120,8 @@ async def create_watched_item(
             default_tags=data.default_tags,
             effective_url=data.url or "",
             domain_name=domain_name,
-            domain_suspended=domain_suspended,
+            domain_suspended=domain_state.suspended,
+            domain_default_schedule_config=domain_state.default_schedule_config,
             source_specs=data.source_specs or [],
             archiver_info_source_id=data.archiver_info_source_id,
         )
@@ -135,12 +136,13 @@ async def create_watched_item(
         # Domain join), so initialize it from the existing domain's state here —
         # otherwise an item created on an already-inactive/archived domain would be
         # scheduled. Mirrors the re-probe route's cascade (#196: shared helper).
-        domain_suspended = await ensure_domain_and_resolve_suspension(session, domain)
+        domain_state = await ensure_domain_and_resolve_suspension(session, domain)
 
         wi = WatchedItem(
             effective_url=probe_result.effective_url,
             domain_name=domain,
-            domain_suspended=domain_suspended,
+            domain_suspended=domain_state.suspended,
+            domain_default_schedule_config=domain_state.default_schedule_config,
             name=data.name or domain or data.url,
             description=data.description,
             is_active=data.is_active,
@@ -217,9 +219,10 @@ async def patch_watched_item(
         derived_domain = domain_name_for_url(wi.effective_url)
         # Upsert the Domain before assigning wi.domain_name so the helper's internal
         # SELECT (which autoflushes the dirty WatchedItem) can't trip the FK.
-        domain_suspended = await ensure_domain_and_resolve_suspension(session, derived_domain)
+        domain_state = await ensure_domain_and_resolve_suspension(session, derived_domain)
         wi.domain_name = derived_domain
-        wi.domain_suspended = domain_suspended
+        wi.domain_suspended = domain_state.suspended
+        wi.domain_default_schedule_config = domain_state.default_schedule_config
 
     # #189: an is_active transition gets a dedicated pause/resume audit event
     # (mirroring archive/restore), kept out of the generic UPDATED entry so

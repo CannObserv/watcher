@@ -777,6 +777,7 @@ class TestListScheduleMaps:
         wi = MagicMock()
         wi.id = ULID()
         wi.default_schedule_config = None
+        wi.domain_default_schedule_config = None
         display, inherited = _build_interval_map([wi])[str(wi.id)]
         assert display == "1d"  # SYSTEM_DEFAULT_SCHEDULE_CONFIG
         assert inherited is True
@@ -803,6 +804,7 @@ class TestListScheduleMaps:
         wi = MagicMock()
         wi.id = ULID()
         wi.default_schedule_config = None
+        wi.domain_default_schedule_config = None
         wi.last_checked_at = last
         # Inherited interval is 1d → next check = last + 1d.
         assert _build_next_check_map([wi], now)[str(wi.id)] == last + timedelta(days=1)

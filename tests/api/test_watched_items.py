@@ -972,6 +972,35 @@ class TestCreateInfoItemLinkedDomainDerivation:
         assert response.status_code == 201, response.text
         assert response.json()["domain_name"] is None
 
+    async def test_create_denormalizes_domain_cadence_onto_item(
+        self, client, db_session, info_client
+    ):
+        """#205: creating an item on a domain with a cadence copies it onto the item."""
+        from ulid import ULID
+
+        from src.core.models.domain import Domain
+        from src.core.models.watched_item import WatchedItem
+
+        db_session.add(
+            Domain(name="cadence-create.example", default_schedule_config={"interval": "7d"})
+        )
+        item = await make_info_item(db_session, name="LinkedCadence")
+        await db_session.commit()
+        response = await client.post(
+            "/api/v1/watched-items",
+            json={
+                "archiver_info_item_id": str(item.info_item_id),
+                "url": "https://cadence-create.example/page",
+            },
+        )
+        assert response.status_code == 201, response.text
+        wi = (
+            await db_session.execute(
+                select(WatchedItem).where(WatchedItem.id == ULID.from_str(response.json()["id"]))
+            )
+        ).scalar_one()
+        assert wi.domain_default_schedule_config == {"interval": "7d"}
+
 
 class TestCheckNow:
     async def test_202_enqueues_task(self, client, db_session):

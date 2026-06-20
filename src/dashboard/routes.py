@@ -373,7 +373,7 @@ async def watched_item_create_submit(
     # #196 Finding 1: upsert the domain and seed domain_suspended from its state —
     # schedule_tick gates solely on WatchedItem.domain_suspended, so a create on an
     # already-suspended domain must not silently arm fetching. Shared with the API paths.
-    domain_suspended = await ensure_domain_and_resolve_suspension(
+    domain_state = await ensure_domain_and_resolve_suspension(
         session, probe_result.effective_domain or None
     )
 
@@ -381,7 +381,8 @@ async def watched_item_create_submit(
     wi = WatchedItem(
         effective_url=probe_result.effective_url,
         domain_name=probe_result.effective_domain or None,
-        domain_suspended=domain_suspended,
+        domain_suspended=domain_state.suspended,
+        domain_default_schedule_config=domain_state.default_schedule_config,
         name=wi_name,
         description=description.strip() or None,
         default_schedule_config={"interval": interval_raw} if interval_raw else None,
@@ -781,13 +782,14 @@ async def watched_item_update_url(
     # Upsert the domain and re-evaluate suspension against the (possibly new) target
     # so moving a WatchedItem onto a suspended/archived domain doesn't bypass the
     # kill-switch. Shared with the API create/PATCH paths (#196).
-    domain_suspended = await ensure_domain_and_resolve_suspension(
+    domain_state = await ensure_domain_and_resolve_suspension(
         session, probe_result.effective_domain or None
     )
 
     wi.effective_url = probe_result.effective_url
     wi.domain_name = probe_result.effective_domain or None
-    wi.domain_suspended = domain_suspended
+    wi.domain_suspended = domain_state.suspended
+    wi.domain_default_schedule_config = domain_state.default_schedule_config
     audit(
         session,
         EventType.WATCHED_ITEM_UPDATED,
@@ -797,7 +799,7 @@ async def watched_item_update_url(
     )
     await session.commit()
 
-    if domain_suspended and hx:
+    if domain_state.suspended and hx:
         return _flash(
             f"URL updated, but '{probe_result.effective_domain}' is suspended — "
             "this Watched Item will not be checked until the domain is reactivated.",

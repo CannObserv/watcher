@@ -42,6 +42,7 @@ from src.core.models.notification_template import (
     VISIBILITY_WATCHED_ITEM,
     NotificationTemplate,
 )
+from src.core.models.temporal_profile import TemporalProfile
 from src.core.models.watched_item import ContentType, WatchedItem
 from src.core.notifications.content import build_body, build_title, resolve_options
 from src.core.notifications.default_templates import (
@@ -534,6 +535,14 @@ async def partial_watched_items_table(
     )
 
 
+def _active_profile_dicts(profiles: list[TemporalProfile]) -> list[dict]:
+    """Active profiles as resolution dicts — the shape resolve_schedule_display and
+    schedule_tick consume (#206). One conversion rule, shared by the detail route
+    and the inline interval field partial.
+    """
+    return [p.to_resolution_dict() for p in profiles if p.is_active]
+
+
 @router.get("/watched-items/{watched_item_id}")
 async def watched_item_detail_page(
     request: Request,
@@ -555,7 +564,7 @@ async def watched_item_detail_page(
 
     # Resolution dicts for the active profiles drive the interval field's
     # profile-aware display (#206) — same shape schedule_tick consumes.
-    profile_dicts = [p.to_resolution_dict() for p in profiles if p.is_active]
+    profile_dicts = _active_profile_dicts(profiles)
     field_contexts = {
         name: _watched_item_field_context(request, wi, name, mode="view", profiles=profile_dicts)
         for name in ("name", "description", "default_schedule_interval", "default_content_type")
@@ -837,7 +846,7 @@ async def _interval_field_profiles(
     if field_name != "default_schedule_interval":
         return None
     profiles = await get_watched_item_profiles(session, wi.id)
-    return [p.to_resolution_dict() for p in profiles if p.is_active]
+    return _active_profile_dicts(profiles)
 
 
 @router.get("/watched-items/{watched_item_id}/field/{field_name}")

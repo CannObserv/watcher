@@ -54,3 +54,21 @@ class TemporalProfile(Base, TimestampMixin):
         kwargs.setdefault("rules", [])
         kwargs.setdefault("is_active", True)
         super().__init__(**kwargs)
+
+    def to_resolution_dict(self) -> dict:
+        """Serialize to the plain-dict shape the scheduler resolvers consume.
+
+        The canonical input for ``resolve_effective_interval`` /
+        ``evaluate_post_actions`` (and thus the display helper), shared by
+        ``schedule_tick`` and the dashboard so the two never drift.
+        """
+        return {
+            "id": str(self.id),
+            "profile_type": self.profile_type,
+            "reference_date": self.reference_date,
+            "date_range_start": self.date_range_start,
+            "date_range_end": self.date_range_end,
+            "rules": self.rules,
+            "post_action": self.post_action,
+            "is_active": self.is_active,
+        }

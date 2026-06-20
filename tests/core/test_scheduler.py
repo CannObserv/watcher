@@ -7,6 +7,7 @@ import pytest
 from src.core.scheduler import (
     compute_next_check,
     evaluate_post_actions,
+    format_interval,
     parse_interval,
     resolve_effective_interval,
     validate_optional_schedule_config,
@@ -61,6 +62,37 @@ class TestParseInterval:
     def test_invalid_raises(self):
         with pytest.raises(ValueError, match="Invalid interval"):
             parse_interval("abc")
+
+
+class TestFormatInterval:
+    """format_interval is the inverse of parse_interval (#206) — renders a
+    timedelta back to the largest unit that divides it evenly, so a
+    profile-resolved cadence can be displayed as '1h'/'6h'/'1d'."""
+
+    def test_days(self):
+        assert format_interval(timedelta(days=1)) == "1d"
+
+    def test_hours(self):
+        assert format_interval(timedelta(hours=6)) == "6h"
+
+    def test_minutes(self):
+        assert format_interval(timedelta(minutes=15)) == "15m"
+
+    def test_seconds(self):
+        assert format_interval(timedelta(seconds=30)) == "30s"
+
+    def test_largest_even_unit_wins(self):
+        # 90 minutes is not a whole number of hours → falls to minutes.
+        assert format_interval(timedelta(minutes=90)) == "90m"
+        # 36 hours is not a whole number of days → falls to hours.
+        assert format_interval(timedelta(hours=36)) == "36h"
+
+    def test_roundtrips_with_parse_interval(self):
+        for s in ("30s", "15m", "6h", "1d"):
+            assert format_interval(parse_interval(s)) == s
+
+    def test_zero_or_negative_is_zero_seconds(self):
+        assert format_interval(timedelta(0)) == "0s"
 
 
 class TestComputeNextCheck:

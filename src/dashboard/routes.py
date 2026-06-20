@@ -60,13 +60,13 @@ from src.core.notifications.preview_fixtures import (
 from src.core.notifier_client import get_notifier_client
 from src.core.probe import ProbeResult
 from src.core.scheduler import (
-    compute_next_check,
     parse_interval,
     validate_optional_schedule_config,
 )
-from src.core.watches.resolution import resolved_schedule_config
+from src.core.watches.schedule import ScheduleDisplay, resolve_schedule_display
 from src.dashboard import templates
 from src.dashboard.context import (
+    get_active_profiles_by_item,
     get_audit_entries,
     get_dashboard_stats,
     get_domain_default_templates,
@@ -206,22 +206,21 @@ def _format_content_type(wi: WatchedItem) -> str:
     return wi.default_content_type or ""
 
 
-def _interval_display(wi: WatchedItem, value: str) -> tuple[str, str | None]:
+def _interval_display(
+    wi: WatchedItem, value: str, *, profiles: list[dict] | None = None
+) -> tuple[str, str | None]:
     """View-mode display for the interval field; returns ``(display, marker)``.
 
-    ``marker`` is the inheritance source word rendered after a "·" — ``None`` for
-    an explicit item interval (no marker), ``"domain"`` when the value is inherited
-    from the Domain cadence tier, or ``"default"`` from the system default (#205).
-    An explicit interval shows verbatim with no marker. A non-None config that
-    carries no interval (e.g. ``{}``) shows a literal empty-config marker rather
-    than a blank value beside an inherited tag — confusing UX (#202 CR).
+    Thin adapter over ``resolve_schedule_display`` (#206). ``marker`` is the source
+    word rendered after a "·" — ``None`` for an explicit item interval (no marker),
+    ``"domain"``/``"default"`` for an inherited tier (#205), or ``"profile"`` when a
+    temporal profile is currently overriding the base cadence. Pass ``profiles`` to
+    honor the profile override; omit for a base-cadence-only view. ``value`` is
+    accepted for the field-meta ``display`` contract but the resolution is
+    authoritative.
     """
-    if value:
-        return value, None
-    if wi.default_schedule_config is None:
-        marker = "domain" if wi.domain_default_schedule_config is not None else "default"
-        return resolved_schedule_config(wi).get("interval", ""), marker
-    return "{ }", None
+    d = resolve_schedule_display(wi, now=datetime.now(UTC), profiles=profiles)
+    return d.interval_text, d.marker
 
 
 WATCHED_ITEM_FIELD_META: dict[str, dict] = {
@@ -266,7 +265,11 @@ EDITABLE_WATCHED_ITEM_FIELDS = set(WATCHED_ITEM_FIELD_META.keys())
 
 
 def _watched_item_field_context(
-    request: Request, wi: WatchedItem, field_name: str, mode: str = "view"
+    request: Request,
+    wi: WatchedItem,
+    field_name: str,
+    mode: str = "view",
+    profiles: list[dict] | None = None,
 ) -> dict:
     meta = WATCHED_ITEM_FIELD_META[field_name]
     value = meta["format"](wi)
@@ -274,9 +277,12 @@ def _watched_item_field_context(
     # e.g. the interval field resolves the inherited system default for view mode
     # while edit mode still binds the explicit override. Others view == edit.
     display_fn = meta.get("display")
-    # display_fn returns (view_value, marker) where marker is None or the
-    # inheritance source word ("domain"/"default") rendered after a "·" (#205).
-    display_value, inherited = display_fn(wi, value) if display_fn else (value, None)
+    # display_fn returns (view_value, marker) where marker is None or the source
+    # word ("domain"/"default"/"profile") rendered after a "·" (#205, #206).
+    # ``profiles`` lets the interval field honor an active temporal-profile override.
+    display_value, inherited = (
+        display_fn(wi, value, profiles=profiles) if display_fn else (value, None)
+    )
     return {
         "watched_item": wi,
         "field_name": field_name,
@@ -423,37 +429,26 @@ def _watched_item_extra_params(q: str | None, include_archived: bool) -> dict[st
     }
 
 
-def _build_next_check_map(
-    watched_items: list[WatchedItem], now: datetime
-) -> dict[str, datetime | None]:
-    """Next-check datetime per item, or None when never checked (#204).
-
-    Resolves the schedule through ``resolved_schedule_config`` (WatchedItem
-    default → system default) so an item with no explicit config still yields a
-    next-check time instead of a blank — matching the detail page.
-    """
-    result: dict[str, datetime | None] = {}
-    for wi in watched_items:
-        if wi.last_checked_at is not None:
-            result[str(wi.id)] = compute_next_check(
-                resolved_schedule_config(wi), wi.last_checked_at, now=now
-            )
-        else:
-            result[str(wi.id)] = None
-    return result
-
-
-def _build_interval_map(
+def _build_schedule_map(
     watched_items: list[WatchedItem],
-) -> dict[str, tuple[str, str | None]]:
-    """Resolved interval display per item as ``(text, marker)`` (#204, #205).
+    now: datetime,
+    profiles_by_wi: dict[str, list[dict]] | None = None,
+) -> dict[str, ScheduleDisplay]:
+    """Resolved schedule display per item, keyed by id (#204, #205, #206).
 
-    Routes through the same resolution + display logic as the detail page
-    (``_interval_display``) so the list shows the inherited cadence (with a
-    ``domain``/``default`` source marker) rather than a blank when an item carries
-    no explicit schedule config.
+    One ``ScheduleDisplay`` per item — carrying the interval text, inheritance
+    source marker, profile-active flag, and next-check datetime — computed once and
+    read by the list template for both the Interval and Next Check columns. Routes
+    through the same ``resolve_schedule_display`` helper as the detail page and
+    ``schedule_tick``, so the list shows the inherited cadence (with a
+    ``domain``/``default``/``profile`` marker) rather than a blank. Pass
+    ``profiles_by_wi`` (item id → active profile dicts) to honor profile overrides.
     """
-    return {str(wi.id): _interval_display(wi, _format_interval(wi)) for wi in watched_items}
+    profiles_by_wi = profiles_by_wi or {}
+    return {
+        str(wi.id): resolve_schedule_display(wi, now=now, profiles=profiles_by_wi.get(str(wi.id)))
+        for wi in watched_items
+    }
 
 
 @router.get("/watched-items")
@@ -477,6 +472,7 @@ async def watched_items_page(
         session, search=q, include_archived=include_archived
     )
     now = datetime.now(UTC)
+    profiles_by_wi = await get_active_profiles_by_item(session, [wi.id for wi in watched_items])
     return templates.TemplateResponse(
         request,
         "pages/watched_items.html",
@@ -484,8 +480,7 @@ async def watched_items_page(
             "request": request,
             "active_page": "watched-items",
             "watched_items": watched_items,
-            "next_check_map": _build_next_check_map(watched_items, now),
-            "interval_map": _build_interval_map(watched_items),
+            "schedule_map": _build_schedule_map(watched_items, now, profiles_by_wi),
             "include_archived": include_archived,
             "q": q or "",
             "page": page,
@@ -521,13 +516,13 @@ async def partial_watched_items_table(
         session, search=q, include_archived=include_archived
     )
     now = datetime.now(UTC)
+    profiles_by_wi = await get_active_profiles_by_item(session, [wi.id for wi in watched_items])
     return templates.TemplateResponse(
         request,
         "partials/watched_items_table.html",
         {
             "watched_items": watched_items,
-            "next_check_map": _build_next_check_map(watched_items, now),
-            "interval_map": _build_interval_map(watched_items),
+            "schedule_map": _build_schedule_map(watched_items, now, profiles_by_wi),
             "page": page,
             "page_size": page_size,
             "total_count": total_count,
@@ -558,8 +553,11 @@ async def watched_item_detail_page(
     profiles = await get_watched_item_profiles(session, wi.id)
     activity = await get_watched_item_activity(session, watched_item_id)
 
+    # Resolution dicts for the active profiles drive the interval field's
+    # profile-aware display (#206) — same shape schedule_tick consumes.
+    profile_dicts = [p.to_resolution_dict() for p in profiles if p.is_active]
     field_contexts = {
-        name: _watched_item_field_context(request, wi, name, mode="view")
+        name: _watched_item_field_context(request, wi, name, mode="view", profiles=profile_dicts)
         for name in ("name", "description", "default_schedule_interval", "default_content_type")
     }
 
@@ -1362,12 +1360,15 @@ async def domain_toggle_active(
         watched_items = await get_domain_watched_items(
             session, name, search=q, sort=sort, order=order, status=status
         )
+        now = datetime.now(UTC)
+        profiles_by_wi = await get_active_profiles_by_item(session, [wi.id for wi in watched_items])
         return templates.TemplateResponse(
             request,
             "partials/domain_toggle_oob.html",
             {
                 "domain": domain,
                 "watched_items": watched_items,
+                "schedule_map": _build_schedule_map(watched_items, now, profiles_by_wi),
                 "q": q or "",
                 "sort": sort,
                 "order": order,
@@ -1557,6 +1558,8 @@ async def _render_domain_detail(
             select(func.count(WatchedItem.id)).where(WatchedItem.domain_name == domain.name)
         )
     ).scalar_one()
+    now = datetime.now(UTC)
+    profiles_by_wi = await get_active_profiles_by_item(session, [wi.id for wi in watched_items])
     field_contexts = {
         fname: _field_context(request, domain, fname, mode="view") for fname in DOMAIN_FIELD_META
     }
@@ -1564,6 +1567,7 @@ async def _render_domain_detail(
         "active_page": "domains",
         "domain": domain,
         "watched_items": watched_items,
+        "schedule_map": _build_schedule_map(watched_items, now, profiles_by_wi),
         "all_watched_items_count": all_watched_items_count,
         "q": q or "",
         "sort": sort,
@@ -1846,12 +1850,15 @@ async def partial_domain_watched_items(
     watched_items = await get_domain_watched_items(
         session, name, search=q, sort=sort, order=order, status=status
     )
+    now = datetime.now(UTC)
+    profiles_by_wi = await get_active_profiles_by_item(session, [wi.id for wi in watched_items])
     return templates.TemplateResponse(
         request,
         "partials/domain_watched_items_table.html",
         {
             "domain": domain,
             "watched_items": watched_items,
+            "schedule_map": _build_schedule_map(watched_items, now, profiles_by_wi),
             "q": q or "",
             "sort": sort,
             "order": order,

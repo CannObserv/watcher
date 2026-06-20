@@ -222,19 +222,7 @@ async def schedule_tick(timestamp: int) -> None:
     def _profile_dicts(profiles_orm: list[TemporalProfile]) -> list[dict] | None:
         if not profiles_orm:
             return None
-        return [
-            {
-                "id": str(p.id),
-                "profile_type": p.profile_type,
-                "reference_date": p.reference_date,
-                "date_range_start": p.date_range_start,
-                "date_range_end": p.date_range_end,
-                "rules": p.rules,
-                "post_action": p.post_action,
-                "is_active": p.is_active,
-            }
-            for p in profiles_orm
-        ]
+        return [p.to_resolution_dict() for p in profiles_orm]
 
     async with get_session_factory()() as session:
         # Load active, non-archived, non-domain-suspended WatchedItems — the

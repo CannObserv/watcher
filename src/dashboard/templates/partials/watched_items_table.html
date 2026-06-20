@@ -12,7 +12,8 @@
     <tbody class="divide-y divide-gray-100 dark:divide-gray-700">
     {% if watched_items %}
       {% for wi in watched_items %}
-        {% set next_check = next_check_map[wi.id | string] %}
+        {% set schedule = schedule_map[wi.id | string] %}
+        {% set next_check = schedule.next_check %}
         <tr>
           <td class="font-medium">
             <a href="/watched-items/{{ wi.id }}" class="link">{{ wi.name }}</a>
@@ -24,10 +25,9 @@
               <span class="text-gray-400">—</span>
             {% endif %}
           </td>
-          {% set interval = interval_map[wi.id | string] %}
           <td>
-            {# inherited schedule shows the resolved value + a "· domain"/"· default" source marker, mirroring the detail page (#204, #205) #}
-            <span class="text-sm">{{ interval[0] }}{% if interval[1] %} <span class="text-gray-400 dark:text-gray-500">· {{ interval[1] }}</span>{% endif %}</span>
+            {# inherited schedule shows the resolved value + a "· domain"/"· default"/"· profile" source marker, mirroring the detail page (#204, #205, #206) #}
+            <span class="text-sm">{{ schedule.interval_text }}{% if schedule.marker %} <span class="text-gray-400 dark:text-gray-500">· {{ schedule.marker }}</span>{% endif %}</span>
           </td>
           <td>
             {% if next_check %}

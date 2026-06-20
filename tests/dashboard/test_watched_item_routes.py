@@ -17,8 +17,7 @@ from src.core.models.temporal_profile import PostAction, ProfileType, TemporalPr
 from src.core.models.watched_item import WatchedItem
 from src.dashboard.routes import (
     _apply_watched_item_field_update,
-    _build_interval_map,
-    _build_next_check_map,
+    _build_schedule_map,
     _watched_item_field_context,
 )
 from tests.conftest import make_info_item, make_watched_item
@@ -166,6 +165,33 @@ class TestListPage:
         assert ">7d <span" in body
         assert "· domain" in body
         assert "· default" not in body
+
+    async def test_active_profile_shows_profile_cadence(self, client, db_session):
+        """#206 (the #204 CR finding-2 fix): a list item whose temporal profile is
+        currently active shows the profile cadence + '· profile', matching
+        schedule_tick — not the base 1d the UI used to display."""
+        item = await make_info_item(db_session)
+        wi = WatchedItem(
+            archiver_info_item_id=item.info_item_id,
+            name="ProfileRamp",
+            default_schedule_config={"interval": "1d"},
+            last_checked_at=datetime.now(UTC) - timedelta(minutes=5),
+        )
+        db_session.add(wi)
+        await db_session.flush()
+        db_session.add(
+            TemporalProfile(
+                watched_item_id=wi.id,
+                profile_type=ProfileType.EVENT,
+                reference_date=date.today() + timedelta(days=10),
+                rules=[{"days_before": 3650, "interval": "1h"}],
+                post_action=PostAction.DEACTIVATE,
+            )
+        )
+        await db_session.commit()
+        body = (await client.get("/watched-items")).content.decode()
+        assert ">1h <span" in body  # profile cadence in the Interval cell
+        assert "· profile" in body
 
     async def test_status_column_consolidated(self, client, db_session):
         """One labeled Status column holds the toggle + badge; no separate Actions column (#190)."""
@@ -471,6 +497,26 @@ class TestDetailPage:
         assert b"{ }" in body
         assert "· default".encode() not in body
 
+    async def test_detail_interval_shows_active_profile_cadence(self, client, db_session):
+        """#206 (the #204 CR finding-2 fix): an item whose temporal profile is
+        currently active shows the profile cadence + '· profile' on the detail
+        interval row, matching what schedule_tick actually does — not the base 1d."""
+        wi = await _make_wi(
+            db_session, name="ProfileDetail", default_schedule_config={"interval": "1d"}
+        )
+        db_session.add(
+            TemporalProfile(
+                watched_item_id=wi.id,
+                profile_type=ProfileType.EVENT,
+                reference_date=date.today() + timedelta(days=10),
+                rules=[{"days_before": 3650, "interval": "1h"}],
+                post_action=PostAction.DEACTIVATE,
+            )
+        )
+        await db_session.commit()
+        body = (await client.get(f"/watched-items/{wi.id}")).content
+        assert "· profile".encode() in body
+
     async def test_detail_interval_shows_domain_marker(self, client, db_session):
         """#205: detail shows '7d · domain' for an item inheriting its domain cadence."""
         wi = await _make_wi(
@@ -701,12 +747,16 @@ class TestFieldHelpers:
     def test_interval_format(self):
         wi = MagicMock()
         wi.default_schedule_config = {"interval": "15m"}
+        wi.domain_default_schedule_config = None
+        wi.last_checked_at = None
         ctx = _watched_item_field_context(MagicMock(), wi, "default_schedule_interval", mode="view")
         assert ctx["field_value"] == "15m"
 
     def test_interval_empty_renders_blank(self):
         wi = MagicMock()
         wi.default_schedule_config = None
+        wi.domain_default_schedule_config = None
+        wi.last_checked_at = None
         ctx = _watched_item_field_context(MagicMock(), wi, "default_schedule_interval", mode="view")
         assert ctx["field_value"] == ""
 
@@ -801,63 +851,78 @@ class TestFieldRoutes:
 
 
 class TestListScheduleMaps:
-    """Unit tests for the list-view Interval / Next Check resolution maps (#204)."""
+    """Unit tests for the list-view schedule map (#204, #205, #206).
 
-    def test_interval_map_resolves_inherited_default(self):
+    ``_build_schedule_map`` returns one ``ScheduleDisplay`` per item, the single
+    source the list template reads for both the Interval and Next Check columns.
+    """
+
+    NOW = datetime(2026, 6, 19, 12, 0, tzinfo=UTC)
+
+    def _wi(self, *, item=None, domain=None, last_checked_at=None):
         wi = MagicMock()
         wi.id = ULID()
-        wi.default_schedule_config = None
-        wi.domain_default_schedule_config = None
-        display, marker = _build_interval_map([wi])[str(wi.id)]
-        assert display == "1d"  # SYSTEM_DEFAULT_SCHEDULE_CONFIG
-        assert marker == "default"  # source label (#205)
+        wi.default_schedule_config = item
+        wi.domain_default_schedule_config = domain
+        wi.last_checked_at = last_checked_at
+        return wi
 
-    def test_interval_map_resolves_domain_default(self):
+    def test_resolves_inherited_default(self):
+        wi = self._wi(item=None, domain=None)
+        sd = _build_schedule_map([wi], self.NOW)[str(wi.id)]
+        assert sd.interval_text == "1d"  # SYSTEM_DEFAULT_SCHEDULE_CONFIG
+        assert sd.marker == "default"  # source label (#205)
+
+    def test_resolves_domain_default(self):
         """#205: an item inheriting a domain cadence is marked '· domain', not '· default'."""
-        wi = MagicMock()
-        wi.id = ULID()
-        wi.default_schedule_config = None
-        wi.domain_default_schedule_config = {"interval": "7d"}
-        display, marker = _build_interval_map([wi])[str(wi.id)]
-        assert display == "7d"
-        assert marker == "domain"
+        wi = self._wi(item=None, domain={"interval": "7d"})
+        sd = _build_schedule_map([wi], self.NOW)[str(wi.id)]
+        assert sd.interval_text == "7d"
+        assert sd.marker == "domain"
 
-    def test_interval_map_explicit_not_inherited(self):
-        wi = MagicMock()
-        wi.id = ULID()
-        wi.default_schedule_config = {"interval": "6h"}
-        wi.domain_default_schedule_config = None
-        display, marker = _build_interval_map([wi])[str(wi.id)]
-        assert display == "6h"
-        assert marker is None
+    def test_explicit_not_inherited(self):
+        wi = self._wi(item={"interval": "6h"}, domain=None)
+        sd = _build_schedule_map([wi], self.NOW)[str(wi.id)]
+        assert sd.interval_text == "6h"
+        assert sd.marker is None
 
-    def test_interval_map_empty_config_shows_braces(self):
-        wi = MagicMock()
-        wi.id = ULID()
-        wi.default_schedule_config = {}
-        wi.domain_default_schedule_config = None
-        display, marker = _build_interval_map([wi])[str(wi.id)]
-        assert display == "{ }"
-        assert marker is None
+    def test_empty_config_shows_braces(self):
+        wi = self._wi(item={}, domain=None)
+        sd = _build_schedule_map([wi], self.NOW)[str(wi.id)]
+        assert sd.interval_text == "{ }"
+        assert sd.marker is None
 
-    def test_next_check_map_resolves_inherited_default(self):
-        now = datetime(2026, 6, 19, 12, 0, tzinfo=UTC)
-        last = now - timedelta(hours=3)
-        wi = MagicMock()
-        wi.id = ULID()
-        wi.default_schedule_config = None
-        wi.domain_default_schedule_config = None
-        wi.last_checked_at = last
+    def test_next_check_resolves_inherited_default(self):
+        last = self.NOW - timedelta(hours=3)
+        wi = self._wi(item=None, domain=None, last_checked_at=last)
         # Inherited interval is 1d → next check = last + 1d.
-        assert _build_next_check_map([wi], now)[str(wi.id)] == last + timedelta(days=1)
+        sd = _build_schedule_map([wi], self.NOW)[str(wi.id)]
+        assert sd.next_check == last + timedelta(days=1)
 
-    def test_next_check_map_none_when_never_checked(self):
-        now = datetime(2026, 6, 19, 12, 0, tzinfo=UTC)
-        wi = MagicMock()
-        wi.id = ULID()
-        wi.default_schedule_config = None
-        wi.last_checked_at = None
-        assert _build_next_check_map([wi], now)[str(wi.id)] is None
+    def test_next_check_none_when_never_checked(self):
+        wi = self._wi(item=None, domain=None, last_checked_at=None)
+        assert _build_schedule_map([wi], self.NOW)[str(wi.id)].next_check is None
+
+    def test_active_profile_overrides_interval_and_next_check(self):
+        """#206: a currently-active profile drives the displayed interval + next-check,
+        matching schedule_tick (the #204 CR finding-2 gap)."""
+        last = self.NOW - timedelta(minutes=10)
+        wi = self._wi(item={"interval": "1d"}, domain=None, last_checked_at=last)
+        profiles = {
+            str(wi.id): [
+                {
+                    "profile_type": "event",
+                    "reference_date": "2026-06-24",  # 5 days out from NOW
+                    "rules": [{"days_before": 30, "interval": "1h"}],
+                    "is_active": True,
+                }
+            ]
+        }
+        sd = _build_schedule_map([wi], self.NOW, profiles)[str(wi.id)]
+        assert sd.profile_active is True
+        assert sd.interval_text == "1h"  # profile cadence, not base 1d
+        assert sd.marker == "profile"
+        assert sd.next_check == last + timedelta(hours=1)
 
 
 class TestTagsEditor:

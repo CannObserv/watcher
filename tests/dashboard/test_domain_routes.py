@@ -225,7 +225,7 @@ class TestDomainDefaultScheduleConfigDashboard:
         body = response.content
         assert b'name="interval"' in body
         assert b"e.g. 6h, 1d, 7d" in body
-        assert b"6h" in body  # current value prefilled
+        assert b'value="6h"' in body  # current value prefilled (not just the placeholder)
         assert b"Default Interval" in body
 
     async def test_cadence_field_view_partial(self, client, db_session):

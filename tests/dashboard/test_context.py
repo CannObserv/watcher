@@ -63,7 +63,6 @@ class TestGetRateLimiterState:
 
         limiter = DomainRateLimiter()
         # Access a domain to create an entry
-        limiter.extract_domain("https://example.com")
         _ = limiter._domains["example.com"]
         domains = get_rate_limiter_state(limiter)
         assert isinstance(domains, list)

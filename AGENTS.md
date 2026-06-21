@@ -160,6 +160,20 @@ path, never join Domain. Per-domain cadence is `Domain.default_schedule_config`
 post-action throttles to 1d only when the effective cadence is faster than 1d
 (never speeds a slower-than-1d item up).
 
+**Rate-limiter keying (#197).** The `DomainRateLimiter` throttle bucket is keyed
+by domain *name*: `WatchedItem.domain_name` == `Domain.name` ==
+`hostname(effective_url)` — the same string by construction (all derive from one
+`urlparse(...).hostname` over the same `effective_url`). The fetch path
+(`src/workers/tasks.py`) calls `acquire_for_domain` /
+`report_rate_limited_for_domain` keyed on `WatchedItem.domain_name` (fallback
+`hostname(effective_url)` is fail-safe, never fail-open); the config-load side
+(startup hydration + poller `configure_domain`) keys on `Domain.name`, so the two
+always agree. **One bucket per hostname** — host variants (`lcb.wa.gov` vs
+`www.lcb.wa.gov`) are independent budgets by design; backoff on one does not slow
+its siblings. A shared-budget alias layer is deferred until real throttle bleed
+is observed. URL-keyed `acquire(url)`/`report_rate_limited(url)` were removed in
+#197 (were dead code).
+
 `archiver_info_item_id` on `WatchedItem` is nullable — WatchedItems created via the
 dashboard (`POST /watched-items/new`) have no InfoItem reference; API-created ones
 may also omit it when using the URL-only path. `effective_url`

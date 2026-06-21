@@ -1,11 +1,25 @@
-"""Per-domain async rate limiter — coordinates concurrent access to domains."""
+"""Per-domain async rate limiter — coordinates concurrent access to domains.
+
+Keying contract (#197): the throttle bucket is keyed by domain *name*, which is
+``WatchedItem.domain_name`` == ``Domain.name`` == ``hostname(effective_url)`` —
+all three are the same string by construction (each flows from the same
+``urlparse(...).hostname`` over the same ``effective_url``; see
+``src/core/probe.py`` and ``src/core/domains.py``). The config-load side
+(``configure_domain``, fed by startup hydration and the poller) keys on
+``Domain.name``; the fetch side (``acquire_for_domain`` /
+``report_rate_limited_for_domain`` in ``src/workers/tasks.py``) keys on
+``WatchedItem.domain_name``, so the two always agree. There is **one bucket per
+hostname**: host variants (``lcb.wa.gov`` vs ``www.lcb.wa.gov``) are independent
+budgets by design — backoff on one does not slow its siblings. Grouping host
+variants under one logical budget would need an explicit alias layer; deferred
+until real shared-backend throttle bleed is observed.
+"""
 
 import asyncio
 import time
 from collections import defaultdict
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
-from urllib.parse import urlparse
 
 from src.core.logging import get_logger
 
@@ -48,27 +62,6 @@ class DomainRateLimiter:
             )
         )
 
-    def extract_domain(self, url: str) -> str:
-        """Extract hostname from a URL."""
-        return urlparse(url).hostname or ""
-
-    @asynccontextmanager
-    async def acquire(self, url: str):
-        """Async context manager: acquire rate-limited slot for a URL's domain."""
-        domain = self.extract_domain(url)
-        state = self._domains[domain]
-        await state.semaphore.acquire()
-        try:
-            async with state.lock:
-                now = time.monotonic()
-                elapsed = now - state.last_request_at
-                if elapsed < state.current_interval:
-                    await asyncio.sleep(state.current_interval - elapsed)
-                state.last_request_at = time.monotonic()
-            yield
-        finally:
-            state.semaphore.release()
-
     def get_domain_states(self) -> list[dict]:
         """Return current state of all tracked domains for monitoring.
 
@@ -86,17 +79,6 @@ class DomainRateLimiter:
                 for domain, state in self._domains.items()
             ],
             key=lambda d: d["name"],
-        )
-
-    def report_rate_limited(self, url: str) -> None:
-        """Report a 429 response — increase the domain's current_interval via backoff."""
-        domain = self.extract_domain(url)
-        state = self._domains[domain]
-        new_interval = max(state.current_interval * BACKOFF_MULTIPLIER, 2.0)
-        state.current_interval = min(new_interval, BACKOFF_MAX_INTERVAL)
-        logger.warning(
-            "rate limited, increasing interval",
-            extra={"domain": domain, "new_interval": state.current_interval},
         )
 
     def configure_domain(
@@ -127,8 +109,9 @@ class DomainRateLimiter:
     async def acquire_for_domain(self, domain: str):
         """Acquire rate-limited slot using a known domain name.
 
-        Prefer over acquire(url) when effective_domain is already resolved.
-        Unknown domains are auto-initialised with global defaults via defaultdict.
+        The sole acquire path (#197): callers pass ``WatchedItem.domain_name``
+        (== ``Domain.name`` == ``hostname(effective_url)``). Unknown domains are
+        auto-initialised with global defaults via defaultdict.
         """
         state = self._domains[domain]
         await state.semaphore.acquire()
@@ -146,7 +129,8 @@ class DomainRateLimiter:
     def report_rate_limited_for_domain(self, domain: str) -> float:
         """Report a 429 for a known domain name; return the new interval.
 
-        Use instead of report_rate_limited(url) when effective_domain is known.
+        The sole backoff path (#197): keyed by ``WatchedItem.domain_name``,
+        matching ``acquire_for_domain``.
         """
         state = self._domains[domain]
         new_interval = max(state.current_interval * BACKOFF_MULTIPLIER, 2.0)

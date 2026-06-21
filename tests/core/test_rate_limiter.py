@@ -7,28 +7,23 @@ from src.core.rate_limiter import DomainRateLimiter
 
 
 class TestDomainRateLimiter:
-    def test_extract_domain(self):
-        limiter = DomainRateLimiter()
-        assert limiter.extract_domain("https://example.com/path") == "example.com"
-        assert limiter.extract_domain("https://sub.example.com:8080/") == "sub.example.com"
-
     async def test_acquire_release(self):
         limiter = DomainRateLimiter(max_concurrent=2, min_interval=0.0)
-        async with limiter.acquire("https://example.com/a"):
+        async with limiter.acquire_for_domain("example.com"):
             pass
 
     async def test_max_concurrent_enforced(self):
         limiter = DomainRateLimiter(max_concurrent=1, min_interval=0.0)
         acquired = []
 
-        async def task(url, delay):
-            async with limiter.acquire(url):
+        async def task(domain, delay):
+            async with limiter.acquire_for_domain(domain):
                 acquired.append(time.monotonic())
                 await asyncio.sleep(delay)
 
         await asyncio.gather(
-            task("https://example.com/a", 0.05),
-            task("https://example.com/b", 0.05),
+            task("example.com", 0.05),
+            task("example.com", 0.05),
         )
         assert len(acquired) == 2
         assert acquired[1] - acquired[0] >= 0.04
@@ -37,14 +32,14 @@ class TestDomainRateLimiter:
         limiter = DomainRateLimiter(max_concurrent=1, min_interval=0.0)
         acquired = []
 
-        async def task(url):
-            async with limiter.acquire(url):
+        async def task(domain):
+            async with limiter.acquire_for_domain(domain):
                 acquired.append(time.monotonic())
                 await asyncio.sleep(0.05)
 
         await asyncio.gather(
-            task("https://example.com/a"),
-            task("https://other.com/b"),
+            task("example.com"),
+            task("other.com"),
         )
         assert len(acquired) == 2
         assert abs(acquired[1] - acquired[0]) < 0.03
@@ -53,20 +48,19 @@ class TestDomainRateLimiter:
         limiter = DomainRateLimiter(max_concurrent=2, min_interval=0.1)
         times = []
 
-        async def task(url):
-            async with limiter.acquire(url):
+        async def task(domain):
+            async with limiter.acquire_for_domain(domain):
                 times.append(time.monotonic())
 
-        await task("https://example.com/a")
-        await task("https://example.com/b")
+        await task("example.com")
+        await task("example.com")
         assert len(times) == 2
         assert times[1] - times[0] >= 0.09
 
     async def test_backoff_on_429(self):
         limiter = DomainRateLimiter(max_concurrent=2, min_interval=0.0)
-        limiter.report_rate_limited("https://example.com/a")
-        domain = limiter.extract_domain("https://example.com/a")
-        state = limiter._domains[domain]
+        limiter.report_rate_limited_for_domain("example.com")
+        state = limiter._domains["example.com"]
         assert state.current_interval > 0.0
 
     def test_get_domain_states_empty(self):
@@ -77,7 +71,7 @@ class TestDomainRateLimiter:
         limiter = DomainRateLimiter(min_interval=1.0)
         # Trigger domain creation
         _ = limiter._domains["example.com"]
-        limiter.report_rate_limited("https://example.com/a")
+        limiter.report_rate_limited_for_domain("example.com")
         states = limiter.get_domain_states()
         assert len(states) == 1
         assert states[0]["name"] == "example.com"

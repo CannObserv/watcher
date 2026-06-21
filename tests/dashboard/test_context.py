@@ -128,6 +128,50 @@ class TestGetDomainsWithWatchedItemCounts:
         assert result[0]["in_backoff"] is True
         assert result[0]["current_interval"] == 4.0
 
+    async def test_archived_watched_item_excluded_from_count(self, db_session):
+        """Archived items are retired — they must not inflate the live count (#209)."""
+        db_session.add(Domain(name="mixed.com", min_interval=1.0, max_concurrency=2))
+        await make_watched_item(
+            db_session,
+            name="Live",
+            primary_url="https://mixed.com/live",
+            default_content_type=ContentType.HTML,
+            domain_name="mixed.com",
+        )
+        await make_watched_item(
+            db_session,
+            name="Gone",
+            primary_url="https://mixed.com/gone",
+            default_content_type=ContentType.HTML,
+            domain_name="mixed.com",
+            archived_at=datetime.now(UTC),
+        )
+
+        result = await get_domains_with_watched_item_counts(db_session)
+        assert len(result) == 1
+        assert result[0]["watched_item_count"] == 1
+
+    async def test_domain_with_only_archived_items_still_appears_with_zero(self, db_session):
+        """A domain whose only item is archived stays in the list with count 0 (#209).
+
+        Guards the LEFT-JOIN-with-ON-filter requirement: a WHERE filter would drop
+        the row entirely.
+        """
+        db_session.add(Domain(name="retired.com", min_interval=1.0, max_concurrency=2))
+        await make_watched_item(
+            db_session,
+            name="Gone",
+            primary_url="https://retired.com",
+            default_content_type=ContentType.HTML,
+            domain_name="retired.com",
+            archived_at=datetime.now(UTC),
+        )
+
+        result = await get_domains_with_watched_item_counts(db_session)
+        names = [d["name"] for d in result]
+        assert "retired.com" in names
+        assert next(d for d in result if d["name"] == "retired.com")["watched_item_count"] == 0
+
 
 @pytest.mark.integration
 class TestGetDomainsFiltered:
@@ -197,6 +241,32 @@ class TestGetDomainsFiltered:
         await db_session.flush()
         result = await get_domains_with_watched_item_counts(db_session)
         assert result[0]["last_checked"] == now
+
+    async def test_last_checked_excludes_archived(self, db_session):
+        """An archived item's check time must not win the max (#209)."""
+        db_session.add(Domain(name="freshness.com"))
+        live_time = datetime(2026, 6, 1, tzinfo=UTC)
+        archived_time = datetime(2026, 6, 20, tzinfo=UTC)  # newer, but archived
+        live = await make_watched_item(
+            db_session,
+            name="Live",
+            primary_url="https://freshness.com/live",
+            default_content_type="html",
+            domain_name="freshness.com",
+        )
+        live.last_checked_at = live_time
+        archived = await make_watched_item(
+            db_session,
+            name="Gone",
+            primary_url="https://freshness.com/gone",
+            default_content_type="html",
+            domain_name="freshness.com",
+            archived_at=datetime.now(UTC),
+        )
+        archived.last_checked_at = archived_time
+        await db_session.flush()
+        result = await get_domains_with_watched_item_counts(db_session)
+        assert result[0]["last_checked"] == live_time
 
     async def test_last_checked_none_when_no_watched_items(self, db_session):
         db_session.add(Domain(name="orphan.com"))

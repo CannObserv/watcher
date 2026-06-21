@@ -3,7 +3,7 @@
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import Select, func, select, text
+from sqlalchemy import Select, and_, func, select, text
 from sqlalchemy.exc import ProgrammingError
 from sqlalchemy.ext.asyncio import AsyncSession
 from ulid import ULID
@@ -231,13 +231,23 @@ async def get_domains_with_watched_item_counts(
         page: 1-based page number (only used when page_size is set).
         page_size: Results per page. None means no pagination (return all).
     """
+    # Archived items are retired (not scheduled/checked) — exclude them from both
+    # aggregates (#209). The filter lives in the JOIN ON clause, not a WHERE, so a
+    # domain whose only items are archived still appears with count 0 (a WHERE would
+    # turn the LEFT JOIN into an INNER JOIN and drop the row).
     stmt = (
         select(
             Domain,
             func.count(WatchedItem.id.distinct()).label("watched_item_count"),
             func.max(WatchedItem.last_checked_at).label("last_checked"),
         )
-        .outerjoin(WatchedItem, WatchedItem.domain_name == Domain.name)
+        .outerjoin(
+            WatchedItem,
+            and_(
+                WatchedItem.domain_name == Domain.name,
+                WatchedItem.archived_at.is_(None),
+            ),
+        )
         .group_by(Domain.id)
     )
 

@@ -72,6 +72,24 @@ def _make_pipeline_stub(*, changed: bool = False) -> AsyncMock:
     return AsyncMock(side_effect=_proc)
 
 
+def _wire_check_task(db_session, monkeypatch, *, fetch_result=None, changed=False):
+    """Monkeypatch ``check_watched_item``'s deps; return ``(limiter, reg)``.
+
+    The returned :class:`DomainRateLimiter` is the *held* instance the task uses,
+    so callers can assert which bucket it acquired (via ``get_domain_states()``).
+    ``reg``'s fetcher returns ``fetch_result`` (default: a 200 success); ``changed``
+    is forwarded to the pipeline stub.
+    """
+    limiter = DomainRateLimiter(min_interval=0.0)
+    mock_fetcher = MagicMock()
+    mock_fetcher.fetch = AsyncMock(return_value=fetch_result or _fake_fetch_result())
+    monkeypatch.setattr(tasks_mod, "process_watched_item", _make_pipeline_stub(changed=changed))
+    monkeypatch.setattr(tasks_mod, "get_session_factory", lambda: _mock_session_factory(db_session))
+    monkeypatch.setattr(tasks_mod, "get_rate_limiter", lambda: limiter)
+    reg = ServiceRegistry(fetcher=mock_fetcher)
+    return limiter, reg
+
+
 # ---------------------------------------------------------------------------
 # _persist_backoff / _maybe_decay_backoff regression tests (preserved).
 # ---------------------------------------------------------------------------
@@ -150,18 +168,7 @@ class TestCheckWatchedItem:
 
         before = datetime.now(UTC)
 
-        fetch_mock = AsyncMock(return_value=_fake_fetch_result())
-        mock_fetcher = MagicMock()
-        mock_fetcher.fetch = fetch_mock
-
-        reg = ServiceRegistry(fetcher=mock_fetcher)
-        monkeypatch.setattr(
-            tasks_mod, "get_session_factory", lambda: _mock_session_factory(db_session)
-        )
-        monkeypatch.setattr(
-            tasks_mod, "get_rate_limiter", lambda: DomainRateLimiter(min_interval=0.0)
-        )
-        monkeypatch.setattr(tasks_mod, "process_watched_item", _make_pipeline_stub())
+        _, reg = _wire_check_task(db_session, monkeypatch)
 
         await check_watched_item(str(watched_item.id), registry=reg)
 
@@ -232,20 +239,12 @@ class TestCheckWatchedItem:
         watched_item.effective_url = "https://www.example.com/page"
         await db_session.commit()
 
-        limiter = DomainRateLimiter(min_interval=0.0)
-        mock_fetcher = MagicMock()
-        mock_fetcher.fetch = AsyncMock(return_value=_fake_fetch_result())
-        monkeypatch.setattr(tasks_mod, "process_watched_item", _make_pipeline_stub())
-        monkeypatch.setattr(
-            tasks_mod, "get_session_factory", lambda: _mock_session_factory(db_session)
-        )
-        monkeypatch.setattr(tasks_mod, "get_rate_limiter", lambda: limiter)
-
-        reg = ServiceRegistry(fetcher=mock_fetcher)
+        limiter, reg = _wire_check_task(db_session, monkeypatch)
         await check_watched_item(str(watched_item.id), registry=reg)
 
-        assert "bucket.example" in limiter._domains
-        assert "www.example.com" not in limiter._domains
+        bucketed = [d["name"] for d in limiter.get_domain_states()]
+        assert "bucket.example" in bucketed
+        assert "www.example.com" not in bucketed
 
     async def test_rate_limit_falls_back_to_hostname_when_domain_name_null(
         self, db_session, monkeypatch
@@ -255,35 +254,18 @@ class TestCheckWatchedItem:
         watched_item.effective_url = "https://fallback.example/page"
         await db_session.commit()
 
-        limiter = DomainRateLimiter(min_interval=0.0)
-        mock_fetcher = MagicMock()
-        mock_fetcher.fetch = AsyncMock(return_value=_fake_fetch_result())
-        monkeypatch.setattr(tasks_mod, "process_watched_item", _make_pipeline_stub())
-        monkeypatch.setattr(
-            tasks_mod, "get_session_factory", lambda: _mock_session_factory(db_session)
-        )
-        monkeypatch.setattr(tasks_mod, "get_rate_limiter", lambda: limiter)
-
-        reg = ServiceRegistry(fetcher=mock_fetcher)
+        limiter, reg = _wire_check_task(db_session, monkeypatch)
         await check_watched_item(str(watched_item.id), registry=reg)
 
-        assert "fallback.example" in limiter._domains
+        bucketed = [d["name"] for d in limiter.get_domain_states()]
+        assert "fallback.example" in bucketed
 
     async def _run_success_cycle(self, db_session, monkeypatch, *, changed: bool):
         watched_item = await make_watched_item(db_session, name="Checker")
         watched_item.effective_url = "https://example.com/page"
         await db_session.commit()
 
-        mock_fetcher = MagicMock()
-        mock_fetcher.fetch = AsyncMock(return_value=_fake_fetch_result())
-        monkeypatch.setattr(tasks_mod, "process_watched_item", _make_pipeline_stub(changed=changed))
-        monkeypatch.setattr(
-            tasks_mod, "get_session_factory", lambda: _mock_session_factory(db_session)
-        )
-        monkeypatch.setattr(
-            tasks_mod, "get_rate_limiter", lambda: DomainRateLimiter(min_interval=0.0)
-        )
-        reg = ServiceRegistry(fetcher=mock_fetcher)
+        _, reg = _wire_check_task(db_session, monkeypatch, changed=changed)
         await check_watched_item(str(watched_item.id), registry=reg)
         return watched_item
 
@@ -316,20 +298,11 @@ class TestCheckWatchedItem:
         watched_item.effective_url = "https://example.com/page"
         await db_session.commit()
 
-        mock_fetcher = MagicMock()
-        mock_fetcher.fetch = AsyncMock(
-            return_value=_fake_fetch_result(content=b"err", status_code=500)
+        _, reg = _wire_check_task(
+            db_session,
+            monkeypatch,
+            fetch_result=_fake_fetch_result(content=b"err", status_code=500),
         )
-
-        monkeypatch.setattr(tasks_mod, "process_watched_item", _make_pipeline_stub())
-        monkeypatch.setattr(
-            tasks_mod, "get_session_factory", lambda: _mock_session_factory(db_session)
-        )
-        monkeypatch.setattr(
-            tasks_mod, "get_rate_limiter", lambda: DomainRateLimiter(min_interval=0.0)
-        )
-
-        reg = ServiceRegistry(fetcher=mock_fetcher)
         result = await check_watched_item(str(watched_item.id), registry=reg)
         assert "error" in result
 
@@ -361,19 +334,11 @@ class TestCheckWatchedItem:
 
         before = datetime.now(UTC)
 
-        mock_fetcher = MagicMock()
-        mock_fetcher.fetch = AsyncMock(
-            return_value=_fake_fetch_result(content=b"err", status_code=503)
+        _, reg = _wire_check_task(
+            db_session,
+            monkeypatch,
+            fetch_result=_fake_fetch_result(content=b"err", status_code=503),
         )
-        monkeypatch.setattr(tasks_mod, "process_watched_item", _make_pipeline_stub())
-        monkeypatch.setattr(
-            tasks_mod, "get_session_factory", lambda: _mock_session_factory(db_session)
-        )
-        monkeypatch.setattr(
-            tasks_mod, "get_rate_limiter", lambda: DomainRateLimiter(min_interval=0.0)
-        )
-
-        reg = ServiceRegistry(fetcher=mock_fetcher)
         result = await check_watched_item(str(watched_item.id), registry=reg)
         assert "error" in result
 

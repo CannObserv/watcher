@@ -164,11 +164,83 @@ class TestDomainDefaultScheduleConfigDashboard:
     """#205: dashboard cadence edit on the domain detail page + back-fill."""
 
     async def test_detail_page_shows_cadence_field(self, client, db_session):
+        """#208: the field is labelled 'Default Interval' (renamed from 'Check Cadence')."""
         db_session.add(Domain(name="cadence-ui.com", default_schedule_config={"interval": "7d"}))
         await db_session.flush()
         response = await client.get("/domains/cadence-ui.com")
-        assert b"Check Cadence" in response.content
+        assert b"Default Interval" in response.content
+        assert b"Check Cadence" not in response.content
         assert b"7d" in response.content
+
+    async def test_detail_cadence_view_mode_by_default(self, client, db_session):
+        """#208: the field renders read-only by default — an Edit button, no live input.
+        The user must click Edit to change the value."""
+        db_session.add(Domain(name="cad-view.com", default_schedule_config={"interval": "7d"}))
+        await db_session.flush()
+        response = await client.get("/domains/cad-view.com")
+        body = response.content
+        assert b'name="interval"' not in body  # no always-on input
+        assert b"/domains/cad-view.com/cadence-field?mode=edit" in body  # Edit affordance
+
+    async def test_detail_cadence_blank_shows_system_default(self, client, db_session):
+        """#208: a domain with no cadence shows the inherited system default '1d · default'."""
+        db_session.add(Domain(name="cad-blank.com"))
+        await db_session.flush()
+        body = (await client.get("/domains/cad-blank.com")).content
+        assert b"1d" in body
+        assert "· default".encode() in body
+
+    async def test_detail_cadence_set_has_no_default_marker(self, client, db_session):
+        """#208: an explicitly-set cadence shows the value with no '· default' signal."""
+        db_session.add(Domain(name="cad-set.com", default_schedule_config={"interval": "7d"}))
+        await db_session.flush()
+        body = (await client.get("/domains/cad-set.com")).content
+        assert b"7d" in body
+        assert "· default".encode() not in body
+
+    async def test_detail_cadence_ordered_below_status(self, client, db_session):
+        """#208: 'Default Interval' sits 2nd — above 'Min Interval'."""
+        db_session.add(Domain(name="cad-order.com"))
+        await db_session.flush()
+        body = (await client.get("/domains/cad-order.com")).content.decode()
+        assert body.index("Default Interval") < body.index("Min Interval")
+
+    async def test_detail_cadence_hint_text(self, client, db_session):
+        """#208: shortened help text."""
+        db_session.add(Domain(name="cad-hint.com"))
+        await db_session.flush()
+        body = (await client.get("/domains/cad-hint.com")).content
+        assert b"Default check cadence inherited by watched items on this domain" in body
+
+    async def test_cadence_field_edit_partial(self, client, db_session):
+        """#208: the edit partial exposes a live input with the suggestive placeholder."""
+        db_session.add(Domain(name="cad-edit.com", default_schedule_config={"interval": "6h"}))
+        await db_session.flush()
+        await db_session.commit()
+        response = await client.get(
+            "/domains/cad-edit.com/cadence-field?mode=edit",
+            headers={"HX-Request": "true"},
+        )
+        assert response.status_code == 200
+        body = response.content
+        assert b'name="interval"' in body
+        assert b"e.g. 6h, 1d, 7d" in body
+        assert b"6h" in body  # current value prefilled
+        assert b"Default Interval" in body
+
+    async def test_cadence_field_view_partial(self, client, db_session):
+        """#208: the view partial swaps back to read-only (Edit button, no input)."""
+        db_session.add(Domain(name="cad-vpart.com", default_schedule_config={"interval": "6h"}))
+        await db_session.flush()
+        await db_session.commit()
+        response = await client.get(
+            "/domains/cad-vpart.com/cadence-field",
+            headers={"HX-Request": "true"},
+        )
+        assert response.status_code == 200
+        body = response.content
+        assert b'name="interval"' not in body
+        assert b"/domains/cad-vpart.com/cadence-field?mode=edit" in body
 
     async def test_post_sets_cadence_and_redirects(self, client, db_session):
         db_session.add(Domain(name="set-cadence.com"))
@@ -237,7 +309,7 @@ class TestDomainDefaultScheduleConfigDashboard:
         assert response.status_code == 400
         body = response.content.decode()
         assert "Invalid interval" in body  # friendly flash from the validator, not a raw error page
-        assert "Check Cadence" in body  # the detail page was re-rendered
+        assert "Default Interval" in body  # the detail page was re-rendered
 
     async def test_post_unchanged_on_bad_interval(self, client, db_session):
         """A rejected cadence leaves the domain's stored value untouched."""

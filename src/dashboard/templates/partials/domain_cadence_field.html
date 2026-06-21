@@ -1,0 +1,53 @@
+{# Domain Default Interval field (#208) — the Domain tier of schedule resolution
+   (#205), distinct from Min Interval (rate-limiter floor). Follows the inline-edit
+   pattern of the other domain fields: read-only view + Edit button by default;
+   Save posts to the dedicated /default-schedule-config route (validation + back-fill
+   onto WatchedItems). When blank, view mode shows the inherited system default with
+   a "· default" marker. Expects: domain, cadence_interval, cadence_display,
+   cadence_inherited, cadence_mode ("view"|"edit", default "view"). #}
+{% set mode = cadence_mode|default("view") %}
+{% set hint = "Default check cadence inherited by watched items on this domain" %}
+<div class="p-4" id="field-default-interval">
+  {% if mode == "edit" %}
+  {# Field editing requires JS (HTMX) for Cancel; Save is a plain POST that
+     re-renders the full page (so the items table reflects the back-fill). #}
+  <form method="post" action="/domains/{{ domain.name }}/default-schedule-config">
+    <div class="grid grid-cols-[1fr_auto] sm:grid-cols-[min(18rem,40%)_1fr_auto] items-center gap-x-4 gap-y-2">
+      <div class="min-w-0">
+        <label for="domain-cadence" class="form-label mb-0">Default Interval</label>
+        <p class="text-xs text-gray-500 dark:text-gray-400" id="domain-cadence-hint">{{ hint }}</p>
+      </div>
+      <div class="flex items-center gap-1 justify-self-end sm:col-start-3 sm:row-start-1">
+        <button type="submit" class="btn btn-primary py-1 px-3 text-sm">Save</button>
+        <button type="button" class="btn btn-secondary py-1 px-3 text-sm"
+          hx-get="/domains/{{ domain.name }}/cadence-field"
+          hx-target="#field-default-interval"
+          hx-swap="outerHTML">Cancel</button>
+      </div>
+      <div class="col-span-2 sm:col-span-1 sm:col-start-2 sm:row-start-1 flex items-center gap-2">
+        <input id="domain-cadence" name="interval" type="text"
+          value="{{ cadence_interval }}"
+          placeholder="e.g. 6h, 1d, 7d"
+          aria-describedby="domain-cadence-hint"
+          class="form-input w-40 text-sm">
+      </div>
+    </div>
+  </form>
+  {% else %}
+  <div class="grid grid-cols-[1fr_auto] sm:grid-cols-[min(18rem,40%)_1fr_auto] items-center gap-x-4 gap-y-2">
+    <div class="min-w-0">
+      <span class="form-label mb-0">Default Interval</span>
+      <p class="text-xs text-gray-500 dark:text-gray-400">{{ hint }}</p>
+    </div>
+    <div class="flex items-center gap-1 justify-self-end sm:col-start-3 sm:row-start-1">
+      <button type="button" class="btn btn-edit py-1 px-3 text-sm"
+        hx-get="/domains/{{ domain.name }}/cadence-field?mode=edit"
+        hx-target="#field-default-interval"
+        hx-swap="outerHTML">Edit</button>
+    </div>
+    <div class="col-span-2 sm:col-span-1 sm:col-start-2 sm:row-start-1 flex items-center gap-2 min-w-0">
+      <span class="text-sm text-gray-900 dark:text-gray-100 font-medium">{{ cadence_display }}{% if cadence_inherited %} <span class="text-gray-400 dark:text-gray-500 font-normal">· {{ cadence_inherited }}</span>{% endif %}</span>
+    </div>
+  </div>
+  {% endif %}
+</div>

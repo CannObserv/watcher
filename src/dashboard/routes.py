@@ -64,6 +64,7 @@ from src.core.scheduler import (
     parse_interval,
     validate_optional_schedule_config,
 )
+from src.core.watches.resolution import SYSTEM_DEFAULT_SCHEDULE_CONFIG
 from src.core.watches.schedule import ScheduleDisplay, resolve_schedule_display
 from src.dashboard import templates
 from src.dashboard.context import (
@@ -1505,6 +1506,44 @@ def _field_context(request: Request, domain: Domain, field_name: str, mode: str 
     }
 
 
+def _cadence_field_context(domain: Domain, mode: str = "view") -> dict:
+    """Build template context for the domain Default Interval field (#208).
+
+    Mirrors the watched-item interval field's inherited-default display: when the
+    domain sets no cadence, view mode shows the system default value with a
+    ``· default`` source marker; edit mode binds the explicit override (blank when
+    inheriting) and shows the suggestive placeholder.
+    """
+    interval = (domain.default_schedule_config or {}).get("interval", "")
+    return {
+        "domain": domain,
+        "cadence_interval": interval,
+        "cadence_display": interval or SYSTEM_DEFAULT_SCHEDULE_CONFIG["interval"],
+        "cadence_inherited": None if interval else "default",
+        "cadence_mode": mode,
+    }
+
+
+@router.get("/domains/{name}/cadence-field")
+async def domain_cadence_field_partial(
+    request: Request,
+    name: str,
+    mode: Literal["view", "edit"] = "view",
+    session: AsyncSession = Depends(get_db_session),
+):
+    """Serve the domain Default Interval field partial in view or edit mode (#208)."""
+    result = await session.execute(select(Domain).where(Domain.name == name))
+    domain = result.scalar_one_or_none()
+    if not domain:
+        raise HTTPException(status_code=404, detail="Domain not found")
+
+    if request.headers.get("HX-Request") != "true":
+        return RedirectResponse(url=f"/domains/{name}", status_code=303)
+
+    ctx = _cadence_field_context(domain, mode=mode)
+    return templates.TemplateResponse(request, "partials/domain_cadence_field.html", ctx)
+
+
 @router.get("/domains/{name}/field/{field_name}")
 async def domain_field_partial(
     request: Request,
@@ -1601,7 +1640,7 @@ async def _render_domain_detail(
         "status": status or "",
         "flash": flash,
         "field_contexts": field_contexts,
-        "cadence_interval": (domain.default_schedule_config or {}).get("interval", ""),
+        **_cadence_field_context(domain),
     }
     return templates.TemplateResponse(
         request, "pages/domain_detail.html", context, status_code=status_code

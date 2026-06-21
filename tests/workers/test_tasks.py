@@ -220,6 +220,55 @@ class TestCheckWatchedItem:
         fetch_mock.assert_not_called()
         proc_mock.assert_not_called()
 
+    async def test_rate_limit_keys_off_domain_name_when_set(self, db_session, monkeypatch):
+        """The limiter buckets on WatchedItem.domain_name, not the URL hostname (#197).
+
+        domain_name and hostname(effective_url) are equal in normal operation; this
+        pins the *preference* — domain_name wins — by making them deliberately differ.
+        """
+        watched_item = await make_watched_item(
+            db_session, name="Keyed", domain_name="bucket.example"
+        )
+        watched_item.effective_url = "https://www.example.com/page"
+        await db_session.commit()
+
+        limiter = DomainRateLimiter(min_interval=0.0)
+        mock_fetcher = MagicMock()
+        mock_fetcher.fetch = AsyncMock(return_value=_fake_fetch_result())
+        monkeypatch.setattr(tasks_mod, "process_watched_item", _make_pipeline_stub())
+        monkeypatch.setattr(
+            tasks_mod, "get_session_factory", lambda: _mock_session_factory(db_session)
+        )
+        monkeypatch.setattr(tasks_mod, "get_rate_limiter", lambda: limiter)
+
+        reg = ServiceRegistry(fetcher=mock_fetcher)
+        await check_watched_item(str(watched_item.id), registry=reg)
+
+        assert "bucket.example" in limiter._domains
+        assert "www.example.com" not in limiter._domains
+
+    async def test_rate_limit_falls_back_to_hostname_when_domain_name_null(
+        self, db_session, monkeypatch
+    ):
+        """With domain_name NULL the limiter keys off hostname(effective_url) — fail-safe (#197)."""
+        watched_item = await make_watched_item(db_session, name="NoDomain", domain_name=None)
+        watched_item.effective_url = "https://fallback.example/page"
+        await db_session.commit()
+
+        limiter = DomainRateLimiter(min_interval=0.0)
+        mock_fetcher = MagicMock()
+        mock_fetcher.fetch = AsyncMock(return_value=_fake_fetch_result())
+        monkeypatch.setattr(tasks_mod, "process_watched_item", _make_pipeline_stub())
+        monkeypatch.setattr(
+            tasks_mod, "get_session_factory", lambda: _mock_session_factory(db_session)
+        )
+        monkeypatch.setattr(tasks_mod, "get_rate_limiter", lambda: limiter)
+
+        reg = ServiceRegistry(fetcher=mock_fetcher)
+        await check_watched_item(str(watched_item.id), registry=reg)
+
+        assert "fallback.example" in limiter._domains
+
     async def _run_success_cycle(self, db_session, monkeypatch, *, changed: bool):
         watched_item = await make_watched_item(db_session, name="Checker")
         watched_item.effective_url = "https://example.com/page"

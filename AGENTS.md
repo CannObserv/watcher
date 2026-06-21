@@ -171,8 +171,8 @@ by domain *name*: `WatchedItem.domain_name` == `Domain.name` ==
 always agree. **One bucket per hostname** — host variants (`lcb.wa.gov` vs
 `www.lcb.wa.gov`) are independent budgets by design; backoff on one does not slow
 its siblings. A shared-budget alias layer is deferred until real throttle bleed
-is observed. URL-keyed `acquire(url)`/`report_rate_limited(url)` were removed in
-#197 (were dead code).
+is observed. URL-keyed `acquire(url)`/`report_rate_limited(url)`/`extract_domain(url)`
+were removed in #197 (were dead code).
 
 `archiver_info_item_id` on `WatchedItem` is nullable — WatchedItems created via the
 dashboard (`POST /watched-items/new`) have no InfoItem reference; API-created ones

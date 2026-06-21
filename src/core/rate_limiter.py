@@ -8,7 +8,9 @@ all three are the same string by construction (each flows from the same
 (``configure_domain``, fed by startup hydration and the poller) keys on
 ``Domain.name``; the fetch side (``acquire_for_domain`` /
 ``report_rate_limited_for_domain`` in ``src/workers/tasks.py``) keys on
-``WatchedItem.domain_name``, so the two always agree. There is **one bucket per
+``WatchedItem.domain_name``, so the two agree for any URL with a hostname (the
+fetch side has a final ``or url`` fallback for hostname-less URLs — a degenerate
+per-URL bucket the config side never matches). There is **one bucket per
 hostname**: host variants (``lcb.wa.gov`` vs ``www.lcb.wa.gov``) are independent
 budgets by design — backoff on one does not slow its siblings. Grouping host
 variants under one logical budget would need an explicit alias layer; deferred

@@ -22,7 +22,10 @@ if matches=$(grep -rn "min-h-0" "$TPL_DIR" 2>/dev/null); then
   fail=1
 fi
 
-# Rule 2: no redundant min-h-[44px] restated on a .btn element
+# Rule 2: no redundant min-h-[44px] restated on a .btn element.
+# Per-line check: assumes the `btn` token and any `min-h-[44px]` share one
+# physical line (the codebase convention); a .btn split across lines with
+# min-h-[44px] on a continuation line would not be flagged.
 if matches=$(grep -rn "min-h-\[44px\]" "$TPL_DIR" 2>/dev/null | grep -E "\bbtn\b"); then
   echo "❌ Redundant min-h-[44px] on a .btn element (the .btn class already guarantees 44px):"
   echo "$matches"

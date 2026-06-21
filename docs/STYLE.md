@@ -118,10 +118,10 @@ one**:
 
 - `.btn` (and every `.btn-*` variant)
 - `.nav-link`
-- `.segment` / `.segment span`
-- `.chip` / `.chip span`
 - `.form-input`
 - `.toggle`
+- `.segment span` (the segmented-control option — height is on the inner `span`, not the bare `.segment` label)
+- `.chip span` (the chip-group option — height is on the inner `span`, not the bare `.chip` label)
 
 Use explicit `min-h-[44px]` **only on bare interactive elements that have no
 component class** — `<a>`, `<label>` wrapping a checkbox/radio, a

@@ -20,13 +20,19 @@ def _template_lines():
     """Yield (relpath, line_no, text) for every line in every dashboard template."""
     for path in sorted(TEMPLATES_DIR.rglob("*.html")):
         rel = path.relative_to(TEMPLATES_DIR)
-        for n, line in enumerate(path.read_text().splitlines(), start=1):
+        for n, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
             yield rel, n, line
 
 
 class TestTouchTargetIdiom:
     def test_no_redundant_min_height_on_btn(self):
-        """A .btn already guarantees 44px — never restate min-h-[44px] on it."""
+        """A .btn already guarantees 44px — never restate min-h-[44px] on it.
+
+        Per-line check: assumes a `.btn` element's class string (the `btn` token
+        and any `min-h-[44px]`) sits on one physical line — the codebase
+        convention. A `.btn` split across lines with `min-h-[44px]` on a
+        continuation line would not be flagged.
+        """
         offenders = [
             f"{rel}:{n}"
             for rel, n, line in _template_lines()

@@ -33,7 +33,7 @@
     <div class="flex items-center gap-2 justify-end">
       {# Edit #}
       <a href="/notifications/{{ tpl.id }}/edit"
-         class="btn btn-secondary text-xs min-h-[44px]"
+         class="btn btn-secondary text-xs"
          aria-label="Edit {{ tpl.title }} notification template">
         Edit
       </a>
@@ -42,7 +42,7 @@
       <button
         hx-post="/notifications/{{ tpl.id }}/test-result"
         hx-swap="none"
-        class="btn btn-secondary text-xs min-h-[44px] htmx-request:opacity-60"
+        class="btn btn-secondary text-xs htmx-request:opacity-60"
         aria-label="Send test notification for {{ tpl.title }}">
         Test
       </button>
@@ -52,7 +52,7 @@
         hx-post="/notifications/{{ tpl.id }}/duplicate"
         hx-target="#templates-tbody"
         hx-swap="innerHTML"
-        class="btn btn-secondary text-xs min-h-[44px] htmx-request:opacity-60"
+        class="btn btn-secondary text-xs htmx-request:opacity-60"
         aria-label="Duplicate {{ tpl.title }} notification template">
         Duplicate
       </button>
@@ -62,7 +62,7 @@
         hx-post="/notifications/{{ tpl.id }}/toggle"
         hx-target="#templates-tbody"
         hx-swap="innerHTML"
-        class="btn btn-secondary text-xs min-h-[44px] htmx-request:opacity-60"
+        class="btn btn-secondary text-xs htmx-request:opacity-60"
         aria-label="{{ 'Pause' if tpl.is_active else 'Activate' }} {{ tpl.title }}">
         {{ "Pause" if tpl.is_active else "Activate" }}
       </button>
@@ -73,7 +73,7 @@
         hx-confirm="Delete template &quot;{{ tpl.title }}&quot;? This cannot be undone."
         hx-target="#templates-tbody"
         hx-swap="innerHTML"
-        class="btn btn-danger-outline text-xs min-h-[44px] htmx-request:opacity-60"
+        class="btn btn-danger-outline text-xs htmx-request:opacity-60"
         aria-label="Delete {{ tpl.title }} notification template">
         Delete
       </button>

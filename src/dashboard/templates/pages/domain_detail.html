@@ -33,7 +33,7 @@
           value="{{ cadence_interval }}"
           placeholder="e.g. 6h, 1d, 7d"
           class="form-input flex-1 min-w-[12rem]">
-        <button type="submit" class="btn btn-secondary min-h-[44px]">Save</button>
+        <button type="submit" class="btn btn-secondary">Save</button>
       </form>
       <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
         Default check interval inherited by items on this domain that set no interval of
@@ -90,7 +90,7 @@
         hx-confirm="Archive {{ domain.name }}? It will be excluded from rate limiting."
         hx-target="body"
         hx-push-url="true"
-        class="btn btn-danger-outline min-h-[44px]">
+        class="btn btn-danger-outline">
         Archive
       </button>
     </form>
@@ -107,7 +107,7 @@
           hx-post="/domains/{{ domain.name }}/restore"
           hx-target="body"
           hx-push-url="true"
-          class="btn btn-secondary min-h-[44px]">
+          class="btn btn-secondary">
           Restore
         </button>
       </form>
@@ -131,13 +131,13 @@
           hx-target="#danger-zone-error"
           hx-swap="innerHTML"
           hx-confirm="Permanently delete {{ domain.name }}? This cannot be undone."
-          class="btn btn-danger min-h-[44px]">
+          class="btn btn-danger">
           Delete
         </button>
       </form>
       {% else %}
       <button disabled
-        class="btn btn-danger min-h-[44px] opacity-50 cursor-not-allowed">
+        class="btn btn-danger opacity-50 cursor-not-allowed">
         Delete
       </button>
       {% endif %}

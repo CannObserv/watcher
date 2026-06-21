@@ -3,17 +3,17 @@
 {# --- Action buttons (shared by both field types) --- #}
 {% macro action_buttons() %}
   {% if mode == "view" %}
-  <button type="button" class="btn btn-edit py-1 px-3 text-sm min-h-[44px]"
+  <button type="button" class="btn btn-edit py-1 px-3 text-sm"
     hx-get="/domains/{{ domain.name }}/field/{{ field_name }}?mode=edit"
     hx-target="#field-{{ field_name }}"
     hx-swap="outerHTML">Edit</button>
   {% else %}
-  <button type="submit" class="btn btn-primary py-1 px-3 text-sm min-h-[44px]"
+  <button type="submit" class="btn btn-primary py-1 px-3 text-sm"
     hx-post="/domains/{{ domain.name }}"
     hx-target="#field-{{ field_name }}"
     hx-swap="outerHTML"
     hx-include="closest form">Save</button>
-  <button type="button" class="btn btn-secondary py-1 px-3 text-sm min-h-[44px]"
+  <button type="button" class="btn btn-secondary py-1 px-3 text-sm"
     hx-get="/domains/{{ domain.name }}/field/{{ field_name }}"
     hx-target="#field-{{ field_name }}"
     hx-swap="outerHTML">Cancel</button>
@@ -42,7 +42,7 @@
       class="form-input text-sm"
       {% if field_hint %}aria-describedby="{{ field_name }}-hint"{% endif %}
       placeholder="Operator notes about this domain…">{{ field_value }}</textarea>
-    <noscript><button type="submit" class="btn btn-secondary py-1 px-3 text-sm min-h-[44px] mt-2">Save</button></noscript>
+    <noscript><button type="submit" class="btn btn-secondary py-1 px-3 text-sm mt-2">Save</button></noscript>
   </form>
   {% else %}
   {# View mode: styled container — same border/shape as edit textarea, lighter to signal read-only #}
@@ -87,7 +87,7 @@
         {% if field_unit %}
         <span class="text-sm text-gray-500 dark:text-gray-400">{{ field_unit }}</span>
         {% endif %}
-        <noscript><button type="submit" class="btn btn-secondary py-1 px-3 text-sm min-h-[44px]">Save</button></noscript>
+        <noscript><button type="submit" class="btn btn-secondary py-1 px-3 text-sm">Save</button></noscript>
       </div>
     </div>
   </form>

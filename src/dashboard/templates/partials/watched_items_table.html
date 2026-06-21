@@ -51,7 +51,7 @@
               <button
                 hx-post="/watched-items/{{ wi.id }}/check-now"
                 hx-swap="none"
-                class="btn btn-secondary text-xs min-h-[44px] htmx-request:opacity-60"
+                class="btn btn-secondary text-xs htmx-request:opacity-60"
                 aria-label="Queue an immediate check for {{ wi.name }}">Check now</button>
               {% endif %}
             </div>

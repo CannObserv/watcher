@@ -24,17 +24,17 @@
        hx-get="{{ base_url }}?page={{ page - 1 }}&page_size={{ page_size }}{% for k, v in extra_params.items() %}&{{ k }}={{ v }}{% endfor %}"
        hx-target="{{ hx_target|default('#domains-table-container') }}"
        hx-swap="innerHTML"
-       class="btn btn-secondary py-1 px-2 text-sm min-h-[44px]">Prev</a>
+       class="btn btn-secondary py-1 px-2 text-sm">Prev</a>
     {% endif %}
     {% for p in range(1, total_pages + 1) %}
       {% if p == page %}
-      <span class="btn btn-primary py-1 px-2 text-sm min-h-[44px]" aria-current="page">{{ p }}</span>
+      <span class="btn btn-primary py-1 px-2 text-sm" aria-current="page">{{ p }}</span>
       {% elif p <= 3 or p > total_pages - 2 or (p >= page - 1 and p <= page + 1) %}
       <a href="{{ base_url }}?page={{ p }}&page_size={{ page_size }}{% for k, v in extra_params.items() %}&{{ k }}={{ v }}{% endfor %}"
          hx-get="{{ base_url }}?page={{ p }}&page_size={{ page_size }}{% for k, v in extra_params.items() %}&{{ k }}={{ v }}{% endfor %}"
          hx-target="{{ hx_target|default('#domains-table-container') }}"
          hx-swap="innerHTML"
-         class="btn btn-secondary py-1 px-2 text-sm min-h-[44px]">{{ p }}</a>
+         class="btn btn-secondary py-1 px-2 text-sm">{{ p }}</a>
       {% elif p == 4 or p == total_pages - 2 %}
       <span class="px-1 text-gray-400">…</span>
       {% endif %}
@@ -44,7 +44,7 @@
        hx-get="{{ base_url }}?page={{ page + 1 }}&page_size={{ page_size }}{% for k, v in extra_params.items() %}&{{ k }}={{ v }}{% endfor %}"
        hx-target="{{ hx_target|default('#domains-table-container') }}"
        hx-swap="innerHTML"
-       class="btn btn-secondary py-1 px-2 text-sm min-h-[44px]">Next</a>
+       class="btn btn-secondary py-1 px-2 text-sm">Next</a>
     {% endif %}
   </div>
 </nav>

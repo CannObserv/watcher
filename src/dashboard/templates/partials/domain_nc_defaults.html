@@ -39,14 +39,14 @@
               <div class="flex items-center gap-2 justify-end">
                 <a
                   href="/notifications/{{ tpl.id }}/edit"
-                  class="btn btn-secondary text-xs min-h-[44px]"
+                  class="btn btn-secondary text-xs"
                   aria-label="Edit {{ tpl.title }} in the global template library">
                   Edit
                 </a>
                 <button
                   hx-post="/notifications/{{ tpl.id }}/test-result"
                   hx-swap="none"
-                  class="btn btn-secondary text-xs min-h-[44px] htmx-request:opacity-60"
+                  class="btn btn-secondary text-xs htmx-request:opacity-60"
                   aria-label="Send test notification for {{ tpl.channel_hint }}">
                   Test
                 </button>
@@ -74,7 +74,7 @@
       </h4>
       <div class="flex items-center gap-2">
         <a href="/domains/{{ domain_name }}/notifications/new"
-           class="btn btn-secondary text-xs min-h-[44px]">
+           class="btn btn-secondary text-xs">
           + Create New
         </a>
       </div>
@@ -105,14 +105,14 @@
               <div class="flex items-center gap-2 justify-end">
                 <a
                   href="/notifications/{{ tpl.id }}/edit"
-                  class="btn btn-secondary text-xs min-h-[44px]"
+                  class="btn btn-secondary text-xs"
                   aria-label="Edit {{ tpl.title }} in the template library">
                   Edit
                 </a>
                 <button
                   hx-post="/notifications/{{ tpl.id }}/test-result"
                   hx-swap="none"
-                  class="btn btn-secondary text-xs min-h-[44px] htmx-request:opacity-60"
+                  class="btn btn-secondary text-xs htmx-request:opacity-60"
                   aria-label="Send test notification for {{ tpl.channel_hint }}">
                   Test
                 </button>
@@ -122,7 +122,7 @@
                   hx-target="#domain-nc-defaults"
                   hx-swap="outerHTML"
                   hx-confirm="Delete the domain template &quot;{{ tpl.title }}&quot;? This cannot be undone."
-                  class="btn btn-danger-outline text-xs min-h-[44px] htmx-request:opacity-60"
+                  class="btn btn-danger-outline text-xs htmx-request:opacity-60"
                   aria-label="Delete {{ tpl.title }} domain template">
                   Delete
                 </button>

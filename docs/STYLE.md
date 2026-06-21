@@ -110,14 +110,40 @@ Grid patterns: `grid-cols-1 sm:grid-cols-2 lg:grid-cols-4` for stat cards.
 
 ## 7. Touch Targets
 
-All interactive elements enforce 44px minimum height:
+All interactive elements enforce the WCAG 2.1 AA 44px minimum height.
 
-- `.btn`: `min-h-[44px]`
-- `.nav-link`: `min-h-[44px]`
-- `.segment span`: `min-h-[44px]`
-- `.chip span`: `min-h-[44px]`
-- `.form-input`: `min-h-[44px]`
-- Mobile hamburger/close: `min-h-[44px] min-w-[44px]`
+**The rule (one idiom — #203): component classes own the 44px guarantee.**
+These bake in `min-h-[44px]`, so **never restate it on an element that carries
+one**:
+
+- `.btn` (and every `.btn-*` variant)
+- `.nav-link`
+- `.segment` / `.segment span`
+- `.chip` / `.chip span`
+- `.form-input`
+- `.toggle`
+
+Use explicit `min-h-[44px]` **only on bare interactive elements that have no
+component class** — `<a>`, `<label>` wrapping a checkbox/radio, a
+component-less `<button>` (e.g. a sortable column header). These are the *only*
+places it belongs; the explicit token is then the signal "this element has no
+component class."
+
+Exceptions:
+
+- **Square icon buttons** (mobile hamburger/close) add `min-w-[44px]` for width
+  — `.btn` guarantees height, not width. Keep `min-w-[44px]`, drop the
+  redundant `min-h-[44px]`: `class="btn btn-ghost p-2 min-w-[44px]"`.
+- **`.chip-xs`** is a deliberate sub-44px class for dense token-insert chips
+  (notification variable chips). It is the only sanctioned target under 44px;
+  do not use it for primary actions.
+
+Never use `min-h-0` to shrink a component target below 44px — it is a latent
+a11y violation.
+
+**Guard:** `tests/dashboard/test_touch_targets.py` (runs in the default `uv run
+pytest` suite) and `scripts/check-touch-targets.sh` fail on redundant
+`min-h-[44px]` on a `.btn` or on any `min-h-0` in a template.
 
 ---
 
@@ -162,9 +188,9 @@ Always wrap with a border/clip container — `overflow-hidden` is required to cl
         <td><span class="badge badge-active">Active</span></td>
         <td class="whitespace-nowrap">
           <div class="flex items-center gap-2 justify-end">
-            <button class="btn btn-secondary text-xs min-h-[44px]"
+            <button class="btn btn-secondary text-xs"
                     aria-label="Edit {name}">Edit</button>
-            <button class="btn btn-danger-outline text-xs min-h-[44px]"
+            <button class="btn btn-danger-outline text-xs"
                     aria-label="Delete {name}">Delete</button>
           </div>
         </td>
@@ -232,7 +258,7 @@ Cancel returns either the single refreshed `<tr>` (preferred — avoids full tab
 ```html
 <button class="btn btn-primary">Save</button>
 <button class="btn btn-danger-outline">Delete</button>
-<button class="btn btn-edit py-1 px-3 text-sm min-h-0">Edit</button>
+<button class="btn btn-edit py-1 px-3 text-sm">Edit</button>
 ```
 
 ### Segmented control (single-select filter)

@@ -28,7 +28,7 @@
         <td>{{ domain.watched_item_count }}</td>
         <td>{{ domain.last_checked.strftime("%Y-%m-%d %H:%M") if domain.last_checked else "—" }}</td>
         <td class="text-end">
-          <a href="/domains/{{ domain.name }}" class="btn btn-secondary py-1 px-3 text-sm min-h-[44px]">Edit</a>
+          <a href="/domains/{{ domain.name }}" class="btn btn-secondary py-1 px-3 text-sm">Edit</a>
         </td>
       </tr>
       {% endfor %}

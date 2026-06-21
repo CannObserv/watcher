@@ -37,13 +37,13 @@
         <button type="submit"
           hx-post="/watched-items/{{ watched_item.id }}/restore"
           hx-target="body"
-          class="btn btn-secondary py-1 px-3 text-sm min-h-[44px]">Restore from archive</button>
+          class="btn btn-secondary py-1 px-3 text-sm">Restore from archive</button>
       </form>
       {% endif %}
       <noscript>
         <form method="post" action="/watched-items/{{ watched_item.id }}/toggle-active" class="inline">
           <input type="hidden" name="active" value="{{ 'false' if watched_item.is_active else 'true' }}">
-          <button type="submit" class="btn btn-secondary py-1 px-3 text-sm min-h-[44px]"
+          <button type="submit" class="btn btn-secondary py-1 px-3 text-sm"
             {% if watched_item.archived_at or watched_item.domain_suspended %}disabled{% endif %}>
             {{ "Pause" if watched_item.is_active else "Resume" }}
           </button>

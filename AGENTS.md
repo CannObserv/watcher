@@ -340,7 +340,7 @@ Authoritative reference: `docs/STYLE.md`.
 
 **Dark Mode:** Tailwind `dark:` variants on every color utility. Class-based toggle (`<html class="dark">`). localStorage key: `watcher-color-scheme`.
 
-**Accessibility:** WCAG 2.1 AA. Skip link, ARIA landmarks, `focus-visible` rings, 44px touch targets, `aria-live` on HTMX swap targets, reduced motion. Wrap decorative emoji in `<span aria-hidden="true">`. No `title` attributes.
+**Accessibility:** WCAG 2.1 AA. Skip link, ARIA landmarks, `focus-visible` rings, 44px touch targets, `aria-live` on HTMX swap targets, reduced motion. Wrap decorative emoji in `<span aria-hidden="true">`. No `title` attributes. **Touch-target idiom (#203):** component classes (`.btn*`, `.segment`, `.chip`, `.form-input`, `.toggle`, nav-link) own the 44px guarantee — never restate `min-h-[44px]` on a `.btn`; use it only on bare interactive elements (`<a>`, `<label>`, component-less `<button>`); never `min-h-0`. Guard: `tests/dashboard/test_touch_targets.py` + `scripts/check-touch-targets.sh`. See `docs/STYLE.md` §7.
 
 **CSS:** Tailwind v4 with `@theme` in `input.css`. Use component classes (`.btn`, `.badge`, `.stat-card`, `.data-table`, `.form-input`, `.link`, `.segment-group`, `.segment`, `.chip-group`, `.chip`, `.detail-grid`, `.toggle`, `.danger-zone`). Badge variants: `.badge-active` (green), `.badge-inactive` (gray), `.badge-archived` (amber), `.badge-error` (red), `.badge-warning` (orange), `.badge-info` (blue). Use CSS logical properties (`margin-inline-start` not `margin-left`).
 

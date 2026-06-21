@@ -175,7 +175,7 @@
         hx-confirm="Archive {{ watched_item.name }}?"
         hx-target="body"
         hx-push-url="true"
-        class="btn btn-danger-outline min-h-[44px]">Archive</button>
+        class="btn btn-danger-outline">Archive</button>
     </form>
   </div>
   {% else %}
@@ -189,7 +189,7 @@
         hx-post="/watched-items/{{ watched_item.id }}/restore"
         hx-target="body"
         hx-push-url="true"
-        class="btn btn-secondary min-h-[44px]">Restore</button>
+        class="btn btn-secondary">Restore</button>
     </form>
   </div>
   {% endif %}

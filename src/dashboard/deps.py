@@ -1,4 +1,4 @@
-"""Dashboard authentication dependencies."""
+"""Dashboard shared dependencies and request helpers."""
 
 import hashlib
 import os

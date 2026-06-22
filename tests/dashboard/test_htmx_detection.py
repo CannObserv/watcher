@@ -11,15 +11,20 @@ scan (no DB) so it runs in the default suite on every ``uv run pytest``.
 import re
 from pathlib import Path
 
+import pytest
+
 _ROOT = Path(__file__).resolve().parents[2]
 DASHBOARD_DIR = _ROOT / "src" / "dashboard"
 
 # The canonical helper lives here and is the sole place allowed to read the raw
-# HX-Request / HX-Boosted headers.
+# HX-Request / HX-Boosted headers. Scope is dashboard-only by design — API
+# routes never render partials, so they have no HTMX-detection concern.
 _HELPER_MODULE = DASHBOARD_DIR / "deps.py"
 
 # Bare reads of the HTMX request headers — what `is_htmx` exists to replace.
-_BARE_HEADER = re.compile(r'request\.headers\.get\(\s*"HX-(?:Request|Boosted)"')
+# Receiver-agnostic (any `<obj>.headers.get`) and quote-agnostic so a rename
+# (`req`) or single quotes can't slip a bare check past the guard.
+_BARE_HEADER = re.compile(r"""\.headers\.get\(\s*["']HX-(?:Request|Boosted)""")
 
 
 def _offending_lines():
@@ -39,3 +44,28 @@ def test_no_bare_htmx_header_checks():
     assert not offenders, (
         "Use src.dashboard.deps.is_htmx instead of a bare HX-* header read:\n" + detail
     )
+
+
+@pytest.mark.parametrize(
+    "snippet",
+    [
+        'request.headers.get("HX-Request")',
+        "request.headers.get('HX-Request')",  # single quotes
+        'req.headers.get("HX-Boosted")',  # renamed receiver
+        'request.headers.get(  "HX-Request"  )',  # whitespace padding
+    ],
+)
+def test_regex_catches_bare_read_variants(snippet):
+    assert _BARE_HEADER.search(snippet), f"guard should flag: {snippet}"
+
+
+@pytest.mark.parametrize(
+    "snippet",
+    [
+        'request.headers.get("Content-Type")',
+        "is_htmx(request)",
+        'request.headers.get("X-ExeDev-UserID")',
+    ],
+)
+def test_regex_ignores_unrelated_header_reads(snippet):
+    assert not _BARE_HEADER.search(snippet), f"guard should ignore: {snippet}"

@@ -73,7 +73,11 @@ Add `WATCHED_ITEM_DELETED = "watched_item.deleted"` to the `EventType` enum. The
 stale `WATCH_DELETED = "watch.deleted"` from #8 is left untouched (removing it is
 out of scope). Audit payload carries `watched_item_id`, `name`, and `url`; the
 trail survives the row deletion because `AuditLog` has no FK to `watched_items`
-(the id lives in the JSONB payload). `source="api"` / `source="dashboard"`.
+(the id lives in the JSONB payload). The payload records `source="api"` for both
+the API and dashboard paths — the dashboard route delegates to the shared API
+function, so the audit cannot (and does not) distinguish origin. This matches the
+existing archive/restore/check-now delegations, which also record `source="api"`
+regardless of caller; a per-origin `source` is intentionally out of scope.
 
 ### Dashboard
 

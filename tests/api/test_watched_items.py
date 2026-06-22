@@ -321,7 +321,14 @@ class TestDeleteWatchedItem:
             .scalars()
             .all()
         )
-        assert any(r.payload.get("watched_item_id") == str(wi_id) for r in rows)
+        matched = [r for r in rows if r.payload.get("watched_item_id") == str(wi_id)]
+        assert len(matched) == 1
+        payload = matched[0].payload
+        # The trail must carry name + url (not just the id) so the deleted item is
+        # identifiable after the row is gone.
+        assert payload["name"] == "ToDelete"
+        assert "url" in payload
+        assert payload["source"] == "api"
 
     async def test_delete_frees_domain_delete_guard(self, client, db_session):
         """An archived item still pins its domain; deleting it unblocks domain delete (#209)."""
@@ -330,6 +337,9 @@ class TestDeleteWatchedItem:
         from src.core.models.domain import Domain
         from src.core.models.watched_item import WatchedItem
 
+        # The local _make_watched_item helper (unlike conftest's make_watched_item)
+        # does not auto-create the Domain, and domain_name is an enforced FK — so the
+        # Domain row must exist before the archived item can reference it.
         domain = Domain(name="delete-me.example.com")
         db_session.add(domain)
         await db_session.flush()

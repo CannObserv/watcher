@@ -181,6 +181,21 @@ class TestDomainDetail:
         response = await client.get("/domains/counts.com")
         assert b"Watched Items (1 \xc2\xb7 1 archived)" in response.content
 
+    async def test_heading_count_no_annotation_when_no_archived(self, client, db_session):
+        """#209 CR2: with only live items the heading is a bare count — no
+        '· N archived' annotation (covers the `all > live` guard's false branch)."""
+        db_session.add(Domain(name="liveonly.com"))
+        await make_watched_item(
+            db_session,
+            name="Live",
+            primary_url="https://liveonly.com/live",
+            default_content_type="html",
+            domain_name="liveonly.com",
+        )
+        response = await client.get("/domains/liveonly.com")
+        assert b"Watched Items (1)" in response.content
+        assert b"archived)" not in response.content
+
     async def test_delete_guard_counts_archived_items(self, client, db_session):
         """#209 CR (1a): the delete guard keeps the archived-inclusive total — an
         archived item still holds the domain_name FK, so deletion must be blocked.

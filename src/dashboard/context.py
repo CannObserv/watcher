@@ -225,9 +225,12 @@ async def get_domains_with_watched_item_counts(
 ) -> list[dict]:
     """Fetch domains with watched item count, last_checked, search, filter, and pagination.
 
+    Archived WatchedItems are excluded from both ``watched_item_count`` and
+    ``last_checked`` — the count reflects live items only (#209).
+
     Args:
         search: Substring match on domain name.
-        status: Filter — "active", "archived", "backoff", or None (all).
+        status: Filter — "active", "inactive", "archived", "backoff", or None (all).
         page: 1-based page number (only used when page_size is set).
         page_size: Results per page. None means no pagination (return all).
     """
@@ -238,7 +241,7 @@ async def get_domains_with_watched_item_counts(
     stmt = (
         select(
             Domain,
-            func.count(WatchedItem.id.distinct()).label("watched_item_count"),
+            func.count(WatchedItem.id).label("watched_item_count"),
             func.max(WatchedItem.last_checked_at).label("last_checked"),
         )
         .outerjoin(

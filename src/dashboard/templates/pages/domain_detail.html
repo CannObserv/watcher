@@ -45,7 +45,8 @@
 {# Watched Items section #}
 <section class="mb-8">
   <h3 class="text-lg font-semibold text-gray-900 dark:text-white mb-4">
-    Watched Items ({{ all_watched_items_count }})
+    {# Live count matches the Domains-list column; archived shown explicitly (#209). #}
+    Watched Items ({{ live_watched_items_count }}{% if all_watched_items_count > live_watched_items_count %} · {{ all_watched_items_count - live_watched_items_count }} archived{% endif %})
   </h3>
 
   <div id="domain-watches">

@@ -159,6 +159,45 @@ class TestDomainDetail:
         response = await client.get("/domains/meta.com")
         assert b"Metadata" in response.content
 
+    async def test_heading_count_excludes_archived_matches_list(self, client, db_session):
+        """#209 CR: heading shows the live (non-archived) count to match the Domains
+        list column, with an explicit '· N archived' annotation for the remainder."""
+        db_session.add(Domain(name="counts.com"))
+        await make_watched_item(
+            db_session,
+            name="Live",
+            primary_url="https://counts.com/live",
+            default_content_type="html",
+            domain_name="counts.com",
+        )
+        await make_watched_item(
+            db_session,
+            name="Gone",
+            primary_url="https://counts.com/gone",
+            default_content_type="html",
+            domain_name="counts.com",
+            archived_at=datetime.now(UTC),
+        )
+        response = await client.get("/domains/counts.com")
+        assert b"Watched Items (1 \xc2\xb7 1 archived)" in response.content
+
+    async def test_delete_guard_counts_archived_items(self, client, db_session):
+        """#209 CR (1a): the delete guard keeps the archived-inclusive total — an
+        archived item still holds the domain_name FK, so deletion must be blocked.
+        The delete block renders only for an archived domain."""
+        db_session.add(Domain(name="guarded.com", archived_at=datetime.now(UTC)))
+        await make_watched_item(
+            db_session,
+            name="Gone",
+            primary_url="https://guarded.com/gone",
+            default_content_type="html",
+            domain_name="guarded.com",
+            archived_at=datetime.now(UTC),
+        )
+        response = await client.get("/domains/guarded.com")
+        assert b"Cannot delete" in response.content
+        assert b"1 watched item" in response.content
+
 
 class TestDomainDefaultScheduleConfigDashboard:
     """#205: dashboard cadence edit on the domain detail page + back-fill."""

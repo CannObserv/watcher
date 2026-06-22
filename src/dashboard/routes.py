@@ -1618,11 +1618,17 @@ async def _render_domain_detail(
     watched_items = await get_domain_watched_items(
         session, domain.name, search=q, sort=sort, order=order, status=status
     )
-    all_watched_items_count = (
+    # Two counts: total (archived-inclusive) gates domain deletion — archived items
+    # still hold the domain_name FK; live (non-archived) is the heading number, which
+    # matches the Domains-list column (#209 CR).
+    all_watched_items_count, live_watched_items_count = (
         await session.execute(
-            select(func.count(WatchedItem.id)).where(WatchedItem.domain_name == domain.name)
+            select(
+                func.count(WatchedItem.id),
+                func.count(WatchedItem.id).filter(WatchedItem.archived_at.is_(None)),
+            ).where(WatchedItem.domain_name == domain.name)
         )
-    ).scalar_one()
+    ).one()
     now = datetime.now(UTC)
     profiles_by_wi = await get_active_profiles_by_item(session, [wi.id for wi in watched_items])
     field_contexts = {
@@ -1634,6 +1640,7 @@ async def _render_domain_detail(
         "watched_items": watched_items,
         "schedule_map": _build_schedule_map(watched_items, now, profiles_by_wi),
         "all_watched_items_count": all_watched_items_count,
+        "live_watched_items_count": live_watched_items_count,
         "q": q or "",
         "sort": sort,
         "order": order,

@@ -13,6 +13,18 @@ from src.api.deps import get_db_session
 from src.core.models.app_user import AppUser
 
 
+def is_htmx(request: Request) -> bool:
+    """True for an HTMX-driven request, excluding boosted full-page navigations.
+
+    Canonical HTMX detector for the dashboard (#211). ``hx-boost`` sends
+    ``HX-Request: true`` for what is semantically a full-page navigation; the
+    ``HX-Boosted`` guard keeps those on the non-HTMX (full page / redirect) path
+    rather than treating them as inline fragment swaps. Use this everywhere
+    instead of a bare ``HX-Request`` header check.
+    """
+    return bool(request.headers.get("HX-Request") and not request.headers.get("HX-Boosted"))
+
+
 async def get_dashboard_user(
     request: Request,
     session: AsyncSession = Depends(get_db_session),

@@ -13,17 +13,13 @@ from src.core.models.api_key import ApiKey
 from src.core.models.app_user import AppUser
 from src.core.models.notification_template import NotificationTemplate
 from src.dashboard import templates
-from src.dashboard.deps import generate_api_key, get_dashboard_user
+from src.dashboard.deps import generate_api_key, get_dashboard_user, is_htmx
 
 router = APIRouter(
     prefix="/settings",
     tags=["settings"],
     dependencies=[Depends(get_dashboard_user)],
 )
-
-
-def _is_htmx(request: Request) -> bool:
-    return bool(request.headers.get("HX-Request") and not request.headers.get("HX-Boosted"))
 
 
 def _flash_trigger(level: str, body: str) -> dict[str, str]:
@@ -109,7 +105,7 @@ async def api_key_create(
     )
     session.add(key)
     await session.commit()
-    if not _is_htmx(request):
+    if not is_htmx(request):
         return RedirectResponse("/settings/api-keys", status_code=303)
     return templates.TemplateResponse(
         request,
@@ -159,7 +155,7 @@ async def api_key_edit_row_post(
         raise HTTPException(status_code=404)
     key.label = label_val
     await session.commit()
-    if not _is_htmx(request):
+    if not is_htmx(request):
         return RedirectResponse("/settings/api-keys", status_code=303)
     return templates.TemplateResponse(
         request,

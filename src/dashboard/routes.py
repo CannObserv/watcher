@@ -87,7 +87,7 @@ from src.dashboard.context import (
     get_watched_item_profiles,
     get_watched_items_total_count,
 )
-from src.dashboard.deps import get_dashboard_user
+from src.dashboard.deps import get_dashboard_user, is_htmx
 
 router = APIRouter(tags=["dashboard"], dependencies=[Depends(get_dashboard_user)])
 logger = get_logger(__name__)
@@ -600,7 +600,7 @@ async def watched_item_archive(
 ):
     """Dashboard archive — cascades to child Watches (delegates to shared logic)."""
     await _api_archive_watched_item(watched_item_id, session)
-    if request.headers.get("HX-Request") == "true":
+    if is_htmx(request):
         return Response(
             status_code=200,
             headers={"HX-Redirect": f"/watched-items/{watched_item_id}"},
@@ -616,7 +616,7 @@ async def watched_item_restore(
 ):
     """Dashboard restore — parent only."""
     await _api_restore_watched_item(watched_item_id, session)
-    if request.headers.get("HX-Request") == "true":
+    if is_htmx(request):
         return Response(
             status_code=200,
             headers={"HX-Redirect": f"/watched-items/{watched_item_id}"},
@@ -637,7 +637,7 @@ async def watched_item_delete(
     page. A 409 (un-archived) surfaces as an OOB error flash for HTMX, or a
     redirect back to the still-present detail page for non-HTMX clients.
     """
-    hx = request.headers.get("HX-Request") == "true"
+    hx = is_htmx(request)
     try:
         await _api_delete_watched_item(watched_item_id, session)
     except HTTPException as exc:
@@ -667,7 +667,7 @@ async def watched_item_mark_reviewed(
     that contained the only form). Callable via direct POST or the API route.
     """
     await _api_mark_reviewed(watched_item_id, session)
-    if request.headers.get("HX-Request") == "true":
+    if is_htmx(request):
         return Response(
             status_code=200,
             headers={"HX-Redirect": f"/watched-items/{watched_item_id}"},
@@ -693,7 +693,7 @@ async def watched_item_toggle_active(
     rejections re-render the toggle in its true state with an OOB flash (HTMX)
     or redirect back to detail (non-HTMX).
     """
-    hx = request.headers.get("HX-Request") == "true"
+    hx = is_htmx(request)
     wi = await get_watched_item_detail(session, watched_item_id)
     if not wi:
         raise HTTPException(status_code=404, detail="WatchedItem not found")
@@ -746,7 +746,7 @@ async def watched_item_check_now(
     effective_url). For HTMX, success and guard failures surface as an OOB
     flash; non-HTMX clients get a redirect back to the detail page.
     """
-    hx = request.headers.get("HX-Request") == "true"
+    hx = is_htmx(request)
     try:
         await _api_check_now(watched_item_id, session)
     except HTTPException as exc:
@@ -783,7 +783,7 @@ async def watched_item_url_field_partial(
     wi = await get_watched_item_detail(session, watched_item_id)
     if not wi:
         raise HTTPException(status_code=404, detail="WatchedItem not found")
-    if request.headers.get("HX-Request") != "true":
+    if not is_htmx(request):
         return RedirectResponse(url=f"/watched-items/{watched_item_id}", status_code=303)
     return templates.TemplateResponse(
         request,
@@ -810,7 +810,7 @@ async def watched_item_update_url(
     operator gets a warning flash instead of the success reload. Probe failures
     surface as a flash.
     """
-    hx = request.headers.get("HX-Request") == "true"
+    hx = is_htmx(request)
     wi = await get_watched_item_detail(session, watched_item_id)
     if not wi:
         raise HTTPException(status_code=404, detail="WatchedItem not found")
@@ -900,7 +900,7 @@ async def watched_item_field_partial(
     if not wi:
         raise HTTPException(status_code=404, detail="WatchedItem not found")
 
-    if request.headers.get("HX-Request") != "true":
+    if not is_htmx(request):
         return RedirectResponse(url=f"/watched-items/{watched_item_id}", status_code=303)
 
     profiles = await _interval_field_profiles(session, wi, field_name)
@@ -942,7 +942,7 @@ async def watched_item_field_update(
     await session.commit()
     await session.refresh(wi)
 
-    if request.headers.get("HX-Request") == "true":
+    if is_htmx(request):
         profiles = await _interval_field_profiles(session, wi, field_name)
         ctx = _watched_item_field_context(request, wi, field_name, mode="view", profiles=profiles)
         return templates.TemplateResponse(request, "partials/watched_item_field.html", ctx)
@@ -1417,7 +1417,7 @@ async def domain_toggle_active(
     await session.commit()
     await session.refresh(domain)
 
-    if request.headers.get("HX-Request") == "true":
+    if is_htmx(request):
         watched_items = await get_domain_watched_items(
             session, name, search=q, sort=sort, order=order, status=status
         )
@@ -1571,7 +1571,7 @@ async def domain_cadence_field_partial(
     if not domain:
         raise HTTPException(status_code=404, detail="Domain not found")
 
-    if request.headers.get("HX-Request") != "true":
+    if not is_htmx(request):
         return RedirectResponse(url=f"/domains/{name}", status_code=303)
 
     ctx = _cadence_field_context(domain, mode=mode)
@@ -1595,7 +1595,7 @@ async def domain_field_partial(
     if not domain:
         raise HTTPException(status_code=404, detail="Domain not found")
 
-    if request.headers.get("HX-Request") != "true":
+    if not is_htmx(request):
         return RedirectResponse(url=f"/domains/{name}", status_code=303)
 
     ctx = _field_context(request, domain, field_name, mode=mode)
@@ -1630,7 +1630,7 @@ async def domain_inline_update(
     await session.commit()
     await session.refresh(domain)
 
-    if request.headers.get("HX-Request") == "true":
+    if is_htmx(request):
         ctx = _field_context(request, domain, field, mode="view")
         return templates.TemplateResponse(request, "partials/domain_field.html", ctx)
     return RedirectResponse(url=f"/domains/{name}", status_code=303)
@@ -1898,7 +1898,7 @@ async def domain_nc_default_remove(
     session: AsyncSession = Depends(get_db_session),
 ):
     """Delete a domain-scoped notification template (#200: removal = delete the row)."""
-    if request.headers.get("HX-Request") != "true":
+    if not is_htmx(request):
         return RedirectResponse(url=f"/domains/{domain_name}", status_code=303)
     tpl = await session.get(NotificationTemplate, parse_ulid(template_id, "Template"))
     if tpl and tpl.visibility == VISIBILITY_DOMAIN and tpl.domain_name == domain_name:
@@ -2390,7 +2390,7 @@ async def notification_template_toggle(
     session: AsyncSession = Depends(get_db_session),
 ):
     """Toggle is_active on a notification template. Returns refreshed list."""
-    if request.headers.get("HX-Request") != "true":
+    if not is_htmx(request):
         return RedirectResponse(url="/notifications", status_code=303)
     result = await session.execute(
         select(NotificationTemplate).where(
@@ -2433,7 +2433,7 @@ async def notification_template_delete(
 
     Templates are standalone post-#200 — no junction refs to block deletion.
     """
-    if request.headers.get("HX-Request") != "true":
+    if not is_htmx(request):
         return RedirectResponse(url="/notifications", status_code=303)
     result = await session.execute(
         select(NotificationTemplate).where(
@@ -2473,7 +2473,7 @@ async def notification_template_duplicate(
     session: AsyncSession = Depends(get_db_session),
 ):
     """Duplicate a notification template. Returns refreshed list."""
-    if request.headers.get("HX-Request") != "true":
+    if not is_htmx(request):
         return RedirectResponse(url="/notifications", status_code=303)
     result = await session.execute(
         select(NotificationTemplate).where(

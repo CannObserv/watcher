@@ -4,7 +4,33 @@ import hashlib
 
 import pytest
 from fastapi import FastAPI
+from starlette.requests import Request
 from starlette.testclient import TestClient
+
+
+def _request(headers: dict[str, str]) -> Request:
+    """Build a minimal Starlette Request carrying the given headers."""
+    raw = [(k.lower().encode(), v.encode()) for k, v in headers.items()]
+    return Request({"type": "http", "headers": raw})
+
+
+class TestIsHtmx:
+    """``is_htmx`` detects an HTMX request but excludes boosted full-page nav (#211)."""
+
+    def test_htmx_request_is_true(self):
+        from src.dashboard.deps import is_htmx
+
+        assert is_htmx(_request({"HX-Request": "true"})) is True
+
+    def test_boosted_request_is_false(self):
+        from src.dashboard.deps import is_htmx
+
+        assert is_htmx(_request({"HX-Request": "true", "HX-Boosted": "true"})) is False
+
+    def test_plain_request_is_false(self):
+        from src.dashboard.deps import is_htmx
+
+        assert is_htmx(_request({})) is False
 
 
 class TestGetDashboardUser:

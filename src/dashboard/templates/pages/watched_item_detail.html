@@ -192,6 +192,19 @@
         class="btn btn-secondary">Restore</button>
     </form>
   </div>
+  <div class="mt-6 pt-6 border-t border-red-200 dark:border-red-800 flex items-center justify-between">
+    <div>
+      <p class="text-sm font-medium text-gray-900 dark:text-white">Delete this Watched Item permanently</p>
+      <p class="text-xs text-gray-500 dark:text-gray-400">Removes the item and all its history (revisions, profile, item notifications). Cannot be undone.</p>
+    </div>
+    <form method="post" action="/watched-items/{{ watched_item.id }}/delete">
+      <button type="submit"
+        hx-post="/watched-items/{{ watched_item.id }}/delete"
+        hx-swap="none"
+        hx-confirm="Permanently delete {{ watched_item.name }}? This cannot be undone."
+        class="btn btn-danger">Delete permanently</button>
+    </form>
+  </div>
   {% endif %}
 </section>
 {% endblock %}

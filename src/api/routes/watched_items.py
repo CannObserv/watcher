@@ -301,6 +301,37 @@ async def restore_watched_item(
     return wi
 
 
+@router.delete("/{watched_item_id}", status_code=204)
+async def delete_watched_item(
+    watched_item_id: str, session: AsyncSession = Depends(get_db_session)
+):
+    """Permanently delete an archived WatchedItem (#210).
+
+    Pre-flight: 404 if not found / malformed id; 409 if the item is not archived
+    (archive first — archived already implies ``is_active=False``). On success the
+    DB cascades the item's children (``temporal_profiles``,
+    ``notification_templates``, ``change_revisions``, ``pending_archiver_sync``)
+    via their ``ON DELETE CASCADE`` FKs. An audit row is written before the delete
+    and survives it (the WatchedItem id lives in the JSONB payload, not an FK).
+    Archiver-side content (InfoItem / SourceRevisions) is left untouched.
+    """
+    wi = await _get_or_404(session, watched_item_id)
+
+    if wi.archived_at is None:
+        raise HTTPException(status_code=409, detail="WatchedItem must be archived before deletion")
+
+    audit(
+        session,
+        EventType.WATCHED_ITEM_DELETED,
+        watched_item_id=str(wi.id),
+        name=wi.name,
+        url=wi.effective_url,
+        source="api",
+    )
+    await session.delete(wi)
+    await session.commit()
+
+
 @router.post("/{watched_item_id}/mark-reviewed", response_model=WatchedItemResponse)
 async def mark_reviewed(watched_item_id: str, session: AsyncSession = Depends(get_db_session)):
     """Stamp ``last_reviewed_at = now()``."""

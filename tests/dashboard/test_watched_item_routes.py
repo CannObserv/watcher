@@ -743,6 +743,83 @@ class TestArchiveRestore:
         assert wi.archived_at is None
 
 
+class TestPermanentDelete:
+    """Danger-Zone permanent delete — archived-only affordance (#210)."""
+
+    async def test_archived_detail_shows_delete_block(self, client, db_session):
+        wi = await make_watched_item(
+            db_session, name="Archived", archived_at=datetime.now(UTC), is_active=False
+        )
+        await db_session.commit()
+        body = (await client.get(f"/watched-items/{wi.id}")).content
+        assert b"Delete permanently" in body
+        assert f"/watched-items/{wi.id}/delete".encode() in body
+
+    async def test_active_detail_hides_delete_block(self, client, db_session):
+        wi = await make_watched_item(db_session, name="Active")
+        await db_session.commit()
+        body = (await client.get(f"/watched-items/{wi.id}")).content
+        assert b"Delete permanently" not in body
+        assert f"/watched-items/{wi.id}/delete".encode() not in body
+
+    async def test_delete_htmx_redirects_to_list(self, client, db_session):
+        wi = await make_watched_item(
+            db_session, name="Gone", archived_at=datetime.now(UTC), is_active=False
+        )
+        await db_session.commit()
+        wi_id = wi.id
+
+        response = await client.post(
+            f"/watched-items/{wi_id}/delete",
+            headers={"HX-Request": "true"},
+            follow_redirects=False,
+        )
+        assert response.status_code == 200
+        assert response.headers["HX-Redirect"] == "/watched-items"
+
+        gone = (
+            await db_session.execute(select(WatchedItem).where(WatchedItem.id == wi_id))
+        ).scalar_one_or_none()
+        assert gone is None
+
+    async def test_delete_non_htmx_redirects_to_list(self, client, db_session):
+        wi = await make_watched_item(
+            db_session, name="Gone2", archived_at=datetime.now(UTC), is_active=False
+        )
+        await db_session.commit()
+        wi_id = wi.id
+
+        response = await client.post(f"/watched-items/{wi_id}/delete", follow_redirects=False)
+        assert response.status_code == 303
+        assert response.headers["location"] == "/watched-items"
+
+        gone = (
+            await db_session.execute(select(WatchedItem).where(WatchedItem.id == wi_id))
+        ).scalar_one_or_none()
+        assert gone is None
+
+    async def test_delete_non_archived_keeps_row_and_flashes(self, client, db_session):
+        wi = await make_watched_item(db_session, name="StillActive")
+        await db_session.commit()
+        wi_id = wi.id
+
+        response = await client.post(
+            f"/watched-items/{wi_id}/delete",
+            headers={"HX-Request": "true"},
+            follow_redirects=False,
+        )
+        assert response.status_code == 200  # OOB flash, not a redirect
+
+        still = (
+            await db_session.execute(select(WatchedItem).where(WatchedItem.id == wi_id))
+        ).scalar_one_or_none()
+        assert still is not None
+
+    async def test_delete_unknown_returns_404(self, client):
+        response = await client.post(f"/watched-items/{ULID()}/delete", follow_redirects=False)
+        assert response.status_code == 404
+
+
 class TestFieldHelpers:
     def test_interval_format(self):
         wi = MagicMock()

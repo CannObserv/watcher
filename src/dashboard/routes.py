@@ -22,6 +22,9 @@ from src.api.routes.watched_items import (
     check_now as _api_check_now,
 )
 from src.api.routes.watched_items import (
+    delete_watched_item as _api_delete_watched_item,
+)
+from src.api.routes.watched_items import (
     mark_reviewed as _api_mark_reviewed,
 )
 from src.api.routes.watched_items import (
@@ -619,6 +622,37 @@ async def watched_item_restore(
             headers={"HX-Redirect": f"/watched-items/{watched_item_id}"},
         )
     return RedirectResponse(url=f"/watched-items/{watched_item_id}", status_code=303)
+
+
+@router.post("/watched-items/{watched_item_id}/delete")
+async def watched_item_delete(
+    request: Request,
+    watched_item_id: str,
+    session: AsyncSession = Depends(get_db_session),
+):
+    """Permanently delete an archived WatchedItem (delegates to the API route, #210).
+
+    The API enforces the guards (404 not found, 409 not archived). On success the
+    item is gone, so we redirect to the list rather than the now-missing detail
+    page. A 409 (un-archived) surfaces as an OOB error flash for HTMX, or a
+    redirect back to the still-present detail page for non-HTMX clients.
+    """
+    hx = request.headers.get("HX-Request") == "true"
+    try:
+        await _api_delete_watched_item(watched_item_id, session)
+    except HTTPException as exc:
+        if exc.status_code == 404:
+            raise
+        if not hx:
+            return RedirectResponse(url=f"/watched-items/{watched_item_id}", status_code=303)
+        return templates.TemplateResponse(
+            request,
+            "partials/flash_oob.html",
+            {"flash_oob_level": "error", "flash_oob_message": str(exc.detail)},
+        )
+    if hx:
+        return Response(status_code=200, headers={"HX-Redirect": "/watched-items"})
+    return RedirectResponse(url="/watched-items", status_code=303)
 
 
 @router.post("/watched-items/{watched_item_id}/mark-reviewed")

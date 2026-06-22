@@ -49,6 +49,7 @@ class EventType:
     WATCHED_ITEM_UPDATED = "watched_item.updated"
     WATCHED_ITEM_ARCHIVED = "watched_item.archived"
     WATCHED_ITEM_RESTORED = "watched_item.restored"
+    WATCHED_ITEM_DELETED = "watched_item.deleted"
     WATCHED_ITEM_PAUSED = "watched_item.paused"
     WATCHED_ITEM_RESUMED = "watched_item.resumed"
     WATCHED_ITEM_REVIEWED = "watched_item.reviewed"

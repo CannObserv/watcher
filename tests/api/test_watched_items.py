@@ -196,6 +196,165 @@ class TestMarkReviewed:
         assert response.status_code == 404
 
 
+class TestDeleteWatchedItem:
+    """Hard delete — archived-only, DB cascade, audited (#210)."""
+
+    async def test_delete_archived_returns_204_and_removes_row(self, client, db_session):
+        from datetime import UTC, datetime
+
+        from src.core.models.watched_item import WatchedItem
+
+        wi = await _make_watched_item(db_session, archived_at=datetime.now(UTC), is_active=False)
+        wi_id = wi.id
+
+        response = await client.delete(f"/api/v1/watched-items/{wi_id}")
+        assert response.status_code == 204
+        assert response.content == b""
+
+        gone = (
+            await db_session.execute(select(WatchedItem).where(WatchedItem.id == wi_id))
+        ).scalar_one_or_none()
+        assert gone is None
+
+    async def test_delete_non_archived_returns_409_and_keeps_row(self, client, db_session):
+        from src.core.models.watched_item import WatchedItem
+
+        wi = await _make_watched_item(db_session)  # active, not archived
+        wi_id = wi.id
+
+        response = await client.delete(f"/api/v1/watched-items/{wi_id}")
+        assert response.status_code == 409
+
+        still = (
+            await db_session.execute(select(WatchedItem).where(WatchedItem.id == wi_id))
+        ).scalar_one_or_none()
+        assert still is not None
+
+    async def test_delete_unknown_returns_404(self, client):
+        from ulid import ULID
+
+        response = await client.delete(f"/api/v1/watched-items/{ULID()}")
+        assert response.status_code == 404
+
+    async def test_delete_malformed_id_returns_404(self, client):
+        response = await client.delete("/api/v1/watched-items/not-a-ulid")
+        assert response.status_code == 404
+
+    async def test_delete_cascades_children(self, client, db_session):
+        from datetime import UTC, datetime
+
+        from src.core.models.change_revision import ChangeRevision
+        from src.core.models.notification_template import (
+            VISIBILITY_WATCHED_ITEM,
+            NotificationTemplate,
+        )
+        from src.core.models.pending_archiver_sync import PendingArchiverSync
+        from src.core.models.temporal_profile import (
+            PostAction,
+            ProfileType,
+            TemporalProfile,
+        )
+
+        now = datetime.now(UTC)
+        wi = await _make_watched_item(db_session, archived_at=now, is_active=False)
+        wi_id = wi.id
+
+        profile = TemporalProfile(
+            watched_item_id=wi_id,
+            profile_type=ProfileType.SEASONAL,
+            rules=[{"days_before": 0, "interval": "1h"}],
+            post_action=PostAction.REDUCE_FREQUENCY,
+        )
+        tmpl = NotificationTemplate(
+            title="Item template",
+            watched_item_id=wi_id,
+            channel_hint="slack",
+            visibility=VISIBILITY_WATCHED_ITEM,
+        )
+        revision = ChangeRevision(
+            watched_item_id=wi_id,
+            content_fingerprint="abc",
+            captured_at=now,
+            schema_version=1,
+        )
+        db_session.add_all([profile, tmpl, revision])
+        await db_session.flush()
+        sync = PendingArchiverSync(
+            change_revision_id=revision.id,
+            watched_item_id=wi_id,
+            content_cache_uri="file:///tmp/x",
+            content_cache_expires_at=now,
+            next_attempt_at=now,
+        )
+        db_session.add(sync)
+        await db_session.flush()
+        await db_session.commit()
+
+        response = await client.delete(f"/api/v1/watched-items/{wi_id}")
+        assert response.status_code == 204
+
+        for model in (TemporalProfile, NotificationTemplate, ChangeRevision, PendingArchiverSync):
+            remaining = (
+                (await db_session.execute(select(model).where(model.watched_item_id == wi_id)))
+                .scalars()
+                .all()
+            )
+            assert remaining == [], f"{model.__name__} rows survived the cascade"
+
+    async def test_delete_writes_audit_that_survives(self, client, db_session):
+        from datetime import UTC, datetime
+
+        wi = await _make_watched_item(
+            db_session, name="ToDelete", archived_at=datetime.now(UTC), is_active=False
+        )
+        wi_id = wi.id
+
+        response = await client.delete(f"/api/v1/watched-items/{wi_id}")
+        assert response.status_code == 204
+
+        rows = (
+            (
+                await db_session.execute(
+                    select(AuditLog).where(AuditLog.event_type == EventType.WATCHED_ITEM_DELETED)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert any(r.payload.get("watched_item_id") == str(wi_id) for r in rows)
+
+    async def test_delete_frees_domain_delete_guard(self, client, db_session):
+        """An archived item still pins its domain; deleting it unblocks domain delete (#209)."""
+        from datetime import UTC, datetime
+
+        from src.core.models.domain import Domain
+        from src.core.models.watched_item import WatchedItem
+
+        domain = Domain(name="delete-me.example.com")
+        db_session.add(domain)
+        await db_session.flush()
+        wi = await _make_watched_item(
+            db_session,
+            name="LastRef",
+            domain_name="delete-me.example.com",
+            archived_at=datetime.now(UTC),
+            is_active=False,
+        )
+        wi_id = wi.id
+
+        blocked = await client.delete("/api/v1/domains/delete-me.example.com")
+        assert blocked.status_code == 409
+
+        assert (await client.delete(f"/api/v1/watched-items/{wi_id}")).status_code == 204
+
+        freed = await client.delete("/api/v1/domains/delete-me.example.com")
+        assert freed.status_code == 204
+        gone = (
+            await db_session.execute(select(WatchedItem).where(WatchedItem.id == wi_id))
+        ).scalar_one_or_none()
+        assert gone is None
+
+
 # TestTemplateCrud removed (#200): the per-WatchedItem
 # /api/v1/watched-items/{id}/notification-templates endpoints (list/create/patch/
 # delete of WatchedItemNotificationTemplate rows) were deleted in the notification-

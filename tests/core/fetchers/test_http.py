@@ -36,8 +36,8 @@ class TestFetchResult:
 class TestHttpFetcher:
     @pytest.mark.integration
     async def test_fetch_real_url(self):
-        """Real-network smoke test: a live round-trip (DNS/TLS/redirects + the
-        lazy real-client branch) that MockTransport can't exercise. A 5xx or
+        """Real-network smoke test: a live round-trip (DNS/TLS + the lazy
+        real-client branch) that MockTransport can't exercise. A 5xx or
         transport error is the host/network being down, not a fetcher bug — skip
         so third-party downtime doesn't surface as spurious red (#213)."""
         fetcher = HttpFetcher()

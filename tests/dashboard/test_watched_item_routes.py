@@ -889,10 +889,6 @@ class TestFieldRoutes:
     async def test_post_content_media_type_override(self, client, db_session):
         """#168: the detail-page content_media_type override round-trips and
         recomputes the generated essence + emits a WATCHED_ITEM_UPDATED audit."""
-        from sqlalchemy import select
-
-        from src.core.models.audit_log import AuditLog, EventType
-
         item = await make_info_item(db_session)
         wi = WatchedItem(
             archiver_info_item_id=item.info_item_id,

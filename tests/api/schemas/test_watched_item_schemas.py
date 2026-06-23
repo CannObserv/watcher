@@ -56,9 +56,12 @@ class TestWatchedItemPatch:
 
     def test_content_media_type_rejects_overlong(self):
         from src.api.schemas.watched_item import WatchedItemPatch
+        from src.core.models.watched_item import CONTENT_MEDIA_TYPE_MAX_LEN
 
+        # At the bound is accepted; one over is rejected (#168, 2048).
+        WatchedItemPatch(content_media_type="x" * CONTENT_MEDIA_TYPE_MAX_LEN)
         with pytest.raises(ValidationError):
-            WatchedItemPatch(content_media_type="x" * 256)
+            WatchedItemPatch(content_media_type="x" * (CONTENT_MEDIA_TYPE_MAX_LEN + 1))
 
 
 class TestWatchedItemResponse:

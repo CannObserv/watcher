@@ -360,6 +360,19 @@ class TestExtractorDispatch:
         )
         assert essences == [None]
 
+    async def test_uses_injected_registry_not_global(self, db_session):
+        """The registry param threads through to extractor dispatch (the injection
+        seam) — not the process-global get_registry()."""
+        wi = await make_watched_item(
+            db_session, name="Injected", content_media_type="application/pdf"
+        )
+        wi.effective_url = "https://x.gov/a"
+        wi.source_specs = [{"schema_version": 1, "extraction": {"algorithm": "full_page"}}]
+        await db_session.flush()
+        spy = _SpyRegistry()
+        await process_watched_item(db_session, wi, raw_content=_HTML, registry=spy)
+        assert spy.essences == ["application/pdf"]
+
     async def test_csv_dispatch_changes_fingerprint_vs_html(self, db_session):
         """Real end-to-end: the same CSV bytes fingerprint differently when routed
         to the CsvExcelExtractor (text/csv) vs the HTML fallback (no media type)."""

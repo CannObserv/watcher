@@ -5,7 +5,7 @@ from datetime import datetime
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from src.api.schemas.types import HttpUrlStr, ULIDStr
-from src.core.models.watched_item import WatchHealthStatus
+from src.core.models.watched_item import CONTENT_MEDIA_TYPE_MAX_LEN, WatchHealthStatus
 
 
 class WatchedItemCreate(BaseModel):
@@ -33,7 +33,7 @@ class WatchedItemCreate(BaseModel):
     description: str | None = None
     is_active: bool = True
     default_schedule_config: dict | None = None
-    content_media_type: str | None = Field(None, max_length=255)
+    content_media_type: str | None = Field(None, max_length=CONTENT_MEDIA_TYPE_MAX_LEN)
     default_tags: list[str] | None = None
     url: HttpUrlStr | None = None
     source_specs: list[dict] | None = None
@@ -57,7 +57,7 @@ class WatchedItemPatch(BaseModel):
     description: str | None = None
     is_active: bool | None = None
     default_schedule_config: dict | None = None
-    content_media_type: str | None = Field(None, max_length=255)
+    content_media_type: str | None = Field(None, max_length=CONTENT_MEDIA_TYPE_MAX_LEN)
     default_tags: list[str] | None = None
     effective_url: HttpUrlStr | None = None
     source_specs: list[dict] | None = None

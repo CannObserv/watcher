@@ -127,14 +127,7 @@ change signal. The user-facing noun is "Watched Item".
 
 A `WatchedItem` owns everything: the canonical `effective_url` and `source_specs`
 used by the pipeline; `default_schedule_config`, `default_tags`;
-`content_media_type` (#168 — the **observed** raw `Content-Type` header, e.g.
-`text/html; charset=utf-8`, auto-detected from the first successful fetch
-(seed-once when NULL), operator-overridable on the detail page; the DB maintains
-a STORED generated `media_type_essence` column — lowercased `type/subtype`, params
-stripped — which the pipeline uses to dispatch the extractor: `text/html`→HTML,
-`application/pdf`→PDF, `text/csv`/spreadsheet→CSV/Excel, everything else→HTML
-fallback. The earlier operator-declared `default_content_type` enum
-(`html`/`pdf`/`file`) was retired in #168); `domain_name` (FK → `Domain.name`, set at create time);
+`content_media_type` (#168); `domain_name` (FK → `Domain.name`, set at create time);
 `domain_suspended` (set True/False by domain deactivation/reactivation — it
 gates scheduling directly, no live Domain join); `domain_default_schedule_config`
 (denormalized copy of the parent Domain's cadence — the Domain tier of schedule
@@ -166,6 +159,24 @@ path, never join Domain. Per-domain cadence is `Domain.default_schedule_config`
 /api/v1/domains/{name}` and the domain detail page; the `reduce_frequency`
 post-action throttles to 1d only when the effective cadence is faster than 1d
 (never speeds a slower-than-1d item up).
+
+**Content media type (#168).** `content_media_type` is the **observed** raw
+`Content-Type` header (e.g. `text/html; charset=utf-8`), not an operator-declared
+enum — the old `default_content_type` enum (`html`/`pdf`/`file`) was retired.
+It is auto-detected by `check_watched_item`, seeded **once** from the first
+successful GET response header when NULL (never auto-clobbered — refresh-on-change
+is deferred to drift detection), and operator-overridable on the detail page and
+via PATCH. Bounded to `CONTENT_MEDIA_TYPE_MAX_LEN` (2048) at the column, the API
+schema, and the detection truncation. The DB maintains a STORED generated
+`media_type_essence` column — the lowercased `type/subtype` with params stripped
+(`WatchedItem.MEDIA_TYPE_ESSENCE_SQL`) — as a queryable/filterable projection.
+**Extractor dispatch** (`process_watched_item`) does **not** read that column; it
+derives the dispatch essence in Python via `media_type.resolve_dispatch_essence`
+(observed/overridden essence, with a URL-extension tiebreaker for
+octet-stream/text-plain/absent headers) so a freshly-seeded, unflushed row routes
+correctly. `ServiceRegistry.get_extractor` maps essence → extractor and is total:
+`text/html`→HTML, `application/pdf`→PDF, `text/csv`/spreadsheet→CSV/Excel,
+everything else (incl. `application/json`, `.xls`)→HTML fallback.
 
 **Rate-limiter keying (#197).** The `DomainRateLimiter` throttle bucket is keyed
 by domain *name*: `WatchedItem.domain_name` == `Domain.name` ==

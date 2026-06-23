@@ -6,6 +6,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from ulid import ULID
 
+from src.core.media_type import media_type_essence_of
 from src.core.models import (
     VISIBILITY_GLOBAL,
     VISIBILITY_WATCHED_ITEM,
@@ -105,6 +106,28 @@ async def test_watched_item_content_media_type_none_allowed(db_session: AsyncSes
     await db_session.refresh(wi)
     assert wi.content_media_type is None
     assert wi.media_type_essence is None
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        "text/html",
+        "Text/HTML; charset=utf-8",
+        "application/pdf",
+        "TEXT/CSV",
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet; foo=bar",
+        "  application/json  ",
+        None,
+    ],
+)
+async def test_media_type_essence_python_sql_parity(db_session: AsyncSession, raw) -> None:
+    """The Python media_type_essence_of mirror must agree with the DB-computed
+    generated column for every input (#168 — guards the dual source of truth)."""
+    wi = WatchedItem(archiver_info_item_id=ULID(), name="Parity", content_media_type=raw)
+    db_session.add(wi)
+    await db_session.flush()
+    await db_session.refresh(wi)
+    assert wi.media_type_essence == media_type_essence_of(raw)
 
 
 async def test_notification_template_defaults(db_session: AsyncSession) -> None:

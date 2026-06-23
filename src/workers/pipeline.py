@@ -32,7 +32,7 @@ from src.core.models.watched_item import WatchedItem
 from src.core.notifications.events import WatchEvent, WatchEventType
 from src.core.notifications.notify import dispatch_event_notifications
 from src.core.rate_limiter import DomainRateLimiter
-from src.core.registry import get_registry
+from src.core.registry import ServiceRegistry, get_registry
 from src.core.sources.scratch import write_scratch_bytes
 from src.core.utils import watched_item_event_base_metadata
 
@@ -181,6 +181,7 @@ async def process_watched_item(
     watched_item: WatchedItem,
     *,
     raw_content: bytes,
+    registry: ServiceRegistry | None = None,
 ) -> WatchedItemResult:
     """Run one check cycle for a WatchedItem.
 
@@ -193,7 +194,11 @@ async def process_watched_item(
 
     `watched_item.last_changed_at` is updated on change.
     `last_checked_at` and `health_status` are managed by the caller (tasks.py).
+    `registry` selects the extractor; defaults to the process singleton. The caller
+    (`check_watched_item`) threads its own registry so the extractor and fetcher
+    come from the same place (honouring the `ServiceRegistry` injection seam).
     """
+    reg = registry if registry is not None else get_registry()
     now = datetime.now(UTC)
     source_specs: list[dict] = watched_item.source_specs or [{}]
 
@@ -202,7 +207,7 @@ async def process_watched_item(
     # cycle's response header) + a URL-extension tiebreaker; unknown types fall
     # back to the HTML extractor.
     essence = resolve_dispatch_essence(watched_item.content_media_type, watched_item.effective_url)
-    extractor = get_registry().get_extractor(essence)
+    extractor = reg.get_extractor(essence)
     extra_config = extraction_overrides_for_essence(essence)
     outcome = await _extract_and_fingerprint(
         raw_content, source_specs, extractor=extractor, extra_config=extra_config

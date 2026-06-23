@@ -18,7 +18,11 @@ from src.core.database import get_session_factory
 from src.core.logging import get_logger
 from src.core.models.audit_log import EventType, audit
 from src.core.models.temporal_profile import TemporalProfile
-from src.core.models.watched_item import WatchedItem, WatchHealthStatus
+from src.core.models.watched_item import (
+    CONTENT_MEDIA_TYPE_MAX_LEN,
+    WatchedItem,
+    WatchHealthStatus,
+)
 from src.core.notifications.events import WatchEvent, WatchEventType
 from src.core.rate_limiter import get_rate_limiter
 from src.core.registry import ServiceRegistry, get_registry
@@ -144,15 +148,18 @@ async def check_watched_item(watched_item_id: str, registry: ServiceRegistry | N
         # Auto-detect content type from the response header (#168). Seed once
         # when unset — the first successful GET is authoritative; a later
         # operator override (or drift refresh, deferred) is never clobbered.
+        # Truncate defensively to the column bound so a pathological header can't
+        # fail the cycle (real Content-Type headers are tiny).
         observed_media_type = fetch_result.headers.get("content-type")
         if observed_media_type and not watched_item.content_media_type:
-            watched_item.content_media_type = observed_media_type
+            watched_item.content_media_type = observed_media_type[:CONTENT_MEDIA_TYPE_MAX_LEN]
 
         # Successful fetch → run the per-WatchedItem pipeline.
         result = await process_watched_item(
             session=session,
             watched_item=watched_item,
             raw_content=fetch_result.content,
+            registry=reg,
         )
 
         # Audit the successful check so executions leave a trail (the dashboard

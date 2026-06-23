@@ -10,9 +10,17 @@ from ulid import ULID
 
 from src.core.models.base import Base, TimestampMixin, ULIDType, generate_ulid
 
-# The `type/subtype` essence of a raw media type, lowercased with parameters
-# (e.g. `; charset=utf-8`) stripped. Used as the extractor dispatch key (#168
-# slice 2) and surfaced as the drift-proof `media_type_essence` generated column.
+# Upper bound for the stored raw media type (operator-overridable; real
+# Content-Type headers are tiny — this is a sanity cap shared by the column, the
+# API schema, and the detection truncation in src/workers/tasks.py).
+CONTENT_MEDIA_TYPE_MAX_LEN = 2048
+
+# SQL for the `media_type_essence` generated column: the lowercased `type/subtype`
+# of `content_media_type` with parameters (e.g. `; charset=utf-8`) stripped. This
+# is the drift-proof *stored projection* (queryable/filterable in SQL). The
+# pipeline derives the extractor dispatch key in Python via
+# `media_type.media_type_essence_of` — which mirrors this SQL — because the column
+# is stale on a freshly-seeded, not-yet-flushed row (#168 slice 2).
 MEDIA_TYPE_ESSENCE_SQL = "lower(btrim(split_part(content_media_type, ';', 1)))"
 
 
@@ -70,9 +78,13 @@ class WatchedItem(Base, TimestampMixin):
     # `text/html; charset=utf-8`). Seeded once from the first successful GET fetch
     # when NULL (#168); operator-overridable via the detail page; auto-refresh on
     # change is deferred to drift detection. Free-form raw MIME, not an enum.
-    content_media_type: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
-    # Drift-proof `type/subtype` essence of `content_media_type`, maintained by the
-    # database as a STORED generated column. Read-only; the extractor dispatch key.
+    content_media_type: Mapped[str | None] = mapped_column(
+        String(CONTENT_MEDIA_TYPE_MAX_LEN), nullable=True, default=None
+    )
+    # STORED generated `type/subtype` projection of `content_media_type` — the
+    # drift-proof, SQL-queryable essence. Read-only. Note: the pipeline dispatches
+    # off the Python mirror (`media_type.media_type_essence_of`), not this column,
+    # so a freshly-seeded unflushed row routes correctly (#168 slice 2).
     media_type_essence: Mapped[str | None] = mapped_column(
         Text, Computed(MEDIA_TYPE_ESSENCE_SQL, persisted=True), nullable=True
     )

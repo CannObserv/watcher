@@ -886,6 +886,48 @@ class TestFieldRoutes:
         await db_session.refresh(wi)
         assert wi.name == "New"
 
+    async def test_post_content_media_type_override(self, client, db_session):
+        """#168: the detail-page content_media_type override round-trips and
+        recomputes the generated essence + emits a WATCHED_ITEM_UPDATED audit."""
+        from sqlalchemy import select
+
+        from src.core.models.audit_log import AuditLog, EventType
+
+        item = await make_info_item(db_session)
+        wi = WatchedItem(
+            archiver_info_item_id=item.info_item_id,
+            name="Override",
+            content_media_type="text/html",
+        )
+        db_session.add(wi)
+        await db_session.flush()
+        await db_session.commit()
+
+        response = await client.post(
+            f"/watched-items/{wi.id}/field/content_media_type",
+            data={"value": "application/pdf"},
+            headers={"HX-Request": "true"},
+        )
+        assert response.status_code == 200
+        await db_session.refresh(wi)
+        assert wi.content_media_type == "application/pdf"
+        assert wi.media_type_essence == "application/pdf"
+
+        audits = (
+            (
+                await db_session.execute(
+                    select(AuditLog).where(AuditLog.event_type == EventType.WATCHED_ITEM_UPDATED)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert any(
+            a.payload.get("watched_item_id") == str(wi.id)
+            and "content_media_type" in (a.payload.get("updated_fields") or [])
+            for a in audits
+        )
+
     async def test_interval_field_partial_shows_active_profile_cadence(self, client, db_session):
         """#206 CR-1: the inline interval field partial honors an active profile
         (· profile), matching the full detail page — not the base cadence."""

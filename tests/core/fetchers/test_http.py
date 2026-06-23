@@ -36,8 +36,19 @@ class TestFetchResult:
 class TestHttpFetcher:
     @pytest.mark.integration
     async def test_fetch_real_url(self):
+        """Real-network smoke test: a live round-trip (DNS/TLS/redirects + the
+        lazy real-client branch) that MockTransport can't exercise. A 5xx or
+        transport error is the host/network being down, not a fetcher bug — skip
+        so third-party downtime doesn't surface as spurious red (#213)."""
         fetcher = HttpFetcher()
-        result = await fetcher.fetch("https://httpbin.org/html")
+        try:
+            result = await fetcher.fetch("https://example.com")
+        except httpx.TransportError as exc:
+            pytest.skip(f"network unavailable: {exc!r}")
+        finally:
+            await fetcher.aclose()
+        if result.status_code >= 500:
+            pytest.skip(f"example.com unavailable (HTTP {result.status_code})")
         assert result.is_success
         assert len(result.content) > 0
 

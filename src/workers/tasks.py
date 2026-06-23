@@ -12,6 +12,7 @@ from urllib.parse import urlparse
 import httpx
 import procrastinate
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 from ulid import ULID
 
 from src.core.database import get_session_factory
@@ -42,7 +43,7 @@ logger = get_logger(__name__)
 
 
 async def _record_check_failure(
-    session,
+    session: AsyncSession,
     watched_item: WatchedItem,
     *,
     now: datetime,

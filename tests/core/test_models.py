@@ -18,7 +18,7 @@ from src.core.models.notification_template import (
     NotificationTemplate,
 )
 from src.core.models.temporal_profile import PostAction, ProfileType, TemporalProfile
-from src.core.models.watched_item import ContentType, WatchedItem, WatchHealthStatus
+from src.core.models.watched_item import WatchedItem, WatchHealthStatus
 
 
 class TestULIDType:
@@ -48,24 +48,20 @@ class TestULIDType:
 
 
 class TestWatchedItemContentType:
-    """ContentType + health enums now live on WatchedItem (#191 collapse)."""
+    """content_media_type is free-form raw MIME — no enum, no validator (#168)."""
 
-    def test_default_content_type(self):
-        wi = WatchedItem(name="Test", default_content_type=ContentType.HTML)
-        assert wi.default_content_type == ContentType.HTML
+    def test_content_media_type_accepts_raw_mime(self):
+        wi = WatchedItem(name="Test", content_media_type="text/html; charset=utf-8")
+        assert wi.content_media_type == "text/html; charset=utf-8"
 
-    def test_content_type_enum_values(self):
-        assert ContentType.HTML.value == "html"
-        assert ContentType.PDF.value == "pdf"
-        assert ContentType.FILE.value == "file"
+    def test_content_media_type_defaults_none(self):
+        wi = WatchedItem(name="Test")
+        assert wi.content_media_type is None
 
-    def test_default_content_type_coerces_string(self):
-        wi = WatchedItem(name="Coerce Test", default_content_type="pdf")
-        assert wi.default_content_type is ContentType.PDF
-
-    def test_default_content_type_rejects_invalid(self):
-        with pytest.raises(ValueError, match="Invalid default_content_type"):
-            WatchedItem(name="Bad Type", default_content_type="invalid")
+    def test_content_media_type_accepts_arbitrary_string(self):
+        # No enum membership check — any origin-reported value is stored verbatim.
+        wi = WatchedItem(name="Odd", content_media_type="application/vnd.custom+json")
+        assert wi.content_media_type == "application/vnd.custom+json"
 
     def test_health_status_default(self):
         wi = WatchedItem(name="T")

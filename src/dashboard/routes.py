@@ -46,7 +46,7 @@ from src.core.models.notification_template import (
     NotificationTemplate,
 )
 from src.core.models.temporal_profile import TemporalProfile
-from src.core.models.watched_item import ContentType, WatchedItem
+from src.core.models.watched_item import WatchedItem
 from src.core.notifications.content import build_body, build_title, resolve_options
 from src.core.notifications.default_templates import (
     compose_body_prefill,
@@ -208,7 +208,7 @@ def _format_interval(wi: WatchedItem) -> str:
 
 
 def _format_content_type(wi: WatchedItem) -> str:
-    return wi.default_content_type or ""
+    return wi.content_media_type or ""
 
 
 def _interval_display(
@@ -255,14 +255,14 @@ WATCHED_ITEM_FIELD_META: dict[str, dict] = {
         "format": _format_interval,
         "display": _interval_display,
     },
-    "default_content_type": {
+    "content_media_type": {
         "label": "Content Type",
-        "hint": None,
-        "type": "select",
+        "hint": "Auto-detected from the first fetch. Override only to correct a "
+        "mislabeled origin (e.g. a PDF served as application/octet-stream).",
+        "type": "text",
         "source": "column",
         "cast": lambda v: v.strip() or None,
         "format": _format_content_type,
-        "options": [("", "—"), ("html", "HTML"), ("pdf", "PDF")],
     },
 }
 
@@ -330,7 +330,6 @@ async def watched_item_create_form(request: Request):
         {
             "active_page": "watched-items",
             "flash": None,
-            "content_types": list(ContentType),
         },
     )
 
@@ -342,7 +341,6 @@ async def watched_item_create_submit(
     name: str = Form(""),
     description: str = Form(""),
     default_schedule_interval: str = Form(""),
-    default_content_type: str = Form(""),
     default_tags: str = Form(""),
     is_active: str = Form(""),
     probe_fn: Callable[[str], Awaitable[ProbeResult]] = Depends(get_probe_fn),
@@ -350,9 +348,10 @@ async def watched_item_create_submit(
 ):
     """Create a standalone WatchedItem from the dashboard form.
 
-    Accepts a URL directly; probes it for effective_url + domain_name.
-    Unchecking ``is_active`` provisions the item paused (#188). Audit row uses
-    ``source="dashboard"``.
+    Accepts a URL directly; probes it for effective_url + domain_name. The
+    content media type is auto-detected from the first fetch (#168), not
+    collected here. Unchecking ``is_active`` provisions the item paused (#188).
+    Audit row uses ``source="dashboard"``.
     """
 
     async def _render_with_flash(message: str, level: str = "error"):
@@ -362,7 +361,6 @@ async def watched_item_create_submit(
             {
                 "active_page": "watched-items",
                 "flash": {"type": level, "message": message},
-                "content_types": list(ContentType),
             },
         )
 
@@ -376,13 +374,6 @@ async def watched_item_create_submit(
             parse_interval(interval_raw)
         except ValueError as exc:
             return await _render_with_flash(str(exc))
-
-    ct_raw = default_content_type.strip() or None
-    if ct_raw is not None:
-        try:
-            ContentType(ct_raw)
-        except ValueError:
-            return await _render_with_flash(f"Invalid content type: {ct_raw!r}")
 
     tags = [t.strip() for t in default_tags.split(",") if t.strip()] or None
     if tags and any(len(t) > 255 for t in tags):
@@ -409,7 +400,6 @@ async def watched_item_create_submit(
         name=wi_name,
         description=description.strip() or None,
         default_schedule_config={"interval": interval_raw} if interval_raw else None,
-        default_content_type=ct_raw,
         default_tags=tags,
         is_active=(is_active == "true"),
     )
@@ -571,7 +561,7 @@ async def watched_item_detail_page(
     profile_dicts = _active_profile_dicts(profiles)
     field_contexts = {
         name: _watched_item_field_context(request, wi, name, mode="view", profiles=profile_dicts)
-        for name in ("name", "description", "default_schedule_interval", "default_content_type")
+        for name in ("name", "description", "default_schedule_interval", "content_media_type")
     }
 
     return templates.TemplateResponse(

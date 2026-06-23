@@ -349,7 +349,7 @@ async def make_watched_item(
     for a URL-only WatchedItem (``archiver_info_item_id`` stays NULL).
 
     Extra ``**kwargs`` flow into the WatchedItem constructor — e.g.
-    ``is_active``, ``default_content_type``, ``default_tags``, ``description``,
+    ``is_active``, ``content_media_type``, ``default_tags``, ``description``,
     ``default_schedule_config``, ``domain_suspended``, ``archived_at``.
     ``primary_url`` seeds ``effective_url`` (and the auto-created InfoSource URL).
     Pass ``domain_name=`` to set ``WatchedItem.domain_name`` (auto-creating the

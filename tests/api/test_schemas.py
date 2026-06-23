@@ -328,21 +328,22 @@ class TestWatchedItemCreate:
             name="Custom Name",
             description="Note",
             default_schedule_config={"interval": "15m"},
-            default_content_type="html",
+            content_media_type="text/html",
             default_tags=["regulatory"],
         )
-        assert schema.default_content_type == "html"
+        assert schema.content_media_type == "text/html"
 
-    def test_watched_item_create_rejects_invalid_content_type(self):
-        with pytest.raises(ValidationError):
-            WatchedItemCreate(
-                archiver_info_item_id="01ABCDEFGHJKMNPQRSTVWXYZ00",
-                default_content_type="garbage",
-            )
-
-    def test_watched_item_create_none_content_type_ok(self):
+    def test_watched_item_create_accepts_arbitrary_media_type(self):
+        # Free-form raw MIME (#168) — no enum membership check; only a length bound.
         schema = WatchedItemCreate(
             archiver_info_item_id="01ABCDEFGHJKMNPQRSTVWXYZ00",
-            default_content_type=None,
+            content_media_type="application/vnd.custom+json",
         )
-        assert schema.default_content_type is None
+        assert schema.content_media_type == "application/vnd.custom+json"
+
+    def test_watched_item_create_none_content_media_type_ok(self):
+        schema = WatchedItemCreate(
+            archiver_info_item_id="01ABCDEFGHJKMNPQRSTVWXYZ00",
+            content_media_type=None,
+        )
+        assert schema.content_media_type is None

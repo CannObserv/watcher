@@ -26,15 +26,14 @@ class TestWatchedItemCreateForm:
         assert b'name="name"' in body
         assert b'name="description"' in body
         assert b'name="default_schedule_interval"' in body
-        assert b'name="default_content_type"' in body
         assert b'name="default_tags"' in body
 
-    async def test_form_lists_all_content_types(self, client):
+    async def test_form_omits_content_type_field(self, client):
+        """#168: content type is auto-detected from the first fetch — no manual field."""
         response = await client.get("/watched-items/new")
         body = response.content
-        assert b'value="html"' in body
-        assert b'value="pdf"' in body
-        assert b'value="file"' in body
+        assert b'name="default_content_type"' not in body
+        assert b'name="content_media_type"' not in body
 
     async def test_form_no_typeahead_picker(self, client):
         """Typeahead InfoItem picker has been removed (#185 Phase A step 7)."""
@@ -62,7 +61,6 @@ class TestWatchedItemCreateSubmit:
                 "name": "WI Y",
                 "description": "note",
                 "default_schedule_interval": "15m",
-                "default_content_type": "html",
                 "default_tags": "regulatory, legislative",
             },
             follow_redirects=False,
@@ -77,7 +75,8 @@ class TestWatchedItemCreateSubmit:
         assert wi.name == "WI Y"
         assert wi.description == "note"
         assert wi.default_schedule_config == {"interval": "15m"}
-        assert wi.default_content_type == "html"
+        # content_media_type is not collected at create; auto-detected on first fetch (#168).
+        assert wi.content_media_type is None
         assert set(wi.default_tags) == {"regulatory", "legislative"}
 
     async def test_name_falls_back_to_domain(self, client, db_session):
@@ -351,17 +350,6 @@ class TestWatchedItemUrlReprobe:
         )
         assert response.status_code == 200
         assert b"interval" in response.content.lower()
-
-    async def test_invalid_content_type_shows_flash(self, client):
-        response = await client.post(
-            "/watched-items/new",
-            data={
-                "url": "https://example.com/ct",
-                "default_content_type": "garbage",
-            },
-        )
-        assert response.status_code == 200
-        assert b"content type" in response.content.lower()
 
     async def test_tag_too_long_shows_flash(self, client):
         response = await client.post(

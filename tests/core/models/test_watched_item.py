@@ -9,7 +9,6 @@ from ulid import ULID
 from src.core.models import (
     VISIBILITY_GLOBAL,
     VISIBILITY_WATCHED_ITEM,
-    ContentType,
     NotificationTemplate,
     WatchedItem,
 )
@@ -31,7 +30,8 @@ async def test_watched_item_defaults(db_session: AsyncSession) -> None:
     assert fetched.last_reviewed_at is None
     assert fetched.last_checked_at is None
     assert fetched.default_schedule_config is None
-    assert fetched.default_content_type is None
+    assert fetched.content_media_type is None
+    assert fetched.media_type_essence is None
     assert fetched.default_tags is None
     assert fetched.created_at is not None
     assert fetched.updated_at is not None
@@ -83,21 +83,28 @@ async def test_watched_item_archiver_info_item_id_unique(db_session: AsyncSessio
         await db_session.flush()
 
 
-async def test_watched_item_validates_default_content_type(db_session: AsyncSession) -> None:
+async def test_watched_item_content_media_type_stores_raw_mime(db_session: AsyncSession) -> None:
+    """Free-form raw MIME stored verbatim; the essence projection strips params (#168)."""
     wi = WatchedItem(
         archiver_info_item_id=ULID(),
         name="Test",
-        default_content_type="html",  # string coerces to enum
+        content_media_type="text/HTML; charset=utf-8",
     )
-    assert wi.default_content_type == ContentType.HTML
+    db_session.add(wi)
+    await db_session.flush()
+    await db_session.refresh(wi)
+    assert wi.content_media_type == "text/HTML; charset=utf-8"
+    # Generated column: lowercased type/subtype, params stripped.
+    assert wi.media_type_essence == "text/html"
 
-    with pytest.raises(ValueError, match="Invalid default_content_type"):
-        WatchedItem(archiver_info_item_id=ULID(), name="Bad", default_content_type="not_a_type")
 
-
-async def test_watched_item_default_content_type_none_allowed(db_session: AsyncSession) -> None:
-    wi = WatchedItem(archiver_info_item_id=ULID(), name="NullCT", default_content_type=None)
-    assert wi.default_content_type is None
+async def test_watched_item_content_media_type_none_allowed(db_session: AsyncSession) -> None:
+    wi = WatchedItem(archiver_info_item_id=ULID(), name="NullCT", content_media_type=None)
+    db_session.add(wi)
+    await db_session.flush()
+    await db_session.refresh(wi)
+    assert wi.content_media_type is None
+    assert wi.media_type_essence is None
 
 
 async def test_notification_template_defaults(db_session: AsyncSession) -> None:

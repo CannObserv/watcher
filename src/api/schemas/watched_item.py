@@ -2,10 +2,10 @@
 
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from src.api.schemas.types import HttpUrlStr, ULIDStr
-from src.core.models.watched_item import ContentType, WatchHealthStatus
+from src.core.models.watched_item import WatchHealthStatus
 
 
 class WatchedItemCreate(BaseModel):
@@ -23,6 +23,9 @@ class WatchedItemCreate(BaseModel):
 
     ``source_specs`` seeds the local pipeline extraction config. Optional at
     create time; updatable later via PATCH.
+
+    ``content_media_type`` is normally auto-detected from the first successful
+    fetch (#168); supplying it here pre-seeds an operator override.
     """
 
     archiver_info_item_id: ULIDStr | None = None
@@ -30,7 +33,7 @@ class WatchedItemCreate(BaseModel):
     description: str | None = None
     is_active: bool = True
     default_schedule_config: dict | None = None
-    default_content_type: str | None = None
+    content_media_type: str | None = Field(None, max_length=255)
     default_tags: list[str] | None = None
     url: HttpUrlStr | None = None
     source_specs: list[dict] | None = None
@@ -41,17 +44,6 @@ class WatchedItemCreate(BaseModel):
         if not self.archiver_info_item_id and not self.url:
             raise ValueError("At least one of archiver_info_item_id or url is required")
         return self
-
-    @field_validator("default_content_type")
-    @classmethod
-    def _ct(cls, v: str | None) -> str | None:
-        if v is None:
-            return None
-        try:
-            ContentType(v)
-        except ValueError as exc:
-            raise ValueError(f"Invalid default_content_type: {v!r}") from exc
-        return v
 
 
 class WatchedItemPatch(BaseModel):
@@ -65,7 +57,7 @@ class WatchedItemPatch(BaseModel):
     description: str | None = None
     is_active: bool | None = None
     default_schedule_config: dict | None = None
-    default_content_type: str | None = None
+    content_media_type: str | None = Field(None, max_length=255)
     default_tags: list[str] | None = None
     effective_url: HttpUrlStr | None = None
     source_specs: list[dict] | None = None
@@ -78,17 +70,6 @@ class WatchedItemPatch(BaseModel):
             if field in self.model_fields_set and getattr(self, field) is None:
                 raise ValueError(f"{field} cannot be null; omit the field to leave it unchanged")
         return self
-
-    @field_validator("default_content_type")
-    @classmethod
-    def _ct(cls, v: str | None) -> str | None:
-        if v is None:
-            return None
-        try:
-            ContentType(v)
-        except ValueError as exc:
-            raise ValueError(f"Invalid default_content_type: {v!r}") from exc
-        return v
 
 
 class WatchedItemResponse(BaseModel):
@@ -111,7 +92,8 @@ class WatchedItemResponse(BaseModel):
     last_changed_at: datetime | None
     health_status: WatchHealthStatus
     default_schedule_config: dict | None
-    default_content_type: str | None
+    content_media_type: str | None
+    media_type_essence: str | None
     default_tags: list[str] | None
     effective_url: str
     source_specs: list[dict]

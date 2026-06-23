@@ -34,7 +34,7 @@ async def _make_watched_item_id(db_session, *, domain_name=None):
         name=f"Test Watched Item {_watched_item_counter}",
         primary_url=f"https://example-{_watched_item_counter}.com",
         domain_name=domain_name,
-        default_content_type="html",
+        content_media_type="text/html",
     )
     await db_session.commit()
     return str(wi.id)

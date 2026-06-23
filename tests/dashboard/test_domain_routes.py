@@ -146,7 +146,7 @@ class TestDomainDetail:
             db_session,
             name="My Watch",
             primary_url="https://watched.com/page",
-            default_content_type="html",
+            content_media_type="text/html",
             domain_name="watched.com",
         )
         response = await client.get("/domains/watched.com")
@@ -167,14 +167,14 @@ class TestDomainDetail:
             db_session,
             name="Live",
             primary_url="https://counts.com/live",
-            default_content_type="html",
+            content_media_type="text/html",
             domain_name="counts.com",
         )
         await make_watched_item(
             db_session,
             name="Gone",
             primary_url="https://counts.com/gone",
-            default_content_type="html",
+            content_media_type="text/html",
             domain_name="counts.com",
             archived_at=datetime.now(UTC),
         )
@@ -189,7 +189,7 @@ class TestDomainDetail:
             db_session,
             name="Live",
             primary_url="https://liveonly.com/live",
-            default_content_type="html",
+            content_media_type="text/html",
             domain_name="liveonly.com",
         )
         response = await client.get("/domains/liveonly.com")
@@ -205,7 +205,7 @@ class TestDomainDetail:
             db_session,
             name="Gone",
             primary_url="https://guarded.com/gone",
-            default_content_type="html",
+            content_media_type="text/html",
             domain_name="guarded.com",
             archived_at=datetime.now(UTC),
         )
@@ -396,7 +396,7 @@ class TestDomainWatchedItemsTableDomainInactiveBadge:
             db_session,
             name="Suspended",
             primary_url="https://ds-tbl.com/p",
-            default_content_type="html",
+            content_media_type="text/html",
             domain_name="ds-tbl.com",
             is_active=False,
             domain_suspended=True,
@@ -412,7 +412,7 @@ class TestDomainWatchedItemsTableDomainInactiveBadge:
             db_session,
             name="Manual Off",
             primary_url="https://mi-tbl.com/p",
-            default_content_type="html",
+            content_media_type="text/html",
             domain_name="mi-tbl.com",
             is_active=False,
             domain_suspended=False,
@@ -427,7 +427,7 @@ class TestDomainWatchedItemsTableDomainInactiveBadge:
             db_session,
             name="ColsWatch",
             primary_url="https://cols.com/p",
-            default_content_type="html",
+            content_media_type="text/html",
             domain_name="cols.com",
         )
         response = await client.get("/partials/domain-watched-items/cols.com")
@@ -612,7 +612,7 @@ class TestDomainDelete:
             db_session,
             name="W",
             primary_url="https://busy-del.com/p",
-            default_content_type="html",
+            content_media_type="text/html",
             domain_name="busy-del.com",
         )
         response = await client.post("/domains/busy-del.com/delete")
@@ -724,7 +724,7 @@ class TestDomainToggleActive:
             db_session,
             name="Manual Inactive",
             primary_url="https://manual.com/p",
-            default_content_type="html",
+            content_media_type="text/html",
             domain_name="manual.com",
             is_active=False,
             domain_suspended=False,
@@ -756,7 +756,7 @@ class TestDomainToggleActive:
             db_session,
             name="OOB Watch",
             primary_url="https://htmx-oob.com/p",
-            default_content_type="html",
+            content_media_type="text/html",
             domain_name="htmx-oob.com",
             is_active=True,
         )
@@ -778,7 +778,7 @@ class TestDomainToggleActive:
             db_session,
             name="Badge Watch",
             primary_url="https://htmx-badge.com/p",
-            default_content_type="html",
+            content_media_type="text/html",
             domain_name="htmx-badge.com",
             is_active=True,
         )

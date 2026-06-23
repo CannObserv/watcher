@@ -17,7 +17,7 @@ import src.workers.tasks as tasks_mod
 from src.core.models.audit_log import AuditLog, EventType
 from src.core.models.domain import Domain
 from src.core.models.temporal_profile import PostAction, ProfileType, TemporalProfile
-from src.core.models.watched_item import ContentType, WatchHealthStatus
+from src.core.models.watched_item import WatchHealthStatus
 from src.core.rate_limiter import DomainRateLimiter
 from src.core.registry import ServiceRegistry
 from src.core.watches.resolution import resolved_schedule_config
@@ -51,6 +51,7 @@ def _fake_fetch_result(
     status_code: int = 200,
     fetcher_used: str = "http",
     duration_ms: int = 10,
+    headers: dict | None = None,
 ):
     """MagicMock matching FetchResult shape."""
     result = MagicMock()
@@ -59,7 +60,7 @@ def _fake_fetch_result(
     result.is_success = 200 <= status_code < 400
     result.fetcher_used = fetcher_used
     result.duration_ms = duration_ms
-    result.headers = {}
+    result.headers = headers if headers is not None else {}
     return result
 
 
@@ -684,10 +685,62 @@ class TestPostActions:
 
 
 # ---------------------------------------------------------------------------
-# Smoke test — type sanity, no DB.
+# Content-type auto-detection (#168).
 # ---------------------------------------------------------------------------
 
 
-class TestContentTypeSanity:
-    def test_content_type_enum_still_html(self):
-        assert ContentType.HTML == "html"
+class TestContentMediaTypeDetection:
+    """check_watched_item seeds content_media_type from the GET response header,
+    seed-once: it populates when unset and never clobbers an existing value."""
+
+    async def test_seeds_content_media_type_from_header_when_unset(self, db_session, monkeypatch):
+        watched_item = await make_watched_item(db_session, name="Detect")
+        watched_item.effective_url = "https://example.com/page"
+        watched_item.content_media_type = None
+        await db_session.flush()
+        await db_session.commit()
+
+        _, reg = _wire_check_task(
+            db_session,
+            monkeypatch,
+            fetch_result=_fake_fetch_result(headers={"content-type": "application/pdf"}),
+        )
+        await check_watched_item(str(watched_item.id), registry=reg)
+
+        await db_session.refresh(watched_item)
+        assert watched_item.content_media_type == "application/pdf"
+        # Generated essence projection follows.
+        assert watched_item.media_type_essence == "application/pdf"
+
+    async def test_does_not_clobber_existing_content_media_type(self, db_session, monkeypatch):
+        watched_item = await make_watched_item(
+            db_session, name="Pinned", content_media_type="application/pdf"
+        )
+        watched_item.effective_url = "https://example.com/page"
+        await db_session.flush()
+        await db_session.commit()
+
+        _, reg = _wire_check_task(
+            db_session,
+            monkeypatch,
+            fetch_result=_fake_fetch_result(headers={"content-type": "text/html; charset=utf-8"}),
+        )
+        await check_watched_item(str(watched_item.id), registry=reg)
+
+        await db_session.refresh(watched_item)
+        # Operator override (or earlier seed) survives — seed-once, no refresh.
+        assert watched_item.content_media_type == "application/pdf"
+
+    async def test_no_header_leaves_content_media_type_unset(self, db_session, monkeypatch):
+        watched_item = await make_watched_item(db_session, name="NoHeader")
+        watched_item.effective_url = "https://example.com/page"
+        await db_session.flush()
+        await db_session.commit()
+
+        _, reg = _wire_check_task(
+            db_session, monkeypatch, fetch_result=_fake_fetch_result(headers={})
+        )
+        await check_watched_item(str(watched_item.id), registry=reg)
+
+        await db_session.refresh(watched_item)
+        assert watched_item.content_media_type is None

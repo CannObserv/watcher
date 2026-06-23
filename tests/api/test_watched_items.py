@@ -130,13 +130,15 @@ class TestPatchWatchedItem:
         assert response.status_code == 200
         assert response.json()["name"] == "Stays"
 
-    async def test_invalid_content_type(self, client, db_session):
+    async def test_update_content_media_type_override(self, client, db_session):
+        # #168: content_media_type is free-form raw MIME (operator override path).
         wi = await _make_watched_item(db_session)
         response = await client.patch(
             f"/api/v1/watched-items/{wi.id}",
-            json={"default_content_type": "bogus"},
+            json={"content_media_type": "application/pdf"},
         )
-        assert response.status_code == 422
+        assert response.status_code == 200
+        assert response.json()["content_media_type"] == "application/pdf"
 
 
 class TestArchiveRestore:

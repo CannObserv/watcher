@@ -15,7 +15,7 @@ from src.core.models.notification_template import (
 )
 from src.core.models.pending_archiver_sync import PendingArchiverSync
 from src.core.models.temporal_profile import PostAction, ProfileType, TemporalProfile
-from src.core.models.watched_item import ContentType, WatchedItem, WatchHealthStatus
+from src.core.models.watched_item import WatchedItem, WatchHealthStatus
 
 __all__ = [
     "ApiKey",
@@ -23,7 +23,6 @@ __all__ = [
     "AuditLog",
     "Base",
     "ChangeRevision",
-    "ContentType",
     "DEFAULT_MAX_CONCURRENCY",
     "DEFAULT_MIN_INTERVAL",
     "Domain",

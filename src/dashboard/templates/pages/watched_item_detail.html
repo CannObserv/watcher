@@ -79,8 +79,8 @@
     </div>
     {# Interval #}
     {{ watched_item_field(field_contexts["default_schedule_interval"]) }}
-    {# Content Type #}
-    {{ watched_item_field(field_contexts["default_content_type"]) }}
+    {# Content Type — auto-detected from the first fetch (#168) #}
+    {{ watched_item_field(field_contexts["content_media_type"]) }}
     {# Description #}
     {{ watched_item_field(field_contexts["description"]) }}
     {# Tags #}

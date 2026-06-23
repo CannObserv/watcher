@@ -3,20 +3,17 @@
 import enum
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Index, String, Text, text
+from sqlalchemy import Boolean, Computed, DateTime, ForeignKey, Index, String, Text, text
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB
-from sqlalchemy.orm import Mapped, mapped_column, validates
+from sqlalchemy.orm import Mapped, mapped_column
 from ulid import ULID
 
 from src.core.models.base import Base, TimestampMixin, ULIDType, generate_ulid
 
-
-class ContentType(enum.StrEnum):
-    """Supported content types for monitoring."""
-
-    HTML = "html"
-    PDF = "pdf"
-    FILE = "file"
+# The `type/subtype` essence of a raw media type, lowercased with parameters
+# (e.g. `; charset=utf-8`) stripped. Used as the extractor dispatch key (#168
+# slice 2) and surfaced as the drift-proof `media_type_essence` generated column.
+MEDIA_TYPE_ESSENCE_SQL = "lower(btrim(split_part(content_media_type, ';', 1)))"
 
 
 class WatchHealthStatus(enum.StrEnum):
@@ -69,8 +66,15 @@ class WatchedItem(Base, TimestampMixin):
     default_schedule_config: Mapped[dict | None] = mapped_column(
         JSONB(none_as_null=True), nullable=True, default=None
     )
-    default_content_type: Mapped[ContentType | None] = mapped_column(
-        String(20), nullable=True, default=None
+    # Observed media type — the verbatim `Content-Type` response header (e.g.
+    # `text/html; charset=utf-8`). Seeded once from the first successful GET fetch
+    # when NULL (#168); operator-overridable via the detail page; auto-refresh on
+    # change is deferred to drift detection. Free-form raw MIME, not an enum.
+    content_media_type: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
+    # Drift-proof `type/subtype` essence of `content_media_type`, maintained by the
+    # database as a STORED generated column. Read-only; the extractor dispatch key.
+    media_type_essence: Mapped[str | None] = mapped_column(
+        Text, Computed(MEDIA_TYPE_ESSENCE_SQL, persisted=True), nullable=True
     )
     default_tags: Mapped[list[str] | None] = mapped_column(
         ARRAY(String), nullable=True, default=None
@@ -132,17 +136,3 @@ class WatchedItem(Base, TimestampMixin):
         kwargs.setdefault("source_specs", [])
         kwargs.setdefault("health_status", WatchHealthStatus.UNKNOWN)
         super().__init__(**kwargs)
-
-    @validates("default_content_type")
-    def validate_default_content_type(
-        self, _key: str, value: str | ContentType | None
-    ) -> ContentType | None:
-        """Coerce string values to ContentType enum, allow NULL."""
-        if value is None:
-            return None
-        if isinstance(value, ContentType):
-            return value
-        try:
-            return ContentType(value)
-        except ValueError as exc:
-            raise ValueError(f"Invalid default_content_type: {value!r}") from exc

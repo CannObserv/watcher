@@ -141,6 +141,13 @@ async def check_watched_item(watched_item_id: str, registry: ServiceRegistry | N
                 await session.commit()
             return {"error": f"HTTP {fetch_result.status_code}"}
 
+        # Auto-detect content type from the response header (#168). Seed once
+        # when unset — the first successful GET is authoritative; a later
+        # operator override (or drift refresh, deferred) is never clobbered.
+        observed_media_type = fetch_result.headers.get("content-type")
+        if observed_media_type and not watched_item.content_media_type:
+            watched_item.content_media_type = observed_media_type
+
         # Successful fetch → run the per-WatchedItem pipeline.
         result = await process_watched_item(
             session=session,

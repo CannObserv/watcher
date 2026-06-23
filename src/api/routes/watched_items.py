@@ -116,7 +116,7 @@ async def create_watched_item(
             description=data.description,
             is_active=data.is_active,
             default_schedule_config=data.default_schedule_config,
-            default_content_type=data.default_content_type,
+            content_media_type=data.content_media_type,
             default_tags=data.default_tags,
             effective_url=data.url or "",
             domain_name=domain_name,
@@ -147,7 +147,7 @@ async def create_watched_item(
             description=data.description,
             is_active=data.is_active,
             default_schedule_config=data.default_schedule_config,
-            default_content_type=data.default_content_type,
+            content_media_type=data.content_media_type,
             default_tags=data.default_tags,
             source_specs=data.source_specs or [],
             archiver_info_source_id=data.archiver_info_source_id,
@@ -372,6 +372,10 @@ async def check_now(watched_item_id: str, session: AsyncSession = Depends(get_db
     await check_watched_item.configure().defer_async(watched_item_id=str(wi.id))
     audit(session, EventType.WATCHED_ITEM_CHECK_REQUESTED, watched_item_id=str(wi.id), source="api")
     await session.commit()
+    # Reload so the DB-generated media_type_essence (and any server-side state) is
+    # populated before serialization — otherwise it lazy-loads in the sync Pydantic
+    # path and raises MissingGreenlet. Mirrors mark_reviewed / create.
+    await session.refresh(wi)
     return wi
 
 

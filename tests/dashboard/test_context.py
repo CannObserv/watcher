@@ -6,7 +6,7 @@ import pytest
 
 from src.core.models.domain import Domain
 from src.core.models.temporal_profile import PostAction, ProfileType, TemporalProfile
-from src.core.models.watched_item import ContentType, WatchedItem
+from src.core.models.watched_item import WatchedItem
 from src.dashboard.context import (
     get_active_profiles_by_item,
     get_dashboard_stats,
@@ -29,13 +29,13 @@ class TestGetDashboardStats:
 
     async def test_counts_watched_items(self, db_session):
         await make_watched_item(
-            db_session, name="W1", primary_url="https://a.com", default_content_type="html"
+            db_session, name="W1", primary_url="https://a.com", content_media_type="text/html"
         )
         await make_watched_item(
             db_session,
             name="W2",
             primary_url="https://b.com",
-            default_content_type="html",
+            content_media_type="text/html",
             is_active=False,
         )
         await db_session.flush()
@@ -84,7 +84,7 @@ class TestGetDomainsWithWatchedItemCounts:
             db_session,
             name="Test",
             primary_url="https://example.com",
-            default_content_type=ContentType.HTML,
+            content_media_type="text/html",
             domain_name="example.com",
         )
 
@@ -102,7 +102,7 @@ class TestGetDomainsWithWatchedItemCounts:
             db_session,
             name="Item A",
             primary_url="https://multi.com",
-            default_content_type=ContentType.HTML,
+            content_media_type="text/html",
             domain_name="multi.com",
         )
 
@@ -135,14 +135,14 @@ class TestGetDomainsWithWatchedItemCounts:
             db_session,
             name="Live",
             primary_url="https://mixed.com/live",
-            default_content_type=ContentType.HTML,
+            content_media_type="text/html",
             domain_name="mixed.com",
         )
         await make_watched_item(
             db_session,
             name="Gone",
             primary_url="https://mixed.com/gone",
-            default_content_type=ContentType.HTML,
+            content_media_type="text/html",
             domain_name="mixed.com",
             archived_at=datetime.now(UTC),
         )
@@ -162,7 +162,7 @@ class TestGetDomainsWithWatchedItemCounts:
             db_session,
             name="Gone",
             primary_url="https://retired.com",
-            default_content_type=ContentType.HTML,
+            content_media_type="text/html",
             domain_name="retired.com",
             archived_at=datetime.now(UTC),
         )
@@ -234,7 +234,7 @@ class TestGetDomainsFiltered:
             db_session,
             name="W",
             primary_url="https://checked.com",
-            default_content_type="html",
+            content_media_type="text/html",
             domain_name="checked.com",
         )
         wi.last_checked_at = now
@@ -251,7 +251,7 @@ class TestGetDomainsFiltered:
             db_session,
             name="Live",
             primary_url="https://freshness.com/live",
-            default_content_type="html",
+            content_media_type="text/html",
             domain_name="freshness.com",
         )
         live.last_checked_at = live_time
@@ -259,7 +259,7 @@ class TestGetDomainsFiltered:
             db_session,
             name="Gone",
             primary_url="https://freshness.com/gone",
-            default_content_type="html",
+            content_media_type="text/html",
             domain_name="freshness.com",
             archived_at=datetime.now(UTC),
         )

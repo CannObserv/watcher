@@ -83,7 +83,7 @@ async def test_create_domain_template(client: AsyncClient, db_session):
         name="Domain seed",
         primary_url="https://dom.example.com",
         domain_name="dom.example.com",
-        default_content_type="html",
+        content_media_type="text/html",
     )
     await db_session.commit()
 
@@ -109,7 +109,7 @@ async def test_create_watched_item_template(client: AsyncClient, db_session):
         db_session,
         name="WI scope",
         primary_url="https://example.com",
-        default_content_type="html",
+        content_media_type="text/html",
     )
     await db_session.commit()
 
@@ -234,7 +234,7 @@ async def test_list_templates_filtered_by_visibility(client: AsyncClient, db_ses
         db_session,
         name="Filter WI",
         primary_url="https://example.com",
-        default_content_type="html",
+        content_media_type="text/html",
     )
     await db_session.commit()
 

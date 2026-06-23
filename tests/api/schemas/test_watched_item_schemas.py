@@ -29,11 +29,12 @@ class TestWatchedItemPatch:
             name="Renamed",
             description="notes",
             default_schedule_config={"interval": "30m"},
-            default_content_type="html",
+            content_media_type="text/html",
             default_tags=["a", "b"],
         )
         assert p.name == "Renamed"
         assert p.default_schedule_config == {"interval": "30m"}
+        assert p.content_media_type == "text/html"
 
     def test_all_fields_optional(self):
         from src.api.schemas.watched_item import WatchedItemPatch
@@ -46,11 +47,18 @@ class TestWatchedItemPatch:
         with pytest.raises(ValidationError):
             WatchedItemPatch(name="")
 
-    def test_invalid_content_type(self):
+    def test_content_media_type_free_form(self):
+        # #168: raw MIME is free-form — any string within the length bound is accepted.
+        from src.api.schemas.watched_item import WatchedItemPatch
+
+        p = WatchedItemPatch(content_media_type="application/octet-stream")
+        assert p.content_media_type == "application/octet-stream"
+
+    def test_content_media_type_rejects_overlong(self):
         from src.api.schemas.watched_item import WatchedItemPatch
 
         with pytest.raises(ValidationError):
-            WatchedItemPatch(default_content_type="bogus")
+            WatchedItemPatch(content_media_type="x" * 256)
 
 
 class TestWatchedItemResponse:
@@ -67,6 +75,14 @@ class TestWatchedItemResponse:
         wi.created_at = wi.updated_at = datetime.now(UTC)
         r = WatchedItemResponse.model_validate(wi)
         assert r.name == "X"
+
+    def test_response_exposes_content_media_type_and_essence(self):
+        # #168: raw observed MIME + the read-only essence projection.
+        from src.api.schemas.watched_item import WatchedItemResponse
+
+        assert "content_media_type" in WatchedItemResponse.model_fields
+        assert "media_type_essence" in WatchedItemResponse.model_fields
+        assert "default_content_type" not in WatchedItemResponse.model_fields
 
 
 class TestIssue186SchemaAdditions:

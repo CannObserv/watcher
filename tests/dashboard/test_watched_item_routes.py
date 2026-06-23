@@ -907,7 +907,6 @@ class TestFieldRoutes:
         assert response.status_code == 200
         await db_session.refresh(wi)
         assert wi.content_media_type == "application/pdf"
-        assert wi.media_type_essence == "application/pdf"
 
         audits = (
             (

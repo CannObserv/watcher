@@ -5,11 +5,10 @@ selection. These pure helpers derive the lowercased ``type/subtype`` essence, ap
 a URL-extension tiebreaker when the header is missing or uninformative, and map an
 essence to the CSV/Excel extractor's internal mode.
 
-The Python ``media_type_essence_of`` mirrors the SQL of the
-``watched_items.media_type_essence`` generated column
-(``WatchedItem.MEDIA_TYPE_ESSENCE_SQL``) — keep the two in sync. The pipeline
-derives the dispatch essence in Python (not from the generated column) because the
-column is stale on a freshly-seeded, not-yet-flushed WatchedItem.
+``resolve_dispatch_essence`` is the single source of truth for the dispatch essence:
+the pipeline calls it to pick the extractor, and ``WatchedItemResponse`` surfaces its
+result as the computed ``media_type_essence`` field — there is no stored/generated
+column to keep in sync (#168).
 """
 
 import os

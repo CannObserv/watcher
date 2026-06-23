@@ -167,16 +167,19 @@ It is auto-detected by `check_watched_item`, seeded **once** from the first
 successful GET response header when NULL (never auto-clobbered — refresh-on-change
 is deferred to drift detection), and operator-overridable on the detail page and
 via PATCH. Bounded to `CONTENT_MEDIA_TYPE_MAX_LEN` (2048) at the column, the API
-schema, and the detection truncation. The DB maintains a STORED generated
-`media_type_essence` column — the lowercased `type/subtype` with params stripped
-(`WatchedItem.MEDIA_TYPE_ESSENCE_SQL`) — as a queryable/filterable projection.
-**Extractor dispatch** (`process_watched_item`) does **not** read that column; it
-derives the dispatch essence in Python via `media_type.resolve_dispatch_essence`
-(observed/overridden essence, with a URL-extension tiebreaker for
-octet-stream/text-plain/absent headers) so a freshly-seeded, unflushed row routes
-correctly. `ServiceRegistry.get_extractor` maps essence → extractor and is total:
+schema, and the detection truncation. The **media-type essence** (lowercased
+`type/subtype`, params stripped, with a URL-extension tiebreaker for
+octet-stream/text-plain/absent headers) is **not stored** — it's a pure function,
+`media_type.resolve_dispatch_essence(content_media_type, effective_url)`, the single
+source of truth used by **both** the pipeline (`process_watched_item` picks the
+extractor) **and** the API (`WatchedItemResponse.media_type_essence` is a computed
+field). `ServiceRegistry.get_extractor` maps essence → extractor and is total:
 `text/html`→HTML, `application/pdf`→PDF, `text/csv`/spreadsheet→CSV/Excel,
-everything else (incl. `application/json`, `.xls`)→HTML fallback.
+everything else (incl. `application/json`, `.xls`)→HTML fallback. A dispatched
+extractor that raises on mismatched bytes is caught as `ExtractionError` and
+recorded like a fetch failure (ERROR health + `CHECK_EXTRACTION_FAILED` audit +
+`WATCH_ERROR`), so a mislabeled non-HTML target surfaces a signal instead of
+re-firing every `schedule_tick`.
 
 **Rate-limiter keying (#197).** The `DomainRateLimiter` throttle bucket is keyed
 by domain *name*: `WatchedItem.domain_name` == `Domain.name` ==

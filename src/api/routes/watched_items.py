@@ -372,10 +372,6 @@ async def check_now(watched_item_id: str, session: AsyncSession = Depends(get_db
     await check_watched_item.configure().defer_async(watched_item_id=str(wi.id))
     audit(session, EventType.WATCHED_ITEM_CHECK_REQUESTED, watched_item_id=str(wi.id), source="api")
     await session.commit()
-    # Reload so the DB-generated media_type_essence (and any server-side state) is
-    # populated before serialization — otherwise it lazy-loads in the sync Pydantic
-    # path and raises MissingGreenlet. Mirrors mark_reviewed / create.
-    await session.refresh(wi)
     return wi
 
 

@@ -2,9 +2,10 @@
 
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, computed_field, model_validator
 
 from src.api.schemas.types import HttpUrlStr, ULIDStr
+from src.core.media_type import resolve_dispatch_essence
 from src.core.models.watched_item import CONTENT_MEDIA_TYPE_MAX_LEN, WatchHealthStatus
 
 
@@ -93,7 +94,6 @@ class WatchedItemResponse(BaseModel):
     health_status: WatchHealthStatus
     default_schedule_config: dict | None
     content_media_type: str | None
-    media_type_essence: str | None
     default_tags: list[str] | None
     effective_url: str
     source_specs: list[dict]
@@ -102,6 +102,16 @@ class WatchedItemResponse(BaseModel):
     domain_suspended: bool = False
     created_at: datetime
     updated_at: datetime
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def media_type_essence(self) -> str | None:
+        """The resolved extractor-dispatch essence — the same value the pipeline
+        dispatches on (`resolve_dispatch_essence`): the observed/overridden
+        ``content_media_type`` essence, with a URL-extension tiebreaker for
+        mislabeled (octet-stream/text-plain/absent) headers. Computed, not stored
+        (#168), so it always reflects the actual dispatch decision."""
+        return resolve_dispatch_essence(self.content_media_type, self.effective_url)
 
 
 class ChangeRevisionResponse(BaseModel):

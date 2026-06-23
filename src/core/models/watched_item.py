@@ -3,7 +3,7 @@
 import enum
 from datetime import datetime
 
-from sqlalchemy import Boolean, Computed, DateTime, ForeignKey, Index, String, Text, text
+from sqlalchemy import Boolean, DateTime, ForeignKey, Index, String, Text, text
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 from ulid import ULID
@@ -14,14 +14,6 @@ from src.core.models.base import Base, TimestampMixin, ULIDType, generate_ulid
 # Content-Type headers are tiny — this is a sanity cap shared by the column, the
 # API schema, and the detection truncation in src/workers/tasks.py).
 CONTENT_MEDIA_TYPE_MAX_LEN = 2048
-
-# SQL for the `media_type_essence` generated column: the lowercased `type/subtype`
-# of `content_media_type` with parameters (e.g. `; charset=utf-8`) stripped. This
-# is the drift-proof *stored projection* (queryable/filterable in SQL). The
-# pipeline derives the extractor dispatch key in Python via
-# `media_type.media_type_essence_of` — which mirrors this SQL — because the column
-# is stale on a freshly-seeded, not-yet-flushed row (#168 slice 2).
-MEDIA_TYPE_ESSENCE_SQL = "lower(btrim(split_part(content_media_type, ';', 1)))"
 
 
 class WatchHealthStatus(enum.StrEnum):
@@ -81,13 +73,10 @@ class WatchedItem(Base, TimestampMixin):
     content_media_type: Mapped[str | None] = mapped_column(
         String(CONTENT_MEDIA_TYPE_MAX_LEN), nullable=True, default=None
     )
-    # STORED generated `type/subtype` projection of `content_media_type` — the
-    # drift-proof, SQL-queryable essence. Read-only. Note: the pipeline dispatches
-    # off the Python mirror (`media_type.media_type_essence_of`), not this column,
-    # so a freshly-seeded unflushed row routes correctly (#168 slice 2).
-    media_type_essence: Mapped[str | None] = mapped_column(
-        Text, Computed(MEDIA_TYPE_ESSENCE_SQL, persisted=True), nullable=True
-    )
+    # The `type/subtype` essence is *not* stored — it's a pure function of
+    # content_media_type + effective_url (`media_type.resolve_dispatch_essence`),
+    # the same value the pipeline dispatches on. The API surfaces it as a computed
+    # field on WatchedItemResponse; no DB column to keep in sync (#168).
     default_tags: Mapped[list[str] | None] = mapped_column(
         ARRAY(String), nullable=True, default=None
     )

@@ -79,13 +79,39 @@ class TestWatchedItemResponse:
         r = WatchedItemResponse.model_validate(wi)
         assert r.name == "X"
 
-    def test_response_exposes_content_media_type_and_essence(self):
-        # #168: raw observed MIME + the read-only essence projection.
+    def test_response_exposes_content_media_type_and_computed_essence(self):
+        # #168: raw observed MIME is a stored field; the essence is computed.
         from src.api.schemas.watched_item import WatchedItemResponse
 
         assert "content_media_type" in WatchedItemResponse.model_fields
-        assert "media_type_essence" in WatchedItemResponse.model_fields
+        assert "media_type_essence" in WatchedItemResponse.model_computed_fields
+        assert "media_type_essence" not in WatchedItemResponse.model_fields
         assert "default_content_type" not in WatchedItemResponse.model_fields
+
+    def test_computed_essence_is_the_resolved_dispatch_essence(self):
+        """#168: media_type_essence reflects the *dispatch* resolution (tiebreaker),
+        the same value the pipeline dispatches on — not just the header projection."""
+        from datetime import UTC, datetime
+
+        from ulid import ULID
+
+        from src.api.schemas.watched_item import WatchedItemResponse
+        from src.core.models.watched_item import WatchedItem
+
+        def _essence(content_media_type, url):
+            wi = WatchedItem(archiver_info_item_id=ULID(), name="X")
+            wi.id = ULID()
+            wi.created_at = wi.updated_at = datetime.now(UTC)
+            wi.content_media_type = content_media_type
+            wi.effective_url = url
+            return WatchedItemResponse.model_validate(wi).media_type_essence
+
+        # Header essence wins when informative.
+        assert _essence("text/html; charset=utf-8", "https://x.gov/a") == "text/html"
+        # Mislabeled header rescued by the URL-extension tiebreaker.
+        assert _essence("application/octet-stream", "https://x.gov/doc.pdf") == "application/pdf"
+        # Nothing informative → None (registry maps to the HTML fallback).
+        assert _essence(None, "https://x.gov/page") is None
 
 
 class TestIssue186SchemaAdditions:

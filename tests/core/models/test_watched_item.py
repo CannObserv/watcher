@@ -6,7 +6,6 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from ulid import ULID
 
-from src.core.media_type import media_type_essence_of
 from src.core.models import (
     VISIBILITY_GLOBAL,
     VISIBILITY_WATCHED_ITEM,
@@ -32,7 +31,6 @@ async def test_watched_item_defaults(db_session: AsyncSession) -> None:
     assert fetched.last_checked_at is None
     assert fetched.default_schedule_config is None
     assert fetched.content_media_type is None
-    assert fetched.media_type_essence is None
     assert fetched.default_tags is None
     assert fetched.created_at is not None
     assert fetched.updated_at is not None
@@ -85,7 +83,8 @@ async def test_watched_item_archiver_info_item_id_unique(db_session: AsyncSessio
 
 
 async def test_watched_item_content_media_type_stores_raw_mime(db_session: AsyncSession) -> None:
-    """Free-form raw MIME stored verbatim; the essence projection strips params (#168)."""
+    """Free-form raw MIME stored verbatim (#168). The essence is no longer stored —
+    it's a computed field on WatchedItemResponse (see the schema tests)."""
     wi = WatchedItem(
         archiver_info_item_id=ULID(),
         name="Test",
@@ -95,8 +94,6 @@ async def test_watched_item_content_media_type_stores_raw_mime(db_session: Async
     await db_session.flush()
     await db_session.refresh(wi)
     assert wi.content_media_type == "text/HTML; charset=utf-8"
-    # Generated column: lowercased type/subtype, params stripped.
-    assert wi.media_type_essence == "text/html"
 
 
 async def test_watched_item_content_media_type_none_allowed(db_session: AsyncSession) -> None:
@@ -105,29 +102,6 @@ async def test_watched_item_content_media_type_none_allowed(db_session: AsyncSes
     await db_session.flush()
     await db_session.refresh(wi)
     assert wi.content_media_type is None
-    assert wi.media_type_essence is None
-
-
-@pytest.mark.parametrize(
-    "raw",
-    [
-        "text/html",
-        "Text/HTML; charset=utf-8",
-        "application/pdf",
-        "TEXT/CSV",
-        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet; foo=bar",
-        "  application/json  ",
-        None,
-    ],
-)
-async def test_media_type_essence_python_sql_parity(db_session: AsyncSession, raw) -> None:
-    """The Python media_type_essence_of mirror must agree with the DB-computed
-    generated column for every input (#168 — guards the dual source of truth)."""
-    wi = WatchedItem(archiver_info_item_id=ULID(), name="Parity", content_media_type=raw)
-    db_session.add(wi)
-    await db_session.flush()
-    await db_session.refresh(wi)
-    assert wi.media_type_essence == media_type_essence_of(raw)
 
 
 async def test_notification_template_defaults(db_session: AsyncSession) -> None:

@@ -41,6 +41,17 @@ logger = get_logger(__name__)
 WATCHER_CACHE_TTL_SECONDS = int(os.environ.get("WATCHER_CACHE_TTL_SECONDS", "600"))
 
 
+class ExtractionError(Exception):
+    """Raised when the dispatched extractor cannot process the fetched bytes.
+
+    Post-#168 the pipeline dispatches PDF/CSV extractors that can raise on bytes
+    that don't match the declared/observed type (a mislabeled origin, an HTML
+    error page served under a `.pdf` URL, or an operator override mismatch).
+    The caller (`check_watched_item`) treats this like a fetch failure so the item
+    surfaces a health signal instead of silently re-failing every tick.
+    """
+
+
 # ---------------------------------------------------------------------------
 # Backoff helpers — invoked by `check_watched_item` in tasks.py.
 # ---------------------------------------------------------------------------
@@ -209,9 +220,14 @@ async def process_watched_item(
     essence = resolve_dispatch_essence(watched_item.content_media_type, watched_item.effective_url)
     extractor = reg.get_extractor(essence)
     extra_config = extraction_overrides_for_essence(essence)
-    outcome = await _extract_and_fingerprint(
-        raw_content, source_specs, extractor=extractor, extra_config=extra_config
-    )
+    try:
+        outcome = await _extract_and_fingerprint(
+            raw_content, source_specs, extractor=extractor, extra_config=extra_config
+        )
+    except Exception as exc:
+        # PDF/CSV extractors raise on mismatched bytes; surface as a typed error so
+        # the caller records a health signal rather than dead-letter-looping (#168).
+        raise ExtractionError(f"extraction failed (essence={essence!r}): {exc}") from exc
 
     last_rev = (
         await session.execute(

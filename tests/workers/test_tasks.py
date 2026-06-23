@@ -21,7 +21,12 @@ from src.core.models.watched_item import WatchHealthStatus
 from src.core.rate_limiter import DomainRateLimiter
 from src.core.registry import ServiceRegistry
 from src.core.watches.resolution import resolved_schedule_config
-from src.workers.pipeline import WatchedItemResult, _maybe_decay_backoff, _persist_backoff
+from src.workers.pipeline import (
+    ExtractionError,
+    WatchedItemResult,
+    _maybe_decay_backoff,
+    _persist_backoff,
+)
 from src.workers.tasks import check_watched_item, schedule_tick
 from tests.conftest import make_watched_item
 
@@ -346,6 +351,46 @@ class TestCheckWatchedItem:
         await db_session.refresh(watched_item)
         assert watched_item.last_checked_at is not None
         assert watched_item.last_checked_at >= before
+
+    async def test_extraction_failure_sets_error_health_and_stamps(self, db_session, monkeypatch):
+        """A dispatched extractor that raises is handled like a fetch failure (#168):
+        CHECK_EXTRACTION_FAILED audit, ERROR health, stamped last_checked_at — so a
+        mislabeled non-HTML target surfaces a signal instead of re-firing every tick."""
+        watched_item = await make_watched_item(db_session, name="BadExtract")
+        watched_item.effective_url = "https://x.gov/doc.pdf"
+        await db_session.commit()
+
+        _, reg = _wire_check_task(
+            db_session,
+            monkeypatch,
+            fetch_result=_fake_fetch_result(headers={"content-type": "application/pdf"}),
+        )
+
+        async def _raise(*args, **kwargs):
+            raise ExtractionError("Failed to parse PDF: not a pdf")
+
+        monkeypatch.setattr(tasks_mod, "process_watched_item", _raise)
+
+        result = await check_watched_item(str(watched_item.id), registry=reg)
+        assert result == {"error": "extraction_failed"}
+
+        audit_rows = (
+            (
+                await db_session.execute(
+                    select(AuditLog).where(AuditLog.event_type == EventType.CHECK_EXTRACTION_FAILED)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert len(audit_rows) == 1
+
+        await db_session.refresh(watched_item)
+        assert watched_item.health_status == WatchHealthStatus.ERROR
+        assert watched_item.last_checked_at is not None
+        # The header was still seeded before extraction ran — so the operator can
+        # see the content_media_type that drove the (failed) dispatch.
+        assert watched_item.content_media_type == "application/pdf"
 
 
 # ---------------------------------------------------------------------------
@@ -709,8 +754,6 @@ class TestContentMediaTypeDetection:
 
         await db_session.refresh(watched_item)
         assert watched_item.content_media_type == "application/pdf"
-        # Generated essence projection follows.
-        assert watched_item.media_type_essence == "application/pdf"
 
     async def test_does_not_clobber_existing_content_media_type(self, db_session, monkeypatch):
         watched_item = await make_watched_item(

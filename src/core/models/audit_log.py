@@ -24,6 +24,7 @@ class EventType:
     CHECK_SNAPSHOT_CREATED = "check.snapshot_created"
     CHECK_NO_CHANGE = "check.no_change"
     CHECK_FETCH_FAILED = "check.fetch_failed"
+    CHECK_EXTRACTION_FAILED = "check.extraction_failed"
     NOTIFICATION_DISPATCHED = "notification.dispatched"
     NOTIFICATION_TEST = "notification.test"
     # #200: every notification target is a NotificationTemplate (any visibility);

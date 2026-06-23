@@ -32,12 +32,49 @@ from src.core.watches.resolution import resolved_schedule_config
 from src.workers import bp
 from src.workers.notify import dispatch_event_notifications
 from src.workers.pipeline import (
+    ExtractionError,
     _maybe_decay_backoff,
     _persist_backoff,
     process_watched_item,
 )
 
 logger = get_logger(__name__)
+
+
+async def _record_check_failure(
+    session,
+    watched_item: WatchedItem,
+    *,
+    now: datetime,
+    url: str,
+    audit_event: str,
+    audit_kwargs: dict,
+    error_metadata: dict,
+) -> None:
+    """Record a failed check: ERROR health + stamped ``last_checked_at`` + audit,
+    and dispatch ``WATCH_ERROR`` once on the OK→ERROR transition.
+
+    Shared by the fetch-failure and extraction-failure paths so both surface a
+    health signal and a fresh ``last_checked_at`` — the latter stops a persistent
+    failure from being re-enqueued every ``schedule_tick`` (#168).
+    """
+    audit(session, audit_event, watched_item_id=str(watched_item.id), **audit_kwargs)
+    previous_health = watched_item.health_status
+    watched_item.health_status = WatchHealthStatus.ERROR
+    watched_item.last_checked_at = now
+    await session.commit()
+
+    if previous_health != WatchHealthStatus.ERROR:
+        error_event = WatchEvent(
+            event_type=WatchEventType.WATCH_ERROR,
+            watched_item_id=str(watched_item.id),
+            item_name=watched_item.name,
+            item_url=watched_item.effective_url or url,
+            occurred_at=now,
+            metadata={**error_metadata, **watched_item_event_base_metadata(watched_item)},
+        )
+        await dispatch_event_notifications(session=session, event=error_event)
+        await session.commit()
 
 
 # ---------------------------------------------------------------------------
@@ -116,33 +153,15 @@ async def check_watched_item(watched_item_id: str, registry: ServiceRegistry | N
                     "status": fetch_result.status_code,
                 },
             )
-            audit(
+            await _record_check_failure(
                 session,
-                EventType.CHECK_FETCH_FAILED,
-                watched_item_id=str(watched_item.id),
-                status_code=fetch_result.status_code,
+                watched_item,
+                now=now,
+                url=url,
+                audit_event=EventType.CHECK_FETCH_FAILED,
+                audit_kwargs={"status_code": fetch_result.status_code},
+                error_metadata={"status_code": fetch_result.status_code},
             )
-            # Track health transition on WatchedItem; dispatch WATCH_ERROR once
-            # for the WatchedItem if it transitions to ERROR (#191).
-            previous_health = watched_item.health_status
-            watched_item.health_status = WatchHealthStatus.ERROR
-            watched_item.last_checked_at = now
-            await session.commit()
-
-            if previous_health != WatchHealthStatus.ERROR:
-                error_event = WatchEvent(
-                    event_type=WatchEventType.WATCH_ERROR,
-                    watched_item_id=str(watched_item.id),
-                    item_name=watched_item.name,
-                    item_url=watched_item.effective_url or url,
-                    occurred_at=now,
-                    metadata={
-                        "status_code": fetch_result.status_code,
-                        **watched_item_event_base_metadata(watched_item),
-                    },
-                )
-                await dispatch_event_notifications(session=session, event=error_event)
-                await session.commit()
             return {"error": f"HTTP {fetch_result.status_code}"}
 
         # Auto-detect content type from the response header (#168). Seed once
@@ -154,13 +173,32 @@ async def check_watched_item(watched_item_id: str, registry: ServiceRegistry | N
         if observed_media_type and not watched_item.content_media_type:
             watched_item.content_media_type = observed_media_type[:CONTENT_MEDIA_TYPE_MAX_LEN]
 
-        # Successful fetch → run the per-WatchedItem pipeline.
-        result = await process_watched_item(
-            session=session,
-            watched_item=watched_item,
-            raw_content=fetch_result.content,
-            registry=reg,
-        )
+        # Successful fetch → run the per-WatchedItem pipeline. A dispatched
+        # PDF/CSV extractor can raise on mismatched bytes (#168); treat that like a
+        # fetch failure so the item surfaces ERROR health + a fresh last_checked_at
+        # instead of dead-letter-looping every schedule_tick.
+        try:
+            result = await process_watched_item(
+                session=session,
+                watched_item=watched_item,
+                raw_content=fetch_result.content,
+                registry=reg,
+            )
+        except ExtractionError as exc:
+            logger.warning(
+                "extraction failed",
+                extra={"watched_item_id": watched_item_id, "error": str(exc)},
+            )
+            await _record_check_failure(
+                session,
+                watched_item,
+                now=now,
+                url=url,
+                audit_event=EventType.CHECK_EXTRACTION_FAILED,
+                audit_kwargs={"error": str(exc)},
+                error_metadata={"error": "extraction_failed"},
+            )
+            return {"error": "extraction_failed"}
 
         # Audit the successful check so executions leave a trail (the dashboard
         # checks_today stat + WatchedItem activity read these). A snapshot event

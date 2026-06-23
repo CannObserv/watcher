@@ -10,6 +10,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 from sqlalchemy import select
 
+from src.core.extractors import CsvExcelExtractor, HtmlExtractor, PdfExtractor
 from src.core.models.change_revision import ChangeRevision
 from src.core.models.pending_archiver_sync import PendingArchiverSync
 from src.workers.pipeline import (
@@ -294,3 +295,112 @@ class TestProcessWatchedItem:
         assert result.notifications_dispatched == 1
         assert len(dispatched_events) == 1
         assert dispatched_events[0].watched_item_id == str(wi.id)
+
+
+# ---------------------------------------------------------------------------
+# Extractor dispatch (#168 slice 2)
+# ---------------------------------------------------------------------------
+
+
+class _SpyRegistry:
+    """Records the essence passed to get_extractor; always returns a real HTML
+    extractor so the rest of the pipeline runs on HTML test content."""
+
+    def __init__(self):
+        self.essences: list[str | None] = []
+
+    def get_extractor(self, media_type_essence):
+        self.essences.append(media_type_essence)
+        return HtmlExtractor()
+
+
+def _make_csv_bytes(rows: int = 5) -> bytes:
+    lines = ["name,age"] + [f"person{i},{20 + i}" for i in range(rows)]
+    return ("\n".join(lines) + "\n").encode()
+
+
+@pytest.mark.integration
+class TestExtractorDispatch:
+    async def _spy_essence(self, db_session, monkeypatch, *, content_media_type, url):
+        wi = await make_watched_item(
+            db_session, name="Dispatch", content_media_type=content_media_type
+        )
+        wi.effective_url = url
+        wi.source_specs = [{"schema_version": 1, "extraction": {"algorithm": "full_page"}}]
+        await db_session.flush()
+        spy = _SpyRegistry()
+        monkeypatch.setattr("src.workers.pipeline.get_registry", lambda: spy)
+        await process_watched_item(db_session, wi, raw_content=_HTML)
+        return spy.essences
+
+    async def test_dispatches_on_content_media_type(self, db_session, monkeypatch):
+        essences = await self._spy_essence(
+            db_session, monkeypatch, content_media_type="application/pdf", url="https://x.gov/a"
+        )
+        assert essences == ["application/pdf"]
+
+    async def test_url_extension_tiebreaker(self, db_session, monkeypatch):
+        essences = await self._spy_essence(
+            db_session, monkeypatch, content_media_type=None, url="https://x.gov/data.csv"
+        )
+        assert essences == ["text/csv"]
+
+    async def test_ambiguous_header_uses_extension(self, db_session, monkeypatch):
+        essences = await self._spy_essence(
+            db_session,
+            monkeypatch,
+            content_media_type="application/octet-stream",
+            url="https://x.gov/doc.pdf",
+        )
+        assert essences == ["application/pdf"]
+
+    async def test_html_default_when_uninformative(self, db_session, monkeypatch):
+        essences = await self._spy_essence(
+            db_session, monkeypatch, content_media_type=None, url="https://x.gov/page"
+        )
+        assert essences == [None]
+
+    async def test_csv_dispatch_changes_fingerprint_vs_html(self, db_session):
+        """Real end-to-end: the same CSV bytes fingerprint differently when routed
+        to the CsvExcelExtractor (text/csv) vs the HTML fallback (no media type)."""
+        csv_bytes = _make_csv_bytes()
+
+        as_csv = await make_watched_item(db_session, name="AsCsv", content_media_type="text/csv")
+        as_csv.effective_url = "https://x.gov/data.csv"
+        as_csv.source_specs = [{"schema_version": 1}]
+        await db_session.flush()
+        await process_watched_item(db_session, as_csv, raw_content=csv_bytes)
+
+        as_html = await make_watched_item(db_session, name="AsHtml", content_media_type=None)
+        as_html.effective_url = "https://x.gov/data"
+        as_html.source_specs = [{"schema_version": 1}]
+        await db_session.flush()
+        await process_watched_item(db_session, as_html, raw_content=csv_bytes)
+
+        await db_session.flush()
+        csv_rev = (
+            await db_session.execute(
+                select(ChangeRevision).where(ChangeRevision.watched_item_id == as_csv.id)
+            )
+        ).scalar_one()
+        html_rev = (
+            await db_session.execute(
+                select(ChangeRevision).where(ChangeRevision.watched_item_id == as_html.id)
+            )
+        ).scalar_one()
+        # Both establish a baseline; the CSV row-range extraction differs from the
+        # HTML text extraction, so the fingerprints diverge — proof the dispatch ran.
+        assert csv_rev.content_fingerprint != html_rev.content_fingerprint
+
+
+class TestExtractorRegistryWiring:
+    """The default registry maps essences to the expected extractor classes."""
+
+    def test_default_registry_maps_media_types(self):
+        from src.core.registry import ServiceRegistry
+
+        reg = ServiceRegistry()
+        assert isinstance(reg.get_extractor("text/html"), HtmlExtractor)
+        assert isinstance(reg.get_extractor("application/pdf"), PdfExtractor)
+        assert isinstance(reg.get_extractor("text/csv"), CsvExcelExtractor)
+        assert isinstance(reg.get_extractor("application/json"), HtmlExtractor)

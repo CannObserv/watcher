@@ -19,8 +19,12 @@ from src.core.extraction_defaults import (
     extraction_config_from_spec as _extraction_config_from_spec,
 )
 from src.core.extractors import HtmlExtractor
-from src.core.extractors.base import ExtractionResult
+from src.core.extractors.base import ExtractionResult, Extractor
 from src.core.logging import get_logger
+from src.core.media_type import (
+    extraction_overrides_for_essence,
+    resolve_dispatch_essence,
+)
 from src.core.models.change_revision import ChangeRevision
 from src.core.models.domain import Domain
 from src.core.models.pending_archiver_sync import PendingArchiverSync
@@ -28,6 +32,7 @@ from src.core.models.watched_item import WatchedItem
 from src.core.notifications.events import WatchEvent, WatchEventType
 from src.core.notifications.notify import dispatch_event_notifications
 from src.core.rate_limiter import DomainRateLimiter
+from src.core.registry import get_registry
 from src.core.sources.scratch import write_scratch_bytes
 from src.core.utils import watched_item_event_base_metadata
 
@@ -90,10 +95,23 @@ async def _maybe_decay_backoff(
 # ---------------------------------------------------------------------------
 
 
-async def _extract_with_spec(raw_content: bytes, document: dict) -> ExtractionResult:
-    """Run the HTML extractor with config derived from a source_spec document."""
-    extractor = HtmlExtractor()
+async def _extract_with_spec(
+    raw_content: bytes,
+    document: dict,
+    *,
+    extractor: Extractor | None = None,
+    extra_config: dict | None = None,
+) -> ExtractionResult:
+    """Run an extractor with config derived from a source_spec document.
+
+    Defaults to the HTML extractor (the historical behaviour) when no extractor is
+    supplied. ``extra_config`` carries media-type-implied knobs (e.g. the CSV/Excel
+    ``content_type`` mode) merged over the spec-derived config.
+    """
+    extractor = extractor or HtmlExtractor()
     config = _extraction_config_from_spec(document)
+    if extra_config:
+        config = {**config, **extra_config}
     return await extractor.extract(raw_content, config=config)
 
 
@@ -110,18 +128,24 @@ class ExtractionOutcome:
 async def _extract_and_fingerprint(
     raw_content: bytes,
     source_specs: list[dict],
+    *,
+    extractor: Extractor | None = None,
+    extra_config: dict | None = None,
 ) -> ExtractionOutcome:
     """Extract content and fingerprint, trying source_specs in order until non-empty.
 
     Falls back to the next spec if the current one yields no chunks. If all
     specs yield empty chunks, uses the last result (fingerprinting empty content
-    is a valid baseline).
+    is a valid baseline). ``extractor``/``extra_config`` select and tune the
+    media-type-appropriate extractor (defaults to HTML).
     """
     specs: list[dict] = source_specs if source_specs else [{}]
     result = ExtractionResult(chunks=[])
     used_spec: dict = {}
     for spec in specs:
-        result = await _extract_with_spec(raw_content, spec)
+        result = await _extract_with_spec(
+            raw_content, spec, extractor=extractor, extra_config=extra_config
+        )
         used_spec = spec
         if result.chunks:
             break
@@ -173,7 +197,16 @@ async def process_watched_item(
     now = datetime.now(UTC)
     source_specs: list[dict] = watched_item.source_specs or [{}]
 
-    outcome = await _extract_and_fingerprint(raw_content, source_specs)
+    # Dispatch the extractor on the observed/overridden media type (#168 slice 2).
+    # Derived in Python from content_media_type (seeded by the caller from this
+    # cycle's response header) + a URL-extension tiebreaker; unknown types fall
+    # back to the HTML extractor.
+    essence = resolve_dispatch_essence(watched_item.content_media_type, watched_item.effective_url)
+    extractor = get_registry().get_extractor(essence)
+    extra_config = extraction_overrides_for_essence(essence)
+    outcome = await _extract_and_fingerprint(
+        raw_content, source_specs, extractor=extractor, extra_config=extra_config
+    )
 
     last_rev = (
         await session.execute(

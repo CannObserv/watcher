@@ -22,29 +22,38 @@ class TestServiceRegistryDefaults:
 
     def test_get_extractor_html(self):
         registry = ServiceRegistry()
-        extractor = registry.get_extractor("html")
+        extractor = registry.get_extractor("text/html")
         assert isinstance(extractor, HtmlExtractor)
 
     def test_get_extractor_pdf(self):
         registry = ServiceRegistry()
-        extractor = registry.get_extractor("pdf")
+        extractor = registry.get_extractor("application/pdf")
         assert isinstance(extractor, PdfExtractor)
 
-    def test_get_extractor_file(self):
+    def test_get_extractor_csv(self):
         registry = ServiceRegistry()
-        extractor = registry.get_extractor("file")
+        extractor = registry.get_extractor("text/csv")
+        assert isinstance(extractor, CsvExcelExtractor)
+
+    def test_get_extractor_xlsx(self):
+        registry = ServiceRegistry()
+        extractor = registry.get_extractor(
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
         assert isinstance(extractor, CsvExcelExtractor)
 
     def test_get_extractor_returns_fresh_instance(self):
         registry = ServiceRegistry()
-        e1 = registry.get_extractor("html")
-        e2 = registry.get_extractor("html")
+        e1 = registry.get_extractor("text/html")
+        e2 = registry.get_extractor("text/html")
         assert e1 is not e2
 
-    def test_get_extractor_unknown_type_raises(self):
+    def test_get_extractor_unknown_essence_falls_back_to_html(self):
+        """Total dispatch (#168): open-world media types resolve to HTML, never raise."""
         registry = ServiceRegistry()
-        with pytest.raises(KeyError):
-            registry.get_extractor("unknown")
+        assert isinstance(registry.get_extractor("application/json"), HtmlExtractor)
+        assert isinstance(registry.get_extractor(None), HtmlExtractor)
+        assert isinstance(registry.get_extractor("application/octet-stream"), HtmlExtractor)
 
 
 class TestServiceRegistryCustomInjection:

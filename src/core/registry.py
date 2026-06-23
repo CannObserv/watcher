@@ -9,10 +9,15 @@ from src.core.extractors.base import Extractor
 from src.core.fetchers.base import Fetcher
 from src.core.fetchers.http import HttpFetcher
 
+# Keyed by media-type essence (#168 slice 2). Dispatch is total: anything not
+# listed (including None, application/json, and ambiguous types) falls back to the
+# HTML extractor — the historical default — rather than raising.
 _DEFAULT_EXTRACTOR_MAP: dict[str, type[Extractor]] = {
-    "html": HtmlExtractor,
-    "pdf": PdfExtractor,
-    "file": CsvExcelExtractor,
+    "text/html": HtmlExtractor,
+    "application/xhtml+xml": HtmlExtractor,
+    "application/pdf": PdfExtractor,
+    "text/csv": CsvExcelExtractor,
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": CsvExcelExtractor,
 }
 
 _DEFAULT_ARCHIVER_BASE_URL = "http://localhost:8020"
@@ -46,9 +51,14 @@ class ServiceRegistry:
             self._fetcher = HttpFetcher()
         return self._fetcher
 
-    def get_extractor(self, content_type: str) -> Extractor:
-        """Return a fresh extractor instance for the given content type."""
-        extractor_cls = self._extractor_map[content_type]
+    def get_extractor(self, media_type_essence: str | None) -> Extractor:
+        """Return a fresh extractor for a media-type essence (total; HTML fallback).
+
+        Raw observed media is open-world, so an unrecognised or missing essence
+        resolves to the HTML extractor rather than raising — preserving the
+        pre-#168 behaviour for everything that isn't explicitly PDF/CSV.
+        """
+        extractor_cls = self._extractor_map.get(media_type_essence or "", HtmlExtractor)
         return extractor_cls()
 
     def get_archiver_client(self) -> ArchiverClient:

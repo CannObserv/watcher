@@ -543,6 +543,9 @@ def _active_profile_dicts(profiles: list[TemporalProfile]) -> list[dict]:
 async def watched_item_detail_page(
     request: Request,
     watched_item_id: str,
+    event_type: str | None = None,
+    page: int = 1,
+    page_size: int = 25,
     session: AsyncSession = Depends(get_db_session),
 ):
     """Detail page for a WatchedItem."""
@@ -558,13 +561,16 @@ async def watched_item_detail_page(
     profiles = await get_watched_item_profiles(session, wi.id)
 
     # Recent Activity reuses the shared audit-log table + chip filter, scoped to
-    # this item (#215). First load is unfiltered, page 1; HTMX drives the rest.
+    # this item (#215). HTMX drives filtering/paging, but the route also honors
+    # the ?event_type/page query params so the no-JS Apply button and deep-links
+    # work (CR-1).
+    event_type = event_type or None
     activity_ctx = await _audit_table_context(
         session,
-        event_type=None,
+        event_type=event_type,
         watched_item_id=str(wi.id),
-        page=1,
-        page_size=25,
+        page=page,
+        page_size=page_size,
     )
 
     # Resolution dicts for the active profiles drive the interval field's
@@ -587,7 +593,7 @@ async def watched_item_detail_page(
         "profiles": profiles,
         # Recent Activity chip-filter context (table context merged below).
         "event_choices": WATCHED_ITEM_EVENT_CHOICES,
-        "selected_event_type": None,
+        "selected_event_type": event_type,
         "chips_target": "#wi-activity-table",
         "chips_watched_item_id": str(wi.id),
         "clear_href": f"/watched-items/{wi.id}",
@@ -1977,6 +1983,11 @@ async def partial_domain_watched_items(
     )
 
 
+# Allowed audit-table page sizes — mirrors the <select> options in
+# partials/pagination.html. Any other value is clamped to the default (#215).
+_AUDIT_PAGE_SIZES = (25, 50, 100)
+
+
 async def _audit_table_context(
     session: AsyncSession,
     *,
@@ -1991,9 +2002,13 @@ async def _audit_table_context(
     the WatchedItem detail "Recent Activity" section (scoped → column hidden,
     different HTMX target). Carries the pagination wiring ``partials/pagination``
     expects, including an ``hx_include`` that preserves the active filter when the
-    page size changes.
+    page size changes. ``page`` / ``page_size`` are clamped to safe bounds so a
+    hand-crafted query (e.g. ``page_size=-5``) can't reach the DB as a negative
+    ``LIMIT`` or load an unbounded result set.
     """
     page = max(1, page)
+    if page_size not in _AUDIT_PAGE_SIZES:
+        page_size = 25
     offset = (page - 1) * page_size
     entries = await get_audit_entries(
         session,
@@ -2046,7 +2061,6 @@ async def audit_log_page(
     context.update(
         {
             "active_page": "audit",
-            "event_type": event_type,
             "event_choices": AUDIT_EVENT_CHOICES,
             "selected_event_type": event_type,
             "chips_target": "#audit-table",

@@ -110,6 +110,28 @@ class TestAuditTableSharedPartial:
         resp = await client.get("/partials/audit-table")
         assert b'aria-label="Pagination"' in resp.content
 
+    async def test_empty_state_copy(self, client):
+        """Empty state is the simplified shared copy (#215 CR-2)."""
+        resp = await client.get("/partials/audit-table")
+        assert b"No entries found." in resp.content
+        assert b"No audit entries found." not in resp.content
+
+    async def test_invalid_page_size_does_not_error(self, client, db_session):
+        """A negative page_size must not reach the DB as a negative LIMIT (#215 CR-3)."""
+        db_session.add(AuditLog(event_type=EventType.CHECK_NO_CHANGE, payload={}))
+        await db_session.commit()
+        resp = await client.get("/partials/audit-table?page_size=-5")
+        assert resp.status_code == 200
+
+    async def test_out_of_range_page_size_is_clamped(self, client, db_session):
+        """An out-of-range page_size falls back to the default 25 — the page-size
+        <select> reflects the clamped value, not the raw param (#215 CR-3)."""
+        for _ in range(30):
+            db_session.add(AuditLog(event_type=EventType.CHECK_NO_CHANGE, payload={}))
+        await db_session.commit()
+        resp = await client.get("/partials/audit-table?page_size=99999")
+        assert b'value="25" selected' in resp.content
+
 
 class Test404Template:
     async def test_watched_item_detail_404_uses_template(self, client):

@@ -1,5 +1,6 @@
 """Integration tests for WatchedItem dashboard routes (#185 Phase A step 7)."""
 
+import re
 from datetime import UTC, date, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -1327,6 +1328,33 @@ class TestPauseResume:
         assert b'<th scope="col">Watched Item</th>' not in body
         # friendly-summary list retired
         assert b"Checked \xe2\x80\x94 no change" not in body
+
+    async def test_detail_activity_honors_event_type_filter(self, client, db_session):
+        """The detail route accepts ?event_type= so the no-JS Apply + deep-links
+        filter Recent Activity, not just HTMX (#215 CR-1). Distinct payload markers
+        prove table-row filtering independent of the chip labels."""
+
+        wi = await _make_wi(db_session, name="FilterDetail", effective_url="https://example.com")
+        db_session.add(
+            AuditLog(
+                event_type=EventType.CHECK_NO_CHANGE,
+                payload={"watched_item_id": str(wi.id), "marker": "KEEPME"},
+            )
+        )
+        db_session.add(
+            AuditLog(
+                event_type=EventType.CHECK_FETCH_FAILED,
+                payload={"watched_item_id": str(wi.id), "marker": "DROPME"},
+            )
+        )
+        await db_session.commit()
+        resp = await client.get(f"/watched-items/{wi.id}?event_type={EventType.CHECK_NO_CHANGE}")
+        body = resp.content
+        assert resp.status_code == 200
+        assert b"KEEPME" in body  # matching row kept
+        assert b"DROPME" not in body  # non-matching row filtered out of the table
+        # selected chip reflects the active filter
+        assert re.search(rb'value="check\.no_change"\s+checked', body)
 
     async def test_detail_shows_health_when_unknown(self, client, db_session):
         """Health badge + tooltip render inline (bound to Last Checked) even when UNKNOWN (#202)."""

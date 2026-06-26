@@ -3,6 +3,9 @@
    and the pagination context (page, page_size, total_count, base_url,
    extra_params, hx_target, hx_include) when paging is wanted. #}
 {% set show_wi = show_watched_item if show_watched_item is defined else True %}
+{# Columns: Time, Event, [Watched Item], Details — single source for the
+   expanded payload row's colspan so it can't drift from the header (#216). #}
+{% set col_count = 4 if show_wi else 3 %}
 {% if entries %}
 <div class="overflow-x-auto">
   <table class="data-table">
@@ -48,7 +51,7 @@
       {# Read-only pretty-printed payload, expanded inline by audit-details-toggle.js (#216).
          Mirrors the Source Specs <pre> block on the Watched Item detail page. #}
       <tr id="audit-payload-{{ entry.id }}" hidden>
-        <td colspan="{{ 4 if show_wi else 3 }}" class="px-3 pb-3">
+        <td colspan="{{ col_count }}" class="px-3 pb-3">
           <div class="flex items-start gap-3">
             <pre class="text-xs overflow-x-auto bg-gray-50 dark:bg-gray-900 rounded p-3 text-gray-800 dark:text-gray-200 flex-1"><code>{{ entry.payload | tojson(indent=2) }}</code></pre>
             <button type="button" class="btn btn-secondary text-xs shrink-0" data-audit-close>Close</button>

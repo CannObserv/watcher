@@ -26,10 +26,10 @@
     if (closeBtn) {
       const row = closeBtn.closest("tr");
       if (!row) return;
-      const viewBtn = document.querySelector('[aria-controls="' + row.id + '"]');
-      if (viewBtn) {
-        setOpen(viewBtn, row, false);
-        viewBtn.focus();
+      const controllingBtn = document.querySelector('[aria-controls="' + row.id + '"]');
+      if (controllingBtn) {
+        setOpen(controllingBtn, row, false);
+        controllingBtn.focus();
       } else {
         row.hidden = true;
       }

@@ -199,6 +199,25 @@ class TestAuditTableSharedPartial:
         assert b"data-audit-close" in body  # Close control to collapse
         assert b">Close<" in body
 
+    async def test_details_disclosure_contract(self, client, db_session):
+        """The View button's aria-controls matches the hidden payload row's id —
+        the contract audit-details-toggle.js relies on to find the row (#216)."""
+        wi = await _make_wi(db_session, name="Contract")
+        db_session.add(
+            AuditLog(
+                event_type=EventType.CHECK_NO_CHANGE,
+                payload={"watched_item_id": str(wi.id), "k": "v"},
+            )
+        )
+        await db_session.commit()
+        body = (await client.get(f"/partials/audit-table?watched_item_id={wi.id}")).content.decode()
+        m = re.search(
+            r'data-audit-view aria-expanded="false" aria-controls="(audit-payload-[^"]+)"', body
+        )
+        assert m, "View button with aria-controls not found"
+        assert f'<tr id="{m.group(1)}" hidden>' in body  # the targeted row exists and is hidden
+        assert 'type="button"' in body  # real buttons, keyboard-operable
+
     async def test_details_empty_payload_shows_no_view(self, client, db_session):
         """A row with an empty payload shows no View button (#216)."""
         db_session.add(AuditLog(event_type=EventType.CHECK_NO_CHANGE, payload={}))

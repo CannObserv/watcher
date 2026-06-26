@@ -545,7 +545,7 @@ def _active_profile_dicts(profiles: list[TemporalProfile]) -> list[dict]:
 async def watched_item_detail_page(
     request: Request,
     watched_item_id: str,
-    event_type: list[str] = Query(default=[]),
+    event_type: list[str] = Query(default_factory=list),
     page: int = 1,
     page_size: int = 25,
     session: AsyncSession = Depends(get_db_session),
@@ -2020,7 +2020,7 @@ async def _audit_table_context(
     item_scoped = watched_item_id is not None
     # extra_params drives the pager links; event_type is multi-valued (one query
     # param per selected chip) so pagination.html expands list values.
-    extra_params: dict[str, object] = {}
+    extra_params: dict[str, str | list[str]] = {}
     if event_types:
         extra_params["event_type"] = event_types
     if watched_item_id:
@@ -2044,7 +2044,7 @@ async def _audit_table_context(
 @router.get("/audit")
 async def audit_log_page(
     request: Request,
-    event_type: list[str] = Query(default=[]),
+    event_type: list[str] = Query(default_factory=list),
     page: int = 1,
     page_size: int = 25,
     session: AsyncSession = Depends(get_db_session),
@@ -2075,7 +2075,7 @@ async def audit_log_page(
 @router.get("/partials/audit-table")
 async def partial_audit_table(
     request: Request,
-    event_type: list[str] = Query(default=[]),
+    event_type: list[str] = Query(default_factory=list),
     watched_item_id: str | None = None,
     page: int = 1,
     page_size: int = 25,

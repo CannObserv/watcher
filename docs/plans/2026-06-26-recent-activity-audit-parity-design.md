@@ -123,7 +123,10 @@ page-size change preserves them:
 
 ## Out of scope
 
-- Multi-select event filtering backend (chips remain single-select as today).
+- ~~Multi-select event filtering backend (chips remain single-select as today).~~
+  **Superseded:** single-select shipped with a desync bug (checkbox chips behaved
+  as single-select replace); the #215 follow-up reworked it to true multi-select
+  with OR semantics. See AGENTS.md "Recent Activity / Audit Log parity".
 - Per-item "mark reviewed" dashboard UI (still intentionally unwired).
 - Audit payload shape changes.
 - Filter/sort persistence across navigations (localStorage).

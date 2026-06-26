@@ -132,6 +132,19 @@ class TestAuditTableSharedPartial:
         resp = await client.get("/partials/audit-table?page_size=99999")
         assert b'value="100" selected' in resp.content
 
+    async def test_page_size_options_derive_from_constant(self, client, db_session):
+        """The page-size <select> renders exactly PAGE_SIZES — same constant that
+        drives the clamp cap, so the two can't diverge (#215 CR-9)."""
+        from src.dashboard.deps import PAGE_SIZES
+
+        db_session.add(AuditLog(event_type=EventType.CHECK_NO_CHANGE, payload={}))
+        await db_session.commit()
+        # page_size=50 (!= 25) forces the pager to render even with one row.
+        body = (await client.get("/partials/audit-table?page_size=50")).content.decode()
+        for size in PAGE_SIZES:
+            assert f'value="{size}"' in body
+        assert body.count('<option value="') == len(PAGE_SIZES)
+
 
 class Test404Template:
     async def test_watched_item_detail_404_uses_template(self, client):

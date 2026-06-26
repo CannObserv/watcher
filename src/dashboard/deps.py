@@ -12,9 +12,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.api.deps import get_db_session
 from src.core.models.app_user import AppUser
 
-# Largest page size the pagination control (partials/pagination.html) offers;
-# the cap for a user-supplied page_size so a crafted query can't load unbounded rows.
-MAX_PAGE_SIZE = 100
+# The page sizes the pagination control offers — the single source for both the
+# <select> options (partials/pagination.html, via the ``page_sizes`` Jinja global
+# registered in src/dashboard/__init__.py) and the clamp cap below, so the two
+# can't diverge (#215 CR-9).
+PAGE_SIZES = (25, 50, 100)
+MAX_PAGE_SIZE = max(PAGE_SIZES)
 
 
 def clamp_pagination(page: int, page_size: int, *, default_size: int = 25) -> tuple[int, int]:

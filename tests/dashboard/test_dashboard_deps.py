@@ -62,6 +62,22 @@ class TestClampPagination:
         assert clamp_pagination(-5, 50) == (1, 50)
 
 
+class TestPageSizesSingleSource:
+    """PAGE_SIZES is the one source for both the clamp cap and the page-size
+    <select> options, so they can't diverge (#215 CR-9)."""
+
+    def test_max_page_size_derived_from_constant(self):
+        from src.dashboard.deps import MAX_PAGE_SIZE, PAGE_SIZES
+
+        assert MAX_PAGE_SIZE == max(PAGE_SIZES)
+
+    def test_page_sizes_registered_as_jinja_global(self):
+        from src.dashboard import templates
+        from src.dashboard.deps import PAGE_SIZES
+
+        assert templates.env.globals["page_sizes"] == PAGE_SIZES
+
+
 class TestGetDashboardUser:
     def test_missing_user_id_raises_307(self):
         from src.dashboard.deps import get_dashboard_user

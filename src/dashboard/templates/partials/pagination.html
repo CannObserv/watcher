@@ -12,7 +12,7 @@
       hx-include="{{ hx_include|default("[name='q'],[name='status']") }}"
       name="page_size"
       aria-label="Results per page">
-      {% for size in [25, 50, 100] %}
+      {% for size in page_sizes %}
       <option value="{{ size }}" {% if page_size == size %}selected{% endif %}>{{ size }}</option>
       {% endfor %}
     </select>

@@ -108,10 +108,8 @@ class TestEventType:
     """Tests for EventType string constants."""
 
     def test_constants_have_expected_values(self):
-        assert EventType.WATCH_CREATED == "watch.created"
-        assert EventType.WATCH_UPDATED == "watch.updated"
-        assert EventType.WATCH_DEACTIVATED == "watch.deactivated"
-        assert EventType.WATCH_DELETED == "watch.deleted"
+        assert EventType.WATCHED_ITEM_CREATED == "watched_item.created"
+        assert EventType.WATCHED_ITEM_UPDATED == "watched_item.updated"
         assert EventType.CHECK_SNAPSHOT_CREATED == "check.snapshot_created"
         assert EventType.CHECK_NO_CHANGE == "check.no_change"
         assert EventType.CHECK_FETCH_FAILED == "check.fetch_failed"

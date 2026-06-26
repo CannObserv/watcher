@@ -247,9 +247,12 @@ class TestAuditTableSharedPartial:
         body = (await client.get("/audit")).content
         assert b"audit-details-toggle.js" in body
 
-    async def test_chips_submit_whole_checked_set(self, client):
+    async def test_chips_submit_whole_checked_set(self, client, db_session):
         """Chips include the whole form on change, so every checked chip is sent —
-        the wiring that gives OR and correct deselect behavior (#215 bug)."""
+        the wiring that gives OR and correct deselect behavior (#215 bug). A row is
+        seeded so a chip exists (chips are data-derived now, #217)."""
+        db_session.add(AuditLog(event_type=EventType.CHECK_NO_CHANGE, payload={}))
+        await db_session.commit()
         resp = await client.get("/audit")
         assert b'hx-include="closest form"' in resp.content
 
@@ -369,7 +372,9 @@ class TestDomainDetailFilters:
 
 
 class TestAuditLogFilters:
-    async def test_audit_page_has_chip_group(self, client):
+    async def test_audit_page_has_chip_group(self, client, db_session):
+        db_session.add(AuditLog(event_type=EventType.CHECK_NO_CHANGE, payload={}))
+        await db_session.commit()
         response = await client.get("/audit")
         body = response.content
         assert b'class="chip-group"' in body
@@ -380,9 +385,23 @@ class TestAuditLogFilters:
         response = await client.get("/audit")
         assert b"filter-pill" not in response.content
 
-    async def test_audit_chips_use_current_event_types(self, client):
-        """Stale legacy watch.* chips were corrected to watched_item.* (#215)."""
+    async def test_selected_event_type_without_rows_still_has_chip(self, client):
+        """A deep-linked filter whose type has no rows still renders a checked chip
+        (union of present + selected) so the operator can see and clear it (#217)."""
+        body = (await client.get("/audit?event_type=domain.created")).content
+        assert re.search(rb'value="domain\.created"\s+checked', body)
+
+    async def test_audit_chips_derived_from_data(self, client, db_session):
+        """Chips reflect the event types actually present — including lifecycle
+        events the curated list omitted — and nothing else (#217)."""
+        db_session.add(AuditLog(event_type=EventType.WATCHED_ITEM_PAUSED, payload={}))
+        db_session.add(AuditLog(event_type=EventType.CHECK_NO_CHANGE, payload={}))
+        await db_session.commit()
         body = (await client.get("/audit")).content
-        assert b'value="watched_item.created"' in body
+        # present event types get chips (lifecycle now filterable)
+        assert b'value="watched_item.paused"' in body
+        assert b'value="check.no_change"' in body
+        # a defined-but-absent type gets no chip (dynamic, not the full static set)
+        assert b'value="domain.created"' not in body
+        # legacy prefix is gone from the data and never appears
         assert b'value="watch.created"' not in body
-        assert b'value="check.extraction_failed"' in body

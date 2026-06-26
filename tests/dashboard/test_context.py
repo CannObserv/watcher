@@ -12,6 +12,7 @@ from src.dashboard.context import (
     get_active_profiles_by_item,
     get_audit_entries_count,
     get_dashboard_stats,
+    get_distinct_audit_event_types,
     get_domain_watched_items,
     get_domains_with_watched_item_counts,
     get_queue_health,
@@ -739,3 +740,28 @@ class TestGetAuditEntriesCount:
         await db_session.flush()
         count = await get_audit_entries_count(db_session, watched_item_id=str(wi.id))
         assert count == 1
+
+
+@pytest.mark.integration
+class TestGetDistinctAuditEventTypes:
+    """Dynamic chip source for the Audit Log filter (#217)."""
+
+    async def test_empty_returns_empty(self, db_session):
+        assert await get_distinct_audit_event_types(db_session) == []
+
+    async def test_returns_distinct_sorted(self, db_session):
+        for et in (
+            EventType.CHECK_NO_CHANGE,
+            EventType.CHECK_NO_CHANGE,  # duplicate collapses
+            EventType.WATCHED_ITEM_PAUSED,
+            EventType.CHECK_FETCH_FAILED,
+        ):
+            db_session.add(AuditLog(event_type=et, payload={}))
+        await db_session.flush()
+        result = await get_distinct_audit_event_types(db_session)
+        # distinct, alphabetical (prefix-grouped)
+        assert result == [
+            "check.fetch_failed",
+            "check.no_change",
+            "watched_item.paused",
+        ]

@@ -1,4 +1,5 @@
-{# Reusable sticky-footer pagination. Expects: page, page_size, total_count, base_url, extra_params (dict), hx_target (optional), hx_include (optional). #}
+{# Reusable sticky-footer pagination. Expects: page, page_size, total_count, base_url, extra_params (dict), hx_target (optional), hx_include (optional).
+   Reads the `page_sizes` Jinja global (registered in src/dashboard/__init__.py) for the per-page <select> options — same PAGE_SIZES that bounds the clamp. #}
 {% set total_pages = (total_count + page_size - 1) // page_size %}
 {% if total_pages > 1 or page_size != 25 %}
 <nav class="sticky bottom-0 bg-white dark:bg-gray-900 border-t border-gray-200 dark:border-gray-700 py-3 px-4 flex items-center justify-between mt-4" aria-label="Pagination">

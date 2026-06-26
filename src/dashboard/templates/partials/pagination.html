@@ -1,5 +1,11 @@
 {# Reusable sticky-footer pagination. Expects: page, page_size, total_count, base_url, extra_params (dict), hx_target (optional), hx_include (optional).
-   Reads the `page_sizes` Jinja global (registered in src/dashboard/__init__.py) for the per-page <select> options — same PAGE_SIZES that bounds the clamp. #}
+   Reads the `page_sizes` Jinja global (registered in src/dashboard/__init__.py) for the per-page <select> options — same PAGE_SIZES that bounds the clamp.
+   extra_params values may be a scalar (q, status) or a list (e.g. multi-valued event_type), emitted as repeated &k=v pairs by the qs() macro. #}
+{% macro qs(extra_params) -%}
+{%- for k, v in extra_params.items() -%}
+{%- if v is iterable and v is not string %}{% for item in v %}&{{ k }}={{ item }}{% endfor %}{% else %}&{{ k }}={{ v }}{% endif -%}
+{%- endfor -%}
+{%- endmacro %}
 {% set total_pages = (total_count + page_size - 1) // page_size %}
 {% if total_pages > 1 or page_size != 25 %}
 <nav class="sticky bottom-0 bg-white dark:bg-gray-900 border-t border-gray-200 dark:border-gray-700 py-3 px-4 flex items-center justify-between mt-4" aria-label="Pagination">
@@ -21,8 +27,8 @@
   </div>
   <div class="flex items-center gap-1">
     {% if page > 1 %}
-    <a href="{{ base_url }}?page={{ page - 1 }}&page_size={{ page_size }}{% for k, v in extra_params.items() %}&{{ k }}={{ v }}{% endfor %}"
-       hx-get="{{ base_url }}?page={{ page - 1 }}&page_size={{ page_size }}{% for k, v in extra_params.items() %}&{{ k }}={{ v }}{% endfor %}"
+    <a href="{{ base_url }}?page={{ page - 1 }}&page_size={{ page_size }}{{ qs(extra_params) }}"
+       hx-get="{{ base_url }}?page={{ page - 1 }}&page_size={{ page_size }}{{ qs(extra_params) }}"
        hx-target="{{ hx_target|default('#domains-table-container') }}"
        hx-swap="innerHTML"
        class="btn btn-secondary py-1 px-2 text-sm">Prev</a>
@@ -31,8 +37,8 @@
       {% if p == page %}
       <span class="btn btn-primary py-1 px-2 text-sm" aria-current="page">{{ p }}</span>
       {% elif p <= 3 or p > total_pages - 2 or (p >= page - 1 and p <= page + 1) %}
-      <a href="{{ base_url }}?page={{ p }}&page_size={{ page_size }}{% for k, v in extra_params.items() %}&{{ k }}={{ v }}{% endfor %}"
-         hx-get="{{ base_url }}?page={{ p }}&page_size={{ page_size }}{% for k, v in extra_params.items() %}&{{ k }}={{ v }}{% endfor %}"
+      <a href="{{ base_url }}?page={{ p }}&page_size={{ page_size }}{{ qs(extra_params) }}"
+         hx-get="{{ base_url }}?page={{ p }}&page_size={{ page_size }}{{ qs(extra_params) }}"
          hx-target="{{ hx_target|default('#domains-table-container') }}"
          hx-swap="innerHTML"
          class="btn btn-secondary py-1 px-2 text-sm">{{ p }}</a>
@@ -41,8 +47,8 @@
       {% endif %}
     {% endfor %}
     {% if page < total_pages %}
-    <a href="{{ base_url }}?page={{ page + 1 }}&page_size={{ page_size }}{% for k, v in extra_params.items() %}&{{ k }}={{ v }}{% endfor %}"
-       hx-get="{{ base_url }}?page={{ page + 1 }}&page_size={{ page_size }}{% for k, v in extra_params.items() %}&{{ k }}={{ v }}{% endfor %}"
+    <a href="{{ base_url }}?page={{ page + 1 }}&page_size={{ page_size }}{{ qs(extra_params) }}"
+       hx-get="{{ base_url }}?page={{ page + 1 }}&page_size={{ page_size }}{{ qs(extra_params) }}"
        hx-target="{{ hx_target|default('#domains-table-container') }}"
        hx-swap="innerHTML"
        class="btn btn-secondary py-1 px-2 text-sm">Next</a>

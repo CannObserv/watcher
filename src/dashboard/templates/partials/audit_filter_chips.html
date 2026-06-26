@@ -1,8 +1,10 @@
-{# Shared event-type chip filter for audit-event tables (#215). Drives the
-   shared /partials/audit-table endpoint over HTMX. Expects:
-   event_choices [(value, label)]; selected_event_type; chips_target (hx-target
-   id, e.g. "#audit-table"); clear_href (no-JS / Clear-filter destination);
-   chips_watched_item_id (optional — scopes the filter to one WatchedItem). #}
+{# Shared event-type chip filter for audit-event tables (#215). Multi-select with
+   OR semantics: each change submits the whole form (hx-include="closest form"),
+   so every checked chip — plus the optional hidden watched_item_id — is sent as a
+   repeated ?event_type= param. Expects: event_choices [(value, label)];
+   selected_event_types (list); chips_target (hx-target id, e.g. "#audit-table");
+   clear_href (Clear-filter / no-JS destination); chips_watched_item_id (optional —
+   scopes the filter to one WatchedItem). #}
 <form method="get" action="{{ clear_href }}" class="mb-4">
   {% if chips_watched_item_id %}
   <input type="hidden" name="watched_item_id" value="{{ chips_watched_item_id }}">
@@ -12,22 +14,21 @@
     {% for value, label in event_choices %}
     <label class="chip">
       <input type="checkbox" name="event_type" value="{{ value }}"
-        {% if selected_event_type == value %}checked{% endif %}
+        {% if value in selected_event_types %}checked{% endif %}
         hx-get="/partials/audit-table"
         hx-target="{{ chips_target }}"
         hx-swap="innerHTML"
         hx-trigger="change"
-        hx-vals='js:{event_type: this.checked ? "{{ value }}" : "", watched_item_id: "{{ chips_watched_item_id or "" }}"}'>
+        hx-include="closest form">
       <span>{{ label }}</span>
     </label>
     {% endfor %}
   </fieldset>
-  {% if selected_event_type %}
-  <a href="{{ clear_href }}" class="link text-sm inline-flex items-center min-h-[44px]"
-     hx-get="/partials/audit-table"
-     hx-vals='{"watched_item_id": "{{ chips_watched_item_id or "" }}"}'
-     hx-target="{{ chips_target }}"
-     hx-swap="innerHTML">Clear filter</a>
+  {% if selected_event_types %}
+  {# Full-page link, not an HTMX swap: clearing must reset the checkboxes, which
+     live outside the swapped table region (a table-only swap would leave them
+     visually checked). #}
+  <a href="{{ clear_href }}" class="link text-sm inline-flex items-center min-h-[44px]">Clear filter</a>
   {% endif %}
   <noscript><button type="submit" class="btn btn-secondary">Apply</button></noscript>
 </form>

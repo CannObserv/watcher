@@ -118,18 +118,20 @@ def get_rate_limiter_state(limiter=None) -> list[dict]:
 
 async def get_audit_entries(
     session: AsyncSession,
-    event_type: str | None = None,
+    event_types: list[str] | None = None,
     watched_item_id: str | None = None,
     limit: int = 100,
     offset: int = 0,
 ) -> list[AuditLog]:
     """Fetch audit log entries with optional filters.
 
-    The WatchedItem association lives in the JSONB ``payload`` (the ``watch_id``
-    FK column was retired with the Watch table in #191).
+    ``event_types`` is OR-matched (``event_type IN (...)``) — multiple selected
+    chips broaden the result set (#215). The WatchedItem association lives in the
+    JSONB ``payload`` (the ``watch_id`` FK column was retired with the Watch table
+    in #191).
     """
     stmt = _apply_audit_filters(
-        select(AuditLog).order_by(AuditLog.created_at.desc()), event_type, watched_item_id
+        select(AuditLog).order_by(AuditLog.created_at.desc()), event_types, watched_item_id
     )
     stmt = stmt.limit(limit).offset(offset)
     result = await session.execute(stmt)
@@ -138,25 +140,26 @@ async def get_audit_entries(
 
 async def get_audit_entries_count(
     session: AsyncSession,
-    event_type: str | None = None,
+    event_types: list[str] | None = None,
     watched_item_id: str | None = None,
 ) -> int:
     """Count audit entries matching the given filters (for pagination, #215)."""
-    stmt = _apply_audit_filters(select(func.count(AuditLog.id)), event_type, watched_item_id)
+    stmt = _apply_audit_filters(select(func.count(AuditLog.id)), event_types, watched_item_id)
     result = await session.execute(stmt)
     return result.scalar_one()
 
 
 def _apply_audit_filters(
-    stmt: Select, event_type: str | None, watched_item_id: str | None
+    stmt: Select, event_types: list[str] | None, watched_item_id: str | None
 ) -> Select:
     """Shared event-type / WatchedItem filter for the audit-entry queries.
 
-    The WatchedItem association lives in the JSONB ``payload`` (the ``watch_id``
-    FK column was retired with the Watch table in #191).
+    ``event_types`` is OR-matched via ``IN`` so selecting several chips unions
+    their rows. The WatchedItem association lives in the JSONB ``payload`` (the
+    ``watch_id`` FK column was retired with the Watch table in #191).
     """
-    if event_type:
-        stmt = stmt.where(AuditLog.event_type == event_type)
+    if event_types:
+        stmt = stmt.where(AuditLog.event_type.in_(event_types))
     if watched_item_id:
         stmt = stmt.where(AuditLog.payload["watched_item_id"].astext == watched_item_id)
     return stmt

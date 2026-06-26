@@ -713,8 +713,20 @@ class TestGetAuditEntriesCount:
         db_session.add(AuditLog(event_type=EventType.CHECK_NO_CHANGE, payload={}))
         db_session.add(AuditLog(event_type=EventType.CHECK_FETCH_FAILED, payload={}))
         await db_session.flush()
-        count = await get_audit_entries_count(db_session, event_type=EventType.CHECK_NO_CHANGE)
+        count = await get_audit_entries_count(db_session, event_types=[EventType.CHECK_NO_CHANGE])
         assert count == 1
+
+    async def test_event_types_are_or_matched(self, db_session):
+        """Multiple event_types union their counts (#215 bug — OR, not AND)."""
+        db_session.add(AuditLog(event_type=EventType.CHECK_NO_CHANGE, payload={}))
+        db_session.add(AuditLog(event_type=EventType.CHECK_FETCH_FAILED, payload={}))
+        db_session.add(AuditLog(event_type=EventType.WATCHED_ITEM_CREATED, payload={}))
+        await db_session.flush()
+        count = await get_audit_entries_count(
+            db_session,
+            event_types=[EventType.CHECK_NO_CHANGE, EventType.CHECK_FETCH_FAILED],
+        )
+        assert count == 2
 
     async def test_filters_by_watched_item_id(self, db_session):
         wi = await make_watched_item(db_session, name="Counted", primary_url="https://a.com")

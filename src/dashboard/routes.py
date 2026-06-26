@@ -545,7 +545,7 @@ def _active_profile_dicts(profiles: list[TemporalProfile]) -> list[dict]:
 async def watched_item_detail_page(
     request: Request,
     watched_item_id: str,
-    event_type: str | None = None,
+    event_type: list[str] = Query(default=[]),
     page: int = 1,
     page_size: int = 25,
     session: AsyncSession = Depends(get_db_session),
@@ -565,11 +565,10 @@ async def watched_item_detail_page(
     # Recent Activity reuses the shared audit-log table + chip filter, scoped to
     # this item (#215). HTMX drives filtering/paging, but the route also honors
     # the ?event_type/page query params so the no-JS Apply button and deep-links
-    # work (CR-1).
-    event_type = event_type or None
+    # work (CR-1). event_type is repeatable and OR-matched.
     activity_ctx = await _audit_table_context(
         session,
-        event_type=event_type,
+        event_types=[e for e in event_type if e],
         watched_item_id=str(wi.id),
         page=page,
         page_size=page_size,
@@ -593,9 +592,9 @@ async def watched_item_detail_page(
         "global_templates": global_templates,
         "domain_templates": domain_templates,
         "profiles": profiles,
-        # Recent Activity chip-filter context (table context merged below).
+        # Recent Activity chip-filter context (table context — incl.
+        # selected_event_types — merged below).
         "event_choices": WATCHED_ITEM_EVENT_CHOICES,
-        "selected_event_type": event_type,
         "chips_target": "#wi-activity-table",
         "chips_watched_item_id": str(wi.id),
         "clear_href": f"/watched-items/{wi.id}",
@@ -1990,7 +1989,7 @@ async def partial_domain_watched_items(
 async def _audit_table_context(
     session: AsyncSession,
     *,
-    event_type: str | None,
+    event_types: list[str],
     watched_item_id: str | None,
     page: int,
     page_size: int,
@@ -1999,33 +1998,37 @@ async def _audit_table_context(
 
     Serves both /audit (no ``watched_item_id`` → Watched Item column shown) and
     the WatchedItem detail "Recent Activity" section (scoped → column hidden,
-    different HTMX target). Carries the pagination wiring ``partials/pagination``
-    expects, including an ``hx_include`` that preserves the active filter when the
-    page size changes. ``page`` / ``page_size`` are clamped (``clamp_pagination``)
-    so a hand-crafted query (e.g. ``page_size=-5``) can't reach the DB as a
-    negative ``LIMIT`` or load an unbounded result set.
+    different HTMX target). ``event_types`` is OR-matched, so several selected
+    chips broaden the result set. Carries the pagination wiring
+    ``partials/pagination`` expects, including an ``hx_include`` that preserves the
+    active filter when the page size changes. ``page`` / ``page_size`` are clamped
+    (``clamp_pagination``) so a hand-crafted query (e.g. ``page_size=-5``) can't
+    reach the DB as a negative ``LIMIT`` or load an unbounded result set.
     """
     page, page_size = clamp_pagination(page, page_size)
     offset = (page - 1) * page_size
     entries = await get_audit_entries(
         session,
-        event_type=event_type,
+        event_types=event_types,
         watched_item_id=watched_item_id,
         limit=page_size,
         offset=offset,
     )
     total_count = await get_audit_entries_count(
-        session, event_type=event_type, watched_item_id=watched_item_id
+        session, event_types=event_types, watched_item_id=watched_item_id
     )
     item_scoped = watched_item_id is not None
-    extra_params: dict[str, str] = {}
-    if event_type:
-        extra_params["event_type"] = event_type
+    # extra_params drives the pager links; event_type is multi-valued (one query
+    # param per selected chip) so pagination.html expands list values.
+    extra_params: dict[str, object] = {}
+    if event_types:
+        extra_params["event_type"] = event_types
     if watched_item_id:
         extra_params["watched_item_id"] = watched_item_id
     return {
         "entries": entries,
         "show_watched_item": not item_scoped,
+        "selected_event_types": event_types,
         "page": page,
         "page_size": page_size,
         "total_count": total_count,
@@ -2041,16 +2044,18 @@ async def _audit_table_context(
 @router.get("/audit")
 async def audit_log_page(
     request: Request,
-    event_type: str | None = None,
+    event_type: list[str] = Query(default=[]),
     page: int = 1,
     page_size: int = 25,
     session: AsyncSession = Depends(get_db_session),
 ):
-    """Audit log page with chip filtering + pagination."""
-    event_type = event_type or None
+    """Audit log page with chip filtering + pagination.
+
+    ``event_type`` is repeatable (``?event_type=a&event_type=b``) and OR-matched.
+    """
     context = await _audit_table_context(
         session,
-        event_type=event_type,
+        event_types=[e for e in event_type if e],
         watched_item_id=None,
         page=page,
         page_size=page_size,
@@ -2059,7 +2064,6 @@ async def audit_log_page(
         {
             "active_page": "audit",
             "event_choices": AUDIT_EVENT_CHOICES,
-            "selected_event_type": event_type,
             "chips_target": "#audit-table",
             "chips_watched_item_id": None,
             "clear_href": "/audit",
@@ -2071,7 +2075,7 @@ async def audit_log_page(
 @router.get("/partials/audit-table")
 async def partial_audit_table(
     request: Request,
-    event_type: str | None = None,
+    event_type: list[str] = Query(default=[]),
     watched_item_id: str | None = None,
     page: int = 1,
     page_size: int = 25,
@@ -2080,7 +2084,7 @@ async def partial_audit_table(
     """HTMX partial: filtered, paginated audit table (shared by /audit + detail)."""
     context = await _audit_table_context(
         session,
-        event_type=event_type or None,
+        event_types=[e for e in event_type if e],
         watched_item_id=watched_item_id or None,
         page=page,
         page_size=page_size,

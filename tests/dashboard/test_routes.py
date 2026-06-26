@@ -132,6 +132,55 @@ class TestAuditTableSharedPartial:
         resp = await client.get("/partials/audit-table?page_size=99999")
         assert b'value="100" selected' in resp.content
 
+    async def test_multiple_event_types_or_filter(self, client, db_session):
+        """Multiple selected event-type chips OR together — not AND, not single-
+        select replace (#215 bug). Distinct payload markers prove which rows show."""
+        wi = await _make_wi(db_session, name="OrFilter")
+        db_session.add(
+            AuditLog(
+                event_type=EventType.CHECK_SNAPSHOT_CREATED,
+                payload={"watched_item_id": str(wi.id), "marker": "SNAProw"},
+            )
+        )
+        db_session.add(
+            AuditLog(
+                event_type=EventType.CHECK_NO_CHANGE,
+                payload={"watched_item_id": str(wi.id), "marker": "NOCHrow"},
+            )
+        )
+        db_session.add(
+            AuditLog(
+                event_type=EventType.CHECK_FETCH_FAILED,
+                payload={"watched_item_id": str(wi.id), "marker": "FAILrow"},
+            )
+        )
+        await db_session.commit()
+        resp = await client.get(
+            f"/partials/audit-table?watched_item_id={wi.id}"
+            f"&event_type={EventType.CHECK_SNAPSHOT_CREATED}"
+            f"&event_type={EventType.CHECK_NO_CHANGE}"
+        )
+        body = resp.content
+        assert b"SNAProw" in body  # both selected types are shown (OR)
+        assert b"NOCHrow" in body
+        assert b"FAILrow" not in body  # an unselected type stays excluded
+
+    async def test_chips_submit_whole_checked_set(self, client):
+        """Chips include the whole form on change, so every checked chip is sent —
+        the wiring that gives OR and correct deselect behavior (#215 bug)."""
+        resp = await client.get("/audit")
+        assert b'hx-include="closest form"' in resp.content
+
+    async def test_multiple_event_types_both_chips_checked(self, client):
+        """A multi-value deep-link checks every selected chip (#215 bug)."""
+        resp = await client.get(
+            f"/audit?event_type={EventType.CHECK_NO_CHANGE}"
+            f"&event_type={EventType.WATCHED_ITEM_CREATED}"
+        )
+        body = resp.content
+        assert re.search(rb'value="check\.no_change"\s+checked', body)
+        assert re.search(rb'value="watched_item\.created"\s+checked', body)
+
     async def test_page_size_options_derive_from_constant(self, client, db_session):
         """The page-size <select> renders exactly PAGE_SIZES — same constant that
         drives the clamp cap, so the two can't diverge (#215 CR-9)."""

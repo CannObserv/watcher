@@ -35,10 +35,27 @@
           {% else %}—{% endif %}
         </td>
         {% endif %}
-        <td class="text-xs text-gray-500 dark:text-gray-400 max-w-[300px] truncate">
-          {{ entry.payload | tojson | truncate(80, True, '…') }}
+        <td>
+          {% if entry.payload %}
+          <button type="button" class="btn btn-secondary text-xs"
+            data-audit-view aria-expanded="false" aria-controls="audit-payload-{{ entry.id }}">View</button>
+          {% else %}
+          <span class="text-gray-400">—</span>
+          {% endif %}
         </td>
       </tr>
+      {% if entry.payload %}
+      {# Read-only pretty-printed payload, expanded inline by audit-details-toggle.js (#216).
+         Mirrors the Source Specs <pre> block on the Watched Item detail page. #}
+      <tr id="audit-payload-{{ entry.id }}" hidden>
+        <td colspan="{{ 4 if show_wi else 3 }}" class="px-3 pb-3">
+          <div class="flex items-start gap-3">
+            <pre class="text-xs overflow-x-auto bg-gray-50 dark:bg-gray-900 rounded p-3 text-gray-800 dark:text-gray-200 flex-1"><code>{{ entry.payload | tojson(indent=2) }}</code></pre>
+            <button type="button" class="btn btn-secondary text-xs shrink-0" data-audit-close>Close</button>
+          </div>
+        </td>
+      </tr>
+      {% endif %}
       {% endfor %}
     </tbody>
   </table>

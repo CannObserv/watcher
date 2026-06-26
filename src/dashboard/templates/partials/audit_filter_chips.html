@@ -1,0 +1,33 @@
+{# Shared event-type chip filter for audit-event tables (#215). Drives the
+   shared /partials/audit-table endpoint over HTMX. Expects:
+   event_choices [(value, label)]; selected_event_type; chips_target (hx-target
+   id, e.g. "#audit-table"); clear_href (no-JS / Clear-filter destination);
+   chips_watched_item_id (optional — scopes the filter to one WatchedItem). #}
+<form method="get" action="{{ clear_href }}" class="mb-4">
+  {% if chips_watched_item_id %}
+  <input type="hidden" name="watched_item_id" value="{{ chips_watched_item_id }}">
+  {% endif %}
+  <fieldset class="chip-group" aria-label="Filter by event type">
+    <legend class="sr-only">Event types</legend>
+    {% for value, label in event_choices %}
+    <label class="chip">
+      <input type="checkbox" name="event_type" value="{{ value }}"
+        {% if selected_event_type == value %}checked{% endif %}
+        hx-get="/partials/audit-table"
+        hx-target="{{ chips_target }}"
+        hx-swap="innerHTML"
+        hx-trigger="change"
+        hx-vals='js:{event_type: this.checked ? "{{ value }}" : "", watched_item_id: "{{ chips_watched_item_id or "" }}"}'>
+      <span>{{ label }}</span>
+    </label>
+    {% endfor %}
+  </fieldset>
+  {% if selected_event_type %}
+  <a href="{{ clear_href }}" class="link text-sm inline-flex items-center min-h-[44px]"
+     hx-get="/partials/audit-table"
+     hx-vals='{"watched_item_id": "{{ chips_watched_item_id or "" }}"}'
+     hx-target="{{ chips_target }}"
+     hx-swap="innerHTML">Clear filter</a>
+  {% endif %}
+  <noscript><button type="submit" class="btn btn-secondary">Apply</button></noscript>
+</form>

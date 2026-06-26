@@ -4,11 +4,13 @@ from datetime import UTC, datetime
 
 import pytest
 
+from src.core.models.audit_log import AuditLog, EventType
 from src.core.models.domain import Domain
 from src.core.models.temporal_profile import PostAction, ProfileType, TemporalProfile
 from src.core.models.watched_item import WatchedItem
 from src.dashboard.context import (
     get_active_profiles_by_item,
+    get_audit_entries_count,
     get_dashboard_stats,
     get_domain_watched_items,
     get_domains_with_watched_item_counts,
@@ -692,3 +694,36 @@ class TestGetActiveProfilesByItem:
         result = await get_active_profiles_by_item(db_session, [wi.id])
 
         assert str(wi.id) not in result
+
+
+@pytest.mark.integration
+class TestGetAuditEntriesCount:
+    """Pager totals for the audit-log / recent-activity table (#215)."""
+
+    async def test_empty_returns_zero(self, db_session):
+        assert await get_audit_entries_count(db_session) == 0
+
+    async def test_counts_all_without_filters(self, db_session):
+        db_session.add(AuditLog(event_type=EventType.CHECK_NO_CHANGE, payload={}))
+        db_session.add(AuditLog(event_type=EventType.WATCHED_ITEM_CREATED, payload={}))
+        await db_session.flush()
+        assert await get_audit_entries_count(db_session) == 2
+
+    async def test_filters_by_event_type(self, db_session):
+        db_session.add(AuditLog(event_type=EventType.CHECK_NO_CHANGE, payload={}))
+        db_session.add(AuditLog(event_type=EventType.CHECK_FETCH_FAILED, payload={}))
+        await db_session.flush()
+        count = await get_audit_entries_count(db_session, event_type=EventType.CHECK_NO_CHANGE)
+        assert count == 1
+
+    async def test_filters_by_watched_item_id(self, db_session):
+        wi = await make_watched_item(db_session, name="Counted", primary_url="https://a.com")
+        db_session.add(
+            AuditLog(event_type=EventType.CHECK_NO_CHANGE, payload={"watched_item_id": str(wi.id)})
+        )
+        db_session.add(
+            AuditLog(event_type=EventType.CHECK_NO_CHANGE, payload={"watched_item_id": "other"})
+        )
+        await db_session.flush()
+        count = await get_audit_entries_count(db_session, watched_item_id=str(wi.id))
+        assert count == 1

@@ -71,8 +71,11 @@ from src.core.watches.resolution import SYSTEM_DEFAULT_SCHEDULE_CONFIG
 from src.core.watches.schedule import ScheduleDisplay, resolve_schedule_display
 from src.dashboard import templates
 from src.dashboard.context import (
+    AUDIT_EVENT_CHOICES,
+    WATCHED_ITEM_EVENT_CHOICES,
     get_active_profiles_by_item,
     get_audit_entries,
+    get_audit_entries_count,
     get_dashboard_stats,
     get_domain_default_templates,
     get_domain_watched_items,
@@ -80,7 +83,6 @@ from src.dashboard.context import (
     get_domains_with_watched_item_counts,
     get_global_default_templates,
     get_queue_health,
-    get_watched_item_activity,
     get_watched_item_detail,
     get_watched_item_list,
     get_watched_item_notifications,
@@ -554,7 +556,16 @@ async def watched_item_detail_page(
     global_templates = await get_global_default_templates(session)
     domain_templates = await get_domain_default_templates(session, wi.domain_name)
     profiles = await get_watched_item_profiles(session, wi.id)
-    activity = await get_watched_item_activity(session, watched_item_id)
+
+    # Recent Activity reuses the shared audit-log table + chip filter, scoped to
+    # this item (#215). First load is unfiltered, page 1; HTMX drives the rest.
+    activity_ctx = await _audit_table_context(
+        session,
+        event_type=None,
+        watched_item_id=str(wi.id),
+        page=1,
+        page_size=25,
+    )
 
     # Resolution dicts for the active profiles drive the interval field's
     # profile-aware display (#206) — same shape schedule_tick consumes.
@@ -564,22 +575,25 @@ async def watched_item_detail_page(
         for name in ("name", "description", "default_schedule_interval", "content_media_type")
     }
 
-    return templates.TemplateResponse(
-        request,
-        "pages/watched_item_detail.html",
-        {
-            "request": request,
-            "active_page": "watched-items",
-            "watched_item": wi,
-            "flash": None,
-            "field_contexts": field_contexts,
-            "templates": item_templates,
-            "global_templates": global_templates,
-            "domain_templates": domain_templates,
-            "profiles": profiles,
-            "activity": activity,
-        },
-    )
+    context = {
+        "request": request,
+        "active_page": "watched-items",
+        "watched_item": wi,
+        "flash": None,
+        "field_contexts": field_contexts,
+        "templates": item_templates,
+        "global_templates": global_templates,
+        "domain_templates": domain_templates,
+        "profiles": profiles,
+        # Recent Activity chip-filter context (table context merged below).
+        "event_choices": WATCHED_ITEM_EVENT_CHOICES,
+        "selected_event_type": None,
+        "chips_target": "#wi-activity-table",
+        "chips_watched_item_id": str(wi.id),
+        "clear_href": f"/watched-items/{wi.id}",
+    }
+    context.update(activity_ctx)
+    return templates.TemplateResponse(request, "pages/watched_item_detail.html", context)
 
 
 @router.post("/watched-items/{watched_item_id}/archive")
@@ -1963,23 +1977,83 @@ async def partial_domain_watched_items(
     )
 
 
+async def _audit_table_context(
+    session: AsyncSession,
+    *,
+    event_type: str | None,
+    watched_item_id: str | None,
+    page: int,
+    page_size: int,
+) -> dict:
+    """Build the shared audit-table render context (#215).
+
+    Serves both /audit (no ``watched_item_id`` → Watched Item column shown) and
+    the WatchedItem detail "Recent Activity" section (scoped → column hidden,
+    different HTMX target). Carries the pagination wiring ``partials/pagination``
+    expects, including an ``hx_include`` that preserves the active filter when the
+    page size changes.
+    """
+    page = max(1, page)
+    offset = (page - 1) * page_size
+    entries = await get_audit_entries(
+        session,
+        event_type=event_type,
+        watched_item_id=watched_item_id,
+        limit=page_size,
+        offset=offset,
+    )
+    total_count = await get_audit_entries_count(
+        session, event_type=event_type, watched_item_id=watched_item_id
+    )
+    item_scoped = watched_item_id is not None
+    extra_params: dict[str, str] = {}
+    if event_type:
+        extra_params["event_type"] = event_type
+    if watched_item_id:
+        extra_params["watched_item_id"] = watched_item_id
+    return {
+        "entries": entries,
+        "show_watched_item": not item_scoped,
+        "page": page,
+        "page_size": page_size,
+        "total_count": total_count,
+        "base_url": "/partials/audit-table",
+        "extra_params": extra_params,
+        "hx_target": "#wi-activity-table" if item_scoped else "#audit-table",
+        "hx_include": (
+            "[name='event_type'],[name='watched_item_id']" if item_scoped else "[name='event_type']"
+        ),
+    }
+
+
 @router.get("/audit")
 async def audit_log_page(
     request: Request,
     event_type: str | None = None,
-    watched_item_id: str | None = None,
+    page: int = 1,
+    page_size: int = 25,
     session: AsyncSession = Depends(get_db_session),
 ):
-    """Audit log page with filtering."""
+    """Audit log page with chip filtering + pagination."""
     event_type = event_type or None
-    entries = await get_audit_entries(
-        session, event_type=event_type, watched_item_id=watched_item_id
+    context = await _audit_table_context(
+        session,
+        event_type=event_type,
+        watched_item_id=None,
+        page=page,
+        page_size=page_size,
     )
-    context = {
-        "active_page": "audit",
-        "entries": entries,
-        "event_type": event_type,
-    }
+    context.update(
+        {
+            "active_page": "audit",
+            "event_type": event_type,
+            "event_choices": AUDIT_EVENT_CHOICES,
+            "selected_event_type": event_type,
+            "chips_target": "#audit-table",
+            "chips_watched_item_id": None,
+            "clear_href": "/audit",
+        }
+    )
     return templates.TemplateResponse(request, "pages/audit_log.html", context)
 
 
@@ -1988,14 +2062,19 @@ async def partial_audit_table(
     request: Request,
     event_type: str | None = None,
     watched_item_id: str | None = None,
+    page: int = 1,
+    page_size: int = 25,
     session: AsyncSession = Depends(get_db_session),
 ):
-    """HTMX partial: filtered audit log table."""
-    event_type = event_type or None
-    entries = await get_audit_entries(
-        session, event_type=event_type, watched_item_id=watched_item_id
+    """HTMX partial: filtered, paginated audit table (shared by /audit + detail)."""
+    context = await _audit_table_context(
+        session,
+        event_type=event_type or None,
+        watched_item_id=watched_item_id or None,
+        page=page,
+        page_size=page_size,
     )
-    return templates.TemplateResponse(request, "partials/audit_table.html", {"entries": entries})
+    return templates.TemplateResponse(request, "partials/audit_table.html", context)
 
 
 # ---------------------------------------------------------------------------

@@ -1,3 +1,8 @@
+{# Shared audit-event table. Used by /audit and the WatchedItem detail "Recent
+   Activity" section (#215). Expects: entries; show_watched_item (default True);
+   and the pagination context (page, page_size, total_count, base_url,
+   extra_params, hx_target, hx_include) when paging is wanted. #}
+{% set show_wi = show_watched_item if show_watched_item is defined else True %}
 {% if entries %}
 <div class="overflow-x-auto">
   <table class="data-table">
@@ -5,7 +10,7 @@
       <tr>
         <th scope="col">Time</th>
         <th scope="col">Event</th>
-        <th scope="col">Watched Item</th>
+        {% if show_wi %}<th scope="col">Watched Item</th>{% endif %}
         <th scope="col">Details</th>
       </tr>
     </thead>
@@ -22,12 +27,14 @@
             {{ entry.event_type }}
           </span>
         </td>
+        {% if show_wi %}
         <td>
           {% set wi_id = entry.payload.get('watched_item_id') if entry.payload else None %}
           {% if wi_id %}
           <a href="/watched-items/{{ wi_id }}" class="link text-sm">{{ wi_id | string | truncate(12, True, '…') }}</a>
           {% else %}—{% endif %}
         </td>
+        {% endif %}
         <td class="text-xs text-gray-500 dark:text-gray-400 max-w-[300px] truncate">
           {{ entry.payload | tojson | truncate(80, True, '…') }}
         </td>
@@ -36,6 +43,9 @@
     </tbody>
   </table>
 </div>
+{% if total_count is defined %}
+{% include "partials/pagination.html" %}
+{% endif %}
 {% else %}
 <p class="text-gray-500 dark:text-gray-400 text-sm">No audit entries found.</p>
 {% endif %}

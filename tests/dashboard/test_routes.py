@@ -181,6 +181,52 @@ class TestAuditTableSharedPartial:
         assert "event_type=check.no_change" in body
         assert "event_type=check.fetch_failed" in body
 
+    async def test_details_view_button_and_inline_payload(self, client, db_session):
+        """Details column shows a View action that expands a pretty-printed,
+        read-only payload row with a Close button (#216)."""
+        wi = await _make_wi(db_session, name="ViewPayload")
+        db_session.add(
+            AuditLog(
+                event_type=EventType.CHECK_NO_CHANGE,
+                payload={"watched_item_id": str(wi.id), "marker": "PRETTYME"},
+            )
+        )
+        await db_session.commit()
+        body = (await client.get(f"/partials/audit-table?watched_item_id={wi.id}")).content
+        assert b"data-audit-view" in body  # View control replaces the clipped JSON
+        assert b">View<" in body
+        assert b'"marker": "PRETTYME"' in body  # pretty-printed (indent=2) payload
+        assert b"data-audit-close" in body  # Close control to collapse
+        assert b">Close<" in body
+
+    async def test_details_empty_payload_shows_no_view(self, client, db_session):
+        """A row with an empty payload shows no View button (#216)."""
+        db_session.add(AuditLog(event_type=EventType.CHECK_NO_CHANGE, payload={}))
+        await db_session.commit()
+        body = (await client.get("/partials/audit-table")).content
+        assert b"data-audit-view" not in body
+
+    async def test_details_row_colspan_tracks_columns(self, client, db_session):
+        """The expanded payload row spans all columns — 4 with the Watched Item
+        column (Audit Log), 3 without (scoped detail view) (#216)."""
+        wi = await _make_wi(db_session, name="Colspan")
+        db_session.add(
+            AuditLog(
+                event_type=EventType.CHECK_NO_CHANGE,
+                payload={"watched_item_id": str(wi.id), "k": "v"},
+            )
+        )
+        await db_session.commit()
+        body_all = (await client.get("/partials/audit-table")).content
+        assert b'colspan="4"' in body_all
+        body_scoped = (await client.get(f"/partials/audit-table?watched_item_id={wi.id}")).content
+        assert b'colspan="3"' in body_scoped
+
+    async def test_audit_details_toggle_script_loaded(self, client):
+        """The payload-toggle script is loaded globally (#216)."""
+        body = (await client.get("/audit")).content
+        assert b"audit-details-toggle.js" in body
+
     async def test_chips_submit_whole_checked_set(self, client):
         """Chips include the whole form on change, so every checked chip is sent —
         the wiring that gives OR and correct deselect behavior (#215 bug)."""

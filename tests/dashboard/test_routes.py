@@ -123,14 +123,14 @@ class TestAuditTableSharedPartial:
         resp = await client.get("/partials/audit-table?page_size=-5")
         assert resp.status_code == 200
 
-    async def test_out_of_range_page_size_is_clamped(self, client, db_session):
-        """An out-of-range page_size falls back to the default 25 — the page-size
-        <select> reflects the clamped value, not the raw param (#215 CR-3)."""
+    async def test_out_of_range_page_size_is_capped(self, client, db_session):
+        """An oversized page_size is capped at the max (100), not passed raw — the
+        page-size <select> reflects the capped value (#215 CR-3/CR-6)."""
         for _ in range(30):
             db_session.add(AuditLog(event_type=EventType.CHECK_NO_CHANGE, payload={}))
         await db_session.commit()
         resp = await client.get("/partials/audit-table?page_size=99999")
-        assert b'value="25" selected' in resp.content
+        assert b'value="100" selected' in resp.content
 
 
 class Test404Template:
@@ -169,6 +169,12 @@ class TestDomainsPage:
         """filter-pill class should not appear in domains page."""
         response = await client.get("/domains")
         assert b"filter-pill" not in response.content
+
+    async def test_invalid_pagination_params_do_not_error(self, client):
+        """Crafted negative page/page_size are clamped, not passed to the DB (#215 CR-6)."""
+        assert (await client.get("/domains?page_size=-5")).status_code == 200
+        assert (await client.get("/domains?page=-5")).status_code == 200
+        assert (await client.get("/partials/domains-table?page_size=-5")).status_code == 200
 
 
 class TestDomainDetailFilters:

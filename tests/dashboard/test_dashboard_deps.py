@@ -33,6 +33,35 @@ class TestIsHtmx:
         assert is_htmx(_request({})) is False
 
 
+class TestClampPagination:
+    """Crafted pagination params must never reach the DB as a negative LIMIT/
+    OFFSET or an unbounded LIMIT (#215 CR-6)."""
+
+    def test_in_range_values_pass_through(self):
+        from src.dashboard.deps import clamp_pagination
+
+        assert clamp_pagination(3, 50) == (3, 50)
+        assert clamp_pagination(1, 100) == (1, 100)
+        assert clamp_pagination(1, 2) == (1, 2)  # small sizes are legitimate
+
+    def test_sub_one_page_size_falls_back_to_default(self):
+        from src.dashboard.deps import clamp_pagination
+
+        assert clamp_pagination(1, 0) == (1, 25)
+        assert clamp_pagination(1, -5) == (1, 25)
+
+    def test_oversized_page_size_is_capped(self):
+        from src.dashboard.deps import clamp_pagination
+
+        assert clamp_pagination(1, 99999) == (1, 100)
+
+    def test_negative_or_zero_page_floors_to_one(self):
+        from src.dashboard.deps import clamp_pagination
+
+        assert clamp_pagination(0, 25) == (1, 25)
+        assert clamp_pagination(-5, 50) == (1, 50)
+
+
 class TestGetDashboardUser:
     def test_missing_user_id_raises_307(self):
         from src.dashboard.deps import get_dashboard_user

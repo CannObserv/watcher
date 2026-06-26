@@ -52,6 +52,13 @@ class TestListPage:
         response = await client.get("/")
         assert b'href="/watched-items"' in response.content
 
+    async def test_invalid_pagination_params_do_not_error(self, client):
+        """Crafted negative page/page_size are clamped, not passed to the DB as a
+        negative LIMIT/OFFSET (#215 CR-6)."""
+        assert (await client.get("/watched-items?page_size=-5")).status_code == 200
+        assert (await client.get("/watched-items?page=-5")).status_code == 200
+        assert (await client.get("/partials/watched-items-table?page_size=-5")).status_code == 200
+
     async def test_removed_columns_absent(self, client, db_session):
         """Information Item, Content Type, Tags, Last Reviewed columns are gone."""
 

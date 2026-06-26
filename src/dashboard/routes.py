@@ -89,7 +89,7 @@ from src.dashboard.context import (
     get_watched_item_profiles,
     get_watched_items_total_count,
 )
-from src.dashboard.deps import get_dashboard_user, is_htmx
+from src.dashboard.deps import clamp_pagination, get_dashboard_user, is_htmx
 
 router = APIRouter(tags=["dashboard"], dependencies=[Depends(get_dashboard_user)])
 logger = get_logger(__name__)
@@ -458,6 +458,7 @@ async def watched_items_page(
     session: AsyncSession = Depends(get_db_session),
 ):
     """List page for WatchedItems."""
+    page, page_size = clamp_pagination(page, page_size)
     watched_items = await get_watched_item_list(
         session,
         search=q,
@@ -502,6 +503,7 @@ async def partial_watched_items_table(
     session: AsyncSession = Depends(get_db_session),
 ):
     """HTMX partial: watched-items table with search, filter, and pagination."""
+    page, page_size = clamp_pagination(page, page_size)
     watched_items = await get_watched_item_list(
         session,
         search=q,
@@ -1233,6 +1235,7 @@ async def domains_page(
     session: AsyncSession = Depends(get_db_session),
 ):
     """Domains list page with search, filter, and pagination."""
+    page, page_size = clamp_pagination(page, page_size)
     domains = await get_domains_with_watched_item_counts(
         session,
         search=q,
@@ -1265,6 +1268,7 @@ async def partial_domains_table(
     session: AsyncSession = Depends(get_db_session),
 ):
     """HTMX partial: domains table with search, filter, and pagination."""
+    page, page_size = clamp_pagination(page, page_size)
     domains = await get_domains_with_watched_item_counts(
         session,
         search=q,
@@ -1983,11 +1987,6 @@ async def partial_domain_watched_items(
     )
 
 
-# Allowed audit-table page sizes — mirrors the <select> options in
-# partials/pagination.html. Any other value is clamped to the default (#215).
-_AUDIT_PAGE_SIZES = (25, 50, 100)
-
-
 async def _audit_table_context(
     session: AsyncSession,
     *,
@@ -2002,13 +2001,11 @@ async def _audit_table_context(
     the WatchedItem detail "Recent Activity" section (scoped → column hidden,
     different HTMX target). Carries the pagination wiring ``partials/pagination``
     expects, including an ``hx_include`` that preserves the active filter when the
-    page size changes. ``page`` / ``page_size`` are clamped to safe bounds so a
-    hand-crafted query (e.g. ``page_size=-5``) can't reach the DB as a negative
-    ``LIMIT`` or load an unbounded result set.
+    page size changes. ``page`` / ``page_size`` are clamped (``clamp_pagination``)
+    so a hand-crafted query (e.g. ``page_size=-5``) can't reach the DB as a
+    negative ``LIMIT`` or load an unbounded result set.
     """
-    page = max(1, page)
-    if page_size not in _AUDIT_PAGE_SIZES:
-        page_size = 25
+    page, page_size = clamp_pagination(page, page_size)
     offset = (page - 1) * page_size
     entries = await get_audit_entries(
         session,

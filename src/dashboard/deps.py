@@ -12,6 +12,28 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.api.deps import get_db_session
 from src.core.models.app_user import AppUser
 
+# Largest page size the pagination control (partials/pagination.html) offers;
+# the cap for a user-supplied page_size so a crafted query can't load unbounded rows.
+MAX_PAGE_SIZE = 100
+
+
+def clamp_pagination(page: int, page_size: int, *, default_size: int = 25) -> tuple[int, int]:
+    """Clamp user-supplied pagination params to safe bounds (#215 CR-6).
+
+    ``page`` floors at 1 — a negative page yields a negative SQL ``OFFSET``, which
+    Postgres rejects. ``page_size`` is bounded to ``[1, MAX_PAGE_SIZE]``: a sub-1
+    value (``0`` / negative — a negative ``LIMIT`` errors in Postgres) falls back to
+    ``default_size``, and anything above the cap is capped, while legitimate
+    in-range sizes (e.g. ``2`` for a small list) pass through. Returns the
+    ``(page, page_size)`` pair.
+    """
+    page = max(1, page)
+    if page_size < 1:
+        page_size = default_size
+    elif page_size > MAX_PAGE_SIZE:
+        page_size = MAX_PAGE_SIZE
+    return page, page_size
+
 
 def is_htmx(request: Request) -> bool:
     """True for an HTMX-driven request, excluding boosted full-page navigations.

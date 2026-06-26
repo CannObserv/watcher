@@ -165,6 +165,22 @@ class TestAuditTableSharedPartial:
         assert b"NOCHrow" in body
         assert b"FAILrow" not in body  # an unselected type stays excluded
 
+    async def test_pager_links_preserve_all_selected_event_types(self, client, db_session):
+        """Paging keeps every selected chip in the link — the qs() macro expands the
+        list-valued event_type into repeated params (#215 bug)."""
+        for _ in range(26):  # > page_size 25 -> a pager renders
+            db_session.add(AuditLog(event_type=EventType.CHECK_NO_CHANGE, payload={}))
+        await db_session.commit()
+        body = (
+            await client.get(
+                f"/partials/audit-table?event_type={EventType.CHECK_NO_CHANGE}"
+                f"&event_type={EventType.CHECK_FETCH_FAILED}"
+            )
+        ).content.decode()
+        assert 'aria-label="Pagination"' in body
+        assert "event_type=check.no_change" in body
+        assert "event_type=check.fetch_failed" in body
+
     async def test_chips_submit_whole_checked_set(self, client):
         """Chips include the whole form on change, so every checked chip is sent —
         the wiring that gives OR and correct deselect behavior (#215 bug)."""

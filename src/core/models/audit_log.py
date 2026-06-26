@@ -15,12 +15,8 @@ from src.core.models.base import Base, ULIDType, generate_ulid
 class EventType:
     """String constants for audit log event_type values."""
 
-    WATCH_CREATED = "watch.created"
-    WATCH_UPDATED = "watch.updated"
-    WATCH_DEACTIVATED = "watch.deactivated"
-    WATCH_ARCHIVED = "watch.archived"
-    WATCH_RESTORED = "watch.restored"
-    WATCH_DELETED = "watch.deleted"
+    # Legacy watch.* events were removed in the #191 collapse; the WATCH_*
+    # constants and their stray audit_log rows were purged (pre-production noise).
     CHECK_SNAPSHOT_CREATED = "check.snapshot_created"
     CHECK_NO_CHANGE = "check.no_change"
     CHECK_FETCH_FAILED = "check.fetch_failed"

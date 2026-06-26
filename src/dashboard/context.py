@@ -165,26 +165,27 @@ def _apply_audit_filters(
     return stmt
 
 
-# Event-type chip choices (value, label) for the filter UI (#215). Labels mirror
-# the raw event string, matching the established audit-log chip convention.
-#
-# AUDIT_EVENT_CHOICES — the curated set for the global /audit screen. Corrects the
-# legacy chips that referenced ``watch.*`` events retired in #191.
-AUDIT_EVENT_CHOICES: list[tuple[str, str]] = [
-    (e, e)
-    for e in (
-        EventType.WATCHED_ITEM_CREATED,
-        EventType.WATCHED_ITEM_UPDATED,
-        EventType.CHECK_SNAPSHOT_CREATED,
-        EventType.CHECK_NO_CHANGE,
-        EventType.CHECK_FETCH_FAILED,
-        EventType.CHECK_EXTRACTION_FAILED,
-        EventType.NOTIFICATION_DISPATCHED,
-    )
-]
+async def get_distinct_audit_event_types(session: AsyncSession) -> list[str]:
+    """Distinct ``event_type`` values present in the audit log, alphabetical (#217).
 
-# WATCHED_ITEM_EVENT_CHOICES — the subset a single item actually emits: its checks
-# and lifecycle events. Domain-level events never carry a ``watched_item_id``.
+    Drives the global Audit Log chip filter so the offered chips always match the
+    data — no dead chips (the earlier legacy-``watch.*`` bug), no missing chips (the
+    lifecycle events the curated list omitted). Alphabetical order naturally groups
+    by prefix (``check.*`` / ``notification.*`` / ``watched_item.*``).
+    """
+    result = await session.execute(
+        select(AuditLog.event_type).distinct().order_by(AuditLog.event_type)
+    )
+    return list(result.scalars().all())
+
+
+# Event-type chip choices (value, label) for the filter UI. Labels mirror the raw
+# event string, matching the established audit-log chip convention (#215).
+#
+# WATCHED_ITEM_EVENT_CHOICES — the curated subset a single item emits (its checks
+# and lifecycle); the per-item Recent Activity filter. Domain-level events never
+# carry a ``watched_item_id``. The global /audit screen derives its chips
+# dynamically instead (get_distinct_audit_event_types, #217).
 WATCHED_ITEM_EVENT_CHOICES: list[tuple[str, str]] = [
     (e, e)
     for e in (

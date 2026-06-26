@@ -71,12 +71,12 @@ from src.core.watches.resolution import SYSTEM_DEFAULT_SCHEDULE_CONFIG
 from src.core.watches.schedule import ScheduleDisplay, resolve_schedule_display
 from src.dashboard import templates
 from src.dashboard.context import (
-    AUDIT_EVENT_CHOICES,
     WATCHED_ITEM_EVENT_CHOICES,
     get_active_profiles_by_item,
     get_audit_entries,
     get_audit_entries_count,
     get_dashboard_stats,
+    get_distinct_audit_event_types,
     get_domain_default_templates,
     get_domain_watched_items,
     get_domains_total_count,
@@ -2053,17 +2053,24 @@ async def audit_log_page(
 
     ``event_type`` is repeatable (``?event_type=a&event_type=b``) and OR-matched.
     """
+    selected = [e for e in event_type if e]
     context = await _audit_table_context(
         session,
-        event_types=[e for e in event_type if e],
+        event_types=selected,
         watched_item_id=None,
         page=page,
         page_size=page_size,
     )
+    # Chips are derived from the event types actually present, so the filter always
+    # matches the data — no dead chips, no missing chips (#217). Union in any active
+    # (selected) type so a deep-linked filter with no rows still has a chip the
+    # operator can see and uncheck.
+    present = await get_distinct_audit_event_types(session)
+    choices = sorted(set(present) | set(selected))
     context.update(
         {
             "active_page": "audit",
-            "event_choices": AUDIT_EVENT_CHOICES,
+            "event_choices": [(e, e) for e in choices],
             "chips_target": "#audit-table",
             "chips_watched_item_id": None,
             "clear_href": "/audit",

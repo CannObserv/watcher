@@ -128,14 +128,77 @@ async def get_audit_entries(
     The WatchedItem association lives in the JSONB ``payload`` (the ``watch_id``
     FK column was retired with the Watch table in #191).
     """
-    stmt = select(AuditLog).order_by(AuditLog.created_at.desc())
+    stmt = _apply_audit_filters(
+        select(AuditLog).order_by(AuditLog.created_at.desc()), event_type, watched_item_id
+    )
+    stmt = stmt.limit(limit).offset(offset)
+    result = await session.execute(stmt)
+    return list(result.scalars().all())
+
+
+async def get_audit_entries_count(
+    session: AsyncSession,
+    event_type: str | None = None,
+    watched_item_id: str | None = None,
+) -> int:
+    """Count audit entries matching the given filters (for pagination, #215)."""
+    stmt = _apply_audit_filters(select(func.count(AuditLog.id)), event_type, watched_item_id)
+    result = await session.execute(stmt)
+    return result.scalar_one()
+
+
+def _apply_audit_filters(
+    stmt: Select, event_type: str | None, watched_item_id: str | None
+) -> Select:
+    """Shared event-type / WatchedItem filter for the audit-entry queries.
+
+    The WatchedItem association lives in the JSONB ``payload`` (the ``watch_id``
+    FK column was retired with the Watch table in #191).
+    """
     if event_type:
         stmt = stmt.where(AuditLog.event_type == event_type)
     if watched_item_id:
         stmt = stmt.where(AuditLog.payload["watched_item_id"].astext == watched_item_id)
-    stmt = stmt.limit(limit).offset(offset)
-    result = await session.execute(stmt)
-    return list(result.scalars().all())
+    return stmt
+
+
+# Event-type chip choices (value, label) for the filter UI (#215). Labels mirror
+# the raw event string, matching the established audit-log chip convention.
+#
+# AUDIT_EVENT_CHOICES — the curated set for the global /audit screen. Corrects the
+# legacy chips that referenced ``watch.*`` events retired in #191.
+AUDIT_EVENT_CHOICES: list[tuple[str, str]] = [
+    (e, e)
+    for e in (
+        EventType.WATCHED_ITEM_CREATED,
+        EventType.WATCHED_ITEM_UPDATED,
+        EventType.CHECK_SNAPSHOT_CREATED,
+        EventType.CHECK_NO_CHANGE,
+        EventType.CHECK_FETCH_FAILED,
+        EventType.CHECK_EXTRACTION_FAILED,
+        EventType.NOTIFICATION_DISPATCHED,
+    )
+]
+
+# WATCHED_ITEM_EVENT_CHOICES — the subset a single item actually emits: its checks
+# and lifecycle events. Domain-level events never carry a ``watched_item_id``.
+WATCHED_ITEM_EVENT_CHOICES: list[tuple[str, str]] = [
+    (e, e)
+    for e in (
+        EventType.CHECK_SNAPSHOT_CREATED,
+        EventType.CHECK_NO_CHANGE,
+        EventType.CHECK_FETCH_FAILED,
+        EventType.CHECK_EXTRACTION_FAILED,
+        EventType.WATCHED_ITEM_CREATED,
+        EventType.WATCHED_ITEM_UPDATED,
+        EventType.WATCHED_ITEM_PAUSED,
+        EventType.WATCHED_ITEM_RESUMED,
+        EventType.WATCHED_ITEM_ARCHIVED,
+        EventType.WATCHED_ITEM_RESTORED,
+        EventType.WATCHED_ITEM_REVIEWED,
+        EventType.WATCHED_ITEM_CHECK_REQUESTED,
+    )
+]
 
 
 async def get_watched_item_profiles(
@@ -380,47 +443,6 @@ async def get_watched_item_detail(
     except (ValueError, TypeError):
         return None
     return await session.get(WatchedItem, wi_ulid)
-
-
-_WI_ACTIVITY_SUMMARY: dict[str, str] = {
-    EventType.CHECK_SNAPSHOT_CREATED: "Checked — change captured",
-    EventType.CHECK_NO_CHANGE: "Checked — no change",
-    EventType.CHECK_FETCH_FAILED: "Fetch failed",
-    EventType.WATCHED_ITEM_CHECK_REQUESTED: "Manual check requested",
-    EventType.WATCHED_ITEM_CREATED: "Watched Item created",
-    EventType.WATCHED_ITEM_UPDATED: "Watched Item updated",
-    EventType.WATCHED_ITEM_PAUSED: "Paused",
-    EventType.WATCHED_ITEM_RESUMED: "Resumed",
-    EventType.WATCHED_ITEM_ARCHIVED: "Archived",
-    EventType.WATCHED_ITEM_RESTORED: "Restored",
-    EventType.WATCHED_ITEM_REVIEWED: "Marked reviewed",
-}
-
-
-async def get_watched_item_activity(
-    session: AsyncSession, watched_item_id: str, limit: int = 20
-) -> list[dict]:
-    """Recent audit activity for a WatchedItem (checks + lifecycle), newest first.
-
-    Check events are WatchedItem-scoped post-#185; their identifier lives in the
-    audit payload (``watched_item_id``), so this filters on the JSONB field.
-    """
-    stmt = (
-        select(AuditLog)
-        .where(AuditLog.payload["watched_item_id"].astext == str(watched_item_id))
-        .order_by(AuditLog.created_at.desc())
-        .limit(limit)
-    )
-    rows = list((await session.execute(stmt)).scalars().all())
-    out: list[dict] = []
-    for row in rows:
-        summary = _WI_ACTIVITY_SUMMARY.get(row.event_type, row.event_type)
-        if row.event_type == EventType.CHECK_FETCH_FAILED:
-            status = (row.payload or {}).get("status_code")
-            if status:
-                summary = f"Fetch failed — HTTP {status}"
-        out.append({"event_type": row.event_type, "timestamp": row.created_at, "summary": summary})
-    return out
 
 
 async def get_global_default_templates(

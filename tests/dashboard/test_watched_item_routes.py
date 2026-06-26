@@ -1288,7 +1288,11 @@ class TestPauseResume:
         assert b"selector" in resp.content
 
     async def test_detail_shows_check_activity(self, client, db_session):
-        """WatchedItem detail surfaces check audit activity (#190 — execution visibility)."""
+        """WatchedItem detail surfaces check audit activity (#190 — execution visibility).
+
+        Post-#215 the Recent Activity section uses the shared audit-log table: the
+        raw event-type badge, not a friendly summary.
+        """
 
         wi = await _make_wi(db_session, name="ActivityWI", effective_url="https://example.com")
         db_session.add(
@@ -1301,7 +1305,28 @@ class TestPauseResume:
         resp = await client.get(f"/watched-items/{wi.id}")
         assert resp.status_code == 200
         assert b"Recent Activity" in resp.content
-        assert b"Checked \xe2\x80\x94 no change" in resp.content  # em-dash
+        assert EventType.CHECK_NO_CHANGE.encode() in resp.content  # raw event badge
+
+    async def test_detail_activity_uses_shared_audit_table(self, client, db_session):
+        """Recent Activity reuses the audit-log table + chip filter, minus the
+        redundant Watched Item column, scoped to this item (#215)."""
+
+        wi = await _make_wi(db_session, name="SharedTable", effective_url="https://example.com")
+        db_session.add(
+            AuditLog(event_type=EventType.CHECK_NO_CHANGE, payload={"watched_item_id": str(wi.id)})
+        )
+        await db_session.commit()
+        resp = await client.get(f"/watched-items/{wi.id}")
+        body = resp.content
+        # chip filter present and scoped to this item
+        assert b'class="chip-group"' in body
+        assert b'id="wi-activity-table"' in body
+        assert str(wi.id).encode() in body  # hidden watched_item_id input
+        # data-table reused, but NOT the redundant Watched Item column header
+        assert b'class="data-table"' in body
+        assert b'<th scope="col">Watched Item</th>' not in body
+        # friendly-summary list retired
+        assert b"Checked \xe2\x80\x94 no change" not in body
 
     async def test_detail_shows_health_when_unknown(self, client, db_session):
         """Health badge + tooltip render inline (bound to Last Checked) even when UNKNOWN (#202)."""

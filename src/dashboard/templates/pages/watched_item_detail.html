@@ -140,17 +140,9 @@
 
 <section class="mb-8">
   <h3 class="text-lg font-semibold text-gray-900 dark:text-white mb-4">Recent Activity</h3>
-  <div class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 divide-y divide-gray-200 dark:divide-gray-700">
-    {% if activity %}
-      {% for entry in activity %}
-      <div class="p-3 flex items-center justify-between gap-4 text-sm">
-        <span class="text-gray-900 dark:text-gray-100">{{ entry.summary }}</span>
-        <span class="text-xs text-gray-500 dark:text-gray-400 tabular-nums whitespace-nowrap">{{ entry.timestamp.strftime("%Y-%m-%d %H:%M UTC") }}</span>
-      </div>
-      {% endfor %}
-    {% else %}
-      <p class="p-4 text-sm text-gray-500 dark:text-gray-400">No activity yet — checks and lifecycle events will appear here.</p>
-    {% endif %}
+  {% include "partials/audit_filter_chips.html" %}
+  <div id="wi-activity-table" aria-live="polite" aria-atomic="false">
+    {% include "partials/audit_table.html" %}
   </div>
 </section>
 

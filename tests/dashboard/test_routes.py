@@ -4,6 +4,7 @@ import re
 
 import pytest
 
+from src.core.models.audit_log import AuditLog, EventType
 from src.core.models.watched_item import WatchedItem
 from tests.conftest import make_info_item
 
@@ -63,8 +64,51 @@ class TestAuditLog:
         assert response.status_code == 200
 
     async def test_audit_filter_by_event_type(self, client):
-        response = await client.get("/partials/audit-table?event_type=watch.created")
+        response = await client.get("/partials/audit-table?event_type=watched_item.created")
         assert response.status_code == 200
+
+
+class TestAuditTableSharedPartial:
+    """The audit-table partial is shared by /audit and the WatchedItem detail
+    page; scoping by watched_item_id hides the redundant column (#215)."""
+
+    async def test_table_has_watched_item_column_by_default(self, client, db_session):
+        db_session.add(AuditLog(event_type=EventType.WATCHED_ITEM_CREATED, payload={}))
+        await db_session.commit()
+        resp = await client.get("/partials/audit-table")
+        assert b'<th scope="col">Watched Item</th>' in resp.content
+
+    async def test_scoped_table_hides_watched_item_column(self, client, db_session):
+        wi = await _make_wi(db_session, name="ScopedCol")
+        resp = await client.get(f"/partials/audit-table?watched_item_id={wi.id}")
+        assert resp.status_code == 200
+        assert b'<th scope="col">Watched Item</th>' not in resp.content
+
+    async def test_scoped_table_filters_to_item(self, client, db_session):
+        wi = await _make_wi(db_session, name="OnlyMine")
+        db_session.add(
+            AuditLog(
+                event_type=EventType.CHECK_NO_CHANGE,
+                payload={"watched_item_id": str(wi.id)},
+            )
+        )
+        db_session.add(
+            AuditLog(
+                event_type=EventType.CHECK_FETCH_FAILED,
+                payload={"watched_item_id": "01OTHERITEMOTHERITEMOTHER"},
+            )
+        )
+        await db_session.commit()
+        resp = await client.get(f"/partials/audit-table?watched_item_id={wi.id}")
+        assert EventType.CHECK_NO_CHANGE.encode() in resp.content
+        assert EventType.CHECK_FETCH_FAILED.encode() not in resp.content
+
+    async def test_pagination_renders_with_many_rows(self, client, db_session):
+        for _ in range(26):  # > default page_size (25) -> 2 pages
+            db_session.add(AuditLog(event_type=EventType.CHECK_NO_CHANGE, payload={}))
+        await db_session.commit()
+        resp = await client.get("/partials/audit-table")
+        assert b'aria-label="Pagination"' in resp.content
 
 
 class Test404Template:
@@ -163,3 +207,10 @@ class TestAuditLogFilters:
     async def test_audit_page_no_filter_pill(self, client):
         response = await client.get("/audit")
         assert b"filter-pill" not in response.content
+
+    async def test_audit_chips_use_current_event_types(self, client):
+        """Stale legacy watch.* chips were corrected to watched_item.* (#215)."""
+        body = (await client.get("/audit")).content
+        assert b'value="watched_item.created"' in body
+        assert b'value="watch.created"' not in body
+        assert b'value="check.extraction_failed"' in body

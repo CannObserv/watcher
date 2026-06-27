@@ -3,6 +3,12 @@
 **Date:** 2026-06-26
 **Status:** Approved
 
+> **Note (superseded in part):** the static `AUDIT_EVENT_CHOICES` list described
+> below for the global `/audit` screen was removed in #217 — the Audit Log now
+> derives its chips dynamically from the event types present in the data
+> (`get_distinct_audit_event_types`). The per-item `WATCHED_ITEM_EVENT_CHOICES`
+> remains as described.
+
 ## Goal
 
 Make the Watched Item detail page's **Recent Activity** section use the same

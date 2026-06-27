@@ -101,3 +101,39 @@ class TestAuditPayloadIndex:
         # order-by every caller applies.
         assert "payload ->> 'watched_item_id'" in indexdef
         assert "created_at" in indexdef
+
+
+class TestAuditScaleIndexes:
+    """``audit_log`` is append-only and unbounded (#218). The Audit Log page runs
+    three queries per load — the ordered/paginated list, its count, and the
+    distinct-``event_type`` chip vocabulary — none of which had a supporting index.
+    """
+
+    async def _indexdef(self, db_session, indexname):
+        result = await db_session.execute(
+            text(
+                "SELECT indexdef FROM pg_indexes "
+                "WHERE tablename = 'audit_log' AND indexname = :name"
+            ),
+            {"name": indexname},
+        )
+        return result.scalar_one_or_none()
+
+    async def test_event_type_index_exists(self, db_session):
+        """Composite ``(event_type, created_at DESC)`` serves the DISTINCT chip
+        query (leading column) and the ``event_type IN (...) ORDER BY created_at
+        DESC`` filtered list."""
+        indexdef = await self._indexdef(db_session, "ix_audit_log_event_type")
+        assert indexdef is not None, "composite index on (event_type, created_at) missing"
+        # Assert the contiguous column list in order — pins both the pair and the
+        # DESC sort on created_at (a bare "event_type" check would be tautological,
+        # since the index name itself contains it).
+        assert "(event_type, created_at DESC)" in indexdef
+
+    async def test_created_at_index_exists(self, db_session):
+        """``(created_at DESC)`` serves the dominant unfiltered Audit Log query —
+        ``ORDER BY created_at DESC LIMIT n`` — which neither composite index can
+        (each leads with a different column)."""
+        indexdef = await self._indexdef(db_session, "ix_audit_log_created_at")
+        assert indexdef is not None, "index on created_at DESC missing"
+        assert "(created_at DESC)" in indexdef

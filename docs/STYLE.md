@@ -48,12 +48,20 @@ Status badges and flashes use **Tailwind defaults only** — never brand purple/
 
 ## 3. Dark Mode
 
-- **Mechanism**: Tailwind `darkMode: class` via `@custom-variant dark (&:where(.dark, .dark *));` in `input.css`.
-- **localStorage key**: `watcher-color-scheme` — values: `"dark"`, `"light"`, or absent (follow system).
-- **FOUC prevention**: Inline `<script>` in `<head>` (before stylesheet) reads localStorage and system preference, adds `.dark` class to `<html>` synchronously.
+- **Mechanism**: Tailwind `darkMode: class` via `@custom-variant dark (&:where(.dark, .dark *));` in `input.css`. **Purely class-based** — there is no `@media (prefers-color-scheme)` dark path, so `<html>` carries `.dark` (dark) or no class (light); "system" is resolved to one of those by JS, not by CSS.
+- **localStorage key**: `watcher-color-scheme` — three states:
+
+  | Value | Behavior |
+  |---|---|
+  | `"light"` | Force light (no `.dark` class) |
+  | `"dark"` | Force dark (`.dark` on `<html>`) |
+  | absent | **System** — follow OS `prefers-color-scheme`; the third state, written by *clearing* the key (`removeItem`), not a `"system"` literal |
+
+- **Three-state toggle**: clicking a theme-toggle cycles the *stored* preference **light → system → dark → light**. The cycle is driven off the stored value, not the rendered class — `system` (OS light) and explicit `light` both render classless and are indistinguishable by class alone. Reaching **system** clears the key, so the FOUC script needs no extra case (absent already means follow-OS). Because the dark variant is class-only, `dark-mode.js` resolves system → `.dark` via `matchMedia` at apply time and re-resolves on OS theme changes while system is active; it dispatches `watcher:theme-changed` when the rendered scheme flips (consumed by `diff-viewer.js`).
+- **FOUC prevention**: Inline `<script>` in `<head>` (before stylesheet) reads localStorage + `prefers-color-scheme` and adds `.dark` to `<html>` synchronously when stored `"dark"` or absent-and-OS-dark.
 - **`<noscript>` fallback**: `<style>` block applies `color-scheme: dark` via `prefers-color-scheme` media query when JS is disabled.
-- **Toggle**: `button#theme-toggle` (desktop sidebar) and `button#theme-toggle-mobile` (mobile topbar). Icon swaps between ☀ (sun, when dark) and ☽ (moon, when light). `aria-label` updates dynamically.
-- **Implementation**: `src/dashboard/static/js/dark-mode.js` — toggles `.dark` on `<html>`, persists to localStorage.
+- **Toggle buttons**: `button#theme-toggle` (desktop sidebar) and `button#theme-toggle-mobile` (mobile topbar). Both render a neutral default (empty `[data-theme-icon]` span + `aria-label="Color theme"`); `dark-mode.js` (via its `META` map — the single source of truth) populates the **current-state** affordance on load and after each `htmx:afterSettle`: ☀ Light · ◑ System · ☽ Dark, with an `aria-label` naming the state and the next action. A CSS placeholder (`[data-theme-icon]:empty::before { content: "◑" }`) shows the neutral system glyph until JS fills the span, so the button never renders blank pre-/no-JS.
+- **Implementation**: `src/dashboard/static/js/dark-mode.js` — document-level click delegation (registered once; defensive against HTMX swaps — the toggle buttons live in persistent chrome and watcher uses no hx-boost) cycling the stored preference; latches an in-memory fallback if `localStorage` throws. Behavior covered by `tests/dashboard/js/dark-mode.test.mjs` (run in-suite via `tests/dashboard/test_dark_mode_js.py`).
 
 ---
 

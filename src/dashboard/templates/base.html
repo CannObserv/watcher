@@ -34,8 +34,11 @@
         <a href="/audit" class="nav-link {% if active_page == 'audit' %}nav-link-active{% endif %}">Audit Log</a>
       </div>
       <div class="p-4 border-t border-gray-200 dark:border-gray-700">
-        <button class="btn btn-ghost w-full justify-start gap-2" id="theme-toggle" type="button" aria-label="Switch to dark mode">
-          <span data-theme-icon aria-hidden="true">&#9789;</span>
+        {# Three-state color-scheme cycle (light → system → dark). dark-mode.js
+           owns the per-state icon + aria-label (its META map, the single source
+           of truth) and fills this neutral default on load. #}
+        <button class="btn btn-ghost w-full justify-start gap-2" id="theme-toggle" type="button" aria-label="Color theme">
+          <span data-theme-icon aria-hidden="true"></span>
           <span class="text-sm">Theme</span>
         </button>
       </div>
@@ -50,8 +53,8 @@
           </button>
           <span class="text-lg font-bold text-gray-900 dark:text-white">Watcher</span>
         </div>
-        <button class="btn btn-ghost p-2" id="theme-toggle-mobile" type="button" aria-label="Switch to dark mode">
-          <span data-theme-icon aria-hidden="true">&#9789;</span>
+        <button class="btn btn-ghost p-2" id="theme-toggle-mobile" type="button" aria-label="Color theme">
+          <span data-theme-icon aria-hidden="true"></span>
         </button>
       </header>
 
@@ -123,17 +126,6 @@
       if(close)close.addEventListener('click',shut);
       if(backdrop)backdrop.addEventListener('click',shut);
       document.addEventListener('keydown',function(e){if(e.key==='Escape'&&!drawer.classList.contains('hidden'))shut();});
-    })();
-    /* Wire up mobile theme toggle to main toggle */
-    (function(){
-      var main=document.getElementById('theme-toggle');
-      var mobile=document.getElementById('theme-toggle-mobile');
-      if(main&&mobile)mobile.addEventListener('click',function(){main.click();
-        var icon=mobile.querySelector('[data-theme-icon]');
-        var mainIcon=main.querySelector('[data-theme-icon]');
-        if(icon&&mainIcon)icon.textContent=mainIcon.textContent;
-        mobile.setAttribute('aria-label',main.getAttribute('aria-label'));
-      });
     })();
   </script>
 </body>

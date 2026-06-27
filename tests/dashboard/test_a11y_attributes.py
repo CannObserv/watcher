@@ -40,7 +40,13 @@ class TestAccessibility:
         assert 'aria-hidden="true">🌱🏛️🔍</span>' in resp.text
 
     async def test_dark_mode_toggle_has_aria_label(self, client):
-        """Dark mode toggle button has an aria-label."""
+        """Theme toggle renders a neutral default; dark-mode.js fills the state.
+
+        The three-state cycle (light / system / dark) can't be known server-side,
+        so base.html renders an empty ``[data-theme-icon]`` span + a neutral
+        ``aria-label`` that dark-mode.js populates on load.
+        """
         resp = await client.get("/")
         assert 'id="theme-toggle"' in resp.text
-        assert "aria-label" in resp.text
+        assert 'aria-label="Color theme"' in resp.text
+        assert '<span data-theme-icon aria-hidden="true"></span>' in resp.text

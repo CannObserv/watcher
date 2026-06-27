@@ -295,6 +295,15 @@
   }
 }
 
+/* -- Theme toggle: no-JS / pre-JS affordance --
+   base.html renders an empty [data-theme-icon] span; dark-mode.js fills it on
+   load. Until then show the neutral system glyph (mirrors META.system.icon in
+   dark-mode.js) so the button never renders blank. */
+#theme-toggle [data-theme-icon]:empty::before,
+#theme-toggle-mobile [data-theme-icon]:empty::before {
+  content: "◑";
+}
+
 /* -- Reduced motion -- */
 @media (prefers-reduced-motion: reduce) {
   *,

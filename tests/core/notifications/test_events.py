@@ -47,8 +47,13 @@ class TestEventTitles:
             assert et.value in EVENT_TITLES, f"EVENT_TITLES missing {et.value}"
 
     def test_titles_are_human_readable(self):
-        assert EVENT_TITLES["change_detected"] == "Change Detected"
-        assert EVENT_TITLES["watch_error"] == "Watch Error"
+        # #221: labels dropped the "Watch" prefix; change_detected → "Change".
+        assert EVENT_TITLES["change_detected"] == "Change"
+        assert EVENT_TITLES["watch_error"] == "Error"
+
+    def test_titles_carry_no_watch_prefix(self):
+        for label in EVENT_TITLES.values():
+            assert not label.startswith("Watch "), f"{label!r} still carries Watch prefix"
 
     def test_iteration_order_is_temporal(self):
         """EVENT_TITLES iterates in roughly temporal lifecycle order.

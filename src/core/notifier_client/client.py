@@ -26,13 +26,13 @@ def get_notifier_client() -> NotifierClient:
 def build_idempotency_key(event: WatchEvent, source_id: str) -> str:
     """Build a stable, tenant-scoped idempotency key for a notification dispatch.
 
-    For change_detected: keyed by (event_type, source_id, change_id) — stable
-    across retries of the same change, unique per source.
+    For change_detected: keyed by (event_type, source_id, change_revision_id) —
+    stable across retries of the same change, unique per source.
     For all other events: keyed by (event_type, source_id, watched_item_id, occurred_at_ms)
     — stable within a millisecond window, unique per source.
     """
-    change_id = event.metadata.get("change_id")
-    if change_id:
-        return f"watcher:{event.event_type.value}:{source_id}:{change_id}"
+    change_revision_id = event.metadata.get("change_revision_id")
+    if change_revision_id:
+        return f"watcher:{event.event_type.value}:{source_id}:{change_revision_id}"
     occurred_ms = int(event.occurred_at.timestamp() * 1000)
     return f"watcher:{event.event_type.value}:{source_id}:{event.watched_item_id}:{occurred_ms}"

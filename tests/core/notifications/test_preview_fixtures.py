@@ -1,6 +1,6 @@
 """Tests for the notification preview mock-event fixtures."""
 
-from datetime import datetime
+from datetime import UTC, datetime
 
 import pytest
 
@@ -8,8 +8,29 @@ from src.core.notifications.events import WatchEvent, WatchEventType
 from src.core.notifications.preview_fixtures import (
     MOCK_EVENT_FIXTURES,
     build_preview_event,
-    compute_preview_unified_diff,
 )
+from src.core.utils import watched_item_event_base_metadata
+
+
+class _FakeWatchedItem:
+    """Minimal stand-in matching the attributes watched_item_event_base_metadata reads."""
+
+    def __init__(self):
+        self.domain_name = "example.com"
+        self.default_schedule_config = {"interval": "1h"}
+        self.last_changed_at = datetime(2026, 4, 15, 3, 22, 0, tzinfo=UTC)
+        self.default_tags = ["regulatory"]
+        self.description = "desc"
+
+
+def _real_change_detected_keys() -> set[str]:
+    """The metadata keys a real change_detected event actually carries.
+
+    Base (watched_item_event_base_metadata) + the keys pipeline.py layers on
+    for a detected change. Mirrors src/workers/pipeline.py's change_meta.
+    """
+    base = set(watched_item_event_base_metadata(_FakeWatchedItem()).keys())
+    return base | {"change_revision_id", "content_fingerprint", "archiver_revision_id"}
 
 
 class TestMockEventFixtures:
@@ -17,11 +38,21 @@ class TestMockEventFixtures:
         for et in WatchEventType:
             assert et.value in MOCK_EVENT_FIXTURES, f"MOCK_EVENT_FIXTURES missing {et.value}"
 
-    def test_change_detected_has_diff_metadata(self):
+    def test_change_detected_matches_pipeline_metadata(self):
+        """#221 fidelity invariant: the fixture must not advertise keys a real
+        change email never carries. Its keys must be a subset of what
+        pipeline.py actually emits."""
+        fx_keys = set(MOCK_EVENT_FIXTURES["change_detected"].keys())
+        real_keys = _real_change_detected_keys()
+        assert fx_keys <= real_keys, f"fixture has phantom keys: {fx_keys - real_keys}"
+        # And the change-identity key is present so change_url renders.
+        assert "change_revision_id" in fx_keys
+
+    def test_change_detected_has_no_diff_phantom_keys(self):
+        """The removed diff/significance keys must not reappear (regression guard)."""
         fx = MOCK_EVENT_FIXTURES["change_detected"]
-        assert "added" in fx
-        assert "modified" in fx
-        assert "removed" in fx
+        for phantom in ("added", "modified", "removed", "significance", "change_id"):
+            assert phantom not in fx
 
     def test_watch_error_has_status_code(self):
         fx = MOCK_EVENT_FIXTURES["watch_error"]
@@ -46,22 +77,9 @@ class TestBuildPreviewEvent:
 
     def test_metadata_includes_fixture_fields(self):
         ev = build_preview_event("change_detected")
-        assert "added" in ev.metadata
-        assert "modified" in ev.metadata
-        assert "significance" in ev.metadata
+        assert "domain_name" in ev.metadata
+        assert "change_revision_id" in ev.metadata
 
     def test_unknown_event_type_raises(self):
         with pytest.raises(KeyError):
             build_preview_event("not_a_real_event_type")
-
-
-class TestComputePreviewUnifiedDiff:
-    """Phase 5 (#156): diff pipeline removed — compute_preview_unified_diff always returns ''."""
-
-    def test_returns_empty_string_for_all_events(self):
-        """Diff pipeline removed in Phase 5; all events return empty string."""
-        for et in WatchEventType:
-            assert compute_preview_unified_diff(et.value) == ""
-
-    def test_unknown_event_type_returns_empty(self):
-        assert compute_preview_unified_diff("not_a_real_event_type") == ""

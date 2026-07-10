@@ -1,4 +1,11 @@
-"""Tests for the notification content builder."""
+"""Tests for the notification content builder.
+
+#221: the diff/significance/change_summary machinery was stripped (Phase 5
+removed the diff pipeline that fed it; restoration tracked in #222). The
+change_detected body is now the header skeleton plus the surviving Context
+toggles (Domain, Last changed, Check interval, Description, Tags). The header
+link is labelled ITEM (was WATCH).
+"""
 
 from datetime import UTC, datetime
 
@@ -31,39 +38,6 @@ def make_event(event_type=WatchEventType.CHANGE_DETECTED, metadata=None):
     )
 
 
-CHANGE_META = {
-    "added": ["Licenses"],
-    "removed": ["Hours"],
-    "modified": [{"label": "Contact Info", "similarity": 0.85}],
-}
-
-# Canonical canned diff used across diff/snippet tests.
-# Phase 5 (#156): diff pipeline removed; hardcoded sample replaces live
-# compute_unified_diff call so test_content.py stays independent of src/core/diff/.
-_SAMPLE_UNIFIED_DIFF = (
-    "--- content\n"
-    "+++ content\n"
-    "@@ -1,5 +1,6 @@\n"
-    " alpha\n"
-    "\n"
-    "-beta\n"
-    "\n"
-    "+beta-changed\n"
-    "\n"
-    " gamma\n"
-    "\n"
-    " delta\n"
-    "\n"
-    " epsilon\n"
-    "\n"
-    "+zeta\n"
-)
-
-
-def _sample_unified_diff() -> str:
-    return _SAMPLE_UNIFIED_DIFF
-
-
 class TestResolveOptions:
     def test_none_config_returns_defaults(self):
         opts = resolve_options(None, "change_detected")
@@ -93,63 +67,52 @@ class TestResolveOptions:
 
 class TestChangeDetectedDefaultBody:
     """The change_detected default body is composed in Python (build_body) by
-    interleaving toggle-driven sections into an always-present skeleton at
-    the canonical layout positions."""
+    interleaving toggle-driven sections into the always-present header
+    skeleton at the canonical layout positions."""
 
     def test_default_skeleton_with_no_toggles(self):
-        """With every toggle off and no extra metadata, the body is the rich
-        skeleton: header (URL, TIMESTAMP, WATCH) + body block (label,
-        change_summary). No optional slots render."""
-        event = make_event(metadata=CHANGE_META)
+        """With every toggle off, the body is the header skeleton alone:
+        item_name, URL, TIMESTAMP, ITEM. The old event_label/change_summary
+        body block was retired in #221."""
+        event = make_event(metadata={})
         body = build_body(event, ContentOptions())
         expected = (
             "Test Watch\n"
             "URL: https://example.com\n"
             "TIMESTAMP: 2026-04-14T12:00:00Z\n"
-            f"WATCH: https://watcher.exe.xyz/watched-items/{WATCH_ID}"
-            "\n\n"
-            "Change Detected\n"
-            "1 added, 1 modified, 1 removed"
+            f"ITEM: https://watcher.exe.xyz/watched-items/{WATCH_ID}"
         )
         assert body == expected
 
-    def test_watch_link_unconditional(self):
-        """WATCH dashboard link is part of the always-present skeleton — there
-        is no toggle to suppress it (issue #104, see also Q4 of the design
-        interview)."""
+    def test_item_link_unconditional(self):
+        """The ITEM dashboard link is part of the always-present skeleton —
+        there is no toggle to suppress it."""
         event = make_event(metadata={})
         body = build_body(event, ContentOptions())
-        assert f"WATCH: https://watcher.exe.xyz/watched-items/{WATCH_ID}" in body
+        assert f"ITEM: https://watcher.exe.xyz/watched-items/{WATCH_ID}" in body
 
-    def test_full_layout_with_every_toggle_on_matches_issue_format(self):
-        """With every toggle on and full metadata, the body matches the issue
-        #155 layout exactly: DOMAIN between item_name and URL; LAST CHANGED
-        + INTERVAL between URL and TIMESTAMP; CHANGE after WATCH;
-        SIGNIFICANCE below CHANGE; diff after the body block; DESCRIPTION +
-        TAGS last."""
+    def test_full_layout_with_every_toggle_on(self):
+        """With every surviving toggle on and full metadata: DOMAIN between
+        item_name and URL; LAST CHANGED + INTERVAL between URL and TIMESTAMP;
+        DESCRIPTION + TAGS as trailing paragraphs."""
         event = make_event(
             metadata={
-                **CHANGE_META,
                 "change_revision_id": "01HV0000000000000000000099",
                 "domain_name": "example.com",
                 "check_interval": "1h",
                 "last_changed_at": "2026-04-09",
-                "significance": 0.5,
                 "description": "Watch for license renewals",
                 "tags": ["cannabis", "license"],
             }
         )
         opts = ContentOptions(
-            include_diff_full=True,
             include_temporal_context=True,
             include_domain=True,
             include_last_changed_at=True,
-            include_significance=True,
-            include_change_dashboard_url=True,
             include_description=True,
             include_tags=True,
         )
-        body = build_body(event, opts, unified_diff=_sample_unified_diff())
+        body = build_body(event, opts)
         expected = (
             "Test Watch\n"
             "DOMAIN: example.com\n"
@@ -157,25 +120,7 @@ class TestChangeDetectedDefaultBody:
             "LAST CHANGED: 2026-04-09\n"
             "INTERVAL: 1h\n"
             "TIMESTAMP: 2026-04-14T12:00:00Z\n"
-            f"WATCH: https://watcher.exe.xyz/watched-items/{WATCH_ID}\n"
-            f"CHANGE: https://watcher.exe.xyz/watched-items/{WATCH_ID}\n"
-            "SIGNIFICANCE: 50%"
-            "\n\n"
-            "Change Detected\n"
-            "1 added, 1 modified, 1 removed"
-            "\n\n"
-            "```diff\n"
-            "--- content\n"
-            "+++ content\n"
-            "@@ -1,5 +1,6 @@\n"
-            " alpha\n"
-            "-beta\n"
-            "+beta-changed\n"
-            " gamma\n"
-            " delta\n"
-            " epsilon\n"
-            "+zeta\n"
-            "```"
+            f"ITEM: https://watcher.exe.xyz/watched-items/{WATCH_ID}"
             "\n\n"
             "DESCRIPTION: Watch for license renewals"
             "\n\n"
@@ -230,98 +175,6 @@ class TestDomainSlot:
         assert "DOMAIN" not in body
 
 
-class TestChangeUrlSlot:
-    CHANGE_ID = "01HV0000000000000000000099"
-
-    def test_renders_after_watch_when_toggle_on_and_change_id_present(self):
-        event = make_event(metadata={"change_revision_id": self.CHANGE_ID})
-        body = build_body(event, ContentOptions(include_change_dashboard_url=True))
-        # CHANGE appears immediately after WATCH (issue layout).
-        watch_idx = body.index("WATCH:")
-        change_idx = body.index("CHANGE:")
-        assert change_idx > watch_idx
-        assert f"CHANGE: https://watcher.exe.xyz/watched-items/{WATCH_ID}" in body
-
-    def test_omitted_when_toggle_off(self):
-        event = make_event(metadata={"change_revision_id": self.CHANGE_ID})
-        body = build_body(event, ContentOptions(include_change_dashboard_url=False))
-        assert "CHANGE:" not in body
-
-    def test_omitted_when_change_id_missing(self):
-        event = make_event(metadata={})
-        body = build_body(event, ContentOptions(include_change_dashboard_url=True))
-        assert "CHANGE:" not in body
-
-
-class TestDiffSlot:
-    """The diff slot renders the unified-diff text fed in via `unified_diff=`,
-    wrapped in a Markdown ```diff fenced block — this replaces the old
-    chunk-label summary."""
-
-    def test_snippet_renders_after_change_summary(self):
-        event = make_event(metadata=CHANGE_META)
-        body = build_body(
-            event, ContentOptions(include_diff_snippet=True), unified_diff=_sample_unified_diff()
-        )
-        # Diff sits after the body block (change_summary).
-        summary_idx = body.index("1 added, 1 modified, 1 removed")
-        diff_idx = body.index("```diff")
-        assert diff_idx > summary_idx
-        assert "-beta" in body
-        assert "+beta-changed" in body
-        assert "+zeta" in body
-
-    def test_snippet_respects_diff_snippet_lines_cap_at_hunk_boundary(self):
-        """diff_snippet_lines caps lines but never truncates mid-hunk —
-        when set below the first hunk's full size, only file headers + the
-        @@ line are emitted, with the truncation footer."""
-        # Two-hunk canned diff (Phase 5 #156: pre-computed, no live diff call).
-        diff = (
-            "--- content\n"
-            "+++ content\n"
-            "@@ -1,5 +1,5 @@\n"
-            " a\n\n-b\n\n+B\n\n c\n\n d\n\n e\n\n"
-            "@@ -12,7 +12,7 @@\n"
-            " l\n\n m\n\n n\n\n-o\n\n+O\n\n p\n\n q\n\n r\n"
-        )
-        event = make_event(metadata=CHANGE_META)
-        # Cap below first hunk size — only headers + @@ should fit.
-        body = build_body(
-            event,
-            ContentOptions(include_diff_snippet=True, diff_snippet_lines=4),
-            unified_diff=diff,
-        )
-        assert "```diff" in body
-        assert "more line" in body  # truncation footer
-
-    def test_full_supersedes_snippet_cap(self):
-        event = make_event(metadata=CHANGE_META)
-        body = build_body(
-            event,
-            ContentOptions(include_diff_full=True, include_diff_snippet=True, diff_snippet_lines=1),
-            unified_diff=_sample_unified_diff(),
-        )
-        # Full diff includes every change line — no truncation footer.
-        assert "+beta-changed" in body
-        assert "+zeta" in body
-        assert "more line" not in body
-
-    def test_omitted_when_both_toggles_off(self):
-        event = make_event(metadata=CHANGE_META)
-        body = build_body(event, ContentOptions(), unified_diff=_sample_unified_diff())
-        assert "```diff" not in body
-
-    def test_omitted_when_unified_diff_missing(self):
-        event = make_event(metadata=CHANGE_META)
-        body = build_body(event, ContentOptions(include_diff_snippet=True), unified_diff=None)
-        assert "```diff" not in body
-
-    def test_omitted_when_unified_diff_empty(self):
-        event = make_event(metadata=CHANGE_META)
-        body = build_body(event, ContentOptions(include_diff_snippet=True), unified_diff="")
-        assert "```diff" not in body
-
-
 class TestStatsSlots:
     def test_interval_renders_with_label_when_toggle_on(self):
         event = make_event(metadata={"check_interval": "1h"})
@@ -333,24 +186,9 @@ class TestStatsSlots:
         body = build_body(event, ContentOptions(include_last_changed_at=True))
         assert "LAST CHANGED: 2026-04-09" in body
 
-    def test_significance_rendered_as_int_percent(self):
-        event = make_event(metadata={"significance": 0.73})
-        body = build_body(event, ContentOptions(include_significance=True))
-        assert "SIGNIFICANCE: 73%" in body
-
-    def test_zero_significance_renders(self):
-        event = make_event(metadata={"significance": 0.0})
-        body = build_body(event, ContentOptions(include_significance=True))
-        assert "SIGNIFICANCE: 0%" in body
-
-    def test_full_significance_renders(self):
-        event = make_event(metadata={"significance": 1.0})
-        body = build_body(event, ContentOptions(include_significance=True))
-        assert "SIGNIFICANCE: 100%" in body
-
     def test_last_changed_and_interval_render_between_url_and_timestamp(self):
-        """Per #155, LAST CHANGED + INTERVAL sit between URL and TIMESTAMP in
-        the header, with LAST CHANGED first (matches issue text ordering)."""
+        """LAST CHANGED + INTERVAL sit between URL and TIMESTAMP in the header,
+        with LAST CHANGED first."""
         event = make_event(metadata={"check_interval": "1h", "last_changed_at": "2026-04-09"})
         body = build_body(
             event,
@@ -360,37 +198,11 @@ class TestStatsSlots:
             "URL: https://example.com\nLAST CHANGED: 2026-04-09\nINTERVAL: 1h\nTIMESTAMP: "
         ) in body
 
-    def test_significance_renders_below_change(self):
-        """Per #155, SIGNIFICANCE sits in the header immediately after CHANGE."""
-        change_id = "01HV0000000000000000000099"
-        event = make_event(metadata={"change_revision_id": change_id, "significance": 0.5})
-        body = build_body(
-            event,
-            ContentOptions(include_change_dashboard_url=True, include_significance=True),
-        )
-        # Header order: WATCH, CHANGE, SIGNIFICANCE — all consecutive, no
-        # blank lines between them.
-        assert (
-            f"CHANGE: https://watcher.exe.xyz/watched-items/{WATCH_ID}\nSIGNIFICANCE: 50%"
-        ) in body
-
-    def test_significance_renders_below_watch_when_change_off(self):
-        """SIGNIFICANCE position degrades gracefully — without CHANGE it sits
-        directly after WATCH (the last unconditional header line)."""
-        event = make_event(metadata={"significance": 0.5})
-        body = build_body(event, ContentOptions(include_significance=True))
-        assert (
-            f"WATCH: https://watcher.exe.xyz/watched-items/{WATCH_ID}\nSIGNIFICANCE: 50%"
-        ) in body
-
     def test_stats_omitted_when_toggles_off(self):
-        event = make_event(
-            metadata={"check_interval": "1h", "last_changed_at": "2026-04-09", "significance": 0.5}
-        )
+        event = make_event(metadata={"check_interval": "1h", "last_changed_at": "2026-04-09"})
         body = build_body(event, ContentOptions())
         assert "INTERVAL" not in body
         assert "LAST CHANGED" not in body
-        assert "SIGNIFICANCE" not in body
 
     def test_stats_omitted_when_metadata_missing(self):
         event = make_event(metadata={})
@@ -399,12 +211,10 @@ class TestStatsSlots:
             ContentOptions(
                 include_temporal_context=True,
                 include_last_changed_at=True,
-                include_significance=True,
             ),
         )
         assert "INTERVAL" not in body
         assert "LAST CHANGED" not in body
-        assert "SIGNIFICANCE" not in body
 
 
 class TestDescriptionSlot:
@@ -488,7 +298,7 @@ class TestRenderTemplate:
 
 class TestBuildTemplateContext:
     def test_context_has_all_watch_event_fields(self):
-        event = make_event(metadata={"significance": 0.5, "change_revision_id": "abc"})
+        event = make_event(metadata={"change_revision_id": "abc"})
         ctx = build_template_context(event)
         assert ctx["watched_item_id"] == event.watched_item_id
         assert ctx["item_name"] == event.item_name
@@ -497,10 +307,10 @@ class TestBuildTemplateContext:
         assert ctx["occurred_at"] == event.occurred_at
 
     def test_metadata_keys_flattened_into_context(self):
-        event = make_event(metadata={"significance": 0.75, "change_revision_id": "xyz"})
+        event = make_event(metadata={"change_revision_id": "xyz", "domain_name": "example.com"})
         ctx = build_template_context(event)
-        assert ctx["significance"] == 0.75
         assert ctx["change_revision_id"] == "xyz"
+        assert ctx["domain_name"] == "example.com"
 
     def test_empty_metadata_produces_base_keys_only(self):
         event = make_event(metadata={})
@@ -513,11 +323,7 @@ class TestBuildTemplateContext:
             "occurred_at",
             "occurred_at_iso",
             "event_label",
-            "change_summary",
             "change_url",
-            "diff_snippet",
-            "diff_full",
-            "chunks_changed",
         }
 
     def test_event_label_matches_event_titles(self):
@@ -560,93 +366,15 @@ class TestBuildTemplateContext:
         ctx = build_template_context(event)
         assert ctx["occurred_at_iso"] == "2026-04-14T12:00:00Z"
 
-    def test_change_summary_counts_changes(self):
-        event = make_event(metadata={"added": ["a", "b"], "modified": [{}], "removed": []})
-        ctx = build_template_context(event)
-        assert ctx["change_summary"] == "2 added, 1 modified"
-
-    def test_change_summary_details_pending_when_empty(self):
-        event = make_event(event_type=WatchEventType.CHANGE_DETECTED, metadata={})
-        ctx = build_template_context(event)
-        assert ctx["change_summary"] == "details pending"
-
-    def test_change_summary_empty_for_non_change_events(self):
-        event = make_event(event_type=WatchEventType.WATCH_PAUSED, metadata={})
-        ctx = build_template_context(event)
-        assert ctx["change_summary"] == ""
-
-    def test_change_url_populated_when_change_id_present(self):
+    def test_change_url_populated_when_change_revision_id_present(self):
         event = make_event(metadata={"change_revision_id": "01HV0000000000000000000099"})
         ctx = build_template_context(event)
         assert ctx["change_url"] == f"https://watcher.exe.xyz/watched-items/{event.watched_item_id}"
 
-    def test_change_url_empty_when_change_id_absent(self):
+    def test_change_url_empty_when_change_revision_id_absent(self):
         event = make_event(metadata={})
         ctx = build_template_context(event)
         assert ctx["change_url"] == ""
-
-    def test_diff_snippet_populated_when_unified_diff_present(self):
-        event = make_event(metadata=CHANGE_META)
-        ctx = build_template_context(event, unified_diff=_sample_unified_diff())
-        assert ctx["diff_snippet"].startswith("```diff\n")
-        assert ctx["diff_snippet"].rstrip("\n").endswith("```")
-        assert "-beta" in ctx["diff_snippet"]
-        assert "+beta-changed" in ctx["diff_snippet"]
-
-    def test_diff_full_populated_when_unified_diff_present(self):
-        event = make_event(metadata=CHANGE_META)
-        ctx = build_template_context(event, unified_diff=_sample_unified_diff())
-        assert ctx["diff_full"].startswith("```diff\n")
-        # Full version contains the second-hunk change (the appended `zeta`).
-        assert "+zeta" in ctx["diff_full"]
-
-    def test_diff_snippet_capped_at_default(self):
-        """Default snippet cap (25 lines) caps long diffs; diff_full keeps all."""
-        # Canned long diff — 30 changed lines so the 25-line cap fires.
-        # Phase 5 (#156): pre-computed; no live compute_unified_diff call.
-        hunk_lines = "".join(f"-old-{i}\n+new-{i}\n" for i in range(30))
-        long_diff = f"--- content\n+++ content\n@@ -1,60 +1,60 @@\n{hunk_lines}"
-        event = make_event(metadata=CHANGE_META)
-        ctx = build_template_context(event, unified_diff=long_diff)
-        snippet_lines = ctx["diff_snippet"].count("\n") + 1
-        full_lines = ctx["diff_full"].count("\n") + 1
-        # Snippet has the truncation footer; cap+fence overhead means a few more
-        # than 25 lines total, but it's strictly smaller than the full diff.
-        assert snippet_lines < full_lines
-        assert "more line" in ctx["diff_snippet"]
-        assert "more line" not in ctx["diff_full"]
-
-    def test_diff_snippet_empty_when_no_unified_diff(self):
-        event = make_event(metadata=CHANGE_META)
-        ctx = build_template_context(event, unified_diff=None)
-        assert ctx["diff_snippet"] == ""
-        assert ctx["diff_full"] == ""
-
-    def test_diff_snippet_empty_when_unified_diff_blank(self):
-        event = make_event(metadata=CHANGE_META)
-        ctx = build_template_context(event, unified_diff="")
-        assert ctx["diff_snippet"] == ""
-        assert ctx["diff_full"] == ""
-
-    def test_chunks_changed_structured(self):
-        """chunks_changed is a list of {status, label, similarity} dicts."""
-        event = make_event(metadata=CHANGE_META)
-        ctx = build_template_context(event)
-        assert ctx["chunks_changed"] == [
-            {"status": "added", "label": "Licenses", "similarity": None},
-            {"status": "removed", "label": "Hours", "similarity": None},
-            {"status": "modified", "label": "Contact Info", "similarity": 0.85},
-        ]
-
-    def test_chunks_changed_empty_when_no_chunk_metadata(self):
-        event = make_event(metadata={})
-        ctx = build_template_context(event)
-        assert ctx["chunks_changed"] == []
-
-    def test_chunks_changed_skips_modified_without_label(self):
-        event = make_event(metadata={"modified": [{"similarity": 0.9}]})
-        ctx = build_template_context(event)
-        assert ctx["chunks_changed"] == []
 
     def test_derived_fields_take_precedence_over_metadata(self):
         """Hostile metadata keys must not clobber derived fields."""
@@ -655,23 +383,15 @@ class TestBuildTemplateContext:
                 "change_revision_id": "01HV0000000000000000000099",
                 "event_label": "BOGUS",
                 "occurred_at_iso": "BOGUS",
-                "change_summary": "BOGUS",
                 "change_url": "BOGUS",
-                "diff_snippet": "BOGUS",
-                "diff_full": "BOGUS",
-                "chunks_changed": "BOGUS",
             }
         )
         ctx = build_template_context(event)
         assert ctx["event_label"] == EVENT_TITLES[event.event_type.value]
         assert ctx["occurred_at_iso"] == "2026-04-14T12:00:00Z"
-        assert ctx["change_summary"] == "details pending"
         assert ctx["change_url"] == (
             f"https://watcher.exe.xyz/watched-items/{event.watched_item_id}"
         )
-        assert ctx["diff_snippet"] == ""
-        assert ctx["diff_full"] == ""
-        assert ctx["chunks_changed"] == []
 
 
 class TestBuildBodyWithTemplates:
@@ -696,26 +416,12 @@ class TestBuildBodyWithTemplates:
         body = build_body(event, opts)
         assert body == "{{ unclosed"
 
-    def test_diff_snippet_in_custom_template_uses_user_cap(self):
-        """User-set diff_snippet_lines must take effect even on the
-        body_template path. build_template_context applies the module
-        default; build_body overrides it with options.diff_snippet_lines so
-        a custom template referencing {{ diff_snippet }} honors the
-        preference."""
-        # Canned long diff — 30 changed lines; Phase 5 (#156) pre-computed.
-        hunk_lines = "".join(f"-old-{i}\n+new-{i}\n" for i in range(30))
-        long_diff = f"--- content\n+++ content\n@@ -1,60 +1,60 @@\n{hunk_lines}"
-
-        event = make_event(metadata=CHANGE_META)
-        opts = ContentOptions(body_template="{{ diff_snippet }}", diff_snippet_lines=4)
-        body = build_body(event, opts, unified_diff=long_diff)
-        # User cap honored: tight cap → truncation footer present.
-        assert "more line" in body
-
-        # And without a cap override, full diff fits without truncation.
-        opts_full = ContentOptions(body_template="{{ diff_full }}")
-        body_full = build_body(event, opts_full, unified_diff=long_diff)
-        assert "more line" not in body_full
+    def test_change_url_available_in_custom_template(self):
+        """change_url survives as a template variable for custom bodies."""
+        event = make_event(metadata={"change_revision_id": "01HV0000000000000000000099"})
+        opts = ContentOptions(body_template="link: {{ change_url }}")
+        body = build_body(event, opts)
+        assert body == f"link: https://watcher.exe.xyz/watched-items/{WATCH_ID}"
 
 
 class TestBuildTitle:
@@ -723,7 +429,7 @@ class TestBuildTitle:
         event = make_event(event_type=WatchEventType.CHANGE_DETECTED)
         title = build_title(event, ContentOptions())
         # Default title carries the [Watcher] prefix for cross-service filtering.
-        assert title == "[Watcher] Change Detected: Test Watch"
+        assert title == "[Watcher] Change: Test Watch"
 
     def test_user_title_template_overrides_default(self):
         event = make_event(event_type=WatchEventType.CHANGE_DETECTED)
@@ -755,7 +461,7 @@ class TestBuildTitleStrict:
     def test_strict_still_renders_valid_default(self):
         event = make_event()
         title = build_title(event, ContentOptions(), strict=True)
-        assert title == "[Watcher] Change Detected: Test Watch"
+        assert title == "[Watcher] Change: Test Watch"
 
 
 class TestBuildBodyStrict:
@@ -768,7 +474,7 @@ class TestBuildBodyStrict:
     def test_strict_renders_default_body(self):
         """change_detected default body is composed in pure Python — strict
         mode is irrelevant on this code path but must not regress."""
-        event = make_event(metadata={"domain_name": "example.com", **CHANGE_META})
+        event = make_event(metadata={"domain_name": "example.com"})
         body = build_body(event, ContentOptions(include_domain=True), strict=True)
         assert "URL: https://example.com" in body
         assert "DOMAIN: example.com" in body

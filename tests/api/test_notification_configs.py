@@ -557,14 +557,14 @@ async def test_create_item_with_content_config(client, db_session):
         f"/api/v1/watched-items/{watch_id}/notifications",
         json=_create_payload(
             content_config={
-                "default": {"include_diff_snippet": True, "diff_snippet_lines": 5},
+                "default": {"include_domain": True, "include_tags": True},
             },
         ),
     )
     assert resp.status_code == 201
     data = resp.json()
-    assert data["content_config"]["default"]["include_diff_snippet"] is True
-    assert data["content_config"]["default"]["diff_snippet_lines"] == 5
+    assert data["content_config"]["default"]["include_domain"] is True
+    assert data["content_config"]["default"]["include_tags"] is True
 
 
 @pytest.mark.integration
@@ -582,10 +582,10 @@ async def test_patch_item_updates_content_config(client, db_session):
         f"/api/v1/watched-items/{watch_id}/notifications/{template_id}",
         json={
             "content_config": {
-                "default": {"include_diff_full": True},
+                "default": {"include_description": True},
             },
         },
     )
     assert resp.status_code == 200
     data = resp.json()
-    assert data["content_config"]["default"]["include_diff_full"] is True
+    assert data["content_config"]["default"]["include_description"] is True

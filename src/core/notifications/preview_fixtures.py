@@ -5,11 +5,17 @@ database. `MOCK_EVENT_FIXTURES` holds one fixture per event type, keyed by the
 string `WatchEventType` value. `build_preview_event()` wraps the fixture in a
 `WatchEvent` suitable for passing through `build_title` / `build_body`.
 
-Phase 5 (#156): ``compute_preview_unified_diff`` now returns an empty string.
-The diff pipeline (Snapshot → Change → unified diff) was removed; preview diffs
-are not reconstructable without real content. Templates receive ``unified_diff=""``
-and diff_snippet / diff_full slots simply render nothing, which is acceptable for
-a stateless preview.
+**Fidelity invariant (#221).** Each fixture's metadata keys must be a subset of
+the keys the real emitters actually produce for that event — otherwise the
+preview shows fields a delivered notification never carries. The shared base
+mirrors `watched_item_event_base_metadata`; the per-event extras mirror what
+`pipeline.py` / `tasks.py` layer on. `tests/core/notifications/test_preview_fixtures.py`
+guards this against drift.
+
+The diff pipeline (Snapshot → Change → unified diff) was removed in Phase 5
+(#156); the diff/significance fixture fields and `compute_preview_unified_diff`
+were removed in #221 along with the toggles that consumed them (restoration
+tracked in #222).
 """
 
 from datetime import UTC, datetime
@@ -22,6 +28,8 @@ _PREVIEW_WATCH_URL = "https://example.com/regulatory-page"
 _PREVIEW_OCCURRED_AT = datetime(2026, 4, 15, 12, 0, 0, tzinfo=UTC)
 
 
+# Mirrors `watched_item_event_base_metadata` (src/core/utils.py): the context
+# every dispatch layers onto the event before adding per-event keys.
 _SHARED_CONTEXT = {
     "domain_name": "example.com",
     "check_interval": "1h",
@@ -31,72 +39,12 @@ _SHARED_CONTEXT = {
 }
 
 
-_PREVIEW_PREVIOUS_TEXT = """\
-<!DOCTYPE html>
-<html lang="en">
-<head><meta charset="utf-8"><title>Cannabis Observer — Regulatory Filings</title></head>
-<body>
-<h1>Cannabis Observer — Regulatory Filings</h1>
-<p>Last updated: 2026-04-10</p>
-<section id="hours">
-  <h2>Hours</h2>
-  <p>Mon-Fri: 9:00 - 17:00</p>
-</section>
-<section id="contact">
-  <h2>Contact</h2>
-  <p><a href="mailto:contact@example.com">contact@example.com</a></p>
-</section>
-<section id="filings">
-  <h2>Recent filings</h2>
-  <ul>
-    <li>Application 2026-04-08</li>
-    <li>Renewal 2026-04-09</li>
-  </ul>
-</section>
-<footer>Footer</footer>
-</body>
-</html>
-"""
-
-_PREVIEW_CURRENT_TEXT = """\
-<!DOCTYPE html>
-<html lang="en">
-<head><meta charset="utf-8"><title>Cannabis Observer — Regulatory Filings</title></head>
-<body>
-<h1>Cannabis Observer — Regulatory Filings</h1>
-<p>Last updated: 2026-04-15</p>
-<section id="licensing">
-  <h2>New licensing program</h2>
-  <p>Apply for a license at <a href="https://example.com/apply">https://example.com/apply</a></p>
-</section>
-<section id="contact">
-  <h2>Contact</h2>
-  <p><a href="mailto:support@example.com">support@example.com</a></p>
-</section>
-<section id="filings">
-  <h2>Recent filings</h2>
-  <ul>
-    <li>Application 2026-04-08</li>
-    <li>Renewal 2026-04-12</li>
-    <li>Renewal 2026-04-15</li>
-  </ul>
-</section>
-<footer>Footer</footer>
-</body>
-</html>
-"""
-
-
 MOCK_EVENT_FIXTURES: dict[str, dict] = {
     WatchEventType.CHANGE_DETECTED.value: {
         **_SHARED_CONTEXT,
-        "added": ["New licensing section"],
-        "modified": [{"label": "Contact information", "similarity": 0.72}],
-        "removed": ["Deprecated hours section"],
-        "significance": 0.65,
-        "change_id": "01KPPFATBNYQGBB38SQ06DN9HZ",
-        "previous_text": _PREVIEW_PREVIOUS_TEXT,
-        "current_text": _PREVIEW_CURRENT_TEXT,
+        # Layered by pipeline.py on change detection.
+        "change_revision_id": "01KPPFATBNYQGBB38SQ06DN9HZ",
+        "content_fingerprint": "sha256:9f2c1e",
     },
     WatchEventType.WATCH_ERROR.value: {
         **_SHARED_CONTEXT,
@@ -125,12 +73,3 @@ def build_preview_event(event_type: str) -> WatchEvent:
         occurred_at=_PREVIEW_OCCURRED_AT,
         metadata=metadata,
     )
-
-
-def compute_preview_unified_diff(event_type: str) -> str:
-    """Return empty string — diff pipeline removed in Phase 5 (#156).
-
-    The Snapshot/Change tables were dropped; there is no content to diff.
-    Preview templates receive ``unified_diff=""`` and diff slots render nothing.
-    """
-    return ""

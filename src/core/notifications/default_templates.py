@@ -8,12 +8,10 @@ means the UI can display and pre-fill them exactly as they'll render.
 For most events the dispatcher renders `DEFAULT_BODY_TEMPLATES[event_type]`
 directly through Jinja. The `change_detected` body is the exception:
 `src.core.notifications.content.build_body` composes it line-by-line in
-Python from the shared `CHANGE_DETECTED_HEADER_LINES` and
-`CHANGE_DETECTED_BODY_BLOCK_LINES` tuples (single source of truth) and
-interleaves optional toggle-driven sections (DOMAIN, LAST CHANGED, INTERVAL,
-CHANGE, SIGNIFICANCE in the header; diff, DESCRIPTION, TAGS as trailing
-paragraphs) at the issue-#155 positions.
-`DEFAULT_BODY_TEMPLATES['change_detected']` is derived from the same tuples
+Python from the shared `CHANGE_DETECTED_HEADER_LINES` tuple (single source of
+truth) and interleaves optional toggle-driven sections (DOMAIN, LAST CHANGED,
+INTERVAL in the header; DESCRIPTION, TAGS as trailing paragraphs).
+`DEFAULT_BODY_TEMPLATES['change_detected']` is derived from the same tuple
 and serves only as the UI seed (`compose_body_prefill`).
 
 Template context (shared with user templates) is built by
@@ -45,7 +43,7 @@ TEMPLATE_VARIABLES: list[TemplateVariable] = [
     TemplateVariable("item_name", "str", "Display name of the watched item", "always"),
     TemplateVariable("item_url", "str", "Monitored URL", "always"),
     TemplateVariable("event_type", "str", 'Event code (e.g. "change_detected")', "always"),
-    TemplateVariable("event_label", "str", 'Human label (e.g. "Change Detected")', "always"),
+    TemplateVariable("event_label", "str", 'Human label (e.g. "Change")', "always"),
     TemplateVariable("occurred_at", "datetime", "When the event occurred (UTC)", "always"),
     TemplateVariable(
         "occurred_at_iso",
@@ -54,43 +52,10 @@ TEMPLATE_VARIABLES: list[TemplateVariable] = [
         "always",
     ),
     # change_detected-only
+    TemplateVariable("change_revision_id", "str", "ULID of the change revision", "change_detected"),
     TemplateVariable(
-        "change_summary",
-        "str",
-        'Counts string (e.g. "2 added, 1 modified")',
-        "change_detected",
+        "change_url", "str", "WatchedItem dashboard URL for this change", "change_detected"
     ),
-    TemplateVariable("added", "list[str]", "Labels of added sections", "change_detected"),
-    TemplateVariable(
-        "modified",
-        "list[{label, similarity}]",
-        "Modified sections with similarity scores",
-        "change_detected",
-    ),
-    TemplateVariable("removed", "list[str]", "Labels of removed sections", "change_detected"),
-    TemplateVariable(
-        "diff_snippet",
-        "str",
-        "Unified diff in a Markdown ```diff block, capped (hunk-boundary aware)",
-        "change_detected",
-    ),
-    TemplateVariable(
-        "diff_full",
-        "str",
-        "Unified diff in a Markdown ```diff block, no cap",
-        "change_detected",
-    ),
-    TemplateVariable(
-        "chunks_changed",
-        "list[{status, label, similarity}]",
-        "Structured list of chunk-level changes (status: added/removed/modified)",
-        "change_detected",
-    ),
-    TemplateVariable("change_id", "str", "ULID of the change for URLs", "change_detected"),
-    TemplateVariable(
-        "change_url", "str", "Direct dashboard URL for this change", "change_detected"
-    ),
-    TemplateVariable("significance", "float", "Change magnitude 0.0–1.0", "change_detected"),
     # watch_error-only
     TemplateVariable("status_code", "int", "HTTP status code returned", "watch_error"),
     # Contextual — populated when relevant metadata exists on the watch
@@ -126,31 +91,29 @@ DEFAULT_TITLE_TEMPLATES: dict[str, str] = {
 
 # Canonical skeleton for the change_detected default body. Both the seed
 # template (DEFAULT_BODY_TEMPLATES['change_detected']) and the dispatch-time
-# composer (`content.build_body`) consume these tuples — single source of
-# truth for the always-present lines. Toggle-driven sections are interleaved
-# by the composer at the issue #155 positions; the WATCH dashboard link is
-# part of the unconditional skeleton.
+# composer (`content.build_body`) consume this tuple — single source of
+# truth for the always-present header lines. Toggle-driven sections are
+# interleaved by the composer at the canonical positions; the ITEM dashboard
+# link is part of the unconditional skeleton.
+#
+# The old body block (`{{ event_label }}` / `{{ change_summary }}`) was
+# retired in #221: `change_summary` could only ever render "details pending"
+# (the diff pipeline that produced counts was removed in Phase 5 #156), and
+# `event_label` already rides the subject line. The change body is now the
+# header alone.
 #
 # Composer insertion anchors in HEADER (see `_build_change_detected_body`):
 #   - DOMAIN: immediately after item_name (index 1)
 #   - LAST CHANGED, INTERVAL: immediately before TIMESTAMP (in that order)
-#   - CHANGE: immediately after WATCH
-#   - SIGNIFICANCE: immediately after CHANGE (or after WATCH when CHANGE off)
-# Reorder these tuples and the composer's index/append calls must follow.
+# Reorder this tuple and the composer's index calls must follow.
 CHANGE_DETECTED_HEADER_LINES: tuple[str, ...] = (
     "{{ item_name }}",
     "URL: {{ item_url }}",
     "TIMESTAMP: {{ occurred_at_iso }}",
-    f"WATCH: {APP_URL}" + "/watched-items/{{ watched_item_id }}",
-)
-CHANGE_DETECTED_BODY_BLOCK_LINES: tuple[str, ...] = (
-    "{{ event_label }}",
-    "{{ change_summary }}",
+    f"ITEM: {APP_URL}" + "/watched-items/{{ watched_item_id }}",
 )
 
-_CHANGE_DETECTED_BODY = (
-    "\n".join(CHANGE_DETECTED_HEADER_LINES) + "\n\n" + "\n".join(CHANGE_DETECTED_BODY_BLOCK_LINES)
-)
+_CHANGE_DETECTED_BODY = "\n".join(CHANGE_DETECTED_HEADER_LINES)
 
 
 DEFAULT_BODY_TEMPLATES: dict[str, str] = {

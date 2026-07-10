@@ -8,17 +8,14 @@ _VALID_EVENT_TYPES = {e.value for e in WatchEventType}
 
 
 class ContentOptions(BaseModel):
-    """Field toggles controlling what extra information appears in a notification body."""
+    """Field toggles controlling what extra information appears in a notification body.
 
-    include_diff_snippet: bool = False
-    """Include the first `diff_snippet_lines` lines of the unified diff in the body."""
-
-    diff_snippet_lines: int = Field(default=25, ge=1, le=200)
-    """Max number of unified-diff lines to include in snippet mode.
-    Truncation is hunk-boundary aware — never mid-hunk."""
-
-    include_diff_full: bool = False
-    """Include the full unified diff. Supersedes include_diff_snippet if both set."""
+    The diff/significance toggles (`include_diff_snippet`, `diff_snippet_lines`,
+    `include_diff_full`, `include_significance`) and the `include_change_dashboard_url`
+    toggle were removed in #221: the diff pipeline was dropped in Phase 5 (#156),
+    so those had no observable effect, and the dashboard-URL toggle duplicated the
+    always-present ITEM link. Diff restoration is tracked in #222.
+    """
 
     include_temporal_context: bool = False
     """Include check interval in the body."""
@@ -28,12 +25,6 @@ class ContentOptions(BaseModel):
 
     include_last_changed_at: bool = False
     """Include the date the watch last detected a change in the body."""
-
-    include_significance: bool = False
-    """Include the change significance score as a percentage in the body."""
-
-    include_change_dashboard_url: bool = False
-    """Include a direct link to the change detail page in the dashboard."""
 
     include_tags: bool = False
     """Include the watch's tags list in the body."""
@@ -58,10 +49,7 @@ class ContentConfig(BaseModel):
     """Applied to all events unless an override exists for the specific event type."""
 
     overrides: dict[str, ContentOptions] = Field(default_factory=dict)
-    """event_type value → ContentOptions. Keys must be valid WatchEventType values.
-
-    Priority between include_diff_snippet and include_diff_full is handled by the content builder.
-    """
+    """event_type value → ContentOptions. Keys must be valid WatchEventType values."""
 
     @field_validator("overrides")
     @classmethod

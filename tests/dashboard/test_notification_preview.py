@@ -14,18 +14,20 @@ class TestPreviewEndpoint:
         )
         assert resp.status_code == 200
         body = resp.text
-        # Default title template: "Change Detected: Example Watch"
-        assert "Change Detected" in body
+        # Default title template (#221): "[Watcher] Change: Example Watch"
+        assert "Change" in body
         assert "Example Watch" in body
 
-    async def test_default_body_contains_change_summary(self, client: AsyncClient):
+    async def test_default_body_contains_item_link(self, client: AsyncClient):
+        """#221: the change body ends at the ITEM dashboard link (the
+        change_summary body block was retired)."""
         resp = await client.post(
             "/notifications/preview",
             data={"preview_event": "change_detected"},
         )
         assert resp.status_code == 200
-        # Mock fixture has 1 added, 1 modified, 1 removed
-        assert "1 added, 1 modified, 1 removed" in resp.text
+        assert "ITEM:" in resp.text
+        assert "/watched-items/" in resp.text
 
     async def test_includes_toggle_driven_slot_when_toggle_on(self, client: AsyncClient):
         resp = await client.post(
@@ -90,8 +92,8 @@ class TestPreviewEndpoint:
             data={"preview_event": "not_a_real_event"},
         )
         assert resp.status_code == 200
-        # Should render change_detected default
-        assert "Change Detected" in resp.text
+        # Should render change_detected default (#221 label: "Change")
+        assert "Change" in resp.text
 
     async def test_per_event_override_applied_when_event_overridden(self, client: AsyncClient):
         """Override for change_detected should be picked up by resolve_options."""
@@ -99,12 +101,12 @@ class TestPreviewEndpoint:
             "/notifications/preview",
             data={
                 "preview_event": "change_detected",
-                "content_config__override__change_detected__include_significance": "1",
+                "content_config__override__change_detected__include_domain": "1",
             },
         )
         assert resp.status_code == 200
-        # Mock significance is 0.65 → 65%
-        assert "SIGNIFICANCE: 65%" in resp.text
+        # Fixture domain is example.com → DOMAIN slot renders from the override.
+        assert "DOMAIN: example.com" in resp.text
 
     async def test_returns_html_fragment_not_full_page(self, client: AsyncClient):
         resp = await client.post(

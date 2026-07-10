@@ -85,15 +85,15 @@ class TestDomainNcCreateErrorPathPreservesContentConfig:
                 # title intentionally omitted — triggers validation error
                 "remote_channel_id": VALID_CHANNEL_ID,
                 "events": ["change_detected"],
-                "content_config__include_significance": "1",
+                "content_config__include_domain": "1",
             },
             follow_redirects=False,
         )
         assert resp.status_code == 200
         assert re.search(
-            r'name="content_config__include_significance"[^>]*\bvalue="1"[^>]*\bchecked',
+            r'name="content_config__include_domain"[^>]*\bvalue="1"[^>]*\bchecked',
             resp.text,
-        ), "include_significance should persist through the error re-render"
+        ), "include_domain should persist through the error re-render"
 
 
 @pytest.mark.integration

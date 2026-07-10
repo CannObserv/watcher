@@ -46,21 +46,22 @@ async def test_notification_new_page_loads(client: AsyncClient):
 
 
 @pytest.mark.integration
-async def test_notification_new_page_link_section_has_change_url_toggle(
+async def test_notification_new_page_has_no_changes_or_link_section(
     client: AsyncClient,
 ):
-    """The Content card's Link section exposes the Change URL toggle. The
-    Watched Item URL appears unconditionally in the default body — there is no
-    toggle for it, so the section is singular."""
+    """#221: the Content card's diff/significance ("Changes") group and the
+    redundant Change URL ("Link") group were removed — the ITEM dashboard link
+    is unconditional in the default body, so there is nothing to toggle."""
     resp = await client.get("/notifications/new")
     assert resp.status_code == 200
     body = resp.content.decode()
-    assert ">Link<" in body
-    assert 'name="content_config__include_change_dashboard_url"' in body
-    # No Watched Item URL toggle — the dashboard link is part of the rich default body.
-    assert 'name="content_config__include_item_url"' not in body
-    # Legacy label gone
-    assert "Dashboard link (change URL)" not in body
+    assert 'name="content_config__include_change_dashboard_url"' not in body
+    assert 'name="content_config__include_diff_snippet"' not in body
+    assert 'name="content_config__include_diff_full"' not in body
+    assert 'name="content_config__include_significance"' not in body
+    # Surviving Context section still renders.
+    assert ">Context<" in body
+    assert 'name="content_config__include_domain"' in body
 
 
 @pytest.mark.integration

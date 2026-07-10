@@ -57,10 +57,7 @@ from src.core.notifications.notify import (
     DispatchCandidate,
     dispatch_via_notifier,
 )
-from src.core.notifications.preview_fixtures import (
-    build_preview_event,
-    compute_preview_unified_diff,
-)
+from src.core.notifications.preview_fixtures import build_preview_event
 from src.core.notifier_client import get_notifier_client
 from src.core.probe import ProbeResult
 from src.core.scheduler import (
@@ -108,22 +105,12 @@ def _status_to_is_active(status: str | None) -> bool | None:
 
 def _parse_content_config_from_form(form) -> dict | None:
     """Extract content_config fields from a flat form POST dict."""
-    _lines_raw = form.get("content_config__diff_snippet_lines", "25")
-    try:
-        _lines = max(1, min(200, int(_lines_raw)))
-    except (ValueError, TypeError):
-        _lines = 25
     title_template = form.get("content_config__title_template", "").strip() or None
     body_template = form.get("content_config__body_template", "").strip() or None
     opts = ContentOptions(
-        include_diff_snippet="content_config__include_diff_snippet" in form,
-        include_diff_full="content_config__include_diff_full" in form,
         include_temporal_context="content_config__include_temporal_context" in form,
         include_domain="content_config__include_domain" in form,
-        diff_snippet_lines=_lines,
         include_last_changed_at="content_config__include_last_changed_at" in form,
-        include_significance="content_config__include_significance" in form,
-        include_change_dashboard_url="content_config__include_change_dashboard_url" in form,
         include_tags="content_config__include_tags" in form,
         include_description="content_config__include_description" in form,
         title_template=title_template,
@@ -131,13 +118,9 @@ def _parse_content_config_from_form(form) -> dict | None:
     )
     # Only store if at least one toggle is enabled or a template string is provided.
     any_enabled = (
-        opts.include_diff_snippet
-        or opts.include_diff_full
-        or opts.include_temporal_context
+        opts.include_temporal_context
         or opts.include_domain
         or opts.include_last_changed_at
-        or opts.include_significance
-        or opts.include_change_dashboard_url
         or opts.include_tags
         or opts.include_description
         or opts.title_template
@@ -148,26 +131,18 @@ def _parse_content_config_from_form(form) -> dict | None:
     for et_value in _ALL_EVENT_TYPE_VALUES:
         prefix = f"content_config__override__{et_value}__"
         et_opts = ContentOptions(
-            include_diff_snippet=f"{prefix}include_diff_snippet" in form,
-            include_diff_full=f"{prefix}include_diff_full" in form,
             include_temporal_context=f"{prefix}include_temporal_context" in form,
             include_domain=f"{prefix}include_domain" in form,
             include_last_changed_at=f"{prefix}include_last_changed_at" in form,
-            include_significance=f"{prefix}include_significance" in form,
-            include_change_dashboard_url=f"{prefix}include_change_dashboard_url" in form,
             include_tags=f"{prefix}include_tags" in form,
             include_description=f"{prefix}include_description" in form,
         )
         if any(
             x
             for x in (
-                et_opts.include_diff_snippet,
-                et_opts.include_diff_full,
                 et_opts.include_temporal_context,
                 et_opts.include_domain,
                 et_opts.include_last_changed_at,
-                et_opts.include_significance,
-                et_opts.include_change_dashboard_url,
                 et_opts.include_tags,
                 et_opts.include_description,
             )
@@ -2242,7 +2217,6 @@ async def notifications_preview(request: Request):
     options = resolve_options(config, et.value)
 
     event = build_preview_event(et.value)
-    preview_diff = compute_preview_unified_diff(et.value)
 
     try:
         title = build_title(event, options, strict=True)
@@ -2254,7 +2228,7 @@ async def notifications_preview(request: Request):
         )
 
     try:
-        body = build_body(event, options, strict=True, unified_diff=preview_diff)
+        body = build_body(event, options, strict=True)
     except TemplateError as exc:
         return templates.TemplateResponse(
             request,

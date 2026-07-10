@@ -45,16 +45,31 @@ class TestGetNotifierClient:
 
 
 class TestBuildIdempotencyKey:
-    def test_change_detected_uses_change_id(self):
-        change_id = str(ULID())
+    def test_change_detected_uses_change_revision_id(self):
+        # #221 (#191 follow-up): the pipeline emits change_revision_id, not the
+        # pre-#191 change_id. The idempotency key keys off the real metadata key.
+        change_revision_id = str(ULID())
         event = _make_event(
             WatchEventType.CHANGE_DETECTED,
-            metadata={"change_id": change_id},
+            metadata={"change_revision_id": change_revision_id},
         )
         source_id = str(ULID())
 
         key = build_idempotency_key(event, source_id)
-        assert key == f"watcher:change_detected:{source_id}:{change_id}"
+        assert key == f"watcher:change_detected:{source_id}:{change_revision_id}"
+
+    def test_stale_change_id_key_ignored(self):
+        """A metadata dict carrying only the retired `change_id` key falls
+        through to the timestamp path — the change-identity branch keys solely
+        off change_revision_id now."""
+        event = _make_event(
+            WatchEventType.CHANGE_DETECTED,
+            metadata={"change_id": str(ULID())},
+        )
+        source_id = str(ULID())
+        occurred_ms = int(event.occurred_at.timestamp() * 1000)
+        key = build_idempotency_key(event, source_id)
+        assert key == f"watcher:change_detected:{source_id}:{event.watched_item_id}:{occurred_ms}"
 
     def test_non_change_event_uses_watched_item_id_and_timestamp(self):
         event = _make_event(WatchEventType.WATCH_CREATED)
@@ -65,20 +80,20 @@ class TestBuildIdempotencyKey:
         assert key == f"watcher:watch_created:{source_id}:{event.watched_item_id}:{occurred_ms}"
 
     def test_key_is_stable_for_same_inputs(self):
-        change_id = str(ULID())
+        change_revision_id = str(ULID())
         event = _make_event(
             WatchEventType.CHANGE_DETECTED,
-            metadata={"change_id": change_id},
+            metadata={"change_revision_id": change_revision_id},
         )
         source_id = str(ULID())
 
         assert build_idempotency_key(event, source_id) == build_idempotency_key(event, source_id)
 
     def test_different_sources_produce_different_keys(self):
-        change_id = str(ULID())
+        change_revision_id = str(ULID())
         event = _make_event(
             WatchEventType.CHANGE_DETECTED,
-            metadata={"change_id": change_id},
+            metadata={"change_revision_id": change_revision_id},
         )
 
         key_a = build_idempotency_key(event, "source-aaa")

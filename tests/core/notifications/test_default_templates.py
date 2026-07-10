@@ -49,16 +49,18 @@ class TestDefaultBodyTemplates:
             assert value
 
     def test_change_detected_references_always_present_skeleton(self):
-        """The change_detected default body is the always-present skeleton
-        (header + body block). Toggle-driven sections are interleaved in
-        Python by `build_body`, not in the Jinja template."""
+        """The change_detected default body is the always-present header
+        skeleton. Toggle-driven sections are interleaved in Python by
+        `build_body`, not in the Jinja template. The event_label/change_summary
+        body block was retired in #221; the header link is now ITEM."""
         tmpl = DEFAULT_BODY_TEMPLATES["change_detected"]
         assert "{{ item_name }}" in tmpl
         assert "URL: {{ item_url }}" in tmpl
         assert "TIMESTAMP: {{ occurred_at_iso }}" in tmpl
-        assert "WATCH: https://watcher.exe.xyz/watched-items/{{ watched_item_id }}" in tmpl
-        assert "{{ event_label }}" in tmpl
-        assert "{{ change_summary }}" in tmpl
+        assert "ITEM: https://watcher.exe.xyz/watched-items/{{ watched_item_id }}" in tmpl
+        # Retired in #221 — must not reappear.
+        assert "change_summary" not in tmpl
+        assert "WATCH:" not in tmpl
 
     def test_change_detected_has_no_include_conditionals(self):
         """Toggle-driven sections live in Python composition, not in the
@@ -108,12 +110,28 @@ class TestTemplateVariables:
         ):
             assert required in names
 
-    def test_chunks_changed_is_change_detected_scoped(self):
-        """chunks_changed (#116) is the structured replacement for the old
-        chunk-label summary and only meaningful for change_detected events."""
-        var = next((v for v in TEMPLATE_VARIABLES if v.name == "chunks_changed"), None)
-        assert var is not None, "TEMPLATE_VARIABLES missing chunks_changed"
+    def test_change_url_is_change_detected_scoped(self):
+        """change_url survives #221 as a change_detected-scoped variable for
+        custom templates (the diff/chunk variables were removed)."""
+        var = next((v for v in TEMPLATE_VARIABLES if v.name == "change_url"), None)
+        assert var is not None, "TEMPLATE_VARIABLES missing change_url"
         assert var.scope == "change_detected"
+
+    def test_removed_diff_variables_absent(self):
+        """The diff/significance/summary variables were removed in #221."""
+        names = {v.name for v in TEMPLATE_VARIABLES}
+        for removed in (
+            "change_summary",
+            "added",
+            "modified",
+            "removed",
+            "diff_snippet",
+            "diff_full",
+            "chunks_changed",
+            "significance",
+            "change_id",
+        ):
+            assert removed not in names
 
     def test_scopes_are_valid(self):
         allowed = {"always", "change_detected", "watch_error", "contextual"}

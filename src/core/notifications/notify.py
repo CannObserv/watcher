@@ -133,10 +133,6 @@ async def dispatch_event_notifications(
     Every candidate is dispatched via the notifier service. Candidates that lack
     a `remote_channel_id` are recorded as failed audit results (the local Apprise
     fallback was removed in #137).
-
-    After Phase 5, the Snapshot/Change tables are gone — unified diff is no longer
-    computed. Templates receive `unified_diff=""` and diff_snippet/diff_full render
-    empty (page-level fingerprint-shift-only notifications).
     """
     # #191: the event identifies a WatchedItem (the single monitored entity).
     watched_item_id = ULID.from_str(event.watched_item_id)
@@ -182,11 +178,6 @@ async def dispatch_event_notifications(
     if not candidates:
         return
 
-    # Snapshot/Change tables removed in Phase 5 — diff is always empty.
-    # Templates still receive `unified_diff` so diff_snippet/diff_full render
-    # as empty strings rather than causing template errors.
-    unified_diff: str = ""
-
     results = []
     async with get_notifier_client() as notifier_client:
         for candidate in candidates:
@@ -198,7 +189,7 @@ async def dispatch_event_notifications(
                 )
                 options = resolve_options(cfg, event_value)
                 rendered_title = build_title(event, options)
-                rendered_body = build_body(event, options, unified_diff=unified_diff)
+                rendered_body = build_body(event, options)
                 if not candidate.remote_channel_id:
                     logger.warning(
                         "candidate has no remote_channel_id; skipping dispatch",

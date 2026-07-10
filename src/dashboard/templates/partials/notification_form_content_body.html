@@ -18,91 +18,45 @@
 
 <div class="space-y-4">
 
-  {# ────── Additive toggles (Changes / Context / Link groups) ────── #}
+  {# ────── Additive Context toggles ──────
+     Order mirrors the change_detected render order (see
+     content._build_change_detected_body): Domain, Last changed, Check interval
+     in the header; Description, Tags as trailing paragraphs. The diff/
+     significance ("Changes") group and the redundant Change-URL ("Link") group
+     were removed in #221. #}
   <fieldset>
-    <legend class="sr-only">Content toggles</legend>
-    <div class="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-3 text-sm">
-
-      <div>
-        <h5 class="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400 mb-2">Changes</h5>
-        <div class="space-y-2">
-          <label class="flex items-center gap-2 text-gray-700 dark:text-gray-300 cursor-pointer">
-            <input type="checkbox" name="{{ prefix }}include_diff_snippet" value="1"
-                   {% if opts and opts.include_diff_snippet %}checked{% endif %}
-                   class="rounded border-gray-300 dark:border-gray-600">
-            Diff snippet
-          </label>
-          <div class="ps-6 flex items-center gap-2 text-xs text-gray-600 dark:text-gray-400">
-            <label for="{{ scope_id }}-snippet-lines">Lines:</label>
-            <input type="number" id="{{ scope_id }}-snippet-lines"
-                   name="{{ prefix }}diff_snippet_lines" min="1" max="100"
-                   value="{{ (opts.diff_snippet_lines if opts else 10) }}"
-                   class="form-input w-20 text-xs">
-          </div>
-          <label class="flex items-center gap-2 text-gray-700 dark:text-gray-300 cursor-pointer">
-            <input type="checkbox" name="{{ prefix }}include_diff_full" value="1"
-                   {% if opts and opts.include_diff_full %}checked{% endif %}
-                   class="rounded border-gray-300 dark:border-gray-600">
-            Full diff <span class="text-xs text-gray-500">(verbose)</span>
-          </label>
-          <label class="flex items-center gap-2 text-gray-700 dark:text-gray-300 cursor-pointer">
-            <input type="checkbox" name="{{ prefix }}include_significance" value="1"
-                   {% if opts and opts.include_significance %}checked{% endif %}
-                   class="rounded border-gray-300 dark:border-gray-600">
-            Significance score
-          </label>
-        </div>
-      </div>
-
-      <div>
-        <h5 class="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400 mb-2">Context</h5>
-        <div class="space-y-2">
-          <label class="flex items-center gap-2 text-gray-700 dark:text-gray-300 cursor-pointer">
-            <input type="checkbox" name="{{ prefix }}include_temporal_context" value="1"
-                   {% if opts and opts.include_temporal_context %}checked{% endif %}
-                   class="rounded border-gray-300 dark:border-gray-600">
-            Check interval
-          </label>
-          <label class="flex items-center gap-2 text-gray-700 dark:text-gray-300 cursor-pointer">
-            <input type="checkbox" name="{{ prefix }}include_domain" value="1"
-                   {% if opts and opts.include_domain %}checked{% endif %}
-                   class="rounded border-gray-300 dark:border-gray-600">
-            Domain
-          </label>
-          <label class="flex items-center gap-2 text-gray-700 dark:text-gray-300 cursor-pointer">
-            <input type="checkbox" name="{{ prefix }}include_last_changed_at" value="1"
-                   {% if opts and opts.include_last_changed_at %}checked{% endif %}
-                   class="rounded border-gray-300 dark:border-gray-600">
-            Last changed
-          </label>
-          <label class="flex items-center gap-2 text-gray-700 dark:text-gray-300 cursor-pointer">
-            <input type="checkbox" name="{{ prefix }}include_tags" value="1"
-                   {% if opts and opts.include_tags %}checked{% endif %}
-                   class="rounded border-gray-300 dark:border-gray-600">
-            Tags
-          </label>
-          <label class="flex items-center gap-2 text-gray-700 dark:text-gray-300 cursor-pointer">
-            <input type="checkbox" name="{{ prefix }}include_description" value="1"
-                   {% if opts and opts.include_description %}checked{% endif %}
-                   class="rounded border-gray-300 dark:border-gray-600">
-            Description
-          </label>
-        </div>
-      </div>
-
-      <div class="sm:col-span-2">
-        <h5 class="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400 mb-2">Link</h5>
-        <div class="space-y-2">
-          {# Watch URL appears unconditionally in the default body — no toggle. #}
-          <label class="flex items-center gap-2 text-gray-700 dark:text-gray-300 cursor-pointer">
-            <input type="checkbox" name="{{ prefix }}include_change_dashboard_url" value="1"
-                   {% if opts and opts.include_change_dashboard_url %}checked{% endif %}
-                   class="rounded border-gray-300 dark:border-gray-600">
-            Change URL
-          </label>
-        </div>
-      </div>
-
+    <legend class="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400 mb-2">Context</legend>
+    <div class="space-y-2 text-sm">
+      <label class="flex items-center gap-2 text-gray-700 dark:text-gray-300 cursor-pointer">
+        <input type="checkbox" name="{{ prefix }}include_domain" value="1"
+               {% if opts and opts.include_domain %}checked{% endif %}
+               class="rounded border-gray-300 dark:border-gray-600">
+        Domain
+      </label>
+      <label class="flex items-center gap-2 text-gray-700 dark:text-gray-300 cursor-pointer">
+        <input type="checkbox" name="{{ prefix }}include_last_changed_at" value="1"
+               {% if opts and opts.include_last_changed_at %}checked{% endif %}
+               class="rounded border-gray-300 dark:border-gray-600">
+        Last changed
+      </label>
+      <label class="flex items-center gap-2 text-gray-700 dark:text-gray-300 cursor-pointer">
+        <input type="checkbox" name="{{ prefix }}include_temporal_context" value="1"
+               {% if opts and opts.include_temporal_context %}checked{% endif %}
+               class="rounded border-gray-300 dark:border-gray-600">
+        Check interval
+      </label>
+      <label class="flex items-center gap-2 text-gray-700 dark:text-gray-300 cursor-pointer">
+        <input type="checkbox" name="{{ prefix }}include_description" value="1"
+               {% if opts and opts.include_description %}checked{% endif %}
+               class="rounded border-gray-300 dark:border-gray-600">
+        Description
+      </label>
+      <label class="flex items-center gap-2 text-gray-700 dark:text-gray-300 cursor-pointer">
+        <input type="checkbox" name="{{ prefix }}include_tags" value="1"
+               {% if opts and opts.include_tags %}checked{% endif %}
+               class="rounded border-gray-300 dark:border-gray-600">
+        Tags
+      </label>
     </div>
   </fieldset>
 

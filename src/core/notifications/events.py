@@ -25,14 +25,14 @@ class WatchEventType(enum.StrEnum):
 
 
 EVENT_TITLES: dict[str, str] = {
-    WatchEventType.WATCH_CREATED.value: "Watch Created",
-    WatchEventType.CHANGE_DETECTED.value: "Change Detected",
-    WatchEventType.WATCH_ERROR.value: "Watch Error",
-    WatchEventType.WATCH_RECOVERED.value: "Watch Recovered",
-    WatchEventType.WATCH_PAUSED.value: "Watch Paused",
-    WatchEventType.WATCH_RESUMED.value: "Watch Resumed",
-    WatchEventType.WATCH_ARCHIVED.value: "Watch Archived",
-    WatchEventType.WATCH_DELETED.value: "Watch Deleted",
+    WatchEventType.WATCH_CREATED.value: "Created",
+    WatchEventType.CHANGE_DETECTED.value: "Change",
+    WatchEventType.WATCH_ERROR.value: "Error",
+    WatchEventType.WATCH_RECOVERED.value: "Recovered",
+    WatchEventType.WATCH_PAUSED.value: "Paused",
+    WatchEventType.WATCH_RESUMED.value: "Resumed",
+    WatchEventType.WATCH_ARCHIVED.value: "Archived",
+    WatchEventType.WATCH_DELETED.value: "Deleted",
 }
 """Public mapping of event type value strings to human-readable titles.
 Iteration order is roughly temporal (watch lifecycle); drives the Subscribe

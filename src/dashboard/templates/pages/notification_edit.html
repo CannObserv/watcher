@@ -12,12 +12,6 @@
 </nav>
 <div class="flex items-center justify-between mb-6">
   <h2 class="text-2xl font-bold text-gray-900 dark:text-white">Edit Notification Template</h2>
-  {% if watch_count or domain_count %}
-  <p class="text-xs text-gray-500 dark:text-gray-400">
-    Used by {{ watch_count }} watch{{ "es" if watch_count != 1 else "" }}
-    and {{ domain_count }} domain{{ "s" if domain_count != 1 else "" }}.
-  </p>
-  {% endif %}
 </div>
 
 <form method="post" action="/notifications/{{ tpl.id }}/edit" class="space-y-4 max-w-5xl">

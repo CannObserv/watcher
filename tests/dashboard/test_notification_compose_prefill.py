@@ -34,16 +34,17 @@ class TestComposeTitlePrefill:
 class TestComposeBodyPrefill:
     async def test_returns_full_default_body_skeleton(self, client: AsyncClient):
         """Seed button returns the change_detected default body template —
-        the always-present skeleton (header + body block)."""
+        the always-present header skeleton (#221: body block retired, link is
+        now ITEM)."""
         resp = await client.get(
             "/notifications/compose-body-prefill",
             params={"preview_event": "change_detected"},
         )
         assert resp.status_code == 200
         assert "{{ item_url }}" in resp.text
-        assert "{{ change_summary }}" in resp.text
         assert "{{ occurred_at_iso }}" in resp.text
-        assert "WATCH:" in resp.text
+        assert "ITEM:" in resp.text
+        assert "change_summary" not in resp.text
 
     async def test_ignores_toggle_state(self, client: AsyncClient):
         """Toggles drive Python-side interleaving in build_body, not the seed
@@ -58,7 +59,7 @@ class TestComposeBodyPrefill:
             params={
                 "preview_event": "change_detected",
                 "content_config__include_domain": "1",
-                "content_config__include_significance": "1",
+                "content_config__include_tags": "1",
             },
         )
         assert plain.status_code == 200

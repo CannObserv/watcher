@@ -125,10 +125,10 @@ class TestNotificationTemplateCreate:
         schema = NotificationTemplateCreate(
             title="My Template",
             remote_channel_id="01HV0000000000000000000099",
-            content_config=ContentConfig(default=ContentOptions(include_diff_snippet=True)),
+            content_config=ContentConfig(default=ContentOptions(include_domain=True)),
         )
         assert schema.content_config is not None
-        assert schema.content_config.default.include_diff_snippet is True
+        assert schema.content_config.default.include_domain is True
 
     def test_content_config_optional(self):
         """content_config defaults to None."""
@@ -257,14 +257,14 @@ class TestNotificationTemplateResponse:
                 "created_at": datetime.now(UTC),
                 "updated_at": datetime.now(UTC),
                 "content_config": {
-                    "default": {"include_diff_snippet": True, "diff_snippet_lines": 5},
+                    "default": {"include_domain": True, "include_tags": True},
                     "overrides": {},
                 },
             }
         )
         assert resp.content_config is not None
-        assert resp.content_config.default.include_diff_snippet is True
-        assert resp.content_config.default.diff_snippet_lines == 5
+        assert resp.content_config.default.include_domain is True
+        assert resp.content_config.default.include_tags is True
 
     def test_content_config_null(self):
         """content_config can be null in response."""

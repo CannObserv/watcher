@@ -19,10 +19,10 @@ from src.core.notifications.events import WatchEvent, WatchEventType
 from src.core.notifications.notify import dispatch_event_notifications
 
 
-def _make_event(event_type=WatchEventType.CHANGE_DETECTED, *, change_id=None):
+def _make_event(event_type=WatchEventType.CHANGE_DETECTED, *, change_revision_id=None):
     metadata = {}
-    if change_id:
-        metadata["change_id"] = change_id
+    if change_revision_id:
+        metadata["change_revision_id"] = change_revision_id
     return WatchEvent(
         event_type=event_type,
         watched_item_id=str(ULID()),
@@ -100,7 +100,7 @@ class TestRemoteDispatchPath:
 
         remote_id = str(ULID())
         template = _fake_template(remote_channel_id=remote_id)
-        event = _make_event(change_id=str(ULID()))
+        event = _make_event(change_revision_id=str(ULID()))
 
         session = _setup_session(templates=[template])
         mock_client = _mock_notifier_client(dispatch_return=_make_dispatch_out("succeeded"))

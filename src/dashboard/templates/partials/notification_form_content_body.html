@@ -11,8 +11,6 @@
     scope:    str — unique per-card scope suffix ("default" or "override-<event>")
 #}
 {% set scope_id = form_id ~ "-" ~ scope %}
-{% set title_edit_id = "edit-title-" ~ scope_id %}
-{% set body_edit_id = "edit-body-" ~ scope_id %}
 {% set title_area_id = "title-template-" ~ scope_id %}
 {% set body_area_id = "body-template-" ~ scope_id %}
 

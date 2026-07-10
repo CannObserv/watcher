@@ -27,7 +27,13 @@ def _real_change_detected_keys() -> set[str]:
     """The metadata keys a real change_detected event actually carries.
 
     Base (watched_item_event_base_metadata) + the keys pipeline.py layers on
-    for a detected change. Mirrors src/workers/pipeline.py's change_meta.
+    for a detected change.
+
+    The base half is derived from live code, but the per-event additions below
+    are hard-coded — keep them synced with the ``change_meta`` dict built in
+    ``src/workers/pipeline.py`` (``process_watched_item``). Because the parity
+    assertion is a subset check (permissive), a new key added to ``change_meta``
+    but omitted here would NOT fail this test; it would only weaken the guard.
     """
     base = set(watched_item_event_base_metadata(_FakeWatchedItem()).keys())
     return base | {"change_revision_id", "content_fingerprint", "archiver_revision_id"}

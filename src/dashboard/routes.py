@@ -2009,6 +2009,10 @@ async def _audit_table_context(
         "total_count": total_count,
         "base_url": "/partials/audit-table",
         "extra_params": extra_params,
+        # Full-page /audit gets the viewport-anchored sticky footer; the item-scoped
+        # detail "Recent Activity" pager is a flush footer inside its card, so it
+        # anchors to the card instead of floating mid-page.
+        "sticky": not item_scoped,
         "hx_target": "#wi-activity-table" if item_scoped else "#audit-table",
         "hx_include": (
             "[name='event_type'],[name='watched_item_id']" if item_scoped else "[name='event_type']"

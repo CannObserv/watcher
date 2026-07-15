@@ -1,14 +1,17 @@
-{# Reusable sticky-footer pagination. Expects: page, page_size, total_count, base_url, extra_params (dict), hx_target (optional), hx_include (optional).
+{# Reusable pagination. Expects: page, page_size, total_count, base_url, extra_params (dict), hx_target (optional), hx_include (optional).
    Reads the `page_sizes` Jinja global (registered in src/dashboard/__init__.py) for the per-page <select> options — same PAGE_SIZES that bounds the clamp.
-   extra_params values may be a scalar (q, status) or a list (e.g. multi-valued event_type), emitted as repeated &k=v pairs by the qs() macro. #}
+   extra_params values may be a scalar (q, status) or a list (e.g. multi-valued event_type), emitted as repeated &k=v pairs by the qs() macro.
+   `sticky` (optional, default true): when true the pager is a viewport-anchored sticky footer for full-page lists (the table fills the height, dark fill matches the page's gray-900); pass false to
+   render it as a flush in-flow footer bar whose dark fill matches the enclosing card (gray-800) — used by the WatchedItem detail "Recent Activity" card so the pager anchors to the card instead of floating mid-page. #}
 {% macro qs(extra_params) -%}
 {%- for k, v in extra_params.items() -%}
 {%- if v is iterable and v is not string %}{% for item in v %}&{{ k }}={{ item }}{% endfor %}{% else %}&{{ k }}={{ v }}{% endif -%}
 {%- endfor -%}
 {%- endmacro %}
 {% set total_pages = (total_count + page_size - 1) // page_size %}
+{% set is_sticky = sticky if sticky is defined else true %}
 {% if total_pages > 1 or page_size != 25 %}
-<nav class="sticky bottom-0 bg-white dark:bg-gray-900 border-t border-gray-200 dark:border-gray-700 py-3 px-4 flex items-center justify-between mt-4" aria-label="Pagination">
+<nav class="{% if is_sticky %}sticky bottom-0 mt-4 dark:bg-gray-900{% else %}dark:bg-gray-800{% endif %} bg-white border-t border-gray-200 dark:border-gray-700 py-3 px-4 flex items-center justify-between" aria-label="Pagination">
   <div class="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400">
     <label for="page-size" class="sr-only">Page size</label>
     <select id="page-size"

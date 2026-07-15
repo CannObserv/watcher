@@ -141,8 +141,14 @@
 <section class="mb-8">
   <h3 class="text-lg font-semibold text-gray-900 dark:text-white mb-4">Recent Activity</h3>
   {% include "partials/audit_filter_chips.html" %}
-  <div id="wi-activity-table" aria-live="polite" aria-atomic="false">
-    {% include "partials/audit_table.html" %}
+  {# Card wrapper (parity with the sibling detail panels). It lives outside the
+     HTMX swap target so it survives table swaps; overflow-hidden clips the table
+     and the non-sticky pager footer to the rounded corners, anchoring the pager
+     to the card instead of letting it float mid-page. #}
+  <div class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden">
+    <div id="wi-activity-table" aria-live="polite" aria-atomic="false">
+      {% include "partials/audit_table.html" %}
+    </div>
   </div>
 </section>
 

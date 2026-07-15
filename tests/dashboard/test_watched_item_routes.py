@@ -562,6 +562,27 @@ class TestDetailPage:
         body = (await client.get(f"/watched-items/{wi.id}")).content.decode()
         assert body.index("Notification Templates") < body.index("Recent Activity")
 
+    async def test_detail_activity_pager_anchored_in_card(self, client, db_session):
+        """Recent Activity table + pager sit in the standard bordered card (parity
+        with the sibling detail panels), and the pager is a non-sticky anchored
+        footer — not a floating sticky bar detached mid-page."""
+        wi = await _make_wi(db_session, name="ActivityCard")
+        for _ in range(26):  # > default page_size (25) -> pager renders
+            db_session.add(
+                AuditLog(
+                    event_type=EventType.CHECK_NO_CHANGE,
+                    payload={"watched_item_id": str(wi.id)},
+                )
+            )
+        await db_session.commit()
+        body = (await client.get(f"/watched-items/{wi.id}")).content.decode()
+        # Pager renders, but not the floating sticky-footer variant.
+        assert 'aria-label="Pagination"' in body
+        assert "sticky bottom-0" not in body
+        # #wi-activity-table is wrapped in the standard card; overflow-hidden clips
+        # the table + footer to the rounded corners so the pager reads as anchored.
+        assert re.search(r'overflow-hidden[^>]*>\s*<div id="wi-activity-table"', body)
+
     async def test_detail_table_uses_static_headers_not_global_partial(self, client, db_session):
         """Regression #182: sort buttons must NOT point at /partials/watch-table."""
         wi = await make_watched_item(db_session, name="Scoped Item")

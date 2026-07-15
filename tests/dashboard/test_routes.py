@@ -279,6 +279,42 @@ class TestAuditTableSharedPartial:
             assert f'value="{size}"' in body
         assert body.count('<option value="') == len(PAGE_SIZES)
 
+    async def test_scoped_pagination_is_not_sticky(self, client, db_session):
+        """WatchedItem-scoped (detail Recent Activity) pager anchors as a card
+        footer — the sticky floating-bar variant is for the full-page /audit list
+        only, where the table fills the viewport."""
+        wi = await _make_wi(db_session, name="ScopedSticky")
+        for _ in range(26):  # > default page_size (25) -> 2 pages -> pager renders
+            db_session.add(
+                AuditLog(
+                    event_type=EventType.CHECK_NO_CHANGE,
+                    payload={"watched_item_id": str(wi.id)},
+                )
+            )
+        await db_session.commit()
+        body = (await client.get(f"/partials/audit-table?watched_item_id={wi.id}")).content
+        assert b'aria-label="Pagination"' in body
+        assert b"sticky bottom-0" not in body
+        # Non-sticky pager takes the card-matching dark fill so it doesn't merge
+        # with the page in dark mode (#223 CR round 2). `dark:bg-gray-800` appears
+        # inline ONLY on this pager — rows use `dark:hover:bg-gray-800`, payload
+        # <pre> uses `dark:bg-gray-900`, `.data-table` fills live in CSS — so its
+        # presence pins the pager fill. (Don't assert `dark:bg-gray-900 not in`:
+        # the scoped rows have payloads, whose <pre> blocks legitimately carry it.)
+        assert b"dark:bg-gray-800" in body
+
+    async def test_global_pagination_is_sticky(self, client, db_session):
+        """The full-page /audit list keeps the sticky-footer pager, page-matching fill."""
+        for _ in range(26):
+            db_session.add(AuditLog(event_type=EventType.CHECK_NO_CHANGE, payload={}))
+        await db_session.commit()
+        body = (await client.get("/partials/audit-table")).content
+        assert b'aria-label="Pagination"' in body
+        assert b"sticky bottom-0" in body
+        # Sticky pager keeps the page-matching `dark:bg-gray-900`; the card-only
+        # `dark:bg-gray-800` fill must not leak onto the global list (#223 CR round 2).
+        assert b"dark:bg-gray-800" not in body
+
 
 class Test404Template:
     async def test_watched_item_detail_404_uses_template(self, client):

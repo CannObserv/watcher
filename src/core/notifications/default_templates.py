@@ -113,7 +113,13 @@ CHANGE_DETECTED_HEADER_LINES: tuple[str, ...] = (
     f"ITEM: {APP_URL}" + "/watched-items/{{ watched_item_id }}",
 )
 
-_CHANGE_DETECTED_BODY = "\n".join(CHANGE_DETECTED_HEADER_LINES)
+# Markdown bullet list — one fact per `<li>` so HTML-email channels (which
+# render the source Markdown through CommonMark in the Notifier, #137) keep each
+# fact on its own line rather than collapsing them into one run-on line (#224/#225).
+# The composer (`content._build_change_detected_body`) prefixes the same `- ` and
+# appends toggle-driven items, so this seed stays in lockstep with dispatch output
+# (guarded by test_content.test_seed_template_matches_dispatcher_output_with_default_options).
+_CHANGE_DETECTED_BODY = "\n".join(f"- {line}" for line in CHANGE_DETECTED_HEADER_LINES)
 
 
 DEFAULT_BODY_TEMPLATES: dict[str, str] = {

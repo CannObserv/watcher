@@ -242,6 +242,18 @@ Dashboard: the library `/notifications` create makes global templates; domain
 templates are created from the domain detail page; item templates from the item
 detail page. Design: [docs/plans/2026-06-19-notification-model-consolidation-design.md](docs/plans/2026-06-19-notification-model-consolidation-design.md).
 
+**Body format — source Markdown (#224/#225).** Notification bodies are **source
+Markdown**. Watcher renders no HTML: it passes the composed body to the Notifier,
+which converts it per channel — CommonMark → HTML for HTML-native plugins
+(Mailgun, SES, `mailto`), raw Markdown for the rest (the local Apprise path was
+stripped in #137). Because CommonMark treats a lone `\n` as a *soft* break (a
+space, not `<br/>`), bodies must be **block-structured**, not `\n`-joined lines —
+the `change_detected` body is a Markdown **bullet list** (one fact per `<li>`;
+`content._build_change_detected_body`). A `\n`-joined paragraph collapses onto
+one run-on line on HTML clients (the #224 regression). Guarded by
+`tests/core/notifications/test_content.py::TestMarkdownListContract`; keep it that
+way when editing the composer.
+
 **WatchEvent identity fields** are `watched_item_id`, `item_name`, `item_url`
 (renamed from `watch_*` in #191). The same names are the user-facing notification
 template variables; the default-template "ITEM:" link (renamed from "WATCH:" in

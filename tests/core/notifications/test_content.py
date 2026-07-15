@@ -71,16 +71,17 @@ class TestChangeDetectedDefaultBody:
     skeleton at the canonical layout positions."""
 
     def test_default_skeleton_with_no_toggles(self):
-        """With every toggle off, the body is the header skeleton alone:
-        item_name, URL, TIMESTAMP, ITEM. The old event_label/change_summary
-        body block was retired in #221."""
+        """With every toggle off, the body is the header skeleton alone rendered
+        as a Markdown bullet list: item_name, URL, TIMESTAMP, ITEM. The list
+        form (#225) keeps each fact on its own line on HTML-email channels,
+        which render the source Markdown through CommonMark (#224)."""
         event = make_event(metadata={})
         body = build_body(event, ContentOptions())
         expected = (
-            "Test Watch\n"
-            "URL: https://example.com\n"
-            "TIMESTAMP: 2026-04-14T12:00:00Z\n"
-            f"ITEM: https://watcher.exe.xyz/watched-items/{WATCH_ID}"
+            "- Test Watch\n"
+            "- URL: https://example.com\n"
+            "- TIMESTAMP: 2026-04-14T12:00:00Z\n"
+            f"- ITEM: https://watcher.exe.xyz/watched-items/{WATCH_ID}"
         )
         assert body == expected
 
@@ -92,9 +93,11 @@ class TestChangeDetectedDefaultBody:
         assert f"ITEM: https://watcher.exe.xyz/watched-items/{WATCH_ID}" in body
 
     def test_full_layout_with_every_toggle_on(self):
-        """With every surviving toggle on and full metadata: DOMAIN between
-        item_name and URL; LAST CHANGED + INTERVAL between URL and TIMESTAMP;
-        DESCRIPTION + TAGS as trailing paragraphs."""
+        """With every surviving toggle on and full metadata, the body is one
+        Markdown bullet list in canonical order: item_name, DOMAIN, URL, LAST
+        CHANGED, INTERVAL, TIMESTAMP, ITEM, DESCRIPTION, TAGS. DESCRIPTION and
+        TAGS are trailing list items (#225 folded them from separate paragraphs
+        into the single list so every fact renders identically on HTML email)."""
         event = make_event(
             metadata={
                 "change_revision_id": "01HV0000000000000000000099",
@@ -114,17 +117,15 @@ class TestChangeDetectedDefaultBody:
         )
         body = build_body(event, opts)
         expected = (
-            "Test Watch\n"
-            "DOMAIN: example.com\n"
-            "URL: https://example.com\n"
-            "LAST CHANGED: 2026-04-09\n"
-            "INTERVAL: 1h\n"
-            "TIMESTAMP: 2026-04-14T12:00:00Z\n"
-            f"ITEM: https://watcher.exe.xyz/watched-items/{WATCH_ID}"
-            "\n\n"
-            "DESCRIPTION: Watch for license renewals"
-            "\n\n"
-            "TAGS: cannabis, license"
+            "- Test Watch\n"
+            "- DOMAIN: example.com\n"
+            "- URL: https://example.com\n"
+            "- LAST CHANGED: 2026-04-09\n"
+            "- INTERVAL: 1h\n"
+            "- TIMESTAMP: 2026-04-14T12:00:00Z\n"
+            f"- ITEM: https://watcher.exe.xyz/watched-items/{WATCH_ID}\n"
+            "- DESCRIPTION: Watch for license renewals\n"
+            "- TAGS: cannabis, license"
         )
         assert body == expected
 
@@ -158,11 +159,12 @@ class TestDomainSlot:
     def test_renders_between_name_and_url_when_toggle_on_and_metadata_present(self):
         event = make_event(metadata={"domain_name": "example.com"})
         body = build_body(event, ContentOptions(include_domain=True))
-        # DOMAIN appears between item_name (line 0) and URL (line 2).
+        # DOMAIN appears between item_name (line 0) and URL (line 2), each a
+        # Markdown list item.
         lines = body.split("\n")
-        assert lines[0] == "Test Watch"
-        assert lines[1] == "DOMAIN: example.com"
-        assert lines[2].startswith("URL:")
+        assert lines[0] == "- Test Watch"
+        assert lines[1] == "- DOMAIN: example.com"
+        assert lines[2].startswith("- URL:")
 
     def test_omitted_when_toggle_off(self):
         event = make_event(metadata={"domain_name": "example.com"})
@@ -195,7 +197,7 @@ class TestStatsSlots:
             ContentOptions(include_temporal_context=True, include_last_changed_at=True),
         )
         assert (
-            "URL: https://example.com\nLAST CHANGED: 2026-04-09\nINTERVAL: 1h\nTIMESTAMP: "
+            "- URL: https://example.com\n- LAST CHANGED: 2026-04-09\n- INTERVAL: 1h\n- TIMESTAMP: "
         ) in body
 
     def test_stats_omitted_when_toggles_off(self):
@@ -259,6 +261,55 @@ class TestTagsSlot:
         event = make_event(metadata={"tags": []})
         body = build_body(event, ContentOptions(include_tags=True))
         assert "TAGS" not in body
+
+
+class TestMarkdownListContract:
+    """#224/#225 regression guard: the change_detected body must be a Markdown
+    bullet list.
+
+    Dispatch moved to the Notifier service in #137; it renders the source
+    Markdown through CommonMark (mistune) for HTML-native channels (Mailgun,
+    SES, mailto). Under CommonMark a lone ``\\n`` is a *soft* break (a space),
+    so a paragraph of ``\\n``-joined fact lines collapses onto one run-on line
+    in HTML email. A bullet list is real block structure — one ``<li>`` per
+    fact — with no reliance on fragile trailing-whitespace hard breaks. Watcher
+    cannot import the Notifier's renderer (cross-repo), so we assert the
+    contract Watcher promises: every body line is a list item.
+    """
+
+    def test_every_line_is_a_list_item_full_metadata(self):
+        event = make_event(
+            metadata={
+                "domain_name": "example.com",
+                "check_interval": "1h",
+                "last_changed_at": "2026-04-09",
+                "description": "Watch for license renewals",
+                "tags": ["cannabis", "license"],
+            }
+        )
+        opts = ContentOptions(
+            include_temporal_context=True,
+            include_domain=True,
+            include_last_changed_at=True,
+            include_description=True,
+            include_tags=True,
+        )
+        body = build_body(event, opts)
+        lines = body.split("\n")
+        assert lines, "body must not be empty"
+        for line in lines:
+            assert line.startswith("- "), (
+                f"non-list line would soft-wrap into the previous line on HTML "
+                f"email (CommonMark soft break): {line!r}"
+            )
+
+    def test_skeleton_is_a_tight_list_without_paragraph_breaks(self):
+        """No blank lines — a single tight bullet list. A blank line would start
+        a new paragraph whose interior ``\\n`` lines would collapse again."""
+        event = make_event(metadata={})
+        body = build_body(event, ContentOptions())
+        assert "\n\n" not in body
+        assert all(line.startswith("- ") for line in body.split("\n"))
 
 
 class TestNonChangeDetectedDefaultBody:

@@ -142,31 +142,39 @@ def build_body(
 
 
 def _build_change_detected_body(event: WatchEvent, options: ContentOptions) -> str:
-    """Compose the change_detected body.
+    """Compose the change_detected body as a Markdown bullet list.
+
+    Every fact is a list item. Dispatch moved to the Notifier service in #137,
+    which renders the source Markdown through CommonMark (mistune) for
+    HTML-native channels (Mailgun, SES, mailto). Under CommonMark a lone `\\n`
+    is a *soft* break (a space), so a paragraph of `\\n`-joined fact lines
+    collapses onto one run-on line in HTML email (the #224 regression). A bullet
+    list is real block structure — one `<li>` per fact — with no reliance on
+    fragile trailing-whitespace hard breaks (#225).
 
     Header lines come from the canonical `CHANGE_DETECTED_HEADER_LINES` tuple in
     default_templates.py — same source of truth as the seed template returned by
-    `compose_body_prefill`. The body is the header alone plus optional
-    toggle-driven sections; the old `event_label` / `change_summary` body block
+    `compose_body_prefill`. The old `event_label` / `change_summary` body block
     was retired in #221 (see default_templates.py).
 
-    Toggle-driven section anchors (header):
+    Fact order (canonical); `?` items are toggle- and metadata-gated:
+      item_name, DOMAIN?, URL, LAST CHANGED?, INTERVAL?, TIMESTAMP, ITEM,
+      DESCRIPTION?, TAGS?
+
+    Insertion anchors:
       - DOMAIN: after item_name
       - LAST CHANGED, INTERVAL: before TIMESTAMP (in that order)
-
-    Trailing paragraphs (each its own):
-      - DESCRIPTION
-      - TAGS
+      - DESCRIPTION, TAGS: appended after the header (trailing list items)
     """
     ctx = build_template_context(event)
     metadata = event.metadata
 
-    header = [render_template(line, ctx) for line in CHANGE_DETECTED_HEADER_LINES]
+    items = [render_template(line, ctx) for line in CHANGE_DETECTED_HEADER_LINES]
     if options.include_domain and metadata.get("domain_name"):
-        header.insert(1, f"DOMAIN: {metadata['domain_name']}")
+        items.insert(1, f"DOMAIN: {metadata['domain_name']}")
 
     try:
-        timestamp_idx = next(i for i, line in enumerate(header) if line.startswith("TIMESTAMP:"))
+        timestamp_idx = next(i for i, line in enumerate(items) if line.startswith("TIMESTAMP:"))
     except StopIteration as exc:
         raise RuntimeError(
             "CHANGE_DETECTED_HEADER_LINES missing TIMESTAMP — composer requires "
@@ -178,16 +186,14 @@ def _build_change_detected_body(event: WatchEvent, options: ContentOptions) -> s
     if options.include_temporal_context and metadata.get("check_interval"):
         pre_timestamp.append(f"INTERVAL: {metadata['check_interval']}")
     for offset, line in enumerate(pre_timestamp):
-        header.insert(timestamp_idx + offset, line)
-
-    paragraphs: list[list[str]] = [header]
+        items.insert(timestamp_idx + offset, line)
 
     if options.include_description and metadata.get("description"):
-        paragraphs.append([f"DESCRIPTION: {metadata['description']}"])
+        items.append(f"DESCRIPTION: {metadata['description']}")
     if options.include_tags and metadata.get("tags"):
-        paragraphs.append([f"TAGS: {', '.join(metadata['tags'])}"])
+        items.append(f"TAGS: {', '.join(metadata['tags'])}")
 
-    return "\n\n".join("\n".join(p) for p in paragraphs)
+    return "\n".join(f"- {item}" for item in items)
 
 
 def _format_change_url(watched_item_id: str, change_revision_id: str | None) -> str:

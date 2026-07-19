@@ -1,10 +1,11 @@
 """Integration tests for dashboard context queries."""
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
 from src.core.models.audit_log import AuditLog, EventType
+from src.core.models.change_revision import ChangeRevision
 from src.core.models.domain import Domain
 from src.core.models.temporal_profile import PostAction, ProfileType, TemporalProfile
 from src.core.models.watched_item import WatchedItem
@@ -16,7 +17,6 @@ from src.dashboard.context import (
     get_domain_watched_items,
     get_domains_with_watched_item_counts,
     get_queue_health,
-    get_rate_limiter_state,
 )
 from tests.conftest import make_info_item, make_watched_item
 
@@ -46,6 +46,30 @@ class TestGetDashboardStats:
         assert stats["total_watches"] == 2
         assert stats["active_watches"] == 1
 
+    async def test_changes_today_counts_todays_change_revisions(self, db_session):
+        """changes_today is backed by ChangeRevision rows captured today (#229)."""
+        wi = await make_watched_item(db_session, auto_info_item=False)
+        await db_session.flush()
+        db_session.add(
+            ChangeRevision(
+                watched_item_id=wi.id,
+                content_fingerprint="fp-today",
+                captured_at=datetime.now(UTC),
+                schema_version=1,
+            )
+        )
+        db_session.add(
+            ChangeRevision(
+                watched_item_id=wi.id,
+                content_fingerprint="fp-yesterday",
+                captured_at=datetime.now(UTC) - timedelta(days=1),
+                schema_version=1,
+            )
+        )
+        await db_session.flush()
+        stats = await get_dashboard_stats(db_session)
+        assert stats["changes_today"] == 1
+
 
 @pytest.mark.integration
 class TestGetQueueHealth:
@@ -55,23 +79,6 @@ class TestGetQueueHealth:
         assert "doing" in queue
         assert "failed" in queue
         assert "succeeded_today" in queue
-
-
-class TestGetRateLimiterState:
-    def test_returns_empty_without_limiter(self):
-        assert get_rate_limiter_state() == []
-
-    def test_returns_domains_from_limiter(self):
-        from src.core.rate_limiter import DomainRateLimiter
-
-        limiter = DomainRateLimiter()
-        # Access a domain to create an entry
-        _ = limiter._domains["example.com"]
-        domains = get_rate_limiter_state(limiter)
-        assert isinstance(domains, list)
-        assert len(domains) == 1
-        assert domains[0]["name"] == "example.com"
-        assert domains[0]["in_backoff"] is False
 
 
 @pytest.mark.integration

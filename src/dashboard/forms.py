@@ -6,15 +6,6 @@ from src.core.notifications.events import WatchEventType
 ALL_EVENT_TYPE_VALUES: list[str] = [e.value for e in WatchEventType]
 
 
-def _status_to_is_active(status: str | None) -> bool | None:
-    """Convert status string param to is_active bool for DB queries."""
-    if status == "active":
-        return True
-    if status == "inactive":
-        return False
-    return None
-
-
 def parse_content_config_from_form(form) -> dict | None:
     """Extract content_config fields from a flat form POST dict."""
     title_template = form.get("content_config__title_template", "").strip() or None

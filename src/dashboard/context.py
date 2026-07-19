@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ulid import ULID
 
 from src.core.models.audit_log import AuditLog, EventType
+from src.core.models.change_revision import ChangeRevision
 from src.core.models.domain import Domain
 from src.core.models.notification_template import (
     VISIBILITY_DOMAIN,
@@ -30,8 +31,8 @@ async def get_dashboard_stats(session: AsyncSession) -> dict:
     """Aggregate counts for dashboard stat cards.
 
     Post-#191 the WatchedItem is the single monitored entity, so the "watches"
-    stats count WatchedItems. ``changes_today`` is always 0 — Change table
-    dropped in Phase 5 (#156).
+    stats count WatchedItems. ``changes_today`` counts ChangeRevisions captured
+    since UTC midnight (#229).
     """
     total = await session.scalar(
         select(func.count(WatchedItem.id)).where(WatchedItem.archived_at.is_(None))
@@ -58,17 +59,16 @@ async def get_dashboard_stats(session: AsyncSession) -> dict:
         )
     )
 
+    changes_today = await session.scalar(
+        select(func.count(ChangeRevision.id)).where(ChangeRevision.captured_at >= today_start)
+    )
+
     return {
         "total_watches": total or 0,
         "active_watches": active or 0,
-        "changes_today": 0,
+        "changes_today": changes_today or 0,
         "checks_today": checks_today or 0,
     }
-
-
-async def get_recent_changes(session: AsyncSession, limit: int = 20) -> list[dict]:
-    """Return empty list — Change table removed in Phase 5 (#156)."""
-    return []
 
 
 async def get_queue_health(session: AsyncSession) -> dict:
@@ -103,18 +103,6 @@ async def get_queue_health(session: AsyncSession) -> dict:
         "failed": counts.get("failed", 0),
         "succeeded_today": succeeded_today or 0,
     }
-
-
-def get_rate_limiter_state(limiter=None) -> list[dict]:
-    """Get current rate limiter domain states.
-
-    Args:
-        limiter: A DomainRateLimiter instance. If None, returns empty list
-                 (caller is responsible for providing the limiter).
-    """
-    if limiter is None:
-        return []
-    return limiter.get_domain_states()
 
 
 async def get_audit_entries(

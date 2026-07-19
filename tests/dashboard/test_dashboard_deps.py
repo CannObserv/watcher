@@ -72,8 +72,8 @@ class TestPageSizesSingleSource:
         assert MAX_PAGE_SIZE == max(PAGE_SIZES)
 
     def test_page_sizes_registered_as_jinja_global(self):
-        from src.dashboard import templates
         from src.dashboard.deps import PAGE_SIZES
+        from src.dashboard.templating import templates
 
         assert templates.env.globals["page_sizes"] == PAGE_SIZES
 

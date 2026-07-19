@@ -66,7 +66,6 @@ from src.core.scheduler import (
 )
 from src.core.watches.resolution import SYSTEM_DEFAULT_SCHEDULE_CONFIG
 from src.core.watches.schedule import ScheduleDisplay, resolve_schedule_display
-from src.dashboard import templates
 from src.dashboard.context import (
     WATCHED_ITEM_EVENT_CHOICES,
     get_active_profiles_by_item,
@@ -87,6 +86,7 @@ from src.dashboard.context import (
     get_watched_items_total_count,
 )
 from src.dashboard.deps import clamp_pagination, get_dashboard_user, is_htmx
+from src.dashboard.templating import templates
 
 router = APIRouter(tags=["dashboard"], dependencies=[Depends(get_dashboard_user)])
 logger = get_logger(__name__)

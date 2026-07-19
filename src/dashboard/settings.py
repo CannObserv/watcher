@@ -12,8 +12,8 @@ from src.api.deps import get_db_session
 from src.core.models.api_key import ApiKey
 from src.core.models.app_user import AppUser
 from src.core.models.notification_template import NotificationTemplate
-from src.dashboard import templates
 from src.dashboard.deps import generate_api_key, get_dashboard_user, is_htmx
+from src.dashboard.templating import templates
 
 router = APIRouter(
     prefix="/settings",

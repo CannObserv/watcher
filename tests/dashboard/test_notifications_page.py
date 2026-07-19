@@ -270,12 +270,12 @@ async def test_test_result_returns_flash_on_success(client: AsyncClient, db_sess
     dispatch_result = DispatchResult(success=True, reason="sent")
     with (
         patch(
-            "src.dashboard.routes.dispatch_via_notifier",
+            "src.dashboard.routes.notifications.dispatch_via_notifier",
             new_callable=AsyncMock,
             return_value=dispatch_result,
         ) as mock_dispatch,
         patch(
-            "src.dashboard.routes.get_notifier_client",
+            "src.dashboard.routes.notifications.get_notifier_client",
         ) as mock_client_factory,
     ):
         client_mock = AsyncMock()
@@ -305,12 +305,12 @@ async def test_test_result_uses_template_content_config(client: AsyncClient, db_
     dispatch_result = DispatchResult(success=True, reason="sent")
     with (
         patch(
-            "src.dashboard.routes.dispatch_via_notifier",
+            "src.dashboard.routes.notifications.dispatch_via_notifier",
             new_callable=AsyncMock,
             return_value=dispatch_result,
         ) as mock_dispatch,
         patch(
-            "src.dashboard.routes.get_notifier_client",
+            "src.dashboard.routes.notifications.get_notifier_client",
         ) as mock_client_factory,
     ):
         client_mock = AsyncMock()
@@ -330,11 +330,11 @@ async def test_test_result_returns_flash_on_dispatch_failure(client: AsyncClient
 
     with (
         patch(
-            "src.dashboard.routes.dispatch_via_notifier",
+            "src.dashboard.routes.notifications.dispatch_via_notifier",
             new_callable=AsyncMock,
             side_effect=Exception("boom"),
         ),
-        patch("src.dashboard.routes.get_notifier_client") as mock_client_factory,
+        patch("src.dashboard.routes.notifications.get_notifier_client") as mock_client_factory,
     ):
         client_mock = AsyncMock()
         client_mock.__aenter__ = AsyncMock(return_value=client_mock)

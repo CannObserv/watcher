@@ -16,9 +16,9 @@ from src.core.models.notification_template import (
 )
 from src.core.models.temporal_profile import PostAction, ProfileType, TemporalProfile
 from src.core.models.watched_item import WatchedItem
-from src.dashboard.routes import (
+from src.dashboard.context import build_schedule_map
+from src.dashboard.routes.watched_items import (
     _apply_watched_item_field_update,
-    _build_schedule_map,
     _watched_item_field_context,
 )
 from tests.conftest import make_info_item, make_watched_item
@@ -1040,26 +1040,26 @@ class TestListScheduleMaps:
 
     def test_resolves_inherited_default(self):
         wi = self._wi(item=None, domain=None)
-        sd = _build_schedule_map([wi], self.NOW)[str(wi.id)]
+        sd = build_schedule_map([wi], self.NOW)[str(wi.id)]
         assert sd.interval_text == "1d"  # SYSTEM_DEFAULT_SCHEDULE_CONFIG
         assert sd.marker == "default"  # source label (#205)
 
     def test_resolves_domain_default(self):
         """#205: an item inheriting a domain cadence is marked '· domain', not '· default'."""
         wi = self._wi(item=None, domain={"interval": "7d"})
-        sd = _build_schedule_map([wi], self.NOW)[str(wi.id)]
+        sd = build_schedule_map([wi], self.NOW)[str(wi.id)]
         assert sd.interval_text == "7d"
         assert sd.marker == "domain"
 
     def test_explicit_not_inherited(self):
         wi = self._wi(item={"interval": "6h"}, domain=None)
-        sd = _build_schedule_map([wi], self.NOW)[str(wi.id)]
+        sd = build_schedule_map([wi], self.NOW)[str(wi.id)]
         assert sd.interval_text == "6h"
         assert sd.marker is None
 
     def test_empty_config_shows_braces(self):
         wi = self._wi(item={}, domain=None)
-        sd = _build_schedule_map([wi], self.NOW)[str(wi.id)]
+        sd = build_schedule_map([wi], self.NOW)[str(wi.id)]
         assert sd.interval_text == "{ }"
         assert sd.marker is None
 
@@ -1067,12 +1067,12 @@ class TestListScheduleMaps:
         last = self.NOW - timedelta(hours=3)
         wi = self._wi(item=None, domain=None, last_checked_at=last)
         # Inherited interval is 1d → next check = last + 1d.
-        sd = _build_schedule_map([wi], self.NOW)[str(wi.id)]
+        sd = build_schedule_map([wi], self.NOW)[str(wi.id)]
         assert sd.next_check == last + timedelta(days=1)
 
     def test_next_check_none_when_never_checked(self):
         wi = self._wi(item=None, domain=None, last_checked_at=None)
-        assert _build_schedule_map([wi], self.NOW)[str(wi.id)].next_check is None
+        assert build_schedule_map([wi], self.NOW)[str(wi.id)].next_check is None
 
     def test_active_profile_overrides_interval_and_next_check(self):
         """#206: a currently-active profile drives the displayed interval + next-check,
@@ -1089,7 +1089,7 @@ class TestListScheduleMaps:
                 }
             ]
         }
-        sd = _build_schedule_map([wi], self.NOW, profiles)[str(wi.id)]
+        sd = build_schedule_map([wi], self.NOW, profiles)[str(wi.id)]
         assert sd.profile_active is True
         assert sd.interval_text == "1h"  # profile cadence, not base 1d
         assert sd.marker == "profile"

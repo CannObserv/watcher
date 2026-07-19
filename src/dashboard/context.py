@@ -18,6 +18,7 @@ from src.core.models.notification_template import (
 )
 from src.core.models.temporal_profile import TemporalProfile
 from src.core.models.watched_item import WatchedItem
+from src.core.watches.schedule import ScheduleDisplay, resolve_schedule_display
 
 _DOMAIN_WI_SORT_COLS: dict[str, Any] = {
     "name": WatchedItem.name,
@@ -485,3 +486,25 @@ async def get_domain_default_templates(
         .order_by(NotificationTemplate.title)
     )
     return list(result.scalars().all())
+
+
+def build_schedule_map(
+    watched_items: list[WatchedItem],
+    now: datetime,
+    profiles_by_wi: dict[str, list[dict]] | None = None,
+) -> dict[str, ScheduleDisplay]:
+    """Resolved schedule display per item, keyed by id (#204, #205, #206).
+
+    One ``ScheduleDisplay`` per item — carrying the interval text, inheritance
+    source marker, profile-active flag, and next-check datetime — computed once and
+    read by the list template for both the Interval and Next Check columns. Routes
+    through the same ``resolve_schedule_display`` helper as the detail page and
+    ``schedule_tick``, so the list shows the inherited cadence (with a
+    ``domain``/``default``/``profile`` marker) rather than a blank. Pass
+    ``profiles_by_wi`` (item id → active profile dicts) to honor profile overrides.
+    """
+    profiles_by_wi = profiles_by_wi or {}
+    return {
+        str(wi.id): resolve_schedule_display(wi, now=now, profiles=profiles_by_wi.get(str(wi.id)))
+        for wi in watched_items
+    }

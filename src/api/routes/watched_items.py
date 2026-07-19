@@ -211,12 +211,6 @@ async def patch_watched_item(
     updates = data.model_dump(exclude_unset=True)
     has_is_active = "is_active" in updates
     target_active = updates.pop("is_active", None)
-    if has_is_active and wi.archived_at is not None:
-        # Raise before touching other fields — parity with the pre-#228 flow.
-        raise HTTPException(
-            status_code=409,
-            detail="WatchedItem is archived; activation is controlled by restore",
-        )
     for field, value in updates.items():
         setattr(wi, field, value)
 

@@ -70,6 +70,8 @@ Sibling services on the same VM, separately managed: **Archiver** at `/home/exed
 
 The exe.dev proxy forwards 3000–9999. Dev server reachable at `https://watcher.exe.xyz:8001/`.
 
+**Single process is load-bearing.** One uvicorn process runs everything: the API, the embedded Procrastinate worker, the config poller, and the cache sweeper (started in the `src/api/main.py` lifespan — there is no separate worker unit). The in-process `DomainRateLimiter` singleton holds all politeness state, so this topology is only correct at exactly one process. Never run `uvicorn --workers N` or a second worker unit against prod: each process would get its own rate-limiter, silently splitting every domain's politeness budget. Escalation path when one process stops being enough (not before): a separate `watcher-worker.service` plus Redis-backed rate-limiter state.
+
 ## Server Lifecycle
 
 **Port 8000 belongs to systemd. Never start uvicorn manually on port 8000.**

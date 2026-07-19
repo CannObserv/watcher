@@ -1,4 +1,4 @@
-"""Scheduler logic — compute when watches are due for checking."""
+"""Cadence engine — interval parsing, temporal-profile resolution, next-check computation."""
 
 import re
 from datetime import UTC, date, datetime, timedelta

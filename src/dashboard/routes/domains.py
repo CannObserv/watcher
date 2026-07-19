@@ -17,7 +17,6 @@ from src.api.schemas.validators import validate_event_list
 from src.core.domains import (
     backfill_domain_schedule_config,
 )
-from src.core.logging import get_logger
 from src.core.models.audit_log import EventType, audit
 from src.core.models.domain import Domain
 from src.core.models.notification_template import (
@@ -28,7 +27,7 @@ from src.core.models.notification_template import (
 from src.core.models.watched_item import WatchedItem
 from src.core.notifications.templates import create_template
 from src.core.probe import ProbeResult
-from src.core.scheduler import (
+from src.core.scheduling.cadence import (
     validate_optional_schedule_config,
 )
 from src.core.scheduling.resolution import SYSTEM_DEFAULT_SCHEDULE_CONFIG
@@ -44,7 +43,6 @@ from src.dashboard.forms import parse_content_config_from_form
 from src.dashboard.templating import templates
 
 router = APIRouter()
-logger = get_logger(__name__)
 
 
 @router.get("/domains")

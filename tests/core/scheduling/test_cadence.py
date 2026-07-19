@@ -4,7 +4,7 @@ from datetime import UTC, date, datetime, timedelta
 
 import pytest
 
-from src.core.scheduler import (
+from src.core.scheduling.cadence import (
     compute_next_check,
     evaluate_post_actions,
     format_interval,

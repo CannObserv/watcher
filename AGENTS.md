@@ -44,7 +44,7 @@ Top-level directories. Read the code for per-file detail.
 
 ```
 src/api/         FastAPI app (ASGI routes, schemas, deps)
-src/core/        Shared domain logic (models, probe, scheduling, notifications, diff, extractors, fetchers, scheduler, storage, crypto)
+src/core/        Shared domain logic (models, probe, scheduling, notifications, diff, extractors, fetchers, storage, crypto)
 src/dashboard/   Server-rendered UI (Jinja2 + HTMX + Tailwind)
 src/workers/     Procrastinate task queue (check_watch, schedule_tick, pipeline)
 tools/           Operational scripts

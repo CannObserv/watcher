@@ -4,7 +4,6 @@ from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.api.deps import get_db_session
-from src.core.logging import get_logger
 from src.dashboard.context import (
     get_audit_entries,
     get_audit_entries_count,
@@ -14,7 +13,6 @@ from src.dashboard.deps import clamp_pagination
 from src.dashboard.templating import templates
 
 router = APIRouter()
-logger = get_logger(__name__)
 
 
 async def audit_table_context(

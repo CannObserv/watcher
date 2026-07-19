@@ -4,7 +4,6 @@ from fastapi import APIRouter, Depends, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.api.deps import get_db_session
-from src.core.logging import get_logger
 from src.dashboard.context import (
     get_dashboard_stats,
     get_domains_with_watched_item_counts,
@@ -13,7 +12,6 @@ from src.dashboard.context import (
 from src.dashboard.templating import templates
 
 router = APIRouter()
-logger = get_logger(__name__)
 
 
 @router.get("/")
@@ -21,10 +19,7 @@ async def dashboard_home(
     request: Request,
     session: AsyncSession = Depends(get_db_session),
 ):
-    """Dashboard home page with stats and system health.
-
-    Phase 5 (#156): Recent Changes section removed — Change table dropped.
-    """
+    """Dashboard home page with stats and system health."""
     stats = await get_dashboard_stats(session)
     queue = await get_queue_health(session)
     domains = await get_domains_with_watched_item_counts(session)

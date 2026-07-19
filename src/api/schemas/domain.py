@@ -5,7 +5,7 @@ from datetime import datetime
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from src.api.schemas.types import ULIDStr
-from src.core.scheduler import validate_optional_schedule_config
+from src.core.scheduling.cadence import validate_optional_schedule_config
 
 
 class DomainPatch(BaseModel):

@@ -6,7 +6,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.api.deps import get_db_session
 from src.api.routes.helpers import parse_ulid
 from src.api.schemas.validators import validate_event_list
-from src.core.logging import get_logger
 from src.core.models.notification_template import (
     VISIBILITY_WATCHED_ITEM,
     NotificationTemplate,
@@ -27,7 +26,6 @@ from src.dashboard.context import (
 from src.dashboard.templating import templates
 
 router = APIRouter()
-logger = get_logger(__name__)
 
 
 async def _item_template_or_404(

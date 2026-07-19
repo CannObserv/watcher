@@ -28,12 +28,11 @@ from src.api.routes.watched_items import (
 from src.core.domains import (
     ensure_domain_and_resolve_suspension,
 )
-from src.core.logging import get_logger
 from src.core.models.audit_log import EventType, audit
 from src.core.models.temporal_profile import TemporalProfile
 from src.core.models.watched_item import WatchedItem
 from src.core.probe import ProbeResult
-from src.core.scheduler import (
+from src.core.scheduling.cadence import (
     parse_interval,
 )
 from src.core.scheduling.schedule import resolve_schedule_display
@@ -59,7 +58,6 @@ from src.dashboard.routes.audit import audit_table_context
 from src.dashboard.templating import templates
 
 router = APIRouter()
-logger = get_logger(__name__)
 
 
 # --- WatchedItem inline field editing ---

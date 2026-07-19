@@ -18,7 +18,7 @@ from datetime import datetime
 from typing import Literal
 
 from src.core.models.watched_item import WatchedItem
-from src.core.scheduler import (
+from src.core.scheduling.cadence import (
     compute_next_check,
     format_interval,
     resolve_effective_interval,

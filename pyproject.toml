@@ -29,11 +29,6 @@ dependencies = [
     "archiver-client>=4.0.0,<5",
 ]
 
-[project.optional-dependencies]
-browser = [
-    "playwright>=1.40.0,<2",
-]
-
 [dependency-groups]
 dev = [
     "anyio>=4.12.1,<5",

@@ -70,6 +70,27 @@ class TestGetDashboardStats:
         stats = await get_dashboard_stats(db_session)
         assert stats["changes_today"] == 1
 
+    async def test_changes_today_excludes_baseline_revisions(self, db_session):
+        """An item's first-ever revision is a baseline, not a change (CR round 1).
+
+        The pipeline creates a ChangeRevision on the first successful check to
+        establish the fingerprint baseline — provisioning a new item must not
+        show up as a 'change today' on the dashboard.
+        """
+        wi = await make_watched_item(db_session, auto_info_item=False)
+        await db_session.flush()
+        db_session.add(
+            ChangeRevision(
+                watched_item_id=wi.id,
+                content_fingerprint="fp-baseline",
+                captured_at=datetime.now(UTC),
+                schema_version=1,
+            )
+        )
+        await db_session.flush()
+        stats = await get_dashboard_stats(db_session)
+        assert stats["changes_today"] == 0
+
 
 @pytest.mark.integration
 class TestGetQueueHealth:

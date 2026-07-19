@@ -3,9 +3,10 @@
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import Select, and_, func, select, text
+from sqlalchemy import Select, and_, exists, func, select, text
 from sqlalchemy.exc import ProgrammingError
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import aliased
 from ulid import ULID
 
 from src.core.models.audit_log import AuditLog, EventType
@@ -32,7 +33,8 @@ async def get_dashboard_stats(session: AsyncSession) -> dict:
 
     Post-#191 the WatchedItem is the single monitored entity, so the "watches"
     stats count WatchedItems. ``changes_today`` counts ChangeRevisions captured
-    since UTC midnight (#229).
+    since UTC midnight (#229), excluding each item's first revision — that row
+    is the pipeline's fingerprint baseline, not a detected change.
     """
     total = await session.scalar(
         select(func.count(WatchedItem.id)).where(WatchedItem.archived_at.is_(None))
@@ -59,8 +61,20 @@ async def get_dashboard_stats(session: AsyncSession) -> dict:
         )
     )
 
+    # An item's first-ever revision is the fingerprint baseline (created on the
+    # first successful check, explicitly "no notification"), not a change —
+    # count only revisions with an older sibling on the same item.
+    older = aliased(ChangeRevision)
     changes_today = await session.scalar(
-        select(func.count(ChangeRevision.id)).where(ChangeRevision.captured_at >= today_start)
+        select(func.count(ChangeRevision.id)).where(
+            ChangeRevision.captured_at >= today_start,
+            exists(
+                select(1).where(
+                    older.watched_item_id == ChangeRevision.watched_item_id,
+                    older.captured_at < ChangeRevision.captured_at,
+                )
+            ),
+        )
     )
 
     return {

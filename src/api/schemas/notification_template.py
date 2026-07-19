@@ -86,6 +86,28 @@ class NotificationTemplateUpdate(BaseModel):
     is_active: bool | None = None
     content_config: ContentConfig | None = None
 
+    def to_updates(self) -> dict:
+        """Translate the PATCH body into a field→value dict for the service (#228).
+
+        ``title``/``channel_hint``/``remote_channel_id`` require a provided,
+        non-None value (nullable only so ``model_fields_set`` can distinguish
+        "not provided"); ``events``/``is_active`` update on any non-None value;
+        ``content_config`` updates whenever provided — ``None`` clears it.
+        """
+        updates: dict = {}
+        for field in ("title", "channel_hint", "remote_channel_id"):
+            if field in self.model_fields_set and getattr(self, field) is not None:
+                updates[field] = getattr(self, field)
+        if self.events is not None:
+            updates["events"] = self.events
+        if self.is_active is not None:
+            updates["is_active"] = self.is_active
+        if "content_config" in self.model_fields_set:
+            updates["content_config"] = (
+                self.content_config.model_dump() if self.content_config else None
+            )
+        return updates
+
     @field_validator("events")
     @classmethod
     def check_events(cls, v: list[str] | None) -> list[str] | None:

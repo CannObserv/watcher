@@ -31,6 +31,7 @@ from src.core.models.notification_template import (
     VISIBILITY_WATCHED_ITEM,
     NotificationTemplate,
 )
+from src.core.notifications import templates as template_service
 from src.core.notifications.events import WatchEvent, WatchEventType
 from src.core.notifications.notify import DispatchCandidate, dispatch_via_notifier
 from src.core.notifier_client import get_notifier_client
@@ -72,19 +73,18 @@ async def create_template(
             raise HTTPException(status_code=404, detail="Domain not found")
     elif data.visibility == VISIBILITY_WATCHED_ITEM:
         await get_watched_item_or_404(data.watched_item_id, session)
-    tpl = NotificationTemplate(
+    tpl = await template_service.create_template(
+        session,
+        visibility=data.visibility,
         title=data.title,
         channel_hint=data.channel_hint,
         events=data.events,
-        visibility=data.visibility,
         domain_name=data.domain_name,
         watched_item_id=ULID.from_str(data.watched_item_id) if data.watched_item_id else None,
         content_config=data.content_config.model_dump() if data.content_config else None,
         remote_channel_id=data.remote_channel_id,
+        audit_fields={},
     )
-    session.add(tpl)
-    await session.flush()
-    audit(session, EventType.NOTIFICATION_TEMPLATE_CREATED, template_id=str(tpl.id))
     await session.commit()
     await session.refresh(tpl)
     return tpl
@@ -123,19 +123,7 @@ async def update_template(
 ) -> NotificationTemplate:
     """Partially update a notification template (visibility/refs are immutable)."""
     tpl = await _get_template_or_404(template_id, session)
-    if "remote_channel_id" in data.model_fields_set and data.remote_channel_id is not None:
-        tpl.remote_channel_id = data.remote_channel_id
-    if "channel_hint" in data.model_fields_set and data.channel_hint is not None:
-        tpl.channel_hint = data.channel_hint
-    if data.events is not None:
-        tpl.events = data.events
-    if data.is_active is not None:
-        tpl.is_active = data.is_active
-    if "title" in data.model_fields_set and data.title is not None:
-        tpl.title = data.title
-    if "content_config" in data.model_fields_set:
-        tpl.content_config = data.content_config.model_dump() if data.content_config else None
-    audit(session, EventType.NOTIFICATION_TEMPLATE_UPDATED, template_id=str(tpl.id))
+    template_service.update_template_fields(session, tpl, data.to_updates(), audit_fields={})
     await session.commit()
     await session.refresh(tpl)
     return tpl
@@ -148,8 +136,7 @@ async def delete_template(
 ) -> None:
     """Delete a template. Templates are standalone post-#200 — no ref check needed."""
     tpl = await _get_template_or_404(template_id, session)
-    audit(session, EventType.NOTIFICATION_TEMPLATE_DELETED, template_id=template_id)
-    await session.delete(tpl)
+    await template_service.delete_template(session, tpl, audit_fields={})
     await session.commit()
 
 

@@ -26,6 +26,11 @@ from src.core.models.change_revision import ChangeRevision
 from src.core.models.watched_item import WatchedItem
 from src.core.probe import ProbeResult
 from src.core.registry import get_registry
+from src.core.watched_items import (
+    ArchivedItemActivationError,
+    SuspendedDomainResumeError,
+    set_watched_item_active,
+)
 from src.workers.tasks import check_watched_item
 
 router = APIRouter(prefix="/watched-items", tags=["watched-items"])
@@ -191,9 +196,11 @@ async def patch_watched_item(
 ):
     """Update mutable WatchedItem fields. All fields optional.
 
-    ``is_active`` (pause/resume) cannot be changed on an archived item — the
-    archive/restore lifecycle owns activation while archived. Such a PATCH
-    returns 409; use ``POST /{id}/restore`` to reactivate.
+    ``is_active`` (pause/resume) is governed by the shared
+    :func:`set_watched_item_active` service (#228): it cannot change on an
+    archived item (409 — restore owns activation) and an item cannot resume
+    while its domain is suspended (409 — kill-switch parity with the
+    dashboard toggle).
 
     An ``is_active`` transition emits a dedicated ``WATCHED_ITEM_PAUSED`` /
     ``WATCHED_ITEM_RESUMED`` audit event (#189) and is excluded from the
@@ -202,12 +209,14 @@ async def patch_watched_item(
     """
     wi = await _get_or_404(session, watched_item_id)
     updates = data.model_dump(exclude_unset=True)
-    if "is_active" in updates and wi.archived_at is not None:
+    has_is_active = "is_active" in updates
+    target_active = updates.pop("is_active", None)
+    if has_is_active and wi.archived_at is not None:
+        # Raise before touching other fields — parity with the pre-#228 flow.
         raise HTTPException(
             status_code=409,
             detail="WatchedItem is archived; activation is controlled by restore",
         )
-    previous_active = wi.is_active
     for field, value in updates.items():
         setattr(wi, field, value)
 
@@ -224,18 +233,16 @@ async def patch_watched_item(
         wi.domain_suspended = domain_state.suspended
         wi.domain_default_schedule_config = domain_state.default_schedule_config
 
-    # #189: an is_active transition gets a dedicated pause/resume audit event
-    # (mirroring archive/restore), kept out of the generic UPDATED entry so
-    # operators can filter by event type. A no-op (same value) emits nothing.
-    if "is_active" in updates and wi.is_active != previous_active:
-        audit(
-            session,
-            EventType.WATCHED_ITEM_RESUMED if wi.is_active else EventType.WATCHED_ITEM_PAUSED,
-            watched_item_id=str(wi.id),
-            source="api",
-        )
+    # #228: the pause/resume transition (guards + dedicated audit event) is
+    # owned by the shared service; runs after the effective_url block so the
+    # resume guard sees the re-derived domain_suspended state.
+    if has_is_active:
+        try:
+            set_watched_item_active(session, wi, active=target_active, source="api")
+        except (ArchivedItemActivationError, SuspendedDomainResumeError) as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
 
-    other_fields = sorted(k for k in updates if k != "is_active")
+    other_fields = sorted(updates)
     # domain_name is derived (not a PATCH input) but changes with effective_url;
     # surface it in the audit so the trail matches the re-probe route (#196).
     if "effective_url" in updates:

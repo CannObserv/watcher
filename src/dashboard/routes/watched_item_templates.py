@@ -7,13 +7,17 @@ from src.api.deps import get_db_session
 from src.api.routes.helpers import parse_ulid
 from src.api.schemas.validators import validate_event_list
 from src.core.logging import get_logger
-from src.core.models.audit_log import EventType, audit
 from src.core.models.notification_template import (
     VISIBILITY_WATCHED_ITEM,
     NotificationTemplate,
 )
 from src.core.models.watched_item import WatchedItem
 from src.core.notifications.events import EVENT_TITLES
+from src.core.notifications.templates import (
+    create_template,
+    delete_template,
+    update_template_fields,
+)
 from src.dashboard.context import (
     get_domain_default_templates,
     get_global_default_templates,
@@ -94,21 +98,14 @@ async def watched_item_template_create(
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-    tpl = NotificationTemplate(
+    await create_template(
+        session,
         visibility=VISIBILITY_WATCHED_ITEM,
         watched_item_id=wi.id,
         title=title.strip() or channel_hint.strip(),
         channel_hint=channel_hint.strip(),
         events=event_list,
-    )
-    session.add(tpl)
-    await session.flush()
-    audit(
-        session,
-        EventType.NOTIFICATION_TEMPLATE_CREATED,
-        watched_item_id=str(wi.id),
-        template_id=str(tpl.id),
-        source="dashboard",
+        audit_fields={"watched_item_id": str(wi.id), "source": "dashboard"},
     )
     await session.commit()
 
@@ -157,15 +154,15 @@ async def watched_item_template_update(
         event_list = validate_event_list(event_list)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    tpl.title = title.strip() or channel_hint.strip()
-    tpl.channel_hint = channel_hint.strip()
-    tpl.events = event_list
-    audit(
+    update_template_fields(
         session,
-        EventType.NOTIFICATION_TEMPLATE_UPDATED,
-        watched_item_id=str(wi.id),
-        template_id=str(tpl.id),
-        source="dashboard",
+        tpl,
+        {
+            "title": title.strip() or channel_hint.strip(),
+            "channel_hint": channel_hint.strip(),
+            "events": event_list,
+        },
+        audit_fields={"watched_item_id": str(wi.id), "source": "dashboard"},
     )
     await session.commit()
 
@@ -188,14 +185,9 @@ async def watched_item_template_delete(
     if not wi:
         raise HTTPException(status_code=404)
     tpl = await _item_template_or_404(session, wi, tpl_id)
-    audit(
-        session,
-        EventType.NOTIFICATION_TEMPLATE_DELETED,
-        watched_item_id=str(wi.id),
-        template_id=str(tpl.id),
-        source="dashboard",
+    await delete_template(
+        session, tpl, audit_fields={"watched_item_id": str(wi.id), "source": "dashboard"}
     )
-    await session.delete(tpl)
     await session.commit()
 
     refreshed = await get_watched_item_notifications(session, wi.id)

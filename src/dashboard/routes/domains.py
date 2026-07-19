@@ -26,6 +26,7 @@ from src.core.models.notification_template import (
     NotificationTemplate,
 )
 from src.core.models.watched_item import WatchedItem
+from src.core.notifications.templates import create_template
 from src.core.probe import ProbeResult
 from src.core.scheduler import (
     validate_optional_schedule_config,
@@ -690,26 +691,21 @@ async def domain_notification_create(
     except ValueError as exc:
         return _page_error(str(exc))
 
-    tpl = NotificationTemplate(
+    await create_template(
+        session,
+        visibility=VISIBILITY_DOMAIN,
+        domain_name=domain_name,
         title=title,
         channel_hint=channel_hint,
         events=events,
-        visibility=VISIBILITY_DOMAIN,
-        domain_name=domain_name,
-        is_active=True,
         content_config=_cc,
         remote_channel_id=remote_channel_id,
-    )
-    session.add(tpl)
-    await session.flush()
-    audit(
-        session,
-        EventType.NOTIFICATION_TEMPLATE_CREATED,
-        template_id=str(tpl.id),
-        title=title,
-        channel_hint=channel_hint,
-        source="domain_dashboard",
-        domain_name=domain_name,
+        audit_fields={
+            "title": title,
+            "channel_hint": channel_hint,
+            "source": "domain_dashboard",
+            "domain_name": domain_name,
+        },
     )
     await session.commit()
     return RedirectResponse(url=f"/domains/{domain_name}", status_code=303)

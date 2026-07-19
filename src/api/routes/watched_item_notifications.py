@@ -35,6 +35,11 @@ from src.core.models.notification_template import (
 )
 from src.core.notifications.events import WatchEvent, WatchEventType
 from src.core.notifications.notify import DispatchCandidate, dispatch_via_notifier
+from src.core.notifications.templates import (
+    create_template,
+    delete_template,
+    update_template_fields,
+)
 from src.core.notifier_client import get_notifier_client
 
 logger = get_logger(__name__)
@@ -66,7 +71,8 @@ async def create_item_notification(
 ) -> NotificationTemplate:
     """Create a watched-item-scoped notification template."""
     wi = await get_watched_item_or_404(watched_item_id, session)
-    tpl = NotificationTemplate(
+    tpl = await create_template(
+        session,
         visibility=VISIBILITY_WATCHED_ITEM,
         watched_item_id=wi.id,
         title=data.title,
@@ -74,15 +80,7 @@ async def create_item_notification(
         events=data.events,
         content_config=data.content_config.model_dump() if data.content_config else None,
         remote_channel_id=data.remote_channel_id,
-    )
-    session.add(tpl)
-    await session.flush()
-    audit(
-        session,
-        EventType.NOTIFICATION_TEMPLATE_CREATED,
-        watched_item_id=str(wi.id),
-        template_id=str(tpl.id),
-        channel_hint=tpl.channel_hint,
+        audit_fields={"watched_item_id": str(wi.id), "channel_hint": data.channel_hint},
     )
     await session.commit()
     await session.refresh(tpl)
@@ -152,23 +150,8 @@ async def update_item_notification(
     """Update an item-scoped template's mutable fields."""
     wi = await get_watched_item_or_404(watched_item_id, session)
     tpl = await _item_template_or_404(session, wi.id, template_id)
-    if data.is_active is not None:
-        tpl.is_active = data.is_active
-    if data.events is not None:
-        tpl.events = data.events
-    if "channel_hint" in data.model_fields_set and data.channel_hint is not None:
-        tpl.channel_hint = data.channel_hint
-    if "remote_channel_id" in data.model_fields_set and data.remote_channel_id is not None:
-        tpl.remote_channel_id = data.remote_channel_id
-    if "title" in data.model_fields_set and data.title is not None:
-        tpl.title = data.title
-    if "content_config" in data.model_fields_set:
-        tpl.content_config = data.content_config.model_dump() if data.content_config else None
-    audit(
-        session,
-        EventType.NOTIFICATION_TEMPLATE_UPDATED,
-        watched_item_id=str(wi.id),
-        template_id=str(tpl.id),
+    update_template_fields(
+        session, tpl, data.to_updates(), audit_fields={"watched_item_id": str(wi.id)}
     )
     await session.commit()
     await session.refresh(tpl)
@@ -184,13 +167,7 @@ async def delete_item_notification(
     """Delete an item-scoped template."""
     wi = await get_watched_item_or_404(watched_item_id, session)
     tpl = await _item_template_or_404(session, wi.id, template_id)
-    audit(
-        session,
-        EventType.NOTIFICATION_TEMPLATE_DELETED,
-        watched_item_id=str(wi.id),
-        template_id=str(tpl.id),
-    )
-    await session.delete(tpl)
+    await delete_template(session, tpl, audit_fields={"watched_item_id": str(wi.id)})
     await session.commit()
 
 

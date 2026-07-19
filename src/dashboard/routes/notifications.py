@@ -30,6 +30,12 @@ from src.core.notifications.notify import (
     dispatch_via_notifier,
 )
 from src.core.notifications.preview_fixtures import build_preview_event
+from src.core.notifications.templates import (
+    create_template,
+    delete_template,
+    duplicate_template,
+    update_template_fields,
+)
 from src.core.notifier_client import get_notifier_client
 from src.dashboard.deps import is_htmx
 from src.dashboard.forms import ALL_EVENT_TYPE_VALUES, parse_content_config_from_form
@@ -295,22 +301,15 @@ async def notification_template_create(
     except ValueError as exc:
         return _page_error(str(exc))
 
-    tpl = NotificationTemplate(
+    await create_template(
+        session,
+        visibility=VISIBILITY_GLOBAL,
         title=title,
         channel_hint=channel_hint,
         events=events,
-        visibility=VISIBILITY_GLOBAL,
         content_config=parse_content_config_from_form(form),
         remote_channel_id=remote_channel_id,
-    )
-    session.add(tpl)
-    audit(
-        session,
-        EventType.NOTIFICATION_TEMPLATE_CREATED,
-        template_id=str(tpl.id),
-        title=title,
-        channel_hint=channel_hint,
-        source="dashboard",
+        audit_fields={"title": title, "channel_hint": channel_hint, "source": "dashboard"},
     )
     await session.commit()
     return RedirectResponse(url="/notifications", status_code=303)
@@ -396,18 +395,17 @@ async def notification_template_edit(
     except ValueError as exc:
         return await _edit_error(str(exc))
 
-    tpl.title = title
-    tpl.remote_channel_id = remote_channel_id
-    tpl.channel_hint = channel_hint
-    tpl.events = events
-    tpl.content_config = parse_content_config_from_form(form)
-    audit(
+    update_template_fields(
         session,
-        EventType.NOTIFICATION_TEMPLATE_UPDATED,
-        template_id=str(tpl.id),
-        title=tpl.title,
-        channel_hint=tpl.channel_hint,
-        source="dashboard",
+        tpl,
+        {
+            "title": title,
+            "remote_channel_id": remote_channel_id,
+            "channel_hint": channel_hint,
+            "events": events,
+            "content_config": parse_content_config_from_form(form),
+        },
+        audit_fields={"title": title, "channel_hint": channel_hint, "source": "dashboard"},
     )
     await session.commit()
     return RedirectResponse(url="/notifications", status_code=303)
@@ -430,14 +428,12 @@ async def notification_template_toggle(
     tpl = result.scalar_one_or_none()
     if not tpl:
         raise HTTPException(status_code=404, detail="Template not found")
-    tpl.is_active = not tpl.is_active
-    audit(
+    new_active = not tpl.is_active
+    update_template_fields(
         session,
-        EventType.NOTIFICATION_TEMPLATE_UPDATED,
-        template_id=str(tpl.id),
-        title=tpl.title,
-        is_active=tpl.is_active,
-        source="dashboard",
+        tpl,
+        {"is_active": new_active},
+        audit_fields={"title": tpl.title, "is_active": new_active, "source": "dashboard"},
     )
     await session.commit()
     result2 = await session.execute(
@@ -474,14 +470,7 @@ async def notification_template_delete(
     if not tpl:
         raise HTTPException(status_code=404, detail="Template not found")
 
-    audit(
-        session,
-        EventType.NOTIFICATION_TEMPLATE_DELETED,
-        template_id=str(tpl.id),
-        title=tpl.title,
-        source="dashboard",
-    )
-    await session.delete(tpl)
+    await delete_template(session, tpl, audit_fields={"title": tpl.title, "source": "dashboard"})
     await session.commit()
     result2 = await session.execute(
         select(NotificationTemplate).order_by(NotificationTemplate.title)
@@ -513,23 +502,8 @@ async def notification_template_duplicate(
     tpl = result.scalar_one_or_none()
     if not tpl:
         raise HTTPException(status_code=404, detail="Template not found")
-    copy = NotificationTemplate(
-        title=f"{tpl.title} (copy)",
-        channel_hint=tpl.channel_hint,
-        events=list(tpl.events),
-        visibility=tpl.visibility,
-        domain_name=tpl.domain_name,
-        watched_item_id=tpl.watched_item_id,
-        content_config=tpl.content_config,
-        remote_channel_id=tpl.remote_channel_id,
-    )
-    session.add(copy)
-    audit(
-        session,
-        EventType.NOTIFICATION_TEMPLATE_CREATED,
-        template_id="(duplicate)",
-        title=copy.title,
-        source="dashboard",
+    await duplicate_template(
+        session, tpl, audit_fields={"title": f"{tpl.title} (copy)", "source": "dashboard"}
     )
     await session.commit()
     result2 = await session.execute(

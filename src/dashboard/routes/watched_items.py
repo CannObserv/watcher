@@ -36,6 +36,11 @@ from src.core.probe import ProbeResult
 from src.core.scheduler import (
     parse_interval,
 )
+from src.core.watched_items import (
+    ArchivedItemActivationError,
+    SuspendedDomainResumeError,
+    set_watched_item_active,
+)
 from src.core.watches.schedule import resolve_schedule_display
 from src.dashboard.context import (
     WATCHED_ITEM_EVENT_CHOICES,
@@ -558,21 +563,14 @@ async def watched_item_toggle_active(
             ctx["flash_oob_level"], ctx["flash_oob_message"] = flash
         return templates.TemplateResponse(request, "partials/watched_item_status_toggle.html", ctx)
 
-    if wi.archived_at is not None:
-        return _respond(("error", "Watched Item is archived — restore it to change its status."))
-
     new_active = active == "true"
-    if wi.domain_suspended and new_active:
+    try:
+        changed = set_watched_item_active(session, wi, active=new_active, source="dashboard")
+    except ArchivedItemActivationError:
+        return _respond(("error", "Watched Item is archived — restore it to change its status."))
+    except SuspendedDomainResumeError:
         return _respond(("warning", "Cannot resume while the domain is suspended."))
-
-    if wi.is_active != new_active:
-        wi.is_active = new_active
-        audit(
-            session,
-            EventType.WATCHED_ITEM_RESUMED if new_active else EventType.WATCHED_ITEM_PAUSED,
-            watched_item_id=str(wi.id),
-            source="dashboard",
-        )
+    if changed:
         await session.commit()
         await session.refresh(wi)
 

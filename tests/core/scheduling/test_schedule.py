@@ -10,7 +10,7 @@ with ``schedule_tick``.
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 
-from src.core.watches.schedule import ScheduleDisplay, resolve_schedule_display
+from src.core.scheduling.schedule import ScheduleDisplay, resolve_schedule_display
 
 NOW = datetime(2026, 6, 20, 12, 0, tzinfo=UTC)
 

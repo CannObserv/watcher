@@ -28,8 +28,8 @@ from src.core.notifications.events import WatchEvent, WatchEventType
 from src.core.rate_limiter import get_rate_limiter
 from src.core.registry import ServiceRegistry, get_registry
 from src.core.scheduler import compute_next_check, evaluate_post_actions, parse_interval
+from src.core.scheduling.resolution import resolved_schedule_config
 from src.core.utils import watched_item_event_base_metadata
-from src.core.watches.resolution import resolved_schedule_config
 from src.workers import bp
 from src.workers.notify import dispatch_event_notifications
 from src.workers.pipeline import (

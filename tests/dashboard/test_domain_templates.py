@@ -6,17 +6,17 @@ notification defaults are now ``NotificationTemplate`` rows with
 ``visibility='domain'`` and ``domain_name`` set — there is no ``DomainNcRef``
 junction and no assign-existing flow (a template has one intrinsic scope).
 
-The ``GET /domains/{name}/nc-defaults`` partial renders two sections:
+The ``GET /domains/{name}/domain-templates`` partial renders two sections:
  - ``global_templates`` — read-only inherited globals (``visibility='global'``)
  - ``assigned`` — the domain's own templates (``visibility='domain'``)
 
 CRUD on the domain section:
  - create:  POST /domains/{name}/notifications/new  → new visibility='domain' row
- - remove:  POST /domains/{name}/nc-defaults/remove/{template_id} → DELETEs the row
+ - remove:  POST /domains/{name}/domain-templates/remove/{template_id} → DELETEs the row
 
 Removed routes (no longer tested — see the deletion notes in TestRemovedRoutes):
- - POST /domains/{name}/nc-defaults/add/{template_id}   (assign existing)
- - GET  /domains/{name}/nc-defaults/assign-row          (assign-existing picker)
+ - POST /domains/{name}/domain-templates/add/{template_id}   (assign existing)
+ - GET  /domains/{name}/domain-templates/assign-row          (assign-existing picker)
 """
 
 import pytest
@@ -76,7 +76,7 @@ async def _make_domain_template(db_session, title: str, domain_name: str, is_act
 
 
 class TestGlobalSection:
-    """GET /domains/{name}/nc-defaults — the read-only inherited-globals section."""
+    """GET /domains/{name}/domain-templates — the read-only inherited-globals section."""
 
     @pytest.mark.integration
     async def test_global_templates_appear_in_partial(self, client: AsyncClient, db_session):
@@ -85,7 +85,7 @@ class TestGlobalSection:
         await _make_global_template(db_session, "GlobalVisibleTemplate")
 
         resp = await client.get(
-            "/domains/global-show.example.com/nc-defaults",
+            "/domains/global-show.example.com/domain-templates",
             headers={"HX-Request": "true"},
         )
         assert resp.status_code == 200
@@ -102,7 +102,7 @@ class TestGlobalSection:
         await _make_domain_template(db_session, "DomainScopedOne", "non-global-check.example.com")
 
         resp = await client.get(
-            "/domains/non-global-check.example.com/nc-defaults",
+            "/domains/non-global-check.example.com/domain-templates",
             headers={"HX-Request": "true"},
         )
         assert resp.status_code == 200
@@ -122,7 +122,7 @@ class TestDomainSection:
     async def test_partial_loads(self, client: AsyncClient, db_session):
         await _make_domain(db_session, "test-domain.com")
         resp = await client.get(
-            "/domains/test-domain.com/nc-defaults",
+            "/domains/test-domain.com/domain-templates",
             headers={"HX-Request": "true"},
         )
         assert resp.status_code == 200
@@ -134,7 +134,7 @@ class TestDomainSection:
         await _make_domain_template(db_session, "MyDomainTemplate", "show-assigned.com")
 
         resp = await client.get(
-            "/domains/show-assigned.com/nc-defaults",
+            "/domains/show-assigned.com/domain-templates",
             headers={"HX-Request": "true"},
         )
         assert resp.status_code == 200
@@ -148,7 +148,7 @@ class TestDomainSection:
         await _make_domain_template(db_session, "TheirTemplate", "theirs.example.com")
 
         resp = await client.get(
-            "/domains/mine.example.com/nc-defaults",
+            "/domains/mine.example.com/domain-templates",
             headers={"HX-Request": "true"},
         )
         assert resp.status_code == 200
@@ -156,13 +156,13 @@ class TestDomainSection:
 
     @pytest.mark.integration
     async def test_remove_deletes_domain_template(self, client: AsyncClient, db_session):
-        """POST .../nc-defaults/remove/{id} deletes the domain-scoped template row (#200)."""
+        """POST .../domain-templates/remove/{id} deletes the domain-scoped template row (#200)."""
         await _make_domain(db_session, "example.com")
         tpl = await _make_domain_template(db_session, "ToDelete", "example.com")
         tpl_id = tpl.id
 
         resp = await client.post(
-            f"/domains/example.com/nc-defaults/remove/{tpl_id}",
+            f"/domains/example.com/domain-templates/remove/{tpl_id}",
             headers={"HX-Request": "true"},
         )
         assert resp.status_code == 200
@@ -178,7 +178,7 @@ class TestDomainSection:
         await _make_domain(db_session, "remove-missing.com")
 
         resp = await client.post(
-            f"/domains/remove-missing.com/nc-defaults/remove/{ULID()}",
+            f"/domains/remove-missing.com/domain-templates/remove/{ULID()}",
             headers={"HX-Request": "true"},
         )
         assert resp.status_code == 200
@@ -194,7 +194,7 @@ class TestDomainSection:
         glob_id = glob.id
 
         resp = await client.post(
-            f"/domains/guard.example.com/nc-defaults/remove/{glob_id}",
+            f"/domains/guard.example.com/domain-templates/remove/{glob_id}",
             headers={"HX-Request": "true"},
         )
         assert resp.status_code == 200
@@ -257,7 +257,7 @@ class TestCreateDomainTemplate:
 
     @pytest.mark.integration
     async def test_created_template_appears_in_partial(self, client: AsyncClient, db_session):
-        """A freshly created domain template renders in the domain nc-defaults partial."""
+        """A freshly created domain template renders in the domain domain-templates partial."""
         await _make_domain(db_session, "create-render.example.com")
 
         await client.post(
@@ -272,7 +272,7 @@ class TestCreateDomainTemplate:
         )
 
         resp = await client.get(
-            "/domains/create-render.example.com/nc-defaults",
+            "/domains/create-render.example.com/domain-templates",
             headers={"HX-Request": "true"},
         )
         assert resp.status_code == 200
@@ -322,8 +322,8 @@ class TestRemovedRoutes:
 
     The assign-existing flow is gone: a template has one intrinsic visibility, so
     you can no longer attach an existing (global) template to a domain. Deleted:
-      - POST /domains/{name}/nc-defaults/add/{template_id}
-      - GET  /domains/{name}/nc-defaults/assign-row
+      - POST /domains/{name}/domain-templates/add/{template_id}
+      - GET  /domains/{name}/domain-templates/assign-row
     These previously created/queried DomainNcRef junction rows (also removed).
     """
 
@@ -333,7 +333,7 @@ class TestRemovedRoutes:
         tpl = await _make_global_template(db_session, "OrphanGlobal")
 
         resp = await client.post(
-            f"/domains/gone-add.example.com/nc-defaults/add/{tpl.id}",
+            f"/domains/gone-add.example.com/domain-templates/add/{tpl.id}",
             headers={"HX-Request": "true"},
         )
         assert resp.status_code == 404
@@ -343,7 +343,7 @@ class TestRemovedRoutes:
         await _make_domain(db_session, "gone-assign-row.example.com")
 
         resp = await client.get(
-            "/domains/gone-assign-row.example.com/nc-defaults/assign-row",
+            "/domains/gone-assign-row.example.com/domain-templates/assign-row",
             headers={"HX-Request": "true"},
         )
         assert resp.status_code == 404

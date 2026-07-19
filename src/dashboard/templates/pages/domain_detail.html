@@ -29,11 +29,11 @@
 </section>
 
 {# Notification Defaults #}
-<section aria-labelledby="domain-nc-defaults-heading" class="mb-8">
-  <h3 id="domain-nc-defaults-heading" class="text-lg font-semibold text-gray-900 dark:text-white mb-4">Notification Defaults</h3>
+<section aria-labelledby="domain-domain-templates-heading" class="mb-8">
+  <h3 id="domain-domain-templates-heading" class="text-lg font-semibold text-gray-900 dark:text-white mb-4">Notification Defaults</h3>
   <div
-    id="domain-nc-defaults-wrapper"
-    hx-get="/domains/{{ domain.name }}/nc-defaults"
+    id="domain-domain-templates-wrapper"
+    hx-get="/domains/{{ domain.name }}/domain-templates"
     hx-trigger="load"
     hx-target="this"
     hx-swap="innerHTML"

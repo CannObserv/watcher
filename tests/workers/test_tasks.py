@@ -20,7 +20,7 @@ from src.core.models.temporal_profile import PostAction, ProfileType, TemporalPr
 from src.core.models.watched_item import WatchHealthStatus
 from src.core.rate_limiter import DomainRateLimiter
 from src.core.registry import ServiceRegistry
-from src.core.watches.resolution import resolved_schedule_config
+from src.core.scheduling.resolution import resolved_schedule_config
 from src.workers.pipeline import (
     ExtractionError,
     WatchedItemResult,

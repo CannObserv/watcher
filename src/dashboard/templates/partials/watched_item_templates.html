@@ -9,13 +9,13 @@
   {% with heading="Global",
           section_templates=global_templates,
           empty_text="No global templates — none fire for every Watched Item." %}
-    {% include "partials/nc_readonly_section.html" %}
+    {% include "partials/inherited_templates_section.html" %}
   {% endwith %}
 
   {% with heading="Domain",
           section_templates=domain_templates,
           empty_text="No domain notification defaults apply to this item." %}
-    {% include "partials/nc_readonly_section.html" %}
+    {% include "partials/inherited_templates_section.html" %}
   {% endwith %}
 
   <section>

@@ -23,7 +23,7 @@ from src.core.scheduler import (
     format_interval,
     resolve_effective_interval,
 )
-from src.core.watches.resolution import resolved_schedule_config
+from src.core.scheduling.resolution import resolved_schedule_config
 
 ScheduleSource = Literal["item", "domain", "default"]
 

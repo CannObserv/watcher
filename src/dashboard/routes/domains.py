@@ -31,7 +31,7 @@ from src.core.probe import ProbeResult
 from src.core.scheduler import (
     validate_optional_schedule_config,
 )
-from src.core.watches.resolution import SYSTEM_DEFAULT_SCHEDULE_CONFIG
+from src.core.scheduling.resolution import SYSTEM_DEFAULT_SCHEDULE_CONFIG
 from src.dashboard.context import (
     build_schedule_map,
     get_active_profiles_by_item,
@@ -590,8 +590,8 @@ async def domain_detail_page(
     )
 
 
-async def _render_domain_nc_defaults(request: Request, domain_name: str, session: AsyncSession):
-    """Render the domain_nc_defaults partial for *domain_name* (#200).
+async def _render_domain_templates(request: Request, domain_name: str, session: AsyncSession):
+    """Render the domain_domain_templates partial for *domain_name* (#200).
 
     Post-#200 a domain's templates are ``NotificationTemplate`` rows with
     ``visibility='domain'`` — there is no assign-existing flow (a template has one
@@ -616,7 +616,7 @@ async def _render_domain_nc_defaults(request: Request, domain_name: str, session
 
     return templates.TemplateResponse(
         request,
-        "partials/domain_nc_defaults.html",
+        "partials/domain_templates.html",
         {
             "domain_name": domain_name,
             "assigned": assigned,
@@ -711,18 +711,18 @@ async def domain_notification_create(
     return RedirectResponse(url=f"/domains/{domain_name}", status_code=303)
 
 
-@router.get("/domains/{domain_name}/nc-defaults")
-async def domain_nc_defaults_partial(
+@router.get("/domains/{domain_name}/domain-templates")
+async def domain_templates_partial(
     request: Request,
     domain_name: str,
     session: AsyncSession = Depends(get_db_session),
 ):
     """HTMX partial: notification defaults assigned to a domain."""
-    return await _render_domain_nc_defaults(request, domain_name, session)
+    return await _render_domain_templates(request, domain_name, session)
 
 
-@router.post("/domains/{domain_name}/nc-defaults/remove/{template_id}")
-async def domain_nc_default_remove(
+@router.post("/domains/{domain_name}/domain-templates/remove/{template_id}")
+async def domain_template_remove(
     request: Request,
     domain_name: str,
     template_id: str,
@@ -741,7 +741,7 @@ async def domain_nc_default_remove(
             template_id=template_id,
         )
         await session.commit()
-    return await _render_domain_nc_defaults(request, domain_name, session)
+    return await _render_domain_templates(request, domain_name, session)
 
 
 @router.get("/partials/domain-watched-items/{name}")

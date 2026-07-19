@@ -19,7 +19,7 @@ from src.core.models.notification_template import (
 )
 from src.core.models.temporal_profile import TemporalProfile
 from src.core.models.watched_item import WatchedItem
-from src.core.watches.schedule import ScheduleDisplay, resolve_schedule_display
+from src.core.scheduling.schedule import ScheduleDisplay, resolve_schedule_display
 
 _DOMAIN_WI_SORT_COLS: dict[str, Any] = {
     "name": WatchedItem.name,
@@ -64,8 +64,8 @@ async def get_dashboard_stats(session: AsyncSession) -> dict:
     )
 
     return {
-        "total_watches": total or 0,
-        "active_watches": active or 0,
+        "total_items": total or 0,
+        "active_items": active or 0,
         "changes_today": changes_today or 0,
         "checks_today": checks_today or 0,
     }

@@ -7,7 +7,7 @@ item default -> denormalized domain default -> system default. None means
 
 from types import SimpleNamespace
 
-from src.core.watches.resolution import SYSTEM_DEFAULT_SCHEDULE_CONFIG, resolved_schedule_config
+from src.core.scheduling.resolution import SYSTEM_DEFAULT_SCHEDULE_CONFIG, resolved_schedule_config
 
 
 def _wi(item=None, domain=None):

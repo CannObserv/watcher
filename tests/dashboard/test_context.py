@@ -25,8 +25,8 @@ from tests.conftest import make_info_item, make_watched_item
 class TestGetDashboardStats:
     async def test_empty_database(self, db_session):
         stats = await get_dashboard_stats(db_session)
-        assert stats["total_watches"] == 0
-        assert stats["active_watches"] == 0
+        assert stats["total_items"] == 0
+        assert stats["active_items"] == 0
         assert stats["changes_today"] == 0
         assert stats["checks_today"] == 0
 
@@ -43,8 +43,8 @@ class TestGetDashboardStats:
         )
         await db_session.flush()
         stats = await get_dashboard_stats(db_session)
-        assert stats["total_watches"] == 2
-        assert stats["active_watches"] == 1
+        assert stats["total_items"] == 2
+        assert stats["active_items"] == 1
 
     async def test_changes_today_counts_todays_change_revisions(self, db_session):
         """changes_today is backed by ChangeRevision rows captured today (#229)."""

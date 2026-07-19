@@ -44,7 +44,7 @@ Top-level directories. Read the code for per-file detail.
 
 ```
 src/api/         FastAPI app (ASGI routes, schemas, deps)
-src/core/        Shared domain logic (models, probe, watches, notifications, diff, extractors, fetchers, scheduler, storage, crypto)
+src/core/        Shared domain logic (models, probe, scheduling, notifications, diff, extractors, fetchers, scheduler, storage, crypto)
 src/dashboard/   Server-rendered UI (Jinja2 + HTMX + Tailwind)
 src/workers/     Procrastinate task queue (check_watch, schedule_tick, pipeline)
 tools/           Operational scripts
@@ -139,9 +139,9 @@ resolution; #205); a single optional
 item-scoped `NotificationTemplate` rows — `visibility='watched_item'`,
 `watched_item_id` set; see **Notifications** below). Schedule resolution is
 3-tier (#205): WatchedItem `default_schedule_config` → Domain default → system
-default (`resolved_schedule_config`, `src/core/watches/resolution.py`).
+default (`resolved_schedule_config`, `src/core/scheduling/resolution.py`).
 **Display** of the resolved interval + next-check goes through one helper,
-`resolve_schedule_display` (`src/core/watches/schedule.py`, #206): it composes the
+`resolve_schedule_display` (`src/core/scheduling/schedule.py`, #206): it composes the
 3-tier base with the active `TemporalProfile` override (`resolve_effective_interval`)
 and `compute_next_check`, returning a `ScheduleDisplay` (`interval_text`, `source`
 item/domain/default, `profile_active`, `next_check`, plus a `marker` property →

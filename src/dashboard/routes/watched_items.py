@@ -36,12 +36,12 @@ from src.core.probe import ProbeResult
 from src.core.scheduler import (
     parse_interval,
 )
+from src.core.scheduling.schedule import resolve_schedule_display
 from src.core.watched_items import (
     ArchivedItemActivationError,
     SuspendedDomainResumeError,
     set_watched_item_active,
 )
-from src.core.watches.schedule import resolve_schedule_display
 from src.dashboard.context import (
     WATCHED_ITEM_EVENT_CHOICES,
     build_schedule_map,

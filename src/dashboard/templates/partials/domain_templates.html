@@ -2,7 +2,7 @@
 {# Expects: domain_name (str), assigned (list[NotificationTemplate] visibility='domain'), #}
 {#          global_templates (list[NotificationTemplate] visibility='global'). #}
 
-<div id="domain-nc-defaults" class="space-y-6" aria-live="polite">
+<div id="domain-domain-templates" class="space-y-6" aria-live="polite">
 
   {# ── Global section ──────────────────────────────────────────────────── #}
   <section>
@@ -118,8 +118,8 @@
                 </button>
                 <button
                   type="button"
-                  hx-post="/domains/{{ domain_name }}/nc-defaults/remove/{{ tpl.id }}"
-                  hx-target="#domain-nc-defaults"
+                  hx-post="/domains/{{ domain_name }}/domain-templates/remove/{{ tpl.id }}"
+                  hx-target="#domain-domain-templates"
                   hx-swap="outerHTML"
                   hx-confirm="Delete the domain template &quot;{{ tpl.title }}&quot;? This cannot be undone."
                   class="btn btn-danger-outline text-xs htmx-request:opacity-60"

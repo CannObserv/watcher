@@ -209,7 +209,8 @@ async def patch_watched_item(
     """
     wi = await _get_or_404(session, watched_item_id)
     updates = data.model_dump(exclude_unset=True)
-    has_is_active = "is_active" in updates
+    # Non-None when present: the schema's _reject_explicit_null forbids
+    # ``"is_active": null``, so a popped value is always a real bool.
     target_active = updates.pop("is_active", None)
     for field, value in updates.items():
         setattr(wi, field, value)
@@ -230,7 +231,7 @@ async def patch_watched_item(
     # #228: the pause/resume transition (guards + dedicated audit event) is
     # owned by the shared service; runs after the effective_url block so the
     # resume guard sees the re-derived domain_suspended state.
-    if has_is_active:
+    if target_active is not None:
         try:
             set_watched_item_active(session, wi, active=target_active, source="api")
         except (ArchivedItemActivationError, SuspendedDomainResumeError) as exc:

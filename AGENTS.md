@@ -108,11 +108,15 @@ Two env files load in order (later overrides earlier):
 1. `/etc/watcher/.env` — production secrets (`DATABASE_URL`, `NOTIFIER_API_KEY`, `ARCHIVER_API_KEY`, `REDIS_URL`). Persistent, managed manually on the VM.
 2. `.env` (repo root, git-ignored) — dev/agent secrets (`GH_TOKEN`, `TEST_DATABASE_URL`, `REDIS_URL`). Never commit.
 
-Load both for shell commands:
+Load both for shell commands (pytest, psql, gh):
 
 ```bash
 export $(cat /etc/watcher/.env .env 2>/dev/null | xargs)
 ```
+
+Never follow this with a hand-run uvicorn — it leaves `DATABASE_URL` pointed
+at production. The dev server is `bash scripts/dev_server.sh` (see **Server
+Lifecycle**; #233).
 
 **Key variables:**
 - `DATABASE_URL` — PostgreSQL connection for watcher (Archiver owns its own database).

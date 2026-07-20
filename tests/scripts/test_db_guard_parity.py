@@ -47,6 +47,14 @@ CORPUS: list[tuple[str, bool]] = [
     # Escaped slash in the password must not be read as the path.
     ("postgresql://u:p%2Fw@host:5432/watcher", False),
     ("postgresql://u:p%2Fw@host:5432/watcher_test", True),
+    # CR finding 1: '@' inside the query of a credential-less URL must not be
+    # read as a credentials terminator — the tail is not the database name.
+    # This names production 'watcher' and must be refused.
+    ("postgresql://host:5432/watcher?options=endpoint%3Da@b_test", False),
+    # ...and a proper _test name keeps its verdict with '@' in the query.
+    ("postgresql://host:5432/watcher_test?options=endpoint%3Da@b", True),
+    # A bare database name is not a connection URL — fail closed, both sides.
+    ("watcher_test", False),
     # Unparseable — both must fail closed.
     ("not-a-url", False),
 ]

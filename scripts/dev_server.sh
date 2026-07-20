@@ -65,14 +65,24 @@ if [[ -z "$DEV_URL" ]]; then
   exit 1
 fi
 
-# db_name <url> — the database name, i.e. the path segment, minus any query
-# string. Strips scheme://credentials@host:port so an escaped slash inside a
-# password cannot be mistaken for the path.
+# db_name <url> — the database name, i.e. the path segment. Strips
+# scheme://credentials@host:port and the query string so neither an escaped
+# slash in a password nor an '@' in the query can be mistaken for the path.
+# The query goes FIRST: on a credential-less URL, '@' inside the query would
+# otherwise be read as a credentials terminator and the tail returned as the
+# name (CR finding 1 — bash accepted, Python refused). Anything without '://'
+# is not a connection URL at all; return nothing so the caller fails closed,
+# matching database_name() in src/core/db_safety.py.
 db_name() {
-  local url="${1#*://}"      # drop scheme
-  url="${url#*@}"            # drop credentials, if any
-  url="${url#*/}"            # drop host:port, leaving path + query
+  local url="$1"
+  case "$url" in
+    *://*) ;;
+    *) return ;;
+  esac
+  url="${url#*://}"          # drop scheme
   url="${url%%\?*}"          # drop query string
+  url="${url#*@}"            # drop credentials, if any
+  url="${url#*/}"            # drop host:port, leaving the database name
   printf '%s' "$url"
 }
 
@@ -118,15 +128,18 @@ unset PROCRASTINATE_DATABASE_URL
 # Decided once, so the dry-run report (which tests assert on) and the executed
 # path cannot drift apart.
 if [[ "${WATCHER_DEV_SKIP_MIGRATE:-}" == "1" ]]; then
+  DO_RESET=0
   DO_MIGRATE=0
   MIGRATE_REPORT="(skipped)"
   RESET_REPORT="(none)"
 elif [[ -n "${WATCHER_DEV_DATABASE_URL:-}" ]]; then
+  DO_RESET=0
   DO_MIGRATE=1
   MIGRATE_REPORT="$DATABASE_URL"
   RESET_REPORT="(none)"
 else
-  DO_MIGRATE=2
+  DO_RESET=1
+  DO_MIGRATE=1
   MIGRATE_REPORT="$DATABASE_URL"
   RESET_REPORT="public-schema"
 fi
@@ -142,12 +155,12 @@ fi
 
 cd "$REPO_ROOT"
 
-if [[ "$DO_MIGRATE" == "2" ]]; then
+if [[ "$DO_RESET" == "1" ]]; then
   echo "dev_server: resetting public schema of $DATABASE_URL"
   psql "${DATABASE_URL/+asyncpg/}" -q -c "DROP SCHEMA public CASCADE; CREATE SCHEMA public;"
 fi
 
-if [[ "$DO_MIGRATE" != "0" ]]; then
+if [[ "$DO_MIGRATE" == "1" ]]; then
   echo "dev_server: alembic upgrade head → $DATABASE_URL"
   uv run alembic upgrade head
 fi

@@ -41,6 +41,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 
 from src.api.deps import get_db_session, get_probe_fn, require_api_key
+from src.core import db_safety
 from src.core.models import Base
 from src.core.models.app_user import AppUser
 from src.core.models.domain import Domain
@@ -64,6 +65,35 @@ if not TEST_DATABASE_URL:
         "TEST_DATABASE_URL environment variable is not set. "
         "Load env: export $(cat /etc/watcher/.env .env 2>/dev/null | xargs)"
     )
+
+if not db_safety.is_non_production_database(TEST_DATABASE_URL):
+    raise RuntimeError(
+        f"TEST_DATABASE_URL points at database "
+        f"{db_safety.database_name(TEST_DATABASE_URL)!r}, whose name carries no "
+        "_test/_dev suffix — refusing to run: teardown creates and drops tables "
+        "and would destroy production data. Point it at a dedicated test "
+        "database, e.g. watcher_test. (#233)"
+    )
+
+# Point the application itself at the test database for the whole session.
+#
+# Anything resolving the URL from the environment rather than through the
+# `get_db_session` override — src.core.database.get_engine(), alembic's
+# get_url(), the src.workers connector, and the src.core.db_safety production
+# guard — would otherwise read the *production* DATABASE_URL that
+# /etc/watcher/.env supplies. Pinning it makes the override and the
+# environment agree, and means a test can never reach production even if it
+# bypasses the dependency override.
+#
+# PROCRASTINATE_DATABASE_URL is cleared because src.workers consults it
+# before DATABASE_URL.
+#
+# At import rather than in a fixture because it must be in place before *any*
+# fixture resolves the URL, and deliberately never restored — the process
+# exists only to run this suite, and a restore would hand the production URL
+# back. This is the single mechanism managing these two variables. (#233)
+os.environ["DATABASE_URL"] = TEST_DATABASE_URL
+os.environ.pop("PROCRASTINATE_DATABASE_URL", None)
 
 
 def _make_mock_probe():

@@ -1,6 +1,7 @@
 """FastAPI application entry point."""
 
 import asyncio
+import os
 from contextlib import asynccontextmanager
 
 from fastapi import APIRouter, Depends, FastAPI
@@ -19,6 +20,7 @@ from src.api.routes.watched_item_notifications import (
 from src.api.routes.watched_items import router as watched_items_router
 from src.core.config_poller import start_config_poller
 from src.core.database import get_session_factory
+from src.core.db_safety import ProductionDatabaseRefused, assert_environment_db_allowed
 from src.core.logging import configure_logging, get_logger
 from src.core.models.domain import Domain
 from src.core.rate_limiter import DomainRateLimiter, get_rate_limiter
@@ -48,11 +50,25 @@ async def hydrate_rate_limiter(limiter: DomainRateLimiter) -> None:
 async def lifespan(application: FastAPI):
     """Hydrate rate limiter, pre-warm SDK, start config poller and procrastinate worker.
 
+    Refuses to serve a production database unless the caller opted in via
+    WATCHER_ALLOW_PRODUCTION_DB=1 (only deploy/watcher.service does) —
+    launch-path-independent backstop for the prod-pointing dev-server recipe
+    (#233); see src.core.db_safety. Runs before any resource is built, so a
+    refused process never hydrates the rate limiter or starts the worker.
+
     Pre-warming the ArchiverClient on startup means a missing ARCHIVER_API_KEY
     crashes the API on boot, not on first request. The SDK is closed last on shutdown,
     after the worker is fully gathered and the procrastinate app has closed.
     """
     from src.workers import get_app
+
+    try:
+        assert_environment_db_allowed(os.environ)
+    except ProductionDatabaseRefused as e:
+        # Log before re-raising: under systemd the bare exception surfaces in
+        # journalctl as a lifespan traceback, burying the actionable text.
+        logger.critical("Refusing to start: %s", e)
+        raise
 
     limiter = get_rate_limiter()
     await hydrate_rate_limiter(limiter)

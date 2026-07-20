@@ -58,7 +58,7 @@ wheels = [
 
 [[package]]
 name = "archiver-client"
-version = "4.1.0"
+version = "4.3.0"
 source = { editable = "../archiver/clients/python" }
 dependencies = [
     { name = "attrs" },

@@ -81,9 +81,17 @@ After committing to `main`: `sudo systemctl restart watcher`. After DB model cha
 Dev server (port 8001, leaves prod alone):
 
 ```bash
-export $(cat /etc/watcher/.env .env 2>/dev/null | xargs)
-uv run uvicorn src.api.main:app --host 0.0.0.0 --port 8001 --reload
+bash scripts/dev_server.sh
 ```
+
+Never launch uvicorn by hand with the prod env loaded — `/etc/watcher/.env`
+points `DATABASE_URL` at production, and a hand-run "dev" server would share
+the prod DB, run a second Procrastinate worker on the prod queue, and split
+the rate-limiter budget (#233). The script targets `TEST_DATABASE_URL` (or
+`WATCHER_DEV_DATABASE_URL`), migrates it, and refuses anything whose DB name
+lacks a `_test`/`_dev` suffix. The same rule is enforced in-app by
+`src/core/db_safety.py`; only `deploy/watcher.service` opts into prod via
+`WATCHER_ALLOW_PRODUCTION_DB=1` (in the unit, never an env file).
 
 **Archiver service.** Owns the canonical InfoItem / InfoSource / SourceRevision / RepSpec registry. Sibling repo at `/home/exedev/archiver` (extracted in #149). Watcher consumes it via the `archiver-client` SDK installed as a path dependency. Don't add Archiver code to this repo — go work in the sibling repo instead.
 

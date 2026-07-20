@@ -45,15 +45,15 @@ sudo systemctl daemon-reload && sudo systemctl restart watcher
 ## Development
 
 ```bash
-# Dev server — use a non-conflicting port so the systemd service stays up
-export $(cat /etc/watcher/.env .env 2>/dev/null | xargs)
-uv run uvicorn src.api.main:app --host 0.0.0.0 --port 8001 --reload
+# Dev server (port 8001) — the ONLY sanctioned launch path (#233).
+# Targets TEST_DATABASE_URL (or WATCHER_DEV_DATABASE_URL), migrates it, and
+# refuses any DB whose name lacks a _test/_dev suffix. Never hand-run uvicorn
+# with the prod env loaded: /etc/watcher/.env points DATABASE_URL at
+# production, and the embedded worker would consume the prod task queue.
+bash scripts/dev_server.sh
 
-# CAUTION: Only stop the service if you need port 8000 specifically.
-# The live site will be DOWN until you restart. Prefer port 8001.
-# sudo systemctl stop watcher
-# uv run uvicorn src.api.main:app --host 0.0.0.0 --port 8000 --reload
-# sudo systemctl start watcher  # MUST restart when done
+# Knobs: WATCHER_DEV_PORT (default 8001; 8000 refused — it belongs to
+# systemd), WATCHER_DEV_DATABASE_URL, WATCHER_DEV_SKIP_MIGRATE=1
 ```
 
 ### Testing code changes against the live site
@@ -72,8 +72,7 @@ Run a worktree build on a different port to avoid conflicting with the service:
 
 ```bash
 cd .worktrees/<branch>
-export $(cat /etc/watcher/.env .env 2>/dev/null | xargs)
-uv run uvicorn src.api.main:app --host 0.0.0.0 --port 8001 --reload
+bash scripts/dev_server.sh   # same guard rails as the repo-root dev server
 ```
 
 ## Testing

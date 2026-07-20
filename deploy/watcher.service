@@ -18,6 +18,11 @@ EnvironmentFile=-/run/watcher/build-id
 EnvironmentFile=/etc/watcher/.env
 EnvironmentFile=-/home/exedev/watcher/.env
 
+# Production-database opt-in for src/core/db_safety (#233). Must live HERE,
+# never in an EnvironmentFile — env files are sourced by hand-run servers,
+# which are exactly what the guard exists to stop.
+Environment=WATCHER_ALLOW_PRODUCTION_DB=1
+
 ExecStart=/usr/local/bin/uv run uvicorn src.api.main:app --host 0.0.0.0 --port 8000
 Restart=on-failure
 RestartSec=5

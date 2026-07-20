@@ -33,7 +33,9 @@ uv sync
 ## Development
 
 ```bash
-uv run uvicorn src.api.main:app --host 0.0.0.0 --port 8000 --reload
+# Dev server on port 8001 against a non-production database (#233).
+# Port 8000 belongs to the systemd service — never bind it by hand.
+bash scripts/dev_server.sh
 ```
 
 ## Testing

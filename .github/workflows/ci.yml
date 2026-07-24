@@ -1,0 +1,159 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Cancel superseded runs on the same PR; never cancel runs on main (keep
+# CI signal for every commit that lands on the protected branch).
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  lint:
+    name: lint
+    runs-on: ubuntu-latest
+    # WIF: mint an OIDC token for google-github-actions/auth to impersonate the
+    # read-only co-pypi-reader SA and pull the cannobserv wheelhouse (#220).
+    # Job-scoped so no other job gains cloud access it doesn't need.
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      # Watcher and the sibling archiver repo are checked out side by side so the
+      # `archiver-client = { path = "../archiver/clients/python" }` dep resolves
+      # (archiver is public; no token needed).
+      - uses: actions/checkout@v5
+        with:
+          path: watcher
+      - uses: actions/checkout@v5
+        with:
+          repository: CannObserv/archiver
+          path: archiver
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Install Python
+        run: uv python install 3.12
+
+      # notifier-client is pinned via an `ssh://git@github-notifier/...` source
+      # (an SSH host alias that exists only on the VM). CI has no such key or
+      # alias; rewrite to https for the public notifier repo.
+      - name: Rewrite notifier SSH source to HTTPS
+        run: git config --global url."https://github.com/".insteadOf "ssh://git@github-notifier/"
+
+      # co-core / co-core-aio resolve from a wheelhouse mirrored from the private
+      # GCS index (#220). Authenticate keyless via Workload Identity Federation —
+      # the read-scoped `github-ci` provider impersonating the objectViewer-only
+      # co-pypi-reader SA — then sync before `uv sync`.
+      - name: Authenticate to Google Cloud (WIF, read-only)
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: co-pypi-reader@co-gcs.iam.gserviceaccount.com
+
+      - name: Sync cannobserv wheelhouse
+        working-directory: watcher
+        run: uv run --no-project --with 'google-cloud-storage>=2,<4' python scripts/sync_wheelhouse.py
+
+      - name: uv sync
+        working-directory: watcher
+        run: uv sync --group dev
+
+      - name: ruff check
+        working-directory: watcher
+        run: uv run ruff check .
+
+      - name: ruff format --check
+        working-directory: watcher
+        run: uv run ruff format --check .
+
+  test:
+    name: test
+    runs-on: ubuntu-latest
+    # WIF: mint an OIDC token for google-github-actions/auth (see the lint job).
+    permissions:
+      contents: read
+      id-token: write
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: watcher_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+
+    env:
+      TEST_DATABASE_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/watcher_test
+      # conftest subprocess-invokes the sibling archiver repo's alembic to build
+      # the cross-schema `information.*` test tables.
+      ARCHIVER_REPO_PATH: ${{ github.workspace }}/archiver
+
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          path: watcher
+      - uses: actions/checkout@v5
+        with:
+          repository: CannObserv/archiver
+          path: archiver
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Install Python
+        run: uv python install 3.12
+
+      - name: Rewrite notifier SSH source to HTTPS
+        run: git config --global url."https://github.com/".insteadOf "ssh://git@github-notifier/"
+
+      - name: Authenticate to Google Cloud (WIF, read-only)
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: co-pypi-reader@co-gcs.iam.gserviceaccount.com
+
+      # Both repos resolve co-core from their own wheelhouse: watcher's for
+      # `uv sync` here, archiver's for the conftest `uv run alembic` subprocess.
+      - name: Sync cannobserv wheelhouse (watcher)
+        working-directory: watcher
+        run: uv run --no-project --with 'google-cloud-storage>=2,<4' python scripts/sync_wheelhouse.py
+
+      - name: Sync cannobserv wheelhouse (archiver, for conftest alembic)
+        working-directory: archiver
+        run: uv run --no-project --with 'google-cloud-storage>=2,<4' python scripts/sync_wheelhouse.py
+
+      - name: uv sync
+        working-directory: watcher
+        run: uv sync --group dev
+
+      # Independent migration smoke-check; conftest also runs upgrade inside the
+      # session fixture (idempotent at head).
+      - name: alembic upgrade head
+        working-directory: watcher
+        run: uv run alembic upgrade head
+
+      # Integration tests hit live external services (unreachable in CI); the
+      # default marker set excludes them.
+      - name: pytest (default, excludes integration)
+        working-directory: watcher
+        run: uv run pytest -m "not integration"

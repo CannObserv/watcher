@@ -14,6 +14,15 @@ TDD required. Red → Green → Refactor. No production code without a failing t
 
 Python ≥3.12, uv, pytest, ruff; Node.js + npm (for Tailwind CLI — `sudo npm install -g @tailwindcss/cli`, one-time VM setup).
 
+**Cannobserv wheelhouse (#220).** `co-core` + `co-core-aio` (the shared cannabis-observer substrate) resolve from a local wheelhouse mirrored from the private GCS index `gs://co-gcs-pypi`, via `[tool.uv] find-links = ["./.wheelhouse"]` — **not** git sources. Populate it **before any `uv` command** (find-links makes every `uv` invocation require the dir; `.wheelhouse/.gitkeep` is tracked so a fresh clone has it):
+
+```bash
+uv run --no-project --with 'google-cloud-storage>=2,<4' python scripts/sync_wheelhouse.py
+uv sync
+```
+
+Auth is ADC: on the VM/deploy the `co-pypi-reader` SA key at `GOOGLE_APPLICATION_CREDENTIALS` (in `/etc/watcher/.env`); in CI, keyless via Workload Identity Federation (`.github/workflows/ci.yml`). The identity needs only `roles/storage.objectViewer`. Reproducibility is `uv.lock` (pins the exact version), not wheelhouse contents. **Upgrade:** re-sync, then `uv lock --upgrade-package co-core` (bump the floor if the minor moved). Currently pinned: **v0.3.4**. The systemd unit refreshes the wheelhouse via a non-fatal `ExecStartPre` so restarts self-heal.
+
 ## Code Exploration Policy
 
 SocratiCode is indexed on this repo (`.socraticodecontextartifacts.json` present). Its MCP tools are **deferred** — schemas load only after a `ToolSearch` prefetch. The SessionStart hook prints the prefetch query; run it before exploring.
@@ -340,6 +349,26 @@ sessions — don't do that.
 upgrade head` and on watcher-table teardown. Tracked in #150 —
 worker-id-suffixed databases + a coordination lock are the rework when
 xdist is actually adopted.
+
+### CI (#220)
+
+GitHub Actions (`.github/workflows/ci.yml`) runs on push/PR to `main`: a
+**lint** job (`ruff check` + `ruff format --check`) and a **test** job
+(`pytest -m "not integration"` against a `postgres:16` service). Both jobs
+checkout the sibling `archiver` repo alongside watcher (public; resolves the
+`archiver-client` path dep + provides conftest's alembic), rewrite the
+`notifier-client` SSH source to HTTPS, authenticate to GCS **keyless via WIF**
+(`vars.GCP_WIF_PROVIDER` → `co-pypi-reader` SA), and sync the wheelhouse before
+`uv sync`. The test job also syncs archiver's wheelhouse (its `uv run alembic`
+subprocess needs co-core). Integration tests hit live external services and are
+excluded in CI. **One-time GCP grant** (operator, for WIF) — bind watcher's repo
+to the read-only SA; the org-scoped `github-ci` provider needs no change:
+```bash
+gcloud iam service-accounts add-iam-policy-binding \
+  co-pypi-reader@co-gcs.iam.gserviceaccount.com --project=co-gcs \
+  --role=roles/iam.workloadIdentityUser \
+  --member="principalSet://iam.googleapis.com/projects/912903030445/locations/global/workloadIdentityPools/github/attribute.repository/CannObserv/watcher"
+```
 
 ## Agent Skills
 

@@ -13,6 +13,13 @@ ExecStartPre=+/bin/bash -c 'mkdir -p /run/watcher && chown exedev:exedev /run/wa
 # Write current git SHA to a runtime env file before starting
 ExecStartPre=/bin/bash -c 'echo BUILD_ID=$(git rev-parse --short HEAD) > /run/watcher/build-id'
 
+# Refresh the cannobserv wheelhouse before `uv run` resolves co-core (#220).
+# Non-fatal (- prefix): a transient GCS failure is logged but does not block a
+# restart when the wheelhouse is already populated; only a genuinely missing
+# wheel surfaces later as a hard uv resolution error. Reads
+# GOOGLE_APPLICATION_CREDENTIALS from the EnvironmentFile above.
+ExecStartPre=-/usr/local/bin/uv run --no-project --with 'google-cloud-storage>=2,<4' python /home/exedev/watcher/scripts/sync_wheelhouse.py
+
 # Load BUILD_ID, then system secrets, then optional repo-local overrides
 EnvironmentFile=-/run/watcher/build-id
 EnvironmentFile=/etc/watcher/.env

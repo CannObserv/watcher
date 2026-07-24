@@ -33,6 +33,13 @@ gunicorn.ctl
 # Claude Code per-instance overrides (env, permissions, hooks)
 .claude/settings.local.json
 
+# cannobserv package index mirror (#220) — populated by scripts/sync_wheelhouse.py.
+# Track an empty .gitkeep so the `[tool.uv] find-links` dir always exists at
+# checkout: every `uv` invocation reads that config before the sync can create
+# the dir, so a fresh clone/runner/deploy without it fails to resolve.
+.wheelhouse/
+!.wheelhouse/.gitkeep
+
 # Tailwind
 src/dashboard/static/css/output.css
 

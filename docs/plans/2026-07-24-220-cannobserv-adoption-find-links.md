@@ -80,7 +80,7 @@ by any mechanism, so this is a clean first adoption.
   needs the archiver-owned `information` schema seeded first (intermediate cross-schema FK in
   9e86f9e4d704), and the suite has always used `create_all`, not migrations. The standalone step
   was dropped; pytest is the schema signal. A dedicated migration-chain check (seed information
-  schema → upgrade head) is a reasonable separate follow-up.
+  schema → upgrade head) is tracked in [#234](https://github.com/CannObserv/watcher/issues/234).
 - **No cannobserv call sites yet** — Phase 0 adopts only a pure util; the `list_all` pagination
   caveat (#77) has nothing to audit until a paginated client is actually used.
 - **Deploy restart pending** — next `sudo systemctl restart watcher` picks up the unit; `uv run

@@ -146,12 +146,12 @@ jobs:
         working-directory: watcher
         run: uv sync --group dev
 
-      # Independent migration smoke-check; conftest also runs upgrade inside the
-      # session fixture (idempotent at head).
-      - name: alembic upgrade head
-        working-directory: watcher
-        run: uv run alembic upgrade head
-
+      # No standalone `alembic upgrade head` smoke-check: watcher's migration
+      # chain creates an intermediate cross-schema FK into the archiver-owned
+      # `information` schema (9e86f9e4d704), so a bare upgrade needs that schema
+      # seeded first. conftest builds the full schema for the suite — the
+      # `information.*` tables via the sibling archiver repo's alembic, watcher's
+      # own tables via Base.metadata.create_all — so pytest is the schema signal.
       # Integration tests hit live external services (unreachable in CI); the
       # default marker set excludes them.
       - name: pytest (default, excludes integration)

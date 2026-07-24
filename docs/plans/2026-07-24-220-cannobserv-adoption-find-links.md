@@ -1,7 +1,7 @@
 ---
 title: "Phase 0 — adopt cannobserv (co-core + co-core-aio) via the private GCS index"
 date: 2026-07-24
-status: executed (pending operator WIF grant + deploy restart)
+status: executed — CI green (pending deploy restart)
 ---
 
 # #220 — adopt cannobserv via find-links (co-core + co-core-aio)
@@ -66,20 +66,22 @@ by any mechanism, so this is a clean first adoption.
 
 - **VM key — done:** `GOOGLE_APPLICATION_CREDENTIALS=/etc/watcher/co-pypi-reader.json` present in
   `/etc/watcher/.env`; bucket read verified.
-- **WIF grant — pending:** bind `attribute.repository/CannObserv/watcher` to `co-pypi-reader`
-  (`roles/iam.workloadIdentityUser`) so CI's `google-github-actions/auth` can impersonate it. The
-  org-scoped `github-ci` provider (`vars.GCP_WIF_PROVIDER`) needs no change. Command in AGENTS.md
-  §CI. Until granted, CI's auth step fails; local dev + the VM service are unaffected.
+- **WIF grant — done:** `attribute.repository/CannObserv/watcher` bound to `co-pypi-reader`
+  (`roles/iam.workloadIdentityUser`) alongside archiver's; the org-scoped `github-ci` provider
+  (`vars.GCP_WIF_PROVIDER`) needed no change. Command in AGENTS.md §CI. First green run:
+  GH Actions run 30116832872 (628 passed, 1 skipped).
 - **Deploy restart — pending:** next `sudo systemctl restart watcher` picks up the new unit;
   `uv run uvicorn` then resolves co-core from the (already-populated) wheelhouse, and the
   `ExecStartPre` keeps it fresh.
 
-## Risks
+## Follow-ups / risks
 
-- **First green CI run is unproven here** — WIF binding is operator-pending and Actions can't run
-  in this session. The resolution path (wheelhouse → `uv sync` → full suite) is verified locally
-  and the workflow mirrors archiver's proven ci.yml.
-- **Lockfile soundness** — `uv.lock` was generated against real GCS wheels (not locally-built), so
-  `uv sync` in CI/deploy matches.
+- **Watcher migrations not independently smoke-tested in CI** — a bare `alembic upgrade head`
+  needs the archiver-owned `information` schema seeded first (intermediate cross-schema FK in
+  9e86f9e4d704), and the suite has always used `create_all`, not migrations. The standalone step
+  was dropped; pytest is the schema signal. A dedicated migration-chain check (seed information
+  schema → upgrade head) is a reasonable separate follow-up.
 - **No cannobserv call sites yet** — Phase 0 adopts only a pure util; the `list_all` pagination
   caveat (#77) has nothing to audit until a paginated client is actually used.
+- **Deploy restart pending** — next `sudo systemctl restart watcher` picks up the unit; `uv run
+  uvicorn` resolves co-core from the populated wheelhouse, and `ExecStartPre` keeps it fresh.

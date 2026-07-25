@@ -8,10 +8,11 @@ from datetime import datetime
 
 
 class WatchEventType(enum.StrEnum):
-    """Notification event type codes. Values mirror the notification_event_types DB table.
+    """Notification event type codes — the authoritative source for event types.
 
     Declaration order is roughly temporal (lifecycle order); drives UI presentation
-    via EVENT_TITLES iteration. StrEnum values are stable and persisted in the DB.
+    via EVENT_TITLES iteration. StrEnum values are stable and persisted as strings
+    in the DB (``audit_log.event_type``, ``notification_templates.events``).
     """
 
     WATCH_CREATED = "watch_created"

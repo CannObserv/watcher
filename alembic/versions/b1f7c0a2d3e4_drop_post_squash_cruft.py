@@ -12,9 +12,11 @@ that were stamped onto the baseline rather than built fresh.
 - ``trg_fn_watches_last_changed_at()`` — an orphaned plpgsql trigger function
   whose body targets the ``watches`` table, dropped in #191. No trigger
   references it (the trigger went with the table).
-- ``notification_event_types`` — a catalog table never queried at runtime (the
-  codes live in the ``EventType`` enum; ``alembic/env.py`` already excludes it
-  from autogenerate), not a FK target, with stale ``watch_*`` seed data.
+- ``notification_event_types`` — a catalog table never queried at runtime and
+  not a FK target. It was superseded by the ``WatchEventType`` enum
+  (``src/core/notifications/events.py``), which is the authoritative source of
+  event-type codes; the table was left unread. (Its seed still mirrored the live
+  enum — it was unused, not stale.)
 
 Everything uses ``IF EXISTS`` so this is a no-op on fresh installs (which never
 had either object) and idempotent on already-migrated databases. Note there is

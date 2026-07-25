@@ -34,18 +34,13 @@ def _include_object(object, name, type_, reflected, compare_to):
     - Procrastinate-managed tables: the task queue installs and migrates its
       own ``procrastinate_*`` tables at app startup; they should not appear
       in Watcher's Alembic diffs.
-    - ``notification_event_types``: a runtime-managed catalog table not
-      declared as a SQLAlchemy model.
     """
     if hasattr(object, "schema") and object.schema not in (None, "public"):
         return False
-    if type_ == "table" and (
-        name.startswith("procrastinate_") or name == "notification_event_types"
-    ):
+    if type_ == "table" and name.startswith("procrastinate_"):
         return False
     if type_ == "index" and reflected and getattr(object, "table", None) is not None:
-        table_name = object.table.name
-        if table_name.startswith("procrastinate_") or table_name == "notification_event_types":
+        if object.table.name.startswith("procrastinate_"):
             return False
     return True
 

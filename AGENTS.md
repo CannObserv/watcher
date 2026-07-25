@@ -353,15 +353,23 @@ xdist is actually adopted.
 ### CI (#220)
 
 GitHub Actions (`.github/workflows/ci.yml`) runs on push/PR to `main`: a
-**lint** job (`ruff check` + `ruff format --check`) and a **test** job
-(`pytest -m "not integration"` against a `postgres:16` service). Both jobs
-checkout the sibling `archiver` repo alongside watcher (public; resolves the
-`archiver-client` path dep + provides conftest's alembic), rewrite the
-`notifier-client` SSH source to HTTPS, authenticate to GCS **keyless via WIF**
-(`vars.GCP_WIF_PROVIDER` → `co-pypi-reader` SA), and sync the wheelhouse before
-`uv sync`. The test job also syncs archiver's wheelhouse (its `uv run alembic`
-subprocess needs co-core). Integration tests hit live external services and are
-excluded in CI. **One-time GCP grant** (operator, for WIF) — bind watcher's repo
+**lint** job (`ruff check` + `ruff format --check`), a **test** job
+(`pytest -m "not integration"` against a `postgres:16` service), and a
+**migrations** job (independent migration-chain smoke-check, #234 — `alembic
+upgrade head` from an empty `postgres:16` then `alembic check` for drift). All
+three jobs checkout the sibling `archiver` repo alongside watcher (public;
+resolves the `archiver-client` path dep + provides conftest's alembic), rewrite
+the `notifier-client` SSH source to HTTPS, authenticate to GCS **keyless via
+WIF** (`vars.GCP_WIF_PROVIDER` → `co-pypi-reader` SA), and sync the wheelhouse
+before `uv sync`. Only the test job also syncs archiver's wheelhouse (its `uv
+run alembic` subprocess needs co-core); the migrations job does **not** — the
+#234 squash collapsed the pre-existing chain into a self-contained genesis
+baseline (`2addddea0b03`) that references no `information` schema, so `upgrade
+head` from empty is fully standalone (no archiver seeding, no cross-service
+ordering). **Squash cutover:** already-migrated DBs need a one-time `alembic
+stamp 2addddea0b03 --purge` before their next upgrade — see `docs/DEPLOYMENT.md`
+→ "Migration baseline (squash)". Integration tests hit live external services
+and are excluded in CI. **One-time GCP grant** (operator, for WIF) — bind watcher's repo
 to the read-only SA; the org-scoped `github-ci` provider needs no change:
 ```bash
 gcloud iam service-accounts add-iam-policy-binding \

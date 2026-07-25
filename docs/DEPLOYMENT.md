@@ -87,6 +87,70 @@ sudo journalctl -u watcher -f
 sudo systemctl daemon-reload && sudo systemctl restart watcher
 ```
 
+## Database Migrations
+
+Migrations are **not** run by the systemd unit or the app lifespan — they are a
+manual step. After a deploy that changes DB models:
+
+```bash
+export $(cat /etc/watcher/.env .env 2>/dev/null | xargs)
+uv run alembic upgrade head
+sudo systemctl restart watcher
+```
+
+A fresh host bootstraps the full schema the same way (`alembic upgrade head`
+against an empty database). The chain is self-contained — it references no
+Archiver-owned schema — and is smoke-checked in CI (`migrations` job, #234).
+
+### Migration baseline (squash) — one-time stamp
+
+The pre-#234 migration chain was squashed into a single genesis baseline
+(`2addddea0b03`, #234). This removed a transitional cross-schema FK into the
+Archiver `information` schema that made `alembic upgrade head` fail from a clean
+database.
+
+Because the old version files were removed, an **already-migrated** database
+(production, or any long-lived dev DB) has an `alembic_version` pointing at a
+revision that no longer exists — a plain `upgrade head` there fails with
+`Can't locate revision …`. **Once**, at the deploy that first lands the squash,
+stamp the baseline instead of upgrading.
+
+**First, confirm the database is exactly at the pre-squash HEAD** (`c5d6e7f8a9b0`,
+the #218 audit-log-indexes migration). `stamp --purge` asserts the baseline
+*regardless of where the DB actually is* — if the DB is behind `c5d6e7f8a9b0`,
+stamping would silently mark the missing migrations as applied and corrupt the
+schema. So this is a **halt-on-mismatch** gate, not a formality:
+
+```bash
+export $(cat /etc/watcher/.env .env 2>/dev/null | xargs)
+# psql needs a driverless URL — strip the SQLAlchemy "+asyncpg" dialect suffix.
+psql "${DATABASE_URL/+asyncpg/}" -c "SELECT version_num FROM alembic_version"
+```
+
+- If it prints **`c5d6e7f8a9b0`** → proceed to the stamp below.
+- **Any other value → STOP.** The DB is not at the pre-squash HEAD; do not stamp.
+  Reconcile it first (upgrade it to `c5d6e7f8a9b0` using the pre-squash version
+  files from git history, or investigate why it diverged) before squashing.
+
+> Production is expected to already be at `c5d6e7f8a9b0` — this gate should pass
+> on the first read. A mismatch means something unusual happened to the DB; do
+> not improvise the stamp, reconcile as above.
+
+```bash
+# Only after confirming the version is c5d6e7f8a9b0:
+uv run alembic stamp 2addddea0b03 --purge   # re-point bookkeeping; schema unchanged
+uv run alembic upgrade head                 # subsequent upgrades work normally
+```
+
+`stamp` only rewrites the `alembic_version` bookkeeping row; it makes no schema
+changes. Fresh databases created after the squash need no stamp — they run the
+genesis migration normally.
+
+> The squash intentionally dropped two pieces of dead cruft from the *baseline*
+> (an orphaned `trg_fn_watches_last_changed_at()` function and the vestigial
+> `notification_event_types` catalog table). Existing databases still carry them
+> harmlessly after the stamp; an optional cleanup migration can drop them later.
+
 ## Archiver Service
 
 The Archiver is a sibling service at `/home/exedev/archiver` (port 8020,

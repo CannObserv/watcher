@@ -146,14 +146,88 @@ jobs:
         working-directory: watcher
         run: uv sync --group dev
 
-      # No standalone `alembic upgrade head` smoke-check: watcher's migration
-      # chain creates an intermediate cross-schema FK into the archiver-owned
-      # `information` schema (9e86f9e4d704), so a bare upgrade needs that schema
-      # seeded first. conftest builds the full schema for the suite — the
-      # `information.*` tables via the sibling archiver repo's alembic, watcher's
-      # own tables via Base.metadata.create_all — so pytest is the schema signal.
-      # Integration tests hit live external services (unreachable in CI); the
-      # default marker set excludes them.
+      # The migration chain is smoke-checked in the dedicated `migrations` job
+      # below (#234). This job builds schema via Base.metadata.create_all
+      # (conftest), not migrations. Integration tests hit live external services
+      # (unreachable in CI); the default marker set excludes them.
       - name: pytest (default, excludes integration)
         working-directory: watcher
         run: uv run pytest -m "not integration"
+
+  migrations:
+    name: migrations
+    runs-on: ubuntu-latest
+    # WIF: mint an OIDC token for google-github-actions/auth (see the lint job).
+    permissions:
+      contents: read
+      id-token: write
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: watcher_migration
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+
+    env:
+      # watcher's alembic env.py reads DATABASE_URL (not TEST_DATABASE_URL).
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/watcher_migration
+
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          path: watcher
+      # Archiver is checked out only so `uv sync` can resolve the
+      # `archiver-client` path dep. Unlike the `test` job, this job runs no
+      # archiver alembic and seeds no `information` schema: the #234 squash
+      # collapsed the pre-existing chain into a self-contained genesis baseline
+      # that references no archiver-owned schema, so `upgrade head` from an empty
+      # database is fully standalone.
+      - uses: actions/checkout@v5
+        with:
+          repository: CannObserv/archiver
+          path: archiver
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Install Python
+        run: uv python install 3.12
+
+      - name: Rewrite notifier SSH source to HTTPS
+        run: git config --global url."https://github.com/".insteadOf "ssh://git@github-notifier/"
+
+      - name: Authenticate to Google Cloud (WIF, read-only)
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: co-pypi-reader@co-gcs.iam.gserviceaccount.com
+
+      - name: Sync cannobserv wheelhouse (watcher)
+        working-directory: watcher
+        run: uv run --no-project --with 'google-cloud-storage>=2,<4' python scripts/sync_wheelhouse.py
+
+      - name: uv sync
+        working-directory: watcher
+        run: uv sync --group dev
+
+      # Independent migration-chain smoke-check (#234): apply the full chain
+      # end-to-end against an empty Postgres. Catches a broken migration that
+      # pytest (create_all-based) would miss — the deploy bootstrap path.
+      - name: alembic upgrade head (from empty DB)
+        working-directory: watcher
+        run: uv run alembic upgrade head
+
+      # Fail on model <-> migration drift (autogenerate would emit operations).
+      - name: alembic check
+        working-directory: watcher
+        run: uv run alembic check

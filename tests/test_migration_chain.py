@@ -53,11 +53,17 @@ def test_single_head(script_directory: ScriptDirectory) -> None:
     assert len(heads) == 1, f"expected a single head, found {heads}"
 
 
-def test_head_is_a_true_base(script_directory: ScriptDirectory) -> None:
-    """After the #234 squash the head is also the base (down_revision is None)."""
-    (head,) = script_directory.get_heads()
-    assert script_directory.get_revision(head).down_revision is None
-    assert script_directory.get_bases() == [head]
+# The #234 squash rooted the chain at a single genesis baseline. Later
+# migrations extend it, but the chain must keep exactly one base and it must
+# stay this revision — a second base (or a pre-genesis revision) would mean the
+# squash was undone or a branch was introduced.
+_GENESIS_REVISION = "2addddea0b03"
+
+
+def test_single_base_is_genesis(script_directory: ScriptDirectory) -> None:
+    """Exactly one base, and it is the #234 genesis baseline."""
+    assert script_directory.get_bases() == [_GENESIS_REVISION]
+    assert script_directory.get_revision(_GENESIS_REVISION).down_revision is None
 
 
 def test_no_information_schema_coupling() -> None:

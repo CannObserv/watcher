@@ -108,7 +108,7 @@ lacks a `_test`/`_dev` suffix. The same rule is enforced in-app by
 
 Full lifecycle reference + cleanup timer: `docs/DEPLOYMENT.md`.
 
-**Mirrored `logging.py`.** Watcher and Archiver still share a copy of `src/core/logging.py`; when changing it here, mirror the change to `/home/exedev/archiver/src/core/logging.py`. The former content-acquisition mirror (`fetchers/`, `extractors/`, `simhash.py`, `extraction_defaults.py`) was retired in #236 — both services now consume co-core (`co_core.pure.extract.*`, `co_core.effects.fetch`, `co_core_aio.fetch`) as the canonical implementation, so there is no fetch/extract/fingerprint copy to keep in sync.
+**No mirror discipline (#159, #236).** The content-acquisition mirror (`fetchers/`, `extractors/`, `simhash.py`, `extraction_defaults.py`) was retired in #236 — both services now consume co-core (`co_core.pure.extract.*`, `co_core.effects.fetch`, `co_core_aio.fetch`) as the canonical implementation, so there is no fetch/extract/fingerprint copy to keep in sync. `src/core/logging.py` happens to be textually identical to Archiver's, but is **not** mirrored: it is 20 lines wrapping `logging.getLogger`, plus an entry-point-only `configure_logging`. Each service owns its own copy — change it here freely, no sibling sync required (ratified in #159).
 
 ## Environment Files
 

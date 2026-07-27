@@ -47,7 +47,10 @@ class ServiceRegistry:
         self._archiver_client: ArchiverClient | None = archiver_client
 
     def get_fetcher(self) -> Fetcher:
-        """Return the registered fetcher (HttpFetcher by default)."""
+        """Return the cached fetcher, lazily building the default HttpFetcher.
+
+        A fresh default is rebuilt on the next call after ``aclose_fetcher``.
+        """
         if self._fetcher is None:
             self._fetcher = HttpFetcher()
         return self._fetcher

@@ -1,19 +1,30 @@
-"""Phase-0 adoption smoke test for the cannobserv substrate (#220).
+"""Content-acquisition adoption contract for the co-core substrate (#220, #236).
 
-Proves the ``co-core`` dependency resolves, imports, and is behaviourally
-correct against watcher's own code — the end-to-end toolchain check that
-Phase 0 exists to validate. ``co_core.pure.util.hashing`` is the chosen
-trivial pure util: it sits squarely on watcher's content-fingerprint path
-(``Chunk.content_hash`` in ``src/core/extractors/base``), so this doubles as
-the Phase-1 anchor — when the shared extractor/fingerprint code moves into
-co-core, this parity is the contract it must keep.
+Originally the Phase-0 resolve/import smoke test (#220), anchored on the
+fingerprint path. #236 completed the swap — the shared extractor/fingerprint
+code now lives in co-core and the ``src/core`` mirror is gone — so this file is
+the parity contract that swap must keep: co-core's sha256 util matches stdlib,
+and the pipeline's fingerprint over co-core's ``HtmlExtractor`` output is stable
+against a pinned golden (guards silent extraction/algorithm drift across
+co-core upgrades that would spuriously re-fingerprint the whole watch set).
 """
 
 import hashlib
 
+from co_core.pure.extract.html import HtmlExtractor
 from co_core.pure.util.hashing import sha256
 
-from src.core.extractors.base import Chunk
+# Representative HTML exercising a heading, a paragraph, and list items.
+_SAMPLE = (
+    b"<html><head><title>Licenses</title></head><body>"
+    b"<h1>License 42</h1><p>Status: active</p>"
+    b"<ul><li>alpha</li><li>beta</li></ul>"
+    b"</body></html>"
+)
+# Pinned fingerprint under the pipeline formula (see src/workers/pipeline.py:
+# `"sha256:" + sha256("\n".join(c.text for c in chunks))`). A change here means
+# co-core's extraction or hashing shifted — investigate before re-pinning.
+_GOLDEN_FINGERPRINT = "sha256:c71573ab273edd866d1624f01efc65f7b4f17c9092efabac4f3207c0f7c4a191"
 
 
 def test_co_core_sha256_matches_stdlib_hexdigest() -> None:
@@ -22,13 +33,14 @@ def test_co_core_sha256_matches_stdlib_hexdigest() -> None:
     assert sha256(data) == hashlib.sha256(data).hexdigest()
 
 
-def test_co_core_sha256_matches_chunk_content_hash() -> None:
-    """co-core's digest equals the ``Chunk.content_hash`` watcher computes today.
+def test_pipeline_fingerprint_over_co_core_extraction_is_stable() -> None:
+    """The watcher fingerprint over co-core's HtmlExtractor output is unchanged.
 
-    ``Chunk.__post_init__`` sets ``content_hash =
-    hashlib.sha256(text.encode()).hexdigest()`` (``src/core/extractors/base``),
-    so a future swap to the co-core impl is a no-op on the fingerprint wire.
+    Reproduces the pipeline's fingerprint formula so a co-core extraction or
+    hashing change surfaces here as a red test rather than as a silent
+    one-time "change detected" across every watched item at cutover.
     """
-    text = "Some extracted content.\n"
-    chunk = Chunk(index=0, chunk_type="page", label="p1", text=text)
-    assert chunk.content_hash == sha256(text.encode("utf-8"))
+    result = HtmlExtractor().extract(_SAMPLE, config={"selectors": []})
+    content_bytes = "\n".join(c.text for c in result.chunks).encode()
+    fingerprint = "sha256:" + hashlib.sha256(content_bytes).hexdigest()
+    assert fingerprint == _GOLDEN_FINGERPRINT

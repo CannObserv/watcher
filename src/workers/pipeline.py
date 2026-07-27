@@ -12,14 +12,17 @@ import os
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 
+from co_core.pure.extract import (
+    ExtractionResult,
+    Extractor,
+)
+from co_core.pure.extract import (
+    extraction_config_from_spec as _extraction_config_from_spec,
+)
+from co_core.pure.extract.html import HtmlExtractor
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.core.extraction_defaults import (
-    extraction_config_from_spec as _extraction_config_from_spec,
-)
-from src.core.extractors import HtmlExtractor
-from src.core.extractors.base import ExtractionResult, Extractor
 from src.core.logging import get_logger
 from src.core.media_type import (
     extraction_overrides_for_essence,
@@ -123,7 +126,8 @@ async def _extract_with_spec(
     config = _extraction_config_from_spec(document)
     if extra_config:
         config = {**config, **extra_config}
-    return await extractor.extract(raw_content, config=config)
+    # Extractors are synchronous in co-core (#236).
+    return extractor.extract(raw_content, config=config)
 
 
 @dataclass

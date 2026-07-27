@@ -4,9 +4,11 @@ from unittest.mock import MagicMock
 
 import pytest
 from archiver_client import ArchiverClient
+from co_core.pure.extract.csv_excel import CsvExcelExtractor
+from co_core.pure.extract.html import HtmlExtractor
+from co_core.pure.extract.pdf import PdfExtractor
 
-from src.core.extractors import CsvExcelExtractor, HtmlExtractor, PdfExtractor
-from src.core.fetchers.http import HttpFetcher
+from src.core.fetch import HttpFetcher
 from src.core.registry import ServiceRegistry, get_registry, set_registry_for_testing
 
 

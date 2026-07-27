@@ -27,8 +27,8 @@ dependencies = [
     "html5lib>=1.1",
     "notifier-client",
     "archiver-client>=4.0.0,<5",
-    "co-core>=0.3,<0.4",
-    "co-core-aio>=0.3,<0.4",
+    "co-core[extract]>=0.5,<0.6",
+    "co-core-aio>=0.5,<0.6",
 ]
 
 [dependency-groups]

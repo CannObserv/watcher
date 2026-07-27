@@ -21,7 +21,7 @@ uv run --no-project --with 'google-cloud-storage>=2,<4' python scripts/sync_whee
 uv sync
 ```
 
-Auth is ADC: on the VM/deploy the `co-pypi-reader` SA key at `GOOGLE_APPLICATION_CREDENTIALS` (in `/etc/watcher/.env`); in CI, keyless via Workload Identity Federation (`.github/workflows/ci.yml`). The identity needs only `roles/storage.objectViewer`. Reproducibility is `uv.lock` (pins the exact version), not wheelhouse contents. **Upgrade:** re-sync, then `uv lock --upgrade-package co-core` (bump the floor if the minor moved). Currently pinned: **v0.3.4**. The systemd unit refreshes the wheelhouse via a non-fatal `ExecStartPre` so restarts self-heal.
+Auth is ADC: on the VM/deploy the `co-pypi-reader` SA key at `GOOGLE_APPLICATION_CREDENTIALS` (in `/etc/watcher/.env`); in CI, keyless via Workload Identity Federation (`.github/workflows/ci.yml`). The identity needs only `roles/storage.objectViewer`. Reproducibility is `uv.lock` (pins the exact version), not wheelhouse contents. **Upgrade:** re-sync, then `uv lock --upgrade-package co-core` (bump the floor if the minor moved). Currently pinned: **v0.5.0** (floors `>=0.5,<0.6`). `co-core` carries the **`extract`** extra (`co-core[extract]`) — the heavy HTML/PDF/CSV parsers behind the extractors constructed in `src/core/registry.py`. The content-acquisition pipeline (fetch → extract → fingerprint) is now co-core's (`co_core.pure.extract.*`, `co_core.effects.fetch`, `co_core_aio.fetch`), adopted in #236; watcher owns only the thin fetch adapter `src/core/fetch.py` (drives `AsyncFetchDriver`, pins the `watcher/0.1.0` User-Agent for fingerprint byte-continuity). The systemd unit refreshes the wheelhouse via a non-fatal `ExecStartPre` so restarts self-heal.
 
 ## Code Exploration Policy
 
@@ -108,7 +108,7 @@ lacks a `_test`/`_dev` suffix. The same rule is enforced in-app by
 
 Full lifecycle reference + cleanup timer: `docs/DEPLOYMENT.md`.
 
-**Mirrored content-acquisition code.** Watcher and Archiver share copies of `src/core/fetchers/`, `src/core/extractors/`, `src/core/simhash.py`, `src/core/extraction_defaults.py`, and `src/core/logging.py`. When changing any of these here, mirror the change to `/home/exedev/archiver/src/core/`. Notifier-style discipline; revisit when fingerprint parity becomes load-bearing (i.e., when Replicator joins the consumer set).
+**Mirrored `logging.py`.** Watcher and Archiver still share a copy of `src/core/logging.py`; when changing it here, mirror the change to `/home/exedev/archiver/src/core/logging.py`. The former content-acquisition mirror (`fetchers/`, `extractors/`, `simhash.py`, `extraction_defaults.py`) was retired in #236 — both services now consume co-core (`co_core.pure.extract.*`, `co_core.effects.fetch`, `co_core_aio.fetch`) as the canonical implementation, so there is no fetch/extract/fingerprint copy to keep in sync.
 
 ## Environment Files
 

@@ -187,28 +187,37 @@ wheels = [
 
 [[package]]
 name = "co-core"
-version = "0.3.4"
+version = "0.5.0"
 source = { registry = ".wheelhouse" }
 dependencies = [
     { name = "dateparser" },
     { name = "pydantic" },
 ]
-sdist = { path = "co_core-0.3.4.tar.gz" }
+sdist = { path = "co_core-0.5.0.tar.gz" }
 wheels = [
-    { path = "co_core-0.3.4-py3-none-any.whl" },
+    { path = "co_core-0.5.0-py3-none-any.whl" },
+]
+
+[package.optional-dependencies]
+extract = [
+    { name = "beautifulsoup4" },
+    { name = "html5lib" },
+    { name = "lxml" },
+    { name = "openpyxl" },
+    { name = "pypdf" },
 ]
 
 [[package]]
 name = "co-core-aio"
-version = "0.3.4"
+version = "0.5.0"
 source = { registry = ".wheelhouse" }
 dependencies = [
     { name = "co-core" },
     { name = "httpx" },
 ]
-sdist = { path = "co_core_aio-0.3.4.tar.gz" }
+sdist = { path = "co_core_aio-0.5.0.tar.gz" }
 wheels = [
-    { path = "co_core_aio-0.3.4-py3-none-any.whl" },
+    { path = "co_core_aio-0.5.0-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -1588,7 +1597,7 @@ dependencies = [
     { name = "archiver-client" },
     { name = "asyncpg" },
     { name = "beautifulsoup4" },
-    { name = "co-core" },
+    { name = "co-core", extra = ["extract"] },
     { name = "co-core-aio" },
     { name = "email-validator" },
     { name = "fastapi" },
@@ -1628,8 +1637,8 @@ requires-dist = [
     { name = "archiver-client", editable = "../archiver/clients/python" },
     { name = "asyncpg", specifier = ">=0.30.0,<1" },
     { name = "beautifulsoup4", specifier = ">=4.12.0,<5" },
-    { name = "co-core", specifier = ">=0.3,<0.4" },
-    { name = "co-core-aio", specifier = ">=0.3,<0.4" },
+    { name = "co-core", extras = ["extract"], specifier = ">=0.5,<0.6" },
+    { name = "co-core-aio", specifier = ">=0.5,<0.6" },
     { name = "email-validator", specifier = ">=2.0,<3" },
     { name = "fastapi", specifier = ">=0.115.0,<1" },
     { name = "html5lib", specifier = ">=1.1" },

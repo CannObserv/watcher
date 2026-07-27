@@ -3,11 +3,12 @@
 import os
 
 from archiver_client import ArchiverClient
+from co_core.pure.extract import Extractor
+from co_core.pure.extract.csv_excel import CsvExcelExtractor
+from co_core.pure.extract.html import HtmlExtractor
+from co_core.pure.extract.pdf import PdfExtractor
 
-from src.core.extractors import CsvExcelExtractor, HtmlExtractor, PdfExtractor
-from src.core.extractors.base import Extractor
-from src.core.fetchers.base import Fetcher
-from src.core.fetchers.http import HttpFetcher
+from src.core.fetch import Fetcher, HttpFetcher
 
 # Keyed by media-type essence (#168 slice 2). Dispatch is total: anything not
 # listed (including None, application/json, and ambiguous types) falls back to the

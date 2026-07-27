@@ -8,9 +8,11 @@ from datetime import UTC, datetime
 from unittest.mock import AsyncMock, patch
 
 import pytest
+from co_core.pure.extract.csv_excel import CsvExcelExtractor
+from co_core.pure.extract.html import HtmlExtractor
+from co_core.pure.extract.pdf import PdfExtractor
 from sqlalchemy import select
 
-from src.core.extractors import CsvExcelExtractor, HtmlExtractor, PdfExtractor
 from src.core.models.change_revision import ChangeRevision
 from src.core.models.pending_archiver_sync import PendingArchiverSync
 from src.workers.pipeline import (

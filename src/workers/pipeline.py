@@ -109,7 +109,7 @@ async def _maybe_decay_backoff(
 # ---------------------------------------------------------------------------
 
 
-async def _extract_with_spec(
+def _extract_with_spec(
     raw_content: bytes,
     document: dict,
     *,
@@ -120,13 +120,13 @@ async def _extract_with_spec(
 
     Defaults to the HTML extractor (the historical behaviour) when no extractor is
     supplied. ``extra_config`` carries media-type-implied knobs (e.g. the CSV/Excel
-    ``content_type`` mode) merged over the spec-derived config.
+    ``content_type`` mode) merged over the spec-derived config. Synchronous:
+    co-core extractors are pure (#236).
     """
     extractor = extractor or HtmlExtractor()
     config = _extraction_config_from_spec(document)
     if extra_config:
         config = {**config, **extra_config}
-    # Extractors are synchronous in co-core (#236).
     return extractor.extract(raw_content, config=config)
 
 
@@ -140,7 +140,7 @@ class ExtractionOutcome:
     schema_version: int
 
 
-async def _extract_and_fingerprint(
+def _extract_and_fingerprint(
     raw_content: bytes,
     source_specs: list[dict],
     *,
@@ -152,13 +152,14 @@ async def _extract_and_fingerprint(
     Falls back to the next spec if the current one yields no chunks. If all
     specs yield empty chunks, uses the last result (fingerprinting empty content
     is a valid baseline). ``extractor``/``extra_config`` select and tune the
-    media-type-appropriate extractor (defaults to HTML).
+    media-type-appropriate extractor (defaults to HTML). Synchronous: extraction
+    and hashing are pure CPU (#236).
     """
     specs: list[dict] = source_specs if source_specs else [{}]
     result = ExtractionResult(chunks=[])
     used_spec: dict = {}
     for spec in specs:
-        result = await _extract_with_spec(
+        result = _extract_with_spec(
             raw_content, spec, extractor=extractor, extra_config=extra_config
         )
         used_spec = spec
@@ -225,7 +226,7 @@ async def process_watched_item(
     extractor = reg.get_extractor(essence)
     extra_config = extraction_overrides_for_essence(essence)
     try:
-        outcome = await _extract_and_fingerprint(
+        outcome = _extract_and_fingerprint(
             raw_content, source_specs, extractor=extractor, extra_config=extra_config
         )
     except Exception as exc:

@@ -40,17 +40,16 @@ class TestExtractionConfigFromSpec:
         assert config == {"selectors": []}
 
 
-@pytest.mark.asyncio
 class TestExtractWithSpec:
-    async def test_extracts_html_with_full_page_algorithm(self):
+    def test_extracts_html_with_full_page_algorithm(self):
         document = {"extraction": {"algorithm": "full_page"}}
-        result = await _extract_with_spec(b"<html><body><p>Hello</p></body></html>", document)
+        result = _extract_with_spec(b"<html><body><p>Hello</p></body></html>", document)
         assert len(result.chunks) >= 1
         assert any("Hello" in c.text for c in result.chunks)
 
-    async def test_css_selector_filters_to_matching_section(self):
+    def test_css_selector_filters_to_matching_section(self):
         document = {"extraction": {"algorithm": "css", "selector": ".target"}}
-        result = await _extract_with_spec(
+        result = _extract_with_spec(
             b"<html><body><div class='target'>kept</div><div>dropped</div></body></html>",
             document,
         )

@@ -88,7 +88,8 @@ async def lifespan(application: FastAPI):
     worker_task.cancel()
     await asyncio.gather(poller_task, worker_task, return_exceptions=True)
     await proc_app.close_async()
-    # SDK close must be the last shutdown step (no consumer can still be in flight).
+    # SDK/HTTP closes must be the last shutdown step (no consumer can still be in flight).
+    await registry.aclose_fetcher()
     await registry.aclose_archiver_client()
 
 

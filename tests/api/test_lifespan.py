@@ -29,6 +29,7 @@ async def test_lifespan_prewarms_archiver_client(monkeypatch):
     fake_reg = MagicMock()
     fake_reg.get_archiver_client = MagicMock(return_value=fake_client)
     fake_reg.aclose_archiver_client = AsyncMock()
+    fake_reg.aclose_fetcher = AsyncMock()
 
     fake_proc_app = MagicMock()
     fake_proc_app.open_async = AsyncMock()
@@ -69,6 +70,7 @@ async def test_lifespan_closes_archiver_client_on_shutdown(monkeypatch):
     fake_reg = MagicMock()
     fake_reg.get_archiver_client = MagicMock(return_value=fake_client)
     fake_reg.aclose_archiver_client = AsyncMock()
+    fake_reg.aclose_fetcher = AsyncMock()
 
     fake_proc_app = MagicMock()
     fake_proc_app.open_async = AsyncMock()
@@ -111,7 +113,11 @@ async def test_lifespan_closes_client_after_proc_app(monkeypatch):
     async def _aclose_info():
         call_order.append("aclose_archiver_client")
 
+    async def _aclose_fetcher():
+        call_order.append("aclose_fetcher")
+
     fake_reg.aclose_archiver_client = AsyncMock(side_effect=_aclose_info)
+    fake_reg.aclose_fetcher = AsyncMock(side_effect=_aclose_fetcher)
 
     fake_proc_app = MagicMock()
     fake_proc_app.open_async = AsyncMock()
@@ -142,7 +148,9 @@ async def test_lifespan_closes_client_after_proc_app(monkeypatch):
         async with lifespan(MagicMock()):
             pass
 
-    assert call_order == ["proc_app.close_async", "aclose_archiver_client"]
+    # HTTP/SDK closes run after the procrastinate app; the Archiver SDK close
+    # stays the very last step (no consumer can still be in flight).
+    assert call_order == ["proc_app.close_async", "aclose_fetcher", "aclose_archiver_client"]
 
 
 @pytest.mark.asyncio
@@ -153,6 +161,7 @@ async def test_lifespan_does_not_start_changes_drain(monkeypatch):
     fake_reg = MagicMock()
     fake_reg.get_archiver_client = MagicMock()
     fake_reg.aclose_archiver_client = AsyncMock()
+    fake_reg.aclose_fetcher = AsyncMock()
 
     fake_proc_app = MagicMock()
     fake_proc_app.open_async = AsyncMock()

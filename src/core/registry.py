@@ -87,6 +87,19 @@ class ServiceRegistry:
             await self._archiver_client.aclose()
             self._archiver_client = None
 
+    async def aclose_fetcher(self) -> None:
+        """Close the cached fetcher's underlying HTTP client (no-op if unbuilt).
+
+        Resets internal state so a subsequent ``get_fetcher`` call rebuilds a
+        fresh default. Safe to call multiple times. Guards on ``aclose`` so an
+        injected test fetcher (which need not implement it) is simply dropped.
+        """
+        if self._fetcher is not None:
+            aclose = getattr(self._fetcher, "aclose", None)
+            if aclose is not None:
+                await aclose()
+            self._fetcher = None
+
 
 _default_registry: "ServiceRegistry | None" = None
 

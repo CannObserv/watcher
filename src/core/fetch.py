@@ -14,10 +14,9 @@ from typing import Protocol
 
 import httpx
 from co_core.effects.fetch import FetchContent, FetchResult
-from co_core_aio.fetch import AsyncFetchDriver
+from co_core_aio.fetch import DEFAULT_TIMEOUT, AsyncFetchDriver
 
 WATCHER_USER_AGENT = "watcher/0.1.0"
-DEFAULT_TIMEOUT = 30.0
 
 
 class Fetcher(Protocol):

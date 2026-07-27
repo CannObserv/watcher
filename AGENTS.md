@@ -108,7 +108,7 @@ lacks a `_test`/`_dev` suffix. The same rule is enforced in-app by
 
 Full lifecycle reference + cleanup timer: `docs/DEPLOYMENT.md`.
 
-**No mirror discipline (#159, #236).** The content-acquisition mirror (`fetchers/`, `extractors/`, `simhash.py`, `extraction_defaults.py`) was retired in #236 — both services now consume co-core (`co_core.pure.extract.*`, `co_core.effects.fetch`, `co_core_aio.fetch`) as the canonical implementation, so there is no fetch/extract/fingerprint copy to keep in sync. `src/core/logging.py` is **service-local**: 20 lines wrapping `logging.getLogger`, plus an entry-point-only `configure_logging`. Archiver has its own — change this one freely, no sibling sync required (ratified in #159).
+**No cross-repo mirror discipline (#159, #236).** Content acquisition is co-core's (see **Cannobserv wheelhouse** above); `src/core/logging.py` is service-local. Nothing in `src/` needs mirroring to Archiver — don't reintroduce a sync obligation.
 
 ## Environment Files
 

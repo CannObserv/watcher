@@ -61,5 +61,7 @@ with the watcher UA — so `tasks.py` and the fetch-faking tests are untouched.
 
 ## Open questions
 
-- `logging.py` stays mirrored (not in #236 scope) → keep a narrowed mirror note rather
-  than fully retiring it.
+- ~~`logging.py` stays mirrored (not in #236 scope) → keep a narrowed mirror note rather
+  than fully retiring it.~~ **Resolved in #159** (`d96ae44`): the mirror discipline is
+  fully retired — `logging.py` is service-local in both repos, no sibling sync. Archiver's
+  reciprocal AGENTS.md wording tracked in CannObserv/archiver#104.

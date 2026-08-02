@@ -75,7 +75,14 @@ skills-vendor/   Git submodules for external skill repos
 | API (live) | 8000 | `systemctl` (`watcher.service`) |
 | API (dev) | 8001 | manual uvicorn |
 
-Sibling services on the same VM, separately managed: **Archiver** (port 8020, `archiver.service`) and **Notifier**. Both are separate repos checked out alongside this one — default `/home/exedev/archiver` and `/home/exedev/notifier` on this VM, with the Archiver checkout overridable via `ARCHIVER_REPO_PATH`. Elsewhere in these docs they're named as "the Archiver repo" / "the Notifier repo"; resolve them against your own checkout rather than assuming the default path.
+Sibling services on the same VM, separately managed: **Archiver** (port 8020, `archiver.service`) and **Notifier**. Both are separate repos checked out alongside this one (`/home/exedev/archiver`, `/home/exedev/notifier` on this VM). Elsewhere in these docs they're named as "the Archiver repo" / "the Notifier repo" — resolve those against your own checkout.
+
+**The Archiver checkout location is not freely relocatable.** Two independent consumers resolve it, and only one takes an override:
+
+- `pyproject.toml` → `[tool.uv.sources]` pins `archiver-client = { path = "../archiver/clients/python", editable = true }` — a **relative path dependency**. `uv sync` requires the repo at `../archiver` from this one, and honors no env var; moving it means editing that line.
+- `tests/conftest.py` reads `ARCHIVER_REPO_PATH` (default `/home/exedev/archiver`) to locate Archiver's alembic for the cross-schema test tables. This is the **only** reader — CI sets it in `.github/workflows/ci.yml`.
+
+So `ARCHIVER_REPO_PATH` redirects the test harness alone. Setting it without also fixing the path dependency yields passing tests over a broken `uv sync`.
 
 The exe.dev proxy forwards 3000–9999. Dev server reachable at `https://watcher.exe.xyz:8001/`.
 
@@ -347,7 +354,10 @@ cd /home/exedev/archiver && uv sync
 ```
 
 Override via `ARCHIVER_REPO_PATH=/some/other/path` if you keep the
-sibling repo elsewhere.
+sibling repo elsewhere — but note this only redirects **this** alembic
+invocation. The `archiver-client` path dependency is separately pinned to
+`../archiver/clients/python` in `[tool.uv.sources]` and ignores the variable;
+relocating the checkout means editing that too (see **Infrastructure**).
 
 The `information` schema persists between pytest sessions to enable
 the cache-check (#150); per-test row isolation is still handled by

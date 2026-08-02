@@ -157,9 +157,9 @@ genesis migration normally.
 ## Archiver Service
 
 The Archiver is a sibling service (port 8020, `archiver.service`; its repo is
-checked out alongside this one — `/home/exedev/archiver` on this VM, override
-`ARCHIVER_REPO_PATH`) that owns the canonical InfoItem / InfoSource /
-SourceRevision / RepSpec registry. Watcher's lifespan pre-warms an `ArchiverClient` SDK against it;
+checked out alongside this one — `/home/exedev/archiver` on this VM, and pinned
+at `../archiver` by the `archiver-client` path dependency) that owns the
+canonical InfoItem / InfoSource / SourceRevision / RepSpec registry. Watcher's lifespan pre-warms an `ArchiverClient` SDK against it;
 without `ARCHIVER_API_KEY` and a reachable service, `watcher.service` will
 refuse to boot.
 
@@ -181,9 +181,33 @@ fails lands in the local `pending_archiver_sync` outbox. The
 Archiver outage self-heals within a minute of the service returning.
 
 The drain runs on the embedded worker inside the single uvicorn process; there
-is no separate unit to start or monitor. Scratch bytes for undrained rows live
-under `WATCHER_CACHE_DIR` and are protected from the cache sweeper until the
-row drains.
+is no separate unit to start or monitor.
+
+**Outbox / scratch interlock.** The cache sweeper skips any scratch file under
+`WATCHER_CACHE_DIR` whose ULID still has a `pending_archiver_sync` row — the row
+owns the file, and the drain drops the row only on a successful POST, after
+which the file becomes a sweep candidate. This is a per-sweep query against the
+outbox, not a lock: a row that never drains pins its scratch file indefinitely,
+so a stuck outbox shows up as disk growth under `WATCHER_CACHE_DIR` rather than
+as a failing check.
+
+To spot one:
+
+```bash
+export $(cat /etc/watcher/.env .env 2>/dev/null | xargs)
+# Backlog size, age of the oldest undrained row, and the last failure reason.
+# psql needs a driverless URL — strip the SQLAlchemy "+asyncpg" dialect suffix.
+psql "${DATABASE_URL/+asyncpg/}" -c \
+  "SELECT count(*), min(created_at) AS oldest, max(attempts) AS max_attempts FROM pending_archiver_sync;"
+psql "${DATABASE_URL/+asyncpg/}" -c \
+  "SELECT id, attempts, last_error FROM pending_archiver_sync ORDER BY created_at LIMIT 5;"
+# Scratch bytes currently held:
+du -sh /var/cache/watcher/scratch
+```
+
+A non-empty backlog with an oldest row older than a few minutes means the drain
+is failing, not merely busy — check `journalctl -u watcher -f` for
+`drain attempt failed` and confirm Archiver is reachable.
 
 ## BUILD_ID
 

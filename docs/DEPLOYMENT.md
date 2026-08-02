@@ -156,11 +156,22 @@ genesis migration normally.
 
 ## Archiver Service
 
-The Archiver is a sibling service at `/home/exedev/archiver` (port 8020,
-`archiver.service`) that owns the canonical InfoItem / InfoSource / SourceRevision / RepSpec
-registry. Watcher's lifespan pre-warms an `ArchiverClient` SDK against it;
+The Archiver is a sibling service (port 8020, `archiver.service`; its repo is
+checked out alongside this one — `/home/exedev/archiver` on this VM, override
+`ARCHIVER_REPO_PATH`) that owns the canonical InfoItem / InfoSource /
+SourceRevision / RepSpec registry. Watcher's lifespan pre-warms an `ArchiverClient` SDK against it;
 without `ARCHIVER_API_KEY` and a reachable service, `watcher.service` will
 refuse to boot.
+
+See the Archiver repo's `docs/DEPLOYMENT.md` for the full Archiver install
+(key generation, env-var registration, systemd unit). After installing
+`archiver.service`, restart `watcher.service`:
+
+```bash
+sudo systemctl restart watcher
+```
+
+## Archiver Sync
 
 SourceRevisions are POSTed to Archiver inline on change detection; anything that
 fails lands in the local `pending_archiver_sync` outbox. The
@@ -169,13 +180,10 @@ fails lands in the local `pending_archiver_sync` outbox. The
 **1-minute** cadence — a hardcoded Procrastinate `cron`, not an env var — so an
 Archiver outage self-heals within a minute of the service returning.
 
-See `/home/exedev/archiver/docs/DEPLOYMENT.md` for the full Archiver install
-(key generation, env-var registration, systemd unit). After installing
-`archiver.service`, restart `watcher.service`:
-
-```bash
-sudo systemctl restart watcher
-```
+The drain runs on the embedded worker inside the single uvicorn process; there
+is no separate unit to start or monitor. Scratch bytes for undrained rows live
+under `WATCHER_CACHE_DIR` and are protected from the cache sweeper until the
+row drains.
 
 ## BUILD_ID
 

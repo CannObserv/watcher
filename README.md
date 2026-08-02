@@ -12,7 +12,7 @@ fingerprint = one change signal. It owns its `effective_url`, `source_specs`, sc
 fingerprints, writes a `ChangeRevision`, and dispatches `CHANGE_DETECTED` once per item.
 
 Canonical content provenance (InfoItem / InfoSource / SourceRevision) lives in the sibling
-**Archiver service** (`/home/exedev/archiver`, port 8020), consumed via the `archiver-client`
+**Archiver service** (separate repo, port 8020), consumed via the `archiver-client`
 SDK. `archiver_info_item_id` on a WatchedItem is an optional cross-schema reference; URL-only
 WatchedItems leave it null. SourceRevisions are POSTed to Archiver on every detected change,
 with a local `pending_archiver_sync` outbox + drain worker guaranteeing delivery during

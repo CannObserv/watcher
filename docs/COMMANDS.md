@@ -117,8 +117,8 @@ uv run alembic upgrade head
 uv run alembic revision --autogenerate -m "description of change"
 uv run alembic current
 
-# Archiver service migrations live in the sibling repo at /home/exedev/archiver.
-# See /home/exedev/archiver/docs/COMMANDS.md.
+# Archiver service migrations live in the sibling Archiver repo.
+# See its docs/COMMANDS.md.
 ```
 
 ## Task Queue (Procrastinate)

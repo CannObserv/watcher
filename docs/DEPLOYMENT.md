@@ -86,6 +86,9 @@ sudo systemctl status watcher
 # Follow logs
 sudo journalctl -u watcher -f
 
+# Follow WARNING+ only (records are JSON: timestamp/level/logger/message — #238)
+sudo journalctl -u watcher -f -o cat | jq 'select(.level == "WARNING" or .level == "ERROR" or .level == "CRITICAL")'
+
 # Reload after editing deploy/watcher.service
 sudo systemctl daemon-reload && sudo systemctl restart watcher
 ```

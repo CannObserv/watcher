@@ -9,7 +9,13 @@ from pythonjsonlogger.json import JsonFormatter
 def configure_logging(level: int = logging.INFO) -> None:
     """Configure root logger with JSON formatting. Call once at entry points."""
     handler = logging.StreamHandler(sys.stdout)
-    handler.setFormatter(JsonFormatter())
+    handler.setFormatter(
+        JsonFormatter(
+            "%(levelname)s %(name)s %(message)s",
+            timestamp=True,
+            rename_fields={"levelname": "level", "name": "logger"},
+        )
+    )
     root = logging.getLogger()
     root.setLevel(level)
     root.handlers = [handler]

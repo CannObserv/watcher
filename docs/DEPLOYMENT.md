@@ -37,12 +37,10 @@ export $(cat /etc/watcher/.env .env 2>/dev/null | xargs)
 | `WATCHER_ALLOW_PRODUCTION_DB` | `deploy/watcher.service` **only** | prod only | `=1` opts into serving a database whose name lacks a `_test`/`_dev` suffix (`src/core/db_safety.py`, #233). Must live in the systemd unit, never an env file — env files are sourced by hand-run dev servers, which are exactly what the guard stops |
 | `WATCHER_DEV_DATABASE_URL` | `.env` | no | Persistent dev database for `scripts/dev_server.sh`; wins over `TEST_DATABASE_URL` |
 
-**No `REDIS_URL`** (archiver#109). Archiver operates `redis-server` and owns the
-`info.changes` change bus; Watcher neither produces to nor consumes from it, and
-needs no Redis connection. If Watcher ever becomes a bus consumer — or grows the
-Redis-backed rate-limiter state that the multi-process escalation would need —
-`REDIS_URL` comes back along with `After=redis-server.service` +
-`Wants=redis-server.service` in `deploy/watcher.service`. Neither is built.
+**No Redis variable.** Archiver operates `redis-server` and owns the
+`info.changes` change bus (archiver#109); Watcher neither produces to nor
+consumes from it, and needs no Redis connection. See `AGENTS.md` § *Redis is
+Archiver's* for the future paths that would reintroduce one — none is built.
 
 ## Systemd Service
 
@@ -163,6 +161,13 @@ The Archiver is a sibling service at `/home/exedev/archiver` (port 8020,
 registry. Watcher's lifespan pre-warms an `ArchiverClient` SDK against it;
 without `ARCHIVER_API_KEY` and a reachable service, `watcher.service` will
 refuse to boot.
+
+SourceRevisions are POSTed to Archiver inline on change detection; anything that
+fails lands in the local `pending_archiver_sync` outbox. The
+`drain_pending_archiver_sync` periodic task
+(`src/workers/source_revisions_drain.py`) retries that outbox on a fixed
+**1-minute** cadence — a hardcoded Procrastinate `cron`, not an env var — so an
+Archiver outage self-heals within a minute of the service returning.
 
 See `/home/exedev/archiver/docs/DEPLOYMENT.md` for the full Archiver install
 (key generation, env-var registration, systemd unit). After installing

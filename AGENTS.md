@@ -35,7 +35,7 @@ and its vendor symlinks resolve to `skills-vendor/` paths that are already exclu
 Editing the file only changes what *subsequent* scans pick up — chunks embedded by an
 earlier index survive it (vendor hits kept ranking after the file landed). Purging them
 takes a clean rebuild: `codebase_remove` then `codebase_index`, which re-embeds the whole
-repo (hours at this repo's observed rate — budget for it).
+repo — budget a maintenance window for it.
 
 **Negative rule.** For broad semantic questions ("where is X", "how does Y work", "what depends on Z"), use SocratiCode MCP tools first. Reach for `grep`/`ripgrep` only on exact strings (error messages, log lines, known symbols). Reserve the Explore subagent for path-pattern walks (e.g. "all `*.py` under `src/api/routes/`"), not semantic search.
 

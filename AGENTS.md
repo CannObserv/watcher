@@ -77,9 +77,11 @@ skills-vendor/   Git submodules for external skill repos
 
 Sibling services on the same VM, separately managed: **Archiver** at `/home/exedev/archiver` (port 8020, `archiver.service`); **Notifier** at `/home/exedev/notifier`.
 
+**Redis is Archiver's (archiver#109).** Archiver operates `redis-server` on this VM — the tracked drop-in, unit ordering, persistence and version-floor policy, and producer-side monitoring are all its (`archiver/docs/plans/2026-07-29-redis-bus-ownership-design.md`). Archiver also owns the `info.changes` change bus and produces to it from its transactional outbox. **Watcher neither produces to nor consumes from the bus, and has no Redis dependency today** — the Watcher-side publisher (`ChangePublisher`, `xadd`/`xreadgroup`, `REDIS_URL`) was removed when the producer moved to Archiver; all async work runs on Procrastinate over Postgres (`PsycopgConnector`). Only *future*, not-yet-built work would change that: a Redis-backed `DomainRateLimiter` if the single-process topology is ever outgrown (see below), a Redis-backed aspect-review cache (#163), or bus **consumption** — if Watcher becomes a consumer it declares `After=redis-server.service` + `Wants=redis-server.service` in its unit (soft ordering, matching Archiver's pattern). None of these exist; don't add `REDIS_URL` back until one does.
+
 The exe.dev proxy forwards 3000–9999. Dev server reachable at `https://watcher.exe.xyz:8001/`.
 
-**Single process is load-bearing.** One uvicorn process runs everything: the API, the embedded Procrastinate worker, the config poller, and the cache sweeper (started in the `src/api/main.py` lifespan — there is no separate worker unit). The in-process `DomainRateLimiter` singleton holds all politeness state, so this topology is only correct at exactly one process. Never run `uvicorn --workers N` or a second worker unit against prod: each process would get its own rate-limiter, silently splitting every domain's politeness budget. Escalation path when one process stops being enough (not before): a separate `watcher-worker.service` plus Redis-backed rate-limiter state.
+**Single process is load-bearing.** One uvicorn process runs everything: the API, the embedded Procrastinate worker, the config poller, and the cache sweeper (started in the `src/api/main.py` lifespan — there is no separate worker unit). The in-process `DomainRateLimiter` singleton holds all politeness state, so this topology is only correct at exactly one process. Never run `uvicorn --workers N` or a second worker unit against prod: each process would get its own rate-limiter, silently splitting every domain's politeness budget. Escalation path when one process stops being enough (not before): a separate `watcher-worker.service` plus Redis-backed rate-limiter state — **not built**, and the only reason Watcher would ever grow a Redis dependency of its own (see **Redis is Archiver's** above).
 
 ## Server Lifecycle
 
@@ -114,8 +116,8 @@ Full lifecycle reference + cleanup timer: `docs/DEPLOYMENT.md`.
 
 Two env files load in order (later overrides earlier):
 
-1. `/etc/watcher/.env` — production secrets (`DATABASE_URL`, `NOTIFIER_API_KEY`, `ARCHIVER_API_KEY`, `REDIS_URL`). Persistent, managed manually on the VM.
-2. `.env` (repo root, git-ignored) — dev/agent secrets (`GH_TOKEN`, `TEST_DATABASE_URL`, `REDIS_URL`). Never commit.
+1. `/etc/watcher/.env` — production secrets (`DATABASE_URL`, `NOTIFIER_API_KEY`, `ARCHIVER_API_KEY`). Persistent, managed manually on the VM.
+2. `.env` (repo root, git-ignored) — dev/agent secrets (`GH_TOKEN`, `TEST_DATABASE_URL`). Never commit.
 
 Load both for shell commands (pytest, psql, gh):
 
@@ -129,7 +131,6 @@ Lifecycle**; #233).
 
 **Key variables:**
 - `DATABASE_URL` — PostgreSQL connection for watcher (Archiver owns its own database).
-- `REDIS_URL` — Redis connection URL (default: `redis://localhost:6379/0`). Override for testing or remote Redis.
 - `NOTIFIER_BASE_URL` — Notifier service URL for the `NotifierClient` SDK (e.g. `http://localhost:9000`). Required — every notification is dispatched through the notifier service.
 - `NOTIFIER_API_KEY` — Required. Watcher tenant API key issued by `scripts/seed_tenant.py` in the notifier repo.
 - `ARCHIVER_BASE_URL` — Archiver service URL for the `ArchiverClient` SDK (default: `http://localhost:8020`).

@@ -34,10 +34,15 @@ export $(cat /etc/watcher/.env .env 2>/dev/null | xargs)
 | `NOTIFIER_API_KEY` | `/etc/watcher/.env` | **yes** | Watcher tenant API key issued by `scripts/seed_tenant.py` in the notifier repo |
 | `ARCHIVER_BASE_URL` | `/etc/watcher/.env` | no | Archiver service base URL (default `http://localhost:8020`) |
 | `ARCHIVER_API_KEY` | `/etc/watcher/.env` | **yes** | API key for the ArchiverClient SDK; missing key crashes the API on boot via the lifespan pre-warm |
-| `REDIS_URL` | `/etc/watcher/.env` | no | Redis connection URL for the change bus (default `redis://localhost:6379/0`) |
-| `CHANGES_DRAIN_INTERVAL_SECONDS` | env | no | Fast-tick changes-outbox drain cadence in seconds (default `10`); the 1-minute Procrastinate periodic stays as a safety floor |
 | `WATCHER_ALLOW_PRODUCTION_DB` | `deploy/watcher.service` **only** | prod only | `=1` opts into serving a database whose name lacks a `_test`/`_dev` suffix (`src/core/db_safety.py`, #233). Must live in the systemd unit, never an env file — env files are sourced by hand-run dev servers, which are exactly what the guard stops |
 | `WATCHER_DEV_DATABASE_URL` | `.env` | no | Persistent dev database for `scripts/dev_server.sh`; wins over `TEST_DATABASE_URL` |
+
+**No `REDIS_URL`** (archiver#109). Archiver operates `redis-server` and owns the
+`info.changes` change bus; Watcher neither produces to nor consumes from it, and
+needs no Redis connection. If Watcher ever becomes a bus consumer — or grows the
+Redis-backed rate-limiter state that the multi-process escalation would need —
+`REDIS_URL` comes back along with `After=redis-server.service` +
+`Wants=redis-server.service` in `deploy/watcher.service`. Neither is built.
 
 ## Systemd Service
 

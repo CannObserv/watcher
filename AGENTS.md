@@ -27,6 +27,16 @@ Auth is ADC: on the VM/deploy the `co-pypi-reader` SA key at `GOOGLE_APPLICATION
 
 SocratiCode is indexed on this repo (`.socraticodecontextartifacts.json` present). Its MCP tools are **deferred** — schemas load only after a `ToolSearch` prefetch. The SessionStart hook prints the prefetch query; run it before exploring.
 
+**Index scope (#240).** `.socraticodeignore` (repo root, gitignore syntax) keeps the
+vendored skill trees — `skills-vendor/` and the `.claude/skills/` symlink farm — out of
+the semantic index; vendor prose otherwise outranks this repo's own code in
+`codebase_search`. `skills/` stays indexed: it holds the committed first-party overrides,
+and its vendor symlinks resolve to `skills-vendor/` paths that are already excluded.
+Editing the file only changes what *subsequent* scans pick up — chunks embedded by an
+earlier index survive it (vendor hits kept ranking after the file landed). Purging them
+takes a clean rebuild: `codebase_remove` then `codebase_index`, which re-embeds the whole
+repo (hours at this repo's observed rate — budget for it).
+
 **Negative rule.** For broad semantic questions ("where is X", "how does Y work", "what depends on Z"), use SocratiCode MCP tools first. Reach for `grep`/`ripgrep` only on exact strings (error messages, log lines, known symbols). Reserve the Explore subagent for path-pattern walks (e.g. "all `*.py` under `src/api/routes/`"), not semantic search.
 
 | Goal | Tool |

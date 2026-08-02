@@ -1,0 +1,13 @@
+# SocratiCode index exclusions (#240) — gitignore syntax, layered on top of
+# SocratiCode's built-in defaults and .gitignore.
+#
+# Vendored skill trees are agent instructions, not project code. Indexing them
+# inflates embedding time and lets vendor prose outrank this repo's own code in
+# codebase_search results.
+#
+# `skills/` itself is NOT excluded: it holds this repo's committed first-party
+# skill overrides (brainstorming, shipping-work-python-fastapi). Its other
+# entries are symlinks into skills-vendor/ and index under those real paths, so
+# excluding skills-vendor/ already covers them.
+skills-vendor/
+.claude/skills/

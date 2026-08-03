@@ -455,6 +455,18 @@ contract (it matches structlog's defaults, so a future structlog/OTel migration 
 churn log consumers) and is pinned by `tests/core/test_logging.py` (#238); don't rename
 or drop keys without updating both.
 
+**uvicorn's own loggers need `--log-config` (#244).** `uvicorn`, `uvicorn.access`,
+and `uvicorn.error` ship with `propagate=False` and their own plain-text handlers,
+so `configure_logging()` — which touches only the **root** logger — never reaches
+them; without the flag journald gets mixed formats (plain access lines interleaved
+with JSON app records). Every uvicorn invocation therefore passes
+`--log-config src/core/log_config.json` (already wired into
+`deploy/watcher.service` and `scripts/dev_server.sh` — the only two sanctioned
+launch paths). That dictConfig file carries **no** copy of the format string: its
+`"()"` key calls `build_json_formatter()` in `src/core/logging.py`, the single
+formatter definition shared with `configure_logging()`. Both facts are pinned by
+`tests/core/test_logging.py`.
+
 **Date & Time:** All UTC. ISO 8601: `YYYY-MM-DDTHH:MM:SS.ffffffZ` (timestamps), `YYYY-MM-DD` (dates).
 
 **General:**

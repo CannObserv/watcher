@@ -30,7 +30,11 @@ EnvironmentFile=-/home/exedev/watcher/.env
 # which are exactly what the guard exists to stop.
 Environment=WATCHER_ALLOW_PRODUCTION_DB=1
 
-ExecStart=/usr/local/bin/uv run uvicorn src.api.main:app --host 0.0.0.0 --port 8000
+# --log-config routes uvicorn's own loggers (uvicorn, uvicorn.access,
+# uvicorn.error — all propagate=False with plain-text handlers by default)
+# through the same JSON formatter as the app, so journald gets one format
+# instead of plain-text access lines interleaved with JSON records (#244).
+ExecStart=/usr/local/bin/uv run uvicorn src.api.main:app --host 0.0.0.0 --port 8000 --log-config src/core/log_config.json
 Restart=on-failure
 RestartSec=5
 

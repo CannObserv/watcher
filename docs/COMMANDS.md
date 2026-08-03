@@ -56,6 +56,11 @@ bash scripts/dev_server.sh
 # systemd), WATCHER_DEV_DATABASE_URL, WATCHER_DEV_SKIP_MIGRATE=1
 ```
 
+Both sanctioned launch paths (`scripts/dev_server.sh` and the systemd
+`ExecStart`) pass `--log-config src/core/log_config.json` so uvicorn's own
+access/error lines are JSON like the app's (#244). Any ad-hoc uvicorn command
+needs the same flag, or it emits plain text alongside the JSON records.
+
 ### Testing code changes against the live site
 
 After committing to main, restart the service to pick up changes:

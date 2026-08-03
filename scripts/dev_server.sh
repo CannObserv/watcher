@@ -166,4 +166,7 @@ if [[ "$DO_MIGRATE" == "1" ]]; then
 fi
 
 echo "dev_server: port $PORT → $DATABASE_URL"
-exec uv run uvicorn src.api.main:app --host 0.0.0.0 --port "$PORT" --reload
+# --log-config keeps uvicorn's own loggers on the app's JSON formatter, same as
+# deploy/watcher.service (#244). Relative path: we cd'd to REPO_ROOT above.
+exec uv run uvicorn src.api.main:app --host 0.0.0.0 --port "$PORT" --reload \
+  --log-config src/core/log_config.json

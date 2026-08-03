@@ -417,6 +417,7 @@ Skills live in `skills/` (agentskills.io) and `.claude/skills/` (Claude Code). L
 |---|---|
 | `reviewing-code-python-fastapi` | CR, code review |
 | `reviewing-architecture` | AR, architecture review |
+| `enforcing-architecture` | add a fitness function, enforce this contract, lock this rule (delegated to by `reviewing-architecture` on a `fitness` directive) |
 | `shipping-work-python-fastapi` | ship it, push GH, close GH, wrap up |
 | `brainstorming` | brainstorm, design this, let's design |
 | `writing-plans` | write plan, implementation plan |

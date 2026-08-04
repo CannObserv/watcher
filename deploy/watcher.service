@@ -18,6 +18,9 @@ ExecStartPre=/bin/bash -c 'echo BUILD_ID=$(git rev-parse --short HEAD) > /run/wa
 # restart when the wheelhouse is already populated; only a genuinely missing
 # wheel surfaces later as a hard uv resolution error. Reads
 # GOOGLE_APPLICATION_CREDENTIALS from the EnvironmentFile above.
+# Its output is plain text, not the app's JSON (#247): it runs before `uv sync`
+# under --no-project, so it cannot import build_json_formatter(). See AGENTS.md
+# → Logging.
 ExecStartPre=-/usr/local/bin/uv run --no-project --with 'google-cloud-storage>=2,<4' python /home/exedev/watcher/scripts/sync_wheelhouse.py
 
 # Load BUILD_ID, then system secrets, then optional repo-local overrides

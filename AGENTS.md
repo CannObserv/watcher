@@ -480,6 +480,18 @@ it on all three is load-bearing — propagation walks ancestors' *handlers*, nev
 their filters, so a filter on the parent `uvicorn` alone never sees a
 `uvicorn.error` record.
 
+**One exception — `ExecStartPre` output is plain text (#247).** The JSON claim
+above scopes to the *application's* records. `deploy/watcher.service` runs the
+wheelhouse sync as a non-fatal `ExecStartPre`, so journald also gets a plain-text
+line on every service start (`wheelhouse in sync: N downloaded, M already present
+-> …`, or `error: could not sync gs://…` on the failure path — the one that
+appears exactly when something is already wrong). That is by design, not drift:
+the step runs under `uv run --no-project` *before* `uv sync`, cannot import the
+project, and so cannot share `build_json_formatter()`; emitting JSON would mean a
+second hand-maintained copy of the key schema. A log pipeline that `json.loads`
+every journald `MESSAGE` must tolerate it (reading the entry's native fields —
+`_SYSTEMD_UNIT`, `SYSLOG_IDENTIFIER`, `MESSAGE` — is unaffected).
+
 **Date & Time:** All UTC. ISO 8601: `YYYY-MM-DDTHH:MM:SS.ffffffZ` (timestamps), `YYYY-MM-DD` (dates).
 
 **General:**

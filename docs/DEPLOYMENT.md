@@ -86,22 +86,34 @@ sudo systemctl status watcher
 # Follow logs
 sudo journalctl -u watcher -f
 
-# Follow WARNING+ only (records are JSON: timestamp/level/logger/message — #238).
+# Follow WARNING+ only (app records are JSON: timestamp/level/logger/message — #238).
+# `-R` + `fromjson?` is load-bearing: the ExecStartPre wheelhouse sync writes a
+# plain-text line on every start (#247), and bare `jq` aborts on it with a parse
+# error — killing the follow and hiding every record after it. Non-JSON lines are
+# tagged PLAIN rather than dropped, so a failed sync still surfaces here.
 # Needs jq (present on this VM at /bin/jq); the grep below is the no-jq fallback.
-sudo journalctl -u watcher -f -o cat | jq 'select(.level == "WARNING" or .level == "ERROR" or .level == "CRITICAL")'
-sudo journalctl -u watcher -f -o cat | grep -E '"level": "(WARNING|ERROR|CRITICAL)"'
+sudo journalctl -u watcher -f -o cat | jq -R 'fromjson? // {level: "PLAIN", message: .} | select(.level | IN("WARNING","ERROR","CRITICAL","PLAIN"))'
+sudo journalctl -u watcher -f -o cat | grep -E '"level": "(WARNING|ERROR|CRITICAL)"|^error: '
 
 # Reload after editing deploy/watcher.service
 sudo systemctl daemon-reload && sudo systemctl restart watcher
 ```
 
-Every line in the journal is JSON, uvicorn's included: the unit's `ExecStart`
-passes `--log-config src/core/log_config.json`, which routes uvicorn's own
-`uvicorn`/`uvicorn.access`/`uvicorn.error` loggers (`propagate=False`, plain-text
-handlers by default) through the app's `build_json_formatter()` (#244), and
-strips uvicorn's ANSI `color_message` duplicate from the payload (#246). Drop the
-flag and the `jq` filter above silently skips the access/boot lines, which come
+Every line the **application** writes is JSON, uvicorn's included: the unit's
+`ExecStart` passes `--log-config src/core/log_config.json`, which routes uvicorn's
+own `uvicorn`/`uvicorn.access`/`uvicorn.error` loggers (`propagate=False`,
+plain-text handlers by default) through the app's `build_json_formatter()` (#244),
+and strips uvicorn's ANSI `color_message` duplicate from the payload (#246). Drop
+the flag and the `jq` filter above silently skips the access/boot lines, which come
 back as plain text. Same flag is baked into `scripts/dev_server.sh`.
+
+The unit's `ExecStartPre` steps are the exception (#247): they run before the
+project is importable, so their output is plain text by design — the wheelhouse
+sync writes `wheelhouse in sync: …` on every start and `error: could not sync
+gs://…` when it fails, and the BUILD_ID stamp writes plain text on failure. Any
+pipeline that `json.loads` every `MESSAGE` must tolerate them; reading journald's
+own fields (`_SYSTEMD_UNIT`, `SYSLOG_IDENTIFIER`, `MESSAGE`) is unaffected. See
+AGENTS.md → Logging.
 
 ## Database Migrations
 

@@ -21,7 +21,7 @@ uv run --no-project --with 'google-cloud-storage>=2,<4' python scripts/sync_whee
 uv sync
 ```
 
-Auth is ADC: on the VM/deploy the `co-pypi-reader` SA key at `GOOGLE_APPLICATION_CREDENTIALS` (in `/etc/watcher/.env`); in CI, keyless via Workload Identity Federation (`.github/workflows/ci.yml`). The identity needs only `roles/storage.objectViewer`. Reproducibility is `uv.lock` (pins the exact version), not wheelhouse contents. **Upgrade:** re-sync, then `uv lock --upgrade-package co-core` (bump the floor if the minor moved). Currently pinned: **v0.5.0** (floors `>=0.5,<0.6`). `co-core` carries the **`extract`** extra (`co-core[extract]`) — the heavy HTML/PDF/CSV parsers behind the extractors constructed in `src/core/registry.py`. The content-acquisition pipeline (fetch → extract → fingerprint) is now co-core's (`co_core.pure.extract.*`, `co_core.effects.fetch`, `co_core_aio.fetch`), adopted in #236; watcher owns only the thin fetch adapter `src/core/fetch.py` (drives `AsyncFetchDriver`, pins the `watcher/0.1.0` User-Agent for fingerprint byte-continuity). The systemd unit refreshes the wheelhouse via a non-fatal `ExecStartPre` so restarts self-heal.
+Auth is ADC: on the VM/deploy the `co-pypi-reader` SA key at `GOOGLE_APPLICATION_CREDENTIALS` (in `/etc/watcher/.env`); in CI, keyless via Workload Identity Federation (`.github/workflows/ci.yml`). The identity needs only `roles/storage.objectViewer`. Reproducibility is `uv.lock` (pins the exact version), not wheelhouse contents. **Upgrade:** re-sync, then `uv lock --upgrade-package co-core` (bump the floor if the minor moved). Currently pinned: **v0.5.0** (floors `>=0.5,<0.6`). `co-core` carries the **`extract`** extra (`co-core[extract]`) — the heavy HTML/PDF/CSV parsers behind the extractors constructed in `src/core/registry.py`. The content-acquisition pipeline (fetch → extract → fingerprint) is now co-core's (`co_core.pure.extract.*`, `co_core.effects.fetch`, `co_core_aio.fetch`), adopted in #236; watcher owns only the thin fetch adapter `src/core/fetch.py` (drives `AsyncFetchDriver`, pins the `watcher/0.1.0` User-Agent for fingerprint byte-continuity). The systemd unit refreshes the wheelhouse via a non-fatal `ExecStartPre` so restarts self-heal (its output is plain text, not the app's JSON — see **Logging**).
 
 ## Code Exploration Policy
 
@@ -488,9 +488,14 @@ line on every service start (`wheelhouse in sync: N downloaded, M already presen
 appears exactly when something is already wrong). That is by design, not drift:
 the step runs under `uv run --no-project` *before* `uv sync`, cannot import the
 project, and so cannot share `build_json_formatter()`; emitting JSON would mean a
-second hand-maintained copy of the key schema. A log pipeline that `json.loads`
-every journald `MESSAGE` must tolerate it (reading the entry's native fields —
-`_SYSTEMD_UNIT`, `SYSLOG_IDENTIFIER`, `MESSAGE` — is unaffected).
+second hand-maintained copy of the key schema. The unit's other two `ExecStartPre`
+lines are silent on success but plain-text on failure the same way (`git rev-parse`
+writes `fatal: not a git repository` to stderr; only stdout is redirected to the
+build-id file). A log pipeline that `json.loads` every journald `MESSAGE` must
+tolerate all of them (reading the entry's native fields — `_SYSTEMD_UNIT`,
+`SYSLOG_IDENTIFIER`, `MESSAGE` — is unaffected); the `jq` follow-recipe in
+`docs/DEPLOYMENT.md` is written to survive them — bare `jq` aborts on the first
+plain line and hides every record after it.
 
 **Date & Time:** All UTC. ISO 8601: `YYYY-MM-DDTHH:MM:SS.ffffffZ` (timestamps), `YYYY-MM-DD` (dates).
 

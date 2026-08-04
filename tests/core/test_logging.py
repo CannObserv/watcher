@@ -91,11 +91,16 @@ def test_log_record_includes_structured_fields(restore_root_logger, capsys):
     assert stamped.utcoffset() == UTC.utcoffset(None)
 
 
+def _load_log_config() -> dict:
+    """The committed --log-config file, parsed."""
+    return json.loads(LOG_CONFIG_PATH.read_text())
+
+
 def test_uvicorn_log_config_is_valid_and_shares_formatter(restore_logging_tree):
     """The uvicorn --log-config file wires uvicorn's loggers through the same
     formatter as the app, and dictConfig accepts it (a malformed file would
     fail the service at boot, not in review)."""
-    config = json.loads(LOG_CONFIG_PATH.read_text())
+    config = _load_log_config()
 
     # Single source of truth: the file builds its formatter from the factory
     # configure_logging() also uses, not a duplicated fmt string.
@@ -107,20 +112,26 @@ def test_uvicorn_log_config_is_valid_and_shares_formatter(restore_logging_tree):
     for name in _UVICORN_LOGGERS:
         assert name in config["loggers"]
         assert config["loggers"][name]["propagate"] is False
-        # Placement matters, not just effect: the strip has to sit on each
-        # *logger* so the record is cleaned at its source. A logger's filters
-        # run only in Logger.handle() for records logged through that logger —
-        # propagation walks ancestors' handlers, never their filters — so
-        # listing it on the parent `uvicorn` alone would never see a
-        # `uvicorn.error` record. Moving it to the stdout handler (or to the
-        # formatter's reserved_attrs) would still pass an output-only
-        # assertion, yet resurrect the field for any handler that serializes
-        # record.__dict__ directly, e.g. OTel's LoggingHandler (#246).
+
+    logging.config.dictConfig(config)  # raises on a malformed config
+
+
+def test_uvicorn_log_config_lists_color_message_filter_on_every_uvicorn_logger():
+    """Placement matters, not just effect: the strip has to sit on each *logger*
+    so the record is cleaned at its source. Moving it to the stdout handler (or
+    to the formatter's reserved_attrs) would still pass an output-only
+    assertion, yet resurrect the field for any handler that serializes
+    record.__dict__ directly, e.g. OTel's LoggingHandler (#246). Listing it on
+    all three is load-bearing — see
+    test_ancestor_filters_do_not_run_for_propagated_records for the executable
+    version of that claim.
+    """
+    config = _load_log_config()
+
+    for name in _UVICORN_LOGGERS:
         assert "strip_color_message" in config["loggers"][name]["filters"]
 
     assert config["filters"]["strip_color_message"]["()"] == "src.core.logging.ColorMessageFilter"
-
-    logging.config.dictConfig(config)  # raises on a malformed config
 
 
 @pytest.mark.parametrize("launch_path", LAUNCH_PATHS)
@@ -222,3 +233,62 @@ def test_filtered_uvicorn_lifecycle_record_serializes_without_color_message():
     assert parsed["message"] == "Started server process [4066888]"
     assert parsed["logger"] == "uvicorn.error"
     assert parsed["level"] == "INFO"
+
+
+# --- The wired tree: dictConfig applied, records logged through real loggers ---
+#
+# The tests above pin the config file's *contents* and the filter class in
+# isolation. These two pin the thing the design actually rests on — that a
+# logger-level `filters` entry strips, and that an ancestor's does not — so the
+# propagation argument is executable rather than a comment (#246).
+
+
+@pytest.mark.parametrize("logger_name", _UVICORN_LOGGERS)
+def test_dictconfig_strips_color_message_from_each_uvicorn_logger(
+    logger_name: str, restore_logging_tree, capsys
+):
+    """A record logged through a configured uvicorn logger serializes clean.
+
+    dictConfig runs in the test body, not a fixture: the stdout handler resolves
+    `ext://sys.stdout` at configure time, and capsys swaps that stream per test
+    phase (same reason configure_logging() stays in the body — see
+    restore_root_logger).
+    """
+    logging.config.dictConfig(_load_log_config())
+
+    logging.getLogger(logger_name).info(
+        "Started server process [%d]",
+        4066888,
+        extra={"color_message": "Started server process [\033[36m%d\033[0m]"},
+    )
+
+    out = capsys.readouterr().out
+    assert "\033" not in out
+    parsed = json.loads(out)
+    assert "color_message" not in parsed
+    assert parsed["logger"] == logger_name
+    assert parsed["message"] == "Started server process [4066888]"
+
+
+def test_ancestor_filters_do_not_run_for_propagated_records(restore_logging_tree, capsys):
+    """Why the filter is listed on all three loggers and not just `uvicorn`.
+
+    Propagation walks ancestors' *handlers*, never their filters: a record
+    logged through an unconfigured descendant reaches `uvicorn`'s stdout handler
+    with `uvicorn`'s filters never having run. So coverage is exhaustive by
+    logger *name* — a future uvicorn logger that carries the extra has to be
+    added to the config file, and a root-level filter would not save it. This
+    test fails the day that stops being true, which is when the enumeration
+    needs revisiting (#246).
+    """
+    logging.config.dictConfig(_load_log_config())
+
+    # Synthetic name: never a real uvicorn logger, so configuring uvicorn's own
+    # loggers can't accidentally make this pass.
+    logging.getLogger("uvicorn.unconfigured_child").info(
+        "boom", extra={"color_message": "\033[36mboom\033[0m"}
+    )
+
+    parsed = json.loads(capsys.readouterr().out)
+    assert parsed["logger"] == "uvicorn.unconfigured_child"
+    assert "color_message" in parsed  # the gap this enumeration accepts

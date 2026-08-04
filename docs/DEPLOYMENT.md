@@ -98,7 +98,8 @@ sudo systemctl daemon-reload && sudo systemctl restart watcher
 Every line in the journal is JSON, uvicorn's included: the unit's `ExecStart`
 passes `--log-config src/core/log_config.json`, which routes uvicorn's own
 `uvicorn`/`uvicorn.access`/`uvicorn.error` loggers (`propagate=False`, plain-text
-handlers by default) through the app's `build_json_formatter()` (#244). Drop the
+handlers by default) through the app's `build_json_formatter()` (#244), and
+strips uvicorn's ANSI `color_message` duplicate from the payload (#246). Drop the
 flag and the `jq` filter above silently skips the access/boot lines, which come
 back as plain text. Same flag is baked into `scripts/dev_server.sh`.
 

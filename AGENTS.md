@@ -469,6 +469,17 @@ launch paths). That dictConfig file carries **no** copy of the format string: it
 formatter definition shared with `configure_logging()`. Both facts are pinned by
 `tests/core/test_logging.py`.
 
+Each of the three uvicorn loggers also lists the `strip_color_message` **filter**
+(`ColorMessageFilter`, `src/core/logging.py`) — uvicorn attaches an ANSI-coloured
+duplicate of every lifecycle line as `extra={"color_message": ...}`, and extras
+reach the JSON payload (#246). It sits on the *loggers*, not the stdout handler
+and not the formatter's `reserved_attrs`: those clean one sink only, so a handler
+that serializes `record.__dict__` directly (OTel's `LoggingHandler`, whose
+reserved list omits `color_message`) would silently resurrect the field. Listing
+it on all three is load-bearing — propagation walks ancestors' *handlers*, never
+their filters, so a filter on the parent `uvicorn` alone never sees a
+`uvicorn.error` record.
+
 **Date & Time:** All UTC. ISO 8601: `YYYY-MM-DDTHH:MM:SS.ffffffZ` (timestamps), `YYYY-MM-DD` (dates).
 
 **General:**

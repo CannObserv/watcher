@@ -1,5 +1,6 @@
 """Regression tests: JSON log records carry timestamp, level, and logger name
-(#238), and uvicorn's own loggers share the app's JSON formatter (#244).
+(#238), uvicorn's own loggers share the app's JSON formatter (#244), and
+uvicorn's `color_message` extra never reaches the payload (#246).
 """
 
 import json
@@ -11,7 +12,12 @@ from pathlib import Path
 
 import pytest
 
-from src.core.logging import build_json_formatter, configure_logging, get_logger
+from src.core.logging import (
+    ColorMessageFilter,
+    build_json_formatter,
+    configure_logging,
+    get_logger,
+)
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 LOG_CONFIG_RELPATH = "src/core/log_config.json"
@@ -21,10 +27,12 @@ LOG_CONFIG_PATH = REPO_ROOT / LOG_CONFIG_RELPATH
 # must pass --log-config; the file alone is inert without the flag.
 LAUNCH_PATHS = ("deploy/watcher.service", "scripts/dev_server.sh")
 
-# Every logger dictConfig rewrites: the three uvicorn ships with
-# propagate=False and its own plain-text handlers — the ones --log-config has
-# to reach — plus root ("") for the app's own records.
-_DICTCONFIG_MANAGED_LOGGERS = ("", "uvicorn", "uvicorn.error", "uvicorn.access")
+# The three loggers uvicorn ships with propagate=False and its own plain-text
+# handlers — the ones --log-config has to reach.
+_UVICORN_LOGGERS = ("uvicorn", "uvicorn.error", "uvicorn.access")
+# Every logger dictConfig rewrites: those three plus root ("") for the app's
+# own records.
+_DICTCONFIG_MANAGED_LOGGERS = ("", *_UVICORN_LOGGERS)
 
 
 @pytest.fixture
@@ -48,17 +56,24 @@ def restore_root_logger() -> Iterator[None]:
 def restore_logging_tree() -> Iterator[None]:
     """Put root and uvicorn's loggers back after a dictConfig application.
 
-    dictConfig rewrites handlers, propagate, AND level on every logger it
-    names; leaking that into later tests would be an order-dependent flake.
+    dictConfig rewrites handlers, propagate, level AND filters on every logger
+    it names; leaking any of them into later tests would be an order-dependent
+    flake (the strip_color_message filter would keep mutating records long after
+    this test — #246).
     """
     saved = {}
     for name in _DICTCONFIG_MANAGED_LOGGERS:
         lg = logging.getLogger(name)
-        saved[name] = (lg.handlers[:], lg.propagate, lg.level)
+        saved[name] = (lg.handlers[:], lg.propagate, lg.level, lg.filters[:])
     yield
-    for name, (handlers, propagate, level) in saved.items():
+    for name, (handlers, propagate, level, filters) in saved.items():
         lg = logging.getLogger(name)
-        lg.handlers, lg.propagate, lg.level = handlers, propagate, level
+        lg.handlers, lg.propagate, lg.level, lg.filters = (
+            handlers,
+            propagate,
+            level,
+            filters,
+        )
 
 
 def test_log_record_includes_structured_fields(restore_root_logger, capsys):
@@ -89,9 +104,21 @@ def test_uvicorn_log_config_is_valid_and_shares_formatter(restore_logging_tree):
         for f in config["formatters"].values()
     )
     # All three uvicorn loggers must be present, else they keep the plain default.
-    for name in ("uvicorn", "uvicorn.error", "uvicorn.access"):
+    for name in _UVICORN_LOGGERS:
         assert name in config["loggers"]
         assert config["loggers"][name]["propagate"] is False
+        # Placement matters, not just effect: the strip has to sit on each
+        # *logger* so the record is cleaned at its source. A logger's filters
+        # run only in Logger.handle() for records logged through that logger —
+        # propagation walks ancestors' handlers, never their filters — so
+        # listing it on the parent `uvicorn` alone would never see a
+        # `uvicorn.error` record. Moving it to the stdout handler (or to the
+        # formatter's reserved_attrs) would still pass an output-only
+        # assertion, yet resurrect the field for any handler that serializes
+        # record.__dict__ directly, e.g. OTel's LoggingHandler (#246).
+        assert "strip_color_message" in config["loggers"][name]["filters"]
+
+    assert config["filters"]["strip_color_message"]["()"] == "src.core.logging.ColorMessageFilter"
 
     logging.config.dictConfig(config)  # raises on a malformed config
 
@@ -138,3 +165,60 @@ def test_shared_formatter_renders_uvicorn_access_record():
     assert parsed["level"] == "INFO"
     assert parsed["message"] == '127.0.0.1:0 - "GET /health HTTP/1.1" 200'
     assert "timestamp" in parsed
+
+
+def _uvicorn_lifecycle_record() -> logging.LogRecord:
+    """A `uvicorn.error` startup line as uvicorn emits it: the plain message
+    plus an ANSI-coloured duplicate attached via extra= for uvicorn's own
+    colour-aware formatter (server.py / config.py / the --reload supervisors).
+    """
+    record = logging.LogRecord(
+        name="uvicorn.error",
+        level=logging.INFO,
+        pathname=__file__,
+        lineno=1,
+        msg="Started server process [%d]",
+        args=(4066888,),
+        exc_info=None,
+    )
+    record.color_message = "Started server process [\033[36m%d\033[0m]"
+    return record
+
+
+def test_color_message_filter_strips_the_extra_from_the_record():
+    """The strip mutates the record itself, so it holds for every sink — not
+    just for a formatter that happens to omit the field (#246)."""
+    record = _uvicorn_lifecycle_record()
+    assert ColorMessageFilter().filter(record) is True
+    assert not hasattr(record, "color_message")
+    assert "color_message" not in record.__dict__
+
+
+def test_color_message_filter_keeps_records_without_the_extra():
+    """Never drops a record: access lines pass no extra= at all."""
+    record = logging.LogRecord(
+        name="uvicorn.access",
+        level=logging.INFO,
+        pathname=__file__,
+        lineno=1,
+        msg="hello",
+        args=(),
+        exc_info=None,
+    )
+    assert ColorMessageFilter().filter(record) is True
+    assert record.getMessage() == "hello"
+
+
+def test_filtered_uvicorn_lifecycle_record_serializes_without_color_message():
+    """End state: the JSON payload carries the four contract keys and no ANSI
+    bytes — the polluted duplicate is gone (#246)."""
+    record = _uvicorn_lifecycle_record()
+    ColorMessageFilter().filter(record)
+
+    rendered = build_json_formatter().format(record)
+    assert "\033" not in rendered
+    parsed = json.loads(rendered)
+    assert "color_message" not in parsed
+    assert parsed["message"] == "Started server process [4066888]"
+    assert parsed["logger"] == "uvicorn.error"
+    assert parsed["level"] == "INFO"

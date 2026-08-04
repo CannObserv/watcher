@@ -34,6 +34,9 @@ Environment=WATCHER_ALLOW_PRODUCTION_DB=1
 # uvicorn.error — all propagate=False with plain-text handlers by default)
 # through the same JSON formatter as the app, so journald gets one format
 # instead of plain-text access lines interleaved with JSON records (#244).
+# The path is relative to WorkingDirectory= above (kept relative to match
+# scripts/dev_server.sh and the docs) — running this line from another
+# directory by hand fails at boot with a missing-file error.
 ExecStart=/usr/local/bin/uv run uvicorn src.api.main:app --host 0.0.0.0 --port 8000 --log-config src/core/log_config.json
 Restart=on-failure
 RestartSec=5

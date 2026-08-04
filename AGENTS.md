@@ -449,11 +449,13 @@ logger = get_logger(__name__)
 ```
 Entry points only: call `configure_logging()` once.
 
-Every record serializes as JSON with four keys — `timestamp` (ISO 8601 UTC), `level`,
-`logger`, `message` — plus `exc_info` when logging an exception. That key set is a
-contract (it matches structlog's defaults, so a future structlog/OTel migration won't
-churn log consumers) and is pinned by `tests/core/test_logging.py` (#238); don't rename
-or drop keys without updating both.
+Every record serializes as JSON with **at least** four keys — `timestamp` (ISO 8601
+UTC), `level`, `logger`, `message` — plus `exc_info` when logging an exception and
+any extras the emitting library attaches (procrastinate adds `action`/`job`/…;
+uvicorn's own lines add `color_message`, which carries ANSI escapes). Those four are
+the contract — a floor, not an exhaustive list (the set matches structlog's defaults,
+so a future structlog/OTel migration won't churn log consumers) — and are pinned by
+`tests/core/test_logging.py` (#238); don't rename or drop keys without updating both.
 
 **uvicorn's own loggers need `--log-config` (#244).** `uvicorn`, `uvicorn.access`,
 and `uvicorn.error` ship with `propagate=False` and their own plain-text handlers,

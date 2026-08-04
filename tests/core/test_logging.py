@@ -13,11 +13,18 @@ import pytest
 
 from src.core.logging import build_json_formatter, configure_logging, get_logger
 
-LOG_CONFIG_PATH = Path("src/core/log_config.json")
+REPO_ROOT = Path(__file__).resolve().parents[2]
+LOG_CONFIG_RELPATH = "src/core/log_config.json"
+LOG_CONFIG_PATH = REPO_ROOT / LOG_CONFIG_RELPATH
 
-# Root plus the three loggers uvicorn ships with propagate=False and its own
-# plain-text handlers — the ones --log-config has to reach.
-_UVICORN_LOGGER_NAMES = ("", "uvicorn", "uvicorn.error", "uvicorn.access")
+# The two sanctioned uvicorn launch paths (AGENTS.md → Server Lifecycle). Both
+# must pass --log-config; the file alone is inert without the flag.
+LAUNCH_PATHS = ("deploy/watcher.service", "scripts/dev_server.sh")
+
+# Every logger dictConfig rewrites: the three uvicorn ships with
+# propagate=False and its own plain-text handlers — the ones --log-config has
+# to reach — plus root ("") for the app's own records.
+_DICTCONFIG_MANAGED_LOGGERS = ("", "uvicorn", "uvicorn.error", "uvicorn.access")
 
 
 @pytest.fixture
@@ -44,10 +51,10 @@ def restore_logging_tree() -> Iterator[None]:
     dictConfig rewrites handlers, propagate, AND level on every logger it
     names; leaking that into later tests would be an order-dependent flake.
     """
-    saved = {
-        name: (lg.handlers[:], lg.propagate, lg.level)
-        for name, lg in ((n, logging.getLogger(n)) for n in _UVICORN_LOGGER_NAMES)
-    }
+    saved = {}
+    for name in _DICTCONFIG_MANAGED_LOGGERS:
+        lg = logging.getLogger(name)
+        saved[name] = (lg.handlers[:], lg.propagate, lg.level)
     yield
     for name, (handlers, propagate, level) in saved.items():
         lg = logging.getLogger(name)
@@ -87,6 +94,27 @@ def test_uvicorn_log_config_is_valid_and_shares_formatter(restore_logging_tree):
         assert config["loggers"][name]["propagate"] is False
 
     logging.config.dictConfig(config)  # raises on a malformed config
+
+
+@pytest.mark.parametrize("launch_path", LAUNCH_PATHS)
+def test_launch_paths_pass_log_config(launch_path: str):
+    """Both sanctioned uvicorn launch paths must pass --log-config.
+
+    The dictConfig file is inert without the flag: uvicorn keeps its own
+    plain-text handlers and journald goes back to mixed formats (#244). The
+    other tests here pin the file's *contents*, so only this one fails when the
+    flag is dropped from a launch command — the same drift class
+    tests/deploy/test_installed_unit_matches_repo.py guards for the unit as a
+    whole (#233).
+    """
+    text = (REPO_ROOT / launch_path).read_text()
+    assert f"--log-config {LOG_CONFIG_RELPATH}" in text, (
+        f"{launch_path} launches uvicorn without --log-config {LOG_CONFIG_RELPATH}; "
+        "uvicorn's own loggers would emit plain text alongside the JSON records."
+    )
+    # The flag is CWD-relative by design (see the comment at each call site), so
+    # the path must resolve from the repo root both launch paths run from.
+    assert LOG_CONFIG_PATH.is_file()
 
 
 def test_shared_formatter_renders_uvicorn_access_record():

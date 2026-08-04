@@ -451,8 +451,8 @@ Entry points only: call `configure_logging()` once.
 
 Every record serializes as JSON with **at least** four keys — `timestamp` (ISO 8601
 UTC), `level`, `logger`, `message` — plus `exc_info` when logging an exception and
-any extras the emitting library attaches (procrastinate adds `action`/`job`/…;
-uvicorn's own lines add `color_message`, which carries ANSI escapes). Those four are
+any extras the emitting library attaches (procrastinate adds `action`/`job`/…, and
+uvicorn's own lines carry extras of their own). Those four are
 the contract — a floor, not an exhaustive list (the set matches structlog's defaults,
 so a future structlog/OTel migration won't churn log consumers) — and are pinned by
 `tests/core/test_logging.py` (#238); don't rename or drop keys without updating both.

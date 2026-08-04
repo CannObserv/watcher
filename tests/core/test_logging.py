@@ -112,8 +112,12 @@ def test_launch_paths_pass_log_config(launch_path: str):
         f"{launch_path} launches uvicorn without --log-config {LOG_CONFIG_RELPATH}; "
         "uvicorn's own loggers would emit plain text alongside the JSON records."
     )
-    # The flag is CWD-relative by design (see the comment at each call site), so
-    # the path must resolve from the repo root both launch paths run from.
+
+
+def test_log_config_resolves_from_the_repo_root():
+    """The --log-config flag is CWD-relative by design (see the comment at each
+    call site), so the path must resolve from the repo root — the directory
+    both launch paths run uvicorn from."""
     assert LOG_CONFIG_PATH.is_file()
 
 

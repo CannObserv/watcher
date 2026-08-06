@@ -1,4 +1,4 @@
-"""Domain rate limiter config API endpoints."""
+"""Domain config API endpoints — politeness floor, cadence, lifecycle."""
 
 from datetime import UTC, datetime
 
@@ -154,7 +154,7 @@ async def delete_domain(name: str, session: AsyncSession = Depends(get_db_sessio
 
 @router.post("/{name}/archive", response_model=DomainResponse)
 async def archive_domain(name: str, session: AsyncSession = Depends(get_db_session)):
-    """Archive a domain — excludes it from rate-limiter sync."""
+    """Archive a domain — suspends checks for every WatchedItem on it."""
     domain = await _get_domain_or_404(name, session)
     if domain.archived_at is None:
         domain.archived_at = datetime.now(UTC)

@@ -255,8 +255,9 @@ Live smoke after deploy against one sacrificial WatchedItem before the flag wide
      hydration, and the 429 `_persist_backoff` / `_maybe_decay_backoff` helpers — deleted.
      Per-host pacing is wholly Replicator's, fed by #245.
    * `HttpFetcher` + the `Fetcher` protocol + `ServiceRegistry`'s fetcher slot and
-     `aclose_fetcher` — deleted. `src/core/fetch.py` is now just `WATCHER_USER_AGENT`,
-     which still rides out on every command's headers for byte-continuity.
+     `aclose_fetcher` — deleted, and with them `src/core/fetch.py` itself;
+     `WATCHER_USER_AGENT` moved into `src/core/fetch_commands.py` beside its only
+     consumer and still rides out on every command's headers for byte-continuity.
    * `resolve_watch_target` is probe-free and synchronous; the `probe_fn` dependency
      came off the watched-item create/edit routes. `probe_url` survives for two
      *operator-initiated* one-shots: domain create and `POST /api/v1/probe`.
@@ -267,8 +268,11 @@ Live smoke after deploy against one sacrificial WatchedItem before the flag wide
    * AGENTS.md's single-process rationale is rewritten: the constraint is now the
      single-member `content.blobs` consumer group, not the retired limiter.
 
-   **Left standing deliberately:** `Domain.current_interval`, `max_concurrency`,
-   `decay_window`, `last_request_at` are inert columns — no writer remains, but dropping
-   them is a destructive migration plus an API-schema break (`DomainResponse` exposes
-   three of them), so it is its own change. `min_interval` stays fully live: it *is* the
+   **Left standing deliberately:** `Domain.current_interval`, `max_concurrency` and
+   `decay_window` are inert columns — nothing *reads* them for behavior, but creates still
+   initialise them and `DomainPatch` still accepts them, so the drop is a destructive
+   migration *plus* the removal of those write sites and three `DomainResponse` fields.
+   (`last_request_at` alone has no writer left.) They were pulled off the domain detail
+   page in the round-3 review: an editable knob that saves a value and changes nothing is
+   worse than a column nobody sees. `min_interval` stays fully live — it *is* the
    published fetch policy.

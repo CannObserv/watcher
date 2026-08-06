@@ -48,7 +48,7 @@ async def partial_system_health(
     request: Request,
     session: AsyncSession = Depends(get_db_session),
 ):
-    """HTMX partial: queue health and rate limiter."""
+    """HTMX partial: queue health and per-domain fetch policy."""
     queue = await get_queue_health(session)
     domains = await get_domains_with_watched_item_counts(session)
     return templates.TemplateResponse(

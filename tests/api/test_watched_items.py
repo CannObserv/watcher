@@ -1219,6 +1219,59 @@ class TestCheckNow:
         assert response.status_code == 422
         assert "url" in response.json()["detail"].lower()
 
+    async def test_409_when_a_command_is_already_in_flight(self, client, db_session):
+        """CR-16: the issue path's open-command gate is a pre-flight too.
+
+        Post-cutover this is the *common* silent no-op: without the guard the
+        operator gets 202 plus a check_requested audit row while the task
+        short-circuits on the gate and nothing reaches the origin.
+        """
+        from datetime import UTC, datetime
+
+        from src.core.fetch_commands import create_fetch_command
+
+        wi = await _make_watched_item(db_session, name="InFlight")
+        wi.effective_url = "https://example.com"
+        await create_fetch_command(db_session, wi, now=datetime.now(UTC))
+        await db_session.commit()
+
+        response = await client.post(f"/api/v1/watched-items/{wi.id}/check-now")
+
+        assert response.status_code == 409
+        assert "in flight" in response.json()["detail"].lower()
+
+    async def test_409_when_domain_suspended(self, client, db_session):
+        """CR-16: parity with pause — the task skips a suspended item too."""
+        wi = await _make_watched_item(db_session, name="Suspended")
+        wi.effective_url = "https://example.com"
+        wi.domain_suspended = True
+        await db_session.commit()
+
+        response = await client.post(f"/api/v1/watched-items/{wi.id}/check-now")
+
+        assert response.status_code == 409
+        assert "suspended" in response.json()["detail"].lower()
+
+    async def test_202_once_the_command_settles(self, client, db_session):
+        """A settled (non-open) command must not keep blocking check-now."""
+        from datetime import UTC, datetime
+        from unittest.mock import AsyncMock, patch
+
+        from src.core.fetch_commands import create_fetch_command
+        from src.core.models.fetch_command import FetchCommandStatus
+
+        wi = await _make_watched_item(db_session, name="Settled")
+        wi.effective_url = "https://example.com"
+        row = await create_fetch_command(db_session, wi, now=datetime.now(UTC))
+        row.status = FetchCommandStatus.SUCCEEDED
+        await db_session.commit()
+
+        with patch("src.api.routes.watched_items.check_watched_item") as mock_task:
+            mock_task.configure.return_value.defer_async = AsyncMock()
+            response = await client.post(f"/api/v1/watched-items/{wi.id}/check-now")
+
+        assert response.status_code == 202
+
     async def test_check_now_returns_202(self, client, db_session):
         """#187: check-now on an active WatchedItem returns 202 Accepted."""
         from unittest.mock import AsyncMock, patch

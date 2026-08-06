@@ -20,8 +20,8 @@ from co_core.pure.adapters.bus import streams
 from co_core.pure.adapters.bus.envelope import from_wire
 from co_core.pure.models.changes import ContentFetchCommand
 
-from src.core.fetch import WATCHER_USER_AGENT
 from src.core.fetch_commands import (
+    WATCHER_USER_AGENT,
     create_fetch_command,
     publish_fetch_command,
 )

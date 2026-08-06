@@ -19,6 +19,7 @@ from src.api.schemas.watched_item import (
     WatchedItemResponse,
 )
 from src.core.domains import domain_name_for_url, ensure_domain_and_resolve_suspension
+from src.core.fetch_commands import has_open_command
 from src.core.logging import get_logger
 from src.core.models.audit_log import EventType, audit
 from src.core.models.change_revision import ChangeRevision
@@ -354,10 +355,16 @@ async def mark_reviewed(watched_item_id: str, session: AsyncSession = Depends(ge
 async def check_now(watched_item_id: str, session: AsyncSession = Depends(get_db_session)):
     """Enqueue an immediate ``check_watched_item`` task for a WatchedItem.
 
-    Pre-flight guards:
+    Pre-flight guards mirror **every** short-circuit in the task, so a request
+    that cannot do anything is rejected up front instead of returning 202 over
+    a silent no-op (and writing a check_requested audit row that never happened):
+
     - 409 if the WatchedItem is archived.
-    - 409 if the WatchedItem is paused (``is_active=False``) — the task would
-      short-circuit, so reject up front rather than enqueue a silent no-op.
+    - 409 if the WatchedItem is paused (``is_active=False``).
+    - 409 if its domain is suspended.
+    - 409 if a fetch command is already open — the issue path's one-command gate
+      (#241). Post-cutover this is the likeliest of the four to be hit, since a
+      command stays open until its fact returns or the reaper expires it.
     - 422 if ``effective_url`` is empty (nothing to fetch).
     """
     wi = await _get_or_404(session, watched_item_id)
@@ -368,8 +375,16 @@ async def check_now(watched_item_id: str, session: AsyncSession = Depends(get_db
     if not wi.is_active:
         raise HTTPException(status_code=409, detail="WatchedItem is paused")
 
+    if wi.domain_suspended:
+        raise HTTPException(status_code=409, detail="WatchedItem's domain is suspended")
+
     if not wi.effective_url:
         raise HTTPException(status_code=422, detail="WatchedItem has no effective url")
+
+    if await has_open_command(session, wi.id):
+        raise HTTPException(
+            status_code=409, detail="A fetch command for this WatchedItem is already in flight"
+        )
 
     await check_watched_item.configure().defer_async(watched_item_id=str(wi.id))
     audit(session, EventType.WATCHED_ITEM_CHECK_REQUESTED, watched_item_id=str(wi.id), source="api")

@@ -581,9 +581,10 @@ async def watched_item_check_now(
 ):
     """Enqueue an immediate check for a WatchedItem (delegates to the API route).
 
-    The API enforces the pre-flight guards (409 archived/paused, 422 empty
-    effective_url). For HTMX, success and guard failures surface as an OOB
-    flash; non-HTMX clients get a redirect back to the detail page.
+    The API enforces the pre-flight guards (409 archived / paused / domain
+    suspended / command already in flight, 422 empty effective_url). For HTMX,
+    success and guard failures surface as an OOB flash; non-HTMX clients get a
+    redirect back to the detail page.
     """
     hx = is_htmx(request)
     try:

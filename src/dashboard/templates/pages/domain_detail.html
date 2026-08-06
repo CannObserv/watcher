@@ -17,13 +17,15 @@
     {% include "partials/domain_status_toggle.html" %}
 
     {# Default Interval (#205, #208) — domain default check cadence; the Domain
-       tier of schedule resolution. Distinct from Min Interval (rate-limiter
-       floor). Sits 2nd, directly below Status. #}
+       tier of schedule resolution. Distinct from Min Interval, the politeness
+       floor published to Replicator. Sits 2nd, directly below Status. #}
     {% include "partials/domain_cadence_field.html" %}
 
+    {# max_concurrency / decay_window were removed with the in-process rate
+       limiter (#241 step 5): nothing reads them, so an editable knob here
+       would save a value and change nothing. The columns survive until their
+       drop migration; the API still reports them on DomainResponse. #}
     {{ domain_field(field_contexts["min_interval"]) }}
-    {{ domain_field(field_contexts["max_concurrency"]) }}
-    {{ domain_field(field_contexts["decay_window"]) }}
     {{ domain_field(field_contexts["notes"]) }}
   </div>
 </section>
@@ -68,12 +70,12 @@
   <div class="flex items-center justify-between">
     <div>
       <p class="text-sm font-medium text-gray-900 dark:text-white">Archive this domain</p>
-      <p class="text-xs text-gray-500 dark:text-gray-400">Excludes from rate-limiter sync. Can be restored.</p>
+      <p class="text-xs text-gray-500 dark:text-gray-400">Suspends checks for every watched item on this domain. Can be restored.</p>
     </div>
     <form method="post" action="/domains/{{ domain.name }}/archive">
       <button type="submit"
         hx-post="/domains/{{ domain.name }}/archive"
-        hx-confirm="Archive {{ domain.name }}? It will be excluded from rate limiting."
+        hx-confirm="Archive {{ domain.name }}? Checks will stop for every watched item on this domain."
         hx-target="body"
         hx-push-url="true"
         class="btn btn-danger-outline">
@@ -86,7 +88,7 @@
     <div class="flex items-center justify-between">
       <div>
         <p class="text-sm font-medium text-gray-900 dark:text-white">Restore this domain</p>
-        <p class="text-xs text-gray-500 dark:text-gray-400">Re-enable rate-limiter sync.</p>
+        <p class="text-xs text-gray-500 dark:text-gray-400">Resume checks for this domain's watched items.</p>
       </div>
       <form method="post" action="/domains/{{ domain.name }}/restore">
         <button type="submit"

@@ -7,8 +7,7 @@ last_checked_at to determine whether a cycle is due.
 Since the Phase-4 cutover (#241) ``check_watched_item`` issues a
 ``content.fetch`` command rather than fetching: Replicator performs the request
 and the resulting fact drives the apply path, which is what actually stamps
-health and ``last_checked_at``. The ``_record_check_*`` helpers below are shared
-with that apply path so both leave identical bookkeeping.
+health and ``last_checked_at`` (``src/workers/fetch_commands.py``).
 """
 
 from datetime import UTC, datetime
@@ -28,97 +27,12 @@ from src.core.fetch_commands import (
 from src.core.logging import get_logger
 from src.core.models.audit_log import EventType, audit
 from src.core.models.temporal_profile import TemporalProfile
-from src.core.models.watched_item import WatchedItem, WatchHealthStatus
-from src.core.notifications.events import WatchEvent, WatchEventType
+from src.core.models.watched_item import WatchedItem
 from src.core.scheduling.cadence import compute_next_check, evaluate_post_actions, parse_interval
 from src.core.scheduling.resolution import resolved_schedule_config
-from src.core.utils import watched_item_event_base_metadata
 from src.workers import bp
-from src.workers.notify import dispatch_event_notifications
 
 logger = get_logger(__name__)
-
-
-async def _record_check_failure(
-    session: AsyncSession,
-    watched_item: WatchedItem,
-    *,
-    now: datetime,
-    url: str,
-    audit_event: str,
-    audit_kwargs: dict,
-    error_metadata: dict,
-) -> None:
-    """Record a failed check: ERROR health + stamped ``last_checked_at`` + audit,
-    and dispatch ``WATCH_ERROR`` once on the OK→ERROR transition.
-
-    Shared by the fetch-failure and extraction-failure paths so both surface a
-    health signal and a fresh ``last_checked_at`` — the latter stops a persistent
-    failure from being re-enqueued every ``schedule_tick`` (#168).
-    """
-    audit(session, audit_event, watched_item_id=str(watched_item.id), **audit_kwargs)
-    previous_health = watched_item.health_status
-    watched_item.health_status = WatchHealthStatus.ERROR
-    watched_item.last_checked_at = now
-    await session.commit()
-
-    if previous_health != WatchHealthStatus.ERROR:
-        error_event = WatchEvent(
-            event_type=WatchEventType.WATCH_ERROR,
-            watched_item_id=str(watched_item.id),
-            item_name=watched_item.name,
-            item_url=watched_item.effective_url or url,
-            occurred_at=now,
-            metadata={**error_metadata, **watched_item_event_base_metadata(watched_item)},
-        )
-        await dispatch_event_notifications(session=session, event=error_event)
-        await session.commit()
-
-
-async def _record_check_success(
-    session: AsyncSession,
-    watched_item: WatchedItem,
-    result,
-    *,
-    now: datetime,
-    url: str,
-) -> None:
-    """Record a successful check: audit trail + OK health + ``last_checked_at``,
-    and dispatch ``WATCH_RECOVERED`` once on the ERROR→OK transition.
-
-    Shared by the Phase-4 apply paths (``apply_fetch_blob`` /
-    ``apply_fetch_failure``) so every outcome leaves identical bookkeeping — the
-    dashboard checks_today stat and WatchedItem activity read these events. A
-    snapshot event marks a baseline/changed cycle (a ChangeRevision was
-    written); otherwise the content was unchanged.
-    """
-    snapshot = result.baseline_established or result.changed
-    audit(
-        session,
-        EventType.CHECK_SNAPSHOT_CREATED if snapshot else EventType.CHECK_NO_CHANGE,
-        watched_item_id=str(watched_item.id),
-        changed=result.changed,
-        baseline=result.baseline_established,
-    )
-
-    previous_health = watched_item.health_status
-    watched_item.health_status = WatchHealthStatus.OK
-    watched_item.last_checked_at = now
-    await session.commit()
-
-    # Recovery: dispatch WATCH_RECOVERED once when the WatchedItem
-    # transitions ERROR → OK (#191).
-    if previous_health == WatchHealthStatus.ERROR:
-        recovery_event = WatchEvent(
-            event_type=WatchEventType.WATCH_RECOVERED,
-            watched_item_id=str(watched_item.id),
-            item_name=watched_item.name,
-            item_url=watched_item.effective_url or url,
-            occurred_at=now,
-            metadata=watched_item_event_base_metadata(watched_item),
-        )
-        await dispatch_event_notifications(session=session, event=recovery_event)
-        await session.commit()
 
 
 async def _issue_fetch_command(session: AsyncSession, watched_item, bus_client) -> dict:
@@ -126,7 +40,7 @@ async def _issue_fetch_command(session: AsyncSession, watched_item, bus_client) 
 
     Persist-commit-publish, in that order: a crash after the commit leaves a
     ``pending_publish`` row the every-minute sweep republishes under the same
-    ``command_id`` (idempotent by Replicator's dedupe). No rate-limiter sleep —
+    ``command_id`` (idempotent by Replicator's dedupe). No politeness sleep —
     per-host pacing is Replicator's since #245 — and no ``last_checked_at``
     stamp: the check has not happened yet.
 

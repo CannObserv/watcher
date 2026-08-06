@@ -34,12 +34,17 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from ulid import ULID
 
-from src.core.fetch import WATCHER_USER_AGENT
 from src.core.logging import get_logger
 from src.core.models.fetch_command import OPEN_STATUSES, FetchCommand, FetchCommandStatus
 from src.core.models.watched_item import WatchedItem
 
 logger = get_logger(__name__)
+
+# Watcher's User-Agent, sent on every command's ``headers`` (replicator#11).
+# **Load-bearing for change detection:** fingerprints are UA-sensitive, so this
+# value must keep matching what the pre-cutover inline fetcher sent, or every
+# watched item reports a spurious change on its next check. Do not "tidy" it.
+WATCHER_USER_AGENT = "watcher/0.1.0"
 
 
 async def create_fetch_command(

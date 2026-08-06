@@ -1,4 +1,4 @@
-"""Domain model — per-domain rate-limiter config and default check cadence."""
+"""Domain model — per-domain politeness floor and default check cadence."""
 
 from datetime import datetime
 
@@ -25,11 +25,14 @@ class Domain(Base, TimestampMixin):
     schedule_config interval string), the Domain tier of the 3-tier schedule
     resolution (#205).
 
-    ``current_interval``, ``max_concurrency``, ``last_request_at`` and
-    ``decay_window`` are **inert** since #241 step 5 retired the in-process
-    ``DomainRateLimiter``: nothing writes them any more and adaptive backoff is
-    Replicator's (replicator#25). They are kept as columns so the retirement did
-    not need a destructive migration; dropping them is tracked separately.
+    ``current_interval``, ``max_concurrency`` and ``decay_window`` are **inert**
+    since #241 step 5 retired the in-process ``DomainRateLimiter``: nothing
+    *reads* them for behavior any more, though creates still initialise them and
+    the API still accepts and echoes them (adaptive backoff is Replicator's —
+    replicator#25). ``last_request_at`` has no writer left at all. They are kept
+    as columns so the retirement needed no destructive migration; the drop must
+    also remove the create/PATCH write sites in ``src/api/routes/domains.py``
+    and the ``DomainResponse`` fields.
     """
 
     __tablename__ = "domains"
@@ -54,8 +57,8 @@ class Domain(Base, TimestampMixin):
     notes: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
     # Operator's desired check *cadence* for items on this domain — a
     # schedule_config interval string ({"interval": "6h"}), the Domain tier of the
-    # 3-tier resolution chain (#205). Distinct from min_interval/current_interval,
-    # which are the request-level rate-limiter floor/backoff. none_as_null=True so
+    # 3-tier resolution chain (#205). Distinct from min_interval, the request-level
+    # politeness floor published to Replicator (#245). none_as_null=True so
     # an unset cadence persists as SQL NULL, not the JSONB 'null' literal (#198).
     default_schedule_config: Mapped[dict | None] = mapped_column(
         JSONB(none_as_null=True), nullable=True, default=None

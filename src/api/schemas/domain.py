@@ -12,11 +12,16 @@ class DomainPatch(BaseModel):
     """Schema for creating or updating a domain config (upsert via PATCH)."""
 
     min_interval: float | None = Field(None, ge=0)
+    # Retained for API compatibility but **inert** since #241 step 5 retired the
+    # in-process rate limiter: these are stored and echoed back, and nothing
+    # reads them. They are not offered on the dashboard for that reason. Drop
+    # them together with their columns.
     max_concurrency: int | None = Field(None, ge=1)
     decay_window: float | None = Field(None, ge=1)
     notes: str | None = None
     # Operator's desired check cadence for items on the domain (#205); the Domain
-    # tier of schedule resolution. Distinct from min_interval (rate-limiter floor).
+    # tier of schedule resolution. Distinct from min_interval, the politeness floor
+    # published to Replicator (#245).
     default_schedule_config: dict | None = None
 
     @field_validator("default_schedule_config")

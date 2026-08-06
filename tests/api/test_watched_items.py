@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock
 import pytest
 from archiver_client import NotFound, ServerError
 from sqlalchemy import select, text
+from ulid import ULID
 
 from src.core.models.audit_log import AuditLog, EventType
 from tests.conftest import make_info_item
@@ -1252,3 +1253,23 @@ class TestCheckNow:
         entries = result.scalars().all()
         assert len(entries) == 1
         assert entries[0].payload["watched_item_id"] == str(wi.id)
+
+
+class TestBusModeAsyncCreate:
+    """#241 step 3: URL-first create in bus fetch mode defers the probe."""
+
+    async def test_create_starts_probing_without_a_probe(self, client, db_session, monkeypatch):
+        from src.core.fetch_commands import FETCH_MODE_ENV
+        from src.core.models.watched_item import WatchedItem, WatchHealthStatus
+
+        monkeypatch.setenv(FETCH_MODE_ENV, "bus")
+        response = await client.post(
+            "/api/v1/watched-items", json={"url": "https://async.example/page"}
+        )
+        assert response.status_code == 201
+        data = response.json()
+        assert data["effective_url"] == "https://async.example/page"
+        assert data["domain_name"] == "async.example"
+
+        wi = await db_session.get(WatchedItem, ULID.from_str(data["id"]))
+        assert wi.health_status == WatchHealthStatus.PROBING

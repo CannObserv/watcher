@@ -17,6 +17,7 @@ from sqlalchemy import select
 import src.workers.fetch_commands as fc_mod
 from src.core.fetch_commands import create_fetch_command
 from src.core.models.audit_log import AuditLog, EventType
+from src.core.models.domain import Domain
 from src.core.models.fetch_command import FetchCommand, FetchCommandStatus
 from src.core.models.watched_item import WatchHealthStatus
 from src.core.registry import ServiceRegistry
@@ -291,3 +292,58 @@ class TestReapFetchCommands:
         assert result == {"reissued": 0, "capped": 0}
         assert fresh.status == FetchCommandStatus.IN_FLIGHT
         assert facted.status == FetchCommandStatus.IN_FLIGHT
+
+
+class TestProbingResolution:
+    """#241 step 3: a PROBING item's first fact is its probe."""
+
+    async def test_final_url_resolves_probing_item(self, db_session, monkeypatch, tmp_path):
+        wi, row = await _row_with_fact(
+            db_session, tmp_path, final_url="https://www.lcb.wa.gov/notices"
+        )
+        wi.health_status = WatchHealthStatus.PROBING
+        await db_session.flush()
+        _wire(db_session, monkeypatch)
+
+        result = await apply_fetch_blob(row.command_id, registry=ServiceRegistry())
+
+        assert result["applied"] is True
+        assert wi.effective_url == "https://www.lcb.wa.gov/notices"
+        assert wi.domain_name == "www.lcb.wa.gov"
+        domain = (
+            await db_session.execute(select(Domain).where(Domain.name == "www.lcb.wa.gov"))
+        ).scalar_one_or_none()
+        assert domain is not None  # ensure_domain upserted the new host
+        assert wi.health_status == WatchHealthStatus.OK
+
+    async def test_probing_without_redirect_just_clears_to_ok(
+        self, db_session, monkeypatch, tmp_path
+    ):
+        wi, row = await _row_with_fact(db_session, tmp_path, final_url=None)
+        original_url = wi.effective_url
+        original_domain = wi.domain_name
+        wi.health_status = WatchHealthStatus.PROBING
+        await db_session.flush()
+        _wire(db_session, monkeypatch)
+
+        await apply_fetch_blob(row.command_id, registry=ServiceRegistry())
+
+        assert wi.effective_url == original_url
+        assert wi.domain_name == original_domain
+        assert wi.health_status == WatchHealthStatus.OK
+
+    async def test_steady_state_redirect_does_not_move_the_item(
+        self, db_session, monkeypatch, tmp_path
+    ):
+        # Non-PROBING items keep the audit-only behaviour: Archiver stays
+        # authoritative for effective_url after the probe phase.
+        wi, row = await _row_with_fact(
+            db_session, tmp_path, final_url="https://elsewhere.example/moved"
+        )
+        original_url = wi.effective_url
+        _wire(db_session, monkeypatch)
+
+        await apply_fetch_blob(row.command_id, registry=ServiceRegistry())
+
+        assert wi.effective_url == original_url
+        assert len(await _audit_events(db_session, EventType.CHECK_REDIRECT_OBSERVED)) == 1

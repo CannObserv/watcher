@@ -29,6 +29,7 @@ from src.core.registry import get_registry
 from src.core.watched_items import (
     ArchivedItemActivationError,
     SuspendedDomainResumeError,
+    resolve_watch_target,
     set_watched_item_active,
 )
 from src.workers.tasks import check_watched_item
@@ -131,12 +132,13 @@ async def create_watched_item(
             archiver_info_source_id=data.archiver_info_source_id,
         )
     else:
+        # Mode-branched (#241): local probes inline; bus defers the probe to the
+        # first fetch (item starts PROBING, resolved by apply_fetch_blob).
         try:
-            probe_result = await probe_fn(data.url)
+            effective_url, domain, health_status = await resolve_watch_target(data.url, probe_fn)
         except httpx.HTTPError as exc:
             raise HTTPException(status_code=422, detail=f"URL unreachable: {exc}") from exc
 
-        domain = probe_result.effective_domain or None
         # #191: schedule_tick gates solely on WatchedItem.domain_suspended (no live
         # Domain join), so initialize it from the existing domain's state here —
         # otherwise an item created on an already-inactive/archived domain would be
@@ -144,10 +146,11 @@ async def create_watched_item(
         domain_state = await ensure_domain_and_resolve_suspension(session, domain)
 
         wi = WatchedItem(
-            effective_url=probe_result.effective_url,
+            effective_url=effective_url,
             domain_name=domain,
             domain_suspended=domain_state.suspended,
             domain_default_schedule_config=domain_state.default_schedule_config,
+            health_status=health_status,
             name=data.name or domain or data.url,
             description=data.description,
             is_active=data.is_active,

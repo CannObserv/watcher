@@ -22,6 +22,10 @@ class WatchHealthStatus(enum.StrEnum):
     UNKNOWN = "unknown"
     OK = "ok"
     ERROR = "error"
+    # Phase 4 (#241): URL-first create in bus mode defers the probe to the first
+    # fetch — the item awaits its first fact, which resolves effective_url from
+    # final_url. Cleared to OK/ERROR by the apply path.
+    PROBING = "probing"
 
 
 class WatchedItem(Base, TimestampMixin):

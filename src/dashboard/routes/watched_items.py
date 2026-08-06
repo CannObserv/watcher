@@ -30,7 +30,7 @@ from src.core.domains import (
 )
 from src.core.models.audit_log import EventType, audit
 from src.core.models.temporal_profile import TemporalProfile
-from src.core.models.watched_item import WatchedItem
+from src.core.models.watched_item import WatchedItem, WatchHealthStatus
 from src.core.probe import ProbeResult
 from src.core.scheduling.cadence import (
     parse_interval,
@@ -39,6 +39,7 @@ from src.core.scheduling.schedule import resolve_schedule_display
 from src.core.watched_items import (
     ArchivedItemActivationError,
     SuspendedDomainResumeError,
+    resolve_watch_target,
     set_watched_item_active,
 )
 from src.dashboard.context import (
@@ -240,24 +241,25 @@ async def watched_item_create_submit(
     if tags and any(len(t) > 255 for t in tags):
         return await _render_with_flash("Tag too long (max 255 characters each)")
 
+    # Mode-branched (#241): local probes inline; bus defers the probe to the
+    # first fetch (item starts PROBING, resolved by apply_fetch_blob).
     try:
-        probe_result = await probe_fn(url_raw)
+        effective_url, domain_name, health_status = await resolve_watch_target(url_raw, probe_fn)
     except httpx.HTTPError as exc:
         return await _render_with_flash(f"URL unreachable: {exc}")
 
     # #196 Finding 1: upsert the domain and seed domain_suspended from its state —
     # schedule_tick gates solely on WatchedItem.domain_suspended, so a create on an
     # already-suspended domain must not silently arm fetching. Shared with the API paths.
-    domain_state = await ensure_domain_and_resolve_suspension(
-        session, probe_result.effective_domain or None
-    )
+    domain_state = await ensure_domain_and_resolve_suspension(session, domain_name)
 
-    wi_name = name.strip() or probe_result.effective_domain or url_raw
+    wi_name = name.strip() or domain_name or url_raw
     wi = WatchedItem(
-        effective_url=probe_result.effective_url,
-        domain_name=probe_result.effective_domain or None,
+        effective_url=effective_url,
+        domain_name=domain_name,
         domain_suspended=domain_state.suspended,
         domain_default_schedule_config=domain_state.default_schedule_config,
+        health_status=health_status,
         name=wi_name,
         description=description.strip() or None,
         default_schedule_config={"interval": interval_raw} if interval_raw else None,
@@ -670,22 +672,24 @@ async def watched_item_update_url(
     if not url_raw:
         return _flash("URL is required.", "error")
 
+    # Mode-branched (#241): local re-probes inline; bus defers to the next fetch
+    # (item re-enters PROBING; the apply path resolves any redirect).
     try:
-        probe_result = await probe_fn(url_raw)
+        effective_url, new_domain, health_status = await resolve_watch_target(url_raw, probe_fn)
     except httpx.HTTPError as exc:
         return _flash(f"URL unreachable: {exc}", "error")
 
     # Upsert the domain and re-evaluate suspension against the (possibly new) target
     # so moving a WatchedItem onto a suspended/archived domain doesn't bypass the
     # kill-switch. Shared with the API create/PATCH paths (#196).
-    domain_state = await ensure_domain_and_resolve_suspension(
-        session, probe_result.effective_domain or None
-    )
+    domain_state = await ensure_domain_and_resolve_suspension(session, new_domain)
 
-    wi.effective_url = probe_result.effective_url
-    wi.domain_name = probe_result.effective_domain or None
+    wi.effective_url = effective_url
+    wi.domain_name = new_domain
     wi.domain_suspended = domain_state.suspended
     wi.domain_default_schedule_config = domain_state.default_schedule_config
+    if health_status == WatchHealthStatus.PROBING:
+        wi.health_status = WatchHealthStatus.PROBING
     audit(
         session,
         EventType.WATCHED_ITEM_UPDATED,
@@ -697,7 +701,7 @@ async def watched_item_update_url(
 
     if domain_state.suspended and hx:
         return _flash(
-            f"URL updated, but '{probe_result.effective_domain}' is suspended — "
+            f"URL updated, but '{new_domain}' is suspended — "
             "this Watched Item will not be checked until the domain is reactivated.",
             "warning",
         )

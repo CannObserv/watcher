@@ -51,6 +51,7 @@
           {% set health = watched_item.health_status or "unknown" %}
           {% if health == "error" %}{% set health_badge, health_tip = "badge-error", "The last check failed — see Recent Activity for details." %}
           {% elif health == "ok" %}{% set health_badge, health_tip = "badge-active", "The last check completed successfully." %}
+          {% elif health == "probing" %}{% set health_badge, health_tip = "badge-info", "Awaiting the first fetch to resolve this URL — redirects will update the effective URL automatically." %}
           {% else %}{% set health_badge, health_tip = "badge-inactive", "No successful check has been recorded yet." %}{% endif %}
           {# Accessible tooltip (no `title` attribute — AGENTS.md a11y rule). The
              badge names itself "Health: <state>" and points aria-describedby at an

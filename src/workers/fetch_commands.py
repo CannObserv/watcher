@@ -22,6 +22,7 @@ from urllib.request import url2pathname
 from sqlalchemy import func, select
 
 from src.core.database import get_session_factory
+from src.core.domains import domain_name_for_url, ensure_domain_and_resolve_suspension
 from src.core.fetch_commands import (
     create_fetch_command,
     publish_fetch_command,
@@ -31,7 +32,11 @@ from src.core.fetch_policy import BUS_REDIS_URL_ENV, bus_client_from_env
 from src.core.logging import get_logger
 from src.core.models.audit_log import EventType, audit
 from src.core.models.fetch_command import FetchCommand, FetchCommandStatus
-from src.core.models.watched_item import CONTENT_MEDIA_TYPE_MAX_LEN, WatchedItem
+from src.core.models.watched_item import (
+    CONTENT_MEDIA_TYPE_MAX_LEN,
+    WatchedItem,
+    WatchHealthStatus,
+)
 from src.core.registry import ServiceRegistry, get_registry
 from src.workers import bp
 from src.workers.pipeline import ExtractionError, process_watched_item
@@ -200,6 +205,34 @@ async def apply_fetch_blob(
             row.status = FetchCommandStatus.EXPIRED
             new_id = await _reissue(session, watched_item, row, bus_client)
             return {"reissued": new_id}
+
+        # Async-probe resolution (#241 step 3): a PROBING item's first fact is
+        # its probe. When the origin redirected, final_url becomes the
+        # effective_url — exactly what the inline probe used to discover — and
+        # the domain facts are re-derived through the shared #196 helper (which
+        # also retires any fetch-policy tombstone for the new host). PROBING
+        # clears to OK via _record_check_success below. Steady-state redirects
+        # (non-PROBING) stay audit-only: Archiver is authoritative then.
+        if (
+            watched_item.health_status == WatchHealthStatus.PROBING
+            and row.final_url
+            and row.final_url != watched_item.effective_url
+        ):
+            new_domain = domain_name_for_url(row.final_url)
+            # Upsert the Domain row before the item references it (FK ordering:
+            # ensure_domain's nested commit flushes the dirty item too).
+            resolution = await ensure_domain_and_resolve_suspension(session, new_domain)
+            watched_item.effective_url = row.final_url
+            watched_item.domain_name = new_domain
+            watched_item.domain_suspended = resolution.suspended
+            watched_item.domain_default_schedule_config = resolution.default_schedule_config
+            audit(
+                session,
+                EventType.WATCHED_ITEM_UPDATED,
+                watched_item_id=str(watched_item.id),
+                updated_fields=["effective_url", "domain_name"],
+                source="probe_resolution",
+            )
 
         # Seed the observed media type once, from the RAW header (#168 semantics:
         # an absent header is not application/octet-stream; the consumer stored

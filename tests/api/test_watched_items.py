@@ -1273,3 +1273,13 @@ class TestBusModeAsyncCreate:
 
         wi = await db_session.get(WatchedItem, ULID.from_str(data["id"]))
         assert wi.health_status == WatchHealthStatus.PROBING
+
+    async def test_create_rejects_invalid_url_syntactically(self, client, monkeypatch):
+        # The API's HttpUrlStr schema rejects this before the route runs; the
+        # route-level ValueError handler (CR-3) is the same guard for the
+        # dashboard Form paths, covered in tests/core/test_watched_items.py.
+        from src.core.fetch_commands import FETCH_MODE_ENV
+
+        monkeypatch.setenv(FETCH_MODE_ENV, "bus")
+        response = await client.post("/api/v1/watched-items", json={"url": "not a url"})
+        assert response.status_code == 422

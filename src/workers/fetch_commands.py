@@ -19,8 +19,13 @@ from datetime import UTC, datetime, timedelta
 from urllib.parse import urlparse
 from urllib.request import url2pathname
 
+import procrastinate
+from redis.exceptions import ConnectionError as RedisConnectionError
+from redis.exceptions import TimeoutError as RedisTimeoutError
 from sqlalchemy import func, select
+from sqlalchemy.exc import OperationalError
 
+from src.core.bus import BUS_REDIS_URL_ENV, get_shared_bus_client
 from src.core.database import get_session_factory
 from src.core.domains import domain_name_for_url, ensure_domain_and_resolve_suspension
 from src.core.fetch_commands import (
@@ -28,7 +33,6 @@ from src.core.fetch_commands import (
     publish_fetch_command,
     select_pending_publish,
 )
-from src.core.fetch_policy import BUS_REDIS_URL_ENV, bus_client_from_env
 from src.core.logging import get_logger
 from src.core.models.audit_log import EventType, audit
 from src.core.models.fetch_command import FetchCommand, FetchCommandStatus
@@ -43,6 +47,22 @@ from src.workers.pipeline import ExtractionError, process_watched_item
 from src.workers.tasks import _record_check_failure, _record_check_success
 
 logger = get_logger(__name__)
+
+# Transient-infra retry for the apply tasks (CR-2): DB restarts
+# (OperationalError), broker/notifier blips. Mirrors check_watched_item's
+# shape; permanent errors (bugs) still fail the job — the reaper's re-defer
+# is the last-resort resurrection for those.
+_APPLY_RETRY = procrastinate.RetryStrategy(
+    max_attempts=3,
+    exponential_wait=5,
+    retry_exceptions={
+        ConnectionError,
+        TimeoutError,
+        RedisConnectionError,
+        RedisTimeoutError,
+        OperationalError,
+    },
+)
 
 
 @bp.periodic(cron="* * * * *", periodic_id="publish_pending_fetch_commands")
@@ -65,7 +85,8 @@ async def publish_pending_fetch_commands(
         if not rows:
             return {"published": 0}
 
-        client = bus_client if bus_client is not None else bus_client_from_env()
+        # Shared, lifespan-owned client (CR-4) — never closed here.
+        client = bus_client if bus_client is not None else get_shared_bus_client()
         if client is None:
             logger.error(
                 "cannot republish %d pending fetch command(s): %s is not set",
@@ -73,27 +94,22 @@ async def publish_pending_fetch_commands(
                 BUS_REDIS_URL_ENV,
             )
             return {"published": 0, "skipped": f"{BUS_REDIS_URL_ENV} not set"}
-        owns_client = bus_client is None
 
         published = 0
-        try:
-            for row in rows:
-                try:
-                    await publish_fetch_command(client, row)
-                    await db.commit()
-                    published += 1
-                except Exception:
-                    # No rollback: publish raises before any ORM mutation, so
-                    # the session is clean; a (rare) failed commit poisons only
-                    # this task run and the next tick gets a fresh session.
-                    logger.warning(
-                        "fetch command republish failed; will retry next tick",
-                        extra={"command_id": row.command_id},
-                        exc_info=True,
-                    )
-        finally:
-            if owns_client:
-                await client.aclose()
+        for row in rows:
+            try:
+                await publish_fetch_command(client, row)
+                await db.commit()
+                published += 1
+            except Exception:
+                # No rollback: publish raises before any ORM mutation, so
+                # the session is clean; a (rare) failed commit poisons only
+                # this task run and the next tick gets a fresh session.
+                logger.warning(
+                    "fetch command republish failed; will retry next tick",
+                    extra={"command_id": row.command_id},
+                    exc_info=True,
+                )
         if published:
             logger.info("republished pending fetch commands", extra={"published": published})
         return {"published": published}
@@ -119,11 +135,11 @@ async def _reissue(session, watched_item, prior, client) -> str:
         reissue_count=prior.reissue_count + 1,
     )
     await session.commit()
-    publish_client = client if client is not None else bus_client_from_env()
+    # Shared, lifespan-owned client (CR-4) — never closed here.
+    publish_client = client if client is not None else get_shared_bus_client()
     if publish_client is None:
         logger.error("re-issued fetch command cannot publish: %s is not set", BUS_REDIS_URL_ENV)
         return row.command_id
-    owns = client is None
     try:
         await publish_fetch_command(publish_client, row, now=now)
         await session.commit()
@@ -133,9 +149,6 @@ async def _reissue(session, watched_item, prior, client) -> str:
             extra={"command_id": row.command_id},
             exc_info=True,
         )
-    finally:
-        if owns:
-            await publish_client.aclose()
     return row.command_id
 
 
@@ -147,7 +160,13 @@ def _blob_path(blob_uri: str) -> str:
     return url2pathname(parsed.path)
 
 
-@bp.task(name="apply_fetch_blob", queue="default")
+@bp.task(
+    name="apply_fetch_blob",
+    queue="default",
+    # CR-2: a transient infra error must not strand the row IN_FLIGHT with its
+    # fact recorded — retry here first; the reaper's re-defer is the backstop.
+    retry=_APPLY_RETRY,
+)
 async def apply_fetch_blob(
     command_id: str, registry: ServiceRegistry | None = None, bus_client=None
 ) -> dict:
@@ -287,7 +306,7 @@ async def apply_fetch_blob(
     }
 
 
-@bp.task(name="apply_fetch_failure", queue="default")
+@bp.task(name="apply_fetch_failure", queue="default", retry=_APPLY_RETRY)
 async def apply_fetch_failure(command_id: str) -> dict:
     """Surface a terminal ``fetch_failed`` on the WatchedItem (#241 apply path).
 
@@ -334,13 +353,17 @@ async def reap_fetch_commands(
 
     ``fetch_failed`` covers the taxonomy's terminal rows; what remains silent is
     a stall (PEL parking, long retry) and an undecodable frame. A command
-    ``in_flight`` with no fact past ``WATCHER_FETCH_COMMAND_TIMEOUT_SECONDS``
-    (default 1800 — deliberately generous; Replicator's reclaim cadence is an
-    operator knob on another host, and pinning 60s would re-issue under live
-    retries) is expired and **re-issued** under a fresh ``command_id``, same
-    intent. At ``WATCHER_FETCH_MAX_REISSUES`` (default 3) the intent stops:
-    ERROR health + WATCH_ERROR, and the item re-enters normal scheduling — the
-    gate lifts, so recovery is automatic when the origin or Replicator heals.
+    ``in_flight`` whose **latest signal** (``coalesce(fact_at, published_at)`` —
+    CR-2: a fact whose apply job died must not shield the row forever) is older
+    than ``WATCHER_FETCH_COMMAND_TIMEOUT_SECONDS`` (default 1800 — deliberately
+    generous; Replicator's reclaim cadence is an operator knob on another host,
+    and pinning 60s would re-issue under live retries) is handled by what it
+    still has: a row holding a blob fact gets its **apply re-deferred** (the
+    bytes exist — refetching would waste an origin request), anything else is
+    expired and **re-issued** under a fresh ``command_id``, same intent. At
+    ``WATCHER_FETCH_MAX_REISSUES`` (default 3) the intent stops: ERROR health +
+    WATCH_ERROR, and the item re-enters normal scheduling — the gate lifts, so
+    recovery is automatic when the origin or Replicator heals.
     """
     timeout = float(os.environ.get("WATCHER_FETCH_COMMAND_TIMEOUT_SECONDS", "1800"))
     max_reissues = int(os.environ.get("WATCHER_FETCH_MAX_REISSUES", "3"))
@@ -350,18 +373,18 @@ async def reap_fetch_commands(
     owns_session = session is None
     ctx = get_session_factory()() if owns_session else None
     db = await ctx.__aenter__() if owns_session else session
-    reissued, capped = 0, 0
+    reissued, capped, reapplied = 0, 0, 0
     try:
+        last_signal = func.coalesce(FetchCommand.fact_at, FetchCommand.published_at)
         rows = list(
             (
                 await db.execute(
                     select(FetchCommand)
                     .where(
                         FetchCommand.status == FetchCommandStatus.IN_FLIGHT,
-                        FetchCommand.fact_at.is_(None),
-                        FetchCommand.published_at < cutoff,
+                        last_signal < cutoff,
                     )
-                    .order_by(FetchCommand.published_at)
+                    .order_by(last_signal)
                     .limit(batch_size)
                 )
             )
@@ -373,6 +396,16 @@ async def reap_fetch_commands(
             if watched_item is None:
                 row.status = FetchCommandStatus.EXPIRED
                 await db.commit()
+                continue
+            if row.fact_at is not None and row.blob_uri:
+                # The fact arrived but the apply never completed (job lost or
+                # retries exhausted). Resurrect the apply — the status guard
+                # makes a duplicate defer harmless. Touch fact_at so this row
+                # waits a full window before the next resurrection attempt.
+                row.fact_at = now
+                await db.commit()
+                await _defer_reapply(row.command_id)
+                reapplied += 1
                 continue
             if row.reissue_count >= max_reissues:
                 row.status = FetchCommandStatus.FAILED
@@ -392,12 +425,25 @@ async def reap_fetch_commands(
             row.status = FetchCommandStatus.EXPIRED
             await _reissue(db, watched_item, row, bus_client)
             reissued += 1
-        if reissued or capped:
+        if reissued or capped or reapplied:
             logger.info(
                 "reaped stalled fetch commands",
-                extra={"reissued": reissued, "capped": capped},
+                extra={"reissued": reissued, "capped": capped, "reapplied": reapplied},
             )
-        return {"reissued": reissued, "capped": capped}
+        return {"reissued": reissued, "capped": capped, "reapplied": reapplied}
     finally:
         if owns_session:
             await ctx.__aexit__(None, None, None)
+
+
+async def _defer_reapply(command_id: str) -> None:
+    """Best-effort re-defer of a lost apply job (CR-2); the next reaper pass
+    retries if the defer itself fails."""
+    try:
+        await apply_fetch_blob.configure().defer_async(command_id=command_id)
+    except Exception:
+        logger.warning(
+            "could not re-defer apply for a stalled command",
+            extra={"command_id": command_id},
+            exc_info=True,
+        )

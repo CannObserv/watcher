@@ -10,12 +10,9 @@ quarter-hour; the two paths share one publish function, so they cannot drift.
 
 import os
 
+from src.core.bus import BUS_REDIS_URL_ENV, get_shared_bus_client
 from src.core.database import get_session_factory
-from src.core.fetch_policy import (
-    BUS_REDIS_URL_ENV,
-    bus_client_from_env,
-    publish_full_policy_set,
-)
+from src.core.fetch_policy import publish_full_policy_set
 from src.core.logging import get_logger
 from src.workers import bp
 
@@ -40,13 +37,11 @@ async def publish_fetch_policy(**periodic_kwargs) -> dict:
         )
         return {"skipped": f"{BUS_REDIS_URL_ENV} not set"}
 
-    client = bus_client_from_env()
+    # Shared, lifespan-owned client (#241 CR-4) — never closed here.
+    client = get_shared_bus_client()
     assert client is not None  # guarded by the env check above
-    try:
-        async with get_session_factory()() as session:
-            published = await publish_full_policy_set(session, client)
-    finally:
-        await client.aclose()
+    async with get_session_factory()() as session:
+        published = await publish_full_policy_set(session, client)
     logger.info("fetch-policy full set published", extra={"published": published})
     return {"published": published}
 

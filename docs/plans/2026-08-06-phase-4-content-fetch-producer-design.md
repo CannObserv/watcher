@@ -189,6 +189,14 @@ notifications on each item's first post-cutover revision. Flag removed after soa
    terminal or timeout. Deferred with replicator#9 §3.
 3. **`content.blobs` retention** — no floor is guaranteed; our consumer group's lag must
    stay near zero. The reaper covers a trimmed-away fact (it looks like a stall).
+4. **Gate race (CR-5)** — the open-command gate is check-then-insert; a concurrent
+   check-now + schedule-tick pair can both pass it and issue two commands. Contract-legal
+   (two occasions), self-healing (the second apply supersedes), cost is one wasted origin
+   fetch. If it shows up in practice, the fix is a partial unique index on
+   `watched_item_id WHERE status IN (open)`.
+5. **`health_status` enum gains `"probing"` (CR-6)** — additive on the OpenAPI surface;
+   a strict client that compiled the old three-value enum will reject it. Watcher's only
+   known consumer is its own dashboard.
 
 ## Testing
 

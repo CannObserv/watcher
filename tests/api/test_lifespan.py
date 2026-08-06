@@ -49,7 +49,9 @@ async def test_lifespan_prewarms_archiver_client(monkeypatch):
         patch("src.api.main.get_registry", return_value=fake_reg),
         patch("src.api.main.start_config_poller", AsyncMock(return_value=poller_task)),
         patch("src.api.main.hydrate_rate_limiter", AsyncMock()),
-        patch("src.workers.get_app", return_value=fake_proc_app),
+        patch("src.api.main.get_app", return_value=fake_proc_app),
+        patch("src.api.main.get_shared_bus_client", return_value=None),
+        patch("src.api.main.aclose_shared_bus_client", AsyncMock()),
     ):
         from src.api.main import lifespan
 
@@ -90,7 +92,9 @@ async def test_lifespan_closes_archiver_client_on_shutdown(monkeypatch):
         patch("src.api.main.get_registry", return_value=fake_reg),
         patch("src.api.main.start_config_poller", AsyncMock(return_value=poller_task)),
         patch("src.api.main.hydrate_rate_limiter", AsyncMock()),
-        patch("src.workers.get_app", return_value=fake_proc_app),
+        patch("src.api.main.get_app", return_value=fake_proc_app),
+        patch("src.api.main.get_shared_bus_client", return_value=None),
+        patch("src.api.main.aclose_shared_bus_client", AsyncMock()),
     ):
         from src.api.main import lifespan
 
@@ -141,7 +145,9 @@ async def test_lifespan_closes_client_after_proc_app(monkeypatch):
         patch("src.api.main.get_registry", return_value=fake_reg),
         patch("src.api.main.start_config_poller", AsyncMock(return_value=poller_task)),
         patch("src.api.main.hydrate_rate_limiter", AsyncMock()),
-        patch("src.workers.get_app", return_value=fake_proc_app),
+        patch("src.api.main.get_app", return_value=fake_proc_app),
+        patch("src.api.main.get_shared_bus_client", return_value=None),
+        patch("src.api.main.aclose_shared_bus_client", AsyncMock()),
     ):
         from src.api.main import lifespan
 
@@ -181,7 +187,9 @@ async def test_lifespan_does_not_start_changes_drain(monkeypatch):
         patch("src.api.main.get_registry", return_value=fake_reg),
         patch("src.api.main.start_config_poller", AsyncMock(return_value=poller_task)),
         patch("src.api.main.hydrate_rate_limiter", AsyncMock()),
-        patch("src.workers.get_app", return_value=fake_proc_app),
+        patch("src.api.main.get_app", return_value=fake_proc_app),
+        patch("src.api.main.get_shared_bus_client", return_value=None),
+        patch("src.api.main.aclose_shared_bus_client", AsyncMock()),
     ):
         from src.api.main import app
 

@@ -23,7 +23,6 @@ Publishing goes through co-core's ``to_wire`` over the strict ``FetchPolicyEmit`
 (``extra="forbid"``) — never hand-rolled fields (issuer-contract rule zero).
 """
 
-import os
 from collections.abc import Sequence
 from datetime import UTC, datetime
 
@@ -37,29 +36,16 @@ from redis.asyncio import Redis
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.core.bus import BUS_REDIS_URL_ENV, bus_client_from_env
 from src.core.logging import get_logger
 from src.core.models.domain import Domain
 from src.core.models.fetch_policy_tombstone import FetchPolicyTombstone
 
 logger = get_logger(__name__)
 
-# Service-prefixed per the AGENTS.md naming rule: a bare REDIS_URL would be
-# silently inherited from /etc/watcher/.env by anything that sources it (the
-# #233 hazard in env-var form). Unset means the producer skips, loudly —
-# Replicator then paces every host at its own conservative default.
-BUS_REDIS_URL_ENV = "WATCHER_BUS_REDIS_URL"
-
-
-def bus_client_from_env() -> Redis | None:
-    """A Redis client for the bus, or None when ``WATCHER_BUS_REDIS_URL`` is unset.
-
-    No localhost default, deliberately: a default credential is how a dev
-    process ends up publishing policy onto the production stream.
-    """
-    url = os.environ.get(BUS_REDIS_URL_ENV)
-    if not url:
-        return None
-    return Redis.from_url(url)
+# Client construction moved to src.core.bus (#241 CR finding 4); re-exported
+# here for the pre-existing import surface.
+__all__ = ["BUS_REDIS_URL_ENV", "bus_client_from_env"]
 
 
 def build_policy_events(

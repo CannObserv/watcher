@@ -15,6 +15,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from ulid import ULID
 
+from src.core.bus import BUS_REDIS_URL_ENV, get_shared_bus_client
 from src.core.database import get_session_factory
 from src.core.fetch_commands import (
     create_fetch_command,
@@ -22,7 +23,6 @@ from src.core.fetch_commands import (
     has_open_command,
     publish_fetch_command,
 )
-from src.core.fetch_policy import BUS_REDIS_URL_ENV, bus_client_from_env
 from src.core.logging import get_logger
 from src.core.models.audit_log import EventType, audit
 from src.core.models.temporal_profile import TemporalProfile
@@ -153,16 +153,24 @@ async def _issue_fetch_command(session: AsyncSession, watched_item, bus_client) 
 
     now = datetime.now(UTC)
     row = await create_fetch_command(session, watched_item, now=now)
+    # Operator breadcrumb on the item's Recent Activity: the check is now a
+    # command in flight; the apply-side events pick the story up (#241 CR-8).
+    audit(
+        session,
+        EventType.CHECK_COMMAND_ISSUED,
+        watched_item_id=str(watched_item.id),
+        command_id=row.command_id,
+    )
     await session.commit()  # MUST-2: the correlation row is durable before any XADD
 
-    client = bus_client if bus_client is not None else bus_client_from_env()
+    # Shared, lifespan-owned client (#241 CR-4) — never closed here.
+    client = bus_client if bus_client is not None else get_shared_bus_client()
     if client is None:
         logger.error(
             "cannot publish fetch command: %s is not set — row stays pending for the sweep",
             BUS_REDIS_URL_ENV,
         )
         return {"issued": row.command_id, "published": False}
-    owns_client = bus_client is None
     try:
         await publish_fetch_command(client, row, now=now)
         await session.commit()
@@ -173,9 +181,6 @@ async def _issue_fetch_command(session: AsyncSession, watched_item, bus_client) 
             exc_info=True,
         )
         return {"issued": row.command_id, "published": False}
-    finally:
-        if owns_client:
-            await client.aclose()
     return {"issued": row.command_id, "published": True}
 
 

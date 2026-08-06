@@ -8,6 +8,7 @@ and own the commit.
 """
 
 from collections.abc import Awaitable, Callable
+from urllib.parse import urlparse
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -38,6 +39,14 @@ async def resolve_watch_target(
     they cannot occur on the bus branch.
     """
     if fetch_mode() == "bus":
+        # Syntactic validation stays at the boundary (CR-3): a typo'd URL must
+        # fail the request, not surface as ERROR health minutes later via a
+        # cross-service round trip through Replicator's DLQ.
+        parsed = urlparse(url)
+        if parsed.scheme not in ("http", "https") or not parsed.hostname:
+            raise ValueError(
+                f"invalid URL {url!r}: an absolute http(s) URL with a hostname is required"
+            )
         return url, domain_name_for_url(url), WatchHealthStatus.PROBING
     result = await probe_fn(url)
     return result.effective_url, result.effective_domain or None, WatchHealthStatus.UNKNOWN

@@ -152,6 +152,7 @@ async def run_blobs_consumer(
     *,
     stop: asyncio.Event,
     block_ms: int = BLOCK_MS,
+    error_backoff_seconds: float = ERROR_BACKOFF_SECONDS,
 ) -> None:
     """Poll → process → ack, until ``stop`` is set.
 
@@ -159,6 +160,11 @@ async def run_blobs_consumer(
     predate any command Watcher issued and can never correlate. After a crash,
     our own unacked entries come back via ``claim_stale`` (a same-name consumer
     does NOT re-see its PEL on ``>`` reads).
+
+    **Every fallible step is inside the backoff guard** (CR-1): a transient DB
+    error while processing must park-and-retry, never escape and kill the task
+    — the message stays unacked, and resetting ``next_claim`` makes the next
+    pass reclaim it promptly instead of waiting out the claim interval.
     """
     consumer = AsyncBusConsumer(
         client, topic=streams.CONTENT_BLOBS, group=CONSUMER_GROUP, consumer=CONSUMER_NAME
@@ -175,6 +181,20 @@ async def run_blobs_consumer(
                 messages = await consumer.claim_stale(min_idle_ms=0, count=10)
             if not messages:
                 messages = await consumer.read(count=1, block_ms=block_ms)
+
+            if not messages:
+                # A client that ignores `block` would busy-spin without this.
+                await asyncio.sleep(IDLE_SLEEP_SECONDS)
+                continue
+
+            for message in messages:
+                async with session_factory() as session:
+                    outcome = await process_fact_message(session, message)
+                await consumer.ack(message.message_id)
+                logger.info(
+                    "content.blobs fact processed",
+                    extra={"message_id": message.message_id, "outcome": outcome},
+                )
         except BusMessageAnomaly as exc:
             # Undecodable frame: ack past it (see module docstring).
             message_id = getattr(exc, "message_id", None)
@@ -189,27 +209,36 @@ async def run_blobs_consumer(
             raise
         except Exception:
             logger.warning("content.blobs consumer error — backing off", exc_info=True)
+            # An unacked in-process message should come back promptly, not
+            # after the full claim interval.
+            next_claim = loop.time()
             try:
-                await asyncio.wait_for(stop.wait(), timeout=ERROR_BACKOFF_SECONDS)
+                await asyncio.wait_for(stop.wait(), timeout=error_backoff_seconds)
             except TimeoutError:
                 pass
             continue
 
-        if not messages:
-            # A client that ignores `block` would busy-spin without this.
-            await asyncio.sleep(IDLE_SLEEP_SECONDS)
-            continue
-
-        for message in messages:
-            async with session_factory() as session:
-                outcome = await process_fact_message(session, message)
-            await consumer.ack(message.message_id)
-            logger.info(
-                "content.blobs fact processed",
-                extra={"message_id": message.message_id, "outcome": outcome},
-            )
-
 
 def start_blobs_consumer(client: Redis, session_factory, *, stop: asyncio.Event) -> asyncio.Task:
-    """Spawn the consumer loop as a lifespan task (caller owns client + stop)."""
-    return asyncio.create_task(run_blobs_consumer(client, session_factory, stop=stop))
+    """Spawn the consumer loop as a lifespan task (caller owns client + stop).
+
+    The done-callback is the dead-man's switch (CR-1): the lifespan never awaits
+    this task until shutdown, so an escaped exception would otherwise kill the
+    fact inbox silently while the process keeps serving.
+    """
+    task = asyncio.create_task(run_blobs_consumer(client, session_factory, stop=stop))
+
+    def _observe(t: asyncio.Task) -> None:
+        if t.cancelled() or stop.is_set():
+            return  # orderly shutdown
+        exc = t.exception()
+        if exc is not None:
+            logger.critical(
+                "content.blobs consumer task DIED — facts will pile up in the PEL until restart",
+                exc_info=exc,
+            )
+        else:
+            logger.critical("content.blobs consumer task exited unexpectedly")
+
+    task.add_done_callback(_observe)
+    return task

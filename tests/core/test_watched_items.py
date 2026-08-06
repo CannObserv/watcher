@@ -2,6 +2,8 @@
 
 from unittest.mock import AsyncMock
 
+import pytest
+
 from src.core.fetch_commands import FETCH_MODE_ENV
 from src.core.models.watched_item import WatchHealthStatus
 from src.core.probe import ProbeResult
@@ -44,3 +46,24 @@ class TestResolveWatchTarget:
         assert effective_url == "https://LCB.wa.gov/Notices"  # submitted URL, untouched
         assert domain == "lcb.wa.gov"  # urlparse().hostname — the limiter-key derivation
         assert health == WatchHealthStatus.PROBING
+
+
+class TestBusModeUrlValidation:
+    """CR-3: syntactic validation stays at the boundary in bus mode."""
+
+    async def test_rejects_a_schemeless_url(self, monkeypatch):
+        monkeypatch.setenv(FETCH_MODE_ENV, "bus")
+        probe = AsyncMock()
+        with pytest.raises(ValueError, match="invalid URL"):
+            await resolve_watch_target("not a url", probe)
+        probe.assert_not_awaited()
+
+    async def test_rejects_a_non_http_scheme(self, monkeypatch):
+        monkeypatch.setenv(FETCH_MODE_ENV, "bus")
+        with pytest.raises(ValueError, match="invalid URL"):
+            await resolve_watch_target("ftp://old.example/file", AsyncMock())
+
+    async def test_rejects_a_hostless_url(self, monkeypatch):
+        monkeypatch.setenv(FETCH_MODE_ENV, "bus")
+        with pytest.raises(ValueError, match="invalid URL"):
+            await resolve_watch_target("https:///nopath-host", AsyncMock())

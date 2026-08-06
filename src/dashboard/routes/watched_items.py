@@ -247,6 +247,8 @@ async def watched_item_create_submit(
         effective_url, domain_name, health_status = await resolve_watch_target(url_raw, probe_fn)
     except httpx.HTTPError as exc:
         return await _render_with_flash(f"URL unreachable: {exc}")
+    except ValueError as exc:
+        return await _render_with_flash(str(exc))
 
     # #196 Finding 1: upsert the domain and seed domain_suspended from its state —
     # schedule_tick gates solely on WatchedItem.domain_suspended, so a create on an
@@ -678,6 +680,8 @@ async def watched_item_update_url(
         effective_url, new_domain, health_status = await resolve_watch_target(url_raw, probe_fn)
     except httpx.HTTPError as exc:
         return _flash(f"URL unreachable: {exc}", "error")
+    except ValueError as exc:
+        return _flash(str(exc), "error")
 
     # Upsert the domain and re-evaluate suspension against the (possibly new) target
     # so moving a WatchedItem onto a suspended/archived domain doesn't bypass the

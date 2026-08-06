@@ -138,6 +138,8 @@ async def create_watched_item(
             effective_url, domain, health_status = await resolve_watch_target(data.url, probe_fn)
         except httpx.HTTPError as exc:
             raise HTTPException(status_code=422, detail=f"URL unreachable: {exc}") from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
 
         # #191: schedule_tick gates solely on WatchedItem.domain_suspended (no live
         # Domain join), so initialize it from the existing domain's state here —

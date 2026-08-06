@@ -18,15 +18,21 @@ from src.api.routes.watched_item_notifications import (
     router as watched_item_notifications_router,
 )
 from src.api.routes.watched_items import router as watched_items_router
+from src.core.bus import BUS_REDIS_URL_ENV, aclose_shared_bus_client, get_shared_bus_client
 from src.core.config_poller import start_config_poller
 from src.core.database import get_session_factory
 from src.core.db_safety import ProductionDatabaseRefused, assert_environment_db_allowed
-from src.core.fetch_policy import BUS_REDIS_URL_ENV, bus_client_from_env
 from src.core.logging import configure_logging, get_logger
 from src.core.models.domain import Domain
 from src.core.rate_limiter import DomainRateLimiter, get_rate_limiter
 from src.core.registry import get_registry
 from src.dashboard import register_dashboard
+
+# Worker imports are safe at module top: src.workers.__init__ defers task-module
+# registration into get_app(), and fetch_facts only touches bp-registered tasks
+# (#241 CR-7; previously inline in the lifespan).
+from src.workers import get_app  # noqa: E402  (grouped with the comment above)
+from src.workers.fetch_facts import start_blobs_consumer  # noqa: E402
 
 configure_logging()
 logger = get_logger(__name__)
@@ -61,8 +67,6 @@ async def lifespan(application: FastAPI):
     crashes the API on boot, not on first request. The SDK is closed last on shutdown,
     after the worker is fully gathered and the procrastinate app has closed.
     """
-    from src.workers import get_app
-
     try:
         assert_environment_db_allowed(os.environ)
     except ProductionDatabaseRefused as e:
@@ -85,9 +89,7 @@ async def lifespan(application: FastAPI):
     # is configured — in local fetch mode it idles (facts for other issuers'
     # commands are acked and discarded as unmatched), and running it keeps the
     # WATCHER_FETCH_MODE flip restart-free.
-    from src.workers.fetch_facts import start_blobs_consumer
-
-    bus_client = bus_client_from_env()
+    bus_client = get_shared_bus_client()
     consumer_stop = asyncio.Event()
     consumer_task = None
     if bus_client is not None:
@@ -110,8 +112,7 @@ async def lifespan(application: FastAPI):
         consumer_task.cancel()
     tasks = [t for t in (poller_task, worker_task, consumer_task) if t is not None]
     await asyncio.gather(*tasks, return_exceptions=True)
-    if bus_client is not None:
-        await bus_client.aclose()
+    await aclose_shared_bus_client()
     await proc_app.close_async()
     # SDK/HTTP closes must be the last shutdown step (no consumer can still be in flight).
     await registry.aclose_fetcher()

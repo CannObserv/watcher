@@ -195,3 +195,65 @@ class TestFailureFacts:
         )
         assert outcome == "unmatched"
         assert fail.calls == []
+
+
+class TestRunBlobsConsumer:
+    """CR-1: the loop must survive processing errors — an escaped exception
+    kills the fact inbox for the rest of the process lifetime."""
+
+    async def test_loop_survives_a_processing_error_and_retries(self, db_session, monkeypatch):
+        import asyncio
+        from contextlib import asynccontextmanager
+
+        import fakeredis
+        from co_core.effects.bus import BusPublish
+        from co_core.pure.adapters.bus.envelope import to_wire
+        from co_core_aio.bus import AsyncBusPublisher
+
+        import src.workers.fetch_facts as ff_mod
+        from src.workers.fetch_facts import run_blobs_consumer
+
+        client = fakeredis.FakeAsyncRedis()
+        # Group must exist BEFORE the fact lands ('$' start), mirroring prod.
+        stop = asyncio.Event()
+
+        calls: list[int] = []
+        real_process = ff_mod.process_fact_message
+
+        async def _flaky(session, message, **kwargs):
+            calls.append(1)
+            if len(calls) == 1:
+                raise RuntimeError("transient DB error")
+            return await real_process(session, message, **kwargs)
+
+        monkeypatch.setattr(ff_mod, "process_fact_message", _flaky)
+
+        @asynccontextmanager
+        async def _ctx():
+            yield db_session
+
+        task = asyncio.create_task(
+            run_blobs_consumer(
+                client,
+                lambda: _ctx(),
+                stop=stop,
+                block_ms=10,
+                error_backoff_seconds=0.01,
+            )
+        )
+        # Let ensure_group run, then publish one fact.
+        await asyncio.sleep(0.1)
+        event = _blob_message("01UNKNOWNCOMMANDIDXXXXXXXX").payload
+        await AsyncBusPublisher(client).execute(BusPublish(streams.CONTENT_BLOBS, to_wire(event)))
+
+        async def _until_processed():
+            while len(calls) < 2:
+                await asyncio.sleep(0.02)
+
+        await asyncio.wait_for(_until_processed(), timeout=5)
+        stop.set()
+        await asyncio.wait_for(task, timeout=5)  # exits cleanly, no exception
+
+        assert len(calls) == 2  # failed once, retried via reclaim, succeeded
+        pending = await client.xpending(streams.CONTENT_BLOBS, "watcher")
+        assert pending["pending"] == 0  # retried message was acked

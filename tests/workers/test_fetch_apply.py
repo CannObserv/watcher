@@ -249,7 +249,7 @@ class TestReapFetchCommands:
 
         result = await reap_fetch_commands(session=db_session, bus_client=client)
 
-        assert result == {"reissued": 1, "capped": 0}
+        assert result == {"reissued": 1, "capped": 0, "reapplied": 0}
         assert row.status == FetchCommandStatus.EXPIRED
         rows = list(
             (
@@ -271,7 +271,7 @@ class TestReapFetchCommands:
 
         result = await reap_fetch_commands(session=db_session, bus_client=client)
 
-        assert result == {"reissued": 0, "capped": 1}
+        assert result == {"reissued": 0, "capped": 1, "reapplied": 0}
         assert row.status == FetchCommandStatus.FAILED
         assert row.failure_reason == "fetch_timeout"
         assert wi.health_status == WatchHealthStatus.ERROR
@@ -280,18 +280,42 @@ class TestReapFetchCommands:
         # The gate lifts: no open command remains, so scheduling resumes.
         assert await client.xlen("content.fetch") == 0
 
-    async def test_fresh_and_facted_rows_are_left_alone(self, db_session):
+    async def test_fresh_rows_and_fresh_facts_are_left_alone(self, db_session):
         _, fresh = await self._stalled_row(db_session, age_minutes=1)
         _, facted = await self._stalled_row(db_session, age_minutes=60)
-        facted.fact_at = NOW
+        facted.fact_at = datetime.now(UTC)  # recent fact — apply presumably queued
         await db_session.flush()
         client = fakeredis.FakeAsyncRedis()
 
         result = await reap_fetch_commands(session=db_session, bus_client=client)
 
-        assert result == {"reissued": 0, "capped": 0}
+        assert result == {"reissued": 0, "capped": 0, "reapplied": 0}
         assert fresh.status == FetchCommandStatus.IN_FLIGHT
         assert facted.status == FetchCommandStatus.IN_FLIGHT
+
+    async def test_stale_fact_with_blob_resurrects_the_apply(self, db_session, monkeypatch):
+        # CR-2: a fact whose apply job died must not shield the row forever —
+        # the reaper re-defers the apply (bytes exist; refetching would waste
+        # an origin request) instead of re-issuing.
+        _, row = await self._stalled_row(db_session, age_minutes=60)
+        row.fact_at = datetime.now(UTC) - timedelta(minutes=60)
+        row.blob_uri = "file:///var/lib/replicator/blobs/ab/cd/abcd.bin"
+        await db_session.flush()
+        deferred: list[str] = []
+
+        async def _spy(command_id: str) -> None:
+            deferred.append(command_id)
+
+        monkeypatch.setattr(fc_mod, "_defer_reapply", _spy)
+        client = fakeredis.FakeAsyncRedis()
+
+        result = await reap_fetch_commands(session=db_session, bus_client=client)
+
+        assert result == {"reissued": 0, "capped": 0, "reapplied": 1}
+        assert deferred == [row.command_id]
+        assert row.status == FetchCommandStatus.IN_FLIGHT  # still open; gate holds
+        assert row.fact_at is not None and row.fact_at > NOW - timedelta(days=1)
+        assert await client.xlen("content.fetch") == 0  # no wasteful refetch
 
 
 class TestProbingResolution:

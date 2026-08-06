@@ -25,6 +25,9 @@ class EventType:
     # recorded for the #157 succession workflow; effective_url is never
     # auto-rewritten (Archiver stays authoritative).
     CHECK_REDIRECT_OBSERVED = "check.redirect_observed"
+    # Phase 4 (#241): a content.fetch command was issued for the item — the
+    # bus-mode counterpart of "a check started"; closed by the apply-side events.
+    CHECK_COMMAND_ISSUED = "check.command_issued"
     NOTIFICATION_DISPATCHED = "notification.dispatched"
     NOTIFICATION_TEST = "notification.test"
     # #200: every notification target is a NotificationTemplate (any visibility);

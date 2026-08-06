@@ -13,7 +13,11 @@ from src.core.models.base import ULIDType
 config = context.config
 
 if config.config_file_name is not None:
-    fileConfig(config.config_file_name)
+    # disable_existing_loggers=False: alembic also runs in-process (the
+    # migration-chain test, dev tooling), and the stdlib default of True would
+    # silently disable every already-created application logger for the rest of
+    # the process — records vanish without an error.
+    fileConfig(config.config_file_name, disable_existing_loggers=False)
 
 target_metadata = Base.metadata
 

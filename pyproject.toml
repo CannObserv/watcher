@@ -29,12 +29,15 @@ dependencies = [
     "notifier-client",
     "archiver-client>=4.0.0,<5",
     "co-core[extract]>=0.7.7,<0.8",
-    "co-core-aio>=0.7.7,<0.8",
+    "co-core-aio[bus]>=0.7.7,<0.8",
 ]
 
 [dependency-groups]
 dev = [
     "anyio>=4.12.1,<5",
+    # In-memory Redis for the fetch-policy producer tests (#245); mirrors
+    # replicator's test harness so the two ends of the stream test alike.
+    "fakeredis>=2.26,<3",
     "openapi-python-client>=0.21,<1",
     # Imported directly by tests/test_dependency_extras.py; declared rather than
     # relied on as a transitive of procrastinate (#242).

@@ -112,6 +112,18 @@ esac
 export DATABASE_URL="$DEV_URL"
 unset PROCRASTINATE_DATABASE_URL
 
+# Same guard for the bus (#245): /etc/watcher/.env carries the production
+# WATCHER_BUS_REDIS_URL, and a dev server inheriting it would publish
+# fetch-policy frames onto the stream the live Replicator paces real origins
+# from. Publish only when a dev bus is explicitly configured.
+if [[ -n "${WATCHER_DEV_BUS_REDIS_URL:-}" ]]; then
+  export WATCHER_BUS_REDIS_URL="$WATCHER_DEV_BUS_REDIS_URL"
+  BUS_REPORT="$WATCHER_BUS_REDIS_URL"
+else
+  unset WATCHER_BUS_REDIS_URL
+  BUS_REPORT="(cleared)"
+fi
+
 # pytest builds watcher_test with Base.metadata.create_all, not alembic, so
 # its alembic_version (if any) never matches the actual tables and a plain
 # `upgrade head` fails mid-history. The test DB is disposable by definition,
@@ -147,6 +159,7 @@ fi
 if [[ "${WATCHER_DEV_SERVER_DRY_RUN:-}" == "1" ]]; then
   echo "DATABASE_URL=$DATABASE_URL"
   echo "PROCRASTINATE_DATABASE_URL=(cleared)"
+  echo "WATCHER_BUS_REDIS_URL=$BUS_REPORT"
   echo "PORT=$PORT"
   echo "MIGRATE=$MIGRATE_REPORT"
   echo "RESET=$RESET_REPORT"

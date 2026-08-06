@@ -220,3 +220,33 @@ def test_migration_can_be_skipped() -> None:
     assert result.returncode == 0, result.stderr
     assert "MIGRATE=(skipped)" in result.stdout
     assert "RESET=(none)" in result.stdout
+
+
+def test_bus_url_is_cleared_unless_dev_bus_is_explicit() -> None:
+    """An inherited production WATCHER_BUS_REDIS_URL must not reach the child (#245).
+
+    /etc/watcher/.env carries the production bus URL; a dev server inheriting it
+    would publish fetch-policy frames onto the stream the live Replicator paces
+    real origins from — the #233 hazard, bus edition.
+    """
+    result = run(
+        {
+            "TEST_DATABASE_URL": TEST_URL,
+            "WATCHER_BUS_REDIS_URL": "redis://localhost:6379/0",
+        }
+    )
+    assert result.returncode == 0, result.stderr
+    assert "WATCHER_BUS_REDIS_URL=(cleared)" in result.stdout
+
+
+def test_explicit_dev_bus_url_is_forwarded() -> None:
+    """WATCHER_DEV_BUS_REDIS_URL opts a dev server into a (scratch) bus."""
+    result = run(
+        {
+            "TEST_DATABASE_URL": TEST_URL,
+            "WATCHER_BUS_REDIS_URL": "redis://localhost:6379/0",
+            "WATCHER_DEV_BUS_REDIS_URL": "redis://localhost:6379/15",
+        }
+    )
+    assert result.returncode == 0, result.stderr
+    assert "WATCHER_BUS_REDIS_URL=redis://localhost:6379/15" in result.stdout

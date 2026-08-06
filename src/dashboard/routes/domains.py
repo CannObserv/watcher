@@ -17,6 +17,7 @@ from src.api.schemas.validators import validate_event_list
 from src.core.domains import (
     backfill_domain_schedule_config,
 )
+from src.core.fetch_policy import clear_tombstone, record_tombstone
 from src.core.models.audit_log import EventType, audit
 from src.core.models.domain import Domain
 from src.core.models.notification_template import (
@@ -41,6 +42,12 @@ from src.dashboard.context import (
 from src.dashboard.deps import clamp_pagination, is_htmx
 from src.dashboard.forms import parse_content_config_from_form
 from src.dashboard.templating import templates
+
+# NOTE (#245): dashboard domain mutations do NOT defer a fetch-policy republish
+# — the dashboard is decoupled from the task queue (test_import_decoupling), so
+# policy changes made here travel on the periodic full-set republish instead
+# (publish_fetch_policy, every 5 minutes). Only the tombstone/clear bookkeeping,
+# which must land atomically with the Domain row, happens in-request.
 
 router = APIRouter()
 
@@ -166,6 +173,8 @@ async def domain_create_submit(
 
     domain = Domain(name=domain_name)
     session.add(domain)
+    # The host is live again: stop republishing its tombstone, if any (#245).
+    await clear_tombstone(session, domain_name)
     audit(session, EventType.DOMAIN_CREATED, domain_name=domain_name, source="dashboard")
     await session.commit()
     return RedirectResponse(url=f"/domains/{domain_name}", status_code=303)
@@ -305,6 +314,9 @@ async def domain_delete(
         return HTMLResponse(status_code=409, content=msg)
 
     audit(session, EventType.DOMAIN_DELETED, domain_name=name, source="dashboard")
+    # Tombstone lands atomically with the delete; the producer keeps
+    # republishing it so LWW consumers can revoke the host's policy (#245).
+    await record_tombstone(session, name)
     await session.delete(domain)
     await session.commit()
 

@@ -1,6 +1,11 @@
 [Unit]
 Description=Watcher — Cannabis Observer monitoring service
-After=network.target postgresql.service
+# redis-server ordering is SOFT (After+Wants, not Requires), matching
+# Archiver's pattern: the broker is Archiver-operated (archiver#109), and
+# Watcher only *publishes* to it — the content.fetch-policy producer (#245).
+# A missing broker degrades to a logged publish failure, never a boot failure.
+After=network.target postgresql.service redis-server.service
+Wants=redis-server.service
 
 [Service]
 Type=simple

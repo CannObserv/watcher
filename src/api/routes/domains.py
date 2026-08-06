@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.api.deps import get_db_session
 from src.api.schemas.domain import DomainPatch, DomainResponse
 from src.core.domains import backfill_domain_schedule_config
+from src.core.fetch_policy import clear_tombstone, record_tombstone
 from src.core.models.audit_log import EventType, audit
 from src.core.models.domain import (
     DEFAULT_DECAY_WINDOW,
@@ -18,6 +19,7 @@ from src.core.models.domain import (
     Domain,
 )
 from src.core.models.watched_item import WatchedItem
+from src.workers.fetch_policy import defer_policy_republish
 
 router = APIRouter(prefix="/domains", tags=["domains"])
 
@@ -77,6 +79,9 @@ async def upsert_domain(
     updates = data.model_dump(exclude_unset=True)
 
     if domain is None:
+        # The host is live again: its fetch-policy tombstone (if any) must stop
+        # being republished, atomically with the row that supersedes it (#245).
+        await clear_tombstone(session, name)
         min_iv = updates.get("min_interval", DEFAULT_MIN_INTERVAL)
         domain = Domain(
             name=name,
@@ -117,6 +122,9 @@ async def upsert_domain(
 
     await session.commit()
     await session.refresh(domain)
+    # Post-commit so the republished set reads the new numbers; best-effort —
+    # the periodic tick covers a failed defer (#245).
+    await defer_policy_republish()
     return domain
 
 
@@ -136,8 +144,12 @@ async def delete_domain(name: str, session: AsyncSession = Depends(get_db_sessio
             detail=f"Cannot delete: watched items still reference domain '{name}'",
         )
 
+    # LWW streams have no delete: the tombstone row keeps the host's revocation
+    # in every full-set republish, atomically with the Domain delete (#245).
+    await record_tombstone(session, name)
     await session.delete(domain)
     await session.commit()
+    await defer_policy_republish()
 
 
 @router.post("/{name}/archive", response_model=DomainResponse)

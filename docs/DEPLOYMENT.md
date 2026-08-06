@@ -36,11 +36,14 @@ export $(cat /etc/watcher/.env .env 2>/dev/null | xargs)
 | `ARCHIVER_API_KEY` | `/etc/watcher/.env` | **yes** | API key for the ArchiverClient SDK; missing key crashes the API on boot via the lifespan pre-warm |
 | `WATCHER_ALLOW_PRODUCTION_DB` | `deploy/watcher.service` **only** | prod only | `=1` opts into serving a database whose name lacks a `_test`/`_dev` suffix (`src/core/db_safety.py`, #233). Must live in the systemd unit, never an env file — env files are sourced by hand-run dev servers, which are exactly what the guard stops |
 | `WATCHER_DEV_DATABASE_URL` | `.env` | no | Persistent dev database for `scripts/dev_server.sh`; wins over `TEST_DATABASE_URL` |
+| `WATCHER_BUS_REDIS_URL` | `/etc/watcher/.env` | prod | Redis URL of the Archiver-operated broker (`redis://localhost:6379/0`) for the `content.fetch-policy` producer (#245). Unset → the periodic publish task skips with an ERROR log and Replicator paces every host at its own conservative default |
+| `WATCHER_DEV_BUS_REDIS_URL` | `.env` | no | Scratch-bus opt-in for `scripts/dev_server.sh`; without it the dev server **clears** an inherited `WATCHER_BUS_REDIS_URL` so it cannot publish policy onto the production stream |
 
-**No Redis variable.** Archiver operates `redis-server` and owns the
-`info.changes` change bus (archiver#109); Watcher neither produces to nor
-consumes from it, and needs no Redis connection. See `AGENTS.md` § *Redis is
-Archiver's* for the future paths that would reintroduce one — none is built.
+**Watcher's Redis connection is publish-only.** Archiver operates
+`redis-server` and owns the broker (archiver#109). Watcher's sole use is the
+`content.fetch-policy` producer above (#245) — it consumes nothing, joins no
+consumer group, and all async work stays on Procrastinate over Postgres. See
+`AGENTS.md` § *Redis and the bus* for the ownership split.
 
 ## Systemd Service
 

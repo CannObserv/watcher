@@ -85,6 +85,52 @@ async def _record_check_failure(
         await session.commit()
 
 
+async def _record_check_success(
+    session: AsyncSession,
+    watched_item: WatchedItem,
+    result,
+    *,
+    now: datetime,
+    url: str,
+) -> None:
+    """Record a successful check: audit trail + OK health + ``last_checked_at``,
+    and dispatch ``WATCH_RECOVERED`` once on the ERROR→OK transition.
+
+    Shared by the local fetch path (``check_watched_item``) and the Phase-4
+    apply path (``apply_fetch_blob``) so both leave identical bookkeeping — the
+    dashboard checks_today stat and WatchedItem activity read these events. A
+    snapshot event marks a baseline/changed cycle (a ChangeRevision was
+    written); otherwise the content was unchanged.
+    """
+    snapshot = result.baseline_established or result.changed
+    audit(
+        session,
+        EventType.CHECK_SNAPSHOT_CREATED if snapshot else EventType.CHECK_NO_CHANGE,
+        watched_item_id=str(watched_item.id),
+        changed=result.changed,
+        baseline=result.baseline_established,
+    )
+
+    previous_health = watched_item.health_status
+    watched_item.health_status = WatchHealthStatus.OK
+    watched_item.last_checked_at = now
+    await session.commit()
+
+    # Recovery: dispatch WATCH_RECOVERED once when the WatchedItem
+    # transitions ERROR → OK (#191).
+    if previous_health == WatchHealthStatus.ERROR:
+        recovery_event = WatchEvent(
+            event_type=WatchEventType.WATCH_RECOVERED,
+            watched_item_id=str(watched_item.id),
+            item_name=watched_item.name,
+            item_url=watched_item.effective_url or url,
+            occurred_at=now,
+            metadata=watched_item_event_base_metadata(watched_item),
+        )
+        await dispatch_event_notifications(session=session, event=recovery_event)
+        await session.commit()
+
+
 async def _issue_fetch_command(session: AsyncSession, watched_item, bus_client) -> dict:
     """Issue one ``content.fetch`` command for the item (#241, MUST-1/MUST-2).
 
@@ -271,44 +317,14 @@ async def check_watched_item(
             )
             return {"error": "extraction_failed"}
 
-        # Audit the successful check so executions leave a trail (the dashboard
-        # checks_today stat + WatchedItem activity read these). A snapshot event
-        # marks a baseline/changed cycle (a ChangeRevision was written); otherwise
-        # the content was unchanged.
-        snapshot = result.baseline_established or result.changed
-        audit(
-            session,
-            EventType.CHECK_SNAPSHOT_CREATED if snapshot else EventType.CHECK_NO_CHANGE,
-            watched_item_id=str(watched_item.id),
-            changed=result.changed,
-            baseline=result.baseline_established,
-        )
+        await _record_check_success(session, watched_item, result, now=now, url=url)
 
-        # Track health + timestamp on WatchedItem.
-        previous_health = watched_item.health_status
-        watched_item.health_status = WatchHealthStatus.OK
-        watched_item.last_checked_at = now
-        await session.commit()
-
-        # Domain backoff decay after successful fetch.
+        # Domain backoff decay after successful fetch (local-fetch mode only —
+        # in bus mode nothing observes statuses here; see #245/replicator#25).
         _limiter = get_rate_limiter()
         _state = _limiter._domains.get(rate_limit_domain)
         if _state and _state.current_interval > _state.min_interval:
             await _maybe_decay_backoff(rate_limit_domain, _limiter, session)
-            await session.commit()
-
-        # Recovery: dispatch WATCH_RECOVERED once when the WatchedItem
-        # transitions ERROR → OK (#191).
-        if previous_health == WatchHealthStatus.ERROR:
-            recovery_event = WatchEvent(
-                event_type=WatchEventType.WATCH_RECOVERED,
-                watched_item_id=str(watched_item.id),
-                item_name=watched_item.name,
-                item_url=watched_item.effective_url or url,
-                occurred_at=now,
-                metadata=watched_item_event_base_metadata(watched_item),
-            )
-            await dispatch_event_notifications(session=session, event=recovery_event)
             await session.commit()
 
     return {

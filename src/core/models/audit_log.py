@@ -21,6 +21,10 @@ class EventType:
     CHECK_NO_CHANGE = "check.no_change"
     CHECK_FETCH_FAILED = "check.fetch_failed"
     CHECK_EXTRACTION_FAILED = "check.extraction_failed"
+    # Phase 4 (#241): the fact's final_url differed from the requested url —
+    # recorded for the #157 succession workflow; effective_url is never
+    # auto-rewritten (Archiver stays authoritative).
+    CHECK_REDIRECT_OBSERVED = "check.redirect_observed"
     NOTIFICATION_DISPATCHED = "notification.dispatched"
     NOTIFICATION_TEST = "notification.test"
     # #200: every notification target is a NotificationTemplate (any visibility);

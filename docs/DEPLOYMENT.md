@@ -37,14 +37,17 @@ export $(cat /etc/watcher/.env .env 2>/dev/null | xargs)
 | `WATCHER_ALLOW_PRODUCTION_DB` | `deploy/watcher.service` **only** | prod only | `=1` opts into serving a database whose name lacks a `_test`/`_dev` suffix (`src/core/db_safety.py`, #233). Must live in the systemd unit, never an env file — env files are sourced by hand-run dev servers, which are exactly what the guard stops |
 | `WATCHER_DEV_DATABASE_URL` | `.env` | no | Persistent dev database for `scripts/dev_server.sh`; wins over `TEST_DATABASE_URL` |
 | `WATCHER_BUS_REDIS_URL` | `/etc/watcher/.env` | prod | Redis URL of the Archiver-operated broker (`redis://localhost:6379/0`) for the `content.fetch-policy` producer (#245). Unset → the periodic publish task skips with an ERROR log and Replicator paces every host at its own conservative default |
-| `WATCHER_FETCH_MODE` | env | no | `local` (default) fetches inline; `bus` issues `content.fetch` commands to Replicator (#241 Phase 4). **Leave `local` until the Phase-4 consumer ships** — see AGENTS.md § Phase 4 contracts |
+| `WATCHER_FETCH_MODE` | env | no | `local` (default) fetches inline; `bus` issues `content.fetch` commands to Replicator (#241 Phase 4). The full loop (issue → consume → apply) ships; flip only per the cutover plan (soak one item first) — see AGENTS.md § Phase 4 contracts |
+| `WATCHER_FETCH_COMMAND_TIMEOUT_SECONDS` | env | no | Reaper timeout for an in-flight command with no fact (default `1800` — deliberately generous; Replicator's reclaim cadence is an operator knob, and a tight value re-issues under live retries) |
+| `WATCHER_FETCH_MAX_REISSUES` | env | no | Re-issues per fetch intent before it fails with ERROR health (default `3`) |
 | `WATCHER_DEV_BUS_REDIS_URL` | `.env` | no | Scratch-bus opt-in for `scripts/dev_server.sh`; without it the dev server **clears** an inherited `WATCHER_BUS_REDIS_URL` so it cannot publish policy onto the production stream |
 
-**Watcher's Redis connection is publish-only.** Archiver operates
-`redis-server` and owns the broker (archiver#109). Watcher's sole use is the
-`content.fetch-policy` producer above (#245) — it consumes nothing, joins no
-consumer group, and all async work stays on Procrastinate over Postgres. See
-`AGENTS.md` § *Redis and the bus* for the ownership split.
+**Watcher's Redis use.** Archiver operates `redis-server` and owns the broker
+(archiver#109). Watcher publishes `content.fetch-policy` (#245) and — Phase 4,
+#241 — publishes `content.fetch` commands and consumes `content.blobs` facts
+via its own consumer group (`watcher`, started in the lifespan when
+`WATCHER_BUS_REDIS_URL` is set). All queued work stays on Procrastinate over
+Postgres. See `AGENTS.md` § *Redis and the bus* for the ownership split.
 
 ## Systemd Service
 

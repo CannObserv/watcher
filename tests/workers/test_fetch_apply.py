@@ -1,0 +1,293 @@
+"""Tests for apply_fetch_blob / apply_fetch_failure / reap_fetch_commands (#241 step 2).
+
+The apply path must leave the SAME bookkeeping the local fetch path leaves —
+health, ``last_checked_at``, check audits, error surfacing — and must be safe
+under the bus's actual delivery semantics: duplicates (status guard),
+no ordering (supersession guard), and expiring blobs (re-issue, not error).
+"""
+
+from contextlib import asynccontextmanager
+from datetime import UTC, datetime, timedelta
+from unittest.mock import AsyncMock, MagicMock
+
+import fakeredis
+import pytest
+from sqlalchemy import select
+
+import src.workers.fetch_commands as fc_mod
+from src.core.fetch_commands import create_fetch_command
+from src.core.models.audit_log import AuditLog, EventType
+from src.core.models.fetch_command import FetchCommand, FetchCommandStatus
+from src.core.models.watched_item import WatchHealthStatus
+from src.core.registry import ServiceRegistry
+from src.workers.fetch_commands import (
+    apply_fetch_blob,
+    apply_fetch_failure,
+    reap_fetch_commands,
+)
+from src.workers.pipeline import ExtractionError, WatchedItemResult
+from tests.conftest import make_watched_item
+
+pytestmark = pytest.mark.integration
+
+NOW = datetime(2026, 8, 6, 17, 30, 0, tzinfo=UTC)
+
+
+def _mock_session_factory(db_session):
+    @asynccontextmanager
+    async def _ctx():
+        yield db_session
+
+    factory = MagicMock()
+    factory.return_value = _ctx()
+    return factory
+
+
+def _stub_pipeline(monkeypatch, *, changed=True, raises=None) -> AsyncMock:
+    async def _proc(session, watched_item, *, raw_content, registry=None):
+        if raises is not None:
+            raise raises
+        return WatchedItemResult(changed=changed)
+
+    stub = AsyncMock(side_effect=_proc)
+    monkeypatch.setattr(fc_mod, "process_watched_item", stub)
+    return stub
+
+
+def _wire(db_session, monkeypatch, **pipeline_kwargs) -> AsyncMock:
+    monkeypatch.setattr(fc_mod, "get_session_factory", lambda: _mock_session_factory(db_session))
+    return _stub_pipeline(monkeypatch, **pipeline_kwargs)
+
+
+async def _row_with_fact(db_session, tmp_path, *, content=b"<p>hi</p>", **fact_over):
+    wi = await make_watched_item(db_session, primary_url="https://lcb.wa.gov/notices")
+    row = await create_fetch_command(db_session, wi, now=NOW)
+    row.status = FetchCommandStatus.IN_FLIGHT
+    row.published_at = NOW
+    blob = tmp_path / "blob.bin"
+    blob.write_bytes(content)
+    row.blob_uri = f"file://{blob}"
+    row.fact_at = NOW
+    row.content_fingerprint = "ab" * 32
+    for key, value in fact_over.items():
+        setattr(row, key, value)
+    await db_session.flush()
+    return wi, row
+
+
+async def _audit_events(db_session, event_type) -> list[AuditLog]:
+    stmt = select(AuditLog).where(AuditLog.event_type == event_type)
+    return list((await db_session.execute(stmt)).scalars().all())
+
+
+class TestApplyFetchBlob:
+    async def test_applies_blob_through_the_pipeline(self, db_session, monkeypatch, tmp_path):
+        wi, row = await _row_with_fact(db_session, tmp_path)
+        stub = _wire(db_session, monkeypatch, changed=True)
+
+        result = await apply_fetch_blob(row.command_id, registry=ServiceRegistry())
+
+        assert result["applied"] is True
+        assert stub.await_count == 1
+        assert stub.await_args.kwargs["raw_content"] == b"<p>hi</p>"
+        assert row.status == FetchCommandStatus.SUCCEEDED
+        assert row.applied_at is not None
+        assert wi.health_status == WatchHealthStatus.OK
+        assert wi.last_checked_at is not None
+        assert len(await _audit_events(db_session, EventType.CHECK_SNAPSHOT_CREATED)) == 1
+
+    async def test_status_guard_makes_duplicates_noops(self, db_session, monkeypatch, tmp_path):
+        _, row = await _row_with_fact(db_session, tmp_path)
+        stub = _wire(db_session, monkeypatch)
+
+        first = await apply_fetch_blob(row.command_id, registry=ServiceRegistry())
+        second = await apply_fetch_blob(row.command_id, registry=ServiceRegistry())
+
+        assert first["applied"] is True
+        assert second == {"skipped": True, "reason": "status_succeeded"}
+        assert stub.await_count == 1
+
+    async def test_out_of_order_apply_is_superseded(self, db_session, monkeypatch, tmp_path):
+        # A reaper re-issue racing a recovered original: the newer command
+        # applied first; the older must not flap the fingerprint A→B→A.
+        wi, older = await _row_with_fact(db_session, tmp_path)
+        newer = await create_fetch_command(
+            db_session, wi, now=NOW + timedelta(minutes=5), intent_id=older.intent_id
+        )
+        newer.status = FetchCommandStatus.SUCCEEDED
+        newer.applied_at = NOW + timedelta(minutes=6)
+        await db_session.flush()
+        stub = _wire(db_session, monkeypatch)
+
+        result = await apply_fetch_blob(older.command_id, registry=ServiceRegistry())
+
+        assert result == {"skipped": True, "reason": "superseded"}
+        assert older.status == FetchCommandStatus.SUPERSEDED
+        assert stub.await_count == 0
+
+    async def test_unreadable_blob_reissues_the_intent(self, db_session, monkeypatch, tmp_path):
+        wi, row = await _row_with_fact(db_session, tmp_path)
+        row.blob_uri = f"file://{tmp_path}/reaped-away.bin"
+        await db_session.flush()
+        stub = _wire(db_session, monkeypatch)
+        client = fakeredis.FakeAsyncRedis()
+
+        result = await apply_fetch_blob(
+            row.command_id, registry=ServiceRegistry(), bus_client=client
+        )
+
+        assert stub.await_count == 0
+        assert row.status == FetchCommandStatus.EXPIRED
+        new_id = result["reissued"]
+        new_row = await db_session.get(FetchCommand, new_id)
+        assert new_row.intent_id == row.intent_id
+        assert new_row.reissue_count == 1
+        assert new_row.status == FetchCommandStatus.IN_FLIGHT  # published to the fake bus
+
+    async def test_seeds_media_type_from_raw_header_once(self, db_session, monkeypatch, tmp_path):
+        wi, row = await _row_with_fact(
+            db_session, tmp_path, content_type_raw="application/pdf; charset=binary"
+        )
+        assert wi.content_media_type is None
+        _wire(db_session, monkeypatch)
+
+        await apply_fetch_blob(row.command_id, registry=ServiceRegistry())
+        assert wi.content_media_type == "application/pdf; charset=binary"
+
+        # Never clobbered on a later apply.
+        wi.content_media_type = "operator/override"
+        another = await create_fetch_command(db_session, wi, now=NOW + timedelta(minutes=9))
+        another.status = FetchCommandStatus.IN_FLIGHT
+        blob = tmp_path / "b2.bin"
+        blob.write_bytes(b"x")
+        another.blob_uri = f"file://{blob}"
+        another.content_type_raw = "text/html"
+        await db_session.flush()
+        await apply_fetch_blob(another.command_id, registry=ServiceRegistry())
+        assert wi.content_media_type == "operator/override"
+
+    async def test_extraction_error_surfaces_like_local_path(
+        self, db_session, monkeypatch, tmp_path
+    ):
+        wi, row = await _row_with_fact(db_session, tmp_path)
+        _wire(db_session, monkeypatch, raises=ExtractionError("bytes are not a PDF"))
+
+        result = await apply_fetch_blob(row.command_id, registry=ServiceRegistry())
+
+        assert result == {"error": "extraction_failed"}
+        assert row.status == FetchCommandStatus.FAILED
+        assert wi.health_status == WatchHealthStatus.ERROR
+        assert wi.last_checked_at is not None
+        assert len(await _audit_events(db_session, EventType.CHECK_EXTRACTION_FAILED)) == 1
+
+    async def test_redirect_divergence_is_audited(self, db_session, monkeypatch, tmp_path):
+        wi, row = await _row_with_fact(
+            db_session, tmp_path, final_url="https://lcb.wa.gov/moved-here"
+        )
+        _wire(db_session, monkeypatch)
+
+        await apply_fetch_blob(row.command_id, registry=ServiceRegistry())
+
+        events = await _audit_events(db_session, EventType.CHECK_REDIRECT_OBSERVED)
+        assert len(events) == 1
+        assert events[0].payload["final_url"] == "https://lcb.wa.gov/moved-here"
+
+
+class TestApplyFetchFailure:
+    async def test_surfaces_error_health_and_audit(self, db_session, monkeypatch):
+        wi = await make_watched_item(db_session, primary_url="https://lcb.wa.gov/notices")
+        row = await create_fetch_command(db_session, wi, now=NOW)
+        row.status = FetchCommandStatus.FAILED
+        row.failure_reason = "http_status"
+        row.status_code = 404
+        await db_session.flush()
+        monkeypatch.setattr(
+            fc_mod, "get_session_factory", lambda: _mock_session_factory(db_session)
+        )
+
+        result = await apply_fetch_failure(row.command_id)
+
+        assert result == {"applied": True, "reason": "http_status"}
+        assert wi.health_status == WatchHealthStatus.ERROR
+        assert wi.last_checked_at is not None
+        assert row.applied_at is not None
+        events = await _audit_events(db_session, EventType.CHECK_FETCH_FAILED)
+        assert len(events) == 1
+        assert events[0].payload["reason"] == "http_status"
+        assert events[0].payload["status_code"] == 404
+
+    async def test_idempotent_once_applied(self, db_session, monkeypatch):
+        wi = await make_watched_item(db_session, primary_url="https://lcb.wa.gov/notices")
+        row = await create_fetch_command(db_session, wi, now=NOW)
+        row.status = FetchCommandStatus.FAILED
+        row.failure_reason = "http_status"
+        await db_session.flush()
+        monkeypatch.setattr(
+            fc_mod, "get_session_factory", lambda: _mock_session_factory(db_session)
+        )
+
+        await apply_fetch_failure(row.command_id)
+        second = await apply_fetch_failure(row.command_id)
+
+        assert second == {"skipped": True, "reason": "already_applied"}
+        assert len(await _audit_events(db_session, EventType.CHECK_FETCH_FAILED)) == 1
+
+
+class TestReapFetchCommands:
+    async def _stalled_row(self, db_session, *, age_minutes=60, reissue_count=0):
+        wi = await make_watched_item(db_session, primary_url="https://lcb.wa.gov/notices")
+        row = await create_fetch_command(db_session, wi, now=NOW, reissue_count=reissue_count)
+        row.status = FetchCommandStatus.IN_FLIGHT
+        row.published_at = datetime.now(UTC) - timedelta(minutes=age_minutes)
+        await db_session.flush()
+        return wi, row
+
+    async def test_stalled_command_is_expired_and_reissued(self, db_session):
+        wi, row = await self._stalled_row(db_session)
+        client = fakeredis.FakeAsyncRedis()
+
+        result = await reap_fetch_commands(session=db_session, bus_client=client)
+
+        assert result == {"reissued": 1, "capped": 0}
+        assert row.status == FetchCommandStatus.EXPIRED
+        rows = list(
+            (
+                await db_session.execute(
+                    select(FetchCommand).where(FetchCommand.intent_id == row.intent_id)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert len(rows) == 2
+        new_row = next(r for r in rows if r.command_id != row.command_id)
+        assert new_row.reissue_count == 1
+        assert new_row.status == FetchCommandStatus.IN_FLIGHT
+
+    async def test_reissue_cap_fails_the_intent_with_error_health(self, db_session):
+        wi, row = await self._stalled_row(db_session, reissue_count=3)
+        client = fakeredis.FakeAsyncRedis()
+
+        result = await reap_fetch_commands(session=db_session, bus_client=client)
+
+        assert result == {"reissued": 0, "capped": 1}
+        assert row.status == FetchCommandStatus.FAILED
+        assert row.failure_reason == "fetch_timeout"
+        assert wi.health_status == WatchHealthStatus.ERROR
+        events = await _audit_events(db_session, EventType.CHECK_FETCH_FAILED)
+        assert events and events[0].payload["reason"] == "fetch_timeout"
+        # The gate lifts: no open command remains, so scheduling resumes.
+        assert await client.xlen("content.fetch") == 0
+
+    async def test_fresh_and_facted_rows_are_left_alone(self, db_session):
+        _, fresh = await self._stalled_row(db_session, age_minutes=1)
+        _, facted = await self._stalled_row(db_session, age_minutes=60)
+        facted.fact_at = NOW
+        await db_session.flush()
+        client = fakeredis.FakeAsyncRedis()
+
+        result = await reap_fetch_commands(session=db_session, bus_client=client)
+
+        assert result == {"reissued": 0, "capped": 0}
+        assert fresh.status == FetchCommandStatus.IN_FLIGHT
+        assert facted.status == FetchCommandStatus.IN_FLIGHT

@@ -21,6 +21,7 @@ from src.api.routes.watched_items import router as watched_items_router
 from src.core.config_poller import start_config_poller
 from src.core.database import get_session_factory
 from src.core.db_safety import ProductionDatabaseRefused, assert_environment_db_allowed
+from src.core.fetch_policy import BUS_REDIS_URL_ENV, bus_client_from_env
 from src.core.logging import configure_logging, get_logger
 from src.core.models.domain import Domain
 from src.core.rate_limiter import DomainRateLimiter, get_rate_limiter
@@ -80,13 +81,37 @@ async def lifespan(application: FastAPI):
 
     poller_task = await start_config_poller(limiter, get_session_factory())
 
+    # Phase 4 (#241): the content.blobs fact consumer. Started whenever the bus
+    # is configured — in local fetch mode it idles (facts for other issuers'
+    # commands are acked and discarded as unmatched), and running it keeps the
+    # WATCHER_FETCH_MODE flip restart-free.
+    from src.workers.fetch_facts import start_blobs_consumer
+
+    bus_client = bus_client_from_env()
+    consumer_stop = asyncio.Event()
+    consumer_task = None
+    if bus_client is not None:
+        consumer_task = start_blobs_consumer(bus_client, get_session_factory(), stop=consumer_stop)
+        logger.info("content.blobs consumer started")
+    else:
+        logger.info("content.blobs consumer not started: %s is not set", BUS_REDIS_URL_ENV)
+
     proc_app = get_app()
     await proc_app.open_async()
     worker_task = asyncio.create_task(proc_app.run_worker_async(install_signal_handlers=False))
     yield
+    consumer_stop.set()
     poller_task.cancel()
     worker_task.cancel()
-    await asyncio.gather(poller_task, worker_task, return_exceptions=True)
+    if consumer_task is not None:
+        # The stop event alone leaves up to BLOCK_MS of read latency; a cancel
+        # is safe (commit-then-ack means a cancelled ack just redelivers, and
+        # the upsert + apply guard make redelivery a no-op).
+        consumer_task.cancel()
+    tasks = [t for t in (poller_task, worker_task, consumer_task) if t is not None]
+    await asyncio.gather(*tasks, return_exceptions=True)
+    if bus_client is not None:
+        await bus_client.aclose()
     await proc_app.close_async()
     # SDK/HTTP closes must be the last shutdown step (no consumer can still be in flight).
     await registry.aclose_fetcher()

@@ -264,12 +264,11 @@ def _apply_domain_filters(stmt, *, search: str | None = None, status: str | None
     if search:
         escaped = search.replace("%", "\\%").replace("_", "\\_")
         stmt = stmt.where(Domain.name.ilike(f"%{escaped}%"))
-    # Mirror Domain.status precedence: archived > inactive > backoff > active.
+    # Mirror Domain.status precedence: archived > inactive > active.
     if status == "active":
         stmt = stmt.where(
             Domain.archived_at.is_(None),
             Domain.is_active.is_(True),
-            Domain.current_interval <= Domain.min_interval,
         )
     elif status == "inactive":
         stmt = stmt.where(
@@ -278,12 +277,6 @@ def _apply_domain_filters(stmt, *, search: str | None = None, status: str | None
         )
     elif status == "archived":
         stmt = stmt.where(Domain.archived_at.isnot(None))
-    elif status == "backoff":
-        stmt = stmt.where(
-            Domain.archived_at.is_(None),
-            Domain.is_active.is_(True),
-            Domain.current_interval > Domain.min_interval,
-        )
     return stmt
 
 
@@ -302,7 +295,7 @@ async def get_domains_with_watched_item_counts(
 
     Args:
         search: Substring match on domain name.
-        status: Filter — "active", "inactive", "archived", "backoff", or None (all).
+        status: Filter — "active", "inactive", "archived", or None (all).
         page: 1-based page number (only used when page_size is set).
         page_size: Results per page. None means no pagination (return all).
     """
@@ -343,7 +336,6 @@ async def get_domains_with_watched_item_counts(
             "decay_window": domain.decay_window,
             "max_concurrency": domain.max_concurrency,
             "last_request_at": domain.last_request_at,
-            "in_backoff": domain.current_interval > domain.min_interval,
             "watched_item_count": watched_item_count,
             "last_checked": last_checked,
             "status": domain.status,

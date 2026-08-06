@@ -5,7 +5,6 @@ import os
 from contextlib import asynccontextmanager
 
 from fastapi import APIRouter, Depends, FastAPI
-from sqlalchemy import select
 
 from src.api.deps import require_api_key
 from src.api.routes.audit_log import router as audit_router
@@ -19,12 +18,9 @@ from src.api.routes.watched_item_notifications import (
 )
 from src.api.routes.watched_items import router as watched_items_router
 from src.core.bus import BUS_REDIS_URL_ENV, aclose_shared_bus_client, get_shared_bus_client
-from src.core.config_poller import start_config_poller
 from src.core.database import get_session_factory
 from src.core.db_safety import ProductionDatabaseRefused, assert_environment_db_allowed
 from src.core.logging import configure_logging, get_logger
-from src.core.models.domain import Domain
-from src.core.rate_limiter import DomainRateLimiter, get_rate_limiter
 from src.core.registry import get_registry
 from src.dashboard import register_dashboard
 
@@ -38,30 +34,15 @@ configure_logging()
 logger = get_logger(__name__)
 
 
-async def hydrate_rate_limiter(limiter: DomainRateLimiter) -> None:
-    """Load persisted domain configs into the rate limiter at startup."""
-    async with get_session_factory()() as session:
-        result = await session.execute(select(Domain))
-        domains = result.scalars().all()
-    for d in domains:
-        limiter.configure_domain(
-            name=d.name,
-            max_concurrency=d.max_concurrency,
-            min_interval=d.min_interval,
-            current_interval=d.current_interval,
-        )
-    logger.info("rate limiter hydrated", extra={"domain_count": len(domains)})
-
-
 @asynccontextmanager
 async def lifespan(application: FastAPI):
-    """Hydrate rate limiter, pre-warm SDK, start config poller and procrastinate worker.
+    """Pre-warm the SDK, start the fact consumer and the procrastinate worker.
 
     Refuses to serve a production database unless the caller opted in via
     WATCHER_ALLOW_PRODUCTION_DB=1 (only deploy/watcher.service does) —
     launch-path-independent backstop for the prod-pointing dev-server recipe
     (#233); see src.core.db_safety. Runs before any resource is built, so a
-    refused process never hydrates the rate limiter or starts the worker.
+    refused process never starts the consumer or the worker.
 
     Pre-warming the ArchiverClient on startup means a missing ARCHIVER_API_KEY
     crashes the API on boot, not on first request. The SDK is closed last on shutdown,
@@ -75,20 +56,15 @@ async def lifespan(application: FastAPI):
         logger.critical("Refusing to start: %s", e)
         raise
 
-    limiter = get_rate_limiter()
-    await hydrate_rate_limiter(limiter)
-
     # Pre-warm the ArchiverClient — raises if ARCHIVER_API_KEY is unset.
     registry = get_registry()
     registry.get_archiver_client()
     logger.info("archiver client pre-warmed")
 
-    poller_task = await start_config_poller(limiter, get_session_factory())
-
-    # Phase 4 (#241): the content.blobs fact consumer. Started whenever the bus
-    # is configured — in local fetch mode it idles (facts for other issuers'
-    # commands are acked and discarded as unmatched), and running it keeps the
-    # WATCHER_FETCH_MODE flip restart-free.
+    # Phase 4 (#241): the content.blobs fact consumer — the only inbound path
+    # for check results now that Watcher itself does not fetch. Without a bus
+    # URL no facts can arrive at all, so the process is issue-only and every
+    # command will eventually be reaped.
     bus_client = get_shared_bus_client()
     consumer_stop = asyncio.Event()
     consumer_task = None
@@ -96,26 +72,29 @@ async def lifespan(application: FastAPI):
         consumer_task = start_blobs_consumer(bus_client, get_session_factory(), stop=consumer_stop)
         logger.info("content.blobs consumer started")
     else:
-        logger.info("content.blobs consumer not started: %s is not set", BUS_REDIS_URL_ENV)
+        # Not a degraded mode any more: with no fact inbox, issued commands
+        # can never be applied and every one of them will be reaped.
+        logger.error(
+            "content.blobs consumer NOT started: %s is not set — no check can complete",
+            BUS_REDIS_URL_ENV,
+        )
 
     proc_app = get_app()
     await proc_app.open_async()
     worker_task = asyncio.create_task(proc_app.run_worker_async(install_signal_handlers=False))
     yield
     consumer_stop.set()
-    poller_task.cancel()
     worker_task.cancel()
     if consumer_task is not None:
         # The stop event alone leaves up to BLOCK_MS of read latency; a cancel
         # is safe (commit-then-ack means a cancelled ack just redelivers, and
         # the upsert + apply guard make redelivery a no-op).
         consumer_task.cancel()
-    tasks = [t for t in (poller_task, worker_task, consumer_task) if t is not None]
+    tasks = [t for t in (worker_task, consumer_task) if t is not None]
     await asyncio.gather(*tasks, return_exceptions=True)
     await aclose_shared_bus_client()
     await proc_app.close_async()
-    # SDK/HTTP closes must be the last shutdown step (no consumer can still be in flight).
-    await registry.aclose_fetcher()
+    # SDK close must be the last shutdown step (no consumer can still be in flight).
     await registry.aclose_archiver_client()
 
 

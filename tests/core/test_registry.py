@@ -8,20 +8,10 @@ from co_core.pure.extract.csv_excel import CsvExcelExtractor
 from co_core.pure.extract.html import HtmlExtractor
 from co_core.pure.extract.pdf import PdfExtractor
 
-from src.core.fetch import HttpFetcher
 from src.core.registry import ServiceRegistry, get_registry, set_registry_for_testing
 
 
 class TestServiceRegistryDefaults:
-    def test_default_fetcher_is_http_fetcher(self):
-        registry = ServiceRegistry()
-        fetcher = registry.get_fetcher()
-        assert isinstance(fetcher, HttpFetcher)
-
-    def test_get_fetcher_returns_same_instance(self):
-        registry = ServiceRegistry()
-        assert registry.get_fetcher() is registry.get_fetcher()
-
     def test_get_extractor_html(self):
         registry = ServiceRegistry()
         extractor = registry.get_extractor("text/html")
@@ -59,46 +49,12 @@ class TestServiceRegistryDefaults:
 
 
 class TestServiceRegistryCustomInjection:
-    def test_custom_fetcher_is_returned(self):
-        mock_fetcher = MagicMock()
-        registry = ServiceRegistry(fetcher=mock_fetcher)
-        assert registry.get_fetcher() is mock_fetcher
-
     def test_custom_extractor_map(self):
         mock_cls = MagicMock(return_value=MagicMock())
         registry = ServiceRegistry(extractor_map={"custom": mock_cls})
         extractor = registry.get_extractor("custom")
         mock_cls.assert_called_once()
         assert extractor is mock_cls.return_value
-
-
-class TestServiceRegistryFetcherClose:
-    @pytest.mark.asyncio
-    async def test_aclose_fetcher_closes_and_resets(self):
-        """Default HttpFetcher is closed and dropped; next get_fetcher rebuilds."""
-        reg = ServiceRegistry()
-        fetcher = reg.get_fetcher()  # lazily builds the default HttpFetcher
-        await reg.aclose_fetcher()
-        assert reg._fetcher is None
-        assert reg.get_fetcher() is not fetcher
-
-    @pytest.mark.asyncio
-    async def test_aclose_fetcher_is_noop_when_unbuilt(self):
-        reg = ServiceRegistry()
-        await reg.aclose_fetcher()  # never built — must not raise
-        assert reg._fetcher is None
-
-    @pytest.mark.asyncio
-    async def test_aclose_fetcher_drops_injected_fetcher_without_aclose(self):
-        """An injected fetcher need not implement aclose; it's simply dropped."""
-
-        class _NoClose:
-            async def fetch(self, url, config=None):  # pragma: no cover - never called
-                raise AssertionError
-
-        reg = ServiceRegistry(fetcher=_NoClose())
-        await reg.aclose_fetcher()  # no aclose attribute — must not raise
-        assert reg._fetcher is None
 
 
 class TestServiceRegistryArchiverClient:

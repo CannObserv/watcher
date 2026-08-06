@@ -1,6 +1,6 @@
 # Phase 4: the `content.fetch` producer — design
 
-**Status:** design for review. **Issue:** #241 (intake), with #245 (politeness wire, shipped),
+**Status:** shipped — all five steps complete (see **Sequencing**). **Issue:** #241 (intake), with #245 (politeness wire, shipped),
 replicator#9/#10/#11 (contract additions, shipped), replicator#25 (adaptive backoff, open).
 
 **Normative contracts (link, don't copy):**
@@ -81,7 +81,7 @@ check-now:
 Replicator's (#245 shipped the numbers; replicator#25 the adaptive part). The issue path
 does not sleep, and `report_rate_limited_for_domain` has no caller on this path.
 
-### Consume path (new lifespan task, beside the config poller)
+### Consume path (new lifespan task)
 
 `content.blobs` consumer — `AsyncBusConsumer(topic=content.blobs, group="watcher")`,
 one in-process asyncio task (the single-process topology holds; the group has one member).
@@ -243,10 +243,32 @@ Live smoke after deploy against one sacrificial WatchedItem before the flag wide
 
 ## Sequencing
 
-1. Migration + `fetch_commands` model + issue path behind `WATCHER_FETCH_MODE` (default
+1. ✅ Migration + `fetch_commands` model + issue path behind `WATCHER_FETCH_MODE` (default
    `local` — inert when merged).
-2. Consumer task + apply/failure paths + reaper + gate (still inert).
-3. Async create (`probing` state) — independently mergeable.
-4. Flip one item to `bus`, soak, widen, delete `local`.
-5. Cleanup: rate-limiter retirement, dashboard backoff UI, AGENTS.md single-process
-   section (the limiter stops being the reason), epic close-out on #241.
+2. ✅ Consumer task + apply/failure paths + reaper + gate (still inert).
+3. ✅ Async create (`probing` state) — independently mergeable.
+4. ✅ Flip one item to `bus`, soak, widen, delete `local`. (See **Cutover** above.)
+5. ✅ Cleanup — what came out, 2026-08-06:
+   * `check_watched_item` is issue-only; the inline fetch, `WATCHER_FETCH_MODE`, and
+     `fetch_mode()` are gone. Its retry set drops the httpx exceptions (unreachable).
+   * `DomainRateLimiter` (module), the config poller (its only consumer), the lifespan
+     hydration, and the 429 `_persist_backoff` / `_maybe_decay_backoff` helpers — deleted.
+     Per-host pacing is wholly Replicator's, fed by #245.
+   * `HttpFetcher` + the `Fetcher` protocol + `ServiceRegistry`'s fetcher slot and
+     `aclose_fetcher` — deleted. `src/core/fetch.py` is now just `WATCHER_USER_AGENT`,
+     which still rides out on every command's headers for byte-continuity.
+   * `resolve_watch_target` is probe-free and synchronous; the `probe_fn` dependency
+     came off the watched-item create/edit routes. `probe_url` survives for two
+     *operator-initiated* one-shots: domain create and `POST /api/v1/probe`.
+   * Dashboard: the Backoff badge, the Backoff filter segment, the backoff row tint, and
+     `in_backoff` in the context dict — gone. `Domain.status` lost its `backoff` branch.
+     The System Health card now reads **Fetch Policy** and shows `min_interval`, the value
+     actually published to Replicator.
+   * AGENTS.md's single-process rationale is rewritten: the constraint is now the
+     single-member `content.blobs` consumer group, not the retired limiter.
+
+   **Left standing deliberately:** `Domain.current_interval`, `max_concurrency`,
+   `decay_window`, `last_request_at` are inert columns — no writer remains, but dropping
+   them is a destructive migration plus an API-schema break (`DomainResponse` exposes
+   three of them), so it is its own change. `min_interval` stays fully live: it *is* the
+   published fetch policy.

@@ -3,6 +3,13 @@
 The per-Watch `check_watch` is gone; `check_watched_item` is the new periodic
 task.  `schedule_tick` enqueues one job per WatchedItem, keyed on the
 WatchedItem's own `last_checked_at`.
+
+Since the Phase-4 cutover (#241 step 5) `check_watched_item` no longer fetches:
+it issues a ``content.fetch`` command and returns. Everything downstream of the
+fetch — pipeline, health, ``last_checked_at``, media-type seeding, check audits
+— now happens in the apply path and is covered by ``test_fetch_apply.py``. What
+remains here is the part that is still this task's: the short-circuit guards,
+plus `schedule_tick`'s due-calculation and post-actions.
 """
 
 from contextlib import asynccontextmanager
@@ -10,23 +17,15 @@ from datetime import UTC, date, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 import src.workers.tasks as tasks_mod
 from src.core.models.audit_log import AuditLog, EventType
 from src.core.models.domain import Domain
+from src.core.models.fetch_command import FetchCommand
 from src.core.models.temporal_profile import PostAction, ProfileType, TemporalProfile
-from src.core.models.watched_item import WatchHealthStatus
-from src.core.rate_limiter import DomainRateLimiter
-from src.core.registry import ServiceRegistry
 from src.core.scheduling.resolution import resolved_schedule_config
-from src.workers.pipeline import (
-    ExtractionError,
-    WatchedItemResult,
-    _maybe_decay_backoff,
-    _persist_backoff,
-)
 from src.workers.tasks import check_watched_item, schedule_tick
 from tests.conftest import make_watched_item
 
@@ -50,347 +49,94 @@ def _mock_session_factory(db_session: AsyncSession):
     return factory
 
 
-def _fake_fetch_result(
-    *,
-    content: bytes = b"<html><body><p>hi</p></body></html>",
-    status_code: int = 200,
-    fetcher_used: str = "http",
-    duration_ms: int = 10,
-    headers: dict | None = None,
-):
-    """MagicMock matching FetchResult shape."""
-    result = MagicMock()
-    result.content = content
-    result.status_code = status_code
-    result.is_success = 200 <= status_code < 400
-    result.fetcher_used = fetcher_used
-    result.duration_ms = duration_ms
-    result.headers = headers if headers is not None else {}
-    return result
+async def _command_count(db_session) -> int:
+    """How many fetch commands exist — the observable of "did it issue?"."""
+    return (await db_session.execute(select(func.count()).select_from(FetchCommand))).scalar_one()
 
 
-def _make_pipeline_stub(*, changed: bool = False) -> AsyncMock:
-    """Return an AsyncMock that mimics `process_watched_item`'s return shape."""
-
-    async def _proc(session, watched_item, *, raw_content, registry=None):
-        return WatchedItemResult(changed=changed)
-
-    return AsyncMock(side_effect=_proc)
+# ---------------------------------------------------------------------------
+# check_watched_item — guards only (the fetch itself is Replicator's since #241)
+# ---------------------------------------------------------------------------
 
 
-def _wire_check_task(db_session, monkeypatch, *, fetch_result=None, changed=False):
-    """Monkeypatch ``check_watched_item``'s deps; return ``(limiter, reg)``.
+class TestCheckWatchedItemGuards:
+    """Every short-circuit must return before a command is issued.
 
-    The returned :class:`DomainRateLimiter` is the *held* instance the task uses,
-    so callers can assert which bucket it acquired (via ``get_domain_states()``).
-    ``reg``'s fetcher returns ``fetch_result`` (default: a 200 success); ``changed``
-    is forwarded to the pipeline stub.
+    The guards are what keeps a paused / archived / domain-suspended / url-less
+    item from putting load on the bus and the origin. Post-cutover the observable
+    is "no fetch_commands row", not "the fetcher was not called".
     """
-    limiter = DomainRateLimiter(min_interval=0.0)
-    mock_fetcher = MagicMock()
-    mock_fetcher.fetch = AsyncMock(return_value=fetch_result or _fake_fetch_result())
-    monkeypatch.setattr(tasks_mod, "process_watched_item", _make_pipeline_stub(changed=changed))
-    monkeypatch.setattr(tasks_mod, "get_session_factory", lambda: _mock_session_factory(db_session))
-    monkeypatch.setattr(tasks_mod, "get_rate_limiter", lambda: limiter)
-    reg = ServiceRegistry(fetcher=mock_fetcher)
-    return limiter, reg
 
-
-# ---------------------------------------------------------------------------
-# _persist_backoff / _maybe_decay_backoff regression tests (preserved).
-# ---------------------------------------------------------------------------
-
-
-class TestPersistBackoff:
-    async def test_persist_backoff_updates_domain(self):
-        domain = MagicMock()
-        domain.current_interval = 1.0
-        domain.last_request_at = None
-
-        mock_result = MagicMock()
-        mock_result.scalar_one_or_none.return_value = domain
-        mock_session = AsyncMock()
-        mock_session.execute = AsyncMock(return_value=mock_result)
-
-        before = datetime.now(UTC)
-        await _persist_backoff("example.com", 4.0, mock_session)
-
-        assert domain.current_interval == 4.0
-        assert domain.last_request_at >= before
-
-    async def test_persist_backoff_noop_if_domain_missing(self):
-        mock_result = MagicMock()
-        mock_result.scalar_one_or_none.return_value = None
-        mock_session = AsyncMock()
-        mock_session.execute = AsyncMock(return_value=mock_result)
-
-        await _persist_backoff("unknown.com", 4.0, mock_session)
-
-
-class TestMaybeDecayBackoff:
-    async def test_resets_when_decay_window_exceeded(self):
-        domain = MagicMock()
-        domain.name = "example.com"
-        domain.min_interval = 1.0
-        domain.current_interval = 8.0
-        domain.decay_window = 1800.0
-        domain.last_request_at = datetime.now(UTC) - timedelta(seconds=1801)
-
-        mock_result = MagicMock()
-        mock_result.scalar_one_or_none.return_value = domain
-        mock_session = AsyncMock()
-        mock_session.execute = AsyncMock(return_value=mock_result)
-
-        limiter = DomainRateLimiter()
-        limiter.configure_domain(
-            "example.com", max_concurrency=2, min_interval=1.0, current_interval=8.0
-        )
-
-        decayed = await _maybe_decay_backoff("example.com", limiter, mock_session)
-        assert decayed is True
-        assert domain.current_interval == 1.0
-        assert domain.last_request_at is None
-        assert limiter._domains["example.com"].current_interval == 1.0
-
-
-# ---------------------------------------------------------------------------
-# check_watched_item
-# ---------------------------------------------------------------------------
-
-
-class TestCheckWatchedItem:
-    """The periodic per-WatchedItem task wires fetcher → pipeline → timestamps."""
-
-    async def test_updates_last_checked_at_on_watched_item(self, db_session, monkeypatch):
-        """check_watched_item stamps WatchedItem.last_checked_at after each cycle.
-
-        #185 Phase A step 6: last_checked_at moved from per-Watch to WatchedItem.
-        """
-        watched_item = await make_watched_item(db_session, name="Primary")
-        await db_session.commit()
-
-        watched_item.effective_url = "https://example.com/page"
-        await db_session.flush()
-
-        before = datetime.now(UTC)
-
-        _, reg = _wire_check_task(db_session, monkeypatch)
-
-        await check_watched_item(str(watched_item.id), registry=reg)
-
-        await db_session.refresh(watched_item)
-        assert watched_item.last_checked_at is not None
-        assert watched_item.last_checked_at >= before
-
-    async def test_noop_when_watched_item_inactive(self, db_session, monkeypatch):
-        """An inactive WatchedItem skips fetcher + pipeline."""
-        watched_item = await make_watched_item(db_session, name="Inactive", is_active=False)
-        await db_session.commit()
-
-        fetch_mock = AsyncMock(return_value=_fake_fetch_result())
-        mock_fetcher = MagicMock()
-        mock_fetcher.fetch = fetch_mock
-
-        proc_mock = _make_pipeline_stub()
-        monkeypatch.setattr(tasks_mod, "process_watched_item", proc_mock)
+    async def _run(self, db_session, monkeypatch, watched_item):
         monkeypatch.setattr(
             tasks_mod, "get_session_factory", lambda: _mock_session_factory(db_session)
         )
+        return await check_watched_item(str(watched_item.id))
 
-        reg = ServiceRegistry(fetcher=mock_fetcher)
-        result = await check_watched_item(str(watched_item.id), registry=reg)
+    async def test_skips_inactive_watched_item(self, db_session, monkeypatch):
+        wi = await make_watched_item(db_session, name="Inactive", is_active=False)
+        await db_session.commit()
+
+        result = await self._run(db_session, monkeypatch, wi)
 
         assert result.get("skipped") is True
-        fetch_mock.assert_not_called()
-        proc_mock.assert_not_called()
+        assert await _command_count(db_session) == 0
 
     async def test_skips_paused_watched_item(self, db_session, monkeypatch):
-        """#188 CR-2: a paused (is_active=False, NOT archived) WatchedItem is
-        skipped before fetch/pipeline.
-
-        Pre-#188 this state was unreachable (the only path to is_active=False was
-        archive). Now pause/resume makes it a normal state, so the task's
-        `not is_active` guard must be exercised."""
-        watched_item = await make_watched_item(db_session, name="Paused", is_active=True)
-        watched_item.is_active = False
-        watched_item.effective_url = "https://example.com/page"
+        """#188 CR-2: paused (is_active=False, NOT archived) is a normal state."""
+        wi = await make_watched_item(db_session, name="Paused", is_active=True)
+        wi.is_active = False
+        wi.effective_url = "https://example.com/page"
         await db_session.commit()
 
-        fetch_mock = AsyncMock(return_value=_fake_fetch_result())
-        mock_fetcher = MagicMock()
-        mock_fetcher.fetch = fetch_mock
+        result = await self._run(db_session, monkeypatch, wi)
 
-        proc_mock = _make_pipeline_stub()
-        monkeypatch.setattr(tasks_mod, "process_watched_item", proc_mock)
+        assert result.get("skipped") is True
+        assert await _command_count(db_session) == 0
+
+    async def test_skips_archived_watched_item(self, db_session, monkeypatch):
+        wi = await make_watched_item(db_session, name="Archived")
+        wi.archived_at = datetime.now(UTC)
+        wi.effective_url = "https://example.com/page"
+        await db_session.commit()
+
+        result = await self._run(db_session, monkeypatch, wi)
+
+        assert result.get("skipped") is True
+        assert await _command_count(db_session) == 0
+
+    async def test_skips_domain_suspended_watched_item(self, db_session, monkeypatch):
+        wi = await make_watched_item(db_session, name="Suspended")
+        wi.domain_suspended = True
+        wi.effective_url = "https://example.com/page"
+        await db_session.commit()
+
+        result = await self._run(db_session, monkeypatch, wi)
+
+        assert result.get("skipped") is True
+        assert await _command_count(db_session) == 0
+
+    async def test_skips_watched_item_without_effective_url(self, db_session, monkeypatch):
+        # The column is NOT NULL with a "" default, so "unset" is the empty
+        # string — that is the state a never-resolved item is actually in.
+        wi = await make_watched_item(db_session, name="NoUrl")
+        wi.effective_url = ""
+        await db_session.commit()
+
+        result = await self._run(db_session, monkeypatch, wi)
+
+        assert result.get("skipped") is True
+        assert result.get("reason") == "no_effective_url"
+        assert await _command_count(db_session) == 0
+
+    async def test_missing_watched_item_is_a_noop(self, db_session, monkeypatch):
         monkeypatch.setattr(
             tasks_mod, "get_session_factory", lambda: _mock_session_factory(db_session)
         )
-
-        reg = ServiceRegistry(fetcher=mock_fetcher)
-        result = await check_watched_item(str(watched_item.id), registry=reg)
+        result = await check_watched_item("01ARZ3NDEKTSV4RRFFQ69G5FAV")
 
         assert result.get("skipped") is True
-        fetch_mock.assert_not_called()
-        proc_mock.assert_not_called()
-
-    async def test_rate_limit_keys_off_domain_name_when_set(self, db_session, monkeypatch):
-        """The limiter buckets on WatchedItem.domain_name, not the URL hostname (#197).
-
-        domain_name and hostname(effective_url) are equal in normal operation; this
-        pins the *preference* — domain_name wins — by making them deliberately differ.
-        """
-        watched_item = await make_watched_item(
-            db_session, name="Keyed", domain_name="bucket.example"
-        )
-        watched_item.effective_url = "https://www.example.com/page"
-        await db_session.commit()
-
-        limiter, reg = _wire_check_task(db_session, monkeypatch)
-        await check_watched_item(str(watched_item.id), registry=reg)
-
-        bucketed = [d["name"] for d in limiter.get_domain_states()]
-        assert "bucket.example" in bucketed
-        assert "www.example.com" not in bucketed
-
-    async def test_rate_limit_falls_back_to_hostname_when_domain_name_null(
-        self, db_session, monkeypatch
-    ):
-        """With domain_name NULL the limiter keys off hostname(effective_url) — fail-safe (#197)."""
-        watched_item = await make_watched_item(db_session, name="NoDomain", domain_name=None)
-        watched_item.effective_url = "https://fallback.example/page"
-        await db_session.commit()
-
-        limiter, reg = _wire_check_task(db_session, monkeypatch)
-        await check_watched_item(str(watched_item.id), registry=reg)
-
-        bucketed = [d["name"] for d in limiter.get_domain_states()]
-        assert "fallback.example" in bucketed
-
-    async def _run_success_cycle(self, db_session, monkeypatch, *, changed: bool):
-        watched_item = await make_watched_item(db_session, name="Checker")
-        watched_item.effective_url = "https://example.com/page"
-        await db_session.commit()
-
-        _, reg = _wire_check_task(db_session, monkeypatch, changed=changed)
-        await check_watched_item(str(watched_item.id), registry=reg)
-        return watched_item
-
-    async def _audit_for(self, db_session, event_type, watched_item_id):
-        rows = (
-            (await db_session.execute(select(AuditLog).where(AuditLog.event_type == event_type)))
-            .scalars()
-            .all()
-        )
-        return [r for r in rows if r.payload.get("watched_item_id") == str(watched_item_id)]
-
-    async def test_success_no_change_audits_check_no_change(self, db_session, monkeypatch):
-        """An unchanged successful cycle writes a CHECK_NO_CHANGE audit (#190 — visibility)."""
-        wi = await self._run_success_cycle(db_session, monkeypatch, changed=False)
-        no_change = await self._audit_for(db_session, EventType.CHECK_NO_CHANGE, wi.id)
-        snapshot = await self._audit_for(db_session, EventType.CHECK_SNAPSHOT_CREATED, wi.id)
-        assert len(no_change) == 1
-        assert snapshot == []
-
-    async def test_success_changed_audits_snapshot_created(self, db_session, monkeypatch):
-        """A changed successful cycle writes a CHECK_SNAPSHOT_CREATED audit."""
-        wi = await self._run_success_cycle(db_session, monkeypatch, changed=True)
-        snapshot = await self._audit_for(db_session, EventType.CHECK_SNAPSHOT_CREATED, wi.id)
-        assert len(snapshot) == 1
-        assert snapshot[0].payload.get("changed") is True
-
-    async def test_fetch_failure_logs_audit_and_sets_health(self, db_session, monkeypatch):
-        """A non-success HTTP response audits CHECK_FETCH_FAILED and marks the WatchedItem ERROR."""
-        watched_item = await make_watched_item(db_session, name="Fails")
-        watched_item.effective_url = "https://example.com/page"
-        await db_session.commit()
-
-        _, reg = _wire_check_task(
-            db_session,
-            monkeypatch,
-            fetch_result=_fake_fetch_result(content=b"err", status_code=500),
-        )
-        result = await check_watched_item(str(watched_item.id), registry=reg)
-        assert "error" in result
-
-        audit_rows = (
-            (
-                await db_session.execute(
-                    select(AuditLog).where(AuditLog.event_type == EventType.CHECK_FETCH_FAILED)
-                )
-            )
-            .scalars()
-            .all()
-        )
-        assert len(audit_rows) == 1
-
-        await db_session.refresh(watched_item)
-        assert watched_item.health_status == WatchHealthStatus.ERROR
-        assert watched_item.last_checked_at is not None
-
-    async def test_stamps_watched_item_last_checked_at_on_fetch_failure(
-        self, db_session, monkeypatch
-    ):
-        """WatchedItem.last_checked_at is stamped even when the HTTP fetch fails."""
-        from datetime import UTC, datetime
-
-        watched_item = await make_watched_item(db_session, name="FailStamp")
-        watched_item.effective_url = "https://example.com/"
-        assert watched_item.last_checked_at is None
-        await db_session.commit()
-
-        before = datetime.now(UTC)
-
-        _, reg = _wire_check_task(
-            db_session,
-            monkeypatch,
-            fetch_result=_fake_fetch_result(content=b"err", status_code=503),
-        )
-        result = await check_watched_item(str(watched_item.id), registry=reg)
-        assert "error" in result
-
-        await db_session.refresh(watched_item)
-        assert watched_item.last_checked_at is not None
-        assert watched_item.last_checked_at >= before
-
-    async def test_extraction_failure_sets_error_health_and_stamps(self, db_session, monkeypatch):
-        """A dispatched extractor that raises is handled like a fetch failure (#168):
-        CHECK_EXTRACTION_FAILED audit, ERROR health, stamped last_checked_at — so a
-        mislabeled non-HTML target surfaces a signal instead of re-firing every tick."""
-        watched_item = await make_watched_item(db_session, name="BadExtract")
-        watched_item.effective_url = "https://x.gov/doc.pdf"
-        await db_session.commit()
-
-        _, reg = _wire_check_task(
-            db_session,
-            monkeypatch,
-            fetch_result=_fake_fetch_result(headers={"content-type": "application/pdf"}),
-        )
-
-        async def _raise(*args, **kwargs):
-            raise ExtractionError("Failed to parse PDF: not a pdf")
-
-        monkeypatch.setattr(tasks_mod, "process_watched_item", _raise)
-
-        result = await check_watched_item(str(watched_item.id), registry=reg)
-        assert result == {"error": "extraction_failed"}
-
-        audit_rows = (
-            (
-                await db_session.execute(
-                    select(AuditLog).where(AuditLog.event_type == EventType.CHECK_EXTRACTION_FAILED)
-                )
-            )
-            .scalars()
-            .all()
-        )
-        assert len(audit_rows) == 1
-
-        await db_session.refresh(watched_item)
-        assert watched_item.health_status == WatchHealthStatus.ERROR
-        assert watched_item.last_checked_at is not None
-        # The header was still seeded before extraction ran — so the operator can
-        # see the content_media_type that drove the (failed) dispatch.
-        assert watched_item.content_media_type == "application/pdf"
+        assert await _command_count(db_session) == 0
 
 
 # ---------------------------------------------------------------------------
@@ -727,63 +473,3 @@ class TestPostActions:
         await db_session.refresh(wi)
         assert wi.is_active is False
         assert wi.archived_at is not None
-
-
-# ---------------------------------------------------------------------------
-# Content-type auto-detection (#168).
-# ---------------------------------------------------------------------------
-
-
-class TestContentMediaTypeDetection:
-    """check_watched_item seeds content_media_type from the GET response header,
-    seed-once: it populates when unset and never clobbers an existing value."""
-
-    async def test_seeds_content_media_type_from_header_when_unset(self, db_session, monkeypatch):
-        watched_item = await make_watched_item(db_session, name="Detect")
-        watched_item.effective_url = "https://example.com/page"
-        watched_item.content_media_type = None
-        await db_session.flush()
-        await db_session.commit()
-
-        _, reg = _wire_check_task(
-            db_session,
-            monkeypatch,
-            fetch_result=_fake_fetch_result(headers={"content-type": "application/pdf"}),
-        )
-        await check_watched_item(str(watched_item.id), registry=reg)
-
-        await db_session.refresh(watched_item)
-        assert watched_item.content_media_type == "application/pdf"
-
-    async def test_does_not_clobber_existing_content_media_type(self, db_session, monkeypatch):
-        watched_item = await make_watched_item(
-            db_session, name="Pinned", content_media_type="application/pdf"
-        )
-        watched_item.effective_url = "https://example.com/page"
-        await db_session.flush()
-        await db_session.commit()
-
-        _, reg = _wire_check_task(
-            db_session,
-            monkeypatch,
-            fetch_result=_fake_fetch_result(headers={"content-type": "text/html; charset=utf-8"}),
-        )
-        await check_watched_item(str(watched_item.id), registry=reg)
-
-        await db_session.refresh(watched_item)
-        # Operator override (or earlier seed) survives — seed-once, no refresh.
-        assert watched_item.content_media_type == "application/pdf"
-
-    async def test_no_header_leaves_content_media_type_unset(self, db_session, monkeypatch):
-        watched_item = await make_watched_item(db_session, name="NoHeader")
-        watched_item.effective_url = "https://example.com/page"
-        await db_session.flush()
-        await db_session.commit()
-
-        _, reg = _wire_check_task(
-            db_session, monkeypatch, fetch_result=_fake_fetch_result(headers={})
-        )
-        await check_watched_item(str(watched_item.id), registry=reg)
-
-        await db_session.refresh(watched_item)
-        assert watched_item.content_media_type is None

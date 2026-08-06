@@ -1,11 +1,10 @@
-"""Tests for the bus-mode issue path and the pending-publish sweep (#241, step 1).
+"""Tests for the issue path and the pending-publish sweep (#241).
 
-``WATCHER_FETCH_MODE=bus`` turns ``check_watched_item``'s fetch into a
-``content.fetch`` command issue. These pin the inertness of the default (local
-mode is byte-for-byte today's path — covered by the existing test_tasks suite),
-the no-fetch property of bus mode, the cheap open-command gate, and the
-crash-recovery sweep (MUST-2's second half: a committed-but-unpublished row is
-republished under the SAME command_id, made idempotent by Replicator's dedupe).
+``check_watched_item`` issues a ``content.fetch`` command — it is the whole of
+what the task does now. These pin that the check itself has not happened at
+issue time, the cheap open-command gate, and the crash-recovery sweep (MUST-2's
+second half: a committed-but-unpublished row is republished under the SAME
+command_id, made idempotent by Replicator's dedupe).
 """
 
 from contextlib import asynccontextmanager
@@ -19,10 +18,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 import src.workers.tasks as tasks_mod
-from src.core.fetch_commands import FETCH_MODE_ENV, create_fetch_command
+from src.core.fetch_commands import create_fetch_command
 from src.core.models.fetch_command import FetchCommand, FetchCommandStatus
-from src.core.rate_limiter import DomainRateLimiter
-from src.core.registry import ServiceRegistry
 from src.workers.fetch_commands import publish_pending_fetch_commands
 from src.workers.tasks import check_watched_item
 from tests.conftest import make_watched_item
@@ -42,28 +39,17 @@ def _mock_session_factory(db_session: AsyncSession):
     return factory
 
 
-def _refusing_registry() -> ServiceRegistry:
-    """A registry whose fetcher fails the test if bus mode ever fetches."""
-    fetcher = MagicMock()
-    fetcher.fetch = AsyncMock(side_effect=AssertionError("bus mode must not fetch"))
-    return ServiceRegistry(fetcher=fetcher)
-
-
 def _wire(db_session, monkeypatch):
     monkeypatch.setattr(tasks_mod, "get_session_factory", lambda: _mock_session_factory(db_session))
-    monkeypatch.setattr(tasks_mod, "get_rate_limiter", lambda: DomainRateLimiter(min_interval=0.0))
-    monkeypatch.setenv(FETCH_MODE_ENV, "bus")
 
 
-class TestCheckWatchedItemBusMode:
+class TestCheckWatchedItemIssue:
     async def test_issues_a_command_instead_of_fetching(self, db_session, monkeypatch):
         wi = await make_watched_item(db_session, primary_url="https://lcb.wa.gov/notices")
         _wire(db_session, monkeypatch)
         client = fakeredis.FakeAsyncRedis()
 
-        result = await check_watched_item(
-            str(wi.id), registry=_refusing_registry(), bus_client=client
-        )
+        result = await check_watched_item(str(wi.id), bus_client=client)
 
         assert result["issued"]
         assert await client.xlen(streams.CONTENT_FETCH) == 1
@@ -78,12 +64,8 @@ class TestCheckWatchedItemBusMode:
         _wire(db_session, monkeypatch)
         client = fakeredis.FakeAsyncRedis()
 
-        first = await check_watched_item(
-            str(wi.id), registry=_refusing_registry(), bus_client=client
-        )
-        second = await check_watched_item(
-            str(wi.id), registry=_refusing_registry(), bus_client=client
-        )
+        first = await check_watched_item(str(wi.id), bus_client=client)
+        second = await check_watched_item(str(wi.id), bus_client=client)
 
         assert first["issued"]
         assert second == {"skipped": True, "reason": "command_in_flight"}
@@ -95,9 +77,7 @@ class TestCheckWatchedItemBusMode:
         broken = MagicMock()
         broken.xadd = AsyncMock(side_effect=ConnectionError("broker down"))
 
-        result = await check_watched_item(
-            str(wi.id), registry=_refusing_registry(), bus_client=broken
-        )
+        result = await check_watched_item(str(wi.id), bus_client=broken)
 
         assert result["issued"]
         assert result["published"] is False

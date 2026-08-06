@@ -167,7 +167,18 @@ class TestApplyFetchBlob:
         await apply_fetch_blob(another.command_id, registry=ServiceRegistry())
         assert wi.content_media_type == "operator/override"
 
-    async def test_extraction_error_surfaces_like_local_path(
+    async def test_absent_raw_header_leaves_media_type_unset(
+        self, db_session, monkeypatch, tmp_path
+    ):
+        """A fact with no ``content_type_raw`` must not write an empty seed (#168)."""
+        wi, row = await _row_with_fact(db_session, tmp_path, content_type_raw=None)
+        _wire(db_session, monkeypatch)
+
+        await apply_fetch_blob(row.command_id, registry=ServiceRegistry())
+
+        assert wi.content_media_type is None
+
+    async def test_extraction_error_surfaces_like_the_retired_local_path(
         self, db_session, monkeypatch, tmp_path
     ):
         wi, row = await _row_with_fact(db_session, tmp_path)

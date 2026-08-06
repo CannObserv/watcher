@@ -1,22 +1,21 @@
 """Unit tests for the Procrastinate RetryStrategy on check_watched_item.
 
-check_watched_item retries on transient network errors (httpx connection or
-timeout, Python builtins). Since #185 Phase A removed the Archiver SDK call
-from the pipeline path, ServerError is no longer a relevant retry exception.
+Post-cutover (#241 step 5) the task makes no origin request, so the httpx
+exceptions it used to retry on are unreachable. What remains retryable is the
+transient infrastructure underneath the issue itself — the DB read and the
+persist-before-publish write. A broker failure is deliberately NOT retried
+here: ``_issue_fetch_command`` swallows it and leaves the row
+``pending_publish`` for the every-minute sweep, which is the durable path.
 """
-
-import httpx
 
 from src.workers.tasks import check_watched_item
 
 
-def test_check_watched_item_retry_strategy_includes_network_errors() -> None:
-    """check_watched_item retries on transient network failures."""
+def test_check_watched_item_retry_strategy_includes_transient_infra_errors() -> None:
+    """check_watched_item retries on transient infrastructure failures."""
     retry_exceptions = check_watched_item.retry_strategy.retry_exceptions
     assert ConnectionError in retry_exceptions
     assert TimeoutError in retry_exceptions
-    assert httpx.ConnectError in retry_exceptions
-    assert httpx.TimeoutException in retry_exceptions
 
 
 def test_check_watched_item_retry_strategy_max_attempts_is_three() -> None:

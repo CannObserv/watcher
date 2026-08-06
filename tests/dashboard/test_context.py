@@ -123,7 +123,6 @@ class TestGetDomainsWithWatchedItemCounts:
         assert len(result) == 1
         assert result[0]["name"] == "example.com"
         assert result[0]["watched_item_count"] == 1
-        assert result[0]["in_backoff"] is False
 
     async def test_single_watched_item_on_domain_counts_as_one(self, db_session):
         """A domain with one WatchedItem reports watched_item_count=1."""
@@ -149,15 +148,6 @@ class TestGetDomainsWithWatchedItemCounts:
         result = await get_domains_with_watched_item_counts(db_session)
         assert len(result) == 1
         assert result[0]["watched_item_count"] == 0
-
-    async def test_domain_in_backoff(self, db_session):
-        domain = Domain(name="slow.com", min_interval=1.0, max_concurrency=2, current_interval=4.0)
-        db_session.add(domain)
-        await db_session.flush()
-
-        result = await get_domains_with_watched_item_counts(db_session)
-        assert result[0]["in_backoff"] is True
-        assert result[0]["current_interval"] == 4.0
 
     async def test_archived_watched_item_excluded_from_count(self, db_session):
         """Archived items are retired — they must not inflate the live count (#209)."""
@@ -232,14 +222,15 @@ class TestGetDomainsFiltered:
         assert "gone.com" in names
         assert "live.com" not in names
 
-    async def test_filter_backoff(self, db_session):
+    async def test_unknown_status_filter_returns_everything(self, db_session):
+        """The retired "backoff" segment must not silently filter to nothing."""
         db_session.add(Domain(name="normal.com"))
-        db_session.add(Domain(name="slow.com", current_interval=5.0))
+        db_session.add(Domain(name="slow.com"))
         await db_session.flush()
         result = await get_domains_with_watched_item_counts(db_session, status="backoff")
         names = [d["name"] for d in result]
         assert "slow.com" in names
-        assert "normal.com" not in names
+        assert "normal.com" in names
 
     async def test_pagination(self, db_session):
         for i in range(5):

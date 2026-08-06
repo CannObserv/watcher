@@ -1,15 +1,18 @@
 """Procrastinate task wrappers: ``check_watched_item`` and ``schedule_tick``.
 
-#185 Phase A step 6. Health status, last_checked_at, and last_changed_at now
-live on WatchedItem (not per Watch). ``check_watched_item`` updates the parent
-WatchedItem's health and timestamp; ``schedule_tick`` uses WatchedItem's
+#185 Phase A step 6. Health status, last_checked_at, and last_changed_at live on
+WatchedItem (not per Watch); ``schedule_tick`` uses WatchedItem's
 last_checked_at to determine whether a cycle is due.
+
+Since the Phase-4 cutover (#241) ``check_watched_item`` issues a
+``content.fetch`` command rather than fetching: Replicator performs the request
+and the resulting fact drives the apply path, which is what actually stamps
+health and ``last_checked_at``. The ``_record_check_*`` helpers below are shared
+with that apply path so both leave identical bookkeeping.
 """
 
 from datetime import UTC, datetime
-from urllib.parse import urlparse
 
-import httpx
 import procrastinate
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -19,32 +22,19 @@ from src.core.bus import BUS_REDIS_URL_ENV, get_shared_bus_client
 from src.core.database import get_session_factory
 from src.core.fetch_commands import (
     create_fetch_command,
-    fetch_mode,
     has_open_command,
     publish_fetch_command,
 )
 from src.core.logging import get_logger
 from src.core.models.audit_log import EventType, audit
 from src.core.models.temporal_profile import TemporalProfile
-from src.core.models.watched_item import (
-    CONTENT_MEDIA_TYPE_MAX_LEN,
-    WatchedItem,
-    WatchHealthStatus,
-)
+from src.core.models.watched_item import WatchedItem, WatchHealthStatus
 from src.core.notifications.events import WatchEvent, WatchEventType
-from src.core.rate_limiter import get_rate_limiter
-from src.core.registry import ServiceRegistry, get_registry
 from src.core.scheduling.cadence import compute_next_check, evaluate_post_actions, parse_interval
 from src.core.scheduling.resolution import resolved_schedule_config
 from src.core.utils import watched_item_event_base_metadata
 from src.workers import bp
 from src.workers.notify import dispatch_event_notifications
-from src.workers.pipeline import (
-    ExtractionError,
-    _maybe_decay_backoff,
-    _persist_backoff,
-    process_watched_item,
-)
 
 logger = get_logger(__name__)
 
@@ -96,8 +86,8 @@ async def _record_check_success(
     """Record a successful check: audit trail + OK health + ``last_checked_at``,
     and dispatch ``WATCH_RECOVERED`` once on the ERROR→OK transition.
 
-    Shared by the local fetch path (``check_watched_item``) and the Phase-4
-    apply path (``apply_fetch_blob``) so both leave identical bookkeeping — the
+    Shared by the Phase-4 apply paths (``apply_fetch_blob`` /
+    ``apply_fetch_failure``) so every outcome leaves identical bookkeeping — the
     dashboard checks_today stat and WatchedItem activity read these events. A
     snapshot event marks a baseline/changed cycle (a ChangeRevision was
     written); otherwise the content was unchanged.
@@ -185,42 +175,34 @@ async def _issue_fetch_command(session: AsyncSession, watched_item, bus_client) 
 
 
 # ---------------------------------------------------------------------------
-# check_watched_item — periodic per-WatchedItem fetch + pipeline + bookkeeping.
+# check_watched_item — periodic per-WatchedItem fetch-command issue.
 # ---------------------------------------------------------------------------
 
 
 @bp.task(
     name="check_watched_item",
     queue="default",
+    # No origin request happens here any more (#241 step 5), so the httpx
+    # exceptions are unreachable; what is left retryable is the DB read and the
+    # persist-before-publish write. Broker failures are deliberately absent —
+    # _issue_fetch_command swallows them and the sweep republishes.
     retry=procrastinate.RetryStrategy(
         max_attempts=3,
         exponential_wait=5,
-        retry_exceptions={
-            ConnectionError,
-            TimeoutError,
-            httpx.ConnectError,
-            httpx.TimeoutException,
-        },
+        retry_exceptions={ConnectionError, TimeoutError},
     ),
 )
-async def check_watched_item(
-    watched_item_id: str,
-    registry: ServiceRegistry | None = None,
-    bus_client=None,
-) -> dict:
-    """Fetch the WatchedItem's URL and run the pipeline.
+async def check_watched_item(watched_item_id: str, bus_client=None) -> dict:
+    """Issue a ``content.fetch`` command for the WatchedItem's URL.
 
-    Updates ``last_checked_at`` and ``health_status`` on the WatchedItem
-    (both success and fetch-failure paths). WATCH_ERROR / WATCH_RECOVERED
-    events are dispatched once per WatchedItem when its health transitions;
-    CHANGE_DETECTED is dispatched inline by the pipeline.
+    Since the Phase-4 cutover (#241) Watcher does not fetch: it publishes a
+    command and returns. The fact that comes back on ``content.blobs`` drives
+    the pipeline, health, ``last_checked_at`` and the check audits — all in the
+    apply path (``src/workers/fetch_commands.py``). This task's remaining job is
+    the guards plus the issue itself.
 
-    Under ``WATCHER_FETCH_MODE=bus`` (#241, Phase 4) the fetch half is replaced
-    by issuing a ``content.fetch`` command — no origin request, no
-    ``last_checked_at`` stamp (that is the apply path's job when the fact
-    returns). ``bus_client`` is a test seam; production builds from env.
+    ``bus_client`` is a test seam; production uses the shared lifespan client.
     """
-    reg = registry if registry is not None else get_registry()
     async with get_session_factory()() as session:
         watched_item = await session.get(WatchedItem, ULID.from_str(watched_item_id))
         if watched_item is None:
@@ -238,107 +220,14 @@ async def check_watched_item(
             )
             return {"skipped": True}
 
-        url = watched_item.effective_url
-        if not url:
+        if not watched_item.effective_url:
             logger.warning(
-                "watched_item has no effective_url — skipping until Watch-create populates it",
+                "watched_item has no effective_url — skipping until create populates it",
                 extra={"watched_item_id": watched_item_id},
             )
             return {"skipped": True, "reason": "no_effective_url"}
 
-        # Phase 4 (#241): bus mode issues a command instead of fetching. Sits
-        # after the guards so paused/archived/suspended/url-less items short-
-        # circuit identically in both modes.
-        if fetch_mode() == "bus":
-            return await _issue_fetch_command(session, watched_item, bus_client)
-
-        fetch_config: dict = {}
-
-        rate_limit_domain = watched_item.domain_name or urlparse(url).hostname or url
-
-        async with get_rate_limiter().acquire_for_domain(rate_limit_domain):
-            fetch_result = await reg.get_fetcher().fetch(url, config=fetch_config)
-
-        if fetch_result.status_code == 429:
-            new_interval = get_rate_limiter().report_rate_limited_for_domain(rate_limit_domain)
-            await _persist_backoff(rate_limit_domain, new_interval, session)
-            await session.commit()
-            raise ConnectionError(f"Rate limited by {rate_limit_domain}")
-
-        now = datetime.now(UTC)
-
-        if not fetch_result.is_success:
-            logger.warning(
-                "fetch failed",
-                extra={
-                    "watched_item_id": watched_item_id,
-                    "status": fetch_result.status_code,
-                },
-            )
-            await _record_check_failure(
-                session,
-                watched_item,
-                now=now,
-                url=url,
-                audit_event=EventType.CHECK_FETCH_FAILED,
-                audit_kwargs={"status_code": fetch_result.status_code},
-                error_metadata={"status_code": fetch_result.status_code},
-            )
-            return {"error": f"HTTP {fetch_result.status_code}"}
-
-        # Auto-detect content type from the response header (#168). Seed once
-        # when unset — the first successful GET is authoritative; a later
-        # operator override (or drift refresh, deferred) is never clobbered.
-        # Truncate defensively to the column bound so a pathological header can't
-        # fail the cycle (real Content-Type headers are tiny).
-        observed_media_type = fetch_result.headers.get("content-type")
-        if observed_media_type and not watched_item.content_media_type:
-            watched_item.content_media_type = observed_media_type[:CONTENT_MEDIA_TYPE_MAX_LEN]
-
-        # Successful fetch → run the per-WatchedItem pipeline. A dispatched
-        # PDF/CSV extractor can raise on mismatched bytes (#168); treat that like a
-        # fetch failure so the item surfaces ERROR health + a fresh last_checked_at
-        # instead of dead-letter-looping every schedule_tick.
-        try:
-            result = await process_watched_item(
-                session=session,
-                watched_item=watched_item,
-                raw_content=fetch_result.content,
-                registry=reg,
-            )
-        except ExtractionError as exc:
-            logger.warning(
-                "extraction failed",
-                extra={"watched_item_id": watched_item_id, "error": str(exc)},
-            )
-            await _record_check_failure(
-                session,
-                watched_item,
-                now=now,
-                url=url,
-                audit_event=EventType.CHECK_EXTRACTION_FAILED,
-                audit_kwargs={"error": str(exc)},
-                error_metadata={"error": "extraction_failed"},
-            )
-            return {"error": "extraction_failed"}
-
-        await _record_check_success(session, watched_item, result, now=now, url=url)
-
-        # Domain backoff decay after successful fetch (local-fetch mode only —
-        # in bus mode nothing observes statuses here; see #245/replicator#25).
-        _limiter = get_rate_limiter()
-        _state = _limiter._domains.get(rate_limit_domain)
-        if _state and _state.current_interval > _state.min_interval:
-            await _maybe_decay_backoff(rate_limit_domain, _limiter, session)
-            await session.commit()
-
-    return {
-        "baseline_established": result.baseline_established,
-        "cache_hit": result.cache_hit,
-        "changed": result.changed,
-        "notifications_dispatched": result.notifications_dispatched,
-        "archiver_sync_enqueued": result.archiver_sync_enqueued,
-    }
+        return await _issue_fetch_command(session, watched_item, bus_client)
 
 
 # ---------------------------------------------------------------------------

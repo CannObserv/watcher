@@ -29,12 +29,10 @@ from src.core.media_type import (
     resolve_dispatch_essence,
 )
 from src.core.models.change_revision import ChangeRevision
-from src.core.models.domain import Domain
 from src.core.models.pending_archiver_sync import PendingArchiverSync
 from src.core.models.watched_item import WatchedItem
 from src.core.notifications.events import WatchEvent, WatchEventType
 from src.core.notifications.notify import dispatch_event_notifications
-from src.core.rate_limiter import DomainRateLimiter
 from src.core.registry import ServiceRegistry, get_registry
 from src.core.sources.scratch import write_scratch_bytes
 from src.core.utils import watched_item_event_base_metadata
@@ -53,55 +51,6 @@ class ExtractionError(Exception):
     The caller (`check_watched_item`) treats this like a fetch failure so the item
     surfaces a health signal instead of silently re-failing every tick.
     """
-
-
-# ---------------------------------------------------------------------------
-# Backoff helpers — invoked by `check_watched_item` in tasks.py.
-# ---------------------------------------------------------------------------
-
-
-async def _persist_backoff(domain_name: str, new_interval: float, session: AsyncSession) -> None:
-    """Persist backoff state to the Domain table after a 429 response."""
-    stmt = select(Domain).where(Domain.name == domain_name)
-    result = await session.execute(stmt)
-    domain = result.scalar_one_or_none()
-    if domain is None:
-        return
-    domain.current_interval = new_interval
-    domain.last_request_at = datetime.now(UTC)
-
-
-async def _maybe_decay_backoff(
-    domain_name: str,
-    limiter: DomainRateLimiter,
-    session: AsyncSession,
-) -> bool:
-    """Check if a domain's backoff should decay and reset if so.
-
-    Returns True if decay was applied.
-    """
-    stmt = select(Domain).where(Domain.name == domain_name)
-    result = await session.execute(stmt)
-    domain = result.scalar_one_or_none()
-    if domain is None:
-        return False
-    if domain.current_interval <= domain.min_interval:
-        return False
-    if domain.last_request_at is None:
-        return False
-
-    elapsed = (datetime.now(UTC) - domain.last_request_at).total_seconds()
-    if elapsed < domain.decay_window:
-        return False
-
-    domain.current_interval = domain.min_interval
-    domain.last_request_at = None
-    limiter.reset_domain_interval(domain_name, domain.min_interval)
-    logger.info(
-        "backoff decayed",
-        extra={"domain": domain_name, "reset_to": domain.min_interval},
-    )
-    return True
 
 
 # ---------------------------------------------------------------------------

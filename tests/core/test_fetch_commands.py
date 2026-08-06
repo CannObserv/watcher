@@ -22,9 +22,7 @@ from co_core.pure.models.changes import ContentFetchCommand
 
 from src.core.fetch import WATCHER_USER_AGENT
 from src.core.fetch_commands import (
-    FETCH_MODE_ENV,
     create_fetch_command,
-    fetch_mode,
     publish_fetch_command,
 )
 from src.core.models.fetch_command import FetchCommand, FetchCommandStatus
@@ -45,22 +43,6 @@ async def _decode_commands(client):
         }
         decoded.append(from_wire(frame, topic=streams.CONTENT_FETCH))
     return decoded
-
-
-class TestFetchMode:
-    def test_defaults_to_local(self, monkeypatch):
-        monkeypatch.delenv(FETCH_MODE_ENV, raising=False)
-        assert fetch_mode() == "local"
-
-    def test_bus_opts_in(self, monkeypatch):
-        monkeypatch.setenv(FETCH_MODE_ENV, "bus")
-        assert fetch_mode() == "bus"
-
-    def test_unknown_value_falls_back_to_local(self, monkeypatch, caplog):
-        monkeypatch.setenv(FETCH_MODE_ENV, "hybrid")
-        with caplog.at_level("WARNING", logger="src.core.fetch_commands"):
-            assert fetch_mode() == "local"
-        assert any("WATCHER_FETCH_MODE" in r.getMessage() for r in caplog.records)
 
 
 class TestCreateFetchCommand:

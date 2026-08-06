@@ -21,18 +21,21 @@
     </dl>
   </div>
   <div class="stat-card">
-    <h4 class="text-sm font-medium text-gray-500 dark:text-gray-400 mb-3">Rate Limiter</h4>
+    <h4 class="text-sm font-medium text-gray-500 dark:text-gray-400 mb-3">Fetch Policy</h4>
     {% if domains %}
     <dl class="space-y-2">
       {% for domain in domains %}
       <div class="flex justify-between">
         <dt class="text-sm text-gray-600 dark:text-gray-400 truncate max-w-[200px]">{{ domain.name }}</dt>
-        <dd class="text-sm font-medium {% if domain.in_backoff %}text-orange-600 dark:text-orange-400{% else %}text-gray-600 dark:text-gray-400{% endif %}">
-          {{ "%.1f"|format(domain.current_interval) }}s{% if domain.in_backoff %} <span aria-hidden="true">⚠</span><span class="sr-only">in backoff</span>{% endif %}
+        <dd class="text-sm font-medium text-gray-600 dark:text-gray-400">
+          {{ "%.1f"|format(domain.min_interval) }}s
         </dd>
       </div>
       {% endfor %}
     </dl>
+    <p class="mt-3 text-xs text-gray-500 dark:text-gray-400">
+      Minimum interval published to Replicator, which enforces it.
+    </p>
     {% else %}
     <p class="text-gray-500 dark:text-gray-400 text-sm">No domains tracked yet.</p>
     {% endif %}

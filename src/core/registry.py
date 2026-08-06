@@ -8,8 +8,6 @@ from co_core.pure.extract.csv_excel import CsvExcelExtractor
 from co_core.pure.extract.html import HtmlExtractor
 from co_core.pure.extract.pdf import PdfExtractor
 
-from src.core.fetch import Fetcher, HttpFetcher
-
 # Keyed by media-type essence (#168 slice 2). Dispatch is total: anything not
 # listed (including None, application/json, and ambiguous types) falls back to the
 # HTML extractor — the historical default — rather than raising.
@@ -29,7 +27,6 @@ class ServiceRegistry:
 
     def __init__(
         self,
-        fetcher: Fetcher | None = None,
         extractor_map: dict[str, type[Extractor]] | None = None,
         *,
         archiver_client: ArchiverClient | None = None,
@@ -39,21 +36,14 @@ class ServiceRegistry:
         All parameters default to the production implementations when omitted.
         ``archiver_client`` is keyword-only and, when provided, wins over env-driven
         construction (test seam).
+
+        There is no fetcher: Watcher stopped making origin requests at the
+        Phase-4 cutover (#241) — bytes now arrive as blobs Replicator fetched.
         """
-        self._fetcher: Fetcher | None = fetcher
         self._extractor_map: dict[str, type[Extractor]] = (
             extractor_map if extractor_map is not None else _DEFAULT_EXTRACTOR_MAP
         )
         self._archiver_client: ArchiverClient | None = archiver_client
-
-    def get_fetcher(self) -> Fetcher:
-        """Return the cached fetcher, lazily building the default HttpFetcher.
-
-        A fresh default is rebuilt on the next call after ``aclose_fetcher``.
-        """
-        if self._fetcher is None:
-            self._fetcher = HttpFetcher()
-        return self._fetcher
 
     def get_extractor(self, media_type_essence: str | None) -> Extractor:
         """Return a fresh extractor for a media-type essence (total; HTML fallback).
@@ -89,19 +79,6 @@ class ServiceRegistry:
         if self._archiver_client is not None:
             await self._archiver_client.aclose()
             self._archiver_client = None
-
-    async def aclose_fetcher(self) -> None:
-        """Close the cached fetcher's underlying HTTP client (no-op if unbuilt).
-
-        Resets internal state so a subsequent ``get_fetcher`` call rebuilds a
-        fresh default. Safe to call multiple times. Guards on ``aclose`` so an
-        injected test fetcher (which need not implement it) is simply dropped.
-        """
-        if self._fetcher is not None:
-            aclose = getattr(self._fetcher, "aclose", None)
-            if aclose is not None:
-                await aclose()
-            self._fetcher = None
 
 
 _default_registry: "ServiceRegistry | None" = None

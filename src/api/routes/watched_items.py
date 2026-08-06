@@ -1,6 +1,5 @@
 """WatchedItem CRUD API endpoints (#161, #185 Phase A)."""
 
-from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 
 import httpx
@@ -11,7 +10,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from ulid import ULID
 
-from src.api.deps import get_db_session, get_probe_fn
+from src.api.deps import get_db_session
 from src.api.routes.helpers import parse_filter_ulid, parse_ulid
 from src.api.schemas.watched_item import (
     ChangeRevisionResponse,
@@ -24,7 +23,6 @@ from src.core.logging import get_logger
 from src.core.models.audit_log import EventType, audit
 from src.core.models.change_revision import ChangeRevision
 from src.core.models.watched_item import WatchedItem
-from src.core.probe import ProbeResult
 from src.core.registry import get_registry
 from src.core.watched_items import (
     ArchivedItemActivationError,
@@ -74,7 +72,6 @@ async def list_watched_items(
 async def create_watched_item(
     data: WatchedItemCreate,
     session: AsyncSession = Depends(get_db_session),
-    probe_fn: Callable[[str], Awaitable[ProbeResult]] = Depends(get_probe_fn),
 ):
     """Create a standalone WatchedItem.
 
@@ -132,12 +129,10 @@ async def create_watched_item(
             archiver_info_source_id=data.archiver_info_source_id,
         )
     else:
-        # Mode-branched (#241): local probes inline; bus defers the probe to the
-        # first fetch (item starts PROBING, resolved by apply_fetch_blob).
+        # No probe (#241): the item starts PROBING with the submitted URL and
+        # its first fact resolves the redirect (apply_fetch_blob).
         try:
-            effective_url, domain, health_status = await resolve_watch_target(data.url, probe_fn)
-        except httpx.HTTPError as exc:
-            raise HTTPException(status_code=422, detail=f"URL unreachable: {exc}") from exc
+            effective_url, domain, health_status = resolve_watch_target(data.url)
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
 

@@ -7,49 +7,41 @@ translate the raised domain errors into their own transport (409 vs OOB flash)
 and own the commit.
 """
 
-from collections.abc import Awaitable, Callable
 from urllib.parse import urlparse
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.domains import domain_name_for_url
-from src.core.fetch_commands import fetch_mode
 from src.core.models.audit_log import EventType, audit
 from src.core.models.watched_item import WatchedItem, WatchHealthStatus
-from src.core.probe import ProbeResult
 
 
-async def resolve_watch_target(
-    url: str,
-    probe_fn: Callable[[str], Awaitable[ProbeResult]],
-) -> tuple[str, str | None, WatchHealthStatus]:
+def resolve_watch_target(url: str) -> tuple[str, str | None, WatchHealthStatus]:
     """``(effective_url, domain_name, health_status)`` for a URL-first create/edit.
 
-    The mode branch of the Phase-4 async-create design (#241): in ``bus`` fetch
-    mode nothing here touches the network — the submitted URL *is* the effective
-    URL until the first fact's ``final_url`` proves otherwise, the domain is its
-    hostname (the same ``urlparse().hostname`` derivation the probe uses, so the
-    rate-limiter keying invariant holds), and the item starts ``PROBING``. The
-    apply path (``apply_fetch_blob``) resolves the redirect, re-derives the
-    domain, and clears the state to OK/ERROR. This closes the boundaries-charter
-    exception: no Watcher fetch outside Replicator's politeness envelope.
+    Nothing here touches the network (the Phase-4 async-create design, #241):
+    the submitted URL *is* the effective URL until the first fact's
+    ``final_url`` proves otherwise, the domain is its hostname (the same
+    ``urlparse().hostname`` derivation the old inline probe used, so the
+    domain-keying invariant holds), and the item starts ``PROBING``. The apply
+    path (``apply_fetch_blob``) resolves the redirect, re-derives the domain,
+    and clears the state to OK/ERROR.
 
-    In ``local`` mode this is exactly the historical inline probe; probe errors
-    (``httpx.HTTPError``) propagate for the route's own transport handling —
-    they cannot occur on the bus branch.
+    That is what closes the boundaries-charter exception for the *scheduled*
+    path: nothing Watcher does on a timer touches an origin. Two
+    operator-initiated one-shot probes remain by design (domain create and
+    ``POST /api/v1/probe``) — a human action against a URL they just typed,
+    not automated traffic.
     """
-    if fetch_mode() == "bus":
-        # Syntactic validation stays at the boundary (CR-3): a typo'd URL must
-        # fail the request, not surface as ERROR health minutes later via a
-        # cross-service round trip through Replicator's DLQ.
-        parsed = urlparse(url)
-        if parsed.scheme not in ("http", "https") or not parsed.hostname:
-            raise ValueError(
-                f"invalid URL {url!r}: an absolute http(s) URL with a hostname is required"
-            )
-        return url, domain_name_for_url(url), WatchHealthStatus.PROBING
-    result = await probe_fn(url)
-    return result.effective_url, result.effective_domain or None, WatchHealthStatus.UNKNOWN
+    # Syntactic validation stays at the boundary (CR-3): a typo'd URL must
+    # fail the request, not surface as ERROR health minutes later via a
+    # cross-service round trip through Replicator's DLQ.
+    parsed = urlparse(url)
+    if parsed.scheme not in ("http", "https") or not parsed.hostname:
+        raise ValueError(
+            f"invalid URL {url!r}: an absolute http(s) URL with a hostname is required"
+        )
+    return url, domain_name_for_url(url), WatchHealthStatus.PROBING
 
 
 class ArchivedItemActivationError(Exception):

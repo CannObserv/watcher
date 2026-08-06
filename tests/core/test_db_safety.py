@@ -8,7 +8,7 @@ docs/COMMANDS.md carried the identical recipe (``export $(cat
 /etc/watcher/.env …)`` + uvicorn on 8001), so a dev server here would have
 served the production ``watcher`` database — and, worse, started a second
 embedded Procrastinate worker against the production queue and a second
-``DomainRateLimiter`` splitting every domain's politeness budget.
+``content.blobs`` consumer stealing production fact deliveries.
 
 ``scripts/dev_server.sh`` fixes the sanctioned launch path, but a docs-side fix
 has the same failure mode as the docs bug it patches — a hand-rolled uvicorn,

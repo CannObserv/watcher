@@ -1,15 +1,13 @@
 """WatchedItem dashboard routes — list, detail, lifecycle, inline fields, tags."""
 
-from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from typing import Literal
 
-import httpx
 from fastapi import APIRouter, Depends, Form, HTTPException, Query, Request
 from fastapi.responses import RedirectResponse, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.api.deps import get_db_session, get_probe_fn
+from src.api.deps import get_db_session
 from src.api.routes.watched_items import (
     archive_watched_item as _api_archive_watched_item,
 )
@@ -31,7 +29,6 @@ from src.core.domains import (
 from src.core.models.audit_log import EventType, audit
 from src.core.models.temporal_profile import TemporalProfile
 from src.core.models.watched_item import WatchedItem, WatchHealthStatus
-from src.core.probe import ProbeResult
 from src.core.scheduling.cadence import (
     parse_interval,
 )
@@ -205,7 +202,6 @@ async def watched_item_create_submit(
     default_schedule_interval: str = Form(""),
     default_tags: str = Form(""),
     is_active: str = Form(""),
-    probe_fn: Callable[[str], Awaitable[ProbeResult]] = Depends(get_probe_fn),
     session: AsyncSession = Depends(get_db_session),
 ):
     """Create a standalone WatchedItem from the dashboard form.
@@ -241,12 +237,10 @@ async def watched_item_create_submit(
     if tags and any(len(t) > 255 for t in tags):
         return await _render_with_flash("Tag too long (max 255 characters each)")
 
-    # Mode-branched (#241): local probes inline; bus defers the probe to the
-    # first fetch (item starts PROBING, resolved by apply_fetch_blob).
+    # No probe (#241): the item starts PROBING with the submitted URL and its
+    # first fact resolves the redirect (apply_fetch_blob).
     try:
-        effective_url, domain_name, health_status = await resolve_watch_target(url_raw, probe_fn)
-    except httpx.HTTPError as exc:
-        return await _render_with_flash(f"URL unreachable: {exc}")
+        effective_url, domain_name, health_status = resolve_watch_target(url_raw)
     except ValueError as exc:
         return await _render_with_flash(str(exc))
 
@@ -642,7 +636,6 @@ async def watched_item_update_url(
     request: Request,
     watched_item_id: str,
     url: str = Form(""),
-    probe_fn: Callable[[str], Awaitable[ProbeResult]] = Depends(get_probe_fn),
     session: AsyncSession = Depends(get_db_session),
 ):
     """Re-probe a new URL and update the WatchedItem's effective_url + domain_name.
@@ -674,12 +667,10 @@ async def watched_item_update_url(
     if not url_raw:
         return _flash("URL is required.", "error")
 
-    # Mode-branched (#241): local re-probes inline; bus defers to the next fetch
-    # (item re-enters PROBING; the apply path resolves any redirect).
+    # No re-probe (#241): the item re-enters PROBING and the apply path
+    # resolves any redirect from the next fact.
     try:
-        effective_url, new_domain, health_status = await resolve_watch_target(url_raw, probe_fn)
-    except httpx.HTTPError as exc:
-        return _flash(f"URL unreachable: {exc}", "error")
+        effective_url, new_domain, health_status = resolve_watch_target(url_raw)
     except ValueError as exc:
         return _flash(str(exc), "error")
 

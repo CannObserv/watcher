@@ -15,13 +15,21 @@ DEFAULT_DECAY_WINDOW = 1800.0
 
 
 class Domain(Base, TimestampMixin):
-    """Per-domain rate-limiter configuration, backoff state, and check cadence.
+    """Per-domain politeness floor and check cadence.
 
-    Two distinct interval concerns live here: ``min_interval``/``current_interval``
-    are the request-level rate-limiter floor/backoff (float seconds), while
-    ``default_schedule_config`` is the operator's desired check *cadence* for items
-    on this domain (a schedule_config interval string) — the Domain tier of the
-    3-tier schedule resolution (#205).
+    Two distinct interval concerns live here: ``min_interval`` is the
+    request-level politeness floor in float seconds — since the Phase-4 cutover
+    it is *published* to Replicator on ``content.fetch-policy`` (#245) rather
+    than enforced in-process — while ``default_schedule_config`` is the
+    operator's desired check *cadence* for items on this domain (a
+    schedule_config interval string), the Domain tier of the 3-tier schedule
+    resolution (#205).
+
+    ``current_interval``, ``max_concurrency``, ``last_request_at`` and
+    ``decay_window`` are **inert** since #241 step 5 retired the in-process
+    ``DomainRateLimiter``: nothing writes them any more and adaptive backoff is
+    Replicator's (replicator#25). They are kept as columns so the retirement did
+    not need a destructive migration; dropping them is tracked separately.
     """
 
     __tablename__ = "domains"
@@ -70,11 +78,14 @@ class Domain(Base, TimestampMixin):
 
     @property
     def status(self) -> str:
-        """Derived status: archived > inactive > backoff > active."""
+        """Derived status: archived > inactive > active.
+
+        The ``backoff`` state is gone with the limiter (#241 step 5) — nothing
+        raised ``current_interval`` above ``min_interval`` any more, so the
+        state was unreachable and the badge always lied by omission.
+        """
         if self.archived_at is not None:
             return "archived"
         if not self.is_active:
             return "inactive"
-        if self.current_interval > self.min_interval:
-            return "backoff"
         return "active"

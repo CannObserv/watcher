@@ -1,6 +1,7 @@
 """The content.fetch issue path — Watcher as Replicator's command issuer (#241).
 
-Phase 4 step 1: everything here is inert until ``WATCHER_FETCH_MODE=bus``.
+Since the Phase-4 cutover this is the only path by which Watcher obtains
+content: it makes no origin request of its own.
 
 The contract this implements is normative in the Replicator repo
 (``docs/contracts/content-fetch-issuer-contract.md``); the MUSTs that land in
@@ -21,7 +22,6 @@ No validator headers (``If-None-Match``/``If-Modified-Since``) are sent: a
 body-less 304 still dead-letters (replicator#17). Revisit when that closes.
 """
 
-import os
 from datetime import UTC, datetime
 
 from co_core.effects.bus import BusPublish
@@ -40,26 +40,6 @@ from src.core.models.fetch_command import OPEN_STATUSES, FetchCommand, FetchComm
 from src.core.models.watched_item import WatchedItem
 
 logger = get_logger(__name__)
-
-# local (default) = today's inline fetch; bus = issue content.fetch commands.
-# Read at issue time so the flag flips without a restart-ordering dance.
-FETCH_MODE_ENV = "WATCHER_FETCH_MODE"
-
-
-def fetch_mode() -> str:
-    """``"bus"`` when explicitly opted in; anything else resolves to ``"local"``.
-
-    Fail-safe direction: an unrecognized value keeps today's proven path and
-    warns, rather than routing fetches onto a bus nobody meant to enable.
-    """
-    value = os.environ.get(FETCH_MODE_ENV, "local")
-    if value in ("local", "bus"):
-        return value
-    logger.warning(
-        "unrecognized WATCHER_FETCH_MODE %r — falling back to 'local'",
-        value,
-    )
-    return "local"
 
 
 async def create_fetch_command(

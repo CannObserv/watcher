@@ -6,8 +6,8 @@ documented dev-server recipe in AGENTS.md and docs/COMMANDS.md sourced
 stayed pointed at production. A dev server on 8001 and the live service on
 8000 would share one database — and, because the lifespan starts the embedded
 Procrastinate worker, the "dev" server would also be a second worker consuming
-the production task queue and a second ``DomainRateLimiter`` splitting every
-domain's politeness budget.
+the production task queue — and, since #241, a second member of the
+``content.blobs`` consumer group, stealing production fact deliveries.
 
 ``scripts/dev_server.sh`` fixes the sanctioned launch path. This module is the
 backstop, because a docs-side fix has the same failure mode as the docs bug it

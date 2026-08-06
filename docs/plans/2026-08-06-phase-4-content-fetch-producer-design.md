@@ -174,9 +174,35 @@ Dashboard shows the probing state; the create form returns immediately. This clo
 "Watcher fetches outside Replicator's politeness envelope" exception named in the
 boundaries charter.
 
-## Cutover (open question for review)
+## Cutover — executed 2026-08-06 17:04Z
 
-Recommended: **flagged dual-run.** `WATCHER_FETCH_MODE=local|bus` read at issue time —
+**Result: cut over, all four WatchedItems on `bus`.** Method: paused the other three items,
+gave the canary a temporary 10m cadence, flipped `WATCHER_FETCH_MODE=bus` in
+`/etc/watcher/.env`, restarted, then widened. Canary was **WSLCB - Public Hearings and
+Outreach** — content stable since 2026-07-28, so any fetcher-induced fingerprint drift
+would surface immediately as a spurious change. (Schedule/pause changes went in by SQL:
+the dashboard is behind the exe.dev login proxy and `/api/v1` needs an `X-API-Key`; all
+temporary cadences were restored afterward.)
+
+Observed over 8 commands / 4 items / 2 origins:
+
+| Criterion | Result |
+|---|---|
+| Fingerprint continuity | `changed: False` on every unchanged item, incl. two whose baselines were computed by the *inline* fetcher ~1 day earlier. Extraction over the 122 KB raw blob reproduced the 8752-byte fingerprint byte-for-byte — the pinned UA did its job. No re-baseline pass needed. |
+| Correlation | 8/8 matched on `command_id`; zero unmatched, zero discards |
+| Per-occasion identity | Distinct `command_id` **and** `intent_id` per issue (MUST-1) |
+| Round-trip (issue→apply) | 0.13–1.35 s; first-of-process was the slow one (connection setup) |
+| Reaper | `{reissued: 0, capped: 0, reapplied: 0}` every 5 min throughout |
+| Bus health | `content.blobs` + `content.fetch` PEL 0, lag 0 |
+| Change path | Exercised by the hourly Meeting Schedule item at 17:30 — new revision → `notification.dispatched` → outbox → drain back-populated `archiver_revision_id` |
+| Errors | Zero ERROR/CRITICAL |
+
+Note for step 5: bus mode returns from `check_watched_item` *before* `acquire_for_domain`,
+so the local `DomainRateLimiter` is already fully bypassed on the check path — all spacing
+now rides the #245 policy stream (verified: all three hosts republished at
+`min_interval_seconds: 1.0`, matching the `domains` table).
+
+Original recommendation, as executed: **flagged dual-run.** `WATCHER_FETCH_MODE=local|bus` read at issue time —
 `local` keeps today's inline fetch; `bus` issues commands. Soak on `bus`, watching:
 facts correlate (no unknown `command_id`s), fingerprint continuity (UA pinned via command
 headers should make revisions byte-identical — any drift shows as a `CHANGE_DETECTED`

@@ -136,9 +136,12 @@ row.** The open row *is* the in-flight marker; the reaper is what closes it.
 ### Reaper (periodic task)
 
 Closes what nothing else will (MUST-6 survives `fetch_failed` — stalls and undecodable
-frames are still silent):
+frames are still silent). Keyed on **signal age** — `coalesce(fact_at, published_at)` —
+so a fact whose apply job died cannot shield its row forever (CR-2): a stale `in_flight`
+row that *holds a blob fact* gets its apply **re-deferred** (the bytes exist; refetching
+would waste an origin request); everything else follows the expire/re-issue path below.
 
-- Open rows older than `WATCHER_FETCH_COMMAND_TIMEOUT_SECONDS` (default **1800** —
+- Open rows whose last signal is older than `WATCHER_FETCH_COMMAND_TIMEOUT_SECONDS` (default **1800** —
   deliberately generous; Replicator's reclaim cadence is an operator knob on another
   host, and a pinned 60s would re-issue under live retries) → `expired`, re-issue fresh
   `command_id` / same `intent_id`, `reissue_count + 1`.
@@ -197,6 +200,11 @@ notifications on each item's first post-cutover revision. Flag removed after soa
 5. **`health_status` enum gains `"probing"` (CR-6)** — additive on the OpenAPI surface;
    a strict client that compiled the old three-value enum will reject it. Watcher's only
    known consumer is its own dashboard.
+6. **Failure-apply exhaustion (CR-13)** — if `apply_fetch_failure` exhausts its retries,
+   the row is `failed` with no `applied_at` and the reaper's status filter skips it: the
+   item misses that command's ERROR surfacing. Not a deadlock — `failed` isn't an open
+   status, so the gate lifts and the next scheduled command repeats the failure with a
+   fresh fact and a fresh apply. Delayed surfacing only; accepted.
 
 ## Testing
 

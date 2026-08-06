@@ -36,16 +36,14 @@ from redis.asyncio import Redis
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.core.bus import BUS_REDIS_URL_ENV, bus_client_from_env
 from src.core.logging import get_logger
 from src.core.models.domain import Domain
 from src.core.models.fetch_policy_tombstone import FetchPolicyTombstone
 
 logger = get_logger(__name__)
 
-# Client construction moved to src.core.bus (#241 CR finding 4); re-exported
-# here for the pre-existing import surface.
-__all__ = ["BUS_REDIS_URL_ENV", "bus_client_from_env"]
+# Bus client construction lives in src.core.bus (#241 CR-4/CR-10) — import
+# BUS_REDIS_URL_ENV / bus_client_from_env from there.
 
 
 def build_policy_events(

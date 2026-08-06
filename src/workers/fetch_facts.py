@@ -169,12 +169,16 @@ async def run_blobs_consumer(
     consumer = AsyncBusConsumer(
         client, topic=streams.CONTENT_BLOBS, group=CONSUMER_GROUP, consumer=CONSUMER_NAME
     )
-    await consumer.ensure_group(start_id="$")
     loop = asyncio.get_running_loop()
     next_claim = loop.time()  # first pass drains any crash leftovers immediately
+    group_ready = False  # created inside the guard: a broker outage racing our
+    # boot must back off and retry, not kill the task before the loop starts (CR-12)
 
     while not stop.is_set():
         try:
+            if not group_ready:
+                await consumer.ensure_group(start_id="$")
+                group_ready = True
             messages: list[BusMessage] = []
             if loop.time() >= next_claim:
                 next_claim = loop.time() + CLAIM_INTERVAL_SECONDS

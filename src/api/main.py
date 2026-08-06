@@ -31,8 +31,8 @@ from src.dashboard import register_dashboard
 # Worker imports are safe at module top: src.workers.__init__ defers task-module
 # registration into get_app(), and fetch_facts only touches bp-registered tasks
 # (#241 CR-7; previously inline in the lifespan).
-from src.workers import get_app  # noqa: E402  (grouped with the comment above)
-from src.workers.fetch_facts import start_blobs_consumer  # noqa: E402
+from src.workers import get_app
+from src.workers.fetch_facts import start_blobs_consumer
 
 configure_logging()
 logger = get_logger(__name__)

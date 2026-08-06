@@ -16,6 +16,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ulid import ULID
 
 from src.core.database import get_session_factory
+from src.core.fetch_commands import (
+    create_fetch_command,
+    fetch_mode,
+    has_open_command,
+    publish_fetch_command,
+)
+from src.core.fetch_policy import BUS_REDIS_URL_ENV, bus_client_from_env
 from src.core.logging import get_logger
 from src.core.models.audit_log import EventType, audit
 from src.core.models.temporal_profile import TemporalProfile
@@ -78,6 +85,54 @@ async def _record_check_failure(
         await session.commit()
 
 
+async def _issue_fetch_command(session: AsyncSession, watched_item, bus_client) -> dict:
+    """Issue one ``content.fetch`` command for the item (#241, MUST-1/MUST-2).
+
+    Persist-commit-publish, in that order: a crash after the commit leaves a
+    ``pending_publish`` row the every-minute sweep republishes under the same
+    ``command_id`` (idempotent by Replicator's dedupe). No rate-limiter sleep —
+    per-host pacing is Replicator's since #245 — and no ``last_checked_at``
+    stamp: the check has not happened yet.
+
+    The open-command gate keeps ``schedule_tick`` from re-issuing every tick
+    against a silently failed command (the contract's most expensive
+    issuer-side hazard).
+    """
+    if await has_open_command(session, watched_item.id):
+        logger.info(
+            "fetch command already open — not re-issuing",
+            extra={"watched_item_id": str(watched_item.id)},
+        )
+        return {"skipped": True, "reason": "command_in_flight"}
+
+    now = datetime.now(UTC)
+    row = await create_fetch_command(session, watched_item, now=now)
+    await session.commit()  # MUST-2: the correlation row is durable before any XADD
+
+    client = bus_client if bus_client is not None else bus_client_from_env()
+    if client is None:
+        logger.error(
+            "cannot publish fetch command: %s is not set — row stays pending for the sweep",
+            BUS_REDIS_URL_ENV,
+        )
+        return {"issued": row.command_id, "published": False}
+    owns_client = bus_client is None
+    try:
+        await publish_fetch_command(client, row, now=now)
+        await session.commit()
+    except Exception:
+        logger.warning(
+            "fetch command publish failed; the sweep will retry it",
+            extra={"command_id": row.command_id},
+            exc_info=True,
+        )
+        return {"issued": row.command_id, "published": False}
+    finally:
+        if owns_client:
+            await client.aclose()
+    return {"issued": row.command_id, "published": True}
+
+
 # ---------------------------------------------------------------------------
 # check_watched_item — periodic per-WatchedItem fetch + pipeline + bookkeeping.
 # ---------------------------------------------------------------------------
@@ -97,13 +152,22 @@ async def _record_check_failure(
         },
     ),
 )
-async def check_watched_item(watched_item_id: str, registry: ServiceRegistry | None = None) -> dict:
+async def check_watched_item(
+    watched_item_id: str,
+    registry: ServiceRegistry | None = None,
+    bus_client=None,
+) -> dict:
     """Fetch the WatchedItem's URL and run the pipeline.
 
     Updates ``last_checked_at`` and ``health_status`` on the WatchedItem
     (both success and fetch-failure paths). WATCH_ERROR / WATCH_RECOVERED
     events are dispatched once per WatchedItem when its health transitions;
     CHANGE_DETECTED is dispatched inline by the pipeline.
+
+    Under ``WATCHER_FETCH_MODE=bus`` (#241, Phase 4) the fetch half is replaced
+    by issuing a ``content.fetch`` command — no origin request, no
+    ``last_checked_at`` stamp (that is the apply path's job when the fact
+    returns). ``bus_client`` is a test seam; production builds from env.
     """
     reg = registry if registry is not None else get_registry()
     async with get_session_factory()() as session:
@@ -130,6 +194,12 @@ async def check_watched_item(watched_item_id: str, registry: ServiceRegistry | N
                 extra={"watched_item_id": watched_item_id},
             )
             return {"skipped": True, "reason": "no_effective_url"}
+
+        # Phase 4 (#241): bus mode issues a command instead of fetching. Sits
+        # after the guards so paused/archived/suspended/url-less items short-
+        # circuit identically in both modes.
+        if fetch_mode() == "bus":
+            return await _issue_fetch_command(session, watched_item, bus_client)
 
         fetch_config: dict = {}
 

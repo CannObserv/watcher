@@ -137,8 +137,9 @@ class WatchedItemResult:
     cache_hit: bool = False
     changed: bool = False
     notifications_dispatched: int = 0
-    archiver_sync_enqueued: bool = False
     errors: list[str] = field(default_factory=list)
+    # No archiver_sync_enqueued flag since #251: a detected change always
+    # enqueues a PendingArchiverSync row, so `changed` already carries it.
 
 
 async def process_watched_item(
@@ -219,25 +220,23 @@ async def process_watched_item(
     session.add(rev)
     await session.flush()  # populate rev.id before scratch write
 
-    # Scratch bytes exist only to feed the Archiver sync (drain worker reads
-    # them via content_cache_uri). For un-synced items they are pure local
-    # churn — and an orphaned scratch with no pending row, which the sweeper
-    # would otherwise 404 on (#194). Gate the write on the same condition.
-    archiver_sync_enqueued = False
-    if watched_item.archiver_info_source_id:
-        scratch_path = write_scratch_bytes(str(rev.id), outcome.content_bytes)
-        expires_at = now + timedelta(seconds=WATCHER_CACHE_TTL_SECONDS)
-        cache_uri = f"file://{scratch_path}"
-        session.add(
-            PendingArchiverSync(
-                change_revision_id=rev.id,
-                watched_item_id=watched_item.id,
-                content_cache_uri=cache_uri,
-                content_cache_expires_at=expires_at,
-                next_attempt_at=now,
-            )
+    # Scratch bytes exist only to feed the Archiver sync (drain worker reads them
+    # via content_cache_uri). Unconditional since #251: archiver_info_source_id is
+    # NOT NULL, so every detected change has somewhere to post. The old guard was
+    # the first of two silent-drop branches for bare-URL items — a captured
+    # revision was written locally and never enqueued.
+    scratch_path = write_scratch_bytes(str(rev.id), outcome.content_bytes)
+    expires_at = now + timedelta(seconds=WATCHER_CACHE_TTL_SECONDS)
+    cache_uri = f"file://{scratch_path}"
+    session.add(
+        PendingArchiverSync(
+            change_revision_id=rev.id,
+            watched_item_id=watched_item.id,
+            content_cache_uri=cache_uri,
+            content_cache_expires_at=expires_at,
+            next_attempt_at=now,
         )
-        archiver_sync_enqueued = True
+    )
 
     watched_item.last_changed_at = now
 
@@ -246,9 +245,8 @@ async def process_watched_item(
         "change_revision_id": str(rev.id),
         "content_fingerprint": outcome.content_fingerprint,
         **watched_item_event_base_metadata(watched_item),
+        "archiver_revision_id": None,  # back-filled by drain worker
     }
-    if archiver_sync_enqueued:
-        change_meta["archiver_revision_id"] = None  # back-filled by drain worker
 
     event = WatchEvent(
         event_type=WatchEventType.CHANGE_DETECTED,
@@ -260,8 +258,4 @@ async def process_watched_item(
     )
     await dispatch_event_notifications(session=session, event=event)
 
-    return WatchedItemResult(
-        changed=True,
-        notifications_dispatched=1,
-        archiver_sync_enqueued=archiver_sync_enqueued,
-    )
+    return WatchedItemResult(changed=True, notifications_dispatched=1)

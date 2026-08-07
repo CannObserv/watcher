@@ -13,12 +13,31 @@ from tests.conftest import make_info_item
 pytestmark = pytest.mark.integration
 
 
+def _create_body(info_item_id, **overrides):
+    """A minimal valid ``POST /api/v1/watched-items`` body.
+
+    #251: the InfoItem link, its URL, and the InfoSource link are all required —
+    there is no URL-only creation path.
+    """
+    body = {
+        "archiver_info_item_id": str(info_item_id),
+        "url": "https://example.com/page",
+        "archiver_info_source_id": str(ULID()),
+    }
+    body.update(overrides)
+    return body
+
+
 async def _make_watched_item(db_session, **overrides):
     """Helper: create a WatchedItem + parent InfoItem via the test fixtures."""
     from src.core.models.watched_item import WatchedItem
 
     item = await make_info_item(db_session)
-    wi = WatchedItem(archiver_info_item_id=item.info_item_id, name=overrides.pop("name", "Test WI"))
+    wi = WatchedItem(
+        archiver_info_source_id=str(ULID()),
+        archiver_info_item_id=item.info_item_id,
+        name=overrides.pop("name", "Test WI"),
+    )
     for k, v in overrides.items():
         setattr(wi, k, v)
     db_session.add(wi)
@@ -76,24 +95,6 @@ class TestGetWatchedItem:
         response = await client.get(f"/api/v1/watched-items/{wi.id}")
         assert response.status_code == 200
         assert response.json()["name"] == "Single"
-
-    async def test_returns_null_archiver_info_item_id_for_standalone(self, client, db_session):
-        """Dashboard-created WatchedItems (archiver_info_item_id=None) must serialise cleanly.
-
-        Regression for the ULIDStr BeforeValidator silently coercing None → "None".
-        """
-        from src.core.models.watched_item import WatchedItem
-
-        wi = WatchedItem(name="Standalone", effective_url="https://example.com/s")
-        db_session.add(wi)
-        await db_session.flush()
-        await db_session.commit()
-
-        response = await client.get(f"/api/v1/watched-items/{wi.id}")
-        assert response.status_code == 200
-        body = response.json()
-        assert body["name"] == "Standalone"
-        assert body["archiver_info_item_id"] is None
 
 
 class TestPatchWatchedItem:
@@ -452,7 +453,11 @@ class TestCreateWatchedItem:
         await db_session.commit()
         response = await client.post(
             "/api/v1/watched-items",
-            json={"archiver_info_item_id": str(item.info_item_id)},
+            json={
+                "url": "https://example.com/page",
+                "archiver_info_source_id": str(ULID()),
+                "archiver_info_item_id": str(item.info_item_id),
+            },
         )
         assert response.status_code == 201, response.text
         body = response.json()
@@ -474,7 +479,11 @@ class TestCreateWatchedItem:
         await db_session.commit()
         response = await client.post(
             "/api/v1/watched-items",
-            json={"archiver_info_item_id": str(item.info_item_id)},
+            json={
+                "url": "https://example.com/page",
+                "archiver_info_source_id": str(ULID()),
+                "archiver_info_item_id": str(item.info_item_id),
+            },
         )
         assert response.status_code == 201, response.text
         wi_id = response.json()["id"]
@@ -492,6 +501,8 @@ class TestCreateWatchedItem:
         response = await client.post(
             "/api/v1/watched-items",
             json={
+                "url": "https://example.com/page",
+                "archiver_info_source_id": str(ULID()),
                 "archiver_info_item_id": str(item.info_item_id),
                 "name": "Overridden",
                 "default_schedule_config": {"interval": "10m"},
@@ -510,11 +521,21 @@ class TestCreateWatchedItem:
         item = await make_info_item(db_session, name="X")
         await db_session.commit()
         r1 = await client.post(
-            "/api/v1/watched-items", json={"archiver_info_item_id": str(item.info_item_id)}
+            "/api/v1/watched-items",
+            json={
+                "url": "https://example.com/page",
+                "archiver_info_source_id": str(ULID()),
+                "archiver_info_item_id": str(item.info_item_id),
+            },
         )
         assert r1.status_code == 201
         r2 = await client.post(
-            "/api/v1/watched-items", json={"archiver_info_item_id": str(item.info_item_id)}
+            "/api/v1/watched-items",
+            json={
+                "url": "https://example.com/page",
+                "archiver_info_source_id": str(ULID()),
+                "archiver_info_item_id": str(item.info_item_id),
+            },
         )
         assert r2.status_code == 409
         assert "already" in r2.json()["detail"].lower()
@@ -523,7 +544,11 @@ class TestCreateWatchedItem:
         info_client.get_info_item = AsyncMock(side_effect=NotFound("nope"))
         response = await client.post(
             "/api/v1/watched-items",
-            json={"archiver_info_item_id": "01ZZZZZZZZZZZZZZZZZZZZZZZZ"},
+            json={
+                "url": "https://example.com/page",
+                "archiver_info_source_id": str(ULID()),
+                "archiver_info_item_id": "01ZZZZZZZZZZZZZZZZZZZZZZZZ",
+            },
         )
         assert response.status_code == 422
 
@@ -531,7 +556,11 @@ class TestCreateWatchedItem:
         info_client.get_info_item = AsyncMock(side_effect=ServerError("boom"))
         response = await client.post(
             "/api/v1/watched-items",
-            json={"archiver_info_item_id": "01ZZZZZZZZZZZZZZZZZZZZZZZZ"},
+            json={
+                "url": "https://example.com/page",
+                "archiver_info_source_id": str(ULID()),
+                "archiver_info_item_id": "01ZZZZZZZZZZZZZZZZZZZZZZZZ",
+            },
         )
         assert response.status_code == 503
         assert response.headers.get("Retry-After") == "30"
@@ -541,7 +570,11 @@ class TestCreateWatchedItem:
         await db_session.commit()
         await client.post(
             "/api/v1/watched-items",
-            json={"archiver_info_item_id": str(item.info_item_id)},
+            json={
+                "url": "https://example.com/page",
+                "archiver_info_source_id": str(ULID()),
+                "archiver_info_item_id": str(item.info_item_id),
+            },
         )
         events = (
             (
@@ -563,6 +596,7 @@ class TestCreateWatchedItem:
         response = await client.post(
             "/api/v1/watched-items",
             json={
+                "archiver_info_source_id": str(ULID()),
                 "archiver_info_item_id": str(item.info_item_id),
                 "url": "https://example.com/page",
                 "source_specs": [{"schema_version": 1, "extraction": {"algorithm": "full_page"}}],
@@ -583,54 +617,24 @@ class TestCreateWatchedItem:
         await db_session.commit()
         response = await client.post(
             "/api/v1/watched-items",
-            json={"archiver_info_item_id": str(item.info_item_id)},
+            json={
+                "url": "https://example.com/page",
+                "archiver_info_source_id": str(ULID()),
+                "archiver_info_item_id": str(item.info_item_id),
+            },
         )
         assert response.status_code == 201
         body = response.json()
         assert "effective_url" in body
         assert "source_specs" in body
-        # Default values when not supplied
-        assert body["effective_url"] == ""
+        # effective_url is the supplied (Archiver-authoritative) URL; source_specs
+        # default to empty when not seeded at create.
+        assert body["effective_url"] == "https://example.com/page"
         assert body["source_specs"] == []
 
-    async def test_creates_without_archiver_info_item_id_url_only(self, client, db_session):
-        """URL-only creates a WatchedItem with archiver_info_item_id=null (#185 Phase A)."""
-        response = await client.post(
-            "/api/v1/watched-items",
-            json={"url": "https://example.com/standalone", "name": "Standalone WI"},
-        )
-        assert response.status_code == 201, response.text
-        body = response.json()
-        assert body["archiver_info_item_id"] is None
-        assert body["name"] == "Standalone WI"
-        assert body["effective_url"] == "https://example.com/standalone"
-        assert body["domain_name"] == "example.com"
-
-    async def test_url_only_name_falls_back_to_domain(self, client, db_session):
-        """Name defaults to the probed domain when not supplied."""
-        response = await client.post(
-            "/api/v1/watched-items",
-            json={"url": "https://lcb.wa.gov/page"},
-        )
-        assert response.status_code == 201, response.text
-        assert response.json()["name"] == "lcb.wa.gov"
-
-    async def test_neither_archiver_info_item_id_nor_url_returns_422(self, client):
-        """At least one of archiver_info_item_id or url is required."""
-        response = await client.post("/api/v1/watched-items", json={"name": "Missing anchor"})
-        assert response.status_code == 422
-
-    async def test_url_only_create_stores_archiver_info_source_id(self, client, db_session):
-        """#1 fix: archiver_info_source_id must be persisted on the URL-only path."""
-        src_id = "01ABCDEFGHJKMNPQRSTVWXYZ00"
-        response = await client.post(
-            "/api/v1/watched-items",
-            json={"url": "https://example.com/srcid", "archiver_info_source_id": src_id},
-        )
-        assert response.status_code == 201, response.text
-        assert response.json()["archiver_info_source_id"] == src_id
-
-    async def test_url_create_on_inactive_domain_sets_domain_suspended(self, client, db_session):
+    async def test_create_on_inactive_domain_sets_domain_suspended(
+        self, client, db_session, info_client
+    ):
         """#191 CR-1: creating on an already-inactive domain marks domain_suspended.
 
         schedule_tick gates solely on WatchedItem.domain_suspended now (no live
@@ -638,20 +642,31 @@ class TestCreateWatchedItem:
         """
         from src.core.models.domain import Domain
 
+        item = await make_info_item(db_session, name="OnInactive")
         db_session.add(Domain(name="inactive-create.example", is_active=False))
         await db_session.commit()
         response = await client.post(
             "/api/v1/watched-items",
-            json={"url": "https://inactive-create.example/page", "name": "On Inactive Domain"},
+            json=_create_body(
+                item.info_item_id,
+                url="https://inactive-create.example/page",
+                name="On Inactive Domain",
+            ),
         )
         assert response.status_code == 201, response.text
         assert response.json()["domain_suspended"] is True
 
-    async def test_url_create_on_active_domain_not_suspended(self, client, db_session):
+    async def test_create_on_active_domain_not_suspended(self, client, db_session, info_client):
         """Items created on a healthy (or fresh) domain are not domain-suspended."""
+        item = await make_info_item(db_session, name="OnActive")
+        await db_session.commit()
         response = await client.post(
             "/api/v1/watched-items",
-            json={"url": "https://active-create.example/page", "name": "On Active Domain"},
+            json=_create_body(
+                item.info_item_id,
+                url="https://active-create.example/page",
+                name="On Active Domain",
+            ),
         )
         assert response.status_code == 201, response.text
         assert response.json()["domain_suspended"] is False
@@ -664,6 +679,7 @@ class TestCreateWatchedItem:
         response = await client.post(
             "/api/v1/watched-items",
             json={
+                "url": "https://example.com/page",
                 "archiver_info_item_id": str(item.info_item_id),
                 "archiver_info_source_id": src_id,
             },
@@ -686,20 +702,20 @@ class TestCreateWatchedItem:
 class TestIssue188IsActive:
     """#188 — provision-paused on create + pause/resume via patch, decoupled from archive."""
 
-    async def test_create_defaults_active(self, client, db_session):
+    async def test_create_defaults_active(self, client, db_session, info_client):
         """A WatchedItem created without is_active is active."""
-        response = await client.post(
-            "/api/v1/watched-items",
-            json={"url": "https://example.com/active-default"},
-        )
+        item = await make_info_item(db_session, name="ActiveDefault")
+        await db_session.commit()
+        response = await client.post("/api/v1/watched-items", json=_create_body(item.info_item_id))
         assert response.status_code == 201, response.text
         assert response.json()["is_active"] is True
 
-    async def test_create_paused_url_only(self, client, db_session):
-        """is_active=False on the URL-only path provisions a paused WatchedItem."""
+    async def test_create_paused(self, client, db_session, info_client):
+        """is_active=False provisions a paused (not archived) WatchedItem."""
+        item = await make_info_item(db_session, name="Paused")
+        await db_session.commit()
         response = await client.post(
-            "/api/v1/watched-items",
-            json={"url": "https://example.com/paused", "is_active": False},
+            "/api/v1/watched-items", json=_create_body(item.info_item_id, is_active=False)
         )
         assert response.status_code == 201, response.text
         body = response.json()
@@ -713,7 +729,12 @@ class TestIssue188IsActive:
         await db_session.commit()
         response = await client.post(
             "/api/v1/watched-items",
-            json={"archiver_info_item_id": str(item.info_item_id), "is_active": False},
+            json={
+                "url": "https://example.com/page",
+                "archiver_info_source_id": str(ULID()),
+                "archiver_info_item_id": str(item.info_item_id),
+                "is_active": False,
+            },
         )
         assert response.status_code == 201, response.text
         assert response.json()["is_active"] is False
@@ -864,7 +885,11 @@ class TestListFilterByArchiverInfoItemId:
         from src.core.models.watched_item import WatchedItem
 
         item = await make_info_item(db_session, name="Filtered")
-        wi = WatchedItem(archiver_info_item_id=item.info_item_id, name="Match")
+        wi = WatchedItem(
+            archiver_info_source_id=str(ULID()),
+            archiver_info_item_id=item.info_item_id,
+            name="Match",
+        )
         db_session.add(wi)
         await _make_watched_item(db_session, name="Other")
         await db_session.commit()
@@ -904,19 +929,6 @@ class TestPatchArchiverInfoSourceId:
         )
         assert response.status_code == 200
         assert response.json()["archiver_info_source_id"] == src_id
-
-    async def test_patch_clears_archiver_info_source_id(self, client, db_session):
-        """PATCH with null clears archiver_info_source_id."""
-        wi = await _make_watched_item(db_session)
-        wi.archiver_info_source_id = "01ABCDEFGHJKMNPQRSTVWXYZ00"
-        await db_session.commit()
-
-        response = await client.patch(
-            f"/api/v1/watched-items/{wi.id}",
-            json={"archiver_info_source_id": None},
-        )
-        assert response.status_code == 200
-        assert response.json()["archiver_info_source_id"] is None
 
 
 class TestPatchEffectiveUrlAndSourceSpecs:
@@ -1088,6 +1100,7 @@ class TestCreateInfoItemLinkedDomainDerivation:
         response = await client.post(
             "/api/v1/watched-items",
             json={
+                "archiver_info_source_id": str(ULID()),
                 "archiver_info_item_id": str(item.info_item_id),
                 "url": "https://linked-create.example/page",
             },
@@ -1105,6 +1118,7 @@ class TestCreateInfoItemLinkedDomainDerivation:
         await client.post(
             "/api/v1/watched-items",
             json={
+                "archiver_info_source_id": str(ULID()),
                 "archiver_info_item_id": str(item.info_item_id),
                 "url": "https://linked-upsert.example/page",
             },
@@ -1125,24 +1139,13 @@ class TestCreateInfoItemLinkedDomainDerivation:
         response = await client.post(
             "/api/v1/watched-items",
             json={
+                "archiver_info_source_id": str(ULID()),
                 "archiver_info_item_id": str(item.info_item_id),
                 "url": "https://linked-inactive.example/page",
             },
         )
         assert response.status_code == 201, response.text
         assert response.json()["domain_suspended"] is True
-
-    async def test_infoitem_linked_create_without_url_leaves_domain_name_null(
-        self, client, db_session, info_client
-    ):
-        item = await make_info_item(db_session, name="LinkedNoUrl")
-        await db_session.commit()
-        response = await client.post(
-            "/api/v1/watched-items",
-            json={"archiver_info_item_id": str(item.info_item_id)},
-        )
-        assert response.status_code == 201, response.text
-        assert response.json()["domain_name"] is None
 
     async def test_create_denormalizes_domain_cadence_onto_item(
         self, client, db_session, info_client
@@ -1161,6 +1164,7 @@ class TestCreateInfoItemLinkedDomainDerivation:
         response = await client.post(
             "/api/v1/watched-items",
             json={
+                "archiver_info_source_id": str(ULID()),
                 "archiver_info_item_id": str(item.info_item_id),
                 "url": "https://cadence-create.example/page",
             },
@@ -1211,7 +1215,14 @@ class TestCheckNow:
     async def test_422_when_no_effective_url(self, client, db_session):
         from src.core.models.watched_item import WatchedItem
 
-        wi = WatchedItem(name="NoUrl", effective_url="")
+        # Not reachable through create since #251 (url is required); the guard
+        # still covers a row whose URL was emptied out of band.
+        wi = WatchedItem(
+            archiver_info_item_id=ULID(),
+            archiver_info_source_id=str(ULID()),
+            name="NoUrl",
+            effective_url="",
+        )
         db_session.add(wi)
         await db_session.commit()
 
@@ -1314,25 +1325,65 @@ class TestCheckNow:
 
 
 class TestAsyncCreate:
-    """#241 step 3: URL-first create defers the probe to the first fetch."""
+    """#241 step 3 / #251: create never touches an origin — Archiver owns the URL."""
 
-    async def test_create_starts_probing_without_a_probe(self, client, db_session):
+    async def test_create_stores_the_url_without_probing(self, client, db_session, info_client):
         from src.core.models.watched_item import WatchedItem, WatchHealthStatus
 
+        item = await make_info_item(db_session, name="AsyncCreate")
+        await db_session.commit()
         response = await client.post(
-            "/api/v1/watched-items", json={"url": "https://async.example/page"}
+            "/api/v1/watched-items",
+            json=_create_body(item.info_item_id, url="https://async.example/page"),
         )
-        assert response.status_code == 201
+        assert response.status_code == 201, response.text
         data = response.json()
+        # Stored verbatim: no probe, no redirect resolution at create time.
         assert data["effective_url"] == "https://async.example/page"
         assert data["domain_name"] == "async.example"
 
         wi = await db_session.get(WatchedItem, ULID.from_str(data["id"]))
-        assert wi.health_status == WatchHealthStatus.PROBING
+        # UNKNOWN, not PROBING: Archiver is authoritative for the URL, so a
+        # steady-state redirect stays audit-only rather than rewriting it.
+        assert wi.health_status == WatchHealthStatus.UNKNOWN
 
-    async def test_create_rejects_invalid_url_syntactically(self, client):
+    async def test_create_rejects_invalid_url_syntactically(self, client, db_session, info_client):
         # The API's HttpUrlStr schema rejects this before the route runs; the
         # route-level ValueError handler (CR-3) is the same guard for the
         # dashboard Form paths, covered in tests/core/test_watched_items.py.
-        response = await client.post("/api/v1/watched-items", json={"url": "not a url"})
+        item = await make_info_item(db_session, name="BadUrl")
+        await db_session.commit()
+        response = await client.post(
+            "/api/v1/watched-items", json=_create_body(item.info_item_id, url="not a url")
+        )
+        assert response.status_code == 422
+
+
+class TestCreateRequiresArchiverLinks:
+    """#251: bare-URL WatchedItems are rolled back — all three links are required."""
+
+    async def test_missing_archiver_info_item_id_returns_422(self, client):
+        body = _create_body(ULID())
+        del body["archiver_info_item_id"]
+        response = await client.post("/api/v1/watched-items", json=body)
+        assert response.status_code == 422
+
+    async def test_missing_archiver_info_source_id_returns_422(self, client):
+        body = _create_body(ULID())
+        del body["archiver_info_source_id"]
+        response = await client.post("/api/v1/watched-items", json=body)
+        assert response.status_code == 422
+
+    async def test_missing_url_returns_422(self, client):
+        body = _create_body(ULID())
+        del body["url"]
+        response = await client.post("/api/v1/watched-items", json=body)
+        assert response.status_code == 422
+
+    async def test_patch_rejects_null_archiver_info_source_id(self, client, db_session):
+        """The column is NOT NULL — clearing it must fail at the schema, not the DB."""
+        wi = await _make_watched_item(db_session, name="KeepSourceId")
+        response = await client.patch(
+            f"/api/v1/watched-items/{wi.id}", json={"archiver_info_source_id": None}
+        )
         assert response.status_code == 422

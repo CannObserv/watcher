@@ -51,24 +51,32 @@ class TestWatchedItemContentType:
     """content_media_type is free-form raw MIME — no enum, no validator (#168)."""
 
     def test_content_media_type_accepts_raw_mime(self):
-        wi = WatchedItem(name="Test", content_media_type="text/html; charset=utf-8")
+        wi = WatchedItem(
+            archiver_info_source_id=str(ULID()),
+            name="Test",
+            content_media_type="text/html; charset=utf-8",
+        )
         assert wi.content_media_type == "text/html; charset=utf-8"
 
     def test_content_media_type_defaults_none(self):
-        wi = WatchedItem(name="Test")
+        wi = WatchedItem(archiver_info_source_id=str(ULID()), name="Test")
         assert wi.content_media_type is None
 
     def test_content_media_type_accepts_arbitrary_string(self):
         # No enum membership check — any origin-reported value is stored verbatim.
-        wi = WatchedItem(name="Odd", content_media_type="application/vnd.custom+json")
+        wi = WatchedItem(
+            archiver_info_source_id=str(ULID()),
+            name="Odd",
+            content_media_type="application/vnd.custom+json",
+        )
         assert wi.content_media_type == "application/vnd.custom+json"
 
     def test_health_status_default(self):
-        wi = WatchedItem(name="T")
+        wi = WatchedItem(archiver_info_source_id=str(ULID()), name="T")
         assert wi.health_status == WatchHealthStatus.UNKNOWN
 
     def test_health_status_coercion_from_string(self):
-        wi = WatchedItem(name="T", health_status="ok")
+        wi = WatchedItem(archiver_info_source_id=str(ULID()), name="T", health_status="ok")
         assert wi.health_status == WatchHealthStatus.OK
 
 

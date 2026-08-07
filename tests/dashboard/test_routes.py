@@ -3,6 +3,7 @@
 import re
 
 import pytest
+from ulid import ULID
 
 from src.core.models.audit_log import AuditLog, EventType
 from src.core.models.watched_item import WatchedItem
@@ -13,6 +14,7 @@ async def _make_wi(db_session, *, name="Test WI", url="https://example.com"):
     """Create + flush a WatchedItem with effective_url; return it."""
     item = await make_info_item(db_session, name=name)
     wi = WatchedItem(
+        archiver_info_source_id=str(ULID()),
         archiver_info_item_id=item.info_item_id,
         name=name,
         effective_url=url,

@@ -2,6 +2,7 @@
 
 import pytest
 from sqlalchemy import text
+from ulid import ULID
 
 from src.core.models.audit_log import EventType
 from tests.conftest import make_info_item
@@ -19,7 +20,12 @@ async def _create_watched_item_via_api(client, db_session, *, name="W"):
     await db_session.commit()
     resp = await client.post(
         "/api/v1/watched-items",
-        json={"archiver_info_item_id": str(item.info_item_id), "name": name},
+        json={
+            "url": "https://example.com/page",
+            "archiver_info_source_id": str(ULID()),
+            "archiver_info_item_id": str(item.info_item_id),
+            "name": name,
+        },
     )
     assert resp.status_code == 201, resp.text
     return resp.json()["id"]

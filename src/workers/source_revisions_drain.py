@@ -42,10 +42,14 @@ async def drain_pending_archiver_sync(*, batch_size: int = 100, **periodic_kwarg
                 await delete_pending(session, row.id)
                 continue
 
+            # archiver_info_source_id is NOT NULL since #251, so the only
+            # remaining orphan case is the WatchedItem being deleted after
+            # select_due read this batch — reachable only across concurrent
+            # transactions, since the pending row is ON DELETE CASCADE.
             wi = await session.get(WatchedItem, row.watched_item_id)
-            if wi is None or not wi.archiver_info_source_id:
+            if wi is None:
                 logger.error(
-                    "drain: WatchedItem missing or no archiver_info_source_id, dropping row",
+                    "drain: WatchedItem missing, dropping row",
                     extra={
                         "pending_id": str(row.id),
                         "watched_item_id": str(row.watched_item_id),
@@ -56,7 +60,7 @@ async def drain_pending_archiver_sync(*, batch_size: int = 100, **periodic_kwarg
 
             try:
                 out = await client.post_source_revision(
-                    info_source_id=str(wi.archiver_info_source_id),
+                    info_source_id=wi.archiver_info_source_id,
                     content_fingerprint=rev.content_fingerprint,
                     captured_at=rev.captured_at,
                     source_revision_id=str(rev.id),

@@ -16,8 +16,8 @@ async def test_make_watched_item_auto_creates_info_item_and_source(db_session):
     assert wi.effective_url
 
 
-async def test_make_watched_item_url_only(db_session):
-    """auto_info_item=False yields a URL-only WatchedItem (no InfoItem)."""
-    wi = await make_watched_item(db_session, name="URLOnly", auto_info_item=False)
-    assert wi.archiver_info_item_id is None
+async def test_make_watched_item_links_the_info_source(db_session):
+    """#251: both Archiver links are NOT NULL, so the factory always sets them."""
+    wi = await make_watched_item(db_session, name="Linked")
+    assert wi.archiver_info_source_id is not None
     assert wi.effective_url

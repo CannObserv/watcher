@@ -13,6 +13,7 @@ from ulid import ULID
 from src.core.models.base import generate_ulid
 from src.core.models.change_revision import ChangeRevision
 from src.core.models.pending_archiver_sync import PendingArchiverSync
+from src.core.models.watched_item import WatchedItem
 from src.workers.source_revisions_drain import drain_pending_archiver_sync
 from tests.conftest import make_watched_item
 
@@ -34,12 +35,12 @@ def _async_session_factory_returning(db_session: AsyncSession):
     return factory
 
 
-async def _setup_pending_row(db_session: AsyncSession, *, with_archiver_id: bool = True) -> tuple:
+async def _setup_pending_row(db_session: AsyncSession) -> tuple:
     """Create WatchedItem + ChangeRevision + PendingArchiverSync."""
     now = datetime.now(UTC)
-    wi = await make_watched_item(db_session, name="DrainTest")
-    if with_archiver_id:
-        wi.archiver_info_source_id = ARCHIVER_SOURCE_ID
+    wi = await make_watched_item(
+        db_session, name="DrainTest", archiver_info_source_id=ARCHIVER_SOURCE_ID
+    )
     await db_session.flush()
 
     rev = ChangeRevision(
@@ -225,17 +226,25 @@ async def test_drain_marks_failure_on_archiver_error(db_session, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_drain_drops_row_when_archiver_info_source_id_missing(
-    db_session, monkeypatch, caplog
-):
-    """Row dropped (logged + deleted) when WatchedItem has no archiver_info_source_id."""
-    _, _, pending = await _setup_pending_row(db_session, with_archiver_id=False)
+async def test_drain_drops_row_when_watched_item_vanished(db_session, monkeypatch, caplog):
+    """#251: the surviving orphan case — the WatchedItem is gone by the time the
+    batch reaches it. Only reachable across concurrent transactions (the pending
+    row is ON DELETE CASCADE), so simulate the lookup miss."""
+    _, _, pending = await _setup_pending_row(db_session)
 
     fake_client = MagicMock()
     fake_client.post_source_revision = AsyncMock()
 
     from src.workers import source_revisions_drain as mod
 
+    real_get = db_session.get
+
+    async def _get(entity, ident, *args, **kwargs):
+        if entity is WatchedItem:
+            return None
+        return await real_get(entity, ident, *args, **kwargs)
+
+    monkeypatch.setattr(db_session, "get", _get)
     monkeypatch.setattr(
         mod, "get_session_factory", lambda: _async_session_factory_returning(db_session)
     )
@@ -251,4 +260,4 @@ async def test_drain_drops_row_when_archiver_info_source_id_missing(
         )
     ).scalar_one_or_none()
     assert remaining is None
-    assert any("archiver_info_source_id" in r.message for r in caplog.records)
+    assert any("WatchedItem missing" in r.message for r in caplog.records)

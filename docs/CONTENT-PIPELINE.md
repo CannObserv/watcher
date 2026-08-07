@@ -30,7 +30,7 @@ What that leaves in the code:
   `command_id` ([`src/core/fetch_commands.py`](../src/core/fetch_commands.py)).
 - **The issue path** — the whole of `check_watched_item` now: fresh ULID per
   occasion, persist-before-publish plus an every-minute sweep, pinned watcher
-  User-Agent, one-open-command gate.
+  User-Agent, `info_source_id`, one-open-command gate.
 - **The `content.blobs` consumer** —
   [`src/workers/fetch_facts.py`](../src/workers/fetch_facts.py), consumer group
   `watcher` with a single member, started in the lifespan whenever
@@ -48,6 +48,37 @@ What that leaves in the code:
   lineage. Knobs: `WATCHER_FETCH_COMMAND_TIMEOUT_SECONDS`,
   `WATCHER_FETCH_MAX_REISSUES`; hitting the cap sets ERROR health and lifts the
   gate.
+
+### `info_source_id` on the wire (#252)
+
+co-core **0.8.0** (cannobserv#300) makes `info_source_id` required on all three
+content contracts and `BlobAvailableEvent.command_id` non-optional. On this side:
+
+- **Issue.** `create_fetch_command` snapshots
+  `WatchedItem.archiver_info_source_id` onto the `fetch_commands` row (`NOT
+  NULL`) and `publish_fetch_command` sends it. Snapshotted rather than joined
+  because the pending-publish sweep holds only the row — a join would also lose
+  the issue-time value on a later InfoSource change.
+- **Correlate.** Unchanged: `command_id` only (MUST-3). Facts still upsert onto
+  the row; the echo is cross-checked against the command's own value and a
+  mismatch logs a warning, never refuses the fact.
+- **Discard.** An unmatched fact stays discarded. The stream is broadcast, so a
+  fact naming one of our InfoSources may answer another issuer's command —
+  fetched under a User-Agent watcher's fingerprints are sensitive to, which is
+  why applying it would manufacture a change signal. `_log_orphan` reports it at
+  WARNING with the WatchedItem the id resolves to. Recovery is deliberately not
+  built; revisit only if production shows a nonzero orphan count.
+- **MUST-2 is bookkeeping now.** The wire carries the domain key, so a lost row
+  no longer makes a fact uncorrelatable in principle. Persist-before-publish
+  stays — the row holds request options, health, re-issue lineage, and reaper
+  state, none of which the wire replaces.
+
+**Deploy ordering.** Replicator must ship its echo (replicator#28) to production
+**before** watcher upgrades. A 0.8.0 consumer against 0.7.7 facts fails required-
+field validation, and an undecodable frame is acked past — silent loss until the
+reaper re-issues. The reverse ordering is safe (`extra="ignore"` on both sides).
+Facts published before Replicator's upgrade and still unread at watcher restart
+hit the same path, so prefer a quiet window.
 
 **Async create (step 3).** Nothing on a create path probes
 (`resolve_watch_target`, [`src/core/watched_items.py`](../src/core/watched_items.py)).

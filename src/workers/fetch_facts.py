@@ -18,7 +18,9 @@ Per message, branch on payload type and **correlate on ``command_id`` only**
   non-terminal only refreshes ``fact_at``.
 * Unknown ``command_id`` → ack and drop, with a log line. By contract the
   in-flight fact for a lost map entry "will arrive, match nothing, and have to
-  be discarded" — this is that discard.
+  be discarded" — this is that discard. Since cannobserv#300 the line also names
+  the WatchedItem the fact's ``info_source_id`` resolves to, when it resolves to
+  one; see ``_log_orphan`` for why that is reporting and not recovery.
 * An undecodable frame is acked past with a warning: on a fact stream we read
   with our own group there is no correlation obligation to discharge and no
   DLQ of ours to route to (mirrors Replicator's policy-reader posture).
@@ -37,9 +39,11 @@ from co_core.pure.adapters.bus.exceptions import BusMessageAnomaly
 from co_core.pure.models.changes import BlobAvailableEvent, FetchFailedEvent
 from co_core_aio.bus import AsyncBusConsumer
 from redis.asyncio import Redis
+from sqlalchemy import select
 
 from src.core.logging import get_logger
 from src.core.models.fetch_command import FetchCommand, FetchCommandStatus
+from src.core.models.watched_item import WatchedItem
 from src.workers.fetch_commands import apply_fetch_blob, apply_fetch_failure
 
 logger = get_logger(__name__)
@@ -72,6 +76,61 @@ async def _defer_apply_failure(command_id: str) -> None:
     await apply_fetch_failure.configure().defer_async(command_id=command_id)
 
 
+async def _log_orphan(session, message: str, payload, **fields) -> None:
+    """Report a fact that correlates to no command of ours — attributably (#252).
+
+    ``info_source_id`` (cannobserv#300) makes the discard *attributable*, not
+    recoverable. ``content.blobs`` is broadcast, so a fact naming one of our
+    InfoSources may answer another issuer's command entirely — and its bytes were
+    fetched under that issuer's User-Agent, which fingerprints are sensitive to
+    (see ``WATCHER_USER_AGENT``). Applying it would manufacture a change signal.
+    So the discard stands and the field buys a line an operator can act on: the
+    WatchedItem it *would* concern, when the id resolves to one.
+    """
+    # ``first()``, not ``scalar_one_or_none()``: nothing constrains one
+    # WatchedItem per InfoSource, and a second row must not turn a log line into
+    # a raise — that would leave the message unacked and re-read forever.
+    watched_item_id = (
+        (
+            await session.execute(
+                select(WatchedItem.id)
+                .where(WatchedItem.archiver_info_source_id == payload.info_source_id)
+                .limit(1)
+            )
+        )
+        .scalars()
+        .first()
+    )
+    logger.warning(
+        message,
+        extra={
+            "command_id": payload.command_id,
+            "info_source_id": payload.info_source_id,
+            "url": payload.url,
+            "watched_item_id": str(watched_item_id) if watched_item_id is not None else None,
+            **fields,
+        },
+    )
+
+
+def _check_echo(row: FetchCommand, payload) -> None:
+    """Warn when a fact's echoed ``info_source_id`` disagrees with the command's.
+
+    Free (both values are in hand) and an integrity signal on the round-trip —
+    but never grounds to refuse the fact: ``command_id`` is the correlator
+    (MUST-3), and the command's own snapshot is the authority on what was asked.
+    """
+    if payload.info_source_id != row.info_source_id:
+        logger.warning(
+            "info_source_id echo mismatch — correlating on command_id anyway",
+            extra={
+                "command_id": row.command_id,
+                "commanded": row.info_source_id,
+                "echoed": payload.info_source_id,
+            },
+        )
+
+
 async def process_fact_message(
     session,
     message: BusMessage,
@@ -88,16 +147,16 @@ async def process_fact_message(
     payload = message.payload
 
     if isinstance(payload, BlobAvailableEvent):
-        if payload.command_id is None:
-            # Non-command emit (seed tooling) — nothing of ours to correlate.
-            return "ignored_non_command"
         row = await session.get(FetchCommand, payload.command_id)
         if row is None:
-            logger.info(
+            await _log_orphan(
+                session,
                 "blob fact matched no fetch command — discarding",
-                extra={"command_id": payload.command_id, "url": payload.url},
+                payload,
+                content_fingerprint=payload.content_fingerprint,
             )
             return "unmatched"
+        _check_echo(row, payload)
         if row.applied_at is not None:
             # Late duplicate after the apply already ran; the row's outcome is
             # settled — refresh nothing, change nothing.
@@ -117,11 +176,14 @@ async def process_fact_message(
     if isinstance(payload, FetchFailedEvent):
         row = await session.get(FetchCommand, payload.command_id)
         if row is None:
-            logger.info(
+            await _log_orphan(
+                session,
                 "failure fact matched no fetch command — discarding",
-                extra={"command_id": payload.command_id, "reason": payload.reason},
+                payload,
+                reason=payload.reason,
             )
             return "unmatched"
+        _check_echo(row, payload)
         if row.applied_at is not None:
             return "already_applied"
         row.fact_at = payload.occurred_at

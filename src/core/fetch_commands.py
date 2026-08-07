@@ -14,9 +14,13 @@ this module:
   ``command_id → WatchedItem`` row for the caller to **commit before** any
   XADD. A crash between commit and publish leaves ``pending_publish``, which
   the sweep republishes under the *same* id — Replicator's dedupe makes the
-  replay a no-op.
+  replay a no-op. Since cannobserv#300 this is bookkeeping rather than
+  correctness (the wire carries the domain key) — but the row still holds what
+  the wire does not, so nothing about the order changes.
 * **replicator#11** — the command pins watcher's User-Agent so the cutover is
   UA-neutral and fingerprints stay byte-continuous.
+* **cannobserv#300** — every command names its ``info_source_id``, snapshotted
+  onto the row at issue time so the sweep can republish without a WatchedItem.
 
 No validator headers (``If-None-Match``/``If-Modified-Since``) are sent: a
 body-less 304 still dead-letters (replicator#17). Revisit when that closes.
@@ -69,6 +73,9 @@ async def create_fetch_command(
         intent_id=intent_id if intent_id is not None else str(ULID()),
         watched_item_id=watched_item.id,
         url=watched_item.effective_url,
+        # Snapshotted at the occasion so the sweep — which holds no WatchedItem
+        # — can publish a valid command (cannobserv#300; NOT NULL since #251).
+        info_source_id=watched_item.archiver_info_source_id,
         status=FetchCommandStatus.PENDING_PUBLISH,
         issued_at=now,
         reissue_count=reissue_count,
@@ -90,6 +97,7 @@ async def publish_fetch_command(
         occurred_at=row.issued_at,
         command_id=row.command_id,
         url=row.url,
+        info_source_id=row.info_source_id,
         headers={"user-agent": WATCHER_USER_AGENT},
     )
     await AsyncBusPublisher(client).execute(BusPublish(streams.CONTENT_FETCH, to_wire(command)))

@@ -1,12 +1,19 @@
 """FetchCommand — outbox, pending map, and inbox for content.fetch (#241, Phase 4).
 
 One row per issued ``ContentFetchCommand``, keyed by the ``command_id`` ULID —
-the sole correlator the bus carries (issuer contract MUST-2/MUST-3: the wire is
-domain-agnostic, so losing this row makes the returning fact permanently
-uncorrelatable). The row is written and committed *before* the XADD
-(persist-before-publish); the fact fields are upserted by the ``content.blobs``
-consumer (MUST-4: at-least-once, per-emission keys — several distinct facts per
-command are normal, last terminal wins).
+the correlator the bus carries (MUST-3: ``url`` is one-to-many against
+InfoSources and is never a key). The row is written and committed *before* the
+XADD (persist-before-publish); the fact fields are upserted by the
+``content.blobs`` consumer (MUST-4: at-least-once, per-emission keys — several
+distinct facts per command are normal, last terminal wins).
+
+**MUST-2 is bookkeeping now, not correctness** (cannobserv#300, #252). Until the
+domain key rode on the wire, losing this row made the returning fact permanently
+uncorrelatable; ``info_source_id`` on all three content contracts makes the fact
+self-describing, so the row's remaining job is what the wire does *not* carry —
+request options, health bookkeeping, re-issue lineage, and the reaper's state.
+Watcher still correlates on ``command_id`` alone: a fact naming one of our
+InfoSources may answer another issuer's command on the broadcast stream.
 
 ``intent_id`` is lineage: one fetch *intent* may span several ``command_id``s
 when the reaper re-issues after a silent failure (MUST-6 — a timeout means
@@ -64,6 +71,11 @@ class FetchCommand(Base, TimestampMixin):
         nullable=False,
     )
     url: Mapped[str] = mapped_column(Text, nullable=False)
+    # The Archiver InfoSource this fetch is for, snapshotted at the occasion and
+    # published on the command (cannobserv#300). Denormalized rather than joined
+    # because the pending-publish sweep holds only this row — and NOT NULL so a
+    # command naming no InfoSource cannot be minted at all.
+    info_source_id: Mapped[str] = mapped_column(String(26), nullable=False)
     status: Mapped[str] = mapped_column(
         String(20), nullable=False, default=FetchCommandStatus.PENDING_PUBLISH
     )

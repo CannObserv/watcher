@@ -14,6 +14,7 @@ from unittest.mock import AsyncMock, MagicMock
 import fakeredis
 import pytest
 from co_core.pure.adapters.bus import streams
+from co_core.pure.adapters.bus.envelope import from_wire
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -103,6 +104,25 @@ class TestPublishPendingSweep:
             for k, v in entries[0][1].items()
         }
         assert fields["key"] == row.command_id  # same id — Replicator dedupes replays
+
+    async def test_republished_command_carries_info_source_id(self, db_session, monkeypatch):
+        # The sweep holds only the FetchCommand row — no WatchedItem — so this
+        # is what proves the #252 field is snapshotted on the row rather than
+        # joined at publish time (cannobserv#300 makes it required on the wire).
+        wi = await make_watched_item(db_session, primary_url="https://lcb.wa.gov/notices")
+        await create_fetch_command(db_session, wi, now=NOW)
+        await db_session.flush()
+        client = fakeredis.FakeAsyncRedis()
+
+        await publish_pending_fetch_commands(session=db_session, bus_client=client)
+
+        entries = await client.xrange(streams.CONTENT_FETCH)
+        fields = {
+            (k.decode() if isinstance(k, bytes) else k): (v.decode() if isinstance(v, bytes) else v)
+            for k, v in entries[0][1].items()
+        }
+        command = from_wire(fields, topic=streams.CONTENT_FETCH).payload
+        assert command.info_source_id == wi.archiver_info_source_id
 
     async def test_failed_publish_keeps_row_pending(self, db_session, monkeypatch):
         wi = await make_watched_item(db_session, primary_url="https://lcb.wa.gov/notices")

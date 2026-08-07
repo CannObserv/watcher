@@ -33,9 +33,13 @@ def _validate_ulid_ref(v: object) -> str:
     inbound reference is held to exactly the standard a path parameter is
     (canonical Crockford base32, **uppercase** — ``ULID.from_str`` rejects the
     lowercase form, and so does this).
+
+    *v* is passed through un-coerced: a non-string trips ``from_str``'s own
+    ``TypeError`` and fails as a type error, rather than being stringified into
+    a length complaint about a value that was never a ULID to begin with.
     """
     try:
-        return str(ULID.from_str(str(v)))
+        return str(ULID.from_str(v))
     except (ValueError, TypeError) as exc:
         raise ValueError(f"must be a 26-character ULID: {exc}") from exc
 

@@ -1,8 +1,10 @@
 # Content Pipeline
 
 How a WatchedItem becomes bytes, a fingerprint, and a SourceRevision — and what
-Watcher owns on each side of that path. Extracted from AGENTS.md (#251 CR-8),
-which keeps only the one-line summaries and points here.
+Watcher owns on each side of that path. Two boundaries meet here: Replicator
+does the fetching, Archiver holds the registry, and Watcher issues commands to
+one while projecting rows from the other. AGENTS.md carries the one-line
+summaries and points here for the mechanics.
 
 Two normative contracts live in the **Replicator** repo. Link, never copy:
 

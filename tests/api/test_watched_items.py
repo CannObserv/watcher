@@ -1238,7 +1238,12 @@ class TestCheckNow:
         response = await client.post(f"/api/v1/watched-items/{wi.id}/check-now")
 
         assert response.status_code == 409
-        assert "in flight" in response.json()["detail"].lower()
+        detail = response.json()["detail"].lower()
+        assert "in flight" in detail
+        # CR-25: "already in flight" alone leaves the operator unable to tell a
+        # two-second wait from a stall — the message must say when it clears.
+        assert "issued" in detail and "s ago" in detail
+        assert "1800s" in detail  # the reaper timeout, quoted from one place
 
     async def test_409_when_domain_suspended(self, client, db_session):
         """CR-16: parity with pause — the task skips a suspended item too."""

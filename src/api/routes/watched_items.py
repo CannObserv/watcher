@@ -19,7 +19,7 @@ from src.api.schemas.watched_item import (
     WatchedItemResponse,
 )
 from src.core.domains import domain_name_for_url, ensure_domain_and_resolve_suspension
-from src.core.fetch_commands import has_open_command
+from src.core.fetch_commands import fetch_command_timeout_seconds, get_open_command
 from src.core.logging import get_logger
 from src.core.models.audit_log import EventType, audit
 from src.core.models.change_revision import ChangeRevision
@@ -364,7 +364,9 @@ async def check_now(watched_item_id: str, session: AsyncSession = Depends(get_db
     - 409 if its domain is suspended.
     - 409 if a fetch command is already open — the issue path's one-command gate
       (#241). Post-cutover this is the likeliest of the four to be hit, since a
-      command stays open until its fact returns or the reaper expires it.
+      command stays open until its fact returns or the reaper expires it; the
+      message quotes the command's age and the timeout so the operator knows
+      whether they are looking at a two-second wait or a stall.
     - 422 if ``effective_url`` is empty (nothing to fetch).
     """
     wi = await _get_or_404(session, watched_item_id)
@@ -381,9 +383,22 @@ async def check_now(watched_item_id: str, session: AsyncSession = Depends(get_db
     if not wi.effective_url:
         raise HTTPException(status_code=422, detail="WatchedItem has no effective url")
 
-    if await has_open_command(session, wi.id):
+    open_command = await get_open_command(session, wi.id)
+    if open_command is not None:
+        # Say when it clears (CR-25). The normal round-trip is under a second,
+        # so an operator who sees this is looking at a stalled command — and
+        # "already in flight" alone gives them no idea whether to wait 2 seconds
+        # or 30 minutes. The reaper expires an unanswered command after
+        # WATCHER_FETCH_COMMAND_TIMEOUT_SECONDS and re-issues it automatically.
+        age = int((datetime.now(UTC) - open_command.issued_at).total_seconds())
+        timeout = int(fetch_command_timeout_seconds())
         raise HTTPException(
-            status_code=409, detail="A fetch command for this WatchedItem is already in flight"
+            status_code=409,
+            detail=(
+                f"A fetch command for this WatchedItem is already in flight "
+                f"(issued {age}s ago). It is retried or expired automatically "
+                f"within {timeout}s of its last signal; no action needed."
+            ),
         )
 
     await check_watched_item.configure().defer_async(watched_item_id=str(wi.id))

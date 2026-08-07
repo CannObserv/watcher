@@ -5,12 +5,16 @@ from urllib.parse import urlparse
 
 import httpx
 
+from src.core.fetch_commands import WATCHER_USER_AGENT
 from src.core.logging import get_logger
 
 logger = get_logger(__name__)
 
 PROBE_TIMEOUT = 15.0
-PROBE_USER_AGENT = "watcher/0.1.0 (probe)"
+# Derived so the two never drift (CR-26). Only ``WATCHER_USER_AGENT`` is
+# fingerprint-critical — probes produce no revisions — but a reader finding two
+# disagreeing version strings can't tell which one matters.
+PROBE_USER_AGENT = f"{WATCHER_USER_AGENT} (probe)"
 
 
 @dataclass(frozen=True)

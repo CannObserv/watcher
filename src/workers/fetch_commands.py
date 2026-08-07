@@ -31,6 +31,7 @@ from src.core.database import get_session_factory
 from src.core.domains import domain_name_for_url, ensure_domain_and_resolve_suspension
 from src.core.fetch_commands import (
     create_fetch_command,
+    fetch_command_timeout_seconds,
     publish_fetch_command,
     select_pending_publish,
 )
@@ -451,7 +452,7 @@ async def reap_fetch_commands(
     WATCH_ERROR, and the item re-enters normal scheduling — the gate lifts, so
     recovery is automatic when the origin or Replicator heals.
     """
-    timeout = float(os.environ.get("WATCHER_FETCH_COMMAND_TIMEOUT_SECONDS", "1800"))
+    timeout = fetch_command_timeout_seconds()
     max_reissues = int(os.environ.get("WATCHER_FETCH_MAX_REISSUES", "3"))
     now = datetime.now(UTC)
     cutoff = now - timedelta(seconds=timeout)

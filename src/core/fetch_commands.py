@@ -22,6 +22,7 @@ No validator headers (``If-None-Match``/``If-Modified-Since``) are sent: a
 body-less 304 still dead-letters (replicator#17). Revisit when that closes.
 """
 
+import os
 from datetime import UTC, datetime
 
 from co_core.effects.bus import BusPublish
@@ -45,6 +46,9 @@ logger = get_logger(__name__)
 # value must keep matching what the pre-cutover inline fetcher sent, or every
 # watched item reports a spurious change on its next check. Do not "tidy" it.
 WATCHER_USER_AGENT = "watcher/0.1.0"
+
+FETCH_COMMAND_TIMEOUT_ENV = "WATCHER_FETCH_COMMAND_TIMEOUT_SECONDS"
+DEFAULT_FETCH_COMMAND_TIMEOUT_SECONDS = 1800.0
 
 
 async def create_fetch_command(
@@ -93,21 +97,42 @@ async def publish_fetch_command(
     row.published_at = now if now is not None else datetime.now(UTC)
 
 
-async def has_open_command(session: AsyncSession, watched_item_id) -> bool:
-    """True when the item already has a command awaiting publish or a fact.
+async def get_open_command(session: AsyncSession, watched_item_id) -> FetchCommand | None:
+    """The item's open command (awaiting publish or a fact), if any.
 
-    The scheduling gate: without it, a silently failed command re-issues every
-    ``schedule_tick`` — 1,440 real origin fetches a day for one 404ing item.
+    The scheduling gate reads this: without it, a silently failed command
+    re-issues every ``schedule_tick`` — 1,440 real origin fetches a day for one
+    404ing item. Returns the row rather than a bool so callers can say *how
+    long* it has been open (the check-now rejection does).
     """
     stmt = (
-        select(FetchCommand.command_id)
+        select(FetchCommand)
         .where(
             FetchCommand.watched_item_id == watched_item_id,
             FetchCommand.status.in_(OPEN_STATUSES),
         )
         .limit(1)
     )
-    return (await session.execute(stmt)).scalar_one_or_none() is not None
+    return (await session.execute(stmt)).scalar_one_or_none()
+
+
+async def has_open_command(session: AsyncSession, watched_item_id) -> bool:
+    """True when the item already has a command awaiting publish or a fact."""
+    return await get_open_command(session, watched_item_id) is not None
+
+
+def fetch_command_timeout_seconds() -> float:
+    """How long an in-flight command may go without a signal before the reaper
+    expires and re-issues it.
+
+    Deliberately generous (default 1800): Replicator's reclaim cadence is an
+    operator knob on another host, and a tight value re-issues under live
+    retries. Read here so the reaper and the check-now rejection quote the same
+    number.
+    """
+    return float(
+        os.environ.get(FETCH_COMMAND_TIMEOUT_ENV, str(DEFAULT_FETCH_COMMAND_TIMEOUT_SECONDS))
+    )
 
 
 async def select_pending_publish(session: AsyncSession, *, limit: int = 100) -> list[FetchCommand]:

@@ -18,7 +18,11 @@ pytestmark = pytest.mark.integration
 
 async def test_watched_item_defaults(db_session: AsyncSession) -> None:
     archiver_info_item_id = ULID()
-    wi = WatchedItem(archiver_info_item_id=archiver_info_item_id, name="Test WatchedItem")
+    wi = WatchedItem(
+        archiver_info_source_id=str(ULID()),
+        archiver_info_item_id=archiver_info_item_id,
+        name="Test WatchedItem",
+    )
     db_session.add(wi)
     await db_session.flush()
 
@@ -40,7 +44,9 @@ async def test_watched_item_domain_default_schedule_config_defaults_null(
     db_session: AsyncSession,
 ) -> None:
     """#205: domain_default_schedule_config defaults to None and persists as SQL NULL."""
-    wi = WatchedItem(archiver_info_item_id=ULID(), name="DomDefaultNull")
+    wi = WatchedItem(
+        archiver_info_source_id=str(ULID()), archiver_info_item_id=ULID(), name="DomDefaultNull"
+    )
     db_session.add(wi)
     await db_session.flush()
 
@@ -61,6 +67,7 @@ async def test_watched_item_domain_default_schedule_config_round_trips(
 ) -> None:
     """#205: a denormalized domain default round-trips intact."""
     wi = WatchedItem(
+        archiver_info_source_id=str(ULID()),
         archiver_info_item_id=ULID(),
         name="DomDefault",
         domain_default_schedule_config={"interval": "7d"},
@@ -73,11 +80,38 @@ async def test_watched_item_domain_default_schedule_config_round_trips(
     assert fetched.domain_default_schedule_config == {"interval": "7d"}
 
 
+async def test_watched_item_requires_archiver_info_item_id(db_session: AsyncSession) -> None:
+    """#251: the Archiver InfoItem link is NOT NULL — bare-URL rows are gone."""
+    db_session.add(WatchedItem(name="NoItemLink", archiver_info_source_id=str(ULID())))
+    with pytest.raises(IntegrityError):
+        await db_session.flush()
+
+
+async def test_watched_item_requires_archiver_info_source_id(db_session: AsyncSession) -> None:
+    """#251: the InfoSource link is NOT NULL — the drain can no longer be handed
+    a revision it has nowhere to post."""
+    db_session.add(WatchedItem(name="NoSourceLink", archiver_info_item_id=ULID()))
+    with pytest.raises(IntegrityError):
+        await db_session.flush()
+
+
 async def test_watched_item_archiver_info_item_id_unique(db_session: AsyncSession) -> None:
     archiver_info_item_id = ULID()
-    db_session.add(WatchedItem(archiver_info_item_id=archiver_info_item_id, name="A"))
+    db_session.add(
+        WatchedItem(
+            archiver_info_source_id=str(ULID()),
+            archiver_info_item_id=archiver_info_item_id,
+            name="A",
+        )
+    )
     await db_session.flush()
-    db_session.add(WatchedItem(archiver_info_item_id=archiver_info_item_id, name="B"))
+    db_session.add(
+        WatchedItem(
+            archiver_info_source_id=str(ULID()),
+            archiver_info_item_id=archiver_info_item_id,
+            name="B",
+        )
+    )
     with pytest.raises(IntegrityError):
         await db_session.flush()
 
@@ -86,6 +120,7 @@ async def test_watched_item_content_media_type_stores_raw_mime(db_session: Async
     """Free-form raw MIME stored verbatim (#168). The essence is no longer stored —
     it's a computed field on WatchedItemResponse (see the schema tests)."""
     wi = WatchedItem(
+        archiver_info_source_id=str(ULID()),
         archiver_info_item_id=ULID(),
         name="Test",
         content_media_type="text/HTML; charset=utf-8",
@@ -97,7 +132,12 @@ async def test_watched_item_content_media_type_stores_raw_mime(db_session: Async
 
 
 async def test_watched_item_content_media_type_none_allowed(db_session: AsyncSession) -> None:
-    wi = WatchedItem(archiver_info_item_id=ULID(), name="NullCT", content_media_type=None)
+    wi = WatchedItem(
+        archiver_info_source_id=str(ULID()),
+        archiver_info_item_id=ULID(),
+        name="NullCT",
+        content_media_type=None,
+    )
     db_session.add(wi)
     await db_session.flush()
     await db_session.refresh(wi)
@@ -106,7 +146,7 @@ async def test_watched_item_content_media_type_none_allowed(db_session: AsyncSes
 
 async def test_notification_template_defaults(db_session: AsyncSession) -> None:
     """A watched_item-visibility NotificationTemplate persists and uses server defaults."""
-    wi = WatchedItem(archiver_info_item_id=ULID(), name="W")
+    wi = WatchedItem(archiver_info_source_id=str(ULID()), archiver_info_item_id=ULID(), name="W")
     db_session.add(wi)
     await db_session.flush()
 
@@ -136,7 +176,7 @@ async def test_notification_template_defaults(db_session: AsyncSession) -> None:
 
 async def test_notification_template_cascade_delete(db_session: AsyncSession) -> None:
     """Deleting a WatchedItem cascades to its watched_item-visibility templates."""
-    wi = WatchedItem(archiver_info_item_id=ULID(), name="W")
+    wi = WatchedItem(archiver_info_source_id=str(ULID()), archiver_info_item_id=ULID(), name="W")
     db_session.add(wi)
     await db_session.flush()
     tmpl_id = ULID()
@@ -167,7 +207,7 @@ async def test_notification_template_visibility_check_rejects_mismatch(
     A global-visibility template must have both refs NULL; supplying a
     watched_item_id violates the CHECK constraint.
     """
-    wi = WatchedItem(archiver_info_item_id=ULID(), name="W")
+    wi = WatchedItem(archiver_info_source_id=str(ULID()), archiver_info_item_id=ULID(), name="W")
     db_session.add(wi)
     await db_session.flush()
 

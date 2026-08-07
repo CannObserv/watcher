@@ -3,7 +3,6 @@
 {% block content %}
 <div class="flex justify-between items-center mb-6 flex-wrap gap-4">
   <h2 class="text-2xl font-semibold text-gray-900 dark:text-white">Watched Items</h2>
-  <a href="/watched-items/new" class="btn btn-primary">New Watched Item</a>
 </div>
 
 <div class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-4 mb-6">
@@ -45,13 +44,11 @@
 {% if total_count == 0 and not q %}
 <div class="stat-card text-center py-12">
   <p class="text-lg font-medium text-gray-900 dark:text-white mb-2">No watched items yet</p>
-  <p class="text-sm text-gray-500 dark:text-gray-400 mb-6">
-    Create a Watched Item from a URL — it owns the defaults and notification
-    templates that its Watches inherit. Add Watches to it afterward.
+  <p class="text-sm text-gray-500 dark:text-gray-400">
+    Watched Items are provisioned from Archiver — open the InfoItem there and
+    choose <span class="font-medium">Begin Watching</span>. Each one carries the
+    schedule defaults and notification templates used here.
   </p>
-  <div class="flex justify-center gap-3">
-    <a href="/watched-items/new" class="btn btn-primary">New Watched Item</a>
-  </div>
 </div>
 {% else %}
 <div id="watched-items-table-container"

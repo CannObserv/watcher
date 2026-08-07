@@ -12,8 +12,9 @@ from src.core.models.base import Base, ULIDType, generate_ulid
 class PendingArchiverSync(Base):
     """A ChangeRevision waiting to be POSTed to Archiver as a SourceRevision.
 
-    Inserted when `watched_item.archiver_info_source_id` is set and a
-    fingerprint change is detected. The drain worker reads `content_cache_uri`,
+    Inserted on every detected fingerprint change (#251 — every WatchedItem
+    carries an `archiver_info_source_id` to post against). The drain worker
+    reads `content_cache_uri`,
     sends the bytes to Archiver, then back-populates
     `change_revisions.archiver_revision_id` on success.
     """

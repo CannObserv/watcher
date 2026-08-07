@@ -44,7 +44,11 @@ async def _make_change_revision(
     from src.core.models.change_revision import ChangeRevision
     from src.core.models.watched_item import WatchedItem
 
-    wi = WatchedItem(name="Sweeper Test WI")
+    wi = WatchedItem(
+        archiver_info_item_id=ULID(),
+        archiver_info_source_id=str(ULID()),
+        name="Sweeper Test WI",
+    )
     db_session.add(wi)
     await db_session.flush()
 

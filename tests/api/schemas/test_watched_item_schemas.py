@@ -16,7 +16,11 @@ class TestRenameArchiversInfoItemId:
     def test_create_accepts_archiver_info_item_id(self):
         from src.api.schemas.watched_item import WatchedItemCreate
 
-        schema = WatchedItemCreate(archiver_info_item_id="01ABCDEFGHJKMNPQRSTVWXYZ00")
+        schema = WatchedItemCreate(
+            archiver_info_item_id="01ABCDEFGHJKMNPQRSTVWXYZ00",
+            url="https://example.com",
+            archiver_info_source_id="01ABCDEFGHJKMNPQRSTVWXYZ00",
+        )
         assert schema.archiver_info_item_id == "01ABCDEFGHJKMNPQRSTVWXYZ00"
         assert "info_item_id" not in WatchedItemCreate.model_fields
 
@@ -73,7 +77,9 @@ class TestWatchedItemResponse:
         from src.api.schemas.watched_item import WatchedItemResponse
         from src.core.models.watched_item import WatchedItem
 
-        wi = WatchedItem(archiver_info_item_id=ULID(), name="X")
+        wi = WatchedItem(
+            archiver_info_source_id=str(ULID()), archiver_info_item_id=ULID(), name="X"
+        )
         wi.id = ULID()
         wi.created_at = wi.updated_at = datetime.now(UTC)
         r = WatchedItemResponse.model_validate(wi)
@@ -99,7 +105,9 @@ class TestWatchedItemResponse:
         from src.core.models.watched_item import WatchedItem
 
         def _essence(content_media_type, url):
-            wi = WatchedItem(archiver_info_item_id=ULID(), name="X")
+            wi = WatchedItem(
+                archiver_info_source_id=str(ULID()), archiver_info_item_id=ULID(), name="X"
+            )
             wi.id = ULID()
             wi.created_at = wi.updated_at = datetime.now(UTC)
             wi.content_media_type = content_media_type
@@ -136,7 +144,9 @@ class TestIssue186SchemaAdditions:
         from src.api.schemas.watched_item import WatchedItemCreate
 
         schema = WatchedItemCreate(
-            url="https://example.com", archiver_info_source_id="01ABCDEFGHJKMNPQRSTVWXYZ00"
+            archiver_info_item_id="01ABCDEFGHJKMNPQRSTVWXYZ00",
+            url="https://example.com",
+            archiver_info_source_id="01ABCDEFGHJKMNPQRSTVWXYZ00",
         )
         assert schema.archiver_info_source_id == "01ABCDEFGHJKMNPQRSTVWXYZ00"
 
@@ -159,7 +169,11 @@ class TestIssue186SchemaAdditions:
         from src.api.schemas.watched_item import WatchedItemCreate
 
         with pytest.raises(ValidationError):
-            WatchedItemCreate(url="https://example.com", archiver_info_source_id="")
+            WatchedItemCreate(
+                archiver_info_item_id="01ABCDEFGHJKMNPQRSTVWXYZ00",
+                url="https://example.com",
+                archiver_info_source_id="",
+            )
 
     def test_patch_rejects_empty_archiver_info_source_id(self):
         """#8: same constraint on the patch schema."""
@@ -230,13 +244,22 @@ class TestIssue188IsActive:
     def test_create_defaults_is_active_true(self):
         from src.api.schemas.watched_item import WatchedItemCreate
 
-        c = WatchedItemCreate(url="https://example.com")
+        c = WatchedItemCreate(
+            archiver_info_item_id="01ABCDEFGHJKMNPQRSTVWXYZ00",
+            url="https://example.com",
+            archiver_info_source_id="01ABCDEFGHJKMNPQRSTVWXYZ00",
+        )
         assert c.is_active is True
 
     def test_create_accepts_is_active_false(self):
         from src.api.schemas.watched_item import WatchedItemCreate
 
-        c = WatchedItemCreate(url="https://example.com", is_active=False)
+        c = WatchedItemCreate(
+            archiver_info_item_id="01ABCDEFGHJKMNPQRSTVWXYZ00",
+            url="https://example.com",
+            archiver_info_source_id="01ABCDEFGHJKMNPQRSTVWXYZ00",
+            is_active=False,
+        )
         assert c.is_active is False
 
     def test_patch_accepts_is_active(self):

@@ -312,12 +312,26 @@ class TestNotificationTemplateResponse:
 
 
 class TestWatchedItemCreate:
-    def test_watched_item_create_requires_archiver_info_item_id_or_url(self):
+    def test_watched_item_create_requires_every_archiver_link(self):
+        """#251: the InfoItem link, its URL, and the InfoSource link are all required."""
         with pytest.raises(ValidationError):
             WatchedItemCreate(name="X")
+        with pytest.raises(ValidationError):
+            WatchedItemCreate(
+                archiver_info_item_id="01ABCDEFGHJKMNPQRSTVWXYZ00", url="https://example.com"
+            )
+        with pytest.raises(ValidationError):
+            WatchedItemCreate(
+                archiver_info_item_id="01ABCDEFGHJKMNPQRSTVWXYZ00",
+                archiver_info_source_id="01ABCDEFGHJKMNPQRSTVWXYZ00",
+            )
 
     def test_watched_item_create_minimal_ok(self):
-        schema = WatchedItemCreate(archiver_info_item_id="01ABCDEFGHJKMNPQRSTVWXYZ00")
+        schema = WatchedItemCreate(
+            archiver_info_item_id="01ABCDEFGHJKMNPQRSTVWXYZ00",
+            url="https://example.com",
+            archiver_info_source_id="01ABCDEFGHJKMNPQRSTVWXYZ00",
+        )
         assert schema.archiver_info_item_id == "01ABCDEFGHJKMNPQRSTVWXYZ00"
         assert schema.name is None
         assert schema.default_tags is None
@@ -325,6 +339,8 @@ class TestWatchedItemCreate:
     def test_watched_item_create_full_ok(self):
         schema = WatchedItemCreate(
             archiver_info_item_id="01ABCDEFGHJKMNPQRSTVWXYZ00",
+            url="https://example.com",
+            archiver_info_source_id="01ABCDEFGHJKMNPQRSTVWXYZ00",
             name="Custom Name",
             description="Note",
             default_schedule_config={"interval": "15m"},
@@ -337,6 +353,8 @@ class TestWatchedItemCreate:
         # Free-form raw MIME (#168) — no enum membership check; only a length bound.
         schema = WatchedItemCreate(
             archiver_info_item_id="01ABCDEFGHJKMNPQRSTVWXYZ00",
+            url="https://example.com",
+            archiver_info_source_id="01ABCDEFGHJKMNPQRSTVWXYZ00",
             content_media_type="application/vnd.custom+json",
         )
         assert schema.content_media_type == "application/vnd.custom+json"
@@ -344,6 +362,8 @@ class TestWatchedItemCreate:
     def test_watched_item_create_none_content_media_type_ok(self):
         schema = WatchedItemCreate(
             archiver_info_item_id="01ABCDEFGHJKMNPQRSTVWXYZ00",
+            url="https://example.com",
+            archiver_info_source_id="01ABCDEFGHJKMNPQRSTVWXYZ00",
             content_media_type=None,
         )
         assert schema.content_media_type is None

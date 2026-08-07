@@ -184,39 +184,15 @@ class TestProcessWatchedItem:
         assert wi.last_changed_at is not None
         assert wi.last_changed_at >= before
 
-    async def test_no_archiver_sync_when_archiver_info_source_id_not_set(self, db_session):
-        """No PendingArchiverSync inserted when archiver_info_source_id is NULL."""
-        wi = await make_watched_item(db_session, name="NoSync")
-        wi.effective_url = "https://example.com"
-        wi.source_specs = [{"schema_version": 1, "extraction": {"algorithm": "full_page"}}]
-        assert wi.archiver_info_source_id is None
-        await db_session.flush()
+    async def test_archiver_sync_enqueued_on_every_change(self, db_session):
+        """#251: every detected change enqueues a PendingArchiverSync — no guard.
 
-        await process_watched_item(db_session, wi, raw_content=_HTML)
-        await db_session.flush()
-        result = await process_watched_item(db_session, wi, raw_content=_HTML_CHANGED)
-        await db_session.flush()
-
-        assert result.archiver_sync_enqueued is False
-        syncs = (
-            (
-                await db_session.execute(
-                    select(PendingArchiverSync).where(PendingArchiverSync.watched_item_id == wi.id)
-                )
-            )
-            .scalars()
-            .all()
-        )
-        assert syncs == []
-
-    async def test_archiver_sync_enqueued_when_archiver_id_set(self, db_session):
-        """PendingArchiverSync inserted when archiver_info_source_id is set + content changed."""
-        from src.core.models.base import generate_ulid
-
+        archiver_info_source_id is NOT NULL, so the old conditional could only
+        ever drop a captured revision on the floor.
+        """
         wi = await make_watched_item(db_session, name="WithSync")
         wi.effective_url = "https://example.com"
         wi.source_specs = [{"schema_version": 1, "extraction": {"algorithm": "full_page"}}]
-        wi.archiver_info_source_id = str(generate_ulid())
         await db_session.flush()
 
         await process_watched_item(db_session, wi, raw_content=_HTML)
@@ -224,7 +200,7 @@ class TestProcessWatchedItem:
         result = await process_watched_item(db_session, wi, raw_content=_HTML_CHANGED)
         await db_session.flush()
 
-        assert result.archiver_sync_enqueued is True
+        assert result.changed is True
         syncs = (
             (
                 await db_session.execute(
@@ -237,35 +213,13 @@ class TestProcessWatchedItem:
         assert len(syncs) == 1
         assert syncs[0].content_cache_uri.startswith("file://")
 
-    async def test_no_scratch_written_when_archiver_info_source_id_not_set(
-        self, db_session, tmp_path, monkeypatch
-    ):
-        """#194: scratch file is pure churn for un-synced items — don't write it."""
-        monkeypatch.setenv("WATCHER_CACHE_DIR", str(tmp_path))
-
-        wi = await make_watched_item(db_session, name="NoScratch")
-        wi.effective_url = "https://example.com"
-        wi.source_specs = [{"schema_version": 1, "extraction": {"algorithm": "full_page"}}]
-        assert wi.archiver_info_source_id is None
-        await db_session.flush()
-
-        await process_watched_item(db_session, wi, raw_content=_HTML)
-        await db_session.flush()
-        await process_watched_item(db_session, wi, raw_content=_HTML_CHANGED)
-        await db_session.flush()
-
-        assert list(tmp_path.glob("*.bin")) == []
-
-    async def test_scratch_written_when_archiver_id_set(self, db_session, tmp_path, monkeypatch):
-        """Synced items still get a scratch file (consumed by the drain worker)."""
-        from src.core.models.base import generate_ulid
-
+    async def test_scratch_written_on_every_change(self, db_session, tmp_path, monkeypatch):
+        """Every change gets a scratch file (consumed by the drain worker)."""
         monkeypatch.setenv("WATCHER_CACHE_DIR", str(tmp_path))
 
         wi = await make_watched_item(db_session, name="WithScratch")
         wi.effective_url = "https://example.com"
         wi.source_specs = [{"schema_version": 1, "extraction": {"algorithm": "full_page"}}]
-        wi.archiver_info_source_id = str(generate_ulid())
         await db_session.flush()
 
         await process_watched_item(db_session, wi, raw_content=_HTML)

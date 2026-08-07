@@ -8,6 +8,7 @@ panel also surfaces read-only Global (``visibility='global'``) and Domain
 """
 
 import pytest
+from ulid import ULID
 
 pytestmark = pytest.mark.integration
 
@@ -17,7 +18,9 @@ async def _seed(db_session, name="WI"):
     from tests.conftest import make_info_item
 
     item = await make_info_item(db_session)
-    wi = WatchedItem(archiver_info_item_id=item.info_item_id, name=name)
+    wi = WatchedItem(
+        archiver_info_source_id=str(ULID()), archiver_info_item_id=item.info_item_id, name=name
+    )
     db_session.add(wi)
     await db_session.flush()
     await db_session.commit()

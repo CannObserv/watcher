@@ -13,8 +13,9 @@ fingerprints, writes a `ChangeRevision`, and dispatches `CHANGE_DETECTED` once p
 
 Canonical content provenance (InfoItem / InfoSource / SourceRevision) lives in the sibling
 **Archiver service** (separate repo, port 8020), consumed via the `archiver-client`
-SDK. `archiver_info_item_id` on a WatchedItem is an optional cross-schema reference; URL-only
-WatchedItems leave it null. SourceRevisions are POSTed to Archiver on every detected change,
+SDK. `archiver_info_item_id` and `archiver_info_source_id` on a WatchedItem are required
+cross-schema references (#251) — every WatchedItem is an InfoItem being watched, and
+Archiver provisions it. SourceRevisions are POSTed to Archiver on every detected change,
 with a local `pending_archiver_sync` outbox + drain worker guaranteeing delivery during
 Archiver outages. Notifications dispatch through the sibling **Notifier service** via the
 `NotifierClient` SDK.

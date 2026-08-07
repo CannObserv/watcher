@@ -28,7 +28,6 @@ from src.core.registry import get_registry
 from src.core.watched_items import (
     ArchivedItemActivationError,
     SuspendedDomainResumeError,
-    resolve_watch_target,
     set_watched_item_active,
 )
 from src.workers.tasks import check_watched_item
@@ -74,90 +73,55 @@ async def create_watched_item(
     data: WatchedItemCreate,
     session: AsyncSession = Depends(get_db_session),
 ):
-    """Create a standalone WatchedItem.
+    """Create a WatchedItem for an Archiver InfoItem.
 
-    Two paths depending on which anchor is provided:
-
-    **InfoItem-linked** (``archiver_info_item_id`` set): validates the InfoItem via the
-    Archiver SDK; name defaults to the InfoItem's name.
-    Errors: NotFound → 422, AuthError → 500, ServerError/network → 503.
-
-    **URL-only** (``url`` set, no ``archiver_info_item_id``): probes the URL for
-    ``effective_url`` + ``domain_name``; name defaults to the probed domain.
-    ``archiver_info_item_id`` is null on the resulting record.
-    Error: unreachable URL → 422.
-
-    At least one of ``archiver_info_item_id`` or ``url`` is required (schema-enforced).
+    One path since #251: ``archiver_info_item_id``, ``url`` and
+    ``archiver_info_source_id`` are all required (schema-enforced). The InfoItem
+    is validated via the Archiver SDK and the name defaults to the InfoItem's
+    name. Errors: NotFound → 422, AuthError → 500, ServerError/network → 503,
+    duplicate InfoItem → 409.
     """
-    if data.archiver_info_item_id:
-        info_client = get_registry().get_archiver_client()
-        try:
-            info_item = await info_client.get_info_item(data.archiver_info_item_id)
-        except NotFound as exc:
-            raise HTTPException(
-                status_code=422,
-                detail=f"archiver_info_item_id {data.archiver_info_item_id} does not exist",
-            ) from exc
-        except AuthError:
-            logger.exception("ArchiverClient auth failure during watched_item create")
-            raise HTTPException(status_code=500, detail="Information service auth failed") from None
-        except (ServerError, httpx.ConnectError, httpx.TimeoutException) as exc:
-            logger.warning("Information service unreachable during watched_item create: %s", exc)
-            raise HTTPException(
-                status_code=503,
-                detail="Information service unavailable; retry shortly",
-                headers={"Retry-After": "30"},
-            ) from exc
+    info_client = get_registry().get_archiver_client()
+    try:
+        info_item = await info_client.get_info_item(data.archiver_info_item_id)
+    except NotFound as exc:
+        raise HTTPException(
+            status_code=422,
+            detail=f"archiver_info_item_id {data.archiver_info_item_id} does not exist",
+        ) from exc
+    except AuthError:
+        logger.exception("ArchiverClient auth failure during watched_item create")
+        raise HTTPException(status_code=500, detail="Information service auth failed") from None
+    except (ServerError, httpx.ConnectError, httpx.TimeoutException) as exc:
+        logger.warning("Information service unreachable during watched_item create: %s", exc)
+        raise HTTPException(
+            status_code=503,
+            detail="Information service unavailable; retry shortly",
+            headers={"Retry-After": "30"},
+        ) from exc
 
-        # Derive the domain from the supplied URL without re-probing — Archiver is
-        # authoritative for the URL. Mirrors the URL-only branch so an InfoItem-linked
-        # create (the Archiver "Begin Watching" path) doesn't leave domain_name NULL (#196).
-        domain_name = domain_name_for_url(data.url)
-        domain_state = await ensure_domain_and_resolve_suspension(session, domain_name)
-        wi = WatchedItem(
-            archiver_info_item_id=ULID.from_str(data.archiver_info_item_id),
-            name=data.name or info_item.name,
-            description=data.description,
-            is_active=data.is_active,
-            default_schedule_config=data.default_schedule_config,
-            content_media_type=data.content_media_type,
-            default_tags=data.default_tags,
-            effective_url=data.url or "",
-            domain_name=domain_name,
-            domain_suspended=domain_state.suspended,
-            domain_default_schedule_config=domain_state.default_schedule_config,
-            source_specs=data.source_specs or [],
-            archiver_info_source_id=data.archiver_info_source_id,
-        )
-    else:
-        # No probe (#241): the item starts PROBING with the submitted URL and
-        # its first fact resolves the redirect (apply_fetch_blob).
-        try:
-            effective_url, domain, health_status = resolve_watch_target(data.url)
-        except ValueError as exc:
-            raise HTTPException(status_code=422, detail=str(exc)) from exc
-
-        # #191: schedule_tick gates solely on WatchedItem.domain_suspended (no live
-        # Domain join), so initialize it from the existing domain's state here —
-        # otherwise an item created on an already-inactive/archived domain would be
-        # scheduled. Mirrors the re-probe route's cascade (#196: shared helper).
-        domain_state = await ensure_domain_and_resolve_suspension(session, domain)
-
-        wi = WatchedItem(
-            effective_url=effective_url,
-            domain_name=domain,
-            domain_suspended=domain_state.suspended,
-            domain_default_schedule_config=domain_state.default_schedule_config,
-            health_status=health_status,
-            name=data.name or domain or data.url,
-            description=data.description,
-            is_active=data.is_active,
-            default_schedule_config=data.default_schedule_config,
-            content_media_type=data.content_media_type,
-            default_tags=data.default_tags,
-            source_specs=data.source_specs or [],
-            archiver_info_source_id=data.archiver_info_source_id,
-        )
+    # Derive the domain from the supplied URL without probing — Archiver is
+    # authoritative for the URL, and nothing on a create path touches an origin
+    # (#241). #191/#196: schedule_tick gates solely on WatchedItem.domain_suspended
+    # (no live Domain join), so seed it from the domain's state here — otherwise an
+    # item created on an already-suspended domain would silently arm fetching.
+    domain_name = domain_name_for_url(data.url)
+    domain_state = await ensure_domain_and_resolve_suspension(session, domain_name)
+    wi = WatchedItem(
+        archiver_info_item_id=ULID.from_str(data.archiver_info_item_id),
+        name=data.name or info_item.name,
+        description=data.description,
+        is_active=data.is_active,
+        default_schedule_config=data.default_schedule_config,
+        content_media_type=data.content_media_type,
+        default_tags=data.default_tags,
+        effective_url=data.url,
+        domain_name=domain_name,
+        domain_suspended=domain_state.suspended,
+        domain_default_schedule_config=domain_state.default_schedule_config,
+        source_specs=data.source_specs or [],
+        archiver_info_source_id=data.archiver_info_source_id,
+    )
 
     session.add(wi)
     try:

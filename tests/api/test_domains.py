@@ -1,6 +1,7 @@
 """Integration tests for domain API endpoints."""
 
 import pytest
+from ulid import ULID
 
 from src.core.models.fetch_policy_tombstone import FetchPolicyTombstone
 
@@ -89,6 +90,7 @@ class TestPatchDomainDefaultScheduleConfig:
 
         # Item on the domain with no explicit cadence (inherits).
         wi = WatchedItem(
+            archiver_info_source_id=str(ULID()),
             archiver_info_item_id=ULID(),
             name="OnDomain",
             domain_name="backfill.example",
@@ -122,6 +124,7 @@ class TestPatchDomainDefaultScheduleConfig:
             json={"default_schedule_config": {"interval": "6h"}},
         )
         wi = WatchedItem(
+            archiver_info_source_id=str(ULID()),
             archiver_info_item_id=ULID(),
             name="ToClear",
             domain_name="clear.example",
@@ -287,6 +290,7 @@ class TestDeleteDomain:
         db_session.add(Domain(name="example.com"))
         item = await make_info_item(db_session, name="W")
         wi = WatchedItem(
+            archiver_info_source_id=str(ULID()),
             archiver_info_item_id=item.info_item_id,
             name="W",
             effective_url="https://example.com/p",

@@ -1,4 +1,4 @@
-"""WatchedItem model — monitored content target, optionally linked to an Archiver InfoItem."""
+"""WatchedItem model — monitored content target, linked to an Archiver InfoItem."""
 
 import enum
 from datetime import datetime
@@ -36,9 +36,12 @@ class WatchedItem(Base, TimestampMixin):
     the single monitored entity; there is no per-Watch override layer.
 
     `archiver_info_item_id` links to an Archiver InfoItem (cross-schema reference to
-    `information.info_items.info_item_id`). Nullable — standalone WatchedItems
-    with no InfoItem reference are allowed; partial unique index enforces
-    uniqueness when set.
+    `information.info_items.info_item_id`) and `archiver_info_source_id` to its
+    active InfoSource. Both are NOT NULL (#251): every WatchedItem is a
+    projection of registry state, and the unique index on the InfoItem link is
+    one-WatchedItem-per-InfoItem. Bare-URL WatchedItems were rolled back — the
+    nullability bought nothing and paid for it with silent drop branches in the
+    SourceRevision path.
 
     `effective_url` and `source_specs` are set at create time and drive
     the pipeline directly, without an Archiver SDK call per cycle.
@@ -50,7 +53,7 @@ class WatchedItem(Base, TimestampMixin):
     __tablename__ = "watched_items"
 
     id: Mapped[ULID] = mapped_column(ULIDType, primary_key=True, default=generate_ulid)
-    archiver_info_item_id: Mapped[ULID | None] = mapped_column(ULIDType, nullable=True)
+    archiver_info_item_id: Mapped[ULID] = mapped_column(ULIDType, nullable=False)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     description: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
     is_active: Mapped[bool] = mapped_column(
@@ -111,9 +114,7 @@ class WatchedItem(Base, TimestampMixin):
         default=list,
         server_default=text("ARRAY[]::jsonb[]"),
     )
-    archiver_info_source_id: Mapped[str | None] = mapped_column(
-        String(26), nullable=True, default=None
-    )
+    archiver_info_source_id: Mapped[str] = mapped_column(String(26), nullable=False)
     last_changed_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True, default=None
     )
@@ -124,12 +125,13 @@ class WatchedItem(Base, TimestampMixin):
         server_default="unknown",
     )
 
+    # Plain unique index since #251 — the column is NOT NULL, so the partial
+    # predicate that used to exempt bare rows has nothing left to exempt.
     __table_args__ = (
         Index(
             "ix_watched_items_archiver_info_item_id",
             "archiver_info_item_id",
             unique=True,
-            postgresql_where=text("archiver_info_item_id IS NOT NULL"),
         ),
     )
 

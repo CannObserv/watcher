@@ -12,15 +12,13 @@ from src.core.models.watched_item import CONTENT_MEDIA_TYPE_MAX_LEN, WatchHealth
 class WatchedItemCreate(BaseModel):
     """Create a WatchedItem via ``POST /api/v1/watched-items``.
 
-    Two creation paths:
-    - **InfoItem-linked** (``archiver_info_item_id`` provided): the InfoItem's existence
-      is validated via the Archiver SDK (NotFound → 422); name defaults to the
-      InfoItem's name when omitted.
-    - **URL-only** (``url`` provided, no ``archiver_info_item_id``): the URL is probed
-      for ``effective_url`` + ``domain_name``; name defaults to the probed
-      domain. Produces a WatchedItem with ``archiver_info_item_id=None`` (#185 Phase A).
-
-    At least one of ``archiver_info_item_id`` or ``url`` is required.
+    One creation path (#251): every WatchedItem is an Archiver InfoItem being
+    watched. ``archiver_info_item_id`` is validated via the Archiver SDK
+    (NotFound → 422) and the name defaults to the InfoItem's name when omitted;
+    ``url`` is the InfoSource URL Archiver is authoritative for (stored as
+    ``effective_url``, never re-probed); ``archiver_info_source_id`` identifies
+    the InfoSource that observed revisions are posted back to. All three are
+    required — the URL-only path was rolled back with bare-URL WatchedItems.
 
     ``source_specs`` seeds the local pipeline extraction config. Optional at
     create time; updatable later via PATCH.
@@ -29,22 +27,16 @@ class WatchedItemCreate(BaseModel):
     fetch (#168); supplying it here pre-seeds an operator override.
     """
 
-    archiver_info_item_id: ULIDStr | None = None
+    archiver_info_item_id: ULIDStr
+    url: HttpUrlStr
+    archiver_info_source_id: str = Field(min_length=1, max_length=26)
     name: str | None = Field(None, min_length=1, max_length=255)
     description: str | None = None
     is_active: bool = True
     default_schedule_config: dict | None = None
     content_media_type: str | None = Field(None, max_length=CONTENT_MEDIA_TYPE_MAX_LEN)
     default_tags: list[str] | None = None
-    url: HttpUrlStr | None = None
     source_specs: list[dict] | None = None
-    archiver_info_source_id: str | None = Field(None, min_length=1, max_length=26)
-
-    @model_validator(mode="after")
-    def _require_anchor(self) -> "WatchedItemCreate":
-        if not self.archiver_info_item_id and not self.url:
-            raise ValueError("At least one of archiver_info_item_id or url is required")
-        return self
 
 
 class WatchedItemPatch(BaseModel):
@@ -67,7 +59,13 @@ class WatchedItemPatch(BaseModel):
     @model_validator(mode="after")
     def _reject_explicit_null(self) -> "WatchedItemPatch":
         """Reject explicit null for NOT NULL DB columns; omitting the field is fine."""
-        for field in ("name", "is_active", "effective_url", "source_specs"):
+        for field in (
+            "name",
+            "is_active",
+            "effective_url",
+            "source_specs",
+            "archiver_info_source_id",
+        ):
             if field in self.model_fields_set and getattr(self, field) is None:
                 raise ValueError(f"{field} cannot be null; omit the field to leave it unchanged")
         return self
@@ -76,14 +74,14 @@ class WatchedItemPatch(BaseModel):
 class WatchedItemResponse(BaseModel):
     """Single WatchedItem record.
 
-    ``archiver_info_item_id`` is null for WatchedItems created via the dashboard
-    (URL-first, no InfoItem required). API-created WatchedItems always have it.
+    ``archiver_info_item_id`` and ``archiver_info_source_id`` are always
+    present — every WatchedItem is linked to an Archiver InfoItem (#251).
     """
 
     model_config = ConfigDict(from_attributes=True)
 
     id: ULIDStr
-    archiver_info_item_id: ULIDStr | None = None
+    archiver_info_item_id: ULIDStr
     name: str
     description: str | None
     is_active: bool
@@ -97,7 +95,7 @@ class WatchedItemResponse(BaseModel):
     default_tags: list[str] | None
     effective_url: str
     source_specs: list[dict]
-    archiver_info_source_id: str | None = None
+    archiver_info_source_id: str
     domain_name: str | None = None
     domain_suspended: bool = False
     created_at: datetime

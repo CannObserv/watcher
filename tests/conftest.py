@@ -9,11 +9,12 @@ The module-level async helpers ``make_watched_item``, ``make_info_item``,
 they are awaitable factory functions test code can call directly.
 
 ``make_watched_item`` is the single WatchedItem factory (#191 collapse). It
-takes an optional ``archiver_info_item_id``; when omitted (and
-``auto_info_item=True``) an InfoItem + primary InfoSource + binding are
-auto-created to honour the 1:1 ``watched_items.archiver_info_item_id``
-uniqueness constraint. The legacy ``target_info_source_id`` /
-``schedule_config`` columns are gone.
+takes an optional ``archiver_info_item_id``; when omitted, an InfoItem +
+primary InfoSource + binding are auto-created to honour the 1:1
+``watched_items.archiver_info_item_id`` uniqueness constraint, and the
+InfoSource's id seeds ``archiver_info_source_id`` (both links are NOT NULL
+since #251). The legacy ``target_info_source_id`` / ``schedule_config``
+columns are gone.
 
 Archiver v4.0.0: sub_aspect concept removed — ``bind_sub_aspect`` deleted;
 ``make_info_source`` no longer accepts ``parent_info_source_id``.
@@ -39,6 +40,7 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy import create_engine, event, or_, select, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
+from ulid import ULID
 
 from src.api.deps import get_db_session, get_probe_fn, require_api_key
 from src.core import db_safety
@@ -366,17 +368,17 @@ async def make_watched_item(
     *,
     name="Test Watched Item",
     archiver_info_item_id=None,
+    archiver_info_source_id=None,
     primary_url="https://example.com",
     domain_name=None,
-    auto_info_item=True,
     **kwargs,
 ):
     """Construct a WatchedItem — the single monitored entity (#191 collapse).
 
-    When ``archiver_info_item_id`` is not supplied and ``auto_info_item`` is
-    True, an InfoItem + primary InfoSource + binding are auto-created so the
-    WatchedItem references a real Archiver InfoItem. Pass ``auto_info_item=False``
-    for a URL-only WatchedItem (``archiver_info_item_id`` stays NULL).
+    An InfoItem + primary InfoSource + binding are auto-created when
+    ``archiver_info_item_id`` is not supplied, so the WatchedItem references a
+    real Archiver InfoItem and its InfoSource. Both links are NOT NULL (#251) —
+    there is no bare-URL variant to construct.
 
     Extra ``**kwargs`` flow into the WatchedItem constructor — e.g.
     ``is_active``, ``content_media_type``, ``default_tags``, ``description``,
@@ -385,7 +387,7 @@ async def make_watched_item(
     Pass ``domain_name=`` to set ``WatchedItem.domain_name`` (auto-creating the
     Domain row).
     """
-    if archiver_info_item_id is None and auto_info_item:
+    if archiver_info_item_id is None:
         item = await make_info_item(session)
         archiver_info_item_id = item.info_item_id
         primary = await make_info_source(session, url=primary_url)
@@ -394,6 +396,10 @@ async def make_watched_item(
             info_item_id=archiver_info_item_id,
             info_source_id=primary.info_source_id,
         )
+        if archiver_info_source_id is None:
+            archiver_info_source_id = str(primary.info_source_id)
+    if archiver_info_source_id is None:
+        archiver_info_source_id = str(ULID())
 
     # Auto-create the Domain row first if a domain_name is requested (FK).
     if domain_name is not None:
@@ -406,6 +412,7 @@ async def make_watched_item(
 
     wi = WatchedItem(
         archiver_info_item_id=archiver_info_item_id,
+        archiver_info_source_id=archiver_info_source_id,
         name=name,
         effective_url=primary_url,
         domain_name=domain_name,

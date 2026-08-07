@@ -1,8 +1,10 @@
-"""Tests for resolve_watch_target — the probe-free URL-first create/edit (#241).
+"""Tests for resolve_watch_target — the probe-free operator URL edit (#241, #251).
 
-Since step 5 there is no mode branch: create and URL-edit never touch the
-network. The item starts PROBING with the URL as submitted and the first fact
-resolves it.
+Nothing touches the network: the item re-enters PROBING with the URL as
+submitted and the first fact resolves it. Its one caller since #251 is the
+dashboard's ``POST /watched-items/{id}/effective-url`` — creates take the URL
+from Archiver and start UNKNOWN (route-level coverage lives in
+tests/dashboard/test_watched_item_routes.py::TestWatchedItemUrlReprobe).
 """
 
 import pytest

@@ -1380,6 +1380,15 @@ class TestCreateRequiresArchiverLinks:
         response = await client.post("/api/v1/watched-items", json=body)
         assert response.status_code == 422
 
+    async def test_malformed_archiver_info_source_id_returns_422(self, client):
+        """CR-2: a malformed ULID fails at the boundary, not later against a
+        real captured revision when the drain posts it to Archiver."""
+        response = await client.post(
+            "/api/v1/watched-items",
+            json=_create_body(ULID(), archiver_info_source_id="not-a-ulid"),
+        )
+        assert response.status_code == 422
+
     async def test_patch_rejects_null_archiver_info_source_id(self, client, db_session):
         """The column is NOT NULL — clearing it must fail at the schema, not the DB."""
         wi = await _make_watched_item(db_session, name="KeepSourceId")

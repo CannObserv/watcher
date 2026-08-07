@@ -69,7 +69,7 @@ src/workers/     Procrastinate task queue (check_watched_item, schedule_tick, pi
 tools/           Operational scripts
 tests/           Mirrors src/ structure
 deploy/          Systemd units and deployment config
-docs/            Reference docs (COMMANDS, DEPLOYMENT, SKILLS, STYLE) + plans/
+docs/            Reference docs (COMMANDS, CONTENT-PIPELINE, DEPLOYMENT, SKILLS, STYLE) + plans/
 scripts/         Build scripts (Tailwind, vendor CSS, cleanup)
 skills/          Agent skills (committed overrides + symlinks → skills-vendor/)
 skills-vendor/   Git submodules for external skill repos
@@ -100,7 +100,7 @@ The exe.dev proxy forwards 3000–9999. Dev server reachable at `https://watcher
 
 **Redis and the bus (archiver#109, #245).** Archiver operates `redis-server` on this VM — the tracked drop-in, persistence and version-floor policy, and producer-side monitoring are all its; it also owns the `info.changes` fact stream. **Watcher's Redis use is publish-only and exactly one thing**: the `content.fetch-policy` producer (#245; `src/core/fetch_policy.py` + the `publish_fetch_policy` periodic task) — Watcher's half of the cluster politeness split (*mechanism to Replicator, policy to the issuer, config over the bus*; normative: `docs/contracts/replicator-boundaries.md` in the Replicator repo). It publishes each `Domain.min_interval` (**never** `current_interval` — that column is inert 429-backoff state since the limiter retired) as a `FetchPolicyState` per host, full-set-republished every 5 minutes **including tombstones** (`fetch_policy_tombstones` table, written on domain delete, cleared on re-create) so a consumer's boot replay never depends on broker retention. Connection via `WATCHER_BUS_REDIS_URL` (unset → loud skip, Replicator falls back to its conservative default; `scripts/dev_server.sh` clears an inherited value unless `WATCHER_DEV_BUS_REDIS_URL` opts into a scratch bus). API domain routes defer an immediate republish; **dashboard routes deliberately don't** (they must not import `src.workers.*` — `tests/dashboard/test_import_decoupling.py`) and ride the periodic tick. Watcher **consumes nothing** and joins no consumer group; all async work stays on Procrastinate over Postgres (`PsycopgConnector`). Bus ownership design of record: `docs/plans/2026-07-29-redis-bus-ownership-design.md` in the Archiver repo ([on GitHub](https://github.com/CannObserv/archiver/blob/main/docs/plans/2026-07-29-redis-bus-ownership-design.md)).
 
-**Phase 4 contracts (#241) — done.** Watcher **is** the `content.fetch` issuer and `content.blobs` consumer; it makes no origin request of its own on any scheduled path. Cut over 2026-08-06, `WATCHER_FETCH_MODE` and the inline-fetch branch deleted in step 5 (soak record + retirement notes: the design doc's cutover section). Design: `docs/plans/2026-08-06-phase-4-content-fetch-producer-design.md`. What that leaves in the code: the `fetch_commands` table (outbox + pending map + inbox keyed `command_id`, `src/core/fetch_commands.py`), the issue path — the whole of `check_watched_item` now (fresh ULID per occasion, persist-before-publish + every-minute sweep, pinned watcher UA, one-open-command gate), the `content.blobs` consumer (`src/workers/fetch_facts.py` — group `watcher`, one member, started in the lifespan whenever `WATCHER_BUS_REDIS_URL` is set; correlates on `command_id` only, never dedupes on fingerprint, branches `terminal` first on `fetch_failed`), the apply tasks (`apply_fetch_blob` / `apply_fetch_failure` in `src/workers/fetch_commands.py` — status-guarded against duplicates, supersession-guarded against out-of-order facts, blob-unreadable → re-issue; they own all check bookkeeping via the shared `_record_check_success`/`_record_check_failure` in `src/workers/tasks.py`), and the reaper (`reap_fetch_commands`, every 5 min, keyed on signal age `coalesce(fact_at, published_at)` — a stale row holding a blob fact gets its apply **re-deferred**, anything else is expired + re-issued with `intent_id` lineage; `WATCHER_FETCH_COMMAND_TIMEOUT_SECONDS`/`WATCHER_FETCH_MAX_REISSUES` knobs, cap → ERROR health and the gate lifts). Async create (step 3): URL-first create/URL-edit never probe (`resolve_watch_target`, `src/core/watched_items.py`) — the item starts `health_status='probing'` with the submitted URL as `effective_url`, and its first fact resolves it (`final_url` → `effective_url` + domain re-derivation via the #196 helper, PROBING → OK/ERROR); steady-state redirects stay audit-only (`CHECK_REDIRECT_OBSERVED`). Step 5 retired, with the fetch path: the in-process `DomainRateLimiter` and its config poller + startup hydration, the 429 backoff/decay helpers, `HttpFetcher` and the registry's fetcher slot, the create-time probe on watched-item routes, and the dashboard Backoff badge/filter. `Domain.current_interval`/`max_concurrency`/`decay_window` survive as **inert columns** — nothing *reads* them for behavior, though creates still initialise them and the API still accepts/echoes them; `last_request_at` has no writer at all. They are off the dashboard (an editable knob that changes nothing is worse than a hidden column). Dropping them is a separate migration that must also remove the create/PATCH write sites and the `DomainResponse` fields. The normative contracts live in the Replicator repo — **link, don't copy**: [`content-fetch-issuer-contract.md`](https://github.com/CannObserv/replicator/blob/main/docs/contracts/content-fetch-issuer-contract.md) (the seven MUSTs: per-occasion `command_id`, persist-before-publish, correlate on `command_id` only, idempotent upsert, no fingerprint dedupe, handle `fetch_failed` + keep a reaper, copy blob bytes before expiry — and note `blob_uri` is a host-local `file://`, VM-local by contract) and [`replicator-boundaries.md`](https://github.com/CannObserv/replicator/blob/main/docs/contracts/replicator-boundaries.md) (what belongs on which side of the fetch boundary). #245 was the cutover's ordering blocker (politeness must not lapse when the fetch path becomes a publish path) and shipped first.
+**Phase 4 contracts (#241) — done.** Watcher **is** the `content.fetch` issuer and `content.blobs` consumer; it makes no origin request of its own on any scheduled path (cut over 2026-08-06; `WATCHER_FETCH_MODE` and the inline-fetch branch deleted in step 5). The `fetch_commands` outbox/inbox, the issue path in `check_watched_item`, the single-member `content.blobs` consumer, the apply tasks, and the reaper are all documented in **[docs/CONTENT-PIPELINE.md](docs/CONTENT-PIPELINE.md)** — along with what step 5 retired, the inert `Domain` columns it left behind, and links to the two normative contracts in the Replicator repo (**link, don't copy**). Design: `docs/plans/2026-08-06-phase-4-content-fetch-producer-design.md`. #245 was the cutover's ordering blocker and shipped first.
 
 Other *future* work that would widen Redis use: a Redis-backed aspect-review cache (#163). It does not exist. *History:* the Watcher-side `info.changes` publisher (`src/core/changes/`, `ChangePublisher`) was deleted in **#156** (Phase 5 cutover); the producer role migrated to Archiver (archiver#106), and archiver#109 assigned operational ownership.
 
@@ -240,23 +240,13 @@ re-firing every `schedule_tick`.
 
 **Every WatchedItem is an Archiver InfoItem being watched (#251).**
 `archiver_info_item_id` and `archiver_info_source_id` are both **NOT NULL** —
-bare-URL WatchedItems were rolled back (epic: CannObserv/archiver#137 step 1;
-production had zero bare rows). One create path remains, `POST
-/api/v1/watched-items`, requiring `archiver_info_item_id` + `url` +
-`archiver_info_source_id` — the Archiver "Begin Watching" provisioning call.
-There is **no dashboard create** (`/watched-items/new`, its form template, and
-the "New Watched Item" CTA are gone); the list's empty state points at Archiver.
-What the nullability had been buying was two silent-drop branches on the
-SourceRevision path — the pipeline's `if watched_item.archiver_info_source_id:`
-gate around the scratch write + outbox insert, and the drain's matching guard —
-both deleted, so a captured revision is now always enqueued and posted. The
-drain keeps only its `wi is None` half (a WatchedItem deleted mid-batch).
-`effective_url` is stored verbatim from the create call and `domain_name`
-derived from it — no probe on any create path (#241), and a fresh item starts
-`health_status='unknown'`, not `probing`: Archiver is authoritative for the URL,
-so a steady-state redirect stays audit-only (`CHECK_REDIRECT_OBSERVED`) instead
-of rewriting it. `resolve_watch_target`'s PROBING return now has one caller, the
-dashboard's `effective_url` edit. On any PATCH that sets `effective_url` (the
+bare-URL WatchedItems were rolled back (epic: CannObserv/archiver#137 step 1).
+One create path, `POST /api/v1/watched-items`, requiring all three of
+`archiver_info_item_id` + `url` + `archiver_info_source_id` (both ids validated
+as ULIDs at the boundary); **no dashboard create**. The nullability had been
+paying for two silent-drop branches on the SourceRevision path — both gone, so a
+captured revision is always enqueued. Full detail, including why a fresh item
+starts `unknown` rather than `probing`: **[docs/CONTENT-PIPELINE.md](docs/CONTENT-PIPELINE.md)**. On any PATCH that sets `effective_url` (the
 URL-succession path), `domain_name` is re-derived from the URL **without**
 re-probing and `domain_suspended` is re-evaluated; every create/PATCH/re-probe
 path (API and dashboard) shares `ensure_domain_and_resolve_suspension` in

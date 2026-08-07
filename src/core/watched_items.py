@@ -17,15 +17,21 @@ from src.core.models.watched_item import WatchedItem, WatchHealthStatus
 
 
 def resolve_watch_target(url: str) -> tuple[str, str | None, WatchHealthStatus]:
-    """``(effective_url, domain_name, health_status)`` for a URL-first create/edit.
+    """``(effective_url, domain_name, health_status)`` for an operator URL edit.
+
+    **One caller since #251**: the dashboard's
+    ``POST /watched-items/{id}/effective-url``. Creates no longer use this —
+    they take the URL from Archiver, which is authoritative for it, and start
+    ``UNKNOWN`` so a steady-state redirect stays audit-only.
 
     Nothing here touches the network (the Phase-4 async-create design, #241):
     the submitted URL *is* the effective URL until the first fact's
     ``final_url`` proves otherwise, the domain is its hostname (the same
     ``urlparse().hostname`` derivation the old inline probe used, so the
-    domain-keying invariant holds), and the item starts ``PROBING``. The apply
-    path (``apply_fetch_blob``) resolves the redirect, re-derives the domain,
-    and clears the state to OK/ERROR.
+    domain-keying invariant holds), and the item re-enters ``PROBING`` — this
+    is now the only producer of that state. The apply path
+    (``apply_fetch_blob``) resolves the redirect, re-derives the domain, and
+    clears the state to OK/ERROR.
 
     That is what closes the boundaries-charter exception for the *scheduled*
     path: nothing Watcher does on a timer touches an origin. Two

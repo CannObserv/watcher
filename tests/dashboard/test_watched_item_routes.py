@@ -15,7 +15,7 @@ from src.core.models.notification_template import (
     NotificationTemplate,
 )
 from src.core.models.temporal_profile import PostAction, ProfileType, TemporalProfile
-from src.core.models.watched_item import WatchedItem
+from src.core.models.watched_item import WatchedItem, WatchHealthStatus
 from src.dashboard.context import build_schedule_map
 from src.dashboard.routes.watched_items import (
     _apply_watched_item_field_update,
@@ -40,13 +40,6 @@ class TestListPage:
         assert b"Begin Watching" in body
         assert b"/watched-items/new" not in body
         assert b"/watches/new" not in body
-
-    async def test_create_routes_are_gone(self, client):
-        """#251: the URL-only create form and its submit route were removed."""
-        assert (await client.get("/watched-items/new")).status_code == 404
-        assert (
-            await client.post("/watched-items/new", data={"url": "https://x.example"})
-        ).status_code == 405
 
     async def test_list_renders_items(self, client, db_session):
         item = await make_info_item(db_session)
@@ -1595,3 +1588,208 @@ class TestCheckNow:
     async def test_check_now_unknown_returns_404(self, client):
         resp = await client.post(f"/watched-items/{ULID()}/check-now")
         assert resp.status_code == 404
+
+
+class TestWatchedItemUrlReprobe:
+    """`POST /watched-items/{id}/effective-url` — the operator URL edit.
+
+    Restored from the deleted create-form test file (#251 CR-1): the create
+    flow it shared a file with is gone, but this route is live, and it is now
+    the only producer of PROBING health — the create path stopped setting it
+    when the URL-only branch was removed.
+    """
+
+    async def test_reprobe_updates_url_and_domain(self, client, db_session):
+        wi = await _make_wi(
+            db_session,
+            name="UrlWI",
+            effective_url="https://old.example/page",
+            domain_name=None,
+        )
+        resp = await client.post(
+            f"/watched-items/{wi.id}/effective-url",
+            data={"url": "https://new.example.org/fresh"},
+            follow_redirects=False,
+        )
+        assert resp.status_code == 303
+        await db_session.refresh(wi)
+        assert wi.effective_url == "https://new.example.org/fresh"
+        assert wi.domain_name == "new.example.org"
+
+    async def test_reprobe_re_enters_probing(self, client, db_session):
+        """#241/#251: the edit defers resolution to the next fact, so the item
+        re-enters PROBING and `apply_fetch_blob` adopts any redirect."""
+        wi = await _make_wi(
+            db_session,
+            name="ProbingWI",
+            effective_url="https://old.example/page",
+            health_status=WatchHealthStatus.OK,
+        )
+        resp = await client.post(
+            f"/watched-items/{wi.id}/effective-url",
+            data={"url": "https://probe.example/page"},
+            follow_redirects=False,
+        )
+        assert resp.status_code == 303
+        await db_session.refresh(wi)
+        assert wi.health_status == WatchHealthStatus.PROBING
+
+    async def test_reprobe_leaves_source_specs_untouched(self, client, db_session):
+        wi = await _make_wi(
+            db_session,
+            name="SpecsWI",
+            effective_url="https://old.example/p",
+            source_specs=[{"kind": "css", "selector": ".main"}],
+        )
+        await client.post(
+            f"/watched-items/{wi.id}/effective-url",
+            data={"url": "https://new.example.org/x"},
+            follow_redirects=False,
+        )
+        await db_session.refresh(wi)
+        assert wi.source_specs == [{"kind": "css", "selector": ".main"}]
+
+    async def test_reprobe_archived_flashes_error(self, client, db_session):
+        wi = await _make_wi(
+            db_session,
+            name="ArchUrl",
+            effective_url="https://x.example/p",
+            archived_at=datetime.now(UTC),
+        )
+        resp = await client.post(
+            f"/watched-items/{wi.id}/effective-url",
+            data={"url": "https://new.example.org/y"},
+            headers={"HX-Request": "true"},
+        )
+        assert resp.status_code == 200
+        assert b"flash-error" in resp.content
+        assert b"archived" in resp.content.lower()
+
+    async def test_reprobe_empty_url_flashes_error(self, client, db_session):
+        wi = await _make_wi(db_session, name="EmptyUrl", effective_url="https://x.example/p")
+        resp = await client.post(
+            f"/watched-items/{wi.id}/effective-url",
+            data={"url": "   "},
+            headers={"HX-Request": "true"},
+        )
+        assert resp.status_code == 200
+        assert b"flash-error" in resp.content
+        await db_session.refresh(wi)
+        assert wi.effective_url == "https://x.example/p"
+
+    async def test_reprobe_invalid_url_flashes_error(self, client, db_session):
+        """The syntactic guard is at the boundary — a typo must not become ERROR
+        health minutes later via Replicator's DLQ (#241 CR-3)."""
+        wi = await _make_wi(db_session, name="BadUrl", effective_url="https://x.example/p")
+        resp = await client.post(
+            f"/watched-items/{wi.id}/effective-url",
+            data={"url": "ftp://old.example/file"},
+            headers={"HX-Request": "true"},
+        )
+        assert resp.status_code == 200
+        assert b"flash-error" in resp.content
+        await db_session.refresh(wi)
+        assert wi.effective_url == "https://x.example/p"
+
+    async def test_reprobe_unknown_returns_404(self, client):
+        resp = await client.post(
+            f"/watched-items/{ULID()}/effective-url",
+            data={"url": "https://new.example.org/z"},
+        )
+        assert resp.status_code == 404
+
+    async def test_reprobe_to_suspended_domain_warns_and_sets_suspended(self, client, db_session):
+        """Re-probing onto a suspended domain re-evaluates domain_suspended and warns (#190 CR3)."""
+        db_session.add(Domain(name="suspended.example", is_active=False))
+        wi = await _make_wi(
+            db_session,
+            name="ToSuspended",
+            effective_url="https://ok.example/p",
+            domain_suspended=False,
+        )
+        resp = await client.post(
+            f"/watched-items/{wi.id}/effective-url",
+            data={"url": "https://suspended.example/page"},
+            headers={"HX-Request": "true"},
+        )
+        assert resp.status_code == 200
+        assert b"flash-warning" in resp.content
+        assert b"suspended" in resp.content.lower()
+        await db_session.refresh(wi)
+        assert wi.domain_name == "suspended.example"
+        assert wi.domain_suspended is True
+
+    async def test_reprobe_to_active_domain_clears_suspended(self, client, db_session):
+        """Re-probing onto a healthy domain clears a stale domain_suspended flag."""
+        wi = await _make_wi(
+            db_session,
+            name="WasSuspended",
+            effective_url="https://old.example/p",
+            domain_suspended=True,
+        )
+        resp = await client.post(
+            f"/watched-items/{wi.id}/effective-url",
+            data={"url": "https://fresh.example/page"},
+            follow_redirects=False,
+        )
+        assert resp.status_code == 303
+        await db_session.refresh(wi)
+        assert wi.domain_suspended is False
+
+    async def test_reprobe_to_suspended_suspends_watched_item(self, client, db_session):
+        """Moving onto a suspended domain sets domain_suspended on the WatchedItem (#191)."""
+        db_session.add(Domain(name="susp-cascade.example", is_active=False))
+        wi = await make_watched_item(
+            db_session,
+            name="ItemA",
+            primary_url="https://ok.example/p",
+            is_active=True,
+        )
+        await db_session.commit()
+        resp = await client.post(
+            f"/watched-items/{wi.id}/effective-url",
+            data={"url": "https://susp-cascade.example/page"},
+            headers={"HX-Request": "true"},
+        )
+        assert resp.status_code == 200
+        await db_session.refresh(wi)
+        assert wi.domain_suspended is True
+
+    async def test_reprobe_to_active_clears_suspension(self, client, db_session):
+        """Moving onto a healthy domain clears domain_suspended on the WatchedItem."""
+        wi = await make_watched_item(
+            db_session,
+            name="ItemB",
+            primary_url="https://old.example/p",
+            is_active=False,
+            domain_suspended=True,
+        )
+        await db_session.commit()
+        resp = await client.post(
+            f"/watched-items/{wi.id}/effective-url",
+            data={"url": "https://healthy.example/page"},
+            follow_redirects=False,
+        )
+        assert resp.status_code == 303
+        await db_session.refresh(wi)
+        assert wi.domain_suspended is False
+
+    async def test_reprobe_emits_audit_with_source_dashboard(self, client, db_session):
+        wi = await _make_wi(db_session, name="AuditUrl", effective_url="https://old.example/p")
+        await client.post(
+            f"/watched-items/{wi.id}/effective-url",
+            data={"url": "https://audited.example/page"},
+            follow_redirects=False,
+        )
+        events = (
+            (
+                await db_session.execute(
+                    select(AuditLog).where(AuditLog.event_type == EventType.WATCHED_ITEM_UPDATED)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert len(events) == 1
+        assert events[0].payload["source"] == "dashboard"
+        assert events[0].payload["updated_fields"] == ["effective_url", "domain_name"]

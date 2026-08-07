@@ -321,3 +321,51 @@ class TestTemplateSchemas:
 
         with pytest.raises(ValidationError):
             ItemNotificationTemplateCreate(title="Item Template")
+
+
+class TestIssue251ULIDValidation:
+    """#251 CR-2: the Archiver links are ULID references, validated as such.
+
+    Both are required now and both are load-bearing downstream — the drain
+    hands ``archiver_info_source_id`` straight to Archiver, and the create
+    route calls ``ULID.from_str`` on the InfoItem id. A length check alone let
+    a malformed value persist and fail much later, against a real captured
+    revision.
+    """
+
+    @pytest.mark.parametrize(
+        "bad",
+        ["not-a-ulid", "x" * 26, "01abcdefghjkmnpqrstvwxyz00", "01ABCDEFGHJKMNPQRSTVWXYZ0"],
+        ids=["too-short", "bad-alphabet", "lowercase", "off-by-one"],
+    )
+    def test_create_rejects_malformed_archiver_info_source_id(self, bad):
+        from pydantic import ValidationError
+
+        from src.api.schemas.watched_item import WatchedItemCreate
+
+        with pytest.raises(ValidationError):
+            WatchedItemCreate(
+                archiver_info_item_id="01ABCDEFGHJKMNPQRSTVWXYZ00",
+                url="https://example.com",
+                archiver_info_source_id=bad,
+            )
+
+    def test_create_rejects_malformed_archiver_info_item_id(self):
+        from pydantic import ValidationError
+
+        from src.api.schemas.watched_item import WatchedItemCreate
+
+        with pytest.raises(ValidationError):
+            WatchedItemCreate(
+                archiver_info_item_id="not-a-ulid",
+                url="https://example.com",
+                archiver_info_source_id="01ABCDEFGHJKMNPQRSTVWXYZ00",
+            )
+
+    def test_patch_rejects_malformed_archiver_info_source_id(self):
+        from pydantic import ValidationError
+
+        from src.api.schemas.watched_item import WatchedItemPatch
+
+        with pytest.raises(ValidationError):
+            WatchedItemPatch(archiver_info_source_id="not-a-ulid")

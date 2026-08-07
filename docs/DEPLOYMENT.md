@@ -136,6 +136,24 @@ A fresh host bootstraps the full schema the same way (`alembic upgrade head`
 against an empty database). The chain is self-contained — it references no
 Archiver-owned schema — and is smoke-checked in CI (`migrations` job, #234).
 
+### Restart-before-migrate — one-time, `d5a71c93e0f2` (#251)
+
+`d5a71c93e0f2` makes `watched_items.archiver_info_item_id` and
+`archiver_info_source_id` NOT NULL. The same release deletes the two code paths
+that could produce a row without them (the dashboard create form and the API's
+URL-only branch), so for **this one migration** the order above is reversed:
+
+```bash
+sudo systemctl restart watcher      # new code first — no path can write a bare row
+uv run alembic upgrade head         # then the constraint
+```
+
+Migrating first leaves the old code briefly serving `/watched-items/new`, whose
+insert then violates the new constraint and 500s. Production held zero bare rows
+at the time of writing, so the migration itself is a metadata-only lock on four
+rows; the ordering is about the window, not the data. Subsequent deploys use the
+standard order above.
+
 ### Migration baseline (squash) — one-time stamp
 
 The pre-#234 migration chain was squashed into a single genesis baseline

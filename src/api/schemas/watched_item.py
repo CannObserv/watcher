@@ -4,7 +4,7 @@ from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict, Field, computed_field, model_validator
 
-from src.api.schemas.types import HttpUrlStr, ULIDStr
+from src.api.schemas.types import HttpUrlStr, ULIDRefStr, ULIDStr
 from src.core.media_type import resolve_dispatch_essence
 from src.core.models.watched_item import CONTENT_MEDIA_TYPE_MAX_LEN, WatchHealthStatus
 
@@ -27,9 +27,9 @@ class WatchedItemCreate(BaseModel):
     fetch (#168); supplying it here pre-seeds an operator override.
     """
 
-    archiver_info_item_id: ULIDStr
+    archiver_info_item_id: ULIDRefStr
     url: HttpUrlStr
-    archiver_info_source_id: str = Field(min_length=1, max_length=26)
+    archiver_info_source_id: ULIDRefStr
     name: str | None = Field(None, min_length=1, max_length=255)
     description: str | None = None
     is_active: bool = True
@@ -54,7 +54,7 @@ class WatchedItemPatch(BaseModel):
     default_tags: list[str] | None = None
     effective_url: HttpUrlStr | None = None
     source_specs: list[dict] | None = None
-    archiver_info_source_id: str | None = Field(None, min_length=1, max_length=26)
+    archiver_info_source_id: ULIDRefStr | None = None
 
     @model_validator(mode="after")
     def _reject_explicit_null(self) -> "WatchedItemPatch":

@@ -243,13 +243,16 @@ re-firing every `schedule_tick`.
 bare-URL WatchedItems were rolled back (epic: CannObserv/archiver#137 step 1).
 One create path, `POST /api/v1/watched-items`, requiring all three of
 `archiver_info_item_id` + `url` + `archiver_info_source_id` (both ids validated
-as ULIDs at the boundary); **no dashboard create**. The nullability had been
-paying for two silent-drop branches on the SourceRevision path — both gone, so a
-captured revision is always enqueued. Full detail, including why a fresh item
-starts `unknown` rather than `probing`: **[docs/CONTENT-PIPELINE.md](docs/CONTENT-PIPELINE.md)**. On any PATCH that sets `effective_url` (the
-URL-succession path), `domain_name` is re-derived from the URL **without**
-re-probing and `domain_suspended` is re-evaluated; every create/PATCH/re-probe
-path (API and dashboard) shares `ensure_domain_and_resolve_suspension` in
+as canonical uppercase ULIDs at the boundary, a constraint the OpenAPI document
+advertises); **no dashboard create**. The nullability had been paying for two
+silent-drop branches on the SourceRevision path — both gone, so a captured
+revision is always enqueued. Full detail, including why a fresh item starts
+`unknown` rather than `probing`:
+**[docs/CONTENT-PIPELINE.md](docs/CONTENT-PIPELINE.md)**. On any PATCH that sets
+`effective_url` (the URL-succession path), `domain_name` is re-derived from the
+URL **without** re-probing and `domain_suspended` is re-evaluated; every
+create/PATCH/re-probe path (API and dashboard) shares
+`ensure_domain_and_resolve_suspension` in
 `src/core/domains.py` (#196). SourceRevisions are POSTed to Archiver via the
 `archiver-client` SDK on every detected change; the local
 `pending_archiver_sync` outbox + drain worker guarantees delivery during

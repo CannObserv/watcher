@@ -369,3 +369,59 @@ class TestIssue251ULIDValidation:
 
         with pytest.raises(ValidationError):
             WatchedItemPatch(archiver_info_source_id="not-a-ulid")
+
+    def test_openapi_advertises_the_ulid_format(self):
+        """#251 CR-10: the spec must carry the constraint the server enforces.
+
+        A BeforeValidator is invisible to JSON Schema, so a client generated
+        from the spec (Archiver's watcher-python) would see a bare string and
+        happily send something the API rejects.
+        """
+        from src.api.main import app
+
+        props = app.openapi()["components"]["schemas"]["WatchedItemCreate"]["properties"]
+        for field in ("archiver_info_item_id", "archiver_info_source_id"):
+            schema = props[field]
+            assert schema.get("format") == "ulid", field
+            assert schema.get("pattern") == r"^[0-7][0-9A-HJKMNP-TV-Z]{25}$", field
+
+    @pytest.mark.parametrize(
+        "value",
+        [
+            "01ABCDEFGHJKMNPQRSTVWXYZ00",
+            "7ZZZZZZZZZZZZZZZZZZZZZZZZZ",
+            "01abcdefghjkmnpqrstvwxyz00",
+            "01ILOU" + "0" * 20,
+            "8" + "0" * 25,
+            "not-a-ulid",
+            "01ABCDEFGHJKMNPQRSTVWXYZ0",
+            "",
+        ],
+        ids=[
+            "canonical",
+            "max",
+            "lowercase",
+            "excluded-letters",
+            "first-char-too-high",
+            "garbage",
+            "too-short",
+            "empty",
+        ],
+    )
+    def test_advertised_pattern_agrees_with_the_parser(self, value):
+        """The spec's pattern and ULID.from_str must accept the same strings —
+        an advertised constraint looser or tighter than the enforced one is
+        worse than none."""
+        import re
+
+        from ulid import ULID
+
+        from src.api.schemas.types import ULID_PATTERN
+
+        try:
+            ULID.from_str(value)
+            parses = True
+        except (ValueError, TypeError):
+            parses = False
+
+        assert bool(re.match(ULID_PATTERN, value)) is parses, value

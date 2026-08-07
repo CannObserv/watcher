@@ -1784,7 +1784,10 @@ class TestWatchedItemUrlReprobe:
         events = (
             (
                 await db_session.execute(
-                    select(AuditLog).where(AuditLog.event_type == EventType.WATCHED_ITEM_UPDATED)
+                    select(AuditLog).where(
+                        AuditLog.event_type == EventType.WATCHED_ITEM_UPDATED,
+                        AuditLog.payload["watched_item_id"].astext == str(wi.id),
+                    )
                 )
             )
             .scalars()

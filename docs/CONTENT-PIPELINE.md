@@ -81,7 +81,13 @@ production had zero bare rows). One create path remains, `POST
 Both ids are validated as ULIDs at the boundary (`ULIDRefStr`,
 [`src/api/schemas/types.py`](../src/api/schemas/types.py)), so a malformed
 reference is a 422 rather than a row that fails later against a real captured
-revision. There is **no dashboard create** (`/watched-items/new`, its form
+revision. **Canonical uppercase Crockford base32 only** — the same standard
+`parse_ulid` holds path parameters to, since it is the same parser
+(`ULID.from_str`, which rejects the lowercase form). The OpenAPI document
+carries the matching `format: ulid` + `pattern`, so a generated client sees the
+constraint rather than a bare string; a schema test pins the pattern and the
+parser to the same accept-set. Archiver's provisioning call satisfies this by
+construction — it sends `str()` of a `ULID`. There is **no dashboard create** (`/watched-items/new`, its form
 template, and the "New Watched Item" CTA are gone); the list's empty state
 points at Archiver.
 

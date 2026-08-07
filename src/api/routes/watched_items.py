@@ -80,6 +80,13 @@ async def create_watched_item(
     is validated via the Archiver SDK and the name defaults to the InfoItem's
     name. Errors: NotFound → 422, AuthError → 500, ServerError/network → 503,
     duplicate InfoItem → 409.
+
+    **Both ids must be canonical ULIDs — uppercase Crockford base32.** That is
+    what ``ULID.from_str`` accepts, so it is what path parameters have always
+    required and what ``ULIDRefStr`` now enforces here; the OpenAPI document
+    advertises the same pattern. Archiver's provisioning call satisfies this by
+    construction (``str()`` of a ``ULID``); a caller that lowercases its ids
+    gets a 422 naming the field.
     """
     info_client = get_registry().get_archiver_client()
     try:

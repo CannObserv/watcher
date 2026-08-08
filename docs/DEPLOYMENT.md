@@ -167,22 +167,24 @@ above, **neither order avoids a window**:
 Run the two back-to-back and accept the seconds in between:
 
 ```bash
+export $(cat /etc/watcher/.env .env 2>/dev/null | xargs)
 uv run alembic upgrade head && sudo systemctl restart watcher
 ```
 
-What fails in that window is bounded and self-healing: `check_watched_item` on
-each `schedule_tick`, the every-minute pending-publish sweep, and the reaper's
-re-issues. All are periodic — the next tick after the restart succeeds, and no
-WatchedItem is left in a bad state. In the journal it looks like
+What fails in that window is bounded and self-healing, and it is only the two
+paths that **INSERT** a command row: `check_watched_item` on each
+`schedule_tick`, and the reaper's re-issues. Both are periodic — the next tick
+after the restart succeeds, and no WatchedItem is left in a bad state. (The
+pending-publish sweep and the fact consumer only UPDATE existing rows, so
+neither is affected; a command already in flight rides the window out and its
+row is backfilled.) In the journal it looks like
 
 ```
 null value in column "info_source_id" of relation "fetch_commands"
 ```
 
 on a handful of procrastinate jobs, then silence. That is the expected shape of
-this deploy, not a symptom of something worse. Prefer a moment with no open
-commands (`SELECT count(*) FROM fetch_commands WHERE status IN
-('pending_publish','in_flight')`) so nothing in flight is disturbed.
+this deploy, not a symptom of something worse.
 
 **This deploy also has a cross-service prerequisite:** Replicator must be
 publishing `info_source_id` on its facts (CannObserv/replicator#28) *before*

@@ -80,6 +80,11 @@ reaper re-issues. The reverse ordering is safe (`extra="ignore"` on both sides).
 Facts published before Replicator's upgrade and still unread at watcher restart
 hit the same path, so prefer a quiet window.
 
+The **migration** has its own ordering problem, unrelated to Replicator: no
+order of `alembic upgrade head` and `systemctl restart` avoids a brief window of
+failing command INSERTs. [`DEPLOYMENT.md`](DEPLOYMENT.md) → "No safe order" has
+the procedure and what it looks like in the journal.
+
 **Async create (step 3).** Nothing on a create path probes
 (`resolve_watch_target`, [`src/core/watched_items.py`](../src/core/watched_items.py)).
 Since #251 that helper's only caller is the dashboard's `effective_url` edit,

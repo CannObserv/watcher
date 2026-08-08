@@ -67,6 +67,15 @@ class TestCreateFetchCommand:
         assert first.command_id != second.command_id
         assert first.intent_id != second.intent_id
 
+    async def test_snapshots_the_info_source_id(self, db_session):
+        # #252/cannobserv#300: the domain key rides on the row, so the sweep —
+        # which holds no WatchedItem — can still publish a valid command.
+        wi = await make_watched_item(db_session, primary_url="https://lcb.wa.gov/notices")
+        row = await create_fetch_command(db_session, wi, now=NOW)
+        await db_session.flush()
+
+        assert row.info_source_id == wi.archiver_info_source_id
+
     async def test_reissue_keeps_intent_lineage(self, db_session):
         wi = await make_watched_item(db_session, primary_url="https://lcb.wa.gov/notices")
         first = await create_fetch_command(db_session, wi, now=NOW)
@@ -93,6 +102,8 @@ class TestPublishFetchCommand:
         assert command.url == row.url
         # replicator#11: UA-neutral cutover — fingerprint byte-continuity.
         assert command.headers == {"user-agent": WATCHER_USER_AGENT}
+        # cannobserv#300: the fetch names the domain object it is for.
+        assert command.info_source_id == wi.archiver_info_source_id
 
     async def test_publish_marks_in_flight(self, db_session):
         wi = await make_watched_item(db_session, primary_url="https://lcb.wa.gov/notices")

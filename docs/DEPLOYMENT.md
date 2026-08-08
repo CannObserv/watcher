@@ -154,6 +154,43 @@ at the time of writing, so the migration itself is a metadata-only lock on four
 rows; the ordering is about the window, not the data. Subsequent deploys use the
 standard order above.
 
+### No safe order — one-time, `e7c4b2a91f60` (#252)
+
+`e7c4b2a91f60` adds `fetch_commands.info_source_id` NOT NULL, and the release
+that needs it is the same release that populates it. Unlike `d5a71c93e0f2`
+above, **neither order avoids a window**:
+
+- Migrate first → the still-running old code's `create_fetch_command` omits the
+  column, and every INSERT raises `NotNullViolation`.
+- Restart first → the new code names a column the database does not have yet.
+
+Run the two back-to-back and accept the seconds in between:
+
+```bash
+export $(cat /etc/watcher/.env .env 2>/dev/null | xargs)
+uv run alembic upgrade head && sudo systemctl restart watcher
+```
+
+What fails in that window is bounded and self-healing, and it is only the two
+paths that **INSERT** a command row: `check_watched_item` on each
+`schedule_tick`, and the reaper's re-issues. Both are periodic — the next tick
+after the restart succeeds, and no WatchedItem is left in a bad state. (The
+pending-publish sweep and the fact consumer only UPDATE existing rows, so
+neither is affected; a command already in flight rides the window out and its
+row is backfilled.) In the journal it looks like
+
+```
+null value in column "info_source_id" of relation "fetch_commands"
+```
+
+on a handful of procrastinate jobs, then silence. That is the expected shape of
+this deploy, not a symptom of something worse.
+
+**This deploy also has a cross-service prerequisite:** Replicator must be
+publishing `info_source_id` on its facts (CannObserv/replicator#28) *before*
+watcher restarts onto co-core 0.8.0, or the fact consumer cannot decode them.
+See [CONTENT-PIPELINE.md](CONTENT-PIPELINE.md) → "`info_source_id` on the wire".
+
 ### Migration baseline (squash) — one-time stamp
 
 The pre-#234 migration chain was squashed into a single genesis baseline

@@ -10,9 +10,14 @@ The value is snapshotted onto the command row rather than joined at publish time
 — the pending-publish sweep holds only this row, no WatchedItem.
 
 Hand-written: autogenerate would emit a bare NOT NULL add and fail on any
-existing row. Backfill is total because #251 made
-``watched_items.archiver_info_source_id`` NOT NULL, so add-nullable → backfill →
-SET NOT NULL needs no fallback branch.
+existing row. Add-nullable → backfill → SET NOT NULL needs no fallback branch
+because *two* guarantees make the backfill total: every ``fetch_commands`` row
+has a ``watched_items`` row (the ``watched_item_id`` FK, ``ON DELETE CASCADE``),
+and every one of those carries an ``archiver_info_source_id`` (#251 made it NOT
+NULL). Drop either and the ``UPDATE ... FROM`` join leaves rows NULL and the
+``SET NOT NULL`` fails.
+
+Deploying this has no safe order — see ``docs/DEPLOYMENT.md`` → "No safe order".
 """
 
 from collections.abc import Sequence

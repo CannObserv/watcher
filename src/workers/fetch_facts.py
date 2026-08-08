@@ -76,7 +76,12 @@ async def _defer_apply_failure(command_id: str) -> None:
     await apply_fetch_failure.configure().defer_async(command_id=command_id)
 
 
-async def _log_orphan(session, message: str, payload, **fields) -> None:
+async def _log_orphan(
+    session,
+    message: str,
+    payload: BlobAvailableEvent | FetchFailedEvent,
+    **fields,
+) -> None:
     """Report a fact that correlates to no command of ours — attributably (#252).
 
     ``info_source_id`` (cannobserv#300) makes the discard *attributable*, not
@@ -113,7 +118,7 @@ async def _log_orphan(session, message: str, payload, **fields) -> None:
     )
 
 
-def _check_echo(row: FetchCommand, payload) -> None:
+def _check_echo(row: FetchCommand, payload: BlobAvailableEvent | FetchFailedEvent) -> None:
     """Warn when a fact's echoed ``info_source_id`` disagrees with the command's.
 
     Free (both values are in hand) and an integrity signal on the round-trip —

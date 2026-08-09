@@ -42,6 +42,13 @@ logger = get_logger(__name__)
 
 WATCHER_CACHE_TTL_SECONDS = int(os.environ.get("WATCHER_CACHE_TTL_SECONDS", "600"))
 
+# The media type of the EXTRACTED content, not of what the origin served. Every
+# extractor in the registry produces text, joined and UTF-8 encoded; the wire
+# keeps this and ``source_media_type`` as separate fields precisely because they
+# differ for one revision (an HTML page is served text/html; the text extracted
+# from it is not).
+EXTRACTED_CONTENT_MEDIA_TYPE = "text/plain; charset=utf-8"
+
 
 class ExtractionError(Exception):
     """Raised when the dispatched extractor cannot process the fetched bytes.
@@ -80,14 +87,6 @@ def _extract_with_spec(
     return extractor.extract(raw_content, config=config)
 
 
-# The media type of the EXTRACTED content, not of what the origin served. Every
-# extractor in the registry produces text, joined and UTF-8 encoded below; the
-# wire keeps this and ``source_media_type`` as separate fields precisely because
-# they differ for one revision (an HTML page is served text/html; the text
-# extracted from it is not).
-EXTRACTED_CONTENT_MEDIA_TYPE = "text/plain; charset=utf-8"
-
-
 @dataclass(frozen=True)
 class BlobProvenance:
     """The correlated ``content.blobs`` fact, carried onto the outbox row (#253).
@@ -96,11 +95,19 @@ class BlobProvenance:
     the pipeline. Optional here only while the HTTP POST path still drains off
     ``content_cache_uri``; the publisher requires it, so this tightens to a
     required argument when the POST goes away.
+
+    Every field is nullable because its source column is (``fetch_commands`` fact
+    fields are all populated by the consumer, so they are NULL until the fact
+    lands). In practice a row that reaches apply has read its blob, so
+    ``blob_uri`` is set, and ``media_type`` is required on ``BlobAvailableEvent``
+    — but a dataclass validates nothing, and declaring ``str`` while a ``None``
+    flows through would move the failure from the publisher's dead-letter path,
+    where it is classified, to a type annotation nobody enforces (CR-2).
     """
 
     command_id: str
-    blob_uri: str
-    source_media_type: str
+    blob_uri: str | None
+    source_media_type: str | None
     blob_expires_at: datetime | None = None
 
 
@@ -125,6 +132,7 @@ def _extract_and_fingerprint(
     *,
     extractor: Extractor | None = None,
     extra_config: dict | None = None,
+    spec_id: str | None = None,
 ) -> ExtractionOutcome:
     """Extract content and fingerprint, trying source_specs in order until non-empty.
 
@@ -134,6 +142,12 @@ def _extract_and_fingerprint(
     ``extractor``/``extra_config`` select and tune the
     media-type-appropriate extractor (defaults to HTML). Synchronous: extraction
     and hashing are pure CPU (#236).
+
+    ``spec_fingerprint`` is ``None`` when the item carried no ``source_specs``:
+    the ``[{}]`` below is a synthetic full-page default, not a spec anyone
+    authored, and ``spec_fingerprint({})`` would name one present in no registry
+    — Archiver's index lookup would miss and flag the revision as superseded.
+    ``spec_id`` identifies the item for the warning path (#253 CR-7).
     """
     specs: list[dict] = source_specs if source_specs else [{}]
     result = ExtractionResult(chunks=[])
@@ -152,11 +166,13 @@ def _extract_and_fingerprint(
         content_bytes=content_bytes,
         content_size_bytes=len(content_bytes),
         schema_version=int(used_spec.get("schema_version", 1)),
-        spec_fingerprint=_spec_fingerprint_or_none(used_spec),
+        spec_fingerprint=(
+            _spec_fingerprint_or_none(used_spec, spec_id=spec_id) if source_specs else None
+        ),
     )
 
 
-def _spec_fingerprint_or_none(spec: dict) -> str | None:
+def _spec_fingerprint_or_none(spec: dict, *, spec_id: str | None = None) -> str | None:
     """co-core's derivation over the spec that produced the bytes, or ``None``.
 
     ``SpecFingerprintError`` subclasses ``ValueError``; co-core rejects a spec
@@ -164,11 +180,17 @@ def _spec_fingerprint_or_none(spec: dict) -> str | None:
     Every one of those is a reason to report no spec identity rather than to
     lose the revision — the field is a diagnostic, and Archiver's policy is
     record-and-flag, never reject (archiver#139).
+
+    ``spec_id`` names the WatchedItem in the warning: an operator who learns only
+    that *a* spec somewhere is malformed cannot go fix one (#253 CR-7).
     """
     try:
         return spec_fingerprint(spec)
     except ValueError as exc:
-        logger.warning("spec_fingerprint underivable", extra={"error": str(exc)})
+        logger.warning(
+            "spec_fingerprint underivable",
+            extra={"error": str(exc), "watched_item_id": spec_id},
+        )
         return None
 
 
@@ -218,7 +240,11 @@ async def process_watched_item(
     """
     reg = registry if registry is not None else get_registry()
     now = datetime.now(UTC)
-    source_specs: list[dict] = watched_item.source_specs or [{}]
+    # Passed through as-is, empty included: substituting the synthetic ``[{}]``
+    # here would hide "the item has no specs" from _extract_and_fingerprint,
+    # which is exactly the distinction spec_fingerprint must report (CR-1). The
+    # extractor's own default handles the empty list.
+    source_specs: list[dict] = watched_item.source_specs or []
 
     # Dispatch the extractor on the observed/overridden media type (#168 slice 2).
     # Derived in Python from content_media_type (seeded by the caller from this
@@ -229,7 +255,11 @@ async def process_watched_item(
     extra_config = extraction_overrides_for_essence(essence)
     try:
         outcome = _extract_and_fingerprint(
-            raw_content, source_specs, extractor=extractor, extra_config=extra_config
+            raw_content,
+            source_specs,
+            extractor=extractor,
+            extra_config=extra_config,
+            spec_id=str(watched_item.id),
         )
     except Exception as exc:
         # PDF/CSV extractors raise on mismatched bytes; surface as a typed error so

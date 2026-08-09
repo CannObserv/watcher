@@ -352,12 +352,14 @@ async def apply_fetch_blob(
                 watched_item=watched_item,
                 raw_content=raw_content,
                 registry=reg,
+                # Both nullable columns, carried through as-is: media_type is
+                # required on the blob fact and the blob has already been read
+                # by here, so in practice both are set — but "" would be a lie
+                # and the publisher's dead-letter path is where a missing value
+                # belongs, not a silent substitution here (CR-2).
                 blob=BlobProvenance(
                     command_id=row.command_id,
                     blob_uri=row.blob_uri,
-                    # media_type is required on the blob fact, so a row that
-                    # reached apply always has one; "" would be a lie, and the
-                    # publisher would rather fail loudly on a missing value.
                     source_media_type=row.media_type,
                     blob_expires_at=row.blob_expires_at,
                 ),

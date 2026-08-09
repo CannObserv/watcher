@@ -392,6 +392,19 @@ class TestSpecFingerprintOnOutcome:
         assert outcome.spec_fingerprint is None
         assert outcome.content_size_bytes > 0
 
+    def test_no_source_specs_reports_no_spec_identity(self):
+        """CR-1: the synthetic ``[{}]`` default is not a spec anyone authored.
+
+        ``spec_fingerprint({})`` returns a perfectly real value, and that is the
+        problem — it names a spec present in no registry, so Archiver's index
+        lookup misses and flags the revision as superseded when the truth is
+        that the producer had none. ``None`` is the honest answer.
+        """
+        outcome = _extract_and_fingerprint(_HTML, [])
+
+        assert outcome.spec_fingerprint is None
+        assert outcome.content_size_bytes > 0
+
     def test_extracted_content_media_type_describes_the_extracted_text(self):
         """Not the source's type — the wire keeps those as separate fields."""
         outcome = _extract_and_fingerprint(_HTML, [_SPEC_FULL_PAGE])

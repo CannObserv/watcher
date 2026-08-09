@@ -49,6 +49,59 @@ What that leaves in the code:
   `WATCHER_FETCH_MAX_REISSUES`; hitting the cap sets ERROR health and lifts the
   gate.
 
+### Extraction outcomes: empty is a failure (#258)
+
+`source_specs` are tried in order and the first yielding non-empty chunks wins;
+an item with none extracts full-page under a synthetic default. When **every**
+spec yields empty, `process_watched_item` raises `ExtractionError` and writes
+nothing — no `ChangeRevision`, no `PendingArchiverSync`, no notification. It
+lands on the same path a raising extractor takes: `CHECK_EXTRACTION_FAILED` +
+ERROR health, dispatched once on the OK→ERROR transition.
+
+Unconditional, on both sides of a baseline. The rule exists because empty
+content fingerprints *consistently*: without it, selector rot presented as a
+**content change** — a zero-byte revision POSTed to Archiver, a
+`CHANGE_DETECTED` notification, health still OK — and an item broken from its
+first check baselined on the empty digest and never reported again. A false
+ERROR on a legitimately-emptied source is recoverable at an operator's glance; a
+false "content changed" is silent. The guard is in `process_watched_item`, not
+`_extract_and_fingerprint` — the extractor reports what it found, the caller
+judges it.
+
+### Observation provenance on the outbox (#253)
+
+`SourceRevisionObservedEvent` carries values the outbox row never held, so
+`pending_archiver_sync` gained six columns, written at enqueue time by
+`process_watched_item`:
+
+| Column | Source |
+|---|---|
+| `command_id`, `blob_uri`, `blob_expires_at` | the correlated `content.blobs` fact, via `BlobProvenance` |
+| `source_media_type` | that fact's normalized `media_type` — what the origin served |
+| `content_media_type` | the **extracted** content's type (`text/plain; charset=utf-8`) — a different thing, which is why the wire keeps both |
+| `spec_fingerprint` | co-core's derivation over the spec the fallback loop actually bound |
+
+`fetch_commands.blob_expires_at` was added to feed the first row: the fact has
+carried it since cannobserv#301 and the consumer was dropping it. It is echoed
+onward under the same name, **never** derived from the issuer contract's MUST-7
+TTL — that is Replicator's policy, on a clock that runs from last fetch
+reference, an event no consumer observes. NULL means the horizon is unknown, and
+Archiver records absence rather than a guess.
+
+Snapshotted rather than joined from `fetch_commands` at drain time: the command
+row's lifecycle is not the outbox row's — delivery to Archiver is the thing being
+guaranteed — and the apply path already holds the values. `command_id` therefore
+carries no FK.
+
+`spec_fingerprint` is **per-spec** (cannobserv#309), so a fallback from `spec[0]`
+to `spec[1]` moves it; Archiver reads the position that implies as a selector-rot
+signal (archiver#139), and its policy is record-and-flag, never reject. Two cases
+report `None` rather than a value: an item with no `source_specs` at all, because
+the synthetic `[{}]` default is a spec present in no registry and naming it would
+be flagged as superseded; and a spec co-core cannot derive from (it rejects
+floats, explicit nulls, non-ASCII keys), because a diagnostic must never cost a
+revision.
+
 ### `info_source_id` on the wire (#252)
 
 co-core **0.8.0** (cannobserv#300) makes `info_source_id` required on all three

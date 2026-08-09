@@ -192,6 +192,34 @@ class TestApplyFetchBlob:
         assert wi.last_checked_at is not None
         assert len(await _audit_events(db_session, EventType.CHECK_EXTRACTION_FAILED)) == 1
 
+    async def test_empty_extraction_reaches_error_health_unstubbed(
+        self, db_session, monkeypatch, tmp_path
+    ):
+        """#258 end-to-end: the real guard drives the apply path, not a stubbed raise.
+
+        The test above proves the *handling* with a mocked ``ExtractionError``.
+        This one proves the guard actually reaches it from real bytes — the
+        operator-facing claim is that rot lands as ERROR health rather than as a
+        content change, and only an unstubbed pipeline can show that.
+        """
+        wi, row = await _row_with_fact(
+            db_session, tmp_path, content=b"<html><body><p>hi</p></body></html>"
+        )
+        wi.source_specs = [
+            {"schema_version": 1, "extraction": {"algorithm": "css", "selector": ".gone"}}
+        ]
+        await db_session.flush()
+        monkeypatch.setattr(
+            fc_mod, "get_session_factory", lambda: _mock_session_factory(db_session)
+        )
+
+        result = await apply_fetch_blob(row.command_id, registry=ServiceRegistry())
+
+        assert result == {"error": "extraction_failed"}
+        assert row.status == FetchCommandStatus.FAILED
+        assert wi.health_status == WatchHealthStatus.ERROR
+        assert len(await _audit_events(db_session, EventType.CHECK_EXTRACTION_FAILED)) == 1
+
     async def test_redirect_divergence_is_audited(self, db_session, monkeypatch, tmp_path):
         wi, row = await _row_with_fact(
             db_session, tmp_path, final_url="https://lcb.wa.gov/moved-here"

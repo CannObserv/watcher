@@ -8,6 +8,7 @@ from datetime import UTC, datetime
 from unittest.mock import AsyncMock, patch
 
 import pytest
+from co_core.pure.extract import derivation_of, spec_fingerprint
 from co_core.pure.extract.csv_excel import CsvExcelExtractor
 from co_core.pure.extract.html import HtmlExtractor
 from co_core.pure.extract.pdf import PdfExtractor
@@ -16,8 +17,10 @@ from sqlalchemy import select
 from src.core.models.change_revision import ChangeRevision
 from src.core.models.pending_archiver_sync import PendingArchiverSync
 from src.workers.pipeline import (
+    BlobProvenance,
     ExtractionError,
     WatchedItemResult,
+    _extract_and_fingerprint,
     _extract_with_spec,
     _extraction_config_from_spec,
     process_watched_item,
@@ -352,6 +355,113 @@ class TestEmptyExtractionGuard:
         result = await process_watched_item(db_session, wi, raw_content=_HTML)
 
         assert result.baseline_established is True
+
+
+# ---------------------------------------------------------------------------
+# Observation provenance on the outbox row (#253)
+# ---------------------------------------------------------------------------
+
+
+class TestSpecFingerprintOnOutcome:
+    """The fingerprint names the spec the loop actually bound, per cannobserv#309.
+
+    Per-spec, not list-level: the fallback moving spec[0] -> spec[1] is a real
+    change in what determines the extracted bytes, and Archiver reads the
+    position it implies as a selector-rot signal.
+    """
+
+    def test_fingerprints_the_spec_actually_used(self):
+        outcome = _extract_and_fingerprint(_HTML, [_SPEC_FULL_PAGE])
+
+        assert outcome.spec_fingerprint == spec_fingerprint(_SPEC_FULL_PAGE)
+        assert derivation_of(outcome.spec_fingerprint) == "spec1"
+
+    def test_fallback_moves_the_fingerprint_to_the_spec_that_matched(self):
+        """spec[0] misses, spec[1] wins — the reported spec must be spec[1]."""
+        outcome = _extract_and_fingerprint(_HTML, [_SPEC_MISSES, _SPEC_FULL_PAGE])
+
+        assert outcome.spec_fingerprint == spec_fingerprint(_SPEC_FULL_PAGE)
+        assert outcome.spec_fingerprint != spec_fingerprint(_SPEC_MISSES)
+
+    def test_underivable_spec_yields_none_and_does_not_fail_extraction(self):
+        """A diagnostic must never fail the pipeline (co-core raises on a float)."""
+        spec = {"schema_version": 1, "extraction": {"algorithm": "full_page"}, "weight": 1.5}
+
+        outcome = _extract_and_fingerprint(_HTML, [spec])
+
+        assert outcome.spec_fingerprint is None
+        assert outcome.content_size_bytes > 0
+
+    def test_extracted_content_media_type_describes_the_extracted_text(self):
+        """Not the source's type — the wire keeps those as separate fields."""
+        outcome = _extract_and_fingerprint(_HTML, [_SPEC_FULL_PAGE])
+
+        assert outcome.content_media_type == "text/plain; charset=utf-8"
+
+
+@pytest.mark.integration
+class TestOutboxProvenance:
+    """#253: the outbox row is the observation, so it carries where it came from."""
+
+    async def test_change_records_blob_provenance_and_spec_identity(self, db_session):
+        wi = await make_watched_item(db_session, name="Provenance")
+        wi.effective_url = "https://example.com"
+        wi.source_specs = [_SPEC_FULL_PAGE]
+        await db_session.flush()
+
+        blob = BlobProvenance(
+            command_id="01J9ZZZZZZZZZZZZZZZZZZZZZZ",
+            blob_uri="file:///var/lib/replicator/blobs/abc.bin",
+            source_media_type="text/html",
+            blob_expires_at=datetime(2026, 8, 16, tzinfo=UTC),
+        )
+
+        await process_watched_item(db_session, wi, raw_content=_HTML, blob=blob)
+        await db_session.flush()
+        await process_watched_item(db_session, wi, raw_content=_HTML_CHANGED, blob=blob)
+        await db_session.flush()
+
+        row = (
+            (
+                await db_session.execute(
+                    select(PendingArchiverSync).where(PendingArchiverSync.watched_item_id == wi.id)
+                )
+            )
+            .scalars()
+            .one()
+        )
+        assert row.command_id == blob.command_id
+        assert row.blob_uri == blob.blob_uri
+        assert row.source_media_type == "text/html"
+        assert row.blob_expires_at == blob.blob_expires_at
+        assert row.spec_fingerprint == spec_fingerprint(_SPEC_FULL_PAGE)
+        assert row.content_media_type == "text/plain; charset=utf-8"
+
+    async def test_change_without_provenance_still_writes_the_legacy_row(self, db_session):
+        """The POST path is untouched in this step — a row with no blob facts
+        still drains over HTTP off content_cache_uri."""
+        wi = await make_watched_item(db_session, name="NoProvenance")
+        wi.effective_url = "https://example.com"
+        wi.source_specs = [_SPEC_FULL_PAGE]
+        await db_session.flush()
+
+        await process_watched_item(db_session, wi, raw_content=_HTML)
+        await db_session.flush()
+        await process_watched_item(db_session, wi, raw_content=_HTML_CHANGED)
+        await db_session.flush()
+
+        row = (
+            (
+                await db_session.execute(
+                    select(PendingArchiverSync).where(PendingArchiverSync.watched_item_id == wi.id)
+                )
+            )
+            .scalars()
+            .one()
+        )
+        assert row.content_cache_uri.startswith("file://")
+        assert row.blob_uri is None
+        assert row.command_id is None
 
 
 # ---------------------------------------------------------------------------

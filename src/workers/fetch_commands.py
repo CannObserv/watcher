@@ -48,7 +48,7 @@ from src.core.registry import ServiceRegistry, get_registry
 from src.core.utils import watched_item_event_base_metadata
 from src.workers import bp
 from src.workers.notify import dispatch_event_notifications
-from src.workers.pipeline import ExtractionError, process_watched_item
+from src.workers.pipeline import BlobProvenance, ExtractionError, process_watched_item
 
 logger = get_logger(__name__)
 
@@ -352,6 +352,15 @@ async def apply_fetch_blob(
                 watched_item=watched_item,
                 raw_content=raw_content,
                 registry=reg,
+                blob=BlobProvenance(
+                    command_id=row.command_id,
+                    blob_uri=row.blob_uri,
+                    # media_type is required on the blob fact, so a row that
+                    # reached apply always has one; "" would be a lie, and the
+                    # publisher would rather fail loudly on a missing value.
+                    source_media_type=row.media_type,
+                    blob_expires_at=row.blob_expires_at,
+                ),
             )
         except ExtractionError as exc:
             logger.warning(

@@ -45,7 +45,7 @@ def _mock_session_factory(db_session):
 
 
 def _stub_pipeline(monkeypatch, *, changed=True, raises=None) -> AsyncMock:
-    async def _proc(session, watched_item, *, raw_content, registry=None):
+    async def _proc(session, watched_item, *, raw_content, registry=None, blob=None):
         if raises is not None:
             raise raises
         return WatchedItemResult(changed=changed)
@@ -191,6 +191,27 @@ class TestApplyFetchBlob:
         assert wi.health_status == WatchHealthStatus.ERROR
         assert wi.last_checked_at is not None
         assert len(await _audit_events(db_session, EventType.CHECK_EXTRACTION_FAILED)) == 1
+
+    async def test_blob_provenance_is_threaded_to_the_pipeline(
+        self, db_session, monkeypatch, tmp_path
+    ):
+        """#253: the apply path holds the FetchCommand, so it supplies provenance.
+
+        The pipeline test proves the outbox row stores what it is given; this
+        proves what it is given comes from the correlated fact.
+        """
+        wi, row = await _row_with_fact(db_session, tmp_path, media_type="application/pdf")
+        row.blob_expires_at = NOW + timedelta(days=7)
+        await db_session.flush()
+        stub = _wire(db_session, monkeypatch, changed=True)
+
+        await apply_fetch_blob(row.command_id, registry=ServiceRegistry())
+
+        blob = stub.await_args.kwargs["blob"]
+        assert blob.command_id == row.command_id
+        assert blob.blob_uri == row.blob_uri
+        assert blob.source_media_type == "application/pdf"
+        assert blob.blob_expires_at == NOW + timedelta(days=7)
 
     async def test_empty_extraction_reaches_error_health_unstubbed(
         self, db_session, monkeypatch, tmp_path

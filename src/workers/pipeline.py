@@ -99,8 +99,9 @@ def _extract_and_fingerprint(
     """Extract content and fingerprint, trying source_specs in order until non-empty.
 
     Falls back to the next spec if the current one yields no chunks. If all
-    specs yield empty chunks, uses the last result (fingerprinting empty content
-    is a valid baseline). ``extractor``/``extra_config`` select and tune the
+    specs yield empty chunks, uses the last result — reporting what it found
+    rather than judging it; the caller rejects the all-empty outcome (#258).
+    ``extractor``/``extra_config`` select and tune the
     media-type-appropriate extractor (defaults to HTML). Synchronous: extraction
     and hashing are pure CPU (#236).
     """
@@ -152,10 +153,11 @@ async def process_watched_item(
     """Run one check cycle for a WatchedItem.
 
     1. Extract content using `watched_item.source_specs`; fingerprint.
-    2. Query `change_revisions` for the last fingerprint.
-    3. First run: insert baseline ChangeRevision, no notification.
-    4. Same fingerprint: cache hit, no action.
-    5. Changed: insert new ChangeRevision, optionally enqueue PendingArchiverSync,
+    2. Empty extraction: raise `ExtractionError` — never a revision (#258).
+    3. Query `change_revisions` for the last fingerprint.
+    4. First run: insert baseline ChangeRevision, no notification.
+    5. Same fingerprint: cache hit, no action.
+    6. Changed: insert new ChangeRevision, optionally enqueue PendingArchiverSync,
        dispatch CHANGE_DETECTED once for the WatchedItem.
 
     `watched_item.last_changed_at` is updated on change.
@@ -183,6 +185,22 @@ async def process_watched_item(
         # PDF/CSV extractors raise on mismatched bytes; surface as a typed error so
         # the caller records a health signal rather than dead-letter-looping (#168).
         raise ExtractionError(f"extraction failed (essence={essence!r}): {exc}") from exc
+
+    # #258: every spec yielded empty. Not an exception from the extractor, but not
+    # a content observation either — the fallback loop exhausted, and its terminal
+    # case left `used_spec` pointing at the last spec rather than a chosen one.
+    # Treated as a failure unconditionally, on both sides of a baseline: an item
+    # whose extraction yields nothing is a broken watch either way, and the
+    # alternative is worse in the silent direction. Empty content fingerprints
+    # consistently, so before this guard rot presented as a *content change* —
+    # zero-byte revision, POST to Archiver, CHANGE_DETECTED notification, health
+    # still OK — and an item broken from its first check baselined on the empty
+    # digest and never reported anything again.
+    if outcome.content_size_bytes == 0:
+        raise ExtractionError(
+            f"every source_spec yielded empty content (essence={essence!r}, "
+            f"specs={len(source_specs)})"
+        )
 
     last_rev = (
         await session.execute(

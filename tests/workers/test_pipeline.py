@@ -16,6 +16,7 @@ from sqlalchemy import select
 from src.core.models.change_revision import ChangeRevision
 from src.core.models.pending_archiver_sync import PendingArchiverSync
 from src.workers.pipeline import (
+    ExtractionError,
     WatchedItemResult,
     _extract_with_spec,
     _extraction_config_from_spec,
@@ -250,6 +251,107 @@ class TestProcessWatchedItem:
         assert result.notifications_dispatched == 1
         assert len(dispatched_events) == 1
         assert dispatched_events[0].watched_item_id == str(wi.id)
+
+
+# ---------------------------------------------------------------------------
+# Empty-extraction guard (#258)
+# ---------------------------------------------------------------------------
+
+# A spec whose selector matches nothing in _HTML — what selector rot looks like
+# once it has reached every alternative in source_specs.
+_SPEC_MISSES = {"schema_version": 1, "extraction": {"algorithm": "css", "selector": ".gone"}}
+_SPEC_FULL_PAGE = {"schema_version": 1, "extraction": {"algorithm": "full_page"}}
+
+
+@pytest.mark.integration
+class TestEmptyExtractionGuard:
+    """#258: an all-empty extraction is a failure, never a content change.
+
+    Unconditional — the guard does not consult prior revisions. Extracting
+    nothing is a broken watch whichever side of a baseline it lands on, and the
+    alternative is a silent false ``content changed`` on a rotted selector.
+    """
+
+    async def test_all_specs_empty_raises_extraction_error(self, db_session):
+        """No baseline yet: the empty digest must not become the baseline."""
+        wi = await make_watched_item(db_session, name="EmptyFirstRun")
+        wi.effective_url = "https://example.com"
+        wi.source_specs = [_SPEC_MISSES]
+        await db_session.flush()
+
+        with pytest.raises(ExtractionError):
+            await process_watched_item(db_session, wi, raw_content=_HTML)
+
+        revs = (
+            (
+                await db_session.execute(
+                    select(ChangeRevision).where(ChangeRevision.watched_item_id == wi.id)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert revs == []
+
+    async def test_rot_after_baseline_writes_nothing_and_does_not_notify(self, db_session):
+        """The regression that matters: rot must not present as a content change.
+
+        Before #258 this wrote a zero-byte ChangeRevision, enqueued it to
+        Archiver, dispatched CHANGE_DETECTED, and left health OK.
+        """
+        wi = await make_watched_item(db_session, name="EmptyAfterBaseline")
+        wi.effective_url = "https://example.com"
+        wi.source_specs = [_SPEC_FULL_PAGE]
+        await db_session.flush()
+
+        await process_watched_item(db_session, wi, raw_content=_HTML)
+        await db_session.flush()
+
+        # Selectors rot: every spec now misses.
+        wi.source_specs = [_SPEC_MISSES]
+        await db_session.flush()
+
+        with patch(
+            "src.workers.pipeline.dispatch_event_notifications", new_callable=AsyncMock
+        ) as mock_dispatch:
+            with pytest.raises(ExtractionError):
+                await process_watched_item(db_session, wi, raw_content=_HTML)
+
+        mock_dispatch.assert_not_awaited()
+
+        revs = (
+            (
+                await db_session.execute(
+                    select(ChangeRevision).where(ChangeRevision.watched_item_id == wi.id)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert len(revs) == 1  # the baseline only
+
+        syncs = (
+            (
+                await db_session.execute(
+                    select(PendingArchiverSync).where(PendingArchiverSync.watched_item_id == wi.id)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert syncs == []
+        assert wi.last_changed_at is None
+
+    async def test_fallback_to_a_later_non_empty_spec_still_succeeds(self, db_session):
+        """The guard fires on exhaustion, not on any single spec missing."""
+        wi = await make_watched_item(db_session, name="FallbackStillWorks")
+        wi.effective_url = "https://example.com"
+        wi.source_specs = [_SPEC_MISSES, _SPEC_FULL_PAGE]
+        await db_session.flush()
+
+        result = await process_watched_item(db_session, wi, raw_content=_HTML)
+
+        assert result.baseline_established is True
 
 
 # ---------------------------------------------------------------------------

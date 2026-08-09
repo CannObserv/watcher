@@ -238,6 +238,18 @@ recorded like a fetch failure (ERROR health + `CHECK_EXTRACTION_FAILED` audit +
 `WATCH_ERROR`), so a mislabeled non-HTML target surfaces a signal instead of
 re-firing every `schedule_tick`.
 
+**Empty extraction is a failure, not a change (#258).** `source_specs` are tried
+in order and the first yielding non-empty chunks wins; when **every** spec yields
+empty, `process_watched_item` raises `ExtractionError` and writes nothing — no
+`ChangeRevision`, no `PendingArchiverSync`, no notification. Unconditional, on
+both sides of a baseline. The rule exists because empty content fingerprints
+*consistently*: without it, selector rot presented as a **content change** (a
+zero-byte revision POSTed to Archiver, a `CHANGE_DETECTED` notification, health
+still OK), and an item broken from its first check baselined on the empty digest
+and never reported again. The guard is in `process_watched_item`, not
+`_extract_and_fingerprint` — the extractor reports what it found, the caller
+judges it.
+
 **Domain keying (#197).** `WatchedItem.domain_name` == `Domain.name` == `hostname(effective_url)` — the same string by construction (all derive from one `urlparse(...).hostname` over the same `effective_url`). That equality is what lets the fetch-policy producer publish per-`Domain.name` while items carry `domain_name`, and it is why `resolve_watch_target` derives the domain with the identical helper. **One entry per hostname** — host variants (`lcb.wa.gov` vs `www.lcb.wa.gov`) are independent by design. *History:* this used to describe the in-process `DomainRateLimiter`'s bucket key; the limiter retired with the local fetch path (#241 step 5) and per-host pacing is Replicator's, but the keying invariant still holds and is still load-bearing.
 
 **Every WatchedItem is an Archiver InfoItem being watched (#251).**

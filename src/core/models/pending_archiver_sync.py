@@ -2,7 +2,7 @@
 
 from datetime import UTC, datetime
 
-from sqlalchemy import DateTime, ForeignKey, Integer, Text, func
+from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column
 from ulid import ULID
 
@@ -38,6 +38,24 @@ class PendingArchiverSync(Base):
     content_cache_expires_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False
     )
+    # --- observation provenance, for source_revision_observed (#253) ---
+    # Snapshotted from the correlated content.blobs fact at enqueue time rather
+    # than joined from fetch_commands at drain time: the command row's lifecycle
+    # is not this row's, and the apply path holds the values already. All
+    # nullable while the HTTP POST path still drains off content_cache_uri —
+    # rows written before the publisher lands legitimately have none.
+    command_id: Mapped[str | None] = mapped_column(String(26), nullable=True, default=None)
+    blob_uri: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
+    blob_expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, default=None
+    )
+    # What the origin served, echoed from the blob fact's normalized media_type.
+    source_media_type: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
+    # ...of the EXTRACTED content, which is a different thing (see the wire's
+    # own note on the pair). Not nullable in intent — it is always in hand — but
+    # nullable in the column so the migration needs no backfill of invented data.
+    content_media_type: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
+    spec_fingerprint: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
     attempts: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0", default=0)
     last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
     next_attempt_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)

@@ -91,6 +91,13 @@ class FetchCommand(Base, TimestampMixin):
     )
     content_fingerprint: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
     blob_uri: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
+    # When the blob stops being retrievable at ``blob_uri``. Echoed onward on
+    # ``source_revision_observed`` under the same name (#253) — never derived
+    # from the issuer contract's MUST-7 TTL, which is Replicator's policy on a
+    # clock that runs from last fetch reference. NULL means unknown.
+    blob_expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, default=None
+    )
     size_bytes: Mapped[int | None] = mapped_column(BigInteger, nullable=True, default=None)
     media_type: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
     content_type_raw: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)

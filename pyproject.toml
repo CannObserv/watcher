@@ -28,8 +28,8 @@ dependencies = [
     "html5lib>=1.1",
     "notifier-client",
     "archiver-client>=4.0.0,<5",
-    "co-core[extract]>=0.8.0,<0.9",
-    "co-core-aio[bus]>=0.8.0,<0.9",
+    "co-core[extract]>=0.8.1,<0.9",
+    "co-core-aio[bus]>=0.8.1,<0.9",
 ]
 
 [dependency-groups]

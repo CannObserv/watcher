@@ -15,6 +15,7 @@ from datetime import UTC, datetime, timedelta
 from co_core.pure.extract import (
     ExtractionResult,
     Extractor,
+    spec_fingerprint,
 )
 from co_core.pure.extract import (
     extraction_config_from_spec as _extraction_config_from_spec,
@@ -79,6 +80,30 @@ def _extract_with_spec(
     return extractor.extract(raw_content, config=config)
 
 
+# The media type of the EXTRACTED content, not of what the origin served. Every
+# extractor in the registry produces text, joined and UTF-8 encoded below; the
+# wire keeps this and ``source_media_type`` as separate fields precisely because
+# they differ for one revision (an HTML page is served text/html; the text
+# extracted from it is not).
+EXTRACTED_CONTENT_MEDIA_TYPE = "text/plain; charset=utf-8"
+
+
+@dataclass(frozen=True)
+class BlobProvenance:
+    """The correlated ``content.blobs`` fact, carried onto the outbox row (#253).
+
+    Supplied by the apply path, which holds the ``FetchCommand`` when it calls
+    the pipeline. Optional here only while the HTTP POST path still drains off
+    ``content_cache_uri``; the publisher requires it, so this tightens to a
+    required argument when the POST goes away.
+    """
+
+    command_id: str
+    blob_uri: str
+    source_media_type: str
+    blob_expires_at: datetime | None = None
+
+
 @dataclass
 class ExtractionOutcome:
     """Result of extracting and fingerprinting raw content."""
@@ -87,6 +112,11 @@ class ExtractionOutcome:
     content_bytes: bytes
     content_size_bytes: int
     schema_version: int
+    # Identity of the spec the fallback loop actually bound — per-spec, so a
+    # fallback from spec[0] to spec[1] moves it (cannobserv#309). ``None`` when
+    # co-core cannot derive one; a diagnostic must never fail the pipeline.
+    spec_fingerprint: str | None = None
+    content_media_type: str = EXTRACTED_CONTENT_MEDIA_TYPE
 
 
 def _extract_and_fingerprint(
@@ -122,7 +152,24 @@ def _extract_and_fingerprint(
         content_bytes=content_bytes,
         content_size_bytes=len(content_bytes),
         schema_version=int(used_spec.get("schema_version", 1)),
+        spec_fingerprint=_spec_fingerprint_or_none(used_spec),
     )
+
+
+def _spec_fingerprint_or_none(spec: dict) -> str | None:
+    """co-core's derivation over the spec that produced the bytes, or ``None``.
+
+    ``SpecFingerprintError`` subclasses ``ValueError``; co-core rejects a spec
+    carrying a float, an explicit null, a non-ASCII key, or any non-JSON type.
+    Every one of those is a reason to report no spec identity rather than to
+    lose the revision — the field is a diagnostic, and Archiver's policy is
+    record-and-flag, never reject (archiver#139).
+    """
+    try:
+        return spec_fingerprint(spec)
+    except ValueError as exc:
+        logger.warning("spec_fingerprint underivable", extra={"error": str(exc)})
+        return None
 
 
 # ---------------------------------------------------------------------------
@@ -149,6 +196,7 @@ async def process_watched_item(
     *,
     raw_content: bytes,
     registry: ServiceRegistry | None = None,
+    blob: BlobProvenance | None = None,
 ) -> WatchedItemResult:
     """Run one check cycle for a WatchedItem.
 
@@ -165,6 +213,8 @@ async def process_watched_item(
     `registry` selects the extractor; defaults to the process singleton. The caller
     (`check_watched_item`) threads its own registry so the extractor and fetcher
     come from the same place (honouring the `ServiceRegistry` injection seam).
+    `blob` carries the correlated `content.blobs` fact onto the outbox row (#253);
+    the apply path always supplies it, and the publisher requires it.
     """
     reg = registry if registry is not None else get_registry()
     now = datetime.now(UTC)
@@ -246,6 +296,11 @@ async def process_watched_item(
     scratch_path = write_scratch_bytes(str(rev.id), outcome.content_bytes)
     expires_at = now + timedelta(seconds=WATCHER_CACHE_TTL_SECONDS)
     cache_uri = f"file://{scratch_path}"
+    # The outbox row is the observation, so it carries where the bytes came from
+    # (#253): the blob facts as Replicator stated them, plus the identity of the
+    # spec they were extracted under. Snapshotted here rather than joined at
+    # drain time — the FetchCommand's lifecycle is not the outbox row's, and the
+    # values are free at this point because the apply path already holds them.
     session.add(
         PendingArchiverSync(
             change_revision_id=rev.id,
@@ -253,6 +308,12 @@ async def process_watched_item(
             content_cache_uri=cache_uri,
             content_cache_expires_at=expires_at,
             next_attempt_at=now,
+            command_id=blob.command_id if blob else None,
+            blob_uri=blob.blob_uri if blob else None,
+            blob_expires_at=blob.blob_expires_at if blob else None,
+            source_media_type=blob.source_media_type if blob else None,
+            content_media_type=outcome.content_media_type,
+            spec_fingerprint=outcome.spec_fingerprint,
         )
     )
 

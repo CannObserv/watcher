@@ -13,7 +13,7 @@ Plus the #252 posture on ``info_source_id`` (cannobserv#300): it is reporting,
 not routing — see ``TestOrphanFacts``.
 """
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from co_core.pure.adapters.bus import streams
@@ -136,6 +136,35 @@ class TestBlobFacts:
         assert row.fact_at == NOW
         assert blob.calls == [row.command_id]
         assert fail.calls == []
+
+    async def test_blob_expires_at_is_persisted(self, db_session):
+        """#253: the blob's horizon is Replicator's to state and ours to carry.
+
+        ``SourceRevisionObservedEvent.blob_expires_at`` is echoed from this fact,
+        never derived locally — the issuer contract's MUST-7 TTL is Replicator's
+        policy on a clock that runs from last fetch reference, which no consumer
+        observes. Dropping it here would leave the observed event with no honest
+        value to send, so Archiver would record absence for every revision.
+        """
+        _, row = await _issued_row(db_session)
+        horizon = NOW + timedelta(days=7)
+
+        outcome = await process_fact_message(
+            db_session,
+            _blob_for(row, blob_expires_at=horizon),
+            defer_blob=_DeferSpy(),
+        )
+
+        assert outcome == "blob_recorded"
+        assert row.blob_expires_at == horizon
+
+    async def test_absent_blob_expires_at_stays_null(self, db_session):
+        """``None`` means the horizon is unknown — record absence, never a guess."""
+        _, row = await _issued_row(db_session)
+
+        await process_fact_message(db_session, _blob_for(row), defer_blob=_DeferSpy())
+
+        assert row.blob_expires_at is None
 
     async def test_duplicate_fact_is_idempotent(self, db_session):
         _, row = await _issued_row(db_session)

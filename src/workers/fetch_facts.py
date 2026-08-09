@@ -169,6 +169,7 @@ async def process_fact_message(
         row.fact_at = payload.occurred_at
         row.content_fingerprint = payload.content_fingerprint
         row.blob_uri = payload.blob_uri
+        row.blob_expires_at = payload.blob_expires_at
         row.size_bytes = payload.size_bytes
         row.media_type = payload.media_type
         row.content_type_raw = payload.content_type_raw

@@ -431,3 +431,7 @@ Use this pattern instead of OOB flash for validation errors that are specific to
 - **Close button**: `&times;` with `aria-label="Dismiss"`, removes parent on click. Uses `ms-4` (logical margin-inline-start).
 - **Animation**: `flash-in` keyframe — 0.2s fade + slide-up.
 - **XSS prevention**: Flash messages rendered via Jinja2 auto-escaping (`{{ flash.message }}`). No raw/safe filter used on user content.
+
+## 4. Class Inventory
+
+**CSS:** Tailwind v4 with `@theme` in `input.css`. Use component classes (`.btn`, `.badge`, `.stat-card`, `.data-table`, `.form-input`, `.link`, `.segment-group`, `.segment`, `.chip-group`, `.chip`, `.detail-grid`, `.toggle`, `.danger-zone`). Badge variants: `.badge-active` (green), `.badge-inactive` (gray), `.badge-archived` (amber), `.badge-error` (red), `.badge-warning` (orange), `.badge-info` (blue). Use CSS logical properties (`margin-inline-start` not `margin-left`).

@@ -14,7 +14,7 @@ TDD required. Red → Green → Refactor. No production code without a failing t
 
 Python ≥3.12, uv, pytest, ruff; Node.js + npm (for Tailwind CLI — `sudo npm install -g @tailwindcss/cli`, one-time VM setup).
 
-**Populate the `co-core` wheelhouse before any `uv` command** — `[tool.uv]
+**Cannobserv wheelhouse.** Populate it before any `uv` command — `[tool.uv]
 find-links` makes every invocation require the directory:
 
 ```bash
@@ -69,6 +69,7 @@ Prefetch query (run via `ToolSearch` once per session if the SessionStart remind
 |---|---|---|
 | API (live) | 8000 | `systemctl` (`watcher.service`) |
 | API (dev) | 8001 | manual uvicorn |
+| Archiver | 8020 | `systemctl` (`archiver.service`) |
 
 **The Archiver checkout is not freely relocatable.** `ARCHIVER_REPO_PATH` redirects the
 test harness alone; the `archiver-client` path dependency in `pyproject.toml` is pinned
@@ -252,7 +253,9 @@ Component classes and the HTMX/flash patterns: [docs/UI.md](docs/UI.md).
 
 **Accessibility:** WCAG 2.1 AA. Skip link, ARIA landmarks, `focus-visible` rings, 44px touch targets, `aria-live` on HTMX swap targets, reduced motion. Wrap decorative emoji in `<span aria-hidden="true">`. No `title` attributes. **Touch-target idiom (#203):** component classes (`.btn*`, `.segment`, `.chip`, `.form-input`, `.toggle`, nav-link) own the 44px guarantee — never restate `min-h-[44px]` on a `.btn`; use it only on bare interactive elements (`<a>`, `<label>`, component-less `<button>`); never `min-h-0`. Guard: `tests/dashboard/test_touch_targets.py` + `scripts/check-touch-targets.sh`. See `docs/STYLE.md` §7.
 
-**CSS:** Tailwind v4 with `@theme` in `input.css`. Use component classes (`.btn`, `.badge`, `.stat-card`, `.data-table`, `.form-input`, `.link`, `.segment-group`, `.segment`, `.chip-group`, `.chip`, `.detail-grid`, `.toggle`, `.danger-zone`). Badge variants: `.badge-active` (green), `.badge-inactive` (gray), `.badge-archived` (amber), `.badge-error` (red), `.badge-warning` (orange), `.badge-info` (blue). Use CSS logical properties (`margin-inline-start` not `margin-left`).
+**CSS:** Tailwind v4 with `@theme` in `input.css`; use the component classes rather
+than raw utilities. Full class inventory and badge variants:
+[docs/UI.md](docs/UI.md).
 
 **HTMX:** OOB flash via `partials/flash_oob.html`. CSS `.htmx-request` for loading states. Detect HTMX via the canonical `is_htmx(request)` helper ([src/dashboard/deps.py](src/dashboard/deps.py)) — `HX-Request` header with `HX-Boosted` guard, so a boosted full-page nav stays on the non-HTMX path — never a bare `request.headers.get("HX-Request")` read (guarded by `tests/dashboard/test_htmx_detection.py`; #211). All mutation routes provide non-HTMX redirect fallback.
 
@@ -266,7 +269,7 @@ Full skill reference: `docs/SKILLS.md`. Cross-project search to the sister `noti
 
 ## Detail Docs
 
-- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — module layout, the Archiver checkout constraint, and the Redis bus topology, streams, and fetch contracts
+- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — module layout, sibling-service topology, the Archiver checkout constraint, and the Redis bus topology, streams, and fetch contracts
 - [docs/COMMANDS.md](docs/COMMANDS.md) — every runnable command, the Archiver-sibling test setup, and CI
 - [docs/CONTENT-PIPELINE.md](docs/CONTENT-PIPELINE.md) — fetch → extract → fingerprint, the fetch-command outbox, the revisions producer
 - [docs/CONVENTIONS.md](docs/CONVENTIONS.md) — logging configuration, ULID error handling, DB-trigger rules

@@ -97,6 +97,23 @@ if not db_safety.is_non_production_database(TEST_DATABASE_URL):
 os.environ["DATABASE_URL"] = TEST_DATABASE_URL
 os.environ.pop("PROCRASTINATE_DATABASE_URL", None)
 
+# The same hazard in bus form, and not hypothetical: a test run under an
+# exported /etc/watcher/.env published a fabricated `source_revision_observed`
+# frame onto the *production* `content.revisions` stream. It was inert —
+# Archiver's consumer dropped it as an unknown info_source — but the producer
+# reached production Redis from a test, which is the #233 failure with a
+# different variable.
+#
+# Any producer resolving the client from the environment rather than through an
+# injected one (`get_shared_bus_client`, `bus_client_from_env`) reads whatever
+# WATCHER_BUS_REDIS_URL supplies. Clearing it makes "no bus" the test default,
+# so a test that forgets to inject a fakeredis client publishes nowhere instead
+# of onto the live stream. Tests that want a bus pass one explicitly.
+#
+# At import, for the same reason as the two above, and never restored.
+os.environ.pop("WATCHER_BUS_REDIS_URL", None)
+os.environ.pop("WATCHER_DEV_BUS_REDIS_URL", None)
+
 
 def _make_mock_probe():
     """Return a mock probe that resolves URLs without real HTTP calls."""

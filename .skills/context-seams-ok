@@ -10,15 +10,10 @@ single process, port ownership — stay in `AGENTS.md`.
 The long-form conventions. `AGENTS.md` keeps the commit format, the logger
 guards on its lifecycle. `AGENTS.md` carries the one-entity rule, the create
 one while projecting rows from the other. AGENTS.md carries the one-line
+**Code Exploration Policy** is the `AGENTS.md` section of that name — the negative
 
 # --- a different repo's policy file: Archiver's, not this one's.
 The Archiver service must also be installed first — see its own `docs/DEPLOYMENT.md`. Archiver authoring tools
-
-# --- duplicate heading, pre-existing: two `### Installation` sections under
-# different `##` parents (Systemd Service, Disk Cleanup Timer). Correct as-is.
-# Entries are stripped and a leading `#` marks a comment, so the hash prefix of
-# a heading cannot appear here — these match the heading text instead.
-Installation
 
 # --- provenance headings. This repo tags doc sections with the issue that
 # introduced them; the anchors are linked from AGENTS.md and from commit

@@ -247,6 +247,7 @@ tests build the schema with `create_all` rather than migrations. Both:
 ## Style & UI
 
 Authoritative reference: `docs/STYLE.md`.
+Component classes and the HTMX/flash patterns: [docs/UI.md](docs/UI.md).
 
 **Brand:** Cannabis Observer — `co-purple-600` (#6d4488) primary accent. Never use brand colors for semantic status (green/yellow/red/blue).
 
@@ -268,7 +269,7 @@ Full skill reference: `docs/SKILLS.md`. Cross-project search to the sister `noti
 
 ## Detail Docs
 
-- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — module layout; the Redis bus topology, streams, and fetch contracts
+- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — module layout, the Archiver checkout constraint, and the Redis bus topology, streams, and fetch contracts
 - [docs/COMMANDS.md](docs/COMMANDS.md) — every runnable command, the Archiver-sibling test setup, and CI
 - [docs/CONTENT-PIPELINE.md](docs/CONTENT-PIPELINE.md) — fetch → extract → fingerprint, the fetch-command outbox, the revisions producer
 - [docs/CONVENTIONS.md](docs/CONVENTIONS.md) — logging configuration, ULID error handling, DB-trigger rules

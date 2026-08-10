@@ -22,6 +22,15 @@ skills-vendor/   Git submodules for external skill repos
 .claude/skills/  Claude Code skill discovery (symlinks → ../../skills/<name>)
 ```
 
+## Archiver checkout location
+
+**The Archiver checkout location is not freely relocatable.** Two independent consumers resolve it, and only one takes an override:
+
+- `pyproject.toml` → `[tool.uv.sources]` pins `archiver-client = { path = "../archiver/clients/python", editable = true }` — a **relative path dependency**. `uv sync` requires the repo at `../archiver` from this one, and honors no env var; moving it means editing that line.
+- `tests/conftest.py` reads `ARCHIVER_REPO_PATH` (default `/home/exedev/archiver`) to locate Archiver's alembic for the cross-schema test tables. This is the **only** reader — CI sets it in `.github/workflows/ci.yml`.
+
+So `ARCHIVER_REPO_PATH` redirects the test harness alone. Setting it without also fixing the path dependency yields passing tests over a broken `uv sync`.
+
 ## Redis and the bus
 
 **Redis and the bus (archiver#109, #245).** Archiver operates `redis-server` on this VM — the tracked drop-in, persistence and version-floor policy, and producer-side monitoring are all its; it also owns the `info.changes` fact stream. **Watcher publishes on three streams and consumes one.** Publish: `content.fetch` (commands, #241), `content.fetch-policy` (#245), and `content.revisions` (`source_revision_observed` — the Archiver HTTP write path retired in #253). Consume: `content.blobs`. The politeness producer is the `content.fetch-policy` producer (#245; `src/core/fetch_policy.py` + the `publish_fetch_policy` periodic task) — Watcher's half of the cluster politeness split (*mechanism to Replicator, policy to the issuer, config over the bus*; normative: `docs/contracts/replicator-boundaries.md` in the Replicator repo). It publishes each `Domain.min_interval` (**never** `current_interval` — that column is inert 429-backoff state since the limiter retired) as a `FetchPolicyState` per host, full-set-republished every 5 minutes **including tombstones** (`fetch_policy_tombstones` table, written on domain delete, cleared on re-create) so a consumer's boot replay never depends on broker retention. Connection via `WATCHER_BUS_REDIS_URL` (unset → loud skip, Replicator falls back to its conservative default; `scripts/dev_server.sh` clears an inherited value unless `WATCHER_DEV_BUS_REDIS_URL` opts into a scratch bus). API domain routes defer an immediate republish; **dashboard routes deliberately don't** (they must not import `src.workers.*` — `tests/dashboard/test_import_decoupling.py`) and ride the periodic tick. Watcher joins exactly one consumer group — `watcher` on `content.blobs`, single-member (#241) — and all async work still stays on Procrastinate over Postgres (`PsycopgConnector`); the bus carries facts and commands, never jobs. Bus ownership design of record: `docs/plans/2026-07-29-redis-bus-ownership-design.md` in the Archiver repo ([on GitHub](https://github.com/CannObserv/archiver/blob/main/docs/plans/2026-07-29-redis-bus-ownership-design.md)).
@@ -37,12 +46,3 @@ skills-vendor/   Git submodules for external skill repos
 ## Redis history and future use
 
 Other *future* work that would widen Redis use: a Redis-backed aspect-review cache (#163). It does not exist. *History:* the Watcher-side `info.changes` publisher (`src/core/changes/`, `ChangePublisher`) was deleted in **#156** (Phase 5 cutover); the producer role migrated to Archiver (archiver#106), and archiver#109 assigned operational ownership.
-
-## Archiver checkout location
-
-**The Archiver checkout location is not freely relocatable.** Two independent consumers resolve it, and only one takes an override:
-
-- `pyproject.toml` → `[tool.uv.sources]` pins `archiver-client = { path = "../archiver/clients/python", editable = true }` — a **relative path dependency**. `uv sync` requires the repo at `../archiver` from this one, and honors no env var; moving it means editing that line.
-- `tests/conftest.py` reads `ARCHIVER_REPO_PATH` (default `/home/exedev/archiver`) to locate Archiver's alembic for the cross-schema test tables. This is the **only** reader — CI sets it in `.github/workflows/ci.yml`.
-
-So `ARCHIVER_REPO_PATH` redirects the test harness alone. Setting it without also fixing the path dependency yields passing tests over a broken `uv sync`.

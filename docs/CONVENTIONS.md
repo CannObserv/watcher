@@ -4,6 +4,16 @@ The long-form conventions. `AGENTS.md` keeps the commit format, the logger
 import, the log-record key contract, and the general code rules; the rest is
 here.
 
+## Log-record key contract
+
+Every record serializes as JSON with **at least** four keys — `timestamp` (ISO 8601
+UTC), `level`, `logger`, `message` — plus `exc_info` when logging an exception and
+any extras the emitting library attaches (procrastinate adds `action`/`job`/…, and
+uvicorn's own lines carry extras of their own). Those four are
+the contract — a floor, not an exhaustive list (the set matches structlog's defaults,
+so a future structlog/OTel migration won't churn log consumers) — and are pinned by
+`tests/core/test_logging.py` (#238); don't rename or drop keys without updating both.
+
 ## uvicorn's own loggers need `--log-config`
 
 **uvicorn's own loggers need `--log-config` (#244).** `uvicorn`, `uvicorn.access`,
@@ -63,13 +73,3 @@ Do not use `parse_ulid` for filter query params — the endpoint itself exists; 
 - Triggers live in Alembic migrations (`CREATE OR REPLACE FUNCTION` + `CREATE OR REPLACE TRIGGER`; downgrade with `DROP TRIGGER IF EXISTS … ON table; DROP FUNCTION IF EXISTS …`).
 - Integration tests use `Base.metadata.create_all` (not migrations), so triggers are NOT applied automatically. Any trigger added in a migration must also be recreated in `tests/conftest.py` inside the `test_engine` fixture, after `create_all`.
 - Current triggers: none. `trg_changes_update_last_changed_at` removed in Phase 5 (#156) when the `changes` table was dropped.
-
-## Log-record key contract
-
-Every record serializes as JSON with **at least** four keys — `timestamp` (ISO 8601
-UTC), `level`, `logger`, `message` — plus `exc_info` when logging an exception and
-any extras the emitting library attaches (procrastinate adds `action`/`job`/…, and
-uvicorn's own lines carry extras of their own). Those four are
-the contract — a floor, not an exhaustive list (the set matches structlog's defaults,
-so a future structlog/OTel migration won't churn log consumers) — and are pinned by
-`tests/core/test_logging.py` (#238); don't rename or drop keys without updating both.

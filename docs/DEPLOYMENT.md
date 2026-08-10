@@ -332,7 +332,7 @@ Files:
 - `deploy/watcher-cleanup.sudoers` — two targeted NOPASSWD rules (`apt-get clean`, `journalctl --vacuum-time=14d`)
 - `scripts/cleanup.sh` — the cleanup script; logs to `/var/log/watcher/cleanup-<timestamp>.log` (keeps 10)
 
-### Installation
+### Installing the timer
 
 ```bash
 # Sudoers rules

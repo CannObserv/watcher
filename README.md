@@ -24,6 +24,8 @@ outages. Notifications dispatch through the sibling **Notifier service** via the
 Operate WatchedItems at `/api/v1/watched-items` (API) and `/watched-items` (dashboard).
 Full conventions: [AGENTS.md](AGENTS.md). Operator install: [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).
 Fetch/revision path and the Archiver linkage: [docs/CONTENT-PIPELINE.md](docs/CONTENT-PIPELINE.md).
+The WatchedItem entity in full: [docs/WATCHED-ITEMS.md](docs/WATCHED-ITEMS.md). Module
+layout and bus topology: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 Collapse design: [docs/plans/2026-06-16-collapse-watcheditem-watch-design.md](docs/plans/2026-06-16-collapse-watcheditem-watch-design.md).
 
 ## Setup

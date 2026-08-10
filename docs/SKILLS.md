@@ -46,6 +46,10 @@ To add a new external skill repo: follow the `managing-skills` skill.
 | `managing-skills` | add skill repo, manage external skills |
 | `socraticode` (codebase MCP) | see **Code Exploration Policy** above |
 
+**Code Exploration Policy** is the `AGENTS.md` section of that name — the negative
+rule and the prefetch query. The tool-by-tool guidance is **SocratiCode (Codebase
+Search)** below.
+
 ## Skill Sources
 
 The trigger list is **Skill Triggers** above. Each project skill is sourced from one of:

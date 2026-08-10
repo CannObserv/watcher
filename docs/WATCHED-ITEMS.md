@@ -96,6 +96,16 @@ are paused (`is_active=false`), archived, or `domain_suspended`, and applies the
 temporal profile's post-actions (deactivate / archive / reduce_frequency) to the
 WatchedItem itself.
 
+## Notification visibility
+
+**Notifications (#200).** One table — `notification_templates` — holds every
+notification target. Each `NotificationTemplate` has an intrinsic `visibility`
+that controls where it fires:
+
+- `global` — every WatchedItem (`domain_name`/`watched_item_id` both NULL).
+- `domain` — every WatchedItem whose `domain_name` matches.
+- `watched_item` — the single `watched_item_id` only.
+
 ## Notification templates
 
 A CHECK constraint (`ck_notification_templates_visibility_refs`) enforces that
@@ -121,6 +131,20 @@ domain + the item) — the single answer to "which channels fire for this item".
 Dashboard: the library `/notifications` create makes global templates; domain
 templates are created from the domain detail page; item templates from the item
 detail page. Design: [docs/plans/2026-06-19-notification-model-consolidation-design.md](../docs/plans/2026-06-19-notification-model-consolidation-design.md).
+
+## Notification body format
+
+**Body format — source Markdown (#224/#225).** Notification bodies are **source
+Markdown**. Watcher renders no HTML: it passes the composed body to the Notifier,
+which converts it per channel — CommonMark → HTML for HTML-native plugins
+(Mailgun, SES, `mailto`), raw Markdown for the rest (the local Apprise path was
+stripped in #137). Because CommonMark treats a lone `\n` as a *soft* break (a
+space, not `<br/>`), bodies must be **block-structured**, not `\n`-joined lines —
+the `change_detected` body is a Markdown **bullet list** (one fact per `<li>`;
+`content._build_change_detected_body`). A `\n`-joined paragraph collapses onto
+one run-on line on HTML clients (the #224 regression). Guarded by
+`tests/core/notifications/test_content.py::TestMarkdownListContract`; keep it that
+way when editing the composer.
 
 ## WatchEvent identity fields
 
@@ -165,27 +189,3 @@ Operators manage WatchedItem defaults (`name`, `description`, `default_schedule_
 ## Plans
 
 Plans: the #191 collapse design is at [docs/plans/2026-06-16-collapse-watcheditem-watch-design.md](../docs/plans/2026-06-16-collapse-watcheditem-watch-design.md). Historical: design at [docs/plans/2026-05-15-watched-item-infoitem-first-design.md](../docs/plans/2026-05-15-watched-item-infoitem-first-design.md); #160 reshape at [docs/plans/2026-05-17-watched-item-watch-reshape.md](../docs/plans/2026-05-17-watched-item-watch-reshape.md); #161 CRUD UI at [docs/plans/2026-05-17-watched-item-crud-ui-plan.md](../docs/plans/2026-05-17-watched-item-crud-ui-plan.md). The Phase 5 cutover design ([docs/plans/2026-05-13-phase-5-watcher-v2-cutover.md](../docs/plans/2026-05-13-phase-5-watcher-v2-cutover.md)) is historical and was superseded by #160.
-
-## Notification body format
-
-**Body format — source Markdown (#224/#225).** Notification bodies are **source
-Markdown**. Watcher renders no HTML: it passes the composed body to the Notifier,
-which converts it per channel — CommonMark → HTML for HTML-native plugins
-(Mailgun, SES, `mailto`), raw Markdown for the rest (the local Apprise path was
-stripped in #137). Because CommonMark treats a lone `\n` as a *soft* break (a
-space, not `<br/>`), bodies must be **block-structured**, not `\n`-joined lines —
-the `change_detected` body is a Markdown **bullet list** (one fact per `<li>`;
-`content._build_change_detected_body`). A `\n`-joined paragraph collapses onto
-one run-on line on HTML clients (the #224 regression). Guarded by
-`tests/core/notifications/test_content.py::TestMarkdownListContract`; keep it that
-way when editing the composer.
-
-## Notification visibility
-
-**Notifications (#200).** One table — `notification_templates` — holds every
-notification target. Each `NotificationTemplate` has an intrinsic `visibility`
-that controls where it fires:
-
-- `global` — every WatchedItem (`domain_name`/`watched_item_id` both NULL).
-- `domain` — every WatchedItem whose `domain_name` matches.
-- `watched_item` — the single `watched_item_id` only.

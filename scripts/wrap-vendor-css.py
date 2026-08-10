@@ -13,7 +13,7 @@ Usage: wrap-vendor-css.py <input.min.css> <output.layered.css>
 
 Used by scripts/build-css.sh (regenerates on every build) and
 scripts/check-css.sh (verifies committed *.layered.css matches source).
-See docs/STYLE.md §14.
+See docs/STYLE.md §11 (Overriding Vendored CSS).
 """
 
 import re

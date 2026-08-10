@@ -26,9 +26,33 @@ Submodule freshness auto-enforced by `UserPromptSubmit` hook in `.claude/setting
 
 To add a new external skill repo: follow the `managing-skills` skill.
 
+## Skill Triggers
+
+| Skill | Triggers / when to invoke |
+|---|---|
+| `reviewing-code-python-fastapi` | CR, code review |
+| `reviewing-architecture` | AR, architecture review |
+| `enforcing-architecture` | add a fitness function, enforce this contract, lock this rule (delegated to by `reviewing-architecture` on a `fitness` directive) |
+| `shipping-work-python-fastapi` | ship it, push GH, close GH, wrap up |
+| `brainstorming` | brainstorm, design this, let's design |
+| `writing-plans` | write plan, implementation plan |
+| `writing-skills` | write skill, new skill, author skill |
+| `systematic-debugging` | any bug, test failure, unexpected behavior |
+| `verification-before-completion` | before any completion claim or commit |
+| `test-driven-development` | before writing implementation code |
+| `subagent-driven-development` | dispatch agents for plan execution |
+| `dispatching-parallel-agents` | 2+ independent tasks in parallel |
+| `using-git-worktrees` | feature work needing isolation |
+| `managing-skills` | add skill repo, manage external skills |
+| `socraticode` (codebase MCP) | see **Code Exploration Policy** above |
+
+**Code Exploration Policy** is the `AGENTS.md` section of that name — the negative
+rule and the prefetch query. The tool-by-tool guidance is **SocratiCode (Codebase
+Search)** below.
+
 ## Skill Sources
 
-For the trigger list of all available skills, see the **Agent Skills** table in `AGENTS.md`. Each project skill is sourced from one of:
+The trigger list is **Skill Triggers** above. Each project skill is sourced from one of:
 
 | Source | Path | Notes |
 |---|---|---|

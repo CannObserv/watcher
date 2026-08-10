@@ -43,7 +43,7 @@ export $(cat /etc/watcher/.env .env 2>/dev/null | xargs)
 #241 — publishes `content.fetch` commands and consumes `content.blobs` facts
 via its own consumer group (`watcher`, started in the lifespan when
 `WATCHER_BUS_REDIS_URL` is set). All queued work stays on Procrastinate over
-Postgres. See `AGENTS.md` § *Redis and the bus* for the ownership split.
+Postgres. See [ARCHITECTURE.md](ARCHITECTURE.md) § *Redis and the bus* for the ownership split.
 
 ## Systemd Service
 
@@ -112,7 +112,7 @@ sync writes `wheelhouse in sync: …` on every start and `error: could not sync
 gs://…` when it fails, and the BUILD_ID stamp writes plain text on failure. Any
 pipeline that `json.loads` every `MESSAGE` must tolerate them; reading journald's
 own fields (`_SYSTEMD_UNIT`, `SYSLOG_IDENTIFIER`, `MESSAGE`) is unaffected. See
-AGENTS.md → Logging.
+[CONVENTIONS.md](CONVENTIONS.md) → *`ExecStartPre` output is plain text*.
 
 ## Database Migrations
 
@@ -332,7 +332,7 @@ Files:
 - `deploy/watcher-cleanup.sudoers` — two targeted NOPASSWD rules (`apt-get clean`, `journalctl --vacuum-time=14d`)
 - `scripts/cleanup.sh` — the cleanup script; logs to `/var/log/watcher/cleanup-<timestamp>.log` (keeps 10)
 
-### Installation
+### Installing the timer
 
 ```bash
 # Sudoers rules
@@ -382,3 +382,9 @@ sudo systemctl daemon-reload && sudo systemctl restart watcher-cleanup.timer
 | Docker dangling images | `docker image prune -f` |
 | Journal logs >14 days | `journalctl --vacuum-time=14d` |
 | Playwright cache | audit only — logs size, warns if >2 GB, never deletes |
+
+## Cannobserv wheelhouse
+
+**Cannobserv wheelhouse (#220).** `co-core` + `co-core-aio` (the shared cannabis-observer substrate) resolve from a local wheelhouse mirrored from the private GCS index `gs://co-gcs-pypi`, via `[tool.uv] find-links = ["./.wheelhouse"]` — **not** git sources. Populate it **before any `uv` command** (find-links makes every `uv` invocation require the dir; `.wheelhouse/.gitkeep` is tracked so a fresh clone has it):
+
+Auth is ADC: on the VM/deploy the `co-pypi-reader` SA key at `GOOGLE_APPLICATION_CREDENTIALS` (in `/etc/watcher/.env`); in CI, keyless via Workload Identity Federation (`.github/workflows/ci.yml`). The identity needs only `roles/storage.objectViewer`. Reproducibility is `uv.lock` (pins the exact version), not wheelhouse contents. **Upgrade:** re-sync, then `uv lock --upgrade-package co-core` (bump the floor if the minor moved). Currently pinned: **v0.8.1** (floors `>=0.8.1,<0.9` — 0.8.1 carries the `spec_fingerprint` derivation the revisions producer imports unconditionally, cannobserv#309; `co-core-aio` carries the **`bus`** extra for the fetch-policy producer — #245). The 0.8 bump (cannobserv#300, adopted in #252) is **breaking in both directions**: `info_source_id` is required on all three content contracts and `BlobAvailableEvent.command_id` stopped being optional, so a 0.7.7 fact no longer decodes here — the deploy-ordering rule that follows is in [docs/CONTENT-PIPELINE.md](../docs/CONTENT-PIPELINE.md) → "`info_source_id` on the wire". `co-core` carries the **`extract`** extra (`co-core[extract]`) — the heavy HTML/PDF/CSV parsers behind the extractors constructed in `src/core/registry.py`. The content-acquisition pipeline (fetch → extract → fingerprint) is now co-core's (`co_core.pure.extract.*`, `co_core.effects.fetch`, `co_core_aio.fetch`), adopted in #236; watcher no longer fetches at all (#241 step 5) — `src/core/fetch.py` is gone; the `watcher/0.1.0` User-Agent now lives in `src/core/fetch_commands.py` beside its only consumer and rides out on every `content.fetch` command's headers to preserve fingerprint byte-continuity. The systemd unit refreshes the wheelhouse via a non-fatal `ExecStartPre` so restarts self-heal (its output is plain text, not the app's JSON — see **Logging**).

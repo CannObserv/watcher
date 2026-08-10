@@ -33,7 +33,7 @@ if ! diff -q "$OUTPUT" "$TMPFILE" > /dev/null 2>&1; then
 fi
 
 # Verify each vendor/*.layered.css matches a fresh wrap of its *.min.css
-# source. See docs/STYLE.md §14.
+# source. See docs/STYLE.md §11 (Overriding Vendored CSS).
 shopt -s nullglob
 for src in "$VENDOR_DIR"/*.min.css; do
   base="$(basename "$src" .min.css)"

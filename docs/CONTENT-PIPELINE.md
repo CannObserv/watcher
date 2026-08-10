@@ -74,7 +74,7 @@ false "content changed" is silent. The guard is in `process_watched_item`, not
 `_extract_and_fingerprint` — the extractor reports what it found, the caller
 judges it.
 
-### Observation provenance on the outbox (#253)
+### Reporting revisions on `content.revisions` (#253)
 
 `SourceRevisionObservedEvent` carries values the outbox row never held, so
 `pending_archiver_sync` gained six columns, written at enqueue time by
@@ -99,15 +99,14 @@ row's lifecycle is not the outbox row's — delivery to Archiver is the thing be
 guaranteed — and the apply path already holds the values. `command_id` therefore
 carries no FK.
 
-### The transport: `content.revisions` (#253)
-
-`drain_pending_archiver_sync` publishes `source_revision_observed` — it no longer
-POSTs. **The outbox stays**: it is the producer-side durability guarantee, and
-only the transport moved. Watcher emits an *observation* and Archiver decides
-what to persist; no `source_revision_id` travels, because a service that does not
-own the registry mints no registry ids. Redelivery is safe by construction — the
-envelope key `info_source_id:extracted_fingerprint` matches Archiver's uniqueness
-constraint, so an at-least-once repeat is an idempotent no-op there.
+`drain_pending_archiver_sync` then publishes each row as
+`source_revision_observed` — it no longer POSTs. **The outbox stays**: it is the
+producer-side durability guarantee, and only the transport moved. Watcher emits
+an *observation* and Archiver decides what to persist; no `source_revision_id`
+travels, because a service that does not own the registry mints no registry ids.
+Redelivery is safe by construction — the envelope key
+`info_source_id:extracted_fingerprint` matches Archiver's uniqueness constraint,
+so an at-least-once repeat is an idempotent no-op there.
 
 **Two failure classes, and conflating them is the bug the drain is shaped to
 avoid.** Building the payload is pure, so a failure is *deterministic* —

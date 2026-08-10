@@ -114,7 +114,7 @@ async def drain_pending_archiver_sync(
     say "no bus" directly; monkeypatching the resolver exercises the real path
     instead (CR-15).
     """
-    client = bus_client or get_shared_bus_client()
+    client = bus_client if bus_client is not None else get_shared_bus_client()
     if client is None:
         logger.warning(
             "bus not configured — source revisions stay queued",

@@ -113,7 +113,15 @@ class WatchedItemResponse(BaseModel):
 
 
 class ChangeRevisionResponse(BaseModel):
-    """One ChangeRevision record for a WatchedItem."""
+    """One ChangeRevision record for a WatchedItem.
+
+    ``archiver_revision_id`` was removed in #253: Archiver allocates the registry
+    id on its side of ``content.revisions`` and never reports it back, so the
+    field could only ever have been null. A **breaking** response change, taken
+    deliberately over shipping a permanently-null field that reads as "not synced
+    yet". The column survives on the model, holding the 23 ids captured while the
+    HTTP write path existed.
+    """
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -122,5 +130,4 @@ class ChangeRevisionResponse(BaseModel):
     content_fingerprint: str
     captured_at: datetime
     content_size_bytes: int | None
-    archiver_revision_id: ULIDStr | None
     schema_version: int

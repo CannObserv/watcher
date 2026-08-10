@@ -438,7 +438,11 @@ class TestWatchedItemRevisions:
         assert data["content_fingerprint"].startswith("sha256:")
         assert data["content_size_bytes"] == 512
         assert data["schema_version"] == 1
-        assert data["archiver_revision_id"] is None
+        # Removed in #253 — Archiver allocates the registry id on its side of
+        # content.revisions and never reports it back, so the field could only
+        # ever be null. Breaking, and deliberate: a permanently-null field reads
+        # as "not synced yet".
+        assert "archiver_revision_id" not in data
 
     async def test_revisions_404_unknown_watched_item(self, client):
         from ulid import ULID

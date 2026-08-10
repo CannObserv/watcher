@@ -8,9 +8,8 @@ once for the WatchedItem (the single monitored entity, #191).
 """
 
 import hashlib
-import os
 from dataclasses import dataclass, field
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 
 from co_core.pure.extract import (
     ExtractionResult,
@@ -35,12 +34,9 @@ from src.core.models.watched_item import WatchedItem
 from src.core.notifications.events import WatchEvent, WatchEventType
 from src.core.notifications.notify import dispatch_event_notifications
 from src.core.registry import ServiceRegistry, get_registry
-from src.core.sources.scratch import write_scratch_bytes
 from src.core.utils import watched_item_event_base_metadata
 
 logger = get_logger(__name__)
-
-WATCHER_CACHE_TTL_SECONDS = int(os.environ.get("WATCHER_CACHE_TTL_SECONDS", "600"))
 
 # The media type of the EXTRACTED content, not of what the origin served. Every
 # extractor in the registry produces text, joined and UTF-8 encoded; the wire
@@ -92,9 +88,8 @@ class BlobProvenance:
     """The correlated ``content.blobs`` fact, carried onto the outbox row (#253).
 
     Supplied by the apply path, which holds the ``FetchCommand`` when it calls
-    the pipeline. Optional here only while the HTTP POST path still drains off
-    ``content_cache_uri``; the publisher requires it, so this tightens to a
-    required argument when the POST goes away.
+    the pipeline. Required since the cutover: an observation Watcher cannot say
+    where it came from has nothing to publish.
 
     Every field is nullable because its source column is (``fetch_commands`` fact
     fields are all populated by the consumer, so they are NULL until the fact
@@ -116,7 +111,6 @@ class ExtractionOutcome:
     """Result of extracting and fingerprinting raw content."""
 
     content_fingerprint: str
-    content_bytes: bytes
     content_size_bytes: int
     schema_version: int
     # Identity of the spec the fallback loop actually bound — per-spec, so a
@@ -163,7 +157,6 @@ def _extract_and_fingerprint(
     fingerprint = "sha256:" + hashlib.sha256(content_bytes).hexdigest()
     return ExtractionOutcome(
         content_fingerprint=fingerprint,
-        content_bytes=content_bytes,
         content_size_bytes=len(content_bytes),
         schema_version=int(used_spec.get("schema_version", 1)),
         spec_fingerprint=(
@@ -218,7 +211,7 @@ async def process_watched_item(
     *,
     raw_content: bytes,
     registry: ServiceRegistry | None = None,
-    blob: BlobProvenance | None = None,
+    blob: BlobProvenance,
 ) -> WatchedItemResult:
     """Run one check cycle for a WatchedItem.
 
@@ -316,32 +309,25 @@ async def process_watched_item(
         schema_version=outcome.schema_version,
     )
     session.add(rev)
-    await session.flush()  # populate rev.id before scratch write
+    await session.flush()  # populate rev.id before the outbox row references it
 
-    # Scratch bytes exist only to feed the Archiver sync (drain worker reads them
-    # via content_cache_uri). Unconditional since #251: archiver_info_source_id is
-    # NOT NULL, so every detected change has somewhere to post. The old guard was
-    # the first of two silent-drop branches for bare-URL items — a captured
-    # revision was written locally and never enqueued.
-    scratch_path = write_scratch_bytes(str(rev.id), outcome.content_bytes)
-    expires_at = now + timedelta(seconds=WATCHER_CACHE_TTL_SECONDS)
-    cache_uri = f"file://{scratch_path}"
     # The outbox row is the observation, so it carries where the bytes came from
     # (#253): the blob facts as Replicator stated them, plus the identity of the
     # spec they were extracted under. Snapshotted here rather than joined at
     # drain time — the FetchCommand's lifecycle is not the outbox row's, and the
     # values are free at this point because the apply path already holds them.
+    # No scratch copy: the durable-ish blob is Replicator's, at blob_uri, and
+    # writing our own copy of bytes it already stored only to report *that* path
+    # was three moving parts doing nothing the blob URI does.
     session.add(
         PendingArchiverSync(
             change_revision_id=rev.id,
             watched_item_id=watched_item.id,
-            content_cache_uri=cache_uri,
-            content_cache_expires_at=expires_at,
             next_attempt_at=now,
-            command_id=blob.command_id if blob else None,
-            blob_uri=blob.blob_uri if blob else None,
-            blob_expires_at=blob.blob_expires_at if blob else None,
-            source_media_type=blob.source_media_type if blob else None,
+            command_id=blob.command_id,
+            blob_uri=blob.blob_uri,
+            blob_expires_at=blob.blob_expires_at,
+            source_media_type=blob.source_media_type,
             content_media_type=outcome.content_media_type,
             spec_fingerprint=outcome.spec_fingerprint,
         )
@@ -350,11 +336,12 @@ async def process_watched_item(
     watched_item.last_changed_at = now
 
     # #191: dispatch CHANGE_DETECTED once for the WatchedItem (the monitored entity).
+    # No archiver_revision_id: Archiver allocates the registry id now and never
+    # tells us, so the key was permanently null (#253).
     change_meta: dict = {
         "change_revision_id": str(rev.id),
         "content_fingerprint": outcome.content_fingerprint,
         **watched_item_event_base_metadata(watched_item),
-        "archiver_revision_id": None,  # back-filled by drain worker
     }
 
     event = WatchEvent(

@@ -34,9 +34,13 @@ class PendingArchiverSync(Base):
         nullable=False,
         index=True,
     )
-    content_cache_uri: Mapped[str] = mapped_column(Text, nullable=False)
-    content_cache_expires_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False
+    # Retired with the scratch cache (#253). Nothing writes these; they are
+    # released rather than dropped because no single deploy order makes a drop
+    # of a NOT NULL column safe — see migration 32140463c26c. Contract step
+    # pending.
+    content_cache_uri: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
+    content_cache_expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, default=None
     )
     # --- observation provenance, for source_revision_observed (#253) ---
     # Snapshotted from the correlated content.blobs fact at enqueue time rather
@@ -56,6 +60,13 @@ class PendingArchiverSync(Base):
     # nullable in the column so the migration needs no backfill of invented data.
     content_media_type: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
     spec_fingerprint: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
+    # Terminal state for a row that can never publish (#253): stamped when the
+    # payload is unbuildable, which is deterministic — retrying reproduces it
+    # exactly. `select_due` skips these, so the row stops spinning but survives
+    # for post-mortem. A *transient* broker failure never lands here.
+    dead_lettered_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, default=None
+    )
     attempts: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0", default=0)
     last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
     next_attempt_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)

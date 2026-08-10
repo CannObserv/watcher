@@ -26,9 +26,6 @@ export $(cat /etc/watcher/.env .env 2>/dev/null | xargs)
 | `PROCRASTINATE_DATABASE_URL` | `/etc/watcher/.env` | no | libpq-style DSN for procrastinate; falls back to `DATABASE_URL` with driver prefix stripped |
 | `GH_TOKEN` | `.env` | no | GitHub personal access token |
 | `TEST_DATABASE_URL` | `.env` | no | PostgreSQL connection string for test database |
-| `WATCHER_CACHE_DIR` | env | no | Scratch directory for SourceRevision bytes (default `/var/cache/watcher/scratch`); must be writable by `watcher` user |
-| `WATCHER_CACHE_TTL_SECONDS` | env | no | Scratch-file lifetime before sweeper removes it (default `600`) |
-| `WATCHER_CACHE_SWEEP_INTERVAL_SECONDS` | env | no | Sweeper periodic interval in seconds (default `60`) |
 | `BUILD_ID` | env | no | Git SHA for static asset cache-busting (default `"dev"`) |
 | `NOTIFIER_BASE_URL` | `/etc/watcher/.env` | **yes** | Base URL of the notifier service (e.g. `http://localhost:9000`) |
 | `NOTIFIER_API_KEY` | `/etc/watcher/.env` | **yes** | Watcher tenant API key issued by `scripts/seed_tenant.py` in the notifier repo |
@@ -66,10 +63,6 @@ sudo chown root:exedev /etc/watcher/.env
 
 # IMPORTANT: /etc/watcher/.env must exist before starting the service.
 # Without it, systemd will refuse to start the unit (EnvironmentFile is required).
-
-# Scratch directory for SourceRevision bytes
-sudo mkdir -p /var/cache/watcher/scratch
-sudo chown watcher:watcher /var/cache/watcher/scratch
 
 # Copy (or symlink) the unit file
 sudo cp deploy/watcher.service /etc/systemd/system/watcher.service
@@ -269,13 +262,17 @@ Archiver outage self-heals within a minute of the service returning.
 The drain runs on the embedded worker inside the single uvicorn process; there
 is no separate unit to start or monitor.
 
-**Outbox / scratch interlock.** The cache sweeper skips any scratch file under
-`WATCHER_CACHE_DIR` whose ULID still has a `pending_archiver_sync` row — the row
-owns the file, and the drain drops the row only on a successful POST, after
-which the file becomes a sweep candidate. This is a per-sweep query against the
-outbox, not a lock: a row that never drains pins its scratch file indefinitely,
-so a stuck outbox shows up as disk growth under `WATCHER_CACHE_DIR` rather than
-as a failing check.
+**There is no scratch cache any more (#253).** Watcher used to write its own
+copy of the extracted bytes, report *that* path as `content_cache_uri`, sweep it,
+and PATCH null — three moving parts doing nothing Replicator's `blob_uri` does.
+The copy, the sweeper, and the `WATCHER_CACHE_*` variables are gone; a stuck
+outbox now shows up only as backlog rows, never as disk growth.
+
+**A dead-lettered row is the one thing the backlog query can miss.** A row whose
+payload cannot be built (a missing wire-required field) is stamped
+`dead_lettered_at` and stops being selected — deliberately, so it cannot spin
+forever. It will sit in the table indefinitely, so count it separately rather
+than reading a flat backlog number as "the drain is fine".
 
 To spot one:
 
@@ -287,8 +284,10 @@ psql "${DATABASE_URL/+asyncpg/}" -c \
   "SELECT count(*), min(created_at) AS oldest, max(attempts) AS max_attempts FROM pending_archiver_sync;"
 psql "${DATABASE_URL/+asyncpg/}" -c \
   "SELECT id, attempts, last_error FROM pending_archiver_sync ORDER BY created_at LIMIT 5;"
-# Scratch bytes currently held:
-du -sh /var/cache/watcher/scratch
+# Rows that will never drain on their own — these need an operator, not patience.
+psql "${DATABASE_URL/+asyncpg/}" -c \
+  "SELECT id, dead_lettered_at, last_error FROM pending_archiver_sync
+   WHERE dead_lettered_at IS NOT NULL ORDER BY dead_lettered_at DESC LIMIT 10;"
 ```
 
 A non-empty backlog with an oldest row older than a few minutes means the drain

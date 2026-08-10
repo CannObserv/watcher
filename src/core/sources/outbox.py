@@ -17,16 +17,42 @@ def _backoff_seconds(attempts: int) -> int:
 
 
 async def select_due(session: AsyncSession, *, limit: int = 100) -> list[PendingArchiverSync]:
-    """Return rows due for retry, oldest-first, with FOR UPDATE SKIP LOCKED."""
+    """Return rows due for retry, oldest-first, with FOR UPDATE SKIP LOCKED.
+
+    Excludes dead-lettered rows only. The old ``attempts < 10`` ceiling is gone
+    (#253): it silently stopped selecting a row without marking it, so an outage
+    lasting ten backoffs abandoned revisions with no operator signal and nothing
+    to find them by. Giving up is now explicit — see :func:`dead_letter` — and a
+    transient broker failure never triggers it, because the outage is not the
+    row's fault and there is no data-loss cliff worth having.
+    """
     result = await session.execute(
         select(PendingArchiverSync)
         .where(PendingArchiverSync.next_attempt_at <= datetime.now(UTC))
-        .where(PendingArchiverSync.attempts < 10)
+        .where(PendingArchiverSync.dead_lettered_at.is_(None))
         .order_by(PendingArchiverSync.next_attempt_at.asc())
         .limit(limit)
         .with_for_update(skip_locked=True)
     )
     return list(result.scalars().all())
+
+
+async def dead_letter(
+    session: AsyncSession,
+    row: PendingArchiverSync,
+    *,
+    error: str,
+    reason: str,
+) -> None:
+    """Move ``row`` to its terminal state — it can never publish (#253).
+
+    Records ``last_error`` and stamps ``dead_lettered_at``; the row is left in
+    place for post-mortem, since the reason it is unpublishable is usually a
+    field the row itself is missing. Does not touch ``attempts`` — the caller
+    owns that counter.
+    """
+    row.last_error = f"{reason}: {error}"[:1000]
+    row.dead_lettered_at = datetime.now(UTC)
 
 
 async def mark_failure(

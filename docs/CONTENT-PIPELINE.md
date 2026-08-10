@@ -99,15 +99,43 @@ row's lifecycle is not the outbox row's — delivery to Archiver is the thing be
 guaranteed — and the apply path already holds the values. `command_id` therefore
 carries no FK.
 
-**These columns have no reader yet.** `drain_pending_archiver_sync` still POSTs
-to Archiver over HTTP off `content_cache_uri`, and the scratch cache and its
-sweeper are still in place. The outbox itself stays — it is the producer-side
-durability guarantee — but its transport is what #253's cutover replaces with a
-`source_revision_observed` publish on `content.revisions`, retiring the scratch
-copy, the sweeper, and `WATCHER_CACHE_*` with it. The consumer half shipped and
-is live (archiver#139); this side is deliberately staged so the capture is
-populated before the publisher depends on it. **Update this section with the
-cutover** rather than appending a second account of the same path.
+### The transport: `content.revisions` (#253)
+
+`drain_pending_archiver_sync` publishes `source_revision_observed` — it no longer
+POSTs. **The outbox stays**: it is the producer-side durability guarantee, and
+only the transport moved. Watcher emits an *observation* and Archiver decides
+what to persist; no `source_revision_id` travels, because a service that does not
+own the registry mints no registry ids. Redelivery is safe by construction — the
+envelope key `info_source_id:extracted_fingerprint` matches Archiver's uniqueness
+constraint, so an at-least-once repeat is an idempotent no-op there.
+
+**Two failure classes, and conflating them is the bug the drain is shaped to
+avoid.** Building the payload is pure, so a failure is *deterministic* —
+identical every loop — and the row is stamped `dead_lettered_at` at once rather
+than spinning forever. Publishing can fail because the broker is down, which is
+*transient*: retry indefinitely, exempt from the ceiling, because an outage is
+not the row's fault and a data-loss cliff at attempt N discards real revisions.
+Mirrors Archiver's own producer split.
+
+That replaced an `attempts < 10` filter in `select_due` which was neither: it
+silently stopped selecting a row without marking it, so an outage lasting ten
+backoffs abandoned revisions with no signal and nothing to find them by.
+`docs/DEPLOYMENT.md` carries the query for dead-lettered rows — a flat backlog
+count no longer tells the whole story.
+
+**Retired with the transport:** the scratch cache (`src/core/sources/scratch.py`),
+its sweeper, the `WATCHER_CACHE_*` variables, and the back-population of
+`ChangeRevision.archiver_revision_id`. Watcher was writing its own copy of bytes
+Replicator had already stored, reporting *that* path as `content_cache_uri`,
+sweeping it, then PATCHing null — three moving parts doing nothing `blob_uri`
+does. `archiver_revision_id` existed only so the sweeper could PATCH against it;
+the column survives holding the ids captured while that path existed, but nothing
+writes or reads it, and it is gone from the API response (a deliberate breaking
+change over shipping a permanently-null field).
+
+`content_cache_uri` / `content_cache_expires_at` are **released, not dropped** —
+no single deploy order makes dropping a NOT NULL column safe, so migration
+`32140463c26c` makes them nullable and a later one contracts.
 
 `spec_fingerprint` is **per-spec** (cannobserv#309), so a fallback from `spec[0]`
 to `spec[1]` moves it; Archiver reads the position that implies as a selector-rot

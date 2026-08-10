@@ -69,6 +69,15 @@ class TestExtractWithSpec:
 _HTML = b"<html><body><p>Hello world</p></body></html>"
 _HTML_CHANGED = b"<html><body><p>Content changed</p></body></html>"
 
+# Provenance is required since the cutover — an observation Watcher cannot say
+# where it came from has nothing to publish. Most tests do not care about the
+# values, only that the pipeline has some.
+_BLOB = BlobProvenance(
+    command_id="01KZMNQR9B5CQZ1CRGR1E393R6",
+    blob_uri="file:///var/lib/replicator/blobs/test.bin",
+    source_media_type="text/html",
+)
+
 
 @pytest.mark.integration
 class TestProcessWatchedItem:
@@ -82,7 +91,7 @@ class TestProcessWatchedItem:
         with patch(
             "src.workers.pipeline.dispatch_event_notifications", new_callable=AsyncMock
         ) as mock_dispatch:
-            result = await process_watched_item(db_session, wi, raw_content=_HTML)
+            result = await process_watched_item(db_session, wi, raw_content=_HTML, blob=_BLOB)
 
         assert isinstance(result, WatchedItemResult)
         assert result.baseline_established is True
@@ -111,14 +120,14 @@ class TestProcessWatchedItem:
         await db_session.flush()
 
         # Establish baseline
-        await process_watched_item(db_session, wi, raw_content=_HTML)
+        await process_watched_item(db_session, wi, raw_content=_HTML, blob=_BLOB)
         await db_session.flush()
 
         # Same content
         with patch(
             "src.workers.pipeline.dispatch_event_notifications", new_callable=AsyncMock
         ) as mock_dispatch:
-            result = await process_watched_item(db_session, wi, raw_content=_HTML)
+            result = await process_watched_item(db_session, wi, raw_content=_HTML, blob=_BLOB)
 
         assert result.cache_hit is True
         assert result.changed is False
@@ -143,13 +152,15 @@ class TestProcessWatchedItem:
         wi.source_specs = [{"schema_version": 1, "extraction": {"algorithm": "full_page"}}]
         await db_session.flush()
 
-        await process_watched_item(db_session, wi, raw_content=_HTML)
+        await process_watched_item(db_session, wi, raw_content=_HTML, blob=_BLOB)
         await db_session.flush()
 
         with patch(
             "src.workers.pipeline.dispatch_event_notifications", new_callable=AsyncMock
         ) as mock_dispatch:
-            result = await process_watched_item(db_session, wi, raw_content=_HTML_CHANGED)
+            result = await process_watched_item(
+                db_session, wi, raw_content=_HTML_CHANGED, blob=_BLOB
+            )
 
         assert result.changed is True
         assert result.notifications_dispatched == 1
@@ -180,11 +191,11 @@ class TestProcessWatchedItem:
         await db_session.flush()
 
         assert wi.last_changed_at is None
-        await process_watched_item(db_session, wi, raw_content=_HTML)
+        await process_watched_item(db_session, wi, raw_content=_HTML, blob=_BLOB)
         assert wi.last_changed_at is None  # baseline: no change event
 
         before = datetime.now(UTC)
-        await process_watched_item(db_session, wi, raw_content=_HTML_CHANGED)
+        await process_watched_item(db_session, wi, raw_content=_HTML_CHANGED, blob=_BLOB)
         assert wi.last_changed_at is not None
         assert wi.last_changed_at >= before
 
@@ -199,9 +210,9 @@ class TestProcessWatchedItem:
         wi.source_specs = [{"schema_version": 1, "extraction": {"algorithm": "full_page"}}]
         await db_session.flush()
 
-        await process_watched_item(db_session, wi, raw_content=_HTML)
+        await process_watched_item(db_session, wi, raw_content=_HTML, blob=_BLOB)
         await db_session.flush()
-        result = await process_watched_item(db_session, wi, raw_content=_HTML_CHANGED)
+        result = await process_watched_item(db_session, wi, raw_content=_HTML_CHANGED, blob=_BLOB)
         await db_session.flush()
 
         assert result.changed is True
@@ -215,23 +226,9 @@ class TestProcessWatchedItem:
             .all()
         )
         assert len(syncs) == 1
-        assert syncs[0].content_cache_uri.startswith("file://")
-
-    async def test_scratch_written_on_every_change(self, db_session, tmp_path, monkeypatch):
-        """Every change gets a scratch file (consumed by the drain worker)."""
-        monkeypatch.setenv("WATCHER_CACHE_DIR", str(tmp_path))
-
-        wi = await make_watched_item(db_session, name="WithScratch")
-        wi.effective_url = "https://example.com"
-        wi.source_specs = [{"schema_version": 1, "extraction": {"algorithm": "full_page"}}]
-        await db_session.flush()
-
-        await process_watched_item(db_session, wi, raw_content=_HTML)
-        await db_session.flush()
-        await process_watched_item(db_session, wi, raw_content=_HTML_CHANGED)
-        await db_session.flush()
-
-        assert len(list(tmp_path.glob("*.bin"))) == 1
+        # No scratch copy since the cutover: the row points at Replicator's blob.
+        assert syncs[0].content_cache_uri is None
+        assert syncs[0].blob_uri == _BLOB.blob_uri
 
     async def test_dispatches_once_per_watched_item(self, db_session):
         """#191: CHANGE_DETECTED fires exactly once for the WatchedItem (the entity)."""
@@ -240,7 +237,7 @@ class TestProcessWatchedItem:
         wi.source_specs = [{"schema_version": 1, "extraction": {"algorithm": "full_page"}}]
         await db_session.flush()
 
-        await process_watched_item(db_session, wi, raw_content=_HTML)
+        await process_watched_item(db_session, wi, raw_content=_HTML, blob=_BLOB)
         await db_session.flush()
 
         dispatched_events = []
@@ -249,7 +246,9 @@ class TestProcessWatchedItem:
             dispatched_events.append(event)
 
         with patch("src.workers.pipeline.dispatch_event_notifications", side_effect=capture):
-            result = await process_watched_item(db_session, wi, raw_content=_HTML_CHANGED)
+            result = await process_watched_item(
+                db_session, wi, raw_content=_HTML_CHANGED, blob=_BLOB
+            )
 
         assert result.notifications_dispatched == 1
         assert len(dispatched_events) == 1
@@ -283,7 +282,7 @@ class TestEmptyExtractionGuard:
         await db_session.flush()
 
         with pytest.raises(ExtractionError):
-            await process_watched_item(db_session, wi, raw_content=_HTML)
+            await process_watched_item(db_session, wi, raw_content=_HTML, blob=_BLOB)
 
         revs = (
             (
@@ -307,7 +306,7 @@ class TestEmptyExtractionGuard:
         wi.source_specs = [_SPEC_FULL_PAGE]
         await db_session.flush()
 
-        await process_watched_item(db_session, wi, raw_content=_HTML)
+        await process_watched_item(db_session, wi, raw_content=_HTML, blob=_BLOB)
         await db_session.flush()
 
         # Selectors rot: every spec now misses.
@@ -318,7 +317,7 @@ class TestEmptyExtractionGuard:
             "src.workers.pipeline.dispatch_event_notifications", new_callable=AsyncMock
         ) as mock_dispatch:
             with pytest.raises(ExtractionError):
-                await process_watched_item(db_session, wi, raw_content=_HTML)
+                await process_watched_item(db_session, wi, raw_content=_HTML, blob=_BLOB)
 
         mock_dispatch.assert_not_awaited()
 
@@ -352,7 +351,7 @@ class TestEmptyExtractionGuard:
         wi.source_specs = [_SPEC_MISSES, _SPEC_FULL_PAGE]
         await db_session.flush()
 
-        result = await process_watched_item(db_session, wi, raw_content=_HTML)
+        result = await process_watched_item(db_session, wi, raw_content=_HTML, blob=_BLOB)
 
         assert result.baseline_established is True
 
@@ -450,32 +449,6 @@ class TestOutboxProvenance:
         assert row.spec_fingerprint == spec_fingerprint(_SPEC_FULL_PAGE)
         assert row.content_media_type == "text/plain; charset=utf-8"
 
-    async def test_change_without_provenance_still_writes_the_legacy_row(self, db_session):
-        """The POST path is untouched in this step — a row with no blob facts
-        still drains over HTTP off content_cache_uri."""
-        wi = await make_watched_item(db_session, name="NoProvenance")
-        wi.effective_url = "https://example.com"
-        wi.source_specs = [_SPEC_FULL_PAGE]
-        await db_session.flush()
-
-        await process_watched_item(db_session, wi, raw_content=_HTML)
-        await db_session.flush()
-        await process_watched_item(db_session, wi, raw_content=_HTML_CHANGED)
-        await db_session.flush()
-
-        row = (
-            (
-                await db_session.execute(
-                    select(PendingArchiverSync).where(PendingArchiverSync.watched_item_id == wi.id)
-                )
-            )
-            .scalars()
-            .one()
-        )
-        assert row.content_cache_uri.startswith("file://")
-        assert row.blob_uri is None
-        assert row.command_id is None
-
 
 # ---------------------------------------------------------------------------
 # Extractor dispatch (#168 slice 2)
@@ -510,7 +483,7 @@ class TestExtractorDispatch:
         await db_session.flush()
         spy = _SpyRegistry()
         monkeypatch.setattr("src.workers.pipeline.get_registry", lambda: spy)
-        await process_watched_item(db_session, wi, raw_content=_HTML)
+        await process_watched_item(db_session, wi, raw_content=_HTML, blob=_BLOB)
         return spy.essences
 
     async def test_dispatches_on_content_media_type(self, db_session, monkeypatch):
@@ -550,7 +523,7 @@ class TestExtractorDispatch:
         wi.source_specs = [{"schema_version": 1, "extraction": {"algorithm": "full_page"}}]
         await db_session.flush()
         spy = _SpyRegistry()
-        await process_watched_item(db_session, wi, raw_content=_HTML, registry=spy)
+        await process_watched_item(db_session, wi, raw_content=_HTML, registry=spy, blob=_BLOB)
         assert spy.essences == ["application/pdf"]
 
     async def test_csv_dispatch_changes_fingerprint_vs_html(self, db_session):
@@ -562,13 +535,13 @@ class TestExtractorDispatch:
         as_csv.effective_url = "https://x.gov/data.csv"
         as_csv.source_specs = [{"schema_version": 1}]
         await db_session.flush()
-        await process_watched_item(db_session, as_csv, raw_content=csv_bytes)
+        await process_watched_item(db_session, as_csv, raw_content=csv_bytes, blob=_BLOB)
 
         as_html = await make_watched_item(db_session, name="AsHtml", content_media_type=None)
         as_html.effective_url = "https://x.gov/data"
         as_html.source_specs = [{"schema_version": 1}]
         await db_session.flush()
-        await process_watched_item(db_session, as_html, raw_content=csv_bytes)
+        await process_watched_item(db_session, as_html, raw_content=csv_bytes, blob=_BLOB)
 
         await db_session.flush()
         csv_rev = (

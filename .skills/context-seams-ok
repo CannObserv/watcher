@@ -1,0 +1,36 @@
+# Seams judged legitimate. One entry per judged line; matched on line content,
+# so an entry expires — and needs re-judging — the moment its line changes.
+# Judged 2026-08-10 during the #255 curation.
+
+# --- back-references: orientation lines in demotion destinations. Each states
+# what stayed in the policy file, which is the routing signal that makes
+# progressive disclosure work. Deleting them would zero the metric and make the
+# surface worse.
+single process, port ownership — stay in `AGENTS.md`.
+The long-form conventions. `AGENTS.md` keeps the commit format, the logger
+guards on its lifecycle. `AGENTS.md` carries the one-entity rule, the create
+one while projecting rows from the other. AGENTS.md carries the one-line
+
+# --- a different repo's policy file: Archiver's, not this one's.
+The Archiver service must also be installed first — see its own `docs/DEPLOYMENT.md`. Archiver authoring tools
+
+# --- duplicate heading, pre-existing: two `### Installation` sections under
+# different `##` parents (Systemd Service, Disk Cleanup Timer). Correct as-is.
+# Entries are stripped and a leading `#` marks a comment, so the hash prefix of
+# a heading cannot appear here — these match the heading text instead.
+Installation
+
+# --- provenance headings. This repo tags doc sections with the issue that
+# introduced them; the anchors are linked from AGENTS.md and from commit
+# messages, so renaming them breaks live references. All pre-existing except
+# COMMANDS.md's `## CI (#220)`, which is the AGENTS.md heading relocated
+# verbatim — rewriting it in transit would have been an unverifiable content
+# change. Retiring the convention repo-wide is its own mechanical change.
+CI (#220)
+Phase 4 (#241) — Watcher is the issuer, not the fetcher
+Extraction outcomes: empty is a failure (#258)
+Reporting revisions on `content.revisions` (#253)
+`info_source_id` on the wire (#252)
+Registry linkage (#251) — every WatchedItem is an InfoItem being watched
+Restart-before-migrate — one-time, `d5a71c93e0f2` (#251)
+No safe order — one-time, `e7c4b2a91f60` (#252)

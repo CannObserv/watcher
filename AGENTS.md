@@ -274,5 +274,6 @@ Full skill reference: `docs/SKILLS.md`. Cross-project search to the sister `noti
 - [docs/CONVENTIONS.md](docs/CONVENTIONS.md) — logging configuration, ULID error handling, DB-trigger rules
 - [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) — systemd units, environment variables, migration ordering, wheelhouse auth
 - [docs/SKILLS.md](docs/SKILLS.md) — skill triggers, vendored skill repos, SocratiCode workflow
-- [docs/STYLE.md](docs/STYLE.md) — brand, color, components, HTMX patterns, accessibility
+- [docs/STYLE.md](docs/STYLE.md) — the design system: brand, color, dark mode, tokens, layout, touch targets, accessibility
+- [docs/UI.md](docs/UI.md) — the component library (`.btn`, `.badge`, `.data-table`, …) and the HTMX/flash interaction patterns
 - [docs/WATCHED-ITEMS.md](docs/WATCHED-ITEMS.md) — the WatchedItem entity: fields, schedule resolution, lifecycle guards, dashboard surfaces

@@ -14,17 +14,18 @@ TDD required. Red → Green → Refactor. No production code without a failing t
 
 Python ≥3.12, uv, pytest, ruff; Node.js + npm (for Tailwind CLI — `sudo npm install -g @tailwindcss/cli`, one-time VM setup).
 
-**Cannobserv wheelhouse (#220).** `co-core` + `co-core-aio` (the shared cannabis-observer substrate) resolve from a local wheelhouse mirrored from the private GCS index `gs://co-gcs-pypi`, via `[tool.uv] find-links = ["./.wheelhouse"]` — **not** git sources. Populate it **before any `uv` command** (find-links makes every `uv` invocation require the dir; `.wheelhouse/.gitkeep` is tracked so a fresh clone has it):
+**Populate the `co-core` wheelhouse before any `uv` command** — `[tool.uv]
+find-links` makes every invocation require the directory:
 
 ```bash
 uv run --no-project --with 'google-cloud-storage>=2,<4' python scripts/sync_wheelhouse.py
 uv sync
 ```
 
-Wheelhouse auth (ADC on the VM, keyless WIF in CI), the upgrade procedure, and the
-currently pinned `co-core` version: [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) → *Cannobserv wheelhouse*.
-`co-core` owns fetch → extract → fingerprint (the `extract` extra); watcher no longer
-fetches at all — [docs/CONTENT-PIPELINE.md](docs/CONTENT-PIPELINE.md).
+Why a wheelhouse and not git sources, the ADC/WIF auth, the upgrade procedure, and the
+pinned version: [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) → *Cannobserv wheelhouse*.
+`co-core` owns fetch → extract → fingerprint; watcher no longer fetches at all —
+[docs/CONTENT-PIPELINE.md](docs/CONTENT-PIPELINE.md).
 
 ## Code Exploration Policy
 
@@ -69,8 +70,6 @@ Prefetch query (run via `ToolSearch` once per session if the SessionStart remind
 | API (live) | 8000 | `systemctl` (`watcher.service`) |
 | API (dev) | 8001 | manual uvicorn |
 
-Sibling services on the same VM, separately managed: **Archiver** (port 8020, `archiver.service`) and **Notifier**. Both are separate repos checked out alongside this one (`/home/exedev/archiver`, `/home/exedev/notifier` on this VM). Elsewhere in these docs they're named as "the Archiver repo" / "the Notifier repo" — resolve those against your own checkout.
-
 **The Archiver checkout is not freely relocatable.** `ARCHIVER_REPO_PATH` redirects the
 test harness alone; the `archiver-client` path dependency in `pyproject.toml` is pinned
 to `../archiver/clients/python` separately and honors no env var. Setting one without
@@ -108,7 +107,9 @@ lacks a `_test`/`_dev` suffix. The same rule is enforced in-app by
 `src/core/db_safety.py`; only `deploy/watcher.service` opts into prod via
 `WATCHER_ALLOW_PRODUCTION_DB=1` (in the unit, never an env file).
 
-**Archiver service.** Owns the canonical InfoItem / InfoSource / SourceRevision / RepSpec registry. Sibling repo (extracted in #149; see **Infrastructure** for checkout location). Watcher consumes it via the `archiver-client` SDK installed as a path dependency. Don't add Archiver code to this repo — go work in the sibling repo instead.
+**Archiver owns the canonical InfoItem / InfoSource / SourceRevision / RepSpec
+registry**; watcher consumes it via the `archiver-client` SDK. Don't add Archiver code
+to this repo — go work in the sibling repo instead.
 
 **Cross-repo policy.** Do not directly edit sibling repos (`archiver`, `notifier`) within a watcher conversation. If a change to a sibling is needed: identify the gap, recommend it, get approval, then file a GH issue in that repo. Implementation happens in a separate session scoped to the sibling.
 
@@ -187,16 +188,12 @@ selector rot presented as a *content change* with health still OK. Full
 rationale, and the six provenance columns the outbox gained for
 `source_revision_observed` (#253): **[docs/CONTENT-PIPELINE.md](docs/CONTENT-PIPELINE.md)**.
 
-**Notifications.** One table — `notification_templates` — holds every notification
-target, and each row's intrinsic `visibility` decides where it fires: `global` (every
-item), `domain` (every item on a matching `domain_name`), or `watched_item` (one item).
-A CHECK constraint enforces that exactly the implied ref column is set.
+**Notifications.** One `notification_templates` table; a row's `visibility` —
+`global` / `domain` / `watched_item` — is what decides where it fires.
 
-**Notification bodies are source Markdown, and must be block-structured** — the
-`change_detected` body is a bullet list, because CommonMark turns a lone `\n` into a
-soft break and a `\n`-joined paragraph collapses to one run-on line on HTML clients.
-Guarded by `tests/core/notifications/test_content.py::TestMarkdownListContract`; keep it
-that way when editing the composer.
+**Notification bodies are source Markdown and must be block-structured**, never
+`\n`-joined — guarded by
+`tests/core/notifications/test_content.py::TestMarkdownListContract`.
 
 Fields, 3-tier schedule resolution, media-type dispatch, lifecycle and delete guards,
 template CRUD, and every dashboard surface: [docs/WATCHED-ITEMS.md](docs/WATCHED-ITEMS.md).

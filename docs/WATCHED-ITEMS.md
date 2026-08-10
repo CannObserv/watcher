@@ -2,8 +2,8 @@
 
 Everything the `WatchedItem` entity owns, the surfaces that render it, and the
 guards on its lifecycle. `AGENTS.md` carries the one-entity rule, the create
-path, and the two invariants an agent needs on nearly every task; the detail is
-here.
+path, and the handful of invariants an agent needs on nearly every task; the
+detail is here.
 
 ## Fields and schedule resolution
 

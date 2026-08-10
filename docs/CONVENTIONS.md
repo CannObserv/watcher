@@ -1,8 +1,8 @@
 # Conventions
 
 The long-form conventions. `AGENTS.md` keeps the commit format, the logger
-import, the log-record key contract, and the general code rules; the rest is
-here.
+import, the four-key floor, and the general code rules; the reasoning behind them
+is here.
 
 ## Log-record key contract
 

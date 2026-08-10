@@ -1,7 +1,8 @@
 # Architecture
 
-Module layout and the message-bus topology. The always-paid rules — single VM,
-single process, port ownership — stay in `AGENTS.md`.
+Module layout, the checkout constraint the `archiver-client` path dependency
+imposes, and the message-bus topology. The always-paid rules — single VM, single
+process, port ownership — stay in `AGENTS.md`.
 
 ## Project Layout
 
@@ -21,6 +22,12 @@ skills/          Agent skills (committed overrides + symlinks → skills-vendor/
 skills-vendor/   Git submodules for external skill repos
 .claude/skills/  Claude Code skill discovery (symlinks → ../../skills/<name>)
 ```
+
+## Sibling services
+
+Sibling services on the same VM, separately managed: **Archiver** (port 8020, `archiver.service`) and **Notifier**. Both are separate repos checked out alongside this one (`/home/exedev/archiver`, `/home/exedev/notifier` on this VM). Elsewhere in these docs they're named as "the Archiver repo" / "the Notifier repo" — resolve those against your own checkout.
+
+**Archiver service.** Owns the canonical InfoItem / InfoSource / SourceRevision / RepSpec registry. Sibling repo (extracted in #149; see **Infrastructure** for checkout location). Watcher consumes it via the `archiver-client` SDK installed as a path dependency. Don't add Archiver code to this repo — go work in the sibling repo instead.
 
 ## Archiver checkout location
 

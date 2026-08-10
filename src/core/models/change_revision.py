@@ -34,6 +34,7 @@ class ChangeRevision(Base):
     # Archiver now allocates on its side of content.revisions without reporting
     # back. Nothing writes this and nothing reads it — retained rather than
     # dropped because the rows captured while that path existed are the only
-    # local pointer to their registry counterparts.
+    # local pointer to their registry counterparts. Drop is tracked in #261,
+    # together with the two released content_cache_* columns.
     archiver_revision_id: Mapped[ULID | None] = mapped_column(ULIDType, nullable=True)
     schema_version: Mapped[int] = mapped_column(Integer, nullable=False)

@@ -135,7 +135,8 @@ change over shipping a permanently-null field).
 
 `content_cache_uri` / `content_cache_expires_at` are **released, not dropped** —
 no single deploy order makes dropping a NOT NULL column safe, so migration
-`32140463c26c` makes them nullable and a later one contracts.
+`32140463c26c` makes them nullable and a later one contracts (#261, together
+with `archiver_revision_id`).
 
 `spec_fingerprint` is **per-spec** (cannobserv#309), so a fallback from `spec[0]`
 to `spec[1]` moves it; Archiver reads the position that implies as a selector-rot

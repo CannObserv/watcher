@@ -252,12 +252,18 @@ sudo systemctl restart watcher
 
 ## Archiver Sync
 
-SourceRevisions are POSTed to Archiver inline on change detection; anything that
-fails lands in the local `pending_archiver_sync` outbox. The
+Every detected change enqueues a `pending_archiver_sync` row; the
 `drain_pending_archiver_sync` periodic task
-(`src/workers/source_revisions_drain.py`) retries that outbox on a fixed
-**1-minute** cadence — a hardcoded Procrastinate `cron`, not an env var — so an
-Archiver outage self-heals within a minute of the service returning.
+(`src/workers/source_revisions_drain.py`) publishes each as
+`source_revision_observed` on `content.revisions`, on a fixed **1-minute**
+cadence — a hardcoded Procrastinate `cron`, not an env var. Nothing is POSTed to
+Archiver any more (#253); Archiver consumes the stream and decides what to
+persist. A broker outage self-heals within a minute of Redis returning, and the
+outbox holds the backlog meanwhile.
+
+With `WATCHER_BUS_REDIS_URL` unset the drain skips loudly and rows accumulate
+rather than draining — the same "no bus, no publish" posture as the fetch-policy
+producer, and the reason an unset broker URL shows up as a growing backlog.
 
 The drain runs on the embedded worker inside the single uvicorn process; there
 is no separate unit to start or monitor.

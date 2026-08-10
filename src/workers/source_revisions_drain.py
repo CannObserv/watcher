@@ -29,6 +29,7 @@ from co_core.pure.adapters.bus import streams
 from co_core.pure.adapters.bus.envelope import to_wire
 from co_core.pure.models.changes import SourceRevisionObservedEmit
 from co_core_aio.bus import AsyncBusPublisher
+from redis.asyncio import Redis
 from redis.exceptions import BusyLoadingError, OutOfMemoryError
 from redis.exceptions import ConnectionError as RedisConnectionError
 from redis.exceptions import TimeoutError as RedisTimeoutError
@@ -61,11 +62,6 @@ _TRANSIENT_PUBLISH_ERRORS: tuple[type[BaseException], ...] = (
 # eventually visible, not as a retry budget. Deterministic failures never reach
 # it — they dead-letter on the first pass.
 MAX_PUBLISH_ATTEMPTS = 100_000
-
-# Distinguishes "caller passed no client, use the shared one" from "caller
-# passed None, meaning no bus" — which a plain None default cannot express, and
-# which the no-bus guard below depends on.
-_UNSET: object = object()
 
 
 def _build_emit(
@@ -107,10 +103,18 @@ def _build_emit(
 @bp.periodic(cron="* * * * *", periodic_id="drain_pending_archiver_sync")
 @bp.task(name="drain_pending_archiver_sync", queue="default")
 async def drain_pending_archiver_sync(
-    *, batch_size: int = 100, bus_client: object = _UNSET, **periodic_kwargs
+    *, batch_size: int = 100, bus_client: Redis | None = None, **periodic_kwargs
 ) -> dict:
-    """Publish due outbox rows to ``content.revisions``; drop each on success."""
-    client = get_shared_bus_client() if bus_client is _UNSET else bus_client
+    """Publish due outbox rows to ``content.revisions``; drop each on success.
+
+    ``bus_client`` is a test seam. "No bus configured" has exactly one spelling —
+    ``get_shared_bus_client()`` returning ``None`` because the env var is unset —
+    so a caller cannot express it by passing ``None`` here, and the guard below
+    has a single meaning. An earlier sentinel default existed only to let a test
+    say "no bus" directly; monkeypatching the resolver exercises the real path
+    instead (CR-15).
+    """
+    client = bus_client or get_shared_bus_client()
     if client is None:
         logger.warning(
             "bus not configured — source revisions stay queued",

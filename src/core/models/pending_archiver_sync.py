@@ -36,8 +36,8 @@ class PendingArchiverSync(Base):
     )
     # Retired with the scratch cache (#253). Nothing writes these; they are
     # released rather than dropped because no single deploy order makes a drop
-    # of a NOT NULL column safe — see migration 32140463c26c. Contract step
-    # pending.
+    # of a NOT NULL column safe — see migration 32140463c26c. Contract step is
+    # tracked in #261.
     content_cache_uri: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
     content_cache_expires_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True, default=None

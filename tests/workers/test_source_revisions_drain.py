@@ -256,10 +256,18 @@ class TestClassification:
 
 class TestGuards:
     async def test_no_bus_configured_skips_loudly_and_keeps_rows(self, db_session, monkeypatch):
+        """The real no-bus path: the resolver returns None because the env is unset.
+
+        Exercised through ``get_shared_bus_client`` rather than by passing None,
+        so the test covers what production actually does (CR-15).
+        """
         _, _, pending = await _setup_pending_row(db_session)
         _wire(db_session, monkeypatch)
+        from src.workers import source_revisions_drain as mod
 
-        result = await drain_pending_archiver_sync(batch_size=10, bus_client=None)
+        monkeypatch.setattr(mod, "get_shared_bus_client", lambda: None)
+
+        result = await drain_pending_archiver_sync(batch_size=10)
 
         assert result == {"skipped": "no_bus"}
         row = (

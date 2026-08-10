@@ -279,7 +279,7 @@ async def process_watched_item(
     if outcome.content_size_bytes == 0:
         raise ExtractionError(
             f"every source_spec yielded empty content (essence={essence!r}, "
-            f"specs={len(source_specs)})"
+            f"authored_specs={len(source_specs)})"
         )
 
     last_rev = (

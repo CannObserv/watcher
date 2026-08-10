@@ -51,10 +51,16 @@ What that leaves in the code:
 
 ### Extraction outcomes: empty is a failure (#258)
 
-`source_specs` are tried in order and the first yielding non-empty chunks wins;
-an item with none extracts full-page under a synthetic default. When **every**
-spec yields empty, `process_watched_item` raises `ExtractionError` and writes
-nothing — no `ChangeRevision`, no `PendingArchiverSync`, no notification. It
+`source_specs` are tried in order and the first yielding non-empty chunks wins.
+An item with **no** specs extracts full-page under a synthetic `[{}]` — inherited
+from #185's pipeline rewrite, never ratified, and reachable by design: the create
+schema documents `source_specs` as optional and `POST /api/v1/watched-items`
+stores `data.source_specs or []`. Worth a decision (full-page default vs. treating
+a spec-less item as unextractable) before anything else builds on it; recorded
+here as the current behaviour, not as an endorsement of it.
+
+When **every** spec yields empty, `process_watched_item` raises `ExtractionError`
+and writes nothing — no `ChangeRevision`, no `PendingArchiverSync`, no notification. It
 lands on the same path a raising extractor takes: `CHECK_EXTRACTION_FAILED` +
 ERROR health, dispatched once on the OK→ERROR transition.
 
@@ -92,6 +98,16 @@ Snapshotted rather than joined from `fetch_commands` at drain time: the command
 row's lifecycle is not the outbox row's — delivery to Archiver is the thing being
 guaranteed — and the apply path already holds the values. `command_id` therefore
 carries no FK.
+
+**These columns have no reader yet.** `drain_pending_archiver_sync` still POSTs
+to Archiver over HTTP off `content_cache_uri`, and the scratch cache and its
+sweeper are still in place. The outbox itself stays — it is the producer-side
+durability guarantee — but its transport is what #253's cutover replaces with a
+`source_revision_observed` publish on `content.revisions`, retiring the scratch
+copy, the sweeper, and `WATCHER_CACHE_*` with it. The consumer half shipped and
+is live (archiver#139); this side is deliberately staged so the capture is
+populated before the publisher depends on it. **Update this section with the
+cutover** rather than appending a second account of the same path.
 
 `spec_fingerprint` is **per-spec** (cannobserv#309), so a fallback from `spec[0]`
 to `spec[1]` moves it; Archiver reads the position that implies as a selector-rot

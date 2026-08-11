@@ -421,3 +421,34 @@ class TestRunBlobsConsumer:
         assert len(calls) == 2  # failed once, retried via reclaim, succeeded
         pending = await client.xpending(streams.CONTENT_BLOBS, "watcher")
         assert pending["pending"] == 0  # retried message was acked
+
+
+class TestForeignPayloadTypes:
+    """The co-core 0.9.3 union widening must not reach this decode path (#254).
+
+    ``payload_from_dict`` now dispatches ``registry_announcement`` and
+    ``watch_status`` too. Neither can legitimately arrive here — they ride
+    ``info.registry`` / ``info.watch-status``, and this consumer reads
+    ``content.blobs`` — but the fact inbox must degrade to a log line rather
+    than a raise if one ever does, because an escaped exception parks the
+    message unacked and the loop re-reads it forever.
+    """
+
+    async def test_registry_announcement_on_the_fact_stream_is_ignored(self, db_session, caplog):
+        from co_core.pure.models.changes import RegistryAnnouncementEmit
+
+        event = RegistryAnnouncementEmit(
+            occurred_at=NOW,
+            info_item_id="01INFOITEMXXXXXXXXXXXXXXXX",
+            generation=1,
+            info_source_id="01INFOSOURCEXXXXXXXXXXXXXX",
+            url="https://lcb.wa.gov/notices",
+            source_specs=[{"selector": "main"}],
+            watch_spec={"schema_version": 1, "interval": "1d"},
+            active=True,
+        )
+        message = from_wire(to_wire(event), topic=streams.CONTENT_BLOBS, message_id="9-9")
+
+        outcome = await process_fact_message(db_session, message)
+
+        assert outcome == "ignored_unknown_type"

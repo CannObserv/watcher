@@ -18,14 +18,17 @@ resolution; #205); a single optional
 `last_checked_at`, `last_changed_at`; and its notification surface (the
 item-scoped `NotificationTemplate` rows — `visibility='watched_item'`,
 `watched_item_id` set; see **Notifications** below). Schedule resolution is
-3-tier (#205): WatchedItem `default_schedule_config` → Domain default → system
-default (`resolved_schedule_config`, `src/core/scheduling/resolution.py`).
+4-tier under a floor (#205, #254): `announced_schedule_config` → WatchedItem
+`default_schedule_config` → Domain default → system default, then
+`max(resolved, throttle_floor_interval)` (`resolved_schedule_config`,
+`src/core/scheduling/resolution.py`).
 **Display** of the resolved interval + next-check goes through one helper,
 `resolve_schedule_display` (`src/core/scheduling/schedule.py`, #206): it composes the
 3-tier base with the active `TemporalProfile` override (`resolve_effective_interval`)
 and `compute_next_check`, returning a `ScheduleDisplay` (`interval_text`, `source`
-item/domain/default, `profile_active`, `next_check`, plus a `marker` property →
-`domain`/`default`/`profile`). Every surface — list (`_build_schedule_map`), detail
+registry/item/domain/default, `profile_active`, `throttled`, `next_check`, plus a
+`marker` property → `profile`/`throttled`/`registry`/`domain`/`default`, in that
+precedence — whichever is actually in force). Every surface — list (`_build_schedule_map`), detail
 interval field, and the domain-detail table — renders from it, so the UI matches
 `schedule_tick` even when a profile is ramping (previously the UI showed the base
 cadence while the scheduler checked at the profile cadence). The profile dict shape
@@ -41,6 +44,59 @@ path, never join Domain. Per-domain cadence is `Domain.default_schedule_config`
 /api/v1/domains/{name}` and the domain detail page; the `reduce_frequency`
 post-action throttles to 1d only when the effective cadence is faster than 1d
 (never speeds a slower-than-1d item up).
+
+## Registry reconciliation (#254)
+
+`info.registry` announcements are the authority on cadence and active state.
+`src/workers/registry_reconcile.py` makes `watched_items` match them; the stream
+mechanics (groupless tail, replay from `0-0`, no DLQ, `generation` ordering) are in
+[ARCHITECTURE.md](ARCHITECTURE.md) → *Redis and the bus*.
+
+**What an announcement owns**, and nothing else: `archiver_info_source_id`,
+`effective_url`, `source_specs`, `announced_schedule_config`, `is_active` — plus
+`domain_name` and its two denormalized facts, and **only when the host actually
+moves**. Re-deriving the domain on every announcement would clear a
+`domain_suspended` an operator set, which is host-level mechanism the registry has
+no opinion on.
+
+**What survives reconciliation**: `health_status`, `last_checked_at`,
+`last_changed_at`, `last_reviewed_at`, `domain_suspended`, `archived_at`,
+`throttle_floor_interval`, `default_schedule_config`, `content_media_type`,
+`default_tags`, `description`, `name`, notification config, audit rows, fetch-command
+history. Pinned by `TestLocalColumnsSurvive` — "we did not write it" is a weaker
+guarantee than "a test fails if someone does".
+
+**Three signals, and a fourth that is not a signal.** `revoked: true` deletes the
+row (and records the generation in `revoked_info_items`, so a stale live
+announcement arriving after the tombstone cannot resurrect it). `active: false`
+keeps the row and stops scheduling — collapsing that into revoked loses the pause on
+the next reconcile. `active: true` schedules. `active: null` is an **abstention**:
+the registry has no opinion yet, so the column is left exactly as it is. Reading
+`null` as `true` would un-pause every item an operator paused, which is precisely
+what the rollout window looks like before CannObserv/archiver#150's import populates
+the column.
+
+**A local pause is not sticky.** `active` applies unconditionally; item-level pause
+lives in Archiver's dashboard alone. What remains legitimately Watcher's is
+*mechanism* — local backoff, `domain_suspended` as the host-level break-glass, and
+the throttle floor. `archived_at` is never touched, so an `active: true` against an
+archived row reconciles the row's contents but no-ops on scheduling (`schedule_tick`
+gates on `archived_at IS NULL` too) rather than resurrecting it.
+
+**Two cadence absences, one answer.** `watch_spec` is required on a live
+announcement since cannobserv#324, so delegation is spelled exactly one way:
+`{"schema_version": 1}` with no `interval`, meaning *apply your own default* — for
+this repo the per-domain tier. An `interval` that does not parse resolves the same
+way and **must not stop scheduling**; co-core deliberately does not validate the
+document's contents, because raising at decode on a no-DLQ stream would drop the
+message and leave the key stale.
+
+**The announced cadence does not live in `default_schedule_config`.** That column
+has an operator and the `reduce_frequency` post-action writing to it, so reconciling
+into it would let the hourly snapshot revert every throttle — and it is what
+archiver#150 imports out of Watcher. The throttle moved to a floor for the same
+reason, in the other direction: as a tier it would be outranked by the announced
+cadence and silently cleared on the next announcement.
 
 ## Content media type
 

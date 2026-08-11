@@ -177,11 +177,11 @@ git clone <archiver-repo> /home/exedev/archiver
 cd /home/exedev/archiver && uv sync
 ```
 
-Override via `ARCHIVER_REPO_PATH=/some/other/path` if you keep the
-sibling repo elsewhere — but note this only redirects **this** alembic
-invocation. The `archiver-client` path dependency is separately pinned to
-`../archiver/clients/python` in `[tool.uv.sources]` and ignores the variable;
-relocating the checkout means editing that too (see **Infrastructure**).
+Override via `ARCHIVER_REPO_PATH=/some/other/path` if you keep the sibling repo
+elsewhere. Since #254 that is the *only* thing pointing at the sibling checkout:
+the `archiver-client` path dependency that used to be pinned separately in
+`[tool.uv.sources]` — and ignored the variable, so relocating meant editing two
+places or getting passing tests over a broken `uv sync` — went with the SDK.
 
 The `information` schema persists between pytest sessions to enable
 the cache-check (#150); per-test row isolation is still handled by
@@ -203,7 +203,8 @@ GitHub Actions (`.github/workflows/ci.yml`) runs on push/PR to `main`: a
 **migrations** job (independent migration-chain smoke-check, #234 — `alembic
 upgrade head` from an empty `postgres:16` then `alembic check` for drift). All
 three jobs checkout the sibling `archiver` repo alongside watcher (public;
-resolves the `archiver-client` path dep + provides conftest's alembic), rewrite
+provides conftest's alembic — the `archiver-client` path dep it also used to
+resolve was removed in #254), rewrite
 the `notifier-client` SSH source to HTTPS, authenticate to GCS **keyless via
 WIF** (`vars.GCP_WIF_PROVIDER` → `co-pypi-reader` SA), and sync the wheelhouse
 before `uv sync`. Only the test job also syncs archiver's wheelhouse (its `uv

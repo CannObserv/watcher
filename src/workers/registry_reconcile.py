@@ -52,7 +52,6 @@ repairs whatever was dropped.
 """
 
 import asyncio
-from urllib.parse import urlsplit
 
 from co_core.effects.bus import BusMessage
 from co_core.pure.adapters.bus import streams
@@ -68,6 +67,7 @@ from src.core.logging import get_logger
 from src.core.models.revoked_info_item import RevokedInfoItem
 from src.core.models.watched_item import WatchedItem
 from src.core.scheduling.cadence import parse_interval
+from src.core.watched_items import derive_watched_item_name
 
 logger = get_logger(__name__)
 
@@ -88,20 +88,6 @@ MAX_APPLY_ATTEMPTS = 3
 # `count=1` before `seek` can pass it — reading one at a time sidesteps the
 # entire sequence. The registry is small enough that the round trips are free.
 READ_COUNT = 1
-
-
-def _derive_name(url: str) -> str:
-    """A legible placeholder name for a WatchedItem created from an announcement.
-
-    ``RegistryAnnouncementState`` carries no ``name`` — the grain is registry
-    state, not presentation — but ``WatchedItem.name`` is NOT NULL. Host + path
-    is the most informative thing derivable from what the announcement *does*
-    carry, and it is deliberately not invented registry data: an operator (or the
-    POST route) can still set a real name, and reconciliation never overwrites it.
-    """
-    parts = urlsplit(url)
-    name = f"{parts.netloc}{parts.path}".rstrip("/") or url
-    return name[:255]
 
 
 def _announced_schedule_config(watch_spec: dict | None) -> dict | None:
@@ -207,7 +193,7 @@ async def reconcile_announcement(session, payload: RegistryAnnouncementState) ->
     if created:
         row = WatchedItem(
             archiver_info_item_id=info_item_ulid,
-            name=_derive_name(payload.url),
+            name=derive_watched_item_name(payload.url),
             effective_url=payload.url,
             archiver_info_source_id=payload.info_source_id,
         )

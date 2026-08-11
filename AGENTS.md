@@ -71,18 +71,22 @@ Prefetch query (run via `ToolSearch` once per session if the SessionStart remind
 | API (dev) | 8001 | manual uvicorn |
 | Archiver | 8020 | `systemctl` (`archiver.service`) |
 
-**The Archiver checkout is not freely relocatable.** `ARCHIVER_REPO_PATH` redirects the
-test harness alone; the `archiver-client` path dependency in `pyproject.toml` is pinned
-to `../archiver/clients/python` separately and honors no env var. Setting one without
-the other yields passing tests over a broken `uv sync`.
+**The Archiver checkout moves freely again (#254).** `ARCHIVER_REPO_PATH` now redirects
+everything that needs the sibling repo — conftest's alembic run — because the
+`archiver-client` path dependency that pinned `../archiver/clients/python` and honored no
+env var went with the SDK. The old trap (setting one without the other, yielding passing
+tests over a broken `uv sync`) no longer has a second half to forget.
 
 The exe.dev proxy forwards 3000–9999. Dev server reachable at `https://watcher.exe.xyz:8001/`.
 
 **Single process is load-bearing.** One uvicorn process runs everything: the API, the embedded Procrastinate worker, the `content.blobs` fact consumer, and the cache sweeper (started in the `src/api/main.py` lifespan — there is no separate worker unit). The reason is now the **fact consumer**, not politeness: `src/workers/fetch_facts.py` joins consumer group `watcher` as a single member (`watcher-1`), and a second process would need its own consumer name *and* an apply-ordering story across members — the supersession guard is per-row, not a cross-process lock. (Until #241 step 5 the reason was the in-process `DomainRateLimiter`; that retired with the local fetch path, so per-host pacing no longer constrains the topology at all — it is Replicator's, fed over `content.fetch-policy`.) Never run `uvicorn --workers N` or a second worker unit against prod. Escalation path when one process stops being enough (not before): a separate `watcher-worker.service` plus a multi-member consumer-group design — **not built**.
 
 **The bus.** Watcher publishes `content.fetch` (commands), `content.fetch-policy`
-(per-host politeness), and `content.revisions` (`source_revision_observed`), and consumes
-`content.blobs` as the single member of consumer group `watcher`. Archiver operates the
+(per-host politeness), and `content.revisions` (`source_revision_observed`); consumes
+`content.blobs` as the single member of consumer group `watcher`; and consumes
+`info.registry` **grouplessly** — a config/state stream replayed from `0-0` at every boot
+via `AsyncBusTailReader`, never `$` (a worker that boots at `$` reads nothing and looks
+exactly like one whose registry is empty). Archiver operates the
 broker. `WATCHER_BUS_REDIS_URL` unset → the publish tasks skip loudly rather than
 silently. Stream ownership, the fetch contracts, and `info_source_id` on the wire:
 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
@@ -109,7 +113,9 @@ lacks a `_test`/`_dev` suffix. The same rule is enforced in-app by
 `WATCHER_ALLOW_PRODUCTION_DB=1` (in the unit, never an env file).
 
 **Archiver owns the canonical InfoItem / InfoSource / SourceRevision / RepSpec
-registry**; watcher consumes it via the `archiver-client` SDK. Don't add Archiver code
+registry**; watcher consumes it over the bus — `info.registry` announcements reconciled
+into `watched_items` (#254). **Watcher makes no HTTP calls to Archiver at all**; the SDK
+is gone and re-adding one is a design regression, not a shortcut. Don't add Archiver code
 to this repo — go work in the sibling repo instead.
 
 **Cross-repo policy.** Do not directly edit sibling repos (`archiver`, `notifier`) within a watcher conversation. If a change to a sibling is needed: identify the gap, recommend it, get approval, then file a GH issue in that repo. Implementation happens in a separate session scoped to the sibling.
@@ -122,7 +128,7 @@ Full lifecycle reference + cleanup timer: `docs/DEPLOYMENT.md`.
 
 Two env files load in order (later overrides earlier):
 
-1. `/etc/watcher/.env` — production secrets (`DATABASE_URL`, `NOTIFIER_API_KEY`, `ARCHIVER_API_KEY`). Persistent, managed manually on the VM.
+1. `/etc/watcher/.env` — production secrets (`DATABASE_URL`, `NOTIFIER_API_KEY`, `GOOGLE_APPLICATION_CREDENTIALS`). Persistent, managed manually on the VM.
 2. `.env` (repo root, git-ignored) — dev/agent secrets (`GH_TOKEN`, `TEST_DATABASE_URL`). Never commit.
 
 Load both for shell commands (pytest, psql, gh):
@@ -148,8 +154,6 @@ pattern — see **Redis and the bus**.
 - `DATABASE_URL` — PostgreSQL connection for watcher (Archiver owns its own database).
 - `NOTIFIER_BASE_URL` — Notifier service URL for the `NotifierClient` SDK (e.g. `http://localhost:9000`). Required — every notification is dispatched through the notifier service.
 - `NOTIFIER_API_KEY` — Required. Watcher tenant API key issued by `scripts/seed_tenant.py` in the notifier repo.
-- `ARCHIVER_BASE_URL` — Archiver service URL for the `ArchiverClient` SDK (default: `http://localhost:8020`).
-- `ARCHIVER_API_KEY` — Required. API key for the `ArchiverClient` SDK; missing key crashes the API on boot (pre-warm in lifespan).
 - `WATCHER_BUS_REDIS_URL` — Broker URL for the `content.fetch-policy` producer (#245; prod: `redis://localhost:6379/0`). Unset → publish task skips loudly. Dev opts in via `WATCHER_DEV_BUS_REDIS_URL` (see **Redis and the bus**).
 
 Full variable reference: `docs/DEPLOYMENT.md`.
@@ -175,12 +179,26 @@ Full reference: `docs/COMMANDS.md`.
 notification tier) is gone. One `WatchedItem` = one URL = one fingerprint = one
 change signal. The user-facing noun is "Watched Item".
 
-Created **only** by `POST /api/v1/watched-items`, which requires all three of
-`archiver_info_item_id` + `url` + `archiver_info_source_id` — every WatchedItem is an
-Archiver InfoItem being watched, and there is no dashboard create form.
+Created two ways since #254: `POST /api/v1/watched-items` (still Archiver's provisioning
+call, requiring all three of `archiver_info_item_id` + `url` + `archiver_info_source_id`;
+no dashboard create form) and the `info.registry` reconcile, which creates from an
+announcement alone so a cold start converges from the snapshot. The POST no longer
+validates the InfoItem over HTTP — that was the last outbound call and it went with the
+SDK — so it is redundant once archiver#141's producer is live.
 `WatchedItem.domain_name` == `Domain.name` == `hostname(effective_url)` by construction;
 one entry per hostname, so host variants (`lcb.wa.gov` vs `www.lcb.wa.gov`) are
 independent by design.
+
+**The registry owns cadence and active state; Watcher owns mechanism (#254).** An
+announcement is authoritative for exactly five columns — `archiver_info_source_id`,
+`effective_url`, `source_specs`, `announced_schedule_config`, `is_active` — plus
+`domain_name` and its denormalized state, and only when the host actually moves.
+Everything else survives reconciliation: health, timings, `domain_suspended`,
+`archived_at`, `throttle_floor_interval`, `default_schedule_config`, media type, tags,
+notification config. **A local pause is not sticky** — item-level pause lives in
+Archiver's dashboard alone; local backoff, `domain_suspended`, and the throttle floor are
+the legitimate local stops. Schedule resolution is four tiers under a floor:
+announced → item → domain → system, then `max(resolved, throttle_floor)`.
 
 **Empty extraction is a failure, not a change (#258).** When every `source_spec`
 yields empty chunks, `process_watched_item` raises `ExtractionError` and writes

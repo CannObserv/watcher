@@ -3,7 +3,6 @@
 from unittest.mock import AsyncMock
 
 import pytest
-from archiver_client import NotFound, ServerError
 from sqlalchemy import select, text
 from ulid import ULID
 
@@ -452,7 +451,7 @@ class TestWatchedItemRevisions:
 
 
 class TestCreateWatchedItem:
-    async def test_creates_with_info_item_name_fallback(self, client, db_session, info_client):
+    async def test_creates_with_url_derived_name_fallback(self, client, db_session):
         item = await make_info_item(db_session, name="Source Item")
         await db_session.commit()
         response = await client.post(
@@ -466,14 +465,14 @@ class TestCreateWatchedItem:
         assert response.status_code == 201, response.text
         body = response.json()
         assert body["archiver_info_item_id"] == str(item.info_item_id)
-        # Name falls back to the InfoItem's name when not supplied.
-        assert body["name"] == "Source Item"
+        # #254: the name falls back to the URL, not the InfoItem's name — the SDK
+        # call that could read the latter is gone, and the announcement that
+        # replaced it carries no name field either.
+        assert body["name"] == "example.com/page"
         assert body["default_schedule_config"] is None
         assert body["archived_at"] is None
 
-    async def test_omitted_default_schedule_config_persists_sql_null(
-        self, client, db_session, info_client
-    ):
+    async def test_omitted_default_schedule_config_persists_sql_null(self, client, db_session):
         """Omitting default_schedule_config stores SQL NULL, not JSONB 'null' (#198).
 
         Both representations read back as Python None, so the route response is no
@@ -499,7 +498,7 @@ class TestCreateWatchedItem:
         ).scalar_one()
         assert is_sql_null is True
 
-    async def test_uses_supplied_name(self, client, db_session, info_client):
+    async def test_uses_supplied_name(self, client, db_session):
         item = await make_info_item(db_session, name="Source")
         await db_session.commit()
         response = await client.post(
@@ -519,9 +518,7 @@ class TestCreateWatchedItem:
         assert body["default_schedule_config"] == {"interval": "10m"}
         assert body["default_tags"] == ["regulatory"]
 
-    async def test_duplicate_archiver_info_item_id_returns_409(
-        self, client, db_session, info_client
-    ):
+    async def test_duplicate_archiver_info_item_id_returns_409(self, client, db_session):
         item = await make_info_item(db_session, name="X")
         await db_session.commit()
         r1 = await client.post(
@@ -544,8 +541,16 @@ class TestCreateWatchedItem:
         assert r2.status_code == 409
         assert "already" in r2.json()["detail"].lower()
 
-    async def test_unknown_archiver_info_item_returns_422(self, client, info_client):
-        info_client.get_info_item = AsyncMock(side_effect=NotFound("nope"))
+    async def test_an_unknown_info_item_is_accepted_not_rejected(self, client):
+        """#254: the SDK validation is gone with the SDK, and nothing replaced it.
+
+        Validating against the local reconciled view cannot work on a create —
+        Archiver provisions and POSTs immediately, well inside the snapshot
+        period, so every legitimate create would race its own announcement. The
+        cost is a row for a nonexistent InfoItem lingering, since absence is not
+        revocation on `info.registry`; the fix is retiring this route once
+        archiver#141's producer is live, not re-adding an HTTP call.
+        """
         response = await client.post(
             "/api/v1/watched-items",
             json={
@@ -554,22 +559,9 @@ class TestCreateWatchedItem:
                 "archiver_info_item_id": "01ZZZZZZZZZZZZZZZZZZZZZZZZ",
             },
         )
-        assert response.status_code == 422
+        assert response.status_code == 201, response.text
 
-    async def test_archiver_server_error_returns_503_with_retry_after(self, client, info_client):
-        info_client.get_info_item = AsyncMock(side_effect=ServerError("boom"))
-        response = await client.post(
-            "/api/v1/watched-items",
-            json={
-                "url": "https://example.com/page",
-                "archiver_info_source_id": str(ULID()),
-                "archiver_info_item_id": "01ZZZZZZZZZZZZZZZZZZZZZZZZ",
-            },
-        )
-        assert response.status_code == 503
-        assert response.headers.get("Retry-After") == "30"
-
-    async def test_emits_audit_event(self, client, db_session, info_client):
+    async def test_emits_audit_event(self, client, db_session):
         item = await make_info_item(db_session, name="A")
         await db_session.commit()
         await client.post(
@@ -592,7 +584,7 @@ class TestCreateWatchedItem:
         assert len(events) == 1
         assert events[0].payload["source"] == "api"
 
-    async def test_creates_with_url_and_source_specs(self, client, db_session, info_client):
+    async def test_creates_with_url_and_source_specs(self, client, db_session):
         """url + source_specs set effective_url and source_specs on the WatchedItem."""
 
         item = await make_info_item(db_session, name="WithUrl")
@@ -613,9 +605,7 @@ class TestCreateWatchedItem:
             {"schema_version": 1, "extraction": {"algorithm": "full_page"}}
         ]
 
-    async def test_response_includes_effective_url_and_source_specs(
-        self, client, db_session, info_client
-    ):
+    async def test_response_includes_effective_url_and_source_specs(self, client, db_session):
         """WatchedItem response always includes effective_url and source_specs."""
         item = await make_info_item(db_session, name="RespFields")
         await db_session.commit()
@@ -636,9 +626,7 @@ class TestCreateWatchedItem:
         assert body["effective_url"] == "https://example.com/page"
         assert body["source_specs"] == []
 
-    async def test_create_on_inactive_domain_sets_domain_suspended(
-        self, client, db_session, info_client
-    ):
+    async def test_create_on_inactive_domain_sets_domain_suspended(self, client, db_session):
         """#191 CR-1: creating on an already-inactive domain marks domain_suspended.
 
         schedule_tick gates solely on WatchedItem.domain_suspended now (no live
@@ -660,7 +648,7 @@ class TestCreateWatchedItem:
         assert response.status_code == 201, response.text
         assert response.json()["domain_suspended"] is True
 
-    async def test_create_on_active_domain_not_suspended(self, client, db_session, info_client):
+    async def test_create_on_active_domain_not_suspended(self, client, db_session):
         """Items created on a healthy (or fresh) domain are not domain-suspended."""
         item = await make_info_item(db_session, name="OnActive")
         await db_session.commit()
@@ -675,7 +663,7 @@ class TestCreateWatchedItem:
         assert response.status_code == 201, response.text
         assert response.json()["domain_suspended"] is False
 
-    async def test_create_stores_archiver_info_source_id(self, client, db_session, info_client):
+    async def test_create_stores_archiver_info_source_id(self, client, db_session):
         """archiver_info_source_id is persisted when supplied on create."""
         item = await make_info_item(db_session, name="SrcId")
         await db_session.commit()
@@ -706,7 +694,7 @@ class TestCreateWatchedItem:
 class TestIssue188IsActive:
     """#188 — provision-paused on create + pause/resume via patch, decoupled from archive."""
 
-    async def test_create_defaults_active(self, client, db_session, info_client):
+    async def test_create_defaults_active(self, client, db_session):
         """A WatchedItem created without is_active is active."""
         item = await make_info_item(db_session, name="ActiveDefault")
         await db_session.commit()
@@ -714,7 +702,7 @@ class TestIssue188IsActive:
         assert response.status_code == 201, response.text
         assert response.json()["is_active"] is True
 
-    async def test_create_paused(self, client, db_session, info_client):
+    async def test_create_paused(self, client, db_session):
         """is_active=False provisions a paused (not archived) WatchedItem."""
         item = await make_info_item(db_session, name="Paused")
         await db_session.commit()
@@ -727,7 +715,7 @@ class TestIssue188IsActive:
         # Paused is NOT archived.
         assert body["archived_at"] is None
 
-    async def test_create_paused_info_item_linked(self, client, db_session, info_client):
+    async def test_create_paused_info_item_linked(self, client, db_session):
         """is_active=False on the InfoItem-linked path provisions a paused WatchedItem."""
         item = await make_info_item(db_session, name="PausedLinked")
         await db_session.commit()
@@ -1096,9 +1084,7 @@ class TestPatchDerivesDomainName:
 class TestCreateInfoItemLinkedDomainDerivation:
     """#196 — InfoItem-linked create with a url must derive domain_name + suspension."""
 
-    async def test_infoitem_linked_create_with_url_derives_domain_name(
-        self, client, db_session, info_client
-    ):
+    async def test_infoitem_linked_create_with_url_derives_domain_name(self, client, db_session):
         item = await make_info_item(db_session, name="LinkedWithUrl")
         await db_session.commit()
         response = await client.post(
@@ -1112,9 +1098,7 @@ class TestCreateInfoItemLinkedDomainDerivation:
         assert response.status_code == 201, response.text
         assert response.json()["domain_name"] == "linked-create.example"
 
-    async def test_infoitem_linked_create_with_url_upserts_domain(
-        self, client, db_session, info_client
-    ):
+    async def test_infoitem_linked_create_with_url_upserts_domain(self, client, db_session):
         from src.core.models.domain import Domain
 
         item = await make_info_item(db_session, name="LinkedUpsert")
@@ -1133,7 +1117,7 @@ class TestCreateInfoItemLinkedDomainDerivation:
         assert domain is not None
 
     async def test_infoitem_linked_create_with_url_on_inactive_domain_suspends(
-        self, client, db_session, info_client
+        self, client, db_session
     ):
         from src.core.models.domain import Domain
 
@@ -1151,9 +1135,7 @@ class TestCreateInfoItemLinkedDomainDerivation:
         assert response.status_code == 201, response.text
         assert response.json()["domain_suspended"] is True
 
-    async def test_create_denormalizes_domain_cadence_onto_item(
-        self, client, db_session, info_client
-    ):
+    async def test_create_denormalizes_domain_cadence_onto_item(self, client, db_session):
         """#205: creating an item on a domain with a cadence copies it onto the item."""
         from ulid import ULID
 
@@ -1185,7 +1167,7 @@ class TestCreateInfoItemLinkedDomainDerivation:
 class TestCheckNow:
     async def test_202_enqueues_task(self, client, db_session):
         """POST /check-now returns 202 with WatchedItem body and defers a task."""
-        from unittest.mock import AsyncMock, patch
+        from unittest.mock import patch
 
         wi = await _make_watched_item(db_session, name="CheckNow")
         wi.effective_url = "https://example.com"
@@ -1275,7 +1257,7 @@ class TestCheckNow:
     async def test_202_once_the_command_settles(self, client, db_session):
         """A settled (non-open) command must not keep blocking check-now."""
         from datetime import UTC, datetime
-        from unittest.mock import AsyncMock, patch
+        from unittest.mock import patch
 
         from src.core.fetch_commands import create_fetch_command
         from src.core.models.fetch_command import FetchCommandStatus
@@ -1294,7 +1276,7 @@ class TestCheckNow:
 
     async def test_check_now_returns_202(self, client, db_session):
         """#187: check-now on an active WatchedItem returns 202 Accepted."""
-        from unittest.mock import AsyncMock, patch
+        from unittest.mock import patch
 
         wi = await _make_watched_item(db_session, name="CheckNow202")
         wi.effective_url = "https://example.com"
@@ -1308,7 +1290,7 @@ class TestCheckNow:
 
     async def test_202_emits_audit_log(self, client, db_session):
         """#3 fix: check-now must write a WATCHED_ITEM_CHECK_REQUESTED audit entry."""
-        from unittest.mock import AsyncMock, patch
+        from unittest.mock import patch
 
         from src.core.models.audit_log import AuditLog, EventType
 
@@ -1331,7 +1313,7 @@ class TestCheckNow:
 class TestAsyncCreate:
     """#241 step 3 / #251: create never touches an origin — Archiver owns the URL."""
 
-    async def test_create_stores_the_url_without_probing(self, client, db_session, info_client):
+    async def test_create_stores_the_url_without_probing(self, client, db_session):
         from src.core.models.watched_item import WatchedItem, WatchHealthStatus
 
         item = await make_info_item(db_session, name="AsyncCreate")
@@ -1351,7 +1333,7 @@ class TestAsyncCreate:
         # steady-state redirect stays audit-only rather than rewriting it.
         assert wi.health_status == WatchHealthStatus.UNKNOWN
 
-    async def test_create_rejects_invalid_url_syntactically(self, client, db_session, info_client):
+    async def test_create_rejects_invalid_url_syntactically(self, client, db_session):
         # The API's HttpUrlStr schema rejects this before the route runs; the
         # route-level ValueError handler (CR-3) is the same guard for the
         # dashboard Form paths, covered in tests/core/test_watched_items.py.

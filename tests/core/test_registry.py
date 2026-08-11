@@ -2,8 +2,6 @@
 
 from unittest.mock import MagicMock
 
-import pytest
-from archiver_client import ArchiverClient
 from co_core.pure.extract.csv_excel import CsvExcelExtractor
 from co_core.pure.extract.html import HtmlExtractor
 from co_core.pure.extract.pdf import PdfExtractor
@@ -55,59 +53,6 @@ class TestServiceRegistryCustomInjection:
         extractor = registry.get_extractor("custom")
         mock_cls.assert_called_once()
         assert extractor is mock_cls.return_value
-
-
-class TestServiceRegistryArchiverClient:
-    def test_registry_provides_archiver_client(self, monkeypatch):
-        monkeypatch.setenv("ARCHIVER_BASE_URL", "http://localhost:8020")
-        monkeypatch.setenv("ARCHIVER_API_KEY", "test-key")
-        reg = ServiceRegistry()
-        client = reg.get_archiver_client()
-        assert client is not None
-        assert isinstance(client, ArchiverClient)
-        assert client._base_url == "http://localhost:8020"
-
-    def test_registry_archiver_client_singleton(self, monkeypatch):
-        """Same instance returned on repeated calls (lazy + cached)."""
-        monkeypatch.setenv("ARCHIVER_API_KEY", "test-key")
-        reg = ServiceRegistry()
-        a = reg.get_archiver_client()
-        b = reg.get_archiver_client()
-        assert a is b
-
-    def test_registry_archiver_client_explicit_injection_wins(self):
-        """If injected via constructor, env vars are ignored."""
-        fake = MagicMock(spec=ArchiverClient)
-        reg = ServiceRegistry(archiver_client=fake)
-        assert reg.get_archiver_client() is fake
-
-    def test_registry_raises_when_api_key_missing(self, monkeypatch):
-        monkeypatch.delenv("ARCHIVER_API_KEY", raising=False)
-        reg = ServiceRegistry()
-        with pytest.raises(RuntimeError, match="ARCHIVER_API_KEY"):
-            reg.get_archiver_client()
-
-    @pytest.mark.asyncio
-    async def test_aclose_archiver_client_resets_lazy_state(self, monkeypatch):
-        """After aclose, next get rebuilds from env."""
-        monkeypatch.setenv("ARCHIVER_API_KEY", "test-key")
-        reg = ServiceRegistry()
-        client = reg.get_archiver_client()
-        await reg.aclose_archiver_client()
-        # Internal state cleared
-        assert reg._archiver_client is None
-        # Re-acquire builds a new instance
-        monkeypatch.setenv("ARCHIVER_API_KEY", "different-key")
-        new_client = reg.get_archiver_client()
-        assert new_client is not client
-
-    @pytest.mark.asyncio
-    async def test_aclose_archiver_client_is_idempotent(self):
-        """Calling aclose without a constructed client is a no-op."""
-        reg = ServiceRegistry()
-        # Should not raise even if no client was ever built.
-        await reg.aclose_archiver_client()
-        assert reg._archiver_client is None
 
 
 class TestSetRegistryForTesting:

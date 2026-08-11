@@ -2,8 +2,6 @@
 
 from datetime import UTC, datetime
 
-import httpx
-from archiver_client import AuthError, NotFound, ServerError
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
@@ -24,10 +22,10 @@ from src.core.logging import get_logger
 from src.core.models.audit_log import EventType, audit
 from src.core.models.change_revision import ChangeRevision
 from src.core.models.watched_item import WatchedItem
-from src.core.registry import get_registry
 from src.core.watched_items import (
     ArchivedItemActivationError,
     SuspendedDomainResumeError,
+    derive_watched_item_name,
     set_watched_item_active,
 )
 from src.workers.tasks import check_watched_item
@@ -76,10 +74,25 @@ async def create_watched_item(
     """Create a WatchedItem for an Archiver InfoItem.
 
     One path since #251: ``archiver_info_item_id``, ``url`` and
-    ``archiver_info_source_id`` are all required (schema-enforced). The InfoItem
-    is validated via the Archiver SDK and the name defaults to the InfoItem's
-    name. Errors: NotFound → 422, AuthError → 500, ServerError/network → 503,
+    ``archiver_info_source_id`` are all required (schema-enforced). Errors:
     duplicate InfoItem → 409.
+
+    **No longer validates the InfoItem over HTTP** (#254). The
+    ``get_info_item`` call here was Watcher's last outbound request to Archiver,
+    and removing it is what let the SDK go. The registry announcement is the
+    authority now: whatever this route creates, the first announcement for the
+    key reconciles — including the ``name``, which this route may set and the
+    reconcile never overwrites.
+
+    What that trades away, stated plainly: a POST naming an InfoItem that does
+    not exist now succeeds, and the row lingers, because **absence is not
+    revocation** on ``info.registry`` — only an explicit tombstone deletes. The
+    alternative was validating against the local reconciled view, which cannot
+    work on a create: Archiver provisions and POSTs immediately, well inside the
+    snapshot period, so every legitimate create would race its own announcement.
+    Once CannObserv/archiver#141's producer is live the reconcile creates rows on
+    its own and this route is redundant — retiring it belongs to the teardown
+    issue, not here, because until then it is the only way a WatchedItem exists.
 
     **Both ids must be canonical ULIDs — uppercase Crockford base32.** That is
     what ``ULID.from_str`` accepts, so it is what path parameters have always
@@ -88,25 +101,6 @@ async def create_watched_item(
     construction (``str()`` of a ``ULID``); a caller that lowercases its ids
     gets a 422 naming the field.
     """
-    info_client = get_registry().get_archiver_client()
-    try:
-        info_item = await info_client.get_info_item(data.archiver_info_item_id)
-    except NotFound as exc:
-        raise HTTPException(
-            status_code=422,
-            detail=f"archiver_info_item_id {data.archiver_info_item_id} does not exist",
-        ) from exc
-    except AuthError:
-        logger.exception("ArchiverClient auth failure during watched_item create")
-        raise HTTPException(status_code=500, detail="Information service auth failed") from None
-    except (ServerError, httpx.ConnectError, httpx.TimeoutException) as exc:
-        logger.warning("Information service unreachable during watched_item create: %s", exc)
-        raise HTTPException(
-            status_code=503,
-            detail="Information service unavailable; retry shortly",
-            headers={"Retry-After": "30"},
-        ) from exc
-
     # Derive the domain from the supplied URL without probing — Archiver is
     # authoritative for the URL, and nothing on a create path touches an origin
     # (#241). #191/#196: schedule_tick gates solely on WatchedItem.domain_suspended
@@ -116,7 +110,7 @@ async def create_watched_item(
     domain_state = await ensure_domain_and_resolve_suspension(session, domain_name)
     wi = WatchedItem(
         archiver_info_item_id=ULID.from_str(data.archiver_info_item_id),
-        name=data.name or info_item.name,
+        name=data.name or derive_watched_item_name(data.url),
         description=data.description,
         is_active=data.is_active,
         default_schedule_config=data.default_schedule_config,

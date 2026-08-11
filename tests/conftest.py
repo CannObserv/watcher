@@ -29,15 +29,12 @@ import os
 import re
 import subprocess
 from collections.abc import AsyncGenerator
-from datetime import UTC, datetime
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock
 from urllib.parse import urlparse
 
 import pytest
-from archiver_client import ArchiverClient, NotFound
 from httpx import ASGITransport, AsyncClient
-from sqlalchemy import create_engine, event, or_, select, text
+from sqlalchemy import create_engine, event, select, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from ulid import ULID
@@ -49,7 +46,6 @@ from src.core.models.app_user import AppUser
 from src.core.models.domain import Domain
 from src.core.models.watched_item import WatchedItem
 from src.core.probe import ProbeResult
-from src.core.registry import ServiceRegistry, set_registry_for_testing
 from src.dashboard.deps import get_dashboard_user
 from tests._information_test_models import (
     InfoItem,  # noqa: F401  registers mapper
@@ -233,8 +229,9 @@ def _apply_archiver_migrations(database_url: str) -> None:
     repo (`/home/exedev/archiver`). Watcher tests need real `info_sources` /
     `info_specs` / `info_items` tables because conftest helpers
     (``make_info_item``, ``make_info_source``, ``bind_primary_source``, etc.)
-    write ``information.*`` rows that the ``info_client`` mock fixture reads
-    back via ``InfoItemSource`` queries.  We invoke archiver's own alembic
+    write ``information.*`` rows the WatchedItem factories reference. (Until
+    #254 they also backed a fake ArchiverClient fixture; the SDK is gone, the
+    tables are still real.) We invoke archiver's own alembic
     instead of mirroring the schema in ``tests/_information_test_models.py``
     — that way schema drift is impossible: the same migrations that build prod
     build the test schema.
@@ -441,100 +438,7 @@ async def make_watched_item(
 
 
 @pytest.fixture
-def info_client(db_session, request):
-    """Mock ArchiverClient backed by the test DB's ``information.*`` tables.
-
-    Routes pull the SDK via ``get_registry().get_archiver_client()``.
-    This fixture swaps the registry singleton's cached client for an AsyncMock
-    whose methods look up live rows in ``db_session`` where possible.
-
-    Tests that need to exercise SDK error paths can stub individual methods
-    on the returned mock
-    (e.g. ``info_client.get_info_item.side_effect = NotFound``).
-    """
-    fake_client = MagicMock(spec=ArchiverClient)
-
-    async def _list_info_items():
-        result = await db_session.execute(select(InfoItem))
-        items = result.scalars().all()
-        out = []
-        for item in items:
-            entry = MagicMock()
-            entry.info_item_id = str(item.info_item_id)
-            entry.name = item.name
-            entry.description = item.description
-            entry.owner = None
-            entry.created_at = item.created_at or datetime.now(UTC)
-            entry.updated_at = item.updated_at or datetime.now(UTC)
-            out.append(entry)
-        return out
-
-    async def _get_info_item(info_item_id: str):
-        result = await db_session.execute(
-            select(InfoItem).where(InfoItem.info_item_id == info_item_id)
-        )
-        item = result.scalars().first()
-        if item is None:
-            raise NotFound(f"info_item {info_item_id} not found")
-        bindings_result = await db_session.execute(
-            select(InfoItemSource).where(
-                InfoItemSource.info_item_id == item.info_item_id,
-                InfoItemSource.deactivated_at.is_(None),
-            )
-        )
-        out = MagicMock()
-        out.info_item_id = str(item.info_item_id)
-        out.name = item.name
-        out.description = item.description
-        info_item_sources = []
-        for binding in bindings_result.scalars().all():
-            b = MagicMock()
-            b.info_source_id = str(binding.info_source_id)
-            b.is_active = binding.deactivated_at is None
-            b.deactivated_at = binding.deactivated_at
-            info_item_sources.append(b)
-        out.info_item_sources = info_item_sources
-        return out
-
-    async def _find_info_item(query: str, *, limit: int = 20):
-        # ILIKE on name + description, mirroring Archiver's pg_trgm-backed
-        # find_info_item, but minus the trigram ranking — substring is fine
-        # for tests.
-        q = f"%{query}%"
-        result = await db_session.execute(
-            select(InfoItem)
-            .where(or_(InfoItem.name.ilike(q), InfoItem.description.ilike(q)))
-            .order_by(InfoItem.created_at.desc())
-            .limit(limit)
-        )
-        items = result.scalars().all()
-        out = []
-        for item in items:
-            entry = MagicMock()
-            entry.info_item_id = str(item.info_item_id)
-            entry.name = item.name
-            entry.description = item.description
-            entry.created_at = item.created_at or datetime.now(UTC)
-            entry.updated_at = item.updated_at or datetime.now(UTC)
-            out.append(entry)
-        return out
-
-    fake_client.list_info_items = AsyncMock(side_effect=_list_info_items)
-    fake_client.get_info_item = AsyncMock(side_effect=_get_info_item)
-    fake_client.find_info_item = AsyncMock(side_effect=_find_info_item)
-
-    # Swap the registry singleton via the test seam so
-    # ``get_registry().get_archiver_client()`` returns this fake everywhere.
-    # ``set_registry_for_testing(None)`` on teardown lets the next call rebuild
-    # a fresh default — no leakage between tests.
-    new_reg = ServiceRegistry(archiver_client=fake_client)
-    set_registry_for_testing(new_reg)
-    request.addfinalizer(lambda: set_registry_for_testing(None))
-    return fake_client
-
-
-@pytest.fixture
-async def client(test_engine, db_session, info_client) -> AsyncGenerator[AsyncClient]:
+async def client(test_engine, db_session) -> AsyncGenerator[AsyncClient]:
     from src.api.main import app
 
     async def override_session() -> AsyncGenerator[AsyncSession]:

@@ -7,13 +7,29 @@ translate the raised domain errors into their own transport (409 vs OOB flash)
 and own the commit.
 """
 
-from urllib.parse import urlparse
+from urllib.parse import urlparse, urlsplit
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.domains import domain_name_for_url
 from src.core.models.audit_log import EventType, audit
 from src.core.models.watched_item import WatchedItem, WatchHealthStatus
+
+
+def derive_watched_item_name(url: str) -> str:
+    """A legible placeholder name derived from a WatchedItem's URL.
+
+    Neither remaining creation path carries a name of its own.
+    ``RegistryAnnouncementState`` has no ``name`` field — its grain is registry
+    state, not presentation — and the POST route stopped being able to borrow
+    the InfoItem's when the Archiver SDK went (#254). ``WatchedItem.name`` is
+    NOT NULL, so host + path is the most informative thing derivable from what
+    is actually in hand, and it is deliberately not invented registry data: an
+    operator can still set a real name, and reconciliation never overwrites one.
+    """
+    parts = urlsplit(url)
+    name = f"{parts.netloc}{parts.path}".rstrip("/") or url
+    return name[:255]
 
 
 def resolve_watch_target(url: str) -> tuple[str, str | None, WatchHealthStatus]:

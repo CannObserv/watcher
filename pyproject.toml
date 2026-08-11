@@ -27,7 +27,6 @@ dependencies = [
     "python-multipart>=0.0.22,<1",
     "html5lib>=1.1",
     "notifier-client",
-    "archiver-client>=4.0.0,<5",
     "co-core[extract]>=0.9.3,<0.10",
     "co-core-aio[bus]>=0.9.3,<0.10",
 ]
@@ -97,4 +96,3 @@ find-links = ["./.wheelhouse"]
 
 [tool.uv.sources]
 notifier-client = { git = "ssh://git@github-notifier/CannObserv/notifier.git", subdirectory = "clients/python", rev = "v0.2.1" }
-archiver-client = { path = "../archiver/clients/python", editable = true }

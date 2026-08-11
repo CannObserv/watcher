@@ -29,8 +29,6 @@ export $(cat /etc/watcher/.env .env 2>/dev/null | xargs)
 | `BUILD_ID` | env | no | Git SHA for static asset cache-busting (default `"dev"`) |
 | `NOTIFIER_BASE_URL` | `/etc/watcher/.env` | **yes** | Base URL of the notifier service (e.g. `http://localhost:9000`) |
 | `NOTIFIER_API_KEY` | `/etc/watcher/.env` | **yes** | Watcher tenant API key issued by `scripts/seed_tenant.py` in the notifier repo |
-| `ARCHIVER_BASE_URL` | `/etc/watcher/.env` | no | Archiver service base URL (default `http://localhost:8020`) |
-| `ARCHIVER_API_KEY` | `/etc/watcher/.env` | **yes** | API key for the ArchiverClient SDK; missing key crashes the API on boot via the lifespan pre-warm |
 | `WATCHER_ALLOW_PRODUCTION_DB` | `deploy/watcher.service` **only** | prod only | `=1` opts into serving a database whose name lacks a `_test`/`_dev` suffix (`src/core/db_safety.py`, #233). Must live in the systemd unit, never an env file — env files are sourced by hand-run dev servers, which are exactly what the guard stops |
 | `WATCHER_DEV_DATABASE_URL` | `.env` | no | Persistent dev database for `scripts/dev_server.sh`; wins over `TEST_DATABASE_URL` |
 | `WATCHER_BUS_REDIS_URL` | `/etc/watcher/.env` | prod | Redis URL of the Archiver-operated broker (`redis://localhost:6379/0`) for the `content.fetch-policy` producer (#245). Unset → the periodic publish task skips with an ERROR log and Replicator paces every host at its own conservative default |
@@ -42,7 +40,9 @@ export $(cat /etc/watcher/.env .env 2>/dev/null | xargs)
 (archiver#109). Watcher publishes `content.fetch-policy` (#245) and — Phase 4,
 #241 — publishes `content.fetch` commands and consumes `content.blobs` facts
 via its own consumer group (`watcher`, started in the lifespan when
-`WATCHER_BUS_REDIS_URL` is set). All queued work stays on Procrastinate over
+`WATCHER_BUS_REDIS_URL` is set). Since #254 it also consumes `info.registry`
+**grouplessly**, replayed from `0-0` at boot; without the bus URL neither
+consumer starts and the registry cannot converge. All queued work stays on Procrastinate over
 Postgres. See [ARCHITECTURE.md](ARCHITECTURE.md) § *Redis and the bus* for the ownership split.
 
 ## Systemd Service
@@ -51,7 +51,7 @@ A systemd unit file is provided at `deploy/watcher.service`.
 
 ### Installation
 
-> **Install the Archiver service first** — see [§ Archiver Service](#archiver-service) below. `watcher.service` pre-warms an `ArchiverClient` in its lifespan and will crash-loop on missing `ARCHIVER_API_KEY` until the Archiver service section is complete.
+> **Install the Archiver service first** — see [§ Archiver Service](#archiver-service) below. Watcher no longer holds an Archiver SDK and will boot without one (#254), but it consumes `info.registry` off the Archiver-operated broker, so until that is up `watched_items` cannot reconcile and no registry state arrives.
 
 ```bash
 # Create system env directory
@@ -236,11 +236,17 @@ genesis migration normally.
 ## Archiver Service
 
 The Archiver is a sibling service (port 8020, `archiver.service`; its repo is
-checked out alongside this one — `/home/exedev/archiver` on this VM, and pinned
-at `../archiver` by the `archiver-client` path dependency) that owns the
-canonical InfoItem / InfoSource / SourceRevision / RepSpec registry. Watcher's lifespan pre-warms an `ArchiverClient` SDK against it;
-without `ARCHIVER_API_KEY` and a reachable service, `watcher.service` will
-refuse to boot.
+checked out alongside this one — `/home/exedev/archiver` on this VM, located for the
+test harness by `ARCHIVER_REPO_PATH`) that owns the canonical InfoItem / InfoSource /
+SourceRevision / RepSpec registry.
+
+**Watcher makes no HTTP calls to it.** The SDK, its API key, and the lifespan pre-warm
+were removed in #254 together with the last outbound call (`get_info_item` on WatchedItem
+create); registry state now arrives as `info.registry` announcements, which Watcher
+reconciles into `watched_items`. `watcher.service` therefore boots regardless of
+Archiver's state — but with the broker down or the producer not running, the registry
+simply never converges, and the log line to look for is the `info.registry` consumer
+failing to start.
 
 See the Archiver repo's `docs/DEPLOYMENT.md` for the full Archiver install
 (key generation, env-var registration, systemd unit). After installing

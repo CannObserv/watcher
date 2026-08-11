@@ -86,10 +86,10 @@ revision is always enqueued. Full detail, including why a fresh item starts
 URL **without** re-probing and `domain_suspended` is re-evaluated; every
 create/PATCH/re-probe path (API and dashboard) shares
 `ensure_domain_and_resolve_suspension` in
-`src/core/domains.py` (#196). SourceRevisions are POSTed to Archiver via the
-`archiver-client` SDK on every detected change; the local
-`pending_archiver_sync` outbox + drain worker guarantees delivery during
-Archiver outages. Notifications dispatch inline from the pipeline **once per
+`src/core/domains.py` (#196). SourceRevisions are published to Archiver as
+`source_revision_observed` facts on `content.revisions` (#253) on every detected
+change; the local `pending_archiver_sync` outbox + drain worker guarantees
+delivery during broker outages. Notifications dispatch inline from the pipeline **once per
 WatchedItem** on change detection (`notifications_dispatched ≤ 1`), with
 `change_revision_id` in WatchEvent metadata. `schedule_tick` skips items that
 are paused (`is_active=false`), archived, or `domain_suspended`, and applies the

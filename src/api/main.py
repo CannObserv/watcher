@@ -21,7 +21,6 @@ from src.core.bus import BUS_REDIS_URL_ENV, aclose_shared_bus_client, get_shared
 from src.core.database import get_session_factory
 from src.core.db_safety import ProductionDatabaseRefused, assert_environment_db_allowed
 from src.core.logging import configure_logging, get_logger
-from src.core.registry import get_registry
 from src.dashboard import register_dashboard
 
 # Worker imports are safe at module top: src.workers.__init__ defers task-module
@@ -37,7 +36,7 @@ logger = get_logger(__name__)
 
 @asynccontextmanager
 async def lifespan(application: FastAPI):
-    """Pre-warm the SDK, start the fact consumer and the procrastinate worker.
+    """Start the fact and registry consumers plus the procrastinate worker.
 
     Refuses to serve a production database unless the caller opted in via
     WATCHER_ALLOW_PRODUCTION_DB=1 (only deploy/watcher.service does) —
@@ -45,9 +44,9 @@ async def lifespan(application: FastAPI):
     (#233); see src.core.db_safety. Runs before any resource is built, so a
     refused process never starts the consumer or the worker.
 
-    Pre-warming the ArchiverClient on startup means a missing ARCHIVER_API_KEY
-    crashes the API on boot, not on first request. The SDK is closed last on shutdown,
-    after the worker is fully gathered and the procrastinate app has closed.
+    Nothing to pre-warm since #254: the Archiver SDK went with Watcher's last
+    outbound call to Archiver, so there is no client to build, no
+    ARCHIVER_API_KEY to fail fast on, and no close to order at shutdown.
     """
     try:
         assert_environment_db_allowed(os.environ)
@@ -56,11 +55,6 @@ async def lifespan(application: FastAPI):
         # journalctl as a lifespan traceback, burying the actionable text.
         logger.critical("Refusing to start: %s", e)
         raise
-
-    # Pre-warm the ArchiverClient — raises if ARCHIVER_API_KEY is unset.
-    registry = get_registry()
-    registry.get_archiver_client()
-    logger.info("archiver client pre-warmed")
 
     # Phase 4 (#241): the content.blobs fact consumer — the only inbound path
     # for check results now that Watcher itself does not fetch. Without a bus
@@ -110,8 +104,6 @@ async def lifespan(application: FastAPI):
     await asyncio.gather(*tasks, return_exceptions=True)
     await aclose_shared_bus_client()
     await proc_app.close_async()
-    # SDK close must be the last shutdown step (no consumer can still be in flight).
-    await registry.aclose_archiver_client()
 
 
 app = FastAPI(title="watcher", version="0.1.0", lifespan=lifespan)

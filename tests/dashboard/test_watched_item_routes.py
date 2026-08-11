@@ -968,6 +968,8 @@ class TestFieldHelpers:
         wi = MagicMock()
         wi.default_schedule_config = {"interval": "15m"}
         wi.domain_default_schedule_config = None
+        wi.announced_schedule_config = None
+        wi.throttle_floor_interval = None
         wi.last_checked_at = None
         ctx = _watched_item_field_context(MagicMock(), wi, "default_schedule_interval", mode="view")
         assert ctx["field_value"] == "15m"
@@ -976,6 +978,8 @@ class TestFieldHelpers:
         wi = MagicMock()
         wi.default_schedule_config = None
         wi.domain_default_schedule_config = None
+        wi.announced_schedule_config = None
+        wi.throttle_floor_interval = None
         wi.last_checked_at = None
         ctx = _watched_item_field_context(MagicMock(), wi, "default_schedule_interval", mode="view")
         assert ctx["field_value"] == ""
@@ -1167,11 +1171,13 @@ class TestListScheduleMaps:
 
     NOW = datetime(2026, 6, 19, 12, 0, tzinfo=UTC)
 
-    def _wi(self, *, item=None, domain=None, last_checked_at=None):
+    def _wi(self, *, item=None, domain=None, last_checked_at=None, announced=None, floor=None):
         wi = MagicMock()
         wi.id = ULID()
         wi.default_schedule_config = item
         wi.domain_default_schedule_config = domain
+        wi.announced_schedule_config = announced
+        wi.throttle_floor_interval = floor
         wi.last_checked_at = last_checked_at
         return wi
 

@@ -15,11 +15,13 @@ from src.core.scheduling.schedule import ScheduleDisplay, resolve_schedule_displ
 NOW = datetime(2026, 6, 20, 12, 0, tzinfo=UTC)
 
 
-def _wi(item=None, domain=None, last_checked_at=None):
+def _wi(item=None, domain=None, last_checked_at=None, announced=None, floor=None):
     """A minimal WatchedItem stand-in carrying only the fields the helper reads."""
     return SimpleNamespace(
         default_schedule_config=item,
         domain_default_schedule_config=domain,
+        announced_schedule_config=announced,
+        throttle_floor_interval=floor,
         last_checked_at=last_checked_at,
     )
 
@@ -132,3 +134,70 @@ def test_returns_frozen_dataclass():
         pass
     else:
         raise AssertionError("ScheduleDisplay should be frozen")
+
+
+class TestRegistryTier:
+    """#254: the announced cadence is a distinct tier and must say so.
+
+    Showing "· domain" (or nothing, as an item interval would) for a cadence the
+    operator cannot change from here is the kind of quiet lie that sends someone
+    editing a field that no longer wins.
+    """
+
+    def test_announced_interval_is_source_registry(self):
+        d = resolve_schedule_display(_wi(announced={"interval": "15m"}), now=NOW)
+        assert d.interval_text == "15m"
+        assert d.source == "registry"
+        assert d.marker == "registry"
+
+    def test_announced_outranks_an_item_interval(self):
+        d = resolve_schedule_display(
+            _wi(announced={"interval": "15m"}, item={"interval": "6h"}), now=NOW
+        )
+        assert d.interval_text == "15m"
+        assert d.source == "registry"
+
+    def test_no_announcement_leaves_the_local_chain_untouched(self):
+        d = resolve_schedule_display(_wi(item={"interval": "6h"}), now=NOW)
+        assert d.source == "item"
+        assert d.marker is None
+
+
+class TestThrottleVisibility:
+    """A throttle used to be visible because it wrote the item config. It writes a
+    floor now, so the display has to carry it or the slow-down is unexplainable."""
+
+    def test_floored_item_shows_the_floor_and_marks_it(self):
+        d = resolve_schedule_display(_wi(item={"interval": "15m"}, floor="1d"), now=NOW)
+        assert d.interval_text == "1d"
+        assert d.throttled is True
+        assert d.marker == "throttled"
+
+    def test_floor_that_does_not_bind_is_not_reported(self):
+        d = resolve_schedule_display(_wi(domain={"interval": "7d"}, floor="1d"), now=NOW)
+        assert d.interval_text == "7d"
+        assert d.throttled is False
+        assert d.marker == "domain"
+
+    def test_a_throttled_announced_item_still_shows_the_throttle(self):
+        """The floor outranks the registry marker: it is what is in force."""
+        d = resolve_schedule_display(_wi(announced={"interval": "15m"}, floor="1d"), now=NOW)
+        assert d.interval_text == "1d"
+        assert d.source == "registry"
+        assert d.marker == "throttled"
+
+    def test_an_active_profile_still_wins_the_marker(self):
+        d = resolve_schedule_display(
+            _wi(announced={"interval": "6h"}, floor="1d"),
+            now=NOW,
+            profiles=[
+                {
+                    "profile_type": "event",
+                    "reference_date": "2026-06-25",
+                    "rules": [{"days_before": 30, "interval": "1h"}],
+                    "is_active": True,
+                }
+            ],
+        )
+        assert d.profile_active is True
+        assert d.marker == "profile"

@@ -16,6 +16,7 @@ from src.core.models.notification_template import (
     NotificationTemplate,
 )
 from src.core.models.pending_archiver_sync import PendingArchiverSync
+from src.core.models.revoked_info_item import RevokedInfoItem
 from src.core.models.temporal_profile import PostAction, ProfileType, TemporalProfile
 from src.core.models.watched_item import WatchedItem, WatchHealthStatus
 
@@ -32,6 +33,7 @@ __all__ = [
     "FetchCommandStatus",
     "FetchPolicyTombstone",
     "PendingArchiverSync",
+    "RevokedInfoItem",
     "NotificationTemplate",
     "VISIBILITIES",
     "VISIBILITY_GLOBAL",

@@ -229,15 +229,20 @@ async def schedule_tick(timestamp: int) -> None:
                         # faster than 1d. With the Domain cadence tier (#205) an item
                         # may already resolve to a slower interval (e.g. a 7d domain);
                         # pinning it to 1d would *speed it up*, the opposite of
-                        # "reduce frequency". When already ≥1d this is a no-op and the
-                        # item config is left untouched, preserving domain inheritance.
+                        # "reduce frequency". When already ≥1d this is a no-op and no
+                        # floor is set, preserving inheritance.
+                        #
+                        # Writes the *floor*, not the item config (#254). A throttle is
+                        # protective mechanism, not cadence policy: policy is the
+                        # registry's since the info.registry reconcile landed, and a
+                        # throttle written into default_schedule_config would be
+                        # outranked by the announced tier — silently un-throttling the
+                        # item on its next announcement, which is the failure this
+                        # column split exists to prevent.
                         if parse_interval(
                             resolved_schedule_config(wi).get("interval")
                         ) < parse_interval("1d"):
-                            wi.default_schedule_config = {
-                                **(wi.default_schedule_config or {}),
-                                "interval": "1d",
-                            }
+                            wi.throttle_floor_interval = "1d"
                             audit(
                                 session,
                                 EventType.WATCHED_ITEM_THROTTLED,

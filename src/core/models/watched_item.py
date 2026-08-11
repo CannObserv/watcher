@@ -3,7 +3,7 @@
 import enum
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Index, String, Text, text
+from sqlalchemy import BigInteger, Boolean, DateTime, ForeignKey, Index, String, Text, text
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 from ulid import ULID
@@ -105,6 +105,34 @@ class WatchedItem(Base, TimestampMixin):
     domain_default_schedule_config: Mapped[dict | None] = mapped_column(
         JSONB(none_as_null=True), nullable=True, default=None
     )
+
+    # Registry-announced cadence policy — the top tier of schedule resolution
+    # (#254). Written only by the info.registry reconcile, from the announcement's
+    # `watch_spec["interval"]`, and only when that interval parses. NULL is the
+    # contract's delegation case (`{"schema_version": 1}` with no `interval`,
+    # cannobserv#324) *and* the unparseable case, which resolve identically: fall
+    # to the local chain. Deliberately NOT `default_schedule_config` — that column
+    # has an operator and the reduce_frequency post-action writing to it, so
+    # reconciling into it would revert every throttle on the next snapshot and
+    # contaminate the values CannObserv/archiver#150 imports out of Watcher.
+    # none_as_null=True per #198.
+    announced_schedule_config: Mapped[dict | None] = mapped_column(
+        JSONB(none_as_null=True), nullable=True, default=None
+    )
+    # Protective slow-down floor, written by the reduce_frequency post-action
+    # (#254). Mechanism, not policy: it composes with the announced cadence as a
+    # `max` rather than competing with it in the tier chain, so a throttle
+    # survives reconciliation and can only ever slow an item, never speed it past
+    # what the registry asked for. Same '30s'/'15m'/'6h'/'1d' vocabulary.
+    throttle_floor_interval: Mapped[str | None] = mapped_column(
+        String(16), nullable=True, default=None
+    )
+    # The info.registry `generation` this row has actually applied (#254). The
+    # reconcile applies iff `generation > applied_generation`, because the
+    # producer's outbox drain reorders under retry and a stale announcement would
+    # otherwise win on a last-write-wins stream. NULL means "no announcement has
+    # ever been applied" — every generation is greater than that, including 0.
+    applied_generation: Mapped[int | None] = mapped_column(BigInteger, nullable=True, default=None)
 
     # Pipeline state — populated at create time; updated by pipeline.
     effective_url: Mapped[str] = mapped_column(Text, nullable=False, default="", server_default="")

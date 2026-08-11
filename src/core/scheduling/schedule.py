@@ -5,7 +5,8 @@ it inherited, is a temporal profile currently overriding it, and when is its nex
 check?" — composed from the same primitives the scheduler uses so the UI cannot
 drift from ``schedule_tick``:
 
-- ``resolved_schedule_config`` — the 3-tier base chain (item → domain → system; #205)
+- ``resolved_schedule_config`` — the 4-tier base chain under the throttle floor
+  (registry → item → domain → system; #205, #254)
 - ``resolve_effective_interval`` — the temporal-profile override (#204 CR finding 2)
 - ``compute_next_check`` — the next-due datetime
 
@@ -23,9 +24,9 @@ from src.core.scheduling.cadence import (
     format_interval,
     resolve_effective_interval,
 )
-from src.core.scheduling.resolution import resolved_schedule_config
+from src.core.scheduling.resolution import base_schedule_config, resolved_schedule_config
 
-ScheduleSource = Literal["item", "domain", "default"]
+ScheduleSource = Literal["registry", "item", "domain", "default"]
 
 
 @dataclass(frozen=True)
@@ -33,47 +34,68 @@ class ScheduleDisplay:
     """Resolved schedule facts for one WatchedItem, ready to render.
 
     ``interval_text`` is the cadence to show — the profile cadence when
-    ``profile_active`` is True, otherwise the base 3-tier resolution. ``source`` is
-    where the *base* interval came from (``item``/``domain``/``default``).
-    ``next_check`` is ``None`` only when the item has never been checked.
+    ``profile_active`` is True, otherwise the base 4-tier resolution *under the
+    throttle floor*, i.e. what the scheduler will actually use. ``source`` is
+    where the base interval came from (``registry``/``item``/``domain``/``default``).
+    ``throttled`` is True when the ``reduce_frequency`` floor is what set the text
+    rather than the tier. ``next_check`` is ``None`` only when the item has never
+    been checked.
     """
 
     interval_text: str
     source: ScheduleSource
     profile_active: bool
     next_check: datetime | None
+    throttled: bool = False
 
     @property
     def marker(self) -> str | None:
         """Source word rendered after a "·" in the UI, or ``None`` for an explicit
-        item interval. ``"profile"`` when a temporal profile is currently overriding
-        the base cadence; otherwise ``"domain"``/``"default"`` for an inherited tier.
+        item interval.
+
+        Precedence is by what is actually in force: ``"profile"`` when a temporal
+        profile is currently overriding the base cadence, then ``"throttled"``
+        when the floor is (#254 — without this a throttle is invisible, since it
+        no longer writes the item config it used to show up in), then
+        ``"registry"``/``"domain"``/``"default"`` for a non-local tier.
         """
         if self.profile_active:
             return "profile"
+        if self.throttled:
+            return "throttled"
         return None if self.source == "item" else self.source
 
 
-def _base_interval(watched_item: WatchedItem) -> tuple[str, ScheduleSource]:
-    """Resolve ``(interval_text, source)`` from the 3-tier chain, no profile.
+def _base_source(watched_item: WatchedItem) -> ScheduleSource:
+    """Which tier the base interval came from — mirrors ``base_schedule_config``."""
+    if watched_item.announced_schedule_config is not None:
+        return "registry"
+    if watched_item.default_schedule_config is not None:
+        return "item"
+    if watched_item.domain_default_schedule_config is not None:
+        return "domain"
+    return "default"
 
-    Mirrors the precedence in ``resolved_schedule_config``: a non-``None`` item
-    config wins at its tier (an intervalless ``{}`` shows the literal ``"{ }"``
-    rather than a blank beside an inherited tag — #202 CR); else a denormalized
-    domain default; else the system default.
+
+def _base_interval(watched_item: WatchedItem) -> tuple[str, ScheduleSource, bool]:
+    """Resolve ``(interval_text, source, throttled)`` from the chain, no profile.
+
+    The text comes from ``resolved_schedule_config`` — the 4-tier chain *under
+    the throttle floor* — so the UI cannot show a cadence the scheduler will not
+    use. ``source`` still names the tier the base came from, and ``throttled``
+    says whether the floor is what moved the number (#254): a throttle used to be
+    visible because it wrote the item config, and reporting it here is what keeps
+    it visible now that it does not.
+
+    An intervalless config (an explicit ``{}`` at any tier) shows the literal
+    ``"{ }"`` rather than a blank beside an inherited tag (#202 CR).
     """
-    item_cfg = watched_item.default_schedule_config
-    if item_cfg is not None:
-        interval = item_cfg.get("interval")
-        return (interval, "item") if interval else ("{ }", "item")
-    source: ScheduleSource = (
-        "domain" if watched_item.domain_default_schedule_config is not None else "default"
-    )
-    # An intervalless inherited config (a stray domain ``{}``) shows the literal
-    # rather than a blank beside the marker — symmetric with the item tier. The
-    # write boundary rejects empty domain defaults, so this is defensive only.
-    interval = resolved_schedule_config(watched_item).get("interval")
-    return (interval, source) if interval else ("{ }", source)
+    source = _base_source(watched_item)
+    resolved = resolved_schedule_config(watched_item)
+    interval = resolved.get("interval")
+    base_interval = base_schedule_config(watched_item).get("interval")
+    throttled = interval is not None and interval != base_interval
+    return (interval if interval else "{ }", source, throttled)
 
 
 def resolve_schedule_display(
@@ -90,7 +112,7 @@ def resolve_schedule_display(
     the cadence, ``interval_text`` shows the profile interval and ``profile_active``
     is True — the tier ``source`` still reflects where the base came from.
     """
-    base_text, source = _base_interval(watched_item)
+    base_text, source, throttled = _base_interval(watched_item)
 
     profile_interval = None
     if profiles:
@@ -116,4 +138,5 @@ def resolve_schedule_display(
         source=source,
         profile_active=profile_active,
         next_check=next_check,
+        throttled=throttled,
     )

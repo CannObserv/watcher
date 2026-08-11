@@ -289,15 +289,15 @@ class TestScheduleTickInactiveDomain:
 
 
 # ---------------------------------------------------------------------------
-# Post-actions: reduce_frequency mutates the WatchedItem's default schedule.
+# Post-actions: reduce_frequency sets the WatchedItem's throttle floor.
 # ---------------------------------------------------------------------------
 
 
 class TestPostActions:
-    """reduce_frequency must mutate the WatchedItem's default schedule."""
+    """reduce_frequency must set the WatchedItem's throttle floor (#254)."""
 
     async def test_reduce_frequency_mutates_watched_item_default(self, db_session, monkeypatch):
-        """post_action=reduce_frequency slows the WatchedItem's default schedule."""
+        """post_action=reduce_frequency slows the WatchedItem via the floor."""
         now = datetime(2026, 5, 17, 12, 0, 0, tzinfo=UTC)
 
         # WatchedItem starts at 1h interval.
@@ -329,9 +329,11 @@ class TestPostActions:
             mock_dt.side_effect = lambda *a, **kw: datetime(*a, **kw)
             await schedule_tick(int(now.timestamp()))
 
-        # WatchedItem's default_schedule_config reduced to 1d.
+        # The throttle lands on the FLOOR, not the item config (#254) — the item's
+        # own cadence is left exactly as the operator (or registry) set it.
         await db_session.refresh(wi)
-        assert wi.default_schedule_config.get("interval") == "1d"
+        assert wi.throttle_floor_interval == "1d"
+        assert wi.default_schedule_config == {"interval": "1h"}
 
         # The WatchedItem now resolves to the 1d interval.
         assert resolved_schedule_config(wi).get("interval") == "1d"
@@ -389,7 +391,8 @@ class TestPostActions:
             await schedule_tick(int(now.timestamp()))
 
         await db_session.refresh(wi)
-        # Item config untouched → still inheriting the 7d domain cadence.
+        # No floor set, item config untouched → still inheriting the 7d domain cadence.
+        assert wi.throttle_floor_interval is None
         assert wi.default_schedule_config is None
         assert resolved_schedule_config(wi).get("interval") == "7d"
 
@@ -473,3 +476,37 @@ class TestPostActions:
         await db_session.refresh(wi)
         assert wi.is_active is False
         assert wi.archived_at is not None
+
+
+class TestThrottleSurvivesReconciliation:
+    """#254: the floor exists so a throttle is not silently reverted.
+
+    Before the split, ``reduce_frequency`` wrote ``default_schedule_config``. Once
+    the registry owns cadence policy that column is outranked by the announced
+    tier, so the very next announcement — or the hourly snapshot, which carries no
+    change at all — would have un-throttled the item.
+    """
+
+    async def test_floor_still_binds_under_a_faster_announced_cadence(self, db_session):
+        wi = await make_watched_item(db_session, name="Throttled")
+        wi.announced_schedule_config = {"interval": "15m"}
+        wi.throttle_floor_interval = "1d"
+        await db_session.commit()
+
+        assert resolved_schedule_config(wi).get("interval") == "1d"
+
+    async def test_a_new_announcement_does_not_clear_the_floor(self, db_session):
+        """The reconcile writes announced_schedule_config; the floor is a different
+        column, so there is no code path by which an announcement clears it."""
+        wi = await make_watched_item(db_session, name="Throttled")
+        wi.throttle_floor_interval = "1d"
+        wi.announced_schedule_config = {"interval": "6h"}
+        await db_session.commit()
+
+        # Simulate the next announcement arriving with a different cadence.
+        wi.announced_schedule_config = {"interval": "30s"}
+        await db_session.commit()
+        await db_session.refresh(wi)
+
+        assert wi.throttle_floor_interval == "1d"
+        assert resolved_schedule_config(wi).get("interval") == "1d"

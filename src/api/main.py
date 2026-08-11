@@ -29,6 +29,7 @@ from src.dashboard import register_dashboard
 # (#241 CR-7; previously inline in the lifespan).
 from src.workers import get_app
 from src.workers.fetch_facts import start_blobs_consumer
+from src.workers.registry_reconcile import start_registry_consumer
 
 configure_logging()
 logger = get_logger(__name__)
@@ -68,14 +69,24 @@ async def lifespan(application: FastAPI):
     bus_client = get_shared_bus_client()
     consumer_stop = asyncio.Event()
     consumer_task = None
+    registry_task = None
     if bus_client is not None:
         consumer_task = start_blobs_consumer(bus_client, get_session_factory(), stop=consumer_stop)
         logger.info("content.blobs consumer started")
+        # #254: the info.registry reconcile — Watcher's registry inbox. Groupless
+        # tail, replayed from 0-0 at boot, so a fresh process converges from the
+        # snapshot alone. Shares the stop event: both are registry/fact inboxes
+        # with the same shutdown story.
+        registry_task = start_registry_consumer(
+            bus_client, get_session_factory(), stop=consumer_stop
+        )
+        logger.info("info.registry consumer started")
     else:
         # Not a degraded mode any more: with no fact inbox, issued commands
         # can never be applied and every one of them will be reaped.
         logger.error(
-            "content.blobs consumer NOT started: %s is not set — no check can complete",
+            "content.blobs and info.registry consumers NOT started: %s is not set — "
+            "no check can complete and the registry cannot reconcile",
             BUS_REDIS_URL_ENV,
         )
 
@@ -90,7 +101,12 @@ async def lifespan(application: FastAPI):
         # is safe (commit-then-ack means a cancelled ack just redelivers, and
         # the upsert + apply guard make redelivery a no-op).
         consumer_task.cancel()
-    tasks = [t for t in (worker_task, consumer_task) if t is not None]
+    if registry_task is not None:
+        # Same reasoning, and cheaper still: the reconcile commits before it
+        # returns and the generation guard makes a re-read a no-op, so a cancel
+        # mid-read costs at most one replayed announcement at next boot.
+        registry_task.cancel()
+    tasks = [t for t in (worker_task, consumer_task, registry_task) if t is not None]
     await asyncio.gather(*tasks, return_exceptions=True)
     await aclose_shared_bus_client()
     await proc_app.close_async()

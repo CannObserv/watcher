@@ -77,8 +77,12 @@ def _base_source(watched_item: WatchedItem) -> ScheduleSource:
     return "default"
 
 
-def _base_interval(watched_item: WatchedItem) -> tuple[str, ScheduleSource, bool]:
-    """Resolve ``(interval_text, source, throttled)`` from the chain, no profile.
+def _base_interval(watched_item: WatchedItem, resolved: dict) -> tuple[str, ScheduleSource, bool]:
+    """Render ``(interval_text, source, throttled)`` from an already-resolved config.
+
+    Takes ``resolved`` rather than recomputing it (#254 CR-9): the caller needs
+    the same config for ``compute_next_check``, and resolving three times per row
+    on a list view is work for nothing.
 
     The text comes from ``resolved_schedule_config`` — the 4-tier chain *under
     the throttle floor* — so the UI cannot show a cadence the scheduler will not
@@ -91,7 +95,6 @@ def _base_interval(watched_item: WatchedItem) -> tuple[str, ScheduleSource, bool
     ``"{ }"`` rather than a blank beside an inherited tag (#202 CR).
     """
     source = _base_source(watched_item)
-    resolved = resolved_schedule_config(watched_item)
     interval = resolved.get("interval")
     base_interval = base_schedule_config(watched_item).get("interval")
     throttled = interval is not None and interval != base_interval
@@ -112,7 +115,8 @@ def resolve_schedule_display(
     the cadence, ``interval_text`` shows the profile interval and ``profile_active``
     is True — the tier ``source`` still reflects where the base came from.
     """
-    base_text, source, throttled = _base_interval(watched_item)
+    resolved = resolved_schedule_config(watched_item)
+    base_text, source, throttled = _base_interval(watched_item, resolved)
 
     profile_interval = None
     if profiles:
@@ -127,7 +131,7 @@ def resolve_schedule_display(
         # Reuse the profile interval already resolved above — no second
         # resolve_effective_interval pass inside compute_next_check.
         next_check = compute_next_check(
-            resolved_schedule_config(watched_item),
+            resolved,
             watched_item.last_checked_at,
             now=now,
             profile_interval=profile_interval,

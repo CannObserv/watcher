@@ -52,6 +52,7 @@ repairs whatever was dropped.
 """
 
 import asyncio
+import logging
 
 from co_core.effects.bus import BusMessage
 from co_core.pure.adapters.bus import streams
@@ -76,10 +77,11 @@ BLOCK_MS = 5000
 # Insurance against a client that ignores `block` (fakeredis) busy-spinning.
 IDLE_SLEEP_SECONDS = 0.05
 ERROR_BACKOFF_SECONDS = 5.0
-# Attempts per message before giving up on it. There is no PEL to park a message
-# in and no DLQ to route it to, so the choice is retry-in-memory or drop — and a
-# drop is survivable only because the periodic snapshot republishes. Bounded so a
-# genuinely poisonous payload cannot wedge the loop.
+# Loop backoffs against one held announcement before dropping it. There is no PEL
+# to park a message in and no DLQ to route it to, so the choice is retry-in-memory
+# or drop — and a drop is survivable only because the periodic snapshot
+# republishes. Bounded so a genuinely poisonous payload cannot wedge the loop
+# forever; the backoff is loop-level so a global failure costs one sleep, not N.
 MAX_APPLY_ATTEMPTS = 3
 
 # `count=1` throughout, deliberately. `AsyncBusTailReader.read` does not advance
@@ -198,11 +200,17 @@ async def reconcile_announcement(session, payload: RegistryAnnouncementState) ->
             archiver_info_source_id=payload.info_source_id,
         )
         session.add(row)
-        # A key coming back from revoked is a live announcement, not a special
-        # case: drop the tombstone so the guard tracks the row again.
-        tomb = await session.get(RevokedInfoItem, key)
-        if tomb is not None:
-            await session.delete(tomb)
+
+    # Any live announcement retires the tombstone — not just one that creates the
+    # row (#254 CR-2). The adopt path matters too: a POST can re-provision a
+    # previously-revoked InfoItem, and leaving the tombstone behind breaks the
+    # "a key has a row XOR a tombstone" invariant this table exists to hold. The
+    # cost shows up later, when that row is deleted and `_stored_generation`
+    # falls back to a tombstone holding a *lower* generation than was actually
+    # applied — re-opening the resurrection window the table was added to close.
+    tomb = await session.get(RevokedInfoItem, key)
+    if tomb is not None:
+        await session.delete(tomb)
 
     row.archiver_info_source_id = payload.info_source_id
     row.effective_url = payload.url
@@ -244,41 +252,6 @@ async def reconcile_announcement(session, payload: RegistryAnnouncementState) ->
     return outcome
 
 
-async def _apply_with_retry(session_factory, payload: RegistryAnnouncementState) -> str | None:
-    """Reconcile one payload, retrying a transient failure in memory.
-
-    There is no PEL here and no DLQ, so a failure is retry-or-drop. Retrying
-    holds ordering (the next message is not read until this one settles);
-    dropping is survivable only because the periodic snapshot republishes, which
-    is why it is the bounded last resort rather than the first response.
-    """
-    for attempt in range(1, MAX_APPLY_ATTEMPTS + 1):
-        try:
-            async with session_factory() as session:
-                return await reconcile_announcement(session, payload)
-        except asyncio.CancelledError:
-            raise
-        except Exception:
-            if attempt == MAX_APPLY_ATTEMPTS:
-                logger.error(
-                    "announcement dropped after repeated failures — the next "
-                    "snapshot must repair this key",
-                    extra={
-                        "info_item_id": getattr(payload, "info_item_id", "?"),
-                        "generation": getattr(payload, "generation", "?"),
-                    },
-                    exc_info=True,
-                )
-                return None
-            logger.warning(
-                "reconcile failed — retrying",
-                extra={"attempt": attempt, "info_item_id": getattr(payload, "info_item_id", "?")},
-                exc_info=True,
-            )
-            await asyncio.sleep(ERROR_BACKOFF_SECONDS * attempt)
-    return None
-
-
 async def run_registry_consumer(
     client: Redis,
     session_factory,
@@ -302,34 +275,44 @@ async def run_registry_consumer(
     """
     reader = AsyncBusTailReader(client, topic=streams.INFO_REGISTRY)
     replayed = False
+    # The message read but not yet applied. Held across iterations because the
+    # cursor has already moved past it and `seek` only goes forward — dropping it
+    # on a failure would be silent loss until the next snapshot (#254 CR-5).
+    pending: RegistryAnnouncementState | None = None
+    attempts = 0
 
     while not stop.is_set():
         try:
-            messages: list[BusMessage] = await reader.read(
-                count=READ_COUNT, block_ms=None if not replayed else block_ms
-            )
-            if not messages:
-                if not replayed:
-                    replayed = True
-                    logger.info("info.registry replay complete — tailing")
+            if pending is None:
+                messages: list[BusMessage] = await reader.read(
+                    count=READ_COUNT, block_ms=None if not replayed else block_ms
+                )
+                if not messages:
+                    if not replayed:
+                        replayed = True
+                        logger.info("info.registry replay complete — tailing")
+                        continue
+                    # A client that ignores `block` would busy-spin without this.
+                    await asyncio.sleep(IDLE_SLEEP_SECONDS)
                     continue
-                # A client that ignores `block` would busy-spin without this.
-                await asyncio.sleep(IDLE_SLEEP_SECONDS)
-                continue
 
-            for message in messages:
-                payload = message.payload
-                if not isinstance(payload, RegistryAnnouncementState):
+                message = messages[0]  # READ_COUNT is 1; see the constant.
+                if not isinstance(message.payload, RegistryAnnouncementState):
                     logger.info(
                         "unexpected payload type on info.registry — ignoring",
-                        extra={"event_type": getattr(payload, "event_type", "?")},
+                        extra={"event_type": getattr(message.payload, "event_type", "?")},
                     )
                     continue
-                outcome = await _apply_with_retry(session_factory, payload)
-                logger.info(
-                    "info.registry announcement processed",
-                    extra={"message_id": message.message_id, "outcome": outcome},
-                )
+                pending = message.payload
+
+            async with session_factory() as session:
+                outcome = await reconcile_announcement(session, pending)
+            logger.info(
+                "info.registry announcement processed",
+                extra={"info_item_id": pending.info_item_id, "outcome": outcome},
+            )
+            pending = None
+            attempts = 0
         except BusMessageAnomaly as exc:
             # No group, so no ack to skip past a poison frame with: the cursor
             # must be advanced explicitly or the next read raises on the same
@@ -346,7 +329,28 @@ async def run_registry_consumer(
         except asyncio.CancelledError:
             raise
         except Exception:
-            logger.warning("info.registry consumer error — backing off", exc_info=True)
+            # One backoff for the *loop*, not per message. A reconcile failure is
+            # almost always global (the database is down), and retrying each of N
+            # announcements through its own escalating sleep turns a five-minute
+            # outage into an hours-long replay that drops every message anyway.
+            # Holding `pending` means the backoff costs latency, never data.
+            attempts += 1
+            give_up = attempts >= MAX_APPLY_ATTEMPTS
+            logger.log(
+                logging.ERROR if give_up else logging.WARNING,
+                "info.registry consumer error — %s",
+                "dropping this announcement; the next snapshot must repair the key"
+                if give_up
+                else "backing off and retrying the same announcement",
+                extra={
+                    "attempt": attempts,
+                    "info_item_id": getattr(pending, "info_item_id", None),
+                },
+                exc_info=True,
+            )
+            if give_up:
+                pending = None
+                attempts = 0
             try:
                 await asyncio.wait_for(stop.wait(), timeout=error_backoff_seconds)
             except TimeoutError:

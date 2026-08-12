@@ -27,16 +27,13 @@ jobs:
       contents: read
       id-token: write
     steps:
-      # Watcher and the sibling archiver repo are checked out side by side so the
-      # `archiver-client = { path = "../archiver/clients/python" }` dep resolves
-      # (archiver is public; no token needed).
+      # No sibling checkout: the `archiver-client` path dep that required one was
+      # removed with the Archiver SDK (#254), and only the `test` job still needs
+      # the repo — for ARCHIVER_REPO_PATH, whose alembic builds the `information`
+      # schema conftest's factories write to.
       - uses: actions/checkout@v5
         with:
           path: watcher
-      - uses: actions/checkout@v5
-        with:
-          repository: CannObserv/archiver
-          path: archiver
 
       - name: Install uv
         uses: astral-sh/setup-uv@v5
@@ -184,16 +181,12 @@ jobs:
       - uses: actions/checkout@v5
         with:
           path: watcher
-      # Archiver is checked out only so `uv sync` can resolve the
-      # `archiver-client` path dep. Unlike the `test` job, this job runs no
-      # archiver alembic and seeds no `information` schema: the #234 squash
-      # collapsed the pre-existing chain into a self-contained genesis baseline
-      # that references no archiver-owned schema, so `upgrade head` from an empty
-      # database is fully standalone.
-      - uses: actions/checkout@v5
-        with:
-          repository: CannObserv/archiver
-          path: archiver
+      # No sibling checkout (#254 removed the `archiver-client` path dep that was
+      # its only reason here). This job runs no archiver alembic and seeds no
+      # `information` schema either: the #234 squash collapsed the pre-existing
+      # chain into a self-contained genesis baseline that references no
+      # archiver-owned schema, so `upgrade head` from an empty database is fully
+      # standalone.
 
       - name: Install uv
         uses: astral-sh/setup-uv@v5

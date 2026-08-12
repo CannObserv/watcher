@@ -1,5 +1,6 @@
 """Integration tests for WatchedItem API endpoints."""
 
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock
 
 import pytest
@@ -7,7 +8,8 @@ from sqlalchemy import select, text
 from ulid import ULID
 
 from src.core.models.audit_log import AuditLog, EventType
-from tests.conftest import make_info_item
+from src.core.models.watched_item import WatchedItem
+from tests.conftest import make_info_item, make_watched_item
 
 pytestmark = pytest.mark.integration
 
@@ -1382,3 +1384,68 @@ class TestCreateRequiresArchiverLinks:
             f"/api/v1/watched-items/{wi.id}", json={"archiver_info_source_id": None}
         )
         assert response.status_code == 422
+
+
+class TestThrottleFloorRelease:
+    """CR-1 (#254): the API's half of the throttle escape hatch."""
+
+    async def test_patching_the_schedule_config_releases_the_floor(self, client, db_session):
+        wi = await make_watched_item(db_session, name="Throttled")
+        wi.throttle_floor_interval = "1d"
+        await db_session.commit()
+
+        response = await client.patch(
+            f"/api/v1/watched-items/{wi.id}",
+            json={"default_schedule_config": {"interval": "30m"}},
+        )
+
+        assert response.status_code == 200, response.text
+        await db_session.refresh(wi)
+        assert wi.throttle_floor_interval is None
+
+    async def test_an_unrelated_patch_leaves_the_floor_alone(self, client, db_session):
+        wi = await make_watched_item(db_session, name="Throttled")
+        wi.throttle_floor_interval = "1d"
+        await db_session.commit()
+
+        response = await client.patch(
+            f"/api/v1/watched-items/{wi.id}", json={"description": "just a note"}
+        )
+
+        assert response.status_code == 200, response.text
+        await db_session.refresh(wi)
+        assert wi.throttle_floor_interval == "1d"
+
+
+class TestDeleteRegistryOwned:
+    """CR-7 (#254): deletion is not durable for a key the registry still announces.
+
+    `info.registry` is level-triggered, so the next snapshot recreates the row —
+    absence is not revocation. A 409 naming the authority beats a delete that
+    silently undoes itself.
+    """
+
+    async def test_deleting_a_reconciled_item_is_refused(self, client, db_session):
+        wi = await make_watched_item(db_session, name="Registry-owned")
+        wi.archived_at = datetime(2026, 8, 1, tzinfo=UTC)
+        wi.is_active = False
+        wi.applied_generation = 4
+        await db_session.commit()
+
+        response = await client.delete(f"/api/v1/watched-items/{wi.id}")
+
+        assert response.status_code == 409
+        assert "Archiver" in response.json()["detail"]
+        assert await db_session.get(WatchedItem, wi.id) is not None
+
+    async def test_deleting_an_un_announced_item_still_works(self, client, db_session):
+        """The whole population during the rollout: POST-created, never announced."""
+        wi = await make_watched_item(db_session, name="Local only")
+        wi.archived_at = datetime(2026, 8, 1, tzinfo=UTC)
+        wi.is_active = False
+        await db_session.commit()
+        assert wi.applied_generation is None
+
+        response = await client.delete(f"/api/v1/watched-items/{wi.id}")
+
+        assert response.status_code == 204

@@ -29,14 +29,12 @@ from src.core.domains import (
 from src.core.models.audit_log import EventType, audit
 from src.core.models.temporal_profile import TemporalProfile
 from src.core.models.watched_item import WatchedItem, WatchHealthStatus
-from src.core.scheduling.cadence import (
-    parse_interval,
-)
 from src.core.scheduling.schedule import resolve_schedule_display
 from src.core.watched_items import (
     ArchivedItemActivationError,
     SuspendedDomainResumeError,
     resolve_watch_target,
+    set_item_schedule_interval,
     set_watched_item_active,
 )
 from src.dashboard.context import (
@@ -169,15 +167,10 @@ def _apply_watched_item_field_update(wi: WatchedItem, field_name: str, raw_value
     if source == "column":
         setattr(wi, field_name, typed_value)
     elif source == "schedule_interval":
-        if not typed_value:
-            wi.default_schedule_config = None
-        else:
-            # Validate interval shape
-            parse_interval(typed_value)
-            wi.default_schedule_config = {
-                **(wi.default_schedule_config or {}),
-                "interval": typed_value,
-            }
+        # Shared with the API PATCH (#254 CR-1): the setter validates the shape
+        # and releases any reduce_frequency throttle, so an operator editing the
+        # interval is once again the way out of a floor.
+        set_item_schedule_interval(wi, typed_value)
 
 
 def _watched_item_extra_params(q: str | None, include_archived: bool) -> dict[str, str]:
@@ -383,7 +376,8 @@ async def watched_item_delete(
 ):
     """Permanently delete an archived WatchedItem (delegates to the API route, #210).
 
-    The API enforces the guards (404 not found, 409 not archived). On success the
+    The API enforces the guards (404 not found, 409 not archived, 409
+    registry-owned — #254 CR-7). On success the
     item is gone, so we redirect to the list rather than the now-missing detail
     page. A 409 (un-archived) surfaces as an OOB error flash for HTMX, or a
     redirect back to the still-present detail page for non-HTMX clients.

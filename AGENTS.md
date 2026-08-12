@@ -197,7 +197,9 @@ Everything else survives reconciliation: health, timings, `domain_suspended`,
 `archived_at`, `throttle_floor_interval`, `default_schedule_config`, media type, tags,
 notification config. **A local pause is not sticky** — item-level pause lives in
 Archiver's dashboard alone; local backoff, `domain_suspended`, and the throttle floor are
-the legitimate local stops. Schedule resolution is four tiers under a floor:
+the legitimate local stops. Deleting a reconciled item 409s (the next announcement would
+recreate it); the throttle floor is released by an explicit operator cadence write, never
+by reconciliation. Schedule resolution is four tiers under a floor:
 announced → item → domain → system, then `max(resolved, throttle_floor)`.
 
 **Empty extraction is a failure, not a change (#258).** When every `source_spec`

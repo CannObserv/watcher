@@ -14,6 +14,41 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.core.domains import domain_name_for_url
 from src.core.models.audit_log import EventType, audit
 from src.core.models.watched_item import WatchedItem, WatchHealthStatus
+from src.core.scheduling.cadence import parse_interval
+
+
+def set_item_schedule_interval(watched_item: WatchedItem, interval: str | None) -> None:
+    """Set (or clear) the operator's item-tier cadence, releasing any throttle.
+
+    The single owner of the item cadence write, shared by the API PATCH and the
+    dashboard's inline interval field — because both must do the *second* half:
+    releasing ``throttle_floor_interval``.
+
+    Why the release belongs here (#254 CR-1). The ``reduce_frequency``
+    post-action used to write ``default_schedule_config`` directly, so editing
+    the interval was itself the way out of a throttle. Moving the throttle to a
+    floor kept it safe from reconciliation but took the escape hatch with it: a
+    floor nothing clears means one temporal profile firing caps an item at 1d
+    permanently, with an operator watching their 30m edit have no effect. An
+    automatic path must not create state a human cannot undo.
+
+    Only an operator releases it. Reconciliation deliberately does not — the
+    registry has no opinion on mechanism, which is the entire reason the floor is
+    a column of its own.
+
+    ``interval`` of ``None`` or empty clears the item tier back to inherited;
+    a value is validated (raises ``ValueError``) before anything is written, so a
+    rejected edit leaves the floor alone too.
+    """
+    if not interval:
+        watched_item.default_schedule_config = None
+    else:
+        parse_interval(interval)  # raises ValueError on a bad shape — before any write
+        watched_item.default_schedule_config = {
+            **(watched_item.default_schedule_config or {}),
+            "interval": interval,
+        }
+    watched_item.throttle_floor_interval = None
 
 
 def derive_watched_item_name(url: str) -> str:

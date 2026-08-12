@@ -181,6 +181,12 @@ async def patch_watched_item(
     for field, value in updates.items():
         setattr(wi, field, value)
 
+    # An explicit item-cadence write releases any reduce_frequency throttle
+    # (#254 CR-1) — otherwise the floor is state an operator cannot undo, and a
+    # PATCH setting 30m would leave the item silently checking daily.
+    if "default_schedule_config" in updates:
+        wi.throttle_floor_interval = None
+
     # #196: a PATCH that sets effective_url must re-derive domain_name (no re-probe;
     # Archiver is authoritative for the URL), upsert the Domain, and re-evaluate
     # domain_suspended — otherwise the Archiver "Begin Watching" PATCH leaves the
@@ -276,7 +282,19 @@ async def delete_watched_item(
     """Permanently delete an archived WatchedItem (#210).
 
     Pre-flight: 404 if not found / malformed id; 409 if the item is not archived
-    (archive first — archived already implies ``is_active=False``). On success the
+    (archive first — archived already implies ``is_active=False``); **409 if the
+    registry still announces it** (``applied_generation IS NOT NULL``, #254 CR-7).
+
+    That last guard exists because deletion is no longer durable for a
+    registry-owned item: ``info.registry`` is level-triggered, so the next
+    announcement — or the hourly snapshot, carrying no change at all — simply
+    recreates the row. Absence is not revocation; only a ``revoked: true``
+    tombstone retires a key, and that is Archiver's call to make. A 409 naming
+    the authority beats a delete that silently undoes itself within the snapshot
+    period, and mirrors the 409 this route already returns for un-archived items.
+    Rows the registry has no opinion on (``applied_generation IS NULL`` — created
+    over this route and never announced) still delete, which is the whole
+    population during the rollout. On success the
     DB cascades the item's children (``temporal_profiles``,
     ``notification_templates``, ``change_revisions``, ``pending_archiver_sync``)
     via their ``ON DELETE CASCADE`` FKs. An audit row is written before the delete
@@ -287,6 +305,15 @@ async def delete_watched_item(
 
     if wi.archived_at is None:
         raise HTTPException(status_code=409, detail="WatchedItem must be archived before deletion")
+
+    if wi.applied_generation is not None:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "WatchedItem is registry-owned; retire the InfoItem in Archiver instead. "
+                "Deleting here is undone by the next info.registry announcement."
+            ),
+        )
 
     audit(
         session,

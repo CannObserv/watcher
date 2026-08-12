@@ -51,8 +51,10 @@ def base_schedule_config(watched_item: WatchedItem) -> dict:
 def resolved_schedule_config(watched_item: WatchedItem) -> dict:
     """Resolve a WatchedItem's schedule config: the 4-tier chain under the floor.
 
-    Returns a fresh dict when the floor applies, so a caller cannot mutate the
-    stored column through the returned value.
+    **The result may alias a stored column** — when no floor applies, the winning
+    tier's dict is returned by reference (long-standing behaviour, unchanged).
+    Callers must treat it as read-only; the floor branch happens to build a fresh
+    dict, but that is an implementation detail and not a guarantee to rely on.
     """
     config = base_schedule_config(watched_item)
 

@@ -92,11 +92,26 @@ document's contents, because raising at decode on a no-DLQ stream would drop the
 message and leave the key stale.
 
 **The announced cadence does not live in `default_schedule_config`.** That column
-has an operator and the `reduce_frequency` post-action writing to it, so reconciling
-into it would let the hourly snapshot revert every throttle — and it is what
-archiver#150 imports out of Watcher. The throttle moved to a floor for the same
-reason, in the other direction: as a tier it would be outranked by the announced
-cadence and silently cleared on the next announcement.
+has an operator writing to it, so reconciling into it would let the hourly snapshot
+revert every operator edit — and it is what archiver#150 imports out of Watcher. The
+`reduce_frequency` throttle moved to a floor for the same reason in the other
+direction: as a tier it would be outranked by the announced cadence and silently
+cleared on the next announcement.
+
+**The floor is releasable, and only by an operator.** Writing an explicit item
+cadence — `PATCH /api/v1/watched-items/{id}` with `default_schedule_config`, or the
+dashboard's inline interval field, both through `set_item_schedule_interval` — clears
+`throttle_floor_interval`. Without that the escape hatch would be gone: before the
+split, editing the interval *was* how a throttle was undone, and a floor nothing
+clears means one temporal profile firing caps an item at 1d forever while the
+operator's edits appear to do nothing. Reconciliation deliberately does not clear it;
+the registry has no opinion on mechanism.
+
+**A registry-owned WatchedItem cannot be deleted here.** `DELETE
+/api/v1/watched-items/{id}` 409s once `applied_generation` is set, naming Archiver as
+the authority: the stream is level-triggered, so the next announcement recreates the
+row, and absence is not revocation — only a `revoked: true` tombstone retires a key.
+Rows the registry has never announced still delete.
 
 ## Content media type
 

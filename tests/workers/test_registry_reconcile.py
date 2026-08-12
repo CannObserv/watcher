@@ -627,11 +627,22 @@ class TestConsumerLoop:
 
     @staticmethod
     def _ctx(db_session):
+        """A session factory over the shared test session.
+
+        Rolls back on an exception, which is what makes it faithful: production
+        gets a *fresh* session per reconcile, so a failed one is simply
+        discarded. Without the rollback the shared savepoint stays aborted and
+        the next call fails for a reason the code under test did not cause.
+        """
         from contextlib import asynccontextmanager
 
         @asynccontextmanager
         async def _factory():
-            yield db_session
+            try:
+                yield db_session
+            except Exception:
+                await db_session.rollback()
+                raise
 
         return _factory
 
@@ -772,3 +783,170 @@ class TestConsumerLoop:
         assert wi.applied_generation == 4
         assert wi.health_status == WatchHealthStatus.OK  # replay changed nothing
         assert wi.last_checked_at == NOW
+
+    async def test_a_transient_failure_retries_the_same_announcement(self, db_session, monkeypatch):
+        """CR-5 (#254): the cursor has already moved and `seek` only goes forward,
+        so a dropped message is silent loss until the next snapshot. The loop
+        holds the announcement and backs off once, rather than per-message."""
+        import asyncio
+
+        import fakeredis
+
+        import src.workers.registry_reconcile as rr
+        from src.workers.registry_reconcile import run_registry_consumer
+
+        client = fakeredis.FakeAsyncRedis()
+        item = ULID()
+        await self._publish(client, self._emit(item, generation=3))
+
+        real = rr.reconcile_announcement
+        calls: list[str] = []
+        done: list[str] = []
+
+        async def _flaky(session, payload):
+            calls.append(payload.info_item_id)
+            if len(calls) == 1:
+                raise RuntimeError("transient DB error")
+            outcome = await real(session, payload)
+            # Recorded *after* the commit: waiting on the pre-call counter would
+            # let the test cancel the task mid-commit and poison the session.
+            done.append(payload.info_item_id)
+            return outcome
+
+        monkeypatch.setattr(rr, "reconcile_announcement", _flaky)
+
+        stop = asyncio.Event()
+        task = asyncio.create_task(
+            run_registry_consumer(
+                client, self._ctx(db_session), stop=stop, block_ms=10, error_backoff_seconds=0.01
+            )
+        )
+        try:
+
+            async def _until():
+                while not done:
+                    await asyncio.sleep(0.02)
+
+            await asyncio.wait_for(_until(), timeout=5)
+        finally:
+            stop.set()
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+
+        # Same announcement both times — not skipped, not a different message.
+        assert calls == [str(item), str(item)]
+        assert (await _get(db_session, item)).applied_generation == 3
+
+    async def test_a_persistently_failing_announcement_is_eventually_dropped(
+        self, db_session, monkeypatch
+    ):
+        """Bounded, so a genuinely poisonous payload cannot wedge the loop —
+        the no-DLQ contract makes the periodic snapshot the repair."""
+        import asyncio
+
+        import fakeredis
+
+        import src.workers.registry_reconcile as rr
+        from src.workers.registry_reconcile import run_registry_consumer
+
+        client = fakeredis.FakeAsyncRedis()
+        first, second = ULID(), ULID()
+        await self._publish(client, self._emit(first, url="https://lcb.wa.gov/poison"))
+        await self._publish(client, self._emit(second, url="https://lcb.wa.gov/good"))
+
+        real = rr.reconcile_announcement
+        seen: list[str] = []
+        done: list[str] = []
+
+        async def _poison_first(session, payload):
+            seen.append(payload.info_item_id)
+            if payload.info_item_id == str(first):
+                raise RuntimeError("permanently unapplicable")
+            outcome = await real(session, payload)
+            done.append(payload.info_item_id)  # after the commit — see above
+            return outcome
+
+        monkeypatch.setattr(rr, "reconcile_announcement", _poison_first)
+
+        stop = asyncio.Event()
+        task = asyncio.create_task(
+            run_registry_consumer(
+                client, self._ctx(db_session), stop=stop, block_ms=10, error_backoff_seconds=0.01
+            )
+        )
+        try:
+
+            async def _until():
+                while str(second) not in done:
+                    await asyncio.sleep(0.02)
+
+            await asyncio.wait_for(_until(), timeout=5)
+        finally:
+            stop.set()
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+
+        # Tried MAX_APPLY_ATTEMPTS times, then moved on rather than wedging.
+        assert seen.count(str(first)) == rr.MAX_APPLY_ATTEMPTS
+        assert await _get(db_session, second) is not None
+        assert await _get(db_session, first) is None  # the poison never landed
+
+
+class TestTombstoneRetirement:
+    """CR-2 (#254): a live announcement retires the tombstone on *every* path.
+
+    The invariant is "a key has a row XOR a tombstone". Clearing only on the
+    create path leaves the adopt path — a POST re-provisioning a previously
+    revoked InfoItem — holding both.
+    """
+
+    async def test_adopting_a_preexisting_row_retires_the_tombstone(self, db_session):
+        info_item_id = ULID()
+        await reconcile_announcement(
+            db_session, _announcement(info_item_id, generation=2, revoked=True)
+        )
+        # Archiver re-provisions over the POST route before any announcement.
+        wi = await make_watched_item(
+            db_session,
+            archiver_info_item_id=info_item_id,
+            archiver_info_source_id=str(ULID()),
+        )
+        await db_session.commit()
+
+        outcome = await reconcile_announcement(
+            db_session, _announcement(info_item_id, generation=5)
+        )
+
+        assert outcome == "updated"
+        assert await db_session.get(RevokedInfoItem, str(info_item_id)) is None
+        assert (await _get(db_session, info_item_id)).id == wi.id
+
+    async def test_a_stranded_tombstone_cannot_weaken_the_guard_after_a_delete(self, db_session):
+        """The concrete cost of getting it wrong. With a tombstone stranded at
+        generation 2 while the row actually applied 8, deleting the row leaves
+        `_stored_generation` answering "2" — a number that was never the applied
+        generation and is low enough to admit announcements it should reject.
+        Retiring the tombstone on adopt leaves the guard honestly empty instead."""
+        info_item_id = ULID()
+        await reconcile_announcement(
+            db_session, _announcement(info_item_id, generation=2, revoked=True)
+        )
+        wi = await make_watched_item(
+            db_session,
+            archiver_info_item_id=info_item_id,
+            archiver_info_source_id=str(ULID()),
+        )
+        await db_session.commit()
+        await reconcile_announcement(db_session, _announcement(info_item_id, generation=8))
+
+        # Operator deletes the row; nothing now holds a generation for the key.
+        await db_session.delete(await _get(db_session, info_item_id))
+        await db_session.commit()
+        assert await db_session.get(RevokedInfoItem, str(info_item_id)) is None
+        assert wi is not None
+
+        # A reordered gen-3 announcement must not be judged against a stale "2".
+        outcome = await reconcile_announcement(
+            db_session, _announcement(info_item_id, generation=3)
+        )
+        assert outcome == "created"  # no tombstone at all beats a misleading one

@@ -510,3 +510,60 @@ class TestThrottleSurvivesReconciliation:
 
         assert wi.throttle_floor_interval == "1d"
         assert resolved_schedule_config(wi).get("interval") == "1d"
+
+
+class TestThrottleFloorIsReleasable:
+    """CR-1: an automatic path must not create state an operator cannot undo.
+
+    Before the floor existed, `reduce_frequency` wrote `default_schedule_config`,
+    so editing the interval from the dashboard or the API released the throttle.
+    The floor has to keep that escape hatch or a profile firing once caps the item
+    at 1d forever.
+    """
+
+    async def test_an_explicit_item_interval_releases_the_floor(self, db_session):
+        from src.core.watched_items import set_item_schedule_interval
+
+        wi = await make_watched_item(db_session, name="Throttled")
+        wi.throttle_floor_interval = "1d"
+        await db_session.commit()
+
+        set_item_schedule_interval(wi, "30m")
+
+        assert wi.throttle_floor_interval is None
+        assert resolved_schedule_config(wi) == {"interval": "30m"}
+
+    async def test_clearing_the_item_interval_also_releases_the_floor(self, db_session):
+        """Clearing back to inherited is just as deliberate an operator act."""
+        from src.core.watched_items import set_item_schedule_interval
+
+        wi = await make_watched_item(db_session, name="Throttled")
+        wi.throttle_floor_interval = "1d"
+        wi.default_schedule_config = {"interval": "15m"}
+        await db_session.commit()
+
+        set_item_schedule_interval(wi, None)
+
+        assert wi.throttle_floor_interval is None
+        assert wi.default_schedule_config is None
+
+    async def test_an_announcement_does_not_release_the_floor(self, db_session):
+        """Only an *operator* releases it. The registry has no opinion on
+        mechanism, which is the whole reason the floor is a separate column."""
+        from src.workers.registry_reconcile import reconcile_announcement
+        from tests.workers.test_registry_reconcile import _announcement
+
+        wi = await make_watched_item(db_session, name="Throttled")
+        wi.throttle_floor_interval = "1d"
+        await db_session.commit()
+
+        await reconcile_announcement(
+            db_session,
+            _announcement(
+                wi.archiver_info_item_id,
+                generation=1,
+                watch_spec={"schema_version": 1, "interval": "15m"},
+            ),
+        )
+        await db_session.refresh(wi)
+        assert wi.throttle_floor_interval == "1d"

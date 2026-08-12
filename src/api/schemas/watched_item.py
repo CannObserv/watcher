@@ -12,13 +12,18 @@ from src.core.models.watched_item import CONTENT_MEDIA_TYPE_MAX_LEN, WatchHealth
 class WatchedItemCreate(BaseModel):
     """Create a WatchedItem via ``POST /api/v1/watched-items``.
 
-    One creation path (#251): every WatchedItem is an Archiver InfoItem being
-    watched. ``archiver_info_item_id`` is validated via the Archiver SDK
-    (NotFound → 422) and the name defaults to the InfoItem's name when omitted;
-    ``url`` is the InfoSource URL Archiver is authoritative for (stored as
-    ``effective_url``, never re-probed); ``archiver_info_source_id`` identifies
-    the InfoSource that observed revisions are posted back to. All three are
-    required — the URL-only path was rolled back with bare-URL WatchedItems.
+    Every WatchedItem is an Archiver InfoItem being watched (#251).
+    ``archiver_info_item_id`` is **not** validated against Archiver — that HTTP
+    call was Watcher's last and went with the SDK (#254); the ``info.registry``
+    announcement for the key is the authority, and reconciles whatever this
+    route creates. ``url`` is the InfoSource URL Archiver is authoritative for
+    (stored as ``effective_url``, never re-probed); ``archiver_info_source_id``
+    identifies the InfoSource that observed revisions are reported against. All
+    three are required — the URL-only path was rolled back with bare-URL
+    WatchedItems.
+
+    ``name`` defaults to a host+path derivation of ``url`` when omitted; a name
+    supplied here survives reconciliation, which never overwrites one.
 
     ``source_specs`` seeds the local pipeline extraction config. Optional at
     create time; updatable later via PATCH.

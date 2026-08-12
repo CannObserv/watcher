@@ -201,10 +201,11 @@ GitHub Actions (`.github/workflows/ci.yml`) runs on push/PR to `main`: a
 **lint** job (`ruff check` + `ruff format --check`), a **test** job
 (`pytest -m "not integration"` against a `postgres:16` service), and a
 **migrations** job (independent migration-chain smoke-check, #234 — `alembic
-upgrade head` from an empty `postgres:16` then `alembic check` for drift). All
-three jobs checkout the sibling `archiver` repo alongside watcher (public;
-provides conftest's alembic — the `archiver-client` path dep it also used to
-resolve was removed in #254), rewrite
+upgrade head` from an empty `postgres:16` then `alembic check` for drift). Only
+the **test** job checks out the sibling `archiver` repo (public; for
+`ARCHIVER_REPO_PATH`, whose alembic builds the `information` schema conftest's
+factories write to) — `lint` and `migrations` stopped needing it when #254
+removed the `archiver-client` path dep. All three jobs rewrite
 the `notifier-client` SSH source to HTTPS, authenticate to GCS **keyless via
 WIF** (`vars.GCP_WIF_PROVIDER` → `co-pypi-reader` SA), and sync the wheelhouse
 before `uv sync`. Only the test job also syncs archiver's wheelhouse (its `uv

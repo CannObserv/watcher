@@ -891,6 +891,56 @@ class TestConsumerLoop:
         assert await _get(db_session, second) is not None
         assert await _get(db_session, first) is None  # the poison never landed
 
+    async def test_a_read_failure_is_not_reported_as_a_dropped_announcement(
+        self, db_session, monkeypatch, caplog
+    ):
+        """CR-11: the backoff handler also catches read failures, where nothing is
+        pending and nothing can be dropped. Reporting those as a drop puts the one
+        log line meaning "a registry key is now stale" into every broker outage,
+        naming no key."""
+        import asyncio
+        import logging
+
+        import fakeredis
+
+        from src.workers.registry_reconcile import run_registry_consumer
+
+        client = fakeredis.FakeAsyncRedis()
+        reads: list[int] = []
+
+        async def _broken_xread(*args, **kwargs):
+            reads.append(1)
+            raise RuntimeError("broker unreachable")
+
+        monkeypatch.setattr(client, "xread", _broken_xread)
+
+        stop = asyncio.Event()
+        with caplog.at_level(logging.WARNING):
+            task = asyncio.create_task(
+                run_registry_consumer(
+                    client,
+                    self._ctx(db_session),
+                    stop=stop,
+                    block_ms=10,
+                    error_backoff_seconds=0.01,
+                )
+            )
+            try:
+
+                async def _until():
+                    while len(reads) < 5:  # well past MAX_APPLY_ATTEMPTS
+                        await asyncio.sleep(0.02)
+
+                await asyncio.wait_for(_until(), timeout=5)
+            finally:
+                stop.set()
+                task.cancel()
+                await asyncio.gather(task, return_exceptions=True)
+
+        assert not any(r.levelno >= logging.ERROR for r in caplog.records)
+        assert not any("dropping this announcement" in r.getMessage() for r in caplog.records)
+        assert any("read failed" in r.getMessage() for r in caplog.records)
+
 
 class TestTombstoneRetirement:
     """CR-2 (#254): a live announcement retires the tombstone on *every* path.

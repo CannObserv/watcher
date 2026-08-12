@@ -38,7 +38,13 @@ is `TemporalProfile.to_resolution_dict()`, shared by the scheduler and the dashb
 WatchedItem via `ensure_domain_and_resolve_suspension` on every create/PATCH path
 and back-filled across a domain's items on domain edit
 (`backfill_domain_schedule_config`) — so the resolver, and the scheduler hot
-path, never join Domain. Per-domain cadence is `Domain.default_schedule_config`
+path, never join Domain. An interval is validated at the API write boundary (`_validated_schedule_config`),
+because `schedule_tick` resolves every item in one task — an unparseable stored
+interval raises out of `compute_next_check` and stops scheduling for the whole
+system, not just its own row. `interval` stays optional inside the document; an
+intervalless `{}` is a meaningful value at its tier.
+
+Per-domain cadence is `Domain.default_schedule_config`
 (a `schedule_config` interval string — operator check cadence, distinct from the
 `Domain.min_interval` rate-limiter floor), editable via `PATCH
 /api/v1/domains/{name}` and the domain detail page; the `reduce_frequency`
@@ -100,8 +106,10 @@ cleared on the next announcement.
 
 **The floor is releasable, and only by an operator.** Writing an explicit item
 cadence — `PATCH /api/v1/watched-items/{id}` with `default_schedule_config`, or the
-dashboard's inline interval field, both through `set_item_schedule_interval` — clears
-`throttle_floor_interval`. Without that the escape hatch would be gone: before the
+dashboard's inline interval field — clears `throttle_floor_interval`. Both go through
+`set_item_schedule_config` (`src/core/watched_items.py`), the single owner of that
+write; `set_item_schedule_interval` is the string-shaped front door the dashboard
+uses. Without that the escape hatch would be gone: before the
 split, editing the interval *was* how a throttle was undone, and a floor nothing
 clears means one temporal profile firing caps an item at 1d forever while the
 operator's edits appear to do nothing. Reconciliation deliberately does not clear it;

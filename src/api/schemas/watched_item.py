@@ -2,11 +2,44 @@
 
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict, Field, computed_field, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    computed_field,
+    field_validator,
+    model_validator,
+)
 
 from src.api.schemas.types import HttpUrlStr, ULIDRefStr, ULIDStr
 from src.core.media_type import resolve_dispatch_essence
 from src.core.models.watched_item import CONTENT_MEDIA_TYPE_MAX_LEN, WatchHealthStatus
+from src.core.scheduling.cadence import parse_interval
+
+
+def _validated_schedule_config(value: dict | None) -> dict | None:
+    """Reject a ``schedule_config`` whose ``interval`` will not parse (#254 CR-10).
+
+    The write boundary is the only place that can hold this line. ``schedule_tick``
+    resolves every WatchedItem in a single task, so an unparseable interval does
+    not break one row — it raises out of ``compute_next_check`` and stops
+    scheduling for the entire system until someone reads the worker log. A typo in
+    one PATCH is a total scheduler outage.
+
+    ``interval`` stays *optional*: an intervalless ``{}`` is a meaningful value at
+    its tier (#202 CR), so this validates the key when present rather than
+    requiring it.
+    """
+    if value is None:
+        return value
+    interval = value.get("interval")
+    if interval is None:
+        return value
+    try:
+        parse_interval(interval)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(str(exc)) from exc
+    return value
 
 
 class WatchedItemCreate(BaseModel):
@@ -43,6 +76,10 @@ class WatchedItemCreate(BaseModel):
     default_tags: list[str] | None = None
     source_specs: list[dict] | None = None
 
+    _check_schedule_config = field_validator("default_schedule_config")(
+        staticmethod(_validated_schedule_config)
+    )
+
 
 class WatchedItemPatch(BaseModel):
     """Partial update to a WatchedItem. All fields optional.
@@ -60,6 +97,10 @@ class WatchedItemPatch(BaseModel):
     effective_url: HttpUrlStr | None = None
     source_specs: list[dict] | None = None
     archiver_info_source_id: ULIDRefStr | None = None
+
+    _check_schedule_config = field_validator("default_schedule_config")(
+        staticmethod(_validated_schedule_config)
+    )
 
     @model_validator(mode="after")
     def _reject_explicit_null(self) -> "WatchedItemPatch":
@@ -103,6 +144,10 @@ class WatchedItemResponse(BaseModel):
     archiver_info_source_id: str
     domain_name: str | None = None
     domain_suspended: bool = False
+    # The info.registry generation this row has applied (#254); NULL until the
+    # first announcement. Exposed because it gates the DELETE 409 — without it a
+    # caller cannot tell whether a delete will be accepted without attempting it.
+    applied_generation: int | None = None
     created_at: datetime
     updated_at: datetime
 

@@ -1449,3 +1449,124 @@ class TestDeleteRegistryOwned:
         response = await client.delete(f"/api/v1/watched-items/{wi.id}")
 
         assert response.status_code == 204
+
+
+class TestScheduleConfigValidation:
+    """CR-10 (#254 round 2): `schedule_tick` iterates every WatchedItem in one
+    task, so an unparseable stored interval is not one broken row — it raises out
+    of `compute_next_check` and stops scheduling for the whole system. The write
+    boundary is the only place that can hold that line.
+    """
+
+    async def test_patch_rejects_an_unparseable_interval(self, client, db_session):
+        wi = await make_watched_item(db_session, name="Bogus")
+        await db_session.commit()
+
+        response = await client.patch(
+            f"/api/v1/watched-items/{wi.id}",
+            json={"default_schedule_config": {"interval": "every other tuesday"}},
+        )
+
+        assert response.status_code == 422
+        await db_session.refresh(wi)
+        assert wi.default_schedule_config is None
+
+    async def test_create_rejects_an_unparseable_interval(self, client, db_session):
+        item = await make_info_item(db_session, name="Bogus")
+        await db_session.commit()
+
+        response = await client.post(
+            "/api/v1/watched-items",
+            json={
+                "url": "https://example.com/page",
+                "archiver_info_source_id": str(ULID()),
+                "archiver_info_item_id": str(item.info_item_id),
+                "default_schedule_config": {"interval": "soon"},
+            },
+        )
+
+        assert response.status_code == 422
+
+    async def test_a_valid_interval_still_passes(self, client, db_session):
+        wi = await make_watched_item(db_session, name="Fine")
+        await db_session.commit()
+
+        response = await client.patch(
+            f"/api/v1/watched-items/{wi.id}",
+            json={"default_schedule_config": {"interval": "6h"}},
+        )
+
+        assert response.status_code == 200, response.text
+
+    async def test_a_config_without_an_interval_is_allowed(self, client, db_session):
+        """An intervalless `{}` is a meaningful value at its tier (#202 CR) — the
+        validator checks the interval when present, it does not require one."""
+        wi = await make_watched_item(db_session, name="Empty")
+        await db_session.commit()
+
+        response = await client.patch(
+            f"/api/v1/watched-items/{wi.id}", json={"default_schedule_config": {}}
+        )
+
+        assert response.status_code == 200, response.text
+
+    async def test_a_hostile_row_cannot_reach_the_scheduler(self, client, db_session):
+        """The consequence the validator exists to prevent, stated as a test."""
+        from src.core.scheduling.cadence import compute_next_check
+        from src.core.scheduling.resolution import resolved_schedule_config
+
+        wi = await make_watched_item(db_session, name="Hostile")
+        await db_session.commit()
+        await client.patch(
+            f"/api/v1/watched-items/{wi.id}",
+            json={"default_schedule_config": {"interval": "every other tuesday"}},
+        )
+        await db_session.refresh(wi)
+
+        # Whatever the route accepted, the scheduler's own call must not raise.
+        compute_next_check(
+            schedule_config=resolved_schedule_config(wi),
+            last_checked_at=datetime(2026, 8, 1, tzinfo=UTC),
+            now=datetime(2026, 8, 11, tzinfo=UTC),
+        )
+
+
+class TestCadencePatchAudit:
+    """The cadence write is routed around the generic setattr loop (CR-12), which
+    is exactly the shape that silently drops a field from the audit trail."""
+
+    async def test_a_cadence_change_is_still_audited(self, client, db_session):
+        wi = await make_watched_item(db_session, name="Audited")
+        await db_session.commit()
+
+        response = await client.patch(
+            f"/api/v1/watched-items/{wi.id}",
+            json={"default_schedule_config": {"interval": "6h"}},
+        )
+        assert response.status_code == 200, response.text
+
+        rows = (
+            (
+                await db_session.execute(
+                    select(AuditLog).where(AuditLog.event_type == EventType.WATCHED_ITEM_UPDATED)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert len(rows) == 1
+        assert "default_schedule_config" in rows[0].payload["updated_fields"]
+
+    async def test_the_cadence_still_lands_alongside_other_fields(self, client, db_session):
+        wi = await make_watched_item(db_session, name="Audited")
+        await db_session.commit()
+
+        response = await client.patch(
+            f"/api/v1/watched-items/{wi.id}",
+            json={"default_schedule_config": {"interval": "6h"}, "description": "note"},
+        )
+
+        assert response.status_code == 200, response.text
+        await db_session.refresh(wi)
+        assert wi.default_schedule_config == {"interval": "6h"}
+        assert wi.description == "note"

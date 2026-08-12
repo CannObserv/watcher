@@ -53,6 +53,7 @@ repairs whatever was dropped.
 
 import asyncio
 import logging
+from collections import deque
 
 from co_core.effects.bus import BusMessage
 from co_core.pure.adapters.bus import streams
@@ -89,6 +90,10 @@ MAX_APPLY_ATTEMPTS = 3
 # batch discards the well-formed messages ahead of it and needs a re-read at
 # `count=1` before `seek` can pass it — reading one at a time sidesteps the
 # entire sequence. The registry is small enough that the round trips are free.
+#
+# The loop does not *depend* on this being 1 (CR-13): it queues whatever a read
+# returns and applies one at a time. Raising it trades the poison-recovery
+# simplicity above for throughput, nothing more.
 READ_COUNT = 1
 
 
@@ -275,15 +280,17 @@ async def run_registry_consumer(
     """
     reader = AsyncBusTailReader(client, topic=streams.INFO_REGISTRY)
     replayed = False
-    # The message read but not yet applied. Held across iterations because the
-    # cursor has already moved past it and `seek` only goes forward — dropping it
-    # on a failure would be silent loss until the next snapshot (#254 CR-5).
-    pending: RegistryAnnouncementState | None = None
+    # Messages read but not yet applied, oldest first. Held across iterations
+    # because the cursor has already moved past them and `seek` only goes forward
+    # — dropping one on a failure would be silent loss until the next snapshot
+    # (#254 CR-5). A queue rather than a single slot so the loop stays correct
+    # if READ_COUNT is ever raised (CR-13); at count=1 it holds at most one.
+    pending: deque[RegistryAnnouncementState] = deque()
     attempts = 0
 
     while not stop.is_set():
         try:
-            if pending is None:
+            if not pending:
                 messages: list[BusMessage] = await reader.read(
                     count=READ_COUNT, block_ms=None if not replayed else block_ms
                 )
@@ -296,22 +303,25 @@ async def run_registry_consumer(
                     await asyncio.sleep(IDLE_SLEEP_SECONDS)
                     continue
 
-                message = messages[0]  # READ_COUNT is 1; see the constant.
-                if not isinstance(message.payload, RegistryAnnouncementState):
-                    logger.info(
-                        "unexpected payload type on info.registry — ignoring",
-                        extra={"event_type": getattr(message.payload, "event_type", "?")},
-                    )
+                for message in messages:
+                    if not isinstance(message.payload, RegistryAnnouncementState):
+                        logger.info(
+                            "unexpected payload type on info.registry — ignoring",
+                            extra={"event_type": getattr(message.payload, "event_type", "?")},
+                        )
+                        continue
+                    pending.append(message.payload)
+                if not pending:
                     continue
-                pending = message.payload
 
+            announcement = pending[0]
             async with session_factory() as session:
-                outcome = await reconcile_announcement(session, pending)
+                outcome = await reconcile_announcement(session, announcement)
             logger.info(
                 "info.registry announcement processed",
-                extra={"info_item_id": pending.info_item_id, "outcome": outcome},
+                extra={"info_item_id": announcement.info_item_id, "outcome": outcome},
             )
-            pending = None
+            pending.popleft()
             attempts = 0
         except BusMessageAnomaly as exc:
             # No group, so no ack to skip past a poison frame with: the cursor
@@ -334,23 +344,29 @@ async def run_registry_consumer(
             # announcements through its own escalating sleep turns a five-minute
             # outage into an hours-long replay that drops every message anyway.
             # Holding `pending` means the backoff costs latency, never data.
-            attempts += 1
-            give_up = attempts >= MAX_APPLY_ATTEMPTS
-            logger.log(
-                logging.ERROR if give_up else logging.WARNING,
-                "info.registry consumer error — %s",
-                "dropping this announcement; the next snapshot must repair the key"
-                if give_up
-                else "backing off and retrying the same announcement",
-                extra={
-                    "attempt": attempts,
-                    "info_item_id": getattr(pending, "info_item_id", None),
-                },
-                exc_info=True,
-            )
-            if give_up:
-                pending = None
-                attempts = 0
+            #
+            # Attempts are counted only against a held announcement (CR-11). This
+            # handler also catches read failures, where nothing is pending and
+            # nothing can be dropped — reporting those as a drop would put the one
+            # log line that means "a registry key is now stale" into every broker
+            # outage, naming no key.
+            if pending:
+                attempts += 1
+                give_up = attempts >= MAX_APPLY_ATTEMPTS
+                logger.log(
+                    logging.ERROR if give_up else logging.WARNING,
+                    "info.registry reconcile failed — %s",
+                    "dropping this announcement; the next snapshot must repair the key"
+                    if give_up
+                    else "backing off and retrying the same announcement",
+                    extra={"attempt": attempts, "info_item_id": pending[0].info_item_id},
+                    exc_info=True,
+                )
+                if give_up:
+                    pending.popleft()
+                    attempts = 0
+            else:
+                logger.warning("info.registry read failed — backing off", exc_info=True)
             try:
                 await asyncio.wait_for(stop.wait(), timeout=error_backoff_seconds)
             except TimeoutError:

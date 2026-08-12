@@ -26,6 +26,7 @@ from src.core.watched_items import (
     ArchivedItemActivationError,
     SuspendedDomainResumeError,
     derive_watched_item_name,
+    set_item_schedule_config,
     set_watched_item_active,
 )
 from src.workers.tasks import check_watched_item
@@ -178,14 +179,18 @@ async def patch_watched_item(
     # Non-None when present: the schema's _reject_explicit_null forbids
     # ``"is_active": null``, so a popped value is always a real bool.
     target_active = updates.pop("is_active", None)
+    # The cadence write goes through the shared owner, which also releases any
+    # reduce_frequency throttle (#254 CR-1/CR-12) — the floor would otherwise be
+    # state an operator cannot undo, and a PATCH setting 30m would leave the item
+    # silently checking daily. Skipped in the generic loop rather than popped from
+    # ``updates``: the audit's ``other_fields`` reads that dict, and popping it
+    # would quietly drop cadence changes out of the trail.
     for field, value in updates.items():
+        if field == "default_schedule_config":
+            continue
         setattr(wi, field, value)
-
-    # An explicit item-cadence write releases any reduce_frequency throttle
-    # (#254 CR-1) — otherwise the floor is state an operator cannot undo, and a
-    # PATCH setting 30m would leave the item silently checking daily.
     if "default_schedule_config" in updates:
-        wi.throttle_floor_interval = None
+        set_item_schedule_config(wi, updates["default_schedule_config"])
 
     # #196: a PATCH that sets effective_url must re-derive domain_name (no re-probe;
     # Archiver is authoritative for the URL), upsert the Domain, and re-evaluate

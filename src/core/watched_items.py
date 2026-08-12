@@ -17,14 +17,16 @@ from src.core.models.watched_item import WatchedItem, WatchHealthStatus
 from src.core.scheduling.cadence import parse_interval
 
 
-def set_item_schedule_interval(watched_item: WatchedItem, interval: str | None) -> None:
+def set_item_schedule_config(watched_item: WatchedItem, config: dict | None) -> None:
     """Set (or clear) the operator's item-tier cadence, releasing any throttle.
 
-    The single owner of the item cadence write, shared by the API PATCH and the
-    dashboard's inline interval field — because both must do the *second* half:
-    releasing ``throttle_floor_interval``.
+    The single owner of the item cadence write. Both operator paths go through
+    it: the API's ``PATCH /api/v1/watched-items/{id}`` (whole ``schedule_config``
+    dict) and the dashboard's inline interval field (via
+    :func:`set_item_schedule_interval`, which is the string-shaped front door to
+    this one).
 
-    Why the release belongs here (#254 CR-1). The ``reduce_frequency``
+    Why the throttle release belongs here (#254 CR-1). The ``reduce_frequency``
     post-action used to write ``default_schedule_config`` directly, so editing
     the interval was itself the way out of a throttle. Moving the throttle to a
     floor kept it safe from reconciliation but took the escape hatch with it: a
@@ -36,19 +38,30 @@ def set_item_schedule_interval(watched_item: WatchedItem, interval: str | None) 
     registry has no opinion on mechanism, which is the entire reason the floor is
     a column of its own.
 
-    ``interval`` of ``None`` or empty clears the item tier back to inherited;
-    a value is validated (raises ``ValueError``) before anything is written, so a
-    rejected edit leaves the floor alone too.
+    Shape validation is the API schema's job (``_validated_schedule_config``,
+    #254 CR-10) so a bad interval is a 422 rather than a 500; the dashboard front
+    door validates for the same reason on its own path.
+    """
+    watched_item.default_schedule_config = config
+    watched_item.throttle_floor_interval = None
+
+
+def set_item_schedule_interval(watched_item: WatchedItem, interval: str | None) -> None:
+    """Set the item-tier cadence from an interval *string* (the dashboard shape).
+
+    Validates before writing anything — a rejected edit leaves both the cadence
+    and the floor exactly as they were — then delegates to
+    :func:`set_item_schedule_config`. ``None`` or empty clears the tier back to
+    inherited, which is just as deliberate an operator act and releases the floor
+    the same way.
     """
     if not interval:
-        watched_item.default_schedule_config = None
-    else:
-        parse_interval(interval)  # raises ValueError on a bad shape — before any write
-        watched_item.default_schedule_config = {
-            **(watched_item.default_schedule_config or {}),
-            "interval": interval,
-        }
-    watched_item.throttle_floor_interval = None
+        set_item_schedule_config(watched_item, None)
+        return
+    parse_interval(interval)  # raises ValueError on a bad shape — before any write
+    set_item_schedule_config(
+        watched_item, {**(watched_item.default_schedule_config or {}), "interval": interval}
+    )
 
 
 def derive_watched_item_name(url: str) -> str:

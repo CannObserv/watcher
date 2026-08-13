@@ -1405,6 +1405,25 @@ class TestPauseResume:
         await db_session.refresh(wi)
         assert wi.is_active is True  # state unchanged
 
+    async def test_url_edit_on_registry_owned_item_flashes(self, client, db_session):
+        """CR-22: the URL is announcement-owned; the dashboard edit flashes the
+        authority instead of writing a value the snapshot cannot repair."""
+        wi = await _make_wi(db_session, name="RegistryUrl")
+        wi.applied_generation = 2
+        original = wi.effective_url
+        await db_session.commit()
+
+        resp = await client.post(
+            f"/watched-items/{wi.id}/effective-url",
+            data={"url": "https://example.org/elsewhere"},
+            headers={"HX-Request": "true"},
+        )
+
+        assert resp.status_code == 200
+        assert b"Archiver" in resp.content
+        await db_session.refresh(wi)
+        assert wi.effective_url == original
+
     async def test_toggle_archived_non_htmx_redirects(self, client, db_session):
         wi = await _make_wi(
             db_session, name="ArchToggleRedir", is_active=False, archived_at=datetime.now(UTC)

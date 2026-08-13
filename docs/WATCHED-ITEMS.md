@@ -91,7 +91,18 @@ the column.
 naming Archiver as the authority (`RegistryOwnedActivationError` in
 `set_watched_item_active`) — a control that silently reverts within the snapshot
 period is worse than a refusal that says where the control lives. Never-announced
-rows keep the local toggle. Item-level pause lives in Archiver's dashboard alone. What remains legitimately Watcher's is
+rows keep the local toggle. Item-level pause lives in Archiver's dashboard alone.
+
+**The guard covers all five owned columns, because the snapshot cannot repair local
+drift.** The hourly republish carries the same generation, which the `>` ordering
+guard ignores as stale — so a local write to an announcement-owned column diverges
+until the next *real* registry mutation, not the next snapshot. Hence: PATCH 409s
+`effective_url` / `source_specs` / `archiver_info_source_id` on reconciled items
+(the dashboard URL edit flashes the same rule), and **restore clears `archived_at`
+without re-activating** a reconciled item — archive→restore was otherwise a
+two-step bypass of the pause guard. A restored registry-owned item stays paused
+until Archiver re-arms it. Watcher-local fields (name, description, tags, item
+cadence, media type) stay editable everywhere. What remains legitimately Watcher's is
 *mechanism* — local backoff, `domain_suspended` as the host-level break-glass, and
 the throttle floor. `archived_at` is never touched, so an `active: true` against an
 archived row reconciles the row's contents but no-ops on scheduling (`schedule_tick`

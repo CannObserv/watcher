@@ -34,6 +34,13 @@ from src.workers.tasks import check_watched_item
 
 router = APIRouter(prefix="/watched-items", tags=["watched-items"])
 
+# The announcement-owned columns a PATCH may name (#254 CR-22). `is_active` is
+# owned too but guarded in set_watched_item_active; announced_schedule_config
+# and applied_generation are not PATCH inputs at all.
+REGISTRY_OWNED_PATCH_FIELDS = frozenset(
+    {"effective_url", "source_specs", "archiver_info_source_id"}
+)
+
 logger = get_logger(__name__)
 
 
@@ -179,6 +186,26 @@ async def patch_watched_item(
     """
     wi = await _get_or_404(session, watched_item_id)
     updates = data.model_dump(exclude_unset=True)
+
+    # #254 CR-22: on a reconciled item the announcement-owned columns are
+    # Archiver's, and — the part that makes this a guard rather than a nicety —
+    # local drift on them is *permanent*: the hourly snapshot republishes the
+    # same generation, which the reconcile's `>` ordering guard ignores as
+    # stale, so a local write diverges until the next real registry mutation.
+    # Never-announced rows keep every field. `is_active` is guarded separately
+    # in set_watched_item_active (same rule, dedicated audit + dashboard flash).
+    if wi.applied_generation is not None:
+        owned = sorted(REGISTRY_OWNED_PATCH_FIELDS & updates.keys())
+        if owned:
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    f"{', '.join(owned)} on a registry-owned WatchedItem: edit the "
+                    "InfoItem in Archiver instead. A local write would diverge from "
+                    "the registry until its next announcement."
+                ),
+            )
+
     # Non-None when present: the schema's _reject_explicit_null forbids
     # ``"is_active": null``, so a popped value is always a real bool.
     target_active = updates.pop("is_active", None)
@@ -271,11 +298,22 @@ async def archive_watched_item(
 async def restore_watched_item(
     watched_item_id: str, session: AsyncSession = Depends(get_db_session)
 ):
-    """Restore the WatchedItem — clears ``archived_at`` and re-activates."""
+    """Restore the WatchedItem — clears ``archived_at``; re-activates local items.
+
+    On a **reconciled** item (``applied_generation`` set) restore leaves
+    ``is_active`` alone (#254 CR-23): the registry owns it, and archive→restore
+    was otherwise a two-step bypass of the pause guard — archive flips it False
+    locally, restore flipped it True unconditionally, resurrecting an item
+    Archiver may have announced paused. The divergence would then be permanent,
+    because the snapshot re-announcing the same generation is ignored as stale.
+    A restored registry-owned item therefore stays paused until Archiver's next
+    real mutation re-arms it — which is the ownership working, not a gap.
+    """
     wi = await _get_or_404(session, watched_item_id)
     if wi.archived_at is not None:
         wi.archived_at = None
-        wi.is_active = True
+        if wi.applied_generation is None:
+            wi.is_active = True
         audit(
             session,
             EventType.WATCHED_ITEM_RESTORED,
@@ -379,7 +417,14 @@ async def check_now(watched_item_id: str, session: AsyncSession = Depends(get_db
         raise HTTPException(status_code=409, detail="WatchedItem is archived")
 
     if not wi.is_active:
-        raise HTTPException(status_code=409, detail="WatchedItem is paused")
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "WatchedItem is paused; resume it in Archiver"
+                if wi.applied_generation is not None
+                else "WatchedItem is paused"
+            ),
+        )
 
     if wi.domain_suspended:
         raise HTTPException(status_code=409, detail="WatchedItem's domain is suspended")

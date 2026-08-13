@@ -1697,3 +1697,133 @@ class TestRegistryOwnedPause:
         await db_session.refresh(wi)
         assert wi.is_active is False
         assert wi.applied_generation == 3
+
+
+class TestRegistryOwnedFields:
+    """CR-22 (#254 round 4): the snapshot cannot repair local drift.
+
+    The hourly republish carries the same generation, which the `>` ordering
+    guard classifies as stale — so "self-corrects at the next snapshot" covers
+    missed messages only, never a local write that diverges after applying. That
+    makes every locally-writable announcement-owned column a permanent-divergence
+    path, and the pause guard covered only one of the five. Same carve-out as
+    everywhere: never-announced rows keep all their fields.
+    """
+
+    FIELDS = (
+        ("effective_url", "https://example.org/moved"),
+        ("source_specs", [{"selector": "#drift"}]),
+        ("archiver_info_source_id", "01ZZZZZZZZZZZZZZZZZZZZZZZZ"),
+    )
+
+    async def test_announcement_owned_fields_409_on_a_reconciled_item(self, client, db_session):
+        wi = await make_watched_item(db_session, name="Registry-owned")
+        wi.applied_generation = 2
+        await db_session.commit()
+
+        for field, value in self.FIELDS:
+            response = await client.patch(f"/api/v1/watched-items/{wi.id}", json={field: value})
+            assert response.status_code == 409, f"{field}: {response.text}"
+            assert "Archiver" in response.json()["detail"]
+
+    async def test_the_same_fields_still_patch_on_a_never_announced_item(self, client, db_session):
+        wi = await make_watched_item(db_session, name="Local only")
+        await db_session.commit()
+
+        for field, value in self.FIELDS:
+            response = await client.patch(f"/api/v1/watched-items/{wi.id}", json={field: value})
+            assert response.status_code == 200, f"{field}: {response.text}"
+
+    async def test_watcher_local_fields_still_patch_on_a_reconciled_item(self, client, db_session):
+        wi = await make_watched_item(db_session, name="Registry-owned")
+        wi.applied_generation = 2
+        await db_session.commit()
+
+        response = await client.patch(
+            f"/api/v1/watched-items/{wi.id}",
+            json={
+                "name": "Renamed locally",
+                "description": "mine",
+                "default_schedule_config": {"interval": "6h"},
+                "default_tags": ["local"],
+            },
+        )
+        assert response.status_code == 200, response.text
+
+
+class TestRestoreOnReconciledItem:
+    """CR-23: restore must not re-arm what the registry paused.
+
+    Archive→restore was a two-step bypass of the pause guard: archive (allowed,
+    Watcher-local) flips is_active False, restore flipped it True unconditionally
+    — and the divergence never repaired, because the snapshot re-announcing
+    active:false at the same generation is ignored as stale.
+    """
+
+    async def test_restore_clears_archived_at_but_leaves_is_active(self, client, db_session):
+        wi = await make_watched_item(db_session, name="Registry-owned", is_active=True)
+        wi.applied_generation = 2
+        await db_session.commit()
+        r = await client.post(f"/api/v1/watched-items/{wi.id}/archive")
+        assert r.status_code == 200
+
+        response = await client.post(f"/api/v1/watched-items/{wi.id}/restore")
+
+        assert response.status_code == 200, response.text
+        await db_session.refresh(wi)
+        assert wi.archived_at is None
+        assert wi.is_active is False  # the registry re-arms it, not restore
+
+    async def test_restore_still_reactivates_a_never_announced_item(self, client, db_session):
+        wi = await make_watched_item(db_session, name="Local only", is_active=True)
+        await db_session.commit()
+        await client.post(f"/api/v1/watched-items/{wi.id}/archive")
+
+        response = await client.post(f"/api/v1/watched-items/{wi.id}/restore")
+
+        assert response.status_code == 200, response.text
+        await db_session.refresh(wi)
+        assert wi.archived_at is None
+        assert wi.is_active is True
+
+    async def test_an_announcement_rearms_a_restored_item(self, client, db_session):
+        """The full loop the ownership design intends: restore leaves it paused,
+        Archiver's next real mutation re-arms it."""
+        from src.workers.registry_reconcile import reconcile_announcement
+        from tests.workers.test_registry_reconcile import _announcement
+
+        wi = await make_watched_item(db_session, name="Registry-owned", is_active=True)
+        wi.applied_generation = 2
+        await db_session.commit()
+        await client.post(f"/api/v1/watched-items/{wi.id}/archive")
+        await client.post(f"/api/v1/watched-items/{wi.id}/restore")
+
+        await reconcile_announcement(
+            db_session, _announcement(wi.archiver_info_item_id, generation=3, active=True)
+        )
+
+        await db_session.refresh(wi)
+        assert wi.is_active is True
+
+
+class TestCheckNowPausedDetail:
+    """CR-24: the 409 must not point at a resume control that also 409s."""
+
+    async def test_paused_reconciled_item_names_archiver(self, client, db_session):
+        wi = await make_watched_item(db_session, name="Registry-owned", is_active=False)
+        wi.applied_generation = 2
+        await db_session.commit()
+
+        response = await client.post(f"/api/v1/watched-items/{wi.id}/check-now")
+
+        assert response.status_code == 409
+        assert "Archiver" in response.json()["detail"]
+
+    async def test_paused_local_item_keeps_the_plain_detail(self, client, db_session):
+        wi = await make_watched_item(db_session, name="Local only", is_active=False)
+        await db_session.commit()
+
+        response = await client.post(f"/api/v1/watched-items/{wi.id}/check-now")
+
+        assert response.status_code == 409
+        assert "Archiver" not in response.json()["detail"]

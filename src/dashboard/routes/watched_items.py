@@ -572,6 +572,16 @@ async def watched_item_update_url(
     if wi.archived_at is not None:
         return _flash("Cannot change the URL of an archived item.", "error")
 
+    # #254 CR-22: the URL is announcement-owned on a reconciled item, and local
+    # drift on it is permanent (the same-generation snapshot is ignored as
+    # stale). Same rule as the API PATCH guard, in this surface's shape.
+    if wi.applied_generation is not None:
+        return _flash(
+            "This item's URL is registry-owned — edit the InfoSource in Archiver "
+            "instead. A local change would diverge until the next announcement.",
+            "warning",
+        )
+
     url_raw = url.strip()
     if not url_raw:
         return _flash("URL is required.", "error")

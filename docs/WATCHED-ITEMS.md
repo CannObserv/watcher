@@ -85,8 +85,13 @@ the registry has no opinion yet, so the column is left exactly as it is. Reading
 what the rollout window looks like before CannObserv/archiver#150's import populates
 the column.
 
-**A local pause is not sticky.** `active` applies unconditionally; item-level pause
-lives in Archiver's dashboard alone. What remains legitimately Watcher's is
+**A local pause is not sticky — and since the 2026-08-13 cutover, not offered.**
+`active` applies unconditionally, and once an item is reconciled
+(`applied_generation` set) the API PATCH and the dashboard toggle both 409/flash
+naming Archiver as the authority (`RegistryOwnedActivationError` in
+`set_watched_item_active`) — a control that silently reverts within the snapshot
+period is worse than a refusal that says where the control lives. Never-announced
+rows keep the local toggle. Item-level pause lives in Archiver's dashboard alone. What remains legitimately Watcher's is
 *mechanism* — local backoff, `domain_suspended` as the host-level break-glass, and
 the throttle floor. `archived_at` is never touched, so an `active: true` against an
 archived row reconciles the row's contents but no-ops on scheduling (`schedule_tick`

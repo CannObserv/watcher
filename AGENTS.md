@@ -196,8 +196,8 @@ announcement is authoritative for exactly five columns — `archiver_info_source
 Everything else survives reconciliation: health, timings, `domain_suspended`,
 `archived_at`, `throttle_floor_interval`, `default_schedule_config`, media type, tags,
 notification config. **A local pause is not sticky** — item-level pause lives in
-Archiver's dashboard alone; local backoff, `domain_suspended`, and the throttle floor are
-the legitimate local stops. Deleting a reconciled item 409s (the next announcement would
+Archiver's dashboard alone (a reconciled item 409s the local toggle); local backoff,
+`domain_suspended`, and the throttle floor are the legitimate local stops. Deleting a reconciled item 409s (the next announcement would
 recreate it); the throttle floor is released by an explicit operator cadence write, never
 by reconciliation. Schedule resolution is four tiers under a floor:
 announced → item → domain → system, then `max(resolved, throttle_floor)`.

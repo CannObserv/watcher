@@ -123,6 +123,10 @@ class SuspendedDomainResumeError(Exception):
     """An item cannot resume while its domain is suspended (kill-switch parity)."""
 
 
+class RegistryOwnedActivationError(Exception):
+    """is_active on a reconciled item is Archiver's — pause/resume there (#254)."""
+
+
 def set_watched_item_active(
     session: AsyncSession, wi: WatchedItem, *, active: bool, source: str
 ) -> bool:
@@ -130,13 +134,33 @@ def set_watched_item_active(
 
     Returns True when the value changed (an audit event was emitted), False on
     a no-op. Raises :class:`ArchivedItemActivationError` for any attempt while
-    archived (even a no-op — restore owns activation), and
-    :class:`SuspendedDomainResumeError` when resuming while ``domain_suspended``.
-    Does not commit; the caller owns the transaction.
+    archived (even a no-op — restore owns activation),
+    :class:`RegistryOwnedActivationError` for any attempt on a reconciled item,
+    and :class:`SuspendedDomainResumeError` when resuming while
+    ``domain_suspended``. Does not commit; the caller owns the transaction.
+
+    **The registry guard (#254, break-glass ruling).** Once an item has applied
+    an announcement (``applied_generation`` set), ``active`` has exactly one
+    owner: Archiver's dashboard, over ``info.registry``. A local toggle would
+    silently revert within the snapshot period — level-triggered reconciliation
+    working as designed — so the 409 names the authority instead of offering a
+    control that lies. Raised even on a no-op, matching the archived guard: the
+    refusal is what teaches where the control lives. Never-announced rows
+    (``applied_generation IS NULL``) keep the local toggle — the registry has no
+    opinion to defer to, and until archiver#141's producer announced them they
+    had no other control surface. The reconcile itself writes the column
+    directly and never passes through here; it is the authority's path, and the
+    legitimate local stops remain backoff, ``domain_suspended``, and the
+    throttle floor.
     """
     if wi.archived_at is not None:
         raise ArchivedItemActivationError(
             "WatchedItem is archived; activation is controlled by restore"
+        )
+    if wi.applied_generation is not None:
+        raise RegistryOwnedActivationError(
+            "WatchedItem is registry-owned; pause or resume it in Archiver instead. "
+            "A local toggle would be reverted by the next info.registry announcement."
         )
     if active and wi.domain_suspended:
         raise SuspendedDomainResumeError("Cannot resume while the domain is suspended")

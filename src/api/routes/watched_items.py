@@ -24,6 +24,7 @@ from src.core.models.change_revision import ChangeRevision
 from src.core.models.watched_item import WatchedItem
 from src.core.watched_items import (
     ArchivedItemActivationError,
+    RegistryOwnedActivationError,
     SuspendedDomainResumeError,
     derive_watched_item_name,
     set_item_schedule_config,
@@ -165,9 +166,11 @@ async def patch_watched_item(
 
     ``is_active`` (pause/resume) is governed by the shared
     :func:`set_watched_item_active` service (#228): it cannot change on an
-    archived item (409 — restore owns activation) and an item cannot resume
-    while its domain is suspended (409 — kill-switch parity with the
-    dashboard toggle).
+    archived item (409 — restore owns activation), it cannot change at all on a
+    **registry-owned** item (409 — once ``applied_generation`` is set, pause and
+    resume live in Archiver, and a local toggle would be reverted by the next
+    ``info.registry`` announcement; #254), and an item cannot resume while its
+    domain is suspended (409 — kill-switch parity with the dashboard toggle).
 
     An ``is_active`` transition emits a dedicated ``WATCHED_ITEM_PAUSED`` /
     ``WATCHED_ITEM_RESUMED`` audit event (#189) and is excluded from the
@@ -211,7 +214,11 @@ async def patch_watched_item(
     if target_active is not None:
         try:
             set_watched_item_active(session, wi, active=target_active, source="api")
-        except (ArchivedItemActivationError, SuspendedDomainResumeError) as exc:
+        except (
+            ArchivedItemActivationError,
+            RegistryOwnedActivationError,
+            SuspendedDomainResumeError,
+        ) as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
 
     other_fields = sorted(updates)

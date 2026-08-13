@@ -32,6 +32,7 @@ from src.core.models.watched_item import WatchedItem, WatchHealthStatus
 from src.core.scheduling.schedule import resolve_schedule_display
 from src.core.watched_items import (
     ArchivedItemActivationError,
+    RegistryOwnedActivationError,
     SuspendedDomainResumeError,
     resolve_watch_target,
     set_item_schedule_interval,
@@ -463,6 +464,14 @@ async def watched_item_toggle_active(
         changed = set_watched_item_active(session, wi, active=new_active, source="dashboard")
     except ArchivedItemActivationError:
         return _respond(("error", "Watched Item is archived — restore it to change its status."))
+    except RegistryOwnedActivationError:
+        return _respond(
+            (
+                "warning",
+                "Pause and resume for this item live in Archiver — a local toggle "
+                "would be reverted by the next registry announcement.",
+            )
+        )
     except SuspendedDomainResumeError:
         return _respond(("warning", "Cannot resume while the domain is suspended."))
     if changed:

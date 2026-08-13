@@ -1608,3 +1608,92 @@ class TestCadencePatchAudit:
         await db_session.refresh(wi)
         assert wi.default_schedule_config == {"interval": "6h"}
         assert wi.description == "note"
+
+
+class TestRegistryOwnedPause:
+    """#254 break-glass follow-through: item-level pause lives in exactly one
+    place — Archiver's dashboard — once the announcement path is authoritative.
+
+    Gated at cutover (2026-08-13): archiver#150's import ran, archiver#141's
+    producer is live, and the delta path is verified in production. A local
+    toggle on a reconciled item would silently revert within the snapshot
+    period, so a 409 naming the authority beats a control that lies. Mirrors
+    the DELETE guard's condition: never-announced rows (`applied_generation IS
+    NULL`) keep the local toggle — the registry has no opinion to defer to.
+    """
+
+    async def test_pausing_a_reconciled_item_is_refused(self, client, db_session):
+        wi = await make_watched_item(db_session, name="Registry-owned", is_active=True)
+        wi.applied_generation = 2
+        await db_session.commit()
+
+        response = await client.patch(f"/api/v1/watched-items/{wi.id}", json={"is_active": False})
+
+        assert response.status_code == 409
+        assert "Archiver" in response.json()["detail"]
+        await db_session.refresh(wi)
+        assert wi.is_active is True
+
+    async def test_resuming_a_reconciled_item_is_refused(self, client, db_session):
+        """Resume is Archiver's call too — `active` is one field, one owner."""
+        wi = await make_watched_item(db_session, name="Registry-owned", is_active=False)
+        wi.applied_generation = 2
+        await db_session.commit()
+
+        response = await client.patch(f"/api/v1/watched-items/{wi.id}", json={"is_active": True})
+
+        assert response.status_code == 409
+        await db_session.refresh(wi)
+        assert wi.is_active is False
+
+    async def test_a_never_announced_item_still_toggles(self, client, db_session):
+        wi = await make_watched_item(db_session, name="Local only", is_active=True)
+        await db_session.commit()
+        assert wi.applied_generation is None
+
+        response = await client.patch(f"/api/v1/watched-items/{wi.id}", json={"is_active": False})
+
+        assert response.status_code == 200, response.text
+        await db_session.refresh(wi)
+        assert wi.is_active is False
+
+    async def test_a_noop_toggle_on_a_reconciled_item_is_still_refused(self, client, db_session):
+        """Same posture as the archived guard: the 409 teaches where the control
+        lives, and a no-op that succeeds teaches the opposite."""
+        wi = await make_watched_item(db_session, name="Registry-owned", is_active=True)
+        wi.applied_generation = 2
+        await db_session.commit()
+
+        response = await client.patch(f"/api/v1/watched-items/{wi.id}", json={"is_active": True})
+
+        assert response.status_code == 409
+
+    async def test_other_fields_still_patch_on_a_reconciled_item(self, client, db_session):
+        """The guard is on `is_active` alone — Watcher-local fields stay editable."""
+        wi = await make_watched_item(db_session, name="Registry-owned")
+        wi.applied_generation = 2
+        await db_session.commit()
+
+        response = await client.patch(
+            f"/api/v1/watched-items/{wi.id}", json={"description": "still mine"}
+        )
+
+        assert response.status_code == 200, response.text
+
+    async def test_the_reconcile_itself_is_not_blocked(self, client, db_session):
+        """The guard lives in `set_watched_item_active`; the reconcile writes the
+        column directly and must keep doing so — it IS the authority's path."""
+        from src.workers.registry_reconcile import reconcile_announcement
+        from tests.workers.test_registry_reconcile import _announcement
+
+        wi = await make_watched_item(db_session, name="Registry-owned", is_active=True)
+        await db_session.commit()
+
+        await reconcile_announcement(
+            db_session,
+            _announcement(wi.archiver_info_item_id, generation=3, active=False),
+        )
+
+        await db_session.refresh(wi)
+        assert wi.is_active is False
+        assert wi.applied_generation == 3

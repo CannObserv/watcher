@@ -1387,6 +1387,24 @@ class TestPauseResume:
         await db_session.refresh(wi)
         assert wi.is_active is False  # state unchanged
 
+    async def test_toggle_registry_owned_flashes_and_keeps_state(self, client, db_session):
+        """#254: pause/resume on a reconciled item is Archiver's — the toggle
+        stays visible but the guard flashes the authority instead of applying."""
+        wi = await _make_wi(db_session, name="RegistryToggle", is_active=True)
+        wi.applied_generation = 2
+        await db_session.commit()
+
+        resp = await client.post(
+            f"/watched-items/{wi.id}/toggle-active",
+            data={"active": "false"},
+            headers={"HX-Request": "true"},
+        )
+
+        assert resp.status_code == 200
+        assert b"Archiver" in resp.content
+        await db_session.refresh(wi)
+        assert wi.is_active is True  # state unchanged
+
     async def test_toggle_archived_non_htmx_redirects(self, client, db_session):
         wi = await _make_wi(
             db_session, name="ArchToggleRedir", is_active=False, archived_at=datetime.now(UTC)

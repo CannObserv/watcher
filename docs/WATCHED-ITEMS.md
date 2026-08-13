@@ -101,7 +101,9 @@ until the next *real* registry mutation, not the next snapshot. Hence: PATCH 409
 (the dashboard URL edit flashes the same rule), and **restore clears `archived_at`
 without re-activating** a reconciled item — archive→restore was otherwise a
 two-step bypass of the pause guard. A restored registry-owned item stays paused
-until Archiver re-arms it. Watcher-local fields (name, description, tags, item
+until Archiver re-arms it — one click, not a round-trip: Archiver's watch-active
+route writes and announces unconditionally, so pressing resume there propagates
+even when it already considers the item active. Watcher-local fields (name, description, tags, item
 cadence, media type) stay editable everywhere. What remains legitimately Watcher's is
 *mechanism* — local backoff, `domain_suspended` as the host-level break-glass, and
 the throttle floor. `archived_at` is never touched, so an `active: true` against an

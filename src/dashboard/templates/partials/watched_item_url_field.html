@@ -39,7 +39,11 @@
         data-copy-url="{{ watched_item.effective_url }}"
         aria-label="Copy URL to clipboard">Copy</button>
       {% endif %}
-      {% if not watched_item.archived_at %}
+      {# Registry-owned (#254): the URL comes from the announcement, and a local
+         write would diverge until the next real registry mutation — the
+         same-generation snapshot cannot repair it. Show where it comes from
+         rather than an Edit the POST guard refuses. #}
+      {% if not watched_item.archived_at and watched_item.applied_generation is none %}
       <button type="button" class="btn btn-edit py-1 px-3 text-sm"
         hx-get="/watched-items/{{ watched_item.id }}/effective-url/field?mode=edit"
         hx-target="#field-effective-url"
@@ -49,6 +53,9 @@
     <div class="col-span-2 sm:col-span-1 sm:col-start-2 sm:row-start-1 flex items-center gap-2 min-w-0">
       {% if watched_item.effective_url %}
       <a href="{{ watched_item.effective_url }}" class="link text-sm break-all" target="_blank" rel="noopener noreferrer">{{ watched_item.effective_url }}</a>
+      {% if watched_item.applied_generation is not none %}
+      <span class="text-xs text-gray-400 dark:text-gray-500 whitespace-nowrap">· registry</span>
+      {% endif %}
       {% else %}
       <span class="text-sm text-gray-500 dark:text-gray-400">No URL set.</span>
       {% endif %}

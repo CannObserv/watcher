@@ -306,8 +306,12 @@ async def restore_watched_item(
     locally, restore flipped it True unconditionally, resurrecting an item
     Archiver may have announced paused. The divergence would then be permanent,
     because the snapshot re-announcing the same generation is ignored as stale.
-    A restored registry-owned item therefore stays paused until Archiver's next
-    real mutation re-arms it — which is the ownership working, not a gap.
+    A restored registry-owned item therefore stays paused until Archiver re-arms
+    it — which is the ownership working, not a gap, and the remedy is one click:
+    Archiver's ``PUT /info-items/{id}/watch-active`` writes and announces
+    **unconditionally**, with no same-value skip, so pressing resume there bumps
+    the generation and propagates even when Archiver already considers the item
+    active. No pause/resume round-trip is needed.
     """
     wi = await _get_or_404(session, watched_item_id)
     if wi.archived_at is not None:

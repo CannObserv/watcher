@@ -620,6 +620,46 @@ class TestDetailPage:
         assert b'name="url"' in resp.content
         assert f"/watched-items/{wi.id}/effective-url".encode() in resp.content
 
+    async def test_registry_owned_url_row_has_no_edit_affordance(self, client, db_session):
+        """CR-27 (#254): the URL is announcement-owned on a reconciled item, so the
+        row shows where it comes from rather than inviting an edit the POST guard
+        will refuse. Same vocabulary as the schedule row's inherited-tier marker."""
+        wi = await _make_wi(db_session, name="RegistryUrlRow", effective_url="https://example.com")
+        wi.applied_generation = 2
+        await db_session.commit()
+
+        body = (await client.get(f"/watched-items/{wi.id}")).content
+
+        assert b"/effective-url/field?mode=edit" not in body
+        assert b"registry" in body.lower()
+
+    async def test_registry_owned_url_field_refuses_edit_mode(self, client, db_session):
+        """Defence in depth: the affordance is gone, but the route is reachable
+        directly and must not hand back a form whose POST cannot succeed."""
+        wi = await _make_wi(
+            db_session, name="RegistryUrlField", effective_url="https://example.com"
+        )
+        wi.applied_generation = 2
+        await db_session.commit()
+
+        resp = await client.get(
+            f"/watched-items/{wi.id}/effective-url/field?mode=edit",
+            headers={"HX-Request": "true"},
+        )
+
+        assert resp.status_code == 200
+        assert b'name="url"' not in resp.content  # view mode, not the edit form
+
+    async def test_never_announced_url_row_keeps_its_edit_affordance(self, client, db_session):
+        """The carve-out every registry guard shares: no announcement, no authority
+        to defer to."""
+        wi = await _make_wi(db_session, name="LocalUrlRow", effective_url="https://example.com")
+        assert wi.applied_generation is None
+
+        body = (await client.get(f"/watched-items/{wi.id}")).content
+
+        assert b"/effective-url/field?mode=edit" in body
+
     async def test_detail_activity_after_notification_templates(self, client, db_session):
         """#202: Recent Activity renders below the Notification Templates panel."""
         wi = await _make_wi(db_session, name="OrderCheck")

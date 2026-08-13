@@ -527,12 +527,19 @@ async def watched_item_url_field_partial(
 
     Powers the inline Edit affordance on the detail page's URL row; the edit
     form posts to the sibling ``/effective-url`` route which re-probes.
+
+    A registry-owned item (``applied_generation`` set) is forced to view mode
+    (#254 CR-27). The template already drops the Edit button, but this route is
+    reachable directly, and handing back a form whose POST is guaranteed to
+    flash a refusal wastes the operator's typing.
     """
     wi = await get_watched_item_detail(session, watched_item_id)
     if not wi:
         raise HTTPException(status_code=404, detail="WatchedItem not found")
     if not is_htmx(request):
         return RedirectResponse(url=f"/watched-items/{watched_item_id}", status_code=303)
+    if wi.applied_generation is not None:
+        mode = "view"
     return templates.TemplateResponse(
         request,
         "partials/watched_item_url_field.html",

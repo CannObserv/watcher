@@ -1498,9 +1498,15 @@ class TestScheduleConfigValidation:
 
         assert response.status_code == 200, response.text
 
-    async def test_a_config_without_an_interval_is_allowed(self, client, db_session):
-        """An intervalless `{}` is a meaningful value at its tier (#202 CR) — the
-        validator checks the interval when present, it does not require one."""
+    async def test_an_intervalless_config_is_rejected(self, client, db_session):
+        """CR-19 (#254 round 3): both cadence boundaries enforce the same rule.
+
+        Verified against the contract history (cannobserv#324, archiver#150):
+        delegation has exactly one spelling — `None`/omit — never an empty
+        document left open to interpretation. The Domain boundary has rejected
+        `{}` since #205; this brings the item tier into line. The resolver's
+        `{}`-passes-through branch stays as defensive rendering for legacy rows.
+        """
         wi = await make_watched_item(db_session, name="Empty")
         await db_session.commit()
 
@@ -1508,7 +1514,39 @@ class TestScheduleConfigValidation:
             f"/api/v1/watched-items/{wi.id}", json={"default_schedule_config": {}}
         )
 
+        assert response.status_code == 422
+        await db_session.refresh(wi)
+        assert wi.default_schedule_config is None
+
+    async def test_a_non_string_interval_is_a_readable_422(self, client, db_session):
+        """CR-18: the 422 detail must state the constraint, not leak an `re`
+        internal ("expected string or bytes-like object")."""
+        wi = await make_watched_item(db_session, name="IntInterval")
+        await db_session.commit()
+
+        response = await client.patch(
+            f"/api/v1/watched-items/{wi.id}",
+            json={"default_schedule_config": {"interval": 6}},
+        )
+
+        assert response.status_code == 422
+        detail = str(response.json()["detail"])
+        assert "must be a string" in detail
+        assert "bytes-like" not in detail
+
+    async def test_clearing_with_null_still_works(self, client, db_session):
+        """`None` is the one spelling of "inherit" — it must keep passing."""
+        wi = await make_watched_item(db_session, name="Clear")
+        wi.default_schedule_config = {"interval": "6h"}
+        await db_session.commit()
+
+        response = await client.patch(
+            f"/api/v1/watched-items/{wi.id}", json={"default_schedule_config": None}
+        )
+
         assert response.status_code == 200, response.text
+        await db_session.refresh(wi)
+        assert wi.default_schedule_config is None
 
     async def test_a_hostile_row_cannot_reach_the_scheduler(self, client, db_session):
         """The consequence the validator exists to prevent, stated as a test."""

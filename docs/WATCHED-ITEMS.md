@@ -38,11 +38,14 @@ is `TemporalProfile.to_resolution_dict()`, shared by the scheduler and the dashb
 WatchedItem via `ensure_domain_and_resolve_suspension` on every create/PATCH path
 and back-filled across a domain's items on domain edit
 (`backfill_domain_schedule_config`) — so the resolver, and the scheduler hot
-path, never join Domain. An interval is validated at the API write boundary (`_validated_schedule_config`),
-because `schedule_tick` resolves every item in one task — an unparseable stored
-interval raises out of `compute_next_check` and stops scheduling for the whole
-system, not just its own row. `interval` stays optional inside the document; an
-intervalless `{}` is a meaningful value at its tier.
+path, never join Domain. Cadence is validated at the API write boundary by the same helper as the Domain
+boundary (`validate_optional_schedule_config`, #205): a non-`None` config must carry a
+parseable `interval`, and `{}` is rejected — delegation has exactly one spelling,
+`None`/omit (the direction cannobserv#324 settled for the registry document). The rule
+is held at the boundary because `schedule_tick` resolves every item in one task — an
+unparseable stored interval raises out of `compute_next_check` and stops scheduling
+for the whole system, not just its own row. The resolver's `{}`-passes-through branch
+survives as defensive rendering for legacy rows.
 
 Per-domain cadence is `Domain.default_schedule_config`
 (a `schedule_config` interval string — operator check cadence, distinct from the

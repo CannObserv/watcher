@@ -38,9 +38,10 @@ def set_item_schedule_config(watched_item: WatchedItem, config: dict | None) -> 
     registry has no opinion on mechanism, which is the entire reason the floor is
     a column of its own.
 
-    Shape validation is the API schema's job (``_validated_schedule_config``,
-    #254 CR-10) so a bad interval is a 422 rather than a 500; the dashboard front
-    door validates for the same reason on its own path.
+    Shape validation is the API schema's job (``validate_optional_schedule_config``,
+    shared with the Domain boundary — #254 CR-10/16) so a bad interval is a 422
+    rather than a 500; the dashboard front door validates for the same reason on
+    its own path.
     """
     watched_item.default_schedule_config = config
     watched_item.throttle_floor_interval = None

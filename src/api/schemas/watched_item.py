@@ -14,32 +14,7 @@ from pydantic import (
 from src.api.schemas.types import HttpUrlStr, ULIDRefStr, ULIDStr
 from src.core.media_type import resolve_dispatch_essence
 from src.core.models.watched_item import CONTENT_MEDIA_TYPE_MAX_LEN, WatchHealthStatus
-from src.core.scheduling.cadence import parse_interval
-
-
-def _validated_schedule_config(value: dict | None) -> dict | None:
-    """Reject a ``schedule_config`` whose ``interval`` will not parse (#254 CR-10).
-
-    The write boundary is the only place that can hold this line. ``schedule_tick``
-    resolves every WatchedItem in a single task, so an unparseable interval does
-    not break one row — it raises out of ``compute_next_check`` and stops
-    scheduling for the entire system until someone reads the worker log. A typo in
-    one PATCH is a total scheduler outage.
-
-    ``interval`` stays *optional*: an intervalless ``{}`` is a meaningful value at
-    its tier (#202 CR), so this validates the key when present rather than
-    requiring it.
-    """
-    if value is None:
-        return value
-    interval = value.get("interval")
-    if interval is None:
-        return value
-    try:
-        parse_interval(interval)
-    except (TypeError, ValueError) as exc:
-        raise ValueError(str(exc)) from exc
-    return value
+from src.core.scheduling.cadence import validate_optional_schedule_config
 
 
 class WatchedItemCreate(BaseModel):
@@ -76,9 +51,19 @@ class WatchedItemCreate(BaseModel):
     default_tags: list[str] | None = None
     source_specs: list[dict] | None = None
 
-    _check_schedule_config = field_validator("default_schedule_config")(
-        staticmethod(_validated_schedule_config)
-    )
+    @field_validator("default_schedule_config")
+    @classmethod
+    def _cadence(cls, v: dict | None) -> dict | None:
+        """Reject a malformed or intervalless cadence at the write boundary.
+
+        The same rule, via the same helper, as the Domain boundary (#205 /
+        `DomainPatch._cadence`) — #254 CR-16/19 verified the direction against
+        cannobserv#324: delegation has exactly one spelling (`None`/omit), never
+        an empty document, and this is the only place that can hold the line —
+        `schedule_tick` resolves every item in one task, so an unparseable
+        stored interval stops scheduling for the whole system, not one row.
+        """
+        return validate_optional_schedule_config(v)
 
 
 class WatchedItemPatch(BaseModel):
@@ -98,9 +83,11 @@ class WatchedItemPatch(BaseModel):
     source_specs: list[dict] | None = None
     archiver_info_source_id: ULIDRefStr | None = None
 
-    _check_schedule_config = field_validator("default_schedule_config")(
-        staticmethod(_validated_schedule_config)
-    )
+    @field_validator("default_schedule_config")
+    @classmethod
+    def _cadence(cls, v: dict | None) -> dict | None:
+        """Same rule as create — see ``WatchedItemCreate._cadence``."""
+        return validate_optional_schedule_config(v)
 
     @model_validator(mode="after")
     def _reject_explicit_null(self) -> "WatchedItemPatch":

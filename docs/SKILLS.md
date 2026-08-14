@@ -124,6 +124,29 @@ This project is indexed with SocratiCode. Always use its MCP tools to explore th
 
 > **Keep the connection alive during indexing.** Indexing runs in the background. Some MCP hosts disconnect idle connections. Call `codebase_status` roughly every 60 seconds after starting `codebase_index` until it completes.
 
+### Index scope
+
+**Index scope (#240).** `.socraticodeignore` (repo root, gitignore syntax) keeps the
+vendored skill trees — `skills-vendor/` and the `.claude/skills/` symlink farm — out of
+the semantic index; vendor prose otherwise outranks this repo's own code in
+`codebase_search`. `skills/` stays indexed: it holds the committed first-party overrides,
+and its vendor symlinks resolve to `skills-vendor/` paths that are already excluded.
+Editing the file only changes what *subsequent* scans pick up — chunks embedded by an
+earlier index survive it (vendor hits kept ranking after the file landed). Purging them
+takes a clean rebuild: `codebase_remove` then `codebase_index`, which re-embeds the whole
+repo — budget a maintenance window for it.
+
+### Prefetch query
+
+The MCP tools are **deferred** — schemas load only after a `ToolSearch` prefetch. The
+SessionStart hook (`.claude/hooks/socraticode-reminder.sh`) prints this query every
+session; run it before exploring. Reproduced here for the case where the reminder did not
+load:
+
+Prefetch query (run via `ToolSearch` once per session if the SessionStart reminder isn't loaded):
+
+`select:mcp__plugin_socraticode_socraticode__codebase_search,mcp__plugin_socraticode_socraticode__codebase_symbol,mcp__plugin_socraticode_socraticode__codebase_symbols,mcp__plugin_socraticode_socraticode__codebase_flow,mcp__plugin_socraticode_socraticode__codebase_impact,mcp__plugin_socraticode_socraticode__codebase_graph_query,mcp__plugin_socraticode_socraticode__codebase_graph_circular,mcp__plugin_socraticode_socraticode__codebase_graph_stats,mcp__plugin_socraticode_socraticode__codebase_graph_visualize,mcp__plugin_socraticode_socraticode__codebase_status,mcp__plugin_socraticode_socraticode__codebase_context,mcp__plugin_socraticode_socraticode__codebase_context_search`
+
 ### Linked Projects
 
 Cross-project search to the sister `notifier` index is enabled via `SOCRATICODE_LINKED_PROJECTS=/home/exedev/notifier` in `.claude/settings.local.json` (gitignored — per-instance config, not a project commitment). The value may be relative (resolved from the project root) or absolute; absolute is recommended since the MCP server's CWD isn't guaranteed across hosts. Pass `includeLinked: true` on `codebase_search` to fan out across both indexes; results carry a `[watcher]` / `[notifier]` label.

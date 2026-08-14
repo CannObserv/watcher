@@ -31,15 +31,7 @@ pinned version: [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) → *Cannobserv wheelho
 
 SocratiCode is indexed on this repo (`.socraticodecontextartifacts.json` present). Its MCP tools are **deferred** — schemas load only after a `ToolSearch` prefetch. The SessionStart hook prints the prefetch query; run it before exploring.
 
-**Index scope (#240).** `.socraticodeignore` (repo root, gitignore syntax) keeps the
-vendored skill trees — `skills-vendor/` and the `.claude/skills/` symlink farm — out of
-the semantic index; vendor prose otherwise outranks this repo's own code in
-`codebase_search`. `skills/` stays indexed: it holds the committed first-party overrides,
-and its vendor symlinks resolve to `skills-vendor/` paths that are already excluded.
-Editing the file only changes what *subsequent* scans pick up — chunks embedded by an
-earlier index survive it (vendor hits kept ranking after the file landed). Purging them
-takes a clean rebuild: `codebase_remove` then `codebase_index`, which re-embeds the whole
-repo — budget a maintenance window for it.
+Index scope (`.socraticodeignore`, #240) and the rebuild procedure: [docs/SKILLS.md](docs/SKILLS.md).
 
 **Negative rule.** For broad semantic questions ("where is X", "how does Y work", "what depends on Z"), use SocratiCode MCP tools first. Reach for `grep`/`ripgrep` only on exact strings (error messages, log lines, known symbols). Reserve the Explore subagent for path-pattern walks (e.g. "all `*.py` under `src/api/routes/`"), not semantic search.
 
@@ -57,9 +49,7 @@ repo — budget a maintenance window for it.
 | Verify index is up to date | `codebase_status` |
 | DB schemas, deployment topology, runbook context | `codebase_context` / `codebase_context_search` |
 
-Prefetch query (run via `ToolSearch` once per session if the SessionStart reminder isn't loaded):
-
-`select:mcp__plugin_socraticode_socraticode__codebase_search,mcp__plugin_socraticode_socraticode__codebase_symbol,mcp__plugin_socraticode_socraticode__codebase_symbols,mcp__plugin_socraticode_socraticode__codebase_flow,mcp__plugin_socraticode_socraticode__codebase_impact,mcp__plugin_socraticode_socraticode__codebase_graph_query,mcp__plugin_socraticode_socraticode__codebase_graph_circular,mcp__plugin_socraticode_socraticode__codebase_graph_stats,mcp__plugin_socraticode_socraticode__codebase_graph_visualize,mcp__plugin_socraticode_socraticode__codebase_status,mcp__plugin_socraticode_socraticode__codebase_context,mcp__plugin_socraticode_socraticode__codebase_context_search`
+The SessionStart hook prints the prefetch query; it is also in [docs/SKILLS.md](docs/SKILLS.md) → *Prefetch query* if the reminder didn't load.
 
 ## Infrastructure
 
@@ -71,27 +61,13 @@ Prefetch query (run via `ToolSearch` once per session if the SessionStart remind
 | API (dev) | 8001 | manual uvicorn |
 | Archiver | 8020 | `systemctl` (`archiver.service`) |
 
-**The Archiver checkout moves freely again (#254).** `ARCHIVER_REPO_PATH` now redirects
-everything that needs the sibling repo — conftest's alembic run — because the
-`archiver-client` path dependency that pinned `../archiver/clients/python` and honored no
-env var went with the SDK. The old trap (setting one without the other, yielding passing
-tests over a broken `uv sync`) no longer has a second half to forget.
+`ARCHIVER_REPO_PATH` redirects everything needing the sibling repo (#254): [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 The exe.dev proxy forwards 3000–9999. Dev server reachable at `https://watcher.exe.xyz:8001/`.
 
-**Single process is load-bearing.** One uvicorn process runs everything: the API, the embedded Procrastinate worker, the `content.blobs` fact consumer, and the cache sweeper (started in the `src/api/main.py` lifespan — there is no separate worker unit). The reason is now the **fact consumer**, not politeness: `src/workers/fetch_facts.py` joins consumer group `watcher` as a single member (`watcher-1`), and a second process would need its own consumer name *and* an apply-ordering story across members — the supersession guard is per-row, not a cross-process lock. (Until #241 step 5 the reason was the in-process `DomainRateLimiter`; that retired with the local fetch path, so per-host pacing no longer constrains the topology at all — it is Replicator's, fed over `content.fetch-policy`.) Never run `uvicorn --workers N` or a second worker unit against prod. Escalation path when one process stops being enough (not before): a separate `watcher-worker.service` plus a multi-member consumer-group design — **not built**.
+**Single process is load-bearing.** One uvicorn process runs everything — API, embedded Procrastinate worker, `content.blobs` fact consumer, cache sweeper. **Never run `uvicorn --workers N` or a second worker unit against prod.** Why the fact consumer makes this load-bearing, and the escalation path that is *not built*: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) → *Single process*.
 
-**The bus.** Watcher publishes `content.fetch` (commands), `content.fetch-policy`
-(per-host politeness), `content.revisions` (`source_revision_observed`), and
-`info.watch-status` (#264 — the registry channel's return leg: applied generation,
-scheduler state, observation freshness; levels-not-edges, full-set republish on
-`WATCHER_WATCH_STATUS_REPUBLISH_CRON`, never an ack path); consumes
-`content.blobs` as the single member of consumer group `watcher`; and consumes
-`info.registry` **grouplessly** — a config/state stream replayed from `0-0` at every boot
-via `AsyncBusTailReader`, never `$` (a worker that boots at `$` reads nothing and looks
-exactly like one whose registry is empty). Archiver operates the
-broker. `WATCHER_BUS_REDIS_URL` unset → the publish tasks skip loudly rather than
-silently. Stream ownership, the fetch contracts, and `info_source_id` on the wire:
+**The bus.** Watcher publishes `content.fetch`, `content.fetch-policy`, `content.revisions`, and `info.watch-status`; consumes `content.blobs` (single-member group `watcher`) and `info.registry` (**groupless**, replayed from `0-0` every boot). Archiver operates the broker. `WATCHER_BUS_REDIS_URL` unset → publish tasks skip loudly. Stream ownership, the fetch contracts, and `info_source_id` on the wire:
 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ## Server Lifecycle
@@ -106,14 +82,7 @@ Dev server (port 8001, leaves prod alone):
 bash scripts/dev_server.sh
 ```
 
-Never launch uvicorn by hand with the prod env loaded — `/etc/watcher/.env`
-points `DATABASE_URL` at production, and a hand-run "dev" server would share
-the prod DB, run a second Procrastinate worker on the prod queue, and split
-the rate-limiter budget (#233). The script targets `TEST_DATABASE_URL` (or
-`WATCHER_DEV_DATABASE_URL`), migrates it, and refuses anything whose DB name
-lacks a `_test`/`_dev` suffix. The same rule is enforced in-app by
-`src/core/db_safety.py`; only `deploy/watcher.service` opts into prod via
-`WATCHER_ALLOW_PRODUCTION_DB=1` (in the unit, never an env file).
+**Never launch uvicorn by hand with the prod env loaded** — it would share the prod DB and run a second worker on the prod queue (#233). The script refuses any DB whose name lacks a `_test`/`_dev` suffix; `src/core/db_safety.py` enforces the same in-app. Full rationale: [docs/COMMANDS.md](docs/COMMANDS.md) → *Development*.
 
 **Archiver owns the canonical InfoItem / InfoSource / SourceRevision / RepSpec
 registry**; watcher consumes it over the bus — `info.registry` announcements reconciled
@@ -144,14 +113,7 @@ Never follow this with a hand-run uvicorn — it leaves `DATABASE_URL` pointed
 at production. The dev server is `bash scripts/dev_server.sh` (see **Server
 Lifecycle**; #233).
 
-**Naming rule for new variables.** Anything naming a shared external resource
-takes a **service-prefixed** name with a separate dev key — Archiver's
-`ARCHIVER_REDIS_URL` / `ARCHIVER_DEV_REDIS_URL` split is the pattern. A bare
-unprefixed name (`REDIS_URL`) is silently inherited from `/etc/watcher/.env` by
-anything that sources it, which is exactly how a dev process ends up pointed at
-a production resource (the #233 hazard, in env-var form). Watcher's own
-`WATCHER_BUS_REDIS_URL` / `WATCHER_DEV_BUS_REDIS_URL` split (#245) follows the
-pattern — see **Redis and the bus**.
+**Naming rule for new variables.** Anything naming a shared external resource takes a **service-prefixed** name with a separate dev key (`WATCHER_BUS_REDIS_URL` / `WATCHER_DEV_BUS_REDIS_URL`). A bare `REDIS_URL` is silently inherited from `/etc/watcher/.env` — the #233 hazard in env-var form. Rationale: [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) → *Environment Variables*.
 
 **Key variables:**
 - `DATABASE_URL` — PostgreSQL connection for watcher (Archiver owns its own database).
@@ -241,15 +203,11 @@ logger = get_logger(__name__)
 ```
 Entry points only: call `configure_logging()` once.
 
-Every record serializes as JSON with **at least** `timestamp` / `level` / `logger` /
-`message`, plus `exc_info` and whatever extras the emitting library attaches. Those four
-are a floor, not an exhaustive list, and are pinned by `tests/core/test_logging.py` —
+Records are JSON with a four-key floor — `timestamp`/`level`/`logger`/`message` — pinned by `tests/core/test_logging.py`;
 don't rename or drop a key without updating both. Why that set, and the rest of the
 logging configuration: [docs/CONVENTIONS.md](docs/CONVENTIONS.md).
 
-uvicorn's own loggers need `--log-config src/core/log_config.json` (both sanctioned launch
-paths already pass it) plus the `strip_color_message` filter; `ExecStartPre` output is
-plain text by design, so a log pipeline must tolerate non-JSON journald lines.
+uvicorn's own loggers need `--log-config src/core/log_config.json` (both sanctioned launch paths already pass it) plus the `strip_color_message` filter.
 [docs/CONVENTIONS.md](docs/CONVENTIONS.md).
 
 **Date & Time:** All UTC. ISO 8601: `YYYY-MM-DDTHH:MM:SS.ffffffZ` (timestamps), `YYYY-MM-DD` (dates).
@@ -283,7 +241,7 @@ Component classes and the HTMX/flash patterns: [docs/UI.md](docs/UI.md).
 than raw utilities. Full class inventory and badge variants:
 [docs/UI.md](docs/UI.md).
 
-**HTMX:** OOB flash via `partials/flash_oob.html`. CSS `.htmx-request` for loading states. Detect HTMX via the canonical `is_htmx(request)` helper ([src/dashboard/deps.py](src/dashboard/deps.py)) — `HX-Request` header with `HX-Boosted` guard, so a boosted full-page nav stays on the non-HTMX path — never a bare `request.headers.get("HX-Request")` read (guarded by `tests/dashboard/test_htmx_detection.py`; #211). All mutation routes provide non-HTMX redirect fallback.
+**HTMX:** OOB flash via `partials/flash_oob.html`. CSS `.htmx-request` for loading states. **Detect HTMX with `is_htmx(request)`** ([src/dashboard/deps.py](src/dashboard/deps.py)), never a bare `HX-Request` read — guarded by `tests/dashboard/test_htmx_detection.py` (#211). Patterns: [docs/UI.md](docs/UI.md) → *HTMX Patterns*.
 
 **Performance:** Pre-built Tailwind (no CDN). `BUILD_ID` env var for cache-busting (`?v={{ build_id }}`). `defer` on all non-critical scripts. System font stack.
 

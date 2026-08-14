@@ -77,6 +77,15 @@ bash scripts/dev_server.sh
 # systemd), WATCHER_DEV_DATABASE_URL, WATCHER_DEV_SKIP_MIGRATE=1
 ```
 
+Never launch uvicorn by hand with the prod env loaded — `/etc/watcher/.env`
+points `DATABASE_URL` at production, and a hand-run "dev" server would share
+the prod DB, run a second Procrastinate worker on the prod queue, and split
+the rate-limiter budget (#233). The script targets `TEST_DATABASE_URL` (or
+`WATCHER_DEV_DATABASE_URL`), migrates it, and refuses anything whose DB name
+lacks a `_test`/`_dev` suffix. The same rule is enforced in-app by
+`src/core/db_safety.py`; only `deploy/watcher.service` opts into prod via
+`WATCHER_ALLOW_PRODUCTION_DB=1` (in the unit, never an env file).
+
 Both sanctioned launch paths (`scripts/dev_server.sh` and the systemd
 `ExecStart`) pass `--log-config src/core/log_config.json` so uvicorn's own
 access/error lines are JSON like the app's (#244). Any ad-hoc uvicorn command

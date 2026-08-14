@@ -358,7 +358,8 @@ Dialog overlay with focus trapping. Focus trap implementation deferred to #39.
 
 ## 2. HTMX Patterns
 
-- **Detection pattern**: When a route needs to distinguish HTMX partials from full-page requests, use `request.headers.get("HX-Request") and not request.headers.get("HX-Boosted")`. The `HX-Boosted` guard prevents boosted navigation from receiving bare fragments.
+**HTMX:** OOB flash via `partials/flash_oob.html`. CSS `.htmx-request` for loading states. Detect HTMX via the canonical `is_htmx(request)` helper ([src/dashboard/deps.py](../src/dashboard/deps.py)) — `HX-Request` header with `HX-Boosted` guard, so a boosted full-page nav stays on the non-HTMX path — never a bare `request.headers.get("HX-Request")` read (guarded by `tests/dashboard/test_htmx_detection.py`; #211). All mutation routes provide non-HTMX redirect fallback.
+- **Detection**: the `HX-Boosted` guard prevents boosted navigation from receiving bare fragments.
 - **OOB flash**: Set `flash_oob_level` and `flash_oob_message`, then `{% include "partials/flash_oob.html" %}`. Swaps into `#flash-region` via `hx-swap-oob="beforeend"`.
 - **Loading states**: `.htmx-request` class (auto-applied by htmx) sets `opacity: 0.6`, `cursor: wait`, `pointer-events: none` on the element and child buttons/inputs/selects.
 - **`aria-busy`**: `src/dashboard/static/js/htmx-a11y.js` sets `aria-busy="true"` on the swap target during `htmx:beforeRequest`, removes it on `htmx:afterSettle`.

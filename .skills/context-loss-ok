@@ -1,0 +1,9 @@
+# Lines this curation had to rewrite rather than move, each judged against its
+# replacement. Format: WARRANT :: CONTENT (see prove-no-loss.sh --help).
+
+# The bus paragraph moved to docs/ARCHITECTURE.md in this same change, so the
+# pointer sentence that named it was rewritten to lead with the new summary.
+# The words survive in AGENTS.md ("Stream ownership, the fetch contracts, and
+# `info_source_id` on the wire: docs/ARCHITECTURE.md"); only the line's leading
+# "silently." — a wrap artefact of the paragraph that moved — is gone.
+retarget :: Stream ownership, the fetch contracts, and `info_source_id` on the wire:

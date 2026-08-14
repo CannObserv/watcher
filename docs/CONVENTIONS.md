@@ -6,6 +6,13 @@ is here.
 
 ## Log-record key contract
 
+Every record serializes as JSON with **at least** `timestamp` / `level` / `logger` /
+`message`, plus `exc_info` and whatever extras the emitting library attaches. Those four
+are a floor, not an exhaustive list, and are pinned by `tests/core/test_logging.py` —
+don't rename or drop a key without updating both.
+
+In detail:
+
 Every record serializes as JSON with **at least** four keys — `timestamp` (ISO 8601
 UTC), `level`, `logger`, `message` — plus `exc_info` when logging an exception and
 any extras the emitting library attaches (procrastinate adds `action`/`job`/…, and
@@ -15,6 +22,12 @@ so a future structlog/OTel migration won't churn log consumers) — and are pinn
 `tests/core/test_logging.py` (#238); don't rename or drop keys without updating both.
 
 ## uvicorn's own loggers need `--log-config`
+
+uvicorn's own loggers need `--log-config src/core/log_config.json` (both sanctioned launch
+paths already pass it) plus the `strip_color_message` filter; `ExecStartPre` output is
+plain text by design, so a log pipeline must tolerate non-JSON journald lines.
+
+In detail:
 
 **uvicorn's own loggers need `--log-config` (#244).** `uvicorn`, `uvicorn.access`,
 and `uvicorn.error` ship with `propagate=False` and their own plain-text handlers,

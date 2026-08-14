@@ -13,10 +13,11 @@ consumer cannot check for us:
   floor, so a cadence-only divergence (unparseable spec, floor, delegation) is
   visible to Archiver's drift detector even though ``applied_active`` never
   moves;
-* ``applied_generation`` publishes ``0`` for a never-reconciled row — safe as a
-  pre-announcement sentinel because archiver#141 bumps atomically on every
-  emit and snapshots filter ``generation > 0``, so a real announcement is
-  always ``>= 1``;
+* ``applied_generation`` publishes ``0`` for a never-reconciled row — the
+  sentinel collapses "never reconciled" and "reconciled at generation 0" (a
+  never-mutated InfoItem announces at 0), which is benign under
+  apply-iff-greater and self-correcting: the consumer replays the registry at
+  every boot, and the first mutation bumps past 0;
 * tombstones (``revoked=True``) ride ``revoked_info_items`` into every full
   set, and an unpublishable row is skipped with a warning, never allowed to
   fail the batch.
@@ -81,10 +82,10 @@ class TestLiveMapping:
         assert event.occurred_at == NOW
 
     def test_never_reconciled_row_publishes_the_zero_sentinel(self):
-        # archiver#141 bumps on every emit and snapshots filter generation > 0,
-        # so 0 never appears on the announcement wire — it is unambiguously
-        # "no announcement applied yet", and any real generation supersedes it
-        # under apply-iff-greater.
+        # 0 means "nothing newer than generation 0 applied" — a never-mutated
+        # InfoItem announces at 0, so this collapses "never reconciled" with
+        # "reconciled at 0"; benign either way under apply-iff-greater, and
+        # any real mutation's generation (>= 1) supersedes it.
         events = build_status_events([_item(applied_generation=None)], [], now=NOW)
         assert events[0].applied_generation == 0
 

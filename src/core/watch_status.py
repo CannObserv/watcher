@@ -30,9 +30,14 @@ republish period is the recovery bound (`src/workers/watch_status.py`).
 Field mappings the consumer cannot check for us:
 
 * ``applied_generation`` — the row's value, or **0** for a never-reconciled
-  row. Safe as a pre-announcement sentinel: archiver#141 bumps atomically on
-  every emit and its snapshot filters ``generation > 0``, so a real
-  announcement is always ``>= 1`` and supersedes under apply-iff-greater.
+  row. The sentinel means "nothing newer than generation 0 applied": a
+  never-*mutated* InfoItem legitimately announces at 0 (archiver#141 bumps
+  only on mutation; its snapshot emits live entries at their raw generation),
+  so 0 collapses "never reconciled" and "reconciled at 0" — benign under
+  apply-iff-greater, and the drift detector's clean read at 0==0 is at worst
+  transiently optimistic: the consumer replays the registry from ``0-0`` at
+  every boot, and the first real mutation bumps to ``>= 1`` and drifts
+  loudly if unapplied.
 * ``applied_active`` — the conjunction the scheduler actually gates on
   (``is_active`` AND un-archived AND domain not suspended), never a bare echo
   of the announcement.

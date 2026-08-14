@@ -138,10 +138,7 @@ repo — budget a maintenance window for it.
 
 ### Prefetch query
 
-The MCP tools are **deferred** — schemas load only after a `ToolSearch` prefetch. The
-SessionStart hook (`.claude/hooks/socraticode-reminder.sh`) prints this query every
-session; run it before exploring. Reproduced here for the case where the reminder did not
-load:
+The SessionStart hook (`.claude/hooks/socraticode-reminder.sh`) prints this every session.
 
 Prefetch query (run via `ToolSearch` once per session if the SessionStart reminder isn't loaded):
 

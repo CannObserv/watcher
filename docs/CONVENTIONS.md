@@ -11,15 +11,11 @@ Every record serializes as JSON with **at least** `timestamp` / `level` / `logge
 are a floor, not an exhaustive list, and are pinned by `tests/core/test_logging.py` —
 don't rename or drop a key without updating both.
 
-In detail:
-
-Every record serializes as JSON with **at least** four keys — `timestamp` (ISO 8601
-UTC), `level`, `logger`, `message` — plus `exc_info` when logging an exception and
-any extras the emitting library attaches (procrastinate adds `action`/`job`/…, and
-uvicorn's own lines carry extras of their own). Those four are
-the contract — a floor, not an exhaustive list (the set matches structlog's defaults,
-so a future structlog/OTel migration won't churn log consumers) — and are pinned by
-`tests/core/test_logging.py` (#238); don't rename or drop keys without updating both.
+`timestamp` is ISO 8601 UTC, and `exc_info` appears when logging an exception.
+Extras come from the emitting library — procrastinate adds `action`/`job`/…, and
+uvicorn's own lines carry extras of their own. The four-key set matches structlog's
+defaults, so a future structlog/OTel migration won't churn log consumers. The pin is
+`tests/core/test_logging.py` (#238).
 
 ## uvicorn's own loggers need `--log-config`
 
@@ -27,9 +23,7 @@ uvicorn's own loggers need `--log-config src/core/log_config.json` (both sanctio
 paths already pass it) plus the `strip_color_message` filter; `ExecStartPre` output is
 plain text by design, so a log pipeline must tolerate non-JSON journald lines.
 
-In detail:
-
-**uvicorn's own loggers need `--log-config` (#244).** `uvicorn`, `uvicorn.access`,
+Why each half is needed (#244): `uvicorn`, `uvicorn.access`,
 and `uvicorn.error` ship with `propagate=False` and their own plain-text handlers,
 so `configure_logging()` — which touches only the **root** logger — never reaches
 them; without the flag journald gets mixed formats (plain access lines interleaved

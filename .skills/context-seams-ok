@@ -33,7 +33,6 @@ No safe order — one-time, `e7c4b2a91f60` (#252)
 
 # 2026-08-14 curation. The Single process section carries the reasoning; the
 # rule itself genuinely does stay in AGENTS.md, so the back-reference is true.
-process, port ownership — stay in `AGENTS.md`; this is the reasoning behind it.
-The rule itself is always-paid and stays in `AGENTS.md`; this is the reasoning behind it.
+process, port ownership — stay in `AGENTS.md`; the reasoning behind them is here.
 # Pre-existing provenance heading, same class as the eight above.
 Registry reconciliation (#254)

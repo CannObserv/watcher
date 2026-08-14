@@ -1,7 +1,7 @@
 # Architecture
 
 Module layout, the sibling-service topology, and the message-bus topology. The always-paid rules — single VM, single
-process, port ownership — stay in `AGENTS.md`.
+process, port ownership — stay in `AGENTS.md`; the reasoning behind them is here.
 
 ## Project Layout
 
@@ -30,12 +30,10 @@ Sibling services on the same VM, separately managed: **Archiver** (port 8020, `a
 
 ## Archiver checkout location
 
-**The Archiver checkout location is not freely relocatable.** Two independent consumers resolve it, and only one takes an override:
+**The Archiver checkout is freely relocatable again (#254).** One consumer resolves it now, and it takes an override:
 
 - **Retired in #254.** `pyproject.toml` used to pin `archiver-client = { path = "../archiver/clients/python", editable = true }` — a relative path dependency that `uv sync` required and no env var could redirect, so a moved checkout broke the install while `ARCHIVER_REPO_PATH` kept the tests passing. Both halves are gone; `ARCHIVER_REPO_PATH` now locates the sibling repo for everything that still needs it (conftest's alembic run).
 - `tests/conftest.py` reads `ARCHIVER_REPO_PATH` (default `/home/exedev/archiver`) to locate Archiver's alembic for the cross-schema test tables. This is the **only** reader — CI sets it in `.github/workflows/ci.yml`.
-
-So `ARCHIVER_REPO_PATH` redirects the test harness alone. Setting it without also fixing the path dependency yields passing tests over a broken `uv sync`.
 
 **The Archiver checkout moves freely again (#254).** `ARCHIVER_REPO_PATH` now redirects
 everything that needs the sibling repo — conftest's alembic run — because the
@@ -45,27 +43,9 @@ tests over a broken `uv sync`) no longer has a second half to forget.
 
 ## Single process
 
-The rule itself is always-paid and stays in `AGENTS.md`; this is the reasoning behind it.
-
 **Single process is load-bearing.** One uvicorn process runs everything: the API, the embedded Procrastinate worker, the `content.blobs` fact consumer, and the cache sweeper (started in the `src/api/main.py` lifespan — there is no separate worker unit). The reason is now the **fact consumer**, not politeness: `src/workers/fetch_facts.py` joins consumer group `watcher` as a single member (`watcher-1`), and a second process would need its own consumer name *and* an apply-ordering story across members — the supersession guard is per-row, not a cross-process lock. (Until #241 step 5 the reason was the in-process `DomainRateLimiter`; that retired with the local fetch path, so per-host pacing no longer constrains the topology at all — it is Replicator's, fed over `content.fetch-policy`.) Never run `uvicorn --workers N` or a second worker unit against prod. Escalation path when one process stops being enough (not before): a separate `watcher-worker.service` plus a multi-member consumer-group design — **not built**.
 
 ## Redis and the bus
-
-At a glance:
-
-**The bus.** Watcher publishes `content.fetch` (commands), `content.fetch-policy`
-(per-host politeness), `content.revisions` (`source_revision_observed`), and
-`info.watch-status` (#264 — the registry channel's return leg: applied generation,
-scheduler state, observation freshness; levels-not-edges, full-set republish on
-`WATCHER_WATCH_STATUS_REPUBLISH_CRON`, never an ack path); consumes
-`content.blobs` as the single member of consumer group `watcher`; and consumes
-`info.registry` **grouplessly** — a config/state stream replayed from `0-0` at every boot
-via `AsyncBusTailReader`, never `$` (a worker that boots at `$` reads nothing and looks
-exactly like one whose registry is empty). Archiver operates the
-broker. `WATCHER_BUS_REDIS_URL` unset → the publish tasks skip loudly rather than
-silently.
-
-In full:
 
 **Redis and the bus (archiver#109, #245).** Archiver operates `redis-server` on this VM — the tracked drop-in, persistence and version-floor policy, and producer-side monitoring are all its; it also owns the `info.changes` fact stream. **Watcher publishes on four streams and consumes two.** Publish: `content.fetch` (commands, #241), `content.fetch-policy` (#245), `content.revisions` (`source_revision_observed` — the Archiver HTTP write path retired in #253), and `info.watch-status` (#264 — see below). Consume: `content.blobs` (fact stream, own consumer group) and `info.registry` (config/state stream, **groupless**). The politeness producer is the `content.fetch-policy` producer (#245; `src/core/fetch_policy.py` + the `publish_fetch_policy` periodic task) — Watcher's half of the cluster politeness split (*mechanism to Replicator, policy to the issuer, config over the bus*; normative: `docs/contracts/replicator-boundaries.md` in the Replicator repo). It publishes each `Domain.min_interval` (**never** `current_interval` — that column is inert 429-backoff state since the limiter retired) as a `FetchPolicyState` per host, full-set-republished every 5 minutes **including tombstones** (`fetch_policy_tombstones` table, written on domain delete, cleared on re-create) so a consumer's boot replay never depends on broker retention. Connection via `WATCHER_BUS_REDIS_URL` (unset → loud skip, Replicator falls back to its conservative default; `scripts/dev_server.sh` clears an inherited value unless `WATCHER_DEV_BUS_REDIS_URL` opts into a scratch bus). API domain routes defer an immediate republish; **dashboard routes deliberately don't** (they must not import `src.workers.*` — `tests/dashboard/test_import_decoupling.py`) and ride the periodic tick. Watcher joins exactly one consumer group — `watcher` on `content.blobs`, single-member (#241) — and all async work still stays on Procrastinate over Postgres (`PsycopgConnector`); the bus carries facts and commands, never jobs. **`info.registry` is the third stream kind and behaves differently (#254).** A config/state stream is broadcast like a fact but last-write-wins per key, so its consumer joins **no** group: it replays from `0-0` with `AsyncBusTailReader` at every boot and then tails. Reading from `$` is the mistake that fails silently — a booting worker sees nothing, indistinguishable from a worker whose registry is genuinely empty — and the driver offers no way to spell it. There is **no DLQ**: an undecodable frame is logged and `seek`-ed past (there is no ack to skip one with), and the producer's periodic snapshot supersedes whatever was dropped. Ordering comes from `generation`, not arrival: apply iff `generation >` the stored value, because the producer's outbox drain reorders under retry. See `src/workers/registry_reconcile.py`. **`info.watch-status` is the registry channel's return leg (#264, contract cannobserv#321): Watcher is the producer.** Same config/state posture in the opposite direction — broadcast LWW per `info_item_id`, no group, no DLQ, no outbox (a dropped frame is corrected by the next full set, which is why the republish period is the recovery bound; `WATCHER_WATCH_STATUS_REPUBLISH_CRON`, default 5 minutes). Payload is **levels, never edges** — `applied_generation` (0 = nothing newer than generation 0 applied — a never-mutated InfoItem legitimately announces at 0, so the sentinel collapses "never reconciled" with "reconciled at 0"; benign under apply-iff-greater), `applied_active` (the conjunction the scheduler actually gates on), `applied_interval` (the resolved cadence **after** the throttle floor, so cadence-only drift is visible), `health` (`ok`/`error`/`unknown`), `last_attempt_at`/`last_observed_at`, and tombstones from `revoked_info_items`. Publishes fire on reconcile (post-commit — the publisher only ever reads committed rows, so `applied_generation` cannot travel early), on health/active/floor transitions, and on the periodic tick — **never per fetch cycle**; a steadily-healthy item costs one frame per period regardless of fetch rate. Archiver tails it into its `watch_status` table and renders the watched-item panel and announced-vs-applied drift detector from it (archiver#151). **It must never become an ack path**: nothing in Watcher blocks on Archiver reading it. See `src/core/watch_status.py` + `src/workers/watch_status.py`. Bus ownership design of record: `docs/plans/2026-07-29-redis-bus-ownership-design.md` in the Archiver repo ([on GitHub](https://github.com/CannObserv/archiver/blob/main/docs/plans/2026-07-29-redis-bus-ownership-design.md)).
 

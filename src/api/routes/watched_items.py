@@ -31,6 +31,7 @@ from src.core.watched_items import (
     set_watched_item_active,
 )
 from src.workers.tasks import check_watched_item
+from src.workers.watch_status import defer_status_republish
 
 router = APIRouter(prefix="/watched-items", tags=["watched-items"])
 
@@ -262,6 +263,9 @@ async def patch_watched_item(
             source="api",
         )
     await session.commit()
+    # PATCH can move every wire-visible watch-status field (active, cadence,
+    # URL/domain and its suspension) — republish post-commit (#264).
+    await defer_status_republish()
     await session.refresh(wi)
     return wi
 
@@ -279,7 +283,8 @@ async def archive_watched_item(
     wi = await _get_or_404(session, watched_item_id)
     now = datetime.now(UTC)
 
-    if wi.archived_at is None:
+    archived_now = wi.archived_at is None
+    if archived_now:
         wi.archived_at = now
         wi.is_active = False
         audit(
@@ -290,6 +295,9 @@ async def archive_watched_item(
         )
 
     await session.commit()
+    if archived_now:
+        # applied_active just went False — republish post-commit (#264).
+        await defer_status_republish()
     await session.refresh(wi)
     return wi
 
@@ -314,7 +322,8 @@ async def restore_watched_item(
     active. No pause/resume round-trip is needed.
     """
     wi = await _get_or_404(session, watched_item_id)
-    if wi.archived_at is not None:
+    restored_now = wi.archived_at is not None
+    if restored_now:
         wi.archived_at = None
         if wi.applied_generation is None:
             wi.is_active = True
@@ -325,6 +334,9 @@ async def restore_watched_item(
             source="api",
         )
     await session.commit()
+    if restored_now:
+        # applied_active may just have changed — republish post-commit (#264).
+        await defer_status_republish()
     await session.refresh(wi)
     return wi
 

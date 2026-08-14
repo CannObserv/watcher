@@ -70,6 +70,7 @@ from src.core.models.revoked_info_item import RevokedInfoItem
 from src.core.models.watched_item import WatchedItem
 from src.core.scheduling.cadence import parse_interval
 from src.core.watched_items import derive_watched_item_name
+from src.workers.watch_status import defer_status_republish
 
 logger = get_logger(__name__)
 
@@ -194,6 +195,10 @@ async def reconcile_announcement(session, payload: RegistryAnnouncementState) ->
             "watched_item revoked",
             extra={"info_item_id": key, "generation": payload.generation},
         )
+        # Post-commit by placement (#264): the tombstone row is durable before
+        # the status stream can carry it. Best-effort — the periodic republish
+        # is the recovery bound.
+        await defer_status_republish()
         return "revoked"
 
     created = row is None
@@ -243,6 +248,12 @@ async def reconcile_announcement(session, payload: RegistryAnnouncementState) ->
 
     row.applied_generation = payload.generation
     await session.commit()
+
+    # The reconcile ack (#264): defer AFTER the commit above, and the publisher
+    # reads committed rows — so applied_generation can never travel before the
+    # reconcile it claims is durable. A failed reconcile raises out before this
+    # line and publishes nothing.
+    await defer_status_republish()
 
     outcome = "created" if created else "updated"
     logger.info(

@@ -1000,3 +1000,56 @@ class TestTombstoneRetirement:
             db_session, _announcement(info_item_id, generation=3)
         )
         assert outcome == "created"  # no tombstone at all beats a misleading one
+
+
+class TestStatusRepublishOnReconcile:
+    """#264: an applied announcement defers a watch-status republish — the
+    reconcile ack. The defer runs *after* the commit inside
+    ``reconcile_announcement`` and the publisher reads committed rows, so
+    ``applied_generation`` can never travel prematurely. A stale or invalid
+    announcement changes nothing and must not publish."""
+
+    def _spy(self, monkeypatch):
+        from unittest.mock import AsyncMock
+
+        import src.workers.registry_reconcile as rr_mod
+
+        spy = AsyncMock()
+        monkeypatch.setattr(rr_mod, "defer_status_republish", spy)
+        return spy
+
+    async def test_create_defers_a_republish(self, db_session, monkeypatch):
+        spy = self._spy(monkeypatch)
+        outcome = await reconcile_announcement(db_session, _announcement(ULID(), generation=1))
+        assert outcome == "created"
+        assert spy.await_count == 1
+
+    async def test_revocation_defers_a_republish(self, db_session, monkeypatch):
+        info_item_id = ULID()
+        await reconcile_announcement(db_session, _announcement(info_item_id, generation=1))
+        spy = self._spy(monkeypatch)
+
+        outcome = await reconcile_announcement(
+            db_session, _announcement(info_item_id, generation=2, revoked=True)
+        )
+        assert outcome == "revoked"
+        assert spy.await_count == 1
+
+    async def test_a_stale_announcement_does_not_defer(self, db_session, monkeypatch):
+        info_item_id = ULID()
+        await reconcile_announcement(db_session, _announcement(info_item_id, generation=5))
+        spy = self._spy(monkeypatch)
+
+        outcome = await reconcile_announcement(
+            db_session, _announcement(info_item_id, generation=4)
+        )
+        assert outcome == "stale"
+        assert spy.await_count == 0
+
+    async def test_a_malformed_id_does_not_defer(self, db_session, monkeypatch):
+        spy = self._spy(monkeypatch)
+        payload = _announcement(ULID(), generation=1)
+        payload = payload.model_copy(update={"info_item_id": "not-a-ulid"})
+        outcome = await reconcile_announcement(db_session, payload)
+        assert outcome == "invalid"
+        assert spy.await_count == 0

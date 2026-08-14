@@ -44,6 +44,7 @@ def get_app() -> procrastinate.App:
         import src.workers.fetch_policy  # noqa: F401
         import src.workers.source_revisions_drain  # noqa: F401
         import src.workers.tasks  # noqa: F401
+        import src.workers.watch_status  # noqa: F401
 
         _app = procrastinate.App(
             connector=procrastinate.PsycopgConnector(conninfo=_get_conninfo()),

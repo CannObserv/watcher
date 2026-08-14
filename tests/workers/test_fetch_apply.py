@@ -431,3 +431,118 @@ class TestProbingResolution:
 
         assert wi.effective_url == original_url
         assert len(await _audit_events(db_session, EventType.CHECK_REDIRECT_OBSERVED)) == 1
+
+
+class TestObservationFreshness:
+    """#264: ``last_observed_at`` is provenance — "content was verified
+    current" — distinct from ``last_checked_at``, the anti-thrash stamp that
+    advances on every outcome (#168)."""
+
+    async def test_success_advances_last_observed_at(self, db_session, monkeypatch, tmp_path):
+        wi, row = await _row_with_fact(db_session, tmp_path)
+        _wire(db_session, monkeypatch, changed=True)
+
+        await apply_fetch_blob(row.command_id, registry=ServiceRegistry())
+
+        assert wi.last_observed_at is not None
+
+    async def test_unchanged_content_still_counts_as_observed(
+        self, db_session, monkeypatch, tmp_path
+    ):
+        # Verified-same is an observation; only *never looked* is not.
+        wi, row = await _row_with_fact(db_session, tmp_path)
+        _wire(db_session, monkeypatch, changed=False)
+
+        await apply_fetch_blob(row.command_id, registry=ServiceRegistry())
+
+        assert wi.last_observed_at is not None
+
+    async def test_failure_advances_last_checked_at_but_not_last_observed_at(
+        self, db_session, monkeypatch
+    ):
+        wi = await make_watched_item(db_session, primary_url="https://lcb.wa.gov/notices")
+        row = await create_fetch_command(db_session, wi, now=NOW)
+        row.status = FetchCommandStatus.FAILED
+        row.failure_reason = "http_status"
+        await db_session.flush()
+        monkeypatch.setattr(
+            fc_mod, "get_session_factory", lambda: _mock_session_factory(db_session)
+        )
+
+        await apply_fetch_failure(row.command_id)
+
+        assert wi.last_checked_at is not None
+        assert wi.last_observed_at is None
+
+    async def test_extraction_failure_is_not_an_observation(
+        self, db_session, monkeypatch, tmp_path
+    ):
+        # #258: empty extraction is a failure — selector rot must not stamp
+        # the content as verified current.
+        wi, row = await _row_with_fact(db_session, tmp_path)
+        _wire(db_session, monkeypatch, raises=ExtractionError("all specs empty"))
+
+        await apply_fetch_blob(row.command_id, registry=ServiceRegistry())
+
+        assert wi.health_status == WatchHealthStatus.ERROR
+        assert wi.last_observed_at is None
+
+
+class TestStatusRepublishOnTransition:
+    """#264: level-not-edge publishing — a health transition defers a
+    watch-status republish; a steady state never does (the periodic tick
+    carries it), keeping the stream off the activity-rate cost curve."""
+
+    def _spy(self, monkeypatch) -> AsyncMock:
+        spy = AsyncMock()
+        monkeypatch.setattr(fc_mod, "defer_status_republish", spy)
+        return spy
+
+    async def test_first_success_transitions_and_defers(self, db_session, monkeypatch, tmp_path):
+        wi, row = await _row_with_fact(db_session, tmp_path)
+        _wire(db_session, monkeypatch)
+        spy = self._spy(monkeypatch)
+        assert wi.health_status == WatchHealthStatus.UNKNOWN
+
+        await apply_fetch_blob(row.command_id, registry=ServiceRegistry())
+
+        assert wi.health_status == WatchHealthStatus.OK
+        assert spy.await_count == 1
+
+    async def test_steady_ok_does_not_defer(self, db_session, monkeypatch, tmp_path):
+        wi, row = await _row_with_fact(db_session, tmp_path)
+        _wire(db_session, monkeypatch)
+        spy = self._spy(monkeypatch)
+
+        await apply_fetch_blob(row.command_id, registry=ServiceRegistry())
+        row2 = await create_fetch_command(db_session, wi, now=NOW)
+        row2.status = FetchCommandStatus.IN_FLIGHT
+        row2.blob_uri = row.blob_uri
+        row2.fact_at = NOW
+        row2.content_fingerprint = "cd" * 32
+        await db_session.flush()
+
+        await apply_fetch_blob(row2.command_id, registry=ServiceRegistry())
+
+        assert spy.await_count == 1  # only the UNKNOWN -> OK transition
+
+    async def test_failure_transition_defers_once(self, db_session, monkeypatch):
+        wi = await make_watched_item(db_session, primary_url="https://lcb.wa.gov/notices")
+        wi.health_status = WatchHealthStatus.OK
+        first = await create_fetch_command(db_session, wi, now=NOW)
+        first.status = FetchCommandStatus.FAILED
+        first.failure_reason = "http_status"
+        second = await create_fetch_command(db_session, wi, now=NOW)
+        second.status = FetchCommandStatus.FAILED
+        second.failure_reason = "http_status"
+        await db_session.flush()
+        monkeypatch.setattr(
+            fc_mod, "get_session_factory", lambda: _mock_session_factory(db_session)
+        )
+        spy = self._spy(monkeypatch)
+
+        await apply_fetch_failure(first.command_id)
+        await apply_fetch_failure(second.command_id)
+
+        assert wi.health_status == WatchHealthStatus.ERROR
+        assert spy.await_count == 1  # only the OK -> ERROR transition

@@ -15,7 +15,11 @@ gates scheduling directly, no live Domain join); `domain_default_schedule_config
 (denormalized copy of the parent Domain's cadence — the Domain tier of schedule
 resolution; #205); a single optional
 `TemporalProfile` (1:1, `temporal_profiles.watched_item_id`); `health_status`,
-`last_checked_at`, `last_changed_at`; and its notification surface (the
+`last_checked_at`, `last_changed_at`, `last_observed_at` (#264 — advances only
+on successful extraction, changed or unchanged alike; `last_checked_at` advances
+on *every* outcome because it is the anti-thrash scheduling stamp (#168), so the
+pair distinguishes "content verified current as of T" from "we tried at T" —
+next-due derives from the latter, never the former); and its notification surface (the
 item-scoped `NotificationTemplate` rows — `visibility='watched_item'`,
 `watched_item_id` set; see **Notifications** below). Schedule resolution is
 4-tier under a floor (#205, #254): `announced_schedule_config` → WatchedItem
@@ -69,7 +73,7 @@ moves**. Re-deriving the domain on every announcement would clear a
 no opinion on.
 
 **What survives reconciliation**: `health_status`, `last_checked_at`,
-`last_changed_at`, `last_reviewed_at`, `domain_suspended`, `archived_at`,
+`last_observed_at`, `last_changed_at`, `last_reviewed_at`, `domain_suspended`, `archived_at`,
 `throttle_floor_interval`, `default_schedule_config`, `content_media_type`,
 `default_tags`, `description`, `name`, notification config, audit rows, fetch-command
 history. Pinned by `TestLocalColumnsSurvive` — "we did not write it" is a weaker

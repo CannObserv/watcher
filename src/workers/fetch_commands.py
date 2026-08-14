@@ -49,6 +49,7 @@ from src.core.utils import watched_item_event_base_metadata
 from src.workers import bp
 from src.workers.notify import dispatch_event_notifications
 from src.workers.pipeline import BlobProvenance, ExtractionError, process_watched_item
+from src.workers.watch_status import defer_status_republish
 
 logger = get_logger(__name__)
 
@@ -74,7 +75,15 @@ async def _record_check_failure(
     previous_health = watched_item.health_status
     watched_item.health_status = WatchHealthStatus.ERROR
     watched_item.last_checked_at = now
+    # last_observed_at deliberately NOT stamped: a failure is an attempt, never
+    # an observation (#264) — the registry must not claim content was verified.
     await session.commit()
+
+    if previous_health != WatchHealthStatus.ERROR:
+        # Health transition: level signal changed, so the watch-status stream
+        # republishes (#264). Post-commit, best-effort; steady-state failures
+        # never publish — that keeps the stream off the activity-rate curve.
+        await defer_status_republish()
 
     if previous_health != WatchHealthStatus.ERROR:
         error_event = WatchEvent(
@@ -118,7 +127,16 @@ async def _record_check_success(
     previous_health = watched_item.health_status
     watched_item.health_status = WatchHealthStatus.OK
     watched_item.last_checked_at = now
+    # Observation freshness (#264): extraction succeeded, changed or unchanged
+    # alike — "content was verified current", where last_checked_at only says
+    # "we tried". Published on info.watch-status; Archiver records it durably.
+    watched_item.last_observed_at = now
     await session.commit()
+
+    if previous_health != WatchHealthStatus.OK:
+        # Health transition (#264): post-commit, best-effort. A steady OK cycle
+        # never publishes — its timestamps converge at the periodic republish.
+        await defer_status_republish()
 
     # Recovery: dispatch WATCH_RECOVERED once when the WatchedItem
     # transitions ERROR → OK (#191).

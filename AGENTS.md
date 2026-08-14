@@ -82,7 +82,10 @@ The exe.dev proxy forwards 3000–9999. Dev server reachable at `https://watcher
 **Single process is load-bearing.** One uvicorn process runs everything: the API, the embedded Procrastinate worker, the `content.blobs` fact consumer, and the cache sweeper (started in the `src/api/main.py` lifespan — there is no separate worker unit). The reason is now the **fact consumer**, not politeness: `src/workers/fetch_facts.py` joins consumer group `watcher` as a single member (`watcher-1`), and a second process would need its own consumer name *and* an apply-ordering story across members — the supersession guard is per-row, not a cross-process lock. (Until #241 step 5 the reason was the in-process `DomainRateLimiter`; that retired with the local fetch path, so per-host pacing no longer constrains the topology at all — it is Replicator's, fed over `content.fetch-policy`.) Never run `uvicorn --workers N` or a second worker unit against prod. Escalation path when one process stops being enough (not before): a separate `watcher-worker.service` plus a multi-member consumer-group design — **not built**.
 
 **The bus.** Watcher publishes `content.fetch` (commands), `content.fetch-policy`
-(per-host politeness), and `content.revisions` (`source_revision_observed`); consumes
+(per-host politeness), `content.revisions` (`source_revision_observed`), and
+`info.watch-status` (#264 — the registry channel's return leg: applied generation,
+scheduler state, observation freshness; levels-not-edges, full-set republish on
+`WATCHER_WATCH_STATUS_REPUBLISH_CRON`, never an ack path); consumes
 `content.blobs` as the single member of consumer group `watcher`; and consumes
 `info.registry` **grouplessly** — a config/state stream replayed from `0-0` at every boot
 via `AsyncBusTailReader`, never `$` (a worker that boots at `$` reads nothing and looks

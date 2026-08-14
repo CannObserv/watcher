@@ -31,6 +31,7 @@ from src.core.models.watched_item import WatchedItem
 from src.core.scheduling.cadence import compute_next_check, evaluate_post_actions, parse_interval
 from src.core.scheduling.resolution import resolved_schedule_config
 from src.workers import bp
+from src.workers.watch_status import defer_status_republish
 
 logger = get_logger(__name__)
 
@@ -197,6 +198,7 @@ async def schedule_tick(timestamp: int) -> None:
             profiles_by_wi.setdefault(str(p.watched_item_id), []).append(p)
 
         deferred = 0
+        status_moved = False  # any wire-visible post-action mutation (#264)
         for wi in watched_items:
             profiles_orm = profiles_by_wi.get(str(wi.id), [])
 
@@ -213,6 +215,7 @@ async def schedule_tick(timestamp: int) -> None:
                     )
                     if action == "deactivate":
                         wi.is_active = False
+                        status_moved = True
                         logger.info(
                             "post-action: deactivate watched_item",
                             extra={"watched_item_id": str(wi.id), "profile_id": profile_dict["id"]},
@@ -220,6 +223,7 @@ async def schedule_tick(timestamp: int) -> None:
                     elif action == "archive":
                         wi.is_active = False
                         wi.archived_at = now
+                        status_moved = True
                         logger.info(
                             "post-action: archive watched_item",
                             extra={"watched_item_id": str(wi.id), "profile_id": profile_dict["id"]},
@@ -243,6 +247,7 @@ async def schedule_tick(timestamp: int) -> None:
                             resolved_schedule_config(wi).get("interval")
                         ) < parse_interval("1d"):
                             wi.throttle_floor_interval = "1d"
+                            status_moved = True
                             audit(
                                 session,
                                 EventType.WATCHED_ITEM_THROTTLED,
@@ -284,6 +289,11 @@ async def schedule_tick(timestamp: int) -> None:
                 deferred += 1
 
         await session.commit()
+
+    if status_moved:
+        # A post-action changed applied_active or the floor (applied_interval)
+        # — one republish covers the tick's whole batch, post-commit (#264).
+        await defer_status_republish()
 
     if deferred:
         logger.info("schedule_tick deferred checks", extra={"count": deferred})

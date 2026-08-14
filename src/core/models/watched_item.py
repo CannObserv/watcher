@@ -68,6 +68,17 @@ class WatchedItem(Base, TimestampMixin):
     last_checked_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True, default=None
     )
+    # Observation freshness (#264): advances only when a cycle's extraction
+    # succeeded — changed or unchanged both count. Distinct from
+    # `last_checked_at`, which advances on every outcome including failures
+    # because it is a scheduling anti-thrash device (#168); this one is
+    # provenance ("content was verified current"), published on
+    # info.watch-status and written through to Archiver's durable
+    # `info_sources.last_observed_at`. Next-due must never derive from it: a
+    # failing item attempts on schedule while this stands still.
+    last_observed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, default=None
+    )
     # none_as_null=True so an omitted/None config persists as SQL NULL, not the
     # JSONB 'null' literal — keeps `IS NULL` queries correct (#198).
     default_schedule_config: Mapped[dict | None] = mapped_column(

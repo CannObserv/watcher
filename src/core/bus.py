@@ -64,3 +64,36 @@ async def aclose_shared_bus_client() -> None:
     if _shared_client is not None:
         await _shared_client.aclose()
         _shared_client = None
+
+
+def resolve_stream_maxlen(env_name: str, default: int) -> int:
+    """Parse a stream-retention cap from ``env_name`` defensively; never unbounded.
+
+    Config/state streams (``content.fetch-policy``, ``info.watch-status``)
+    republish their full set periodically, so an untrimmed stream grows without
+    bound and a consumer's replay-from-``0-0`` boot cost tracks *history*
+    rather than corpus size (watcher#264 CR-1/CR-3; the pattern mirrors
+    Archiver's ``resolve_registry_maxlen``). An invalid or non-positive value
+    falls back to ``default`` with a warning — misconfiguration must degrade
+    to bounded, not to unbounded.
+    """
+    raw = os.environ.get(env_name)
+    if raw is None or not raw.strip():
+        return default
+    try:
+        value = int(raw)
+    except ValueError:
+        logger.warning(
+            "invalid %s — falling back to default",
+            env_name,
+            extra={"value": raw, "default": default},
+        )
+        return default
+    if value <= 0:
+        logger.warning(
+            "non-positive %s — falling back to default",
+            env_name,
+            extra={"value": raw, "default": default},
+        )
+        return default
+    return value

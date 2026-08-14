@@ -61,3 +61,40 @@ class TestDeferStatusRepublish:
         with caplog.at_level("WARNING", logger="src.workers.watch_status"):
             await defer_status_republish()
         assert any("watch-status republish" in r.getMessage() for r in caplog.records)
+
+
+class TestDeferCoalescing:
+    """CR-2: a cold start applies N announcements in a burst; the queueing
+    lock keeps that N deferred republishes, not N queued jobs each publishing
+    the full set."""
+
+    async def test_defer_passes_the_queueing_lock(self, monkeypatch):
+        captured = {}
+
+        class _Job:
+            async def defer_async(self):
+                captured["deferred"] = True
+
+        def configure(**kwargs):
+            captured.update(kwargs)
+            return _Job()
+
+        monkeypatch.setattr("src.workers.watch_status.publish_watch_status.configure", configure)
+        await defer_status_republish()
+        assert captured["queueing_lock"] == "publish_watch_status"
+        assert captured["deferred"] is True
+
+    async def test_already_enqueued_is_a_quiet_coalesce_not_a_warning(self, monkeypatch, caplog):
+        from procrastinate.exceptions import AlreadyEnqueued
+
+        class _Job:
+            async def defer_async(self):
+                raise AlreadyEnqueued("queueing lock held")
+
+        monkeypatch.setattr(
+            "src.workers.watch_status.publish_watch_status.configure",
+            lambda **kwargs: _Job(),
+        )
+        with caplog.at_level("WARNING", logger="src.workers.watch_status"):
+            await defer_status_republish()
+        assert not [r for r in caplog.records if r.levelno >= 30]

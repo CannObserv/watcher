@@ -264,8 +264,11 @@ async def patch_watched_item(
         )
     await session.commit()
     # PATCH can move every wire-visible watch-status field (active, cadence,
-    # URL/domain and its suspension) — republish post-commit (#264).
-    await defer_status_republish()
+    # URL/domain and its suspension) — republish post-commit (#264), gated so
+    # a no-op PATCH publishes nothing (CR-4). `updates` has had `is_active`
+    # popped, so the two terms cover the whole surface between them.
+    if updates or target_active is not None:
+        await defer_status_republish()
     await session.refresh(wi)
     return wi
 

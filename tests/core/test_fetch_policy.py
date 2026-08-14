@@ -164,3 +164,27 @@ class TestTombstoneRows:
             }
             hosts.add(from_wire(frame, topic=streams.CONTENT_FETCH_POLICY).payload.host)
         assert hosts == {"live.example", "gone.example"}
+
+
+class TestPolicyStreamRetention:
+    """watcher#264 CR-3: the fetch-policy full set republishes every 5 minutes
+    and had accumulated ~7k untrimmed entries in prod — every publish must
+    carry a maxlen."""
+
+    async def test_every_publish_carries_maxlen(self, monkeypatch):
+        captured = []
+
+        class _CapturingPublisher:
+            def __init__(self, client):
+                pass
+
+            async def execute(self, effect):
+                captured.append(effect)
+
+        import src.core.fetch_policy as fp_mod
+
+        monkeypatch.setattr(fp_mod, "AsyncBusPublisher", _CapturingPublisher)
+        events = build_policy_events([_domain("lcb.wa.gov")], [_tombstone("gone.example")], now=NOW)
+        await publish_policy_events(object(), events)
+        assert len(captured) == 2
+        assert all(e.maxlen == fp_mod.DEFAULT_FETCH_POLICY_STREAM_MAXLEN for e in captured)

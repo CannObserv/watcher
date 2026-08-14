@@ -19,6 +19,7 @@ against panel staleness, and independent of the announcement stream's period.
 import os
 
 from croniter import croniter
+from procrastinate.exceptions import AlreadyEnqueued
 
 from src.core.bus import BUS_REDIS_URL_ENV, get_shared_bus_client
 from src.core.database import get_session_factory
@@ -86,9 +87,19 @@ async def defer_status_republish() -> None:
     periodic tick republishes everything anyway — so a failed defer degrades
     to at most one period of staleness. It must never fail the request or
     reconcile that triggered it.
+
+    The queueing lock coalesces bursts: a cold-start reconcile applies N
+    announcements back-to-back, and without it each would queue its own job,
+    each publishing the entire set (N² frames at scale — CR-2). At most one
+    republish waits in the queue; the publisher reads committed rows, so the
+    one that runs carries everything the burst wrote.
     """
     try:
-        await publish_watch_status.configure().defer_async()
+        await publish_watch_status.configure(queueing_lock="publish_watch_status").defer_async()
+    except AlreadyEnqueued:
+        # A republish is already queued and will read this mutation's committed
+        # state when it runs — the burst coalesced, which is the design.
+        logger.debug("watch-status republish already queued — coalesced")
     except Exception:
         logger.warning(
             "could not defer watch-status republish; the periodic tick will cover it",

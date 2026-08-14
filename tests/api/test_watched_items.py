@@ -1827,3 +1827,39 @@ class TestCheckNowPausedDetail:
 
         assert response.status_code == 409
         assert "Archiver" not in response.json()["detail"]
+
+
+class TestPatchStatusRepublishGate:
+    """watcher#264 CR-4: the PATCH defer is gated on a wire-visible change —
+    a no-op PATCH must not publish a watch-status full set."""
+
+    def _spy(self, monkeypatch) -> AsyncMock:
+        import src.api.routes.watched_items as api_mod
+
+        spy = AsyncMock()
+        monkeypatch.setattr(api_mod, "defer_status_republish", spy)
+        return spy
+
+    async def test_noop_patch_does_not_defer(self, client, db_session, monkeypatch):
+        wi = await _make_watched_item(db_session)
+        spy = self._spy(monkeypatch)
+        response = await client.patch(f"/api/v1/watched-items/{wi.id}", json={})
+        assert response.status_code == 200
+        assert spy.await_count == 0
+
+    async def test_field_patch_defers(self, client, db_session, monkeypatch):
+        wi = await _make_watched_item(db_session)
+        spy = self._spy(monkeypatch)
+        response = await client.patch(
+            f"/api/v1/watched-items/{wi.id}",
+            json={"default_schedule_config": {"interval": "30m"}},
+        )
+        assert response.status_code == 200
+        assert spy.await_count == 1
+
+    async def test_pause_patch_defers(self, client, db_session, monkeypatch):
+        wi = await _make_watched_item(db_session)
+        spy = self._spy(monkeypatch)
+        response = await client.patch(f"/api/v1/watched-items/{wi.id}", json={"is_active": False})
+        assert response.status_code == 200
+        assert spy.await_count == 1

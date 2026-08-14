@@ -36,11 +36,17 @@ from redis.asyncio import Redis
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.core.bus import resolve_stream_maxlen
 from src.core.logging import get_logger
 from src.core.models.domain import Domain
 from src.core.models.fetch_policy_tombstone import FetchPolicyTombstone
 
 logger = get_logger(__name__)
+
+FETCH_POLICY_STREAM_MAXLEN_ENV = "WATCHER_FETCH_POLICY_STREAM_MAXLEN"
+# Producer-enforced retention (watcher#264 CR-3): the full set republishes
+# every 5 minutes forever, and prod had accumulated ~7k untrimmed entries.
+DEFAULT_FETCH_POLICY_STREAM_MAXLEN = 50_000
 
 # Bus client construction lives in src.core.bus (#241 CR-4/CR-10) — import
 # BUS_REDIS_URL_ENV / bus_client_from_env from there.
@@ -87,10 +93,20 @@ def build_policy_events(
 
 
 async def publish_policy_events(client: Redis, events: Sequence[FetchPolicyEmit]) -> int:
-    """XADD each event to ``content.fetch-policy``; returns the count published."""
+    """XADD each event to ``content.fetch-policy``; returns the count published.
+
+    Every publish carries ``maxlen`` (approximate trim) — same producer-enforced
+    retention rule as ``info.watch-status`` (watcher#264 CR-1/CR-3): a
+    periodically-republished full set on an untrimmed stream grows without bound.
+    """
+    maxlen = resolve_stream_maxlen(
+        FETCH_POLICY_STREAM_MAXLEN_ENV, DEFAULT_FETCH_POLICY_STREAM_MAXLEN
+    )
     publisher = AsyncBusPublisher(client)
     for event in events:
-        await publisher.execute(BusPublish(streams.CONTENT_FETCH_POLICY, to_wire(event)))
+        await publisher.execute(
+            BusPublish(streams.CONTENT_FETCH_POLICY, to_wire(event), maxlen=maxlen)
+        )
     return len(events)
 
 

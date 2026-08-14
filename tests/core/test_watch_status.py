@@ -35,6 +35,8 @@ from ulid import ULID
 from src.core.models.revoked_info_item import RevokedInfoItem
 from src.core.models.watched_item import WatchedItem, WatchHealthStatus
 from src.core.watch_status import (
+    DEFAULT_WATCH_STATUS_STREAM_MAXLEN,
+    WATCH_STATUS_STREAM_MAXLEN_ENV,
     build_status_events,
     publish_full_status_set,
     publish_status_events,
@@ -282,3 +284,60 @@ class TestPublishFullStatusSet:
         }
         payload = from_wire(frame, topic=streams.INFO_WATCH_STATUS).payload
         assert payload.applied_generation == 4
+
+
+class TestBuilderHardening:
+    def test_corrupt_interval_falls_back_to_none_not_a_dropped_frame(self, caplog):
+        # CR-5: one corrupt cadence value must not silence the item's whole
+        # status — the generation ack matters more than the interval.
+        item = _item(announced_schedule_config={"interval": 123})
+        with caplog.at_level("WARNING"):
+            events = build_status_events([item], [], now=NOW)
+        assert len(events) == 1
+        assert events[0].applied_interval is None
+        assert events[0].applied_generation == 7
+        assert events[0].health == "ok"
+        degraded = [
+            r for r in caplog.records if "publishing without applied_interval" in r.getMessage()
+        ]
+        assert len(degraded) == 1
+
+
+class TestStreamRetention:
+    """CR-1: the module docstring promises retention rides the producer's
+    maxlen — so every publish must actually carry one; unbounded is never an
+    option (the full set republishes every few minutes forever)."""
+
+    def test_resolver_defaults_and_overrides(self, monkeypatch):
+        from src.core.bus import resolve_stream_maxlen
+
+        monkeypatch.delenv(WATCH_STATUS_STREAM_MAXLEN_ENV, raising=False)
+        assert resolve_stream_maxlen(WATCH_STATUS_STREAM_MAXLEN_ENV, 50_000) == 50_000
+        monkeypatch.setenv(WATCH_STATUS_STREAM_MAXLEN_ENV, "1234")
+        assert resolve_stream_maxlen(WATCH_STATUS_STREAM_MAXLEN_ENV, 50_000) == 1234
+
+    def test_resolver_never_returns_unbounded(self, monkeypatch, caplog):
+        from src.core.bus import resolve_stream_maxlen
+
+        for bad in ("not-a-number", "0", "-5"):
+            monkeypatch.setenv(WATCH_STATUS_STREAM_MAXLEN_ENV, bad)
+            with caplog.at_level("WARNING"):
+                assert resolve_stream_maxlen(WATCH_STATUS_STREAM_MAXLEN_ENV, 50_000) == 50_000
+
+    async def test_every_publish_carries_maxlen(self, monkeypatch):
+        captured = []
+
+        class _CapturingPublisher:
+            def __init__(self, client):
+                pass
+
+            async def execute(self, effect):
+                captured.append(effect)
+
+        import src.core.watch_status as ws_mod
+
+        monkeypatch.setattr(ws_mod, "AsyncBusPublisher", _CapturingPublisher)
+        events = build_status_events([_item()], [_tombstone()], now=NOW)
+        await publish_status_events(object(), events)
+        assert len(captured) == 2
+        assert all(e.maxlen == DEFAULT_WATCH_STATUS_STREAM_MAXLEN for e in captured)

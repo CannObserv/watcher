@@ -67,12 +67,18 @@ from redis.asyncio import Redis
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.core.bus import resolve_stream_maxlen
 from src.core.logging import get_logger
 from src.core.models.revoked_info_item import RevokedInfoItem
 from src.core.models.watched_item import WatchedItem, WatchHealthStatus
 from src.core.scheduling.resolution import resolved_schedule_config
 
 logger = get_logger(__name__)
+
+WATCH_STATUS_STREAM_MAXLEN_ENV = "WATCHER_WATCH_STATUS_STREAM_MAXLEN"
+# ~50k frames holds thousands of full sets at today's corpus and still bounds
+# the consumer's boot replay; same default as Archiver's registry stream.
+DEFAULT_WATCH_STATUS_STREAM_MAXLEN = 50_000
 
 _HEALTH_WIRE = {
     WatchHealthStatus.OK: "ok",
@@ -101,28 +107,41 @@ def build_status_events(
     """
     events: list[WatchStatusEmit] = []
     for item in items:
+        base = dict(
+            occurred_at=now,
+            info_item_id=str(item.archiver_info_item_id),
+            applied_generation=(
+                item.applied_generation if item.applied_generation is not None else 0
+            ),
+            applied_active=(
+                item.is_active and item.archived_at is None and not item.domain_suspended
+            ),
+            health=_health_wire_value(item.health_status),
+            last_attempt_at=item.last_checked_at,
+            last_observed_at=item.last_observed_at,
+        )
         try:
             events.append(
                 WatchStatusEmit(
-                    occurred_at=now,
-                    info_item_id=str(item.archiver_info_item_id),
-                    applied_generation=(
-                        item.applied_generation if item.applied_generation is not None else 0
-                    ),
-                    applied_active=(
-                        item.is_active and item.archived_at is None and not item.domain_suspended
-                    ),
-                    health=_health_wire_value(item.health_status),
-                    applied_interval=resolved_schedule_config(item).get("interval"),
-                    last_attempt_at=item.last_checked_at,
-                    last_observed_at=item.last_observed_at,
+                    **base, applied_interval=resolved_schedule_config(item).get("interval")
                 )
             )
         except ValidationError:
-            logger.warning(
-                "skipping unpublishable watch-status row",
-                extra={"info_item_id": str(item.archiver_info_item_id), "kind": "live"},
-            )
+            # A corrupt cadence value must not silence the whole frame — the
+            # generation ack and health matter more than the interval, so
+            # degrade to "own default in force" before giving up (CR-5). The
+            # second attempt failing means the row itself is unpublishable.
+            try:
+                events.append(WatchStatusEmit(**base))
+                logger.warning(
+                    "unpublishable resolved interval — publishing without applied_interval",
+                    extra={"info_item_id": str(item.archiver_info_item_id)},
+                )
+            except ValidationError:
+                logger.warning(
+                    "skipping unpublishable watch-status row",
+                    extra={"info_item_id": str(item.archiver_info_item_id), "kind": "live"},
+                )
     for tombstone in tombstones:
         try:
             events.append(
@@ -142,10 +161,20 @@ def build_status_events(
 
 
 async def publish_status_events(client: Redis, events: Sequence[WatchStatusEmit]) -> int:
-    """XADD each event to ``info.watch-status``; returns the count published."""
+    """XADD each event to ``info.watch-status``; returns the count published.
+
+    Every publish carries ``maxlen`` (approximate trim) — the full set goes out
+    every republish period forever, so retention must be producer-enforced or
+    the stream grows without bound (CR-1).
+    """
+    maxlen = resolve_stream_maxlen(
+        WATCH_STATUS_STREAM_MAXLEN_ENV, DEFAULT_WATCH_STATUS_STREAM_MAXLEN
+    )
     publisher = AsyncBusPublisher(client)
     for event in events:
-        await publisher.execute(BusPublish(streams.INFO_WATCH_STATUS, to_wire(event)))
+        await publisher.execute(
+            BusPublish(streams.INFO_WATCH_STATUS, to_wire(event), maxlen=maxlen)
+        )
     return len(events)
 
 

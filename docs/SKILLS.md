@@ -64,12 +64,25 @@ Description-driven skills (`systematic-debugging`, `verification-before-completi
 
 ## Local Overrides
 
-A committed directory in `skills/` completely supersedes the vendor version (no inheritance). Must be fully self-contained.
+A committed directory in `skills/` completely supersedes the vendor version — there is no
+inheritance, so whatever the directory does not provide, the skill does not have. That does
+**not** mean copying the vendor tree: both overrides fork `SKILL.md` alone and symlink every
+sibling asset back to `skills-vendor/`, so upstream fixes to the parts that were never
+customized arrive with a submodule bump. Each override records its base commit in a
+`<!-- forked from <vendor>@<sha> -->` marker directly under the frontmatter — that marker is
+what makes the next refresh a 3-way diff instead of a guess.
 
 | Skill | Override reason |
 |---|---|
-| `shipping-work-python-fastapi` | Thin override of upstream variant: sources `/etc/watcher/.env` + `$PROJECT_ROOT/.env` via `set -a; source; set +a` before delegating to upstream pre-ship; bracketed commit convention (`[type]` is literal) documented in Step 2 |
-| `brainstorming` | Project conventions (docs/plans/ path, commit format); invokes using-git-worktrees after design approval; FastAPI stack context; proactive-suggestion mode |
+| `shipping-work-python-fastapi` | `SKILL.md` only: watcher commit convention in Step 2, and Step 1 pointed at [scripts/pre-ship.sh](../scripts/pre-ship.sh). All six `scripts/` entries are vendor symlinks — the ship gate is **not** forked |
+| `brainstorming` | `SKILL.md` only: `docs/plans/` path, `#<n> [type]:` commit format, a GitHub issue on the architectural path, `writing-plans` optional rather than mandatory, `using-git-worktrees` after design approval, TDD as the bounded path's workflow, and the exe.dev proxy note for the visual companion's port. `visual-companion.md`, `spec-document-reviewer-prompt.md` and `scripts/` are vendor symlinks |
+
+**The ship gate's env loading lives outside the skill.** [scripts/pre-ship.sh](../scripts/pre-ship.sh)
+is watcher's wrapper, in the location upstream's Step 1 resolution loop probes first. It loads
+`/etc/watcher/.env` and the repo `.env` — parsing each line rather than sourcing it, so a
+secrets file cannot execute and a malformed line cannot decide whether the gate runs — then
+`exec`s the vendored gate through the `skills/` symlink. Forking the gate to add those lines is
+the failure mode this replaced: the fork stops receiving upstream fixes without saying so.
 
 ## SocratiCode (Codebase Search)
 

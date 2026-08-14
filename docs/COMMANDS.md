@@ -19,10 +19,31 @@ Two env files, loaded in order:
 .env
 
 # Load both for shell commands
-export $(cat /etc/watcher/.env .env 2>/dev/null | xargs)
+source scripts/load-env.sh
 ```
 
 The systemd service loads both automatically (see `deploy/watcher.service`).
+
+`scripts/load-env.sh` is **sourced, not executed** — the exports have to land in your
+shell. It parses each file rather than sourcing it, so a secrets file is never run, and
+skips a malformed line instead of aborting. It replaced
+`export $(cat … | xargs)`, which printed the whole environment (secrets included) when
+both files were absent, died under `set -e` on any comment line, and word-split values
+containing spaces. Paths are overridable via `WATCHER_SYSTEM_ENV_FILE` /
+`WATCHER_PROJECT_ENV_FILE`; guarded by `tests/scripts/test_load_env.py`.
+
+## Shipping
+
+```bash
+# Full ship gate: ruff check, ruff format --check, pytest (non-integration)
+bash scripts/pre-ship.sh
+```
+
+This is watcher's thin wrapper — it loads the env files above, then delegates to the
+vendored gate in `shipping-work-python-fastapi`. Run it from the repo root; it exits
+non-zero on any failure and 2 on tooling/infra problems (including an uninitialized
+`skills-vendor/` submodule). See [SKILLS.md](SKILLS.md) for why the gate itself is not
+forked.
 
 ## Service Management
 
@@ -117,7 +138,7 @@ sudo -u postgres psql -c "CREATE DATABASE watcher OWNER watcher;"
 sudo -u postgres psql -c "CREATE DATABASE watcher_test OWNER watcher;"
 
 # Watcher migrations (requires DATABASE_URL in env)
-export $(cat /etc/watcher/.env .env 2>/dev/null | xargs)
+source scripts/load-env.sh
 uv run alembic upgrade head
 uv run alembic revision --autogenerate -m "description of change"
 uv run alembic current
@@ -130,7 +151,7 @@ uv run alembic current
 
 ```bash
 # Apply procrastinate schema (first time, after DB setup)
-export $(cat /etc/watcher/.env .env 2>/dev/null | xargs)
+source scripts/load-env.sh
 uv run procrastinate --app=src.workers.app schema --apply
 
 # Run worker standalone (alternative to embedded mode in FastAPI)

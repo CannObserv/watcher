@@ -305,9 +305,38 @@ A question about a UI topic is not automatically a visual question. "What does p
 If they agree to the companion, read the detailed guide before proceeding:
 [`visual-companion.md`](visual-companion.md) (symlinked to vendor, as is `scripts/`).
 
-**On this VM:** the companion's server binds a local port. The exe.dev proxy
-forwards 3000–9999, so reach it at `https://watcher.exe.xyz:<port>/` rather than
-localhost. Ports 8000 (systemd) and 8001 (dev server) are taken — see AGENTS.md.
+**Resolve the guide's script paths against this skill directory, not your cwd.** The guide
+writes them as `scripts/start-server.sh`; from the project root — where you actually run —
+that hits watcher's own `scripts/` and fails with a bare "No such file or directory". Use:
+
+```bash
+bash skills/brainstorming/scripts/start-server.sh --project-dir "$PWD" --open
+```
+
+`start-server.sh` derives its own `SCRIPT_DIR` from `$0`, so invoking it through the symlink
+is safe. Same cwd-vs-skill-dir trap as
+[#63](https://github.com/gregoryfoster/skills/issues/63), which upstream fixed in
+`shipping-work` but not here.
+
+**On this VM the defaults do not reach the user.** `start-server.sh` binds `127.0.0.1` on a
+random port in 49152–65535 — the exe.dev proxy forwards only 3000–9999, and only to a
+non-loopback bind. Both have to be overridden, or the URL it prints is unreachable from the
+user's browser:
+
+```bash
+BRAINSTORM_PORT=7391 bash skills/brainstorming/scripts/start-server.sh \
+  --project-dir "$PWD" --host 0.0.0.0 --url-host watcher.exe.xyz
+```
+
+Pick any free port in 3000–9999 — 8000 (systemd) and 8001 (dev server) are taken. Hand the
+user the emitted `url` verbatim: its `?key=` is the session credential, and the server answers
+403 without it, which is what keeps the `0.0.0.0` bind from being an open door. Do **not** pass
+`--open`; there is no browser on this VM.
+
+Verified locally (bind, 200 with key, 403 without, clean stop). End-to-end reachability
+through the proxy can't be checked from the VM's own shell — curl fails the same way against
+port 8000, which is serving fine — so confirm with the user that the tab loaded before relying
+on it.
 
 ## Proactive suggestion
 

@@ -137,7 +137,7 @@ Two env files load in order (later overrides earlier):
 Load both for shell commands (pytest, psql, gh):
 
 ```bash
-export $(cat /etc/watcher/.env .env 2>/dev/null | xargs)
+source scripts/load-env.sh
 ```
 
 Never follow this with a hand-run uvicorn — it leaves `DATABASE_URL` pointed

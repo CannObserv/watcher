@@ -22,31 +22,12 @@ DELEGATE="skills/shipping-work-python-fastapi/scripts/pre-ship.sh"
   exit 2
 }
 
-# Parse each env file line by line; never `set -a; . file` (which executes the
-# file) and never `export $(cat ... | xargs)` (which word-splits values, chokes
-# on comment lines, and dumps the whole environment when every file is absent).
-# A malformed line is skipped, not fatal: a bad line in a secrets file must not
-# decide whether the ship gate runs.
-load_env() {
-  [ -r "$1" ] || return 0
-  while IFS= read -r line || [ -n "$line" ]; do
-    line=${line#"${line%%[![:space:]]*}"}        # drop leading blanks
-    case $line in ''|\#*) continue ;; esac        # blank or comment
-    line=${line#export }                          # tolerate `export K=v`
-    case $line in *=*) ;; *) continue ;; esac
-    key=${line%%=*} val=${line#*=}
-    key=${key%"${key##*[![:space:]]}"}
-    case $key in ''|*[!A-Za-z0-9_]*) continue ;; esac
-    case $val in                                  # strip matched quotes
-      \"*\") val=${val#\"} val=${val%\"} ;;
-      \'*\') val=${val#\'} val=${val%\'} ;;
-    esac
-    export "$key=$val"
-  done < "$1"
-}
-
-load_env /etc/watcher/.env
-load_env "$PROJECT_ROOT/.env"
+# Load secrets through the shared loader — it parses each file rather than
+# sourcing it, so a secrets file is never executed, and a malformed line is
+# skipped rather than deciding whether the ship gate runs.
+# Guarded by tests/scripts/test_load_env.py.
+# shellcheck source=scripts/load-env.sh
+source "$PROJECT_ROOT/scripts/load-env.sh"
 
 # exec so the exit code the Iron Law gates on propagates unchanged;
 # "$@" so --help still reaches the gate.

@@ -26,8 +26,7 @@ def get_database_url() -> str:
     url = os.environ.get("DATABASE_URL")
     if not url:
         raise RuntimeError(
-            "DATABASE_URL environment variable is not set. "
-            "Load env: export $(cat /etc/watcher/.env .env 2>/dev/null | xargs)"
+            "DATABASE_URL environment variable is not set. Load env: source scripts/load-env.sh"
         )
     return url
 

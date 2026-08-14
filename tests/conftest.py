@@ -60,8 +60,7 @@ ARCHIVER_REPO_PATH = Path(os.environ.get("ARCHIVER_REPO_PATH", "/home/exedev/arc
 TEST_DATABASE_URL = os.environ.get("TEST_DATABASE_URL")
 if not TEST_DATABASE_URL:
     raise RuntimeError(
-        "TEST_DATABASE_URL environment variable is not set. "
-        "Load env: export $(cat /etc/watcher/.env .env 2>/dev/null | xargs)"
+        "TEST_DATABASE_URL environment variable is not set. Load env: source scripts/load-env.sh"
     )
 
 if not db_safety.is_non_production_database(TEST_DATABASE_URL):

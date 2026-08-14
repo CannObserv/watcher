@@ -15,7 +15,7 @@ The service loads env files in this order (later values override earlier):
 For shell commands that need secrets:
 
 ```bash
-export $(cat /etc/watcher/.env .env 2>/dev/null | xargs)
+source scripts/load-env.sh
 ```
 
 ## Environment Variables
@@ -132,7 +132,7 @@ Migrations are **not** run by the systemd unit or the app lifespan — they are 
 manual step. After a deploy that changes DB models:
 
 ```bash
-export $(cat /etc/watcher/.env .env 2>/dev/null | xargs)
+source scripts/load-env.sh
 uv run alembic upgrade head
 sudo systemctl restart watcher
 ```
@@ -172,7 +172,7 @@ above, **neither order avoids a window**:
 Run the two back-to-back and accept the seconds in between:
 
 ```bash
-export $(cat /etc/watcher/.env .env 2>/dev/null | xargs)
+source scripts/load-env.sh
 uv run alembic upgrade head && sudo systemctl restart watcher
 ```
 
@@ -216,7 +216,7 @@ stamping would silently mark the missing migrations as applied and corrupt the
 schema. So this is a **halt-on-mismatch** gate, not a formality:
 
 ```bash
-export $(cat /etc/watcher/.env .env 2>/dev/null | xargs)
+source scripts/load-env.sh
 # psql needs a driverless URL — strip the SQLAlchemy "+asyncpg" dialect suffix.
 psql "${DATABASE_URL/+asyncpg/}" -c "SELECT version_num FROM alembic_version"
 ```
@@ -301,7 +301,7 @@ than reading a flat backlog number as "the drain is fine".
 To spot one:
 
 ```bash
-export $(cat /etc/watcher/.env .env 2>/dev/null | xargs)
+source scripts/load-env.sh
 # Backlog size, age of the oldest undrained row, and the last failure reason.
 # psql needs a driverless URL — strip the SQLAlchemy "+asyncpg" dialect suffix.
 psql "${DATABASE_URL/+asyncpg/}" -c \

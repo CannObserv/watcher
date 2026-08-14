@@ -78,11 +78,12 @@ what makes the next refresh a 3-way diff instead of a guess.
 | `brainstorming` | `SKILL.md` only: `docs/plans/` path, `#<n> [type]:` commit format, a GitHub issue on the architectural path, `writing-plans` optional rather than mandatory, `using-git-worktrees` after design approval, TDD as the bounded path's workflow, and the exe.dev proxy note for the visual companion's port. `visual-companion.md`, `spec-document-reviewer-prompt.md` and `scripts/` are vendor symlinks |
 
 **The ship gate's env loading lives outside the skill.** [scripts/pre-ship.sh](../scripts/pre-ship.sh)
-is watcher's wrapper, in the location upstream's Step 1 resolution loop probes first. It loads
-`/etc/watcher/.env` and the repo `.env` — parsing each line rather than sourcing it, so a
-secrets file cannot execute and a malformed line cannot decide whether the gate runs — then
-`exec`s the vendored gate through the `skills/` symlink. Forking the gate to add those lines is
-the failure mode this replaced: the fork stops receiving upstream fixes without saying so.
+is watcher's wrapper, in the location upstream's Step 1 resolution loop probes first. It sources
+[scripts/load-env.sh](../scripts/load-env.sh) — the shared loader the whole repo now uses, which
+parses each env file rather than sourcing it, so a secrets file cannot execute and a malformed
+line cannot decide whether the gate runs — then `exec`s the vendored gate through the `skills/`
+symlink. Forking the gate to add those lines is the failure mode this replaced: the fork stops
+receiving upstream fixes without saying so.
 
 ## SocratiCode (Codebase Search)
 

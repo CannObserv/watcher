@@ -341,3 +341,18 @@ class TestStreamRetention:
         await publish_status_events(object(), events)
         assert len(captured) == 2
         assert all(e.maxlen == DEFAULT_WATCH_STATUS_STREAM_MAXLEN for e in captured)
+
+
+class TestBuilderHardeningWithFloor:
+    def test_corrupt_interval_under_a_floor_publishes_the_floor(self):
+        # CR-7: parse_interval raises TypeError (not ValueError) on a non-str
+        # interval; before the resolution catch was broadened this killed the
+        # whole batch. With it, the floor wins — also the truthful cadence.
+        item = _item(
+            announced_schedule_config={"interval": 123},
+            throttle_floor_interval="1d",
+        )
+        events = build_status_events([item], [], now=NOW)
+        assert len(events) == 1
+        assert events[0].applied_interval == "1d"
+        assert events[0].applied_generation == 7

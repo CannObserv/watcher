@@ -64,11 +64,14 @@ def resolved_schedule_config(watched_item: WatchedItem) -> dict:
 
     try:
         resolved_is_faster = parse_interval(config.get("interval")) < parse_interval(floor)
-    except ValueError:
+    except (TypeError, ValueError):
         # The reconcile validates before storing, so an unparseable interval
-        # should be unreachable here — but this is the scheduler's hot loop and
-        # a raise would kill the tick for every item. The floor is the safe
-        # direction: slower, never faster.
+        # should be unreachable here — but this is the scheduler's hot loop
+        # (and, since #264, the watch-status full-set builder) and a raise
+        # would kill the tick for every item. TypeError is parse_interval's
+        # non-string spelling of the same corruption (#264 CR-7; the reconcile's
+        # own catch pairs them too). The floor is the safe direction: slower,
+        # never faster.
         resolved_is_faster = True
 
     if not resolved_is_faster:

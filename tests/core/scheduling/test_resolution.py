@@ -117,3 +117,14 @@ class TestThrottleFloor:
     def test_empty_floor_is_absent(self, floor):
         wi = _wi(announced={"interval": "15m"}, floor=floor)
         assert resolved_schedule_config(wi) == {"interval": "15m"}
+
+
+class TestFloorBranchExceptionSurface:
+    """#264 CR-7: ``parse_interval`` raises TypeError on a non-string interval
+    (not just ValueError), and the floor branch must survive both — it sits in
+    the scheduler's hot loop and in the watch-status full-set builder, where
+    one corrupt row would otherwise kill the whole tick / batch."""
+
+    def test_a_non_string_interval_under_a_floor_resolves_to_the_floor(self):
+        wi = _wi(announced={"interval": 123}, floor="1d")
+        assert resolved_schedule_config(wi) == {"interval": "1d"}

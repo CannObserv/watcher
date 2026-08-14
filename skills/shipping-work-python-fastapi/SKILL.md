@@ -1,16 +1,16 @@
 ---
 name: shipping-work-python-fastapi
 description: "For Python/FastAPI projects (uv + ruff + pytest): finalizes work by ensuring everything is committed, pushed to the remote, and reflected on GitHub: closes issues, posts summary comments, and presents a completion table. Use when the user says 'ship it', 'push GH', 'close GH', or 'wrap up' and the project is a FastAPI service."
-compatibility: Designed for Python FastAPI projects using uv, ruff, pytest. Requires git, gh, uv. pytest-cov is optional — pre-ship.sh auto-detects it and adds --no-cov when present. Watcher variant: also requires /etc/watcher/.env (system secrets); sourced via pre-ship wrapper before delegating to upstream.
+compatibility: Designed for Python FastAPI projects using uv, ruff, pytest. Requires git, gh, uv. pytest-cov is optional — pre-ship.sh auto-detects it and adds --no-cov when present. Watcher variant: also requires /etc/watcher/.env (system secrets), loaded by scripts/pre-ship.sh before it delegates to the vendored gate.
 metadata:
   author: gregoryfoster
-  version: "1.2"
+  version: "1.4"
   triggers: ship it, push GH, close GH, wrap up
   overrides: gregoryfoster-skills/shipping-work-python-fastapi
-  override-reason: "Sources /etc/watcher/.env (system secrets) and $PROJECT_ROOT/.env (repo-local overrides) before delegating to upstream pre-ship via set -a/set +a to handle values containing spaces, quotes, or newlines correctly."
+  override-reason: "Carries the watcher commit convention in Step 2 and points Step 1 at scripts/pre-ship.sh, the env-loading wrapper that supplies /etc/watcher/.env and the repo .env to the vendored gate. Drops the vendor self-budget note (its guard test does not exist in this repo). All scripts/ entries are vendor symlinks — the gate itself is not forked."
 ---
 
-<!-- forked from gregoryfoster-skills@d5d2b30 -->
+<!-- forked from gregoryfoster-skills@9f6c52c -->
 
 # Shipping Work — Python/FastAPI — watcher
 
@@ -49,8 +49,18 @@ Determine which GitHub issue(s) to close (priority order):
 ### Step 1 — Run pre-ship checks
 
 ```bash
-bash scripts/pre-ship.sh
+N=shipping-work-python-fastapi S=pre-ship.sh SD=
+{ [ ! -x .skills/doctor.sh ] || bash .skills/doctor.sh; } || exit 1
+for d in scripts ".claude/skills/$N/scripts" "$HOME/.claude/skills/$N/scripts"; do
+  [ -f "$d/$S" ] && { SD="$d"; break; }
+done
+echo "SKILL_SCRIPTS=${SD:?not found in scripts/, .claude/skills/$N/scripts/, or ~/.claude/skills/$N/scripts/}"
+bash "${SD:?not found in scripts/, .claude/skills/$N/scripts/, or ~/.claude/skills/$N/scripts/}/$S"
 ```
+
+The first line is a preflight: when `.skills/doctor.sh` is present, it heals any dangling vendor symlinks (or reports an actionable error); when absent, the group is a no-op. `|| exit 1` skips `pre-ship.sh` if the doctor reports unrecoverable state so the original "No such file or directory" noise doesn't drown out the doctor's message. The loop then resolves the script against the skill directory rather than the cwd — a bare `scripts/` path resolves relative to the project root, where the script does not exist ([#63](https://github.com/gregoryfoster/skills/issues/63)). A project-local `scripts/` copy still wins if one exists; `${SD:?…}` fails loudly with the searched paths when no candidate resolves. Resolution runs *after* the doctor so a freshly healed symlink chain is visible to it.
+
+Step 1 prints `SKILL_SCRIPTS=<path>`. In every later step `<SKILL_SCRIPTS>` is a **placeholder** for that literal path — substitute the value printed here (same convention as `init-project-fastapi` Phase 0). Each Bash invocation runs in a fresh shell, so the shell variable itself is not inherited.
 
 ```
 NO CONTINUATION IF CHECKS FAIL
@@ -61,17 +71,17 @@ If checks fail: stop, report the failure, fix before proceeding. Do not push fai
 ### Step 1.5 — Documentation spot-check
 
 ```bash
-bash scripts/doc-check.sh
+bash "<SKILL_SCRIPTS>/doc-check.sh"
 ```
 
-`doc-check.sh` lists files changed on this branch vs the upstream default branch and flags any that match the project's `SENSITIVE_PATHS` array (AGENTS.md, README.md, pyproject.toml, uv.lock, schema.sql, route/model/core dirs, `.env.example`). When sensitive paths change, the matching doc sections may need updates too.
+`doc-check.sh` lists files changed on this branch vs the upstream default branch and flags any that match the project's `SENSITIVE_PATHS` array (AGENTS.md, README.md, CHANGELOG.md, pyproject.toml, uv.lock, schema.sql, `alembic/versions/`, `deploy/`, route/model/core dirs, `.env.example`). When sensitive paths change, the matching doc sections may need updates too.
 
 If the script exits 1: review the listed files, decide whether each requires a doc update, and either commit the docs now or note them as deliberate skips. If the script exits 2: an infra/tooling problem prevented the doc check from running — investigate the underlying error rather than proceeding.
 
 ### Step 2 — Ensure a clean working tree
 
 ```bash
-bash scripts/check-status.sh
+bash "<SKILL_SCRIPTS>/check-status.sh"
 ```
 
 If uncommitted changes exist, commit them following the watcher convention:
@@ -103,7 +113,7 @@ If Step 2.5 did not apply (single checkout) and you're on a feature branch, merg
 ### Step 4 — Push
 
 ```bash
-bash scripts/push.sh
+bash "<SKILL_SCRIPTS>/push.sh"
 ```
 
 Confirm push succeeded before proceeding.
@@ -113,7 +123,7 @@ Confirm push succeeded before proceeding.
 For each issue in scope:
 
 ```bash
-bash scripts/comment-issue.sh <number> "<summary>"
+bash "<SKILL_SCRIPTS>/comment-issue.sh" <number> "<summary>"
 ```
 
 Comment must include:
@@ -131,7 +141,7 @@ Before closing any issue, verify the original requirements against what was impl
 </HARD-GATE>
 
 ```bash
-bash scripts/close-issue.sh <number>
+bash "<SKILL_SCRIPTS>/close-issue.sh" <number>
 ```
 
 ### Step 7 — Report
@@ -148,7 +158,8 @@ After the summary table, review commits and changes shipped to identify any post
 
 | Category | Trigger | Example action |
 |---|---|---|
-| DB migration | `schema.sql` changed | `apply_schema` or `systemctl restart <project>` |
+| DB migration (alembic) | `alembic/versions/` changed | `uv run alembic upgrade head` (or the project's `migrate.sh`), then `systemctl restart <project>` |
+| DB migration (raw SQL) | `schema.sql` changed | `apply_schema` or `systemctl restart <project>` |
 | Service restart | Code change (no auto-reload in prod) | `systemctl restart <project>` |
 | Integration tests | New `@pytest.mark.integration` tests | `uv run pytest -m integration` on a real env |
 | Env var / secret | New config key | Add to `/etc/<project>/env` and restart |
@@ -163,3 +174,4 @@ If nothing applies, omit this step entirely.
 - If `gh` CLI hits errors (e.g., Projects API changes), use `--json` flag workarounds as needed
 - The project's AGENTS.md is authoritative for commit conventions — read it before committing
 - `pre-ship.sh` auto-derives its per-SHA stamp prefix from `$(basename "$(git rev-parse --show-toplevel)")` — no project-name substitution needed
+- Step 1's resolution loop finds [scripts/pre-ship.sh](../../scripts/pre-ship.sh) — watcher's env-loading wrapper — as its first candidate. The wrapper loads `/etc/watcher/.env` and the repo `.env`, then delegates to the vendored gate through `skills/shipping-work-python-fastapi/scripts/pre-ship.sh`. Every script in this skill's `scripts/` is a symlink to vendor, so upstream gate fixes arrive with a submodule bump

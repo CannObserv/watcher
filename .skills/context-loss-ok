@@ -30,3 +30,44 @@ duplicate :: `info.registry` **grouplessly** — a config/state stream replayed 
 duplicate :: via `AsyncBusTailReader`, never `$` (a worker that boots at `$` reads nothing and looks
 duplicate :: exactly like one whose registry is empty). Archiver operates the
 duplicate :: broker. `WATCHER_BUS_REDIS_URL` unset → the publish tasks skip loudly rather than
+
+# Directive 13: docs/WATCHED-ITEMS.md split. The index entry named "lifecycle
+# guards, dashboard surfaces" among that doc's contents; this same change moved
+# both into docs/WATCHED-ITEMS-DASHBOARD.md, so the line was rewritten into two
+# entries — one per doc — and both now describe what they actually point at.
+retarget :: the WatchedItem entity: fields, schedule resolution, registry reconciliation, lifecycle guards, dashboard sur
+
+# Directive 13 follow-on: the AGENTS.md "Watched Items" detail was compressed
+# once docs/WATCHED-ITEMS.md had headroom from the split. Every claim in these
+# lines was checked individually against that doc before warranting, and the
+# two it did NOT cover were written into it first (§ Registry linkage and
+# lifecycle): creation from an announcement alone / cold-start convergence, and
+# the POST no longer validating the InfoItem over HTTP (archiver#141). Checking
+# also turned up a stale claim there — "One create path" — which #254 had
+# refuted; corrected to two in the same edit.
+# As with the bus block above, this is judged content-equivalence rather than a
+# byte match: read "## Registry reconciliation" and "## Registry linkage and
+# lifecycle" against these lines to challenge it.
+duplicate :: Created two ways since #254: `POST /api/v1/watched-items` (still Archiver's provisioning
+duplicate :: call, requiring all three of `archiver_info_item_id` + `url` + `archiver_info_source_id`;
+duplicate :: no dashboard create form) and the `info.registry` reconcile, which creates from an
+duplicate :: announcement alone so a cold start converges from the snapshot. The POST no longer
+duplicate :: validates the InfoItem over HTTP — that was the last outbound call and it went with the
+duplicate :: SDK — so it is redundant once archiver#141's producer is live.
+duplicate :: `WatchedItem.domain_name` == `Domain.name` == `hostname(effective_url)` by construction;
+duplicate :: one entry per hostname, so host variants (`lcb.wa.gov` vs `www.lcb.wa.gov`) are
+duplicate :: independent by design.
+duplicate :: **The registry owns cadence and active state; Watcher owns mechanism (#254).** An
+duplicate :: announcement is authoritative for exactly five columns — `archiver_info_source_id`,
+duplicate :: `domain_name` and its denormalized state, and only when the host actually moves.
+duplicate :: Everything else survives reconciliation: health, timings, `domain_suspended`,
+duplicate :: `archived_at`, `throttle_floor_interval`, `default_schedule_config`, media type, tags,
+duplicate :: notification config. **A local pause is not sticky** — item-level pause lives in
+duplicate :: Archiver's dashboard alone; local backoff, `domain_suspended`, and the throttle floor are
+duplicate :: the legitimate local stops. On a **reconciled** item (`applied_generation` set) every
+duplicate :: announcement-owned field 409s locally — `is_active`, `effective_url`, `source_specs`,
+duplicate :: `archiver_info_source_id` — and restore clears `archived_at` without re-activating,
+duplicate :: because the same-generation snapshot cannot repair local drift. Deleting a reconciled item 409s (the next announcement would
+duplicate :: recreate it); the throttle floor is released by an explicit operator cadence write, never
+duplicate :: by reconciliation. Schedule resolution is four tiers under a floor:
+duplicate :: announced → item → domain → system, then `max(resolved, throttle_floor)`.

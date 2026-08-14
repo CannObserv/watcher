@@ -144,31 +144,9 @@ Full reference: `docs/COMMANDS.md`.
 notification tier) is gone. One `WatchedItem` = one URL = one fingerprint = one
 change signal. The user-facing noun is "Watched Item".
 
-Created two ways since #254: `POST /api/v1/watched-items` (still Archiver's provisioning
-call, requiring all three of `archiver_info_item_id` + `url` + `archiver_info_source_id`;
-no dashboard create form) and the `info.registry` reconcile, which creates from an
-announcement alone so a cold start converges from the snapshot. The POST no longer
-validates the InfoItem over HTTP — that was the last outbound call and it went with the
-SDK — so it is redundant once archiver#141's producer is live.
-`WatchedItem.domain_name` == `Domain.name` == `hostname(effective_url)` by construction;
-one entry per hostname, so host variants (`lcb.wa.gov` vs `www.lcb.wa.gov`) are
-independent by design.
+Created two ways since #254: `POST /api/v1/watched-items` (Archiver's provisioning call) and the `info.registry` reconcile, which creates from an announcement alone so a cold start converges from the snapshot. `WatchedItem.domain_name` == `Domain.name` == `hostname(effective_url)`; one entry per hostname, so host variants are independent by design.
 
-**The registry owns cadence and active state; Watcher owns mechanism (#254).** An
-announcement is authoritative for exactly five columns — `archiver_info_source_id`,
-`effective_url`, `source_specs`, `announced_schedule_config`, `is_active` — plus
-`domain_name` and its denormalized state, and only when the host actually moves.
-Everything else survives reconciliation: health, timings, `domain_suspended`,
-`archived_at`, `throttle_floor_interval`, `default_schedule_config`, media type, tags,
-notification config. **A local pause is not sticky** — item-level pause lives in
-Archiver's dashboard alone; local backoff, `domain_suspended`, and the throttle floor are
-the legitimate local stops. On a **reconciled** item (`applied_generation` set) every
-announcement-owned field 409s locally — `is_active`, `effective_url`, `source_specs`,
-`archiver_info_source_id` — and restore clears `archived_at` without re-activating,
-because the same-generation snapshot cannot repair local drift. Deleting a reconciled item 409s (the next announcement would
-recreate it); the throttle floor is released by an explicit operator cadence write, never
-by reconciliation. Schedule resolution is four tiers under a floor:
-announced → item → domain → system, then `max(resolved, throttle_floor)`.
+**The registry owns cadence and active state; Watcher owns mechanism (#254).** An announcement is authoritative for exactly five columns (`archiver_info_source_id`, `effective_url`, `source_specs`, `announced_schedule_config`, `is_active`) plus `domain_name`; everything else — health, timings, `domain_suspended`, `archived_at`, `throttle_floor_interval`, tags, notification config — survives reconciliation. **A local pause is not sticky**: item-level pause lives in Archiver's dashboard alone, and on a reconciled item every announcement-owned field 409s locally. Schedule resolution is four tiers under a floor. The full rules — what each 409 is, what restore does and doesn't do, how the floor is released: [docs/WATCHED-ITEMS.md](docs/WATCHED-ITEMS.md) → *Registry reconciliation*.
 
 **Empty extraction is a failure, not a change (#258).** When every `source_spec`
 yields empty chunks, `process_watched_item` raises `ExtractionError` and writes
@@ -261,4 +239,5 @@ Full skill reference: `docs/SKILLS.md`. Cross-project search to the sister `noti
 - [docs/SKILLS.md](docs/SKILLS.md) — skill triggers, vendored skill repos, SocratiCode workflow
 - [docs/STYLE.md](docs/STYLE.md) — the design system: brand, color, dark mode, tokens, layout, touch targets, accessibility
 - [docs/UI.md](docs/UI.md) — the component library (`.btn`, `.badge`, `.data-table`, …) and the HTMX/flash interaction patterns
-- [docs/WATCHED-ITEMS.md](docs/WATCHED-ITEMS.md) — the WatchedItem entity: fields, schedule resolution, registry reconciliation, lifecycle guards, dashboard surfaces
+- [docs/WATCHED-ITEMS.md](docs/WATCHED-ITEMS.md) — the WatchedItem entity: fields, schedule resolution, registry reconciliation, notifications
+- [docs/WATCHED-ITEMS-DASHBOARD.md](docs/WATCHED-ITEMS-DASHBOARD.md) — the operator surface: API/dashboard routes, lifecycle guards, list and detail views, audit parity

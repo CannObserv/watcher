@@ -33,7 +33,7 @@ SocratiCode is indexed on this repo (`.socraticodecontextartifacts.json` present
 
 **Negative rule.** For broad semantic questions ("where is X", "how does Y work", "what depends on Z"), use SocratiCode MCP tools first. Reach for `grep`/`ripgrep` only on exact strings (error messages, log lines, known symbols). Reserve the Explore subagent for path-pattern walks (e.g. "all `*.py` under `src/api/routes/`"), not semantic search.
 
-[docs/SKILLS.md](docs/SKILLS.md) has the rest: the tool-selection table, index scope (`.socraticodeignore`, #240) and rebuild procedure, and the prefetch query itself if the reminder didn't load.
+[docs/SKILLS.md](docs/SKILLS.md) has the rest: *When to use each tool* (the goal→tool table), *Index scope* (`.socraticodeignore`, #240) and its rebuild procedure, and *Prefetch query* — the literal query, if the hook's reminder didn't load.
 
 ## Infrastructure
 
@@ -186,7 +186,7 @@ Component classes and the HTMX/flash patterns: [docs/UI.md](docs/UI.md).
 
 **Dark Mode:** Tailwind `dark:` variants on every color utility. Class-based toggle (`<html class="dark">`). localStorage key: `watcher-color-scheme`.
 
-**Accessibility:** WCAG 2.1 AA. **Touch-target idiom (#203):** component classes own the 44px guarantee — never restate `min-h-[44px]` on a `.btn`, never `min-h-0`. Skip links, ARIA landmarks, `focus-visible`, `aria-live`, reduced motion, no `title` attributes: `docs/STYLE.md` §7–8 (guards: `tests/dashboard/test_touch_targets.py`, `scripts/check-touch-targets.sh`).
+**Accessibility:** WCAG 2.1 AA. **Touch-target idiom (#203):** component classes own the 44px guarantee — never restate `min-h-[44px]` on a `.btn`, never `min-h-0`. Skip links, ARIA landmarks, `focus-visible`, `aria-live`, reduced motion, no `title` attributes: [docs/STYLE.md](docs/STYLE.md) §7–8 (guards: `tests/dashboard/test_touch_targets.py`, `scripts/check-touch-targets.sh`).
 
 **CSS:** Tailwind v4 with `@theme` in `input.css`; use the component classes rather
 than raw utilities. Full class inventory and badge variants:

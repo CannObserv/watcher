@@ -1,6 +1,8 @@
 # Architecture
 
-Module layout, the sibling-service topology, and the message-bus topology. The always-paid rules — single VM, single
+Module layout, the sibling-service topology, the message-bus topology, the
+single-process constraint, and why nothing here mirrors to a sibling repo. The
+always-paid rules — single VM, single
 process, port ownership — stay in `AGENTS.md`; the reasoning behind them is here.
 
 ## Project Layout

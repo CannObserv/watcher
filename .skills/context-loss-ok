@@ -56,7 +56,15 @@ duplicate :: validates the InfoItem over HTTP — that was the last outbound cal
 duplicate :: SDK — so it is redundant once archiver#141's producer is live.
 duplicate :: `WatchedItem.domain_name` == `Domain.name` == `hostname(effective_url)` by construction;
 duplicate :: one entry per hostname, so host variants (`lcb.wa.gov` vs `www.lcb.wa.gov`) are
-duplicate :: independent by design.
+# CR round 4, finding 19: the two entries below are pinned to AGENTS.md with the
+# PATH:: form. Their base lines are wrapped fragments — "independent by design."
+# is the entire line at f6b36f0:AGENTS.md:193 — so CONTENT cannot be made longer
+# than the line itself, and the usual "lengthen it until it is distinctive"
+# remedy is unavailable. Scoping stops them reaching a --file docs/X.md run;
+# within AGENTS.md they stay broad, and "independent by design" does still occur
+# in the compressed replacement at AGENTS.md:121. Re-judge both if that sentence
+# is ever rewritten.
+AGENTS.md :: duplicate :: independent by design.
 duplicate :: **The registry owns cadence and active state; Watcher owns mechanism (#254).** An
 duplicate :: announcement is authoritative for exactly five columns — `archiver_info_source_id`,
 duplicate :: `domain_name` and its denormalized state, and only when the host actually moves.
@@ -119,7 +127,7 @@ duplicate :: to this repo — go work in the sibling repo instead.
 # Key variables -> the docs/DEPLOYMENT.md '## Environment Variables' table,
 # a strict superset. Its WATCHER_BUS_REDIS_URL row is the MORE current text:
 # it names info.watch-status (#264), which the AGENTS.md version predated.
-duplicate :: **Key variables:**
+AGENTS.md :: duplicate :: **Key variables:**
 duplicate :: - `DATABASE_URL` — PostgreSQL connection for watcher (Archiver owns its own database).
 duplicate :: - `NOTIFIER_BASE_URL` — Notifier service URL for the `NotifierClient` SDK (e.g. `http://localhost:9000`). Required — every notification is dispatched through th
 duplicate :: - `NOTIFIER_API_KEY` — Required. Watcher tenant API key issued by `scripts/seed_tenant.py` in the notifier repo.

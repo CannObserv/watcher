@@ -36,3 +36,12 @@ No safe order — one-time, `e7c4b2a91f60` (#252)
 process, port ownership — stay in `AGENTS.md`; the reasoning behind them is here.
 # Pre-existing provenance heading, same class as the eight above.
 Registry reconciliation (#254)
+
+# CR round 3. Both judged legitimate:
+# - the DASHBOARD doc's pointer is to the ARCHIVER repo's own docs/DEPLOYMENT.md
+#   and AGENTS.md, explicitly qualified as "its own" so it cannot be misread as
+#   this repo's file in a sibling checkout. Nothing here moved.
+# - WATCHED-ITEMS.md's new preamble names AGENTS.md as carrying the one-entity
+#   rule, which it still does.
+The Archiver service must be installed first — see its own `docs/DEPLOYMENT.md`.
+[WATCHED-ITEMS-DASHBOARD.md](WATCHED-ITEMS-DASHBOARD.md). `AGENTS.md` carries

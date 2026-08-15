@@ -162,8 +162,7 @@ rationale, and the six provenance columns the outbox gained for
 `\n`-joined — guarded by
 `tests/core/notifications/test_content.py::TestMarkdownListContract`.
 
-Fields, 3-tier schedule resolution, media-type dispatch, lifecycle and delete guards,
-template CRUD, and every dashboard surface: [docs/WATCHED-ITEMS.md](docs/WATCHED-ITEMS.md).
+Fields, 3-tier schedule resolution, media-type dispatch and template CRUD: [docs/WATCHED-ITEMS.md](docs/WATCHED-ITEMS.md). Lifecycle and delete guards, and every dashboard surface: [docs/WATCHED-ITEMS-DASHBOARD.md](docs/WATCHED-ITEMS-DASHBOARD.md).
 
 ## Conventions
 

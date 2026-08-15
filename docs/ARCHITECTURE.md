@@ -35,12 +35,6 @@ Sibling services on the same VM, separately managed: **Archiver** (port 8020, `a
 - **Retired in #254.** `pyproject.toml` used to pin `archiver-client = { path = "../archiver/clients/python", editable = true }` — a relative path dependency that `uv sync` required and no env var could redirect, so a moved checkout broke the install while `ARCHIVER_REPO_PATH` kept the tests passing. Both halves are gone; `ARCHIVER_REPO_PATH` now locates the sibling repo for everything that still needs it (conftest's alembic run).
 - `tests/conftest.py` reads `ARCHIVER_REPO_PATH` (default `/home/exedev/archiver`) to locate Archiver's alembic for the cross-schema test tables. This is the **only** reader — CI sets it in `.github/workflows/ci.yml`.
 
-**The Archiver checkout moves freely again (#254).** `ARCHIVER_REPO_PATH` now redirects
-everything that needs the sibling repo — conftest's alembic run — because the
-`archiver-client` path dependency that pinned `../archiver/clients/python` and honored no
-env var went with the SDK. The old trap (setting one without the other, yielding passing
-tests over a broken `uv sync`) no longer has a second half to forget.
-
 ## Single process
 
 **Single process is load-bearing.** One uvicorn process runs everything: the API, the embedded Procrastinate worker, the `content.blobs` fact consumer, and the cache sweeper (started in the `src/api/main.py` lifespan — there is no separate worker unit). The reason is now the **fact consumer**, not politeness: `src/workers/fetch_facts.py` joins consumer group `watcher` as a single member (`watcher-1`), and a second process would need its own consumer name *and* an apply-ordering story across members — the supersession guard is per-row, not a cross-process lock. (Until #241 step 5 the reason was the in-process `DomainRateLimiter`; that retired with the local fetch path, so per-host pacing no longer constrains the topology at all — it is Replicator's, fed over `content.fetch-policy`.) Never run `uvicorn --workers N` or a second worker unit against prod. Escalation path when one process stops being enough (not before): a separate `watcher-worker.service` plus a multi-member consumer-group design — **not built**.

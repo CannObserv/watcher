@@ -71,3 +71,23 @@ duplicate :: because the same-generation snapshot cannot repair local drift. Del
 duplicate :: recreate it); the throttle floor is released by an explicit operator cadence write, never
 duplicate :: by reconciliation. Schedule resolution is four tiers under a floor:
 duplicate :: announced → item → domain → system, then `max(resolved, throttle_floor)`.
+
+# CR round 3, finding 14: the moved Archiver paragraph was the third statement
+# of one fact in docs/ARCHITECTURE.md "## Archiver checkout location". Checked
+# clause by clause against the bullets that remain there: ARCHIVER_REPO_PATH
+# redirecting everything that needs the sibling repo (conftest's alembic run),
+# the archiver-client path dependency on ../archiver/clients/python that no env
+# var could redirect, and both halves now being gone — which is what "no second
+# half to forget" says. Judged content-equivalence, as above.
+duplicate :: **The Archiver checkout moves freely again (#254).** `ARCHIVER_REPO_PATH` now redirects
+duplicate :: everything that needs the sibling repo — conftest's alembic run — because the
+duplicate :: `archiver-client` path dependency that pinned `../archiver/clients/python` and honored no
+duplicate :: env var went with the SDK. The old trap (setting one without the other, yielding passing
+duplicate :: tests over a broken `uv sync`) no longer has a second half to forget.
+
+# CR round 3, finding 15: this pointer named lifecycle/delete guards and the
+# dashboard surfaces as living in docs/WATCHED-ITEMS.md; the split in this same
+# branch moved both to docs/WATCHED-ITEMS-DASHBOARD.md. Rewritten into two
+# pointers, one per doc, each naming what it actually contains.
+retarget :: Fields, 3-tier schedule resolution, media-type dispatch, lifecycle and delete guards,
+retarget :: template CRUD, and every dashboard surface: [docs/WATCHED-ITEMS.md](docs/WATCHED-ITEMS.md).

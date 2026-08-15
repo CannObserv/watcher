@@ -28,6 +28,10 @@ Sibling services on the same VM, separately managed: **Archiver** (port 8020, `a
 
 **Archiver service.** Owns the canonical InfoItem / InfoSource / SourceRevision / RepSpec registry. Sibling repo (extracted in #149; see **Infrastructure** for checkout location). Watcher consumes it **over the bus only** — `info.registry` announcements reconciled into `watched_items` (#254) — and makes no HTTP calls to it at all; the `archiver-client` SDK and its path dependency were removed with the last one. Don't add Archiver code to this repo — go work in the sibling repo instead.
 
+## No cross-repo mirror discipline
+
+**No cross-repo mirror discipline (#159, #236).** Content acquisition is co-core's (see **Cannobserv wheelhouse** above); `src/core/logging.py` is service-local. Nothing in `src/` needs mirroring to Archiver — don't reintroduce a sync obligation.
+
 ## Archiver checkout location
 
 **The Archiver checkout is freely relocatable again (#254).** One consumer resolves it now, and it takes an override:

@@ -31,25 +31,9 @@ pinned version: [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) → *Cannobserv wheelho
 
 SocratiCode is indexed on this repo (`.socraticodecontextartifacts.json` present). Its MCP tools are **deferred** — schemas load only after a `ToolSearch` prefetch. The SessionStart hook prints the prefetch query; run it before exploring.
 
-Index scope (`.socraticodeignore`, #240) and the rebuild procedure: [docs/SKILLS.md](docs/SKILLS.md).
-
 **Negative rule.** For broad semantic questions ("where is X", "how does Y work", "what depends on Z"), use SocratiCode MCP tools first. Reach for `grep`/`ripgrep` only on exact strings (error messages, log lines, known symbols). Reserve the Explore subagent for path-pattern walks (e.g. "all `*.py` under `src/api/routes/`"), not semantic search.
 
-| Goal | Tool |
-|------|------|
-| Where is X defined / how does Y work / what files touch Z | `codebase_search` |
-| Exact string/regex match (errors, log lines, known symbols) | `grep` / `rg` |
-| Blast radius of changing/deleting a file or function | `codebase_impact` |
-| What does an entry point actually do? | `codebase_flow` |
-| Callers and callees of a function | `codebase_symbol` |
-| List symbols in a file or search by name across the project | `codebase_symbols` |
-| Imports/dependents of a file | `codebase_graph_query` |
-| Spot circular deps or structural issues | `codebase_graph_circular`, `codebase_graph_stats` |
-| Visualise module structure | `codebase_graph_visualize` |
-| Verify index is up to date | `codebase_status` |
-| DB schemas, deployment topology, runbook context | `codebase_context` / `codebase_context_search` |
-
-The SessionStart hook prints the prefetch query; it is also in [docs/SKILLS.md](docs/SKILLS.md) → *Prefetch query* if the reminder didn't load.
+[docs/SKILLS.md](docs/SKILLS.md) has the rest: the tool-selection table, index scope (`.socraticodeignore`, #240) and rebuild procedure, and the prefetch query itself if the reminder didn't load.
 
 ## Infrastructure
 
@@ -84,17 +68,13 @@ bash scripts/dev_server.sh
 
 **Never launch uvicorn by hand with the prod env loaded** — it would share the prod DB and run a second worker on the prod queue (#233). The script refuses any DB whose name lacks a `_test`/`_dev` suffix; `src/core/db_safety.py` enforces the same in-app. Full rationale: [docs/COMMANDS.md](docs/COMMANDS.md) → *Development*.
 
-**Archiver owns the canonical InfoItem / InfoSource / SourceRevision / RepSpec
-registry**; watcher consumes it over the bus — `info.registry` announcements reconciled
-into `watched_items` (#254). **Watcher makes no HTTP calls to Archiver at all**; the SDK
-is gone and re-adding one is a design regression, not a shortcut. Don't add Archiver code
-to this repo — go work in the sibling repo instead.
+**Archiver owns the canonical registry**; watcher consumes it over the bus and makes **no HTTP calls to Archiver at all** — re-adding an SDK is a design regression. Don't add Archiver code to this repo: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) → *Sibling services*.
 
 **Cross-repo policy.** Do not directly edit sibling repos (`archiver`, `notifier`) within a watcher conversation. If a change to a sibling is needed: identify the gap, recommend it, get approval, then file a GH issue in that repo. Implementation happens in a separate session scoped to the sibling.
 
 Full lifecycle reference + cleanup timer: `docs/DEPLOYMENT.md`.
 
-**No cross-repo mirror discipline (#159, #236).** Content acquisition is co-core's (see **Cannobserv wheelhouse** above); `src/core/logging.py` is service-local. Nothing in `src/` needs mirroring to Archiver — don't reintroduce a sync obligation.
+**Nothing in `src/` mirrors to Archiver** (#159, #236) — don't reintroduce a sync obligation: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) → *No cross-repo mirror discipline*.
 
 ## Environment Files
 
@@ -114,12 +94,6 @@ at production. The dev server is `bash scripts/dev_server.sh` (see **Server
 Lifecycle**; #233).
 
 **Naming rule for new variables.** Anything naming a shared external resource takes a **service-prefixed** name with a separate dev key (`WATCHER_BUS_REDIS_URL` / `WATCHER_DEV_BUS_REDIS_URL`). A bare `REDIS_URL` is silently inherited from `/etc/watcher/.env` — the #233 hazard in env-var form. Rationale: [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) → *Environment Variables*.
-
-**Key variables:**
-- `DATABASE_URL` — PostgreSQL connection for watcher (Archiver owns its own database).
-- `NOTIFIER_BASE_URL` — Notifier service URL for the `NotifierClient` SDK (e.g. `http://localhost:9000`). Required — every notification is dispatched through the notifier service.
-- `NOTIFIER_API_KEY` — Required. Watcher tenant API key issued by `scripts/seed_tenant.py` in the notifier repo.
-- `WATCHER_BUS_REDIS_URL` — Broker URL for the `content.fetch-policy` producer (#245; prod: `redis://localhost:6379/0`). Unset → publish task skips loudly. Dev opts in via `WATCHER_DEV_BUS_REDIS_URL` (see **Redis and the bus**).
 
 Full variable reference: `docs/DEPLOYMENT.md`.
 
@@ -212,7 +186,7 @@ Component classes and the HTMX/flash patterns: [docs/UI.md](docs/UI.md).
 
 **Dark Mode:** Tailwind `dark:` variants on every color utility. Class-based toggle (`<html class="dark">`). localStorage key: `watcher-color-scheme`.
 
-**Accessibility:** WCAG 2.1 AA. Skip link, ARIA landmarks, `focus-visible` rings, 44px touch targets, `aria-live` on HTMX swap targets, reduced motion. Wrap decorative emoji in `<span aria-hidden="true">`. No `title` attributes. **Touch-target idiom (#203):** component classes (`.btn*`, `.segment`, `.chip`, `.form-input`, `.toggle`, nav-link) own the 44px guarantee — never restate `min-h-[44px]` on a `.btn`; use it only on bare interactive elements (`<a>`, `<label>`, component-less `<button>`); never `min-h-0`. Guard: `tests/dashboard/test_touch_targets.py` + `scripts/check-touch-targets.sh`. See `docs/STYLE.md` §7.
+**Accessibility:** WCAG 2.1 AA. **Touch-target idiom (#203):** component classes own the 44px guarantee — never restate `min-h-[44px]` on a `.btn`, never `min-h-0`. Skip links, ARIA landmarks, `focus-visible`, `aria-live`, reduced motion, no `title` attributes: `docs/STYLE.md` §7–8 (guards: `tests/dashboard/test_touch_targets.py`, `scripts/check-touch-targets.sh`).
 
 **CSS:** Tailwind v4 with `@theme` in `input.css`; use the component classes rather
 than raw utilities. Full class inventory and badge variants:

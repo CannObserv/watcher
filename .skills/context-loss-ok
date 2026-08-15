@@ -91,3 +91,41 @@ duplicate :: tests over a broken `uv sync`) no longer has a second half to forge
 # pointers, one per doc, each naming what it actually contains.
 retarget :: Fields, 3-tier schedule resolution, media-type dispatch, lifecycle and delete guards,
 retarget :: template CRUD, and every dashboard surface: [docs/WATCHED-ITEMS.md](docs/WATCHED-ITEMS.md).
+
+# Curation pass 2 (2026-08-15). Each block below was checked against its
+# destination before removal; all are judged content-equivalence, not byte
+# matches — the sections named are the ones to read to challenge them.
+#
+# Tool table -> docs/SKILLS.md '### When to use each tool', a 19-row superset.
+# All 12 tools confirmed present there; two rows already matched verbatim.
+duplicate :: | Where is X defined / how does Y work / what files touch Z | `codebase_search` |
+duplicate :: | Exact string/regex match (errors, log lines, known symbols) | `grep` / `rg` |
+duplicate :: | Blast radius of changing/deleting a file or function | `codebase_impact` |
+duplicate :: | What does an entry point actually do? | `codebase_flow` |
+duplicate :: | Callers and callees of a function | `codebase_symbol` |
+duplicate :: | List symbols in a file or search by name across the project | `codebase_symbols` |
+duplicate :: | Imports/dependents of a file | `codebase_graph_query` |
+duplicate :: | Spot circular deps or structural issues | `codebase_graph_circular`, `codebase_graph_stats` |
+duplicate :: | DB schemas, deployment topology, runbook context | `codebase_context` / `codebase_context_search` |
+#
+# Archiver-owns-registry -> docs/ARCHITECTURE.md '## Sibling services', which
+# carries all five claims and the final sentence verbatim.
+duplicate :: **Archiver owns the canonical InfoItem / InfoSource / SourceRevision / RepSpec
+duplicate :: registry**; watcher consumes it over the bus — `info.registry` announcements reconciled
+duplicate :: into `watched_items` (#254). **Watcher makes no HTTP calls to Archiver at all**; the SDK
+duplicate :: is gone and re-adding one is a design regression, not a shortcut. Don't add Archiver code
+duplicate :: to this repo — go work in the sibling repo instead.
+#
+# Key variables -> the docs/DEPLOYMENT.md '## Environment Variables' table,
+# a strict superset. Its WATCHER_BUS_REDIS_URL row is the MORE current text:
+# it names info.watch-status (#264), which the AGENTS.md version predated.
+duplicate :: **Key variables:**
+duplicate :: - `DATABASE_URL` — PostgreSQL connection for watcher (Archiver owns its own database).
+duplicate :: - `NOTIFIER_BASE_URL` — Notifier service URL for the `NotifierClient` SDK (e.g. `http://localhost:9000`). Required — every notification is dispatched through th
+duplicate :: - `NOTIFIER_API_KEY` — Required. Watcher tenant API key issued by `scripts/seed_tenant.py` in the notifier repo.
+duplicate :: - `WATCHER_BUS_REDIS_URL` — Broker URL for the `content.fetch-policy` producer (#245; prod: `redis://localhost:6379/0`). Unset → publish task skips loudly. Dev 
+#
+# Accessibility -> docs/STYLE.md sections 7 and 8. All fourteen specifics
+# (skip link, focus-visible, aria-live, reduced motion, aria-hidden, no title,
+# the component-class list, min-h-0, and both guard scripts) confirmed there.
+duplicate :: **Accessibility:** WCAG 2.1 AA. Skip link, ARIA landmarks, `focus-visible` rings, 44px touch targets, `aria-live` on HTMX swap targets, reduced motion. Wrap dec

@@ -1,0 +1,139 @@
+# Lines this curation had to rewrite rather than move, each judged against its
+# replacement. Format: WARRANT :: CONTENT (see prove-no-loss.sh --help).
+
+# The bus paragraph moved to docs/ARCHITECTURE.md in this same change, so the
+# pointer sentence that named it was rewritten to lead with the new summary.
+# The words survive in AGENTS.md ("Stream ownership, the fetch contracts, and
+# `info_source_id` on the wire: docs/ARCHITECTURE.md"); only the line's leading
+# "silently." — a wrap artefact of the paragraph that moved — is gone.
+retarget :: Stream ownership, the fetch contracts, and `info_source_id` on the wire:
+
+# CR round 2, finding 10: the "At a glance" bus summary was dropped from
+# docs/ARCHITECTURE.md as restatement. These lines are the AGENTS.md bus
+# paragraph they had been moved into. Each claim below was checked individually
+# against "## Redis and the bus", which states all of them at greater length:
+# the four publish streams, info.watch-status as levels-not-edges with the
+# republish cron and the never-an-ack-path rule, content.blobs as a
+# single-member group, info.registry groupless and replayed from 0-0 via
+# AsyncBusTailReader (never $), Archiver operating the broker, and the loud
+# skip when WATCHER_BUS_REDIS_URL is unset. AGENTS.md also still carries a
+# compressed inline summary, so no reader loses the overview.
+# NOTE: this is judged content-equivalence, not a byte match — challenge it by
+# reading "## Redis and the bus" against these lines.
+duplicate :: **The bus.** Watcher publishes `content.fetch` (commands), `content.fetch-policy`
+duplicate :: (per-host politeness), `content.revisions` (`source_revision_observed`), and
+duplicate :: `info.watch-status` (#264 — the registry channel's return leg: applied generation,
+duplicate :: scheduler state, observation freshness; levels-not-edges, full-set republish on
+duplicate :: `WATCHER_WATCH_STATUS_REPUBLISH_CRON`, never an ack path); consumes
+duplicate :: `content.blobs` as the single member of consumer group `watcher`; and consumes
+duplicate :: `info.registry` **grouplessly** — a config/state stream replayed from `0-0` at every boot
+duplicate :: via `AsyncBusTailReader`, never `$` (a worker that boots at `$` reads nothing and looks
+duplicate :: exactly like one whose registry is empty). Archiver operates the
+duplicate :: broker. `WATCHER_BUS_REDIS_URL` unset → the publish tasks skip loudly rather than
+
+# Directive 13: docs/WATCHED-ITEMS.md split. The index entry named "lifecycle
+# guards, dashboard surfaces" among that doc's contents; this same change moved
+# both into docs/WATCHED-ITEMS-DASHBOARD.md, so the line was rewritten into two
+# entries — one per doc — and both now describe what they actually point at.
+retarget :: the WatchedItem entity: fields, schedule resolution, registry reconciliation, lifecycle guards, dashboard sur
+
+# Directive 13 follow-on: the AGENTS.md "Watched Items" detail was compressed
+# once docs/WATCHED-ITEMS.md had headroom from the split. Every claim in these
+# lines was checked individually against that doc before warranting, and the
+# two it did NOT cover were written into it first (§ Registry linkage and
+# lifecycle): creation from an announcement alone / cold-start convergence, and
+# the POST no longer validating the InfoItem over HTTP (archiver#141). Checking
+# also turned up a stale claim there — "One create path" — which #254 had
+# refuted; corrected to two in the same edit.
+# As with the bus block above, this is judged content-equivalence rather than a
+# byte match: read "## Registry reconciliation" and "## Registry linkage and
+# lifecycle" against these lines to challenge it.
+duplicate :: Created two ways since #254: `POST /api/v1/watched-items` (still Archiver's provisioning
+duplicate :: call, requiring all three of `archiver_info_item_id` + `url` + `archiver_info_source_id`;
+duplicate :: no dashboard create form) and the `info.registry` reconcile, which creates from an
+duplicate :: announcement alone so a cold start converges from the snapshot. The POST no longer
+duplicate :: validates the InfoItem over HTTP — that was the last outbound call and it went with the
+duplicate :: SDK — so it is redundant once archiver#141's producer is live.
+duplicate :: `WatchedItem.domain_name` == `Domain.name` == `hostname(effective_url)` by construction;
+duplicate :: one entry per hostname, so host variants (`lcb.wa.gov` vs `www.lcb.wa.gov`) are
+# CR round 4, finding 19: the two entries below are pinned to AGENTS.md with the
+# PATH:: form. Their base lines are wrapped fragments — "independent by design."
+# is the entire line at f6b36f0:AGENTS.md:193 — so CONTENT cannot be made longer
+# than the line itself, and the usual "lengthen it until it is distinctive"
+# remedy is unavailable. Scoping stops them reaching a --file docs/X.md run;
+# within AGENTS.md they stay broad, and "independent by design" does still occur
+# in the compressed replacement at AGENTS.md:121. Re-judge both if that sentence
+# is ever rewritten.
+AGENTS.md :: duplicate :: independent by design.
+duplicate :: **The registry owns cadence and active state; Watcher owns mechanism (#254).** An
+duplicate :: announcement is authoritative for exactly five columns — `archiver_info_source_id`,
+duplicate :: `domain_name` and its denormalized state, and only when the host actually moves.
+duplicate :: Everything else survives reconciliation: health, timings, `domain_suspended`,
+duplicate :: `archived_at`, `throttle_floor_interval`, `default_schedule_config`, media type, tags,
+duplicate :: notification config. **A local pause is not sticky** — item-level pause lives in
+duplicate :: Archiver's dashboard alone; local backoff, `domain_suspended`, and the throttle floor are
+duplicate :: the legitimate local stops. On a **reconciled** item (`applied_generation` set) every
+duplicate :: announcement-owned field 409s locally — `is_active`, `effective_url`, `source_specs`,
+duplicate :: `archiver_info_source_id` — and restore clears `archived_at` without re-activating,
+duplicate :: because the same-generation snapshot cannot repair local drift. Deleting a reconciled item 409s (the next announcement would
+duplicate :: recreate it); the throttle floor is released by an explicit operator cadence write, never
+duplicate :: by reconciliation. Schedule resolution is four tiers under a floor:
+duplicate :: announced → item → domain → system, then `max(resolved, throttle_floor)`.
+
+# CR round 3, finding 14: the moved Archiver paragraph was the third statement
+# of one fact in docs/ARCHITECTURE.md "## Archiver checkout location". Checked
+# clause by clause against the bullets that remain there: ARCHIVER_REPO_PATH
+# redirecting everything that needs the sibling repo (conftest's alembic run),
+# the archiver-client path dependency on ../archiver/clients/python that no env
+# var could redirect, and both halves now being gone — which is what "no second
+# half to forget" says. Judged content-equivalence, as above.
+duplicate :: **The Archiver checkout moves freely again (#254).** `ARCHIVER_REPO_PATH` now redirects
+duplicate :: everything that needs the sibling repo — conftest's alembic run — because the
+duplicate :: `archiver-client` path dependency that pinned `../archiver/clients/python` and honored no
+duplicate :: env var went with the SDK. The old trap (setting one without the other, yielding passing
+duplicate :: tests over a broken `uv sync`) no longer has a second half to forget.
+
+# CR round 3, finding 15: this pointer named lifecycle/delete guards and the
+# dashboard surfaces as living in docs/WATCHED-ITEMS.md; the split in this same
+# branch moved both to docs/WATCHED-ITEMS-DASHBOARD.md. Rewritten into two
+# pointers, one per doc, each naming what it actually contains.
+retarget :: Fields, 3-tier schedule resolution, media-type dispatch, lifecycle and delete guards,
+retarget :: template CRUD, and every dashboard surface: [docs/WATCHED-ITEMS.md](docs/WATCHED-ITEMS.md).
+
+# Curation pass 2 (2026-08-15). Each block below was checked against its
+# destination before removal; all are judged content-equivalence, not byte
+# matches — the sections named are the ones to read to challenge them.
+#
+# Tool table -> docs/SKILLS.md '### When to use each tool', a 19-row superset.
+# All 12 tools confirmed present there; two rows already matched verbatim.
+duplicate :: | Where is X defined / how does Y work / what files touch Z | `codebase_search` |
+duplicate :: | Exact string/regex match (errors, log lines, known symbols) | `grep` / `rg` |
+duplicate :: | Blast radius of changing/deleting a file or function | `codebase_impact` |
+duplicate :: | What does an entry point actually do? | `codebase_flow` |
+duplicate :: | Callers and callees of a function | `codebase_symbol` |
+duplicate :: | List symbols in a file or search by name across the project | `codebase_symbols` |
+duplicate :: | Imports/dependents of a file | `codebase_graph_query` |
+duplicate :: | Spot circular deps or structural issues | `codebase_graph_circular`, `codebase_graph_stats` |
+duplicate :: | DB schemas, deployment topology, runbook context | `codebase_context` / `codebase_context_search` |
+#
+# Archiver-owns-registry -> docs/ARCHITECTURE.md '## Sibling services', which
+# carries all five claims and the final sentence verbatim.
+duplicate :: **Archiver owns the canonical InfoItem / InfoSource / SourceRevision / RepSpec
+duplicate :: registry**; watcher consumes it over the bus — `info.registry` announcements reconciled
+duplicate :: into `watched_items` (#254). **Watcher makes no HTTP calls to Archiver at all**; the SDK
+duplicate :: is gone and re-adding one is a design regression, not a shortcut. Don't add Archiver code
+duplicate :: to this repo — go work in the sibling repo instead.
+#
+# Key variables -> the docs/DEPLOYMENT.md '## Environment Variables' table,
+# a strict superset. Its WATCHER_BUS_REDIS_URL row is the MORE current text:
+# it names info.watch-status (#264), which the AGENTS.md version predated.
+AGENTS.md :: duplicate :: **Key variables:**
+duplicate :: - `DATABASE_URL` — PostgreSQL connection for watcher (Archiver owns its own database).
+duplicate :: - `NOTIFIER_BASE_URL` — Notifier service URL for the `NotifierClient` SDK (e.g. `http://localhost:9000`). Required — every notification is dispatched through th
+duplicate :: - `NOTIFIER_API_KEY` — Required. Watcher tenant API key issued by `scripts/seed_tenant.py` in the notifier repo.
+duplicate :: - `WATCHER_BUS_REDIS_URL` — Broker URL for the `content.fetch-policy` producer (#245; prod: `redis://localhost:6379/0`). Unset → publish task skips loudly. Dev 
+#
+# Accessibility -> docs/STYLE.md sections 7 and 8. All fourteen specifics
+# (skip link, focus-visible, aria-live, reduced motion, aria-hidden, no title,
+# the component-class list, min-h-0, and both guard scripts) confirmed there.
+duplicate :: **Accessibility:** WCAG 2.1 AA. Skip link, ARIA landmarks, `focus-visible` rings, 44px touch targets, `aria-live` on HTMX swap targets, reduced motion. Wrap dec

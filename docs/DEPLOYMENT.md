@@ -20,6 +20,15 @@ source scripts/load-env.sh
 
 ## Environment Variables
 
+**Naming rule for new variables.** Anything naming a shared external resource
+takes a **service-prefixed** name with a separate dev key — Archiver's
+`ARCHIVER_REDIS_URL` / `ARCHIVER_DEV_REDIS_URL` split is the pattern. A bare
+unprefixed name (`REDIS_URL`) is silently inherited from `/etc/watcher/.env` by
+anything that sources it, which is exactly how a dev process ends up pointed at
+a production resource (the #233 hazard, in env-var form). Watcher's own
+`WATCHER_BUS_REDIS_URL` / `WATCHER_DEV_BUS_REDIS_URL` split (#245) follows the
+pattern — see **Redis and the bus**.
+
 | Variable | Location | Required | Purpose |
 |---|---|---|---|
 | `DATABASE_URL` | `/etc/watcher/.env` | **yes** | PostgreSQL connection string |

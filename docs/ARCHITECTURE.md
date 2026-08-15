@@ -1,7 +1,9 @@
 # Architecture
 
-Module layout, the sibling-service topology, and the message-bus topology. The always-paid rules — single VM, single
-process, port ownership — stay in `AGENTS.md`.
+Module layout, the sibling-service topology, the message-bus topology, the
+single-process constraint, and why nothing here mirrors to a sibling repo. The
+always-paid rules — single VM, single
+process, port ownership — stay in `AGENTS.md`; the reasoning behind them is here.
 
 ## Project Layout
 
@@ -28,14 +30,20 @@ Sibling services on the same VM, separately managed: **Archiver** (port 8020, `a
 
 **Archiver service.** Owns the canonical InfoItem / InfoSource / SourceRevision / RepSpec registry. Sibling repo (extracted in #149; see **Infrastructure** for checkout location). Watcher consumes it **over the bus only** — `info.registry` announcements reconciled into `watched_items` (#254) — and makes no HTTP calls to it at all; the `archiver-client` SDK and its path dependency were removed with the last one. Don't add Archiver code to this repo — go work in the sibling repo instead.
 
+## No cross-repo mirror discipline
+
+**No cross-repo mirror discipline (#159, #236).** Content acquisition is co-core's (see **Cannobserv wheelhouse** above); `src/core/logging.py` is service-local. Nothing in `src/` needs mirroring to Archiver — don't reintroduce a sync obligation.
+
 ## Archiver checkout location
 
-**The Archiver checkout location is not freely relocatable.** Two independent consumers resolve it, and only one takes an override:
+**The Archiver checkout is freely relocatable again (#254).** One consumer resolves it now, and it takes an override:
 
 - **Retired in #254.** `pyproject.toml` used to pin `archiver-client = { path = "../archiver/clients/python", editable = true }` — a relative path dependency that `uv sync` required and no env var could redirect, so a moved checkout broke the install while `ARCHIVER_REPO_PATH` kept the tests passing. Both halves are gone; `ARCHIVER_REPO_PATH` now locates the sibling repo for everything that still needs it (conftest's alembic run).
 - `tests/conftest.py` reads `ARCHIVER_REPO_PATH` (default `/home/exedev/archiver`) to locate Archiver's alembic for the cross-schema test tables. This is the **only** reader — CI sets it in `.github/workflows/ci.yml`.
 
-So `ARCHIVER_REPO_PATH` redirects the test harness alone. Setting it without also fixing the path dependency yields passing tests over a broken `uv sync`.
+## Single process
+
+**Single process is load-bearing.** One uvicorn process runs everything: the API, the embedded Procrastinate worker, the `content.blobs` fact consumer, and the cache sweeper (started in the `src/api/main.py` lifespan — there is no separate worker unit). The reason is now the **fact consumer**, not politeness: `src/workers/fetch_facts.py` joins consumer group `watcher` as a single member (`watcher-1`), and a second process would need its own consumer name *and* an apply-ordering story across members — the supersession guard is per-row, not a cross-process lock. (Until #241 step 5 the reason was the in-process `DomainRateLimiter`; that retired with the local fetch path, so per-host pacing no longer constrains the topology at all — it is Replicator's, fed over `content.fetch-policy`.) Never run `uvicorn --workers N` or a second worker unit against prod. Escalation path when one process stops being enough (not before): a separate `watcher-worker.service` plus a multi-member consumer-group design — **not built**.
 
 ## Redis and the bus
 

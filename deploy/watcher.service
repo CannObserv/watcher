@@ -57,5 +57,13 @@ ExecStart=/usr/local/bin/uv run uvicorn src.api.main:app --host 0.0.0.0 --port 8
 Restart=on-failure
 RestartSec=5
 
+# uvicorn exits 143 (128+15) on SIGTERM, which is the normal path for
+# `systemctl stop` — without this, systemd files a clean stop as `failed` and
+# `systemctl is-active watcher` cannot distinguish a routine stop from a crash
+# (#256). Restart=on-failure reads the same status, so an *out-of-band* SIGTERM
+# now also counts as clean and is not auto-restarted; that is the intended
+# trade — SIGTERM is a deliberate signal, and a genuine crash exits non-143.
+SuccessExitStatus=143
+
 [Install]
 WantedBy=multi-user.target

@@ -63,6 +63,19 @@ def test_repo_unit_declares_the_bus_opt_in() -> None:
     assert "Environment=WATCHER_BUS_ENABLED=1" in text
 
 
+def test_repo_unit_treats_sigterm_exit_as_success() -> None:
+    """#256: a graceful stop must not read as a failure.
+
+    uvicorn exits 143 (128+15) on SIGTERM, which is the normal path for
+    ``systemctl stop``. Without ``SuccessExitStatus=143`` systemd files that
+    under ``failed``, so ``systemctl is-active watcher`` — the one signal an
+    operator checks first — cannot tell a routine stop from a crash, and the
+    journal has to be read to find out which happened.
+    """
+    text = REPO_UNIT.read_text()
+    assert "SuccessExitStatus=143" in text
+
+
 def test_installed_unit_matches_repo() -> None:
     installed = _read_if_installed(INSTALLED_UNIT)
     if installed is None:

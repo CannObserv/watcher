@@ -145,16 +145,44 @@ sudo systemctl start postgresql
 sudo -u postgres psql -c "CREATE USER watcher WITH PASSWORD 'watcher';"
 sudo -u postgres psql -c "CREATE DATABASE watcher OWNER watcher;"
 sudo -u postgres psql -c "CREATE DATABASE watcher_test OWNER watcher;"
+# Then split the roles: scripts/setup-db-roles.sql (#259) — see
+# docs/DEPLOYMENT.md -> "Migration role and application role". Grants are not
+# schema state, so no migration recreates them on a fresh host.
 
-# Watcher migrations (requires DATABASE_URL in env)
+# Watcher migrations. Alembic connects with WATCHER_MIGRATION_DATABASE_URL when
+# set, else DATABASE_URL (#259). alembic.ini carries no URL, so a shell that
+# skipped load-env.sh fails instead of reaching for a default.
 source scripts/load-env.sh
 uv run alembic upgrade head
-uv run alembic revision --autogenerate -m "description of change"
 uv run alembic current
 
 # Archiver service migrations live in the sibling Archiver repo.
 # See its docs/COMMANDS.md.
 ```
+
+**Autogenerate wants a scratch database, not production.** `--autogenerate`
+diffs the models against whatever database it connects to, so pointing it at
+`DATABASE_URL` means diffing production. Build a throwaway instead — which is
+what `CREATEDB` on the migration role (#259) is for:
+
+```bash
+source scripts/load-env.sh
+MIG="${WATCHER_MIGRATION_DATABASE_URL:-$DATABASE_URL}"   # the owning role
+SCRATCH="${MIG%/*}/watcher_autogen_dev"                  # same credentials, new database
+
+psql "${MIG/+asyncpg/}" -c "CREATE DATABASE watcher_autogen_dev"
+WATCHER_MIGRATION_DATABASE_URL="$SCRATCH" uv run alembic upgrade head
+WATCHER_MIGRATION_DATABASE_URL="$SCRATCH" uv run alembic revision \
+  --autogenerate -m "description of change"
+WATCHER_MIGRATION_DATABASE_URL="$SCRATCH" uv run alembic check   # drift, locally
+psql "${MIG/+asyncpg/}" -c "DROP DATABASE watcher_autogen_dev"
+```
+
+`watcher_test` is not a substitute: pytest builds it with
+`Base.metadata.create_all`, so its `alembic_version` never matches its tables
+and `upgrade head` fails part-way through the chain. Alembic warns on stderr
+when the two URLs name different databases — that line is expected here, and is
+the signal to take seriously anywhere else.
 
 ## Task Queue (Procrastinate)
 

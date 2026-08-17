@@ -174,7 +174,10 @@ jobs:
           --health-retries 10
 
     env:
-      # watcher's alembic env.py reads DATABASE_URL (not TEST_DATABASE_URL).
+      # watcher's alembic env.py reads WATCHER_MIGRATION_DATABASE_URL, else
+      # DATABASE_URL (#259) — never TEST_DATABASE_URL. Only the fallback is set
+      # here, so this job also covers the single-role shape every host has
+      # until scripts/setup-db-roles.sql runs.
       DATABASE_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/watcher_migration
 
     steps:

@@ -49,15 +49,29 @@ What that leaves in the code:
   `WATCHER_FETCH_MAX_REISSUES`; hitting the cap sets ERROR health and lifts the
   gate.
 
-### Extraction outcomes: empty is a failure (#258)
+### Extraction outcomes: empty is a failure (#258, #260)
 
 `source_specs` are tried in order and the first yielding non-empty chunks wins.
-An item with **no** specs extracts full-page under a synthetic `[{}]` — inherited
-from #185's pipeline rewrite, never ratified, and reachable by design: the create
-schema documents `source_specs` as optional and `POST /api/v1/watched-items`
-stores `data.source_specs or []`. Worth a decision (full-page default vs. treating
-a spec-less item as unextractable) before anything else builds on it; recorded
-here as the current behaviour, not as an endorsement of it.
+
+**A spec-less item is unextractable, not a whole-page watch (#260).** The
+synthetic `[{}]` full-page default — inherited unremarked from #185's pipeline
+rewrite, never ratified — is gone, and with it the "optional at create"
+affordance: `WatchedItemCreate.source_specs` is required and non-empty, `PATCH`
+holds the same floor, and `process_watched_item` raises `ExtractionError` before
+dispatching an extractor when a row carries none. Settled that way because
+Archiver, the only caller, always has specs in hand: its registry refuses to
+announce a source as live without non-empty `source_specs`, and provisioning
+always sends them. Production carried 0 spec-less items of 4.
+
+**The residual, stated rather than gated.** The `info.registry` reconcile writes
+`list(payload.source_specs or [])` and co-core's announcement still declares the
+field optional, so a spec-less row remains *reachable over the wire* after the
+API door closed. That path is deliberately **not** gated a second time: an
+announcement is authoritative for `source_specs`, and refusing one would break
+the cold-start convergence #254 exists to provide. Such a row can only come from
+a source Archiver would not announce as live, which therefore never schedules —
+and if one ever does check, the pipeline guard is exactly what makes it loud
+(ERROR health, no revision) instead of silent.
 
 When **every** spec yields empty, `process_watched_item` raises `ExtractionError`
 and writes nothing — no `ChangeRevision`, no `PendingArchiverSync`, no notification. It
@@ -139,12 +153,12 @@ with `archiver_revision_id`).
 
 `spec_fingerprint` is **per-spec** (cannobserv#309), so a fallback from `spec[0]`
 to `spec[1]` moves it; Archiver reads the position that implies as a selector-rot
-signal (archiver#139), and its policy is record-and-flag, never reject. Two cases
-report `None` rather than a value: an item with no `source_specs` at all, because
-the synthetic `[{}]` default is a spec present in no registry and naming it would
-be flagged as superseded; and a spec co-core cannot derive from (it rejects
-floats, explicit nulls, non-ASCII keys), because a diagnostic must never cost a
-revision.
+signal (archiver#139), and its policy is record-and-flag, never reject. It
+reports `None` for a spec co-core cannot derive from (it rejects floats, explicit
+nulls, non-ASCII keys), because a diagnostic must never cost a revision. The
+other `None` case — an item with no `source_specs` at all — no longer produces a
+revision to attribute: #260 made that item unextractable rather than a full-page
+watch under a spec present in no registry.
 
 ### `info_source_id` on the wire (#252)
 

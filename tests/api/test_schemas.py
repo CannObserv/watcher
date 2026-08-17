@@ -311,6 +311,10 @@ class TestNotificationTemplateResponse:
         assert "domain_ref_count" not in NotificationTemplateResponse.model_fields
 
 
+# Required and non-empty on create since #260.
+_SPECS = [{"schema_version": 1, "extraction": {"algorithm": "full_page"}}]
+
+
 class TestWatchedItemCreate:
     def test_watched_item_create_requires_every_archiver_link(self):
         """#251: the InfoItem link, its URL, and the InfoSource link are all required."""
@@ -318,12 +322,15 @@ class TestWatchedItemCreate:
             WatchedItemCreate(name="X")
         with pytest.raises(ValidationError):
             WatchedItemCreate(
-                archiver_info_item_id="01ABCDEFGHJKMNPQRSTVWXYZ00", url="https://example.com"
+                archiver_info_item_id="01ABCDEFGHJKMNPQRSTVWXYZ00",
+                url="https://example.com",
+                source_specs=_SPECS,
             )
         with pytest.raises(ValidationError):
             WatchedItemCreate(
                 archiver_info_item_id="01ABCDEFGHJKMNPQRSTVWXYZ00",
                 archiver_info_source_id="01ABCDEFGHJKMNPQRSTVWXYZ00",
+                source_specs=_SPECS,
             )
 
     def test_watched_item_create_minimal_ok(self):
@@ -331,6 +338,7 @@ class TestWatchedItemCreate:
             archiver_info_item_id="01ABCDEFGHJKMNPQRSTVWXYZ00",
             url="https://example.com",
             archiver_info_source_id="01ABCDEFGHJKMNPQRSTVWXYZ00",
+            source_specs=_SPECS,
         )
         assert schema.archiver_info_item_id == "01ABCDEFGHJKMNPQRSTVWXYZ00"
         assert schema.name is None
@@ -341,6 +349,7 @@ class TestWatchedItemCreate:
             archiver_info_item_id="01ABCDEFGHJKMNPQRSTVWXYZ00",
             url="https://example.com",
             archiver_info_source_id="01ABCDEFGHJKMNPQRSTVWXYZ00",
+            source_specs=_SPECS,
             name="Custom Name",
             description="Note",
             default_schedule_config={"interval": "15m"},
@@ -355,6 +364,7 @@ class TestWatchedItemCreate:
             archiver_info_item_id="01ABCDEFGHJKMNPQRSTVWXYZ00",
             url="https://example.com",
             archiver_info_source_id="01ABCDEFGHJKMNPQRSTVWXYZ00",
+            source_specs=_SPECS,
             content_media_type="application/vnd.custom+json",
         )
         assert schema.content_media_type == "application/vnd.custom+json"
@@ -364,6 +374,7 @@ class TestWatchedItemCreate:
             archiver_info_item_id="01ABCDEFGHJKMNPQRSTVWXYZ00",
             url="https://example.com",
             archiver_info_source_id="01ABCDEFGHJKMNPQRSTVWXYZ00",
+            source_specs=_SPECS,
             content_media_type=None,
         )
         assert schema.content_media_type is None

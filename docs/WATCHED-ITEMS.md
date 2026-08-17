@@ -180,12 +180,17 @@ re-firing every `schedule_tick`.
 **Every WatchedItem is an Archiver InfoItem being watched (#251).**
 `archiver_info_item_id` and `archiver_info_source_id` are both **NOT NULL** —
 bare-URL WatchedItems were rolled back (epic: CannObserv/archiver#137 step 1).
-Two create paths since #254. `POST /api/v1/watched-items` requires all three of
-`archiver_info_item_id` + `url` + `archiver_info_source_id` (both ids validated
-as canonical uppercase ULIDs at the boundary, a constraint the OpenAPI document
-advertises); **no dashboard create**. The `info.registry` reconcile is the
-second: it creates from an announcement alone, so a cold start converges from
-the snapshot without anyone calling the API. The POST no longer validates the
+Two create paths since #254. `POST /api/v1/watched-items` requires all four of
+`archiver_info_item_id` + `url` + `archiver_info_source_id` + a **non-empty**
+`source_specs` (both ids validated as canonical uppercase ULIDs at the boundary,
+a constraint the OpenAPI document advertises; `source_specs` became required in
+#260 — a spec-less item has no defined extraction, and Archiver never provisions
+one, so PATCH holds the same non-empty floor); **no dashboard create**. The
+`info.registry` reconcile is the second: it creates from an announcement alone,
+so a cold start converges from the snapshot without anyone calling the API — and
+it is **not** gated on `source_specs`, because an announcement is authoritative
+for that column ([CONTENT-PIPELINE.md](CONTENT-PIPELINE.md) → *Extraction
+outcomes* has the residual that leaves). The POST no longer validates the
 InfoItem over HTTP — that was watcher's last outbound call and it went with the
 SDK — which makes the endpoint redundant once archiver#141's producer is live. The nullability had been paying for two
 silent-drop branches on the SourceRevision path — both gone, so a captured

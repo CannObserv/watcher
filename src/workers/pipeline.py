@@ -137,16 +137,17 @@ def _extract_and_fingerprint(
     media-type-appropriate extractor (defaults to HTML). Synchronous: extraction
     and hashing are pure CPU (#236).
 
-    ``spec_fingerprint`` is ``None`` when the item carried no ``source_specs``:
-    the ``[{}]`` below is a synthetic full-page default, not a spec anyone
-    authored, and ``spec_fingerprint({})`` would name one present in no registry
-    — Archiver's index lookup would miss and flag the revision as superseded.
+    Nothing is substituted for an absent spec (#260): an empty ``source_specs``
+    extracts nothing and names no spec, rather than silently watching the whole
+    page under a synthetic ``[{}]``. Callers reject the spec-less item before
+    reaching here; the honest empty outcome is the backstop, since
+    ``spec_fingerprint({})`` would name a spec present in no registry and
+    Archiver's index lookup would flag the revision as superseded.
     ``spec_id`` identifies the item for the warning path (#253 CR-7).
     """
-    specs: list[dict] = source_specs if source_specs else [{}]
     result = ExtractionResult(chunks=[])
     used_spec: dict = {}
-    for spec in specs:
+    for spec in source_specs:
         result = _extract_with_spec(
             raw_content, spec, extractor=extractor, extra_config=extra_config
         )
@@ -215,12 +216,13 @@ async def process_watched_item(
 ) -> WatchedItemResult:
     """Run one check cycle for a WatchedItem.
 
-    1. Extract content using `watched_item.source_specs`; fingerprint.
-    2. Empty extraction: raise `ExtractionError` — never a revision (#258).
-    3. Query `change_revisions` for the last fingerprint.
-    4. First run: insert baseline ChangeRevision, no notification.
-    5. Same fingerprint: cache hit, no action.
-    6. Changed: insert new ChangeRevision, optionally enqueue PendingArchiverSync,
+    1. No `source_specs`: raise `ExtractionError` — nothing to extract (#260).
+    2. Extract content using `watched_item.source_specs`; fingerprint.
+    3. Empty extraction: raise `ExtractionError` — never a revision (#258).
+    4. Query `change_revisions` for the last fingerprint.
+    5. First run: insert baseline ChangeRevision, no notification.
+    6. Same fingerprint: cache hit, no action.
+    7. Changed: insert new ChangeRevision, optionally enqueue PendingArchiverSync,
        dispatch CHANGE_DETECTED once for the WatchedItem.
 
     `watched_item.last_changed_at` is updated on change.
@@ -233,11 +235,20 @@ async def process_watched_item(
     """
     reg = registry if registry is not None else get_registry()
     now = datetime.now(UTC)
-    # Passed through as-is, empty included: substituting the synthetic ``[{}]``
-    # here would hide "the item has no specs" from _extract_and_fingerprint,
-    # which is exactly the distinction spec_fingerprint must report (CR-1). The
-    # extractor's own default handles the empty list.
     source_specs: list[dict] = watched_item.source_specs or []
+
+    # #260: a spec-less item is unextractable, not a whole-page watch. The API
+    # refuses to create one, but the `info.registry` reconcile writes whatever an
+    # announcement carries and co-core still declares `source_specs` optional
+    # there — so the state stays reachable over the wire, for a source Archiver
+    # would not announce as live and therefore never schedules. Raising here is
+    # what makes that residual loud (ERROR health, no revision) rather than
+    # silent: the retired synthetic `[{}]` extracted the full page under a
+    # config nobody authored, and reported no spec identity for the revision it
+    # produced. Ahead of the extractor dispatch so the message names the cause
+    # rather than an extraction failure it would be wrapped as.
+    if not source_specs:
+        raise ExtractionError("watched item has no source_specs; nothing to extract")
 
     # Dispatch the extractor on the observed/overridden media type (#168 slice 2).
     # Derived in Python from content_media_type (seeded by the caller from this

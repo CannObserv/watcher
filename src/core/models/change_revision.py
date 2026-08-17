@@ -13,8 +13,11 @@ class ChangeRevision(Base):
     """One fingerprint snapshot captured for a WatchedItem in a check cycle.
 
     Inserted on first run (baseline) and on every subsequent fingerprint
-    change. The `archiver_revision_id` is back-populated by the drain worker
-    after a successful POST to Archiver.
+    change. Purely local: Archiver mints its own SourceRevision id on its side
+    of `content.revisions` and never reports it back, so there is no registry
+    id stored here (#261 dropped the retired `archiver_revision_id`). The
+    mapping is re-derivable from `(info_source_id, content_fingerprint)`,
+    Archiver's own uniqueness constraint.
     """
 
     __tablename__ = "change_revisions"
@@ -29,12 +32,4 @@ class ChangeRevision(Base):
     content_fingerprint: Mapped[str] = mapped_column(Text, nullable=False)
     captured_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     content_size_bytes: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
-    # Historical only since #253. The HTTP write path back-populated Archiver's
-    # minted id so the cache sweeper could PATCH against it; both are gone, and
-    # Archiver now allocates on its side of content.revisions without reporting
-    # back. Nothing writes this and nothing reads it — retained rather than
-    # dropped because the rows captured while that path existed are the only
-    # local pointer to their registry counterparts. Drop is tracked in #261,
-    # together with the two released content_cache_* columns.
-    archiver_revision_id: Mapped[ULID | None] = mapped_column(ULIDType, nullable=True)
     schema_version: Mapped[int] = mapped_column(Integer, nullable=False)

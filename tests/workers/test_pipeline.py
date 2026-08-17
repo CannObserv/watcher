@@ -227,7 +227,6 @@ class TestProcessWatchedItem:
         )
         assert len(syncs) == 1
         # No scratch copy since the cutover: the row points at Replicator's blob.
-        assert syncs[0].content_cache_uri is None
         assert syncs[0].blob_uri == _BLOB.blob_uri
 
     async def test_dispatches_once_per_watched_item(self, db_session):

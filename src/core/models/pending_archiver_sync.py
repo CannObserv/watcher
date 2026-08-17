@@ -14,9 +14,8 @@ class PendingArchiverSync(Base):
 
     Inserted on every detected fingerprint change (#251 — every WatchedItem
     carries an `archiver_info_source_id` to post against). The drain worker
-    reads `content_cache_uri`,
-    sends the bytes to Archiver, then back-populates
-    `change_revisions.archiver_revision_id` on success.
+    builds a `source_revision_observed` payload from the provenance columns
+    below and publishes it to `content.revisions`, then deletes the row.
     """
 
     __tablename__ = "pending_archiver_sync"
@@ -34,20 +33,12 @@ class PendingArchiverSync(Base):
         nullable=False,
         index=True,
     )
-    # Retired with the scratch cache (#253). Nothing writes these; they are
-    # released rather than dropped because no single deploy order makes a drop
-    # of a NOT NULL column safe — see migration 32140463c26c. Contract step is
-    # tracked in #261.
-    content_cache_uri: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
-    content_cache_expires_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True, default=None
-    )
     # --- observation provenance, for source_revision_observed (#253) ---
     # Snapshotted from the correlated content.blobs fact at enqueue time rather
     # than joined from fetch_commands at drain time: the command row's lifecycle
     # is not this row's, and the apply path holds the values already. All
-    # nullable while the HTTP POST path still drains off content_cache_uri —
-    # rows written before the publisher lands legitimately have none.
+    # nullable because rows enqueued before the publisher landed carry none —
+    # the drain dead-letters those rather than inventing values.
     command_id: Mapped[str | None] = mapped_column(String(26), nullable=True, default=None)
     blob_uri: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
     blob_expires_at: Mapped[datetime | None] = mapped_column(

@@ -290,8 +290,6 @@ class TestDeleteWatchedItem:
         sync = PendingArchiverSync(
             change_revision_id=revision.id,
             watched_item_id=wi_id,
-            content_cache_uri="file:///tmp/x",
-            content_cache_expires_at=now,
             next_attempt_at=now,
         )
         db_session.add(sync)

@@ -510,9 +510,49 @@ class TestDetailPage:
         assert "The last check completed successfully." in body
         assert body.index("Last Checked") < body.index('aria-label="Health: ok"')
 
+    async def test_detail_shows_content_verified_timestamp(self, client, db_session):
+        """#266: last_observed_at renders in the Details panel as 'Content Verified'."""
+        wi = await _make_wi(
+            db_session,
+            name="ObservedItem",
+            last_observed_at=datetime(2026, 8, 15, 12, 30, tzinfo=UTC),
+        )
+        body = (await client.get(f"/watched-items/{wi.id}")).content.decode()
+        assert ">Content Verified</span>" in body
+        assert "2026-08-15 12:30 UTC" in body
+
+    async def test_detail_content_verified_empty_state(self, client, db_session):
+        """A never-observed item says so rather than showing a bare dash."""
+        wi = await _make_wi(db_session, name="UnobservedItem")
+        body = (await client.get(f"/watched-items/{wi.id}")).content.decode()
+        assert ">Content Verified</span>" in body
+        assert "Never verified" in body
+
+    async def test_detail_content_verified_explains_the_distinction(self, client, db_session):
+        """#266: the pair is only useful if the page says how the two differ.
+
+        Wording tracks docs/WATCHED-ITEMS.md — "content verified current" vs the
+        attempt stamp. It must not narrow the stamp to a successful *extraction*:
+        since #249 an origin 304 stamps last_observed_at too, with no extraction
+        having run.
+        """
+        wi = await _make_wi(db_session, name="ExplainedItem")
+        body = (await client.get(f"/watched-items/{wi.id}")).content.decode()
+        assert "Content confirmed current" in body
+        assert "Last Checked is the most recent attempt" in body
+        assert "successful extraction" not in body.lower()
+
+    async def test_detail_content_verified_follows_last_checked(self, client, db_session):
+        """The two freshness stamps sit adjacent, attempt first."""
+        wi = await _make_wi(db_session, name="AdjacentItem")
+        body = (await client.get(f"/watched-items/{wi.id}")).content.decode()
+        assert body.index(">Last Checked</span>") < body.index(">Content Verified</span>")
+        assert body.index(">Content Verified</span>") < body.index(">Last Changed</span>")
+
     async def test_detail_row_order(self, client, db_session):
         """#202: Details rows render Name, URL, Domain, Status, Last Checked,
-        Last Changed, Interval, Content Type, Description, Tags — in that order."""
+        Content Verified (#266), Last Changed, Interval, Content Type,
+        Description, Tags — in that order."""
         db_session.add(Domain(name="order-domain.com"))
         wi = await _make_wi(
             db_session,
@@ -527,6 +567,7 @@ class TestDetailPage:
             ">Domain</span>",
             ">Status</span>",
             ">Last Checked</span>",
+            ">Content Verified</span>",
             ">Last Changed</span>",
             ">Interval</span>",
             ">Content Type</span>",

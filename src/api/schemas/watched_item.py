@@ -129,6 +129,11 @@ class WatchedItemResponse(BaseModel):
     archived_at: datetime | None
     last_reviewed_at: datetime | None
     last_checked_at: datetime | None
+    # Observation freshness (#264, surfaced #266). `last_checked_at` is "we
+    # tried at T"; this is "the content was verified current as of T" — a
+    # successful check, or a 304 in which the origin asserted the bytes are
+    # current (#249). Additive: never derive next-due from it.
+    last_observed_at: datetime | None
     last_changed_at: datetime | None
     health_status: WatchHealthStatus
     default_schedule_config: dict | None

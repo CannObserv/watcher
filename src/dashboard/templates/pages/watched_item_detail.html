@@ -69,6 +69,24 @@
         </div>
       </div>
     </div>
+    {# Content Verified — last_observed_at (#264, surfaced #266). The row exists
+       to make the pair legible: Last Checked advances on every outcome because
+       it is the anti-thrash scheduling stamp (#168), while this one advances
+       only when the content itself was confirmed current.
+       It deliberately does *not* split its two provenances — a successful check
+       and an origin 304 (#249). The column stores an instant, not the evidence
+       that produced it, so the page has nothing to render the difference from;
+       provenance lives in Recent Activity, where CHECK_NO_CHANGE carries
+       `source: not_modified`. #}
+    <div class="p-4">
+      <div class="grid grid-cols-[1fr_auto] sm:grid-cols-[min(18rem,40%)_1fr_auto] items-start gap-x-4 gap-y-2">
+        <div class="min-w-0"><span class="form-label mb-0">Content Verified</span></div>
+        <div class="col-span-2 sm:col-span-1 sm:col-start-2 sm:row-start-1 min-w-0">
+          <span class="text-sm text-gray-700 dark:text-gray-300">{% if watched_item.last_observed_at %}{{ watched_item.last_observed_at.strftime("%Y-%m-%d %H:%M UTC") }}{% else %}Never verified{% endif %}</span>
+          <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">Content confirmed current as of this time. Last Checked is the most recent attempt, successful or not.</p>
+        </div>
+      </div>
+    </div>
     {# Last Changed — field/value #}
     <div class="p-4">
       <div class="grid grid-cols-[1fr_auto] sm:grid-cols-[min(18rem,40%)_1fr_auto] items-center gap-x-4 gap-y-2">

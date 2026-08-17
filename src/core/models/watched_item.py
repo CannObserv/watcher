@@ -68,12 +68,14 @@ class WatchedItem(Base, TimestampMixin):
     last_checked_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True, default=None
     )
-    # Observation freshness (#264): advances only when a cycle's extraction
-    # succeeded — changed or unchanged both count. Distinct from
-    # `last_checked_at`, which advances on every outcome including failures
-    # because it is a scheduling anti-thrash device (#168); this one is
-    # provenance ("content was verified current"), published on
-    # info.watch-status and written through to Archiver's durable
+    # Observation freshness (#264): advances when a cycle verified the content is
+    # current — a successful extraction (changed or unchanged alike) and, since
+    # #249, a 304 in which the origin asserts the bytes are current without
+    # sending any. Distinct from `last_checked_at`, which advances on every
+    # outcome including failures because it is a scheduling anti-thrash device
+    # (#168); this one is provenance ("content was verified current"), published
+    # on info.watch-status, surfaced on `WatchedItemResponse` and the detail page
+    # (#266), and written through to Archiver's durable
     # `info_sources.last_observed_at`. Next-due must never derive from it: a
     # failing item attempts on schedule while this stands still.
     last_observed_at: Mapped[datetime | None] = mapped_column(

@@ -17,11 +17,17 @@ gates scheduling directly, no live Domain join); `domain_default_schedule_config
 (denormalized copy of the parent Domain's cadence — the Domain tier of schedule
 resolution; #205); a single optional
 `TemporalProfile` (1:1, `temporal_profiles.watched_item_id`); `health_status`,
-`last_checked_at`, `last_changed_at`, `last_observed_at` (#264 — advances only
-on successful extraction, changed or unchanged alike; `last_checked_at` advances
+`last_checked_at`, `last_changed_at`, `last_observed_at` (#264 — advances when the
+content was verified current: a successful check, changed or unchanged alike, **and**
+an origin 304 where no extraction ran at all (#249); `last_checked_at` advances
 on *every* outcome because it is the anti-thrash scheduling stamp (#168), so the
 pair distinguishes "content verified current as of T" from "we tried at T" —
-next-due derives from the latter, never the former); and its notification surface (the
+next-due derives from the latter, never the former. Both are on
+`WatchedItemResponse` and on the detail page's Details panel, the latter as
+**Content Verified** beside **Last Checked** (#266); the row does not split the
+two provenances, because the column stores the instant and not the evidence —
+that lives in the audit trail, where `CHECK_NO_CHANGE` carries
+`source: not_modified`); and its notification surface (the
 item-scoped `NotificationTemplate` rows — `visibility='watched_item'`,
 `watched_item_id` set; see **Notifications** below). Schedule resolution is
 4-tier under a floor (#205, #254): `announced_schedule_config` → WatchedItem

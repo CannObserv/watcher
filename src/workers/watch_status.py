@@ -65,8 +65,8 @@ async def publish_watch_status(**periodic_kwargs) -> dict:
     Procrastinate records the failed job, and the next cron tick is the retry.
     """
     # Asked of src.core.bus, not of the URL variable: since #262 the URL alone
-    # builds no client, so an env check here would fall through to a None
-    # client and publish nothing while claiming it could.
+    # builds no client, so a bare env check here would pass and then hit the
+    # assert below on a None client — or, under python -O, publish on None.
     reason = bus_disabled_reason()
     if reason is not None:
         logger.error(

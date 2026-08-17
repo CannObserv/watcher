@@ -89,7 +89,7 @@ def assert_environment_bus_allowed(environ: Mapping[str, str]) -> None:
     :func:`bus_client_from_env` already fails *closed* on this combination, but
     closed-and-silent trades one production hazard for another: drop
     ``Environment=WATCHER_BUS_ENABLED=1`` from the unit and Watcher stops
-    publishing with nothing but a WARNING per producer to say so. A URL present
+    publishing with nothing but a per-producer ERROR to say so. A URL present
     without the opt-in is always a mistake in either direction — a service that
     lost its flag, or a process that should never have had the URL — so the
     entry point refuses to start.
@@ -132,9 +132,10 @@ def bus_client_from_env() -> Redis | None:
     returned client's lifecycle — for the process-shared one, use
     :func:`get_shared_bus_client`.
     """
-    if bus_disabled_reason() is not None:
+    url = os.environ.get(BUS_REDIS_URL_ENV)
+    if not url or not bus_enabled():
         return None
-    return Redis.from_url(os.environ[BUS_REDIS_URL_ENV])
+    return Redis.from_url(url)
 
 
 def get_shared_bus_client() -> Redis | None:

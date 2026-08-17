@@ -140,9 +140,12 @@ async def _record_check_success(
     previous_health = watched_item.health_status
     watched_item.health_status = WatchHealthStatus.OK
     watched_item.last_checked_at = now
-    # Observation freshness (#264): extraction succeeded, changed or unchanged
-    # alike — "content was verified current", where last_checked_at only says
-    # "we tried". Published on info.watch-status; Archiver records it durably.
+    # Observation freshness (#264): "content was verified current", where
+    # last_checked_at only says "we tried". Both callers qualify — a successful
+    # extraction (changed or unchanged alike), and a 304 in which the origin
+    # itself asserts the bytes are current without sending any (#249). The
+    # audit's `source` key is what keeps those two apart downstream.
+    # Published on info.watch-status; Archiver records it durably.
     watched_item.last_observed_at = now
     await session.commit()
 

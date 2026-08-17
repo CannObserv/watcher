@@ -80,6 +80,23 @@ class Domain(Base, TimestampMixin):
         super().__init__(**kwargs)
 
     @property
+    def is_suspended(self) -> bool:
+        """Archived or deactivated — the two states that stop Watcher watching.
+
+        One spelling of a predicate that had grown three (#250, CR-1 finding 7):
+        it decides ``WatchedItem.domain_suspended`` when an item is created or a
+        domain is toggled, and since #250 it also decides whether the host's
+        fetch policy publishes live or ``revoked=True``. Those must never
+        disagree — a host revoked on the wire but still scheduled locally, or
+        the reverse, is the failure this collapses.
+
+        Equivalent to ``status != "active"``, but kept as its own predicate:
+        ``status`` is a display string whose members may grow, and a suspension
+        check should not depend on which of them happen to be non-active.
+        """
+        return self.archived_at is not None or not self.is_active
+
+    @property
     def status(self) -> str:
         """Derived status: archived > inactive > active.
 

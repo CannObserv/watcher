@@ -123,19 +123,28 @@ def bus_client_from_env() -> Redis | None:
     """A NEW Redis client for the bus, or None when the env does not allow one.
 
     Requires both a URL and ``WATCHER_BUS_ENABLED=1``. This is the single funnel
-    ``get_shared_bus_client`` and every direct caller pass through, so the gate
-    covers publish *and* consume without a second mechanism: producers already
-    treat a None client as a loud skip, and the consumers never start.
+    for client *construction* — ``get_shared_bus_client`` and every direct caller
+    pass through it — so the gate covers publish *and* consume without a second
+    mechanism: producers already treat a None client as a loud skip, and the
+    consumer never starts.
+
+    It is **not** the only thing that asks whether the bus is usable. A caller
+    that must *explain* the absence (the producers, which log which variable is
+    missing before skipping) asks :func:`bus_disabled_reason` instead. #262's
+    premise that a single funnel covered both readings was wrong — two producers
+    tested ``WATCHER_BUS_REDIS_URL`` directly and then asserted on the client,
+    which this gate would have turned into an AssertionError. Do not reintroduce
+    a bare env check; the two functions share one predicate below so they cannot
+    disagree.
 
     No localhost default, deliberately: a default credential is how a dev
     process ends up publishing onto the production stream. The caller owns the
     returned client's lifecycle — for the process-shared one, use
     :func:`get_shared_bus_client`.
     """
-    url = os.environ.get(BUS_REDIS_URL_ENV)
-    if not url or not bus_enabled():
+    if bus_disabled_reason() is not None:
         return None
-    return Redis.from_url(url)
+    return Redis.from_url(os.environ[BUS_REDIS_URL_ENV])
 
 
 def get_shared_bus_client() -> Redis | None:

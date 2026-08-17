@@ -378,3 +378,43 @@ class TestFetchPolicyTombstoneHooks:
         # Expire so the get() re-reads the row state the route just committed.
         db_session.expire_all()
         assert await db_session.get(FetchPolicyTombstone, "ts-back.example") is None
+
+
+class TestSuspensionRepublishesPolicy:
+    """Every mutation that changes published policy must ask for a republish (#250 CR-1).
+
+    Before #250 archive and restore did not affect the wire, so only upsert and
+    delete deferred. Now suspension revokes the host's policy, which makes these
+    routes policy-changing too — and without the defer the change waits up to
+    five minutes for the periodic full set. That window is the wrong direction
+    for a deactivation: Replicator keeps pacing the host at the *live* interval
+    after Watcher has stopped watching it.
+    """
+
+    async def test_archive_defers_a_republish(self, client, monkeypatch):
+        calls: list[int] = []
+
+        async def _spy() -> None:
+            calls.append(1)
+
+        monkeypatch.setattr("src.api.routes.domains.defer_policy_republish", _spy)
+        await client.patch("/api/v1/domains/arch-pub.example", json={})
+        calls.clear()
+
+        response = await client.post("/api/v1/domains/arch-pub.example/archive")
+        assert response.status_code == 200
+        assert calls == [1]
+
+    async def test_restore_defers_a_republish(self, client, monkeypatch):
+        calls: list[int] = []
+
+        async def _spy() -> None:
+            calls.append(1)
+
+        await client.patch("/api/v1/domains/rest-pub.example", json={})
+        await client.post("/api/v1/domains/rest-pub.example/archive")
+
+        monkeypatch.setattr("src.api.routes.domains.defer_policy_republish", _spy)
+        response = await client.post("/api/v1/domains/rest-pub.example/restore")
+        assert response.status_code == 200
+        assert calls == [1]

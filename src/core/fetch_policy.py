@@ -66,11 +66,16 @@ def is_suspended(domain: Domain) -> bool:
     """Whether ``domain`` is archived or deactivated — either revokes its policy.
 
     Both states already stop Watcher issuing fetch commands for the domain's
-    items (``ensure_domain_and_resolve_suspension`` sets ``domain_suspended``),
-    so a live policy for the host asserts configuration Watcher no longer acts
-    on. One predicate so the two states cannot drift apart (#250).
+    items, so a live policy for the host asserts configuration Watcher no longer
+    acts on. Two mechanisms write the ``WatchedItem.domain_suspended`` that does
+    the stopping: ``ensure_domain_and_resolve_suspension`` *resolves* it for an
+    item being created (its caller writes the field), and ``domain_toggle_active``
+    back-fills every existing item when an operator flips the domain.
+
+    Delegates to :attr:`Domain.is_suspended` so the predicate has exactly one
+    spelling (#250, CR-1 finding 7).
     """
-    return domain.archived_at is not None or not domain.is_active
+    return domain.is_suspended
 
 
 def build_policy_events(

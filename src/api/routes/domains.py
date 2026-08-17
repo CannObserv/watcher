@@ -154,20 +154,32 @@ async def delete_domain(name: str, session: AsyncSession = Depends(get_db_sessio
 
 @router.post("/{name}/archive", response_model=DomainResponse)
 async def archive_domain(name: str, session: AsyncSession = Depends(get_db_session)):
-    """Archive a domain — suspends checks for every WatchedItem on it."""
+    """Archive a domain — suspends checks for every WatchedItem on it.
+
+    Republishes, because since #250 suspension revokes the host's policy on the
+    wire. Without the defer the revocation waits for the five-minute full set,
+    and Replicator goes on pacing a host Watcher has already stopped watching.
+    """
     domain = await _get_domain_or_404(name, session)
     if domain.archived_at is None:
         domain.archived_at = datetime.now(UTC)
     await session.commit()
     await session.refresh(domain)
+    await defer_policy_republish()
     return domain
 
 
 @router.post("/{name}/restore", response_model=DomainResponse)
 async def restore_domain(name: str, session: AsyncSession = Depends(get_db_session)):
-    """Restore an archived domain."""
+    """Restore an archived domain.
+
+    Republishes for the same reason as archive (#250): the live interval should
+    reach Replicator when the operator restores the domain, not up to five
+    minutes later.
+    """
     domain = await _get_domain_or_404(name, session)
     domain.archived_at = None
     await session.commit()
     await session.refresh(domain)
+    await defer_policy_republish()
     return domain

@@ -1,12 +1,12 @@
 """Alembic migration environment — async PostgreSQL."""
 
 import asyncio
-import os
 from logging.config import fileConfig
 
 from sqlalchemy.ext.asyncio import create_async_engine
 
 from alembic import context
+from src.core.database import get_migration_database_url
 from src.core.models import Base
 from src.core.models.base import ULIDType
 
@@ -50,11 +50,15 @@ def _include_object(object, name, type_, reflected, compare_to):
 
 
 def get_url() -> str:
-    """Read database URL from environment or alembic.ini."""
-    return os.environ.get(
-        "DATABASE_URL",
-        config.get_main_option("sqlalchemy.url", ""),
-    )
+    """Return the URL to migrate: the migration role's, else the app's.
+
+    Alembic is the one thing that needs DDL rights, so since #259 it reads
+    ``WATCHER_MIGRATION_DATABASE_URL`` first and falls back to ``DATABASE_URL``
+    — which is every host that has not run ``scripts/setup-db-roles.sql`` yet.
+    Resolution (and the divergence warning) lives in ``src.core.database`` so
+    it is testable without importing this module, whose import runs migrations.
+    """
+    return get_migration_database_url(config.get_main_option("sqlalchemy.url", ""))
 
 
 def run_migrations_offline() -> None:

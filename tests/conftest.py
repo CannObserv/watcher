@@ -41,6 +41,7 @@ from ulid import ULID
 
 from src.api.deps import get_db_session, get_probe_fn, require_api_key
 from src.core import db_safety
+from src.core.database import MIGRATION_DATABASE_URL_ENV
 from src.core.models import Base
 from src.core.models.app_user import AppUser
 from src.core.models.domain import Domain
@@ -89,7 +90,18 @@ if not db_safety.is_non_production_database(TEST_DATABASE_URL):
 # fixture resolves the URL, and deliberately never restored — the process
 # exists only to run this suite, and a restore would hand the production URL
 # back. This is the single mechanism managing these two variables. (#233)
+#
+# WATCHER_MIGRATION_DATABASE_URL is pinned for the same reason and is the
+# sharper edge of it (#259): it is the credential that holds DDL rights, so an
+# inherited production value would let anything invoking alembic migrate
+# production even with DATABASE_URL pointed here. Pinned rather than cleared —
+# clearing falls back to DATABASE_URL, which is right only until a test sets it.
+# The suite does hold DDL rights on the database it names, deliberately:
+# `test_engine` below runs create_all/drop_all and _apply_archiver_migrations
+# subprocess-invokes Archiver's alembic. Both are migration-shaped work, and
+# both are safe because the _test/_dev suffix check above already ran.
 os.environ["DATABASE_URL"] = TEST_DATABASE_URL
+os.environ[MIGRATION_DATABASE_URL_ENV] = TEST_DATABASE_URL
 os.environ.pop("PROCRASTINATE_DATABASE_URL", None)
 
 # The same hazard in bus form, and not hypothetical: a test run under an

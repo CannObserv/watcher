@@ -105,8 +105,15 @@ uv run pytest                                # tests
 uv run pytest -m integration                 # integration tests (needs PostgreSQL)
 uv run ruff check .                          # lint
 uv run alembic upgrade head                  # apply migrations
-uv run alembic revision --autogenerate -m "description"
 ```
+
+**Never run `alembic revision --autogenerate` against `DATABASE_URL`** — it diffs
+the models against whatever it connects to, which is production. Build a scratch
+database first (that is what `CREATEDB` on the migration role is for, #259):
+[docs/COMMANDS.md](docs/COMMANDS.md) → *Autogenerate wants a scratch database*.
+Alembic connects with `WATCHER_MIGRATION_DATABASE_URL`, else `DATABASE_URL`;
+`alembic.ini` carries no URL, so an unloaded shell fails instead of defaulting to
+production.
 
 Full reference: `docs/COMMANDS.md`.
 

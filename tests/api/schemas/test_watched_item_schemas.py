@@ -17,6 +17,9 @@ from src.api.schemas.watched_item import (
 )
 from src.core.models.watched_item import CONTENT_MEDIA_TYPE_MAX_LEN, WatchedItem
 
+# Required and non-empty on create since #260; every construction needs one.
+_SPECS = [{"schema_version": 1, "extraction": {"algorithm": "full_page"}}]
+
 
 class TestRenameArchiversInfoItemId:
     """Regression guard: field must be archiver_info_item_id, not info_item_id."""
@@ -30,6 +33,7 @@ class TestRenameArchiversInfoItemId:
             archiver_info_item_id="01ABCDEFGHJKMNPQRSTVWXYZ00",
             url="https://example.com",
             archiver_info_source_id="01ABCDEFGHJKMNPQRSTVWXYZ00",
+            source_specs=_SPECS,
         )
         assert schema.archiver_info_item_id == "01ABCDEFGHJKMNPQRSTVWXYZ00"
         assert "info_item_id" not in WatchedItemCreate.model_fields
@@ -123,6 +127,7 @@ class TestIssue186SchemaAdditions:
             archiver_info_item_id="01ABCDEFGHJKMNPQRSTVWXYZ00",
             url="https://example.com",
             archiver_info_source_id="01ABCDEFGHJKMNPQRSTVWXYZ00",
+            source_specs=_SPECS,
         )
         assert schema.archiver_info_source_id == "01ABCDEFGHJKMNPQRSTVWXYZ00"
 
@@ -141,6 +146,7 @@ class TestIssue186SchemaAdditions:
                 archiver_info_item_id="01ABCDEFGHJKMNPQRSTVWXYZ00",
                 url="https://example.com",
                 archiver_info_source_id="",
+                source_specs=_SPECS,
             )
 
     def test_patch_rejects_empty_archiver_info_source_id(self):
@@ -194,6 +200,7 @@ class TestIssue188IsActive:
             archiver_info_item_id="01ABCDEFGHJKMNPQRSTVWXYZ00",
             url="https://example.com",
             archiver_info_source_id="01ABCDEFGHJKMNPQRSTVWXYZ00",
+            source_specs=_SPECS,
         )
         assert c.is_active is True
 
@@ -203,6 +210,7 @@ class TestIssue188IsActive:
             url="https://example.com",
             archiver_info_source_id="01ABCDEFGHJKMNPQRSTVWXYZ00",
             is_active=False,
+            source_specs=_SPECS,
         )
         assert c.is_active is False
 
@@ -253,6 +261,57 @@ class TestTemplateSchemas:
             ItemNotificationTemplateCreate(title="Item Template")
 
 
+class TestIssue260SourceSpecsRequired:
+    """#260: `source_specs` is required and non-empty — the spec-less state is gone.
+
+    Settled as options 3 + 2 together. Archiver, the only caller, always has
+    specs in hand: its `registry_announcement` refuses to announce a source as
+    live without non-empty `source_specs`, and `watcher_provisioning` always
+    passes them. The "optional at create" affordance therefore named a state
+    nobody could legitimately reach and the pipeline had no ratified behaviour
+    for — it silently watched the whole page under a synthetic `[{}]`.
+    """
+
+    def test_create_requires_source_specs(self):
+        with pytest.raises(ValidationError):
+            WatchedItemCreate(
+                archiver_info_item_id="01ABCDEFGHJKMNPQRSTVWXYZ00",
+                url="https://example.com",
+                archiver_info_source_id="01ABCDEFGHJKMNPQRSTVWXYZ00",
+            )
+
+    def test_create_rejects_empty_source_specs(self):
+        """An empty list is the same unreachable state spelled explicitly."""
+        with pytest.raises(ValidationError):
+            WatchedItemCreate(
+                archiver_info_item_id="01ABCDEFGHJKMNPQRSTVWXYZ00",
+                url="https://example.com",
+                archiver_info_source_id="01ABCDEFGHJKMNPQRSTVWXYZ00",
+                source_specs=[],
+            )
+
+    def test_create_accepts_non_empty_source_specs(self):
+        specs = [{"schema_version": 1, "extraction": {"algorithm": "full_page"}}]
+        c = WatchedItemCreate(
+            archiver_info_item_id="01ABCDEFGHJKMNPQRSTVWXYZ00",
+            url="https://example.com",
+            archiver_info_source_id="01ABCDEFGHJKMNPQRSTVWXYZ00",
+            source_specs=specs,
+        )
+        assert c.source_specs == specs
+
+    def test_patch_rejects_empty_source_specs(self):
+        """The create gate is worth nothing if PATCH can empty the list again."""
+        with pytest.raises(ValidationError):
+            WatchedItemPatch(source_specs=[])
+
+    def test_openapi_advertises_source_specs_as_required(self):
+        """A client generated from the spec must not send a body the API rejects."""
+        schema = app.openapi()["components"]["schemas"]["WatchedItemCreate"]
+        assert "source_specs" in schema["required"]
+        assert schema["properties"]["source_specs"]["minItems"] == 1
+
+
 class TestIssue251ULIDValidation:
     """#251 CR-2: the Archiver links are ULID references, validated as such.
 
@@ -274,6 +333,7 @@ class TestIssue251ULIDValidation:
                 archiver_info_item_id="01ABCDEFGHJKMNPQRSTVWXYZ00",
                 url="https://example.com",
                 archiver_info_source_id=bad,
+                source_specs=_SPECS,
             )
 
     def test_create_rejects_malformed_archiver_info_item_id(self):
@@ -282,6 +342,7 @@ class TestIssue251ULIDValidation:
                 archiver_info_item_id="not-a-ulid",
                 url="https://example.com",
                 archiver_info_source_id="01ABCDEFGHJKMNPQRSTVWXYZ00",
+                source_specs=_SPECS,
             )
 
     def test_patch_rejects_malformed_archiver_info_source_id(self):
@@ -344,5 +405,6 @@ class TestIssue251ULIDValidation:
                 archiver_info_item_id=bad,
                 url="https://example.com",
                 archiver_info_source_id="01ABCDEFGHJKMNPQRSTVWXYZ00",
+                source_specs=_SPECS,
             )
         assert "type str" in str(exc_info.value)

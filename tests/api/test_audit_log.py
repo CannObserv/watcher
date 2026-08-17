@@ -25,6 +25,8 @@ async def _create_watched_item_via_api(client, db_session, *, name="W"):
             "archiver_info_source_id": str(ULID()),
             "archiver_info_item_id": str(item.info_item_id),
             "name": name,
+            # Required and non-empty since #260.
+            "source_specs": [{"schema_version": 1, "extraction": {"algorithm": "full_page"}}],
         },
     )
     assert resp.status_code == 201, resp.text

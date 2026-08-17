@@ -130,7 +130,7 @@ async def create_watched_item(
         domain_name=domain_name,
         domain_suspended=domain_state.suspended,
         domain_default_schedule_config=domain_state.default_schedule_config,
-        source_specs=data.source_specs or [],
+        source_specs=list(data.source_specs),
         archiver_info_source_id=data.archiver_info_source_id,
     )
 

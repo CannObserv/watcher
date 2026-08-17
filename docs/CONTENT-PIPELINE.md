@@ -169,14 +169,18 @@ its sweeper, the `WATCHER_CACHE_*` variables, and the back-population of
 Replicator had already stored, reporting *that* path as `content_cache_uri`,
 sweeping it, then PATCHing null — three moving parts doing nothing `blob_uri`
 does. `archiver_revision_id` existed only so the sweeper could PATCH against it;
-the column survives holding the ids captured while that path existed, but nothing
-writes or reads it, and it is gone from the API response (a deliberate breaking
-change over shipping a permanently-null field).
+it is gone from the API response too (a deliberate breaking change over shipping
+a permanently-null field).
 
-`content_cache_uri` / `content_cache_expires_at` are **released, not dropped** —
-no single deploy order makes dropping a NOT NULL column safe, so migration
-`32140463c26c` makes them nullable and a later one contracts (#261, together
-with `archiver_revision_id`).
+All three columns are now **dropped**, in `f4a8b26c9d31` (#261). The two cache
+columns were an expand/contract: no single deploy order makes dropping a NOT
+NULL column safe, so `32140463c26c` released them to nullable and the contract
+waited until the publisher was live. `archiver_revision_id` was different in
+kind — dead but holding real ids — and dropping it costs nothing, because
+Archiver identifies a SourceRevision by `(info_source_id, content_fingerprint)`
+(`uq_source_revisions_source_fingerprint`, the pair its upsert conflicts on).
+The local copy was redundant, not unique; the mapping is re-derivable from the
+fingerprint Watcher still stores.
 
 `spec_fingerprint` is **per-spec** (cannobserv#309), so a fallback from `spec[0]`
 to `spec[1]` moves it; Archiver reads the position that implies as a selector-rot

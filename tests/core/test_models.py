@@ -9,6 +9,7 @@ from ulid import ULID
 from src.core.database import get_database_url, get_engine, reset_engine
 from src.core.models.audit_log import AuditLog, EventType, audit
 from src.core.models.base import ULIDType
+from src.core.models.change_revision import ChangeRevision
 from src.core.models.domain import Domain
 from src.core.models.notification_template import (
     VISIBILITIES,
@@ -17,6 +18,7 @@ from src.core.models.notification_template import (
     VISIBILITY_WATCHED_ITEM,
     NotificationTemplate,
 )
+from src.core.models.pending_archiver_sync import PendingArchiverSync
 from src.core.models.temporal_profile import PostAction, ProfileType, TemporalProfile
 from src.core.models.watched_item import WatchedItem, WatchHealthStatus
 
@@ -321,3 +323,22 @@ class TestNotificationTemplateModel:
             VISIBILITY_DOMAIN,
             VISIBILITY_WATCHED_ITEM,
         )
+
+
+class TestRetiredTransportColumns:
+    """#261: the three columns the content.revisions cutover left behind are gone.
+
+    They were released, not dropped, in `32140463c26c` because no single deploy
+    order makes dropping a NOT NULL column safe. The publisher is live, so the
+    contract step landed — and nothing may reintroduce them: the scratch cache
+    they described does not exist, and Archiver re-derives its revision id from
+    `(info_source_id, content_fingerprint)`, its own uniqueness constraint.
+    """
+
+    def test_pending_archiver_sync_has_no_scratch_cache_columns(self):
+        columns = set(PendingArchiverSync.__table__.columns.keys())
+        assert "content_cache_uri" not in columns
+        assert "content_cache_expires_at" not in columns
+
+    def test_change_revision_has_no_archiver_revision_id(self):
+        assert "archiver_revision_id" not in ChangeRevision.__table__.columns.keys()

@@ -34,8 +34,6 @@ async def _make_pending(session, *, offset_seconds: int = 0) -> tuple:
     pending = PendingArchiverSync(
         change_revision_id=rev.id,
         watched_item_id=wi.id,
-        content_cache_uri="file:///x.bin",
-        content_cache_expires_at=now + timedelta(seconds=600),
         next_attempt_at=now + timedelta(seconds=offset_seconds),
     )
     session.add(pending)

@@ -347,8 +347,9 @@ async def process_watched_item(
     watched_item.last_changed_at = now
 
     # #191: dispatch CHANGE_DETECTED once for the WatchedItem (the monitored entity).
-    # No archiver_revision_id: Archiver allocates the registry id now and never
-    # tells us, so the key was permanently null (#253).
+    # No registry id in the metadata: Archiver allocates it on its side of
+    # content.revisions and never tells us, so the key was permanently null
+    # (#253; the column it mirrored was dropped in #261).
     change_meta: dict = {
         "change_revision_id": str(rev.id),
         "content_fingerprint": outcome.content_fingerprint,

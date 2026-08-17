@@ -164,8 +164,8 @@ class ChangeRevisionResponse(BaseModel):
     id on its side of ``content.revisions`` and never reports it back, so the
     field could only ever have been null. A **breaking** response change, taken
     deliberately over shipping a permanently-null field that reads as "not synced
-    yet". The column survives on the model, holding the 23 ids captured while the
-    HTTP write path existed.
+    yet". The column backing it is gone too as of #261 — the mapping to a
+    registry revision is re-derivable from ``content_fingerprint``.
     """
 
     model_config = ConfigDict(from_attributes=True)

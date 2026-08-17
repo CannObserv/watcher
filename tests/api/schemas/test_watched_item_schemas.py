@@ -119,6 +119,10 @@ class TestIssue186SchemaAdditions:
     def test_response_has_last_checked_at(self):
         assert "last_checked_at" in WatchedItemResponse.model_fields
 
+    def test_response_has_last_observed_at(self):
+        """#266: observation freshness is additive on the response, beside last_checked_at."""
+        assert "last_observed_at" in WatchedItemResponse.model_fields
+
     def test_response_has_archiver_info_source_id(self):
         assert "archiver_info_source_id" in WatchedItemResponse.model_fields
 

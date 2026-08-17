@@ -5,7 +5,11 @@
 -- service out of its own schema.
 --
 --   sudo -u postgres WATCHER_APP_PASSWORD='<generated>' \
---     psql -d watcher -f scripts/setup-db-roles.sql
+--     psql -d watcher < scripts/setup-db-roles.sql
+--
+-- Redirected, not `-f`: the `postgres` OS user cannot read anything under
+-- /home/exedev, so `-f` fails with "Permission denied" on this host. The
+-- redirect is performed by the invoking shell, which can.
 --
 -- The password never appears in this file: it is read from the environment by
 -- \getenv below. Run order, the /etc/watcher/.env edit that follows, the

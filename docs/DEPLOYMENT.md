@@ -181,8 +181,10 @@ database while the service is up.
 # A password only this file and /etc/watcher/.env will ever hold.
 APP_PW="$(openssl rand -base64 24 | tr -d '/+=')"
 
+# Redirected, not `-f`: the postgres OS user cannot read under /home/exedev,
+# so `-f scripts/...` fails with "Permission denied". The shell does the read.
 sudo -u postgres WATCHER_APP_PASSWORD="$APP_PW" \
-  psql -d watcher -f scripts/setup-db-roles.sql
+  psql -d watcher < scripts/setup-db-roles.sql
 ```
 
 It prints two tables when it finishes. Check them before going further:

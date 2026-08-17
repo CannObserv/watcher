@@ -15,7 +15,12 @@ Per message, branch on payload type and **correlate on ``command_id`` only**
 * ``FetchFailedEvent`` → branch ``terminal`` first (its wire key is
   per-emission, so several distinct facts per command are normal — MUST-4);
   terminal marks the row failed and defers ``apply_fetch_failure``;
-  non-terminal only refreshes ``fact_at``.
+  non-terminal only refreshes ``fact_at``. The one exception is
+  ``reason="not_modified"`` (#249): a 304 is a *successful check that found no
+  change*, so a terminal fact carrying it closes the row as ``NOT_MODIFIED`` and
+  defers ``apply_fetch_not_modified`` instead — it must never reach
+  ``apply_fetch_failure``, which would mark a healthy item ERROR and notify a
+  user about it on every no-change check.
 * Unknown ``command_id`` → ack and drop, with a log line. By contract the
   in-flight fact for a lost map entry "will arrive, match nothing, and have to
   be discarded" — this is that discard. Since cannobserv#300 the line also names
@@ -42,9 +47,17 @@ from redis.asyncio import Redis
 from sqlalchemy import select
 
 from src.core.logging import get_logger
-from src.core.models.fetch_command import FetchCommand, FetchCommandStatus
+from src.core.models.fetch_command import (
+    NOT_MODIFIED_REASON,
+    FetchCommand,
+    FetchCommandStatus,
+)
 from src.core.models.watched_item import WatchedItem
-from src.workers.fetch_commands import apply_fetch_blob, apply_fetch_failure
+from src.workers.fetch_commands import (
+    apply_fetch_blob,
+    apply_fetch_failure,
+    apply_fetch_not_modified,
+)
 
 logger = get_logger(__name__)
 
@@ -74,6 +87,10 @@ async def _defer_apply_blob(command_id: str) -> None:
 
 async def _defer_apply_failure(command_id: str) -> None:
     await apply_fetch_failure.configure().defer_async(command_id=command_id)
+
+
+async def _defer_apply_not_modified(command_id: str) -> None:
+    await apply_fetch_not_modified.configure().defer_async(command_id=command_id)
 
 
 async def _log_orphan(
@@ -142,6 +159,7 @@ async def process_fact_message(
     *,
     defer_blob: DeferFn = _defer_apply_blob,
     defer_failure: DeferFn = _defer_apply_failure,
+    defer_not_modified: DeferFn = _defer_apply_not_modified,
 ) -> str:
     """Apply one decoded fact to the pending map; returns an outcome tag.
 
@@ -198,6 +216,21 @@ async def process_fact_message(
             # command is still retrying; fact_at keeps the reaper's hands off.
             await session.commit()
             return "nonterminal_recorded"
+        if payload.reason == NOT_MODIFIED_REASON:
+            # #249: not a failure. Close the command under its own status and
+            # send it down the success-shaped apply. ``failure_reason`` stays
+            # NULL on purpose — at steady state this token outnumbers every real
+            # failure combined (co-core's own note), so journalling it as one
+            # would destroy ``failure_reason`` as a signal. The status column is
+            # the record. No fingerprint and no ``blob_uri`` are written either:
+            # there are no bytes for this occasion, and ``content_fingerprint``
+            # here is Replicator's raw-bytes identity for *this* command.
+            row.status = FetchCommandStatus.NOT_MODIFIED
+            if payload.status_code is not None:
+                row.status_code = payload.status_code
+            await session.commit()
+            await defer_not_modified(row.command_id)
+            return "not_modified_recorded"
         row.status = FetchCommandStatus.FAILED
         row.failure_reason = payload.reason
         row.failure_detail = payload.detail

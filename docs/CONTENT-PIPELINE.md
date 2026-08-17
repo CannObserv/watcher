@@ -36,18 +36,45 @@ What that leaves in the code:
   `watcher` with a single member, started in the lifespan whenever
   `WATCHER_BUS_REDIS_URL` is set. Correlates on `command_id` only, never dedupes
   on fingerprint, branches `terminal` first on `fetch_failed`.
-- **The apply tasks** — `apply_fetch_blob` / `apply_fetch_failure` in
+- **The apply tasks** — `apply_fetch_blob` / `apply_fetch_failure` /
+  `apply_fetch_not_modified` in
   [`src/workers/fetch_commands.py`](../src/workers/fetch_commands.py):
   status-guarded against duplicates, supersession-guarded against out-of-order
   facts, blob-unreadable → re-issue. They own all check bookkeeping via the
-  shared `_record_check_success` / `_record_check_failure` in
-  [`src/workers/tasks.py`](../src/workers/tasks.py).
+  shared `_record_check_success` / `_record_check_failure`, which live in that
+  same module.
 - **The reaper** — `reap_fetch_commands`, every 5 minutes, keyed on signal age
   `coalesce(fact_at, published_at)`. A stale row holding a blob fact gets its
   apply **re-deferred**; anything else is expired and re-issued with `intent_id`
   lineage. Knobs: `WATCHER_FETCH_COMMAND_TIMEOUT_SECONDS`,
   `WATCHER_FETCH_MAX_REISSUES`; hitting the cap sets ERROR health and lifts the
   gate.
+
+### `not_modified` is a success, not a failure (#249)
+
+A 304 rides `FetchFailedEvent` with `reason="not_modified"`, `terminal=True`,
+`status_code=304` — co-core's registry calls it "the one token on this event that
+is **not** a failure", and rejected a dedicated `content_unchanged` event because
+the event's real meaning is *"this command will not produce a blob"*. There is no
+new dispatch arm; the consumer branches `terminal` first, then the reason.
+
+Watcher's handling, top to bottom:
+
+| Piece | Behaviour |
+|---|---|
+| Row status | `FetchCommandStatus.NOT_MODIFIED` — its own member, so a 304 is not confusable with `SUCCEEDED` ("a blob went through the pipeline") in any status-keyed query. No migration: `status` is a plain `String(20)`. |
+| `failure_reason` | Stays NULL. At steady state this token outnumbers every real failure combined, so journalling it as one would destroy `failure_reason` as a signal. |
+| Fingerprint | Nothing written. There is no item-level fingerprint to reuse (Watcher's extracted-text identity lives on `ChangeRevision`), and `fetch_commands.content_fingerprint` is Replicator's *raw-bytes* identity for an occasion that produced bytes. The item keeps the content it already has. |
+| Apply | `apply_fetch_not_modified` → OK health, fresh `last_checked_at`, `last_observed_at` stamped (the content *was* verified current), `CHECK_NO_CHANGE` audit carrying `source: not_modified`, `WATCH_RECOVERED` if the item was in ERROR. Never `CHECK_FETCH_FAILED`, never `WATCH_ERROR`. |
+| Revision half | Skipped entirely — no extraction, no `ChangeRevision`, no `PendingArchiverSync`, no `content.revisions` frame. |
+| Gate / reaper | `OPEN_STATUSES` is a *positive* enumeration, so the new member is closed to the scheduling gate and invisible to the reaper for free. |
+
+**Watcher does not yet send validators.** `If-None-Match` / `If-Modified-Since`
+storage and replay, and the fingerprint-continuity question a 304 raises (an
+extraction drift goes unnoticed for as long as the origin keeps answering 304),
+are [#269](https://github.com/CannObserv/watcher/issues/269). This half only has
+to *receive* the token — which is why it is safe to land first, and dead code
+until #269 does.
 
 ### Extraction outcomes: empty is a failure (#258)
 

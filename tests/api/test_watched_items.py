@@ -290,8 +290,6 @@ class TestDeleteWatchedItem:
         sync = PendingArchiverSync(
             change_revision_id=revision.id,
             watched_item_id=wi_id,
-            content_cache_uri="file:///tmp/x",
-            content_cache_expires_at=now,
             next_attempt_at=now,
         )
         db_session.add(sync)
@@ -687,6 +685,29 @@ class TestCreateWatchedItem:
         assert "last_checked_at" in body
         assert body["health_status"] == "unknown"
         assert body["last_checked_at"] is None
+
+    async def test_response_includes_last_observed_at(self, client, db_session):
+        """#266: last_observed_at rides beside last_checked_at on every response.
+
+        Additive and non-breaking — the pair is what makes freshness readable:
+        last_checked_at says "we tried at T", last_observed_at says "content was
+        verified current as of T" (#264, and a 304 counts too since #249).
+        """
+        observed = datetime(2026, 8, 15, 12, 30, tzinfo=UTC)
+        wi = await _make_watched_item(db_session, name="ObservedFields", last_observed_at=observed)
+        response = await client.get(f"/api/v1/watched-items/{wi.id}")
+        assert response.status_code == 200
+        body = response.json()
+        assert "last_observed_at" in body
+        assert body["last_observed_at"].startswith("2026-08-15T12:30:00")
+
+    async def test_response_last_observed_at_null_before_first_observation(
+        self, client, db_session
+    ):
+        """A never-observed item reports null, not an absent key."""
+        wi = await _make_watched_item(db_session, name="NeverObserved")
+        body = (await client.get(f"/api/v1/watched-items/{wi.id}")).json()
+        assert body["last_observed_at"] is None
 
 
 class TestIssue188IsActive:

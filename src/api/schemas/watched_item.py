@@ -129,6 +129,11 @@ class WatchedItemResponse(BaseModel):
     archived_at: datetime | None
     last_reviewed_at: datetime | None
     last_checked_at: datetime | None
+    # Observation freshness (#264, surfaced #266). `last_checked_at` is "we
+    # tried at T"; this is "the content was verified current as of T" — a
+    # successful check, or a 304 in which the origin asserted the bytes are
+    # current (#249). Additive: never derive next-due from it.
+    last_observed_at: datetime | None
     last_changed_at: datetime | None
     health_status: WatchHealthStatus
     default_schedule_config: dict | None
@@ -164,8 +169,8 @@ class ChangeRevisionResponse(BaseModel):
     id on its side of ``content.revisions`` and never reports it back, so the
     field could only ever have been null. A **breaking** response change, taken
     deliberately over shipping a permanently-null field that reads as "not synced
-    yet". The column survives on the model, holding the 23 ids captured while the
-    HTTP write path existed.
+    yet". The column backing it is gone too as of #261 — the mapping to a
+    registry revision is re-derivable from ``content_fingerprint``.
     """
 
     model_config = ConfigDict(from_attributes=True)

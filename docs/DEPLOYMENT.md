@@ -170,6 +170,33 @@ at the time of writing, so the migration itself is a metadata-only lock on four
 rows; the ordering is about the window, not the data. Subsequent deploys use the
 standard order above.
 
+### Restart-before-migrate — one-time, `f4a8b26c9d31` (#261)
+
+`f4a8b26c9d31` **drops** three columns the previous release still maps:
+`pending_archiver_sync.content_cache_uri` / `content_cache_expires_at` and
+`change_revisions.archiver_revision_id`. SQLAlchemy names every mapped column in
+its SELECTs, so the order above is reversed for this one:
+
+```bash
+sudo systemctl restart watcher      # new code first — it no longer maps them
+uv run alembic upgrade head         # then drop the columns
+```
+
+Migrating first would drop columns out from under the running process, and every
+query against those two tables — the pipeline's last-fingerprint lookup and
+`GET /watched-items/{id}/revisions` among them — would fail with
+`UndefinedColumn` until the restart landed.
+
+Restart-first has no equivalent window: the new code never references the three,
+both cache columns were already released to nullable by `32140463c26c`, and
+`archiver_revision_id` has always been nullable, so nothing the new code writes
+needs them. `pending_archiver_sync` held zero rows at the time of writing and
+`change_revisions` held 32, of which 23 carried an `archiver_revision_id` — those
+values are destroyed by design (#261): Archiver identifies a SourceRevision by
+`(info_source_id, content_fingerprint)`, so the mapping is re-derivable and the
+local copy was redundant rather than unique. Subsequent deploys use the standard
+order above.
+
 ### No safe order — one-time, `e7c4b2a91f60` (#252)
 
 `e7c4b2a91f60` adds `fetch_commands.info_source_id` NOT NULL, and the release

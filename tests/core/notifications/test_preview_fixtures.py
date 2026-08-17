@@ -36,7 +36,7 @@ def _real_change_detected_keys() -> set[str]:
     but omitted here would NOT fail this test; it would only weaken the guard.
     """
     base = set(watched_item_event_base_metadata(_FakeWatchedItem()).keys())
-    return base | {"change_revision_id", "content_fingerprint", "archiver_revision_id"}
+    return base | {"change_revision_id", "content_fingerprint"}
 
 
 class TestMockEventFixtures:

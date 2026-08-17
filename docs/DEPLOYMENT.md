@@ -31,7 +31,8 @@ pattern — see **Redis and the bus**.
 
 | Variable | Location | Required | Purpose |
 |---|---|---|---|
-| `DATABASE_URL` | `/etc/watcher/.env` | **yes** | PostgreSQL connection string |
+| `DATABASE_URL` | `/etc/watcher/.env` | **yes** | PostgreSQL connection string the **application** connects with. Once the role split is applied (below) this names `watcher_app`, which holds DML and no DDL |
+| `WATCHER_MIGRATION_DATABASE_URL` | `/etc/watcher/.env` | no | Connection string **Alembic** connects with — the schema owner, `watcher` (#259). Unset → falls back to `DATABASE_URL`, which is the pre-split behaviour and what every host uses until `scripts/setup-db-roles.sql` has run. Set-but-empty counts as unset. `scripts/dev_server.sh` overwrites it with the dev database, and `tests/conftest.py` pins it to `TEST_DATABASE_URL`: it is the one variable that can drop tables, so it is never inherited by a non-production launch path |
 | `PROCRASTINATE_DATABASE_URL` | `/etc/watcher/.env` | no | libpq-style DSN for procrastinate; falls back to `DATABASE_URL` with driver prefix stripped |
 | `GH_TOKEN` | `.env` | no | GitHub personal access token |
 | `TEST_DATABASE_URL` | `.env` | no | PostgreSQL connection string for test database |
@@ -151,6 +152,116 @@ sudo systemctl restart watcher
 A fresh host bootstraps the full schema the same way (`alembic upgrade head`
 against an empty database). The chain is self-contained — it references no
 Archiver-owned schema — and is smoke-checked in CI (`migrations` job, #234).
+
+Alembic connects with `WATCHER_MIGRATION_DATABASE_URL` when it is set and
+`DATABASE_URL` otherwise (#259), so the command above is unchanged either way.
+`alembic.ini` carries **no** URL: it used to default to the production database
+with a guessable password, which made "migrate production" the behaviour of a
+shell that forgot `source scripts/load-env.sh`. With neither variable set the
+run now fails instead.
+
+### Migration role and application role — one-time (#259)
+
+Splits the single `watcher` role in two: `watcher` keeps owning and migrating
+the schema, and a new `watcher_app` serves it with `SELECT/INSERT/UPDATE/DELETE`
+and no DDL. **The code half is already deployed and is a no-op until this runs**
+— the fallback above means a single-role database behaves exactly as before.
+
+`scripts/setup-db-roles.sql` is purely additive: it creates one role, grants it
+strictly less than exists today, and reassigns no ownership. `watcher` remains
+the owner, which is why rollback is an env-file edit rather than a repair. It
+also gives `watcher` `CREATEDB` — the missing attribute that forced
+`9c1d4b7ea822` and `f4a8b26c9d31` to be hand-written and made per-agent test
+databases a `sudo -u postgres` job.
+
+**1. Apply the grants.** Read the script first; it runs against the live
+database while the service is up.
+
+```bash
+# A password only this file and /etc/watcher/.env will ever hold.
+APP_PW="$(openssl rand -base64 24 | tr -d '/+=')"
+
+# Redirected, not `-f`: the postgres OS user cannot read under /home/exedev,
+# so `-f scripts/...` fails with "Permission denied". The shell does the read.
+sudo -u postgres WATCHER_APP_PASSWORD="$APP_PW" \
+  psql -d watcher < scripts/setup-db-roles.sql
+```
+
+It prints two tables when it finishes. Check them before going further:
+`watcher_app` must show `createdb=f`, `schema_usage=t`, **`schema_create=f`**,
+and `sel/ins/upd/del = t` on all 17 tables except `alembic_version`, which is
+`t/f/f/f`. Re-running the script is safe — it re-asserts the attributes and
+rotates the password.
+
+**2. Prove the new role can serve, and cannot DDL.** Still before touching the
+env file, so a failure here costs nothing:
+
+```bash
+APP_URL="postgresql://watcher_app:${APP_PW}@localhost:5432/watcher"
+
+psql "$APP_URL" -c "SELECT count(*) FROM watched_items"          # succeeds
+psql "$APP_URL" -c "CREATE TABLE ddl_probe (x int)"              # permission denied for schema public
+psql "$APP_URL" -c "DROP TABLE watched_items"                    # must be owner of table watched_items
+psql "$APP_URL" -c "INSERT INTO alembic_version VALUES ('x')"    # permission denied for table alembic_version
+psql "$APP_URL" -c "SELECT nextval('procrastinate_jobs_id_seq')" # succeeds — enqueue needs this
+```
+
+The three refusals are the whole point. If `CREATE TABLE` succeeds, the app role
+holds `CREATE` on `public` and the split has bought nothing — stop and fix the
+grant rather than proceeding.
+
+**3. Point the two URLs at the two roles** in `/etc/watcher/.env`. The
+migration credential is the value `DATABASE_URL` holds *right now*:
+
+```ini
+DATABASE_URL=postgresql+asyncpg://watcher_app:<APP_PW>@localhost:5432/watcher
+WATCHER_MIGRATION_DATABASE_URL=postgresql+asyncpg://watcher:<existing>@localhost:5432/watcher
+```
+
+Both live in the same file, so the service process inherits the migration
+credential in its environment — the weaker of the two options considered in
+#259, accepted for deploy friction. The guarantee it still buys is the one that
+matters: the *connection the app actually opens* cannot execute DDL, whatever
+reaches it.
+
+**4. Restart and confirm.**
+
+```bash
+sudo systemctl restart watcher
+source scripts/load-env.sh                      # pick up the edited file
+curl -s localhost:8000/ready                    # {"status":"ready","db":true,...}
+sudo journalctl -u watcher -n 50 | grep -i 'permission denied' || echo "no permission errors"
+```
+
+Then confirm the queue still turns over — the readiness probe only proves
+`SELECT 1`, while `procrastinate` needs sequences and functions:
+
+```bash
+psql "${DATABASE_URL/+asyncpg/}" -c \
+  "SELECT status, count(*) FROM procrastinate_jobs GROUP BY status"
+```
+
+A `succeeded` count that grows over a few minutes means the embedded worker is
+enqueuing and running under the new role. `permission denied for sequence` in
+the journal is the signature of a missed sequence grant.
+
+**5. Migrate as usual.** `uv run alembic upgrade head` now connects as `watcher`
+through the new variable. Nothing about the command changes.
+
+**Rollback.** Nothing in step 1 removes anything, so recovery is one line:
+comment out the new `DATABASE_URL`, restore the previous `watcher` value, and
+`sudo systemctl restart watcher`. The service is back on the owning role within
+a restart, and the grants can stay in place while the failure is diagnosed.
+Dropping the role entirely (`DROP OWNED BY watcher_app; DROP ROLE watcher_app;`)
+is only needed to undo it permanently.
+
+**What the split does not cover.** Grants are not schema state, so they live
+outside the Alembic chain and no migration recreates them — a rebuilt or
+restored database needs this script run again. Objects created by any role
+*other* than `watcher` are not covered by the default privileges either: a
+migration run as `postgres` leaves tables the app cannot read, with no error at
+migrate time. And `procrastinate schema --apply` on a procrastinate upgrade is
+DDL, so it needs the migration credential too.
 
 ### Restart-before-migrate — one-time, `d5a71c93e0f2` (#251)
 

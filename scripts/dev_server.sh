@@ -112,6 +112,16 @@ esac
 export DATABASE_URL="$DEV_URL"
 unset PROCRASTINATE_DATABASE_URL
 
+# Same treatment for the migration credential (#259), and it is the sharpest of
+# the three: alembic reads WATCHER_MIGRATION_DATABASE_URL first, that variable
+# lives in /etc/watcher/.env which this script sources, and the `alembic
+# upgrade head` below runs with whatever it finds. Inheriting it would point
+# the *dev* launch path at production holding DDL rights — including the
+# public-schema DROP in the TEST_DATABASE_URL branch. Overwritten rather than
+# unset: unset falls back to DATABASE_URL, which is the same value today but
+# would silently follow any future change to that fallback.
+export WATCHER_MIGRATION_DATABASE_URL="$DEV_URL"
+
 # Same guard for the bus (#245): /etc/watcher/.env carries the production
 # WATCHER_BUS_REDIS_URL, and a dev server inheriting it would publish
 # fetch-policy frames onto the stream the live Replicator paces real origins
@@ -169,6 +179,7 @@ fi
 
 if [[ "${WATCHER_DEV_SERVER_DRY_RUN:-}" == "1" ]]; then
   echo "DATABASE_URL=$DATABASE_URL"
+  echo "WATCHER_MIGRATION_DATABASE_URL=$WATCHER_MIGRATION_DATABASE_URL"
   echo "PROCRASTINATE_DATABASE_URL=(cleared)"
   echo "WATCHER_BUS_REDIS_URL=$BUS_REPORT"
   echo "WATCHER_BUS_ENABLED=$BUS_ENABLED_REPORT"

@@ -13,7 +13,9 @@ The invariants encoded here are the ones the #234 squash established:
 - the chain renders end-to-end and creates every model-backed table.
 """
 
+import configparser
 import io
+import os
 import re
 from contextlib import redirect_stdout
 from pathlib import Path
@@ -23,6 +25,7 @@ from alembic.config import Config
 from alembic.script import ScriptDirectory
 
 from alembic import command
+from src.core.database import MIGRATION_DATABASE_URL_ENV
 from src.core.models import Base
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -110,3 +113,52 @@ def test_offline_upgrade_renders_all_tables(monkeypatch: pytest.MonkeyPatch) -> 
         )
 
     assert _INFORMATION_COUPLING.search(rendered) is None
+
+
+def test_ini_carries_no_database_url() -> None:
+    """``alembic.ini`` must not name a database (#259).
+
+    It shipped ``postgresql+asyncpg://watcher:watcher@localhost:5432/watcher``
+    — the *production* database, with a guessable password — as the fallback
+    ``get_url()`` reaches when ``DATABASE_URL`` is unset. A shell that forgot
+    ``source scripts/load-env.sh`` therefore migrated production rather than
+    failing. The value is now empty so the resolver raises instead.
+    """
+    parser = configparser.ConfigParser()
+    parser.read(_REPO_ROOT / "alembic.ini")
+    assert parser.get("alembic", "sqlalchemy.url", fallback="") == ""
+
+
+@pytest.mark.integration
+class TestMigrationCredentialPrecedence:
+    """``alembic`` connects with the migration role, falling back to the app's.
+
+    Exercised end-to-end against the live test database: ``alembic current``
+    runs ``env.py`` online, so a case that passes proves the URL it *actually
+    connected with*, not what a helper returned. The counter-URL names a
+    closed port, so reading the wrong variable fails loudly rather than
+    silently succeeding against the same database.
+    """
+
+    UNREACHABLE = "postgresql+asyncpg://watcher:watcher@127.0.0.1:1/nonexistent"
+
+    @staticmethod
+    def _config() -> Config:
+        return Config(str(_REPO_ROOT / "alembic.ini"))
+
+    def test_migration_url_wins(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv(MIGRATION_DATABASE_URL_ENV, os.environ["DATABASE_URL"])
+        monkeypatch.setenv("DATABASE_URL", self.UNREACHABLE)
+        command.current(self._config())
+
+    def test_falls_back_to_database_url(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """The pre-#259 path: no migration credential configured anywhere."""
+        monkeypatch.delenv(MIGRATION_DATABASE_URL_ENV, raising=False)
+        command.current(self._config())
+
+    def test_unreachable_url_really_fails(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Pins the counter-URL, without which the two cases above prove nothing."""
+        monkeypatch.delenv(MIGRATION_DATABASE_URL_ENV, raising=False)
+        monkeypatch.setenv("DATABASE_URL", self.UNREACHABLE)
+        with pytest.raises(OSError):
+            command.current(self._config())

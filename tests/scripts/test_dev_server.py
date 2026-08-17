@@ -98,6 +98,29 @@ def test_clears_inherited_procrastinate_url() -> None:
     assert "PROCRASTINATE_DATABASE_URL=(cleared)" in result.stdout
 
 
+def test_overrides_inherited_migration_url() -> None:
+    """WATCHER_MIGRATION_DATABASE_URL must be forced onto the dev database.
+
+    #259 gives Alembic its own credential, and ``/etc/watcher/.env`` — which
+    this script sources — is where it lives. The script runs ``alembic upgrade
+    head`` before exec'ing uvicorn, so an inherited production value would make
+    the *dev* launch path migrate **production** with the schema owner's
+    rights: the #233 hazard with the one variable that can drop tables.
+    """
+    result = run({"WATCHER_MIGRATION_DATABASE_URL": PROD_URL, "TEST_DATABASE_URL": TEST_URL})
+    assert result.returncode == 0, result.stderr
+    # Line-exact: PROD_URL is a prefix of TEST_URL, so a substring check on the
+    # whole report would pass on the very output it is meant to reject.
+    assert f"WATCHER_MIGRATION_DATABASE_URL={TEST_URL}" in result.stdout.splitlines()
+
+
+def test_migration_url_follows_the_dedicated_dev_database() -> None:
+    """It tracks the resolved dev URL, not TEST_DATABASE_URL specifically."""
+    result = run({"WATCHER_DEV_DATABASE_URL": DEV_URL, "TEST_DATABASE_URL": TEST_URL})
+    assert result.returncode == 0, result.stderr
+    assert f"WATCHER_MIGRATION_DATABASE_URL={DEV_URL}" in result.stdout
+
+
 def test_refuses_to_bind_the_production_port() -> None:
     """Port 8000 belongs to systemd; a dev launch there is always a mistake."""
     result = run({"TEST_DATABASE_URL": TEST_URL, "WATCHER_DEV_PORT": "8000"})

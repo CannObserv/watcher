@@ -15,15 +15,17 @@ import pytest
 from sqlalchemy import select
 
 import src.workers.fetch_commands as fc_mod
-from src.core.fetch_commands import create_fetch_command
+from src.core.fetch_commands import create_fetch_command, get_open_command
 from src.core.models.audit_log import AuditLog, EventType
 from src.core.models.domain import Domain
-from src.core.models.fetch_command import FetchCommand, FetchCommandStatus
+from src.core.models.fetch_command import OPEN_STATUSES, FetchCommand, FetchCommandStatus
 from src.core.models.watched_item import WatchHealthStatus
+from src.core.notifications.events import WatchEventType
 from src.core.registry import ServiceRegistry
 from src.workers.fetch_commands import (
     apply_fetch_blob,
     apply_fetch_failure,
+    apply_fetch_not_modified,
     reap_fetch_commands,
 )
 from src.workers.pipeline import ExtractionError, WatchedItemResult
@@ -292,6 +294,148 @@ class TestApplyFetchFailure:
 
         assert second == {"skipped": True, "reason": "already_applied"}
         assert len(await _audit_events(db_session, EventType.CHECK_FETCH_FAILED)) == 1
+
+
+class TestApplyFetchNotModified:
+    """#249 part 1: a 304 is a successful check that found no change.
+
+    The trap this closes: routed to ``apply_fetch_failure`` it would set ERROR
+    health, write ``CHECK_FETCH_FAILED``, and fire one ``WATCH_ERROR`` — on
+    *every* successful no-change check, for the most useful answer an origin
+    can give.
+    """
+
+    async def _not_modified_row(self, db_session, **wi_kwargs):
+        wi = await make_watched_item(
+            db_session, primary_url="https://lcb.wa.gov/notices", **wi_kwargs
+        )
+        row = await create_fetch_command(db_session, wi, now=NOW)
+        row.status = FetchCommandStatus.NOT_MODIFIED
+        row.status_code = 304
+        row.fact_at = NOW
+        await db_session.flush()
+        return wi, row
+
+    def _spy_dispatch(self, monkeypatch) -> AsyncMock:
+        spy = AsyncMock(return_value=0)
+        monkeypatch.setattr(fc_mod, "dispatch_event_notifications", spy)
+        return spy
+
+    async def test_records_an_unchanged_check_with_ok_health(self, db_session, monkeypatch):
+        wi, row = await self._not_modified_row(db_session)
+        monkeypatch.setattr(
+            fc_mod, "get_session_factory", lambda: _mock_session_factory(db_session)
+        )
+        stub = _stub_pipeline(monkeypatch)
+        dispatch = self._spy_dispatch(monkeypatch)
+
+        result = await apply_fetch_not_modified(row.command_id)
+
+        assert result == {"applied": True, "not_modified": True}
+        assert wi.health_status == WatchHealthStatus.OK
+        assert wi.last_checked_at is not None
+        # A 304 IS an observation: the origin asserted its bytes are current.
+        assert wi.last_observed_at is not None
+        assert row.applied_at is not None
+        assert row.status == FetchCommandStatus.NOT_MODIFIED
+        # No bytes → the revision-producing half never runs.
+        assert stub.await_count == 0
+        # No WATCH_ERROR, and no notification at all on a steady OK item.
+        assert dispatch.await_count == 0
+
+    async def test_audits_as_checked_unchanged_never_as_a_fetch_failure(
+        self, db_session, monkeypatch
+    ):
+        _, row = await self._not_modified_row(db_session)
+        monkeypatch.setattr(
+            fc_mod, "get_session_factory", lambda: _mock_session_factory(db_session)
+        )
+        self._spy_dispatch(monkeypatch)
+
+        await apply_fetch_not_modified(row.command_id)
+
+        assert await _audit_events(db_session, EventType.CHECK_FETCH_FAILED) == []
+        assert await _audit_events(db_session, EventType.CHECK_SNAPSHOT_CREATED) == []
+        events = await _audit_events(db_session, EventType.CHECK_NO_CHANGE)
+        assert len(events) == 1
+        assert events[0].payload["changed"] is False
+        assert events[0].payload["baseline"] is False
+        # Distinguishable from an unchanged *extraction* in the audit trail.
+        assert events[0].payload["source"] == "not_modified"
+
+    async def test_error_item_recovers(self, db_session, monkeypatch):
+        wi, row = await self._not_modified_row(db_session)
+        wi.health_status = WatchHealthStatus.ERROR
+        await db_session.flush()
+        monkeypatch.setattr(
+            fc_mod, "get_session_factory", lambda: _mock_session_factory(db_session)
+        )
+        dispatch = self._spy_dispatch(monkeypatch)
+
+        await apply_fetch_not_modified(row.command_id)
+
+        assert wi.health_status == WatchHealthStatus.OK
+        assert dispatch.await_count == 1
+        event = dispatch.await_args.kwargs["event"]
+        assert event.event_type == WatchEventType.WATCH_RECOVERED
+
+    async def test_idempotent_once_applied(self, db_session, monkeypatch):
+        _, row = await self._not_modified_row(db_session)
+        monkeypatch.setattr(
+            fc_mod, "get_session_factory", lambda: _mock_session_factory(db_session)
+        )
+        self._spy_dispatch(monkeypatch)
+
+        await apply_fetch_not_modified(row.command_id)
+        second = await apply_fetch_not_modified(row.command_id)
+
+        assert second == {"skipped": True, "reason": "already_applied"}
+        assert len(await _audit_events(db_session, EventType.CHECK_NO_CHANGE)) == 1
+
+    async def test_unknown_command_is_a_noop(self, db_session, monkeypatch):
+        monkeypatch.setattr(
+            fc_mod, "get_session_factory", lambda: _mock_session_factory(db_session)
+        )
+        result = await apply_fetch_not_modified("01UNKNOWNCOMMANDIDXXXXXXXX")
+        assert result == {"skipped": True, "reason": "unknown_command"}
+
+    async def test_deleted_watched_item_is_a_noop(self, db_session, monkeypatch):
+        wi, row = await self._not_modified_row(db_session)
+        await db_session.delete(wi)
+        await db_session.flush()
+        monkeypatch.setattr(
+            fc_mod, "get_session_factory", lambda: _mock_session_factory(db_session)
+        )
+        result = await apply_fetch_not_modified(row.command_id)
+        assert result == {"skipped": True, "reason": "watched_item_gone"}
+
+
+class TestNotModifiedStatusContract:
+    """The two status readers the new member has to satisfy (#249)."""
+
+    async def test_not_modified_is_not_an_open_command(self, db_session):
+        # The scheduling gate: a 304 closes the command, so the item must be
+        # free to be checked again on its next tick.
+        wi = await make_watched_item(db_session, primary_url="https://lcb.wa.gov/notices")
+        row = await create_fetch_command(db_session, wi, now=NOW)
+        row.status = FetchCommandStatus.NOT_MODIFIED
+        await db_session.flush()
+
+        assert FetchCommandStatus.NOT_MODIFIED not in OPEN_STATUSES
+        assert await get_open_command(db_session, wi.id) is None
+
+    async def test_reaper_leaves_a_not_modified_row_alone(self, db_session):
+        wi = await make_watched_item(db_session, primary_url="https://lcb.wa.gov/notices")
+        row = await create_fetch_command(db_session, wi, now=NOW)
+        row.status = FetchCommandStatus.NOT_MODIFIED
+        row.published_at = datetime.now(UTC) - timedelta(minutes=60)
+        await db_session.flush()
+
+        client = fakeredis.FakeAsyncRedis()
+        result = await reap_fetch_commands(session=db_session, bus_client=client)
+
+        assert result == {"reissued": 0, "capped": 0, "reapplied": 0}
+        assert row.status == FetchCommandStatus.NOT_MODIFIED
 
 
 class TestReapFetchCommands:

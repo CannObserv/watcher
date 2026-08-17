@@ -116,12 +116,23 @@ unset PROCRASTINATE_DATABASE_URL
 # WATCHER_BUS_REDIS_URL, and a dev server inheriting it would publish
 # fetch-policy frames onto the stream the live Replicator paces real origins
 # from. Publish only when a dev bus is explicitly configured.
+#
+# WATCHER_BUS_ENABLED is the opt-in src/core/bus.py requires beside the URL
+# (#262) — normally unit-only, exactly like WATCHER_ALLOW_PRODUCTION_DB. This
+# script is the other sanctioned launch path, so it sets the flag itself in the
+# branch that points at a scratch broker, and clears it in the branch that has
+# no bus at all: the app must never see a URL without the flag, and never a
+# flag inherited from an env file that has no business carrying one.
 if [[ -n "${WATCHER_DEV_BUS_REDIS_URL:-}" ]]; then
   export WATCHER_BUS_REDIS_URL="$WATCHER_DEV_BUS_REDIS_URL"
+  export WATCHER_BUS_ENABLED=1
   BUS_REPORT="$WATCHER_BUS_REDIS_URL"
+  BUS_ENABLED_REPORT="1"
 else
   unset WATCHER_BUS_REDIS_URL
+  unset WATCHER_BUS_ENABLED
   BUS_REPORT="(cleared)"
+  BUS_ENABLED_REPORT="(cleared)"
 fi
 
 # pytest builds watcher_test with Base.metadata.create_all, not alembic, so
@@ -160,6 +171,7 @@ if [[ "${WATCHER_DEV_SERVER_DRY_RUN:-}" == "1" ]]; then
   echo "DATABASE_URL=$DATABASE_URL"
   echo "PROCRASTINATE_DATABASE_URL=(cleared)"
   echo "WATCHER_BUS_REDIS_URL=$BUS_REPORT"
+  echo "WATCHER_BUS_ENABLED=$BUS_ENABLED_REPORT"
   echo "PORT=$PORT"
   echo "MIGRATE=$MIGRATE_REPORT"
   echo "RESET=$RESET_REPORT"

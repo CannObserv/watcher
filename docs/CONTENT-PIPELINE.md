@@ -36,12 +36,13 @@ What that leaves in the code:
   `watcher` with a single member, started in the lifespan whenever
   `WATCHER_BUS_REDIS_URL` is set. Correlates on `command_id` only, never dedupes
   on fingerprint, branches `terminal` first on `fetch_failed`.
-- **The apply tasks** — `apply_fetch_blob` / `apply_fetch_failure` in
+- **The apply tasks** — `apply_fetch_blob` / `apply_fetch_failure` /
+  `apply_fetch_not_modified` in
   [`src/workers/fetch_commands.py`](../src/workers/fetch_commands.py):
   status-guarded against duplicates, supersession-guarded against out-of-order
   facts, blob-unreadable → re-issue. They own all check bookkeeping via the
-  shared `_record_check_success` / `_record_check_failure` in
-  [`src/workers/tasks.py`](../src/workers/tasks.py).
+  shared `_record_check_success` / `_record_check_failure`, which live in that
+  same module.
 - **The reaper** — `reap_fetch_commands`, every 5 minutes, keyed on signal age
   `coalesce(fact_at, published_at)`. A stale row holding a blob fact gets its
   apply **re-deferred**; anything else is expired and re-issued with `intent_id`
@@ -49,15 +50,55 @@ What that leaves in the code:
   `WATCHER_FETCH_MAX_REISSUES`; hitting the cap sets ERROR health and lifts the
   gate.
 
-### Extraction outcomes: empty is a failure (#258)
+### `not_modified` is a success, not a failure (#249)
+
+A 304 rides `FetchFailedEvent` with `reason="not_modified"`, `terminal=True`,
+`status_code=304` — co-core's registry calls it "the one token on this event that
+is **not** a failure", and rejected a dedicated `content_unchanged` event because
+the event's real meaning is *"this command will not produce a blob"*. There is no
+new dispatch arm; the consumer branches `terminal` first, then the reason.
+
+Watcher's handling, top to bottom:
+
+| Piece | Behaviour |
+|---|---|
+| Row status | `FetchCommandStatus.NOT_MODIFIED` — its own member, so a 304 is not confusable with `SUCCEEDED` ("a blob went through the pipeline") in any status-keyed query. No migration: `status` is a plain `String(20)`. |
+| `failure_reason` | Stays NULL. At steady state this token outnumbers every real failure combined, so journalling it as one would destroy `failure_reason` as a signal. |
+| Fingerprint | Nothing written. There is no item-level fingerprint to reuse (Watcher's extracted-text identity lives on `ChangeRevision`), and `fetch_commands.content_fingerprint` is Replicator's *raw-bytes* identity for an occasion that produced bytes. The item keeps the content it already has. |
+| Apply | `apply_fetch_not_modified` → OK health, fresh `last_checked_at`, `last_observed_at` stamped (the content *was* verified current), `CHECK_NO_CHANGE` audit carrying `source: not_modified`, `WATCH_RECOVERED` if the item was in ERROR. Never `CHECK_FETCH_FAILED`, never `WATCH_ERROR`. |
+| Revision half | Skipped entirely — no extraction, no `ChangeRevision`, no `PendingArchiverSync`, no `content.revisions` frame. |
+| Gate / reaper | `OPEN_STATUSES` is a *positive* enumeration, so the new member is closed to the scheduling gate and invisible to the reaper for free. |
+
+**Watcher does not yet send validators.** `If-None-Match` / `If-Modified-Since`
+storage and replay, and the fingerprint-continuity question a 304 raises (an
+extraction drift goes unnoticed for as long as the origin keeps answering 304),
+are [#269](https://github.com/CannObserv/watcher/issues/269). This half only has
+to *receive* the token — which is why it is safe to land first, and dead code
+until #269 does.
+
+### Extraction outcomes: empty is a failure (#258, #260)
 
 `source_specs` are tried in order and the first yielding non-empty chunks wins.
-An item with **no** specs extracts full-page under a synthetic `[{}]` — inherited
-from #185's pipeline rewrite, never ratified, and reachable by design: the create
-schema documents `source_specs` as optional and `POST /api/v1/watched-items`
-stores `data.source_specs or []`. Worth a decision (full-page default vs. treating
-a spec-less item as unextractable) before anything else builds on it; recorded
-here as the current behaviour, not as an endorsement of it.
+
+**A spec-less item is unextractable, not a whole-page watch (#260).** The
+synthetic `[{}]` full-page default — inherited unremarked from #185's pipeline
+rewrite, never ratified — is gone, and with it the "optional at create"
+affordance: `WatchedItemCreate.source_specs` is required and non-empty, `PATCH`
+holds the same floor, and `process_watched_item` raises `ExtractionError` before
+dispatching an extractor when a row carries none. Settled that way because
+Archiver, the only caller, always has specs in hand: its registry refuses to
+announce a source as live without non-empty `source_specs`, and provisioning
+always sends them. Production carried 0 spec-less items of 4.
+
+**The residual, stated rather than gated.** The `info.registry` reconcile writes
+`list(payload.source_specs or [])` and co-core's announcement still declares the
+field optional, so a spec-less row remains *reachable over the wire* after the
+API door closed. That path is deliberately **not** gated a second time: an
+announcement is authoritative for `source_specs`, and refusing one would break
+the cold-start convergence #254 exists to provide. Such a row can only come from
+a source Archiver would not announce as live, which therefore never schedules —
+and if one ever does check, the pipeline guard is exactly what makes it loud
+(ERROR health, no revision) instead of silent.
 
 When **every** spec yields empty, `process_watched_item` raises `ExtractionError`
 and writes nothing — no `ChangeRevision`, no `PendingArchiverSync`, no notification. It
@@ -139,12 +180,12 @@ with `archiver_revision_id`).
 
 `spec_fingerprint` is **per-spec** (cannobserv#309), so a fallback from `spec[0]`
 to `spec[1]` moves it; Archiver reads the position that implies as a selector-rot
-signal (archiver#139), and its policy is record-and-flag, never reject. Two cases
-report `None` rather than a value: an item with no `source_specs` at all, because
-the synthetic `[{}]` default is a spec present in no registry and naming it would
-be flagged as superseded; and a spec co-core cannot derive from (it rejects
-floats, explicit nulls, non-ASCII keys), because a diagnostic must never cost a
-revision.
+signal (archiver#139), and its policy is record-and-flag, never reject. It
+reports `None` for a spec co-core cannot derive from (it rejects floats, explicit
+nulls, non-ASCII keys), because a diagnostic must never cost a revision. The
+other `None` case — an item with no `source_specs` at all — no longer produces a
+revision to attribute: #260 made that item unextractable rather than a full-page
+watch under a spec present in no registry.
 
 ### `info_source_id` on the wire (#252)
 

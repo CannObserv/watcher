@@ -356,6 +356,73 @@ class TestEmptyExtractionGuard:
         assert result.baseline_established is True
 
 
+@pytest.mark.integration
+class TestSpecLessItemIsUnextractable:
+    """#260: an item with no ``source_specs`` is not extractable, not full-page.
+
+    The API refuses to create one, but the `info.registry` reconcile writes
+    whatever an announcement carries and co-core still declares `source_specs`
+    optional there — so the state stays reachable over the wire. This guard is
+    what makes that residual loud (ERROR health, no revision) instead of silent
+    (a whole-page watch nobody configured).
+    """
+
+    async def test_spec_less_item_raises_extraction_error(self, db_session):
+        wi = await make_watched_item(db_session, name="SpecLessFirstRun")
+        wi.effective_url = "https://example.com"
+        wi.source_specs = []
+        await db_session.flush()
+
+        with pytest.raises(ExtractionError, match="source_specs"):
+            await process_watched_item(db_session, wi, raw_content=_HTML, blob=_BLOB)
+
+        revs = (
+            (
+                await db_session.execute(
+                    select(ChangeRevision).where(ChangeRevision.watched_item_id == wi.id)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert revs == []
+
+    async def test_specs_emptied_after_a_baseline_writes_nothing_and_does_not_notify(
+        self, db_session
+    ):
+        """Unconditional, like #258 — losing the specs is not a content change."""
+        wi = await make_watched_item(db_session, name="SpecLessAfterBaseline")
+        wi.effective_url = "https://example.com"
+        wi.source_specs = [_SPEC_FULL_PAGE]
+        await db_session.flush()
+
+        await process_watched_item(db_session, wi, raw_content=_HTML, blob=_BLOB)
+        await db_session.flush()
+
+        wi.source_specs = []
+        await db_session.flush()
+
+        with patch(
+            "src.workers.pipeline.dispatch_event_notifications", new_callable=AsyncMock
+        ) as mock_dispatch:
+            with pytest.raises(ExtractionError):
+                await process_watched_item(db_session, wi, raw_content=_HTML_CHANGED, blob=_BLOB)
+
+        mock_dispatch.assert_not_awaited()
+
+        revs = (
+            (
+                await db_session.execute(
+                    select(ChangeRevision).where(ChangeRevision.watched_item_id == wi.id)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert len(revs) == 1  # the baseline only
+        assert wi.last_changed_at is None
+
+
 # ---------------------------------------------------------------------------
 # Observation provenance on the outbox row (#253)
 # ---------------------------------------------------------------------------
@@ -391,18 +458,20 @@ class TestSpecFingerprintOnOutcome:
         assert outcome.spec_fingerprint is None
         assert outcome.content_size_bytes > 0
 
-    def test_no_source_specs_reports_no_spec_identity(self):
-        """CR-1: the synthetic ``[{}]`` default is not a spec anyone authored.
+    def test_no_source_specs_extracts_nothing_and_names_no_spec(self):
+        """#260: the synthetic ``[{}]`` full-page default is gone.
 
-        ``spec_fingerprint({})`` returns a perfectly real value, and that is the
-        problem — it names a spec present in no registry, so Archiver's index
-        lookup misses and flags the revision as superseded when the truth is
-        that the producer had none. ``None`` is the honest answer.
+        Nothing is substituted for an absent spec, so there is nothing to
+        extract and no spec identity to report. ``spec_fingerprint({})`` would
+        have returned a perfectly real value, and that was the problem — it
+        names a spec present in no registry, so Archiver's index lookup misses
+        and flags the revision as superseded. The caller refuses the outcome
+        before it can become a revision.
         """
         outcome = _extract_and_fingerprint(_HTML, [])
 
         assert outcome.spec_fingerprint is None
-        assert outcome.content_size_bytes > 0
+        assert outcome.content_size_bytes == 0
 
     def test_extracted_content_media_type_describes_the_extracted_text(self):
         """Not the source's type — the wire keeps those as separate fields."""

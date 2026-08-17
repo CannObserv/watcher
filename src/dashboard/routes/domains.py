@@ -48,6 +48,18 @@ from src.dashboard.templating import templates
 # policy changes made here travel on the periodic full-set republish instead
 # (publish_fetch_policy, every 5 minutes). Only the tombstone/clear bookkeeping,
 # which must land atomically with the Domain row, happens in-request.
+#
+# #250 widened what that costs, and the trade was re-affirmed rather than
+# inherited. Archive, restore and toggle-active now change what publishes for the
+# host (live interval vs. revoked=True), so the window is no longer "a stale
+# number" but "a host still being paced at its live interval for up to five
+# minutes after the operator stopped watching it". That is bounded, self-healing
+# and in the safe direction — the consumer's fallback is at least as strict as
+# anything we publish (see src/core/fetch_policy's module docstring) — so it does
+# not justify importing the task queue here. The API routes
+# (src/api/routes/domains) do defer, and the delegation seam used by
+# watched_item_check_now is the way to close the gap on this side if the latency
+# ever matters.
 
 router = APIRouter()
 

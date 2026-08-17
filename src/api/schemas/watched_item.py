@@ -33,8 +33,13 @@ class WatchedItemCreate(BaseModel):
     ``name`` defaults to a host+path derivation of ``url`` when omitted; a name
     supplied here survives reconciliation, which never overwrites one.
 
-    ``source_specs`` seeds the local pipeline extraction config. Optional at
-    create time; updatable later via PATCH.
+    ``source_specs`` seeds the local pipeline extraction config. **Required and
+    non-empty** (#260): a WatchedItem with no specs has no defined extraction,
+    and the full-page default it used to inherit was never ratified. Archiver,
+    the only caller, always has them — its registry refuses to announce a source
+    as live without non-empty ``source_specs`` — so this closes a state nobody
+    could legitimately reach. Updatable later via PATCH, which holds the same
+    floor.
 
     ``content_media_type`` is normally auto-detected from the first successful
     fetch (#168); supplying it here pre-seeds an operator override.
@@ -49,7 +54,7 @@ class WatchedItemCreate(BaseModel):
     default_schedule_config: dict | None = None
     content_media_type: str | None = Field(None, max_length=CONTENT_MEDIA_TYPE_MAX_LEN)
     default_tags: list[str] | None = None
-    source_specs: list[dict] | None = None
+    source_specs: list[dict] = Field(..., min_length=1)
 
     @field_validator("default_schedule_config")
     @classmethod
@@ -71,6 +76,9 @@ class WatchedItemPatch(BaseModel):
 
     ``effective_url`` is set directly without re-probing — Archiver is the
     authoritative source for URL succession.
+
+    ``source_specs``, when supplied, must be non-empty — the create-time floor
+    (#260) is worth nothing if a PATCH can empty the list again.
     """
 
     name: str | None = Field(None, min_length=1, max_length=255)
@@ -80,7 +88,7 @@ class WatchedItemPatch(BaseModel):
     content_media_type: str | None = Field(None, max_length=CONTENT_MEDIA_TYPE_MAX_LEN)
     default_tags: list[str] | None = None
     effective_url: HttpUrlStr | None = None
-    source_specs: list[dict] | None = None
+    source_specs: list[dict] | None = Field(None, min_length=1)
     archiver_info_source_id: ULIDRefStr | None = None
 
     @field_validator("default_schedule_config")

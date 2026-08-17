@@ -5,10 +5,12 @@
   its XADD leaves ``pending_publish``, republished **under the same
   ``command_id``** (idempotent by Replicator's dedupe). Every minute; no-op
   query when idle.
-* ``apply_fetch_blob`` / ``apply_fetch_failure`` — deferred by the
-  content.blobs consumer (``src/workers/fetch_facts.py``) after it upserts a
-  fact; they restore the exact bookkeeping the local fetch path performs
-  (health, ``last_checked_at``, audits, WATCH_ERROR/RECOVERED).
+* ``apply_fetch_blob`` / ``apply_fetch_failure`` / ``apply_fetch_not_modified``
+  — deferred by the content.blobs consumer (``src/workers/fetch_facts.py``)
+  after it upserts a fact; they restore the exact bookkeeping the local fetch
+  path performs (health, ``last_checked_at``, audits, WATCH_ERROR/RECOVERED).
+  Two of the three are success paths: a 304 is a check that found no change, not
+  a failed check (#249).
 * ``reap_fetch_commands`` — MUST-6's backstop for the still-silent outcomes
   (stalls, undecodable frames): expire + re-issue with intent lineage, cap with
   an ERROR surface.
@@ -48,7 +50,12 @@ from src.core.registry import ServiceRegistry, get_registry
 from src.core.utils import watched_item_event_base_metadata
 from src.workers import bp
 from src.workers.notify import dispatch_event_notifications
-from src.workers.pipeline import BlobProvenance, ExtractionError, process_watched_item
+from src.workers.pipeline import (
+    BlobProvenance,
+    ExtractionError,
+    WatchedItemResult,
+    process_watched_item,
+)
 from src.workers.watch_status import defer_status_republish
 
 logger = get_logger(__name__)
@@ -105,15 +112,20 @@ async def _record_check_success(
     *,
     now: datetime,
     url: str,
+    audit_extra: dict | None = None,
 ) -> None:
     """Record a successful check: audit trail + OK health + ``last_checked_at``,
     and dispatch ``WATCH_RECOVERED`` once on the ERROR→OK transition.
 
-    Shared by both apply paths (``apply_fetch_blob`` / ``apply_fetch_failure``)
-    so every outcome leaves identical bookkeeping — the
-    dashboard checks_today stat and WatchedItem activity read these events. A
+    Shared by the succeeding apply paths (``apply_fetch_blob`` /
+    ``apply_fetch_not_modified``) so every outcome leaves identical bookkeeping —
+    the dashboard checks_today stat and WatchedItem activity read these events. A
     snapshot event marks a baseline/changed cycle (a ChangeRevision was
     written); otherwise the content was unchanged.
+
+    ``audit_extra`` adds payload keys to that audit without changing which event
+    fires — the 304 path uses it to stay distinguishable from an unchanged
+    *extraction*, which is a materially different observation (#249).
     """
     snapshot = result.baseline_established or result.changed
     audit(
@@ -122,14 +134,18 @@ async def _record_check_success(
         watched_item_id=str(watched_item.id),
         changed=result.changed,
         baseline=result.baseline_established,
+        **(audit_extra or {}),
     )
 
     previous_health = watched_item.health_status
     watched_item.health_status = WatchHealthStatus.OK
     watched_item.last_checked_at = now
-    # Observation freshness (#264): extraction succeeded, changed or unchanged
-    # alike — "content was verified current", where last_checked_at only says
-    # "we tried". Published on info.watch-status; Archiver records it durably.
+    # Observation freshness (#264): "content was verified current", where
+    # last_checked_at only says "we tried". Both callers qualify — a successful
+    # extraction (changed or unchanged alike), and a 304 in which the origin
+    # itself asserts the bytes are current without sending any (#249). The
+    # audit's `source` key is what keeps those two apart downstream.
+    # Published on info.watch-status; Archiver records it durably.
     watched_item.last_observed_at = now
     await session.commit()
 
@@ -458,6 +474,73 @@ async def apply_fetch_failure(command_id: str) -> dict:
             error_metadata=error_metadata,
         )
     return {"applied": True, "reason": row.failure_reason}
+
+
+@bp.task(name="apply_fetch_not_modified", queue="default", retry=_APPLY_RETRY)
+async def apply_fetch_not_modified(command_id: str) -> dict:
+    """Close a 304 as a successful check that found no change (#249 part 1).
+
+    Deferred by the content.blobs consumer for the one ``fetch_failed`` reason
+    that is not a failure. The origin was asked a conditional question and
+    answered "your bytes are current" — the most useful answer it can give. Sent
+    down ``apply_fetch_failure`` instead, it would set ERROR health, write
+    ``CHECK_FETCH_FAILED``, and fire one ``WATCH_ERROR`` on the OK→ERROR
+    transition, on *every* successful no-change check.
+
+    Two decisions this path records, both left open by the issue:
+
+    * **The row's status is its own member, ``NOT_MODIFIED``**, not
+      ``SUCCEEDED``-with-no-blob. ``SUCCEEDED`` means "a blob went through the
+      pipeline"; overloading it makes a 304 indistinguishable in every
+      status-keyed query from a real apply, and dilutes exactly the signal an
+      operator reads. It costs no migration — ``status`` is a plain
+      ``String(20)`` with no CHECK constraint or PG enum behind it — and
+      ``OPEN_STATUSES`` is a positive enumeration, so the new member is closed to
+      the scheduling gate and invisible to the reaper without either being
+      touched.
+    * **Nothing is written for the fingerprint.** There is no item-level
+      fingerprint to reuse — Watcher's extracted-text identity lives on
+      ``ChangeRevision`` rows, and ``fetch_commands.content_fingerprint`` is
+      Replicator's *raw-bytes* identity for the occasion that produced bytes.
+      Copying either forward would assert a fact nobody published. The item keeps
+      the content it already has, which is the whole point of the exchange.
+
+    The revision-producing half is skipped entirely: no bytes, no extraction, no
+    ``ChangeRevision``, no ``PendingArchiverSync``, no ``content.revisions``
+    frame. So the check is recorded through ``_record_check_success`` with an
+    empty result — unchanged, no baseline — which yields ``CHECK_NO_CHANGE``,
+    OK health, a fresh ``last_checked_at``, and ``WATCH_RECOVERED`` if the item
+    was in ERROR. ``last_observed_at`` is stamped (#264 semantics: the content
+    *was* verified current, which is more than "we tried").
+
+    Guarded on ``applied_at`` only, mirroring ``apply_fetch_failure``: there is
+    no supersession guard because there is no content to apply out of order —
+    the A→B→A fingerprint flap ``apply_fetch_blob`` protects against cannot
+    arise from a fact that carries no fingerprint.
+    """
+    async with get_session_factory()() as session:
+        row = await session.get(FetchCommand, command_id)
+        if row is None:
+            return {"skipped": True, "reason": "unknown_command"}
+        if row.applied_at is not None:
+            return {"skipped": True, "reason": "already_applied"}
+        watched_item = await session.get(WatchedItem, row.watched_item_id)
+        if watched_item is None:
+            return {"skipped": True, "reason": "watched_item_gone"}
+
+        now = datetime.now(UTC)
+        row.applied_at = now
+        await _record_check_success(
+            session,
+            watched_item,
+            WatchedItemResult(),
+            now=now,
+            url=row.url,
+            # Keeps a 304 distinguishable from an unchanged extraction in the
+            # audit trail — same outcome for the item, different evidence.
+            audit_extra={"source": "not_modified"},
+        )
+    return {"applied": True, "not_modified": True}
 
 
 @bp.periodic(cron="*/5 * * * *", periodic_id="reap_fetch_commands")

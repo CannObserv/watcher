@@ -10,6 +10,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from src.core.bus import BUS_ENABLED_ENV, BUS_REDIS_URL_ENV, BusNotEnabled
+
 
 @pytest.mark.asyncio
 async def test_lifespan_does_not_start_changes_drain(monkeypatch):
@@ -110,3 +112,65 @@ async def test_registry_consumer_starts_and_stops_with_a_bus_url(monkeypatch):
 
     assert registry_task.cancelled()
     assert blobs_task.cancelled()
+
+
+@pytest.mark.asyncio
+async def test_lifespan_refuses_a_bus_url_without_the_opt_in(monkeypatch, caplog):
+    """#262: ``WATCHER_BUS_REDIS_URL`` set and ``WATCHER_BUS_ENABLED`` absent aborts.
+
+    Deliberately sets the variable that ``tests/conftest.py`` clears at import.
+    Without that, nothing in the suite reaches this branch — the flag is inert
+    under pytest, so its first exercise would otherwise be a production restart.
+
+    The refusal is logged CRITICAL before it propagates: under systemd a bare
+    lifespan traceback buries the actionable line in journalctl, exactly as the
+    production-database guard beside it found (#233).
+    """
+    monkeypatch.setenv(BUS_REDIS_URL_ENV, "redis://localhost:6379/0")
+    monkeypatch.delenv(BUS_ENABLED_ENV, raising=False)
+
+    with (
+        patch("src.api.main.get_app") as get_app,
+        patch("src.api.main.get_shared_bus_client") as get_client,
+    ):
+        from src.api.main import lifespan
+
+        with caplog.at_level("CRITICAL", logger="src.api.main"):
+            with pytest.raises(BusNotEnabled):
+                async with lifespan(MagicMock()):
+                    pass
+
+    # Nothing was built: the refusal precedes every resource, so a refused
+    # process never joins the consumer group or opens the worker.
+    get_client.assert_not_called()
+    get_app.assert_not_called()
+    assert any(BUS_ENABLED_ENV in r.getMessage() for r in caplog.records)
+
+
+@pytest.mark.asyncio
+async def test_lifespan_accepts_a_bus_url_with_the_opt_in(monkeypatch):
+    """The sanctioned production shape — the unit sets both — still starts."""
+    monkeypatch.setenv(BUS_REDIS_URL_ENV, "redis://localhost:6379/0")
+    monkeypatch.setenv(BUS_ENABLED_ENV, "1")
+
+    fake_proc_app = MagicMock()
+    fake_proc_app.open_async = AsyncMock()
+    fake_proc_app.close_async = AsyncMock()
+
+    async def _worker_run(install_signal_handlers: bool = True) -> None:
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            return
+
+    fake_proc_app.run_worker_async = _worker_run
+
+    with (
+        patch("src.api.main.get_app", return_value=fake_proc_app),
+        patch("src.api.main.get_shared_bus_client", return_value=None),
+        patch("src.api.main.aclose_shared_bus_client", AsyncMock()),
+    ):
+        from src.api.main import lifespan
+
+        async with lifespan(MagicMock()):
+            pass

@@ -40,13 +40,28 @@ class FetchCommandStatus(enum.StrEnum):
     PENDING_PUBLISH = "pending_publish"  # row committed, XADD not yet confirmed
     IN_FLIGHT = "in_flight"  # published; awaiting a fact
     SUCCEEDED = "succeeded"  # blob applied through the pipeline
+    NOT_MODIFIED = "not_modified"  # origin answered 304; closed, no blob (#249)
     FAILED = "failed"  # terminal fetch_failed (or re-issue cap hit)
     SUPERSEDED = "superseded"  # a newer command for the item applied first
     EXPIRED = "expired"  # reaped after timeout; re-issued under a fresh id
 
 
+# The one ``FetchFailedEvent.reason`` that is **not** a failure (co-core 0.10.0,
+# CannObserv/replicator#17): a conditional request whose validator matched, so
+# the origin answered 304 and there is no body. It rides ``fetch_failed`` because
+# the event's real meaning is "this command will not produce a blob" — co-core's
+# own registry rejected a dedicated ``content_unchanged`` event and wrote the
+# trade-off down. Watcher's response is to close the command and keep the content
+# it already has; see ``apply_fetch_not_modified`` (#249).
+NOT_MODIFIED_REASON = "not_modified"
+
 # The statuses that make a command "open": they gate scheduling (no new issue
 # while one is open) and are what the reaper scans.
+#
+# A *positive* enumeration, deliberately — a new terminal member (``NOT_MODIFIED``,
+# #249) is closed by default rather than by remembering to exclude it. Keep it
+# that way: the failure mode of the inverse spelling is an item whose scheduling
+# gate never lifts.
 OPEN_STATUSES = (FetchCommandStatus.PENDING_PUBLISH, FetchCommandStatus.IN_FLIGHT)
 
 

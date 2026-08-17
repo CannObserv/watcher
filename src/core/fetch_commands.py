@@ -22,8 +22,11 @@ this module:
 * **cannobserv#300** — every command names its ``info_source_id``, snapshotted
   onto the row at issue time so the sweep can republish without a WatchedItem.
 
-No validator headers (``If-None-Match``/``If-Modified-Since``) are sent: a
-body-less 304 still dead-letters (replicator#17). Revisit when that closes.
+No validator headers (``If-None-Match``/``If-Modified-Since``) are sent yet.
+replicator#17 has landed the ``not_modified`` outcome and Watcher now *receives*
+it correctly (#249) — but storing and replaying validators is #269, and needs
+that Replicator in **production** first: a validator sent to a deployment that
+still classifies 304 as a plain fetch failure reproduces the trap #249 closed.
 """
 
 import os

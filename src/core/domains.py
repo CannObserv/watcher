@@ -83,7 +83,10 @@ async def ensure_domain_and_resolve_suspension(
             ).scalar_one_or_none()
     if existing is not None:
         return DomainResolution(
-            suspended=bool(existing.archived_at is not None or not existing.is_active),
+            # Domain.is_suspended, not an inline repeat of it: since #250 the
+            # same predicate also decides whether the host publishes live policy
+            # or revoked, and the two must not drift (CR-1 finding 7).
+            suspended=existing.is_suspended,
             default_schedule_config=existing.default_schedule_config,
         )
     return DomainResolution(suspended=False, default_schedule_config=None)

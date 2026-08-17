@@ -38,6 +38,14 @@ EnvironmentFile=-/home/exedev/watcher/.env
 # which are exactly what the guard exists to stop.
 Environment=WATCHER_ALLOW_PRODUCTION_DB=1
 
+# Bus opt-in for src/core/bus (#262), and unit-only for the same reason: the
+# EnvironmentFile above carries WATCHER_BUS_REDIS_URL, so every process that
+# sources /etc/watcher/.env inherits the production broker address. This line is
+# what separates the service from an agent shell, a script, or a REPL.
+# Dropping it does NOT silently disable publishing — the lifespan refuses to
+# start on a URL held without it.
+Environment=WATCHER_BUS_ENABLED=1
+
 # --log-config routes uvicorn's own loggers (uvicorn, uvicorn.access,
 # uvicorn.error — all propagate=False with plain-text handlers by default)
 # through the same JSON formatter as the app, so journald gets one format
@@ -48,6 +56,14 @@ Environment=WATCHER_ALLOW_PRODUCTION_DB=1
 ExecStart=/usr/local/bin/uv run uvicorn src.api.main:app --host 0.0.0.0 --port 8000 --log-config src/core/log_config.json
 Restart=on-failure
 RestartSec=5
+
+# uvicorn exits 143 (128+15) on SIGTERM, which is the normal path for
+# `systemctl stop` — without this, systemd files a clean stop as `failed` and
+# `systemctl is-active watcher` cannot distinguish a routine stop from a crash
+# (#256). Restart=on-failure reads the same status, so an *out-of-band* SIGTERM
+# now also counts as clean and is not auto-restarted; that is the intended
+# trade — SIGTERM is a deliberate signal, and a genuine crash exits non-143.
+SuccessExitStatus=143
 
 [Install]
 WantedBy=multi-user.target

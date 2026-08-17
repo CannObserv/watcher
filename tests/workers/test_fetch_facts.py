@@ -259,6 +259,108 @@ class TestFailureFacts:
         assert fail.calls == []
 
 
+class TestNotModifiedFacts:
+    """#249 part 1: ``not_modified`` rides ``FetchFailedEvent`` but is a success.
+
+    co-core's own registry says so (``changes.py`` — "the one token on this event
+    that is **not** a failure"). The consumer's job here is to close the row
+    without routing it to the failure apply, which would mark a healthy item
+    ERROR and notify a user about it on every no-change check.
+    """
+
+    async def test_not_modified_closes_the_row_as_its_own_status(self, db_session):
+        _, row = await _issued_row(db_session)
+        blob, fail, unchanged = _DeferSpy(), _DeferSpy(), _DeferSpy()
+
+        outcome = await process_fact_message(
+            db_session,
+            _failure_for(row, reason="not_modified", status_code=304),
+            defer_blob=blob,
+            defer_failure=fail,
+            defer_not_modified=unchanged,
+        )
+
+        assert outcome == "not_modified_recorded"
+        assert row.status == FetchCommandStatus.NOT_MODIFIED
+        assert row.status_code == 304
+        assert row.fact_at == NOW
+        assert unchanged.calls == [row.command_id]
+        assert fail.calls == []
+        assert blob.calls == []
+
+    async def test_not_modified_is_never_journalled_as_a_failure(self, db_session):
+        # co-core note 2: at steady state this token outnumbers every real
+        # failure combined, so anything counting failure_reason must not see it.
+        _, row = await _issued_row(db_session)
+
+        await process_fact_message(
+            db_session,
+            _failure_for(row, reason="not_modified", status_code=304),
+            defer_not_modified=_DeferSpy(),
+        )
+
+        assert row.failure_reason is None
+        assert row.failure_detail is None
+
+    async def test_not_modified_records_no_fingerprint(self, db_session):
+        # There are no bytes for this command, so ``content_fingerprint`` (the
+        # RAW-bytes identity Replicator published for *this* command) stays NULL
+        # rather than inheriting the previous occasion's value.
+        _, row = await _issued_row(db_session)
+
+        await process_fact_message(
+            db_session,
+            _failure_for(row, reason="not_modified", status_code=304),
+            defer_not_modified=_DeferSpy(),
+        )
+
+        assert row.content_fingerprint is None
+        assert row.blob_uri is None
+
+    async def test_not_modified_after_apply_changes_nothing(self, db_session):
+        _, row = await _issued_row(db_session)
+        row.applied_at = NOW
+        row.status = FetchCommandStatus.SUCCEEDED
+        await db_session.flush()
+        unchanged = _DeferSpy()
+
+        outcome = await process_fact_message(
+            db_session,
+            _failure_for(row, reason="not_modified", status_code=304),
+            defer_not_modified=unchanged,
+        )
+
+        assert outcome == "already_applied"
+        assert row.status == FetchCommandStatus.SUCCEEDED
+        assert unchanged.calls == []
+
+    async def test_nonterminal_not_modified_still_only_refreshes_fact_at(self, db_session):
+        # ``terminal`` is branched first (contract), and the token does not
+        # promote a non-terminal fact into a closed row.
+        _, row = await _issued_row(db_session)
+        unchanged = _DeferSpy()
+
+        outcome = await process_fact_message(
+            db_session,
+            _failure_for(row, terminal=False, reason="not_modified", status_code=304),
+            defer_not_modified=unchanged,
+        )
+
+        assert outcome == "nonterminal_recorded"
+        assert row.status == FetchCommandStatus.IN_FLIGHT
+        assert unchanged.calls == []
+
+    async def test_unknown_not_modified_is_discarded(self, db_session):
+        unchanged = _DeferSpy()
+        outcome = await process_fact_message(
+            db_session,
+            _failure_message("01UNKNOWNCOMMANDIDXXXXXXXX", reason="not_modified", status_code=304),
+            defer_not_modified=unchanged,
+        )
+        assert outcome == "unmatched"
+        assert unchanged.calls == []
+
+
 class TestOrphanFacts:
     """#252: ``info_source_id`` makes an unmatched fact *attributable*, not
     recoverable.

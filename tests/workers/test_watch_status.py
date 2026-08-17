@@ -7,8 +7,8 @@ never a crash and never a silent pass), the configurable republish cadence,
 and the best-effort defer used by mutation paths.
 """
 
+from src.core.bus import BUS_ENABLED_ENV, BUS_REDIS_URL_ENV
 from src.workers.watch_status import (
-    BUS_REDIS_URL_ENV,
     DEFAULT_REPUBLISH_CRON,
     REPUBLISH_CRON_ENV,
     _republish_cron,
@@ -24,6 +24,22 @@ class TestPublishWatchStatusTask:
             result = await publish_watch_status()
         assert result == {"skipped": f"{BUS_REDIS_URL_ENV} not set"}
         assert any(BUS_REDIS_URL_ENV in r.getMessage() for r in caplog.records)
+
+    async def test_skips_loudly_when_the_url_is_set_without_the_opt_in(self, monkeypatch, caplog):
+        """#262: the URL check alone is no longer the gate.
+
+        This task used to read ``WATCHER_BUS_REDIS_URL`` directly and then
+        ``assert client is not None``. With the opt-in gating client
+        construction, that pairing turns a stray process's misconfiguration
+        into an ``AssertionError`` — or, under ``python -O``, a publish attempt
+        on ``None``. It must skip, and say which variable is missing.
+        """
+        monkeypatch.setenv(BUS_REDIS_URL_ENV, "redis://localhost:6379/0")
+        monkeypatch.delenv(BUS_ENABLED_ENV, raising=False)
+        with caplog.at_level("ERROR", logger="src.workers.watch_status"):
+            result = await publish_watch_status()
+        assert result == {"skipped": f"{BUS_ENABLED_ENV} is not 1"}
+        assert any(BUS_ENABLED_ENV in r.getMessage() for r in caplog.records)
 
 
 class TestRepublishCron:

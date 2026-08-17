@@ -237,6 +237,10 @@ def test_bus_url_is_cleared_unless_dev_bus_is_explicit() -> None:
     )
     assert result.returncode == 0, result.stderr
     assert "WATCHER_BUS_REDIS_URL=(cleared)" in result.stdout
+    # And the opt-in goes with it: a cleared URL plus a leaked flag would be
+    # merely useless, but the pair must stay consistent so the two branches of
+    # this script are the only two shapes the app ever sees (#262).
+    assert "WATCHER_BUS_ENABLED=(cleared)" in result.stdout
 
 
 def test_explicit_dev_bus_url_is_forwarded() -> None:
@@ -250,3 +254,39 @@ def test_explicit_dev_bus_url_is_forwarded() -> None:
     )
     assert result.returncode == 0, result.stderr
     assert "WATCHER_BUS_REDIS_URL=redis://localhost:6379/15" in result.stdout
+
+
+def test_dev_bus_branch_sets_the_bus_opt_in() -> None:
+    """#262: a sanctioned launch path pointed at a scratch broker opts itself in.
+
+    The flag is otherwise unit-only, so without this the dev server would set a
+    dev bus URL and then refuse to start on the very gate that exists to stop
+    *unsanctioned* processes — the same way this script already handles the
+    production-database opt-in's dev counterpart.
+    """
+    result = run(
+        {
+            "TEST_DATABASE_URL": TEST_URL,
+            "WATCHER_DEV_BUS_REDIS_URL": "redis://localhost:6379/15",
+        }
+    )
+    assert result.returncode == 0, result.stderr
+    assert "WATCHER_BUS_ENABLED=1" in result.stdout
+
+
+def test_an_inherited_bus_opt_in_does_not_survive_without_a_dev_bus() -> None:
+    """A flag leaked into an env file must not re-arm the production URL.
+
+    The unit is the only sanctioned home for it, but this script sources
+    /etc/watcher/.env and the repo .env — so it clears what it did not set.
+    """
+    result = run(
+        {
+            "TEST_DATABASE_URL": TEST_URL,
+            "WATCHER_BUS_REDIS_URL": "redis://localhost:6379/0",
+            "WATCHER_BUS_ENABLED": "1",
+        }
+    )
+    assert result.returncode == 0, result.stderr
+    assert "WATCHER_BUS_REDIS_URL=(cleared)" in result.stdout
+    assert "WATCHER_BUS_ENABLED=(cleared)" in result.stdout

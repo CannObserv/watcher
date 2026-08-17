@@ -40,21 +40,23 @@ pattern — see **Redis and the bus**.
 | `NOTIFIER_API_KEY` | `/etc/watcher/.env` | **yes** | Watcher tenant API key issued by `scripts/seed_tenant.py` in the notifier repo |
 | `WATCHER_ALLOW_PRODUCTION_DB` | `deploy/watcher.service` **only** | prod only | `=1` opts into serving a database whose name lacks a `_test`/`_dev` suffix (`src/core/db_safety.py`, #233). Must live in the systemd unit, never an env file — env files are sourced by hand-run dev servers, which are exactly what the guard stops |
 | `WATCHER_DEV_DATABASE_URL` | `.env` | no | Persistent dev database for `scripts/dev_server.sh`; wins over `TEST_DATABASE_URL` |
-| `WATCHER_BUS_REDIS_URL` | `/etc/watcher/.env` | prod | Redis URL of the Archiver-operated broker (`redis://localhost:6379/0`) for the `content.fetch-policy` and `info.watch-status` producers (#245, #264). Unset → both periodic publish tasks skip with an ERROR log: Replicator paces every host at its own conservative default, and Archiver's watched-item panel / drift detector go stale |
+| `WATCHER_BUS_REDIS_URL` | `/etc/watcher/.env` | prod | Redis URL of the Archiver-operated broker (`redis://localhost:6379/0`) for the `content.fetch-policy` and `info.watch-status` producers (#245, #264). Unset → both periodic publish tasks skip with an ERROR log: Replicator paces every host at its own conservative default, and Archiver's watched-item panel / drift detector go stale. **Not sufficient on its own since #262** — see `WATCHER_BUS_ENABLED` |
+| `WATCHER_BUS_ENABLED` | `deploy/watcher.service` **only** | prod only | `=1` opts this process into building a bus client at all (`src/core/bus.py`, #262). Without it `bus_client_from_env()` returns `None`, so nothing publishes and neither consumer starts — **and a URL held without it aborts startup** with `BusNotEnabled`, so a unit that lost the line fails loudly instead of going quiet. Must live in the systemd unit, never an env file: `WATCHER_BUS_REDIS_URL` does live in one, so every process that sources `/etc/watcher/.env` inherits the production broker address, and the flag is the only thing separating the service from an agent shell or a REPL. `scripts/dev_server.sh` sets it for itself when `WATCHER_DEV_BUS_REDIS_URL` names a scratch bus |
 | `WATCHER_WATCH_STATUS_REPUBLISH_CRON` | env | no | Cron expression for the `info.watch-status` full-set republish (default `*/5 * * * *`, #264). The period is the recovery bound for a dropped frame — this stream has no outbox by design; loss is corrected by the next full set. A malformed value falls back to the default with an ERROR log |
 | `WATCHER_WATCH_STATUS_STREAM_MAXLEN` | env | no | Producer-enforced retention cap for `info.watch-status` (`XADD MAXLEN ~`, default `50000`). The full set republishes forever, so an untrimmed stream grows without bound; invalid/non-positive values fall back to the default with a warning — never to unbounded |
 | `WATCHER_FETCH_POLICY_STREAM_MAXLEN` | env | no | Same producer-enforced retention cap for `content.fetch-policy` (default `50000`) |
 | `WATCHER_FETCH_COMMAND_TIMEOUT_SECONDS` | env | no | Reaper timeout for an in-flight command with no fact (default `1800` — deliberately generous; Replicator's reclaim cadence is an operator knob, and a tight value re-issues under live retries) |
 | `WATCHER_FETCH_MAX_REISSUES` | env | no | Re-issues per fetch intent before it fails with ERROR health (default `3`) |
-| `WATCHER_DEV_BUS_REDIS_URL` | `.env` | no | Scratch-bus opt-in for `scripts/dev_server.sh`; without it the dev server **clears** an inherited `WATCHER_BUS_REDIS_URL` so it cannot publish policy onto the production stream |
+| `WATCHER_DEV_BUS_REDIS_URL` | `.env` | no | Scratch-bus opt-in for `scripts/dev_server.sh`; without it the dev server **clears** an inherited `WATCHER_BUS_REDIS_URL` (and `WATCHER_BUS_ENABLED`) so it cannot publish policy onto the production stream. With it, the script exports both, since the flag is otherwise unit-only |
 
 **Watcher's Redis use.** Archiver operates `redis-server` and owns the broker
 (archiver#109). Watcher publishes `content.fetch-policy` (#245) and — Phase 4,
 #241 — publishes `content.fetch` commands and consumes `content.blobs` facts
 via its own consumer group (`watcher`, started in the lifespan when
-`WATCHER_BUS_REDIS_URL` is set). Since #254 it also consumes `info.registry`
-**grouplessly**, replayed from `0-0` at boot; without the bus URL neither
-consumer starts and the registry cannot converge. Since #264 it publishes
+`WATCHER_BUS_REDIS_URL` is set **and** `WATCHER_BUS_ENABLED=1`, #262). Since
+#254 it also consumes `info.registry` **grouplessly**, replayed from `0-0` at
+boot; without a usable bus neither consumer starts and the registry cannot
+converge. Since #264 it publishes
 `info.watch-status` — the return leg of the registry channel: applied
 generation, scheduler state, and observation freshness per InfoItem, full-set
 republished on `WATCHER_WATCH_STATUS_REPUBLISH_CRON` (default every 5

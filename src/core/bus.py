@@ -16,9 +16,26 @@ The env var is service-prefixed per the AGENTS.md naming rule: a bare
 ``REDIS_URL`` would be silently inherited from ``/etc/watcher/.env`` by
 anything that sources it (the #233 hazard in env-var form). Unset means "no
 bus": producers skip loudly, the consumer never starts.
+
+A URL is *configuration*, not *permission* (#262). Anything that sources
+``/etc/watcher/.env`` inherits the production broker address — an agent shell,
+a one-off script, a ``python -c``, a REPL — and before the gate below, merely
+importing a producer in one of those was enough to reach the live streams. That
+is not the "merely noisy stray producer" archiver#139 reasoned about: a stray
+``content.fetch`` makes Replicator issue **real origin requests** against
+government portals under Watcher's pinned User-Agent; ``content.fetch-policy``
+is last-write-wins per host, so a dev database's numbers become cluster-wide
+politeness instruction until the next full-set republish; and
+``content.revisions`` writes into **Archiver's** registry, which a dev database
+seeded from production would fill with real-looking rows. So publishing (and
+consuming) additionally requires ``WATCHER_BUS_ENABLED=1``, which only
+``deploy/watcher.service`` and ``scripts/dev_server.sh``'s scratch-bus branch
+set — never an env file, for the same reason as
+``WATCHER_ALLOW_PRODUCTION_DB`` (#233).
 """
 
 import os
+from collections.abc import Mapping
 
 from redis.asyncio import Redis
 
@@ -28,11 +45,87 @@ logger = get_logger(__name__)
 
 BUS_REDIS_URL_ENV = "WATCHER_BUS_REDIS_URL"
 
+#: Unit-only opt-in gating every bus client this process can build (#262).
+BUS_ENABLED_ENV = "WATCHER_BUS_ENABLED"
+
 _shared_client: Redis | None = None
 
 
+class BusNotEnabled(RuntimeError):
+    """Raised when a process holds a bus URL it was never authorised to use."""
+
+
+def bus_enabled(environ: Mapping[str, str] | None = None) -> bool:
+    """True when the caller explicitly opted this process into the bus.
+
+    Only the exact string ``"1"`` opts in. A fuzzy truthiness check would let a
+    stray value quietly re-open the hole the gate closes — the same rule
+    ``src.core.db_safety`` applies to ``WATCHER_ALLOW_PRODUCTION_DB``.
+    """
+    if environ is None:
+        environ = os.environ
+    return environ.get(BUS_ENABLED_ENV) == "1"
+
+
+def bus_disabled_reason(environ: Mapping[str, str] | None = None) -> str | None:
+    """Why no bus client can be built, or None when one can.
+
+    Producers log and return this verbatim, so the operator reads the variable
+    that is actually missing rather than the one the check happened to test
+    first.
+    """
+    if environ is None:
+        environ = os.environ
+    if not environ.get(BUS_REDIS_URL_ENV):
+        return f"{BUS_REDIS_URL_ENV} not set"
+    if not bus_enabled(environ):
+        return f"{BUS_ENABLED_ENV} is not 1"
+    return None
+
+
+def assert_environment_bus_allowed(environ: Mapping[str, str]) -> None:
+    """Refuse a bus URL that was never opted into (#262, the loud half).
+
+    :func:`bus_client_from_env` already fails *closed* on this combination, but
+    closed-and-silent trades one production hazard for another: drop
+    ``Environment=WATCHER_BUS_ENABLED=1`` from the unit and Watcher stops
+    publishing with nothing but a per-producer ERROR to say so. A URL present
+    without the opt-in is always a mistake in either direction — a service that
+    lost its flag, or a process that should never have had the URL — so the
+    entry point refuses to start.
+
+    Not raised when the URL is absent: that names no broker, so nothing can be
+    published by accident, and making it fatal would stop every dev server and
+    script that never wanted a bus. The producers' existing loud skip covers it.
+
+    Takes ``environ`` explicitly, like ``assert_environment_db_allowed``: the
+    caller decides what is being gated, and this stays callable from a test
+    even though ``tests/conftest.py`` clears the real variable at import.
+    """
+    if not environ.get(BUS_REDIS_URL_ENV):
+        return
+    if bus_enabled(environ):
+        return
+    raise BusNotEnabled(
+        f"refusing to start: {BUS_REDIS_URL_ENV} is set but {BUS_ENABLED_ENV} is not 1, "
+        "so this process holds a broker address it is not authorised to use.\n"
+        f"  Only deploy/watcher.service may publish to the production bus; it sets "
+        f"{BUS_ENABLED_ENV}=1. If this IS the service, that line is missing from the "
+        "installed unit.\n"
+        "  For a dev server use: bash scripts/dev_server.sh (set "
+        "WATCHER_DEV_BUS_REDIS_URL for a scratch bus).\n"
+        f"  For anything else, unset {BUS_REDIS_URL_ENV}. (See #262 and the #253 "
+        "incident it was filed from.)"
+    )
+
+
 def bus_client_from_env() -> Redis | None:
-    """A NEW Redis client for the bus, or None when the env var is unset.
+    """A NEW Redis client for the bus, or None when the env does not allow one.
+
+    Requires both a URL and ``WATCHER_BUS_ENABLED=1``. This is the single funnel
+    ``get_shared_bus_client`` and every direct caller pass through, so the gate
+    covers publish *and* consume without a second mechanism: producers already
+    treat a None client as a loud skip, and the consumers never start.
 
     No localhost default, deliberately: a default credential is how a dev
     process ends up publishing onto the production stream. The caller owns the
@@ -40,13 +133,13 @@ def bus_client_from_env() -> Redis | None:
     :func:`get_shared_bus_client`.
     """
     url = os.environ.get(BUS_REDIS_URL_ENV)
-    if not url:
+    if not url or not bus_enabled():
         return None
     return Redis.from_url(url)
 
 
 def get_shared_bus_client() -> Redis | None:
-    """The process-shared bus client, built lazily; None when the env is unset.
+    """The process-shared bus client, built lazily; None when the env forbids one.
 
     Never close the returned client — the lifespan owns it. The env var is
     re-read while unbuilt, so a test that sets the var after import still gets

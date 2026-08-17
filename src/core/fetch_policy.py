@@ -8,11 +8,21 @@ Last-write-wins per ``host``, so correctness rests on two producer-side rules:
 * **Full-set republish.** The consumer replays the stream from ``0-0`` at boot,
   so its view must be reconstructible from what remains on the broker — the
   periodic task republishes every policy, not just changed ones.
-* **Tombstones are republished too.** A revoked host (deleted Domain) keeps its
-  ``revoked=True`` frame in every full set; dropping it would let broker
-  trimming age the tombstone out from under a booting consumer. The
-  ``fetch_policy_tombstones`` table carries that obligation past the Domain
-  row's deletion.
+* **Tombstones are republished too.** A revoked host keeps its ``revoked=True``
+  frame in every full set; dropping it would let broker trimming age the
+  tombstone out from under a booting consumer. The ``fetch_policy_tombstones``
+  table carries that obligation past a Domain row's deletion; a *suspended*
+  Domain needs no table at all, because its row survives (#250).
+
+**Suspended for any reason ⇒ no live policy published (#250).** A domain that is
+archived or deactivated publishes ``revoked=True``, not its ``min_interval``.
+``revoked`` is the contract's tombstone — "no explicit policy for this host",
+*not* "no limit": the consumer falls back to its own conservative default, which
+rule 1 requires be at least as strict as anything a producer would publish. So
+revocation cannot open a politeness gap, and republishing a live interval for a
+host Watcher has stopped watching is the one way that host ends up *looser* than
+the fallback. Restore and reactivate need no bookkeeping: the next full set reads
+the cleared columns and emits live again.
 
 The published interval is ``Domain.min_interval`` — the operator floor — never
 ``current_interval``: that column is 429-backoff *state*, and its feed dies at
@@ -52,13 +62,30 @@ DEFAULT_FETCH_POLICY_STREAM_MAXLEN = 50_000
 # BUS_REDIS_URL_ENV / bus_client_from_env from there.
 
 
+def is_suspended(domain: Domain) -> bool:
+    """Whether ``domain`` is archived or deactivated — either revokes its policy.
+
+    Both states already stop Watcher issuing fetch commands for the domain's
+    items (``ensure_domain_and_resolve_suspension`` sets ``domain_suspended``),
+    so a live policy for the host asserts configuration Watcher no longer acts
+    on. One predicate so the two states cannot drift apart (#250).
+    """
+    return domain.archived_at is not None or not domain.is_active
+
+
 def build_policy_events(
     domains: Sequence[Domain],
     tombstones: Sequence[FetchPolicyTombstone],
     *,
     now: datetime,
 ) -> list[FetchPolicyEmit]:
-    """One ``FetchPolicyEmit`` per domain (live) and per tombstone (revoked).
+    """One ``FetchPolicyEmit`` per domain and per tombstone.
+
+    A domain emits its live ``min_interval`` unless it is suspended — archived
+    or deactivated — in which case it emits ``revoked=True`` with no interval
+    (#250; see the module docstring for why that is the safe direction). Every
+    domain still emits, suspended or not: contract rule 2 requires revoked hosts
+    keep appearing in the full set.
 
     A host the model rejects (non-ASCII, embedded port, …) is skipped with a
     warning rather than failing the batch — one unpublishable row must not stop
@@ -68,12 +95,16 @@ def build_policy_events(
     """
     events: list[FetchPolicyEmit] = []
     for domain in domains:
+        revoked = is_suspended(domain)
         try:
             events.append(
                 FetchPolicyEmit(
                     occurred_at=now,
                     host=domain.name,
-                    min_interval_seconds=domain.min_interval,
+                    # None, never a fake number: a consumer that ignores
+                    # `revoked` gets an arithmetic failure, not a stale value.
+                    min_interval_seconds=None if revoked else domain.min_interval,
+                    revoked=revoked,
                 )
             )
         except ValidationError:
@@ -113,9 +144,11 @@ async def publish_policy_events(client: Redis, events: Sequence[FetchPolicyEmit]
 async def publish_full_policy_set(session: AsyncSession, client: Redis) -> int:
     """Publish the whole policy set: every Domain, plus every tombstone.
 
-    All domains publish — paused/archived domains still carry the operator's
-    politeness intent for their host, and a frame for a host nobody fetches is
-    harmless where a missing tombstone is not.
+    The Domain query is deliberately unfiltered. A suspended domain is not
+    dropped from the set — it is emitted as ``revoked=True`` (#250), which is
+    what keeps contract rule 2 satisfied without any archive/restore
+    bookkeeping: the row survives, so the tombstone keeps being republished for
+    as long as the domain stays suspended, and stops the moment it is restored.
     """
     domains = (await session.execute(select(Domain))).scalars().all()
     tombstones = (await session.execute(select(FetchPolicyTombstone))).scalars().all()

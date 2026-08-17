@@ -49,6 +49,20 @@ def test_repo_unit_declares_the_production_opt_in() -> None:
     assert "Environment=WATCHER_ALLOW_PRODUCTION_DB=1" in text
 
 
+def test_repo_unit_declares_the_bus_opt_in() -> None:
+    """#262: the bus gate is unit-only, for the same reason as the DB one.
+
+    ``WATCHER_BUS_REDIS_URL`` lives in ``/etc/watcher/.env``, so every process
+    that sources it inherits a broker address. The flag is what separates the
+    service from an agent shell or a REPL, and it only works if no env file
+    carries it. Without this line the service starts and refuses to publish —
+    which is why ``src/core/bus.py`` also makes the URL-without-flag
+    combination a startup failure rather than a silent one.
+    """
+    text = REPO_UNIT.read_text()
+    assert "Environment=WATCHER_BUS_ENABLED=1" in text
+
+
 def test_installed_unit_matches_repo() -> None:
     installed = _read_if_installed(INSTALLED_UNIT)
     if installed is None:

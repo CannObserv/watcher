@@ -21,7 +21,7 @@ import os
 from croniter import croniter
 from procrastinate.exceptions import AlreadyEnqueued
 
-from src.core.bus import BUS_REDIS_URL_ENV, get_shared_bus_client
+from src.core.bus import bus_disabled_reason, get_shared_bus_client
 from src.core.database import get_session_factory
 from src.core.logging import get_logger
 from src.core.watch_status import publish_full_status_set
@@ -57,23 +57,27 @@ def _republish_cron() -> str:
 async def publish_watch_status(**periodic_kwargs) -> dict:
     """Publish every WatchedItem's scheduler state (and every tombstone) to the bus.
 
-    Skips loudly when ``WATCHER_BUS_REDIS_URL`` is unset: nothing in Watcher
-    blocks on this stream — it must never become an ack path — but Archiver's
-    panel and drift detector go stale, and an operator must be able to see
-    that the statuses are not travelling. A publish failure raises —
+    Skips loudly when no bus client can be built — ``WATCHER_BUS_REDIS_URL``
+    unset, or set without the ``WATCHER_BUS_ENABLED=1`` opt-in (#262): nothing
+    in Watcher blocks on this stream — it must never become an ack path — but
+    Archiver's panel and drift detector go stale, and an operator must be able
+    to see that the statuses are not travelling. A publish failure raises —
     Procrastinate records the failed job, and the next cron tick is the retry.
     """
-    if not os.environ.get(BUS_REDIS_URL_ENV):
+    # Asked of src.core.bus, not of the URL variable: since #262 the URL alone
+    # builds no client, so an env check here would fall through to a None
+    # client and publish nothing while claiming it could.
+    reason = bus_disabled_reason()
+    if reason is not None:
         logger.error(
-            "watch-status publish skipped: %s is not set — Archiver's panel and "
-            "drift detector are stale",
-            BUS_REDIS_URL_ENV,
+            "watch-status publish skipped: %s — Archiver's panel and drift detector are stale",
+            reason,
         )
-        return {"skipped": f"{BUS_REDIS_URL_ENV} not set"}
+        return {"skipped": reason}
 
     # Shared, lifespan-owned client (#241 CR-4) — never closed here.
     client = get_shared_bus_client()
-    assert client is not None  # guarded by the env check above
+    assert client is not None  # guarded by bus_disabled_reason() above
     async with get_session_factory()() as session:
         published = await publish_full_status_set(session, client)
     logger.info("watch-status full set published", extra={"published": published})

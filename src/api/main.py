@@ -17,7 +17,13 @@ from src.api.routes.watched_item_notifications import (
     router as watched_item_notifications_router,
 )
 from src.api.routes.watched_items import router as watched_items_router
-from src.core.bus import BUS_REDIS_URL_ENV, aclose_shared_bus_client, get_shared_bus_client
+from src.core.bus import (
+    BUS_REDIS_URL_ENV,
+    BusNotEnabled,
+    aclose_shared_bus_client,
+    assert_environment_bus_allowed,
+    get_shared_bus_client,
+)
 from src.core.database import get_session_factory
 from src.core.db_safety import ProductionDatabaseRefused, assert_environment_db_allowed
 from src.core.logging import configure_logging, get_logger
@@ -44,13 +50,20 @@ async def lifespan(application: FastAPI):
     (#233); see src.core.db_safety. Runs before any resource is built, so a
     refused process never starts the consumer or the worker.
 
+    Refuses the same way for a bus URL held without WATCHER_BUS_ENABLED=1
+    (#262). The enforcement point is here rather than at import of
+    src.core.bus: an import-time check would abort alembic, everything under
+    scripts/, and anything else that transitively imports the module —
+    including the tooling used to deploy the fix.
+
     Nothing to pre-warm since #254: the Archiver SDK went with Watcher's last
     outbound call to Archiver, so there is no client to build, no
     ARCHIVER_API_KEY to fail fast on, and no close to order at shutdown.
     """
     try:
         assert_environment_db_allowed(os.environ)
-    except ProductionDatabaseRefused as e:
+        assert_environment_bus_allowed(os.environ)
+    except (ProductionDatabaseRefused, BusNotEnabled) as e:
         # Log before re-raising: under systemd the bare exception surfaces in
         # journalctl as a lifespan traceback, burying the actionable text.
         logger.critical("Refusing to start: %s", e)

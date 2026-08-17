@@ -8,9 +8,7 @@ same task so an operator change reaches Replicator in seconds, not at the next
 quarter-hour; the two paths share one publish function, so they cannot drift.
 """
 
-import os
-
-from src.core.bus import BUS_REDIS_URL_ENV, get_shared_bus_client
+from src.core.bus import bus_disabled_reason, get_shared_bus_client
 from src.core.database import get_session_factory
 from src.core.fetch_policy import publish_full_policy_set
 from src.core.logging import get_logger
@@ -24,22 +22,27 @@ logger = get_logger(__name__)
 async def publish_fetch_policy(**periodic_kwargs) -> dict:
     """Publish every Domain's politeness numbers (and every tombstone) to the bus.
 
-    Skips loudly when ``WATCHER_BUS_REDIS_URL`` is unset: Replicator falls back
-    to its conservative per-host default, which is safe, but an operator must be
-    able to see that the numbers are not travelling. A publish failure raises —
-    Procrastinate records the failed job, and the next cron tick is the retry.
+    Skips loudly when no bus client can be built — ``WATCHER_BUS_REDIS_URL``
+    unset, or set without the ``WATCHER_BUS_ENABLED=1`` opt-in (#262):
+    Replicator falls back to its conservative per-host default, which is safe,
+    but an operator must be able to see that the numbers are not travelling. A
+    publish failure raises — Procrastinate records the failed job, and the next
+    cron tick is the retry.
     """
-    if not os.environ.get(BUS_REDIS_URL_ENV):
+    # Asked of src.core.bus, not of the URL variable: since #262 the URL alone
+    # builds no client, so an env check here would fall through to a None
+    # client and publish nothing while claiming it could.
+    reason = bus_disabled_reason()
+    if reason is not None:
         logger.error(
-            "fetch-policy publish skipped: %s is not set — Replicator is pacing "
-            "every host at its own default",
-            BUS_REDIS_URL_ENV,
+            "fetch-policy publish skipped: %s — Replicator is pacing every host at its own default",
+            reason,
         )
-        return {"skipped": f"{BUS_REDIS_URL_ENV} not set"}
+        return {"skipped": reason}
 
     # Shared, lifespan-owned client (#241 CR-4) — never closed here.
     client = get_shared_bus_client()
-    assert client is not None  # guarded by the env check above
+    assert client is not None  # guarded by bus_disabled_reason() above
     async with get_session_factory()() as session:
         published = await publish_full_policy_set(session, client)
     logger.info("fetch-policy full set published", extra={"published": published})

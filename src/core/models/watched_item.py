@@ -35,13 +35,14 @@ class WatchedItem(Base, TimestampMixin):
     chain (WatchedItem default → system default). Post-#191 the WatchedItem is
     the single monitored entity; there is no per-Watch override layer.
 
-    `archiver_info_item_id` links to an Archiver InfoItem (cross-schema reference to
-    `information.info_items.info_item_id`) and `archiver_info_source_id` to its
-    active InfoSource. Both are NOT NULL (#251): every WatchedItem is a
-    projection of registry state, and the unique index on the InfoItem link is
-    one-WatchedItem-per-InfoItem. Bare-URL WatchedItems were rolled back — the
-    nullability bought nothing and paid for it with silent drop branches in the
-    SourceRevision path.
+    `archiver_info_item_id` links to an Archiver InfoItem (a cross-*service*
+    reference to Archiver's `information.info_items.info_item_id`, in Archiver's
+    own database — Watcher's local copy of that schema was dropped in #271) and
+    `archiver_info_source_id` to its active InfoSource. Both are NOT NULL (#251):
+    every WatchedItem is a projection of registry state, and the unique index on
+    the InfoItem link is one-WatchedItem-per-InfoItem. Bare-URL WatchedItems
+    were rolled back — the nullability bought nothing and paid for it with
+    silent drop branches in the SourceRevision path.
 
     `effective_url` and `source_specs` are set at create time and drive
     the pipeline directly, without an Archiver SDK call per cycle.

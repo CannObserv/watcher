@@ -43,6 +43,18 @@ _INFORMATION_COUPLING = re.compile(
     r"""|["']information\.\w""",
 )
 
+# Schema-level DDL against `information`, in any quoting or spelling: the
+# `CASCADE` drop #271 performed on production by hand, and the `CREATE` that
+# would put the mirror back. Deliberately not part of `_INFORMATION_COUPLING`
+# — that one is about cross-schema *references*, this one about the schema's
+# existence. `\bSCHEMA\s+(?:IF\s+(?:NOT\s+)?EXISTS\s+)?` keeps prose like
+# "the ``information`` schema" from matching: the keyword must precede the
+# name, as in SQL, not follow it.
+_INFORMATION_SCHEMA_DDL = re.compile(
+    r"\b(?:CREATE|DROP)\s+SCHEMA\s+(?:IF\s+(?:NOT\s+)?EXISTS\s+)?[\"']?information\b",
+    re.IGNORECASE,
+)
+
 
 @pytest.fixture(scope="module")
 def script_directory() -> ScriptDirectory:
@@ -67,6 +79,54 @@ def test_single_base_is_genesis(script_directory: ScriptDirectory) -> None:
     """Exactly one base, and it is the #234 genesis baseline."""
     assert script_directory.get_bases() == [_GENESIS_REVISION]
     assert script_directory.get_revision(_GENESIS_REVISION).down_revision is None
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        'op.execute("DROP SCHEMA information CASCADE")',
+        "op.execute('drop schema if exists information cascade')",
+        'op.execute("CREATE SCHEMA information")',
+        'op.execute("DROP  SCHEMA\n    information")',
+    ],
+)
+def test_information_ddl_pattern_matches_known_forms(line: str) -> None:
+    """The detector must recognise schema-level DDL, not just cross-schema refs.
+
+    `_INFORMATION_COUPLING` only matches *references* (`schema="information"`,
+    `"information.info_items"`), so a bare `op.execute("DROP SCHEMA
+    information CASCADE")` slipped straight past it — the exact shape #271
+    warns about.
+    """
+    assert _INFORMATION_SCHEMA_DDL.search(line), f"undetected information-schema DDL: {line!r}"
+
+
+def test_information_ddl_pattern_ignores_prose() -> None:
+    """Docstrings explaining the rule must not trip it (the genesis baseline does)."""
+    prose = "the Archiver-owned ``information`` schema was dropped from production (#271)"
+    assert _INFORMATION_SCHEMA_DDL.search(prose) is None
+
+
+def test_no_migration_creates_or_drops_the_information_schema() -> None:
+    """No migration may CREATE or DROP the `information` schema (#271).
+
+    Production's dead copy was removed by an operator, deliberately not by a
+    migration: `tests/conftest.py` builds a real `information` schema in
+    `TEST_DATABASE_URL` from Archiver's alembic and keeps it alive between
+    sessions (#150). A migration dropping it would break every test run and
+    CI's `test` job; one creating it would put Watcher back in the business of
+    mirroring Archiver's registry, which #234 ended.
+    """
+    offenders = [
+        path.name
+        for path in _VERSIONS_DIR.glob("*.py")
+        if _INFORMATION_SCHEMA_DDL.search(path.read_text())
+    ]
+    assert not offenders, (
+        f"migration(s) issue CREATE/DROP SCHEMA information: {offenders} — "
+        "the schema is Archiver's; production's dead copy is an operator drop, "
+        "see docs/DEPLOYMENT.md"
+    )
 
 
 def test_no_information_schema_coupling() -> None:
@@ -113,6 +173,7 @@ def test_offline_upgrade_renders_all_tables(monkeypatch: pytest.MonkeyPatch) -> 
         )
 
     assert _INFORMATION_COUPLING.search(rendered) is None
+    assert _INFORMATION_SCHEMA_DDL.search(rendered) is None
 
 
 def test_ini_carries_no_database_url() -> None:

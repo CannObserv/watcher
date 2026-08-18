@@ -33,8 +33,10 @@ def _include_object(object, name, type_, reflected, compare_to):
     """Restrict autogenerate to Watcher-owned tables in the public schema.
 
     Filters out:
-    - Non-public schemas: the Information service owns ``information`` on a
-      separate Alembic root (``alembic_information.ini``).
+    - Non-public schemas: Archiver owns ``information``, in its own database
+      and under its own Alembic root. Production's dead copy was dropped by
+      hand (#271); the one ``tests/conftest.py`` builds lives only in
+      ``TEST_DATABASE_URL``, and autogenerate must never diff against it.
     - Procrastinate-managed tables: the task queue installs and migrates its
       own ``procrastinate_*`` tables at app startup; they should not appear
       in Watcher's Alembic diffs.

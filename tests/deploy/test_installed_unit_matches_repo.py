@@ -16,6 +16,8 @@ Skips when the unit is not installed, so CI and dev clones pass; it only
 asserts on a host that actually runs the service.
 """
 
+import shutil
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -38,6 +40,22 @@ def _read_if_installed(path: Path) -> str | None:
         return None
 
 
+def _unset_environment(unit_text: str) -> set[str]:
+    """Return every variable named by an ``UnsetEnvironment=`` line.
+
+    ``UnsetEnvironment=`` takes a space-separated list and may be repeated, so
+    the directive's meaning is the union of its tokens — not the text of any
+    one line. Parsing keeps the assertions in this module indifferent to how a
+    future edit chooses to group the names.
+    """
+    names: set[str] = set()
+    for line in unit_text.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("UnsetEnvironment="):
+            names.update(stripped.split("=", 1)[1].split())
+    return names
+
+
 def test_repo_unit_declares_the_production_opt_in() -> None:
     """The opt-in must live in the unit, never in an env file.
 
@@ -56,22 +74,17 @@ def test_repo_unit_drops_the_migration_credential() -> None:
     ``DATABASE_URL``, and the unit loads that file wholesale — so the service
     inherited the one credential that can drop tables even though the
     connection it opens is the DML-only ``watcher_app`` one (#259). Only
-    ``alembic/env.py`` ever reads it; nothing in the running service does.
+    ``alembic/env.py`` ever reads it; nothing in the running service does, and
+    ``alembic`` run from a shell still resolves it from the env file.
 
-    ``UnsetEnvironment=``, not the ``Environment=WATCHER_MIGRATION_DATABASE_URL=``
-    that #270 proposed. Blanking does not work at any position in the unit:
-    systemd.exec is explicit that "settings from these files override settings
-    made with ``Environment=``" — file over inline, not last-one-wins — so the
-    env file simply reinstates the credential. ``UnsetEnvironment=`` is applied
-    as the final step of environment compilation and undoes assignments from
-    every source, which is the only directive that can remove a variable an
-    ``EnvironmentFile=`` sets. Verified against systemd 255 on the host.
+    ``UnsetEnvironment=``, not ``Environment=WATCHER_MIGRATION_DATABASE_URL=``;
+    the unit comment on that line explains why blanking cannot work.
 
-    Inert everywhere else: the variable stays in the env file, so ``alembic``
-    run from a shell still resolves it.
+    Asserted on the parsed token rather than the whole line, because
+    ``UnsetEnvironment=`` takes a space-separated list: a second variable added
+    later is valid systemd and must not read as a regression here.
     """
-    text = REPO_UNIT.read_text()
-    assert "UnsetEnvironment=WATCHER_MIGRATION_DATABASE_URL\n" in text
+    assert "WATCHER_MIGRATION_DATABASE_URL" in _unset_environment(REPO_UNIT.read_text())
 
 
 def test_repo_unit_declares_the_bus_opt_in() -> None:
@@ -99,6 +112,47 @@ def test_repo_unit_treats_sigterm_exit_as_success() -> None:
     """
     text = REPO_UNIT.read_text()
     assert "SuccessExitStatus=143" in text
+
+
+def test_systemd_has_loaded_the_installed_unit() -> None:
+    """A copied unit that was never ``daemon-reload``ed is still not in force.
+
+    ``test_installed_unit_matches_repo`` compares bytes on disk. systemd serves
+    the unit it parsed at the last reload, so ``sudo cp`` alone leaves every
+    other assertion in this module green while the running service keeps its
+    old configuration.
+
+    #270 is what made that gap worth closing: ``WATCHER_ALLOW_PRODUCTION_DB``
+    and ``WATCHER_BUS_ENABLED`` announce a missed reload the next time the
+    service restarts — it fails to start, or refuses to publish.
+    ``UnsetEnvironment=`` announces nothing. The credential is simply still
+    there, and the only signal is this one.
+
+    Skips off-host for the same reason the drift check does; ``NeedDaemonReload``
+    is readable without privileges, so nothing here needs root.
+    """
+    if _read_if_installed(INSTALLED_UNIT) is None:
+        pytest.skip(f"{INSTALLED_UNIT} not present — not a host running the service")
+    systemctl = shutil.which("systemctl")
+    if systemctl is None:
+        pytest.skip("systemctl not available")
+
+    result = subprocess.run(
+        [systemctl, "show", "watcher", "--property=NeedDaemonReload", "--value"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        pytest.skip(f"systemctl show failed: {result.stderr.strip()}")
+
+    assert result.stdout.strip() == "no", (
+        "systemd has not reloaded the installed unit — the file at "
+        f"{INSTALLED_UNIT} is not what the service is running.\n"
+        "Reload with:\n"
+        "  sudo systemctl daemon-reload\n"
+        "Then restart the service when it is safe to do so."
+    )
 
 
 def test_installed_unit_matches_repo() -> None:

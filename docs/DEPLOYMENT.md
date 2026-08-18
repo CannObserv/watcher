@@ -32,7 +32,7 @@ pattern — see **Redis and the bus**.
 | Variable | Location | Required | Purpose |
 |---|---|---|---|
 | `DATABASE_URL` | `/etc/watcher/.env` | **yes** | PostgreSQL connection string the **application** connects with. Once the role split is applied (below) this names `watcher_app`, which holds DML and no DDL |
-| `WATCHER_MIGRATION_DATABASE_URL` | `/etc/watcher/.env` | no | Connection string **Alembic** connects with — the schema owner, `watcher` (#259). Unset → falls back to `DATABASE_URL`, which is the pre-split behaviour and what every host uses until `scripts/setup-db-roles.sql` has run. Set-but-empty counts as unset. `scripts/dev_server.sh` overwrites it with the dev database, and `tests/conftest.py` pins it to `TEST_DATABASE_URL`: it is the one variable that can drop tables, so it is never inherited by a non-production launch path. `deploy/watcher.service` drops it from the service process with `UnsetEnvironment=` (#270) — only `alembic/env.py` ever reads it |
+| `WATCHER_MIGRATION_DATABASE_URL` | `/etc/watcher/.env` | no | Connection string **Alembic** connects with — the schema owner, `watcher` (#259). Unset → falls back to `DATABASE_URL`, which is the pre-split behaviour and what every host uses until `scripts/setup-db-roles.sql` has run. Set-but-empty counts as unset — which is what the shell launchers rely on; the service has it removed outright. `scripts/dev_server.sh` overwrites it with the dev database, and `tests/conftest.py` pins it to `TEST_DATABASE_URL`: it is the one variable that can drop tables, so it is never inherited by a non-production launch path. `deploy/watcher.service` drops it from the service process with `UnsetEnvironment=` (#270) — only `alembic/env.py` ever reads it |
 | `PROCRASTINATE_DATABASE_URL` | `/etc/watcher/.env` | no | libpq-style DSN for procrastinate; falls back to `DATABASE_URL` with driver prefix stripped |
 | `GH_TOKEN` | `.env` | no | GitHub personal access token |
 | `TEST_DATABASE_URL` | `.env` | no | PostgreSQL connection string for test database |
@@ -222,13 +222,10 @@ Both live in the same file, so every process that sources it holds the
 migration credential — the weaker of the two options considered in #259,
 accepted for deploy friction. The service is the exception:
 `deploy/watcher.service` carries
-`UnsetEnvironment=WATCHER_MIGRATION_DATABASE_URL` (#270), so the credential is
-dropped from *its* environment while `alembic` run from a shell still resolves
-it. Note `UnsetEnvironment=`, not `Environment=WATCHER_MIGRATION_DATABASE_URL=`:
-an `EnvironmentFile=` overrides `Environment=` regardless of the order the two
-appear in, so a blank is simply reinstated by the env file; `UnsetEnvironment=`
-is applied as the final step of environment compilation and is the only
-directive that removes a variable an env file sets. The guarantee underneath is
+`UnsetEnvironment=WATCHER_MIGRATION_DATABASE_URL` (#270), the only *unit*
+directive that can remove a variable an `EnvironmentFile=` sets — the comment
+on that line explains why `Environment=WATCHER_MIGRATION_DATABASE_URL=` cannot.
+`alembic` run from a shell still resolves it. The guarantee underneath is
 unchanged and is the one that matters: the *connection the app actually opens*
 cannot execute DDL, whatever reaches it.
 
@@ -239,7 +236,15 @@ sudo systemctl restart watcher
 source scripts/load-env.sh                      # pick up the edited file
 curl -s localhost:8000/ready                    # {"status":"ready","db":true,...}
 sudo journalctl -u watcher -n 50 | grep -i 'permission denied' || echo "no permission errors"
+
+# #270: the service must not hold the migration credential. Expect 0.
+sudo tr '\0' '\n' < /proc/$(systemctl show watcher -p MainPID --value)/environ \
+  | grep -c WATCHER_MIGRATION_DATABASE_URL
 ```
+
+A non-zero count means `UnsetEnvironment=` is not in force — most often an
+installed unit that was never `daemon-reload`ed, which
+`tests/deploy/test_installed_unit_matches_repo.py` also checks.
 
 Then confirm the queue still turns over — the readiness probe only proves
 `SELECT 1`, while `procrastinate` needs sequences and functions:

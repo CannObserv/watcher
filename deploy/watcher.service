@@ -38,6 +38,23 @@ EnvironmentFile=-/home/exedev/watcher/.env
 # which are exactly what the guard exists to stop.
 Environment=WATCHER_ALLOW_PRODUCTION_DB=1
 
+# Drop the migration credential from the service process (#270). The
+# EnvironmentFile above carries WATCHER_MIGRATION_DATABASE_URL — the schema
+# owner, the one role that can execute DDL — while the connection this process
+# opens is the DML-only application role (#259). Only alembic/env.py ever reads
+# it, so the service should not hold it.
+#
+# UnsetEnvironment=, not `Environment=WATCHER_MIGRATION_DATABASE_URL=`: an
+# EnvironmentFile= overrides Environment= regardless of the order the two appear
+# in (systemd.exec: "settings from these files override settings made with
+# Environment="), so a blank is reinstated by the env file. UnsetEnvironment= is
+# applied as the final step of environment compilation and undoes assignments
+# from every source — the only directive that can remove one an env file sets.
+#
+# Inert elsewhere: the variable stays in /etc/watcher/.env, so `alembic` run
+# from a shell still resolves it.
+UnsetEnvironment=WATCHER_MIGRATION_DATABASE_URL
+
 # Bus opt-in for src/core/bus (#262), and unit-only for the same reason: the
 # EnvironmentFile above carries WATCHER_BUS_REDIS_URL, so every process that
 # sources /etc/watcher/.env inherits the production broker address. This line is

@@ -49,6 +49,31 @@ def test_repo_unit_declares_the_production_opt_in() -> None:
     assert "Environment=WATCHER_ALLOW_PRODUCTION_DB=1" in text
 
 
+def test_repo_unit_drops_the_migration_credential() -> None:
+    """#270: the service process must not inherit the DDL credential.
+
+    ``WATCHER_MIGRATION_DATABASE_URL`` lives in ``/etc/watcher/.env`` beside
+    ``DATABASE_URL``, and the unit loads that file wholesale — so the service
+    inherited the one credential that can drop tables even though the
+    connection it opens is the DML-only ``watcher_app`` one (#259). Only
+    ``alembic/env.py`` ever reads it; nothing in the running service does.
+
+    ``UnsetEnvironment=``, not the ``Environment=WATCHER_MIGRATION_DATABASE_URL=``
+    that #270 proposed. Blanking does not work at any position in the unit:
+    systemd.exec is explicit that "settings from these files override settings
+    made with ``Environment=``" — file over inline, not last-one-wins — so the
+    env file simply reinstates the credential. ``UnsetEnvironment=`` is applied
+    as the final step of environment compilation and undoes assignments from
+    every source, which is the only directive that can remove a variable an
+    ``EnvironmentFile=`` sets. Verified against systemd 255 on the host.
+
+    Inert everywhere else: the variable stays in the env file, so ``alembic``
+    run from a shell still resolves it.
+    """
+    text = REPO_UNIT.read_text()
+    assert "UnsetEnvironment=WATCHER_MIGRATION_DATABASE_URL\n" in text
+
+
 def test_repo_unit_declares_the_bus_opt_in() -> None:
     """#262: the bus gate is unit-only, for the same reason as the DB one.
 

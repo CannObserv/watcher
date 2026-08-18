@@ -87,6 +87,20 @@
         </div>
       </div>
     </div>
+    {# Last Full Fetch — last_full_fetch_at (#269). The row that keeps a 304
+       streak legible: Content Verified advances on an origin 304 exactly as it
+       does on a real read, so without this one an operator cannot tell a
+       freshly-extracted item from one whose fingerprint has been inherited for
+       a week. It is also what the validator age ceiling measures. #}
+    <div class="p-4">
+      <div class="grid grid-cols-[1fr_auto] sm:grid-cols-[min(18rem,40%)_1fr_auto] items-start gap-x-4 gap-y-2">
+        <div class="min-w-0"><span class="form-label mb-0">Last Full Fetch</span></div>
+        <div class="col-span-2 sm:col-span-1 sm:col-start-2 sm:row-start-1 min-w-0">
+          <span class="text-sm text-gray-700 dark:text-gray-300">{% if watched_item.last_full_fetch_at %}{{ watched_item.last_full_fetch_at.strftime("%Y-%m-%d %H:%M UTC") }}{% else %}Never fetched{% endif %}</span>
+          <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">When bytes last arrived. A conditional check answered 304 confirms the content without re-reading it, so Content Verified can be newer than this.</p>
+        </div>
+      </div>
+    </div>
     {# Last Changed — field/value #}
     <div class="p-4">
       <div class="grid grid-cols-[1fr_auto] sm:grid-cols-[min(18rem,40%)_1fr_auto] items-center gap-x-4 gap-y-2">

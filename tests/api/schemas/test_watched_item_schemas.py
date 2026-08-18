@@ -412,3 +412,8 @@ class TestIssue251ULIDValidation:
                 source_specs=_SPECS,
             )
         assert "type str" in str(exc_info.value)
+
+
+def test_response_has_last_full_fetch_at():
+    """#269: when bytes last arrived, beside the two freshness stamps."""
+    assert "last_full_fetch_at" in WatchedItemResponse.model_fields

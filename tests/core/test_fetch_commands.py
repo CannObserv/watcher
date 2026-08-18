@@ -12,7 +12,7 @@ Pins the issuer-contract MUSTs that live on this side of the wire:
   cutover is UA-neutral and fingerprints stay byte-continuous.
 """
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import fakeredis
 import pytest
@@ -26,6 +26,7 @@ from src.core.fetch_commands import (
     publish_fetch_command,
 )
 from src.core.models.fetch_command import FetchCommand, FetchCommandStatus
+from src.core.validators import CONDITIONAL_GET_ENV, validator_source_key
 from tests.conftest import make_watched_item
 
 pytestmark = pytest.mark.integration
@@ -126,3 +127,117 @@ class TestPublishFetchCommand:
         # The cascade happens DB-side; drop the identity-map copy before re-reading.
         db_session.expire_all()
         assert await db_session.get(FetchCommand, command_id) is None
+
+
+class TestValidatorReplay:
+    """#269 part 3: the command replays the item's stored validators.
+
+    Snapshotted onto the row at issue, not read from the item at publish: the
+    pending-publish sweep holds only the row (the same argument that put
+    ``info_source_id`` there, cannobserv#300), and the row is then an exact
+    record of what each occasion asked.
+    """
+
+    async def _item_with_validators(self, db_session, **over):
+        wi = await make_watched_item(db_session, primary_url="https://lcb.wa.gov/notices")
+        wi.etag = over.pop("etag", 'W/"v2"')
+        wi.last_modified = over.pop("last_modified", "Wed, 13 Aug 2026 10:00:00 GMT")
+        wi.last_full_fetch_at = over.pop("last_full_fetch_at", NOW - timedelta(hours=1))
+        wi.validator_source_key = over.pop(
+            "validator_source_key",
+            validator_source_key(effective_url=wi.effective_url, source_specs=wi.source_specs),
+        )
+        await db_session.flush()
+        return wi
+
+    async def test_snapshots_the_pair_onto_the_row(self, db_session, monkeypatch):
+        monkeypatch.setenv(CONDITIONAL_GET_ENV, "true")
+        wi = await self._item_with_validators(db_session)
+
+        row = await create_fetch_command(db_session, wi, now=NOW)
+        await db_session.flush()
+
+        assert row.request_etag == 'W/"v2"'
+        assert row.request_last_modified == "Wed, 13 Aug 2026 10:00:00 GMT"
+
+    async def test_publishes_the_validator_headers_verbatim(self, db_session, monkeypatch):
+        monkeypatch.setenv(CONDITIONAL_GET_ENV, "true")
+        wi = await self._item_with_validators(db_session)
+        row = await create_fetch_command(db_session, wi, now=NOW)
+        await db_session.flush()
+        client = fakeredis.FakeAsyncRedis()
+
+        await publish_fetch_command(client, row, now=NOW)
+
+        (message,) = await _decode_commands(client)
+        command = message.payload
+        assert command.headers == {
+            "user-agent": WATCHER_USER_AGENT,
+            "if-none-match": 'W/"v2"',
+            "if-modified-since": "Wed, 13 Aug 2026 10:00:00 GMT",
+        }
+
+    async def test_the_gate_off_sends_only_the_user_agent(self, db_session, monkeypatch):
+        # Default posture, and the canary's off-position: byte-for-byte the
+        # pre-#269 command.
+        monkeypatch.delenv(CONDITIONAL_GET_ENV, raising=False)
+        wi = await self._item_with_validators(db_session)
+        row = await create_fetch_command(db_session, wi, now=NOW)
+        await db_session.flush()
+        client = fakeredis.FakeAsyncRedis()
+
+        await publish_fetch_command(client, row, now=NOW)
+
+        (message,) = await _decode_commands(client)
+        command = message.payload
+        assert command.headers == {"user-agent": WATCHER_USER_AGENT}
+        assert row.request_etag is None
+
+    async def test_force_full_fetch_snapshots_nothing(self, db_session, monkeypatch):
+        monkeypatch.setenv(CONDITIONAL_GET_ENV, "true")
+        wi = await self._item_with_validators(db_session)
+
+        row = await create_fetch_command(db_session, wi, now=NOW, force_full_fetch=True)
+        await db_session.flush()
+
+        assert row.request_etag is None
+        assert row.request_last_modified is None
+
+    async def test_an_unsendable_stored_value_is_never_snapshotted(self, db_session, monkeypatch):
+        # Replicator refuses it BEFORE any request goes out, so minting the
+        # command at all buys an ERROR health transition for nothing.
+        monkeypatch.setenv(CONDITIONAL_GET_ENV, "true")
+        wi = await self._item_with_validators(db_session, etag='"v2"\r\nX-Evil: 1')
+
+        row = await create_fetch_command(db_session, wi, now=NOW)
+        await db_session.flush()
+
+        assert row.request_etag is None
+        assert row.request_last_modified == "Wed, 13 Aug 2026 10:00:00 GMT"
+
+    async def test_a_stale_source_key_snapshots_nothing(self, db_session, monkeypatch):
+        # The specs, the URL, or the extraction generation moved: the pair was
+        # earned under a different meaning of the bytes.
+        monkeypatch.setenv(CONDITIONAL_GET_ENV, "true")
+        wi = await self._item_with_validators(db_session, validator_source_key="sha256:stale")
+
+        row = await create_fetch_command(db_session, wi, now=NOW)
+        await db_session.flush()
+
+        assert row.request_etag is None
+
+    async def test_the_sweep_republishes_the_same_headers(self, db_session, monkeypatch):
+        # The sweep holds only the row — the snapshot is what makes its
+        # republish byte-identical to the original command.
+        monkeypatch.setenv(CONDITIONAL_GET_ENV, "true")
+        wi = await self._item_with_validators(db_session)
+        row = await create_fetch_command(db_session, wi, now=NOW)
+        await db_session.flush()
+        monkeypatch.delenv(CONDITIONAL_GET_ENV, raising=False)
+        client = fakeredis.FakeAsyncRedis()
+
+        await publish_fetch_command(client, row, now=NOW)
+
+        (message,) = await _decode_commands(client)
+        command = message.payload
+        assert command.headers["if-none-match"] == 'W/"v2"'

@@ -39,7 +39,11 @@ from src.core.fetch_commands import (
 )
 from src.core.logging import get_logger
 from src.core.models.audit_log import EventType, audit
-from src.core.models.fetch_command import FetchCommand, FetchCommandStatus
+from src.core.models.fetch_command import (
+    INVALID_REQUEST_OPTIONS_REASON,
+    FetchCommand,
+    FetchCommandStatus,
+)
 from src.core.models.watched_item import (
     CONTENT_MEDIA_TYPE_MAX_LEN,
     WatchedItem,
@@ -48,6 +52,7 @@ from src.core.models.watched_item import (
 from src.core.notifications.events import WatchEvent, WatchEventType
 from src.core.registry import ServiceRegistry, get_registry
 from src.core.utils import watched_item_event_base_metadata
+from src.core.validators import clear_validators, record_validators
 from src.workers import bp
 from src.workers.notify import dispatch_event_notifications
 from src.workers.pipeline import (
@@ -429,6 +434,11 @@ async def apply_fetch_blob(
 
         row.status = FetchCommandStatus.SUCCEEDED
         row.applied_at = now
+        # #269: this fact closed the item's latest command (the ordering guard
+        # above is what makes that true), so its validators are the pair the
+        # next command may replay. Always an overwrite, NULLs included — the
+        # pair must describe the latest 200.
+        record_validators(watched_item, etag=row.etag, last_modified=row.last_modified, now=now)
         await _record_check_success(session, watched_item, result, now=now, url=row.url)
 
     return {
@@ -459,6 +469,24 @@ async def apply_fetch_failure(command_id: str) -> dict:
 
         now = datetime.now(UTC)
         row.applied_at = now
+        if row.failure_reason == INVALID_REQUEST_OPTIONS_REASON:
+            # #269's one loop hazard. This refusal happens BEFORE any request
+            # goes out, so an unsendable stored validator would be re-snapshotted
+            # and refused on every cycle, forever — each one an ERROR health
+            # transition and a WATCH_ERROR. Forgetting the pair makes the next
+            # command unconditional, which is self-healing; every other reason
+            # says nothing about our validators and leaves them alone.
+            logger.warning(
+                "command refused for its request options — clearing stored validators",
+                extra={
+                    "command_id": command_id,
+                    "watched_item_id": str(watched_item.id),
+                    "request_etag": row.request_etag,
+                    "request_last_modified": row.request_last_modified,
+                    "detail": row.failure_detail,
+                },
+            )
+            clear_validators(watched_item)
         audit_kwargs: dict = {"reason": row.failure_reason}
         error_metadata: dict = {"reason": row.failure_reason}
         if row.status_code is not None:

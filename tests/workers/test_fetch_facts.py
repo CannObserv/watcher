@@ -554,3 +554,57 @@ class TestForeignPayloadTypes:
         outcome = await process_fact_message(db_session, message)
 
         assert outcome == "ignored_unknown_type"
+
+
+class TestValidatorFacts:
+    """#269 part 2: the conditional-GET validators land on the row.
+
+    They arrive on every blob fact and were dropped until now. The row is the
+    *provenance* half — what this occasion returned; the item-level pair the next
+    command replays is written by the apply path, under its ordering guard
+    (MUST-5: a validator pinned to a fingerprint replays a stale
+    ``If-None-Match`` for exactly as long as the content is unchanged).
+    """
+
+    async def test_blob_fact_records_both_validators(self, db_session):
+        wi = await make_watched_item(db_session, primary_url="https://lcb.wa.gov/notices")
+        row = await create_fetch_command(db_session, wi, now=NOW)
+        await db_session.commit()
+
+        await process_fact_message(
+            db_session,
+            _blob_for(row, etag='W/"v2"', last_modified="Wed, 13 Aug 2026 10:00:00 GMT"),
+            defer_blob=_DeferSpy(),
+        )
+
+        await db_session.refresh(row)
+        assert row.etag == 'W/"v2"'
+        assert row.last_modified == "Wed, 13 Aug 2026 10:00:00 GMT"
+
+    async def test_absent_validators_stay_null(self, db_session):
+        # None means "nobody said" — never a default to substitute for.
+        wi = await make_watched_item(db_session, primary_url="https://lcb.wa.gov/notices")
+        row = await create_fetch_command(db_session, wi, now=NOW)
+        await db_session.commit()
+
+        await process_fact_message(db_session, _blob_for(row), defer_blob=_DeferSpy())
+
+        await db_session.refresh(row)
+        assert row.etag is None
+        assert row.last_modified is None
+
+    async def test_a_not_modified_fact_records_no_validators(self, db_session):
+        # A 304 carries none, and the stored pair is current by definition.
+        wi = await make_watched_item(db_session, primary_url="https://lcb.wa.gov/notices")
+        row = await create_fetch_command(db_session, wi, now=NOW)
+        await db_session.commit()
+
+        await process_fact_message(
+            db_session,
+            _failure_for(row, reason="not_modified", status_code=304),
+            defer_not_modified=_DeferSpy(),
+        )
+
+        await db_session.refresh(row)
+        assert row.etag is None
+        assert row.last_modified is None

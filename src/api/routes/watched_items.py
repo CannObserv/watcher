@@ -469,7 +469,12 @@ async def check_now(watched_item_id: str, session: AsyncSession = Depends(get_db
             ),
         )
 
-    await check_watched_item.configure().defer_async(watched_item_id=str(wi.id))
+    # force_full_fetch (#269): an operator asking for a check now wants bytes,
+    # not a 304 that confirms what we already believe. Conditional GET is the
+    # scheduler's optimisation; this button is the way past it.
+    await check_watched_item.configure().defer_async(
+        watched_item_id=str(wi.id), force_full_fetch=True
+    )
     audit(session, EventType.WATCHED_ITEM_CHECK_REQUESTED, watched_item_id=str(wi.id), source="api")
     await session.commit()
     return wi

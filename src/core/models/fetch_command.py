@@ -55,6 +55,13 @@ class FetchCommandStatus(enum.StrEnum):
 # it already has; see ``apply_fetch_not_modified`` (#249).
 NOT_MODIFIED_REASON = "not_modified"
 
+# The one ``reason`` for which no request ever went out (replicator#11): the
+# command's ``headers`` or ``timeout_seconds`` were refused before the origin was
+# contacted. It is the only failure that says something about *our* request
+# options rather than the origin, which is why it — alone — invalidates the
+# item's stored conditional-GET validators (#269).
+INVALID_REQUEST_OPTIONS_REASON = "invalid_request_options"
+
 # The statuses that make a command "open": they gate scheduling (no new issue
 # while one is open) and are what the reaper scans.
 #
@@ -99,6 +106,12 @@ class FetchCommand(Base, TimestampMixin):
         DateTime(timezone=True), nullable=True, default=None
     )
     reissue_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    # What this command ASKED, snapshotted at the occasion (#269) — the same
+    # reason ``info_source_id`` is here: the pending-publish sweep holds only
+    # this row, so a republish must be able to reproduce the exact headers.
+    # Also the audit trail for a 304: what validator earned it.
+    request_etag: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
+    request_last_modified: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
 
     # --- fact fields (upserted by the content.blobs consumer) ---
     fact_at: Mapped[datetime | None] = mapped_column(
@@ -118,6 +131,11 @@ class FetchCommand(Base, TimestampMixin):
     content_type_raw: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
     final_url: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
     status_code: Mapped[int | None] = mapped_column(Integer, nullable=True, default=None)
+    # The conditional-GET validators this occasion returned, verbatim (#269).
+    # Provenance for the row; the pair the *next* command replays is the item's,
+    # written by the apply path under its ordering guard (MUST-5).
+    etag: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
+    last_modified: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
     failure_reason: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
     failure_detail: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
     applied_at: Mapped[datetime | None] = mapped_column(

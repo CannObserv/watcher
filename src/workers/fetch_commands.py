@@ -410,6 +410,12 @@ async def apply_fetch_blob(
             )
             row.status = FetchCommandStatus.FAILED
             row.applied_at = now
+            # #269: bytes arrived and could not be extracted. Keeping the stored
+            # pair would let the next cycle answer 304 — and a 304 apply records
+            # a *successful* check, so a broken extraction would flip back to OK
+            # health without anything having been extracted. Forget it, and the
+            # next command fetches in full and re-asserts the failure.
+            clear_validators(watched_item)
             await _record_check_failure(
                 session,
                 watched_item,

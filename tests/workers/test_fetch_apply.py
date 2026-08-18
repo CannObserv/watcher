@@ -777,6 +777,29 @@ class TestValidatorStorage:
         assert wi.last_modified == "Wed, 13 Aug 2026 10:00:00 GMT"
         assert wi.last_full_fetch_at == NOW - timedelta(hours=6)
 
+    async def test_extraction_failure_clears_the_pair(self, db_session, tmp_path, monkeypatch):
+        """Bytes arrived but could not be extracted — do not let a 304 mask it.
+
+        Keeping the pair would let the next cycle answer 304, and a 304 apply
+        records a *successful* check: OK health on an item whose extraction is
+        broken. Clearing forces the next command to fetch in full, so the
+        failure keeps re-asserting itself until someone fixes the spec.
+        """
+        wi, row = await _row_with_fact(db_session, tmp_path, etag='W/"v2"')
+        wi.etag = 'W/"v1"'
+        wi.validator_source_key = validator_source_key(
+            effective_url=wi.effective_url, source_specs=wi.source_specs
+        )
+        await db_session.flush()
+        _wire(db_session, monkeypatch, raises=ExtractionError("no chunks"))
+        monkeypatch.setattr(fc_mod, "dispatch_event_notifications", AsyncMock(return_value=0))
+
+        result = await apply_fetch_blob(row.command_id)
+
+        assert result == {"error": "extraction_failed"}
+        assert wi.etag is None
+        assert wi.validator_source_key is None
+
     async def test_invalid_request_options_clears_the_pair(self, db_session, monkeypatch):
         # The one loop hazard: the refusal happens BEFORE any request, so a bad
         # stored validator would be re-snapshotted and refused every cycle,

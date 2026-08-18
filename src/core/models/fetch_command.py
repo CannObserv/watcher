@@ -27,7 +27,17 @@ from watcher's extracted-text fingerprint on ``ChangeRevision``; the two coexist
 import enum
 from datetime import datetime
 
-from sqlalchemy import BigInteger, DateTime, ForeignKey, Index, Integer, String, Text, text
+from sqlalchemy import (
+    BigInteger,
+    Boolean,
+    DateTime,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    Text,
+    text,
+)
 from sqlalchemy.orm import Mapped, mapped_column
 from ulid import ULID
 
@@ -112,6 +122,14 @@ class FetchCommand(Base, TimestampMixin):
     # Also the audit trail for a 304: what validator earned it.
     request_etag: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
     request_last_modified: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
+    # Whether this occasion was asked for as an unconditional re-read — the
+    # operator's check-now (#269 CR-1). Lineage, like ``intent_id``: the reaper
+    # re-issues under a fresh command_id, and without carrying this the forced
+    # intent is lost and the replacement may be answered 304, which is the one
+    # thing check-now promises not to do.
+    forced_full_fetch: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=text("false")
+    )
 
     # --- fact fields (upserted by the content.blobs consumer) ---
     fact_at: Mapped[datetime | None] = mapped_column(

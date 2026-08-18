@@ -116,6 +116,7 @@ async def create_fetch_command(
         reissue_count=reissue_count,
         request_etag=request_etag,
         request_last_modified=request_last_modified,
+        forced_full_fetch=force_full_fetch,
     )
     session.add(row)
     return row

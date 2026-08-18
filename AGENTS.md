@@ -142,7 +142,9 @@ them verbatim, but only for items named in `WATCHER_CONDITIONAL_GET_ENABLED`
 (unset → off, byte-identical to the pre-#269 command). Validators are snapshotted
 onto the `fetch_commands` row at issue — the sweep republishes from that row
 alone — and a 304 inherits the last fingerprint, so a spec/URL/extractor change
-must invalidate them: that is `validator_source_key`, plus an age ceiling. Never
+must invalidate them: that is `validator_source_key` (whose extraction half is
+derived from the installed co-core version, so a wheelhouse upgrade invalidates
+by itself), plus an age ceiling. Never
 route `invalid_request_options` past the validator clear; the refusal precedes
 the request, so a bad stored value wedges the item permanently.
 [docs/CONTENT-PIPELINE.md](docs/CONTENT-PIPELINE.md) → *Conditional GET*.

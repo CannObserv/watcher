@@ -8,20 +8,26 @@ The rules under test, and why each exists, are in
 ``src/core/validators.py`` and docs/CONTENT-PIPELINE.md.
 """
 
+import logging
 from datetime import UTC, datetime, timedelta
+from importlib.metadata import PackageNotFoundError, version
 from types import SimpleNamespace
 
 from src.core.validators import (
+    CO_CORE_DISTRIBUTION,
     CONDITIONAL_GET_ENV,
     DEFAULT_VALIDATOR_MAX_AGE_HOURS,
     EXTRACTION_GENERATION,
+    LOCAL_EXTRACTION_GENERATION,
     MAX_VALIDATOR_LENGTH,
     VALIDATOR_MAX_AGE_ENV,
     clear_validators,
     conditional_get_enabled,
+    extraction_generation,
     record_validators,
     replayable_validators,
     sendable_validator,
+    stamp_full_fetch,
     validator_max_age,
     validator_source_key,
 )
@@ -116,7 +122,7 @@ class TestValidatorSourceKey:
 
     def test_moves_when_the_extraction_generation_moves(self):
         assert validator_source_key(effective_url=URL, source_specs=SPECS) != validator_source_key(
-            effective_url=URL, source_specs=SPECS, generation=EXTRACTION_GENERATION + 1
+            effective_url=URL, source_specs=SPECS, generation=f"{EXTRACTION_GENERATION}+next"
         )
 
     def test_spec_order_is_significant(self):
@@ -128,6 +134,33 @@ class TestValidatorSourceKey:
 
     def test_no_specs_still_derives_a_key(self):
         assert validator_source_key(effective_url=URL, source_specs=None)
+
+
+class TestExtractionGeneration:
+    """CR-3: a co-core upgrade must invalidate stored validators on its own.
+
+    The hand-bumped constant was the same hazard `WATCHER_USER_AGENT` is guarded
+    against, one step quieter: an extractor change nobody bumps for leaves every
+    304-ing item inheriting a fingerprint the old extractor computed. Deriving
+    the generation from the installed distribution removes the human step; the
+    local half stays for a watcher-side extraction change, which co-core's
+    version cannot see.
+    """
+
+    def test_carries_the_installed_co_core_version(self):
+        assert version(CO_CORE_DISTRIBUTION) in EXTRACTION_GENERATION
+
+    def test_carries_the_local_generation(self):
+        assert str(LOCAL_EXTRACTION_GENERATION) in EXTRACTION_GENERATION
+
+    def test_a_missing_distribution_does_not_raise(self, monkeypatch):
+        # Wheelhouse trouble must not take the issue path down; an unknown
+        # version simply invalidates, which is the safe direction.
+        def _boom(_name):
+            raise PackageNotFoundError(_name)
+
+        monkeypatch.setattr("src.core.validators.version", _boom)
+        assert extraction_generation()
 
 
 class TestConditionalGetEnabled:
@@ -164,6 +197,14 @@ class TestValidatorMaxAge:
     def test_reads_the_env_override(self, monkeypatch):
         monkeypatch.setenv(VALIDATOR_MAX_AGE_ENV, "24")
         assert validator_max_age() == timedelta(hours=24)
+
+    def test_a_non_positive_ceiling_is_logged(self, monkeypatch, caplog):
+        # CR-6: safe direction (always re-fetch), but a typo'd sign silently
+        # switches the feature off — say so.
+        monkeypatch.setenv(VALIDATOR_MAX_AGE_ENV, "-168")
+        with caplog.at_level(logging.INFO, logger="src.core.validators"):
+            assert validator_max_age() <= timedelta(0)
+        assert any("conditional GET" in r.getMessage() for r in caplog.records)
 
     def test_an_unparseable_value_falls_back_to_the_default(self, monkeypatch):
         # A typo'd knob must not wedge every command; the safe direction is
@@ -249,10 +290,21 @@ class TestRecordAndClear:
 
         assert item.etag == '"xyz"'
         assert item.last_modified is None
-        assert item.last_full_fetch_at == NOW
         assert item.validator_source_key == validator_source_key(
             effective_url=URL, source_specs=SPECS
         )
+
+    def test_record_does_not_own_the_fetch_stamp(self):
+        # CR-2: "bytes arrived" is a fetch fact, not a validator fact — an
+        # extraction failure stores no pair and must still move the stamp.
+        item = _item(last_full_fetch_at=None)
+        record_validators(item, etag='"xyz"', last_modified=None, now=NOW)
+        assert item.last_full_fetch_at is None
+
+    def test_stamp_full_fetch_records_when_bytes_arrived(self):
+        item = _item(last_full_fetch_at=None)
+        stamp_full_fetch(item, now=NOW)
+        assert item.last_full_fetch_at == NOW
 
     def test_record_clears_a_pair_the_origin_stopped_sending(self):
         # Always overwrite, including None: the pair must describe the latest 200.
@@ -260,8 +312,6 @@ class TestRecordAndClear:
         record_validators(item, etag=None, last_modified=None, now=NOW)
         assert item.etag is None
         assert item.last_modified is None
-        # …but the fetch still happened, so the age ceiling restarts.
-        assert item.last_full_fetch_at == NOW
 
     def test_clear_drops_the_pair_and_its_key(self):
         item = _item()

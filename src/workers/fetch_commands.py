@@ -52,7 +52,7 @@ from src.core.models.watched_item import (
 from src.core.notifications.events import WatchEvent, WatchEventType
 from src.core.registry import ServiceRegistry, get_registry
 from src.core.utils import watched_item_event_base_metadata
-from src.core.validators import clear_validators, record_validators
+from src.core.validators import clear_validators, record_validators, stamp_full_fetch
 from src.workers import bp
 from src.workers.notify import dispatch_event_notifications
 from src.workers.pipeline import (
@@ -248,8 +248,9 @@ async def _reissue(session, watched_item, prior, client) -> str:
     """Re-issue an intent under a fresh ``command_id`` (MUST-6: a timeout or a
     lost blob is grounds to re-issue, never to conclude failure).
 
-    Same ``intent_id``, ``reissue_count + 1``. Persist-commit-publish, like the
-    original issue; a failed publish leaves ``pending_publish`` for the sweep.
+    Same ``intent_id``, ``reissue_count + 1``, same forced-fetch intent.
+    Persist-commit-publish, like the original issue; a failed publish leaves
+    ``pending_publish`` for the sweep.
     Returns the new ``command_id``.
     """
     now = datetime.now(UTC)
@@ -259,6 +260,10 @@ async def _reissue(session, watched_item, prior, client) -> str:
         now=now,
         intent_id=prior.intent_id,
         reissue_count=prior.reissue_count + 1,
+        # The forced intent is lineage too (CR-1): a check-now that stalled and
+        # was reaped must not come back as a conditional GET the origin can
+        # answer 304, leaving the operator with no bytes and no signal.
+        force_full_fetch=prior.forced_full_fetch,
     )
     await session.commit()
     # Shared, lifespan-owned client (CR-4) — never closed here.
@@ -416,6 +421,8 @@ async def apply_fetch_blob(
             # health without anything having been extracted. Forget it, and the
             # next command fetches in full and re-asserts the failure.
             clear_validators(watched_item)
+            # …but bytes DID arrive, and that is what this stamp records (CR-2).
+            stamp_full_fetch(watched_item, now=now)
             await _record_check_failure(
                 session,
                 watched_item,
@@ -445,6 +452,7 @@ async def apply_fetch_blob(
         # next command may replay. Always an overwrite, NULLs included — the
         # pair must describe the latest 200.
         record_validators(watched_item, etag=row.etag, last_modified=row.last_modified, now=now)
+        stamp_full_fetch(watched_item, now=now)
         await _record_check_success(session, watched_item, result, now=now, url=row.url)
 
     return {

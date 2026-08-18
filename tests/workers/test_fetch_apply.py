@@ -22,7 +22,7 @@ from src.core.models.fetch_command import OPEN_STATUSES, FetchCommand, FetchComm
 from src.core.models.watched_item import WatchHealthStatus
 from src.core.notifications.events import WatchEventType
 from src.core.registry import ServiceRegistry
-from src.core.validators import validator_source_key
+from src.core.validators import CONDITIONAL_GET_ENV, validator_source_key
 from src.workers.fetch_commands import (
     apply_fetch_blob,
     apply_fetch_failure,
@@ -693,6 +693,72 @@ class TestStatusRepublishOnTransition:
         assert spy.await_count == 1  # only the OK -> ERROR transition
 
 
+class TestForcedFetchLineage:
+    """CR-1: a forced full fetch must survive the reaper's re-issue.
+
+    Check-now promises a real re-read. Before this, a forced command that
+    stalled past the timeout was re-issued by ``_reissue`` — which re-resolved
+    validators from the item and could send ``If-None-Match``, so the operator's
+    forced check could be answered 304 and produce no bytes at all, with nothing
+    saying the request had been downgraded.
+    """
+
+    async def test_reissue_after_an_unreadable_blob_keeps_the_forced_intent(
+        self, db_session, monkeypatch, tmp_path
+    ):
+        monkeypatch.setenv(CONDITIONAL_GET_ENV, "true")
+        wi, row = await _row_with_fact(db_session, tmp_path)
+        wi.etag = 'W/"v2"'
+        # Real clock: _reissue resolves validators against datetime.now, so a
+        # fixture-era stamp would age the pair out and pass for the wrong reason.
+        wi.last_full_fetch_at = datetime.now(UTC) - timedelta(hours=1)
+        wi.validator_source_key = validator_source_key(
+            effective_url=wi.effective_url, source_specs=wi.source_specs
+        )
+        row.forced_full_fetch = True
+        row.blob_uri = "file:///nonexistent/blob.bin"
+        await db_session.flush()
+        _wire(db_session, monkeypatch)
+
+        await apply_fetch_blob(row.command_id, bus_client=AsyncMock())
+
+        reissued = (
+            await db_session.execute(
+                select(FetchCommand).where(
+                    FetchCommand.watched_item_id == wi.id,
+                    FetchCommand.command_id != row.command_id,
+                )
+            )
+        ).scalar_one()
+        assert reissued.forced_full_fetch is True
+        assert reissued.request_etag is None
+
+    async def test_an_ordinary_reissue_still_replays(self, db_session, monkeypatch, tmp_path):
+        monkeypatch.setenv(CONDITIONAL_GET_ENV, "true")
+        wi, row = await _row_with_fact(db_session, tmp_path)
+        wi.etag = 'W/"v2"'
+        wi.last_full_fetch_at = datetime.now(UTC) - timedelta(hours=1)
+        wi.validator_source_key = validator_source_key(
+            effective_url=wi.effective_url, source_specs=wi.source_specs
+        )
+        row.blob_uri = "file:///nonexistent/blob.bin"
+        await db_session.flush()
+        _wire(db_session, monkeypatch)
+
+        await apply_fetch_blob(row.command_id, bus_client=AsyncMock())
+
+        reissued = (
+            await db_session.execute(
+                select(FetchCommand).where(
+                    FetchCommand.watched_item_id == wi.id,
+                    FetchCommand.command_id != row.command_id,
+                )
+            )
+        ).scalar_one()
+        assert reissued.forced_full_fetch is False
+        assert reissued.request_etag == 'W/"v2"'
+
+
 class TestValidatorStorage:
     """#269 part 2: the item's replayable pair, written from the closing fact.
 
@@ -799,6 +865,37 @@ class TestValidatorStorage:
         assert result == {"error": "extraction_failed"}
         assert wi.etag is None
         assert wi.validator_source_key is None
+        # CR-2: bytes DID arrive — the stamp records the fetch, not the outcome.
+        assert wi.last_full_fetch_at is not None
+
+    async def test_probe_resolution_keys_the_pair_to_the_final_url(
+        self, db_session, tmp_path, monkeypatch
+    ):
+        """CR-4: the same apply moves effective_url and stores the validators.
+
+        The pair belongs to where the bytes came from, so the key must be over
+        the *resolved* URL. Storing it before the probe block would key it to the
+        pre-redirect URL, and every later command would silently refuse to
+        replay — benign, invisible, and exactly the kind of regression a test
+        has to hold still.
+        """
+        wi, row = await _row_with_fact(
+            db_session,
+            tmp_path,
+            etag='W/"v2"',
+            final_url="https://www.lcb.wa.gov/notices",
+        )
+        wi.health_status = WatchHealthStatus.PROBING
+        await db_session.flush()
+        _wire(db_session, monkeypatch)
+
+        await apply_fetch_blob(row.command_id, registry=ServiceRegistry())
+
+        assert wi.effective_url == "https://www.lcb.wa.gov/notices"
+        assert wi.etag == 'W/"v2"'
+        assert wi.validator_source_key == validator_source_key(
+            effective_url="https://www.lcb.wa.gov/notices", source_specs=wi.source_specs
+        )
 
     async def test_invalid_request_options_clears_the_pair(self, db_session, monkeypatch):
         # The one loop hazard: the refusal happens BEFORE any request, so a bad

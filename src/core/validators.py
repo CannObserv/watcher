@@ -22,16 +22,19 @@ unnoticed for as long as the origin keeps answering 304. Five of the six rules
 below make that deterministic rather than probabilistic; the sixth is the
 residual net for what none of them can see.
 
-The rules, in the order ``replayable_validators`` applies them:
+The rules ``replayable_validators`` applies (listed by subject, not by the order
+they are evaluated in — the predicate short-circuits and the order is an
+implementation detail):
 
 1. The gate is off for this item (``WATCHER_CONDITIONAL_GET_ENABLED``).
 2. The caller forced a full fetch — the operator's "check now".
 3. Nothing stored, or nothing sendable once guarded.
 4. ``validator_source_key`` disagrees with the item's current key: the URL
-   moved, the ``source_specs`` were re-announced, or ``EXTRACTION_GENERATION``
-   was bumped. One key rather than a clear scattered across every writer of
-   those fields — a path that forgets to call a clear is the failure mode that
-   ends in a silently stale fingerprint.
+   moved, the ``source_specs`` were re-announced, or the extraction generation
+   changed (a co-core upgrade, or a bump of ``LOCAL_EXTRACTION_GENERATION``).
+   One key rather than a clear scattered across every writer of those fields —
+   a path that forgets to call a clear is the failure mode that ends in a
+   silently stale fingerprint.
 5. No ``last_full_fetch_at`` — unknown provenance is not replayable.
 6. The pair is older than ``WATCHER_VALIDATOR_MAX_AGE_HOURS``.
 """
@@ -40,6 +43,7 @@ import hashlib
 import json
 import os
 from datetime import datetime, timedelta
+from importlib.metadata import PackageNotFoundError, version
 
 from src.core.logging import get_logger
 
@@ -57,12 +61,41 @@ DEFAULT_VALIDATOR_MAX_AGE_HOURS = 168.0
 # over the bound came from somewhere else and is not replayable either.
 MAX_VALIDATOR_LENGTH = 1024
 
-# Bumped whenever a change to extraction could move the fingerprint for bytes
-# that did not change: an extractor swap, a co-core extraction upgrade, a change
-# to how chunks are joined. Same discipline as ``WATCHER_USER_AGENT``, and the
-# same failure mode when skipped — an item that keeps answering 304 never
-# re-extracts, so the drift is invisible until the origin's bytes change.
-EXTRACTION_GENERATION = 1
+# The distribution that owns extraction (fetch → extract → fingerprint lives in
+# co-core; watcher only calls it).
+CO_CORE_DISTRIBUTION = "co-core"
+
+# Bumped by hand when *watcher's* own extraction changes in a way co-core's
+# version cannot see — how chunks are joined, which extractor a media type
+# dispatches to, the spec fallback order.
+LOCAL_EXTRACTION_GENERATION = 1
+
+
+def extraction_generation() -> str:
+    """Identity of the extraction that produced a fingerprint (CR-3).
+
+    Two halves. The co-core version arrives through the wheelhouse with no
+    human in the loop, so pinning a hand-bumped integer here reproduced the
+    ``WATCHER_USER_AGENT`` hazard one step quieter: an extractor change nobody
+    bumped for would leave every 304-ing item inheriting a fingerprint the *old*
+    extractor computed, invisible until the origin's bytes happened to change.
+    Reading the installed version makes an upgrade invalidate every stored
+    validator by itself — one full fetch per item, which at this fleet size is
+    free. The local half stays for watcher-side extraction changes, which
+    co-core's version cannot see.
+
+    A missing distribution degrades to a sentinel rather than raising: the issue
+    path must not fall over for a packaging problem, and an unknown version
+    simply forces unconditional fetches, which is the safe direction.
+    """
+    try:
+        co_core = version(CO_CORE_DISTRIBUTION)
+    except PackageNotFoundError:
+        co_core = "unknown"
+    return f"{co_core}+{LOCAL_EXTRACTION_GENERATION}"
+
+
+EXTRACTION_GENERATION = extraction_generation()
 
 # Printable US-ASCII and SP. Narrower than RFC 9110 permits, matching the
 # refusal list Replicator applies to a command's ``headers``: this excludes CR,
@@ -99,7 +132,7 @@ def validator_source_key(
     *,
     effective_url: str,
     source_specs: list | None,
-    generation: int = EXTRACTION_GENERATION,
+    generation: str = EXTRACTION_GENERATION,
 ) -> str:
     """Identity of "what these bytes were going to mean" when a pair was stored.
 
@@ -151,6 +184,15 @@ def validator_max_age() -> timedelta:
             "unparseable %s — using the default", VALIDATOR_MAX_AGE_ENV, extra={"value": raw}
         )
         return timedelta(hours=DEFAULT_VALIDATOR_MAX_AGE_HOURS)
+    if hours <= 0:
+        # Safe direction — every command fetches in full — but silent, and a
+        # typo'd sign is indistinguishable from a deliberate kill switch unless
+        # the effect is said out loud (CR-6).
+        logger.info(
+            "%s is not positive — conditional GET is effectively disabled",
+            VALIDATOR_MAX_AGE_ENV,
+            extra={"value": raw},
+        )
     return timedelta(hours=hours)
 
 
@@ -203,8 +245,9 @@ def record_validators(
     """Store the pair from the fact that closed the item's latest command.
 
     Called only from the blob apply path, and only after its ordering guard, so
-    a late older fact can never overwrite a newer pair (MUST-5). **Always an
-    overwrite, ``None`` included**: the pair must describe the latest 200, and an
+    a late older fact can never overwrite a newer pair (MUST-5). The fetch stamp
+    is ``stamp_full_fetch``'s, not this function's. **Always an overwrite,
+    ``None`` included**: the pair must describe the latest 200, and an
     origin that stopped offering a validator must not leave the old one
     replayable against bytes it no longer names.
     """
@@ -214,6 +257,16 @@ def record_validators(
         effective_url=watched_item.effective_url,
         source_specs=watched_item.source_specs,
     )
+
+
+def stamp_full_fetch(watched_item, *, now: datetime) -> None:
+    """Record that bytes arrived (CR-2).
+
+    Deliberately separate from ``record_validators``: "we got bytes" is a fetch
+    fact, true even when extraction then failed and no pair was stored. Folding
+    it into the validator write left the column — rendered as *Last Full Fetch*
+    — claiming no bytes had arrived on exactly the cycle where they had.
+    """
     watched_item.last_full_fetch_at = now
 
 
@@ -221,7 +274,7 @@ def clear_validators(watched_item) -> None:
     """Forget the pair, so the next command is unconditional.
 
     ``last_full_fetch_at`` survives: it records when bytes last arrived, which
-    stays true whatever happens to the validators.
+    stays true whatever happens to the validators (``stamp_full_fetch``).
     """
     watched_item.etag = None
     watched_item.last_modified = None

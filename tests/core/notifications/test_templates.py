@@ -26,7 +26,13 @@ pytestmark = pytest.mark.integration
 
 async def _last_audit(session, event_type: str) -> AuditLog:
     result = await session.execute(
-        select(AuditLog).where(AuditLog.event_type == event_type).order_by(AuditLog.created_at)
+        select(AuditLog)
+        .where(AuditLog.event_type == event_type)
+        # Tie-break on the id (CR-9): rows written in one transaction can share
+        # a created_at, which made "the last one" nondeterministic and this
+        # module intermittently red. The id is a ULID — monotonic within a
+        # transaction — so it orders what the timestamp cannot separate.
+        .order_by(AuditLog.created_at, AuditLog.id)
     )
     rows = result.scalars().all()
     assert rows, f"no audit rows for {event_type}"

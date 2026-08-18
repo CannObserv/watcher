@@ -147,6 +147,10 @@ class TestApplyFetchBlob:
         assert new_row.intent_id == row.intent_id
         assert new_row.reissue_count == 1
         assert new_row.status == FetchCommandStatus.IN_FLIGHT  # published to the fake bus
+        # CR-13: a fact arrived but the bytes did not, so nothing may claim they
+        # did. This is the one apply path where that distinction exists, and a
+        # false stamp here would be silent (#269).
+        assert wi.last_full_fetch_at is None
 
     async def test_seeds_media_type_from_raw_header_once(self, db_session, monkeypatch, tmp_path):
         wi, row = await _row_with_fact(

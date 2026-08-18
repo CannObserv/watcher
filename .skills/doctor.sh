@@ -42,7 +42,7 @@ set -euo pipefail
 # copy that produced it. Nothing branches on it: sync_self keeps the installed
 # copy equal to the vendored source, which makes drift transient and a
 # version-comparison mechanism unnecessary.
-VERSION="2026-08-11-1"
+VERSION="2026-08-14-1"
 
 CHECK_ONLY=0
 VERBOSE=0
@@ -191,6 +191,71 @@ sync_self() {
 # the overwhelming majority of invocations. A self-sync placed after the heal
 # logic would almost never run.
 sync_self
+
+# The auto-refresh hook's contract is TWO artifacts — the symlink and the
+# SessionStart registration in .claude/settings.json — and only the second one
+# makes it run. A repo carrying the symlink without the registration looks
+# installed to anyone who lists .claude/hooks/ and refreshes nothing, so its
+# vendored skills freeze at whatever commit they were on.
+#
+# Four of twelve audited consumers were in exactly that state, pinned at one
+# commit for over a week while the rest of the cohort moved through four skill
+# versions (#167). Nothing detected it, because a half-installed hook is silent
+# by construction: the missing half is the half that would have run.
+#
+# Reported HERE, for the same reason sync_self lives here — the doctor is the
+# one code path that still runs in a repo whose refresh hook does not, whether
+# through a reviewing-*/shipping-* preflight or a SessionStart entry of its
+# own. Warn only; a wiring gap is not a dangling symlink and must not change
+# this script's exit code, which Phase 1 preflights gate on with `|| exit 1`.
+#
+# Only when the symlink is present: that is what distinguishes "somebody
+# installed this and it half-landed" from "this consumer never wanted the
+# hook", and nagging the second group trains everyone to ignore the first.
+check_refresh_registration() {
+  local hook=".claude/hooks/skills-submodule-update.sh"
+  local settings=".claude/settings.json"
+  [ -L "$hook" ] || return 0
+  # NOT `[ -f "$settings" ] || return 0`. No settings.json at all is the
+  # strongest form of unregistered, so it must fall through to the warning
+  # rather than out of the function — an early return there made the doctor
+  # silent on the plainest half-install there is.
+  #
+  # Scoped to .hooks.SessionStart[].hooks[].command, not a grep over the file.
+  # The basename appears in settings.json for reasons that are not
+  # registrations — a `permissions.allow` entry naming the hook is the common
+  # one — and a whole-file grep counted those, so this warning stayed silent on
+  # exactly the half-installed repos it was added for (CR finding 1).
+  #
+  # No jq, no warning. The doctor is advisory and runs on every session start,
+  # so a wrong warning is worse than none: it would fire in every consumer
+  # without jq, including correctly-installed ones, and train the reader to
+  # ignore the message. install-refresh.sh --check reports UNKNOWN in that case,
+  # which is the right place for a demand that jq be installed.
+  command -v jq >/dev/null 2>&1 || return 0
+  if [ -f "$settings" ] && jq -e '[.hooks.SessionStart[]?.hooks[]?.command // ""]
+            | any(contains("skills-submodule-update.sh"))' \
+       "$settings" >/dev/null 2>&1; then
+    return 0
+  fi
+  echo "doctor: $hook is installed but $settings does not register it," >&2
+  echo "doctor: so the auto-refresh hook never runs and this repo's vendored" >&2
+  echo "doctor: skills stay frozen at their current commit. Repair with:" >&2
+  # Resolved here rather than printed as a glob. `bash skills-vendor/*/…` passes
+  # every extra match as an argument to the first, and install-refresh.sh
+  # rejects unknown arguments — so the paste-under-pressure path would fail on
+  # any repo vendoring a second skills repo.
+  local installer
+  for installer in skills-vendor/*/skills/managing-skills/scripts/install-refresh.sh; do
+    [ -f "$installer" ] || continue
+    echo "doctor:   bash $installer" >&2
+    return 0
+  done
+  echo "doctor:   bash <vendor>/skills/managing-skills/scripts/install-refresh.sh" >&2
+  return 0
+}
+
+check_refresh_registration
 
 # Directories whose direct children are scanned for dangling symlinks.
 # skills/ is the vendored-skill chain; .claude/hooks/ holds the hook symlinks

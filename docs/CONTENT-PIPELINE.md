@@ -132,6 +132,13 @@ cycle, forever, each one an ERROR health transition and a `WATCH_ERROR`. So
 next command is unconditional, and the item self-heals. Every other reason says
 nothing about our request options and leaves the pair alone.
 
+**An extraction failure also clears the pair.** Bytes arrived and could not be
+extracted (#258/#260), so the item is in ERROR with no new fingerprint — and a
+304 apply records a *successful* check. Keeping the validators would let the next
+cycle answer 304 and flip a broken item back to OK health without anything having
+been extracted. Forgetting them makes the next command a full fetch that
+re-asserts the failure until the spec is fixed.
+
 **Freshness now reads as a triple**: `last_checked_at` (we tried),
 `last_observed_at` (the content was confirmed current — a 304 counts), and
 `last_full_fetch_at` (bytes actually arrived). The gap between the last two is

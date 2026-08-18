@@ -241,6 +241,11 @@ the `archiver-client` path dependency that used to be pinned separately in
 `[tool.uv.sources]` — and ignored the variable, so relocating meant editing two
 places or getting passing tests over a broken `uv sync` — went with the SDK.
 
+This test-only schema is the *only* `information` schema Watcher has: the
+production database's dead copy was dropped in #271 (see `docs/DEPLOYMENT.md` →
+"Drop the dead `information` schema"), and no migration may create or drop one —
+`tests/test_migration_chain.py` fails the suite if a version file tries.
+
 The `information` schema persists between pytest sessions to enable
 the cache-check (#150); per-test row isolation is still handled by
 `db_session`'s savepoint rollback. Tests that bypass `db_session` and

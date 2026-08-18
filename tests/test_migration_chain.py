@@ -43,17 +43,31 @@ _INFORMATION_COUPLING = re.compile(
     r"""|["']information\.\w""",
 )
 
-# Schema-level DDL against `information`, in any quoting or spelling: the
-# `CASCADE` drop #271 performed on production by hand, and the `CREATE` that
-# would put the mirror back. Deliberately not part of `_INFORMATION_COUPLING`
-# — that one is about cross-schema *references*, this one about the schema's
-# existence. `\bSCHEMA\s+(?:IF\s+(?:NOT\s+)?EXISTS\s+)?` keeps prose like
-# "the ``information`` schema" from matching: the keyword must precede the
-# name, as in SQL, not follow it.
+# Schema-level DDL against `information`, in either spelling a migration can
+# use: raw SQL (`op.execute("DROP SCHEMA information CASCADE")`) and
+# SQLAlchemy's DDL constructs (`op.execute(sa.schema.DropSchema("information"))`),
+# which are the idiomatic form and carry no space between keyword and noun.
+# Deliberately not part of `_INFORMATION_COUPLING` — that one is about
+# cross-schema *references*, this one about the schema's existence.
+#
+# The raw-SQL branch requires the keyword to *precede* the name, as in SQL, so
+# prose like "the ``information`` schema" cannot match; the construct branch
+# requires the name quoted as a call argument, so prose naming `DropSchema`
+# cannot either.
 _INFORMATION_SCHEMA_DDL = re.compile(
-    r"\b(?:CREATE|DROP)\s+SCHEMA\s+(?:IF\s+(?:NOT\s+)?EXISTS\s+)?[\"']?information\b",
+    r"\b(?:CREATE|DROP)\s+SCHEMA\s+(?:IF\s+(?:NOT\s+)?EXISTS\s+)?[\"']?information\b"
+    r"""|\b(?:Create|Drop)Schema\(\s*["']information["']""",
     re.IGNORECASE,
 )
+
+
+def _versions_matching(pattern: re.Pattern[str]) -> list[str]:
+    """Names of the version files whose source matches ``pattern``."""
+    return [
+        path.name
+        for path in _VERSIONS_DIR.glob("*.py")
+        if pattern.search(path.read_text(encoding="utf-8"))
+    ]
 
 
 @pytest.fixture(scope="module")
@@ -88,6 +102,12 @@ def test_single_base_is_genesis(script_directory: ScriptDirectory) -> None:
         "op.execute('drop schema if exists information cascade')",
         'op.execute("CREATE SCHEMA information")',
         'op.execute("DROP  SCHEMA\n    information")',
+        # SQLAlchemy's DDL constructs — the idiomatic spelling in an Alembic
+        # migration, and the one the keyword-only pattern used to miss.
+        'op.execute(sa.schema.DropSchema("information", cascade=True))',
+        "op.execute(DropSchema('information'))",
+        'op.execute(sa.schema.CreateSchema("information", if_not_exists=True))',
+        'op.execute(CreateSchema("information"))',
     ],
 )
 def test_information_ddl_pattern_matches_known_forms(line: str) -> None:
@@ -117,11 +137,7 @@ def test_no_migration_creates_or_drops_the_information_schema() -> None:
     CI's `test` job; one creating it would put Watcher back in the business of
     mirroring Archiver's registry, which #234 ended.
     """
-    offenders = [
-        path.name
-        for path in _VERSIONS_DIR.glob("*.py")
-        if _INFORMATION_SCHEMA_DDL.search(path.read_text())
-    ]
+    offenders = _versions_matching(_INFORMATION_SCHEMA_DDL)
     assert not offenders, (
         f"migration(s) issue CREATE/DROP SCHEMA information: {offenders} — "
         "the schema is Archiver's; production's dead copy is an operator drop, "
@@ -136,11 +152,7 @@ def test_no_information_schema_coupling() -> None:
     database. A migration reintroducing a cross-schema FK would break
     `alembic upgrade head` on a clean bootstrap — the regression #234 fixed.
     """
-    offenders = [
-        path.name
-        for path in _VERSIONS_DIR.glob("*.py")
-        if _INFORMATION_COUPLING.search(path.read_text())
-    ]
+    offenders = _versions_matching(_INFORMATION_COUPLING)
     assert not offenders, (
         f"migration(s) reference the Archiver-owned `information` schema: {offenders}"
     )

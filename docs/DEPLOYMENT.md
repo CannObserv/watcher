@@ -407,15 +407,20 @@ genesis migration normally.
 > `notification_event_types` catalog table). Existing databases still carry them
 > harmlessly after the stamp; an optional cleanup migration can drop them later.
 
-### Drop the dead `information` schema — one-time (#271)
+### Drop the dead `information` schema — applied 2026-08-18 (#271)
 
-Production's `watcher` database carries an empty `information` schema
+**Done; nothing to run.** Unlike the one-time sections above, this one cannot
+come back: they describe orderings a replayed chain re-enters, whereas the
+genesis baseline (#234) creates no `information` schema, so no database built or
+restored after it has one. Kept as the record of what was removed and why.
+
+Production's `watcher` database *had* carried an empty `information` schema
 (`info_items`, `info_sources`, both owned by `watcher`), left behind when #234
-stopped mirroring Archiver's registry locally. Nothing in `src/` reads or writes
-it, and #259's grants cover `schema public` only — so it is neither granted to
-`watcher_app` nor explicitly excluded, which is the whole reason to remove it
-rather than leave it for whoever next audits privileges. Zero rows: this is
-tidying, not risk.
+stopped mirroring Archiver's registry locally. Nothing in `src/` read or wrote
+it, and #259's grants cover `schema public` only — so it sat outside the grant
+model entirely, neither granted to `watcher_app` nor explicitly excluded, which
+is the whole reason to remove it rather than leave it for whoever next audits
+privileges. Zero rows: tidying, not risk.
 
 **Operator action on production only — deliberately not a migration.**
 `tests/conftest.py` builds a real `information` schema in `TEST_DATABASE_URL` by
@@ -423,35 +428,38 @@ invoking Archiver's own alembic and keeps it alive between sessions for the #150
 cache-check (see [COMMANDS.md](COMMANDS.md) → "Tests require the Archiver sibling
 repo"). A migration dropping the schema would therefore break every local test
 run and CI's `test` job. `tests/test_migration_chain.py` fails the suite if a
-version file ever issues `CREATE`/`DROP SCHEMA information`.
+version file ever creates or drops the schema — in raw SQL or through
+SQLAlchemy's `CreateSchema`/`DropSchema` constructs.
 
-`DROP SCHEMA` is DDL, so it needs the migration credential — `DATABASE_URL` is
-`watcher_app` since #259 and cannot execute it:
+What was run, and what it proved. `DROP SCHEMA` is DDL, so it took the
+migration credential — `DATABASE_URL` is `watcher_app` since #259 and cannot
+execute it. Re-running step 1 today reports `relation "information.info_items"
+does not exist`; that is the schema being gone, not a broken instruction:
 
 ```bash
 source scripts/load-env.sh
 # psql needs a driverless URL — strip the SQLAlchemy "+asyncpg" dialect suffix.
 MIG="${WATCHER_MIGRATION_DATABASE_URL/+asyncpg/}"
 
-# 1. Confirm it is dead. Both counts must be 0, and \dt must list exactly
-#    info_items and info_sources — anything else and this is not the schema
-#    this issue described. Any non-zero count → STOP and find out what wrote it.
-psql "$MIG" -c "SELECT count(*) FROM information.info_items"
-psql "$MIG" -c "SELECT count(*) FROM information.info_sources"
+# 1. Confirmed dead: both counts 0, exactly those two tables, and `\d` on each
+#    showed no `Referenced by:` — so CASCADE could only reach the two of them.
+psql "$MIG" -c "SELECT count(*) FROM information.info_items"      # 0
+psql "$MIG" -c "SELECT count(*) FROM information.info_sources"    # 0
 psql "$MIG" -c "\dt information.*"
 
-# 2. Drop.
+# 2. Dropped — "NOTICE: drop cascades to 2 other objects", both those tables.
 psql "$MIG" -c "DROP SCHEMA information CASCADE"
 
-# 3. Verify.
-psql "$MIG" -c "\dn"              # no `information` row
-curl -s localhost:8000/ready       # {"status":"ready","db":true,...}
+# 3. Verified.
+psql "$MIG" -c "\dn"              # `public` only
+curl -s localhost:8000/ready       # {"status":"ready","db":true,"queue":true}
+uv run alembic check               # No new upgrade operations detected
 ```
 
-No restart, and nothing to re-grant: no connection the service opens ever
-referenced the schema. Rollback is not a restore — the tables held no rows, so
-recreating them would mean re-running Archiver's alembic against this database,
-which is precisely the mirror #234 removed.
+No restart was needed and nothing had to be re-granted: no connection the
+service opens ever referenced the schema. Rollback would not be a restore — the
+tables held no rows, so recreating them would mean re-running Archiver's alembic
+against this database, which is precisely the mirror #234 removed.
 
 **Archiver still owns `information`** — in *its own* database, where it is live
 and canonical. Watcher's only remaining mention is a docstring in
@@ -459,12 +467,8 @@ and canonical. Watcher's only remaining mention is a docstring in
 the referent of `archiver_info_item_id`; that documents a foreign system and is
 not a dependency. `alembic/env.py`'s autogenerate filter also drops every
 non-`public` schema, so the copy tests build in `TEST_DATABASE_URL` can never
-turn into a Watcher migration.
-
-**Siblings.** `notifier` and `replicator` name no `information` schema anywhere
-in their source, so neither should carry one; `\dn` against each service's
-database while at the psql prompt confirms it. `archiver` owns the schema
-legitimately — leave it alone.
+turn into a Watcher migration. Whether any *other* sibling's database carries a
+leftover of its own is that repo's business, not this one's.
 
 ## Archiver Service
 

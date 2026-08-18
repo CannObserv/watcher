@@ -136,6 +136,17 @@ selector rot presented as a *content change* with health still OK. Full
 rationale, and the six provenance columns the outbox gained for
 `source_revision_observed` (#253): **[docs/CONTENT-PIPELINE.md](docs/CONTENT-PIPELINE.md)**.
 
+**Conditional GET is gated and item-scoped (#269).** Watcher stores each item's
+`etag`/`last_modified` from the fact that closed its *latest* command and replays
+them verbatim, but only for items named in `WATCHER_CONDITIONAL_GET_ENABLED`
+(unset → off, byte-identical to the pre-#269 command). Validators are snapshotted
+onto the `fetch_commands` row at issue — the sweep republishes from that row
+alone — and a 304 inherits the last fingerprint, so a spec/URL/extractor change
+must invalidate them: that is `validator_source_key`, plus an age ceiling. Never
+route `invalid_request_options` past the validator clear; the refusal precedes
+the request, so a bad stored value wedges the item permanently.
+[docs/CONTENT-PIPELINE.md](docs/CONTENT-PIPELINE.md) → *Conditional GET*.
+
 **Notifications.** One `notification_templates` table; a row's `visibility` —
 `global` / `domain` / `watched_item` — is what decides where it fires.
 

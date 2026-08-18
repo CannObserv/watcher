@@ -193,6 +193,11 @@ async def process_fact_message(
         row.content_type_raw = payload.content_type_raw
         row.final_url = payload.final_url
         row.status_code = payload.status_code
+        # #269: the conditional-GET validators, verbatim. Recorded on the row as
+        # provenance for this occasion; the item-level pair the next command
+        # replays is written by the apply path, after its ordering guard.
+        row.etag = payload.etag
+        row.last_modified = payload.last_modified
         await session.commit()
         await defer_blob(row.command_id)
         return "blob_recorded"

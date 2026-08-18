@@ -134,6 +134,11 @@ class WatchedItemResponse(BaseModel):
     # successful check, or a 304 in which the origin asserted the bytes are
     # current (#249). Additive: never derive next-due from it.
     last_observed_at: datetime | None
+    # When bytes last arrived (#269). The third stamp of the freshness set: a
+    # conditional GET answered 304 advances the other two and not this one, so
+    # the gap is how long the item's fingerprint has been inherited rather than
+    # recomputed. NULL before the first blob.
+    last_full_fetch_at: datetime | None = None
     last_changed_at: datetime | None
     health_status: WatchHealthStatus
     default_schedule_config: dict | None

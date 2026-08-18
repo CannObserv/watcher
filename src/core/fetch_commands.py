@@ -22,11 +22,15 @@ this module:
 * **cannobserv#300** — every command names its ``info_source_id``, snapshotted
   onto the row at issue time so the sweep can republish without a WatchedItem.
 
-No validator headers (``If-None-Match``/``If-Modified-Since``) are sent yet.
-replicator#17 has landed the ``not_modified`` outcome and Watcher now *receives*
-it correctly (#249) — but storing and replaying validators is #269, and needs
-that Replicator in **production** first: a validator sent to a deployment that
-still classifies 304 as a plain fetch failure reproduces the trap #249 closed.
+* **#269** — the command replays the item's stored conditional-GET validators
+  (``If-None-Match`` / ``If-Modified-Since``), **snapshotted onto the row at
+  issue** rather than read from the item at publish: the sweep holds only the
+  row. Which occasions may replay, and which must re-fetch in full, is
+  ``src/core/validators.py``; the gate is off until an item is named in
+  ``WATCHER_CONDITIONAL_GET_ENABLED``. Safe only because replicator#17 (the
+  ``not_modified`` outcome) and #249 part 1 (Watcher's handling of it) are both
+  in production — a validator sent to a deployment that still classifies 304 as
+  a plain fetch failure reproduces the trap #249 closed.
 """
 
 import os
@@ -45,6 +49,7 @@ from ulid import ULID
 from src.core.logging import get_logger
 from src.core.models.fetch_command import OPEN_STATUSES, FetchCommand, FetchCommandStatus
 from src.core.models.watched_item import WatchedItem
+from src.core.validators import replayable_validators
 
 logger = get_logger(__name__)
 
@@ -58,6 +63,23 @@ FETCH_COMMAND_TIMEOUT_ENV = "WATCHER_FETCH_COMMAND_TIMEOUT_SECONDS"
 DEFAULT_FETCH_COMMAND_TIMEOUT_SECONDS = 1800.0
 
 
+def _command_headers(row: FetchCommand) -> dict[str, str]:
+    """The command's ``headers`` map: the pinned UA, plus any snapshotted validators.
+
+    Lower-cased names, one line each. Replicator folds case before merging, but
+    "issuer wins" is only a rule if exactly one field line goes on the wire.
+    Values are replayed **verbatim and unparsed** — ``W/`` prefix, quotes, and
+    the origin's own date spelling included; the send-side guard at snapshot
+    time already refused anything Replicator would not send.
+    """
+    headers = {"user-agent": WATCHER_USER_AGENT}
+    if row.request_etag:
+        headers["if-none-match"] = row.request_etag
+    if row.request_last_modified:
+        headers["if-modified-since"] = row.request_last_modified
+    return headers
+
+
 async def create_fetch_command(
     session: AsyncSession,
     watched_item: WatchedItem,
@@ -65,12 +87,22 @@ async def create_fetch_command(
     now: datetime,
     intent_id: str | None = None,
     reissue_count: int = 0,
+    force_full_fetch: bool = False,
 ) -> FetchCommand:
     """Persist the pending command row (MUST-2: caller commits before publishing).
 
     ``intent_id`` defaults to a fresh ULID (a new intent); the reaper passes the
     prior command's ``intent_id`` on re-issue so lineage survives the id change.
+
+    The conditional-GET validators are resolved **here**, at the occasion, and
+    stored on the row (#269): the pending-publish sweep republishes from the row
+    alone, so a value re-read at publish time could differ from what the command
+    was minted to ask. ``force_full_fetch`` is the operator's "check now" — an
+    unconditional re-read, whatever is stored.
     """
+    request_etag, request_last_modified = replayable_validators(
+        watched_item, now=now, force_full_fetch=force_full_fetch
+    )
     row = FetchCommand(
         command_id=str(ULID()),  # MUST-1: per occasion, never per resource
         intent_id=intent_id if intent_id is not None else str(ULID()),
@@ -82,6 +114,8 @@ async def create_fetch_command(
         status=FetchCommandStatus.PENDING_PUBLISH,
         issued_at=now,
         reissue_count=reissue_count,
+        request_etag=request_etag,
+        request_last_modified=request_last_modified,
     )
     session.add(row)
     return row
@@ -94,14 +128,16 @@ async def publish_fetch_command(
 
     Publishes through ``to_wire`` over the strict Emit class — never hand-rolled
     fields (a hand-built frame dead-letters silently on the consumer side). The
-    pinned User-Agent is the replicator#11 byte-continuity guarantee.
+    pinned User-Agent is the replicator#11 byte-continuity guarantee; the
+    validators, when present, come off the row (#269) so the sweep's republish
+    is byte-identical to the original command.
     """
     command = ContentFetchCommandEmit(
         occurred_at=row.issued_at,
         command_id=row.command_id,
         url=row.url,
         info_source_id=row.info_source_id,
-        headers={"user-agent": WATCHER_USER_AGENT},
+        headers=_command_headers(row),
     )
     await AsyncBusPublisher(client).execute(BusPublish(streams.CONTENT_FETCH, to_wire(command)))
     row.status = FetchCommandStatus.IN_FLIGHT

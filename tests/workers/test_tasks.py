@@ -26,6 +26,7 @@ from src.core.models.domain import Domain
 from src.core.models.fetch_command import FetchCommand
 from src.core.models.temporal_profile import PostAction, ProfileType, TemporalProfile
 from src.core.scheduling.resolution import resolved_schedule_config
+from src.core.validators import CONDITIONAL_GET_ENV, validator_source_key
 from src.workers.tasks import check_watched_item, schedule_tick
 from tests.conftest import make_watched_item
 
@@ -567,3 +568,49 @@ class TestThrottleFloorIsReleasable:
         )
         await db_session.refresh(wi)
         assert wi.throttle_floor_interval == "1d"
+
+
+class TestForcedFullFetch:
+    """#269 rule 5: the operator's "check now" is always a real re-read.
+
+    The escape hatch that makes conditional GET debuggable — an operator who
+    suspects a stale validator forces one full fetch from the dashboard instead
+    of editing the database.
+    """
+
+    async def _issue(self, db_session, monkeypatch, wi, **kwargs):
+        monkeypatch.setattr(
+            tasks_mod, "get_session_factory", lambda: _mock_session_factory(db_session)
+        )
+        await check_watched_item(str(wi.id), bus_client=AsyncMock(), **kwargs)
+        return (
+            await db_session.execute(
+                select(FetchCommand).where(FetchCommand.watched_item_id == wi.id)
+            )
+        ).scalar_one()
+
+    async def _item(self, db_session):
+        wi = await make_watched_item(db_session, primary_url="https://lcb.wa.gov/notices")
+        wi.etag = 'W/"v2"'
+        wi.last_full_fetch_at = datetime.now(UTC) - timedelta(hours=1)
+        wi.validator_source_key = validator_source_key(
+            effective_url=wi.effective_url, source_specs=wi.source_specs
+        )
+        await db_session.commit()
+        return wi
+
+    async def test_check_now_issues_an_unconditional_command(self, db_session, monkeypatch):
+        monkeypatch.setenv(CONDITIONAL_GET_ENV, "true")
+        wi = await self._item(db_session)
+
+        row = await self._issue(db_session, monkeypatch, wi, force_full_fetch=True)
+
+        assert row.request_etag is None
+
+    async def test_a_scheduled_check_still_replays(self, db_session, monkeypatch):
+        monkeypatch.setenv(CONDITIONAL_GET_ENV, "true")
+        wi = await self._item(db_session)
+
+        row = await self._issue(db_session, monkeypatch, wi)
+
+        assert row.request_etag == 'W/"v2"'

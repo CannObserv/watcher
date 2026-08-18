@@ -36,7 +36,9 @@ from src.workers.watch_status import defer_status_republish
 logger = get_logger(__name__)
 
 
-async def _issue_fetch_command(session: AsyncSession, watched_item, bus_client) -> dict:
+async def _issue_fetch_command(
+    session: AsyncSession, watched_item, bus_client, *, force_full_fetch: bool = False
+) -> dict:
     """Issue one ``content.fetch`` command for the item (#241, MUST-1/MUST-2).
 
     Persist-commit-publish, in that order: a crash after the commit leaves a
@@ -57,7 +59,9 @@ async def _issue_fetch_command(session: AsyncSession, watched_item, bus_client) 
         return {"skipped": True, "reason": "command_in_flight"}
 
     now = datetime.now(UTC)
-    row = await create_fetch_command(session, watched_item, now=now)
+    row = await create_fetch_command(
+        session, watched_item, now=now, force_full_fetch=force_full_fetch
+    )
     # Operator breadcrumb on the item's Recent Activity: the check is now a
     # command in flight; the apply-side events pick the story up (#241 CR-8).
     audit(
@@ -107,7 +111,9 @@ async def _issue_fetch_command(session: AsyncSession, watched_item, bus_client) 
         retry_exceptions={ConnectionError, TimeoutError},
     ),
 )
-async def check_watched_item(watched_item_id: str, bus_client=None) -> dict:
+async def check_watched_item(
+    watched_item_id: str, bus_client=None, force_full_fetch: bool = False
+) -> dict:
     """Issue a ``content.fetch`` command for the WatchedItem's URL.
 
     Since the Phase-4 cutover (#241) Watcher does not fetch: it publishes a
@@ -117,6 +123,9 @@ async def check_watched_item(watched_item_id: str, bus_client=None) -> dict:
     the guards plus the issue itself.
 
     ``bus_client`` is a test seam; production uses the shared lifespan client.
+    ``force_full_fetch`` suppresses conditional GET for this occasion (#269): the
+    check-now route sets it, so an operator who suspects a stale validator can
+    force a real re-read without touching the database.
     """
     async with get_session_factory()() as session:
         watched_item = await session.get(WatchedItem, ULID.from_str(watched_item_id))
@@ -142,7 +151,9 @@ async def check_watched_item(watched_item_id: str, bus_client=None) -> dict:
             )
             return {"skipped": True, "reason": "no_effective_url"}
 
-        return await _issue_fetch_command(session, watched_item, bus_client)
+        return await _issue_fetch_command(
+            session, watched_item, bus_client, force_full_fetch=force_full_fetch
+        )
 
 
 # ---------------------------------------------------------------------------

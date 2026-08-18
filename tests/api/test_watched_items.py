@@ -701,6 +701,25 @@ class TestCreateWatchedItem:
         assert "last_observed_at" in body
         assert body["last_observed_at"].startswith("2026-08-15T12:30:00")
 
+    async def test_response_includes_last_full_fetch_at(self, client, db_session):
+        """#269: the third freshness stamp — when bytes last actually arrived.
+
+        A 304 advances last_checked_at and last_observed_at but not this one, so
+        the gap between them is how long a fingerprint has been inherited rather
+        than recomputed.
+        """
+        fetched = datetime(2026, 8, 15, 9, 15, tzinfo=UTC)
+        wi = await _make_watched_item(
+            db_session, name="FullFetchFields", last_full_fetch_at=fetched
+        )
+        body = (await client.get(f"/api/v1/watched-items/{wi.id}")).json()
+        assert body["last_full_fetch_at"].startswith("2026-08-15T09:15:00")
+
+    async def test_response_last_full_fetch_at_null_before_any_bytes(self, client, db_session):
+        wi = await _make_watched_item(db_session, name="NeverFullyFetched")
+        body = (await client.get(f"/api/v1/watched-items/{wi.id}")).json()
+        assert body["last_full_fetch_at"] is None
+
     async def test_response_last_observed_at_null_before_first_observation(
         self, client, db_session
     ):
@@ -1187,8 +1206,10 @@ class TestCheckNow:
         assert response.status_code == 202
         body = response.json()
         assert body["id"] == str(wi.id)
+        # force_full_fetch: an operator's check-now is always a real re-read,
+        # never a conditional GET that can answer 304 (#269 rule 5).
         mock_task.configure.return_value.defer_async.assert_awaited_once_with(
-            watched_item_id=str(wi.id)
+            watched_item_id=str(wi.id), force_full_fetch=True
         )
 
     async def test_404_unknown(self, client):

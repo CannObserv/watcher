@@ -27,7 +27,16 @@ next-due derives from the latter, never the former. Both are on
 **Content Verified** beside **Last Checked** (#266); the row does not split the
 two provenances, because the column stores the instant and not the evidence —
 that lives in the audit trail, where `CHECK_NO_CHANGE` carries
-`source: not_modified`); and its notification surface (the
+`source: not_modified`); `last_full_fetch_at` (#269 — the third stamp of the
+freshness set: when *bytes* last arrived, advanced only by a blob apply, so a
+304 moves the other two and not this one; the gap between it and
+`last_observed_at` is how long the item's fingerprint has been inherited rather
+than recomputed, and the detail page shows it as **Last Full Fetch**); the
+conditional-GET validator state `etag` / `last_modified` / `validator_source_key`
+(#269 — the pair the next command replays and the identity of what the bytes were
+going to mean when it was stored; see
+[docs/CONTENT-PIPELINE.md](CONTENT-PIPELINE.md) → *Conditional GET*); and its
+notification surface (the
 item-scoped `NotificationTemplate` rows — `visibility='watched_item'`,
 `watched_item_id` set; see **Notifications** below). Schedule resolution is
 4-tier under a floor (#205, #254): `announced_schedule_config` → WatchedItem

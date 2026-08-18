@@ -157,6 +157,24 @@ class WatchedItem(Base, TimestampMixin):
         server_default=text("ARRAY[]::jsonb[]"),
     )
     archiver_info_source_id: Mapped[str] = mapped_column(String(26), nullable=False)
+    # --- conditional-GET validator state (#269) ---
+    # The pair from the fact that closed this item's latest command, replayed
+    # verbatim as If-None-Match / If-Modified-Since. Item-level and never
+    # fingerprint-level: a validator pinned to a fingerprint replays a stale
+    # If-None-Match for exactly as long as the content is unchanged (MUST-5).
+    etag: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
+    last_modified: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
+    # Identity of "what these bytes were going to mean" when the pair was
+    # stored — URL + source_specs + extraction generation. A mismatch against
+    # the item's current key is what stops a 304 streak from inheriting a
+    # fingerprint nothing recomputed (src/core/validators.py).
+    validator_source_key: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
+    # When bytes last actually arrived. Distinct from last_checked_at (every
+    # outcome) and last_observed_at (every successful check, 304 included):
+    # this one advances ONLY on a 200, which is what the age ceiling measures.
+    last_full_fetch_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, default=None
+    )
     last_changed_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True, default=None
     )

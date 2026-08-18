@@ -22,6 +22,7 @@ from src.core.models.fetch_command import OPEN_STATUSES, FetchCommand, FetchComm
 from src.core.models.watched_item import WatchHealthStatus
 from src.core.notifications.events import WatchEventType
 from src.core.registry import ServiceRegistry
+from src.core.validators import validator_source_key
 from src.workers.fetch_commands import (
     apply_fetch_blob,
     apply_fetch_failure,
@@ -690,3 +691,130 @@ class TestStatusRepublishOnTransition:
 
         assert wi.health_status == WatchHealthStatus.ERROR
         assert spy.await_count == 1  # only the OK -> ERROR transition
+
+
+class TestValidatorStorage:
+    """#269 part 2: the item's replayable pair, written from the closing fact.
+
+    Item-level, never fingerprint-level (issuer contract MUST-5), and only from
+    the fact that closed the item's *latest* command — which is what the existing
+    supersession guard already establishes.
+    """
+
+    async def test_blob_apply_stores_the_pair_with_its_provenance(
+        self, db_session, tmp_path, monkeypatch
+    ):
+        wi, row = await _row_with_fact(
+            db_session,
+            tmp_path,
+            etag='W/"v2"',
+            last_modified="Wed, 13 Aug 2026 10:00:00 GMT",
+        )
+        _wire(db_session, monkeypatch)
+
+        await apply_fetch_blob(row.command_id)
+
+        assert wi.etag == 'W/"v2"'
+        assert wi.last_modified == "Wed, 13 Aug 2026 10:00:00 GMT"
+        assert wi.last_full_fetch_at is not None
+        assert wi.validator_source_key == validator_source_key(
+            effective_url=wi.effective_url, source_specs=wi.source_specs
+        )
+
+    async def test_a_200_without_validators_clears_the_stored_pair(
+        self, db_session, tmp_path, monkeypatch
+    ):
+        # Always an overwrite: the pair must describe the latest 200, so an
+        # origin that stopped sending one must not leave the old one replayable.
+        wi, row = await _row_with_fact(db_session, tmp_path)
+        wi.etag = 'W/"stale"'
+        wi.last_modified = "Mon, 11 Aug 2026 10:00:00 GMT"
+        await db_session.flush()
+        _wire(db_session, monkeypatch)
+
+        await apply_fetch_blob(row.command_id)
+
+        assert wi.etag is None
+        assert wi.last_modified is None
+        assert wi.last_full_fetch_at is not None
+
+    async def test_a_superseded_apply_leaves_the_pair_alone(
+        self, db_session, tmp_path, monkeypatch
+    ):
+        # MUST-5's failure mode in its ordering form: a late older fact must not
+        # overwrite validators a newer command already stored.
+        wi, row = await _row_with_fact(db_session, tmp_path, etag='W/"old"')
+        newer = await create_fetch_command(db_session, wi, now=NOW + timedelta(minutes=5))
+        newer.status = FetchCommandStatus.SUCCEEDED
+        newer.applied_at = NOW + timedelta(minutes=5)
+        wi.etag = 'W/"new"'
+        await db_session.flush()
+        _wire(db_session, monkeypatch)
+
+        result = await apply_fetch_blob(row.command_id)
+
+        assert result == {"skipped": True, "reason": "superseded"}
+        assert wi.etag == 'W/"new"'
+
+    async def test_not_modified_apply_keeps_the_pair_and_its_age(self, db_session, monkeypatch):
+        # A 304 brings no validators and no bytes: the stored pair is still
+        # current, and the age ceiling must keep running toward a full re-fetch.
+        wi = await make_watched_item(db_session, primary_url="https://lcb.wa.gov/notices")
+        wi.etag = 'W/"v2"'
+        wi.last_modified = "Wed, 13 Aug 2026 10:00:00 GMT"
+        wi.last_full_fetch_at = NOW - timedelta(hours=6)
+        row = await create_fetch_command(db_session, wi, now=NOW)
+        row.status = FetchCommandStatus.NOT_MODIFIED
+        row.status_code = 304
+        await db_session.flush()
+        monkeypatch.setattr(
+            fc_mod, "get_session_factory", lambda: _mock_session_factory(db_session)
+        )
+
+        await apply_fetch_not_modified(row.command_id)
+
+        assert wi.etag == 'W/"v2"'
+        assert wi.last_modified == "Wed, 13 Aug 2026 10:00:00 GMT"
+        assert wi.last_full_fetch_at == NOW - timedelta(hours=6)
+
+    async def test_invalid_request_options_clears_the_pair(self, db_session, monkeypatch):
+        # The one loop hazard: the refusal happens BEFORE any request, so a bad
+        # stored validator would be re-snapshotted and refused every cycle,
+        # forever, each time costing ERROR health and a WATCH_ERROR.
+        wi = await make_watched_item(db_session, primary_url="https://lcb.wa.gov/notices")
+        wi.etag = 'W/"unsendable"'
+        wi.last_modified = "Wed, 13 Aug 2026 10:00:00 GMT"
+        wi.validator_source_key = "sha256:whatever"
+        row = await create_fetch_command(db_session, wi, now=NOW)
+        row.status = FetchCommandStatus.FAILED
+        row.failure_reason = "invalid_request_options"
+        await db_session.flush()
+        monkeypatch.setattr(
+            fc_mod, "get_session_factory", lambda: _mock_session_factory(db_session)
+        )
+        monkeypatch.setattr(fc_mod, "dispatch_event_notifications", AsyncMock(return_value=0))
+
+        await apply_fetch_failure(row.command_id)
+
+        assert wi.etag is None
+        assert wi.last_modified is None
+        assert wi.validator_source_key is None
+
+    async def test_an_ordinary_failure_leaves_the_pair_alone(self, db_session, monkeypatch):
+        # A 503 says nothing about our validators; forgetting them would buy a
+        # full re-fetch for every transient outage.
+        wi = await make_watched_item(db_session, primary_url="https://lcb.wa.gov/notices")
+        wi.etag = 'W/"v2"'
+        row = await create_fetch_command(db_session, wi, now=NOW)
+        row.status = FetchCommandStatus.FAILED
+        row.failure_reason = "http_status"
+        row.status_code = 503
+        await db_session.flush()
+        monkeypatch.setattr(
+            fc_mod, "get_session_factory", lambda: _mock_session_factory(db_session)
+        )
+        monkeypatch.setattr(fc_mod, "dispatch_event_notifications", AsyncMock(return_value=0))
+
+        await apply_fetch_failure(row.command_id)
+
+        assert wi.etag == 'W/"v2"'

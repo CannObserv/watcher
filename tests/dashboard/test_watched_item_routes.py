@@ -1920,3 +1920,33 @@ class TestWatchedItemUrlReprobe:
         assert len(events) == 1
         assert events[0].payload["source"] == "dashboard"
         assert events[0].payload["updated_fields"] == ["effective_url", "domain_name"]
+
+
+class TestLastFullFetch:
+    """#269: how long an item has been riding 304s must be visible.
+
+    Without this row the age ceiling is invisible: Content Verified advances on
+    a 304 exactly as it does on a real read, so an operator has no way to tell a
+    freshly-extracted item from one whose fingerprint was inherited for a week.
+    """
+
+    async def test_detail_shows_last_full_fetch(self, client, db_session):
+        wi = await _make_wi(
+            db_session,
+            name="FetchedItem",
+            last_full_fetch_at=datetime(2026, 8, 15, 9, 15, tzinfo=UTC),
+        )
+        body = (await client.get(f"/watched-items/{wi.id}")).content.decode()
+        assert ">Last Full Fetch</span>" in body
+        assert "2026-08-15 09:15 UTC" in body
+
+    async def test_detail_last_full_fetch_empty_state(self, client, db_session):
+        wi = await _make_wi(db_session, name="NeverFetchedItem")
+        body = (await client.get(f"/watched-items/{wi.id}")).content.decode()
+        assert ">Last Full Fetch</span>" in body
+        assert "Never fetched" in body
+
+    async def test_detail_last_full_fetch_explains_the_distinction(self, client, db_session):
+        wi = await _make_wi(db_session, name="ExplainedFetchItem")
+        body = (await client.get(f"/watched-items/{wi.id}")).content.decode()
+        assert "bytes last arrived" in body

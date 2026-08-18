@@ -18,9 +18,10 @@ content is unchanged, which is the period conditional GET was supposed to help).
 produces no bytes, so nothing is extracted and no fingerprint is recomputed — the
 item's fingerprint is inherited from the last 200. That is the point of the
 optimisation, but it means a drift introduced by an *extraction* change would go
-unnoticed for as long as the origin keeps answering 304. Five of the six rules
-below make that deterministic rather than probabilistic; the sixth is the
-residual net for what none of them can see.
+unnoticed for as long as the origin keeps answering 304. Three of the six rules
+below make that deterministic rather than probabilistic; the last is the
+residual net for what none of them can see. (Rules 3-5 are the deterministic
+set; rules 1-2 are the gate and the operator's override, not drift protections.)
 
 The rules ``replayable_validators`` applies (listed by subject, not by the order
 they are evaluated in — the predicate short-circuits and the order is an
@@ -83,6 +84,12 @@ def extraction_generation() -> str:
     validator by itself — one full fetch per item, which at this fleet size is
     free. The local half stays for watcher-side extraction changes, which
     co-core's version cannot see.
+
+    **Over-invalidating is the point, not a rough edge.** Any co-core release
+    moves this value, including one that never touched extraction — co-core
+    publishes no extraction-specific marker to narrow it to, and inventing one
+    would put the human step back exactly where it failed. A wasted full fetch
+    costs a page; a missed one costs an inherited fingerprint nobody can see.
 
     A missing distribution degrades to a sentinel rather than raising: the issue
     path must not fall over for a packaging problem, and an unknown version

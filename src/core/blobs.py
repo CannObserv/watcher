@@ -46,9 +46,17 @@ logger = get_logger(__name__)
 # Schemes whose blobs are already local files (issuer contract MUST-7).
 SUPPORTED_SCHEMES = ("file",)
 
+# Authorities a local scheme may carry and still mean "this host". Anything
+# else names a machine we are not, and `url2pathname` would silently drop it
+# (CR-9) — on a same-layout host, a successful read of the wrong bytes.
+LOCAL_NETLOCS = ("", "localhost")
+
 # Scheme → writer that streams the blob onto an open temp file. Empty until
 # replicator#7's object store lands; registering an arm here is the whole
-# integration point for a new backend.
+# integration point for a new backend. An arm may raise anything its SDK raises
+# — ``blob_file`` wraps it as ``BlobUnreadable`` (CR-10) — so an arm only needs
+# to raise deliberately when the failure is PERMANENT: raise
+# ``UnsupportedBlobScheme`` for a 401/403, which no amount of re-fetching fixes.
 _SPOOLERS: dict[str, Callable[[ParseResult, IO[bytes]], None]] = {}
 
 
@@ -90,15 +98,20 @@ def blob_file(blob_uri: str | None) -> Iterator[Path]:
     parsed = _parse(blob_uri)
     spool = _SPOOLERS.get(parsed.scheme)
     if spool is None:
+        if parsed.netloc.lower() not in LOCAL_NETLOCS:
+            raise BlobUnreadable(f"blob_uri names another host: {blob_uri!r}")
         yield Path(url2pathname(parsed.path))
         return
-    handle = NamedTemporaryFile(prefix="watcher-blob-", delete=False)  # noqa: SIM115
+    handle = NamedTemporaryFile(prefix="watcher-blob-", delete=False)
     path = Path(handle.name)
     try:
         try:
             with handle:
                 spool(parsed, handle)
-        except OSError as exc:
+        except BlobReadError:
+            # The arm's own verdict, permanent or not — never reclassified.
+            raise
+        except Exception as exc:
             raise BlobUnreadable(f"{blob_uri!r}: {exc}") from exc
         yield path
     finally:

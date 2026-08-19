@@ -81,6 +81,54 @@ class TestBlobFile:
         assert spooled and not spooled[0].exists()
         assert blob.exists()
 
+    def test_a_uri_naming_another_host_is_refused(self, tmp_path):
+        # CR-9: urlparse drops the netloc and url2pathname returns the bare
+        # path, so `file://otherhost/x` used to open the LOCAL /x. On a
+        # same-layout host that is a successful read of the wrong bytes, under
+        # a real command, with nothing anywhere reporting an error. MUST-7 says
+        # host-local; a URI that names another host is not this host's to read.
+        blob = tmp_path / "blob.bin"
+        blob.write_bytes(b"<p>hi</p>")
+
+        with pytest.raises(BlobUnreadable):
+            with blob_file(f"file://otherhost{blob}"):
+                pass  # pragma: no cover - never entered
+
+    def test_localhost_and_empty_authority_are_this_host(self, tmp_path):
+        blob = tmp_path / "blob.bin"
+        blob.write_bytes(b"<p>hi</p>")
+
+        assert read_blob(f"file://{blob}") == b"<p>hi</p>"
+        assert read_blob(f"file://localhost{blob}") == b"<p>hi</p>"
+
+    def test_a_spooler_raising_anything_becomes_blob_unreadable(self, tmp_path, monkeypatch):
+        # CR-10: a backend arm raises what its SDK raises — a 403 from a GCS
+        # client is not an OSError. Untyped, it would escape apply_fetch_blob
+        # past both excepts, exhaust the retries, and leave the row IN_FLIGHT
+        # for the reaper to resurrect forever: the wedge #275 removed.
+        def _boom(parsed, fh):
+            raise RuntimeError("403 Forbidden")
+
+        monkeypatch.setattr("src.core.blobs.SUPPORTED_SCHEMES", ())
+        monkeypatch.setattr("src.core.blobs._SPOOLERS", {"file": _boom})
+
+        with pytest.raises(BlobUnreadable):
+            with blob_file("file:///tmp/whatever.bin"):
+                pass  # pragma: no cover - never entered
+
+    def test_a_spooler_may_still_declare_a_permanent_failure(self, tmp_path, monkeypatch):
+        # The wrapper must not swallow the arm's own verdict: an IAM refusal is
+        # permanent, and re-fetching three times buys nothing.
+        def _forbidden(parsed, fh):
+            raise UnsupportedBlobScheme("no objectViewer on the temp bucket")
+
+        monkeypatch.setattr("src.core.blobs.SUPPORTED_SCHEMES", ())
+        monkeypatch.setattr("src.core.blobs._SPOOLERS", {"file": _forbidden})
+
+        with pytest.raises(UnsupportedBlobScheme):
+            with blob_file("file:///tmp/whatever.bin"):
+                pass  # pragma: no cover - never entered
+
     def test_unsupported_scheme_raises_before_any_temp_file(self):
         with pytest.raises(UnsupportedBlobScheme):
             with blob_file("gs://co-temp-blobs/ab/cdef"):

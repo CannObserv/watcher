@@ -53,33 +53,31 @@ What that leaves in the code:
 ### An unreadable blob is capped, not retried forever (#275)
 
 Reading `blob_uri` is the one place Watcher parses that URI, so the scheme
-dispatch lives in [`src/core/blobs.py`](../src/core/blobs.py) rather than in the
-worker: a new backend (replicator#7's object store) registers a spooler there,
-not a branch in `apply_fetch_blob`. Non-local backends stream onto a temp file
-that `blob_file` removes on the way out; a `file://` blob is Replicator's own
-file, so it is yielded in place. Async callers await `aread_blob` — the apply
-task shares its process with the API. The two error types are the decision:
+dispatch lives in [`src/core/blobs.py`](../src/core/blobs.py), not in the
+worker: a new backend (CannObserv/replicator#7's object store) registers a
+spooler there. Non-local backends stream onto a temp file `blob_file` removes on
+the way out; a `file://` blob is Replicator's own and is yielded in place. Async
+callers await `aread_blob` — the apply task shares its process with the API. The
+two error types are the decision:
 
-- **`BlobUnreadable`** — the backend is understood, this blob is missing. Could
-  be the blob reaped between fact and apply, so re-issue, **capped** at
+- **`BlobUnreadable`** — backend understood, blob missing; possibly the blob
+  reaped between fact and apply. Re-issue, **capped** at
   `WATCHER_FETCH_MAX_REISSUES` against the same `reissue_count` the reaper
-  reads. The cap is the whole point: the re-issue publishes immediately, so the
-  scheduling gate never sees it and the cycle runs at Replicator's fetch
-  round-trip rather than the item's interval — each turn a real origin request,
-  with health still reading OK because this path used to record no check at all.
-  Systematic causes exist today: a permissions or mount change under
-  Replicator's blob dir, a blob dir moved without both services updated, a
-  Replicator deployed on another host.
-- **`UnsupportedBlobScheme`** — a re-issued command's fact would name the same
-  backend, so re-fetching buys nothing. Terminal on the first occasion, zero
-  re-issues.
+  reads. The cap is load-bearing because the re-issue publishes immediately: the
+  scheduling gate never sees it, so an uncapped loop runs at Replicator's fetch
+  round-trip rather than the item's interval, each turn a real origin request.
+  Systematic causes today: a permissions or mount change under Replicator's blob
+  dir, a blob dir moved without both services updated, a Replicator on another
+  host.
+- **`UnsupportedBlobScheme`** — a re-issue's fact would name the same backend,
+  so re-fetching buys nothing. Terminal on the first occasion, zero re-issues.
 
-Both terminate the same way: `FAILED` with `failure_reason="blob_unreadable"`
-(distinct from `fetch_timeout` — the remedy is the blob store, not the origin),
+Both end `FAILED` with `failure_reason="blob_unreadable"` (distinct from
+`fetch_timeout` — the remedy is the blob store, not the origin),
 `CHECK_FETCH_FAILED`, ERROR health, one `WATCH_ERROR` on the transition, and the
-gate lifts so the item re-enters normal scheduling and recovers by itself.
-Neither `stamp_full_fetch` nor `clear_validators` fires: no bytes arrived, and
-being unable to read a blob says nothing about the stored pair.
+gate lifts so the item re-enters normal scheduling. Neither `stamp_full_fetch`
+nor `clear_validators` fires: no bytes arrived, and being unable to read a blob
+says nothing about the stored pair.
 
 ### `not_modified` is a success, not a failure (#249)
 

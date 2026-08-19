@@ -40,15 +40,43 @@ What that leaves in the code:
   `apply_fetch_not_modified` in
   [`src/workers/fetch_commands.py`](../src/workers/fetch_commands.py):
   status-guarded against duplicates, supersession-guarded against out-of-order
-  facts, blob-unreadable → re-issue. They own all check bookkeeping via the
-  shared `_record_check_success` / `_record_check_failure`, which live in that
-  same module.
+  facts, blob-unreadable → **capped** re-issue (#275, below). They own all check
+  bookkeeping via the shared `_record_check_success` / `_record_check_failure`,
+  which live in that same module.
 - **The reaper** — `reap_fetch_commands`, every 5 minutes, keyed on signal age
   `coalesce(fact_at, published_at)`. A stale row holding a blob fact gets its
   apply **re-deferred**; anything else is expired and re-issued with `intent_id`
   lineage. Knobs: `WATCHER_FETCH_COMMAND_TIMEOUT_SECONDS`,
-  `WATCHER_FETCH_MAX_REISSUES`; hitting the cap sets ERROR health and lifts the
-  gate.
+  `WATCHER_FETCH_MAX_REISSUES` (shared with the apply path — it caps a lineage,
+  not a sweep); hitting the cap sets ERROR health and lifts the gate.
+
+### An unreadable blob is capped, not retried forever (#275)
+
+Reading `blob_uri` is the one place Watcher parses that URI, so the scheme
+dispatch lives in [`src/core/blobs.py`](../src/core/blobs.py) rather than in the
+worker: a new backend (replicator#7's object store) is an arm of `read_blob`,
+not a branch in `apply_fetch_blob`. Its two error types are the decision:
+
+- **`BlobUnreadable`** — the backend is understood, this blob is missing. Could
+  be the blob reaped between fact and apply, so re-issue, **capped** at
+  `WATCHER_FETCH_MAX_REISSUES` against the same `reissue_count` the reaper
+  reads. The cap is the whole point: the re-issue publishes immediately, so the
+  scheduling gate never sees it and the cycle runs at Replicator's fetch
+  round-trip rather than the item's interval — each turn a real origin request,
+  with health still reading OK because this path used to record no check at all.
+  Systematic causes exist today: a permissions or mount change under
+  Replicator's blob dir, a blob dir moved without both services updated, a
+  Replicator deployed on another host.
+- **`UnsupportedBlobScheme`** — a re-issued command's fact would name the same
+  backend, so re-fetching buys nothing. Terminal on the first occasion, zero
+  re-issues.
+
+Both terminate the same way: `FAILED` with `failure_reason="blob_unreadable"`
+(distinct from `fetch_timeout` — the remedy is the blob store, not the origin),
+`CHECK_FETCH_FAILED`, ERROR health, one `WATCH_ERROR` on the transition, and the
+gate lifts so the item re-enters normal scheduling and recovers by itself.
+Neither `stamp_full_fetch` nor `clear_validators` fires: no bytes arrived, and
+being unable to read a blob says nothing about the stored pair.
 
 ### `not_modified` is a success, not a failure (#249)
 

@@ -61,6 +61,8 @@ WATCHER_USER_AGENT = "watcher/0.1.0"
 
 FETCH_COMMAND_TIMEOUT_ENV = "WATCHER_FETCH_COMMAND_TIMEOUT_SECONDS"
 DEFAULT_FETCH_COMMAND_TIMEOUT_SECONDS = 1800.0
+FETCH_MAX_REISSUES_ENV = "WATCHER_FETCH_MAX_REISSUES"
+DEFAULT_FETCH_MAX_REISSUES = 3
 
 
 def _command_headers(row: FetchCommand) -> dict[str, str]:
@@ -181,6 +183,16 @@ def fetch_command_timeout_seconds() -> float:
     return float(
         os.environ.get(FETCH_COMMAND_TIMEOUT_ENV, str(DEFAULT_FETCH_COMMAND_TIMEOUT_SECONDS))
     )
+
+
+def fetch_max_reissues() -> int:
+    """How many times one intent may be re-issued before it fails outright.
+
+    Read here for the same reason as the timeout: two paths cap the same
+    lineage counter — the reaper's stall sweep and the blob-unreadable apply
+    (#275) — and they must quote the same number.
+    """
+    return int(os.environ.get(FETCH_MAX_REISSUES_ENV, str(DEFAULT_FETCH_MAX_REISSUES)))
 
 
 async def select_pending_publish(session: AsyncSession, *, limit: int = 100) -> list[FetchCommand]:

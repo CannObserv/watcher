@@ -152,6 +152,102 @@ class TestApplyFetchBlob:
         # false stamp here would be silent (#269).
         assert wi.last_full_fetch_at is None
 
+    async def test_unreadable_blob_loop_terminates_at_the_cap(
+        self, db_session, monkeypatch, tmp_path
+    ):
+        # #275: the re-issue is a real origin request. A systematic cause — a
+        # permissions change under Replicator's blob dir, a cross-host blob_uri
+        # — makes every turn of the loop fail identically, so the cap the sweep
+        # applies to stalls has to apply here too. The assertion is termination.
+        monkeypatch.setenv("WATCHER_FETCH_MAX_REISSUES", "2")
+        wi, row = await _row_with_fact(db_session, tmp_path)
+        missing = f"file://{tmp_path}/reaped-away.bin"
+        row.blob_uri = missing
+        await db_session.flush()
+        stub = _wire(db_session, monkeypatch)
+        client = fakeredis.FakeAsyncRedis()
+
+        # Follow the intent the way Replicator would drive it: each re-issue
+        # comes back with a fact whose blob is just as unreadable.
+        command_id, applies = row.command_id, 0
+        while True:
+            applies += 1
+            assert applies <= 10, "the re-issue loop never terminated"
+            result = await apply_fetch_blob(
+                command_id, registry=ServiceRegistry(), bus_client=client
+            )
+            if "reissued" not in result:
+                break
+            command_id = result["reissued"]
+            nxt = await db_session.get(FetchCommand, command_id)
+            nxt.fact_at = NOW
+            nxt.blob_uri = missing
+            await db_session.flush()
+
+        assert applies == 3  # the original occasion + WATCHER_FETCH_MAX_REISSUES
+        final = await db_session.get(FetchCommand, command_id)
+        assert final.status == FetchCommandStatus.FAILED
+        assert final.failure_reason == "blob_unreadable"
+        assert final.reissue_count == 2
+        assert final.applied_at is not None
+        assert stub.await_count == 0
+        # The gate lifts: no open command left, so the item re-enters normal
+        # scheduling and recovers by itself once the cause is fixed.
+        assert await get_open_command(db_session, wi.id) is None
+        assert wi.health_status == WatchHealthStatus.ERROR
+        assert wi.last_checked_at is not None
+
+    async def test_capped_unreadable_blob_surfaces_its_own_reason(
+        self, db_session, monkeypatch, tmp_path
+    ):
+        # Distinct from fetch_timeout: the remedy is a blob store an operator
+        # has to fix, not an origin that stalled.
+        monkeypatch.setenv("WATCHER_FETCH_MAX_REISSUES", "1")
+        wi, row = await _row_with_fact(db_session, tmp_path)
+        row.blob_uri = f"file://{tmp_path}/reaped-away.bin"
+        row.reissue_count = 1
+        wi.etag = 'W/"v1"'
+        wi.last_modified = "Wed, 06 Aug 2026 17:00:00 GMT"
+        await db_session.flush()
+        _wire(db_session, monkeypatch)
+
+        result = await apply_fetch_blob(row.command_id, registry=ServiceRegistry())
+
+        assert result["error"] == "blob_unreadable"
+        events = await _audit_events(db_session, EventType.CHECK_FETCH_FAILED)
+        assert events and events[0].payload["reason"] == "blob_unreadable"
+        assert events[0].payload["reissues"] == 1
+        # No bytes arrived, so nothing may claim they did (CR-13) — and being
+        # unable to read a blob says nothing about the stored pair, so it stays
+        # (only invalid_request_options clears validators).
+        assert wi.last_full_fetch_at is None
+        assert wi.etag == 'W/"v1"'
+        assert wi.last_modified == "Wed, 06 Aug 2026 17:00:00 GMT"
+
+    async def test_unsupported_scheme_fails_without_reissuing(
+        self, db_session, monkeypatch, tmp_path
+    ):
+        # replicator#7's gs:// backend, before this build can read it: every
+        # fact would raise on the scheme, so a re-issue spends a real origin
+        # fetch to learn the same thing. Terminal on the first occasion (#275).
+        wi, row = await _row_with_fact(db_session, tmp_path)
+        row.blob_uri = "gs://co-temp-blobs/ab/cdef"
+        await db_session.flush()
+        stub = _wire(db_session, monkeypatch)
+        client = fakeredis.FakeAsyncRedis()
+
+        result = await apply_fetch_blob(
+            row.command_id, registry=ServiceRegistry(), bus_client=client
+        )
+
+        assert result["error"] == "blob_unreadable"
+        assert stub.await_count == 0
+        assert row.status == FetchCommandStatus.FAILED
+        assert row.failure_reason == "blob_unreadable"
+        assert row.reissue_count == 0
+        assert await get_open_command(db_session, wi.id) is None
+        assert wi.health_status == WatchHealthStatus.ERROR
+
     async def test_seeds_media_type_from_raw_header_once(self, db_session, monkeypatch, tmp_path):
         wi, row = await _row_with_fact(
             db_session, tmp_path, content_type_raw="application/pdf; charset=binary"

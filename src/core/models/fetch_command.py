@@ -72,6 +72,12 @@ NOT_MODIFIED_REASON = "not_modified"
 # item's stored conditional-GET validators (#269).
 INVALID_REQUEST_OPTIONS_REASON = "invalid_request_options"
 
+# Watcher's own ``reason``, never Replicator's: the fact arrived and named a
+# blob whose bytes could not be read (#275). Distinct from ``fetch_timeout``
+# because the remedy is — the blob store, its permissions, or a backend this
+# build cannot read — not an origin that stalled.
+BLOB_UNREADABLE_REASON = "blob_unreadable"
+
 # The statuses that make a command "open": they gate scheduling (no new issue
 # while one is open) and are what the reaper scans.
 #

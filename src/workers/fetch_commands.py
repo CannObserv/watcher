@@ -10,16 +10,14 @@
   after it upserts a fact; they restore the exact bookkeeping the local fetch
   path performs (health, ``last_checked_at``, audits, WATCH_ERROR/RECOVERED).
   Two of the three are success paths: a 304 is a check that found no change, not
-  a failed check (#249).
+  a failed check (#249). An unreadable blob re-issues, capped — every turn of
+  that loop is a real origin request (#275).
 * ``reap_fetch_commands`` — MUST-6's backstop for the still-silent outcomes
   (stalls, undecodable frames): expire + re-issue with intent lineage, cap with
   an ERROR surface.
 """
 
-import os
 from datetime import UTC, datetime, timedelta
-from urllib.parse import urlparse
-from urllib.request import url2pathname
 
 import procrastinate
 from redis.exceptions import ConnectionError as RedisConnectionError
@@ -28,18 +26,21 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.core.blobs import BlobUnreadable, UnsupportedBlobScheme, read_blob
 from src.core.bus import BUS_REDIS_URL_ENV, get_shared_bus_client
 from src.core.database import get_session_factory
 from src.core.domains import domain_name_for_url, ensure_domain_and_resolve_suspension
 from src.core.fetch_commands import (
     create_fetch_command,
     fetch_command_timeout_seconds,
+    fetch_max_reissues,
     publish_fetch_command,
     select_pending_publish,
 )
 from src.core.logging import get_logger
 from src.core.models.audit_log import EventType, audit
 from src.core.models.fetch_command import (
+    BLOB_UNREADABLE_REASON,
     INVALID_REQUEST_OPTIONS_REASON,
     FetchCommand,
     FetchCommandStatus,
@@ -283,12 +284,33 @@ async def _reissue(session, watched_item, prior, client) -> str:
     return row.command_id
 
 
-def _blob_path(blob_uri: str) -> str:
-    """Filesystem path for a ``file://`` blob URI (host-local by contract, MUST-7)."""
-    parsed = urlparse(blob_uri)
-    if parsed.scheme != "file":
-        raise ValueError(f"unsupported blob_uri scheme: {blob_uri!r}")
-    return url2pathname(parsed.path)
+async def _fail_blob_unreadable(session, watched_item, row, *, now: datetime, detail: str) -> dict:
+    """Terminate an intent whose bytes never became readable (#275).
+
+    The same shape the reaper's cap uses — FAILED + ERROR health + a fresh
+    ``last_checked_at``, so the item leaves ``OPEN_STATUSES`` and re-enters
+    normal scheduling; recovery is automatic once the cause is fixed — under its
+    own ``failure_reason``.
+
+    Neither validator helper fires here. No bytes arrived, so ``stamp_full_fetch``
+    would be a lie (CR-13); and being unable to *read* a blob says nothing about
+    the stored pair, so it survives exactly as it does under every
+    ``apply_fetch_failure`` reason but ``invalid_request_options``.
+    """
+    row.status = FetchCommandStatus.FAILED
+    row.failure_reason = BLOB_UNREADABLE_REASON
+    row.failure_detail = detail
+    row.applied_at = now
+    await _record_check_failure(
+        session,
+        watched_item,
+        now=now,
+        url=row.url,
+        audit_event=EventType.CHECK_FETCH_FAILED,
+        audit_kwargs={"reason": BLOB_UNREADABLE_REASON, "reissues": row.reissue_count},
+        error_metadata={"reason": BLOB_UNREADABLE_REASON},
+    )
+    return {"error": BLOB_UNREADABLE_REASON, "reissues": row.reissue_count}
 
 
 @bp.task(
@@ -312,7 +334,10 @@ async def apply_fetch_blob(
 
     A blob that cannot be read (reaped, or a cross-host ``blob_uri``) is a
     re-issue under a fresh ``command_id`` — MUST-7's clock runs from last fetch,
-    not last read, so waiting cannot help.
+    not last read, so waiting cannot help — but **capped** at
+    ``WATCHER_FETCH_MAX_REISSUES``, the same lineage counter the reaper caps
+    (#275). A backend this build cannot read at all skips the re-issues
+    entirely: see ``_fail_blob_unreadable``.
     """
     reg = registry if registry is not None else get_registry()
     async with get_session_factory()() as session:
@@ -345,9 +370,35 @@ async def apply_fetch_blob(
             return {"skipped": True, "reason": "superseded"}
 
         try:
-            with open(_blob_path(row.blob_uri), "rb") as fh:
-                raw_content = fh.read()
-        except (OSError, ValueError) as exc:
+            raw_content = read_blob(row.blob_uri)
+        except UnsupportedBlobScheme as exc:
+            # Deterministic (#275): a re-issue's fact would name the same
+            # backend, so each turn of the loop is a real origin request spent
+            # learning the same thing. Terminal on the first occasion.
+            logger.error(
+                "blob_uri names an unreadable backend — failing the intent",
+                extra={"command_id": command_id, "blob_uri": row.blob_uri, "error": str(exc)},
+            )
+            return await _fail_blob_unreadable(session, watched_item, row, now=now, detail=str(exc))
+        except BlobUnreadable as exc:
+            # May be transient (blob reaped between fact and apply), so re-issue
+            # — but under the SAME lineage cap the reaper applies to stalls
+            # (#275). Without it a systematic cause (a permissions change under
+            # the blob dir, a cross-host blob_uri) loops forever, each turn a
+            # real origin fetch, with health still reading OK.
+            if row.reissue_count >= fetch_max_reissues():
+                logger.error(
+                    "blob still unreadable at the re-issue cap — failing the intent",
+                    extra={
+                        "command_id": command_id,
+                        "blob_uri": row.blob_uri,
+                        "reissues": row.reissue_count,
+                        "error": str(exc),
+                    },
+                )
+                return await _fail_blob_unreadable(
+                    session, watched_item, row, now=now, detail=str(exc)
+                )
             logger.warning(
                 "blob unreadable — re-issuing the intent",
                 extra={"command_id": command_id, "blob_uri": row.blob_uri, "error": str(exc)},
@@ -607,7 +658,7 @@ async def reap_fetch_commands(
     recovery is automatic when the origin or Replicator heals.
     """
     timeout = fetch_command_timeout_seconds()
-    max_reissues = int(os.environ.get("WATCHER_FETCH_MAX_REISSUES", "3"))
+    max_reissues = fetch_max_reissues()
     now = datetime.now(UTC)
     cutoff = now - timedelta(seconds=timeout)
 

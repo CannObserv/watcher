@@ -9,7 +9,7 @@ destroys or reassigns anything.
 
 These are text assertions, deliberately. They cannot prove the grants are
 *correct* — only a rehearsal against a real cluster does that (see the runbook
-in docs/DEPLOYMENT.md). They exist to stop the shapes that make the script
+in docs/MIGRATIONS.md). They exist to stop the shapes that make the script
 dangerous rather than merely wrong.
 """
 

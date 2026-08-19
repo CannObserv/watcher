@@ -33,7 +33,7 @@ no longer exists. At deploy, stamp them at this baseline instead of upgrading:
     uv run alembic stamp 2addddea0b03 --purge
 
 Fresh databases need no stamp — they run this migration normally. See
-``docs/DEPLOYMENT.md`` → "Migration baseline (squash)".
+``docs/MIGRATIONS.md`` → "Migration baseline (squash)".
 """
 
 from collections.abc import Sequence

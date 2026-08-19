@@ -57,7 +57,7 @@ Sibling services on the same VM, separately managed: **Archiver** (port 8020, `a
 
 ## `info_source_id` on the wire
 
-**`info_source_id` on the wire (#252, cannobserv#300).** Every `content.fetch` Watcher publishes names the Archiver InfoSource it is for; **correlation is unchanged** — `command_id` only (MUST-3), and an unmatched fact is still discarded. **Deploy ordering is load-bearing:** Replicator must ship its echo (replicator#28) to production *first*, and the migration has no safe order. Both, plus why the field is reporting and not routing: **[docs/CONTENT-PIPELINE.md](../docs/CONTENT-PIPELINE.md)** and `docs/DEPLOYMENT.md` → "No safe order".
+**`info_source_id` on the wire (#252, cannobserv#300).** Every `content.fetch` Watcher publishes names the Archiver InfoSource it is for; **correlation is unchanged** — `command_id` only (MUST-3), and an unmatched fact is still discarded. **Deploy ordering is load-bearing:** Replicator must ship its echo (replicator#28) to production *first*, and the migration has no safe order. Both, plus why the field is reporting and not routing: **[docs/CONTENT-PIPELINE.md](../docs/CONTENT-PIPELINE.md)** and `docs/MIGRATIONS.md` → "No safe order".
 
 ## Redis history and future use
 

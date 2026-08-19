@@ -17,7 +17,7 @@ and every one of those carries an ``archiver_info_source_id`` (#251 made it NOT
 NULL). Drop either and the ``UPDATE ... FROM`` join leaves rows NULL and the
 ``SET NOT NULL`` fails.
 
-Deploying this has no safe order — see ``docs/DEPLOYMENT.md`` → "No safe order".
+Deploying this has no safe order — see ``docs/MIGRATIONS.md`` → "No safe order".
 """
 
 from collections.abc import Sequence

@@ -26,7 +26,7 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.core.blobs import BlobUnreadable, UnsupportedBlobScheme, read_blob
+from src.core.blobs import BlobUnreadable, UnsupportedBlobScheme, aread_blob
 from src.core.bus import BUS_REDIS_URL_ENV, get_shared_bus_client
 from src.core.database import get_session_factory
 from src.core.domains import domain_name_for_url, ensure_domain_and_resolve_suspension
@@ -370,7 +370,9 @@ async def apply_fetch_blob(
             return {"skipped": True, "reason": "superseded"}
 
         try:
-            raw_content = read_blob(row.blob_uri)
+            # Off the event loop (CR-2): this task shares its process with the
+            # API and the content.blobs consumer, and a blob is not small.
+            raw_content = await aread_blob(row.blob_uri)
         except UnsupportedBlobScheme as exc:
             # Deterministic (#275): a re-issue's fact would name the same
             # backend, so each turn of the loop is a real origin request spent

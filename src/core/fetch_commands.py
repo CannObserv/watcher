@@ -34,6 +34,7 @@ this module:
 """
 
 import os
+from collections.abc import Callable
 from datetime import UTC, datetime
 
 from co_core.effects.bus import BusPublish
@@ -171,6 +172,27 @@ async def has_open_command(session: AsyncSession, watched_item_id) -> bool:
     return await get_open_command(session, watched_item_id) is not None
 
 
+def _env_number[T: (int, float)](env: str, default: T, cast: Callable[[str], T]) -> T:
+    """One knob read, with the fallback both knobs need (CR-1, CR-3).
+
+    An unparseable value falls back to the default rather than raising, for the
+    same reason ``validator_max_age`` does: **a knob must not be able to wedge
+    the path it governs**. Both of these are read while handling a failure — the
+    cap from inside ``except BlobUnreadable``, the timeout once per reaper pass
+    — so a ``ValueError`` there escapes the handler, leaves the row exactly as
+    it was, and the next pass repeats it. A typo would reinstate the very loop
+    #275 removed.
+    """
+    raw = os.environ.get(env)
+    if raw is None:
+        return default
+    try:
+        return cast(raw)
+    except ValueError:
+        logger.warning("unparseable %s — using the default", env, extra={"value": raw})
+        return default
+
+
 def fetch_command_timeout_seconds() -> float:
     """How long an in-flight command may go without a signal before the reaper
     expires and re-issues it.
@@ -180,9 +202,7 @@ def fetch_command_timeout_seconds() -> float:
     retries. Read here so the reaper and the check-now rejection quote the same
     number.
     """
-    return float(
-        os.environ.get(FETCH_COMMAND_TIMEOUT_ENV, str(DEFAULT_FETCH_COMMAND_TIMEOUT_SECONDS))
-    )
+    return _env_number(FETCH_COMMAND_TIMEOUT_ENV, DEFAULT_FETCH_COMMAND_TIMEOUT_SECONDS, float)
 
 
 def fetch_max_reissues() -> int:
@@ -192,7 +212,7 @@ def fetch_max_reissues() -> int:
     lineage counter — the reaper's stall sweep and the blob-unreadable apply
     (#275) — and they must quote the same number.
     """
-    return int(os.environ.get(FETCH_MAX_REISSUES_ENV, str(DEFAULT_FETCH_MAX_REISSUES)))
+    return _env_number(FETCH_MAX_REISSUES_ENV, DEFAULT_FETCH_MAX_REISSUES, int)
 
 
 async def select_pending_publish(session: AsyncSession, *, limit: int = 100) -> list[FetchCommand]:

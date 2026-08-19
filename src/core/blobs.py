@@ -17,12 +17,39 @@ The two error types are the point, because the caller's remedy differs:
 
 Neither is a subclass of the other: the apply path branches on both, and an
 inheritance relationship would make the ``except`` ordering load-bearing.
+
+**Await ``aread_blob``, never ``read_blob``, from the worker** (CR-2). One
+uvicorn process runs the API, the fact consumer and the apply tasks, so a
+multi-MB blob read inline stalls all three.
+
+**Non-local backends spool through a temp file** (CR-5). ``blob_file`` yields a
+local path and removes anything it created; a ``file://`` blob is Replicator's
+own file and is yielded in place, never copied and never deleted. What this
+does *not* do is cap memory end to end: co-core's extractor takes ``bytes``, so
+one full copy is materialised whatever the backend. The spool keeps a remote
+download from being a *second* one.
 """
 
-from urllib.parse import urlparse
+import asyncio
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
+from pathlib import Path
+from tempfile import NamedTemporaryFile
+from typing import IO
+from urllib.parse import ParseResult, urlparse
 from urllib.request import url2pathname
 
+from src.core.logging import get_logger
+
+logger = get_logger(__name__)
+
+# Schemes whose blobs are already local files (issuer contract MUST-7).
 SUPPORTED_SCHEMES = ("file",)
+
+# Scheme → writer that streams the blob onto an open temp file. Empty until
+# replicator#7's object store lands; registering an arm here is the whole
+# integration point for a new backend.
+_SPOOLERS: dict[str, Callable[[ParseResult, IO[bytes]], None]] = {}
 
 
 class BlobReadError(Exception):
@@ -37,8 +64,8 @@ class BlobUnreadable(BlobReadError):
     """The backend is understood; this blob could not be read. May be transient."""
 
 
-def read_blob(blob_uri: str | None) -> bytes:
-    """The bytes at ``blob_uri``.
+def _parse(blob_uri: str | None) -> ParseResult:
+    """The parsed URI, or the typed refusal.
 
     A missing URI is ``BlobUnreadable`` rather than ``UnsupportedBlobScheme``:
     nothing about the backend is known, so it belongs on the re-issuable side —
@@ -47,12 +74,50 @@ def read_blob(blob_uri: str | None) -> bytes:
     if not blob_uri:
         raise BlobUnreadable("blob_uri is empty")
     parsed = urlparse(blob_uri)
-    if parsed.scheme not in SUPPORTED_SCHEMES:
+    if parsed.scheme not in SUPPORTED_SCHEMES and parsed.scheme not in _SPOOLERS:
         raise UnsupportedBlobScheme(f"unsupported blob_uri scheme: {blob_uri!r}")
-    # Host-local by contract (issuer contract MUST-7).
-    path = url2pathname(parsed.path)
+    return parsed
+
+
+@contextmanager
+def blob_file(blob_uri: str | None) -> Iterator[Path]:
+    """A local path holding the blob's bytes, for the duration of the block.
+
+    Cleanup covers exactly what this function created — a spooled copy is
+    removed on the way out, including when the body raises; a ``file://`` blob
+    is Replicator's, and deleting it would destroy the fact's own evidence.
+    """
+    parsed = _parse(blob_uri)
+    spool = _SPOOLERS.get(parsed.scheme)
+    if spool is None:
+        yield Path(url2pathname(parsed.path))
+        return
+    handle = NamedTemporaryFile(prefix="watcher-blob-", delete=False)  # noqa: SIM115
+    path = Path(handle.name)
     try:
-        with open(path, "rb") as fh:
-            return fh.read()
-    except OSError as exc:
-        raise BlobUnreadable(f"{blob_uri!r}: {exc}") from exc
+        try:
+            with handle:
+                spool(parsed, handle)
+        except OSError as exc:
+            raise BlobUnreadable(f"{blob_uri!r}: {exc}") from exc
+        yield path
+    finally:
+        path.unlink(missing_ok=True)
+
+
+def read_blob(blob_uri: str | None) -> bytes:
+    """The bytes at ``blob_uri``. Blocking — see ``aread_blob``."""
+    with blob_file(blob_uri) as path:
+        try:
+            return path.read_bytes()
+        except OSError as exc:
+            # The URI is in the message, and the caller persists that message to
+            # ``fetch_commands.failure_detail`` (CR-4). Fine for file:// and
+            # gs://; a credential-bearing URI shape would need redacting here
+            # and at the caller's log line before it could be adopted.
+            raise BlobUnreadable(f"{blob_uri!r}: {exc}") from exc
+
+
+async def aread_blob(blob_uri: str | None) -> bytes:
+    """``read_blob`` off the event loop — what async callers must use (CR-2)."""
+    return await asyncio.to_thread(read_blob, blob_uri)

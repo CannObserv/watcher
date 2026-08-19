@@ -7,7 +7,13 @@ thing), while a blob that is merely missing may be transient.
 
 import pytest
 
-from src.core.blobs import BlobUnreadable, UnsupportedBlobScheme, read_blob
+from src.core.blobs import (
+    BlobUnreadable,
+    UnsupportedBlobScheme,
+    aread_blob,
+    blob_file,
+    read_blob,
+)
 
 
 class TestReadBlob:
@@ -32,11 +38,66 @@ class TestReadBlob:
         with pytest.raises(BlobUnreadable):
             read_blob(None)
 
-    def test_unsupported_scheme_is_not_caught_as_unreadable(self):
-        # The apply path branches on these two types; if one subclassed the
-        # other, ordering the excepts wrong would silently restore the loop.
+    def test_the_two_error_types_are_siblings(self):
+        # The apply path branches on both; if either subclassed the other,
+        # ordering the excepts wrong would silently restore the loop (CR-6).
+        assert not issubclass(UnsupportedBlobScheme, BlobUnreadable)
+        assert not issubclass(BlobUnreadable, UnsupportedBlobScheme)
+
+
+class TestBlobFile:
+    def test_a_local_blob_is_yielded_in_place_and_survives(self, tmp_path):
+        # MUST-7: a file:// blob is already a local file, and it is
+        # REPLICATOR'S file. Copying it would double every check's disk I/O;
+        # deleting it on exit would destroy the fact's own evidence (CR-5).
+        blob = tmp_path / "blob.bin"
+        blob.write_bytes(b"<p>hi</p>")
+
+        with blob_file(f"file://{blob}") as path:
+            assert path == blob
+            assert path.read_bytes() == b"<p>hi</p>"
+
+        assert blob.exists()
+
+    def test_a_spooled_copy_is_removed_on_exit(self, tmp_path, monkeypatch):
+        # The contract the future non-local arm relies on: whatever this
+        # function creates, it cleans up — including when the body raises.
+        blob = tmp_path / "blob.bin"
+        blob.write_bytes(b"<p>hi</p>")
+        spooled: list = []
+        monkeypatch.setattr("src.core.blobs.SUPPORTED_SCHEMES", ())
+        monkeypatch.setattr(
+            "src.core.blobs._SPOOLERS",
+            {"file": lambda parsed, fh: fh.write(blob.read_bytes())},
+        )
+
+        with pytest.raises(RuntimeError):
+            with blob_file(f"file://{blob}") as path:
+                spooled.append(path)
+                assert path != blob
+                assert path.read_bytes() == b"<p>hi</p>"
+                raise RuntimeError("the caller blew up mid-read")
+
+        assert spooled and not spooled[0].exists()
+        assert blob.exists()
+
+    def test_unsupported_scheme_raises_before_any_temp_file(self):
         with pytest.raises(UnsupportedBlobScheme):
-            try:
-                read_blob("gs://co-temp-blobs/ab/cdef")
-            except BlobUnreadable as exc:  # pragma: no cover - must not fire
-                pytest.fail(f"unsupported scheme leaked as unreadable: {exc}")
+            with blob_file("gs://co-temp-blobs/ab/cdef"):
+                pass  # pragma: no cover - never entered
+
+
+class TestAreadBlob:
+    async def test_reads_off_the_event_loop(self, tmp_path):
+        # CR-2: the apply task runs in the one load-bearing process, next to the
+        # API and the fact consumer. A multi-MB blob read inline stalls both.
+        blob = tmp_path / "blob.bin"
+        blob.write_bytes(b"<p>hi</p>")
+
+        assert await aread_blob(f"file://{blob}") == b"<p>hi</p>"
+
+    async def test_propagates_the_typed_errors(self, tmp_path):
+        with pytest.raises(BlobUnreadable):
+            await aread_blob(f"file://{tmp_path}/reaped-away.bin")
+        with pytest.raises(UnsupportedBlobScheme):
+            await aread_blob("gs://co-temp-blobs/ab/cdef")

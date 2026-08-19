@@ -54,8 +54,11 @@ What that leaves in the code:
 
 Reading `blob_uri` is the one place Watcher parses that URI, so the scheme
 dispatch lives in [`src/core/blobs.py`](../src/core/blobs.py) rather than in the
-worker: a new backend (replicator#7's object store) is an arm of `read_blob`,
-not a branch in `apply_fetch_blob`. Its two error types are the decision:
+worker: a new backend (replicator#7's object store) registers a spooler there,
+not a branch in `apply_fetch_blob`. Non-local backends stream onto a temp file
+that `blob_file` removes on the way out; a `file://` blob is Replicator's own
+file, so it is yielded in place. Async callers await `aread_blob` — the apply
+task shares its process with the API. The two error types are the decision:
 
 - **`BlobUnreadable`** — the backend is understood, this blob is missing. Could
   be the blob reaped between fact and apply, so re-issue, **capped** at

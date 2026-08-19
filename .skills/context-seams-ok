@@ -45,3 +45,8 @@ Registry reconciliation (#254)
 #   rule, which it still does.
 The Archiver service must be installed first — see its own `docs/DEPLOYMENT.md`.
 [WATCHED-ITEMS-DASHBOARD.md](WATCHED-ITEMS-DASHBOARD.md). `AGENTS.md` carries
+docs/MIGRATIONS.md :: provenance-heading :: Restart-before-migrate — one-time, `d5a71c93e0f2` (#251)
+docs/MIGRATIONS.md :: provenance-heading :: No safe order — one-time, `e7c4b2a91f60` (#252)
+provenance-heading :: Migration role and application role — one-time (#259)
+provenance-heading :: Restart-before-migrate — one-time, `f4a8b26c9d31` (#261)
+provenance-heading :: Drop the dead `information` schema — applied 2026-08-18 (#271)

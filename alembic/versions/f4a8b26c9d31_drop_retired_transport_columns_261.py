@@ -32,7 +32,7 @@ out from under the running process and every query against these two tables
 fails with `UndefinedColumn` until the restart lands. Restart-first has no
 equivalent window: the new code never references them, and all three are
 nullable, so nothing it writes needs them. Recorded in
-`docs/DEPLOYMENT.md` → *Restart-before-migrate — one-time, `f4a8b26c9d31`*.
+`docs/MIGRATIONS.md` → *Restart-before-migrate — one-time, `f4a8b26c9d31`*.
 """
 
 from collections.abc import Sequence

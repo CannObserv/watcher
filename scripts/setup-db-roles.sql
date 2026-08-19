@@ -14,7 +14,7 @@
 -- The password never appears in this file: it is read from the environment by
 -- \getenv below. Run order, the /etc/watcher/.env edit that follows, the
 -- verification commands, and the rollback are in
--- docs/DEPLOYMENT.md -> "Migration role and application role".
+-- docs/MIGRATIONS.md -> "Migration role and application role".
 --
 --
 -- WHAT IT DOES

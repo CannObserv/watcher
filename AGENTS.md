@@ -22,8 +22,7 @@ uv run --no-project --with 'google-cloud-storage>=2,<4' python scripts/sync_whee
 uv sync
 ```
 
-Why a wheelhouse and not git sources, the ADC/WIF auth, the upgrade procedure, and the
-pinned version: [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) → *Cannobserv wheelhouse*.
+Auth, upgrade procedure and the pinned version: [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) → *Cannobserv wheelhouse*.
 `co-core` owns fetch → extract → fingerprint; watcher no longer fetches at all —
 [docs/CONTENT-PIPELINE.md](docs/CONTENT-PIPELINE.md).
 
@@ -33,7 +32,7 @@ SocratiCode is indexed on this repo (`.socraticodecontextartifacts.json` present
 
 **Negative rule.** For broad semantic questions ("where is X", "how does Y work", "what depends on Z"), use SocratiCode MCP tools first. Reach for `grep`/`ripgrep` only on exact strings (error messages, log lines, known symbols). Reserve the Explore subagent for path-pattern walks (e.g. "all `*.py` under `src/api/routes/`"), not semantic search.
 
-[docs/SKILLS.md](docs/SKILLS.md) has the rest: *When to use each tool* (the goal→tool table), *Index scope* (`.socraticodeignore`, #240) and its rebuild procedure, and *Prefetch query* — the literal query, if the hook's reminder didn't load.
+The goal→tool table, index scope and rebuild, and the literal prefetch query: [docs/SKILLS.md](docs/SKILLS.md).
 
 ## Infrastructure
 
@@ -51,8 +50,7 @@ The exe.dev proxy forwards 3000–9999. Dev server reachable at `https://watcher
 
 **Single process is load-bearing.** One uvicorn process runs everything — API, embedded Procrastinate worker, `content.blobs` fact consumer, cache sweeper. **Never run `uvicorn --workers N` or a second worker unit against prod.** Why the fact consumer makes this load-bearing, and the escalation path that is *not built*: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) → *Single process*.
 
-**The bus.** Watcher publishes `content.fetch`, `content.fetch-policy`, `content.revisions`, and `info.watch-status`; consumes `content.blobs` (single-member group `watcher`) and `info.registry` (**groupless**, replayed from `0-0` every boot). Archiver operates the broker. `WATCHER_BUS_REDIS_URL` unset → publish tasks skip loudly. Stream ownership, the fetch contracts, and `info_source_id` on the wire:
-[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+**The bus.** Archiver operates the broker. Watcher publishes `content.fetch`, `content.fetch-policy`, `content.revisions`, `info.watch-status`; consumes `content.blobs` (single-member group `watcher`) and `info.registry` (**groupless**, replayed from `0-0` every boot). `WATCHER_BUS_REDIS_URL` unset → publish tasks skip loudly. Stream ownership, the fetch contracts, `info_source_id` on the wire: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ## Server Lifecycle
 
@@ -72,8 +70,6 @@ bash scripts/dev_server.sh
 
 **Cross-repo policy.** Do not directly edit sibling repos (`archiver`, `notifier`) within a watcher conversation. If a change to a sibling is needed: identify the gap, recommend it, get approval, then file a GH issue in that repo. Implementation happens in a separate session scoped to the sibling.
 
-Full lifecycle reference + cleanup timer: `docs/DEPLOYMENT.md`.
-
 **Nothing in `src/` mirrors to Archiver** (#159, #236) — don't reintroduce a sync obligation: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) → *No cross-repo mirror discipline*.
 
 ## Environment Files
@@ -89,13 +85,7 @@ Load both for shell commands (pytest, psql, gh):
 source scripts/load-env.sh
 ```
 
-Never follow this with a hand-run uvicorn — it leaves `DATABASE_URL` pointed
-at production. The dev server is `bash scripts/dev_server.sh` (see **Server
-Lifecycle**; #233).
-
 **Naming rule for new variables.** Anything naming a shared external resource takes a **service-prefixed** name with a separate dev key (`WATCHER_BUS_REDIS_URL` / `WATCHER_DEV_BUS_REDIS_URL`). A bare `REDIS_URL` is silently inherited from `/etc/watcher/.env` — the #233 hazard in env-var form. Rationale: [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) → *Environment Variables*.
-
-Full variable reference: `docs/DEPLOYMENT.md`.
 
 ## Common Commands
 
@@ -108,46 +98,41 @@ uv run alembic upgrade head                  # apply migrations
 ```
 
 **Never run `alembic revision --autogenerate` against `DATABASE_URL`** — it diffs
-the models against whatever it connects to, which is production. Build a scratch
-database first (that is what `CREATEDB` on the migration role is for, #259):
+the models against production. Build a scratch database first (#259):
 [docs/COMMANDS.md](docs/COMMANDS.md) → *Autogenerate wants a scratch database*.
 Alembic connects with `WATCHER_MIGRATION_DATABASE_URL`, else `DATABASE_URL`;
-`alembic.ini` carries no URL, so an unloaded shell fails instead of defaulting to
-production.
-
-Full reference: `docs/COMMANDS.md`.
+`alembic.ini` carries no URL, so an unloaded shell fails rather than defaulting
+to production.
 
 ## Watched Items
 
-**The `WatchedItem` is the single monitored entity (#191).** The earlier
-`WatchedItem → Watch` one-to-many was collapsed: `Watch` (the model, table,
-`/watches*` routes, the override resolution chain, and the per-Watch
-notification tier) is gone. One `WatchedItem` = one URL = one fingerprint = one
-change signal. The user-facing noun is "Watched Item".
+**The `WatchedItem` is the single monitored entity (#191).** One `WatchedItem` =
+one URL = one fingerprint = one change signal; the earlier `Watch` model — its
+table, its `/watches*` routes, the override resolution chain and the per-Watch
+notification tier — is gone. The user-facing noun is "Watched
+Item".
 
-**The `info.registry` reconcile is the creation path** — it creates from an announcement alone, so a cold start converges from the snapshot. `POST /api/v1/watched-items` still exists and still works, but Archiver retired its outbound provisioning call in archiver#158 (2026-08-17), so it currently has no caller. `source_specs` is required and non-empty there (#260); the reconcile is not gated, so a spec-less item stays reachable over the wire and raises `ExtractionError` at pipeline time rather than silently watching the whole page. `WatchedItem.domain_name` == `Domain.name` == `hostname(effective_url)`; one entry per hostname, so host variants are independent by design.
+**The `info.registry` reconcile is the creation path** — it creates from an announcement alone, so a cold start converges from the snapshot. `POST /api/v1/watched-items` still works but has had no caller since archiver#158 (2026-08-17). `source_specs` is required and non-empty there (#260); the reconcile is not gated, so a spec-less item stays reachable over the wire and raises `ExtractionError` at pipeline time rather than silently watching the whole page. `WatchedItem.domain_name` == `Domain.name` == `hostname(effective_url)`; one entry per hostname, so host variants are independent by design.
 
-**The registry owns cadence and active state; Watcher owns mechanism (#254).** An announcement is authoritative for exactly five columns (`archiver_info_source_id`, `effective_url`, `source_specs`, `announced_schedule_config`, `is_active`) plus `domain_name`; everything else — health, timings, `domain_suspended`, `archived_at`, `throttle_floor_interval`, tags, notification config — survives reconciliation. **A local pause is not sticky**: item-level pause lives in Archiver's dashboard alone, and on a reconciled item every announcement-owned field 409s locally. Schedule resolution is four tiers under a floor. The full rules — what each 409 is, what restore does and doesn't do, how the floor is released: [docs/WATCHED-ITEMS.md](docs/WATCHED-ITEMS.md) → *Registry reconciliation*.
+**The registry owns cadence and active state; Watcher owns mechanism (#254).** An announcement is authoritative for exactly five columns (`archiver_info_source_id`, `effective_url`, `source_specs`, `announced_schedule_config`, `is_active`) plus `domain_name`; everything else survives reconciliation. **A local pause is not sticky**: item-level pause lives in Archiver's dashboard alone, and on a reconciled item every announcement-owned field 409s locally. Schedule resolution is four tiers under a floor. What each 409 is, what restore does and doesn't do, how the floor is released: [docs/WATCHED-ITEMS.md](docs/WATCHED-ITEMS.md) → *Registry reconciliation*.
 
 **Empty extraction is a failure, not a change (#258).** When every `source_spec`
 yields empty chunks, `process_watched_item` raises `ExtractionError` and writes
-nothing — unconditionally, on both sides of a baseline. Before the guard,
-selector rot presented as a *content change* with health still OK. Full
-rationale, and the six provenance columns the outbox gained for
-`source_revision_observed` (#253): **[docs/CONTENT-PIPELINE.md](docs/CONTENT-PIPELINE.md)**.
+nothing — unconditionally, on both sides of a baseline. Rationale, and the six
+provenance columns the outbox gained for `source_revision_observed` (#253):
+**[docs/CONTENT-PIPELINE.md](docs/CONTENT-PIPELINE.md)**.
 
-**Conditional GET is gated and item-scoped (#269).** Watcher stores each item's
-`etag`/`last_modified` from the fact that closed its *latest* command and replays
-them verbatim, but only for items named in `WATCHER_CONDITIONAL_GET_ENABLED`
-(unset → off, byte-identical to the pre-#269 command). Validators are snapshotted
-onto the `fetch_commands` row at issue — the sweep republishes from that row
-alone — and a 304 inherits the last fingerprint, so a spec/URL/extractor change
-must invalidate them: that is `validator_source_key` (whose extraction half is
-derived from the installed co-core version, so a wheelhouse upgrade invalidates
-by itself), plus an age ceiling. Never
-route `invalid_request_options` past the validator clear; the refusal precedes
-the request, so a bad stored value wedges the item permanently.
-[docs/CONTENT-PIPELINE.md](docs/CONTENT-PIPELINE.md) → *Conditional GET*.
+**Conditional GET is gated and item-scoped (#269).** Watcher replays each item's
+stored `etag`/`last_modified`, but only for items named in
+`WATCHER_CONDITIONAL_GET_ENABLED` (unset → off, byte-identical to the pre-#269
+command). A 304 inherits the last fingerprint, so a spec/URL/extractor change
+must invalidate the pair — `validator_source_key`, whose extraction half is
+derived from the installed co-core version, plus an age ceiling. Never route
+`invalid_request_options` past the validator clear: the refusal precedes the
+request, so a bad stored value wedges the item permanently. An unreadable blob
+re-issues under a cap for the same reason (#275).
+[docs/CONTENT-PIPELINE.md](docs/CONTENT-PIPELINE.md) → *Conditional GET*, *An
+unreadable blob is capped*.
 
 **Notifications.** One `notification_templates` table; a row's `visibility` —
 `global` / `domain` / `watched_item` — is what decides where it fires.
@@ -174,12 +159,7 @@ logger = get_logger(__name__)
 ```
 Entry points only: call `configure_logging()` once.
 
-Records are JSON with a four-key floor — `timestamp`/`level`/`logger`/`message` — pinned by `tests/core/test_logging.py`;
-don't rename or drop a key without updating both. Why that set, and the rest of the
-logging configuration: [docs/CONVENTIONS.md](docs/CONVENTIONS.md).
-
-uvicorn's own loggers need `--log-config src/core/log_config.json` (both sanctioned launch paths already pass it) plus the `strip_color_message` filter.
-[docs/CONVENTIONS.md](docs/CONVENTIONS.md).
+Records are JSON with a four-key floor — `timestamp`/`level`/`logger`/`message` — pinned by `tests/core/test_logging.py`; don't rename or drop a key without updating both. uvicorn's own loggers need `--log-config src/core/log_config.json` (both sanctioned launch paths already pass it) plus the `strip_color_message` filter. Both: [docs/CONVENTIONS.md](docs/CONVENTIONS.md).
 
 **Date & Time:** All UTC. ISO 8601: `YYYY-MM-DDTHH:MM:SS.ffffffZ` (timestamps), `YYYY-MM-DD` (dates).
 
@@ -191,46 +171,40 @@ uvicorn's own loggers need `--log-config src/core/log_config.json` (both sanctio
 - Small, focused functions
 - Optional JSONB columns: declare as `JSONB(none_as_null=True)` so Python `None` persists as SQL `NULL`, not a JSONB `'null'` literal (otherwise `WHERE col IS NULL` silently misses those rows — #198)
 
-**ULID format errors:** path parameter → 404 (`parse_ulid`), filter query parameter → 400
-(`parse_filter_ulid`). **DB triggers:** currently none; any trigger added in a migration
-must also be recreated in `tests/conftest.py`'s `test_engine` fixture, because integration
-tests build the schema with `create_all` rather than migrations. Both:
-[docs/CONVENTIONS.md](docs/CONVENTIONS.md).
+**ULID format errors:** path parameter → 404 (`parse_ulid`), filter query parameter → 400 (`parse_filter_ulid`). **DB triggers:** currently none; one added in a migration must also be recreated in `tests/conftest.py`'s `test_engine` fixture (integration tests build the schema with `create_all`). Both: [docs/CONVENTIONS.md](docs/CONVENTIONS.md).
 
 ## Style & UI
 
-Authoritative reference: `docs/STYLE.md`.
-Component classes and the HTMX/flash patterns: [docs/UI.md](docs/UI.md).
+Design system: [docs/STYLE.md](docs/STYLE.md). Component library and the
+HTMX/flash patterns: [docs/UI.md](docs/UI.md). Both authoritative; what follows
+is only what is easy to get wrong.
 
 **Brand:** Cannabis Observer — `co-purple-600` (#6d4488) primary accent. Never use brand colors for semantic status (green/yellow/red/blue).
 
-**Dark Mode:** Tailwind `dark:` variants on every color utility. Class-based toggle (`<html class="dark">`). localStorage key: `watcher-color-scheme`.
+**Dark Mode:** Tailwind `dark:` variants on every color utility. Class-based toggle (`<html class="dark">`), localStorage key `watcher-color-scheme`.
 
-**Accessibility:** WCAG 2.1 AA. **Touch-target idiom (#203):** component classes own the 44px guarantee — never restate `min-h-[44px]` on a `.btn`, never `min-h-0`. Skip links, ARIA landmarks, `focus-visible`, `aria-live`, reduced motion, no `title` attributes: [docs/STYLE.md](docs/STYLE.md) §7–8 (guards: `tests/dashboard/test_touch_targets.py`, `scripts/check-touch-targets.sh`).
+**Accessibility:** WCAG 2.1 AA, and no `title` attributes. **Touch-target idiom (#203):** component classes own the 44px guarantee — never restate `min-h-[44px]` on a `.btn`, never `min-h-0`. [docs/STYLE.md](docs/STYLE.md) §7–8 (guards: `tests/dashboard/test_touch_targets.py`, `scripts/check-touch-targets.sh`).
 
-**CSS:** Tailwind v4 with `@theme` in `input.css`; use the component classes rather
-than raw utilities. Full class inventory and badge variants:
-[docs/UI.md](docs/UI.md).
+**CSS:** Tailwind v4 with `@theme` in `input.css`; use the component classes rather than raw utilities, and never a CDN build.
 
-**HTMX:** OOB flash via `partials/flash_oob.html`. CSS `.htmx-request` for loading states. **Detect HTMX with `is_htmx(request)`** ([src/dashboard/deps.py](src/dashboard/deps.py)), never a bare `HX-Request` read — guarded by `tests/dashboard/test_htmx_detection.py` (#211). Patterns: [docs/UI.md](docs/UI.md) → *HTMX Patterns*.
-
-**Performance:** Pre-built Tailwind (no CDN). `BUILD_ID` env var for cache-busting (`?v={{ build_id }}`). `defer` on all non-critical scripts. System font stack.
+**HTMX:** **Detect HTMX with `is_htmx(request)`** ([src/dashboard/deps.py](src/dashboard/deps.py)), never a bare `HX-Request` read — guarded by `tests/dashboard/test_htmx_detection.py` (#211). OOB flash via `partials/flash_oob.html`.
 
 ## Agent Skills
 
 Skills live in `skills/` (agentskills.io) and `.claude/skills/` (Claude Code). Local overrides in `skills/` shadow vendor submodules in `skills-vendor/`.
 
-Full skill reference: `docs/SKILLS.md`. Cross-project search to the sister `notifier` index requires a per-instance `.claude/settings.local.json` (gitignored) — see "Linked Projects" in `docs/SKILLS.md`.
+Cross-project search to the sister `notifier` index requires a per-instance `.claude/settings.local.json` (gitignored) — see "Linked Projects" in `docs/SKILLS.md`.
 
 ## Detail Docs
 
-- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — module layout, sibling-service topology, the Archiver checkout constraint, and the Redis bus topology, streams, and fetch contracts
-- [docs/COMMANDS.md](docs/COMMANDS.md) — every runnable command, the Archiver-sibling test setup, and CI
+- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — module layout, sibling services, the Archiver checkout constraint, bus topology and fetch contracts
+- [docs/COMMANDS.md](docs/COMMANDS.md) — every runnable command, the Archiver-sibling test setup, CI
 - [docs/CONTENT-PIPELINE.md](docs/CONTENT-PIPELINE.md) — fetch → extract → fingerprint, the fetch-command outbox, the revisions producer
 - [docs/CONVENTIONS.md](docs/CONVENTIONS.md) — logging configuration, ULID error handling, DB-trigger rules
-- [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) — systemd units, environment variables, migration ordering, wheelhouse auth
+- [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) — systemd units, environment variables, wheelhouse auth
+- [docs/MIGRATIONS.md](docs/MIGRATIONS.md) — the manual upgrade step, the two-role grant model, one-time orderings
 - [docs/SKILLS.md](docs/SKILLS.md) — skill triggers, vendored skill repos, SocratiCode workflow
 - [docs/STYLE.md](docs/STYLE.md) — the design system: brand, color, dark mode, tokens, layout, touch targets, accessibility
-- [docs/UI.md](docs/UI.md) — the component library (`.btn`, `.badge`, `.data-table`, …) and the HTMX/flash interaction patterns
-- [docs/WATCHED-ITEMS.md](docs/WATCHED-ITEMS.md) — the WatchedItem entity: fields, schedule resolution, registry reconciliation, notifications
-- [docs/WATCHED-ITEMS-DASHBOARD.md](docs/WATCHED-ITEMS-DASHBOARD.md) — the operator surface: API/dashboard routes, lifecycle guards, list and detail views, audit parity
+- [docs/UI.md](docs/UI.md) — the component library and the HTMX/flash interaction patterns
+- [docs/WATCHED-ITEMS.md](docs/WATCHED-ITEMS.md) — the entity: fields, schedule resolution, registry reconciliation, notifications
+- [docs/WATCHED-ITEMS-DASHBOARD.md](docs/WATCHED-ITEMS-DASHBOARD.md) — the operator surface: routes, lifecycle guards, list and detail views, audit parity

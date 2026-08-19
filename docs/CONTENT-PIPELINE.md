@@ -344,7 +344,7 @@ hit the same path, so prefer a quiet window.
 
 The **migration** has its own ordering problem, unrelated to Replicator: no
 order of `alembic upgrade head` and `systemctl restart` avoids a brief window of
-failing command INSERTs. [`DEPLOYMENT.md`](DEPLOYMENT.md) → "No safe order" has
+failing command INSERTs. [`MIGRATIONS.md`](MIGRATIONS.md) → "No safe order" has
 the procedure and what it looks like in the journal.
 
 **Async create (step 3).** Nothing on a create path probes
@@ -409,5 +409,5 @@ re-evaluated; every create/PATCH/re-probe path (API and dashboard) shares
 [`src/core/domains.py`](../src/core/domains.py) (#196).
 
 **Deploy note.** `d5a71c93e0f2` is the one migration that inverts the standard
-order — restart first, then upgrade. See `docs/DEPLOYMENT.md` →
+order — restart first, then upgrade. See `docs/MIGRATIONS.md` →
 "Restart-before-migrate".

@@ -146,7 +146,7 @@ sudo -u postgres psql -c "CREATE USER watcher WITH PASSWORD 'watcher';"
 sudo -u postgres psql -c "CREATE DATABASE watcher OWNER watcher;"
 sudo -u postgres psql -c "CREATE DATABASE watcher_test OWNER watcher;"
 # Then split the roles: scripts/setup-db-roles.sql (#259) — see
-# docs/DEPLOYMENT.md -> "Migration role and application role". Grants are not
+# docs/MIGRATIONS.md -> "Migration role and application role". Grants are not
 # schema state, so no migration recreates them on a fresh host.
 
 # Watcher migrations. Alembic connects with WATCHER_MIGRATION_DATABASE_URL when
@@ -242,7 +242,7 @@ the `archiver-client` path dependency that used to be pinned separately in
 places or getting passing tests over a broken `uv sync` — went with the SDK.
 
 This test-only schema is the *only* `information` schema Watcher has: the
-production database's dead copy was dropped in #271 (see `docs/DEPLOYMENT.md` →
+production database's dead copy was dropped in #271 (see `docs/MIGRATIONS.md` →
 "Drop the dead `information` schema"), and no migration may create or drop one —
 `tests/test_migration_chain.py` fails the suite if a version file tries.
 
@@ -277,7 +277,7 @@ run alembic` subprocess needs co-core); the migrations job does **not** — the
 baseline (`2addddea0b03`) that references no `information` schema, so `upgrade
 head` from empty is fully standalone (no archiver seeding, no cross-service
 ordering). **Squash cutover:** already-migrated DBs need a one-time `alembic
-stamp 2addddea0b03 --purge` before their next upgrade — see `docs/DEPLOYMENT.md`
+stamp 2addddea0b03 --purge` before their next upgrade — see `docs/MIGRATIONS.md`
 → "Migration baseline (squash)". Integration tests hit live external services
 and are excluded in CI. **One-time GCP grant** (operator, for WIF) — bind watcher's repo
 to the read-only SA; the org-scoped `github-ci` provider needs no change:

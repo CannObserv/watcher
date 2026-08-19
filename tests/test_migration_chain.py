@@ -141,7 +141,7 @@ def test_no_migration_creates_or_drops_the_information_schema() -> None:
     assert not offenders, (
         f"migration(s) issue CREATE/DROP SCHEMA information: {offenders} — "
         "the schema is Archiver's; production's dead copy is an operator drop, "
-        "see docs/DEPLOYMENT.md"
+        "see docs/MIGRATIONS.md"
     )
 
 

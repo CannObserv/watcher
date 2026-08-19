@@ -12,6 +12,7 @@ Pins the issuer-contract MUSTs that live on this side of the wire:
   cutover is UA-neutral and fingerprints stay byte-continuous.
 """
 
+import logging
 from datetime import UTC, datetime, timedelta
 
 import fakeredis
@@ -21,15 +22,23 @@ from co_core.pure.adapters.bus.envelope import from_wire
 from co_core.pure.models.changes import ContentFetchCommand
 
 from src.core.fetch_commands import (
+    DEFAULT_FETCH_COMMAND_TIMEOUT_SECONDS,
+    DEFAULT_FETCH_MAX_REISSUES,
+    FETCH_COMMAND_TIMEOUT_ENV,
+    FETCH_MAX_REISSUES_ENV,
     WATCHER_USER_AGENT,
     create_fetch_command,
+    fetch_command_timeout_seconds,
+    fetch_max_reissues,
     publish_fetch_command,
 )
 from src.core.models.fetch_command import FetchCommand, FetchCommandStatus
 from src.core.validators import CONDITIONAL_GET_ENV, validator_source_key
 from tests.conftest import make_watched_item
 
-pytestmark = pytest.mark.integration
+# The mark sits on the classes that need PostgreSQL, not on the module: the
+# env-knob tests below are pure reads and belong in the default suite (CR-14).
+_integration = pytest.mark.integration
 
 NOW = datetime(2026, 8, 6, 16, 0, 0, tzinfo=UTC)
 
@@ -46,6 +55,7 @@ async def _decode_commands(client):
     return decoded
 
 
+@_integration
 class TestCreateFetchCommand:
     async def test_persists_pending_publish_row(self, db_session):
         wi = await make_watched_item(db_session, primary_url="https://lcb.wa.gov/notices")
@@ -88,6 +98,7 @@ class TestCreateFetchCommand:
         assert reissued.reissue_count == 1
 
 
+@_integration
 class TestPublishFetchCommand:
     async def test_frame_decodes_with_pinned_user_agent(self, db_session):
         wi = await make_watched_item(db_session, primary_url="https://lcb.wa.gov/notices")
@@ -129,6 +140,7 @@ class TestPublishFetchCommand:
         assert await db_session.get(FetchCommand, command_id) is None
 
 
+@_integration
 class TestValidatorReplay:
     """#269 part 3: the command replays the item's stored validators.
 
@@ -241,3 +253,55 @@ class TestValidatorReplay:
         (message,) = await _decode_commands(client)
         command = message.payload
         assert command.headers["if-none-match"] == 'W/"v2"'
+
+
+class TestFetchMaxReissues:
+    def test_defaults_to_three(self, monkeypatch):
+        monkeypatch.delenv(FETCH_MAX_REISSUES_ENV, raising=False)
+        assert fetch_max_reissues() == DEFAULT_FETCH_MAX_REISSUES
+
+    def test_reads_the_env_override(self, monkeypatch):
+        monkeypatch.setenv(FETCH_MAX_REISSUES_ENV, "5")
+        assert fetch_max_reissues() == 5
+
+    def test_an_unparseable_value_falls_back_to_the_default(self, monkeypatch, caplog):
+        # CR-1: this is read inside ``except BlobUnreadable`` in the blob apply.
+        # Raising there escapes the handler, leaves the row IN_FLIGHT holding a
+        # fact, and the reaper re-defers the same doomed apply every window —
+        # the unbounded loop #275 removed, in env-var form.
+        monkeypatch.setenv(FETCH_MAX_REISSUES_ENV, "three")
+        with caplog.at_level(logging.WARNING, logger="src.core.fetch_commands"):
+            assert fetch_max_reissues() == DEFAULT_FETCH_MAX_REISSUES
+        assert any(FETCH_MAX_REISSUES_ENV in r.getMessage() for r in caplog.records)
+
+    def test_zero_is_honoured_as_no_reissues(self, monkeypatch):
+        # Safe direction — an unreadable blob fails on the first occasion — so
+        # it passes through rather than being corrected to the default.
+        monkeypatch.setenv(FETCH_MAX_REISSUES_ENV, "0")
+        assert fetch_max_reissues() == 0
+
+
+class TestFetchCommandTimeoutSeconds:
+    def test_defaults(self, monkeypatch):
+        monkeypatch.delenv(FETCH_COMMAND_TIMEOUT_ENV, raising=False)
+        assert fetch_command_timeout_seconds() == DEFAULT_FETCH_COMMAND_TIMEOUT_SECONDS
+
+    def test_a_non_positive_timeout_is_logged(self, monkeypatch, caplog):
+        # CR-13: safe direction it is not — every in-flight command becomes
+        # stale at once, so one reaper pass re-issues the fleet. Say it out loud.
+        monkeypatch.setenv(FETCH_COMMAND_TIMEOUT_ENV, "0")
+        with caplog.at_level(logging.INFO, logger="src.core.fetch_commands"):
+            assert fetch_command_timeout_seconds() == 0.0
+        assert any("not positive" in r.getMessage() for r in caplog.records)
+
+    def test_reads_the_env_override(self, monkeypatch):
+        monkeypatch.setenv(FETCH_COMMAND_TIMEOUT_ENV, "60")
+        assert fetch_command_timeout_seconds() == 60.0
+
+    def test_an_unparseable_value_falls_back_to_the_default(self, monkeypatch, caplog):
+        # CR-3: worse blast radius than the cap — this one is read once per
+        # reaper pass, so a typo takes out the whole sweep, not one item.
+        monkeypatch.setenv(FETCH_COMMAND_TIMEOUT_ENV, "half an hour")
+        with caplog.at_level(logging.WARNING, logger="src.core.fetch_commands"):
+            assert fetch_command_timeout_seconds() == DEFAULT_FETCH_COMMAND_TIMEOUT_SECONDS
+        assert any(FETCH_COMMAND_TIMEOUT_ENV in r.getMessage() for r in caplog.records)

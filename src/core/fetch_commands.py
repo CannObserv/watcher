@@ -172,7 +172,9 @@ async def has_open_command(session: AsyncSession, watched_item_id) -> bool:
     return await get_open_command(session, watched_item_id) is not None
 
 
-def _env_number[T: (int, float)](env: str, default: T, cast: Callable[[str], T]) -> T:
+def _env_number[T: (int, float)](
+    env: str, default: T, cast: Callable[[str], T], *, warn_non_positive: str = ""
+) -> T:
     """One knob read, with the fallback both knobs need (CR-1, CR-3).
 
     An unparseable value falls back to the default rather than raising, for the
@@ -187,10 +189,15 @@ def _env_number[T: (int, float)](env: str, default: T, cast: Callable[[str], T])
     if raw is None:
         return default
     try:
-        return cast(raw)
+        value = cast(raw)
     except ValueError:
         logger.warning("unparseable %s — using the default", env, extra={"value": raw})
         return default
+    if warn_non_positive and value <= 0:
+        # CR-13, and CR-6's rule before it: a typo'd sign is indistinguishable
+        # from a deliberate kill switch unless the effect is said out loud.
+        logger.info("%s is not positive — %s", env, warn_non_positive, extra={"value": raw})
+    return value
 
 
 def fetch_command_timeout_seconds() -> float:
@@ -202,7 +209,12 @@ def fetch_command_timeout_seconds() -> float:
     retries. Read here so the reaper and the check-now rejection quote the same
     number.
     """
-    return _env_number(FETCH_COMMAND_TIMEOUT_ENV, DEFAULT_FETCH_COMMAND_TIMEOUT_SECONDS, float)
+    return _env_number(
+        FETCH_COMMAND_TIMEOUT_ENV,
+        DEFAULT_FETCH_COMMAND_TIMEOUT_SECONDS,
+        float,
+        warn_non_positive="every in-flight command is already stale to the reaper",
+    )
 
 
 def fetch_max_reissues() -> int:

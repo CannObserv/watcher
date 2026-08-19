@@ -130,7 +130,8 @@ must invalidate the pair — `validator_source_key`, whose extraction half is
 derived from the installed co-core version, plus an age ceiling. Never route
 `invalid_request_options` past the validator clear: the refusal precedes the
 request, so a bad stored value wedges the item permanently. An unreadable blob
-re-issues under a cap for the same reason (#275).
+is capped for a related reason — its re-issue bypasses the scheduling gate
+(#275).
 [docs/CONTENT-PIPELINE.md](docs/CONTENT-PIPELINE.md) → *Conditional GET*, *An
 unreadable blob is capped*.
 

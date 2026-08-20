@@ -273,12 +273,13 @@ and its config poller + startup hydration, the 429 backoff/decay helpers,
 `HttpFetcher` and the registry's fetcher slot, the create-time probe on
 watched-item routes, and the dashboard Backoff badge/filter.
 
-`Domain.current_interval` / `max_concurrency` / `decay_window` survive as **inert
-columns** — nothing *reads* them for behavior, though creates still initialise
-them and the API still accepts/echoes them; `last_request_at` has no writer at
-all. They are off the dashboard (an editable knob that changes nothing is worse
-than a hidden column). Dropping them is a separate migration that must also
-remove the create/PATCH write sites and the `DomainResponse` fields.
+`Domain.current_interval` / `max_concurrency` / `decay_window` /
+`last_request_at` survived step 5 as inert columns and were dropped in #272
+(migration `10783d8a2405`, restart-before-migrate — see
+[docs/MIGRATIONS.md](MIGRATIONS.md)) together with the API create/PATCH write
+sites and the `DomainResponse` fields. An old client still sending the retired
+request knobs gets the repo-wide unknown-field treatment: silently ignored,
+not a 422.
 
 #245 was the cutover's ordering blocker — politeness must not lapse when the
 fetch path becomes a publish path — and shipped first.

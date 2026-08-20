@@ -21,10 +21,8 @@
        floor published to Replicator. Sits 2nd, directly below Status. #}
     {% include "partials/domain_cadence_field.html" %}
 
-    {# max_concurrency / decay_window were removed with the in-process rate
-       limiter (#241 step 5): nothing reads them, so an editable knob here
-       would save a value and change nothing. The columns survive until their
-       drop migration; the API still reports them on DomainResponse. #}
+    {# max_concurrency / decay_window went with the in-process rate limiter
+       (#241 step 5); their columns were dropped in #272. #}
     {{ domain_field(field_contexts["min_interval"]) }}
     {{ domain_field(field_contexts["notes"]) }}
   </div>

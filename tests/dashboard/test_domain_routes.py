@@ -127,7 +127,7 @@ class TestDomainDetail:
         assert response.status_code == 404
 
     async def test_detail_page_shows_config_fields(self, client, db_session):
-        db_session.add(Domain(name="config.com", min_interval=3.5, max_concurrency=5))
+        db_session.add(Domain(name="config.com", min_interval=3.5))
         await db_session.flush()
         response = await client.get("/domains/config.com")
         assert b"3.5" in response.content

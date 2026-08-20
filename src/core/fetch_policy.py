@@ -24,10 +24,10 @@ host Watcher has stopped watching is the one way that host ends up *looser* than
 the fallback. Restore and reactivate need no bookkeeping: the next full set reads
 the cleared columns and emits live again.
 
-The published interval is ``Domain.min_interval`` — the operator floor — never
-``current_interval``: that column is 429-backoff *state*, and its feed dies at
-the Phase-4 cutover (no non-terminal ``fetch_failed``; replicator#9 §3).
-Adaptive backoff is Replicator's follow-on (replicator#25).
+The published interval is ``Domain.min_interval`` — the operator floor. The
+limiter's ``current_interval`` 429-backoff state froze at the Phase-4 cutover
+(no non-terminal ``fetch_failed``; replicator#9 §3) and its column is dropped
+(#272). Adaptive backoff is Replicator's follow-on (replicator#25).
 
 Publishing goes through co-core's ``to_wire`` over the strict ``FetchPolicyEmit``
 (``extra="forbid"``) — never hand-rolled fields (issuer-contract rule zero).

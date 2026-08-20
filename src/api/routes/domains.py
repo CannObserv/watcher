@@ -12,12 +12,7 @@ from src.api.schemas.domain import DomainPatch, DomainResponse
 from src.core.domains import backfill_domain_schedule_config
 from src.core.fetch_policy import clear_tombstone, record_tombstone
 from src.core.models.audit_log import EventType, audit
-from src.core.models.domain import (
-    DEFAULT_DECAY_WINDOW,
-    DEFAULT_MAX_CONCURRENCY,
-    DEFAULT_MIN_INTERVAL,
-    Domain,
-)
+from src.core.models.domain import DEFAULT_MIN_INTERVAL, Domain
 from src.core.models.watched_item import WatchedItem
 from src.workers.fetch_policy import defer_policy_republish
 
@@ -38,10 +33,6 @@ def _apply_domain_updates(domain: Domain, updates: dict) -> None:
     """Apply provided ``DomainPatch`` fields onto an existing Domain row."""
     if "min_interval" in updates:
         domain.min_interval = updates["min_interval"]
-    if "max_concurrency" in updates:
-        domain.max_concurrency = updates["max_concurrency"]
-    if "decay_window" in updates:
-        domain.decay_window = updates["decay_window"]
     if "notes" in updates:
         domain.notes = updates["notes"]
     if "default_schedule_config" in updates:
@@ -69,7 +60,7 @@ async def upsert_domain(
 ):
     """Create or update a domain config (upsert by hostname).
 
-    On create: min_interval defaults to 1.0, current_interval defaults to min_interval.
+    On create: min_interval defaults to 1.0.
     On update: only provided fields are changed.
     """
     stmt = select(Domain).where(Domain.name == name)
@@ -82,13 +73,9 @@ async def upsert_domain(
         # The host is live again: its fetch-policy tombstone (if any) must stop
         # being republished, atomically with the row that supersedes it (#245).
         await clear_tombstone(session, name)
-        min_iv = updates.get("min_interval", DEFAULT_MIN_INTERVAL)
         domain = Domain(
             name=name,
-            min_interval=min_iv,
-            max_concurrency=updates.get("max_concurrency", DEFAULT_MAX_CONCURRENCY),
-            current_interval=min_iv,
-            decay_window=updates.get("decay_window", DEFAULT_DECAY_WINDOW),
+            min_interval=updates.get("min_interval", DEFAULT_MIN_INTERVAL),
             notes=updates.get("notes"),
             default_schedule_config=updates.get("default_schedule_config"),
         )

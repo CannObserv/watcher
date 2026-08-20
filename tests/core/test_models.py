@@ -232,19 +232,16 @@ class TestDomainModel:
         d = Domain(name="example.com")
         assert d.name == "example.com"
         assert d.min_interval == 1.0
-        assert d.max_concurrency == 2
-        assert d.current_interval == 1.0
-        assert d.last_request_at is None
 
     def test_create_domain_custom(self):
-        d = Domain(name="slow.gov", min_interval=5.0, max_concurrency=1, current_interval=10.0)
+        d = Domain(name="slow.gov", min_interval=5.0)
         assert d.min_interval == 5.0
-        assert d.max_concurrency == 1
-        assert d.current_interval == 10.0
 
-    def test_current_interval_defaults_to_min_interval(self):
-        d = Domain(name="example.com", min_interval=3.0)
-        assert d.current_interval == 3.0
+    def test_rate_limiter_columns_are_gone(self):
+        # #272: the four columns the retired in-process limiter (#241 step 5)
+        # left behind are dropped, not merely inert.
+        for column in ("max_concurrency", "current_interval", "decay_window", "last_request_at"):
+            assert not hasattr(Domain, column)
 
 
 class TestNotificationTemplateModel:

@@ -5,7 +5,7 @@ from src.core.models.app_user import AppUser
 from src.core.models.audit_log import AuditLog
 from src.core.models.base import Base, TimestampMixin, ULIDType, generate_ulid
 from src.core.models.change_revision import ChangeRevision
-from src.core.models.domain import DEFAULT_MAX_CONCURRENCY, DEFAULT_MIN_INTERVAL, Domain
+from src.core.models.domain import DEFAULT_MIN_INTERVAL, Domain
 from src.core.models.fetch_command import FetchCommand, FetchCommandStatus
 from src.core.models.fetch_policy_tombstone import FetchPolicyTombstone
 from src.core.models.notification_template import (
@@ -26,7 +26,6 @@ __all__ = [
     "AuditLog",
     "Base",
     "ChangeRevision",
-    "DEFAULT_MAX_CONCURRENCY",
     "DEFAULT_MIN_INTERVAL",
     "Domain",
     "FetchCommand",

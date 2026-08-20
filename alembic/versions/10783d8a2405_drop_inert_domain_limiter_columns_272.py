@@ -26,7 +26,8 @@ release still maps all four columns and SQLAlchemy names every mapped column
 in its SELECTs, so migrating first fails every Domain query with
 `UndefinedColumn` until the restart lands. Restart-first has no equivalent
 window: the new code never references them, and all four carry server defaults
-or are nullable, so the old schema accepts the new code's INSERTs. Recorded in
+or are nullable, so the pre-migration schema accepts the new code's INSERTs
+during the restart-to-migrate gap. Recorded in
 `docs/MIGRATIONS.md` → *Restart-before-migrate — one-time, `10783d8a2405`*.
 """
 

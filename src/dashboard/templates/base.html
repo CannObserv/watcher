@@ -122,8 +122,8 @@
       var drawer=document.getElementById('mobile-nav');
       var backdrop=document.getElementById('mobile-backdrop');
       if(!toggle||!drawer)return;
-      function open(){drawer.classList.remove('hidden');toggle.setAttribute('aria-expanded','true');window.focusTrap.activate(drawer,{onEscape:shut});}
-      function shut(){drawer.classList.add('hidden');toggle.setAttribute('aria-expanded','false');window.focusTrap.deactivate(drawer);}
+      function open(){drawer.classList.remove('hidden');toggle.setAttribute('aria-expanded','true');window.focusTrap&&window.focusTrap.activate(drawer,{onEscape:shut});}
+      function shut(){drawer.classList.add('hidden');toggle.setAttribute('aria-expanded','false');toggle.focus();window.focusTrap&&window.focusTrap.deactivate(drawer);}
       toggle.addEventListener('click',open);
       if(close)close.addEventListener('click',shut);
       if(backdrop)backdrop.addEventListener('click',shut);

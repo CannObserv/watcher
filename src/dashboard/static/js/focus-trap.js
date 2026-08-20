@@ -19,7 +19,11 @@
  *    .deactivate(dialog) for dialogs with their own open/close wiring
  *    (the mobile drawer in base.html).
  *
- * One trap is active at a time — the app has no stacked dialogs.
+ * Traps stack (innermost wins). The app has no stacked dialogs today, but the
+ * guard test funnels every future modal through here, so activating a second
+ * trap must not strand the first one's restore target: each entry keeps its
+ * own, and since an inner dialog's trigger sits inside the outer one, popping
+ * naturally walks focus back out.
  */
 (function () {
   "use strict";
@@ -29,44 +33,57 @@
     "select:not([disabled]), textarea:not([disabled]), " +
     "[tabindex]:not([tabindex='-1'])";
 
-  var active = null; // { dialog, onEscape, restoreTo }
+  var stack = []; // { dialog, onEscape, restoreTo }, innermost last
 
   function focusables(dialog) {
     return Array.prototype.slice.call(dialog.querySelectorAll(FOCUSABLE));
   }
 
+  function indexOf(dialog) {
+    for (var i = 0; i < stack.length; i++) {
+      if (stack[i].dialog === dialog) return i;
+    }
+    return -1;
+  }
+
   function activate(dialog, opts) {
-    active = {
+    if (indexOf(dialog) !== -1) return; // already armed — keep the original restoreTo
+    stack.push({
       dialog: dialog,
       onEscape: (opts && opts.onEscape) || null,
       restoreTo: document.activeElement,
-    };
-    var initial = dialog.querySelector("[data-focus-trap-initial]") || focusables(dialog)[0];
-    if (initial) {
-      initial.focus();
-      if (typeof initial.select === "function") initial.select();
-    }
+    });
+    var hooked = dialog.querySelector("[data-focus-trap-initial]");
+    var initial = hooked || focusables(dialog)[0];
+    if (!initial) return;
+    initial.focus();
+    // Pre-select only where the dialog asked for it: auto-selecting a
+    // pre-filled input means the next keystroke wipes it.
+    if (hooked && typeof initial.select === "function") initial.select();
   }
 
   function deactivate(dialog) {
-    if (!active || active.dialog !== dialog) return;
-    var restoreTo = active.restoreTo;
-    active = null;
-    if (restoreTo && typeof restoreTo.focus === "function") restoreTo.focus();
+    var i = indexOf(dialog);
+    if (i === -1) return;
+    var entry = stack[i];
+    stack.splice(i, 1);
+    // Only the innermost trap owns focus; unwinding one beneath it must not
+    // yank focus out of the dialog the user is actually in.
+    if (i !== stack.length) return;
+    if (entry.restoreTo && typeof entry.restoreTo.focus === "function") entry.restoreTo.focus();
   }
 
   document.addEventListener("keydown", function (evt) {
-    if (!active) return;
-    var dialog = active.dialog;
-    if (!document.contains(dialog)) {
-      active = null; // dialog was swapped out from under the trap
-      return;
-    }
+    // Dialogs swapped out from under their trap disarm themselves.
+    while (stack.length && !document.contains(stack[stack.length - 1].dialog)) stack.pop();
+    if (!stack.length) return;
+    var entry = stack[stack.length - 1];
+    var dialog = entry.dialog;
 
     if (evt.key === "Escape") {
       if (dialog.getAttribute("data-focus-trap-escape") === "ignore") return;
       evt.preventDefault();
-      var onEscape = active.onEscape;
+      var onEscape = entry.onEscape;
       if (onEscape) {
         onEscape(); // consumer hides the dialog (and may deactivate itself)
       } else {
@@ -104,7 +121,7 @@
       target.hasAttribute && target.hasAttribute("data-focus-trap")
         ? target
         : target.querySelector("[data-focus-trap]");
-    if (dialog && (!active || active.dialog !== dialog)) activate(dialog);
+    if (dialog) activate(dialog); // no-op when this dialog is already armed
   });
 
   window.focusTrap = { activate: activate, deactivate: deactivate };

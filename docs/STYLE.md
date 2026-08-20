@@ -184,7 +184,7 @@ pytest` suite) and `scripts/check-touch-targets.sh` fail on redundant
 
 ## 10. Performance
 
-- **No CDN scripts**: All JS vendored locally in `src/dashboard/static/js/` (htmx, app, dark-mode, htmx-a11y).
+- **No CDN scripts**: All JS vendored locally in `src/dashboard/static/js/`.
 - **`defer`**: All `<script>` tags use `defer` — except the inline FOUC-prevention script in `<head>` (must run synchronously).
 - **Cache-busting**: `BUILD_ID` env var (default `"dev"`) exposed as `{{ build_id }}` in templates. All static assets loaded with `?v={{ build_id }}`. Set in `src/dashboard/__init__.py`.
 - **System font stack**: No custom fonts loaded. Tailwind default font stack.

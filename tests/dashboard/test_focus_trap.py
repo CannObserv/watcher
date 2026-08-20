@@ -12,14 +12,19 @@ from pathlib import Path
 TEMPLATES = Path(__file__).parents[2] / "src" / "dashboard" / "templates"
 
 TAG_WITH_ARIA_MODAL = re.compile(r"<[^>]*aria-modal=\"true\"[^>]*>", re.DOTALL)
+TAG_WITH_ROLE_DIALOG = re.compile(r"<[^>]*role=\"dialog\"[^>]*>", re.DOTALL)
+
+
+def _tags_matching(pattern):
+    found = []
+    for template in sorted(TEMPLATES.rglob("*.html")):
+        for match in pattern.finditer(template.read_text()):
+            found.append((template.relative_to(TEMPLATES), match.group(0)))
+    return found
 
 
 def _aria_modal_tags():
-    found = []
-    for template in sorted(TEMPLATES.rglob("*.html")):
-        for match in TAG_WITH_ARIA_MODAL.finditer(template.read_text()):
-            found.append((template.relative_to(TEMPLATES), match.group(0)))
-    return found
+    return _tags_matching(TAG_WITH_ARIA_MODAL)
 
 
 class TestFocusTrapHook:
@@ -35,6 +40,20 @@ class TestFocusTrapHook:
             f"(WCAG 2.4.3 / 2.1.2 — see #39): {missing}"
         )
 
+    def test_every_role_dialog_element_declares_aria_modal(self):
+        """A dialog that omits aria-modal escapes the hook guard above (CR item 5).
+
+        Without this, the #39 defect class re-enters through the weaker
+        declaration: no inertness claim, but no focus management either.
+        """
+        dialogs = _tags_matching(TAG_WITH_ROLE_DIALOG)
+        assert len(dialogs) >= 2, "scan found no dialogs — the guard would pass vacuously"
+        missing = [(path, tag) for path, tag in dialogs if 'aria-modal="true"' not in tag]
+        assert not missing, (
+            'role="dialog" elements must declare aria-modal="true" so the '
+            f"focus-trap hook guard applies to them (#39): {missing}"
+        )
+
     def test_base_template_loads_focus_trap_js(self):
         """focus-trap.js must load deferred with cache-busting (STYLE.md §10)."""
         base = (TEMPLATES / "base.html").read_text()
@@ -42,6 +61,19 @@ class TestFocusTrapHook:
             r"<script src=\"/static/js/focus-trap\.js\?v={{ build_id }}\" defer></script>",
             base,
         ), "base.html must load focus-trap.js with defer and ?v={{ build_id }}"
+
+    def test_drawer_script_guards_deferred_focus_trap(self):
+        """The inline drawer script must not assume focus-trap.js has run (CR item 4).
+
+        focus-trap.js is deferred; a click landing before it executes would
+        otherwise throw and open the drawer with no trap at all.
+        """
+        base = (TEMPLATES / "base.html").read_text()
+        for call in ("focusTrap.activate(", "focusTrap.deactivate("):
+            assert call in base
+        assert base.count("window.focusTrap&&") == 2, (
+            "both window.focusTrap calls in the drawer script must be guarded"
+        )
 
 
 class TestApiKeyModalEscapeSemantics:

@@ -151,6 +151,16 @@ test("activate prefers [data-focus-trap-initial] and pre-selects it", () => {
   assert.equal(input.selectCount, 1);
 });
 
+test("an unhooked first-focusable input is focused but NOT pre-selected", () => {
+  // Pre-selecting a pre-filled input nobody asked to select means the first
+  // keystroke replaces its content. Only the explicit hook opts in.
+  const world = makeWorld();
+  const { dialog, input } = makeModal(world);
+  world.window.focusTrap.activate(dialog);
+  assert.equal(world.document.activeElement, input);
+  assert.equal(input.selectCount, 0);
+});
+
 test("Tab on the last focusable wraps to the first", () => {
   const world = makeWorld();
   const { dialog, input, doneBtn } = makeModal(world);
@@ -272,4 +282,75 @@ test("a trap whose dialog left the DOM disarms itself", () => {
   dialog.detached = true; // swapped out
   const evt = world.keydown("Tab");
   assert.equal(evt.defaultPrevented, false);
+});
+
+// --- Stacking (CR item 3) --------------------------------------------------
+// The app has no stacked dialogs today, but the guard test funnels every future
+// modal through this utility, so a second activate must not silently strand the
+// first trap's restore target.
+
+test("a second trap supersedes the first; Tab is contained in the innermost", () => {
+  const world = makeWorld();
+  const outer = makeModal(world);
+  world.window.focusTrap.activate(outer.dialog);
+  const inner = makeModal(world);
+  world.window.focusTrap.activate(inner.dialog);
+  assert.equal(world.document.activeElement, inner.input);
+  inner.doneBtn.focus();
+  const evt = world.keydown("Tab");
+  assert.equal(evt.defaultPrevented, true);
+  assert.equal(world.document.activeElement, inner.input); // wrapped within inner
+});
+
+test("deactivating the inner trap restores focus into the outer and re-arms it", () => {
+  const world = makeWorld();
+  const outer = makeModal(world);
+  world.window.focusTrap.activate(outer.dialog);
+  const focusedBeforeInner = world.document.activeElement;
+  const inner = makeModal(world);
+  world.window.focusTrap.activate(inner.dialog);
+  world.window.focusTrap.deactivate(inner.dialog);
+  assert.equal(world.document.activeElement, focusedBeforeInner); // back inside outer
+  outer.doneBtn.focus();
+  const evt = world.keydown("Tab");
+  assert.equal(evt.defaultPrevented, true);
+  assert.equal(world.document.activeElement, outer.input); // outer trap live again
+});
+
+test("deactivating an outer trap under an inner one does not steal focus", () => {
+  const world = makeWorld();
+  const outer = makeModal(world);
+  world.window.focusTrap.activate(outer.dialog);
+  const inner = makeModal(world);
+  world.window.focusTrap.activate(inner.dialog);
+  world.window.focusTrap.deactivate(outer.dialog);
+  assert.equal(world.document.activeElement, inner.input); // inner keeps focus
+  const evt = world.keydown("Tab", { shiftKey: true });
+  assert.equal(evt.defaultPrevented, true);
+});
+
+test("activate on an already-armed dialog is a no-op", () => {
+  const world = makeWorld();
+  const trigger = world.makeEl("button", {}, world.body);
+  trigger.focus();
+  const { dialog, doneBtn } = makeModal(world);
+  world.window.focusTrap.activate(dialog);
+  doneBtn.focus();
+  world.window.focusTrap.activate(dialog); // must not re-capture restoreTo
+  assert.equal(world.document.activeElement, doneBtn); // focus untouched
+  world.window.focusTrap.deactivate(dialog);
+  assert.equal(world.document.activeElement, trigger); // original trigger, not doneBtn
+});
+
+test("a detached inner dialog is pruned, leaving the outer trap armed", () => {
+  const world = makeWorld();
+  const outer = makeModal(world);
+  world.window.focusTrap.activate(outer.dialog);
+  const inner = makeModal(world);
+  world.window.focusTrap.activate(inner.dialog);
+  inner.dialog.detached = true; // swapped out from under the trap
+  outer.doneBtn.focus();
+  const evt = world.keydown("Tab");
+  assert.equal(evt.defaultPrevented, true);
+  assert.equal(world.document.activeElement, outer.input);
 });

@@ -250,6 +250,21 @@ class TestGcsArm:
         with pytest.raises(UnsupportedBlobScheme):
             read_blob(self.GS_URI)
 
+    def test_an_unusable_credential_is_permanent(self, monkeypatch, tmp_path):
+        # CR-17: a set-but-wrong path (or a malformed key) is the same operator
+        # misconfig as an unset variable — construction never touches the
+        # network, so the failure is deterministic. It must not burn the cap:
+        # under the backend flip that is three wasted origin fetches per item,
+        # fleet-wide, before every item settles FAILED.
+        monkeypatch.setenv(GCS_BLOB_CREDENTIALS_ENV, str(tmp_path / "no-such-key.json"))
+        monkeypatch.setattr(blobs_mod, "_gcs_client_cache", None)
+
+        with pytest.raises(UnsupportedBlobScheme):
+            read_blob(self.GS_URI)
+
+        # Never cached: fixing the file is all recovery needs.
+        assert blobs_mod._gcs_client_cache is None
+
     def test_the_client_is_built_once(self, monkeypatch, tmp_path):
         built = []
         monkeypatch.setenv(GCS_BLOB_CREDENTIALS_ENV, str(tmp_path / "key.json"))

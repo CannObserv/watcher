@@ -1,5 +1,8 @@
-{# One-time key display — swap into #api-keys-modal-container; auto-shown via inline script #}
+{# One-time key display — swap into #api-keys-modal-container; visible on swap,
+   focus-trap.js arms it on htmx:afterSwap (#39). Escape is suppressed: closing
+   without copying destroys the key, so exit is the explicit Done button only. #}
 <div id="api-key-modal" role="dialog" aria-modal="true" aria-label="New API key generated"
+     data-focus-trap data-focus-trap-escape="ignore"
      class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
   <div class="bg-white dark:bg-gray-800 rounded-lg shadow-xl w-full max-w-lg p-6 space-y-4">
     <h2 class="text-lg font-semibold text-gray-900 dark:text-white">API key generated</h2>
@@ -9,6 +12,7 @@
     </p>
     <div class="flex gap-2">
       <input id="new-api-key-value"
+             data-focus-trap-initial
              type="text"
              class="form-input flex-1 font-mono text-sm"
              value="{{ raw_key }}"

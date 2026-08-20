@@ -168,7 +168,8 @@ pytest` suite) and `scripts/check-touch-targets.sh` fail on redundant
 - **Reduced motion**: Global `@media (prefers-reduced-motion: reduce)` forces `animation-duration` and `transition-duration` to `0.01ms`.
 - **Muted text minimum**: `text-gray-500` (light) / `dark:text-gray-400` (dark) — used for secondary labels, table headers, footer.
 - **No `title` attributes**: Tooltips not used; all info in visible text or `aria-label`.
-- **Mobile drawer**: `role="dialog" aria-modal="true" aria-label="Navigation menu"`. Escape closes. Focus returns to trigger.
+- **Modal dialogs** (#39): every `aria-modal="true"` element must carry `data-focus-trap` — `focus-trap.js` supplies the behavior the semantics promise: focus moves into the dialog on open (`[data-focus-trap-initial]` preferred, else first focusable; inputs pre-selected), Tab/Shift-Tab contained, Escape closes, focus restored to the trigger. Guarded by `tests/dashboard/test_focus_trap.py`. Dialogs HTMX swaps in arm automatically on `htmx:afterSwap`; dialogs with their own open/close wiring call `window.focusTrap.activate/deactivate` (the mobile drawer). Where closing is destructive, opt out of Escape with `data-focus-trap-escape="ignore"` — the one-time API-key modal does; key loss must never be a one-keystroke action. Open/close transitions, if added, must respect `prefers-reduced-motion` (the global reduced-motion rule above already covers CSS transitions).
+- **Mobile drawer**: `role="dialog" aria-modal="true" aria-label="Navigation menu"`; focus management via `focus-trap.js` (above).
 
 ---
 

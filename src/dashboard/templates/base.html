@@ -59,7 +59,7 @@
       </header>
 
       <!-- Mobile drawer -->
-      <div id="mobile-nav" class="fixed inset-0 z-40 hidden md:hidden" role="dialog" aria-modal="true" aria-label="Navigation menu">
+      <div id="mobile-nav" class="fixed inset-0 z-40 hidden md:hidden" role="dialog" aria-modal="true" aria-label="Navigation menu" data-focus-trap>
         <div id="mobile-backdrop" class="absolute inset-0 bg-black/50"></div>
         <nav class="absolute inset-y-0 start-0 w-65 bg-white dark:bg-gray-800 shadow-lg flex flex-col" aria-label="Main navigation">
           <div class="p-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
@@ -105,6 +105,7 @@
   </div>
 
   <script src="/static/js/htmx.min.js?v={{ build_id }}" defer></script>
+  <script src="/static/js/focus-trap.js?v={{ build_id }}" defer></script>
   <script src="/static/js/app.js?v={{ build_id }}" defer></script>
   <script src="/static/js/dark-mode.js?v={{ build_id }}" defer></script>
   <script src="/static/js/htmx-a11y.js?v={{ build_id }}" defer></script>
@@ -113,19 +114,19 @@
   <script src="/static/js/audit-details-toggle.js?v={{ build_id }}" defer></script>
   {% block extra_scripts %}{% endblock %}
   <script>
-    /* Mobile nav toggle */
+    /* Mobile nav toggle — focus-trap.js owns Escape, Tab containment, and
+       focus restore to the trigger (#39). */
     (function(){
       var toggle=document.getElementById('menu-toggle');
       var close=document.getElementById('menu-close');
       var drawer=document.getElementById('mobile-nav');
       var backdrop=document.getElementById('mobile-backdrop');
       if(!toggle||!drawer)return;
-      function open(){drawer.classList.remove('hidden');toggle.setAttribute('aria-expanded','true');}
-      function shut(){drawer.classList.add('hidden');toggle.setAttribute('aria-expanded','false');toggle.focus();}
+      function open(){drawer.classList.remove('hidden');toggle.setAttribute('aria-expanded','true');window.focusTrap.activate(drawer,{onEscape:shut});}
+      function shut(){drawer.classList.add('hidden');toggle.setAttribute('aria-expanded','false');window.focusTrap.deactivate(drawer);}
       toggle.addEventListener('click',open);
       if(close)close.addEventListener('click',shut);
       if(backdrop)backdrop.addEventListener('click',shut);
-      document.addEventListener('keydown',function(e){if(e.key==='Escape'&&!drawer.classList.contains('hidden'))shut();});
     })();
   </script>
 </body>

@@ -3,10 +3,10 @@
 Watcher is the policy half of the politeness split (replicator#12): it owns the
 per-host numbers in ``Domain`` and publishes them as ``FetchPolicyState`` frames
 on ``content.fetch-policy``. These tests pin the three rules the consumer side
-cannot check for us:
+cannot check for us (a fourth — publish ``min_interval``, never the limiter's
+``current_interval`` backoff state — needs no pin since #272 dropped that
+column):
 
-* the published interval is ``Domain.min_interval`` — the operator floor
-  (the limiter's ``current_interval`` backoff state is dropped — #272);
 * tombstones (``revoked=True``) keep appearing in the full-set republish so a
   booting consumer can never replay a stale live value it cannot revoke
   (cannobserv#285 rule 2);

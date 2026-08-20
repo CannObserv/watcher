@@ -114,15 +114,19 @@
   <script src="/static/js/audit-details-toggle.js?v={{ build_id }}" defer></script>
   {% block extra_scripts %}{% endblock %}
   <script>
-    /* Mobile nav toggle — focus-trap.js owns Escape, Tab containment, and
-       focus restore to the trigger (#39). */
+    /* Mobile nav toggle. When focus-trap.js has run it owns Escape, Tab
+       containment, and focus restore (the toggle is passed as the durable
+       restore target). The window.focusTrap guards and shut()'s own
+       toggle.focus() are the fallback for the deferred-load window: a click
+       landing before the script executes still opens and closes the drawer
+       exactly as it did pre-#39. Do not remove either as redundant. */
     (function(){
       var toggle=document.getElementById('menu-toggle');
       var close=document.getElementById('menu-close');
       var drawer=document.getElementById('mobile-nav');
       var backdrop=document.getElementById('mobile-backdrop');
       if(!toggle||!drawer)return;
-      function open(){drawer.classList.remove('hidden');toggle.setAttribute('aria-expanded','true');window.focusTrap&&window.focusTrap.activate(drawer,{onEscape:shut});}
+      function open(){drawer.classList.remove('hidden');toggle.setAttribute('aria-expanded','true');window.focusTrap&&window.focusTrap.activate(drawer,{onEscape:shut,restoreTo:toggle});}
       function shut(){drawer.classList.add('hidden');toggle.setAttribute('aria-expanded','false');toggle.focus();window.focusTrap&&window.focusTrap.deactivate(drawer);}
       toggle.addEventListener('click',open);
       if(close)close.addEventListener('click',shut);

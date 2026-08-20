@@ -4,9 +4,11 @@
  * aria-modal="true" promises assistive tech the rest of the page is inert;
  * this utility is what makes that true. Behaviors: capture the trigger
  * (document.activeElement) on activate, move focus into the dialog
- * ([data-focus-trap-initial] preferred, else first focusable — inputs are
- * pre-selected), contain Tab/Shift-Tab within the dialog, close on Escape,
- * and restore focus to the trigger on deactivate.
+ * ([data-focus-trap-initial] preferred, else the first rendered focusable;
+ * the hooked element is also pre-selected), contain Tab/Shift-Tab within the
+ * dialog, close on Escape, and restore focus to the trigger on deactivate.
+ * Only rendered elements join the Tab cycle, so a collapsed section inside a
+ * dialog cannot swallow focus.
  *
  * Consumers:
  *  - Declarative: mark the dialog [data-focus-trap]. Dialogs HTMX swaps into
@@ -15,9 +17,12 @@
  *    unless it opts out with data-focus-trap-escape="ignore" — required where
  *    closing is destructive (the one-time key display: Escape must never be
  *    a one-keystroke key loss).
- *  - Imperative: window.focusTrap.activate(dialog, {onEscape}) /
+ *  - Imperative: window.focusTrap.activate(dialog, {onEscape, restoreTo}) /
  *    .deactivate(dialog) for dialogs with their own open/close wiring
- *    (the mobile drawer in base.html).
+ *    (the mobile drawer in base.html). Pass restoreTo when the trigger is
+ *    known: the captured activeElement can be <body> (Safari does not focus
+ *    buttons on click) or an element HTMX later swaps away, and restoring to
+ *    either silently drops focus back to the top of the page.
  *
  * Traps stack (innermost wins). The app has no stacked dialogs today, but the
  * guard test funnels every future modal through here, so activating a second
@@ -33,10 +38,20 @@
     "select:not([disabled]), textarea:not([disabled]), " +
     "[tabindex]:not([tabindex='-1'])";
 
-  var stack = []; // { dialog, onEscape, restoreTo }, innermost last
+  var stack = []; // { dialog, onEscape, restoreTo, captured }, innermost last
+
+  // display:none / [hidden] elements report no client rects; position:fixed
+  // ones do, so this does not over-reject inside our fixed-overlay dialogs.
+  function rendered(el) {
+    return typeof el.getClientRects !== "function" || el.getClientRects().length > 0;
+  }
 
   function focusables(dialog) {
-    return Array.prototype.slice.call(dialog.querySelectorAll(FOCUSABLE));
+    return Array.prototype.slice.call(dialog.querySelectorAll(FOCUSABLE)).filter(rendered);
+  }
+
+  function focusable(el) {
+    return !!el && typeof el.focus === "function" && el !== document.body && document.contains(el);
   }
 
   function indexOf(dialog) {
@@ -47,19 +62,20 @@
   }
 
   function activate(dialog, opts) {
-    if (indexOf(dialog) !== -1) return; // already armed — keep the original restoreTo
+    if (indexOf(dialog) !== -1) return; // already armed — keep the original restore target
     stack.push({
       dialog: dialog,
       onEscape: (opts && opts.onEscape) || null,
-      restoreTo: document.activeElement,
+      restoreTo: (opts && opts.restoreTo) || null,
+      captured: document.activeElement,
     });
     var hooked = dialog.querySelector("[data-focus-trap-initial]");
-    var initial = hooked || focusables(dialog)[0];
+    var initial = hooked && rendered(hooked) ? hooked : focusables(dialog)[0];
     if (!initial) return;
     initial.focus();
     // Pre-select only where the dialog asked for it: auto-selecting a
     // pre-filled input means the next keystroke wipes it.
-    if (hooked && typeof initial.select === "function") initial.select();
+    if (initial === hooked && typeof initial.select === "function") initial.select();
   }
 
   function deactivate(dialog) {
@@ -70,7 +86,11 @@
     // Only the innermost trap owns focus; unwinding one beneath it must not
     // yank focus out of the dialog the user is actually in.
     if (i !== stack.length) return;
-    if (entry.restoreTo && typeof entry.restoreTo.focus === "function") entry.restoreTo.focus();
+    // Explicit trigger first, then whatever held focus at activate time —
+    // skipping either if it is gone or is <body>, which would drop the user
+    // at the top of the page instead of where they opened the dialog.
+    var target = focusable(entry.restoreTo) ? entry.restoreTo : entry.captured;
+    if (focusable(target)) target.focus();
   }
 
   document.addEventListener("keydown", function (evt) {

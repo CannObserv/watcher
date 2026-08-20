@@ -42,7 +42,12 @@ function matchesSel(el, sel) {
 
 function makeWorld() {
   const listeners = {};
-  const body = { tagName: "BODY", attrs: {}, children: [], parent: null };
+  // body is focusable-shaped so the "never restore to <body>" rule is testable
+  // rather than passing for want of a focus() method.
+  const body = {
+    tagName: "BODY", attrs: {}, children: [], parent: null, focusCount: 0,
+    focus() { this.focusCount++; document.activeElement = this; },
+  };
 
   function makeEl(tagName, attrs = {}, parent = null) {
     const el = {
@@ -51,6 +56,7 @@ function makeWorld() {
       children: [],
       parent,
       detached: false,
+      notRendered: false, // display:none / [hidden] — no client rects
       focusCount: 0,
       selectCount: 0,
       classList: {
@@ -84,6 +90,13 @@ function makeWorld() {
         let cur = other;
         while (cur) { if (cur === this) return true; cur = cur.parent; }
         return false;
+      },
+      // Rendered-ness the way a browser reports it: an element inside a
+      // display:none subtree has no client rects, position:fixed ones do.
+      getClientRects() {
+        let cur = this;
+        while (cur) { if (cur.notRendered) return []; cur = cur.parent; }
+        return [{}];
       },
     };
     if (parent) parent.children.push(el);
@@ -282,6 +295,95 @@ test("a trap whose dialog left the DOM disarms itself", () => {
   dialog.detached = true; // swapped out
   const evt = world.keydown("Tab");
   assert.equal(evt.defaultPrevented, false);
+});
+
+// --- Rendered-only Tab cycle (CR round 2, item 10) -------------------------
+
+test("unrendered elements are excluded from the Tab cycle", () => {
+  const world = makeWorld();
+  const { dialog, input, copyBtn, doneBtn } = makeModal(world);
+  doneBtn.notRendered = true; // e.g. a collapsed section inside the dialog
+  world.window.focusTrap.activate(dialog);
+  copyBtn.focus(); // last *rendered* focusable
+  const evt = world.keydown("Tab");
+  assert.equal(evt.defaultPrevented, true);
+  assert.equal(world.document.activeElement, input);
+});
+
+test("initial focus skips an unrendered first focusable", () => {
+  const world = makeWorld();
+  const { dialog, input, copyBtn } = makeModal(world);
+  input.notRendered = true;
+  world.window.focusTrap.activate(dialog);
+  assert.equal(world.document.activeElement, copyBtn);
+});
+
+test("an unrendered [data-focus-trap-initial] falls back to the first rendered element", () => {
+  const world = makeWorld();
+  const { dialog, input, copyBtn } = makeModal(world);
+  input.attrs["data-focus-trap-initial"] = "";
+  input.notRendered = true;
+  world.window.focusTrap.activate(dialog);
+  assert.equal(world.document.activeElement, copyBtn);
+  assert.equal(input.selectCount, 0);
+});
+
+test("elements inside the dialog stay in the cycle when nothing is hidden", () => {
+  // Guards the filter against over-rejecting: fixed-position dialogs still
+  // report client rects for their children.
+  const world = makeWorld();
+  const { dialog, input, doneBtn } = makeModal(world);
+  world.window.focusTrap.activate(dialog);
+  doneBtn.focus();
+  world.keydown("Tab");
+  assert.equal(world.document.activeElement, input);
+});
+
+// --- Restore-target validity (CR round 2, item 11) --------------------------
+
+test("an explicit opts.restoreTo wins over the element focused at activate time", () => {
+  const world = makeWorld();
+  const trigger = world.makeEl("button", {}, world.body);
+  const durable = world.makeEl("button", {}, world.body);
+  trigger.focus();
+  const { dialog } = makeModal(world);
+  world.window.focusTrap.activate(dialog, { restoreTo: durable });
+  world.window.focusTrap.deactivate(dialog);
+  assert.equal(world.document.activeElement, durable);
+});
+
+test("a restore target that left the DOM falls back to the captured element", () => {
+  const world = makeWorld();
+  const trigger = world.makeEl("button", {}, world.body);
+  const doomed = world.makeEl("button", {}, world.body);
+  trigger.focus();
+  const { dialog } = makeModal(world);
+  world.window.focusTrap.activate(dialog, { restoreTo: doomed });
+  doomed.detached = true; // HTMX swapped the trigger's row away
+  world.window.focusTrap.deactivate(dialog);
+  assert.equal(world.document.activeElement, trigger);
+});
+
+test("a detached captured element is not focused on restore", () => {
+  const world = makeWorld();
+  const trigger = world.makeEl("button", {}, world.body);
+  trigger.focus();
+  const focusesBefore = trigger.focusCount;
+  const { dialog } = makeModal(world);
+  world.window.focusTrap.activate(dialog);
+  trigger.detached = true;
+  world.window.focusTrap.deactivate(dialog);
+  assert.equal(trigger.focusCount, focusesBefore); // no focus() on a detached node
+});
+
+test("<body> as the captured element is never a restore target", () => {
+  // Safari does not focus buttons on click, so activeElement can be <body>.
+  const world = makeWorld();
+  assert.equal(world.document.activeElement, world.body);
+  const { dialog } = makeModal(world);
+  world.window.focusTrap.activate(dialog);
+  world.window.focusTrap.deactivate(dialog);
+  assert.equal(world.body.focusCount, 0);
 });
 
 // --- Stacking (CR item 3) --------------------------------------------------

@@ -11,8 +11,11 @@ from pathlib import Path
 
 TEMPLATES = Path(__file__).parents[2] / "src" / "dashboard" / "templates"
 
-TAG_WITH_ARIA_MODAL = re.compile(r"<[^>]*aria-modal=\"true\"[^>]*>", re.DOTALL)
-TAG_WITH_ROLE_DIALOG = re.compile(r"<[^>]*role=\"dialog\"[^>]*>", re.DOTALL)
+TAG_WITH_ARIA_MODAL = re.compile(r"<[^>]*aria-modal=\"true\"[^>]*>")
+TAG_WITH_ROLE_DIALOG = re.compile(r"<[^>]*role=\"dialog\"[^>]*>")
+GUARDED_FOCUS_TRAP_CALL = re.compile(
+    r"window\.focusTrap\s*&&\s*window\.focusTrap\.(activate|deactivate)\("
+)
 
 
 def _tags_matching(pattern):
@@ -69,10 +72,13 @@ class TestFocusTrapHook:
         otherwise throw and open the drawer with no trap at all.
         """
         base = (TEMPLATES / "base.html").read_text()
-        for call in ("focusTrap.activate(", "focusTrap.deactivate("):
-            assert call in base
-        assert base.count("window.focusTrap&&") == 2, (
-            "both window.focusTrap calls in the drawer script must be guarded"
+        guarded = {m.group(1) for m in GUARDED_FOCUS_TRAP_CALL.finditer(base)}
+        assert guarded == {"activate", "deactivate"}, (
+            "both window.focusTrap calls in the drawer script must be guarded, "
+            f"found: {sorted(guarded)}"
+        )
+        assert base.count("window.focusTrap.") == len(GUARDED_FOCUS_TRAP_CALL.findall(base)), (
+            "every window.focusTrap use must sit behind a guard"
         )
 
 

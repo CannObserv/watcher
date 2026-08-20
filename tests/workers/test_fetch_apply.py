@@ -227,11 +227,12 @@ class TestApplyFetchBlob:
     async def test_unsupported_scheme_fails_without_reissuing(
         self, db_session, monkeypatch, tmp_path
     ):
-        # replicator#7's gs:// backend, before this build can read it: every
-        # fact would raise on the scheme, so a re-issue spends a real origin
-        # fetch to learn the same thing. Terminal on the first occasion (#275).
+        # A backend this build cannot read: every fact would raise on the
+        # scheme, so a re-issue spends a real origin fetch to learn the same
+        # thing. Terminal on the first occasion (#275). s3:// stands in — gs://
+        # graduated to a real arm and would go out over the network here.
         wi, row = await _row_with_fact(db_session, tmp_path)
-        row.blob_uri = "gs://co-temp-blobs/ab/cdef"
+        row.blob_uri = "s3://co-temp-blobs/ab/cdef"
         await db_session.flush()
         stub = _wire(db_session, monkeypatch)
         client = fakeredis.FakeAsyncRedis()

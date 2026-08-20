@@ -5,9 +5,14 @@ build cannot read is permanent (a re-issued command's fact would say the same
 thing), while a blob that is merely missing may be transient.
 """
 
-import pytest
+import os
 
+import pytest
+from google.api_core import exceptions as gcs_exceptions
+
+import src.core.blobs as blobs_mod
 from src.core.blobs import (
+    GCS_BLOB_CREDENTIALS_ENV,
     BlobUnreadable,
     UnsupportedBlobScheme,
     aread_blob,
@@ -28,9 +33,9 @@ class TestReadBlob:
             read_blob(f"file://{tmp_path}/reaped-away.bin")
 
     def test_unknown_scheme_is_unsupported(self):
-        # replicator#7's object-store backend, before this build can read it.
+        # A backend no build of this module has ever read.
         with pytest.raises(UnsupportedBlobScheme):
-            read_blob("gs://co-temp-blobs/ab/cdef")
+            read_blob("s3://co-temp-blobs/ab/cdef")
 
     def test_missing_uri_is_unreadable(self):
         # A fact that named no blob: nothing about the backend is known, so this
@@ -131,7 +136,7 @@ class TestBlobFile:
 
     def test_unsupported_scheme_raises_before_any_temp_file(self):
         with pytest.raises(UnsupportedBlobScheme):
-            with blob_file("gs://co-temp-blobs/ab/cdef"):
+            with blob_file("s3://co-temp-blobs/ab/cdef"):
                 pass  # pragma: no cover - never entered
 
 
@@ -148,4 +153,130 @@ class TestAreadBlob:
         with pytest.raises(BlobUnreadable):
             await aread_blob(f"file://{tmp_path}/reaped-away.bin")
         with pytest.raises(UnsupportedBlobScheme):
-            await aread_blob("gs://co-temp-blobs/ab/cdef")
+            await aread_blob("s3://co-temp-blobs/ab/cdef")
+
+
+class _FakeGcsBlob:
+    def __init__(self, calls, outcome):
+        self._calls, self._outcome = calls, outcome
+
+    def download_to_file(self, fh):
+        if isinstance(self._outcome, Exception):
+            raise self._outcome
+        fh.write(self._outcome)
+
+
+class _FakeGcsClient:
+    """Records (bucket, key) pairs; one outcome for every download."""
+
+    def __init__(self, outcome):
+        self.calls: list[tuple[str, str]] = []
+        self._outcome = outcome
+
+    def bucket(self, name):
+        client = self
+
+        class _Bucket:
+            def blob(self, key):
+                client.calls.append((name, key))
+                return _FakeGcsBlob(client.calls, client._outcome)
+
+        return _Bucket()
+
+
+@pytest.fixture
+def gcs(monkeypatch):
+    """Install a fake GCS client; yields a factory taking the download outcome."""
+
+    def _install(outcome):
+        fake = _FakeGcsClient(outcome)
+        monkeypatch.setattr(blobs_mod, "_gcs_client", lambda: fake)
+        return fake
+
+    return _install
+
+
+class TestGcsArm:
+    GS_URI = "gs://co-gcs-blobs/blobs/" + "ab" * 32 + ".bin"
+
+    def test_downloads_through_the_spooled_temp_file(self, gcs):
+        fake = gcs(b"<p>hi</p>")
+
+        assert read_blob(self.GS_URI) == b"<p>hi</p>"
+        # replicator#7: the key is FLAT — bucket from the authority, key the
+        # path verbatim. Deriving anything (the file:// shard rule especially)
+        # would be wrong; the URI is used as given.
+        assert fake.calls == [("co-gcs-blobs", "blobs/" + "ab" * 32 + ".bin")]
+
+    def test_not_found_is_reissuable(self, gcs):
+        # Under this backend a 404 is the lifecycle rule having reaped the
+        # blob — exactly the case a fresh content.fetch repairs.
+        gcs(gcs_exceptions.NotFound("no such object"))
+
+        with pytest.raises(BlobUnreadable):
+            read_blob(self.GS_URI)
+
+    def test_forbidden_is_permanent(self, gcs):
+        # A missing or revoked grant stays broken until an operator acts;
+        # re-fetching three times against it just burns origin requests.
+        gcs(gcs_exceptions.Forbidden("no objectViewer"))
+
+        with pytest.raises(UnsupportedBlobScheme):
+            read_blob(self.GS_URI)
+
+    def test_any_other_sdk_error_is_reissuable(self, gcs):
+        # The wrapper's contract (CR-10): untyped failures land on the capped
+        # side rather than escaping the apply task.
+        gcs(gcs_exceptions.ServiceUnavailable("backend flapped"))
+
+        with pytest.raises(BlobUnreadable):
+            read_blob(self.GS_URI)
+
+    def test_missing_bucket_or_key_is_permanent(self, gcs):
+        gcs(b"")
+        with pytest.raises(UnsupportedBlobScheme):
+            read_blob("gs:///blobs/x.bin")
+        with pytest.raises(UnsupportedBlobScheme):
+            read_blob("gs://co-gcs-blobs")
+
+    def test_unset_credential_is_permanent(self, monkeypatch):
+        # The identity is GCS_BLOB_CREDENTIALS (singular BLOB) — deliberately
+        # NOT GOOGLE_APPLICATION_CREDENTIALS, which is the wheelhouse SA.
+        # Unset, no gs:// blob is readable by this process until an operator
+        # acts: permanent, zero re-issues.
+        monkeypatch.delenv(GCS_BLOB_CREDENTIALS_ENV, raising=False)
+        monkeypatch.setattr(blobs_mod, "_gcs_client_cache", None)
+
+        with pytest.raises(UnsupportedBlobScheme):
+            read_blob(self.GS_URI)
+
+    def test_the_client_is_built_once(self, monkeypatch, tmp_path):
+        built = []
+        monkeypatch.setenv(GCS_BLOB_CREDENTIALS_ENV, str(tmp_path / "key.json"))
+        monkeypatch.setattr(blobs_mod, "_gcs_client_cache", None)
+        monkeypatch.setattr(
+            blobs_mod.storage.Client,
+            "from_service_account_json",
+            classmethod(lambda cls, path: built.append(path) or _FakeGcsClient(b"x")),
+        )
+
+        assert read_blob(self.GS_URI) == b"x"
+        assert read_blob(self.GS_URI) == b"x"
+        assert built == [str(tmp_path / "key.json")]
+
+
+@pytest.mark.integration
+class TestGcsLive:
+    async def test_the_binding_answers_404_not_403(self):
+        """A bogus key must come back NotFound, not Forbidden.
+
+        This is the live proof the credential wiring works end to end: an
+        unauthenticated or unbound principal gets 403 on a private bucket, so
+        a 404 can only mean the request authenticated AND the objectViewer
+        grant held. No object is created or needed.
+        """
+        if not os.environ.get(GCS_BLOB_CREDENTIALS_ENV):
+            pytest.skip(f"{GCS_BLOB_CREDENTIALS_ENV} not set")
+
+        with pytest.raises(BlobUnreadable):
+            await aread_blob("gs://co-gcs-blobs/blobs/" + "0" * 64 + ".bin")

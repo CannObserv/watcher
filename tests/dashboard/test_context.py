@@ -110,7 +110,7 @@ class TestGetDomainsWithWatchedItemCounts:
         assert result == []
 
     async def test_domain_with_watched_items(self, db_session):
-        domain = Domain(name="example.com", min_interval=1.0, max_concurrency=2)
+        domain = Domain(name="example.com", min_interval=1.0)
         db_session.add(domain)
         await make_watched_item(
             db_session,
@@ -127,7 +127,7 @@ class TestGetDomainsWithWatchedItemCounts:
 
     async def test_single_watched_item_on_domain_counts_as_one(self, db_session):
         """A domain with one WatchedItem reports watched_item_count=1."""
-        domain = Domain(name="multi.com", min_interval=1.0, max_concurrency=2)
+        domain = Domain(name="multi.com", min_interval=1.0)
         db_session.add(domain)
         await make_watched_item(
             db_session,
@@ -142,7 +142,7 @@ class TestGetDomainsWithWatchedItemCounts:
         assert result[0]["watched_item_count"] == 1
 
     async def test_domain_with_no_watched_items(self, db_session):
-        domain = Domain(name="orphan.com", min_interval=1.0, max_concurrency=2)
+        domain = Domain(name="orphan.com", min_interval=1.0)
         db_session.add(domain)
         await db_session.flush()
 
@@ -152,7 +152,7 @@ class TestGetDomainsWithWatchedItemCounts:
 
     async def test_archived_watched_item_excluded_from_count(self, db_session):
         """Archived items are retired — they must not inflate the live count (#209)."""
-        db_session.add(Domain(name="mixed.com", min_interval=1.0, max_concurrency=2))
+        db_session.add(Domain(name="mixed.com", min_interval=1.0))
         await make_watched_item(
             db_session,
             name="Live",
@@ -179,7 +179,7 @@ class TestGetDomainsWithWatchedItemCounts:
         Guards the LEFT-JOIN-with-ON-filter requirement: a WHERE filter would drop
         the row entirely.
         """
-        db_session.add(Domain(name="retired.com", min_interval=1.0, max_concurrency=2))
+        db_session.add(Domain(name="retired.com", min_interval=1.0))
         await make_watched_item(
             db_session,
             name="Gone",

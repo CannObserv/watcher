@@ -181,6 +181,26 @@ values are destroyed by design (#261): Archiver identifies a SourceRevision by
 local copy was redundant rather than unique. Subsequent deploys use the standard
 order above.
 
+## Restart-before-migrate — one-time, `10783d8a2405` (#272)
+
+`10783d8a2405` **drops** the four inert `domains` columns the retired
+in-process rate limiter (#241 step 5) left behind: `max_concurrency`,
+`decay_window`, `current_interval`, `last_request_at`. Same reasoning as
+`f4a8b26c9d31` above — the previous release still maps all four, so the order
+is reversed:
+
+```bash
+sudo systemctl restart watcher      # new code first — it no longer maps them
+uv run alembic upgrade head         # then drop the columns
+```
+
+Restart-first has no window: the new code never references them, and all four
+carry genesis server defaults or are nullable, so the old schema accepts the
+new code's INSERTs until the migration lands. The values are destroyed by
+design — nothing has read them for behavior since #241 step 5 (`current_interval`
+froze at the Phase-4 cutover; `last_request_at` had no writer at all).
+Subsequent deploys use the standard order above.
+
 ## No safe order — one-time, `e7c4b2a91f60` (#252)
 
 `e7c4b2a91f60` adds `fetch_commands.info_source_id` NOT NULL, and the release

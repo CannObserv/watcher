@@ -23,19 +23,35 @@ class TestPatchDomain:
     async def test_patch_creates_domain_if_absent(self, client):
         response = await client.patch(
             "/api/v1/domains/example.com",
-            json={"min_interval": 3.0, "max_concurrency": 1},
+            json={"min_interval": 3.0},
         )
         assert response.status_code == 200
         data = response.json()
         assert data["name"] == "example.com"
         assert data["min_interval"] == 3.0
-        assert data["max_concurrency"] == 1
-        assert data["current_interval"] == 3.0  # defaults to min_interval on create
+
+    async def test_response_omits_dropped_rate_limiter_fields(self, client):
+        # #272: the retired limiter's knobs are gone from the wire, not echoed.
+        response = await client.patch("/api/v1/domains/example.com", json={"min_interval": 3.0})
+        data = response.json()
+        for field in ("max_concurrency", "current_interval", "decay_window", "last_request_at"):
+            assert field not in data
+
+    async def test_patch_ignores_dropped_rate_limiter_fields(self, client):
+        # An old client still sending the retired knobs gets a 200 no-op —
+        # unknown fields are ignored (Pydantic default), the repo-wide schema
+        # posture — not a 422.
+        response = await client.patch(
+            "/api/v1/domains/example.com",
+            json={"min_interval": 3.0, "max_concurrency": 1, "decay_window": 900.0},
+        )
+        assert response.status_code == 200
+        assert response.json()["min_interval"] == 3.0
 
     async def test_patch_updates_existing_domain(self, client):
         await client.patch(
             "/api/v1/domains/example.com",
-            json={"min_interval": 2.0, "max_concurrency": 2},
+            json={"min_interval": 2.0},
         )
         response = await client.patch(
             "/api/v1/domains/example.com",
@@ -43,7 +59,6 @@ class TestPatchDomain:
         )
         assert response.status_code == 200
         assert response.json()["min_interval"] == 5.0
-        assert response.json()["max_concurrency"] == 2  # unchanged
 
     async def test_patch_with_no_fields_returns_current(self, client):
         await client.patch("/api/v1/domains/example.com", json={"min_interval": 2.0})
@@ -187,13 +202,13 @@ class TestApplyDomainUpdates:
         from src.api.routes.domains import _apply_domain_updates
         from src.core.models.domain import Domain
 
-        domain = Domain(name="x.example", min_interval=1.0, max_concurrency=2)
+        domain = Domain(name="x.example", min_interval=1.0, notes="keep")
         _apply_domain_updates(
             domain, {"min_interval": 5.0, "default_schedule_config": {"interval": "7d"}}
         )
         assert domain.min_interval == 5.0
         assert domain.default_schedule_config == {"interval": "7d"}
-        assert domain.max_concurrency == 2  # absent from updates → unchanged
+        assert domain.notes == "keep"  # absent from updates → unchanged
 
     def test_clearing_cadence_to_none_applies(self):
         from src.api.routes.domains import _apply_domain_updates
@@ -246,30 +261,6 @@ class TestUpsertDomainRaceReapply:
         assert winner.default_schedule_config == {"interval": "6h"}
         session.rollback.assert_awaited_once()
         session.commit.assert_awaited_once()
-
-
-class TestDecayWindow:
-    async def test_patch_creates_domain_with_default_decay_window(self, client):
-        response = await client.patch("/api/v1/domains/decay-test.com", json={"min_interval": 2.0})
-        assert response.status_code == 200
-        data = response.json()
-        assert data["decay_window"] == 1800.0
-
-    async def test_patch_sets_custom_decay_window(self, client):
-        response = await client.patch(
-            "/api/v1/domains/custom-decay.com",
-            json={"min_interval": 2.0, "decay_window": 900.0},
-        )
-        assert response.status_code == 200
-        assert response.json()["decay_window"] == 900.0
-
-    async def test_patch_updates_decay_window(self, client):
-        await client.patch("/api/v1/domains/update-decay.com", json={"min_interval": 1.0})
-        response = await client.patch(
-            "/api/v1/domains/update-decay.com", json={"decay_window": 600.0}
-        )
-        assert response.status_code == 200
-        assert response.json()["decay_window"] == 600.0
 
 
 class TestDeleteDomain:

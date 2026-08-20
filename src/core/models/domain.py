@@ -2,7 +2,7 @@
 
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, Float, Integer, String, Text
+from sqlalchemy import Boolean, DateTime, Float, String, Text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 from ulid import ULID
@@ -10,8 +10,6 @@ from ulid import ULID
 from src.core.models.base import Base, TimestampMixin, ULIDType, generate_ulid
 
 DEFAULT_MIN_INTERVAL = 1.0
-DEFAULT_MAX_CONCURRENCY = 2
-DEFAULT_DECAY_WINDOW = 1800.0
 
 
 class Domain(Base, TimestampMixin):
@@ -25,14 +23,10 @@ class Domain(Base, TimestampMixin):
     schedule_config interval string), the Domain tier of the 3-tier schedule
     resolution (#205).
 
-    ``current_interval``, ``max_concurrency`` and ``decay_window`` are **inert**
-    since #241 step 5 retired the in-process ``DomainRateLimiter``: nothing
-    *reads* them for behavior any more, though creates still initialise them and
-    the API still accepts and echoes them (adaptive backoff is Replicator's —
-    replicator#25). ``last_request_at`` has no writer left at all. They are kept
-    as columns so the retirement needed no destructive migration; the drop must
-    also remove the create/PATCH write sites in ``src/api/routes/domains.py``
-    and the ``DomainResponse`` fields.
+    The in-process ``DomainRateLimiter``'s columns — ``current_interval``,
+    ``max_concurrency``, ``decay_window``, ``last_request_at`` — were retired
+    with it (#241 step 5) and dropped in #272; adaptive backoff is Replicator's
+    (replicator#25).
     """
 
     __tablename__ = "domains"
@@ -41,18 +35,6 @@ class Domain(Base, TimestampMixin):
     name: Mapped[str] = mapped_column(String(253), unique=True, nullable=False)
     min_interval: Mapped[float] = mapped_column(
         Float, nullable=False, default=DEFAULT_MIN_INTERVAL, server_default="1.0"
-    )
-    max_concurrency: Mapped[int] = mapped_column(
-        Integer, nullable=False, default=DEFAULT_MAX_CONCURRENCY, server_default="2"
-    )
-    current_interval: Mapped[float] = mapped_column(
-        Float, nullable=False, default=DEFAULT_MIN_INTERVAL, server_default="1.0"
-    )
-    last_request_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True, default=None
-    )
-    decay_window: Mapped[float] = mapped_column(
-        Float, nullable=False, default=DEFAULT_DECAY_WINDOW, server_default="1800.0"
     )
     notes: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
     # Operator's desired check *cadence* for items on this domain — a
@@ -73,9 +55,6 @@ class Domain(Base, TimestampMixin):
     def __init__(self, **kwargs: object) -> None:
         """Set Python-side defaults."""
         kwargs.setdefault("min_interval", DEFAULT_MIN_INTERVAL)
-        kwargs.setdefault("max_concurrency", DEFAULT_MAX_CONCURRENCY)
-        kwargs.setdefault("current_interval", kwargs.get("min_interval", DEFAULT_MIN_INTERVAL))
-        kwargs.setdefault("decay_window", DEFAULT_DECAY_WINDOW)
         kwargs.setdefault("is_active", True)
         super().__init__(**kwargs)
 
@@ -101,8 +80,8 @@ class Domain(Base, TimestampMixin):
         """Derived status: archived > inactive > active.
 
         The ``backoff`` state is gone with the limiter (#241 step 5) — nothing
-        raised ``current_interval`` above ``min_interval`` any more, so the
-        state was unreachable and the badge always lied by omission.
+        tracked a raised interval any more, so the state was unreachable and
+        the badge always lied by omission.
         """
         if self.archived_at is not None:
             return "archived"

@@ -5,8 +5,8 @@ per-host numbers in ``Domain`` and publishes them as ``FetchPolicyState`` frames
 on ``content.fetch-policy``. These tests pin the three rules the consumer side
 cannot check for us:
 
-* the published interval is ``Domain.min_interval`` — the operator floor — never
-  ``current_interval`` (a backoff artifact that freezes at the Phase-4 cutover);
+* the published interval is ``Domain.min_interval`` — the operator floor
+  (the limiter's ``current_interval`` backoff state is dropped — #272);
 * tombstones (``revoked=True``) keep appearing in the full-set republish so a
   booting consumer can never replay a stale live value it cannot revoke
   (cannobserv#285 rule 2);
@@ -41,14 +41,12 @@ def _domain(
     name: str,
     *,
     min_interval: float = 1.0,
-    current_interval: float = 1.0,
     is_active: bool = True,
     archived_at: datetime | None = None,
 ) -> Domain:
     return Domain(
         name=name,
         min_interval=min_interval,
-        current_interval=current_interval,
         is_active=is_active,
         archived_at=archived_at,
     )
@@ -79,15 +77,6 @@ class TestBuildPolicyEvents:
         assert event.min_interval_seconds == 2.5
         assert event.revoked is False
         assert event.occurred_at == NOW
-
-    def test_publishes_min_interval_never_current_interval(self):
-        # current_interval is 429-backoff state; it freezes at the Phase-4
-        # cutover (no non-terminal fetch_failed — replicator#9 §3), so
-        # publishing it would fossilize a backoff artifact into policy.
-        events = build_policy_events(
-            [_domain("lcb.wa.gov", min_interval=1.0, current_interval=60.0)], [], now=NOW
-        )
-        assert events[0].min_interval_seconds == 1.0
 
     def test_tombstone_becomes_revoked_event(self):
         events = build_policy_events([], [_tombstone("gone.example")], now=NOW)
@@ -252,7 +241,7 @@ class TestTombstoneRows:
         await db_session.flush()
 
     async def test_full_set_reads_domains_and_tombstones(self, db_session):
-        db_session.add(Domain(name="live.example", min_interval=3.0, current_interval=3.0))
+        db_session.add(Domain(name="live.example", min_interval=3.0))
         await record_tombstone(db_session, "gone.example", now=NOW)
         await db_session.flush()
 
@@ -266,7 +255,7 @@ class TestTombstoneRows:
     async def test_full_set_revokes_archived_and_inactive_domains(self, db_session):
         # #250 end to end: the query still selects every Domain (rule 2), but a
         # suspended one travels as a tombstone rather than a live interval.
-        db_session.add(Domain(name="live.example", min_interval=3.0, current_interval=3.0))
+        db_session.add(Domain(name="live.example", min_interval=3.0))
         db_session.add(Domain(name="archived.example", min_interval=3.0, archived_at=NOW))
         db_session.add(Domain(name="paused.example", min_interval=3.0, is_active=False))
         await db_session.flush()

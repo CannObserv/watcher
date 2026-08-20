@@ -15,7 +15,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.fetch_policy import clear_tombstone
-from src.core.models.domain import DEFAULT_MAX_CONCURRENCY, DEFAULT_MIN_INTERVAL, Domain
+from src.core.models.domain import DEFAULT_MIN_INTERVAL, Domain
 from src.core.models.watched_item import WatchedItem
 
 
@@ -63,14 +63,7 @@ async def ensure_domain_and_resolve_suspension(
     if existing is None:
         try:
             async with session.begin_nested():
-                session.add(
-                    Domain(
-                        name=domain_name,
-                        min_interval=DEFAULT_MIN_INTERVAL,
-                        max_concurrency=DEFAULT_MAX_CONCURRENCY,
-                        current_interval=DEFAULT_MIN_INTERVAL,
-                    )
-                )
+                session.add(Domain(name=domain_name, min_interval=DEFAULT_MIN_INTERVAL))
                 # The host is live again: retire its fetch-policy tombstone (if
                 # any) atomically with the row that supersedes it (#245). No
                 # republish defer here — a fresh domain's min_interval equals

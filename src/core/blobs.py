@@ -110,11 +110,14 @@ def _gcs_client() -> storage.Client:
     the blob path a package-index principal (or vice versa) is exactly the
     conflation the separate variable exists to prevent.
 
-    An unset variable is ``UnsupportedBlobScheme``: no ``gs://`` blob is
-    readable by this process until an operator sets it, so re-issuing would
-    spend real origin fetches learning the same thing. Never cached — the next
-    call re-reads the environment, so recovery needs no restart of anything
-    but the env.
+    An unset OR unusable variable is ``UnsupportedBlobScheme`` (CR-17):
+    construction never touches the network — ``from_service_account_json``
+    only reads the local file; token exchange happens per request — so every
+    construction failure is deterministic operator misconfig, and re-issuing
+    would spend real origin fetches learning the same thing. Failures are
+    never cached: the next call re-reads the environment and the file, so
+    recovery needs no restart. A client already *built*, though, holds its
+    loaded key — after rotating the file at the same path, restart (CR-18).
     """
     global _gcs_client_cache
     if _gcs_client_cache is None:
@@ -125,7 +128,12 @@ def _gcs_client() -> storage.Client:
                     raise UnsupportedBlobScheme(
                         f"{GCS_BLOB_CREDENTIALS_ENV} is not set — no gs:// blob is readable"
                     )
-                _gcs_client_cache = storage.Client.from_service_account_json(key_path)
+                try:
+                    _gcs_client_cache = storage.Client.from_service_account_json(key_path)
+                except Exception as exc:
+                    raise UnsupportedBlobScheme(
+                        f"{GCS_BLOB_CREDENTIALS_ENV} is unusable ({key_path!r}): {exc}"
+                    ) from exc
     return _gcs_client_cache
 
 

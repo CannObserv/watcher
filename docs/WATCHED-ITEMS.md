@@ -35,7 +35,7 @@ than recomputed, and the detail page shows it as **Last Full Fetch**); the
 conditional-GET validator state `etag` / `last_modified` / `validator_source_key`
 (#269 — the pair the next command replays and the identity of what the bytes were
 going to mean when it was stored; see
-[docs/CONTENT-PIPELINE.md](CONTENT-PIPELINE.md) → *Conditional GET*); and its
+[docs/CONDITIONAL-GET.md](CONDITIONAL-GET.md)); and its
 notification surface (the
 item-scoped `NotificationTemplate` rows — `visibility='watched_item'`,
 `watched_item_id` set; see **Notifications** below). Schedule resolution is

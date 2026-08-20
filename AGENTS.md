@@ -12,7 +12,7 @@ TDD required. Red → Green → Refactor. No production code without a failing t
 
 ## Environment & Tooling
 
-Python ≥3.12, uv, pytest, ruff; Node.js + npm (for Tailwind CLI — `sudo npm install -g @tailwindcss/cli`, one-time VM setup).
+Python ≥3.12, uv, pytest, ruff; Node.js + npm (Tailwind CLI — `sudo npm install -g @tailwindcss/cli`, one-time VM setup).
 
 **Cannobserv wheelhouse.** Populate it before any `uv` command — `[tool.uv]
 find-links` makes every invocation require the directory:
@@ -46,7 +46,7 @@ The goal→tool table, index scope and rebuild, and the literal prefetch query: 
 
 `ARCHIVER_REPO_PATH` redirects everything needing the sibling repo (#254): [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
-The exe.dev proxy forwards 3000–9999. Dev server reachable at `https://watcher.exe.xyz:8001/`.
+The exe.dev proxy forwards 3000–9999; dev server at `https://watcher.exe.xyz:8001/`.
 
 **Single process is load-bearing.** One uvicorn process runs everything — API, embedded Procrastinate worker, `content.blobs` fact consumer, cache sweeper. **Never run `uvicorn --workers N` or a second worker unit against prod.** Why the fact consumer makes this load-bearing, and the escalation path that is *not built*: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) → *Single process*.
 
@@ -85,7 +85,7 @@ Load both for shell commands (pytest, psql, gh):
 source scripts/load-env.sh
 ```
 
-**Naming rule for new variables.** Anything naming a shared external resource takes a **service-prefixed** name with a separate dev key (`WATCHER_BUS_REDIS_URL` / `WATCHER_DEV_BUS_REDIS_URL`). A bare `REDIS_URL` is silently inherited from `/etc/watcher/.env` — the #233 hazard in env-var form. Rationale: [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) → *Environment Variables*.
+**Naming rule for new variables.** Anything naming a shared external resource takes a **service-prefixed** name with a separate dev key (`WATCHER_BUS_REDIS_URL` / `WATCHER_DEV_BUS_REDIS_URL`). A bare `REDIS_URL` is silently inherited from `/etc/watcher/.env` — the #233 hazard in env-var form: [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) → *Environment Variables*.
 
 ## Common Commands
 
@@ -126,23 +126,18 @@ provenance columns the outbox gained for `source_revision_observed` (#253):
 stored `etag`/`last_modified`, but only for items named in
 `WATCHER_CONDITIONAL_GET_ENABLED` (unset → off, byte-identical to the pre-#269
 command). A 304 inherits the last fingerprint, so a spec/URL/extractor change
-must invalidate the pair — `validator_source_key`, whose extraction half is
-derived from the installed co-core version, plus an age ceiling. Never route
-`invalid_request_options` past the validator clear: the refusal precedes the
-request, so a bad stored value wedges the item permanently. An unreadable blob
-is capped for a related reason — its re-issue bypasses the scheduling gate
-(#275).
-[docs/CONTENT-PIPELINE.md](docs/CONTENT-PIPELINE.md) → *Conditional GET*, *An
-unreadable blob is capped*.
+must invalidate the pair: [docs/CONDITIONAL-GET.md](docs/CONDITIONAL-GET.md).
+Never route `invalid_request_options` past the validator clear — the refusal
+precedes the request, so a bad stored value wedges the item permanently. An unreadable
+blob's re-issue is capped for a related reason — it bypasses the scheduling
+gate (#275): [docs/CONTENT-PIPELINE.md](docs/CONTENT-PIPELINE.md).
 
 **Notifications.** One `notification_templates` table; a row's `visibility` —
-`global` / `domain` / `watched_item` — is what decides where it fires.
-
-**Notification bodies are source Markdown and must be block-structured**, never
-`\n`-joined — guarded by
+`global` / `domain` / `watched_item` — decides where it fires. **Bodies are
+source Markdown and must be block-structured**, never `\n`-joined — guarded by
 `tests/core/notifications/test_content.py::TestMarkdownListContract`.
 
-Fields, 3-tier schedule resolution, media-type dispatch and template CRUD: [docs/WATCHED-ITEMS.md](docs/WATCHED-ITEMS.md). Lifecycle and delete guards, and every dashboard surface: [docs/WATCHED-ITEMS-DASHBOARD.md](docs/WATCHED-ITEMS-DASHBOARD.md).
+Fields, schedule resolution, media-type dispatch, template CRUD: [docs/WATCHED-ITEMS.md](docs/WATCHED-ITEMS.md). Lifecycle, delete guards, every dashboard surface: [docs/WATCHED-ITEMS-DASHBOARD.md](docs/WATCHED-ITEMS-DASHBOARD.md).
 
 ## Conventions
 
@@ -201,6 +196,7 @@ Cross-project search to the sister `notifier` index requires a per-instance `.cl
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — module layout, sibling services, the Archiver checkout constraint, bus topology and fetch contracts
 - [docs/COMMANDS.md](docs/COMMANDS.md) — every runnable command, the Archiver-sibling test setup, CI
 - [docs/CONTENT-PIPELINE.md](docs/CONTENT-PIPELINE.md) — fetch → extract → fingerprint, the fetch-command outbox, the revisions producer
+- [docs/CONDITIONAL-GET.md](docs/CONDITIONAL-GET.md) — #269 validators: gate, snapshot, invalidation
 - [docs/CONVENTIONS.md](docs/CONVENTIONS.md) — logging configuration, ULID error handling, DB-trigger rules
 - [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) — systemd units, environment variables, wheelhouse auth
 - [docs/MIGRATIONS.md](docs/MIGRATIONS.md) — the manual upgrade step, the two-role grant model, one-time orderings

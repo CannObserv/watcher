@@ -153,17 +153,34 @@ installer — never by hand:
 ```bash
 V=skills-vendor/gregoryfoster-skills/skills
 bash $V/managing-skills/scripts/install-hook.sh --hook socraticode-health.sh \
-  --skill init-socraticode --marker socraticode-health --copy-fallback [--check]
+  --skill init-socraticode --marker socraticode-health --copy-fallback
 bash $V/managing-skills/scripts/install-hook.sh --hook socraticode-reminder.sh \
   --skill init-socraticode --marker socraticode-prefetch --marker socraticode-reminder \
-  --copy-fallback [--check]
-bash $V/managing-skills/scripts/install-refresh.sh [--check]
+  --copy-fallback
+bash $V/managing-skills/scripts/install-refresh.sh
 ```
+
+Append `--check` to any of the three to audit without writing: each reports its
+symlink and its registration independently and exits 3 if either is missing, or
+if the hook is a copy where a vendored source exists to link at instead.
 
 **The health hook reports; it never repairs.** No re-index, no Docker start, no
 file edit — it runs before an agent has context. Findings land on stdout and in
-`.git/socraticode-health.log`; act on them with `codebase_index` or by re-running
-`init-socraticode`.
+`.git/socraticode-health.log` (tail-bounded to 200 lines); act on them with
+`codebase_index` or by re-running `init-socraticode`.
+
+**It costs one session start per UTC day.** Measured here at **~8s** against a
+warm MCP server; a cold start pays for `npx -y socraticode` on top, bounded by
+the `HEALTH_TIMEOUT_MS=60000` ceiling the hook exports. A day-stamped lock in
+`.git/` means every other session that day is free. If a session start stalls
+for several seconds with no output, this is why — it is not hung.
+
+The hook's own output carries the reports-never-repairs caveat on every path
+that prints a finding, so the warning always arrives attached to the thing it
+qualifies. That is why `AGENTS.md` says nothing about it: the policy block sat 3
+tokens under its 6,000 budget, any clause pushed the file over, and a signal the
+hook already emits at the moment of need does not need a standing line in the
+file loaded on every invocation.
 
 **Why it exists (#276).** Adding an artifact to `.socraticodecontextartifacts.json`
 does not index it, and nothing warns you: `codebase_context_search` simply answers
@@ -184,7 +201,7 @@ install run all three `--check` commands above, not just the one you ran.
 
 ### Prefetch query
 
-The SessionStart hook (`.claude/hooks/socraticode-reminder.sh`) prints this every session.
+The `socraticode-reminder.sh` hook above prints this every session.
 
 Prefetch query (run via `ToolSearch` once per session if the SessionStart reminder isn't loaded):
 

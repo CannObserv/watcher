@@ -28,7 +28,7 @@
     {
       "name": "skills-doc",
       "path": "./docs/SKILLS.md",
-      "description": "Agent skills index. Catalogues the skills available under skills/ (agentskills.io) and .claude/skills/ (Claude Code) directories."
+      "description": "Agent skills index. Catalogues the skills available under skills/ (agentskills.io) and .claude/skills/ (Claude Code) directories, the vendored submodule repos they symlink into, and the SessionStart hook inventory registered in .claude/settings.json (socraticode-reminder prefetch, socraticode-health once-per-day index check, skills-submodule-update refresh) with the vendored install-hook.sh/install-refresh.sh commands that install and audit them. Also carries the SocratiCode goal-to-tool table, index scope (.socraticodeignore), the ToolSearch prefetch query, and linked-project setup."
     },
     {
       "name": "design-and-plans",

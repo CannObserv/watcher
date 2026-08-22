@@ -177,10 +177,11 @@ for several seconds with no output, this is why — it is not hung.
 
 The hook's own output carries the reports-never-repairs caveat on every path
 that prints a finding, so the warning always arrives attached to the thing it
-qualifies. That is why `AGENTS.md` says nothing about it: the policy block sat 3
-tokens under its 6,000 budget, any clause pushed the file over, and a signal the
-hook already emits at the moment of need does not need a standing line in the
-file loaded on every invocation.
+qualifies. `AGENTS.md` states the rule too, in one clause under *Code Exploration
+Policy* — an agent that reads a finding at session start should not re-index on
+its say-so. The two are deliberate belt-and-braces: the hook's line cannot drift
+from the hook, and the policy line arrives even in a session where the hook is
+silent.
 
 **Why it exists (#276).** Adding an artifact to `.socraticodecontextartifacts.json`
 does not index it, and nothing warns you: `codebase_context_search` simply answers

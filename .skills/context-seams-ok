@@ -45,8 +45,20 @@ Registry reconciliation (#254)
 #   rule, which it still does.
 The Archiver service must be installed first — see its own `docs/DEPLOYMENT.md`.
 [WATCHED-ITEMS-DASHBOARD.md](WATCHED-ITEMS-DASHBOARD.md). `AGENTS.md` carries
-docs/MIGRATIONS.md :: provenance-heading :: Restart-before-migrate — one-time, `d5a71c93e0f2` (#251)
-docs/MIGRATIONS.md :: provenance-heading :: No safe order — one-time, `e7c4b2a91f60` (#252)
-provenance-heading :: Migration role and application role — one-time (#259)
-provenance-heading :: Restart-before-migrate — one-time, `f4a8b26c9d31` (#261)
-provenance-heading :: Drop the dead `information` schema — applied 2026-08-18 (#271)
+docs/MIGRATIONS.md :: Restart-before-migrate — one-time, `d5a71c93e0f2` (#251)
+docs/MIGRATIONS.md :: No safe order — one-time, `e7c4b2a91f60` (#252)
+
+# --- #276 curation: provenance headings, pre-existing and untouched by this run.
+# The docs tree's own convention of naming the issue/commit a section came from.
+# Nothing left AGENTS.md into them in this change — the Watched Items and
+# Conventions losses were warranted `duplicate` in .skills/context-loss-ok, not
+# moved — so each is a legitimate heading, not fallout from this run.
+docs/CONTENT-PIPELINE.md :: An unreadable blob is capped, not retried forever (#275)
+docs/CONTENT-PIPELINE.md :: `not_modified` is a success, not a failure (#249)
+docs/CONTENT-PIPELINE.md :: Conditional GET: storing and replaying validators (#269)
+docs/CONTENT-PIPELINE.md :: Extraction outcomes: empty is a failure (#258, #260)
+docs/MIGRATIONS.md :: Migration role and application role — one-time (#259)
+docs/MIGRATIONS.md :: Restart-before-migrate — one-time, `f4a8b26c9d31` (#261)
+docs/MIGRATIONS.md :: Restart-before-migrate — one-time, `10783d8a2405` (#272)
+docs/MIGRATIONS.md :: Drop the dead `information` schema — applied 2026-08-18 (#271)
+docs/SKILLS.md :: `AGENTS.md` states the rule too, in one clause under *Code Exploration

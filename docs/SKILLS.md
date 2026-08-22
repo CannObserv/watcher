@@ -173,11 +173,14 @@ against per-artifact status and names any gap. It also re-checks graph edge yiel
 and a FAILED last operation, so an install that was green in January is not assumed
 green in June.
 
-**Registering a hook evicts its group-mates.** `install-hook.sh`'s dedupe strips the
-whole `SessionStart` matcher group whose *first* command matches the marker, so a
-sibling hook sharing that group disappears silently. Keep one hook per group — the
-installers append that shape — and after any install run all three `--check`
-commands above, not just the one you ran.
+**Registering a hook evicts its group-mates**
+([gregoryfoster/skills#222](https://github.com/gregoryfoster/skills/issues/222)).
+`install-hook.sh`'s dedupe strips the whole `SessionStart` matcher group whose
+*first* command matches the marker, so a sibling hook sharing that group
+disappears silently — its symlink survives, so `doctor.sh` still reads healthy.
+The mirror case duplicates: a marker matching at index ≥1 is not stripped at all.
+Keep one hook per group — the installers append that shape — and after any
+install run all three `--check` commands above, not just the one you ran.
 
 ### Prefetch query
 

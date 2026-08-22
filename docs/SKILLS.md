@@ -22,7 +22,7 @@ Local overrides in `skills/` automatically shadow vendor skills in both systems.
 
 Init after cloning: `git submodule update --init --recursive`
 
-Submodule freshness auto-enforced by `UserPromptSubmit` hook in `.claude/settings.json`. Force-refresh: `git submodule update --remote --merge skills-vendor/gregoryfoster-skills skills-vendor/obra-superpowers`
+Submodule freshness auto-enforced by the `skills-submodule-update` `SessionStart` hook registered in `.claude/settings.json`. Force-refresh: `git submodule update --remote --merge skills-vendor/gregoryfoster-skills skills-vendor/obra-superpowers`
 
 To add a new external skill repo: follow the `managing-skills` skill.
 
@@ -44,6 +44,7 @@ To add a new external skill repo: follow the `managing-skills` skill.
 | `dispatching-parallel-agents` | 2+ independent tasks in parallel |
 | `using-git-worktrees` | feature work needing isolation |
 | `managing-skills` | add skill repo, manage external skills |
+| `init-socraticode` | init socraticode, set up code search, index this project, audit the SocratiCode install |
 | `socraticode` (codebase MCP) | see **Code Exploration Policy** above |
 
 **Code Exploration Policy** is the `AGENTS.md` section of that name — the negative
@@ -135,6 +136,48 @@ Editing the file only changes what *subsequent* scans pick up — chunks embedde
 earlier index survive it (vendor hits kept ranking after the file landed). Purging them
 takes a clean rebuild: `codebase_remove` then `codebase_index`, which re-embeds the whole
 repo — budget a maintenance window for it.
+
+### SessionStart hooks
+
+Three hooks are registered in `.claude/settings.json`, each a symlink into
+`skills-vendor/` so an upstream fix arrives on the normal submodule refresh
+rather than needing a re-install. Install and audit them through the vendored
+installer — never by hand:
+
+| Hook | Marker | What it does |
+|---|---|---|
+| `socraticode-reminder.sh` | `socraticode-prefetch` | Prints the `ToolSearch` prefetch query below, every session |
+| `socraticode-health.sh` | `socraticode-health` | Once-per-UTC-day infra check (#276); silent when clean |
+| `skills-submodule-update.sh` | `skills-submodule-update.sh` | Once-per-UTC-day submodule pointer bump, `main` only |
+
+```bash
+V=skills-vendor/gregoryfoster-skills/skills
+bash $V/managing-skills/scripts/install-hook.sh --hook socraticode-health.sh \
+  --skill init-socraticode --marker socraticode-health --copy-fallback [--check]
+bash $V/managing-skills/scripts/install-hook.sh --hook socraticode-reminder.sh \
+  --skill init-socraticode --marker socraticode-prefetch --marker socraticode-reminder \
+  --copy-fallback [--check]
+bash $V/managing-skills/scripts/install-refresh.sh [--check]
+```
+
+**The health hook reports; it never repairs.** No re-index, no Docker start, no
+file edit — it runs before an agent has context. Findings land on stdout and in
+`.git/socraticode-health.log`; act on them with `codebase_index` or by re-running
+`init-socraticode`.
+
+**Why it exists (#276).** Adding an artifact to `.socraticodecontextartifacts.json`
+does not index it, and nothing warns you: `codebase_context_search` simply answers
+from the artifacts it has, and `codebase_status` stays `green` while reporting the
+shortfall on a line nobody reads. The hook compares the manifest's declared count
+against per-artifact status and names any gap. It also re-checks graph edge yield
+and a FAILED last operation, so an install that was green in January is not assumed
+green in June.
+
+**Registering a hook evicts its group-mates.** `install-hook.sh`'s dedupe strips the
+whole `SessionStart` matcher group whose *first* command matches the marker, so a
+sibling hook sharing that group disappears silently. Keep one hook per group — the
+installers append that shape — and after any install run all three `--check`
+commands above, not just the one you ran.
 
 ### Prefetch query
 

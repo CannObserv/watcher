@@ -6,11 +6,25 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash .claude/hooks/socraticode-reminder.sh"
-          },
+            "command": "bash \"${CLAUDE_PROJECT_DIR:-.}/.claude/hooks/socraticode-health.sh\" # socraticode-health"
+          }
+        ]
+      },
+      {
+        "matcher": ".*",
+        "hooks": [
           {
             "type": "command",
-            "command": "bash .claude/hooks/skills-submodule-update.sh"
+            "command": "bash \"${CLAUDE_PROJECT_DIR:-.}/.claude/hooks/socraticode-reminder.sh\" # socraticode-prefetch"
+          }
+        ]
+      },
+      {
+        "matcher": ".*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PROJECT_DIR:-.}/.claude/hooks/skills-submodule-update.sh\""
           }
         ]
       }

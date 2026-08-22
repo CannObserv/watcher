@@ -207,7 +207,9 @@ it is **not** gated on `source_specs`, because an announcement is authoritative
 for that column ([CONTENT-PIPELINE.md](CONTENT-PIPELINE.md) → *Extraction
 outcomes* has the residual that leaves). The POST no longer validates the
 InfoItem over HTTP — that was watcher's last outbound call and it went with the
-SDK — which makes the endpoint redundant once archiver#141's producer is live. The nullability had been paying for two
+SDK — which makes the endpoint redundant once archiver#141's producer is live. It
+has had **no caller since archiver#158 (2026-08-17)**; it still works, and is kept
+for manual provisioning and tests. The nullability had been paying for two
 silent-drop branches on the SourceRevision path — both gone, so a captured
 revision is always enqueued. Full detail, including why a fresh item starts
 `unknown` rather than `probing`:

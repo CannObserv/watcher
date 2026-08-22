@@ -29,6 +29,7 @@ Auth, upgrade procedure and the pinned version: [docs/DEPLOYMENT.md](docs/DEPLOY
 ## Code Exploration Policy
 
 SocratiCode is indexed on this repo (`.socraticodecontextartifacts.json` present). Its MCP tools are **deferred** — schemas load only after a `ToolSearch` prefetch. The SessionStart hook prints the prefetch query; run it before exploring.
+A second, daily health hook **reports only** — confirm with `codebase_status` before acting on it.
 
 **Negative rule.** For broad semantic questions ("where is X", "how does Y work", "what depends on Z"), use SocratiCode MCP tools first. Reach for `grep`/`ripgrep` only on exact strings (error messages, log lines, known symbols). Reserve the Explore subagent for path-pattern walks (e.g. "all `*.py` under `src/api/routes/`"), not semantic search.
 
@@ -50,7 +51,7 @@ The exe.dev proxy forwards 3000–9999; dev server at `https://watcher.exe.xyz:8
 
 **Single process is load-bearing.** One uvicorn process runs everything — API, embedded Procrastinate worker, `content.blobs` fact consumer, cache sweeper. **Never run `uvicorn --workers N` or a second worker unit against prod.** Why the fact consumer makes this load-bearing, and the escalation path that is *not built*: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) → *Single process*.
 
-**The bus.** Archiver operates the broker. Watcher publishes `content.fetch`, `content.fetch-policy`, `content.revisions`, `info.watch-status`; consumes `content.blobs` (single-member group `watcher`) and `info.registry` (**groupless**, replayed from `0-0` every boot). `WATCHER_BUS_REDIS_URL` unset → publish tasks skip loudly. Stream ownership, the fetch contracts, `info_source_id` on the wire: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+**The bus.** Archiver operates the broker; watcher publishes four streams and consumes two — `content.blobs` (single-member group `watcher`) and `info.registry` (**groupless**, replayed from `0-0` every boot). `WATCHER_BUS_REDIS_URL` unset → publish tasks skip loudly. Stream inventory and ownership, the fetch contracts, `info_source_id` on the wire: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) → *Redis and the bus*.
 
 ## Server Lifecycle
 
@@ -64,7 +65,7 @@ Dev server (port 8001, leaves prod alone):
 bash scripts/dev_server.sh
 ```
 
-**Never launch uvicorn by hand with the prod env loaded** — it would share the prod DB and run a second worker on the prod queue (#233). The script refuses any DB whose name lacks a `_test`/`_dev` suffix; `src/core/db_safety.py` enforces the same in-app. Full rationale: [docs/COMMANDS.md](docs/COMMANDS.md) → *Development*.
+**Never launch uvicorn by hand with the prod env loaded** — it shares the prod DB and runs a second worker on the prod queue (#233). `scripts/dev_server.sh` and `src/core/db_safety.py` both refuse any DB whose name lacks a `_test`/`_dev` suffix. Full rationale: [docs/COMMANDS.md](docs/COMMANDS.md) → *Development*.
 
 **Archiver owns the canonical registry**; watcher consumes it over the bus and makes **no HTTP calls to Archiver at all** — re-adding an SDK is a design regression. Don't add Archiver code to this repo: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) → *Sibling services*.
 
@@ -112,25 +113,24 @@ table, its `/watches*` routes, the override resolution chain and the per-Watch
 notification tier — is gone. The user-facing noun is "Watched
 Item".
 
-**The `info.registry` reconcile is the creation path** — it creates from an announcement alone, so a cold start converges from the snapshot. `POST /api/v1/watched-items` still works but has had no caller since archiver#158 (2026-08-17). `source_specs` is required and non-empty there (#260); the reconcile is not gated, so a spec-less item stays reachable over the wire and raises `ExtractionError` at pipeline time rather than silently watching the whole page. `WatchedItem.domain_name` == `Domain.name` == `hostname(effective_url)`; one entry per hostname, so host variants are independent by design.
+**The `info.registry` reconcile is the creation path**, and the registry owns
+cadence and active state while Watcher owns mechanism (#254): an announcement is
+authoritative for a named set of columns, everything else survives reconciliation,
+and **a local pause is not sticky** — item-level pause lives in Archiver's
+dashboard alone, and every announcement-owned field 409s locally on a reconciled
+item. `POST /api/v1/watched-items` still works but has had no caller since
+archiver#158. What each 409 is, the authoritative column list, schedule
+resolution, domain keying: [docs/WATCHED-ITEMS.md](docs/WATCHED-ITEMS.md).
 
-**The registry owns cadence and active state; Watcher owns mechanism (#254).** An announcement is authoritative for exactly five columns (`archiver_info_source_id`, `effective_url`, `source_specs`, `announced_schedule_config`, `is_active`) plus `domain_name`; everything else survives reconciliation. **A local pause is not sticky**: item-level pause lives in Archiver's dashboard alone, and on a reconciled item every announcement-owned field 409s locally. Schedule resolution is four tiers under a floor. What each 409 is, what restore does and doesn't do, how the floor is released: [docs/WATCHED-ITEMS.md](docs/WATCHED-ITEMS.md) → *Registry reconciliation*.
-
-**Empty extraction is a failure, not a change (#258).** When every `source_spec`
-yields empty chunks, `process_watched_item` raises `ExtractionError` and writes
-nothing — unconditionally, on both sides of a baseline. Rationale, and the six
-provenance columns the outbox gained for `source_revision_observed` (#253):
+**Empty extraction is a failure, not a change (#258).** Every `source_spec`
+yielding empty chunks raises `ExtractionError` and writes nothing —
+unconditionally, on both sides of a baseline:
 **[docs/CONTENT-PIPELINE.md](docs/CONTENT-PIPELINE.md)**.
 
-**Conditional GET is gated and item-scoped (#269).** Watcher replays each item's
-stored `etag`/`last_modified`, but only for items named in
-`WATCHER_CONDITIONAL_GET_ENABLED` (unset → off, byte-identical to the pre-#269
-command). A 304 inherits the last fingerprint, so a spec/URL/extractor change
-must invalidate the pair: [docs/CONDITIONAL-GET.md](docs/CONDITIONAL-GET.md).
-Never route `invalid_request_options` past the validator clear — the refusal
-precedes the request, so a bad stored value wedges the item permanently. An unreadable
-blob's re-issue is capped for a related reason — it bypasses the scheduling
-gate (#275): [docs/CONTENT-PIPELINE.md](docs/CONTENT-PIPELINE.md).
+**Conditional GET is gated and item-scoped (#269)** — off unless the item is
+named in `WATCHER_CONDITIONAL_GET_ENABLED`, and a 304 inherits the last
+fingerprint, so a spec/URL/extractor change must invalidate the stored pair:
+[docs/CONDITIONAL-GET.md](docs/CONDITIONAL-GET.md).
 
 **Notifications.** One `notification_templates` table; a row's `visibility` —
 `global` / `domain` / `watched_item` — decides where it fires. **Bodies are
@@ -155,7 +155,7 @@ logger = get_logger(__name__)
 ```
 Entry points only: call `configure_logging()` once.
 
-Records are JSON with a four-key floor — `timestamp`/`level`/`logger`/`message` — pinned by `tests/core/test_logging.py`; don't rename or drop a key without updating both. uvicorn's own loggers need `--log-config src/core/log_config.json` (both sanctioned launch paths already pass it) plus the `strip_color_message` filter. Both: [docs/CONVENTIONS.md](docs/CONVENTIONS.md).
+Records are JSON with a four-key floor — `timestamp`/`level`/`logger`/`message` — pinned by `tests/core/test_logging.py`. The floor, and why uvicorn's own loggers need `--log-config` plus a filter: [docs/CONVENTIONS.md](docs/CONVENTIONS.md).
 
 **Date & Time:** All UTC. ISO 8601: `YYYY-MM-DDTHH:MM:SS.ffffffZ` (timestamps), `YYYY-MM-DD` (dates).
 

@@ -27,6 +27,10 @@ from src.core.bus import (
 from src.core.database import get_session_factory
 from src.core.db_safety import ProductionDatabaseRefused, assert_environment_db_allowed
 from src.core.logging import configure_logging, get_logger
+from src.core.notifier_client import (
+    NotifierNotEnabled,
+    assert_environment_notifier_allowed,
+)
 from src.dashboard import register_dashboard
 
 # Worker imports are safe at module top: src.workers.__init__ defers task-module
@@ -51,10 +55,11 @@ async def lifespan(application: FastAPI):
     refused process never starts the consumer or the worker.
 
     Refuses the same way for a bus URL held without WATCHER_BUS_ENABLED=1
-    (#262). The enforcement point is here rather than at import of
-    src.core.bus: an import-time check would abort alembic, everything under
-    scripts/, and anything else that transitively imports the module —
-    including the tooling used to deploy the fix.
+    (#262), and for a notifier URL held without NOTIFIER_ENABLED=1 (#277). The
+    enforcement point is here rather than at import of src.core.bus or
+    src.core.notifier_client: an import-time check would abort alembic,
+    everything under scripts/, and anything else that transitively imports the
+    module — including the tooling used to deploy the fix.
 
     Nothing to pre-warm since #254: the Archiver SDK went with Watcher's last
     outbound call to Archiver, so there is no client to build, no
@@ -63,7 +68,8 @@ async def lifespan(application: FastAPI):
     try:
         assert_environment_db_allowed(os.environ)
         assert_environment_bus_allowed(os.environ)
-    except (ProductionDatabaseRefused, BusNotEnabled) as e:
+        assert_environment_notifier_allowed(os.environ)
+    except (ProductionDatabaseRefused, BusNotEnabled, NotifierNotEnabled) as e:
         # Log before re-raising: under systemd the bare exception surfaces in
         # journalctl as a lifespan traceback, burying the actionable text.
         logger.critical("Refusing to start: %s", e)

@@ -101,6 +101,21 @@ def test_repo_unit_declares_the_bus_opt_in() -> None:
     assert "Environment=WATCHER_BUS_ENABLED=1" in text
 
 
+def test_repo_unit_declares_the_notifier_opt_in() -> None:
+    """#277: the notifier gate is unit-only, for the same reason as the other two.
+
+    ``NOTIFIER_BASE_URL`` and ``NOTIFIER_API_KEY`` live in ``/etc/watcher/.env``,
+    so every process that sources it inherits the production tenant's
+    credentials. The flag is what separates the service from a pytest run, a
+    hand-run dev server, a script or a REPL — and it only works if no env file
+    carries it. Without this line the service starts and refuses to notify,
+    which is why ``src/core/notifier_client`` also makes the URL-without-flag
+    combination a startup failure rather than a silent one.
+    """
+    text = REPO_UNIT.read_text()
+    assert "Environment=NOTIFIER_ENABLED=1" in text
+
+
 def test_repo_unit_treats_sigterm_exit_as_success() -> None:
     """#256: a graceful stop must not read as a failure.
 

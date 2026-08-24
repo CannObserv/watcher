@@ -37,8 +37,16 @@ class TestGetNotifierClient:
             get_notifier_client()
 
     def test_returns_client_when_env_set(self, monkeypatch):
+        """Both variables AND the opt-in — a URL is not permission (#277).
+
+        The opt-in is what this test gained: before it, two variables inherited
+        from /etc/watcher/.env were enough to build a client that dispatched to
+        the production tenant. The gate itself is pinned in
+        tests/test_notifier_isolation.py.
+        """
         monkeypatch.setenv("NOTIFIER_BASE_URL", "http://localhost:9000")
         monkeypatch.setenv("NOTIFIER_API_KEY", "nk_test")
+        monkeypatch.setenv("NOTIFIER_ENABLED", "1")
 
         client = get_notifier_client()
         assert isinstance(client, NotifierClient)

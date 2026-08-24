@@ -88,6 +88,8 @@ source scripts/load-env.sh
 
 **Naming rule for new variables.** Anything naming a shared external resource takes a **service-prefixed** name with a separate dev key (`WATCHER_BUS_REDIS_URL` / `WATCHER_DEV_BUS_REDIS_URL`). A bare `REDIS_URL` is silently inherited from `/etc/watcher/.env` — the #233 hazard in env-var form: [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) → *Environment Variables*.
 
+**A URL is configuration, not permission.** Three unit-only opt-ins gate the production resources — `WATCHER_ALLOW_PRODUCTION_DB` (#233), `WATCHER_BUS_ENABLED` (#262), `NOTIFIER_ENABLED` (#277). Never put one in an env file; a URL held without its flag aborts startup. `scripts/dev_server.sh` and `tests/conftest.py` clear what they did not set.
+
 ## Common Commands
 
 ```bash

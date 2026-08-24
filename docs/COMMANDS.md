@@ -74,7 +74,9 @@ sudo systemctl daemon-reload && sudo systemctl restart watcher
 bash scripts/dev_server.sh
 
 # Knobs: WATCHER_DEV_PORT (default 8001; 8000 refused — it belongs to
-# systemd), WATCHER_DEV_DATABASE_URL, WATCHER_DEV_SKIP_MIGRATE=1
+# systemd), WATCHER_DEV_DATABASE_URL, WATCHER_DEV_SKIP_MIGRATE=1,
+# WATCHER_DEV_BUS_REDIS_URL, WATCHER_DEV_NOTIFIER_BASE_URL +
+# WATCHER_DEV_NOTIFIER_API_KEY (both or neither)
 ```
 
 Never launch uvicorn by hand with the prod env loaded — `/etc/watcher/.env`
@@ -85,6 +87,16 @@ the rate-limiter budget (#233). The script targets `TEST_DATABASE_URL` (or
 lacks a `_test`/`_dev` suffix. The same rule is enforced in-app by
 `src/core/db_safety.py`; only `deploy/watcher.service` opts into prod via
 `WATCHER_ALLOW_PRODUCTION_DB=1` (in the unit, never an env file).
+
+The database is not the only production resource an env file hands out. The
+script clears an inherited `WATCHER_BUS_REDIS_URL` (#262) and an inherited
+`NOTIFIER_BASE_URL`/`NOTIFIER_API_KEY` (#277) unless a scratch replacement is
+named, because a dev server runs the embedded worker against a real check
+pipeline — so an inherited notifier key delivers real notifications to real
+subscribers as the production tenant, and succeeds, leaving no error behind.
+Each resource has a unit-only opt-in flag; a URL held without its flag aborts
+startup rather than going quiet. See [DEPLOYMENT.md](DEPLOYMENT.md) →
+*Environment Variables*.
 
 Both sanctioned launch paths (`scripts/dev_server.sh` and the systemd
 `ExecStart`) pass `--log-config src/core/log_config.json` so uvicorn's own

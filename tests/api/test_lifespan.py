@@ -11,6 +11,11 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from src.core.bus import BUS_ENABLED_ENV, BUS_REDIS_URL_ENV, BusNotEnabled
+from src.core.notifier_client import (
+    NOTIFIER_BASE_URL_ENV,
+    NOTIFIER_ENABLED_ENV,
+    NotifierNotEnabled,
+)
 
 
 @pytest.mark.asyncio
@@ -174,3 +179,39 @@ async def test_lifespan_accepts_a_bus_url_with_the_opt_in(monkeypatch):
 
         async with lifespan(MagicMock()):
             pass
+
+
+@pytest.mark.asyncio
+async def test_lifespan_refuses_a_notifier_url_without_the_opt_in(monkeypatch, caplog):
+    """#277: ``NOTIFIER_BASE_URL`` set and ``NOTIFIER_ENABLED`` absent aborts.
+
+    Third of the three startup gates, and the reason the loud half exists here
+    rather than only in the client: a notifier URL held without the opt-in means
+    either a service that lost its flag — which would otherwise stop notifying
+    with nothing but a per-dispatch error to say so — or a process that should
+    never have had the URL. Both are misconfigurations, so neither gets to serve.
+
+    Deliberately sets the variable ``tests/conftest.py`` clears at import.
+    Without that, nothing in the suite reaches this branch and the flag's first
+    exercise would be a production restart.
+    """
+    monkeypatch.setenv(NOTIFIER_BASE_URL_ENV, "http://localhost:9000")
+    monkeypatch.delenv(NOTIFIER_ENABLED_ENV, raising=False)
+
+    with (
+        patch("src.api.main.get_app") as get_app,
+        patch("src.api.main.get_shared_bus_client") as get_client,
+    ):
+        from src.api.main import lifespan
+
+        with caplog.at_level("CRITICAL", logger="src.api.main"):
+            with pytest.raises(NotifierNotEnabled):
+                async with lifespan(MagicMock()):
+                    pass
+
+    # Same ordering guarantee as the two gates beside it: the refusal precedes
+    # every resource, so a refused process never joins the consumer group or
+    # opens the worker.
+    get_client.assert_not_called()
+    get_app.assert_not_called()
+    assert any(NOTIFIER_ENABLED_ENV in r.getMessage() for r in caplog.records)

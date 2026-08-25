@@ -49,3 +49,26 @@ duplicate :: Records are JSON with a four-key floor — `timestamp`/`level`/`log
 # this same change, not dropped.
 duplicate :: **The `info.registry` reconcile is the creation path** — it creates from an announcement alone
 duplicate :: **The registry owns cadence and active state; Watcher owns mechanism (#254).** An announcement is authoritative for exactly five columns
+
+# --- #278 CR round 2: Environment Files -> docs/ENVIRONMENT.md ---------------
+# The notifier-credential paragraph was tightened to the rule alone; every
+# dropped detail was grepped in the destination before warranting, per the
+# header of this file. docs/ENVIRONMENT.md carries "600 root:root", the
+# load-env.sh exemption, "unreadable as `exedev`", the ~1289 delivered
+# notifications, "Slack and Mailgun", and both WATCHER_DEV_NOTIFIER_* names.
+# The surviving inline text keeps the rule and points at that doc.
+duplicate :: A third file, `/etc/watcher/notifier.env` (600 root:root), holds
+duplicate :: `WATCHER_NOTIFIER_BASE_URL` + `WATCHER_NOTIFIER_API_KEY` and is loaded by
+duplicate :: `deploy/watcher.service` alone — never by `load-env.sh`, and unreadable as
+duplicate :: `exedev`. **Do not source it, copy it, or re-add those two variables to a shared
+duplicate :: env file** (#278): the gate below stops an inherited credential being *used*, but
+duplicate :: ~1289 watcher fixture notifications had already been delivered on it to
+duplicate :: production Slack and Mailgun, and a credential nothing holds cannot be spent.
+duplicate :: Non-production runs use notifier's development tenant via
+duplicate :: `WATCHER_DEV_NOTIFIER_BASE_URL` / `WATCHER_DEV_NOTIFIER_API_KEY` in `.env`.
+
+# The two pointers below named docs/DEPLOYMENT.md → *Environment Variables*,
+# which this same run moved to docs/ENVIRONMENT.md. The corrected lines are in
+# AGENTS.md verbatim apart from the new target.
+retarget :: **Naming rule for new variables.** Anything naming a shared external resource takes a **service-prefixed** name with a separate dev key (`WATCHER_BUS_REDIS_URL`
+retarget :: - [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) — systemd units, environment variables, wheelhouse auth

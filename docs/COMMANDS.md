@@ -95,8 +95,8 @@ named, because a dev server runs the embedded worker against a real check
 pipeline — so an inherited notifier key delivers real notifications to real
 subscribers as the production tenant, and succeeds, leaving no error behind.
 Each resource has a unit-only opt-in flag; a URL held without its flag aborts
-startup rather than going quiet. See [DEPLOYMENT.md](DEPLOYMENT.md) →
-*Environment Variables*.
+startup rather than going quiet. See
+[ENVIRONMENT.md](ENVIRONMENT.md) → *Environment Variables*.
 
 Both sanctioned launch paths (`scripts/dev_server.sh` and the systemd
 `ExecStart`) pass `--log-config src/core/log_config.json` so uvicorn's own

@@ -80,15 +80,7 @@ Two env files load in order (later overrides earlier):
 1. `/etc/watcher/.env` — production secrets (`DATABASE_URL`, `GOOGLE_APPLICATION_CREDENTIALS`). Persistent, managed manually on the VM.
 2. `.env` (repo root, git-ignored) — dev/agent secrets (`GH_TOKEN`, `TEST_DATABASE_URL`). Never commit.
 
-A third file, `/etc/watcher/notifier.env` (600 root:root), holds
-`WATCHER_NOTIFIER_BASE_URL` + `WATCHER_NOTIFIER_API_KEY` and is loaded by
-`deploy/watcher.service` alone — never by `load-env.sh`, and unreadable as
-`exedev`. **Do not source it, copy it, or re-add those two variables to a shared
-env file** (#278): the gate below stops an inherited credential being *used*, but
-~1289 watcher fixture notifications had already been delivered on it to
-production Slack and Mailgun, and a credential nothing holds cannot be spent.
-Non-production runs use notifier's development tenant via
-`WATCHER_DEV_NOTIFIER_BASE_URL` / `WATCHER_DEV_NOTIFIER_API_KEY` in `.env`.
+Plus `/etc/watcher/notifier.env` (600 root:root, `WATCHER_NOTIFIER_BASE_URL` + `WATCHER_NOTIFIER_API_KEY`): `deploy/watcher.service` loads it, nothing else reads it. **Never source, copy, or re-add those names to a shared env file** (#278) — a backup beside the original counts. Non-production runs use notifier's dev tenant via `WATCHER_DEV_NOTIFIER_*`.
 
 Load both for shell commands (pytest, psql, gh):
 
@@ -96,7 +88,7 @@ Load both for shell commands (pytest, psql, gh):
 source scripts/load-env.sh
 ```
 
-**Naming rule for new variables.** Anything naming a shared external resource takes a **service-prefixed** name with a separate dev key (`WATCHER_BUS_REDIS_URL` / `WATCHER_DEV_BUS_REDIS_URL`). A bare `REDIS_URL` is silently inherited from `/etc/watcher/.env` — the #233 hazard in env-var form: [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) → *Environment Variables*.
+**Naming rule for new variables.** Anything naming a shared external resource takes a **service-prefixed** name with a separate dev key (`WATCHER_BUS_REDIS_URL` / `WATCHER_DEV_BUS_REDIS_URL`). A bare `REDIS_URL` is silently inherited from `/etc/watcher/.env` — the #233 hazard in env-var form: [docs/ENVIRONMENT.md](docs/ENVIRONMENT.md) → *Environment Variables*.
 
 **A URL is configuration, not permission.** Three unit-only opt-ins gate the production resources — `WATCHER_ALLOW_PRODUCTION_DB` (#233), `WATCHER_BUS_ENABLED` (#262), `WATCHER_NOTIFIER_ENABLED` (#277). Never put one in an env file; a URL held without its flag aborts startup — and for the notifier, so does the **flag held without a URL**, which means the unit lost `/etc/watcher/notifier.env` (#278). `scripts/dev_server.sh` and `tests/conftest.py` clear what they did not set.
 
@@ -210,7 +202,8 @@ Cross-project search to the sister `notifier` index requires a per-instance `.cl
 - [docs/CONTENT-PIPELINE.md](docs/CONTENT-PIPELINE.md) — fetch → extract → fingerprint, the fetch-command outbox, the revisions producer
 - [docs/CONDITIONAL-GET.md](docs/CONDITIONAL-GET.md) — #269 validators: gate, snapshot, invalidation
 - [docs/CONVENTIONS.md](docs/CONVENTIONS.md) — logging configuration, ULID error handling, DB-trigger rules
-- [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) — systemd units, environment variables, wheelhouse auth
+- [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) — systemd units, the install runbook, timers, wheelhouse auth
+- [docs/ENVIRONMENT.md](docs/ENVIRONMENT.md) — every env file and variable, load order, the unit-only credentials
 - [docs/MIGRATIONS.md](docs/MIGRATIONS.md) — the manual upgrade step, the two-role grant model, one-time orderings
 - [docs/SKILLS.md](docs/SKILLS.md) — skill triggers, vendored skill repos, SocratiCode workflow
 - [docs/STYLE.md](docs/STYLE.md) — the design system: brand, color, dark mode, tokens, layout, touch targets, accessibility

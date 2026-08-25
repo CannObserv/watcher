@@ -5,8 +5,8 @@ in which order, and which values a non-production launch path must never
 inherit.
 
 Split out of [DEPLOYMENT.md](DEPLOYMENT.md) — where install, systemd, timers
-and the wheelhouse still live — when the two sections below reached 54% of
-that document and pushed it past its budget.
+and the wheelhouse still live — when the two sections below reached 54% of a
+document already over its budget.
 
 ## Environment Files
 

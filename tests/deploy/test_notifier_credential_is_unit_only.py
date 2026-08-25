@@ -20,7 +20,8 @@ three opt-in flags, applied to the secret itself. ``scripts/load-env.sh`` does
 not know the path, so no shell inherits it.
 
 The on-host assertions skip on any machine that does not run the service, the
-same way ``test_installed_unit_matches_repo`` does.
+same way ``test_installed_unit_matches_repo`` does. The repo ``.env`` check is
+deliberately *not* one of them — it guards a file that travels with the clone.
 """
 
 import stat
@@ -43,14 +44,6 @@ SHARED_ENV_FILE = Path("/etc/watcher/.env")
 #: a path that no longer exists (silent), so the guard and the message share one
 #: source.
 NOTIFIER_ENV_FILE = Path(NOTIFIER_ENV_FILE_PATH)
-
-#: Every file a shell can pick the credential up from. ``scripts/load-env.sh``
-#: exports the first two in order; the glob catches the third case, which is not
-#: hypothetical — #278's own fix took a ``cp -a`` backup of the shared file
-#: before editing it, and ``cp -a`` preserved ``640 root:exedev``, so the
-#: production key was readable by every agent on the VM again within a minute of
-#: being removed from it (CR-1).
-SHARED_ENV_GLOB = ".env*"
 
 #: The two variables that together make a dispatch deliverable.
 NOTIFIER_CREDENTIAL_VARS = ("WATCHER_NOTIFIER_BASE_URL", "WATCHER_NOTIFIER_API_KEY")
@@ -120,6 +113,72 @@ def test_load_env_does_not_reach_the_notifier_env_file() -> None:
     assert str(NOTIFIER_ENV_FILE) not in LOAD_ENV.read_text()
 
 
+def _credential_candidates(system_dir: Path, repo_env: Path) -> list[Path]:
+    """Every regular file a shell could read the credential out of.
+
+    The whole directory, not a ``.env*`` glob (CR-9). The glob matched the shape
+    that prompted CR-1 — a ``.env.bak-*`` beside the shared file — and missed the
+    likelier one: ``notifier.env.bak`` is what a copy of the *credential file
+    itself* gets called, and it does not start with ``.env``. A planted one at
+    mode 644 holding the real key passed the guard. Scanning the directory costs
+    nothing (five files here) and needs no prediction about what a backup will be
+    named.
+
+    Directories are dropped rather than read (CR-13): ``read_text()`` on one
+    raises ``IsADirectoryError``, which would error the guard instead of skipping
+    an entry that cannot hold an assignment anyway.
+
+    ``NOTIFIER_ENV_FILE`` is excluded by resolved path — it is the one file that
+    is *supposed* to define the pair.
+    """
+    candidates = (
+        [path for path in sorted(system_dir.iterdir()) if path.is_file()]
+        if system_dir.is_dir()
+        else []
+    )
+    if repo_env.is_file():
+        candidates.append(repo_env)
+    return [path for path in candidates if path.resolve() != NOTIFIER_ENV_FILE.resolve()]
+
+
+class TestCredentialCandidates:
+    """The candidate set is the guard's real contract, so it is tested directly.
+
+    The sweep below can only ever assert about this host's live files, which are
+    (correctly) clean — so on a green VM it exercises no selection logic at all.
+    These pin the selection itself against a fixture, which is how CR-9's hole
+    would have been caught the first time.
+    """
+
+    def test_a_backup_of_the_credential_file_is_a_candidate(self, tmp_path) -> None:
+        """The CR-9 hole: ``notifier.env.bak`` does not match ``.env*``."""
+        (tmp_path / "notifier.env.bak").write_text("WATCHER_NOTIFIER_API_KEY=nk_x\n")
+        names = [p.name for p in _credential_candidates(tmp_path, tmp_path / "absent")]
+        assert "notifier.env.bak" in names
+
+    def test_the_credential_file_itself_is_not_a_candidate(self) -> None:
+        candidates = _credential_candidates(NOTIFIER_ENV_FILE.parent, REPO_ROOT / ".env")
+        assert NOTIFIER_ENV_FILE.resolve() not in [p.resolve() for p in candidates]
+
+    def test_directories_are_skipped(self, tmp_path) -> None:
+        """CR-13: a directory would raise IsADirectoryError, not read as clean."""
+        (tmp_path / ".env.d").mkdir()
+        (tmp_path / ".env").write_text("DATABASE_URL=x\n")
+        names = [p.name for p in _credential_candidates(tmp_path, tmp_path / "absent")]
+        assert names == [".env"]
+
+    def test_the_repo_env_file_joins_the_system_directory(self, tmp_path) -> None:
+        repo_env = tmp_path / "repo.env"
+        repo_env.write_text("GH_TOKEN=x\n")
+        (tmp_path / "system").mkdir()
+        assert _credential_candidates(tmp_path / "system", repo_env) == [repo_env]
+
+    def test_a_missing_system_directory_yields_only_the_repo_file(self, tmp_path) -> None:
+        repo_env = tmp_path / "repo.env"
+        repo_env.write_text("GH_TOKEN=x\n")
+        assert _credential_candidates(tmp_path / "nope", repo_env) == [repo_env]
+
+
 def _credential_offenders(path: Path) -> list[str]:
     """Return the credential variables ``path`` defines, or [] if unreadable.
 
@@ -134,44 +193,59 @@ def _credential_offenders(path: Path) -> list[str]:
         return []
 
 
-def test_no_shell_readable_env_file_carries_the_notifier_credential() -> None:
-    """The on-host half: nothing a shell can read may define the pair.
+def _offender_report(candidates: list[Path]) -> str:
+    """Render the files that define the credential, by name and never by value."""
+    offenders = {str(path): found for path in candidates if (found := _credential_offenders(path))}
+    if not offenders:
+        return ""
+    return (
+        "these shell-readable files define the production notifier credential: "
+        + "; ".join(f"{path} → {', '.join(names)}" for path, names in sorted(offenders.items()))
+        + f". Anything readable as `exedev` is held by every agent, suite and REPL. "
+        f"The pair belongs in {NOTIFIER_ENV_FILE} and nowhere else; a backup taken "
+        "while editing counts, and must be shredded rather than left beside the file "
+        "it copied. (#278)"
+    )
 
-    Asserted against the *live* files rather than a fixture, because they are
+
+def test_no_file_in_the_system_env_directory_carries_the_notifier_credential() -> None:
+    """The on-host half: nothing beside the credential file may define the pair.
+
+    Asserted against the *live* directory rather than a fixture, because it is
     hand-managed on the VM — a repo-side check would pass while the real one
     still handed out the key, which is how #278 happened in the first place.
 
-    Three surfaces, not one (CR-1, CR-5):
+    Two surfaces here (CR-1, CR-5), and the repo ``.env`` is the third, split
+    into its own test below so it is not skipped off-VM:
 
     * ``/etc/watcher/.env`` — exported by ``scripts/load-env.sh``.
-    * its ``.env*`` siblings — a ``.env.bak`` from an edit is not sourced by
-      anything, but ``cp -a`` preserves ``640 root:exedev``, so any agent can
-      simply read it. #278's own fix left one for four minutes.
-    * the repo ``.env`` — the *second* file ``load-env.sh`` exports, and an
-      ``EnvironmentFile=`` in the unit besides. Dropping the key there to debug
-      a dispatch re-arms #278 exactly, and the original guard stayed green.
+    * every sibling beside it — a backup from an edit is sourced by nothing, but
+      ``cp -a`` preserves ``640 root:exedev``, so any agent can simply read it.
+      #278's own fix left one for four minutes.
     """
     if not SHARED_ENV_FILE.exists():
         pytest.skip(f"{SHARED_ENV_FILE} not present — not a host running the service")
 
-    candidates = sorted(SHARED_ENV_FILE.parent.glob(SHARED_ENV_GLOB))
-    repo_env = REPO_ROOT / ".env"
-    if repo_env.is_file():
-        candidates.append(repo_env)
+    report = _offender_report(_credential_candidates(SHARED_ENV_FILE.parent, Path("/nonexistent")))
+    assert not report, report
 
-    offenders = {
-        str(path): found
-        for path in candidates
-        if path.resolve() != NOTIFIER_ENV_FILE.resolve() and (found := _credential_offenders(path))
-    }
-    assert not offenders, (
-        "these shell-readable files define the production notifier credential: "
-        + "; ".join(f"{path} → {', '.join(names)}" for path, names in sorted(offenders.items()))
-        + f". Anything readable as `exedev` is held by every agent, suite and REPL on "
-        f"this host. The pair belongs in {NOTIFIER_ENV_FILE} and nowhere else; a "
-        "backup taken while editing counts, and must be shredded rather than left "
-        "beside the file it copied. (#278)"
-    )
+
+def test_the_repo_env_file_does_not_carry_the_notifier_credential() -> None:
+    """The repo half, which must run wherever the file does (CR-10).
+
+    ``.env`` is the *second* file ``load-env.sh`` exports and an
+    ``EnvironmentFile=`` in the unit besides, so a key pasted there to debug a
+    dispatch re-arms #278 exactly. It is also a repo-level surface: tying its
+    check to ``/etc/watcher/.env``'s existence — as the combined sweep did —
+    made it inert on every clone that is not this VM, which is precisely where
+    someone edits ``.env`` without a production service to think about.
+    """
+    repo_env = REPO_ROOT / ".env"
+    if not repo_env.is_file():
+        pytest.skip(f"{repo_env} not present — nothing to check")
+
+    report = _offender_report([repo_env])
+    assert not report, report
 
 
 def test_notifier_env_file_is_readable_only_by_root() -> None:

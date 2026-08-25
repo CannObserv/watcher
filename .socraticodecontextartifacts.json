@@ -23,7 +23,12 @@
     {
       "name": "deployment-doc",
       "path": "./docs/DEPLOYMENT.md",
-      "description": "Production deployment guide. Systemd unit (watcher.service), port allocation (8000 live, 8001 dev), exe.dev proxy, restart procedure, env file layout (/etc/watcher/.env + repo .env)."
+      "description": "Production deployment guide. Systemd unit (watcher.service), port allocation (8000 live, 8001 dev), exe.dev proxy, restart procedure, install runbook, the disk-cleanup timer, Archiver sync and the cannobserv wheelhouse. Env files and variables moved to docs/ENVIRONMENT.md (#278)."
+    },
+    {
+      "name": "environment-doc",
+      "path": "./docs/ENVIRONMENT.md",
+      "description": "Every env file and variable that configures a Watcher process, and the load order systemd and scripts/load-env.sh apply. Carries the three unit-only opt-in flags (WATCHER_ALLOW_PRODUCTION_DB #233, WATCHER_BUS_ENABLED #262, WATCHER_NOTIFIER_ENABLED #277), the unit-only /etc/watcher/notifier.env credential file and why it is separate (#278), the WATCHER_DEV_* scratch overrides scripts/dev_server.sh reads, and the retired/renamed variable history."
     },
     {
       "name": "skills-doc",

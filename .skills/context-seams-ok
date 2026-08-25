@@ -62,3 +62,29 @@ docs/MIGRATIONS.md :: Restart-before-migrate — one-time, `f4a8b26c9d31` (#261)
 docs/MIGRATIONS.md :: Restart-before-migrate — one-time, `10783d8a2405` (#272)
 docs/MIGRATIONS.md :: Drop the dead `information` schema — applied 2026-08-18 (#271)
 docs/SKILLS.md :: `AGENTS.md` states the rule too, in one clause under *Code Exploration
+
+# --- Judged 2026-08-25 during the #278 CR round-2 curation, which split
+# docs/DEPLOYMENT.md's configuration half out to docs/ENVIRONMENT.md.
+# Each back-reference below points at content that did NOT move: the
+# dead-letter query and the jq follow-recipe are both still in DEPLOYMENT.md
+# (verified by grep this run), and the third names the *Archiver repo's* file,
+# not ours.
+`docs/DEPLOYMENT.md` carries the query for dead-lettered rows — a flat backlog
+`docs/DEPLOYMENT.md` is written to survive them — bare `jq` aborts on the first
+See the Archiver repo's `docs/DEPLOYMENT.md` for the full Archiver install
+
+# The orientation line at the head of the new doc, naming what stayed behind —
+# the same routing signal as the back-references acknowledged above.
+Split out of [DEPLOYMENT.md](DEPLOYMENT.md) — where install, systemd, timers
+
+
+# source-back-reference: .socraticodecontextartifacts.json legitimately indexes
+# docs/DEPLOYMENT.md, which still exists. The split's real obligation was the
+# NEW doc — docs/ENVIRONMENT.md was added to that manifest this run, so the
+# configuration half stays in the SocratiCode index rather than falling out of it.
+      "path": "./docs/DEPLOYMENT.md",
+
+# moved-title: the sweep flags any mention of a title this run moved. This one
+# was retargeted in the same run and names the section at its new home
+# (ENVIRONMENT.md), so it points at the content rather than at where it used to be.
+[ENVIRONMENT.md](ENVIRONMENT.md) → *Environment Variables*.

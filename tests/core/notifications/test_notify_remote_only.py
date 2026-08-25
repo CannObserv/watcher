@@ -95,8 +95,8 @@ class TestRemoteOnlyDispatch:
         dispatch any longer.
         """
         monkeypatch.delenv("USE_REMOTE_NOTIFY", raising=False)
-        monkeypatch.setenv("NOTIFIER_BASE_URL", "http://localhost:9000")
-        monkeypatch.setenv("NOTIFIER_API_KEY", "nk_test")
+        monkeypatch.setenv("WATCHER_NOTIFIER_BASE_URL", "http://localhost:9000")
+        monkeypatch.setenv("WATCHER_NOTIFIER_API_KEY", "nk_test")
 
         remote_id = str(ULID())
         local_cfg = _fake_local_config(remote_channel_id=remote_id)
@@ -132,8 +132,8 @@ class TestRemoteOnlyDispatch:
         Pre-strip behaviour: log a warning and dispatch via local Apprise.
         Post-strip: log + record an unsuccessful audit result. No exception.
         """
-        monkeypatch.setenv("NOTIFIER_BASE_URL", "http://localhost:9000")
-        monkeypatch.setenv("NOTIFIER_API_KEY", "nk_test")
+        monkeypatch.setenv("WATCHER_NOTIFIER_BASE_URL", "http://localhost:9000")
+        monkeypatch.setenv("WATCHER_NOTIFIER_API_KEY", "nk_test")
 
         local_cfg = _fake_local_config(remote_channel_id=None)
         event = _make_event()

@@ -23,17 +23,17 @@ def _make_event(event_type=WatchEventType.CHANGE_DETECTED, *, metadata=None):
 
 class TestGetNotifierClient:
     def test_raises_when_base_url_missing(self, monkeypatch):
-        monkeypatch.delenv("NOTIFIER_BASE_URL", raising=False)
-        monkeypatch.setenv("NOTIFIER_API_KEY", "nk_test")
+        monkeypatch.delenv("WATCHER_NOTIFIER_BASE_URL", raising=False)
+        monkeypatch.setenv("WATCHER_NOTIFIER_API_KEY", "nk_test")
 
-        with pytest.raises(RuntimeError, match="NOTIFIER_BASE_URL"):
+        with pytest.raises(RuntimeError, match="WATCHER_NOTIFIER_BASE_URL"):
             get_notifier_client()
 
     def test_raises_when_api_key_missing(self, monkeypatch):
-        monkeypatch.setenv("NOTIFIER_BASE_URL", "http://localhost:9000")
-        monkeypatch.delenv("NOTIFIER_API_KEY", raising=False)
+        monkeypatch.setenv("WATCHER_NOTIFIER_BASE_URL", "http://localhost:9000")
+        monkeypatch.delenv("WATCHER_NOTIFIER_API_KEY", raising=False)
 
-        with pytest.raises(RuntimeError, match="NOTIFIER_API_KEY"):
+        with pytest.raises(RuntimeError, match="WATCHER_NOTIFIER_API_KEY"):
             get_notifier_client()
 
     def test_returns_client_when_env_set(self, monkeypatch):
@@ -44,9 +44,9 @@ class TestGetNotifierClient:
         the production tenant. The gate itself is pinned in
         tests/test_notifier_isolation.py.
         """
-        monkeypatch.setenv("NOTIFIER_BASE_URL", "http://localhost:9000")
-        monkeypatch.setenv("NOTIFIER_API_KEY", "nk_test")
-        monkeypatch.setenv("NOTIFIER_ENABLED", "1")
+        monkeypatch.setenv("WATCHER_NOTIFIER_BASE_URL", "http://localhost:9000")
+        monkeypatch.setenv("WATCHER_NOTIFIER_API_KEY", "nk_test")
+        monkeypatch.setenv("WATCHER_NOTIFIER_ENABLED", "1")
 
         client = get_notifier_client()
         assert isinstance(client, NotifierClient)

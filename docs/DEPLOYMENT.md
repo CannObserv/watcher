@@ -37,9 +37,9 @@ pattern — see **Redis and the bus**.
 | `GH_TOKEN` | `.env` | no | GitHub personal access token |
 | `TEST_DATABASE_URL` | `.env` | no | PostgreSQL connection string for test database |
 | `BUILD_ID` | env | no | Git SHA for static asset cache-busting (default `"dev"`) |
-| `NOTIFIER_BASE_URL` | `/etc/watcher/.env` | **yes** | Base URL of the notifier service (e.g. `http://localhost:9000`). **Not sufficient on its own since #277** — see `NOTIFIER_ENABLED` |
-| `NOTIFIER_API_KEY` | `/etc/watcher/.env` | **yes** | Watcher tenant API key issued by `scripts/seed_tenant.py` in the notifier repo. This is the credential that makes a stray dispatch *deliverable*, which is why the pair is gated |
-| `NOTIFIER_ENABLED` | `deploy/watcher.service` **only** | prod only | `=1` opts this process into building a notifier client at all (`src/core/notifier_client/client.py`, #277). Without it `get_notifier_client()` raises `NotifierNotEnabled` — **and a URL held without it aborts startup**, so a unit that lost the line fails loudly instead of going quiet on notifications. Must live in the systemd unit, never an env file, for the same reason as the two flags above and with the largest blast radius of the three: a stray database row is recoverable and a stray bus frame is inert, but a stray notification is delivered to real subscribers, cannot be recalled, and *succeeds* — leaving no error behind to notice. `scripts/dev_server.sh` sets it for itself when `WATCHER_DEV_NOTIFIER_BASE_URL` names a scratch notifier |
+| `WATCHER_NOTIFIER_BASE_URL` | `/etc/watcher/.env` | **yes** | Base URL of the notifier service (e.g. `http://localhost:9000`). **Not sufficient on its own since #277** — see `WATCHER_NOTIFIER_ENABLED` |
+| `WATCHER_NOTIFIER_API_KEY` | `/etc/watcher/.env` | **yes** | Watcher tenant API key issued by `scripts/seed_tenant.py` in the notifier repo. This is the credential that makes a stray dispatch *deliverable*, which is why the pair is gated |
+| `WATCHER_NOTIFIER_ENABLED` | `deploy/watcher.service` **only** | prod only | `=1` opts this process into building a notifier client at all (`src/core/notifier_client/client.py`, #277). Without it `get_notifier_client()` raises `NotifierNotEnabled` — **and a URL held without it aborts startup**, so a unit that lost the line fails loudly instead of going quiet on notifications. Must live in the systemd unit, never an env file, for the same reason as the two flags above and with the largest blast radius of the three: a stray database row is recoverable and a stray bus frame is inert, but a stray notification is delivered to real subscribers, cannot be recalled, and *succeeds* — leaving no error behind to notice. `scripts/dev_server.sh` sets it for itself when `WATCHER_DEV_NOTIFIER_BASE_URL` names a scratch notifier |
 | `WATCHER_ALLOW_PRODUCTION_DB` | `deploy/watcher.service` **only** | prod only | `=1` opts into serving a database whose name lacks a `_test`/`_dev` suffix (`src/core/db_safety.py`, #233). Must live in the systemd unit, never an env file — env files are sourced by hand-run dev servers, which are exactly what the guard stops |
 | `WATCHER_DEV_DATABASE_URL` | `.env` | no | Persistent dev database for `scripts/dev_server.sh`; wins over `TEST_DATABASE_URL` |
 | `WATCHER_BUS_REDIS_URL` | `/etc/watcher/.env` | prod | Redis URL of the Archiver-operated broker (`redis://localhost:6379/0`) for the `content.fetch-policy` and `info.watch-status` producers (#245, #264). Unset → both periodic publish tasks skip with an ERROR log: Replicator paces every host at its own conservative default, and Archiver's watched-item panel / drift detector go stale. **Not sufficient on its own since #262** — see `WATCHER_BUS_ENABLED` |
@@ -53,8 +53,26 @@ pattern — see **Redis and the bus**.
 | `GCS_BLOB_CREDENTIALS` | env | for `gs://` blobs | Key file for the `co-gcs-blob-reader` SA (`/etc/watcher/co-gcs-blob-reader.json`), read by the `gs://` blob arm (#275). Singular `BLOB` — easy to typo as `BLOBS`. Deliberately **not** `GOOGLE_APPLICATION_CREDENTIALS`, which is the wheelhouse identity: reading fetched content and reading the private package index are different jobs and must not share a principal. Unset or unusable (missing file, malformed key) → every `gs://` blob fails permanently (`blob_unreadable`, no re-issues) until fixed; a rotated key at the same path needs a restart |
 | `WATCHER_FETCH_MAX_REISSUES` | env | no | Re-issues per fetch intent before it fails with ERROR health (default `3`). Caps the *lineage*, not one path: both the reaper's stall sweep and the blob-unreadable apply (#275) read the same `reissue_count` |
 | `WATCHER_DEV_BUS_REDIS_URL` | `.env` | no | Scratch-bus opt-in for `scripts/dev_server.sh`; without it the dev server **clears** an inherited `WATCHER_BUS_REDIS_URL` (and `WATCHER_BUS_ENABLED`) so it cannot publish policy onto the production stream. With it, the script exports both, since the flag is otherwise unit-only |
-| `WATCHER_DEV_NOTIFIER_BASE_URL` | `.env` | no | Scratch-notifier opt-in for `scripts/dev_server.sh`; without it the dev server **clears** an inherited `NOTIFIER_BASE_URL`, `NOTIFIER_API_KEY` and `NOTIFIER_ENABLED` so it cannot notify the production tenant (#277). Requires `WATCHER_DEV_NOTIFIER_API_KEY` beside it — a URL without its key refuses to start rather than fall back to the production credential |
+| `WATCHER_DEV_NOTIFIER_BASE_URL` | `.env` | no | Scratch-notifier opt-in for `scripts/dev_server.sh`; without it the dev server **clears** an inherited `WATCHER_NOTIFIER_BASE_URL`, `WATCHER_NOTIFIER_API_KEY` and `WATCHER_NOTIFIER_ENABLED` so it cannot notify the production tenant (#277). Requires `WATCHER_DEV_NOTIFIER_API_KEY` beside it — a URL without its key refuses to start rather than fall back to the production credential |
 | `WATCHER_DEV_NOTIFIER_API_KEY` | `.env` | no | The scratch notifier's tenant key. Required whenever `WATCHER_DEV_NOTIFIER_BASE_URL` is set; meaningless without it |
+
+**Retired variables.** Removed from `/etc/watcher/.env` under #277 after each
+was confirmed to have no reader in `src/`, `scripts/` or `tests/`. Historical
+plan documents under `docs/plans/` still describe them and are left as written
+— they are a record of what was true then, not instructions:
+
+| Variable | Retired because |
+|---|---|
+| `USE_REMOTE_NOTIFY` | The local Apprise path it switched between is gone; the remote path is the only path. `docs/plans/2026-05-02-notifier-adapter.md` still names it as a rollback lever — it is not one, and flipping it does nothing |
+| `ARCHIVER_BASE_URL` | Watcher makes no HTTP calls to Archiver since #254; the SDK went with them |
+| `ARCHIVER_API_KEY` | Same. Removing it from this file does not revoke it on Archiver's side — that needs an issue there |
+| `APPRISE_SECRET_KEY` | The Fernet key for encrypted Apprise URLs. Verified no ciphertext column survives in the schema before deletion |
+
+The notifier pair was **renamed** rather than retired in the same pass:
+`NOTIFIER_BASE_URL` → `WATCHER_NOTIFIER_BASE_URL`, `NOTIFIER_API_KEY` →
+`WATCHER_NOTIFIER_API_KEY`, bringing them under the service-prefix rule that
+`WATCHER_BUS_REDIS_URL` already followed. A bare `NOTIFIER_*` name in a shell
+today resolves to nothing.
 
 **Watcher's Redis use.** Archiver operates `redis-server` and owns the broker
 (archiver#109). Watcher publishes `content.fetch-policy` (#245) and — Phase 4,

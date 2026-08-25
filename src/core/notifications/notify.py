@@ -179,6 +179,16 @@ async def dispatch_event_notifications(
         return
 
     results = []
+    # Outside the per-candidate try below, deliberately (CR-6, #277): a client
+    # that cannot be built is a process-level misconfiguration, not a failed
+    # dispatch, so it must not be recorded as one per candidate. The two
+    # failure modes it raises — the "unset" RuntimeErrors and
+    # NotifierNotEnabled — are both unreachable in a correctly launched
+    # process: the lifespan gate refuses to start on a URL held without the
+    # opt-in, and refuses nothing when no URL is configured at all. If one ever
+    # does escape here it surfaces as a task failure, which is the honest
+    # signal; the two route call sites catch broad Exception for the same
+    # reason, since a 500 there would be less useful than a reason string.
     async with get_notifier_client() as notifier_client:
         for candidate in candidates:
             try:

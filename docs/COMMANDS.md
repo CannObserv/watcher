@@ -90,7 +90,7 @@ lacks a `_test`/`_dev` suffix. The same rule is enforced in-app by
 
 The database is not the only production resource an env file hands out. The
 script clears an inherited `WATCHER_BUS_REDIS_URL` (#262) and an inherited
-`NOTIFIER_BASE_URL`/`NOTIFIER_API_KEY` (#277) unless a scratch replacement is
+`WATCHER_NOTIFIER_BASE_URL`/`WATCHER_NOTIFIER_API_KEY` (#277) unless a scratch replacement is
 named, because a dev server runs the embedded worker against a real check
 pipeline — so an inherited notifier key delivers real notifications to real
 subscribers as the production tenant, and succeeds, leaving no error behind.

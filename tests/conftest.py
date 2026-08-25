@@ -122,14 +122,14 @@ os.environ.pop("WATCHER_BUS_REDIS_URL", None)
 os.environ.pop("WATCHER_DEV_BUS_REDIS_URL", None)
 
 # The same hazard again, and the one with the largest blast radius (#277):
-# /etc/watcher/.env carries NOTIFIER_BASE_URL and NOTIFIER_API_KEY, and
+# /etc/watcher/.env carries WATCHER_NOTIFIER_BASE_URL and WATCHER_NOTIFIER_API_KEY, and
 # AGENTS.md tells every agent to `source scripts/load-env.sh` before pytest. A
 # stray database row is recoverable and a stray bus frame is inert; a stray
 # notification is *delivered*, to real subscribers on real channels, and cannot
 # be recalled. Worse, it succeeds — so unlike the two above it leaves no error
 # behind to notice.
 #
-# Belt to the NOTIFIER_ENABLED gate's braces (src/core/notifier_client): the
+# Belt to the WATCHER_NOTIFIER_ENABLED gate's braces (src/core/notifier_client): the
 # gate holds for every launch path, this makes "no notifier" the default for
 # this one. Tests that want a client set both vars via monkeypatch.setenv,
 # which restores itself on teardown.
@@ -139,8 +139,8 @@ os.environ.pop("WATCHER_DEV_BUS_REDIS_URL", None)
 # switch that does not exist. See tests/test_notifier_isolation.py.
 #
 # At import, for the same reason as the four above, and never restored.
-os.environ.pop("NOTIFIER_BASE_URL", None)
-os.environ.pop("NOTIFIER_API_KEY", None)
+os.environ.pop("WATCHER_NOTIFIER_BASE_URL", None)
+os.environ.pop("WATCHER_NOTIFIER_API_KEY", None)
 
 
 def _make_mock_probe():

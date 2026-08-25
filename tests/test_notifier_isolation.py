@@ -3,7 +3,7 @@
 Third sibling of ``test_db_isolation`` and ``test_bus_isolation``, and the last
 outbound production credential to get a gate (#277).
 
-``/etc/watcher/.env`` carries ``NOTIFIER_BASE_URL`` and ``NOTIFIER_API_KEY``,
+``/etc/watcher/.env`` carries ``WATCHER_NOTIFIER_BASE_URL`` and ``WATCHER_NOTIFIER_API_KEY``,
 and AGENTS.md tells every agent to ``source scripts/load-env.sh`` before
 running pytest. Before this, ``get_notifier_client()`` read both straight from
 ``os.environ`` and raised only when they were *unset* — so a suite, a hand-run
@@ -16,7 +16,7 @@ Two mechanisms, deliberately, because they cover different things:
 * The **scrub** below makes "no notifier" the default for pytest specifically.
   A test that wants one sets the variables via ``monkeypatch.setenv``, which
   restores itself on teardown.
-* The **gate** (``NOTIFIER_ENABLED=1``) covers every other launch path at once,
+* The **gate** (``WATCHER_NOTIFIER_ENABLED=1``) covers every other launch path at once,
   which a scrub cannot: a scrub has to be written once per entry point, and
   nothing scrubs a ``python -c``, an agent shell, or ``scripts/*.py``.
 
@@ -27,13 +27,14 @@ scrub would never have covered.
 """
 
 import os
+import pathlib
 
 import pytest
 
 from src.core.notifier_client import (
-    NOTIFIER_API_KEY_ENV,
-    NOTIFIER_BASE_URL_ENV,
-    NOTIFIER_ENABLED_ENV,
+    WATCHER_NOTIFIER_API_KEY_ENV,
+    WATCHER_NOTIFIER_BASE_URL_ENV,
+    WATCHER_NOTIFIER_ENABLED_ENV,
     NotifierNotEnabled,
     assert_environment_notifier_allowed,
     get_notifier_client,
@@ -43,12 +44,12 @@ from src.core.notifier_client import (
 
 class TestNotifierIsolation:
     def test_notifier_env_is_cleared_for_the_session(self) -> None:
-        assert os.environ.get(NOTIFIER_BASE_URL_ENV) is None
-        assert os.environ.get(NOTIFIER_API_KEY_ENV) is None
+        assert os.environ.get(WATCHER_NOTIFIER_BASE_URL_ENV) is None
+        assert os.environ.get(WATCHER_NOTIFIER_API_KEY_ENV) is None
 
     def test_client_construction_raises_rather_than_connecting(self) -> None:
         """The path any unpatched test takes: a refusal, not a dispatch."""
-        with pytest.raises(RuntimeError, match=f"{NOTIFIER_BASE_URL_ENV} .* is required"):
+        with pytest.raises(RuntimeError, match=f"{WATCHER_NOTIFIER_BASE_URL_ENV} .* is required"):
             get_notifier_client()
 
     def test_use_remote_notify_is_not_scrubbed_because_nothing_reads_it(self) -> None:
@@ -58,16 +59,29 @@ class TestNotifierIsolation:
         Apprise path was removed — see
         ``tests/core/notifications/test_notify_remote_only.py``, which asserts
         it is *ignored*. Scrubbing it would advertise a switch that does not
-        exist, and would quietly start passing if one were ever reintroduced.
-        This pins the omission as deliberate.
-        """
-        import src.core.notifier_client.client as client_module
+        exist. This pins the omission as deliberate, and fails the moment a
+        reader comes back — at which point the scrub, not this test, is the fix.
 
-        assert "USE_REMOTE_NOTIFY" not in client_module.__dict__
+        Asserts against the *source text* of every module that could read it,
+        not against ``__dict__`` (CR-2): a module namespace holds only
+        top-level bindings, so an ``os.environ.get("USE_REMOTE_NOTIFY")``
+        buried in a function body would sail straight through a ``__dict__``
+        check while the guard still read as green.
+        """
+        watched = [
+            pathlib.Path("src/core/notifier_client/client.py"),
+            pathlib.Path("src/core/notifications/notify.py"),
+        ]
+        for path in watched:
+            assert path.exists(), f"{path} moved — update this guard"
+            assert "USE_REMOTE_NOTIFY" not in path.read_text(), (
+                f"{path} reads USE_REMOTE_NOTIFY again; if that is deliberate, "
+                "add it to the tests/conftest.py scrub and update this test"
+            )
 
 
 class TestNotifierEnabledGate:
-    """#277: a URL is not permission — ``NOTIFIER_ENABLED=1`` is.
+    """#277: a URL is not permission — ``WATCHER_NOTIFIER_ENABLED=1`` is.
 
     The same rule ``src.core.bus`` applies to the broker address (#262) and
     ``src.core.db_safety`` applies to the production database (#233). Only the
@@ -76,23 +90,23 @@ class TestNotifierEnabledGate:
     """
 
     def test_exact_one_opts_in(self) -> None:
-        assert notifier_enabled({NOTIFIER_ENABLED_ENV: "1"}) is True
+        assert notifier_enabled({WATCHER_NOTIFIER_ENABLED_ENV: "1"}) is True
 
     @pytest.mark.parametrize("value", ["true", "yes", "0", "", "1 "])
     def test_anything_else_does_not(self, value: str) -> None:
-        assert notifier_enabled({NOTIFIER_ENABLED_ENV: value}) is False
+        assert notifier_enabled({WATCHER_NOTIFIER_ENABLED_ENV: value}) is False
 
     def test_absent_does_not(self) -> None:
         assert notifier_enabled({}) is False
 
     def test_client_refuses_a_url_held_without_the_flag(self, monkeypatch) -> None:
-        monkeypatch.setenv(NOTIFIER_BASE_URL_ENV, "http://localhost:9000")
-        monkeypatch.setenv(NOTIFIER_API_KEY_ENV, "nk_test")
-        monkeypatch.delenv(NOTIFIER_ENABLED_ENV, raising=False)
+        monkeypatch.setenv(WATCHER_NOTIFIER_BASE_URL_ENV, "http://localhost:9000")
+        monkeypatch.setenv(WATCHER_NOTIFIER_API_KEY_ENV, "nk_test")
+        monkeypatch.delenv(WATCHER_NOTIFIER_ENABLED_ENV, raising=False)
 
         with pytest.raises(NotifierNotEnabled) as excinfo:
             get_notifier_client()
-        assert NOTIFIER_ENABLED_ENV in str(excinfo.value)
+        assert WATCHER_NOTIFIER_ENABLED_ENV in str(excinfo.value)
 
     def test_missing_url_is_still_the_url_error(self, monkeypatch) -> None:
         """The operator reads the variable that is actually missing.
@@ -100,27 +114,28 @@ class TestNotifierEnabledGate:
         Same ordering rule as ``bus_disabled_reason``: reporting the flag first
         would send someone hunting for an opt-in when the real problem is that
         no notifier was configured at all.
-        """
-        monkeypatch.delenv(NOTIFIER_BASE_URL_ENV, raising=False)
-        monkeypatch.setenv(NOTIFIER_ENABLED_ENV, "1")
 
-        with pytest.raises(RuntimeError, match=NOTIFIER_BASE_URL_ENV):
+        Deliberately close to
+        ``tests/core/test_notifier_client.py::TestGetNotifierClient`` (CR-4).
+        That module owns the factory's *contract*; this one owns its ordering
+        **relative to the gate**, which is why the flag is set here and absent
+        there. Change one, check the other.
+        """
+        monkeypatch.delenv(WATCHER_NOTIFIER_BASE_URL_ENV, raising=False)
+        monkeypatch.setenv(WATCHER_NOTIFIER_ENABLED_ENV, "1")
+
+        with pytest.raises(RuntimeError, match=WATCHER_NOTIFIER_BASE_URL_ENV):
             get_notifier_client()
 
     def test_missing_key_is_still_the_key_error(self, monkeypatch) -> None:
-        monkeypatch.setenv(NOTIFIER_BASE_URL_ENV, "http://localhost:9000")
-        monkeypatch.delenv(NOTIFIER_API_KEY_ENV, raising=False)
-        monkeypatch.setenv(NOTIFIER_ENABLED_ENV, "1")
+        """Sibling of the test above; same relationship to
+        ``tests/core/test_notifier_client.py`` (CR-4)."""
+        monkeypatch.setenv(WATCHER_NOTIFIER_BASE_URL_ENV, "http://localhost:9000")
+        monkeypatch.delenv(WATCHER_NOTIFIER_API_KEY_ENV, raising=False)
+        monkeypatch.setenv(WATCHER_NOTIFIER_ENABLED_ENV, "1")
 
-        with pytest.raises(RuntimeError, match=NOTIFIER_API_KEY_ENV):
+        with pytest.raises(RuntimeError, match=WATCHER_NOTIFIER_API_KEY_ENV):
             get_notifier_client()
-
-    def test_url_key_and_flag_together_build_a_client(self, monkeypatch) -> None:
-        monkeypatch.setenv(NOTIFIER_BASE_URL_ENV, "http://localhost:9000")
-        monkeypatch.setenv(NOTIFIER_API_KEY_ENV, "nk_test")
-        monkeypatch.setenv(NOTIFIER_ENABLED_ENV, "1")
-
-        assert get_notifier_client() is not None
 
 
 class TestEnvironmentNotifierGate:
@@ -136,22 +151,28 @@ class TestEnvironmentNotifierGate:
     def test_url_without_the_flag_refuses(self) -> None:
         with pytest.raises(NotifierNotEnabled) as excinfo:
             assert_environment_notifier_allowed(
-                {NOTIFIER_BASE_URL_ENV: "http://localhost:9000"},
+                {WATCHER_NOTIFIER_BASE_URL_ENV: "http://localhost:9000"},
             )
         message = str(excinfo.value)
-        assert NOTIFIER_ENABLED_ENV in message
+        assert WATCHER_NOTIFIER_ENABLED_ENV in message
         assert "deploy/watcher.service" in message
         assert "scripts/dev_server.sh" in message
 
     def test_url_with_a_non_opt_in_value_refuses(self) -> None:
         with pytest.raises(NotifierNotEnabled):
             assert_environment_notifier_allowed(
-                {NOTIFIER_BASE_URL_ENV: "http://localhost:9000", NOTIFIER_ENABLED_ENV: "true"},
+                {
+                    WATCHER_NOTIFIER_BASE_URL_ENV: "http://localhost:9000",
+                    WATCHER_NOTIFIER_ENABLED_ENV: "true",
+                },
             )
 
     def test_url_with_the_flag_is_allowed(self) -> None:
         assert_environment_notifier_allowed(
-            {NOTIFIER_BASE_URL_ENV: "http://localhost:9000", NOTIFIER_ENABLED_ENV: "1"},
+            {
+                WATCHER_NOTIFIER_BASE_URL_ENV: "http://localhost:9000",
+                WATCHER_NOTIFIER_ENABLED_ENV: "1",
+            },
         )
 
     def test_no_url_is_allowed_flag_or_not(self) -> None:
@@ -162,4 +183,4 @@ class TestEnvironmentNotifierGate:
         the case where something tries to dispatch anyway.
         """
         assert_environment_notifier_allowed({})
-        assert_environment_notifier_allowed({NOTIFIER_ENABLED_ENV: "1"})
+        assert_environment_notifier_allowed({WATCHER_NOTIFIER_ENABLED_ENV: "1"})

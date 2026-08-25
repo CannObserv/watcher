@@ -77,7 +77,7 @@ bash scripts/dev_server.sh
 
 Two env files load in order (later overrides earlier):
 
-1. `/etc/watcher/.env` — production secrets (`DATABASE_URL`, `NOTIFIER_API_KEY`, `GOOGLE_APPLICATION_CREDENTIALS`). Persistent, managed manually on the VM.
+1. `/etc/watcher/.env` — production secrets (`DATABASE_URL`, `WATCHER_NOTIFIER_API_KEY`, `GOOGLE_APPLICATION_CREDENTIALS`). Persistent, managed manually on the VM.
 2. `.env` (repo root, git-ignored) — dev/agent secrets (`GH_TOKEN`, `TEST_DATABASE_URL`). Never commit.
 
 Load both for shell commands (pytest, psql, gh):
@@ -88,7 +88,7 @@ source scripts/load-env.sh
 
 **Naming rule for new variables.** Anything naming a shared external resource takes a **service-prefixed** name with a separate dev key (`WATCHER_BUS_REDIS_URL` / `WATCHER_DEV_BUS_REDIS_URL`). A bare `REDIS_URL` is silently inherited from `/etc/watcher/.env` — the #233 hazard in env-var form: [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) → *Environment Variables*.
 
-**A URL is configuration, not permission.** Three unit-only opt-ins gate the production resources — `WATCHER_ALLOW_PRODUCTION_DB` (#233), `WATCHER_BUS_ENABLED` (#262), `NOTIFIER_ENABLED` (#277). Never put one in an env file; a URL held without its flag aborts startup. `scripts/dev_server.sh` and `tests/conftest.py` clear what they did not set.
+**A URL is configuration, not permission.** Three unit-only opt-ins gate the production resources — `WATCHER_ALLOW_PRODUCTION_DB` (#233), `WATCHER_BUS_ENABLED` (#262), `WATCHER_NOTIFIER_ENABLED` (#277). Never put one in an env file; a URL held without its flag aborts startup. `scripts/dev_server.sh` and `tests/conftest.py` clear what they did not set.
 
 ## Common Commands
 

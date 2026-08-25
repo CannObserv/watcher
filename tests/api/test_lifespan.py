@@ -12,8 +12,8 @@ import pytest
 
 from src.core.bus import BUS_ENABLED_ENV, BUS_REDIS_URL_ENV, BusNotEnabled
 from src.core.notifier_client import (
-    NOTIFIER_BASE_URL_ENV,
-    NOTIFIER_ENABLED_ENV,
+    WATCHER_NOTIFIER_BASE_URL_ENV,
+    WATCHER_NOTIFIER_ENABLED_ENV,
     NotifierNotEnabled,
 )
 
@@ -183,7 +183,7 @@ async def test_lifespan_accepts_a_bus_url_with_the_opt_in(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_lifespan_refuses_a_notifier_url_without_the_opt_in(monkeypatch, caplog):
-    """#277: ``NOTIFIER_BASE_URL`` set and ``NOTIFIER_ENABLED`` absent aborts.
+    """#277: ``WATCHER_NOTIFIER_BASE_URL`` set and ``WATCHER_NOTIFIER_ENABLED`` absent aborts.
 
     Third of the three startup gates, and the reason the loud half exists here
     rather than only in the client: a notifier URL held without the opt-in means
@@ -195,8 +195,8 @@ async def test_lifespan_refuses_a_notifier_url_without_the_opt_in(monkeypatch, c
     Without that, nothing in the suite reaches this branch and the flag's first
     exercise would be a production restart.
     """
-    monkeypatch.setenv(NOTIFIER_BASE_URL_ENV, "http://localhost:9000")
-    monkeypatch.delenv(NOTIFIER_ENABLED_ENV, raising=False)
+    monkeypatch.setenv(WATCHER_NOTIFIER_BASE_URL_ENV, "http://localhost:9000")
+    monkeypatch.delenv(WATCHER_NOTIFIER_ENABLED_ENV, raising=False)
 
     with (
         patch("src.api.main.get_app") as get_app,
@@ -214,4 +214,4 @@ async def test_lifespan_refuses_a_notifier_url_without_the_opt_in(monkeypatch, c
     # opens the worker.
     get_client.assert_not_called()
     get_app.assert_not_called()
-    assert any(NOTIFIER_ENABLED_ENV in r.getMessage() for r in caplog.records)
+    assert any(WATCHER_NOTIFIER_ENABLED_ENV in r.getMessage() for r in caplog.records)

@@ -318,7 +318,7 @@ def test_an_inherited_bus_opt_in_does_not_survive_without_a_dev_bus() -> None:
 def test_inherited_production_notifier_is_cleared() -> None:
     """#277: a dev server must not notify the production tenant.
 
-    /etc/watcher/.env carries NOTIFIER_BASE_URL and NOTIFIER_API_KEY, and this
+    /etc/watcher/.env carries WATCHER_NOTIFIER_BASE_URL and WATCHER_NOTIFIER_API_KEY, and this
     script sources it. The dev server runs the embedded worker against a real
     check pipeline, so an inherited key means real deliveries to real
     subscribers — the #233 hazard, notifier edition, and the only one of the
@@ -327,13 +327,13 @@ def test_inherited_production_notifier_is_cleared() -> None:
     result = run(
         {
             "TEST_DATABASE_URL": TEST_URL,
-            "NOTIFIER_BASE_URL": "http://localhost:9000",
-            "NOTIFIER_API_KEY": "nk_production",
+            "WATCHER_NOTIFIER_BASE_URL": "http://localhost:9000",
+            "WATCHER_NOTIFIER_API_KEY": "nk_production",
         }
     )
     assert result.returncode == 0, result.stderr
-    assert "NOTIFIER_BASE_URL=(cleared)" in result.stdout
-    assert "NOTIFIER_ENABLED=(cleared)" in result.stdout
+    assert "WATCHER_NOTIFIER_BASE_URL=(cleared)" in result.stdout
+    assert "WATCHER_NOTIFIER_ENABLED=(cleared)" in result.stdout
 
 
 def test_explicit_dev_notifier_is_forwarded_and_opts_in() -> None:
@@ -346,21 +346,21 @@ def test_explicit_dev_notifier_is_forwarded_and_opts_in() -> None:
     result = run(
         {
             "TEST_DATABASE_URL": TEST_URL,
-            "NOTIFIER_BASE_URL": "http://localhost:9000",
-            "NOTIFIER_API_KEY": "nk_production",
+            "WATCHER_NOTIFIER_BASE_URL": "http://localhost:9000",
+            "WATCHER_NOTIFIER_API_KEY": "nk_production",
             "WATCHER_DEV_NOTIFIER_BASE_URL": "http://localhost:9001",
             "WATCHER_DEV_NOTIFIER_API_KEY": "nk_dev",
         }
     )
     assert result.returncode == 0, result.stderr
-    assert "NOTIFIER_BASE_URL=http://localhost:9001" in result.stdout
-    assert "NOTIFIER_ENABLED=1" in result.stdout
+    assert "WATCHER_NOTIFIER_BASE_URL=http://localhost:9001" in result.stdout
+    assert "WATCHER_NOTIFIER_ENABLED=1" in result.stdout
 
 
 def test_dev_notifier_url_without_a_dev_key_refuses() -> None:
     """Half a scratch notifier is a misconfiguration, not a mode.
 
-    Falling back to the inherited NOTIFIER_API_KEY would point a dev base URL
+    Falling back to the inherited WATCHER_NOTIFIER_API_KEY would point a dev base URL
     at production credentials — or, if the dev notifier ignores the key,
     silently authorise the wrong tenant. Neither is worth guessing at, and the
     pair is two lines in .env.
@@ -368,7 +368,7 @@ def test_dev_notifier_url_without_a_dev_key_refuses() -> None:
     result = run(
         {
             "TEST_DATABASE_URL": TEST_URL,
-            "NOTIFIER_API_KEY": "nk_production",
+            "WATCHER_NOTIFIER_API_KEY": "nk_production",
             "WATCHER_DEV_NOTIFIER_BASE_URL": "http://localhost:9001",
         }
     )
@@ -385,11 +385,11 @@ def test_an_inherited_notifier_opt_in_does_not_survive() -> None:
     result = run(
         {
             "TEST_DATABASE_URL": TEST_URL,
-            "NOTIFIER_BASE_URL": "http://localhost:9000",
-            "NOTIFIER_API_KEY": "nk_production",
-            "NOTIFIER_ENABLED": "1",
+            "WATCHER_NOTIFIER_BASE_URL": "http://localhost:9000",
+            "WATCHER_NOTIFIER_API_KEY": "nk_production",
+            "WATCHER_NOTIFIER_ENABLED": "1",
         }
     )
     assert result.returncode == 0, result.stderr
-    assert "NOTIFIER_BASE_URL=(cleared)" in result.stdout
-    assert "NOTIFIER_ENABLED=(cleared)" in result.stdout
+    assert "WATCHER_NOTIFIER_BASE_URL=(cleared)" in result.stdout
+    assert "WATCHER_NOTIFIER_ENABLED=(cleared)" in result.stdout

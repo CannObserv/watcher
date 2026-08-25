@@ -55,7 +55,7 @@ async def lifespan(application: FastAPI):
     refused process never starts the consumer or the worker.
 
     Refuses the same way for a bus URL held without WATCHER_BUS_ENABLED=1
-    (#262), and for a notifier URL held without NOTIFIER_ENABLED=1 (#277). The
+    (#262), and for a notifier URL held without WATCHER_NOTIFIER_ENABLED=1 (#277). The
     enforcement point is here rather than at import of src.core.bus or
     src.core.notifier_client: an import-time check would abort alembic,
     everything under scripts/, and anything else that transitively imports the

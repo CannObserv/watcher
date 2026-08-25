@@ -90,7 +90,30 @@ pattern — see **Redis and the bus**.
 | `WATCHER_FETCH_MAX_REISSUES` | env | no | Re-issues per fetch intent before it fails with ERROR health (default `3`). Caps the *lineage*, not one path: both the reaper's stall sweep and the blob-unreadable apply (#275) read the same `reissue_count` |
 | `WATCHER_DEV_BUS_REDIS_URL` | `.env` | no | Scratch-bus opt-in for `scripts/dev_server.sh`; without it the dev server **clears** an inherited `WATCHER_BUS_REDIS_URL` (and `WATCHER_BUS_ENABLED`) so it cannot publish policy onto the production stream. With it, the script exports both, since the flag is otherwise unit-only |
 | `WATCHER_DEV_NOTIFIER_BASE_URL` | `.env` | no | Scratch-notifier opt-in for `scripts/dev_server.sh`; without it the dev server **clears** `WATCHER_NOTIFIER_BASE_URL`, `WATCHER_NOTIFIER_API_KEY` and `WATCHER_NOTIFIER_ENABLED` so it cannot notify the production tenant (#277) — kept after #278 moved the pair out of the sourced env files, because it also catches a shell that exported them by hand. Requires `WATCHER_DEV_NOTIFIER_API_KEY` beside it — a URL without its key refuses to start rather than fall back to whatever key is in the environment |
-| `WATCHER_DEV_NOTIFIER_API_KEY` | `.env` | no | The scratch notifier's tenant key. Required whenever `WATCHER_DEV_NOTIFIER_BASE_URL` is set; meaningless without it. Use a key notifier marks **`development`** (notifier#22): a production notifier answers one with 403, so a dev server pointed at production fails loudly instead of delivering |
+| `WATCHER_DEV_NOTIFIER_API_KEY` | `.env` | no | The scratch notifier's tenant key. Required whenever `WATCHER_DEV_NOTIFIER_BASE_URL` is set; meaningless without it. Use a key notifier marks **`development`** (notifier#22), so a dev server pointed at a production notifier is refused instead of delivering |
+
+**The dev notifier tenant (#278, provisioned 2026-08-25).** Watcher's
+development credential is valid against the notifier deployment on
+**`http://localhost:9001`**, a separate instance from production's `:9000` with
+its own database. Two consequences, both verified rather than assumed:
+
+* The dev key **authenticates on `:9001`** — which is itself the proof that
+  deployment is not classified production, since notifier refuses a
+  `development` key wherever `serving_production()` is true.
+* Presented to production `:9000` it comes back **401 `Invalid API key`, not the
+  403** notifier#22 describes. The 403 branch compares a key's `environment`
+  against the deployment it reached, which only arises when one database holds
+  both kinds. Here the two deployments have separate databases, so the dev key
+  does not exist in production at all — refused by non-existence, which is the
+  stronger of the two failures. Do not rely on reading a 403 to detect a
+  misdirected dev server; the refusal is what matters, not its code.
+
+The dev tenant currently has **no channels and no templates**, so a dev server
+can authenticate and construct a client but has nothing to dispatch *to*:
+`dispatch_event_notifications` skips a candidate with no `remote_channel_id`
+and records it as a failed audit result. That is fine for the isolation #278
+asked for, and not yet enough to exercise the notification path end to end —
+sink channels are requested on that issue.
 
 **Retired variables.** Removed from `/etc/watcher/.env` under #277 after each
 was confirmed to have no reader in `src/`, `scripts/` or `tests/`. Historical

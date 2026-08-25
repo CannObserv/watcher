@@ -62,22 +62,28 @@ class TestNotifierIsolation:
         exist. This pins the omission as deliberate, and fails the moment a
         reader comes back — at which point the scrub, not this test, is the fix.
 
-        Asserts against the *source text* of every module that could read it,
-        not against ``__dict__`` (CR-2): a module namespace holds only
-        top-level bindings, so an ``os.environ.get("USE_REMOTE_NOTIFY")``
-        buried in a function body would sail straight through a ``__dict__``
-        check while the guard still read as green.
+        Sweeps the *source text* of all of ``src/``. Two earlier shapes were
+        both too narrow: ``__dict__`` holds only top-level bindings, so a read
+        buried in a function body sailed through it (CR-2); a hand-maintained
+        list of two modules then missed any third file that reacquired the
+        variable (CR-9). A whole-tree sweep has neither hole and needs no
+        upkeep when modules move — which also retires the CWD-relative paths
+        that made the previous version fail from anywhere but the repo root
+        (CR-8).
         """
-        watched = [
-            pathlib.Path("src/core/notifier_client/client.py"),
-            pathlib.Path("src/core/notifications/notify.py"),
+        src_root = pathlib.Path(__file__).resolve().parents[1] / "src"
+        assert src_root.is_dir(), f"{src_root} is missing — this guard is anchored wrong"
+
+        offenders = [
+            path.relative_to(src_root.parent)
+            for path in sorted(src_root.rglob("*.py"))
+            if "USE_REMOTE_NOTIFY" in path.read_text(encoding="utf-8")
         ]
-        for path in watched:
-            assert path.exists(), f"{path} moved — update this guard"
-            assert "USE_REMOTE_NOTIFY" not in path.read_text(), (
-                f"{path} reads USE_REMOTE_NOTIFY again; if that is deliberate, "
-                "add it to the tests/conftest.py scrub and update this test"
-            )
+        assert not offenders, (
+            f"USE_REMOTE_NOTIFY is read again in: {', '.join(map(str, offenders))}. "
+            "If that is deliberate, add it to the tests/conftest.py scrub and "
+            "delete this test — the omission it pins is no longer true."
+        )
 
 
 class TestNotifierEnabledGate:

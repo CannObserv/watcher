@@ -65,7 +65,7 @@ plan documents under `docs/plans/` still describe them and are left as written
 |---|---|
 | `USE_REMOTE_NOTIFY` | The local Apprise path it switched between is gone; the remote path is the only path. `docs/plans/2026-05-02-notifier-adapter.md` still names it as a rollback lever — it is not one, and flipping it does nothing |
 | `ARCHIVER_BASE_URL` | Watcher makes no HTTP calls to Archiver since #254; the SDK went with them |
-| `ARCHIVER_API_KEY` | Same. Removing it from this file does not revoke it on Archiver's side — that needs an issue there |
+| `ARCHIVER_API_KEY` | Same. Removing it from this file does **not** revoke it — the key is presumably still valid on Archiver's side, where revocation is tracked as [CannObserv/archiver#186](https://github.com/CannObserv/archiver/issues/186). Until that closes, treat the credential as live |
 | `APPRISE_SECRET_KEY` | The Fernet key for encrypted Apprise URLs. Verified no ciphertext column survives in the schema before deletion |
 
 The notifier pair was **renamed** rather than retired in the same pass:

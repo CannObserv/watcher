@@ -3,9 +3,10 @@
 Third sibling of ``test_db_isolation`` and ``test_bus_isolation``, and the last
 outbound production credential to get a gate (#277).
 
-``/etc/watcher/.env`` carries ``WATCHER_NOTIFIER_BASE_URL`` and ``WATCHER_NOTIFIER_API_KEY``,
-and AGENTS.md tells every agent to ``source scripts/load-env.sh`` before
-running pytest. Before this, ``get_notifier_client()`` read both straight from
+``/etc/watcher/.env`` *carried* ``WATCHER_NOTIFIER_BASE_URL`` and
+``WATCHER_NOTIFIER_API_KEY`` until #278 moved them to a unit-only file, and
+AGENTS.md tells every agent to ``source scripts/load-env.sh`` before running
+pytest. Before this, ``get_notifier_client()`` read both straight from
 ``os.environ`` and raised only when they were *unset* — so a suite, a hand-run
 dev server, a script or a REPL in a prod-sourced shell dispatched for real, to
 the production notifier, as the production tenant, and the dispatch *succeeded
@@ -24,6 +25,13 @@ The gate is the load-bearing half. When #277 was filed the whole suite already
 passed with the base URL pointed at a black hole — no test reached the real
 client — so the residue rows that prompted it came from a hand-run path the
 scrub would never have covered.
+
+#278 then removed the credential from the shell environment entirely
+(``/etc/watcher/notifier.env``, loaded by the unit alone), which is a third
+mechanism and not a replacement for either: the scrub keeps this suite's
+guarantee a property of the suite rather than of the VM's file layout, and the
+gate still covers the paths neither reaches. See
+``tests/deploy/test_notifier_credential_is_unit_only.py``.
 """
 
 import os
@@ -35,6 +43,7 @@ from src.core.notifier_client import (
     WATCHER_NOTIFIER_API_KEY_ENV,
     WATCHER_NOTIFIER_BASE_URL_ENV,
     WATCHER_NOTIFIER_ENABLED_ENV,
+    NotifierCredentialMissing,
     NotifierNotEnabled,
     assert_environment_notifier_allowed,
     get_notifier_client,
@@ -46,6 +55,18 @@ class TestNotifierIsolation:
     def test_notifier_env_is_cleared_for_the_session(self) -> None:
         assert os.environ.get(WATCHER_NOTIFIER_BASE_URL_ENV) is None
         assert os.environ.get(WATCHER_NOTIFIER_API_KEY_ENV) is None
+
+    def test_the_gate_flag_is_cleared_too(self) -> None:
+        """The flag is scrubbed beside the pair it gates (#278).
+
+        Since #278 the flag held without a URL is itself a startup failure, so
+        an exported ``WATCHER_NOTIFIER_ENABLED=1`` — a shell that copied the
+        unit's line, an agent that ran an experiment — would make every test
+        touching the lifespan fail on the environment rather than the code.
+        Clearing it keeps the session's answer to "is there a notifier?" a flat
+        no, whatever the launching shell believed.
+        """
+        assert os.environ.get(WATCHER_NOTIFIER_ENABLED_ENV) is None
 
     def test_client_construction_raises_rather_than_connecting(self) -> None:
         """The path any unpatched test takes: a refusal, not a dispatch."""
@@ -181,7 +202,7 @@ class TestEnvironmentNotifierGate:
             },
         )
 
-    def test_no_url_is_allowed_flag_or_not(self) -> None:
+    def test_no_url_and_no_flag_is_allowed(self) -> None:
         """No URL names no notifier, so nothing can be dispatched by accident.
 
         Making the absence fatal would stop every dev server, script and test
@@ -189,4 +210,26 @@ class TestEnvironmentNotifierGate:
         the case where something tries to dispatch anyway.
         """
         assert_environment_notifier_allowed({})
-        assert_environment_notifier_allowed({WATCHER_NOTIFIER_ENABLED_ENV: "1"})
+
+    def test_the_flag_without_a_url_refuses(self) -> None:
+        """#278's other direction: opted in, and nothing to opt in *to*.
+
+        Only ``deploy/watcher.service`` sets the flag, and since #278 the
+        credential it goes with lives in ``/etc/watcher/notifier.env`` — a
+        separate file, loaded by that unit alone. So the flag without a URL
+        means the service came up without its credential file, and would run
+        silently un-notifying: every dispatch failing one at a time in the
+        worker log, with a green ``systemctl status``.
+
+        ``EnvironmentFile=`` without the ``-`` prefix already fails that start.
+        This is the in-app half, and it covers what systemd cannot see — a file
+        that exists but was truncated, emptied, or had the assignment renamed.
+
+        Nothing else can hit it: ``scripts/dev_server.sh`` sets both or neither,
+        and ``tests/conftest.py`` clears all three.
+        """
+        with pytest.raises(NotifierCredentialMissing) as excinfo:
+            assert_environment_notifier_allowed({WATCHER_NOTIFIER_ENABLED_ENV: "1"})
+        message = str(excinfo.value)
+        assert WATCHER_NOTIFIER_BASE_URL_ENV in message
+        assert "/etc/watcher/notifier.env" in message

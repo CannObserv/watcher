@@ -5,10 +5,11 @@ states for the broker address (#262) and ``src.core.db_safety`` for the
 production database (#233), applied here to the last outbound production
 credential that lacked it.
 
-``/etc/watcher/.env`` carries ``WATCHER_NOTIFIER_BASE_URL`` and ``WATCHER_NOTIFIER_API_KEY``,
-and AGENTS.md tells every agent to ``source scripts/load-env.sh`` before
-pytest. Before the gate below, that was enough to dispatch for real: the
-factory read both variables straight from ``os.environ`` and refused only when
+``/etc/watcher/.env`` *carried* ``WATCHER_NOTIFIER_BASE_URL`` and
+``WATCHER_NOTIFIER_API_KEY`` until #278 below, and AGENTS.md tells every agent
+to ``source scripts/load-env.sh`` before pytest. Before the gate below, that
+was enough to dispatch for real: the factory read both variables straight from
+``os.environ`` and refused only when
 they were *unset*, so a suite, a hand-run dev server, a one-off script or a
 REPL in a prod-sourced shell notified the production tenant — and *succeeded*,
 which is why it left no error to notice. The blast radius is not a stray row in
@@ -20,6 +21,15 @@ all. Only ``deploy/watcher.service`` and ``scripts/dev_server.sh``'s
 scratch-notifier branch set it — never an env file, for the same reason as
 ``WATCHER_ALLOW_PRODUCTION_DB`` and ``WATCHER_BUS_ENABLED``: an env file is
 precisely what the unsanctioned launch paths source.
+
+#278 then moved the credential itself out of ``/etc/watcher/.env`` and into
+``/etc/watcher/notifier.env``, which only the unit loads. The gate had stopped
+every process on this VM from *using* the production key; it could not stop
+them from *holding* it, and notifier's audit found ~1289 watcher fixture
+notifications already delivered on it. Two consequences here: the pair is no
+longer inherited by anything a developer or an agent runs, and the flag held
+*without* a URL now means the unit lost its credential file — a startup
+failure, not a mode, for the same reason as its mirror image.
 """
 
 import os
@@ -36,8 +46,18 @@ WATCHER_NOTIFIER_API_KEY_ENV = "WATCHER_NOTIFIER_API_KEY"
 WATCHER_NOTIFIER_ENABLED_ENV = "WATCHER_NOTIFIER_ENABLED"
 
 
+#: Unit-only env file holding the production credential (#278). Named here for
+#: the error messages: it is the file an operator has to go and look at, and
+#: ``scripts/load-env.sh`` deliberately does not know the path.
+NOTIFIER_ENV_FILE = "/etc/watcher/notifier.env"
+
+
 class NotifierNotEnabled(RuntimeError):
     """Raised when a process holds a notifier URL it was never authorised to use."""
+
+
+class NotifierCredentialMissing(RuntimeError):
+    """Raised when a process opted into the notifier but has no address for one."""
 
 
 def notifier_enabled(environ: Mapping[str, str] | None = None) -> bool:
@@ -64,15 +84,40 @@ def assert_environment_notifier_allowed(environ: Mapping[str, str]) -> None:
     service that lost its flag, or a process that should never have had the URL
     — so the entry point refuses to start.
 
-    Not raised when the URL is absent: that names no notifier, so nothing can be
-    dispatched by accident, and making it fatal would stop every dev server and
-    script that never wanted one.
+    The mirror image is fatal too, since #278: the flag *without* a URL. Only
+    the unit sets the flag, and the credential it goes with now lives in its own
+    unit-only file — so this combination means the service came up without
+    ``/etc/watcher/notifier.env`` and would run silently un-notifying, one
+    failed dispatch at a time behind a green ``systemctl status``. The unit's
+    ``EnvironmentFile=`` is not ``-``-prefixed, so systemd already refuses that
+    start; this covers what systemd cannot see — a file that is present but
+    empty, truncated, or has the assignment renamed. Nothing legitimate hits it:
+    ``scripts/dev_server.sh`` sets both or neither, and ``tests/conftest.py``
+    clears all three.
+
+    Neither flag nor URL is allowed and silent: that names no notifier, so
+    nothing can be dispatched by accident, and making it fatal would stop every
+    dev server and script that never wanted one.
 
     Takes ``environ`` explicitly, like its two siblings: the caller decides what
     is being gated, and this stays callable from a test even though
     ``tests/conftest.py`` clears the real variables at import.
     """
     if not environ.get(WATCHER_NOTIFIER_BASE_URL_ENV):
+        if notifier_enabled(environ):
+            raise NotifierCredentialMissing(
+                f"refusing to start: {WATCHER_NOTIFIER_ENABLED_ENV} is 1 but "
+                f"{WATCHER_NOTIFIER_BASE_URL_ENV} is unset, so this process is opted "
+                "into a notifier it cannot reach — it would start clean and then fail "
+                "every dispatch.\n"
+                f"  The production credential lives in {NOTIFIER_ENV_FILE}, loaded by "
+                "deploy/watcher.service alone (#278). Check that the file exists and "
+                f"still assigns {WATCHER_NOTIFIER_BASE_URL_ENV} and "
+                f"{WATCHER_NOTIFIER_API_KEY_ENV}.\n"
+                f"  For a dev server use: bash scripts/dev_server.sh (it sets "
+                f"{WATCHER_NOTIFIER_ENABLED_ENV} only beside a WATCHER_DEV_NOTIFIER_BASE_URL).\n"
+                f"  For anything else, unset {WATCHER_NOTIFIER_ENABLED_ENV}."
+            )
         return
     if notifier_enabled(environ):
         return

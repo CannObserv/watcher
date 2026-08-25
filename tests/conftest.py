@@ -140,8 +140,15 @@ os.environ.pop("WATCHER_DEV_BUS_REDIS_URL", None)
 #
 # WATCHER_NOTIFIER_ENABLED joins them under #278, which made the flag-without-a-URL
 # combination a startup failure in its own right: an exported flag would
-# otherwise turn every lifespan test into an environment failure. All three
-# cleared means the session's answer to "is there a notifier?" is a flat no.
+# otherwise turn every lifespan test into an environment failure.
+#
+# The WATCHER_DEV_NOTIFIER_* pair goes too (CR-3), matching the dev variable the
+# bus block above already pops. Nothing in src/ reads either — they are
+# scripts/dev_server.sh's — but they live in the repo .env that load-env.sh
+# exports before every pytest run, and #278 asked notifier for a development
+# key that belongs in exactly that file. All five cleared means the session's
+# answer to "is there a notifier?" is a flat no, whatever the launching shell
+# was holding.
 #
 # USE_REMOTE_NOTIFY is deliberately NOT cleared: nothing in src/ has read it
 # since the local Apprise path was removed, and clearing it would advertise a
@@ -151,6 +158,8 @@ os.environ.pop("WATCHER_DEV_BUS_REDIS_URL", None)
 os.environ.pop("WATCHER_NOTIFIER_BASE_URL", None)
 os.environ.pop("WATCHER_NOTIFIER_API_KEY", None)
 os.environ.pop("WATCHER_NOTIFIER_ENABLED", None)
+os.environ.pop("WATCHER_DEV_NOTIFIER_BASE_URL", None)
+os.environ.pop("WATCHER_DEV_NOTIFIER_API_KEY", None)
 
 
 def _make_mock_probe():

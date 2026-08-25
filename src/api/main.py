@@ -28,6 +28,7 @@ from src.core.database import get_session_factory
 from src.core.db_safety import ProductionDatabaseRefused, assert_environment_db_allowed
 from src.core.logging import configure_logging, get_logger
 from src.core.notifier_client import (
+    NotifierCredentialMissing,
     NotifierNotEnabled,
     assert_environment_notifier_allowed,
 )
@@ -55,7 +56,9 @@ async def lifespan(application: FastAPI):
     refused process never starts the consumer or the worker.
 
     Refuses the same way for a bus URL held without WATCHER_BUS_ENABLED=1
-    (#262), and for a notifier URL held without WATCHER_NOTIFIER_ENABLED=1 (#277). The
+    (#262), for a notifier URL held without WATCHER_NOTIFIER_ENABLED=1 (#277), and
+    for that flag held without a URL (#278) — which means the unit's
+    /etc/watcher/notifier.env did not load. The
     enforcement point is here rather than at import of src.core.bus or
     src.core.notifier_client: an import-time check would abort alembic,
     everything under scripts/, and anything else that transitively imports the
@@ -69,7 +72,12 @@ async def lifespan(application: FastAPI):
         assert_environment_db_allowed(os.environ)
         assert_environment_bus_allowed(os.environ)
         assert_environment_notifier_allowed(os.environ)
-    except (ProductionDatabaseRefused, BusNotEnabled, NotifierNotEnabled) as e:
+    except (
+        ProductionDatabaseRefused,
+        BusNotEnabled,
+        NotifierNotEnabled,
+        NotifierCredentialMissing,
+    ) as e:
         # Log before re-raising: under systemd the bare exception surfaces in
         # journalctl as a lifespan traceback, burying the actionable text.
         logger.critical("Refusing to start: %s", e)

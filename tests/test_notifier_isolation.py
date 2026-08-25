@@ -68,6 +68,31 @@ class TestNotifierIsolation:
         """
         assert os.environ.get(WATCHER_NOTIFIER_ENABLED_ENV) is None
 
+    def test_the_dev_pair_is_cleared_too(self) -> None:
+        """The scratch-notifier pair is scrubbed beside the production one (CR-3).
+
+        ``scripts/dev_server.sh`` reads ``WATCHER_DEV_NOTIFIER_BASE_URL`` and
+        ``WATCHER_DEV_NOTIFIER_API_KEY`` from the repo ``.env`` — which
+        ``scripts/load-env.sh`` exports before every pytest run. Nothing in
+        ``src/`` reads either today, and the flag being cleared means no client
+        could be built from them regardless; this is the same defence-in-depth
+        the bus block four lines above already applies to
+        ``WATCHER_DEV_BUS_REDIS_URL``.
+
+        It stops being hypothetical the moment notifier mints the development
+        key #278 asked for: that key belongs in the repo ``.env``, and from that
+        day a test session would carry a live notifier address and credential
+        while this module's docstring claims the session has none.
+
+        Names spelled literally, not imported: nothing in ``src/`` reads
+        either variable — they are ``scripts/dev_server.sh``'s alone — so
+        exporting constants for them would advertise readers that do not
+        exist. Same shape as ``tests/test_bus_isolation.py``, which spells
+        ``WATCHER_DEV_BUS_REDIS_URL`` the same way and for the same reason.
+        """
+        assert os.environ.get("WATCHER_DEV_NOTIFIER_BASE_URL") is None
+        assert os.environ.get("WATCHER_DEV_NOTIFIER_API_KEY") is None
+
     def test_client_construction_raises_rather_than_connecting(self) -> None:
         """The path any unpatched test takes: a refusal, not a dispatch."""
         with pytest.raises(RuntimeError, match=f"{WATCHER_NOTIFIER_BASE_URL_ENV} .* is required"):

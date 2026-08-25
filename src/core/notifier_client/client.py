@@ -57,7 +57,14 @@ class NotifierNotEnabled(RuntimeError):
 
 
 class NotifierCredentialMissing(RuntimeError):
-    """Raised when a process opted into the notifier but has no address for one."""
+    """Raised when a process opted into the notifier but has no address for one.
+
+    A *startup*-time guard, raised only by :func:`assert_environment_notifier_allowed`
+    — which in practice means ``src.api.main``'s lifespan (CR-7).
+    :func:`get_notifier_client` cannot raise it: its unset-URL ``RuntimeError``
+    fires first, by the ordering rule documented there, and a process that
+    reached a dispatch at all had already passed the lifespan check.
+    """
 
 
 def notifier_enabled(environ: Mapping[str, str] | None = None) -> bool:

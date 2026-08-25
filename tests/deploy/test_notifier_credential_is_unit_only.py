@@ -28,12 +28,29 @@ from pathlib import Path
 
 import pytest
 
+from src.core.notifier_client.client import NOTIFIER_ENV_FILE as NOTIFIER_ENV_FILE_PATH
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 REPO_UNIT = REPO_ROOT / "deploy" / "watcher.service"
 LOAD_ENV = REPO_ROOT / "scripts" / "load-env.sh"
 
 SHARED_ENV_FILE = Path("/etc/watcher/.env")
-NOTIFIER_ENV_FILE = Path("/etc/watcher/notifier.env")
+
+#: Imported rather than spelled again (CR-4). Four things name this path — the
+#: unit, this guard, the docs, and ``NotifierCredentialMissing``'s message, which
+#: is what an operator reads when the file fails to load. Moving the file with a
+#: literal here would fail this module (good) and leave that message pointing at
+#: a path that no longer exists (silent), so the guard and the message share one
+#: source.
+NOTIFIER_ENV_FILE = Path(NOTIFIER_ENV_FILE_PATH)
+
+#: Every file a shell can pick the credential up from. ``scripts/load-env.sh``
+#: exports the first two in order; the glob catches the third case, which is not
+#: hypothetical — #278's own fix took a ``cp -a`` backup of the shared file
+#: before editing it, and ``cp -a`` preserved ``640 root:exedev``, so the
+#: production key was readable by every agent on the VM again within a minute of
+#: being removed from it (CR-1).
+SHARED_ENV_GLOB = ".env*"
 
 #: The two variables that together make a dispatch deliverable.
 NOTIFIER_CREDENTIAL_VARS = ("WATCHER_NOTIFIER_BASE_URL", "WATCHER_NOTIFIER_API_KEY")
@@ -103,22 +120,57 @@ def test_load_env_does_not_reach_the_notifier_env_file() -> None:
     assert str(NOTIFIER_ENV_FILE) not in LOAD_ENV.read_text()
 
 
-def test_shared_env_file_does_not_carry_the_notifier_credential() -> None:
-    """The on-host half: the file every agent sources must not define it.
+def _credential_offenders(path: Path) -> list[str]:
+    """Return the credential variables ``path`` defines, or [] if unreadable.
 
-    Asserted against the *live* file rather than a fixture, because the file is
+    Unreadable counts as clean deliberately: a file this account cannot read is
+    a file this account cannot pick a credential up from, which is the property
+    under test. ``/etc/watcher/notifier.env`` is exactly that, and it must not
+    fail its own sibling guard.
+    """
+    try:
+        return sorted(_defined_keys(path).intersection(NOTIFIER_CREDENTIAL_VARS))
+    except (PermissionError, UnicodeDecodeError):
+        return []
+
+
+def test_no_shell_readable_env_file_carries_the_notifier_credential() -> None:
+    """The on-host half: nothing a shell can read may define the pair.
+
+    Asserted against the *live* files rather than a fixture, because they are
     hand-managed on the VM — a repo-side check would pass while the real one
     still handed out the key, which is how #278 happened in the first place.
+
+    Three surfaces, not one (CR-1, CR-5):
+
+    * ``/etc/watcher/.env`` — exported by ``scripts/load-env.sh``.
+    * its ``.env*`` siblings — a ``.env.bak`` from an edit is not sourced by
+      anything, but ``cp -a`` preserves ``640 root:exedev``, so any agent can
+      simply read it. #278's own fix left one for four minutes.
+    * the repo ``.env`` — the *second* file ``load-env.sh`` exports, and an
+      ``EnvironmentFile=`` in the unit besides. Dropping the key there to debug
+      a dispatch re-arms #278 exactly, and the original guard stayed green.
     """
     if not SHARED_ENV_FILE.exists():
         pytest.skip(f"{SHARED_ENV_FILE} not present — not a host running the service")
-    offenders = sorted(_defined_keys(SHARED_ENV_FILE).intersection(NOTIFIER_CREDENTIAL_VARS))
+
+    candidates = sorted(SHARED_ENV_FILE.parent.glob(SHARED_ENV_GLOB))
+    repo_env = REPO_ROOT / ".env"
+    if repo_env.is_file():
+        candidates.append(repo_env)
+
+    offenders = {
+        str(path): found
+        for path in candidates
+        if path.resolve() != NOTIFIER_ENV_FILE.resolve() and (found := _credential_offenders(path))
+    }
     assert not offenders, (
-        f"{SHARED_ENV_FILE} defines {', '.join(offenders)}. That file is exported "
-        "into every agent shell by scripts/load-env.sh, so the production "
-        f"notifier credential is held by every process on this host. Move the "
-        f"definitions to {NOTIFIER_ENV_FILE}, which only deploy/watcher.service "
-        "loads. (#278)"
+        "these shell-readable files define the production notifier credential: "
+        + "; ".join(f"{path} → {', '.join(names)}" for path, names in sorted(offenders.items()))
+        + f". Anything readable as `exedev` is held by every agent, suite and REPL on "
+        f"this host. The pair belongs in {NOTIFIER_ENV_FILE} and nowhere else; a "
+        "backup taken while editing counts, and must be shredded rather than left "
+        "beside the file it copied. (#278)"
     )
 
 

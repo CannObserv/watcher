@@ -14,6 +14,7 @@ from src.core.bus import BUS_ENABLED_ENV, BUS_REDIS_URL_ENV, BusNotEnabled
 from src.core.notifier_client import (
     WATCHER_NOTIFIER_BASE_URL_ENV,
     WATCHER_NOTIFIER_ENABLED_ENV,
+    NotifierCredentialMissing,
     NotifierNotEnabled,
 )
 
@@ -215,3 +216,45 @@ async def test_lifespan_refuses_a_notifier_url_without_the_opt_in(monkeypatch, c
     get_client.assert_not_called()
     get_app.assert_not_called()
     assert any(WATCHER_NOTIFIER_ENABLED_ENV in r.getMessage() for r in caplog.records)
+
+
+@pytest.mark.asyncio
+async def test_lifespan_refuses_the_notifier_flag_without_a_url(monkeypatch, caplog):
+    """#278: the mirror image — opted in, with no notifier to reach.
+
+    Only ``deploy/watcher.service`` sets the flag, and since #278 the credential
+    it goes with lives in ``/etc/watcher/notifier.env`` — a separate file that
+    unit alone loads. So this combination means the file did not load, and the
+    service would come up green and then fail every dispatch one at a time.
+
+    The ``caplog`` assertion is the point of this test, not decoration. The
+    refusal happens whether or not ``src.api.main`` knows the exception type;
+    what breaks silently is the ``logger.critical`` line, whose whole purpose
+    (per the handler's own comment) is to keep the actionable text out of a
+    lifespan traceback in journald. An operator restarting a service whose
+    credential file vanished has exactly one place to look, and this is it.
+    (CR-2: the exception was missing from the handler's tuple. The #277 test
+    above asserts its own log record the same way — what was missing was a test
+    for *this* exception at all, not the habit of checking.)
+    """
+    monkeypatch.delenv(WATCHER_NOTIFIER_BASE_URL_ENV, raising=False)
+    monkeypatch.setenv(WATCHER_NOTIFIER_ENABLED_ENV, "1")
+
+    with (
+        patch("src.api.main.get_app") as get_app,
+        patch("src.api.main.get_shared_bus_client") as get_client,
+    ):
+        from src.api.main import lifespan
+
+        with caplog.at_level("CRITICAL", logger="src.api.main"):
+            with pytest.raises(NotifierCredentialMissing):
+                async with lifespan(MagicMock()):
+                    pass
+
+    assert any(
+        record.levelname == "CRITICAL" and "Refusing to start" in record.getMessage()
+        for record in caplog.records
+    ), "the refusal was not logged — src.api.main's handler does not catch this exception"
+    get_client.assert_not_called()
+    get_app.assert_not_called()
+    assert any(WATCHER_NOTIFIER_BASE_URL_ENV in r.getMessage() for r in caplog.records)

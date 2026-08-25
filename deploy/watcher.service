@@ -65,14 +65,14 @@ Environment=WATCHER_BUS_ENABLED=1
 
 # Notifier opt-in for src/core/notifier_client (#277), unit-only on the same
 # principle and with the largest blast radius of the three: the EnvironmentFile
-# above carries NOTIFIER_BASE_URL and NOTIFIER_API_KEY, so anything that sources
+# above carries WATCHER_NOTIFIER_BASE_URL and WATCHER_NOTIFIER_API_KEY, so anything that sources
 # /etc/watcher/.env holds the production tenant's credentials. A stray database
 # row is recoverable and a stray bus frame is inert; a stray notification is
 # delivered to real subscribers and cannot be recalled — and it *succeeds*, so
 # it leaves no error behind to notice.
 # Dropping this line does NOT silently disable notifications — the lifespan
 # refuses to start on a URL held without it.
-Environment=NOTIFIER_ENABLED=1
+Environment=WATCHER_NOTIFIER_ENABLED=1
 
 # --log-config routes uvicorn's own loggers (uvicorn, uvicorn.access,
 # uvicorn.error — all propagate=False with plain-text handlers by default)

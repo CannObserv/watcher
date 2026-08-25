@@ -95,8 +95,8 @@ def _make_audit_capture():
 class TestRemoteDispatchPath:
     async def test_uses_notifier_when_remote_channel_id_set(self, monkeypatch):
         """With remote_channel_id set, calls the notifier API."""
-        monkeypatch.setenv("NOTIFIER_BASE_URL", "http://localhost:9000")
-        monkeypatch.setenv("NOTIFIER_API_KEY", "nk_test")
+        monkeypatch.setenv("WATCHER_NOTIFIER_BASE_URL", "http://localhost:9000")
+        monkeypatch.setenv("WATCHER_NOTIFIER_API_KEY", "nk_test")
 
         remote_id = str(ULID())
         template = _fake_template(remote_channel_id=remote_id)
@@ -121,8 +121,8 @@ class TestRemoteDispatchPath:
 
         Previously this fell back to local Apprise; that path is gone in #137.
         """
-        monkeypatch.setenv("NOTIFIER_BASE_URL", "http://localhost:9000")
-        monkeypatch.setenv("NOTIFIER_API_KEY", "nk_test")
+        monkeypatch.setenv("WATCHER_NOTIFIER_BASE_URL", "http://localhost:9000")
+        monkeypatch.setenv("WATCHER_NOTIFIER_API_KEY", "nk_test")
 
         template = _fake_template(remote_channel_id=None)
         event = _make_event()
@@ -144,8 +144,8 @@ class TestRemoteDispatchPath:
 
     async def test_notifier_error_recorded_as_failure(self, monkeypatch):
         """NotifierError from the API is caught and logged as a failed attempt."""
-        monkeypatch.setenv("NOTIFIER_BASE_URL", "http://localhost:9000")
-        monkeypatch.setenv("NOTIFIER_API_KEY", "nk_test")
+        monkeypatch.setenv("WATCHER_NOTIFIER_BASE_URL", "http://localhost:9000")
+        monkeypatch.setenv("WATCHER_NOTIFIER_API_KEY", "nk_test")
 
         template = _fake_template(remote_channel_id=str(ULID()))
         event = _make_event()
@@ -170,8 +170,8 @@ class TestRemoteDispatchPath:
 
     async def test_metadata_includes_event_type_and_source(self, monkeypatch):
         """dispatch() is called with metadata containing event_type and the visibility source."""
-        monkeypatch.setenv("NOTIFIER_BASE_URL", "http://localhost:9000")
-        monkeypatch.setenv("NOTIFIER_API_KEY", "nk_test")
+        monkeypatch.setenv("WATCHER_NOTIFIER_BASE_URL", "http://localhost:9000")
+        monkeypatch.setenv("WATCHER_NOTIFIER_API_KEY", "nk_test")
 
         template = _fake_template("watched_item", remote_channel_id=str(ULID()))
         event = _make_event(WatchEventType.WATCH_CREATED)
@@ -192,8 +192,8 @@ class TestRemoteDispatchPath:
 
     async def test_notifier_failed_status_recorded_as_failure(self, monkeypatch):
         """FAILED status from notifier API is success=False; reason taken from attempts."""
-        monkeypatch.setenv("NOTIFIER_BASE_URL", "http://localhost:9000")
-        monkeypatch.setenv("NOTIFIER_API_KEY", "nk_test")
+        monkeypatch.setenv("WATCHER_NOTIFIER_BASE_URL", "http://localhost:9000")
+        monkeypatch.setenv("WATCHER_NOTIFIER_API_KEY", "nk_test")
 
         template = _fake_template(remote_channel_id=str(ULID()))
         event = _make_event()
@@ -219,8 +219,8 @@ class TestRemoteDispatchPath:
 
     async def test_notifier_failed_status_uses_default_reason_when_no_attempts(self, monkeypatch):
         """FAILED status with no attempts falls back to the default reason string."""
-        monkeypatch.setenv("NOTIFIER_BASE_URL", "http://localhost:9000")
-        monkeypatch.setenv("NOTIFIER_API_KEY", "nk_test")
+        monkeypatch.setenv("WATCHER_NOTIFIER_BASE_URL", "http://localhost:9000")
+        monkeypatch.setenv("WATCHER_NOTIFIER_API_KEY", "nk_test")
 
         template = _fake_template(remote_channel_id=str(ULID()))
         event = _make_event()
@@ -241,8 +241,8 @@ class TestRemoteDispatchPath:
 
     async def test_two_visibilities_both_dispatched(self, monkeypatch):
         """A global template + a watched_item template → 2 dispatches with distinct sources."""
-        monkeypatch.setenv("NOTIFIER_BASE_URL", "http://localhost:9000")
-        monkeypatch.setenv("NOTIFIER_API_KEY", "nk_test")
+        monkeypatch.setenv("WATCHER_NOTIFIER_BASE_URL", "http://localhost:9000")
+        monkeypatch.setenv("WATCHER_NOTIFIER_API_KEY", "nk_test")
 
         templates = [
             _fake_template("global", remote_channel_id=str(ULID())),
@@ -267,8 +267,8 @@ class TestRemoteDispatchPath:
         self, monkeypatch
     ):
         """attempt.reason=None falls back to the default via `or reason`."""
-        monkeypatch.setenv("NOTIFIER_BASE_URL", "http://localhost:9000")
-        monkeypatch.setenv("NOTIFIER_API_KEY", "nk_test")
+        monkeypatch.setenv("WATCHER_NOTIFIER_BASE_URL", "http://localhost:9000")
+        monkeypatch.setenv("WATCHER_NOTIFIER_API_KEY", "nk_test")
 
         template = _fake_template(remote_channel_id=str(ULID()))
         event = _make_event()

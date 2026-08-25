@@ -148,11 +148,11 @@ else
 fi
 
 # Same guard again for the notifier (#277), and this is the one whose stray
-# output cannot be recalled: /etc/watcher/.env carries NOTIFIER_BASE_URL and
-# NOTIFIER_API_KEY, and this server runs the embedded worker against a real
+# output cannot be recalled: /etc/watcher/.env carries WATCHER_NOTIFIER_BASE_URL and
+# WATCHER_NOTIFIER_API_KEY, and this server runs the embedded worker against a real
 # check pipeline — so an inherited key delivers real notifications to real
 # subscribers as the production tenant, and *succeeds*, leaving no error to
-# notice. NOTIFIER_ENABLED is the unit-only opt-in the app now requires beside
+# notice. WATCHER_NOTIFIER_ENABLED is the unit-only opt-in the app now requires beside
 # the URL; as with the bus, this script sets it in the branch that points at a
 # scratch notifier and clears it in the branch that has none.
 #
@@ -162,19 +162,19 @@ fi
 if [[ -n "${WATCHER_DEV_NOTIFIER_BASE_URL:-}" ]]; then
   if [[ -z "${WATCHER_DEV_NOTIFIER_API_KEY:-}" ]]; then
     echo "dev_server: WATCHER_DEV_NOTIFIER_BASE_URL is set without WATCHER_DEV_NOTIFIER_API_KEY." >&2
-    echo "  Refusing to fall back to the inherited NOTIFIER_API_KEY — that is the" >&2
+    echo "  Refusing to fall back to the inherited WATCHER_NOTIFIER_API_KEY — that is the" >&2
     echo "  production tenant's credential (#277). Set both in .env, or neither." >&2
     exit 1
   fi
-  export NOTIFIER_BASE_URL="$WATCHER_DEV_NOTIFIER_BASE_URL"
-  export NOTIFIER_API_KEY="$WATCHER_DEV_NOTIFIER_API_KEY"
-  export NOTIFIER_ENABLED=1
-  NOTIFIER_REPORT="$NOTIFIER_BASE_URL"
+  export WATCHER_NOTIFIER_BASE_URL="$WATCHER_DEV_NOTIFIER_BASE_URL"
+  export WATCHER_NOTIFIER_API_KEY="$WATCHER_DEV_NOTIFIER_API_KEY"
+  export WATCHER_NOTIFIER_ENABLED=1
+  NOTIFIER_REPORT="$WATCHER_NOTIFIER_BASE_URL"
   NOTIFIER_ENABLED_REPORT="1"
 else
-  unset NOTIFIER_BASE_URL
-  unset NOTIFIER_API_KEY
-  unset NOTIFIER_ENABLED
+  unset WATCHER_NOTIFIER_BASE_URL
+  unset WATCHER_NOTIFIER_API_KEY
+  unset WATCHER_NOTIFIER_ENABLED
   NOTIFIER_REPORT="(cleared)"
   NOTIFIER_ENABLED_REPORT="(cleared)"
 fi
@@ -217,8 +217,8 @@ if [[ "${WATCHER_DEV_SERVER_DRY_RUN:-}" == "1" ]]; then
   echo "PROCRASTINATE_DATABASE_URL=(cleared)"
   echo "WATCHER_BUS_REDIS_URL=$BUS_REPORT"
   echo "WATCHER_BUS_ENABLED=$BUS_ENABLED_REPORT"
-  echo "NOTIFIER_BASE_URL=$NOTIFIER_REPORT"
-  echo "NOTIFIER_ENABLED=$NOTIFIER_ENABLED_REPORT"
+  echo "WATCHER_NOTIFIER_BASE_URL=$NOTIFIER_REPORT"
+  echo "WATCHER_NOTIFIER_ENABLED=$NOTIFIER_ENABLED_REPORT"
   echo "PORT=$PORT"
   echo "MIGRATE=$MIGRATE_REPORT"
   echo "RESET=$RESET_REPORT"

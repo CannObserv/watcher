@@ -25,8 +25,8 @@ from src.core.notifications.notify import dispatch_event_notifications
 
 @pytest.fixture(autouse=True)
 def notifier_env(monkeypatch):
-    monkeypatch.setenv("NOTIFIER_BASE_URL", "http://localhost:9000")
-    monkeypatch.setenv("NOTIFIER_API_KEY", "nk_test")
+    monkeypatch.setenv("WATCHER_NOTIFIER_BASE_URL", "http://localhost:9000")
+    monkeypatch.setenv("WATCHER_NOTIFIER_API_KEY", "nk_test")
 
 
 def make_event(event_type=WatchEventType.CHANGE_DETECTED, watched_item_id=None):

@@ -23,7 +23,8 @@ outages. Notifications dispatch through the sibling **Notifier service** via the
 `NotifierClient` SDK.
 
 Operate WatchedItems at `/api/v1/watched-items` (API) and `/watched-items` (dashboard).
-Full conventions: [AGENTS.md](AGENTS.md). Operator install: [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).
+Full conventions: [AGENTS.md](AGENTS.md). Operator install: [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md);
+env files and every variable: [docs/ENVIRONMENT.md](docs/ENVIRONMENT.md).
 Fetch/revision path and the Archiver linkage: [docs/CONTENT-PIPELINE.md](docs/CONTENT-PIPELINE.md).
 The WatchedItem entity in full: [docs/WATCHED-ITEMS.md](docs/WATCHED-ITEMS.md); the API
 and dashboard surfaces that operate it: [docs/WATCHED-ITEMS-DASHBOARD.md](docs/WATCHED-ITEMS-DASHBOARD.md). Module

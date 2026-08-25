@@ -104,11 +104,16 @@ def test_repo_unit_declares_the_bus_opt_in() -> None:
 def test_repo_unit_declares_the_notifier_opt_in() -> None:
     """#277: the notifier gate is unit-only, for the same reason as the other two.
 
-    ``WATCHER_NOTIFIER_BASE_URL`` and ``WATCHER_NOTIFIER_API_KEY`` live in ``/etc/watcher/.env``,
-    so every process that sources it inherits the production tenant's
-    credentials. The flag is what separates the service from a pytest run, a
-    hand-run dev server, a script or a REPL — and it only works if no env file
-    carries it. Without this line the service starts and refuses to notify,
+    ``WATCHER_NOTIFIER_BASE_URL`` and ``WATCHER_NOTIFIER_API_KEY`` lived in
+    ``/etc/watcher/.env`` when this flag was added, so every process that
+    sourced it inherited the production tenant's credentials. The flag is what
+    separated the service from a pytest run, a hand-run dev server, a script or
+    a REPL — and it only works if no env file carries it. #278 moved the pair
+    to ``/etc/watcher/notifier.env`` so nothing but the unit holds it either;
+    the flag stays, because it is what the app checks
+    (``tests/deploy/test_notifier_credential_is_unit_only.py`` owns the move).
+
+    Without this line the service starts and refuses to notify,
     which is why ``src/core/notifier_client`` also makes the URL-without-flag
     combination a startup failure rather than a silent one.
     """

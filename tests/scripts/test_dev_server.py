@@ -318,7 +318,8 @@ def test_an_inherited_bus_opt_in_does_not_survive_without_a_dev_bus() -> None:
 def test_inherited_production_notifier_is_cleared() -> None:
     """#277: a dev server must not notify the production tenant.
 
-    /etc/watcher/.env carries WATCHER_NOTIFIER_BASE_URL and WATCHER_NOTIFIER_API_KEY, and this
+    /etc/watcher/.env carried WATCHER_NOTIFIER_BASE_URL and WATCHER_NOTIFIER_API_KEY until
+    #278 moved them to a unit-only file; the clearing stays regardless, and this
     script sources it. The dev server runs the embedded worker against a real
     check pipeline, so an inherited key means real deliveries to real
     subscribers — the #233 hazard, notifier edition, and the only one of the

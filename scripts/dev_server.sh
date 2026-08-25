@@ -33,7 +33,7 @@
 #   WATCHER_DEV_SKIP_MIGRATE=1           skip the alembic upgrade
 #   WATCHER_DEV_SERVER_DRY_RUN=1         print resolution, do not exec uvicorn
 #   WATCHER_DEV_NOTIFIER_BASE_URL        scratch notifier; opts in, needs the key below
-#   WATCHER_DEV_NOTIFIER_API_KEY         scratch notifier key; required with the URL
+#   WATCHER_DEV_NOTIFIER_API_KEY         scratch notifier key ('development'-marked); required with the URL
 #   WATCHER_DEV_SERVER_SKIP_ENV_FILES=1  skip sourcing env files (tests)
 set -euo pipefail
 
@@ -148,22 +148,31 @@ else
 fi
 
 # Same guard again for the notifier (#277), and this is the one whose stray
-# output cannot be recalled: /etc/watcher/.env carries WATCHER_NOTIFIER_BASE_URL and
-# WATCHER_NOTIFIER_API_KEY, and this server runs the embedded worker against a real
-# check pipeline — so an inherited key delivers real notifications to real
+# output cannot be recalled: this server runs the embedded worker against a real
+# check pipeline, so a production key here delivers real notifications to real
 # subscribers as the production tenant, and *succeeds*, leaving no error to
 # notice. WATCHER_NOTIFIER_ENABLED is the unit-only opt-in the app now requires beside
 # the URL; as with the bus, this script sets it in the branch that points at a
 # scratch notifier and clears it in the branch that has none.
 #
-# Both halves or neither: a dev base URL falling back to the inherited
-# production key would be the exact hazard this clears, so a URL without its
-# key refuses rather than guesses.
+# Since #278 the production credential lives in /etc/watcher/notifier.env, which
+# only deploy/watcher.service loads — so the env files sourced above no longer
+# supply WATCHER_NOTIFIER_BASE_URL or WATCHER_NOTIFIER_API_KEY at all. The clearing below
+# stays regardless: it is what makes this script's guarantee independent of the
+# VM's file layout, and it still catches a shell that exported the pair by hand
+# before invoking it.
+#
+# Both halves or neither: a dev base URL falling back to whatever key happened
+# to be in the environment would be the exact hazard this clears, so a URL
+# without its key refuses rather than guesses. Point both at notifier's
+# development tenant — a key it marks `development`, which a production notifier
+# refuses with 403 (notifier#22).
 if [[ -n "${WATCHER_DEV_NOTIFIER_BASE_URL:-}" ]]; then
   if [[ -z "${WATCHER_DEV_NOTIFIER_API_KEY:-}" ]]; then
     echo "dev_server: WATCHER_DEV_NOTIFIER_BASE_URL is set without WATCHER_DEV_NOTIFIER_API_KEY." >&2
-    echo "  Refusing to fall back to the inherited WATCHER_NOTIFIER_API_KEY — that is the" >&2
-    echo "  production tenant's credential (#277). Set both in .env, or neither." >&2
+    echo "  Refusing to fall back to an inherited WATCHER_NOTIFIER_API_KEY — that would be the" >&2
+    echo "  production tenant's credential (#277). Set both in .env, or neither; use a key" >&2
+    echo "  notifier marks 'development' (#278)." >&2
     exit 1
   fi
   export WATCHER_NOTIFIER_BASE_URL="$WATCHER_DEV_NOTIFIER_BASE_URL"

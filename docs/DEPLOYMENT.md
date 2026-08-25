@@ -9,8 +9,36 @@ The service loads env files in this order (later values override earlier):
 | `/run/watcher/build-id` | `BUILD_ID` (auto-generated from git SHA) | optional |
 | `/etc/watcher/.env` | Production secrets (`DATABASE_URL`) | **yes** |
 | `.env` (repo root) | Dev/agent overrides (`GH_TOKEN`, `TEST_DATABASE_URL`) | optional |
+| `/etc/watcher/notifier.env` | The production notifier credential, unit-only (#278) | **yes** |
 
 `/etc/watcher/.env` is owned by `root:exedev` (mode 640) and survives repo resets, worktree switches, and redeployments.
+
+`/etc/watcher/notifier.env` is `600 root:root` and holds
+`WATCHER_NOTIFIER_BASE_URL` + `WATCHER_NOTIFIER_API_KEY` and nothing else.
+`scripts/load-env.sh` does not know the path, so no shell, suite or REPL
+inherits the pair; systemd parses `EnvironmentFile=` as root before `User=`
+takes effect, so the `exedev` account never needs to read it.
+
+**Why it is separate.** #277 made the notifier credential unusable outside the
+unit (`WATCHER_NOTIFIER_ENABLED`); it could not make it *unheld*. Every agent
+shell on this VM sources `/etc/watcher/.env`, and notifier's audit
+([CannObserv/notifier#22](https://github.com/CannObserv/notifier/issues/22),
+watcher#278) found ~1289 watcher fixture notifications already delivered on that
+key to the production Slack and Mailgun channels. A flag stops an accident; it
+does not stop a deliberate `export`, and it does not stop the key being read out
+of a process environment. Moving the file is what makes the credential
+genuinely unavailable to anything but the service.
+
+It is loaded **last** (env files apply in order, so nothing may override it) and
+**required** — no `-` prefix, so an absent file fails the start rather than
+leaving the service up and quietly un-notifying.
+`src/core/notifier_client.assert_environment_notifier_allowed` makes the same
+combination fatal in-app, which covers what systemd cannot see: a file present
+but empty, truncated, or with the assignment renamed.
+
+**Do not** re-add either variable to `/etc/watcher/.env` or to the repo `.env`.
+Non-production runs point at notifier's *development* tenant instead — see
+`WATCHER_DEV_NOTIFIER_BASE_URL` below.
 
 For shell commands that need secrets:
 
@@ -37,9 +65,9 @@ pattern — see **Redis and the bus**.
 | `GH_TOKEN` | `.env` | no | GitHub personal access token |
 | `TEST_DATABASE_URL` | `.env` | no | PostgreSQL connection string for test database |
 | `BUILD_ID` | env | no | Git SHA for static asset cache-busting (default `"dev"`) |
-| `WATCHER_NOTIFIER_BASE_URL` | `/etc/watcher/.env` | **yes** | Base URL of the notifier service (e.g. `http://localhost:9000`). **Not sufficient on its own since #277** — see `WATCHER_NOTIFIER_ENABLED` |
-| `WATCHER_NOTIFIER_API_KEY` | `/etc/watcher/.env` | **yes** | Watcher tenant API key issued by `scripts/seed_tenant.py` in the notifier repo. This is the credential that makes a stray dispatch *deliverable*, which is why the pair is gated |
-| `WATCHER_NOTIFIER_ENABLED` | `deploy/watcher.service` **only** | prod only | `=1` opts this process into building a notifier client at all (`src/core/notifier_client/client.py`, #277). Without it `get_notifier_client()` raises `NotifierNotEnabled` — **and a URL held without it aborts startup**, so a unit that lost the line fails loudly instead of going quiet on notifications. Must live in the systemd unit, never an env file, for the same reason as the two flags above and with the largest blast radius of the three: a stray database row is recoverable and a stray bus frame is inert, but a stray notification is delivered to real subscribers, cannot be recalled, and *succeeds* — leaving no error behind to notice. `scripts/dev_server.sh` sets it for itself when `WATCHER_DEV_NOTIFIER_BASE_URL` names a scratch notifier |
+| `WATCHER_NOTIFIER_BASE_URL` | `/etc/watcher/notifier.env` | **yes** | Base URL of the notifier service (e.g. `http://localhost:9000`). **Not sufficient on its own since #277** — see `WATCHER_NOTIFIER_ENABLED`. Moved out of `/etc/watcher/.env` under #278: that file is exported into every agent shell, and this pair must be held by the service alone |
+| `WATCHER_NOTIFIER_API_KEY` | `/etc/watcher/notifier.env` | **yes** | Watcher tenant API key issued by `scripts/seed_tenant.py` in the notifier repo, marked `production` there. This is the credential that makes a stray dispatch *deliverable*, which is why the pair is gated — and, since #278, why it lives in a file no shell sources |
+| `WATCHER_NOTIFIER_ENABLED` | `deploy/watcher.service` **only** | prod only | `=1` opts this process into building a notifier client at all (`src/core/notifier_client/client.py`, #277). Without it `get_notifier_client()` raises `NotifierNotEnabled` — **and a URL held without it aborts startup**, so a unit that lost the line fails loudly instead of going quiet on notifications. Must live in the systemd unit, never an env file, for the same reason as the two flags above and with the largest blast radius of the three: a stray database row is recoverable and a stray bus frame is inert, but a stray notification is delivered to real subscribers, cannot be recalled, and *succeeds* — leaving no error behind to notice. `scripts/dev_server.sh` sets it for itself when `WATCHER_DEV_NOTIFIER_BASE_URL` names a scratch notifier. Since #278 the **flag without a URL** aborts startup too: only the unit sets it, and the credential it goes with is in the unit's own env file, so that combination means the file did not load |
 | `WATCHER_ALLOW_PRODUCTION_DB` | `deploy/watcher.service` **only** | prod only | `=1` opts into serving a database whose name lacks a `_test`/`_dev` suffix (`src/core/db_safety.py`, #233). Must live in the systemd unit, never an env file — env files are sourced by hand-run dev servers, which are exactly what the guard stops |
 | `WATCHER_DEV_DATABASE_URL` | `.env` | no | Persistent dev database for `scripts/dev_server.sh`; wins over `TEST_DATABASE_URL` |
 | `WATCHER_BUS_REDIS_URL` | `/etc/watcher/.env` | prod | Redis URL of the Archiver-operated broker (`redis://localhost:6379/0`) for the `content.fetch-policy` and `info.watch-status` producers (#245, #264). Unset → both periodic publish tasks skip with an ERROR log: Replicator paces every host at its own conservative default, and Archiver's watched-item panel / drift detector go stale. **Not sufficient on its own since #262** — see `WATCHER_BUS_ENABLED` |
@@ -53,8 +81,8 @@ pattern — see **Redis and the bus**.
 | `GCS_BLOB_CREDENTIALS` | env | for `gs://` blobs | Key file for the `co-gcs-blob-reader` SA (`/etc/watcher/co-gcs-blob-reader.json`), read by the `gs://` blob arm (#275). Singular `BLOB` — easy to typo as `BLOBS`. Deliberately **not** `GOOGLE_APPLICATION_CREDENTIALS`, which is the wheelhouse identity: reading fetched content and reading the private package index are different jobs and must not share a principal. Unset or unusable (missing file, malformed key) → every `gs://` blob fails permanently (`blob_unreadable`, no re-issues) until fixed; a rotated key at the same path needs a restart |
 | `WATCHER_FETCH_MAX_REISSUES` | env | no | Re-issues per fetch intent before it fails with ERROR health (default `3`). Caps the *lineage*, not one path: both the reaper's stall sweep and the blob-unreadable apply (#275) read the same `reissue_count` |
 | `WATCHER_DEV_BUS_REDIS_URL` | `.env` | no | Scratch-bus opt-in for `scripts/dev_server.sh`; without it the dev server **clears** an inherited `WATCHER_BUS_REDIS_URL` (and `WATCHER_BUS_ENABLED`) so it cannot publish policy onto the production stream. With it, the script exports both, since the flag is otherwise unit-only |
-| `WATCHER_DEV_NOTIFIER_BASE_URL` | `.env` | no | Scratch-notifier opt-in for `scripts/dev_server.sh`; without it the dev server **clears** an inherited `WATCHER_NOTIFIER_BASE_URL`, `WATCHER_NOTIFIER_API_KEY` and `WATCHER_NOTIFIER_ENABLED` so it cannot notify the production tenant (#277). Requires `WATCHER_DEV_NOTIFIER_API_KEY` beside it — a URL without its key refuses to start rather than fall back to the production credential |
-| `WATCHER_DEV_NOTIFIER_API_KEY` | `.env` | no | The scratch notifier's tenant key. Required whenever `WATCHER_DEV_NOTIFIER_BASE_URL` is set; meaningless without it |
+| `WATCHER_DEV_NOTIFIER_BASE_URL` | `.env` | no | Scratch-notifier opt-in for `scripts/dev_server.sh`; without it the dev server **clears** `WATCHER_NOTIFIER_BASE_URL`, `WATCHER_NOTIFIER_API_KEY` and `WATCHER_NOTIFIER_ENABLED` so it cannot notify the production tenant (#277) — kept after #278 moved the pair out of the sourced env files, because it also catches a shell that exported them by hand. Requires `WATCHER_DEV_NOTIFIER_API_KEY` beside it — a URL without its key refuses to start rather than fall back to whatever key is in the environment |
+| `WATCHER_DEV_NOTIFIER_API_KEY` | `.env` | no | The scratch notifier's tenant key. Required whenever `WATCHER_DEV_NOTIFIER_BASE_URL` is set; meaningless without it. Use a key notifier marks **`development`** (notifier#22): a production notifier answers one with 403, so a dev server pointed at production fails loudly instead of delivering |
 
 **Retired variables.** Removed from `/etc/watcher/.env` under #277 after each
 was confirmed to have no reader in `src/`, `scripts/` or `tests/`. Historical
@@ -109,8 +137,19 @@ echo 'DATABASE_URL=postgresql+asyncpg://watcher:watcher@localhost:5432/watcher' 
 sudo chmod 640 /etc/watcher/.env
 sudo chown root:exedev /etc/watcher/.env
 
-# IMPORTANT: /etc/watcher/.env must exist before starting the service.
-# Without it, systemd will refuse to start the unit (EnvironmentFile is required).
+# The notifier credential goes in its OWN file, readable by root only (#278).
+# It must never join /etc/watcher/.env: scripts/load-env.sh exports that file
+# into every agent shell, and this is the pair that makes a stray dispatch
+# deliverable to real subscribers.
+sudo install -m 600 -o root -g root /dev/null /etc/watcher/notifier.env
+sudo tee /etc/watcher/notifier.env >/dev/null <<'EOF'
+WATCHER_NOTIFIER_BASE_URL=http://localhost:9000
+WATCHER_NOTIFIER_API_KEY=<production tenant key from notifier's scripts/seed_tenant.py>
+EOF
+
+# IMPORTANT: /etc/watcher/.env and /etc/watcher/notifier.env must both exist
+# before starting the service. Without either, systemd refuses to start the
+# unit (both EnvironmentFile= lines are required).
 
 # Copy (or symlink) the unit file
 sudo cp deploy/watcher.service /etc/systemd/system/watcher.service

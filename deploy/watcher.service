@@ -33,6 +33,24 @@ EnvironmentFile=-/run/watcher/build-id
 EnvironmentFile=/etc/watcher/.env
 EnvironmentFile=-/home/exedev/watcher/.env
 
+# The production notifier credential, loaded by this unit and nothing else
+# (#278). /etc/watcher/.env is exported into every agent shell by
+# scripts/load-env.sh, so while WATCHER_NOTIFIER_BASE_URL and
+# WATCHER_NOTIFIER_API_KEY lived there, every process on this VM *held* the
+# production tenant's key — the #277 flag below stopped it being used by
+# accident, but notifier's audit had already found ~1289 watcher fixture
+# notifications delivered on it to the real Slack and Mailgun channels.
+# This file is 600 root:root: systemd parses EnvironmentFile= as root before
+# User= takes effect, so the exedev account never needs to read it.
+#
+# Last, deliberately: env files apply in order, so loading the repo-local
+# .env afterwards would let a stray value there redirect production's
+# notifications. And required, not optional (no `-`): an absent file must
+# fail the start rather than leave the service up and quietly un-notifying.
+# src/core/notifier_client makes the same combination fatal in-app, which
+# covers the case systemd cannot see — a file present but empty.
+EnvironmentFile=/etc/watcher/notifier.env
+
 # Production-database opt-in for src/core/db_safety (#233). Must live HERE,
 # never in an EnvironmentFile — env files are sourced by hand-run servers,
 # which are exactly what the guard exists to stop.

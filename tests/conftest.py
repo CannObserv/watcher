@@ -122,17 +122,26 @@ os.environ.pop("WATCHER_BUS_REDIS_URL", None)
 os.environ.pop("WATCHER_DEV_BUS_REDIS_URL", None)
 
 # The same hazard again, and the one with the largest blast radius (#277):
-# /etc/watcher/.env carries WATCHER_NOTIFIER_BASE_URL and WATCHER_NOTIFIER_API_KEY, and
-# AGENTS.md tells every agent to `source scripts/load-env.sh` before pytest. A
-# stray database row is recoverable and a stray bus frame is inert; a stray
-# notification is *delivered*, to real subscribers on real channels, and cannot
-# be recalled. Worse, it succeeds — so unlike the two above it leaves no error
-# behind to notice.
+# /etc/watcher/.env carried WATCHER_NOTIFIER_BASE_URL and WATCHER_NOTIFIER_API_KEY
+# until #278 moved them to a unit-only file, and AGENTS.md tells every agent to
+# `source scripts/load-env.sh` before pytest. A stray database row is
+# recoverable and a stray bus frame is inert; a stray notification is
+# *delivered*, to real subscribers on real channels, and cannot be recalled.
+# Worse, it succeeds — so unlike the two above it leaves no error behind to
+# notice.
 #
-# Belt to the WATCHER_NOTIFIER_ENABLED gate's braces (src/core/notifier_client): the
-# gate holds for every launch path, this makes "no notifier" the default for
-# this one. Tests that want a client set both vars via monkeypatch.setenv,
-# which restores itself on teardown.
+# Kept after the move, and not redundantly: the scrub is what makes this suite
+# indifferent to where the credential lives. A developer who exports the pair by
+# hand, a future env file that reacquires it, a `.env` holding a scratch
+# notifier — all of them stop here, and the guarantee this module owns ("no test
+# can dispatch") stays a property of the suite rather than of the VM's file
+# layout. Tests that want a client set both vars via monkeypatch.setenv, which
+# restores itself on teardown.
+#
+# WATCHER_NOTIFIER_ENABLED joins them under #278, which made the flag-without-a-URL
+# combination a startup failure in its own right: an exported flag would
+# otherwise turn every lifespan test into an environment failure. All three
+# cleared means the session's answer to "is there a notifier?" is a flat no.
 #
 # USE_REMOTE_NOTIFY is deliberately NOT cleared: nothing in src/ has read it
 # since the local Apprise path was removed, and clearing it would advertise a
@@ -141,6 +150,7 @@ os.environ.pop("WATCHER_DEV_BUS_REDIS_URL", None)
 # At import, for the same reason as the four above, and never restored.
 os.environ.pop("WATCHER_NOTIFIER_BASE_URL", None)
 os.environ.pop("WATCHER_NOTIFIER_API_KEY", None)
+os.environ.pop("WATCHER_NOTIFIER_ENABLED", None)
 
 
 def _make_mock_probe():

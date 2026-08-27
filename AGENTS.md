@@ -122,8 +122,12 @@ cadence and active state while Watcher owns mechanism (#254): an announcement is
 authoritative for a named set of columns, everything else survives reconciliation,
 and **a local pause is not sticky** — item-level pause lives in Archiver's
 dashboard alone, and every announcement-owned field 409s locally on a reconciled
-item. `POST /api/v1/watched-items` still works but has had no caller since
-archiver#158. What each 409 is, the authoritative column list, schedule
+item. Every applied announcement is audited: a create as `watched_item.created`
+(`source: registry`), an update as `watched_item.announcement_applied` with a
+`changes` diff — emitted **only when non-empty**, so the hourly snapshot and the
+`0-0` boot replay stay silent (#274). `POST /api/v1/watched-items` still works
+but has had no caller since archiver#158. What each 409 is, the authoritative
+column list, the spec-acknowledgement meaning of `last_reviewed_at`, schedule
 resolution, domain keying: [docs/WATCHED-ITEMS.md](docs/WATCHED-ITEMS.md).
 
 **Empty extraction is a failure, not a change (#258).** Every `source_spec`

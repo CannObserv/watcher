@@ -88,7 +88,13 @@ class AuditLog(Base):
     #     a ``created_at DESC`` index (#218);
     #   - the ``event_type IN (...) ORDER BY created_at DESC`` filtered list and
     #     the DISTINCT-``event_type`` chip vocabulary → one composite leading with
-    #     ``event_type`` (#217 chips, #218).
+    #     ``event_type`` (#217 chips, #218);
+    #   - the unacknowledged-specs badge (#274) — one ``event_type`` equality plus
+    #     a payload item-id and a ``changes ? 'source_specs'`` test, ordered,
+    #     ``LIMIT 1``. It takes ``ix_audit_log_event_type`` rather than the
+    #     payload index above (confirmed by EXPLAIN), leaving both payload
+    #     predicates as residual filters — bounded, because a diff-less
+    #     announcement never writes a row at all.
     __table_args__ = (
         Index(
             "ix_audit_log_payload_watched_item_id",

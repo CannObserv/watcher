@@ -294,6 +294,12 @@ async def reconcile_announcement(session, payload: RegistryAnnouncementState) ->
     # In the same transaction as the writes it describes: an audit row that can
     # outlive a rolled-back reconcile describes a change that never happened.
     if created:
+        # The id is assigned at flush, and the audit payload needs it. It happens
+        # to be there already — the `session.get(RevokedInfoItem, ...)` above
+        # autoflushes — but that is a load-bearing side effect of an unrelated
+        # lookup, and the failure mode if it ever moves is silent: a literal
+        # "None" in the payload, an audit row belonging to no item.
+        await session.flush()
         # No "before" to diff against — a create that also emitted a diff would
         # report every column as changed. Parity with the API create path, which
         # has always recorded a birth; without this, a registry-born item reads

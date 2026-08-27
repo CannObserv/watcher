@@ -398,7 +398,14 @@ async def delete_watched_item(
 
 @router.post("/{watched_item_id}/mark-reviewed", response_model=WatchedItemResponse)
 async def mark_reviewed(watched_item_id: str, session: AsyncSession = Depends(get_db_session)):
-    """Stamp ``last_reviewed_at = now()``."""
+    """Acknowledge the current ``source_specs`` — stamps ``last_reviewed_at``.
+
+    Since #274 the column means "the operator has seen the specs the registry
+    most recently announced", compared against the newest
+    ``watched_item.announcement_applied`` event whose diff touched
+    ``source_specs``. Narrow on purpose: a cadence re-announcement does not raise
+    the prompt this clears.
+    """
     wi = await _get_or_404(session, watched_item_id)
     wi.last_reviewed_at = datetime.now(UTC)
     audit(

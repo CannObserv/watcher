@@ -160,6 +160,14 @@ def validator_source_key(
 
     The spec half is ``canonical_specs`` verbatim — one notion of a spec change,
     shared with the reconcile (#274).
+
+    **Do not "tidy" the specs back to a nested value.** Embedding the canonical
+    *string* rather than the parsed list is what makes this key and the
+    reconcile's comparison provably the same function; the nested spelling
+    computed the same verdict only by coincidence of ``sort_keys``. It is also
+    not free to change: #274 moved it, which invalidated every stored validator
+    pair once (one full fetch per item, which this module already treats as free
+    at this fleet size). Moving it back would cost the same again.
     """
     payload = json.dumps(
         {

@@ -411,10 +411,13 @@ async def watched_item_mark_reviewed(
     watched_item_id: str,
     session: AsyncSession = Depends(get_db_session),
 ):
-    """Stamp last_reviewed_at = now() on a WatchedItem.
+    """Acknowledge the current ``source_specs`` — stamps ``last_reviewed_at``.
 
-    Dashboard UI for this is pending (#185 Phase A removed the sub_aspect banner
-    that contained the only form). Callable via direct POST or the API route.
+    The **Acknowledge** button in the Source Specs panel's "Specs changed"
+    callout is the caller (#274). It had none between #185 Phase A, which removed
+    the sub_aspect banner holding the only form, and #274, which gave the stamp a
+    meaning worth setting: the operator has seen the specs the registry most
+    recently announced.
     """
     await _api_mark_reviewed(watched_item_id, session)
     if is_htmx(request):

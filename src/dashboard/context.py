@@ -202,6 +202,7 @@ WATCHED_ITEM_EVENT_CHOICES: list[tuple[str, str]] = [
         EventType.WATCHED_ITEM_UPDATED,
         EventType.WATCHED_ITEM_PAUSED,
         EventType.WATCHED_ITEM_RESUMED,
+        EventType.WATCHED_ITEM_THROTTLED,
         EventType.WATCHED_ITEM_ARCHIVED,
         EventType.WATCHED_ITEM_RESTORED,
         EventType.WATCHED_ITEM_REVIEWED,
@@ -234,7 +235,8 @@ async def unacknowledged_spec_change(
         .where(
             AuditLog.event_type == EventType.WATCHED_ITEM_ANNOUNCEMENT_APPLIED,
             AuditLog.payload["watched_item_id"].astext == str(watched_item.id),
-            AuditLog.payload["changes"].has_key("source_specs"),  # noqa: W601 — JSONB ?, not dict
+            # SQLAlchemy's JSONB `?` operator, not dict.has_key.
+            AuditLog.payload["changes"].has_key("source_specs"),
         )
         .order_by(AuditLog.created_at.desc())
         .limit(1)

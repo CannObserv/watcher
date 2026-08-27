@@ -1109,6 +1109,27 @@ class TestAnnouncementAudit:
         assert len(rows) == 1
         assert rows[0].payload["source"] == "registry"
         assert rows[0].payload["info_item_id"] == str(info_item_id)
+        # The id is assigned at flush. Asserted here because the failure mode is
+        # silent: `str(None)` is a perfectly good JSON string, and the row would
+        # simply never appear in any item's Recent Activity.
+        wi = await _get(db_session, info_item_id)
+        assert rows[0].payload["watched_item_id"] == str(wi.id)
+
+    async def test_a_create_records_a_real_id_without_a_domain(self, db_session):
+        """The narrowest path to the create-path audit: a hostless URL skips the
+        domain branch entirely (``domain_name_for_url`` returns None, and
+        ``ensure_domain_and_resolve_suspension`` early-returns without querying),
+        so nothing on that side can flush the row for us."""
+        info_item_id = ULID()
+
+        await reconcile_announcement(
+            db_session, self._ann(info_item_id, generation=1, url="file:///x")
+        )
+
+        wi = await _get(db_session, info_item_id)
+        rows = await _audit(db_session, EventType.WATCHED_ITEM_CREATED)
+        assert wi.domain_name is None
+        assert rows[0].payload["watched_item_id"] == str(wi.id)
 
     async def test_a_create_records_no_diff(self, db_session):
         """There is no "before" to diff against. A create that also emitted an

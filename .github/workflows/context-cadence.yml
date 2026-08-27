@@ -19,6 +19,10 @@ on:
   schedule:
     - cron: '1 14 * * 3'
   workflow_dispatch:
+  # TEMPORARY (#279): available PATs lack Actions write, so workflow_dispatch
+  # is unavailable — fire the first run off a push instead, then remove this.
+  push:
+    branches: [main]
 
 # contents: write because the job appends one JSONL line and pushes it. That is
 # append-only telemetry, not code.

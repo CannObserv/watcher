@@ -66,9 +66,11 @@ from ulid import ULID
 
 from src.core.domains import domain_name_for_url, ensure_domain_and_resolve_suspension
 from src.core.logging import get_logger
+from src.core.models.audit_log import EventType, audit
 from src.core.models.revoked_info_item import RevokedInfoItem
 from src.core.models.watched_item import WatchedItem
 from src.core.scheduling.cadence import parse_interval
+from src.core.validators import canonical_specs
 from src.core.watched_items import derive_watched_item_name
 from src.workers.watch_status import defer_status_republish
 
@@ -135,6 +137,43 @@ async def _stored_generation(session, info_item_id: str, row: WatchedItem | None
         return row.applied_generation
     tomb = await session.get(RevokedInfoItem, info_item_id)
     return tomb.generation if tomb is not None else None
+
+
+# The columns an announcement is authoritative for — the diff's whole subject.
+# ``domain_name`` is deliberately absent: it is derived, and it only ever moves
+# with ``effective_url``, which is already here.
+_ANNOUNCED_COLUMNS = (
+    "archiver_info_source_id",
+    "effective_url",
+    "source_specs",
+    "announced_schedule_config",
+    "is_active",
+)
+
+
+def _announcement_changes(before: dict, after: dict) -> dict:
+    """What the registry actually moved, as ``{column: {old, new}}``.
+
+    ``source_specs`` is compared through ``canonical_specs`` rather than by
+    equality, so the codebase holds exactly one answer to "did the specs change?"
+    — the same one ``validator_source_key`` uses to invalidate conditional-GET
+    validators (#269). Order across the list counts; key order inside a spec does
+    not, because a JSONB round-trip does not preserve it and reporting that churn
+    would train the operator to ignore the signal.
+
+    Emptiness is the point: the hourly snapshot re-announces every item
+    unchanged, and an event per item per hour would bury the one that matters.
+    """
+    changes = {}
+    for column in _ANNOUNCED_COLUMNS:
+        old, new = before[column], after[column]
+        if column == "source_specs":
+            if canonical_specs(old) == canonical_specs(new):
+                continue
+        elif old == new:
+            continue
+        changes[column] = {"old": old, "new": new}
+    return changes
 
 
 async def reconcile_announcement(session, payload: RegistryAnnouncementState) -> str:
@@ -222,6 +261,10 @@ async def reconcile_announcement(session, payload: RegistryAnnouncementState) ->
     if tomb is not None:
         await session.delete(tomb)
 
+    # Snapshot before the overwrite — this is the only moment the previous
+    # announcement's values still exist anywhere (#274).
+    before = {column: getattr(row, column) for column in _ANNOUNCED_COLUMNS}
+
     row.archiver_info_source_id = payload.info_source_id
     row.effective_url = payload.url
     row.source_specs = list(payload.source_specs or [])
@@ -247,6 +290,36 @@ async def reconcile_announcement(session, payload: RegistryAnnouncementState) ->
         row.domain_default_schedule_config = domain_state.default_schedule_config
 
     row.applied_generation = payload.generation
+
+    # In the same transaction as the writes it describes: an audit row that can
+    # outlive a rolled-back reconcile describes a change that never happened.
+    if created:
+        # No "before" to diff against — a create that also emitted a diff would
+        # report every column as changed. Parity with the API create path, which
+        # has always recorded a birth; without this, a registry-born item reads
+        # in the Audit Log as having appeared from nowhere.
+        audit(
+            session,
+            EventType.WATCHED_ITEM_CREATED,
+            watched_item_id=str(row.id),
+            info_item_id=key,
+            generation=payload.generation,
+            source="registry",
+        )
+    else:
+        changes = _announcement_changes(
+            before, {column: getattr(row, column) for column in _ANNOUNCED_COLUMNS}
+        )
+        if changes:
+            audit(
+                session,
+                EventType.WATCHED_ITEM_ANNOUNCEMENT_APPLIED,
+                watched_item_id=str(row.id),
+                info_item_id=key,
+                generation=payload.generation,
+                changes=changes,
+            )
+
     await session.commit()
 
     # The reconcile ack (#264): defer AFTER the commit above, and the publisher

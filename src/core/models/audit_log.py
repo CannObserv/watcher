@@ -57,6 +57,11 @@ class EventType:
     WATCHED_ITEM_PAUSED = "watched_item.paused"
     WATCHED_ITEM_RESUMED = "watched_item.resumed"
     WATCHED_ITEM_REVIEWED = "watched_item.reviewed"
+    # #274: the registry re-announced an item and something it owns actually
+    # moved. Carries a `changes` diff over the five announcement-authoritative
+    # columns; emitted only when that diff is non-empty, so the hourly snapshot's
+    # unchanged re-announcements stay out of the log.
+    WATCHED_ITEM_ANNOUNCEMENT_APPLIED = "watched_item.announcement_applied"
     WATCHED_ITEM_CHECK_REQUESTED = "watched_item.check_requested"
 
 

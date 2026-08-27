@@ -29,6 +29,7 @@ from co_core.pure.models.changes import RegistryAnnouncementEmit
 from sqlalchemy import select
 from ulid import ULID
 
+from src.core.models.audit_log import AuditLog, EventType
 from src.core.models.revoked_info_item import RevokedInfoItem
 from src.core.models.watched_item import WatchedItem, WatchHealthStatus
 from src.core.scheduling.resolution import resolved_schedule_config
@@ -92,6 +93,21 @@ async def _get(session, info_item_id) -> WatchedItem | None:
         )
         .scalars()
         .one_or_none()
+    )
+
+
+async def _audit(session, event_type) -> list[AuditLog]:
+    """Audit rows of one type, oldest first."""
+    return list(
+        (
+            await session.execute(
+                select(AuditLog)
+                .where(AuditLog.event_type == event_type)
+                .order_by(AuditLog.created_at)
+            )
+        )
+        .scalars()
+        .all()
     )
 
 
@@ -1053,3 +1069,253 @@ class TestStatusRepublishOnReconcile:
         outcome = await reconcile_announcement(db_session, payload)
         assert outcome == "invalid"
         assert spy.await_count == 0
+
+
+class TestAnnouncementAudit:
+    """The reconcile must leave a record of what the registry changed (#274).
+
+    Before this, ``reconcile_announcement`` wrote no audit row of any kind: a
+    re-announced ``source_specs`` — which changes what the fingerprint *means* —
+    landed as a silent overwrite, and so did a URL move and a deactivation. The
+    detection already existed (``validator_source_key`` invalidates on it); it
+    was simply never surfaced to a human.
+
+    Scoped to the five announcement-authoritative columns. ``domain_name`` is
+    excluded: derived, and it only ever moves with ``effective_url``, which is
+    already in the diff.
+    """
+
+    SOURCE_ID = str(ULID())
+
+    def _ann(self, info_item_id, **kwargs):
+        """``_announcement`` with a stable ``info_source_id``.
+
+        The module helper mints a fresh one per call. That is a real change to a
+        real authoritative column — see the dedicated test below — so leaving it
+        random would put a change in every diff that no test asked for.
+        """
+        kwargs.setdefault("info_source_id", self.SOURCE_ID)
+        return _announcement(info_item_id, **kwargs)
+
+    async def test_a_create_records_a_birth(self, db_session):
+        """Parity with the API create path, which has always emitted this. A
+        registry-born item with no ``watched_item.created`` row reads, in the
+        Audit Log, as an item that appeared from nowhere."""
+        info_item_id = ULID()
+
+        await reconcile_announcement(db_session, self._ann(info_item_id, generation=1))
+
+        rows = await _audit(db_session, EventType.WATCHED_ITEM_CREATED)
+        assert len(rows) == 1
+        assert rows[0].payload["source"] == "registry"
+        assert rows[0].payload["info_item_id"] == str(info_item_id)
+
+    async def test_a_create_records_no_diff(self, db_session):
+        """There is no "before" to diff against. A create that also emitted an
+        announcement-applied row would report every column as changed."""
+        await reconcile_announcement(db_session, self._ann(ULID(), generation=1))
+
+        assert await _audit(db_session, EventType.WATCHED_ITEM_ANNOUNCEMENT_APPLIED) == []
+
+    async def test_a_spec_change_is_recorded_with_both_values(self, db_session):
+        info_item_id = ULID()
+        await reconcile_announcement(
+            db_session, self._ann(info_item_id, generation=1, source_specs=[{"selector": "#a"}])
+        )
+
+        await reconcile_announcement(
+            db_session, self._ann(info_item_id, generation=2, source_specs=[{"selector": "#b"}])
+        )
+
+        rows = await _audit(db_session, EventType.WATCHED_ITEM_ANNOUNCEMENT_APPLIED)
+        assert len(rows) == 1
+        changes = rows[0].payload["changes"]
+        assert changes["source_specs"]["old"] == [{"selector": "#a"}]
+        assert changes["source_specs"]["new"] == [{"selector": "#b"}]
+        assert rows[0].payload["generation"] == 2
+
+    async def test_a_reorder_is_a_change(self, db_session):
+        """Order-significant across the list — the fallback loop tries specs in
+        order, so a reorder can bind a different spec. Same answer as
+        ``validator_source_key``, which is the point of sharing the dumper."""
+        info_item_id = ULID()
+        await reconcile_announcement(
+            db_session,
+            self._ann(info_item_id, generation=1, source_specs=[{"a": 1}, {"b": 2}]),
+        )
+
+        await reconcile_announcement(
+            db_session,
+            self._ann(info_item_id, generation=2, source_specs=[{"b": 2}, {"a": 1}]),
+        )
+
+        rows = await _audit(db_session, EventType.WATCHED_ITEM_ANNOUNCEMENT_APPLIED)
+        assert len(rows) == 1
+        assert "source_specs" in rows[0].payload["changes"]
+
+    async def test_a_key_reorder_within_one_spec_is_not_a_change(self, db_session):
+        """Order-insensitive within a spec's keys: a JSONB round-trip does not
+        preserve key order, and reporting that as an operator-visible change
+        would train the operator to ignore the signal."""
+        info_item_id = ULID()
+        await reconcile_announcement(
+            db_session,
+            self._ann(info_item_id, generation=1, source_specs=[{"a": 1, "b": 2}]),
+        )
+
+        await reconcile_announcement(
+            db_session,
+            self._ann(info_item_id, generation=2, source_specs=[{"b": 2, "a": 1}]),
+        )
+
+        assert await _audit(db_session, EventType.WATCHED_ITEM_ANNOUNCEMENT_APPLIED) == []
+
+    async def test_an_identical_re_announcement_records_nothing(self, db_session):
+        """The hourly snapshot re-announces every item unchanged. An event per
+        item per hour would bury the one that matters."""
+        info_item_id = ULID()
+        await reconcile_announcement(db_session, self._ann(info_item_id, generation=1))
+
+        await reconcile_announcement(db_session, self._ann(info_item_id, generation=2))
+
+        assert await _audit(db_session, EventType.WATCHED_ITEM_ANNOUNCEMENT_APPLIED) == []
+
+    async def test_a_url_move_is_recorded(self, db_session):
+        """A URL move changes *what is watched* exactly as much as a spec change
+        does, and was silent by the same mechanism."""
+        info_item_id = ULID()
+        await reconcile_announcement(
+            db_session, self._ann(info_item_id, generation=1, url="https://lcb.wa.gov/notices")
+        )
+
+        await reconcile_announcement(
+            db_session, self._ann(info_item_id, generation=2, url="https://lcb.wa.gov/updates")
+        )
+
+        rows = await _audit(db_session, EventType.WATCHED_ITEM_ANNOUNCEMENT_APPLIED)
+        assert len(rows) == 1
+        assert rows[0].payload["changes"]["effective_url"] == {
+            "old": "https://lcb.wa.gov/notices",
+            "new": "https://lcb.wa.gov/updates",
+        }
+        # Derived, and it only moves with the URL that is already in the diff.
+        assert "domain_name" not in rows[0].payload["changes"]
+
+    async def test_a_deactivation_is_recorded(self, db_session):
+        info_item_id = ULID()
+        await reconcile_announcement(db_session, self._ann(info_item_id, generation=1, active=True))
+
+        await reconcile_announcement(
+            db_session, self._ann(info_item_id, generation=2, active=False)
+        )
+
+        rows = await _audit(db_session, EventType.WATCHED_ITEM_ANNOUNCEMENT_APPLIED)
+        assert rows[0].payload["changes"]["is_active"] == {"old": True, "new": False}
+
+    async def test_an_abstention_is_not_a_change(self, db_session):
+        """``active: None`` means the registry has no opinion — nothing was
+        applied, so there is nothing to report."""
+        info_item_id = ULID()
+        await reconcile_announcement(db_session, self._ann(info_item_id, generation=1, active=True))
+
+        await reconcile_announcement(db_session, self._ann(info_item_id, generation=2, active=None))
+
+        assert await _audit(db_session, EventType.WATCHED_ITEM_ANNOUNCEMENT_APPLIED) == []
+
+    async def test_a_cadence_change_is_recorded(self, db_session):
+        info_item_id = ULID()
+        await reconcile_announcement(
+            db_session,
+            self._ann(
+                info_item_id, generation=1, watch_spec={"schema_version": 1, "interval": "6h"}
+            ),
+        )
+
+        await reconcile_announcement(
+            db_session,
+            self._ann(
+                info_item_id, generation=2, watch_spec={"schema_version": 1, "interval": "24h"}
+            ),
+        )
+
+        rows = await _audit(db_session, EventType.WATCHED_ITEM_ANNOUNCEMENT_APPLIED)
+        assert len(rows) == 1
+        assert "announced_schedule_config" in rows[0].payload["changes"]
+
+    async def test_a_stale_announcement_records_nothing(self, db_session):
+        """The generation guard returns before any write. This is what keeps a
+        boot replay silent — see the replay test below."""
+        info_item_id = ULID()
+        await reconcile_announcement(db_session, self._ann(info_item_id, generation=5))
+
+        outcome = await reconcile_announcement(
+            db_session, self._ann(info_item_id, generation=3, source_specs=[{"selector": "#b"}])
+        )
+
+        assert outcome == "stale"
+        assert await _audit(db_session, EventType.WATCHED_ITEM_ANNOUNCEMENT_APPLIED) == []
+
+    async def test_a_boot_replay_records_nothing(self, db_session):
+        """``info.registry`` is groupless and replayed from ``0-0`` every boot.
+        Without the generation guard in front of the diff, every restart would
+        re-emit the whole registry into the Audit Log — the one way this feature
+        turns into spam, so it is pinned rather than inferred."""
+        first, second = ULID(), ULID()
+        stream = [
+            self._ann(first, generation=1),
+            self._ann(second, generation=1),
+            self._ann(first, generation=2, source_specs=[{"selector": "#b"}]),
+        ]
+        for msg in stream:
+            await reconcile_announcement(db_session, msg)
+        before = len(await _audit(db_session, EventType.WATCHED_ITEM_ANNOUNCEMENT_APPLIED))
+
+        for msg in stream:  # the boot replay, from 0-0
+            await reconcile_announcement(db_session, msg)
+
+        assert len(await _audit(db_session, EventType.WATCHED_ITEM_ANNOUNCEMENT_APPLIED)) == before
+
+    async def test_a_revocation_records_nothing(self, db_session):
+        """A tombstone carries no descriptive fields to diff, and the row it
+        would name is gone."""
+        info_item_id = ULID()
+        await reconcile_announcement(db_session, self._ann(info_item_id, generation=1))
+
+        await reconcile_announcement(
+            db_session, self._ann(info_item_id, generation=2, revoked=True)
+        )
+
+        assert await _audit(db_session, EventType.WATCHED_ITEM_ANNOUNCEMENT_APPLIED) == []
+
+    async def test_the_event_is_item_scoped(self, db_session):
+        """``watched_item_id`` in the payload is what puts the row in the item's
+        Recent Activity — the indexed lookup, and the whole surfacing story."""
+        info_item_id = ULID()
+        await reconcile_announcement(db_session, self._ann(info_item_id, generation=1))
+        wi = await _get(db_session, info_item_id)
+
+        await reconcile_announcement(
+            db_session, self._ann(info_item_id, generation=2, source_specs=[{"selector": "#b"}])
+        )
+
+        rows = await _audit(db_session, EventType.WATCHED_ITEM_ANNOUNCEMENT_APPLIED)
+        assert rows[0].payload["watched_item_id"] == str(wi.id)
+
+    async def test_a_source_id_change_is_recorded(self, db_session):
+        """``archiver_info_source_id`` is authoritative too — the InfoItem was
+        rebound to a different source."""
+        info_item_id = ULID()
+        first, second = str(ULID()), str(ULID())
+        await reconcile_announcement(
+            db_session, self._ann(info_item_id, generation=1, info_source_id=first)
+        )
+
+        await reconcile_announcement(
+            db_session, self._ann(info_item_id, generation=2, info_source_id=second)
+        )
+
+        rows = await _audit(db_session, EventType.WATCHED_ITEM_ANNOUNCEMENT_APPLIED)
+        assert rows[0].payload["changes"]["archiver_info_source_id"] == {
+            "old": first,
+            "new": second,
+        }

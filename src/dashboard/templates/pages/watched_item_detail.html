@@ -148,6 +148,25 @@
 <section class="mb-8">
   <h3 class="text-lg font-semibold text-gray-900 dark:text-white mb-4">Source Specs</h3>
   <div class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-4">
+    {# #274: the registry re-announced the specs and nobody has acknowledged it.
+       A spec change alters what the fingerprint *means*, so it earns a prompt
+       here rather than only a line in Recent Activity. Acknowledging stamps
+       `last_reviewed_at` through the route that has existed since #161. #}
+    {% if spec_change_at %}
+    <div class="flex flex-wrap items-center justify-between gap-3 mb-3 p-3 rounded bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800">
+      <p class="text-sm text-amber-800 dark:text-amber-200">
+        <span class="badge badge-warning">Specs changed</span>
+        The registry re-announced these specs on {{ spec_change_at.strftime("%Y-%m-%d") }} — see Recent Activity for the previous value.
+      </p>
+      <form method="post" action="/watched-items/{{ watched_item.id }}/mark-reviewed">
+        <button type="submit"
+          hx-post="/watched-items/{{ watched_item.id }}/mark-reviewed"
+          hx-target="body"
+          hx-push-url="true"
+          class="btn btn-secondary">Acknowledge</button>
+      </form>
+    </div>
+    {% endif %}
     <p class="text-xs text-gray-500 dark:text-gray-400 mb-2">Pipeline extraction config (read-only — authored via Archiver tooling).</p>
     {% if watched_item.source_specs %}
     <pre class="text-xs overflow-x-auto bg-gray-50 dark:bg-gray-900 rounded p-3 text-gray-800 dark:text-gray-200"><code>{{ watched_item.source_specs | tojson(indent=2) }}</code></pre>
@@ -188,7 +207,7 @@
 {# Metadata #}
 <p class="text-xs text-gray-400 dark:text-gray-500 mb-8">
   Metadata · ID: {{ watched_item.id }} · Created: {{ watched_item.created_at.strftime("%Y-%m-%d") }} · Updated: {{ watched_item.updated_at.strftime("%Y-%m-%d") }}
-  {% if watched_item.last_reviewed_at %} · Reviewed: {{ watched_item.last_reviewed_at.strftime("%Y-%m-%d") }}{% endif %}
+  {% if watched_item.last_reviewed_at %} · Specs acknowledged: {{ watched_item.last_reviewed_at.strftime("%Y-%m-%d") }}{% endif %}
 </p>
 
 {# Danger zone #}

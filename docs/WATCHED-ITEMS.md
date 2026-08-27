@@ -89,6 +89,41 @@ moves**. Re-deriving the domain on every announcement would clear a
 `domain_suspended` an operator set, which is host-level mechanism the registry has
 no opinion on.
 
+**What an announcement records (#274).** Every applied announcement leaves an
+audit row. A create emits `watched_item.created` with `source: "registry"` —
+parity with the API create path, so a registry-born item does not read as having
+appeared from nowhere. An update emits `watched_item.announcement_applied`
+carrying `changes: {column: {old, new}}` over the five owned columns above,
+**only when that diff is non-empty**: the hourly snapshot re-announces every item
+unchanged, and an event per item per hour would bury the one that matters. The
+generation guard returns before any write, so the groupless replay from `0-0` at
+every boot records nothing (`test_a_boot_replay_records_nothing`).
+
+`domain_name` is deliberately absent from the diff — derived, and it only ever
+moves with `effective_url`, which is already there.
+
+`source_specs` is compared through `canonical_specs` (`src/core/validators.py`),
+the same canonicalisation `validator_source_key` hashes: order **significant**
+across the list (the fallback loop tries specs in order, so a reorder can bind a
+different spec), order **insensitive** within one spec's keys (a JSONB round-trip
+does not preserve them). One notion of "did the specs change?" — two would be a
+bug farm, and the conditional-GET invalidation (#269) already depended on this
+one.
+
+No notification fires. `WatchEventType` is a closed enum persisted in
+`notification_templates.events`; a member for this would drag in the template UI
+and dispatch for a signal the audit row and the detail-page badge already carry.
+
+**Spec acknowledgement (#274).** `last_reviewed_at` means *the operator has
+acknowledged the current `source_specs`* — compared against the newest
+`announcement_applied` event whose diff touched `source_specs`
+(`unacknowledged_spec_change`, `src/dashboard/context.py`). `NULL` reads as
+*never acknowledged*, not *acknowledged at the dawn of time*. Narrow on purpose:
+a cadence re-announcement does **not** raise it, because
+`announced_schedule_config` changes *when* the fingerprint is taken, not what it
+means — a prompt firing for both would be trained away, taking the one that
+matters with it.
+
 **What survives reconciliation**: `health_status`, `last_checked_at`,
 `last_observed_at`, `last_changed_at`, `last_reviewed_at`, `domain_suspended`, `archived_at`,
 `throttle_floor_interval`, `default_schedule_config`, `content_media_type`,

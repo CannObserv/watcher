@@ -49,6 +49,7 @@ from src.dashboard.context import (
     get_watched_item_notifications,
     get_watched_item_profiles,
     get_watched_items_total_count,
+    unacknowledged_spec_change,
 )
 from src.dashboard.deps import clamp_pagination, is_htmx
 from src.dashboard.routes.audit import audit_table_context
@@ -295,6 +296,8 @@ async def watched_item_detail_page(
     global_templates = await get_global_default_templates(session)
     domain_templates = await get_domain_default_templates(session, wi.domain_name)
     profiles = await get_watched_item_profiles(session, wi.id)
+    # #274: the registry re-announced the specs and nobody has acknowledged it.
+    spec_change_at = await unacknowledged_spec_change(session, wi)
 
     # Recent Activity reuses the shared audit-log table + chip filter, scoped to
     # this item (#215). HTMX drives filtering/paging, but the route also honors
@@ -326,6 +329,7 @@ async def watched_item_detail_page(
         "global_templates": global_templates,
         "domain_templates": domain_templates,
         "profiles": profiles,
+        "spec_change_at": spec_change_at,
         # Recent Activity chip-filter context (table context — incl.
         # selected_event_types — merged below).
         "event_choices": WATCHED_ITEM_EVENT_CHOICES,

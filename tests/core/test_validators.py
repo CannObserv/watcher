@@ -13,6 +13,8 @@ from datetime import UTC, datetime, timedelta
 from importlib.metadata import PackageNotFoundError, version
 from types import SimpleNamespace
 
+import pytest
+
 from src.core.validators import (
     CO_CORE_DISTRIBUTION,
     CONDITIONAL_GET_ENV,
@@ -21,6 +23,7 @@ from src.core.validators import (
     LOCAL_EXTRACTION_GENERATION,
     MAX_VALIDATOR_LENGTH,
     VALIDATOR_MAX_AGE_ENV,
+    canonical_specs,
     clear_validators,
     conditional_get_enabled,
     extraction_generation,
@@ -95,6 +98,60 @@ class TestSendableValidator:
         # A truncated ETag is a validator that can never match — worse than none.
         assert sendable_validator("x" * MAX_VALIDATOR_LENGTH) is not None
         assert sendable_validator("x" * (MAX_VALIDATOR_LENGTH + 1)) is None
+
+
+class TestCanonicalSpecs:
+    """The single notion of "did the specs change?" (#274).
+
+    Extracted from ``validator_source_key`` rather than reimplemented beside it:
+    two answers to that question in one codebase is the bug farm the issue named.
+    The key itself cannot be reused for the comparison — it also folds in the URL
+    and the extraction generation, so it moves on a co-core upgrade with
+    byte-identical specs.
+    """
+
+    def test_is_stable_across_key_ordering(self):
+        assert canonical_specs([{"a": 1, "b": 2}]) == canonical_specs([{"b": 2, "a": 1}])
+
+    def test_spec_order_is_significant(self):
+        # Same reason as the key: the fallback loop tries specs in order.
+        assert canonical_specs([{"a": 1}, {"b": 2}]) != canonical_specs([{"b": 2}, {"a": 1}])
+
+    def test_none_and_empty_are_the_same_absence(self):
+        # A registry that stops announcing specs and one that announces `[]` have
+        # said the same thing; the reconcile stores `[]` for both.
+        assert canonical_specs(None) == canonical_specs([])
+
+    def test_moves_when_a_spec_changes(self):
+        assert canonical_specs([{"selector": "#content"}]) != canonical_specs(
+            [{"selector": "main"}]
+        )
+
+    def test_survives_a_non_json_value(self):
+        # `default=str`, matching the key: a JSONB round-trip can hand back a
+        # Decimal or a datetime, and raising here would break the reconcile.
+        assert canonical_specs([{"at": datetime(2026, 8, 27, tzinfo=UTC)}])
+
+    @pytest.mark.parametrize(
+        "left,right",
+        [
+            ([{"a": 1, "b": 2}], [{"b": 2, "a": 1}]),
+            (None, []),
+            ([{"a": 1}, {"b": 2}], [{"b": 2}, {"a": 1}]),
+            ([{"selector": "#content"}], [{"selector": "main"}]),
+        ],
+    )
+    def test_agrees_with_the_validator_key(self, left, right):
+        """The two must never disagree about whether the specs moved.
+
+        Held at the same URL and generation, so the key's verdict is the specs'
+        verdict alone. This is the property the extraction exists to guarantee.
+        """
+        specs_same = canonical_specs(left) == canonical_specs(right)
+        key_same = validator_source_key(
+            effective_url=URL, source_specs=left
+        ) == validator_source_key(effective_url=URL, source_specs=right)
+        assert specs_same == key_same
 
 
 class TestValidatorSourceKey:

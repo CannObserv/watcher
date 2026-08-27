@@ -205,9 +205,43 @@ WATCHED_ITEM_EVENT_CHOICES: list[tuple[str, str]] = [
         EventType.WATCHED_ITEM_ARCHIVED,
         EventType.WATCHED_ITEM_RESTORED,
         EventType.WATCHED_ITEM_REVIEWED,
+        EventType.WATCHED_ITEM_ANNOUNCEMENT_APPLIED,
         EventType.WATCHED_ITEM_CHECK_REQUESTED,
     )
 ]
+
+
+async def unacknowledged_spec_change(
+    session: AsyncSession, watched_item: WatchedItem
+) -> datetime | None:
+    """When the specs last changed without the operator acknowledging it (#274).
+
+    ``None`` means nothing to acknowledge. Otherwise the ``created_at`` of the
+    newest ``announcement_applied`` event whose diff touched ``source_specs``,
+    which is what the badge dates itself to.
+
+    ``last_reviewed_at IS NULL`` reads as *never acknowledged* rather than
+    *acknowledged at the dawn of time*: the null had to mean one of the two, and
+    surfacing is the recoverable direction.
+
+    Narrow by design — only ``source_specs``. A spec change alters what the
+    fingerprint *means*; a cadence change alters when it is taken. A prompt that
+    fired for both would be trained away, and then the one that matters is missed
+    too.
+    """
+    stmt = (
+        select(AuditLog.created_at)
+        .where(
+            AuditLog.event_type == EventType.WATCHED_ITEM_ANNOUNCEMENT_APPLIED,
+            AuditLog.payload["watched_item_id"].astext == str(watched_item.id),
+            AuditLog.payload["changes"].has_key("source_specs"),  # noqa: W601 — JSONB ?, not dict
+        )
+        .order_by(AuditLog.created_at.desc())
+        .limit(1)
+    )
+    if watched_item.last_reviewed_at is not None:
+        stmt = stmt.where(AuditLog.created_at > watched_item.last_reviewed_at)
+    return await session.scalar(stmt)
 
 
 async def get_watched_item_profiles(

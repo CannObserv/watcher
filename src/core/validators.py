@@ -135,6 +135,21 @@ def sendable_validator(value: str | None) -> str | None:
     return value
 
 
+def canonical_specs(source_specs: list | None) -> str:
+    """The canonical spelling of a spec list — the one notion of "did it change?".
+
+    Order-significant over the list (the fallback loop tries specs in order, so a
+    reorder can bind a different spec) and order-insensitive within each spec's
+    keys (``sort_keys``), because a JSONB round-trip does not preserve key order.
+
+    Extracted so the reconcile's spec-change detection (#274) and the validator
+    key below cannot drift apart. The key itself is *not* reusable for that
+    comparison: it also folds in the URL and the extraction generation, so it
+    moves on a co-core upgrade over byte-identical specs.
+    """
+    return json.dumps(source_specs or [], sort_keys=True, separators=(",", ":"), default=str)
+
+
 def validator_source_key(
     *,
     effective_url: str,
@@ -143,13 +158,15 @@ def validator_source_key(
 ) -> str:
     """Identity of "what these bytes were going to mean" when a pair was stored.
 
-    Order-significant over the spec list (the fallback loop tries specs in order,
-    so a reorder can bind a different spec) and order-insensitive within each
-    spec's keys (``sort_keys``), because a JSONB round-trip does not preserve
-    key order and a spurious mismatch costs a full fetch for nothing.
+    The spec half is ``canonical_specs`` verbatim — one notion of a spec change,
+    shared with the reconcile (#274).
     """
     payload = json.dumps(
-        {"url": effective_url, "specs": source_specs or [], "generation": generation},
+        {
+            "url": effective_url,
+            "specs": canonical_specs(source_specs),
+            "generation": generation,
+        },
         sort_keys=True,
         separators=(",", ":"),
         default=str,

@@ -72,3 +72,23 @@ duplicate :: `WATCHER_DEV_NOTIFIER_BASE_URL` / `WATCHER_DEV_NOTIFIER_API_KEY` in
 # AGENTS.md verbatim apart from the new target.
 retarget :: **Naming rule for new variables.** Anything naming a shared external resource takes a **service-prefixed** name with a separate dev key (`WATCHER_BUS_REDIS_URL`
 retarget :: - [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) — systemd units, environment variables, wheelhouse auth
+
+# --- #274 curation: the announcement-audit paragraph returns to docs/ ---
+# Three lines are the audit prose itself. Every claim in them is carried, more
+# fully, by docs/WATCHED-ITEMS.md → "What an announcement records (#274)":
+# the audit row per applied announcement, `watched_item.created` with
+# `source: "registry"`, `announcement_applied` with its `changes` diff, the
+# non-empty condition, and the silent `0-0` boot replay. Read against the
+# destination before warranting, not inferred from the topic.
+AGENTS.md :: duplicate :: Every applied announcement is audited: a create as
+AGENTS.md :: duplicate :: (`source: registry`), an update as `watched_item.announcement_applied`
+AGENTS.md :: duplicate :: `changes` diff — emitted **only when non-empty**
+# The remaining three are reflow, not loss: removing the sentence above re-wraps
+# the paragraph around it. Every surviving word — the `POST` caller note, the
+# archiver#158 reference, the whole pointer list — is still inline in AGENTS.md,
+# on differently-bounded lines. The pointer's dropped topic ("the
+# spec-acknowledgement meaning of `last_reviewed_at`") is covered by the same
+# destination section.
+AGENTS.md :: duplicate :: boot replay stay silent (#274). `POST /api/v1/watched-items` still works
+AGENTS.md :: duplicate :: but has had no caller since archiver#158. What each 409 is, the authoritative
+AGENTS.md :: duplicate :: column list, the spec-acknowledgement meaning of `last_reviewed_at`, schedule

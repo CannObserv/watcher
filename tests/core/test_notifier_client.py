@@ -30,7 +30,7 @@ class TestGetNotifierClient:
             get_notifier_client()
 
     def test_raises_when_api_key_missing(self, monkeypatch):
-        monkeypatch.setenv("WATCHER_NOTIFIER_BASE_URL", "http://localhost:9000")
+        monkeypatch.setenv("WATCHER_NOTIFIER_BASE_URL", "http://notifier.invalid:9000")
         monkeypatch.delenv("WATCHER_NOTIFIER_API_KEY", raising=False)
 
         with pytest.raises(RuntimeError, match="WATCHER_NOTIFIER_API_KEY"):
@@ -45,7 +45,7 @@ class TestGetNotifierClient:
         the production tenant. The gate itself is pinned in
         tests/test_notifier_isolation.py.
         """
-        monkeypatch.setenv("WATCHER_NOTIFIER_BASE_URL", "http://localhost:9000")
+        monkeypatch.setenv("WATCHER_NOTIFIER_BASE_URL", "http://notifier.invalid:9000")
         monkeypatch.setenv("WATCHER_NOTIFIER_API_KEY", "nk_test")
         monkeypatch.setenv("WATCHER_NOTIFIER_ENABLED", "1")
 

@@ -36,6 +36,7 @@ gate still covers the paths neither reaches. See
 
 import os
 import pathlib
+import re
 
 import pytest
 
@@ -152,7 +153,7 @@ class TestNotifierEnabledGate:
         assert notifier_enabled({}) is False
 
     def test_client_refuses_a_url_held_without_the_flag(self, monkeypatch) -> None:
-        monkeypatch.setenv(WATCHER_NOTIFIER_BASE_URL_ENV, "http://localhost:9000")
+        monkeypatch.setenv(WATCHER_NOTIFIER_BASE_URL_ENV, "http://notifier.invalid:9000")
         monkeypatch.setenv(WATCHER_NOTIFIER_API_KEY_ENV, "nk_test")
         monkeypatch.delenv(WATCHER_NOTIFIER_ENABLED_ENV, raising=False)
 
@@ -182,7 +183,7 @@ class TestNotifierEnabledGate:
     def test_missing_key_is_still_the_key_error(self, monkeypatch) -> None:
         """Sibling of the test above; same relationship to
         ``tests/core/test_notifier_client.py`` (CR-4)."""
-        monkeypatch.setenv(WATCHER_NOTIFIER_BASE_URL_ENV, "http://localhost:9000")
+        monkeypatch.setenv(WATCHER_NOTIFIER_BASE_URL_ENV, "http://notifier.invalid:9000")
         monkeypatch.delenv(WATCHER_NOTIFIER_API_KEY_ENV, raising=False)
         monkeypatch.setenv(WATCHER_NOTIFIER_ENABLED_ENV, "1")
 
@@ -203,7 +204,7 @@ class TestEnvironmentNotifierGate:
     def test_url_without_the_flag_refuses(self) -> None:
         with pytest.raises(NotifierNotEnabled) as excinfo:
             assert_environment_notifier_allowed(
-                {WATCHER_NOTIFIER_BASE_URL_ENV: "http://localhost:9000"},
+                {WATCHER_NOTIFIER_BASE_URL_ENV: "http://notifier.invalid:9000"},
             )
         message = str(excinfo.value)
         assert WATCHER_NOTIFIER_ENABLED_ENV in message
@@ -214,7 +215,7 @@ class TestEnvironmentNotifierGate:
         with pytest.raises(NotifierNotEnabled):
             assert_environment_notifier_allowed(
                 {
-                    WATCHER_NOTIFIER_BASE_URL_ENV: "http://localhost:9000",
+                    WATCHER_NOTIFIER_BASE_URL_ENV: "http://notifier.invalid:9000",
                     WATCHER_NOTIFIER_ENABLED_ENV: "true",
                 },
             )
@@ -222,7 +223,7 @@ class TestEnvironmentNotifierGate:
     def test_url_with_the_flag_is_allowed(self) -> None:
         assert_environment_notifier_allowed(
             {
-                WATCHER_NOTIFIER_BASE_URL_ENV: "http://localhost:9000",
+                WATCHER_NOTIFIER_BASE_URL_ENV: "http://notifier.invalid:9000",
                 WATCHER_NOTIFIER_ENABLED_ENV: "1",
             },
         )
@@ -258,3 +259,46 @@ class TestEnvironmentNotifierGate:
         message = str(excinfo.value)
         assert WATCHER_NOTIFIER_BASE_URL_ENV in message
         assert "/etc/watcher/notifier.env" in message
+
+
+class TestFixtureHostsAreUnresolvable:
+    """No test fixture may name a notifier host that could ever answer (#280).
+
+    None of these fixtures open a socket — the URL is arbitrary, and that is
+    exactly why it drifts. Naming loopback on notifier's port was true while
+    notifier ran beside watcher; notifier#43 moved it to its own VM and the
+    literal stopped describing anything, while still reading as the real
+    production URL. The obvious repair — substitute the new host — is worse: it
+    makes the suite track production configuration, so the next move breaks
+    these files again, and a fixture holding the live URL is *more* copyable,
+    not less, which is the whole hazard.
+
+    So the rule is neither host, but a name reserved by RFC 2606 to never
+    resolve: ``notifier.invalid``. It cannot become stale, because it was never
+    true.
+
+    The pattern is built rather than written out so this guard does not trip
+    over its own docstring.
+    """
+
+    _NOTIFIER_URL = re.compile(r"https?://([^\"'\s/]+):900[01]")
+
+    def test_no_test_file_names_a_resolvable_notifier_host(self) -> None:
+        tests_root = pathlib.Path(__file__).resolve().parent
+        assert tests_root.is_dir(), f"{tests_root} is missing — this guard is anchored wrong"
+
+        offenders: list[str] = []
+        for path in sorted(tests_root.rglob("*.py")):
+            text = path.read_text(encoding="utf-8")
+            for match in self._NOTIFIER_URL.finditer(text):
+                host = match.group(1)
+                if not host.endswith(".invalid"):
+                    line = text.count("\n", 0, match.start()) + 1
+                    offenders.append(f"{path.relative_to(tests_root.parent)}:{line} → {host}")
+
+        assert not offenders, (
+            "Test fixtures name a notifier host that resolves:\n  "
+            + "\n  ".join(offenders)
+            + "\nUse a reserved name that never resolves (notifier.invalid) rather "
+            "than whichever host is real this quarter."
+        )

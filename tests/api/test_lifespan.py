@@ -196,7 +196,7 @@ async def test_lifespan_refuses_a_notifier_url_without_the_opt_in(monkeypatch, c
     Without that, nothing in the suite reaches this branch and the flag's first
     exercise would be a production restart.
     """
-    monkeypatch.setenv(WATCHER_NOTIFIER_BASE_URL_ENV, "http://localhost:9000")
+    monkeypatch.setenv(WATCHER_NOTIFIER_BASE_URL_ENV, "http://notifier.invalid:9000")
     monkeypatch.delenv(WATCHER_NOTIFIER_ENABLED_ENV, raising=False)
 
     with (

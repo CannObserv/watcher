@@ -328,7 +328,7 @@ def test_inherited_production_notifier_is_cleared() -> None:
     result = run(
         {
             "TEST_DATABASE_URL": TEST_URL,
-            "WATCHER_NOTIFIER_BASE_URL": "http://localhost:9000",
+            "WATCHER_NOTIFIER_BASE_URL": "http://notifier.invalid:9000",
             "WATCHER_NOTIFIER_API_KEY": "nk_production",
         }
     )
@@ -347,14 +347,14 @@ def test_explicit_dev_notifier_is_forwarded_and_opts_in() -> None:
     result = run(
         {
             "TEST_DATABASE_URL": TEST_URL,
-            "WATCHER_NOTIFIER_BASE_URL": "http://localhost:9000",
+            "WATCHER_NOTIFIER_BASE_URL": "http://notifier.invalid:9000",
             "WATCHER_NOTIFIER_API_KEY": "nk_production",
-            "WATCHER_DEV_NOTIFIER_BASE_URL": "http://localhost:9001",
+            "WATCHER_DEV_NOTIFIER_BASE_URL": "http://notifier.invalid:9001",
             "WATCHER_DEV_NOTIFIER_API_KEY": "nk_dev",
         }
     )
     assert result.returncode == 0, result.stderr
-    assert "WATCHER_NOTIFIER_BASE_URL=http://localhost:9001" in result.stdout
+    assert "WATCHER_NOTIFIER_BASE_URL=http://notifier.invalid:9001" in result.stdout
     assert "WATCHER_NOTIFIER_ENABLED=1" in result.stdout
 
 
@@ -370,7 +370,7 @@ def test_dev_notifier_url_without_a_dev_key_refuses() -> None:
         {
             "TEST_DATABASE_URL": TEST_URL,
             "WATCHER_NOTIFIER_API_KEY": "nk_production",
-            "WATCHER_DEV_NOTIFIER_BASE_URL": "http://localhost:9001",
+            "WATCHER_DEV_NOTIFIER_BASE_URL": "http://notifier.invalid:9001",
         }
     )
     assert result.returncode != 0
@@ -386,7 +386,7 @@ def test_an_inherited_notifier_opt_in_does_not_survive() -> None:
     result = run(
         {
             "TEST_DATABASE_URL": TEST_URL,
-            "WATCHER_NOTIFIER_BASE_URL": "http://localhost:9000",
+            "WATCHER_NOTIFIER_BASE_URL": "http://notifier.invalid:9000",
             "WATCHER_NOTIFIER_API_KEY": "nk_production",
             "WATCHER_NOTIFIER_ENABLED": "1",
         }

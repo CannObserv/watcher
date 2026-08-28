@@ -73,7 +73,7 @@ pattern — see **Redis and the bus**.
 | `GH_TOKEN` | `.env` | no | GitHub personal access token |
 | `TEST_DATABASE_URL` | `.env` | no | PostgreSQL connection string for test database |
 | `BUILD_ID` | env | no | Git SHA for static asset cache-busting (default `"dev"`) |
-| `WATCHER_NOTIFIER_BASE_URL` | `/etc/watcher/notifier.env` | **yes** | Base URL of the notifier service (e.g. `http://localhost:9000`). **Not sufficient on its own since #277** — see `WATCHER_NOTIFIER_ENABLED`. Moved out of `/etc/watcher/.env` under #278: that file is exported into every agent shell, and this pair must be held by the service alone |
+| `WATCHER_NOTIFIER_BASE_URL` | `/etc/watcher/notifier.env` | **yes** | Base URL of the notifier service — `http://notifier:9000` on this VM since notifier#43 moved it to its own host (#280). `notifier` is a MagicDNS name on the `cannobserv.org.github` tailnet, and notifier binds its tailnet address alone: a watcher that has not joined cannot reach it from anywhere. **Not sufficient on its own since #277** — see `WATCHER_NOTIFIER_ENABLED`. Moved out of `/etc/watcher/.env` under #278: that file is exported into every agent shell, and this pair must be held by the service alone |
 | `WATCHER_NOTIFIER_API_KEY` | `/etc/watcher/notifier.env` | **yes** | Watcher tenant API key issued by `scripts/seed_tenant.py` in the notifier repo, marked `production` there. This is the credential that makes a stray dispatch *deliverable*, which is why the pair is gated — and, since #278, why it lives in a file no shell sources |
 | `WATCHER_NOTIFIER_ENABLED` | `deploy/watcher.service` **only** | prod only | `=1` opts this process into building a notifier client at all (`src/core/notifier_client/client.py`, #277). Without it `get_notifier_client()` raises `NotifierNotEnabled` — **and a URL held without it aborts startup**, so a unit that lost the line fails loudly instead of going quiet on notifications. Must live in the systemd unit, never an env file, for the same reason as the two flags above and with the largest blast radius of the three: a stray database row is recoverable and a stray bus frame is inert, but a stray notification is delivered to real subscribers, cannot be recalled, and *succeeds* — leaving no error behind to notice. `scripts/dev_server.sh` sets it for itself when `WATCHER_DEV_NOTIFIER_BASE_URL` names a scratch notifier. Since #278 the **flag without a URL** aborts startup too: only the unit sets it, and the credential it goes with is in the unit's own env file, so that combination means the file did not load |
 | `WATCHER_ALLOW_PRODUCTION_DB` | `deploy/watcher.service` **only** | prod only | `=1` opts into serving a database whose name lacks a `_test`/`_dev` suffix (`src/core/db_safety.py`, #233). Must live in the systemd unit, never an env file — env files are sourced by hand-run dev servers, which are exactly what the guard stops |
@@ -94,8 +94,10 @@ pattern — see **Redis and the bus**.
 
 **The dev notifier tenant (#278, provisioned 2026-08-25).** Watcher's
 development credential is valid against the notifier deployment on
-**`http://localhost:9001`**, a separate instance from production's `:9000` with
-its own database. Two consequences, both verified rather than assumed:
+**`http://notifier:9001`**, a separate instance from production's `:9000` with
+its own database. Both moved off this VM with notifier#43 and are now tailnet
+MagicDNS names (#280) — the split between them is unchanged, only the host.
+Two consequences, both verified rather than assumed:
 
 * The dev key **authenticates on `:9001`** — which is itself the proof that
   deployment is not classified production, since notifier refuses a

@@ -26,7 +26,9 @@ skills-vendor/   Git submodules for external skill repos
 
 ## Sibling services
 
-Sibling services on the same VM, separately managed: **Archiver** (port 8020, `archiver.service`) and **Notifier**. Both are separate repos checked out alongside this one (`/home/exedev/archiver`, `/home/exedev/notifier` on this VM). Elsewhere in these docs they're named as "the Archiver repo" / "the Notifier repo" — resolve those against your own checkout.
+Two sibling services, separately managed and no longer co-located: **Archiver** runs on this VM (port 8020, `archiver.service`), and **Notifier** moved to a dedicated VM under notifier#43 (#280) — reached as `http://notifier:9000`, a MagicDNS name on the `cannobserv.org.github` tailnet, which this VM joined as node `watcher` / `tag:watcher`. Notifier binds its tailnet address alone, so a watcher process that is not on the tailnet cannot reach it from loopback, from exe.dev's internal `10.42.0.0/16`, or from the internet.
+
+Both are separate repos, checked out alongside this one on this VM (`/home/exedev/archiver`, `/home/exedev/notifier`). **The Notifier checkout outlived the service's move**: it is the sister SocratiCode index that `docs/SKILLS.md` § *Linked Projects* points at, not a deployment — don't remove it as cutover cleanup, and don't read it as evidence notifier still runs here. Elsewhere in these docs the two are named as "the Archiver repo" / "the Notifier repo" — resolve those against your own checkout.
 
 **Archiver service.** Owns the canonical InfoItem / InfoSource / SourceRevision / RepSpec registry. Sibling repo (extracted in #149; see **Infrastructure** for checkout location). Watcher consumes it **over the bus only** — `info.registry` announcements reconciled into `watched_items` (#254) — and makes no HTTP calls to it at all; the `archiver-client` SDK and its path dependency were removed with the last one. Don't add Archiver code to this repo — go work in the sibling repo instead.
 

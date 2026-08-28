@@ -197,7 +197,7 @@ Cross-project search to the sister `notifier` index requires a per-instance `.cl
 
 ## Detail Docs
 
-- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — module layout, sibling services, the Archiver checkout constraint, bus topology and fetch contracts
+- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — module layout, sibling services (notifier is off-VM, over the tailnet), the Archiver checkout constraint, bus topology and fetch contracts
 - [docs/COMMANDS.md](docs/COMMANDS.md) — every runnable command, the Archiver-sibling test setup, CI
 - [docs/CONTENT-PIPELINE.md](docs/CONTENT-PIPELINE.md) — fetch → extract → fingerprint, the fetch-command outbox, the revisions producer
 - [docs/CONDITIONAL-GET.md](docs/CONDITIONAL-GET.md) — #269 validators: gate, snapshot, invalidation

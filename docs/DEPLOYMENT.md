@@ -11,6 +11,19 @@ A systemd unit file is provided at `deploy/watcher.service`.
 
 > **Install the Archiver service first** — see [§ Archiver Service](#archiver-service) below. Watcher no longer holds an Archiver SDK and will boot without one (#254), but it consumes `info.registry` off the Archiver-operated broker, so until that is up `watched_items` cannot reconcile and no registry state arrives.
 
+> **Join the tailnet first, too** (#280). Notifier runs on its own VM since
+> notifier#43 and binds its **tailnet address alone** — it is unreachable from
+> loopback, from exe.dev's internal `10.42.0.0/16`, and from the internet. So
+> `notifier` in `WATCHER_NOTIFIER_BASE_URL` is a MagicDNS name on the
+> `cannobserv.org.github` tailnet, and a host that has not joined cannot resolve
+> or reach it at all.
+>
+> This failure is quieter than the old wrong-port one. The #277/#278 gates check
+> that the URL and the flag are *held together*, not that the host answers, so a
+> watcher off the tailnet **starts clean** and then fails every dispatch at call
+> time. Join the tailnet, then confirm `curl http://notifier:9000/health`
+> answers before starting the unit.
+
 ```bash
 # Create system env directory
 sudo mkdir -p /etc/watcher
@@ -25,7 +38,7 @@ sudo chown root:exedev /etc/watcher/.env
 # deliverable to real subscribers.
 sudo install -m 600 -o root -g root /dev/null /etc/watcher/notifier.env
 sudo tee /etc/watcher/notifier.env >/dev/null <<'EOF'
-WATCHER_NOTIFIER_BASE_URL=http://localhost:9000
+WATCHER_NOTIFIER_BASE_URL=http://notifier:9000
 WATCHER_NOTIFIER_API_KEY=<production tenant key from notifier's scripts/seed_tenant.py>
 EOF
 

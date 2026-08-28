@@ -10,7 +10,12 @@ wheels/
 .venv
 
 # Environment / secrets
+# `.env.*` too, not just `.env` (#280): the notifier cutover left a
+# `.env.bak-precutover-*` beside the original, holding every token the real file
+# holds while matching none of the patterns here. A backup of a secrets file is
+# a secrets file. Add a `!.env.example` negation if a committed template lands.
 .env
+.env.*
 
 # Coverage
 htmlcov/

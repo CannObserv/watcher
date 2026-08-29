@@ -12,8 +12,10 @@ A systemd unit file is provided at `deploy/watcher.service`.
 > **Install the Archiver service first** — see [§ Archiver Service](#archiver-service) below. Watcher no longer holds an Archiver SDK and will boot without one (#254), but it consumes `info.registry` off the Archiver-operated broker, so until that is up `watched_items` cannot reconcile and no registry state arrives.
 
 > **Join the tailnet first, too** (#280). Notifier runs on its own VM since
-> notifier#43 and binds its **tailnet address alone** — it is unreachable from
-> loopback, from exe.dev's internal `10.42.0.0/16`, and from the internet. So
+> notifier#43 and binds its **tailnet address alone** — its launch scripts
+> resolve this host's `100.x` address and hand uvicorn that one `--host`, so it
+> is unreachable from loopback, from exe.dev's internal `10.42.0.0/16`, and
+> from the internet. So
 > `notifier` in `WATCHER_NOTIFIER_BASE_URL` is a MagicDNS name on the
 > `cannobserv.org.github` tailnet, and a host that has not joined cannot resolve
 > or reach it at all.

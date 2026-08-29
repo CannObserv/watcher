@@ -14,8 +14,14 @@ wheels/
 # `.env.bak-precutover-*` beside the original, holding every token the real file
 # holds while matching none of the patterns here. A backup of a secrets file is
 # a secrets file. Add a `!.env.example` negation if a committed template lands.
+#
+# `notifier.env*` is the other family the credential sweep reads — a copy of
+# /etc/watcher/notifier.env keeps that name, and it does not begin with `.env`
+# (CR-9). Guarded in lockstep by tests/test_env_files_are_not_committable.py:
+# a name that sweep knows to read is one git must know to ignore.
 .env
 .env.*
+notifier.env*
 
 # Coverage
 htmlcov/

@@ -179,6 +179,86 @@ class TestCredentialCandidates:
         assert _credential_candidates(tmp_path / "nope", repo_env) == [repo_env]
 
 
+class TestRepoEnvCandidates:
+    """The repo root gets the same treatment as the system directory (#280).
+
+    The two halves were asymmetric: ``/etc/watcher`` was scanned whole after
+    CR-9, while the repo half checked ``.env`` and nothing beside it. The
+    notifier VM cutover then left a ``.env.bak-precutover-*`` in this very
+    directory holding every token the real file holds — the exact shape CR-1
+    reported, in the one location the sweep had stopped looking.
+
+    Unlike ``/etc/watcher``, the repo root is not a dedicated env directory —
+    scanning all of it would read pyproject.toml, the lockfile and every
+    top-level doc, and a placeholder assignment in one of those would fail the
+    guard for no reason. So the selection is by env-file *shape*: a name
+    starting with ``.env`` or ``notifier.env`` covers both families CR-9
+    identified without reading anything else.
+    """
+
+    def test_the_repo_env_file_is_a_candidate(self, tmp_path) -> None:
+        (tmp_path / ".env").write_text("GH_TOKEN=x\n")
+        assert [p.name for p in _repo_env_candidates(tmp_path)] == [".env"]
+
+    def test_a_backup_beside_the_repo_env_file_is_a_candidate(self, tmp_path) -> None:
+        """The #280 shape: the cutover's own backup, in the repo root."""
+        (tmp_path / ".env").write_text("GH_TOKEN=x\n")
+        (tmp_path / ".env.bak-precutover-20260828T183354Z").write_text(
+            "WATCHER_NOTIFIER_API_KEY=nk_x\n"
+        )
+        names = [p.name for p in _repo_env_candidates(tmp_path)]
+        assert ".env.bak-precutover-20260828T183354Z" in names
+
+    def test_a_copy_of_the_credential_file_is_a_candidate(self, tmp_path) -> None:
+        """CR-9's other family, which does not start with ``.env``."""
+        (tmp_path / "notifier.env.bak").write_text("WATCHER_NOTIFIER_API_KEY=nk_x\n")
+        names = [p.name for p in _repo_env_candidates(tmp_path)]
+        assert "notifier.env.bak" in names
+
+    def test_ordinary_repo_files_are_not_read(self, tmp_path) -> None:
+        """The reason this half is shape-selected rather than scanned whole."""
+        (tmp_path / "pyproject.toml").write_text("[project]\n")
+        (tmp_path / "README.md").write_text("WATCHER_NOTIFIER_API_KEY=<paste yours>\n")
+        assert _repo_env_candidates(tmp_path) == []
+
+    def test_directories_are_skipped(self, tmp_path) -> None:
+        """Same reason as the system half: ``read_text()`` on one raises."""
+        (tmp_path / ".env.d").mkdir()
+        (tmp_path / ".env").write_text("GH_TOKEN=x\n")
+        assert [p.name for p in _repo_env_candidates(tmp_path)] == [".env"]
+
+    def test_a_repo_without_an_env_file_yields_nothing(self, tmp_path) -> None:
+        assert _repo_env_candidates(tmp_path) == []
+
+
+#: Filename families an env file's contents can hide behind in the repo root.
+#: ``.env`` and its backups; ``notifier.env`` and its copies (CR-9's other
+#: family, which does not start with ``.env``).
+ENV_FILE_PREFIXES = (".env", "notifier.env")
+
+
+def _repo_env_candidates(repo_root: Path) -> list[Path]:
+    """Every env-shaped regular file in the repo root (#280).
+
+    The system half scans ``/etc/watcher`` whole, because that directory holds
+    nothing but env files and credentials. The repo root holds the project, so
+    this half selects by name shape instead: scanning it whole would read the
+    lockfile and every top-level doc, and a placeholder assignment in a README
+    would fail the guard over nothing real.
+
+    Selection is by *prefix family*, not by exact name — that is what CR-9's
+    hole cost: a rule naming one file misses the backup beside it, which is
+    precisely what the notifier VM cutover then left here.
+    """
+    if not repo_root.is_dir():
+        return []
+    return [
+        path
+        for path in sorted(repo_root.iterdir())
+        if path.is_file() and path.name.startswith(ENV_FILE_PREFIXES)
+    ]
+
+
 def _credential_offenders(path: Path) -> list[str]:
     """Return the credential variables ``path`` defines, or [] if unreadable.
 
@@ -230,7 +310,7 @@ def test_no_file_in_the_system_env_directory_carries_the_notifier_credential() -
     assert not report, report
 
 
-def test_the_repo_env_file_does_not_carry_the_notifier_credential() -> None:
+def test_no_env_shaped_file_in_the_repo_root_carries_the_notifier_credential() -> None:
     """The repo half, which must run wherever the file does (CR-10).
 
     ``.env`` is the *second* file ``load-env.sh`` exports and an
@@ -239,12 +319,18 @@ def test_the_repo_env_file_does_not_carry_the_notifier_credential() -> None:
     check to ``/etc/watcher/.env``'s existence — as the combined sweep did —
     made it inert on every clone that is not this VM, which is precisely where
     someone edits ``.env`` without a production service to think about.
-    """
-    repo_env = REPO_ROOT / ".env"
-    if not repo_env.is_file():
-        pytest.skip(f"{repo_env} not present — nothing to check")
 
-    report = _offender_report([repo_env])
+    Widened past ``.env`` itself in #280. The system half has scanned its whole
+    directory since CR-9, on the reasoning that a backup is not a name you can
+    predict; this half kept checking one file until the notifier VM cutover
+    left a ``.env.bak-precutover-*`` right here, holding every token ``.env``
+    holds. Same lesson, second location.
+    """
+    candidates = _repo_env_candidates(REPO_ROOT)
+    if not candidates:
+        pytest.skip(f"no env-shaped file in {REPO_ROOT} — nothing to check")
+
+    report = _offender_report(candidates)
     assert not report, report
 
 

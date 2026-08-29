@@ -97,7 +97,10 @@ development credential is valid against the notifier deployment on
 **`http://notifier:9001`**, a separate instance from production's `:9000` with
 its own database. Both moved off this VM with notifier#43 and are now tailnet
 MagicDNS names (#280) — the split between them is unchanged, only the host.
-Two consequences, both verified rather than assumed:
+Two consequences, both verified rather than assumed, and **re-probed against
+the tailnet hosts on 2026-08-29** after the move (#280) — the original
+2026-08-25 readings were taken against loopback, so the label would otherwise
+have outlived what it certified:
 
 * The dev key **authenticates on `:9001`** — which is itself the proof that
   deployment is not classified production, since notifier refuses a

@@ -92,3 +92,34 @@ AGENTS.md :: duplicate :: `changes` diff — emitted **only when non-empty**
 AGENTS.md :: duplicate :: boot replay stay silent (#274). `POST /api/v1/watched-items` still works
 AGENTS.md :: duplicate :: but has had no caller since archiver#158. What each 409 is, the authoritative
 AGENTS.md :: duplicate :: column list, the spec-acknowledgement meaning of `last_reviewed_at`, schedule
+
+# --- #280 curation: the #191 collapse residue -> docs/WATCHED-ITEMS.md -------
+# The enumeration of what the collapse removed was demoted verbatim into
+# "WatchEvent identity fields" (L326-329), which already carried the #191
+# rename residue — grepped there, not assumed. The rule itself stays inline:
+# "**The `WatchedItem` is the single monitored entity (#191).**" is untouched at
+# AGENTS.md L114, and "one URL = one fingerprint = one change signal" survives
+# on the re-wrapped line beneath it. The two boundary lines are re-wrap, not
+# loss — every surviving word is still inline, on differently-bounded lines,
+# which the closed warrant set spells `duplicate` (same reading the #274
+# entries above take).
+AGENTS.md :: duplicate :: table, its `/watches*` routes, the override resolution chain and the per-Watch
+AGENTS.md :: duplicate :: one URL = one fingerprint = one change signal; the earlier `Watch` model — its
+AGENTS.md :: duplicate :: notification tier — is gone. The user-facing noun is "Watched
+
+# --- #280 curation: two pointers to docs/WATCHED-ITEMS.md merged into one ----
+# The section named the same doc twice and listed "schedule resolution" in both.
+# The merged pointer at AGENTS.md L141 carries every topic word from both, none
+# dropped: fields, what each 409 is, the authoritative column list, schedule
+# resolution, domain keying, media-type dispatch, template CRUD. Only the
+# duplicate link and the repeated topic are gone.
+AGENTS.md :: duplicate :: archiver#158. What each 409 is, the authoritative column list, schedule
+AGENTS.md :: duplicate :: resolution, domain keying: [docs/WATCHED-ITEMS.md](docs/WATCHED-ITEMS.md).
+AGENTS.md :: duplicate :: Fields, schedule resolution, media-type dispatch, template CRUD: [docs/WATCHED-ITEMS.md](docs/WATCHED-ITEMS.md). Lifecycle, delete guards, every dashboard surface: [docs/WATCHED-ITEMS-DASHBOARD.md](docs/WATCHED-ITEMS-DASHBOARD.md).
+
+# --- #280 curation: the Detail Docs parenthetical -> docs/ARCHITECTURE.md ----
+# Added earlier on this same branch, then removed here: docs/ARCHITECTURE.md
+# "Sibling services" now opens with the notifier relocation in full, so the
+# index entry was restating its own destination. The index line is otherwise
+# verbatim what it was before this branch.
+AGENTS.md :: duplicate :: - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — module layout, sibling services (notifier is off-VM, over the tailnet), the Archiver checkout constraint, bus topology and fetch contracts

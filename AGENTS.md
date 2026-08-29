@@ -112,9 +112,8 @@ to production.
 ## Watched Items
 
 **The `WatchedItem` is the single monitored entity (#191).** One `WatchedItem` =
-one URL = one fingerprint = one change signal; the earlier `Watch` model — its
-table, its `/watches*` routes, the override resolution chain and the per-Watch
-notification tier — is gone. The user-facing noun is "Watched
+one URL = one fingerprint = one change signal; the earlier `Watch` model is
+gone. The user-facing noun is "Watched
 Item".
 
 **The `info.registry` reconcile is the creation path**, and the registry owns
@@ -123,8 +122,7 @@ authoritative for a named set of columns, everything else survives reconciliatio
 and **a local pause is not sticky** — item-level pause lives in Archiver's
 dashboard alone, and every announcement-owned field 409s locally on a reconciled
 item. `POST /api/v1/watched-items` still works but has had no caller since
-archiver#158. What each 409 is, the authoritative column list, schedule
-resolution, domain keying: [docs/WATCHED-ITEMS.md](docs/WATCHED-ITEMS.md).
+archiver#158.
 
 **Empty extraction is a failure, not a change (#258).** Every `source_spec`
 yielding empty chunks raises `ExtractionError` and writes nothing —
@@ -141,7 +139,7 @@ fingerprint, so a spec/URL/extractor change must invalidate the stored pair:
 source Markdown and must be block-structured**, never `\n`-joined — guarded by
 `tests/core/notifications/test_content.py::TestMarkdownListContract`.
 
-Fields, schedule resolution, media-type dispatch, template CRUD: [docs/WATCHED-ITEMS.md](docs/WATCHED-ITEMS.md). Lifecycle, delete guards, every dashboard surface: [docs/WATCHED-ITEMS-DASHBOARD.md](docs/WATCHED-ITEMS-DASHBOARD.md).
+Fields, what each 409 is, the authoritative column list, schedule resolution, domain keying, media-type dispatch, template CRUD: [docs/WATCHED-ITEMS.md](docs/WATCHED-ITEMS.md). Lifecycle, delete guards, every dashboard surface: [docs/WATCHED-ITEMS-DASHBOARD.md](docs/WATCHED-ITEMS-DASHBOARD.md).
 
 ## Conventions
 
@@ -197,7 +195,7 @@ Cross-project search to the sister `notifier` index requires a per-instance `.cl
 
 ## Detail Docs
 
-- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — module layout, sibling services (notifier is off-VM, over the tailnet), the Archiver checkout constraint, bus topology and fetch contracts
+- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — module layout, sibling services, the Archiver checkout constraint, bus topology and fetch contracts
 - [docs/COMMANDS.md](docs/COMMANDS.md) — every runnable command, the Archiver-sibling test setup, CI
 - [docs/CONTENT-PIPELINE.md](docs/CONTENT-PIPELINE.md) — fetch → extract → fingerprint, the fetch-command outbox, the revisions producer
 - [docs/CONDITIONAL-GET.md](docs/CONDITIONAL-GET.md) — #269 validators: gate, snapshot, invalidation

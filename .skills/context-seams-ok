@@ -88,3 +88,10 @@ Split out of [DEPLOYMENT.md](DEPLOYMENT.md) — where install, systemd, timers
 # was retargeted in the same run and names the section at its new home
 # (ENVIRONMENT.md), so it points at the content rather than at where it used to be.
 [ENVIRONMENT.md](ENVIRONMENT.md) → *Environment Variables*.
+
+# --- #280 curation ----------------------------------------------------------
+# The #191 collapse residue was demoted here from AGENTS.md, and the line points
+# back to say what stayed. Legitimate: AGENTS.md L114 still carries the
+# one-entity rule verbatim — grepped, not assumed. The pointer would only lie if
+# that rule moved too.
+tier with it. `AGENTS.md` carries the one-entity rule itself; this is the list of

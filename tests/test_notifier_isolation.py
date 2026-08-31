@@ -265,12 +265,39 @@ class TestEnvironmentNotifierGate:
 #: name the real host on purpose, which is their job.
 SWEPT_ROOTS = ("tests", "src", "scripts")
 
+#: Suffixes swept within those roots. ``.sh`` is not decoration (CR-12): adding
+#: ``scripts/`` while globbing ``*.py`` excluded ``scripts/dev_server.sh``, the
+#: one file in the tree that reads and rewrites ``WATCHER_NOTIFIER_BASE_URL`` —
+#: the highest-risk file in the newly added root, invisible to the guard that
+#: claimed to cover it.
+SWEPT_SUFFIXES = (".py", ".sh")
+
 #: Port-keyed, not semantic. Nothing in a URL says "notifier", so the pair of
 #: ports notifier serves is the identifying signal — which means a notifier URL
 #: written on some other port slips through, and an unrelated stub server on
 #: 9000 would be reported with a notifier's message. Both are acceptable: the
 #: ports are convention here, and the guard is a tripwire, not a type system.
 NOTIFIER_URL = re.compile(r"""https?://([^"'\s/]+):900[01]""")
+
+
+REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
+
+
+def _swept_files(repo_root: pathlib.Path) -> list[pathlib.Path]:
+    """Every file under ``SWEPT_ROOTS`` whose suffix is swept, sorted.
+
+    Selection is a function so it can be asserted directly: the trees are
+    clean, so the sweep below proves nothing about *what it opened*, which is
+    exactly how ``scripts/*.sh`` sat outside a guard that named ``scripts/``.
+    """
+    files: list[pathlib.Path] = []
+    for root in SWEPT_ROOTS:
+        tree = repo_root / root
+        assert tree.is_dir(), f"{tree} is missing — this guard is anchored wrong"
+        files += [
+            path for path in tree.rglob("*") if path.is_file() and path.suffix in SWEPT_SUFFIXES
+        ]
+    return sorted(files)
 
 
 def _resolvable_notifier_hosts(text: str) -> list[tuple[int, str]]:
@@ -349,21 +376,36 @@ class TestSweptTreesNameNoResolvableHost:
     ``src/`` and ``scripts/`` are swept beside ``tests/`` (#280 CR-5) for a
     different reason: there a literal would be a real connection target, not an
     inert fixture. The base URL is configuration and arrives from the
-    environment — a hardcoded one is the defect, whatever host it names.
+    environment — a hardcoded one is the defect, whatever host it names. Shell
+    counts as source in ``scripts/`` (CR-12) — the notifier-aware file there is
+    ``dev_server.sh``, and a Python-only glob never opened it.
     """
 
+    def test_shell_scripts_are_swept_beside_python(self) -> None:
+        """CR-12, pinned by name: the file the widening was for.
+
+        ``scripts/dev_server.sh`` is where a notifier URL would do damage, and a
+        ``*.py`` glob over ``scripts/`` walks straight past it. Asserting the
+        selection rather than the result, because the tree is (correctly) clean
+        — a sweep that opens nothing passes just as loudly as one that works.
+        """
+        swept = {path.name for path in _swept_files(REPO_ROOT)}
+        assert "dev_server.sh" in swept
+        assert "load-env.sh" in swept
+        assert "test_notifier_isolation.py" in swept
+
+    def test_docs_are_not_swept(self) -> None:
+        """They name the real host on purpose."""
+        assert not [p for p in _swept_files(REPO_ROOT) if "docs/" in str(p)]
+
     def test_no_swept_file_names_a_resolvable_notifier_host(self) -> None:
-        repo_root = pathlib.Path(__file__).resolve().parents[1]
         offenders: list[str] = []
-        for root in SWEPT_ROOTS:
-            tree = repo_root / root
-            assert tree.is_dir(), f"{tree} is missing — this guard is anchored wrong"
-            for path in sorted(tree.rglob("*.py")):
-                text = path.read_text(encoding="utf-8")
-                offenders += [
-                    f"{path.relative_to(repo_root)}:{line} \u2192 {host}"
-                    for line, host in _resolvable_notifier_hosts(text)
-                ]
+        for path in _swept_files(REPO_ROOT):
+            text = path.read_text(encoding="utf-8")
+            offenders += [
+                f"{path.relative_to(REPO_ROOT)}:{line} \u2192 {host}"
+                for line, host in _resolvable_notifier_hosts(text)
+            ]
 
         assert not offenders, (
             "these name a notifier host that resolves:\n  "

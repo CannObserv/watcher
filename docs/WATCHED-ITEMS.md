@@ -323,7 +323,9 @@ template variables; the default-template "ITEM:" link (renamed from "WATCH:" in
 audits carry the WatchedItem as `watched_item_id` inside the JSONB `payload`
 (filter via `GET /api/v1/audit?watched_item_id=<ulid>`).
 
-**What the #191 collapse removed.** The `Watch` model is gone — its table, its
+## What the #191 collapse removed
+
+The `Watch` model is gone — its table, its
 `/watches*` routes, the override resolution chain and the per-Watch notification
 tier with it. `AGENTS.md` carries the one-entity rule itself; this is the list of
 what an agent will not find.

@@ -122,7 +122,7 @@ authoritative for a named set of columns, everything else survives reconciliatio
 and **a local pause is not sticky** — item-level pause lives in Archiver's
 dashboard alone, and every announcement-owned field 409s locally on a reconciled
 item. `POST /api/v1/watched-items` still works but has had no caller since
-archiver#158.
+archiver#158. What each 409 is: [docs/WATCHED-ITEMS.md](docs/WATCHED-ITEMS.md).
 
 **Empty extraction is a failure, not a change (#258).** Every `source_spec`
 yielding empty chunks raises `ExtractionError` and writes nothing —

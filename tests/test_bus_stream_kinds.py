@@ -37,6 +37,14 @@ from co_core.pure.adapters.bus import streams
 from co_core.pure.adapters.bus.streams import stream_kind
 
 SRC = pathlib.Path(__file__).resolve().parent.parent / "src"
+STREAMS_MODULE = "co_core.pure.adapters.bus.streams"
+
+# Every canonical stream name, so a topic written as a bare string still resolves.
+STREAM_VALUES = frozenset(
+    value
+    for name, value in vars(streams).items()
+    if name.isupper() and not name.startswith("_") and isinstance(value, str)
+)
 
 
 def _modules():
@@ -44,22 +52,57 @@ def _modules():
         yield path, ast.parse(path.read_text())
 
 
-def _topic_of(call: ast.Call, position: int | None = None) -> str | None:
-    """The canonical stream a bus call names, or None if it names none.
+def _stream_aliases(tree: ast.Module) -> dict[str, str]:
+    """Local name → streams attribute, for `from ...streams import CONTENT_BLOBS`.
 
-    Accepts ``topic=streams.X`` and, for ``BusPublish``, the positional first
-    argument. A topic that is not a ``streams.<CONST>`` attribute yields None —
-    the separate coverage test is what refuses those.
+    Without this a call site that imports the constant directly resolves to
+    nothing, and a rule that skips what it cannot resolve blesses it (CR-22).
     """
-    node = None
-    for keyword in call.keywords:
-        if keyword.arg == "topic":
-            node = keyword.value
-    if node is None and position is not None and len(call.args) > position:
-        node = call.args[position]
+    aliases: dict[str, str] = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom) and node.module == STREAMS_MODULE:
+            for alias in node.names:
+                aliases[alias.asname or alias.name] = alias.name
+    return aliases
+
+
+def _resolve_topic(node: ast.expr | None, aliases: dict[str, str]) -> str | None:
+    """The canonical stream an expression names, or None if the guard cannot tell.
+
+    Three forms, because all three are things a person writes: the qualified
+    `streams.X`, a bare name imported from that module, and a literal.
+    """
     if isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name):
         if node.value.id == "streams":
-            return getattr(streams, node.attr)
+            return getattr(streams, node.attr, None)
+    if isinstance(node, ast.Name) and node.id in aliases:
+        return getattr(streams, aliases[node.id], None)
+    if isinstance(node, ast.Constant) and node.value in STREAM_VALUES:
+        return node.value
+    return None
+
+
+def _topic_arg(call: ast.Call, position: int | None = None) -> ast.expr | None:
+    """The expression a bus call passes as its topic, unresolved."""
+    for keyword in call.keywords:
+        if keyword.arg == "topic":
+            return keyword.value
+    if position is not None and len(call.args) > position:
+        return call.args[position]
+    return None
+
+
+def _callee(call: ast.Call) -> str | None:
+    """The called name, qualified or not — `X()` and `mod.X()` both yield "X".
+
+    Matching only bare names left `bus.AsyncBusConsumer(...)` invisible to every
+    rule here, masked purely by there being one call site for the `assert found`
+    backstop to trip on (CR-23).
+    """
+    if isinstance(call.func, ast.Name):
+        return call.func.id
+    if isinstance(call.func, ast.Attribute):
+        return call.func.attr
     return None
 
 
@@ -67,9 +110,30 @@ def _calls(name: str):
     """Every call to ``name`` across src/, with its module path and tree."""
     for path, tree in _modules():
         for node in ast.walk(tree):
-            if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
-                if node.func.id == name:
-                    yield path, tree, node
+            if isinstance(node, ast.Call) and _callee(node) == name:
+                yield path, tree, node
+
+
+def _assigned_values(tree: ast.Module, name: str) -> list[ast.expr]:
+    """Every value bound to ``name`` anywhere in the module.
+
+    Annotated assignments count (CR-25), and function scope counts because the
+    trim cap is resolved inside the publisher, not at import.
+    """
+    values = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Assign) and any(
+            isinstance(t, ast.Name) and t.id == name for t in node.targets
+        ):
+            values.append(node.value)
+        elif (
+            isinstance(node, ast.AnnAssign)
+            and isinstance(node.target, ast.Name)
+            and node.target.id == name
+            and node.value is not None
+        ):
+            values.append(node.value)
+    return values
 
 
 class TestReaderMatchesStreamKind:
@@ -77,8 +141,8 @@ class TestReaderMatchesStreamKind:
 
     def test_every_grouped_consumer_reads_a_grouped_stream(self):
         found = 0
-        for path, _tree, call in _calls("AsyncBusConsumer"):
-            topic = _topic_of(call)
+        for path, tree, call in _calls("AsyncBusConsumer"):
+            topic = _resolve_topic(_topic_arg(call), _stream_aliases(tree))
             assert topic is not None, f"{path}: AsyncBusConsumer topic is not a streams constant"
             assert stream_kind(topic) != "config_state", (
                 f"{path}: {topic!r} is a config/state stream and takes no consumer group — "
@@ -90,8 +154,8 @@ class TestReaderMatchesStreamKind:
 
     def test_every_tail_reader_reads_a_config_state_stream(self):
         found = 0
-        for path, _tree, call in _calls("AsyncBusTailReader"):
-            topic = _topic_of(call)
+        for path, tree, call in _calls("AsyncBusTailReader"):
+            topic = _resolve_topic(_topic_arg(call), _stream_aliases(tree))
             assert topic is not None, f"{path}: AsyncBusTailReader topic is not a streams constant"
             assert stream_kind(topic) == "config_state", (
                 f"{path}: {topic!r} is a {stream_kind(topic)} stream. A tail reader replays it "
@@ -122,13 +186,8 @@ class TestGroupNamesAreDerived:
                 "defect cannobserv#384 found on all five cluster groups."
             )
             assert isinstance(group, ast.Name), f"{path}: unexpected group expression"
-            assigned = [
-                node.value
-                for node in tree.body
-                if isinstance(node, ast.Assign)
-                and any(isinstance(t, ast.Name) and t.id == group.id for t in node.targets)
-            ]
-            assert assigned, f"{path}: {group.id} is not assigned at module level"
+            assigned = _assigned_values(tree, group.id)
+            assert assigned, f"{path}: {group.id} is not assigned in this module"
             assert any(
                 isinstance(value, ast.Call)
                 and isinstance(value.func, ast.Name)
@@ -151,15 +210,38 @@ class TestConfigStatePublishesAreTrimmed:
 
     def test_every_config_state_publish_passes_maxlen(self):
         checked = set()
-        for path, _tree, call in _calls("BusPublish"):
-            topic = _topic_of(call, position=0)
-            if topic is None or stream_kind(topic) != "config_state":
+        for path, tree, call in _calls("BusPublish"):
+            topic = _resolve_topic(_topic_arg(call, position=0), _stream_aliases(tree))
+            assert topic is not None, (
+                f"{path}: BusPublish topic is not a recognizable stream, so this guard "
+                "cannot tell whether it needs a trim. Name it with a streams constant — "
+                "skipping what it cannot classify is how a config/state publish evades "
+                "this rule entirely (CR-22)."
+            )
+            if stream_kind(topic) != "config_state":
                 continue
-            assert any(k.arg == "maxlen" for k in call.keywords), (
+            maxlen = next((k.value for k in call.keywords if k.arg == "maxlen"), None)
+            assert maxlen is not None, (
                 f"{path}: publish to config/state stream {topic!r} without maxlen. The "
                 "republished full set grows without bound and the boot replay grows with "
                 "it; the trim belongs on the publish, not on an operator's XTRIM."
             )
+            # Presence is not the contract — `maxlen=None` is BusPublish's own default
+            # and trims nothing, so the rule would bless a disabled trim while reading
+            # as enforced (CR-24).
+            if isinstance(maxlen, ast.Constant):
+                assert isinstance(maxlen.value, int) and maxlen.value > 0, (
+                    f"{path}: maxlen={maxlen.value!r} on {topic!r} trims nothing. "
+                    "None is BusPublish's default and means unbounded."
+                )
+            else:
+                assert isinstance(maxlen, ast.Name), f"{path}: unexpected maxlen expression"
+                assert any(
+                    isinstance(value, ast.Call) for value in _assigned_values(tree, maxlen.id)
+                ), (
+                    f"{path}: {maxlen.id} must come from a resolver call "
+                    "(resolve_stream_maxlen), which is what guarantees a bounded value"
+                )
             checked.add(topic)
         assert checked, "no config/state publishes found — has BusPublish been renamed?"
 
@@ -175,6 +257,8 @@ class TestTaxonomyCoverage:
             for node in ast.walk(tree):
                 if isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name):
                     if node.value.id == "streams" and node.attr.isupper():
+                        if node.attr.startswith("_"):
+                            continue  # co-core's private kind table, not a stream
                         referenced.add(getattr(streams, node.attr))
         assert referenced, "no streams.* references found in src/"
         for topic in sorted(referenced):
@@ -197,3 +281,71 @@ class TestTaxonomyCoverage:
         groupless. If co-core reclassifies one, that prose is wrong and this
         fails rather than the description quietly drifting."""
         assert stream_kind(topic) == kind
+
+
+class TestTheScannerSeesEveryCallForm:
+    """The rules above were mutation-verified, but only against call sites
+    written in the style already present — which proved the rules right without
+    proving the *scan* complete. These pin the scan itself, because a guard that
+    cannot see a violation is worse than no guard: it gets cited as coverage.
+    """
+
+    @pytest.mark.parametrize(
+        ("source", "expected"),
+        [
+            ("BusPublish(streams.INFO_REGISTRY, f)", streams.INFO_REGISTRY),
+            (
+                "from co_core.pure.adapters.bus.streams import INFO_REGISTRY\n"
+                "BusPublish(INFO_REGISTRY, f)",
+                streams.INFO_REGISTRY,
+            ),
+            (
+                "from co_core.pure.adapters.bus.streams import INFO_REGISTRY as R\n"
+                "BusPublish(R, f)",
+                streams.INFO_REGISTRY,
+            ),
+            ('BusPublish("info.registry", f)', streams.INFO_REGISTRY),
+        ],
+        ids=["qualified", "bare-import", "aliased-import", "literal"],
+    )
+    def test_a_topic_resolves_however_it_is_written(self, source, expected):
+        """CR-22: the bare-import form is what let a config/state publish with
+        no trim pass the whole suite — the rule skipped what it could not
+        resolve, and blessed it by skipping."""
+        tree = ast.parse(source)
+        (call,) = [n for n in ast.walk(tree) if isinstance(n, ast.Call)]
+        assert _resolve_topic(_topic_arg(call, position=0), _stream_aliases(tree)) == expected
+
+    def test_an_unrecognizable_topic_resolves_to_nothing(self):
+        """And the rules assert on that rather than continuing past it."""
+        tree = ast.parse("BusPublish(some_variable, f)")
+        (call,) = [n for n in ast.walk(tree) if isinstance(n, ast.Call)]
+        assert _resolve_topic(_topic_arg(call, position=0), _stream_aliases(tree)) is None
+
+    @pytest.mark.parametrize(
+        "source",
+        [
+            "AsyncBusConsumer(c, topic=t, group=g, consumer=n)",
+            "bus.AsyncBusConsumer(c, topic=t, group=g, consumer=n)",
+            "co_core_aio.bus.AsyncBusConsumer(c, topic=t, group=g, consumer=n)",
+        ],
+        ids=["bare", "module-qualified", "fully-qualified"],
+    )
+    def test_a_qualified_callee_is_still_matched(self, source):
+        """CR-23: matching only bare names left `bus.AsyncBusConsumer(...)`
+        invisible to every rule. It was caught once only because a single call
+        site made `assert found` trip on zero — incidental, and gone the moment
+        a second consumer exists."""
+        (call,) = [n for n in ast.walk(ast.parse(source)) if isinstance(n, ast.Call)]
+        assert _callee(call) == "AsyncBusConsumer"
+
+    @pytest.mark.parametrize(
+        "source",
+        ["X = f()", "X: str = f()", "def g():\n    X = f()"],
+        ids=["assign", "annotated", "function-scope"],
+    )
+    def test_assignments_are_found_in_every_form(self, source):
+        """CR-25: an annotated assignment used to read as 'not assigned at
+        module level', accusing the author of the wrong mistake."""
+        values = _assigned_values(ast.parse(source), "X")
+        assert values and all(isinstance(v, ast.Call) for v in values)

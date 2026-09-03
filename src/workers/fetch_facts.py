@@ -36,6 +36,7 @@ second run a no-op — at-least-once ends at the row, exactly-once at the apply.
 """
 
 import asyncio
+from collections.abc import Mapping
 from typing import Protocol
 
 from co_core.effects.bus import BusMessage
@@ -265,10 +266,28 @@ async def process_fact_message(
     return "ignored_unknown_type"
 
 
-def _group_field(group: dict, key: str) -> str:
-    """One ``XINFO GROUPS`` field as text — the client decodes or it doesn't."""
+def _group_text(group: Mapping[str, object], key: str) -> str:
+    """One ``XINFO GROUPS`` field as text — the client decodes or it doesn't.
+
+    redis-py returns ``str`` keys with ``bytes`` values unless the client was
+    built with ``decode_responses`` (verified against redis-py 7.4.1 and the
+    live broker); fakeredis matches. ``str()`` on the fallback keeps the return
+    type honest for the numeric fields rather than passing an ``int`` through a
+    signature that promises text.
+    """
     value = group[key]
-    return value.decode() if isinstance(value, bytes) else value
+    return value.decode() if isinstance(value, bytes) else str(value)
+
+
+def _stream_position(group: Mapping[str, object]) -> tuple[int, int]:
+    """A group's ``last-delivered-id`` as a sortable ``(ms, seq)`` pair.
+
+    Stream ids are ``<ms>-<seq>`` in decimal, so comparing them as strings is
+    wrong in the direction that matters: ``"9-0" > "10-0"`` lexicographically
+    while ``9 < 10`` numerically. Every comparison here goes through this.
+    """
+    ms, _, seq = _group_text(group, "last-delivered-id").partition("-")
+    return int(ms), int(seq or 0)
 
 
 async def migrate_legacy_group(client: Redis) -> str:
@@ -285,36 +304,59 @@ async def migrate_legacy_group(client: Redis) -> str:
     CannObserv/broker#1 Phase 3 window.
 
     Idempotent by construction — once the legacy group is gone every subsequent
-    boot takes the ``no_legacy_group`` path — and safe to run concurrently with
-    ``ensure_group``, which swallows ``BUSYGROUP``. It must run *before* it,
-    though: ``ensure_group`` creating the new group at ``$`` first would leave
-    nothing for this function to inherit a position into.
+    boot takes the ``no_legacy_group`` path. It must run *before*
+    ``ensure_group``: that creating the new group at ``$`` first would leave no
+    legacy position to inherit is the whole hazard, restated one caller up.
 
-    The legacy group is destroyed only when its PEL is empty, because
-    ``XGROUP DESTROY`` discards the entries in it. The audit read ``pending 0``
-    on 2026-09-01; that is a reading, not a property of the deploy window, so a
-    non-empty PEL leaves both groups standing and says so loudly rather than
-    dropping unacked facts to keep the rename tidy.
+    **Nothing is destroyed while it is the only record of a position.** Two
+    guards, and both refuse rather than repair, because repair means choosing
+    between a gap and a replay and that is an operator's call:
+
+    * *The new group is already ahead of the legacy one.* Reachable by hand —
+      ``XGROUP CREATE … $`` instead of the recorded id — and destroying the
+      legacy group would then drop every entry between them **and** the only
+      evidence of where it was. Compared numerically (see ``_stream_position``).
+    * *The legacy PEL is not drained.* ``XGROUP DESTROY`` discards the entries
+      in it. The audit read ``pending 0`` on 2026-09-01; that is a reading, not
+      a property of the deploy window.
+
+    Both leave the legacy group standing and say so loudly. So does losing the
+    create race: a group made by someone else sits at a position this function
+    did not choose, so it declines to assert an inheritance it cannot vouch for
+    and re-evaluates on the next boot, where the comparison above applies.
     """
     try:
         groups = await client.xinfo_groups(streams.CONTENT_BLOBS)
-    except ResponseError:
-        return "no_legacy_group"  # stream absent: a fresh deployment
+    except ResponseError as exc:
+        # Only "no such key" means *no stream*. A WRONGTYPE, or the NOPERM that
+        # arrives once broker#1 D7 puts a credential in front of this call, is a
+        # failed question — not the answer "nothing to migrate". Raising is safe:
+        # the caller's backoff guard retries without killing the consumer.
+        if "no such key" not in str(exc).lower():
+            raise
+        return "no_legacy_group"
 
-    by_name = {_group_field(g, "name"): g for g in groups}
+    by_name = {_group_text(g, "name"): g for g in groups}
     legacy = by_name.get(LEGACY_CONSUMER_GROUP)
     if legacy is None:
         return "no_legacy_group"
 
-    if CONSUMER_GROUP not in by_name:
-        last_delivered = _group_field(legacy, "last-delivered-id")
+    existing = by_name.get(CONSUMER_GROUP)
+    if existing is None:
+        last_delivered = _group_text(legacy, "last-delivered-id")
         try:
-            await client.xgroup_create(
-                streams.CONTENT_BLOBS, CONSUMER_GROUP, id=last_delivered, mkstream=True
-            )
+            # No mkstream: reaching here means the legacy group exists, which
+            # means the stream does.
+            await client.xgroup_create(streams.CONTENT_BLOBS, CONSUMER_GROUP, id=last_delivered)
         except ResponseError as exc:
             if "BUSYGROUP" not in str(exc):
                 raise
+            logger.warning(
+                "content.blobs group appeared mid-rename — keeping the legacy group; "
+                "its position will be compared on the next boot",
+                extra={"old_group": LEGACY_CONSUMER_GROUP, "new_group": CONSUMER_GROUP},
+            )
+            return "new_group_created_concurrently"
         logger.info(
             "content.blobs consumer group renamed (#285)",
             extra={
@@ -323,6 +365,21 @@ async def migrate_legacy_group(client: Redis) -> str:
                 "inherited_last_delivered_id": last_delivered,
             },
         )
+    elif _stream_position(existing) > _stream_position(legacy):
+        logger.error(
+            "content.blobs group %s is AHEAD of the legacy group — refusing to destroy it; "
+            "facts between the two positions would be delivered to nobody. Repoint "
+            "%s with XGROUP SETID (replaying the overlap) or accept the gap, then restart",
+            CONSUMER_GROUP,
+            CONSUMER_GROUP,
+            extra={
+                "old_group": LEGACY_CONSUMER_GROUP,
+                "new_group": CONSUMER_GROUP,
+                "legacy_last_delivered_id": _group_text(legacy, "last-delivered-id"),
+                "new_last_delivered_id": _group_text(existing, "last-delivered-id"),
+            },
+        )
+        return "new_group_ahead_of_legacy"
 
     if legacy["pending"]:
         logger.warning(

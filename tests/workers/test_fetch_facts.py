@@ -13,16 +13,35 @@ Plus the #252 posture on ``info_source_id`` (cannobserv#300): it is reporting,
 not routing — see ``TestOrphanFacts``.
 """
 
+import asyncio
+from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
 
+import fakeredis
 import pytest
+from co_core.effects.bus import BusPublish
 from co_core.pure.adapters.bus import streams
 from co_core.pure.adapters.bus.envelope import from_wire, to_wire
-from co_core.pure.models.changes import BlobAvailableEmit, FetchFailedEmit
+from co_core.pure.adapters.bus.streams import group_name
+from co_core.pure.models.changes import (
+    BlobAvailableEmit,
+    FetchFailedEmit,
+    RegistryAnnouncementEmit,
+)
+from co_core_aio.bus import AsyncBusPublisher
+from redis.exceptions import ResponseError
 
+import src.workers.fetch_facts as ff_mod
 from src.core.fetch_commands import create_fetch_command
 from src.core.models.fetch_command import FetchCommandStatus
-from src.workers.fetch_facts import process_fact_message
+from src.workers.fetch_facts import (
+    CONSUMER_GROUP,
+    CONSUMER_NAME,
+    LEGACY_CONSUMER_GROUP,
+    migrate_legacy_group,
+    process_fact_message,
+    run_blobs_consumer,
+)
 from tests.conftest import make_watched_item
 
 pytestmark = pytest.mark.integration
@@ -468,17 +487,6 @@ class TestRunBlobsConsumer:
     kills the fact inbox for the rest of the process lifetime."""
 
     async def test_loop_survives_a_processing_error_and_retries(self, db_session, monkeypatch):
-        import asyncio
-        from contextlib import asynccontextmanager
-
-        import fakeredis
-        from co_core.effects.bus import BusPublish
-        from co_core.pure.adapters.bus.envelope import to_wire
-        from co_core_aio.bus import AsyncBusPublisher
-
-        import src.workers.fetch_facts as ff_mod
-        from src.workers.fetch_facts import CONSUMER_GROUP, run_blobs_consumer
-
         client = fakeredis.FakeAsyncRedis()
         # Group must exist BEFORE the fact lands ('$' start), mirroring prod.
         stop = asyncio.Event()
@@ -537,8 +545,6 @@ class TestForeignPayloadTypes:
     """
 
     async def test_registry_announcement_on_the_fact_stream_is_ignored(self, db_session, caplog):
-        from co_core.pure.models.changes import RegistryAnnouncementEmit
-
         event = RegistryAnnouncementEmit(
             occurred_at=NOW,
             info_item_id="01INFOITEMXXXXXXXXXXXXXXXX",
@@ -610,6 +616,26 @@ class TestValidatorFacts:
         assert row.last_modified is None
 
 
+class _RaisingXInfoClient:
+    """Minimal stand-in for the one call fakeredis cannot make fail.
+
+    fakeredis returns ``[]`` for ``XINFO GROUPS`` on an absent key where real
+    Redis raises ``ResponseError("no such key")`` (verified against redis-py
+    7.4.1 and the live broker), so the handler that distinguishes an absent
+    stream from a *failed* call has no fakeredis-reachable path.
+    """
+
+    def __init__(self, error: Exception):
+        self._error = error
+        self.destroyed: list[str] = []
+
+    async def xinfo_groups(self, _topic):
+        raise self._error
+
+    async def xgroup_destroy(self, _topic, group):  # pragma: no cover - never reached
+        self.destroyed.append(group)
+
+
 class TestGroupNaming:
     """#285 — the group is *derived* from the stream, never hand-written.
 
@@ -620,18 +646,12 @@ class TestGroupNaming:
     """
 
     def test_group_is_derived_from_the_stream(self):
-        from co_core.pure.adapters.bus.streams import group_name
-
-        from src.workers.fetch_facts import CONSUMER_GROUP
-
         assert CONSUMER_GROUP == group_name(streams.CONTENT_BLOBS, "watcher")
         assert CONSUMER_GROUP == "watcher.blobs"
 
     def test_no_purpose_segment_for_a_lone_group(self):
         """Watcher runs exactly one group on content.blobs, so the segment that
         disambiguates two groups of the same service must be absent."""
-        from src.workers.fetch_facts import CONSUMER_GROUP
-
         assert CONSUMER_GROUP.count(".") == 1
         assert "-" not in CONSUMER_GROUP
 
@@ -640,8 +660,6 @@ class TestGroupNaming:
         it changes only as a consequence of the group rename. The dot becomes a
         hyphen: ``watcher.blobs-1`` would read as the ``-<purpose>`` group form.
         """
-        from src.workers.fetch_facts import CONSUMER_GROUP, CONSUMER_NAME
-
         assert CONSUMER_NAME == f"{CONSUMER_GROUP.replace('.', '-')}-1"
         assert CONSUMER_NAME == "watcher-blobs-1"
 
@@ -657,28 +675,31 @@ class TestLegacyGroupMigration:
     rename from the CannObserv/broker#1 Phase 3 window.
     """
 
+    async def _drain(self, client, group, consumer, *, count):
+        batches = await client.xreadgroup(
+            group, consumer, {streams.CONTENT_BLOBS: ">"}, count=count
+        )
+        for _stream, entries in batches:
+            for message_id, _fields in entries:
+                await client.xack(streams.CONTENT_BLOBS, group, message_id)
+
     async def _legacy_group_at(self, client, *, read: int):
         """Legacy group advanced past ``read`` entries, all acked (prod's shape)."""
-        await client.xgroup_create(streams.CONTENT_BLOBS, "watcher", id="0", mkstream=True)
+        await client.xgroup_create(
+            streams.CONTENT_BLOBS, LEGACY_CONSUMER_GROUP, id="0", mkstream=True
+        )
         if read:
-            batches = await client.xreadgroup(
-                "watcher", "watcher-1", {streams.CONTENT_BLOBS: ">"}, count=read
-            )
-            for _stream, entries in batches:
-                for message_id, _fields in entries:
-                    await client.xack(streams.CONTENT_BLOBS, "watcher", message_id)
+            await self._drain(client, LEGACY_CONSUMER_GROUP, "watcher-1", count=read)
 
-    async def _group_names(self, client):
+    async def _groups(self, client):
         groups = await client.xinfo_groups(streams.CONTENT_BLOBS)
-        return {g["name"].decode() if isinstance(g["name"], bytes) else g["name"] for g in groups}
+        return {
+            (g["name"].decode() if isinstance(g["name"], bytes) else g["name"]): g for g in groups
+        }
 
     async def test_new_group_inherits_the_legacy_position(self):
         """The whole point: facts the legacy group had not yet read must still
         be delivered, and ones it had already acked must not be re-delivered."""
-        import fakeredis
-
-        from src.workers.fetch_facts import CONSUMER_GROUP, migrate_legacy_group
-
         client = fakeredis.FakeAsyncRedis()
         await client.xadd(streams.CONTENT_BLOBS, {"seq": "1"})
         await client.xadd(streams.CONTENT_BLOBS, {"seq": "2"})
@@ -688,94 +709,158 @@ class TestLegacyGroupMigration:
         assert await migrate_legacy_group(client) == "migrated"
 
         batches = await client.xreadgroup(
-            CONSUMER_GROUP, "watcher-blobs-1", {streams.CONTENT_BLOBS: ">"}, count=10
+            CONSUMER_GROUP, CONSUMER_NAME, {streams.CONTENT_BLOBS: ">"}, count=10
         )
         delivered = [message_id for _stream, entries in batches for message_id, _f in entries]
         assert delivered == [unread]
 
     async def test_legacy_group_is_destroyed_once_drained(self):
-        import fakeredis
-
-        from src.workers.fetch_facts import CONSUMER_GROUP, migrate_legacy_group
-
         client = fakeredis.FakeAsyncRedis()
         await client.xadd(streams.CONTENT_BLOBS, {"seq": "1"})
         await self._legacy_group_at(client, read=1)
 
         await migrate_legacy_group(client)
 
-        assert await self._group_names(client) == {CONSUMER_GROUP}
+        assert set(await self._groups(client)) == {CONSUMER_GROUP}
 
     async def test_undrained_pel_keeps_both_groups(self):
         """Destroying a group with a live PEL discards the entries in it. The
         audit read ``pending 0``; that is a reading, not a property, so the
         drop is conditional and the mismatch is loud rather than silent."""
-        import fakeredis
-
-        from src.workers.fetch_facts import CONSUMER_GROUP, migrate_legacy_group
-
         client = fakeredis.FakeAsyncRedis()
         await client.xadd(streams.CONTENT_BLOBS, {"seq": "1"})
-        await client.xgroup_create(streams.CONTENT_BLOBS, "watcher", id="0", mkstream=True)
-        await client.xreadgroup("watcher", "watcher-1", {streams.CONTENT_BLOBS: ">"}, count=1)
+        await client.xgroup_create(
+            streams.CONTENT_BLOBS, LEGACY_CONSUMER_GROUP, id="0", mkstream=True
+        )
+        await client.xreadgroup(
+            LEGACY_CONSUMER_GROUP, "watcher-1", {streams.CONTENT_BLOBS: ">"}, count=1
+        )
 
         assert await migrate_legacy_group(client) == "legacy_pel_not_drained"
-        assert await self._group_names(client) == {"watcher", CONSUMER_GROUP}
+        assert set(await self._groups(client)) == {LEGACY_CONSUMER_GROUP, CONSUMER_GROUP}
 
     async def test_absent_legacy_group_is_a_noop(self):
         """Greenfield and every boot after the first: nothing to rename, and no
         group created here — ``ensure_group`` owns that."""
-        import fakeredis
-
-        from src.workers.fetch_facts import migrate_legacy_group
-
         client = fakeredis.FakeAsyncRedis()
         await client.xadd(streams.CONTENT_BLOBS, {"seq": "1"})
 
         assert await migrate_legacy_group(client) == "no_legacy_group"
-        assert await self._group_names(client) == set()
+        assert await self._groups(client) == {}
 
     async def test_missing_stream_is_a_noop(self):
-        """A broker with no content.blobs at all — a fresh deployment."""
-        import fakeredis
+        """A broker with no content.blobs at all — a fresh deployment. Real
+        Redis raises here; fakeredis returns an empty list, so both shapes of
+        'nothing to migrate' are pinned (CR-3)."""
+        assert await migrate_legacy_group(fakeredis.FakeAsyncRedis()) == "no_legacy_group"
 
-        from src.workers.fetch_facts import migrate_legacy_group
+        stub = _RaisingXInfoClient(ResponseError("no such key"))
+        assert await migrate_legacy_group(stub) == "no_legacy_group"
+        assert stub.destroyed == []
 
-        client = fakeredis.FakeAsyncRedis()
-
-        assert await migrate_legacy_group(client) == "no_legacy_group"
+    @pytest.mark.parametrize(
+        "error",
+        [
+            ResponseError("WRONGTYPE Operation against a key holding the wrong kind of value"),
+            ResponseError("NOPERM this user has no permissions to run the 'xinfo' command"),
+        ],
+        ids=["wrongtype", "noperm"],
+    )
+    async def test_a_failed_xinfo_is_not_read_as_nothing_to_migrate(self, error):
+        """CR-2: only ``no such key`` means 'no stream'. A permission or type
+        error reported as ``no_legacy_group`` would decline the one rename that
+        could still have been correct — and broker#1 D7 puts a credential in
+        front of this call. Raising is right: the caller's guard backs off."""
+        with pytest.raises(ResponseError):
+            await migrate_legacy_group(_RaisingXInfoClient(error))
 
     async def test_second_call_is_idempotent(self):
-        import fakeredis
-
-        from src.workers.fetch_facts import CONSUMER_GROUP, migrate_legacy_group
-
         client = fakeredis.FakeAsyncRedis()
         await client.xadd(streams.CONTENT_BLOBS, {"seq": "1"})
         await self._legacy_group_at(client, read=1)
 
         assert await migrate_legacy_group(client) == "migrated"
         assert await migrate_legacy_group(client) == "no_legacy_group"
-        assert await self._group_names(client) == {CONSUMER_GROUP}
+        assert set(await self._groups(client)) == {CONSUMER_GROUP}
+
+    async def test_a_new_group_ahead_of_the_legacy_one_is_refused(self):
+        """CR-1: the failure this function exists to prevent, committed by the
+        function itself. If ``watcher.blobs`` already exists *ahead* of
+        ``watcher`` — the mistake broker#1's step 16a invites, ``XGROUP CREATE
+        ... $`` instead of the recorded id — destroying the legacy group drops
+        every entry between them **and** the only record of where it was."""
+        client = fakeredis.FakeAsyncRedis()
+        await client.xadd(streams.CONTENT_BLOBS, {"seq": "1"})
+        await self._legacy_group_at(client, read=1)
+        gap = await client.xadd(streams.CONTENT_BLOBS, {"seq": "2"})
+        await client.xgroup_create(streams.CONTENT_BLOBS, CONSUMER_GROUP, id="$")
+
+        assert await migrate_legacy_group(client) == "new_group_ahead_of_legacy"
+
+        # Both groups stand, so the gap is still recoverable from the legacy one.
+        assert set(await self._groups(client)) == {LEGACY_CONSUMER_GROUP, CONSUMER_GROUP}
+        batches = await client.xreadgroup(
+            LEGACY_CONSUMER_GROUP, "watcher-1", {streams.CONTENT_BLOBS: ">"}, count=10
+        )
+        assert [mid for _s, entries in batches for mid, _f in entries] == [gap]
+
+    async def test_a_new_group_behind_the_legacy_one_completes(self):
+        """Behind is safe: the new group re-reads the overlap, and the consumer
+        is idempotent at the row (MUST-4). Only *ahead* loses anything."""
+        client = fakeredis.FakeAsyncRedis()
+        await client.xadd(streams.CONTENT_BLOBS, {"seq": "1"})
+        await self._legacy_group_at(client, read=1)
+        await client.xgroup_create(streams.CONTENT_BLOBS, CONSUMER_GROUP, id="0")
+
+        assert await migrate_legacy_group(client) == "migrated"
+        assert set(await self._groups(client)) == {CONSUMER_GROUP}
+
+    @pytest.mark.parametrize(
+        ("legacy_id", "new_id", "expected"),
+        [
+            ("10-0", "9-0", "migrated"),  # lexicographically "9-0" > "10-0"
+            ("9-0", "10-0", "new_group_ahead_of_legacy"),
+            ("5-1", "5-2", "new_group_ahead_of_legacy"),
+            ("5-2", "5-1", "migrated"),
+            ("5-0", "5-0", "migrated"),  # equal is not ahead
+        ],
+        ids=["ms-lex-trap", "ms-ahead", "seq-ahead", "seq-behind", "equal"],
+    )
+    async def test_positions_compare_numerically_not_lexicographically(
+        self, legacy_id, new_id, expected, monkeypatch
+    ):
+        """CR-1: stream ids are ``<ms>-<seq>``, so string comparison is wrong —
+        ``"9-0" > "10-0"`` lexicographically. The first case is the one that
+        would silently destroy a legacy group sitting *ahead* of the new one."""
+        destroyed: list[str] = []
+
+        class _Stub:
+            async def xinfo_groups(self, _topic):
+                return [
+                    {"name": LEGACY_CONSUMER_GROUP, "pending": 0, "last-delivered-id": legacy_id},
+                    {"name": CONSUMER_GROUP, "pending": 0, "last-delivered-id": new_id},
+                ]
+
+            async def xgroup_destroy(self, _topic, group):
+                destroyed.append(group)
+
+        assert await migrate_legacy_group(_Stub()) == expected
+        assert destroyed == ([LEGACY_CONSUMER_GROUP] if expected == "migrated" else [])
 
     async def test_consumer_loop_migrates_before_it_reads(self, db_session):
         """End to end: a fact published while the old-named Watcher was down is
         still processed after the rename. Under a bare ``ensure_group('$')`` it
         would be dropped with no signal at all."""
-        import asyncio
-        from contextlib import asynccontextmanager
-
-        import fakeredis
-        from co_core.effects.bus import BusPublish
-        from co_core_aio.bus import AsyncBusPublisher
-
-        from src.workers.fetch_facts import CONSUMER_GROUP, run_blobs_consumer
-
         client = fakeredis.FakeAsyncRedis()
-        await client.xgroup_create(streams.CONTENT_BLOBS, "watcher", id="0", mkstream=True)
+        await client.xgroup_create(
+            streams.CONTENT_BLOBS, LEGACY_CONSUMER_GROUP, id="0", mkstream=True
+        )
+        legacy_before = (await self._groups(client))[LEGACY_CONSUMER_GROUP]["last-delivered-id"]
         # Published in the gap: after the last `watcher` read, before the restart.
         event = _blob_message("01UNKNOWNCOMMANDIDXXXXXXXX").payload
-        await AsyncBusPublisher(client).execute(BusPublish(streams.CONTENT_BLOBS, to_wire(event)))
+        gap = await AsyncBusPublisher(client).execute(
+            BusPublish(streams.CONTENT_BLOBS, to_wire(event))
+        )
 
         stop = asyncio.Event()
 
@@ -789,19 +874,25 @@ class TestLegacyGroupMigration:
             )
         )
 
-        async def _until_acked():
+        async def _until_read():
             while True:
-                info = await client.xinfo_groups(streams.CONTENT_BLOBS)
-                for group in info:
-                    name = group["name"]
-                    name = name.decode() if isinstance(name, bytes) else name
-                    if name == CONSUMER_GROUP and group["entries-read"]:
-                        return
+                group = (await self._groups(client)).get(CONSUMER_GROUP)
+                if group and group["entries-read"]:
+                    return group
                 await asyncio.sleep(0.02)
 
-        await asyncio.wait_for(_until_acked(), timeout=5)
+        group = await asyncio.wait_for(_until_read(), timeout=5)
         stop.set()
         await asyncio.wait_for(task, timeout=5)
 
+        # CR-8: name the delivery rather than inferring it from `pending == 0`,
+        # which also holds when nothing was ever delivered.
+        assert group["entries-read"] == 1
+        last_delivered = group["last-delivered-id"]
+        last_delivered = (
+            last_delivered.decode() if isinstance(last_delivered, bytes) else last_delivered
+        )
+        assert last_delivered != legacy_before
+        assert last_delivered == gap.bus_message_id
         pending = await client.xpending(streams.CONTENT_BLOBS, CONSUMER_GROUP)
         assert pending["pending"] == 0  # the gap fact was delivered and acked

@@ -27,8 +27,8 @@ dependencies = [
     "python-multipart>=0.0.22,<1",
     "html5lib>=1.1",
     "notifier-client",
-    "co-core[extract]>=0.10,<0.11",
-    "co-core-aio[bus]>=0.10,<0.11",
+    "co-core[extract]>=0.13.1,<0.14",
+    "co-core-aio[bus]>=0.13.1,<0.14",
     "google-cloud-storage>=2,<4",
 ]
 

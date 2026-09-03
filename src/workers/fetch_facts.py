@@ -1,6 +1,6 @@
 """The content.blobs consumer — Watcher's fact inbox for Phase 4 (#241).
 
-One consumer group (``watcher`` — fact streams broadcast, one group per
+One consumer group (``watcher.blobs`` — fact streams broadcast, one group per
 service), one member (the single-process topology, see AGENTS.md). Started as a
 lifespan task beside the config poller; a deployment without
 ``WATCHER_BUS_REDIS_URL`` simply never starts it.
@@ -41,9 +41,11 @@ from typing import Protocol
 from co_core.effects.bus import BusMessage
 from co_core.pure.adapters.bus import streams
 from co_core.pure.adapters.bus.exceptions import BusMessageAnomaly
+from co_core.pure.adapters.bus.streams import group_name
 from co_core.pure.models.changes import BlobAvailableEvent, FetchFailedEvent
 from co_core_aio.bus import AsyncBusConsumer
 from redis.asyncio import Redis
+from redis.exceptions import ResponseError
 from sqlalchemy import select
 
 from src.core.logging import get_logger
@@ -61,10 +63,21 @@ from src.workers.fetch_commands import (
 
 logger = get_logger(__name__)
 
-CONSUMER_GROUP = "watcher"
+# Derived, never hand-written (#285, cannobserv#384): `<service>.<stream-suffix>`,
+# no `purpose` segment because Watcher runs exactly one group on this stream. The
+# 0/5 cluster-wide conformance rate #384 documents was the product of a convention
+# that lived in prose beside a free-string `group` parameter — so the helper is the
+# contract, and it raises on a config/state topic that must never grow a group.
+CONSUMER_GROUP = group_name(streams.CONTENT_BLOBS, "watcher")
+# The pre-#285 name. Renamed in place by `migrate_legacy_group` on first boot;
+# delete this and that function once every deployment has booted past it.
+LEGACY_CONSUMER_GROUP = "watcher"
 # One member: the single-process topology is load-bearing (AGENTS.md). A second
 # process would need its own consumer name AND a shared apply-ordering story.
-CONSUMER_NAME = "watcher-1"
+# Group-derived with the dot flattened: `watcher.blobs-1` would read as the
+# `-<purpose>` group form. Host-independent and restart-stable, which is the
+# property the #285 audit checked and the only one that matters here.
+CONSUMER_NAME = "watcher-blobs-1"
 
 # Read block per poll; also the shutdown latency ceiling.
 BLOCK_MS = 5000
@@ -252,6 +265,77 @@ async def process_fact_message(
     return "ignored_unknown_type"
 
 
+def _group_field(group: dict, key: str) -> str:
+    """One ``XINFO GROUPS`` field as text — the client decodes or it doesn't."""
+    value = group[key]
+    return value.decode() if isinstance(value, bytes) else value
+
+
+async def migrate_legacy_group(client: Redis) -> str:
+    """Rename the pre-#285 bare ``watcher`` group to ``CONSUMER_GROUP`` (#285).
+
+    **Why this is code and not a runbook step.** ``ensure_group`` mints at
+    ``start_id="$"``. A renamed Watcher that restarts *before* the broker-side
+    ``XGROUP CREATE`` therefore starts reading at the tail, and every fact
+    published between the legacy group's last read and that moment is delivered
+    to nobody — no error, no PEL, no lag, no signal of any kind. The correct
+    ordering (create at the old position, *then* restart) was a hand-typed pair
+    of ``redis-cli`` commands guarding against undetectable data loss; doing it
+    in-process makes it deterministic, testable, and independent of the
+    CannObserv/broker#1 Phase 3 window.
+
+    Idempotent by construction — once the legacy group is gone every subsequent
+    boot takes the ``no_legacy_group`` path — and safe to run concurrently with
+    ``ensure_group``, which swallows ``BUSYGROUP``. It must run *before* it,
+    though: ``ensure_group`` creating the new group at ``$`` first would leave
+    nothing for this function to inherit a position into.
+
+    The legacy group is destroyed only when its PEL is empty, because
+    ``XGROUP DESTROY`` discards the entries in it. The audit read ``pending 0``
+    on 2026-09-01; that is a reading, not a property of the deploy window, so a
+    non-empty PEL leaves both groups standing and says so loudly rather than
+    dropping unacked facts to keep the rename tidy.
+    """
+    try:
+        groups = await client.xinfo_groups(streams.CONTENT_BLOBS)
+    except ResponseError:
+        return "no_legacy_group"  # stream absent: a fresh deployment
+
+    by_name = {_group_field(g, "name"): g for g in groups}
+    legacy = by_name.get(LEGACY_CONSUMER_GROUP)
+    if legacy is None:
+        return "no_legacy_group"
+
+    if CONSUMER_GROUP not in by_name:
+        last_delivered = _group_field(legacy, "last-delivered-id")
+        try:
+            await client.xgroup_create(
+                streams.CONTENT_BLOBS, CONSUMER_GROUP, id=last_delivered, mkstream=True
+            )
+        except ResponseError as exc:
+            if "BUSYGROUP" not in str(exc):
+                raise
+        logger.info(
+            "content.blobs consumer group renamed (#285)",
+            extra={
+                "old_group": LEGACY_CONSUMER_GROUP,
+                "new_group": CONSUMER_GROUP,
+                "inherited_last_delivered_id": last_delivered,
+            },
+        )
+
+    if legacy["pending"]:
+        logger.warning(
+            "legacy content.blobs group still has unacked entries — keeping it; "
+            "drain the PEL, then restart to complete the #285 rename",
+            extra={"old_group": LEGACY_CONSUMER_GROUP, "pending": legacy["pending"]},
+        )
+        return "legacy_pel_not_drained"
+
+    await client.xgroup_destroy(streams.CONTENT_BLOBS, LEGACY_CONSUMER_GROUP)
+    return "migrated"
+
+
 async def run_blobs_consumer(
     client: Redis,
     session_factory,
@@ -261,6 +345,9 @@ async def run_blobs_consumer(
     error_backoff_seconds: float = ERROR_BACKOFF_SECONDS,
 ) -> None:
     """Poll → process → ack, until ``stop`` is set.
+
+    ``migrate_legacy_group`` first (#285): it is what keeps a rename from
+    silently skipping the facts published while the old-named consumer was down.
 
     ``ensure_group(start_id="$")``: facts published before our group existed
     predate any command Watcher issued and can never correlate. After a crash,
@@ -283,6 +370,9 @@ async def run_blobs_consumer(
     while not stop.is_set():
         try:
             if not group_ready:
+                # Before ensure_group, never after: creating the new group at
+                # "$" first would leave no legacy position to inherit (#285).
+                await migrate_legacy_group(client)
                 await consumer.ensure_group(start_id="$")
                 group_ready = True
             messages: list[BusMessage] = []

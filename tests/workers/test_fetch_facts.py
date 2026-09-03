@@ -14,6 +14,7 @@ not routing — see ``TestOrphanFacts``.
 """
 
 import asyncio
+import logging
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
 
@@ -804,16 +805,31 @@ class TestLegacyGroupMigration:
         )
         assert [mid for _s, entries in batches for mid, _f in entries] == [gap]
 
-    async def test_a_new_group_behind_the_legacy_one_completes(self):
-        """Behind is safe: the new group re-reads the overlap, and the consumer
-        is idempotent at the row (MUST-4). Only *ahead* loses anything."""
+    async def test_a_new_group_behind_the_legacy_one_replays_and_says_so(self, caplog):
+        """CR-11/CR-15: behind is safe — the new group re-reads the overlap and
+        the consumer is idempotent at the row (MUST-4) — but it is the one path
+        that materially changes behaviour, so it must not be the silent one."""
+        caplog.set_level(logging.WARNING, logger="src.workers.fetch_facts")
         client = fakeredis.FakeAsyncRedis()
-        await client.xadd(streams.CONTENT_BLOBS, {"seq": "1"})
-        await self._legacy_group_at(client, read=1)
+        first = await client.xadd(streams.CONTENT_BLOBS, {"seq": "1"})
+        second = await client.xadd(streams.CONTENT_BLOBS, {"seq": "2"})
+        await self._legacy_group_at(client, read=2)
         await client.xgroup_create(streams.CONTENT_BLOBS, CONSUMER_GROUP, id="0")
 
         assert await migrate_legacy_group(client) == "migrated"
         assert set(await self._groups(client)) == {CONSUMER_GROUP}
+
+        # The overlap is genuinely re-delivered — that is the consequence the
+        # log line exists to explain.
+        batches = await client.xreadgroup(
+            CONSUMER_GROUP, CONSUMER_NAME, {streams.CONTENT_BLOBS: ">"}, count=10
+        )
+        assert [mid for _s, entries in batches for mid, _f in entries] == [first, second]
+
+        records = [r for r in caplog.records if r.levelno == logging.WARNING]
+        assert len(records) == 1
+        assert "replay" in records[0].message.lower()
+        assert records[0].replayed_entries == 2
 
     @pytest.mark.parametrize(
         ("legacy_id", "new_id", "expected"),
@@ -840,6 +856,9 @@ class TestLegacyGroupMigration:
                     {"name": LEGACY_CONSUMER_GROUP, "pending": 0, "last-delivered-id": legacy_id},
                     {"name": CONSUMER_GROUP, "pending": 0, "last-delivered-id": new_id},
                 ]
+
+            async def xrange(self, _topic, **_kw):
+                return []  # the behind path sizes its replay warning with this
 
             async def xgroup_destroy(self, _topic, group):
                 destroyed.append(group)
@@ -896,3 +915,96 @@ class TestLegacyGroupMigration:
         assert last_delivered == gap.bus_message_id
         pending = await client.xpending(streams.CONTENT_BLOBS, CONSUMER_GROUP)
         assert pending["pending"] == 0  # the gap fact was delivered and acked
+
+    async def test_the_loop_retries_a_refused_migration_until_it_settles(
+        self, db_session, monkeypatch, caplog
+    ):
+        """CR-12: a refusal must not be a one-shot log at boot.
+
+        The PEL case tells an operator to drain and restart. Draining should be
+        enough: nothing about the rename needs a process boundary, and a
+        refusal that never retries also means the ERROR for the ahead case
+        scrolls away once and never returns for a condition that persists.
+        """
+        caplog.set_level(logging.WARNING, logger="src.workers.fetch_facts")
+        monkeypatch.setattr(ff_mod, "CLAIM_INTERVAL_SECONDS", 0.05)
+        client = fakeredis.FakeAsyncRedis()
+        await client.xadd(streams.CONTENT_BLOBS, {"seq": "1"})
+        await client.xgroup_create(
+            streams.CONTENT_BLOBS, LEGACY_CONSUMER_GROUP, id="0", mkstream=True
+        )
+        batches = await client.xreadgroup(
+            LEGACY_CONSUMER_GROUP, "watcher-1", {streams.CONTENT_BLOBS: ">"}, count=1
+        )
+        stuck = batches[0][1][0][0]  # unacked: the legacy PEL that blocks the destroy
+
+        stop = asyncio.Event()
+
+        @asynccontextmanager
+        async def _ctx():
+            yield db_session
+
+        task = asyncio.create_task(
+            run_blobs_consumer(
+                client, lambda: _ctx(), stop=stop, block_ms=10, error_backoff_seconds=0.01
+            )
+        )
+        try:
+
+            async def _until(predicate):
+                while not predicate(await self._groups(client)):
+                    await asyncio.sleep(0.02)
+
+            # Refused while the PEL stands — both groups, consumer still serving.
+            await asyncio.wait_for(
+                _until(lambda g: {LEGACY_CONSUMER_GROUP, CONSUMER_GROUP} <= set(g)), timeout=5
+            )
+            await asyncio.sleep(0.15)  # several claim ticks: still refused
+            assert LEGACY_CONSUMER_GROUP in await self._groups(client)
+
+            # Drain it the way the log line instructs — and nothing else.
+            await client.xack(streams.CONTENT_BLOBS, LEGACY_CONSUMER_GROUP, stuck)
+
+            # The rename completes on a later tick, with no restart.
+            await asyncio.wait_for(_until(lambda g: set(g) == {CONSUMER_GROUP}), timeout=5)
+        finally:
+            stop.set()
+            await asyncio.wait_for(task, timeout=5)
+
+        # The refusal was reported more than once, not filed away at boot.
+        pel_warnings = [r for r in caplog.records if "unacked entries" in r.message]
+        assert len(pel_warnings) > 1
+
+    async def test_a_settled_migration_stops_being_retried(self, db_session, monkeypatch):
+        """The retry is bounded: once terminal, nothing re-runs it — a boot
+        against a broker that never had the legacy group must not call
+        ``XINFO GROUPS`` on every claim tick forever."""
+        monkeypatch.setattr(ff_mod, "CLAIM_INTERVAL_SECONDS", 0.02)
+        client = fakeredis.FakeAsyncRedis()
+        await client.xadd(streams.CONTENT_BLOBS, {"seq": "1"})
+
+        calls: list[int] = []
+        real = ff_mod.migrate_legacy_group
+
+        async def _counted(c):
+            calls.append(1)
+            return await real(c)
+
+        monkeypatch.setattr(ff_mod, "migrate_legacy_group", _counted)
+
+        stop = asyncio.Event()
+
+        @asynccontextmanager
+        async def _ctx():
+            yield db_session
+
+        task = asyncio.create_task(
+            run_blobs_consumer(
+                client, lambda: _ctx(), stop=stop, block_ms=10, error_backoff_seconds=0.01
+            )
+        )
+        await asyncio.sleep(0.2)  # ~10 claim ticks
+        stop.set()
+        await asyncio.wait_for(task, timeout=5)
+
+        assert calls == [1]  # settled on the first pass, never retried

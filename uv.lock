@@ -379,15 +379,15 @@ wheels = [
 
 [[package]]
 name = "co-core"
-version = "0.10.0"
+version = "0.13.2"
 source = { registry = ".wheelhouse" }
 dependencies = [
     { name = "dateparser" },
     { name = "pydantic" },
 ]
-sdist = { path = "co_core-0.10.0.tar.gz" }
+sdist = { path = "co_core-0.13.2.tar.gz" }
 wheels = [
-    { path = "co_core-0.10.0-py3-none-any.whl" },
+    { path = "co_core-0.13.2-py3-none-any.whl" },
 ]
 
 [package.optional-dependencies]
@@ -401,15 +401,15 @@ extract = [
 
 [[package]]
 name = "co-core-aio"
-version = "0.10.0"
+version = "0.13.2"
 source = { registry = ".wheelhouse" }
 dependencies = [
     { name = "co-core" },
     { name = "httpx" },
 ]
-sdist = { path = "co_core_aio-0.10.0.tar.gz" }
+sdist = { path = "co_core_aio-0.13.2.tar.gz" }
 wheels = [
-    { path = "co_core_aio-0.10.0-py3-none-any.whl" },
+    { path = "co_core_aio-0.13.2-py3-none-any.whl" },
 ]
 
 [package.optional-dependencies]
@@ -2058,8 +2058,8 @@ requires-dist = [
     { name = "alembic", specifier = ">=1.15.0,<2" },
     { name = "asyncpg", specifier = ">=0.30.0,<1" },
     { name = "beautifulsoup4", specifier = ">=4.12.0,<5" },
-    { name = "co-core", extras = ["extract"], specifier = ">=0.10,<0.11" },
-    { name = "co-core-aio", extras = ["bus"], specifier = ">=0.10,<0.11" },
+    { name = "co-core", extras = ["extract"], specifier = ">=0.13.1,<0.14" },
+    { name = "co-core-aio", extras = ["bus"], specifier = ">=0.13.1,<0.14" },
     { name = "email-validator", specifier = ">=2.0,<3" },
     { name = "fastapi", specifier = ">=0.115.0,<1" },
     { name = "google-cloud-storage", specifier = ">=2,<4" },

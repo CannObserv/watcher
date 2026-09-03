@@ -477,7 +477,7 @@ class TestRunBlobsConsumer:
         from co_core_aio.bus import AsyncBusPublisher
 
         import src.workers.fetch_facts as ff_mod
-        from src.workers.fetch_facts import run_blobs_consumer
+        from src.workers.fetch_facts import CONSUMER_GROUP, run_blobs_consumer
 
         client = fakeredis.FakeAsyncRedis()
         # Group must exist BEFORE the fact lands ('$' start), mirroring prod.
@@ -521,7 +521,7 @@ class TestRunBlobsConsumer:
         await asyncio.wait_for(task, timeout=5)  # exits cleanly, no exception
 
         assert len(calls) == 2  # failed once, retried via reclaim, succeeded
-        pending = await client.xpending(streams.CONTENT_BLOBS, "watcher")
+        pending = await client.xpending(streams.CONTENT_BLOBS, CONSUMER_GROUP)
         assert pending["pending"] == 0  # retried message was acked
 
 
@@ -608,3 +608,200 @@ class TestValidatorFacts:
         await db_session.refresh(row)
         assert row.etag is None
         assert row.last_modified is None
+
+
+class TestGroupNaming:
+    """#285 — the group is *derived* from the stream, never hand-written.
+
+    cannobserv#384 landed ``<service>.<stream-suffix>[-<purpose>]`` and, with it,
+    ``group_name``. The 0/5 conformance rate that issue documents was the direct
+    product of a convention that existed only as prose beside a free-string
+    ``group`` parameter, so the helper — not the literal — is the contract.
+    """
+
+    def test_group_is_derived_from_the_stream(self):
+        from co_core.pure.adapters.bus.streams import group_name
+
+        from src.workers.fetch_facts import CONSUMER_GROUP
+
+        assert CONSUMER_GROUP == group_name(streams.CONTENT_BLOBS, "watcher")
+        assert CONSUMER_GROUP == "watcher.blobs"
+
+    def test_no_purpose_segment_for_a_lone_group(self):
+        """Watcher runs exactly one group on content.blobs, so the segment that
+        disambiguates two groups of the same service must be absent."""
+        from src.workers.fetch_facts import CONSUMER_GROUP
+
+        assert CONSUMER_GROUP.count(".") == 1
+        assert "-" not in CONSUMER_GROUP
+
+    def test_consumer_name_stays_group_derived_and_host_independent(self):
+        """The audit's conclusion on the *name* was 'verified, nothing to do' —
+        it changes only as a consequence of the group rename. The dot becomes a
+        hyphen: ``watcher.blobs-1`` would read as the ``-<purpose>`` group form.
+        """
+        from src.workers.fetch_facts import CONSUMER_GROUP, CONSUMER_NAME
+
+        assert CONSUMER_NAME == f"{CONSUMER_GROUP.replace('.', '-')}-1"
+        assert CONSUMER_NAME == "watcher-blobs-1"
+
+
+class TestLegacyGroupMigration:
+    """#285 — the rename carries a silent-loss hazard, so Watcher performs it.
+
+    ``ensure_group(start_id='$')`` mints at the tail. A renamed Watcher that
+    restarts before the broker-side ``XGROUP CREATE`` therefore drops everything
+    published between the last ``watcher`` read and that moment, with no error,
+    no PEL and no signal. Enforcing the create-before-read ordering in-process
+    turns a hand-typed runbook step into a tested path — and decouples the
+    rename from the CannObserv/broker#1 Phase 3 window.
+    """
+
+    async def _legacy_group_at(self, client, *, read: int):
+        """Legacy group advanced past ``read`` entries, all acked (prod's shape)."""
+        await client.xgroup_create(streams.CONTENT_BLOBS, "watcher", id="0", mkstream=True)
+        if read:
+            batches = await client.xreadgroup(
+                "watcher", "watcher-1", {streams.CONTENT_BLOBS: ">"}, count=read
+            )
+            for _stream, entries in batches:
+                for message_id, _fields in entries:
+                    await client.xack(streams.CONTENT_BLOBS, "watcher", message_id)
+
+    async def _group_names(self, client):
+        groups = await client.xinfo_groups(streams.CONTENT_BLOBS)
+        return {g["name"].decode() if isinstance(g["name"], bytes) else g["name"] for g in groups}
+
+    async def test_new_group_inherits_the_legacy_position(self):
+        """The whole point: facts the legacy group had not yet read must still
+        be delivered, and ones it had already acked must not be re-delivered."""
+        import fakeredis
+
+        from src.workers.fetch_facts import CONSUMER_GROUP, migrate_legacy_group
+
+        client = fakeredis.FakeAsyncRedis()
+        await client.xadd(streams.CONTENT_BLOBS, {"seq": "1"})
+        await client.xadd(streams.CONTENT_BLOBS, {"seq": "2"})
+        await self._legacy_group_at(client, read=2)
+        unread = await client.xadd(streams.CONTENT_BLOBS, {"seq": "3"})
+
+        assert await migrate_legacy_group(client) == "migrated"
+
+        batches = await client.xreadgroup(
+            CONSUMER_GROUP, "watcher-blobs-1", {streams.CONTENT_BLOBS: ">"}, count=10
+        )
+        delivered = [message_id for _stream, entries in batches for message_id, _f in entries]
+        assert delivered == [unread]
+
+    async def test_legacy_group_is_destroyed_once_drained(self):
+        import fakeredis
+
+        from src.workers.fetch_facts import CONSUMER_GROUP, migrate_legacy_group
+
+        client = fakeredis.FakeAsyncRedis()
+        await client.xadd(streams.CONTENT_BLOBS, {"seq": "1"})
+        await self._legacy_group_at(client, read=1)
+
+        await migrate_legacy_group(client)
+
+        assert await self._group_names(client) == {CONSUMER_GROUP}
+
+    async def test_undrained_pel_keeps_both_groups(self):
+        """Destroying a group with a live PEL discards the entries in it. The
+        audit read ``pending 0``; that is a reading, not a property, so the
+        drop is conditional and the mismatch is loud rather than silent."""
+        import fakeredis
+
+        from src.workers.fetch_facts import CONSUMER_GROUP, migrate_legacy_group
+
+        client = fakeredis.FakeAsyncRedis()
+        await client.xadd(streams.CONTENT_BLOBS, {"seq": "1"})
+        await client.xgroup_create(streams.CONTENT_BLOBS, "watcher", id="0", mkstream=True)
+        await client.xreadgroup("watcher", "watcher-1", {streams.CONTENT_BLOBS: ">"}, count=1)
+
+        assert await migrate_legacy_group(client) == "legacy_pel_not_drained"
+        assert await self._group_names(client) == {"watcher", CONSUMER_GROUP}
+
+    async def test_absent_legacy_group_is_a_noop(self):
+        """Greenfield and every boot after the first: nothing to rename, and no
+        group created here — ``ensure_group`` owns that."""
+        import fakeredis
+
+        from src.workers.fetch_facts import migrate_legacy_group
+
+        client = fakeredis.FakeAsyncRedis()
+        await client.xadd(streams.CONTENT_BLOBS, {"seq": "1"})
+
+        assert await migrate_legacy_group(client) == "no_legacy_group"
+        assert await self._group_names(client) == set()
+
+    async def test_missing_stream_is_a_noop(self):
+        """A broker with no content.blobs at all — a fresh deployment."""
+        import fakeredis
+
+        from src.workers.fetch_facts import migrate_legacy_group
+
+        client = fakeredis.FakeAsyncRedis()
+
+        assert await migrate_legacy_group(client) == "no_legacy_group"
+
+    async def test_second_call_is_idempotent(self):
+        import fakeredis
+
+        from src.workers.fetch_facts import CONSUMER_GROUP, migrate_legacy_group
+
+        client = fakeredis.FakeAsyncRedis()
+        await client.xadd(streams.CONTENT_BLOBS, {"seq": "1"})
+        await self._legacy_group_at(client, read=1)
+
+        assert await migrate_legacy_group(client) == "migrated"
+        assert await migrate_legacy_group(client) == "no_legacy_group"
+        assert await self._group_names(client) == {CONSUMER_GROUP}
+
+    async def test_consumer_loop_migrates_before_it_reads(self, db_session):
+        """End to end: a fact published while the old-named Watcher was down is
+        still processed after the rename. Under a bare ``ensure_group('$')`` it
+        would be dropped with no signal at all."""
+        import asyncio
+        from contextlib import asynccontextmanager
+
+        import fakeredis
+        from co_core.effects.bus import BusPublish
+        from co_core_aio.bus import AsyncBusPublisher
+
+        from src.workers.fetch_facts import CONSUMER_GROUP, run_blobs_consumer
+
+        client = fakeredis.FakeAsyncRedis()
+        await client.xgroup_create(streams.CONTENT_BLOBS, "watcher", id="0", mkstream=True)
+        # Published in the gap: after the last `watcher` read, before the restart.
+        event = _blob_message("01UNKNOWNCOMMANDIDXXXXXXXX").payload
+        await AsyncBusPublisher(client).execute(BusPublish(streams.CONTENT_BLOBS, to_wire(event)))
+
+        stop = asyncio.Event()
+
+        @asynccontextmanager
+        async def _ctx():
+            yield db_session
+
+        task = asyncio.create_task(
+            run_blobs_consumer(
+                client, lambda: _ctx(), stop=stop, block_ms=10, error_backoff_seconds=0.01
+            )
+        )
+
+        async def _until_acked():
+            while True:
+                info = await client.xinfo_groups(streams.CONTENT_BLOBS)
+                for group in info:
+                    name = group["name"]
+                    name = name.decode() if isinstance(name, bytes) else name
+                    if name == CONSUMER_GROUP and group["entries-read"]:
+                        return
+                await asyncio.sleep(0.02)
+
+        await asyncio.wait_for(_until_acked(), timeout=5)
+        stop.set()
+        await asyncio.wait_for(task, timeout=5)
+
+        pending = await client.xpending(streams.CONTENT_BLOBS, CONSUMER_GROUP)
+        assert pending["pending"] == 0  # the gap fact was delivered and acked

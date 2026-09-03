@@ -13,10 +13,13 @@ Plus the #252 posture on ``info_source_id`` (cannobserv#300): it is reporting,
 not routing — see ``TestOrphanFacts``.
 """
 
+import ast
 import asyncio
 import logging
+import pathlib
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
+from typing import get_args
 
 import fakeredis
 import pytest
@@ -1008,3 +1011,154 @@ class TestLegacyGroupMigration:
         await asyncio.wait_for(task, timeout=5)
 
         assert calls == [1]  # settled on the first pass, never retried
+
+    async def test_every_outcome_is_classified_settled_or_unsettled(self):
+        """CR-17: the loop branches on a set of literals that restates the
+        function's return strings. Nothing binds the two, and the dangerous
+        direction is silent — a refusal misclassified as settled clears
+        ``next_migration_retry`` and reverts CR-12 with a green suite. So the
+        source is the fixture: every ``return`` in the function must be
+        classified, and every classified outcome must be reachable.
+        """
+        tree = ast.parse(pathlib.Path(ff_mod.__file__).read_text())
+        (func,) = [
+            n
+            for n in ast.walk(tree)
+            if isinstance(n, ast.AsyncFunctionDef) and n.name == "migrate_legacy_group"
+        ]
+        # The returns are module constants now, so resolve each name back to its
+        # value — which also fails if one is returned that the module does not
+        # define, rather than quietly shrinking the set.
+        returned = set()
+        for node in ast.walk(func):
+            if not isinstance(node, ast.Return):
+                continue
+            assert isinstance(node.value, ast.Name), ast.dump(node)
+            returned.add(getattr(ff_mod, node.value.id))
+
+        assert returned == ff_mod.MIGRATION_OUTCOMES
+        assert set(get_args(ff_mod.MigrationOutcome)) == ff_mod.MIGRATION_OUTCOMES
+        assert (
+            ff_mod.SETTLED_MIGRATION_OUTCOMES | ff_mod.UNSETTLED_MIGRATION_OUTCOMES
+            == ff_mod.MIGRATION_OUTCOMES
+        )
+        assert not (ff_mod.SETTLED_MIGRATION_OUTCOMES & ff_mod.UNSETTLED_MIGRATION_OUTCOMES)
+
+    async def _scenario(self, name, client):
+        """Set up the broker state that produces one unsettled outcome."""
+        await client.xadd(streams.CONTENT_BLOBS, {"seq": "1"})
+        await client.xgroup_create(
+            streams.CONTENT_BLOBS, LEGACY_CONSUMER_GROUP, id="0", mkstream=True
+        )
+        if name == "legacy_pel_not_drained":
+            await client.xreadgroup(
+                LEGACY_CONSUMER_GROUP, "watcher-1", {streams.CONTENT_BLOBS: ">"}, count=1
+            )
+        elif name == "new_group_ahead_of_legacy":
+            await self._drain(client, LEGACY_CONSUMER_GROUP, "watcher-1", count=1)
+            await client.xadd(streams.CONTENT_BLOBS, {"seq": "2"})
+            await client.xgroup_create(streams.CONTENT_BLOBS, CONSUMER_GROUP, id="$")
+        else:  # pragma: no cover - guard against a mistyped parametrization
+            raise AssertionError(name)
+
+    @pytest.mark.parametrize("outcome", ["legacy_pel_not_drained", "new_group_ahead_of_legacy"])
+    async def test_no_unsettled_outcome_leaves_the_new_group_absent(self, outcome):
+        """CR-18: the load-bearing invariant, pinned.
+
+        ``migrate_legacy_group`` runs *before* ``ensure_group``, but on a retry
+        pass ``ensure_group`` has already run once. That is only safe because
+        every unsettled outcome implies ``watcher.blobs`` already exists, so the
+        ``ensure_group(start_id="$")`` in between is a BUSYGROUP no-op. An
+        unsettled return with the group *absent* would let ``ensure_group``
+        mint it at the tail on the very pass that refused — #285's original
+        data loss, reintroduced through the fix for it.
+        """
+        client = fakeredis.FakeAsyncRedis()
+        await self._scenario(outcome, client)
+
+        assert await migrate_legacy_group(client) == outcome
+        assert CONSUMER_GROUP in await self._groups(client)
+
+    async def test_an_unsettled_boot_pass_does_not_run_the_migration_twice(
+        self, db_session, monkeypatch
+    ):
+        """CR-20: the boot attempt arms the retry timer for one interval ahead,
+        so the retry block on that same pass must decline to fire. It is one
+        ``>=`` away from double-logging every refused boot."""
+        monkeypatch.setattr(ff_mod, "CLAIM_INTERVAL_SECONDS", 30.0)  # never elapses here
+        client = fakeredis.FakeAsyncRedis()
+        await self._scenario("legacy_pel_not_drained", client)
+
+        calls: list[str] = []
+        real = ff_mod.migrate_legacy_group
+
+        async def _counted(c):
+            outcome = await real(c)
+            calls.append(outcome)
+            return outcome
+
+        monkeypatch.setattr(ff_mod, "migrate_legacy_group", _counted)
+
+        stop = asyncio.Event()
+
+        @asynccontextmanager
+        async def _ctx():
+            yield db_session
+
+        task = asyncio.create_task(
+            run_blobs_consumer(
+                client, lambda: _ctx(), stop=stop, block_ms=10, error_backoff_seconds=0.01
+            )
+        )
+        await asyncio.sleep(0.2)
+        stop.set()
+        await asyncio.wait_for(task, timeout=5)
+
+        assert calls == ["legacy_pel_not_drained"]
+
+    async def test_a_standing_refusal_backs_off_to_a_ceiling(self, db_session, monkeypatch):
+        """CR-19: persistence was the goal, but a fixed 60s cadence for a
+        condition needing manual action is 1440 identical ERRORs a day. The
+        interval doubles while the outcome is unchanged and clamps at the
+        ceiling, so the condition stays visible without flooding."""
+        # Floor and ceiling far enough apart that the doubling clears the
+        # loop's own poll period, which would otherwise mask it.
+        monkeypatch.setattr(ff_mod, "CLAIM_INTERVAL_SECONDS", 0.05)
+        monkeypatch.setattr(ff_mod, "MIGRATION_RETRY_CEILING_SECONDS", 0.4)
+        client = fakeredis.FakeAsyncRedis()
+        await self._scenario("legacy_pel_not_drained", client)
+
+        stamps: list[float] = []
+        real = ff_mod.migrate_legacy_group
+
+        async def _timed(c):
+            stamps.append(asyncio.get_running_loop().time())
+            return await real(c)
+
+        monkeypatch.setattr(ff_mod, "migrate_legacy_group", _timed)
+
+        stop = asyncio.Event()
+
+        @asynccontextmanager
+        async def _ctx():
+            yield db_session
+
+        task = asyncio.create_task(
+            run_blobs_consumer(
+                client, lambda: _ctx(), stop=stop, block_ms=5, error_backoff_seconds=0.01
+            )
+        )
+        try:
+            # Attempts at +0.05, +0.10, +0.20, +0.40, +0.40 after the boot one.
+            while len(stamps) < 6:
+                await asyncio.sleep(0.01)
+        finally:
+            stop.set()
+            await asyncio.wait_for(task, timeout=10)
+
+        gaps = [b - a for a, b in zip(stamps, stamps[1:], strict=False)]
+        assert gaps[0] >= 0.05  # first retry no sooner than one interval
+        assert gaps[-1] > gaps[0] * 1.5  # the wait grew...
+        assert all(g < 0.4 * 2 for g in gaps)  # ...and never ran past the ceiling
+        # The last two both sit at the ceiling, so they match within scheduling noise.
+        assert abs(gaps[-1] - gaps[-2]) < 0.1

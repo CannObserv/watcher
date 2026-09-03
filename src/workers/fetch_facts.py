@@ -37,7 +37,7 @@ second run a no-op — at-least-once ends at the row, exactly-once at the apply.
 
 import asyncio
 from collections.abc import Mapping
-from typing import Protocol
+from typing import Literal, Protocol
 
 from co_core.effects.bus import BusMessage
 from co_core.pure.adapters.bus import streams
@@ -80,9 +80,41 @@ LEGACY_CONSUMER_GROUP = "watcher"
 # property the #285 audit checked and the only one that matters here.
 CONSUMER_NAME = "watcher-blobs-1"
 
-# Outcomes of `migrate_legacy_group` that leave nothing outstanding. Anything
-# else is a refusal the consumer keeps re-attempting — see `run_blobs_consumer`.
-SETTLED_MIGRATION_OUTCOMES = frozenset({"migrated", "no_legacy_group"})
+# The outcomes of `migrate_legacy_group`, named rather than restated at each
+# site (CR-17). The loop branches on the classification below, and the dangerous
+# direction is silent: a refusal misclassified as settled clears the retry timer
+# and reverts CR-12 with a green suite. `test_every_outcome_is_classified_...`
+# reads the function's own `return`s and fails if one is missing from either set.
+MIGRATED = "migrated"
+NO_LEGACY_GROUP = "no_legacy_group"
+LEGACY_PEL_NOT_DRAINED = "legacy_pel_not_drained"
+NEW_GROUP_AHEAD_OF_LEGACY = "new_group_ahead_of_legacy"
+NEW_GROUP_CREATED_CONCURRENTLY = "new_group_created_concurrently"
+
+MigrationOutcome = Literal[
+    "migrated",
+    "no_legacy_group",
+    "legacy_pel_not_drained",
+    "new_group_ahead_of_legacy",
+    "new_group_created_concurrently",
+]
+
+# Nothing outstanding: the consumer never re-attempts.
+SETTLED_MIGRATION_OUTCOMES = frozenset({MIGRATED, NO_LEGACY_GROUP})
+# A standing condition the consumer keeps re-attempting — see `run_blobs_consumer`.
+# Every one of these implies `watcher.blobs` already exists; that is the invariant
+# the ordering rests on (CR-18), pinned by
+# `test_no_unsettled_outcome_leaves_the_new_group_absent`.
+UNSETTLED_MIGRATION_OUTCOMES = frozenset(
+    {LEGACY_PEL_NOT_DRAINED, NEW_GROUP_AHEAD_OF_LEGACY, NEW_GROUP_CREATED_CONCURRENTLY}
+)
+MIGRATION_OUTCOMES = SETTLED_MIGRATION_OUTCOMES | UNSETTLED_MIGRATION_OUTCOMES
+
+# A refusal is re-attempted after `CLAIM_INTERVAL_SECONDS`, then at double the
+# previous wait while the outcome is unchanged, clamped here (CR-19). Fixed-rate
+# retries would log the ahead-of-legacy ERROR 1440 times a day for a condition
+# that needs a human; a changed outcome resets to the floor.
+MIGRATION_RETRY_CEILING_SECONDS = 3600.0
 # Bound on the overlap XRANGE behind the replay warning: the count is there to
 # size the replay for an operator, not to be exact about a pathological one.
 REPLAY_COUNT_CAP = 1000
@@ -297,7 +329,7 @@ def _stream_position(group: Mapping[str, object]) -> tuple[int, int]:
     return int(ms), int(seq or 0)
 
 
-async def migrate_legacy_group(client: Redis) -> str:
+async def migrate_legacy_group(client: Redis) -> MigrationOutcome:
     """Rename the pre-#285 bare ``watcher`` group to ``CONSUMER_GROUP`` (#285).
 
     **Why this is code and not a runbook step.** ``ensure_group`` mints at
@@ -314,6 +346,17 @@ async def migrate_legacy_group(client: Redis) -> str:
     boot takes the ``no_legacy_group`` path. It must run *before*
     ``ensure_group``: that creating the new group at ``$`` first would leave no
     legacy position to inherit is the whole hazard, restated one caller up.
+
+    **Invariant, load-bearing (CR-18): every unsettled outcome implies
+    ``CONSUMER_GROUP`` already exists on the broker.** The caller runs this once
+    before ``ensure_group`` and then re-attempts on a timer, so from the second
+    attempt onward an ``ensure_group(start_id="$")`` has already happened in
+    between; it is a ``BUSYGROUP`` no-op only because of this. An unsettled
+    return with the group *absent* — a stricter guard added above the
+    ``xgroup_create``, say — would let ``ensure_group`` mint it at the tail on
+    the very pass that refused, which is #285's original data loss reintroduced
+    through the fix for it. Pinned by
+    ``test_no_unsettled_outcome_leaves_the_new_group_absent``.
 
     **Nothing is destroyed while it is the only record of a position.** Two
     guards, and both refuse rather than repair, because repair means choosing
@@ -353,12 +396,12 @@ async def migrate_legacy_group(client: Redis) -> str:
         # rephrasing would fail loudly in production, not quietly here.
         if "no such key" not in str(exc).lower():
             raise
-        return "no_legacy_group"
+        return NO_LEGACY_GROUP
 
     by_name = {_group_text(g, "name"): g for g in groups}
     legacy = by_name.get(LEGACY_CONSUMER_GROUP)
     if legacy is None:
-        return "no_legacy_group"
+        return NO_LEGACY_GROUP
 
     existing = by_name.get(CONSUMER_GROUP)
     if existing is None:
@@ -372,10 +415,10 @@ async def migrate_legacy_group(client: Redis) -> str:
                 raise
             logger.warning(
                 "content.blobs group appeared mid-rename — keeping the legacy group; "
-                "its position will be compared on the next boot",
+                "its position is compared on the next retry",
                 extra={"old_group": LEGACY_CONSUMER_GROUP, "new_group": CONSUMER_GROUP},
             )
-            return "new_group_created_concurrently"
+            return NEW_GROUP_CREATED_CONCURRENTLY
         logger.info(
             "content.blobs consumer group renamed (#285)",
             extra={
@@ -388,7 +431,8 @@ async def migrate_legacy_group(client: Redis) -> str:
         logger.error(
             "content.blobs group %s is AHEAD of the legacy group — refusing to destroy it; "
             "facts between the two positions would be delivered to nobody. Repoint "
-            "%s with XGROUP SETID (replaying the overlap) or accept the gap, then restart",
+            "%s with XGROUP SETID (replaying the overlap) or destroy the legacy group to "
+            "accept the gap — no restart needed, this is re-checked on a retry",
             CONSUMER_GROUP,
             CONSUMER_GROUP,
             extra={
@@ -398,7 +442,7 @@ async def migrate_legacy_group(client: Redis) -> str:
                 "new_last_delivered_id": _group_text(existing, "last-delivered-id"),
             },
         )
-        return "new_group_ahead_of_legacy"
+        return NEW_GROUP_AHEAD_OF_LEGACY
     elif _stream_position(existing) < _stream_position(legacy):
         # Safe — the overlap re-reads and the consumer is idempotent at the row
         # (MUST-4) — but it is the one path that materially changes behaviour,
@@ -428,13 +472,13 @@ async def migrate_legacy_group(client: Redis) -> str:
     if legacy["pending"]:
         logger.warning(
             "legacy content.blobs group still has unacked entries — keeping it; "
-            "drain the PEL, then restart to complete the #285 rename",
+            "drain the PEL and the next retry completes the #285 rename, no restart needed",
             extra={"old_group": LEGACY_CONSUMER_GROUP, "pending": legacy["pending"]},
         )
-        return "legacy_pel_not_drained"
+        return LEGACY_PEL_NOT_DRAINED
 
     await client.xgroup_destroy(streams.CONTENT_BLOBS, LEGACY_CONSUMER_GROUP)
-    return "migrated"
+    return MIGRATED
 
 
 async def run_blobs_consumer(
@@ -450,10 +494,12 @@ async def run_blobs_consumer(
     ``migrate_legacy_group`` first (#285): it is what keeps a rename from
     silently skipping the facts published while the old-named consumer was down.
     Its refusals are **standing conditions**, so an unsettled outcome is
-    re-attempted every ``CLAIM_INTERVAL_SECONDS`` until it settles — a drained
-    PEL then completes the rename with no restart, and the ahead-of-legacy
-    ERROR keeps reappearing while it remains true instead of scrolling away
-    once at boot. A settled outcome retries never (CR-12).
+    re-attempted after ``CLAIM_INTERVAL_SECONDS`` and then at doubling waits up
+    to ``MIGRATION_RETRY_CEILING_SECONDS`` until it settles — a drained PEL
+    completes the rename with no restart, and the ahead-of-legacy ERROR keeps
+    reappearing while it remains true instead of scrolling away once at boot,
+    without logging it 1440 times a day (CR-12, CR-19). A settled outcome
+    retries never; a *changed* outcome resets the wait to the floor.
 
     ``ensure_group(start_id="$")``: facts published before our group existed
     predate any command Watcher issued and can never correlate. After a crash,
@@ -471,19 +517,37 @@ async def run_blobs_consumer(
     loop = asyncio.get_running_loop()
     next_claim = loop.time()  # first pass drains any crash leftovers immediately
     next_migration_retry: float | None = None  # set only while a refusal stands
+    retry_delay = CLAIM_INTERVAL_SECONDS
+    last_migration_outcome: str | None = None
     group_ready = False  # created inside the guard: a broker outage racing our
     # boot must back off and retry, not kill the task before the loop starts (CR-12)
 
-    async def _migration_settled() -> bool:
-        return await migrate_legacy_group(client) in SETTLED_MIGRATION_OUTCOMES
+    async def _attempt_migration() -> float | None:
+        """Run the migration; return when to retry it, or ``None`` once settled.
+
+        Unchanged refusals back off geometrically to a ceiling so a condition
+        needing a human stays visible without flooding the log; a *changed*
+        outcome resets to the floor, because it means the situation moved and
+        the next step deserves to be seen promptly (CR-19).
+        """
+        nonlocal retry_delay, last_migration_outcome
+        outcome = await migrate_legacy_group(client)
+        settled = outcome in SETTLED_MIGRATION_OUTCOMES
+        if not settled:
+            retry_delay = (
+                CLAIM_INTERVAL_SECONDS
+                if outcome != last_migration_outcome
+                else min(retry_delay * 2, MIGRATION_RETRY_CEILING_SECONDS)
+            )
+        last_migration_outcome = outcome
+        return None if settled else loop.time() + retry_delay
 
     while not stop.is_set():
         try:
             if not group_ready:
                 # Before ensure_group, never after: creating the new group at
                 # "$" first would leave no legacy position to inherit (#285).
-                if not await _migration_settled():
-                    next_migration_retry = loop.time() + CLAIM_INTERVAL_SECONDS
+                next_migration_retry = await _attempt_migration()
                 await consumer.ensure_group(start_id="$")
                 group_ready = True
             if next_migration_retry is not None and loop.time() >= next_migration_retry:
@@ -491,9 +555,7 @@ async def run_blobs_consumer(
                 # operator draining the PEL exactly as the log says should not
                 # also need a restart, and the ahead-of-legacy ERROR must keep
                 # reappearing while it is true rather than scrolling away once.
-                next_migration_retry = (
-                    None if await _migration_settled() else loop.time() + CLAIM_INTERVAL_SECONDS
-                )
+                next_migration_retry = await _attempt_migration()
             messages: list[BusMessage] = []
             if loop.time() >= next_claim:
                 next_claim = loop.time() + CLAIM_INTERVAL_SECONDS

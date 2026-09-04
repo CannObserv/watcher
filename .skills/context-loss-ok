@@ -123,3 +123,41 @@ AGENTS.md :: duplicate :: Fields, schedule resolution, media-type dispatch, temp
 # index entry was restating its own destination. The index line is otherwise
 # verbatim what it was before this branch.
 AGENTS.md :: duplicate :: - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — module layout, sibling services (notifier is off-VM, over the tailnet), the Archiver checkout constraint, bus topology and fetch contracts
+
+# --- 2026-09-04 curation (#287 CR follow-up): AGENTS.md 6170 -> under budget ---
+# Every line below was read against its replacement or its destination before
+# being warranted. `duplicate` follows this file's established meaning: the
+# dropped detail is in the destination doc the surviving index entry names,
+# confirmed by grep, not by assumption.
+
+# Class C, Infrastructure. The unit/port fact was stated three times — here, in
+# the port table immediately below it, and again as the first line of Server
+# Lifecycle. The clause was dropped; both other statements stand.
+tighten :: Systemd service `watcher` runs the live site on port 8000.
+
+# Class C, Watched Items. Narrative history of how the convention arose: the
+# `Watch` model no longer exists, so nothing can be reached for by that name.
+# What it was and what its collapse removed is docs/WATCHED-ITEMS.md
+# "What the #191 collapse removed" (:326).
+tighten :: one URL = one fingerprint = one change signal; the earlier `Watch` model is
+tighten :: gone. The user-facing noun is "Watched
+
+# Class B/D, Watched Items -> docs/CONDITIONAL-GET.md, which the Detail Docs
+# index already names as "gate, snapshot, invalidation". Gate at :38, the
+# 304-inherits-fingerprint trap at :45-46, the stale-extractor case at :70.
+# Conditional GET is off by default and item-scoped, so it is needed on some
+# tasks rather than nearly every one.
+duplicate :: **Conditional GET is gated and item-scoped (#269)** — off unless the item is
+duplicate :: named in `WATCHER_CONDITIONAL_GET_ENABLED`, and a 304 inherits the last
+duplicate :: fingerprint, so a spec/URL/extractor change must invalidate the stored pair:
+duplicate :: [docs/CONDITIONAL-GET.md](docs/CONDITIONAL-GET.md).
+
+# Class B/D, Watched Items -> docs/WATCHED-ITEMS.md, which the Detail Docs index
+# already names as covering notifications. Visibility semantics at
+# "## Notification visibility" (:266); the block-structured Markdown rule and
+# the same TestMarkdownListContract guard at "## Notification body format"
+# (:302), in more detail than the inline copy carried.
+duplicate :: **Notifications.** One `notification_templates` table; a row's `visibility` —
+duplicate :: `global` / `domain` / `watched_item` — decides where it fires. **Bodies are
+duplicate :: source Markdown and must be block-structured**, never `\n`-joined — guarded by
+duplicate :: `tests/core/notifications/test_content.py::TestMarkdownListContract`.

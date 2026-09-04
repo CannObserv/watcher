@@ -37,7 +37,7 @@ The goal→tool table, index scope and rebuild, and the literal prefetch query: 
 
 ## Infrastructure
 
-**Single-VM setup.** Dev and prod on the same VM. Code committed to `main` is the deployed code. Systemd service `watcher` runs the live site on port 8000.
+**Single-VM setup.** Dev and prod on the same VM. Code committed to `main` is the deployed code.
 
 | Service | Port | Managed by |
 |---|---|---|
@@ -114,8 +114,7 @@ to production.
 ## Watched Items
 
 **The `WatchedItem` is the single monitored entity (#191).** One `WatchedItem` =
-one URL = one fingerprint = one change signal; the earlier `Watch` model is
-gone. The user-facing noun is "Watched
+one URL = one fingerprint = one change signal. The user-facing noun is "Watched
 Item".
 
 **The `info.registry` reconcile is the creation path**, and the registry owns
@@ -130,16 +129,6 @@ archiver#158. What each 409 is: [docs/WATCHED-ITEMS.md](docs/WATCHED-ITEMS.md).
 yielding empty chunks raises `ExtractionError` and writes nothing —
 unconditionally, on both sides of a baseline:
 **[docs/CONTENT-PIPELINE.md](docs/CONTENT-PIPELINE.md)**.
-
-**Conditional GET is gated and item-scoped (#269)** — off unless the item is
-named in `WATCHER_CONDITIONAL_GET_ENABLED`, and a 304 inherits the last
-fingerprint, so a spec/URL/extractor change must invalidate the stored pair:
-[docs/CONDITIONAL-GET.md](docs/CONDITIONAL-GET.md).
-
-**Notifications.** One `notification_templates` table; a row's `visibility` —
-`global` / `domain` / `watched_item` — decides where it fires. **Bodies are
-source Markdown and must be block-structured**, never `\n`-joined — guarded by
-`tests/core/notifications/test_content.py::TestMarkdownListContract`.
 
 Fields, what each 409 is, the authoritative column list, schedule resolution, domain keying, media-type dispatch, template CRUD: [docs/WATCHED-ITEMS.md](docs/WATCHED-ITEMS.md). Lifecycle, delete guards, every dashboard surface: [docs/WATCHED-ITEMS-DASHBOARD.md](docs/WATCHED-ITEMS-DASHBOARD.md).
 
@@ -198,9 +187,9 @@ Cross-project search to the sister `notifier` index requires a per-instance `.cl
 ## Detail Docs
 
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — module layout, sibling services, the Archiver checkout constraint, bus topology and fetch contracts
+- [docs/BUS-CONNECTION-POLICY.md](docs/BUS-CONNECTION-POLICY.md) — #287 bus client timeouts, retries, redaction, startup PING
 - [docs/COMMANDS.md](docs/COMMANDS.md) — every runnable command, the Archiver-sibling test setup, CI
 - [docs/CONTENT-PIPELINE.md](docs/CONTENT-PIPELINE.md) — fetch → extract → fingerprint, the fetch-command outbox, the revisions producer
-- [docs/BUS-CONNECTION-POLICY.md](docs/BUS-CONNECTION-POLICY.md) — #287 bus client timeouts, retries, redaction, startup PING
 - [docs/CONDITIONAL-GET.md](docs/CONDITIONAL-GET.md) — #269 validators: gate, snapshot, invalidation
 - [docs/CONVENTIONS.md](docs/CONVENTIONS.md) — logging configuration, ULID error handling, DB-trigger rules
 - [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) — systemd units, the install runbook, timers, wheelhouse auth

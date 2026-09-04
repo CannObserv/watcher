@@ -1,0 +1,19 @@
+
+# --- 2026-09-04 curation ----------------------------------------------------
+# All four predate this run; judged rather than rewritten, since each already
+# takes one of the three forms the check accepts.
+
+# Gated by tests/test_bus_stream_kinds.py::test_the_stream_inventory_is_complete
+# (L369-382), which asserts the referenced set equals WATCHER_STREAMS and whose
+# failure message names this AGENTS.md sentence by its wording.
+gated :: watcher publishes four streams and consumes two
+
+# Gated by tests/core/test_logging.py::test_log_record_includes_structured_fields
+# (L79-89), which asserts message, level, logger and timestamp by name.
+gated :: Records are JSON with a four-key floor
+
+# The two files are the numbered list immediately below the sentence.
+enumerated :: Two env files load in order
+
+# All three flags are named in the same sentence, each with its issue.
+enumerated :: Three unit-only opt-ins gate the production resources

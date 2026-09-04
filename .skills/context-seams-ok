@@ -95,3 +95,12 @@ Split out of [DEPLOYMENT.md](DEPLOYMENT.md) — where install, systemd, timers
 # one-entity rule verbatim — grepped, not assumed. The pointer would only lie if
 # that rule moved too.
 tier with it. `AGENTS.md` carries the one-entity rule itself; this is the list of
+
+# --- 2026-09-04 curation ----------------------------------------------------
+# provenance-heading, docs/WATCHED-ITEMS.md:326. Surfaced because this run's
+# .skills/context-loss-ok warrant points at this heading as the home for the
+# `Watch`-model history it tightened out of AGENTS.md. Judged legitimate for the
+# same reason as its 24 siblings above: `#191` in the slug is a class 3b shape,
+# not a lie — the content the heading names did not move, and renaming it would
+# break the warrant that now cites it.
+What the #191 collapse removed

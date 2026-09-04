@@ -304,7 +304,13 @@ def _git(args: list[str], cwd: Path) -> subprocess.CompletedProcess[str]:
 
 
 def _run_gate(repo: Path, entries: tuple[str, ...], base: str):
-    """Run the real gate over `repo` with `entries` as its committed list."""
+    """Run the real gate over `repo` with `entries` as its list.
+
+    The list is rewritten on every call, so a test's own entries always win and
+    the sandbox carries no list between tests. It is per-run state, not shared
+    setup: a future test that reads `.skills/doc-sensitive-paths` without
+    passing through here would be reading whatever ran last (CR-22).
+    """
     (repo / ".skills").mkdir(exist_ok=True)
     (repo / ".skills" / "doc-sensitive-paths").write_text(
         "\n".join(entries) + "\n", encoding="utf-8"
@@ -407,11 +413,21 @@ def test_mirror_agrees_with_the_real_script(sandbox) -> None:
     )
     assert sorted(_bullets_after(result.stdout, "Sensitive paths changed")) == predicted
 
-    # The sandbox is only evidence if it actually exercised both verdicts.
+    # The sandbox is only evidence if it actually exercised both verdicts, and
+    # each of these names a branch the comparison above would otherwise cover
+    # only implicitly — trimming a fixture entry would drop it silently (CR-21).
     assert UNWATCHED_FILE not in predicted
     assert "pyproject.toml.bak" not in predicted
     assert "packages/pkg/pyproject.toml" in predicted
     assert "abc/x.py" not in predicted, "entry 'a*c/' must not glob"
+    assert "tests/deploy/test_unit.py" in predicted, (
+        "the cross-tree reach .skills/doc-sensitive-paths documents and "
+        "test_cross_tree_entries_are_documented enforces"
+    )
+    assert "docs/guide.md" in predicted, (
+        "a slash-less entry still names a directory — upstream calls the "
+        "omitted trailing slash a trap, not an error"
+    )
 
 
 def test_mirror_agrees_on_which_entries_are_dead(sandbox) -> None:

@@ -72,6 +72,11 @@ sibling asset back to `skills-vendor/`, so upstream fixes to the parts that were
 customized arrive with a submodule bump. Each override records its base commit in a
 `<!-- forked from <vendor>@<sha> -->` marker directly under the frontmatter — that marker is
 what makes the next refresh a 3-way diff instead of a guess.
+[tests/test_fork_markers.py](../tests/test_fork_markers.py) holds it to that: every non-symlinked
+`skills/*/SKILL.md` must carry a marker, and its SHA must resolve in that vendor's submodule and
+be an ancestor of the pinned commit. Falling *behind* the pin is fine — that is sync debt, paid
+down on the fork's own schedule; a stamp that names no commit, or one ahead of the pin, is a
+marker that cannot be diffed against.
 
 | Skill | Override reason |
 |---|---|

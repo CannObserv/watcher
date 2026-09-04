@@ -258,3 +258,117 @@ async def test_lifespan_refuses_the_notifier_flag_without_a_url(monkeypatch, cap
     get_client.assert_not_called()
     get_app.assert_not_called()
     assert any(WATCHER_NOTIFIER_BASE_URL_ENV in r.getMessage() for r in caplog.records)
+
+
+class TestBusReachabilityProbe:
+    """#287: ``from_url`` is lazy, so startup cannot otherwise tell a reachable
+    broker from a dead one. The consumers start either way and a partition then
+    presents exactly as an idle cluster — which is also what a healthy Watcher
+    with nothing to do looks like. One PING at ERROR closes that gap."""
+
+    @staticmethod
+    def _proc_app():
+        fake = MagicMock()
+        fake.open_async = AsyncMock()
+        fake.close_async = AsyncMock()
+
+        async def _worker_run(install_signal_handlers: bool = True) -> None:
+            try:
+                await asyncio.Event().wait()
+            except asyncio.CancelledError:
+                return
+
+        fake.run_worker_async = _worker_run
+        return fake
+
+    @pytest.mark.asyncio
+    async def test_the_probe_does_not_block_the_lifespan(self, monkeypatch):
+        """Detached, not awaited. The worst case is
+        ``WORST_CASE_CONNECT_SECONDS`` of waiting, and the dashboard has no
+        business being unavailable because the bus is — so a broker that never
+        answers must not hold the HTTP surface closed.
+        """
+        monkeypatch.setenv(BUS_REDIS_URL_ENV, "redis://:hunter2@broker:6379/0")
+        monkeypatch.setenv(BUS_ENABLED_ENV, "1")
+
+        pinged = asyncio.Event()
+
+        class _Hangs:
+            async def ping(self):
+                pinged.set()
+                await asyncio.Event().wait()  # never answers
+
+        forever = asyncio.create_task(asyncio.Event().wait())
+
+        with (
+            patch("src.api.main.get_app", return_value=self._proc_app()),
+            patch("src.api.main.get_shared_bus_client", return_value=_Hangs()),
+            patch("src.api.main.aclose_shared_bus_client", AsyncMock()),
+            patch("src.api.main.start_blobs_consumer", MagicMock(return_value=forever)),
+            patch("src.api.main.start_registry_consumer", MagicMock(return_value=forever)),
+        ):
+            from src.api.main import lifespan
+
+            application = MagicMock()
+            async with lifespan(application):
+                # Entered while the PING is still outstanding: that is the whole
+                # claim. Awaiting the event would pass even if it were inline.
+                await asyncio.wait_for(pinged.wait(), timeout=5)
+                task = application.state.bus_reachability_task
+                assert not task.done()
+
+        # Shutdown joins it rather than leaving a "Task was destroyed but it is
+        # pending" behind — the one case a straggling PING actually matters.
+        assert task.done()
+
+    @pytest.mark.asyncio
+    async def test_an_unreachable_broker_is_logged_with_the_password_redacted(
+        self, monkeypatch, caplog
+    ):
+        """The URL is the one field identifying *which* broker is down, and the
+        broker gains a ``requirepass`` at CannObserv/broker#1 D3. This line goes
+        to journald, which is the one place an operator is guaranteed to look."""
+        monkeypatch.setenv(BUS_REDIS_URL_ENV, "redis://watcher:hunter2@broker:6379/0")
+        monkeypatch.setenv(BUS_ENABLED_ENV, "1")
+
+        class _Dead:
+            async def ping(self):
+                raise ConnectionError("Error 111 connecting to broker:6379.")
+
+        forever = asyncio.create_task(asyncio.Event().wait())
+
+        with (
+            patch("src.api.main.get_app", return_value=self._proc_app()),
+            patch("src.api.main.get_shared_bus_client", return_value=_Dead()),
+            patch("src.api.main.aclose_shared_bus_client", AsyncMock()),
+            patch("src.api.main.start_blobs_consumer", MagicMock(return_value=forever)),
+            patch("src.api.main.start_registry_consumer", MagicMock(return_value=forever)),
+            caplog.at_level("ERROR", logger="src.core.bus"),
+        ):
+            from src.api.main import lifespan
+
+            application = MagicMock()
+            async with lifespan(application):
+                assert await application.state.bus_reachability_task is False
+
+        messages = " ".join(r.getMessage() for r in caplog.records)
+        assert "unreachable" in messages
+        assert "hunter2" not in repr(caplog.records)
+
+    @pytest.mark.asyncio
+    async def test_no_bus_client_means_no_probe(self, monkeypatch):
+        """Dormant is not down. With no client there is no broker to be
+        unreachable, and the existing "consumers NOT started" ERROR already says
+        why nothing will arrive."""
+        with (
+            patch("src.api.main.get_app", return_value=self._proc_app()),
+            patch("src.api.main.get_shared_bus_client", return_value=None),
+            patch("src.api.main.aclose_shared_bus_client", AsyncMock()),
+            patch("src.api.main.probe_bus_reachable") as probe,
+        ):
+            from src.api.main import lifespan
+
+            async with lifespan(MagicMock()):
+                pass
+
+        probe.assert_not_called()

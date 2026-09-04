@@ -53,6 +53,8 @@ The exe.dev proxy forwards 3000–9999; dev server at `https://watcher.exe.xyz:8
 
 **The bus.** Archiver operates the broker; watcher publishes four streams and consumes two — `content.blobs` (single-member group `watcher.blobs`, derived by co-core's `group_name` — #285) and `info.registry` (**groupless**, replayed from `0-0` every boot). `WATCHER_BUS_REDIS_URL` unset → publish tasks skip loudly. Stream inventory and ownership, the fetch contracts, `info_source_id` on the wire: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) → *Redis and the bus*.
 
+**The client carries an explicit connection policy (#287).** `socket_timeout` has a **floor**, not a ceiling — redis-py does not extend it for a blocking command, so a value at or below a loop's `BLOCK_MS` manufactures a timeout on every idle read. It is *derived* from `src/core/read_windows.py`, the leaf both `src/core/bus.py` and the workers import; never transcribe a window. Retries are an explicit **zero** — a redis-py retry re-sends the command, and a duplicated `content.fetch` is a duplicated origin request. Measurements, the startup PING, and why the loops need no error classification: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) → *Bus connection policy*.
+
 ## Server Lifecycle
 
 **Port 8000 belongs to systemd. Never start uvicorn manually on port 8000.**

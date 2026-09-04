@@ -23,6 +23,7 @@ from src.core.bus import (
     aclose_shared_bus_client,
     assert_environment_bus_allowed,
     get_shared_bus_client,
+    probe_bus_reachable,
 )
 from src.core.database import get_session_factory
 from src.core.db_safety import ProductionDatabaseRefused, assert_environment_db_allowed
@@ -91,7 +92,21 @@ async def lifespan(application: FastAPI):
     consumer_stop = asyncio.Event()
     consumer_task = None
     registry_task = None
+    reachability_task = None
     if bus_client is not None:
+        # #287: ``from_url`` is lazy, so nothing above can tell a reachable
+        # broker from a dead one — the consumers below start either way and a
+        # partition then reads as an idle cluster, which is what a healthy idle
+        # Watcher also looks like. One PING says which it is, at ERROR.
+        #
+        # Detached because the worst case is ``WORST_CASE_CONNECT_SECONDS`` of
+        # waiting, and the dashboard has no business being unavailable because
+        # the bus is. Held on ``app.state`` so a test can await it rather than
+        # yield the loop and hope it ran.
+        reachability_task = asyncio.create_task(
+            probe_bus_reachable(bus_client, os.environ.get(BUS_REDIS_URL_ENV, ""))
+        )
+        application.state.bus_reachability_task = reachability_task
         consumer_task = start_blobs_consumer(bus_client, get_session_factory(), stop=consumer_stop)
         logger.info("content.blobs consumer started")
         # #254: the info.registry reconcile — Watcher's registry inbox. Groupless
@@ -127,7 +142,13 @@ async def lifespan(application: FastAPI):
         # returns and the generation guard makes a re-read a no-op, so a cancel
         # mid-read costs at most one replayed announcement at next boot.
         registry_task.cancel()
-    tasks = [t for t in (worker_task, consumer_task, registry_task) if t is not None]
+    if reachability_task is not None:
+        # A single PING that is supposed to have finished long ago; cancelling a
+        # straggler only matters when the broker is black-holed at shutdown.
+        reachability_task.cancel()
+    tasks = [
+        t for t in (worker_task, consumer_task, registry_task, reachability_task) if t is not None
+    ]
     await asyncio.gather(*tasks, return_exceptions=True)
     await aclose_shared_bus_client()
     await proc_app.close_async()

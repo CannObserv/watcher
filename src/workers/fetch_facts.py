@@ -49,6 +49,7 @@ from redis.asyncio import Redis
 from redis.exceptions import ResponseError
 from sqlalchemy import select
 
+from src.core import read_windows
 from src.core.logging import get_logger
 from src.core.models.fetch_command import (
     NOT_MODIFIED_REASON,
@@ -119,8 +120,11 @@ MIGRATION_RETRY_CEILING_SECONDS = 3600.0
 # size the replay for an operator, not to be exact about a pathological one.
 REPLAY_COUNT_CAP = 1000
 
-# Read block per poll; also the shutdown latency ceiling.
-BLOCK_MS = 5000
+# Read block per poll; also the shutdown latency ceiling. Owned by the leaf
+# module so `src.core.bus` can derive its socket_timeout from the longest
+# window without importing this one (#287) — re-exported here because this is
+# where a reader of the loop looks for it.
+BLOCK_MS = read_windows.BLOBS_BLOCK_MS
 # Insurance against a client that ignores `block` (fakeredis) busy-spinning.
 IDLE_SLEEP_SECONDS = 0.05
 # Reclaim our own PEL this often — entries left unacked by a crash mid-process.

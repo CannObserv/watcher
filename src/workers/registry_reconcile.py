@@ -64,6 +64,7 @@ from redis.asyncio import Redis
 from sqlalchemy import select
 from ulid import ULID
 
+from src.core import read_windows
 from src.core.domains import domain_name_for_url, ensure_domain_and_resolve_suspension
 from src.core.logging import get_logger
 from src.core.models.audit_log import EventType, audit
@@ -76,8 +77,11 @@ from src.workers.watch_status import defer_status_republish
 
 logger = get_logger(__name__)
 
-# Read block per poll; also the shutdown latency ceiling.
-BLOCK_MS = 5000
+# Read block per poll; also the shutdown latency ceiling. Owned by the leaf
+# module so `src.core.bus` can derive its socket_timeout from the longest
+# window without importing this one (#287) — re-exported here because this is
+# where a reader of the loop looks for it.
+BLOCK_MS = read_windows.REGISTRY_BLOCK_MS
 # Insurance against a client that ignores `block` (fakeredis) busy-spinning.
 IDLE_SLEEP_SECONDS = 0.05
 ERROR_BACKOFF_SECONDS = 5.0

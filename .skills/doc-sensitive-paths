@@ -2,18 +2,21 @@
 # One path per line; `#`-comments and blank lines ignored. This file REPLACES
 # doc-check.sh's built-in defaults rather than extending them.
 #
-# Entries match whole path SEGMENTS at any depth (gregoryfoster/skills#252).
-# Two entries therefore reach further than their name suggests, and both
-# over-matches are kept deliberately — do not narrow them:
-#   deploy/   also reaches tests/deploy/, whose two tests assert the installed
-#             unit and the unit-only notifier credential; both are documented
-#             in DEPLOYMENT.md / ENVIRONMENT.md, so a hit there is a fair ask
-#   scripts/  also reaches tests/scripts/ and the six vendored skill symlinks
-#             under skills/*/scripts/. The entry earns its place on COMMANDS.md
-#             alone; the extra hits are the price of not anchoring it
+# Entries match whole path SEGMENTS at any depth (gregoryfoster/skills#252), so
+# a directory entry also flags every same-named directory elsewhere in the
+# tree. Here that means the mirrored test trees, and every such over-match is
+# kept deliberately — do not narrow them:
+#   deploy/   -> tests/deploy/   (asserts the installed unit and the unit-only
+#                                 notifier credential — DEPLOYMENT/ENVIRONMENT)
+#   scripts/  -> tests/scripts/  (and the vendored skill symlinks under
+#                                 skills/*/scripts/ — COMMANDS.md)
+#   tools/    -> tests/tools/    (ARCHITECTURE.md's module table)
 # For a spot-check that exits 1 and asks a human to look, over-matching is the
-# cheap failure; the miss that exits 0 is the expensive one. Narrowing either
-# one means listing files individually, which is the under-match #252 fixed.
+# cheap failure; the miss that exits 0 is the expensive one. Narrowing any of
+# them means listing files individually, which is the under-match #252 fixed.
+# tests/test_doc_sensitive_paths.py fails an entry that reaches outside its own
+# tree without being named here, so this list cannot go quietly incomplete —
+# it already did so twice (CR-5, CR-11).
 #
 # Dropped from the defaults because nothing in this repo matches them —
 # a dead entry reads as coverage of a tree we do not have:

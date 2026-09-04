@@ -17,7 +17,9 @@ that exist.
 
 import shutil
 import subprocess
+import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -35,9 +37,13 @@ def _parse_list_file(path: Path) -> list[str]:
     comment — the advice lines cite issue numbers.
 
     ``encoding="utf-8"`` is not decoration (CR-1): both files carry em-dashes,
-    and the default is the *locale's* encoding, so under ``LC_ALL=C`` — a
-    systemd timer, a cron job, a runner with ``LANG`` unset — every test here
-    died with ``UnicodeDecodeError`` instead of reporting on the list.
+    and the default is the *locale's* encoding. CPython hides that most of the
+    time — under ``LC_ALL=C`` it turns on PEP 540 UTF-8 mode and the read
+    succeeds — but the cover is gone under ``PYTHONUTF8=0`` (measured: every
+    test here then died with ``UnicodeDecodeError`` instead of reporting on the
+    list) and under any *named* non-UTF-8 locale, which enables no such mode.
+    Naming the encoding costs nothing and removes the dependency; it is also
+    what the rest of this suite does (tests/conftest.py, test_migration_chain).
     """
     entries: list[str] = []
     for raw in path.read_text(encoding="utf-8").splitlines():
@@ -83,6 +89,7 @@ def tracked_files() -> list[str]:
         cwd=REPO_ROOT,
         capture_output=True,
         text=True,
+        encoding="utf-8",
         check=True,
     )
     return result.stdout.splitlines()
@@ -105,6 +112,33 @@ class TestSensitivePaths:
             if not any(_path_matches(f, entry) for f in tracked_files)
         ]
         assert not dead, f"entries match no tracked file: {dead}"
+
+    def test_cross_tree_entries_are_documented(self, tracked_files: list[str]) -> None:
+        """An entry reaching outside its own tree must say so in the header.
+
+        Segment matching means `deploy/` also flags `tests/deploy/`. That is
+        the intended trade, but only while the file says which entries make it:
+        a reader who meets an undocumented hit reaches for the entry doing the
+        real work. The note went incomplete twice by hand — once when it was
+        written, once when `tools/` was added a commit later — so the check is
+        mechanical rather than editorial (CR-11).
+        """
+        header = "\n".join(
+            line
+            for line in PATHS_FILE.read_text(encoding="utf-8").splitlines()
+            if line.lstrip().startswith("#")
+        )
+        undocumented = {}
+        for entry in _parse_list_file(PATHS_FILE):
+            outside = [
+                f for f in tracked_files if _path_matches(f, entry) and not f.startswith(entry)
+            ]
+            if outside and entry not in header:
+                undocumented[entry] = outside[:3]
+        assert not undocumented, (
+            f"these entries match files outside their own tree and are not "
+            f"named in {PATHS_FILE.name}'s header: {undocumented}"
+        )
 
 
 class TestDocSections:
@@ -180,7 +214,7 @@ SANDBOX_FILES = (
     "abc/x.py",
     "a*c/x.py",
     "src/café.py",
-    "untouched/file.txt",
+    "untouched/file.txt",  # UNWATCHED_FILE
 )
 # Chosen for the branches, not for realism: a directory entry and a bare-name
 # entry, a name whose ".bak" sibling must NOT match, a nested package copy that
@@ -196,6 +230,29 @@ SANDBOX_ENTRIES = (
     "a*c/",
     "src/café.py",
 )
+# The file the census runs are allowed to touch: it must match no entry below,
+# or those runs take the hit path and never reach the census.
+UNWATCHED_FILE = "untouched/file.txt"
+LIVE_ENTRIES = ("AGENTS.md", "docs")
+DEAD_ENTRIES = ("schema.sql", "src/models/")
+
+
+def _fs_encodable(name: str) -> bool:
+    """Can this filename be written to the filesystem as-is?
+
+    The sandbox deliberately includes a non-ASCII path, and creating it needs
+    the *filesystem* encoding, not the one every read here names explicitly.
+    Under ``PYTHONUTF8=0`` in a C locale that encoding is ASCII and the write
+    raises — erroring the whole differential section in exactly the environment
+    CR-1 cited as the reason to name encodings. Drop the file there rather than
+    the test: every other branch still runs, and the entry naming it simply
+    matches nothing, which the gate tolerates while another entry is live.
+    """
+    try:
+        name.encode(sys.getfilesystemencoding())
+    except UnicodeEncodeError:
+        return False
+    return True
 
 
 def _git(args: list[str], cwd: Path) -> subprocess.CompletedProcess[str]:
@@ -209,31 +266,59 @@ def _git(args: list[str], cwd: Path) -> subprocess.CompletedProcess[str]:
     )
 
 
-def _parse_hit_block(stdout: str) -> list[str]:
-    """Take the flagged files — the block before the blank line.
+def _run_gate(repo: Path, entries: tuple[str, ...], base: str):
+    """Run the real gate over `repo` with `entries` as its committed list."""
+    (repo / ".skills").mkdir(exist_ok=True)
+    (repo / ".skills" / "doc-sensitive-paths").write_text(
+        "\n".join(entries) + "\n", encoding="utf-8"
+    )
+    return subprocess.run(
+        ["bash", str(DOC_CHECK), "--base", base],
+        cwd=repo,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+    )
 
-    The advice that follows uses the same ``  - `` bullet, so a naive scan of
-    every bullet would fold nine doc sections into the file list and compare
-    green against nothing.
+
+def _bullets_after(stdout: str, prefix: str) -> list[str]:
+    """Collect the ``  - `` bullets of the block introduced by `prefix`.
+
+    Both blocks the gate prints — flagged files, and the entries that matched
+    nothing — use the same bullet, and the hit path prints the advice list in a
+    third. Anchoring on the introducing line and stopping at the blank one is
+    what keeps the three from being read as one (CR-10).
     """
     lines = stdout.splitlines()
-    assert lines and lines[0].startswith("Sensitive paths changed"), stdout
-    hits = []
-    for line in lines[1:]:
+    start = next((i for i, line in enumerate(lines) if line.startswith(prefix)), None)
+    assert start is not None, f"no line starting {prefix!r} in:\n{stdout}"
+    bullets = []
+    for line in lines[start + 1 :]:
         if not line.strip():
             break
-        assert line.startswith("  - "), f"unexpected hit line: {line!r}"
-        hits.append(line[4:])
-    return hits
+        if line.startswith("  - "):
+            bullets.append(line[4:])
+    return bullets
 
 
-@pytest.mark.skipif(not DOC_CHECK.is_file(), reason="vendored doc-check.sh not present")
-def test_mirror_agrees_with_the_real_script(tmp_path: Path) -> None:
+@pytest.fixture(scope="module")
+def sandbox(tmp_path_factory: pytest.TempPathFactory):
+    """A throwaway repo with two useful base refs.
+
+    ``base_all`` predates every file, so a run against it changes all of them —
+    the hit path. ``base_files`` predates only a touch of an unwatched file, so
+    a run against it changes nothing the list can match — the path where the
+    gate runs its dead-entry census, which is the verdict the mirror in this
+    module is otherwise trusted on.
+    """
     if shutil.which("git") is None:
         pytest.skip("git not available")
+    if not DOC_CHECK.is_file():
+        pytest.skip("vendored doc-check.sh not present")
 
-    repo = tmp_path / "sandbox"
-    repo.mkdir()
+    files = tuple(name for name in SANDBOX_FILES if _fs_encodable(name))
+
+    repo = tmp_path_factory.mktemp("doc-check-sandbox")
     _git(["init", "-q", "-b", "main"], repo)
     ident = [
         "-c",
@@ -244,40 +329,70 @@ def test_mirror_agrees_with_the_real_script(tmp_path: Path) -> None:
         "commit.gpgsign=false",
     ]
     _git([*ident, "commit", "-q", "--allow-empty", "-m", "base"], repo)
-    base = _git(["rev-parse", "HEAD"], repo).stdout.strip()
+    base_all = _git(["rev-parse", "HEAD"], repo).stdout.strip()
 
-    for name in SANDBOX_FILES:
+    for name in files:
         target = repo / name
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text("x\n", encoding="utf-8")
     _git(["add", "-A"], repo)
     _git([*ident, "commit", "-q", "-m", "files"], repo)
+    base_files = _git(["rev-parse", "HEAD"], repo).stdout.strip()
 
-    # Written after the commit so the list itself is not part of the diff.
-    (repo / ".skills").mkdir()
-    (repo / ".skills" / "doc-sensitive-paths").write_text(
-        "\n".join(SANDBOX_ENTRIES) + "\n", encoding="utf-8"
-    )
+    (repo / UNWATCHED_FILE).write_text("y\n", encoding="utf-8")
+    _git(["add", "-A"], repo)
+    _git([*ident, "commit", "-q", "-m", "touch an unwatched file"], repo)
 
-    result = subprocess.run(
-        ["bash", str(DOC_CHECK), "--base", base],
-        cwd=repo,
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-    )
+    # Never committed, so the list itself is in no diff the gate examines.
+    return SimpleNamespace(repo=repo, files=files, base_all=base_all, base_files=base_files)
+
+
+def test_mirror_agrees_with_the_real_script(sandbox) -> None:
+    """The hit path: same files flagged, file for file."""
+    result = _run_gate(sandbox.repo, SANDBOX_ENTRIES, sandbox.base_all)
     assert result.returncode == 1, f"rc={result.returncode}\n{result.stderr}"
+    assert result.stderr == "", result.stderr
     assert ".skills/doc-sensitive-paths" in result.stdout, result.stdout
 
     predicted = sorted(
         name
-        for name in SANDBOX_FILES
+        for name in sandbox.files
         if any(_path_matches(name, entry) for entry in SANDBOX_ENTRIES)
     )
-    assert sorted(_parse_hit_block(result.stdout)) == predicted
+    assert sorted(_bullets_after(result.stdout, "Sensitive paths changed")) == predicted
 
     # The sandbox is only evidence if it actually exercised both verdicts.
-    assert "untouched/file.txt" not in predicted
+    assert UNWATCHED_FILE not in predicted
     assert "pyproject.toml.bak" not in predicted
     assert "packages/pkg/pyproject.toml" in predicted
     assert "abc/x.py" not in predicted, "entry 'a*c/' must not glob"
+
+
+def test_mirror_agrees_on_which_entries_are_dead(sandbox) -> None:
+    """The census path — the verdict `test_every_entry_matches_a_tracked_file`
+    makes about this repo, made here by the gate itself against a known tree.
+
+    Nothing else compares the two: the hit path never consults the census, so a
+    mirror that disagreed with it about a dead entry would be believed (CR-10).
+    """
+    entries = (*LIVE_ENTRIES, *DEAD_ENTRIES)
+    result = _run_gate(sandbox.repo, entries, sandbox.base_files)
+    assert result.returncode == 0, f"rc={result.returncode}\n{result.stderr}"
+    assert result.stderr == "", result.stderr
+
+    predicted_dead = sorted(
+        entry for entry in entries if not any(_path_matches(f, entry) for f in sandbox.files)
+    )
+    assert predicted_dead == sorted(DEAD_ENTRIES), "fixture no longer tests what it says"
+    assert sorted(_bullets_after(result.stdout, "Note:")) == predicted_dead
+
+
+def test_an_all_dead_list_is_exit_2(sandbox) -> None:
+    """A list that cannot hit anything is a gate that did not run.
+
+    This module's own guard rests on that contract: it fails a *single* dead
+    entry precisely because upstream only fails when every one of them is dead.
+    """
+    result = _run_gate(sandbox.repo, DEAD_ENTRIES, sandbox.base_files)
+    assert result.returncode == 2, f"rc={result.returncode}\n{result.stdout}"
+    assert "matches any" in result.stderr, result.stderr

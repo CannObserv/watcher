@@ -45,6 +45,11 @@ SCANNED_ROOTS = (ROOT / "src", ROOT / "scripts")
 STREAMS_MODULE = "co_core.pure.adapters.bus.streams"
 STREAMS_PACKAGE = "co_core.pure.adapters.bus"
 
+# The helper that derives a conforming consumer-group name. One-element sets on
+# both sides because there is one right answer today; they are sets so adding a
+# second resolver is a data change rather than an edit to the check.
+GROUP_NAME_DERIVERS = frozenset({"group_name"})
+
 # The resolvers that guarantee a *bounded* positive cap. Any other call satisfies
 # "maxlen comes from somewhere" while guaranteeing nothing — and a resolver that
 # can return 0 emits `XADD MAXLEN 0`, trimming a config/state stream to a single
@@ -163,7 +168,7 @@ def _callee(call: ast.Call) -> str | None:
 
 
 def _calls(name: str):
-    """Every call to ``name`` across src/, with its module path and tree."""
+    """Every call to ``name`` across the scanned roots, with its path and tree."""
     for path, tree in _modules():
         for node in ast.walk(tree):
             if isinstance(node, ast.Call) and _callee(node) == name:
@@ -190,6 +195,31 @@ def _assigned_values(tree: ast.Module, name: str) -> list[ast.expr]:
         ):
             values.append(node.value)
     return values
+
+
+def _derives_from(tree: ast.Module, name: str, allowed: frozenset[str]) -> tuple[bool, list]:
+    """Whether **every** binding of ``name`` is a call to one of ``allowed``.
+
+    ``all``, not ``any`` (CR-33): one conforming assignment said nothing about a
+    later rebinding, so a derived group name followed by
+    ``CONSUMER_GROUP = "watcher"`` satisfied the rule that exists to forbid
+    exactly that. And callee matching goes through ``_callee``, so the qualified
+    form is accepted (CR-34): ``streams.group_name(...)`` is correct code and was
+    rejected by a bare ``ast.Name`` comparison.
+
+    Both call sites share this so the two rules cannot drift apart again — they
+    were written independently, which is why CR-28's strictness fix reached one
+    and CR-23's qualified-callee fix reached neither. The residual looseness is
+    that ``_callee`` matches on the final attribute, so an unrelated method of
+    the same name would pass; that is not a state anyone reaches by accident, and
+    resolving callees back to their imports is more machinery than the risk earns.
+
+    Returns the verdict and the callee names found, so a failure can name what it
+    actually saw rather than only what it wanted.
+    """
+    values = _assigned_values(tree, name)
+    callees = [_callee(v) if isinstance(v, ast.Call) else None for v in values]
+    return bool(values) and all(c in allowed for c in callees), callees
 
 
 class TestReaderMatchesStreamKind:
@@ -254,14 +284,13 @@ class TestGroupNamesAreDerived:
                 "defect cannobserv#384 found on all five cluster groups."
             )
             assert isinstance(group, ast.Name), f"{path}: unexpected group expression"
-            assigned = _assigned_values(tree, group.id)
-            assert assigned, f"{path}: {group.id} is not assigned in this module"
-            assert any(
-                isinstance(value, ast.Call)
-                and isinstance(value.func, ast.Name)
-                and value.func.id == "group_name"
-                for value in assigned
-            ), f"{path}: {group.id} must be derived by group_name(), not written out"
+            derived, callees = _derives_from(tree, group.id, GROUP_NAME_DERIVERS)
+            assert derived, (
+                f"{path}: every binding of {group.id} must be a "
+                f"{'/'.join(sorted(GROUP_NAME_DERIVERS))}() call — found {callees!r}. A later "
+                "rebinding to a literal is the free-string defect this rule exists to forbid, "
+                "and an earlier derived assignment does not excuse it."
+            )
             found += 1
         assert found, "no AsyncBusConsumer call sites found — has the class been renamed?"
 
@@ -306,17 +335,13 @@ class TestConfigStatePublishesAreTrimmed:
                 )
             else:
                 assert isinstance(maxlen, ast.Name), f"{path}: unexpected maxlen expression"
-                sources = _assigned_values(tree, maxlen.id)
-                assert sources, f"{path}: {maxlen.id} is not assigned in this module"
-                assert all(
-                    isinstance(value, ast.Call) and _callee(value) in BOUNDED_MAXLEN_RESOLVERS
-                    for value in sources
-                ), (
-                    f"{path}: {maxlen.id} must come from a bounded resolver "
-                    f"({', '.join(sorted(BOUNDED_MAXLEN_RESOLVERS))}). Any other call satisfies "
-                    "'maxlen comes from somewhere' while guaranteeing nothing — and a value of 0 "
-                    "trims the stream to one entry, so a boot replay returns a partial set no "
-                    "consumer can tell from a complete one."
+                bounded, callees = _derives_from(tree, maxlen.id, BOUNDED_MAXLEN_RESOLVERS)
+                assert bounded, (
+                    f"{path}: every binding of {maxlen.id} must come from a bounded resolver "
+                    f"({', '.join(sorted(BOUNDED_MAXLEN_RESOLVERS))}) — found {callees!r}. Any "
+                    "other call satisfies 'maxlen comes from somewhere' while guaranteeing "
+                    "nothing, and a value of 0 trims the stream to one entry, so a boot replay "
+                    "returns a partial set no consumer can tell from a complete one."
                 )
             checked.add(topic)
         assert checked, "no config/state publishes found — has BusPublish been renamed?"
@@ -475,3 +500,30 @@ class TestTheScannerSeesEveryCallForm:
         assert (
             _resolve_topic(ast.parse("streams.group_name").body[0].value, aliases, modules) is None
         )
+
+    @pytest.mark.parametrize(
+        ("source", "expected"),
+        [
+            ("X = group_name(a, b)", True),
+            ("X = streams.group_name(a, b)", True),
+            ("X = mod.streams.group_name(a, b)", True),
+            ('X = group_name(a, b)\nX = "watcher"', False),
+            ('X = "watcher"', False),
+            ("X = other_call()", False),
+        ],
+        ids=["bare", "qualified", "deeply-qualified", "rebound", "literal", "wrong-callee"],
+    )
+    def test_derivation_requires_every_binding_to_be_a_derivation(self, source, expected):
+        """CR-33/CR-34, in one place because the two rules that need this were
+        written separately and drifted: ``any`` let a rebinding through, and a
+        bare-name callee match rejected the qualified form of the very call the
+        rule demands."""
+        derived, _callees = _derives_from(ast.parse(source), "X", frozenset({"group_name"}))
+        assert derived is expected
+
+    def test_derivation_reports_what_it_found(self):
+        """A failure should name the callee it saw, not only the one it wanted."""
+        _derived, callees = _derives_from(
+            ast.parse("X = group_name(a, b)\nX = int(y)"), "X", frozenset({"group_name"})
+        )
+        assert callees == ["group_name", "int"]

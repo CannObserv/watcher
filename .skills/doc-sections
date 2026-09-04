@@ -1,0 +1,17 @@
+# Advice printed when Step 1.5 hits: the doc sections to spot-check.
+# One section per line, same grammar as doc-sensitive-paths; REPLACES the
+# built-in defaults. Tailored alongside the path list, which upstream requires
+# (gregoryfoster/skills#261) — the list says what the gate watches, this says
+# what to do about a hit. Each line names the change that usually triggers it.
+#
+# Guarded by tests/test_doc_sensitive_paths.py.
+
+AGENTS.md: the authoritative summary — conventions, watched-items rules, the detail-doc table (any structural change)
+README.md: orientation and curated links only; the deep material belongs in docs/
+docs/ARCHITECTURE.md: module layout, sibling services, bus topology (src/ layout, new streams or consumers)
+docs/COMMANDS.md: every runnable command (scripts/, pyproject.toml scripts and deps)
+docs/DEPLOYMENT.md: systemd units, install runbook, timers, wheelhouse (deploy/, tests/deploy/)
+docs/ENVIRONMENT.md: env files, variables, the unit-only credentials (new config keys in src/core/config.py, deploy/)
+docs/MIGRATIONS.md: manual upgrade steps, grants, one-time orderings (alembic/versions/)
+docs/WATCHED-ITEMS.md: fields, schedule resolution, registry reconciliation, notifications (src/core/watched_items.py, registry, notifications)
+docs/WATCHED-ITEMS-DASHBOARD.md: routes, lifecycle guards, list and detail views (src/dashboard/)

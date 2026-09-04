@@ -1,0 +1,31 @@
+# Sensitive paths for shipping-work's Step 1.5 doc spot-check (#281).
+# One path per line; `#`-comments and blank lines ignored. This file REPLACES
+# doc-check.sh's built-in defaults rather than extending them.
+#
+# Entries match whole path SEGMENTS at any depth (gregoryfoster/skills#252), so
+# `deploy/` also reaches `tests/deploy/`. That over-match is kept deliberately:
+# those two tests assert the installed unit and the unit-only notifier
+# credential, and both are documented in DEPLOYMENT.md / ENVIRONMENT.md. For a
+# spot-check that exits 1 and asks a human to look, over-matching is the cheap
+# failure; the miss that exits 0 is the expensive one.
+#
+# Dropped from the defaults because nothing in this repo matches them —
+# a dead entry reads as coverage of a tree we do not have:
+#   schema.sql     — no raw-SQL schema; Alembic owns the schema
+#   src/models/    — models live under src/core/models/, covered by src/core/
+#   .env.example   — env files are never committed (tests/test_env_files_are_not_committable.py)
+#
+# Guarded by tests/test_doc_sensitive_paths.py.
+
+AGENTS.md
+README.md
+CHANGELOG.md
+pyproject.toml
+uv.lock
+alembic/versions/
+deploy/
+scripts/
+src/api/
+src/core/
+src/dashboard/
+src/workers/

@@ -1,16 +1,16 @@
 ---
 name: shipping-work-python-fastapi
-description: "For Python/FastAPI projects (uv + ruff + pytest): finalizes work by ensuring everything is committed, pushed to the remote, and reflected on GitHub: closes issues, posts summary comments, and presents a completion table. Use when the user says 'ship it', 'push GH', 'close GH', or 'wrap up' and the project is a FastAPI service."
+description: "For Python/FastAPI projects (uv + ruff + pytest; Alembic migrations, systemd service restarts): finalizes work by ensuring everything is committed, pushed to the remote, and reflected on GitHub: closes issues, posts summary comments, and presents a completion table. Use when the user says 'ship it', 'push GH', 'close GH', or 'wrap up' and the project is a FastAPI service."
 compatibility: "Designed for Python FastAPI projects using uv, ruff, pytest. Requires git, gh, uv. pytest-cov is optional — pre-ship.sh auto-detects it and adds --no-cov when present. Watcher variant: also requires /etc/watcher/.env (system secrets), loaded by scripts/pre-ship.sh before it delegates to the vendored gate."
 metadata:
   author: gregoryfoster
   version: "1.4"
   triggers: ship it, push GH, close GH, wrap up
   overrides: gregoryfoster-skills/shipping-work-python-fastapi
-  override-reason: "Carries the watcher commit convention in Step 2 and points Step 1 at scripts/pre-ship.sh, the env-loading wrapper that supplies /etc/watcher/.env and the repo .env to the vendored gate. Drops the vendor self-budget note (its guard test does not exist in this repo). All scripts/ entries are vendor symlinks — the gate itself is not forked."
+  override-reason: "Carries the watcher commit convention in Step 2, points Step 1 at scripts/pre-ship.sh — the env-loading wrapper that supplies /etc/watcher/.env and the repo .env to the vendored gate — and names watcher's .skills/ tailoring in Step 1.5. Drops the vendor self-budget note (its guard test does not exist in this repo). All scripts/ entries are vendor symlinks — the gate itself is not forked."
 ---
 
-<!-- forked from gregoryfoster-skills@9f6c52c -->
+<!-- forked from gregoryfoster-skills@a727638 -->
 
 # Shipping Work — Python/FastAPI — watcher
 
@@ -74,15 +74,24 @@ If checks fail: stop, report the failure, fix before proceeding. Do not push fai
 bash "<SKILL_SCRIPTS>/doc-check.sh"
 ```
 
-`doc-check.sh` lists files changed on this branch vs the upstream default branch and flags any that match the project's `SENSITIVE_PATHS` array (AGENTS.md, README.md, CHANGELOG.md, pyproject.toml, uv.lock, schema.sql, `alembic/versions/`, `deploy/`, route/model/core dirs, `.env.example`). When sensitive paths change, the matching doc sections may need updates too.
+`doc-check.sh` lists files changed on this branch vs the upstream default branch and flags any that match the project's sensitive-path list. Entries match path *segments*, not just the start of the path, so `src/core/` also covers `packages/<pkg>/src/core/` and `pyproject.toml` covers each workspace member's ([gregoryfoster/skills#252](https://github.com/gregoryfoster/skills/issues/252)). When sensitive paths change, the matching doc sections may need updates too.
 
-If the script exits 1: review the listed files, decide whether each requires a doc update, and either commit the docs now or note them as deliberate skips. If the script exits 2: an infra/tooling problem prevented the doc check from running — investigate the underlying error rather than proceeding.
+Watcher tailors both halves rather than running on upstream's defaults, and each file **replaces** those defaults wholesale:
+
+- [.skills/doc-sensitive-paths](../../.skills/doc-sensitive-paths) — what the gate watches. Drops the three defaults that match nothing here (`schema.sql`, `src/models/`, `.env.example`) and adds `scripts/`, `src/dashboard/`, `src/workers/`. `deploy/` reaching `tests/deploy/` is a kept over-match, not an oversight
+- [.skills/doc-sections](../../.skills/doc-sections) — the advice printed on a hit, naming watcher's own docs. Tailor it *with* the path list ([#261](https://github.com/gregoryfoster/skills/issues/261)): a repo that tailors only the list gets advice written for a stack it may not have
+
+Both are guarded by [tests/test_doc_sensitive_paths.py](../../tests/test_doc_sensitive_paths.py), which fails on an entry that matches no tracked file and on advice naming a doc that no longer exists.
+
+If the script exits 1: review the listed files, decide whether each requires a doc update, and either commit the docs now or note them as deliberate skips. If the script exits 2: an infra/tooling problem prevented the doc check from running — investigate the underlying error rather than proceeding. Two exit-2 cases are worth naming. When no entry in the list matches any tracked file, the script says so instead of passing, because a list that cannot hit anything would otherwise print the same clean green as a genuinely doc-neutral branch. The same goes for anything under `.skills/` that the script cannot use, the directory included: a tailoring never silently reverts to the built-in defaults, so an exit 2 there means the override is unusable, not absent. Fix the file; do not wave the step through.
 
 ### Step 2 — Ensure a clean working tree
 
 ```bash
 bash "<SKILL_SCRIPTS>/check-status.sh"
 ```
+
+If the script exits 2, `git status` itself failed: the tree state is **unknown**, which is not the same as clean. Investigate git's error rather than proceeding ([#257](https://github.com/gregoryfoster/skills/issues/257)).
 
 If uncommitted changes exist, commit them following the watcher convention:
 

@@ -75,7 +75,7 @@ what makes the next refresh a 3-way diff instead of a guess.
 
 | Skill | Override reason |
 |---|---|
-| `shipping-work-python-fastapi` | `SKILL.md` only: watcher commit convention in Step 2, and Step 1 pointed at [scripts/pre-ship.sh](../scripts/pre-ship.sh). All six `scripts/` entries are vendor symlinks — the ship gate is **not** forked |
+| `shipping-work-python-fastapi` | `SKILL.md` only: watcher commit convention in Step 2, Step 1 pointed at [scripts/pre-ship.sh](../scripts/pre-ship.sh), and Step 1.5 naming watcher's `.skills/` tailoring. All six `scripts/` entries are vendor symlinks — the ship gate is **not** forked |
 | `brainstorming` | `SKILL.md` only: `docs/plans/` path, `#<n> [type]:` commit format, a GitHub issue on the architectural path, `writing-plans` optional rather than mandatory, `using-git-worktrees` after design approval, TDD as the bounded path's workflow, and the exe.dev proxy note for the visual companion's port. `visual-companion.md`, `spec-document-reviewer-prompt.md` and `scripts/` are vendor symlinks |
 
 **The ship gate's env loading lives outside the skill.** [scripts/pre-ship.sh](../scripts/pre-ship.sh)
@@ -85,6 +85,25 @@ parses each env file rather than sourcing it, so a secrets file cannot execute a
 line cannot decide whether the gate runs — then `exec`s the vendored gate through the `skills/`
 symlink. Forking the gate to add those lines is the failure mode this replaced: the fork stops
 receiving upstream fixes without saying so.
+
+**The doc spot-check is tailored, not forked** (#281). `doc-check.sh` matches its
+sensitive-path entries against whole path *segments* at any depth
+([gregoryfoster/skills#252](https://github.com/gregoryfoster/skills/issues/252)) — under the
+old start-of-path matching a nested layout reported `No sensitive paths changed` and exited 0,
+a miss byte-identical to a pass. Two committed files replace its built-in defaults wholesale:
+
+| File | Role |
+|---|---|
+| [.skills/doc-sensitive-paths](../.skills/doc-sensitive-paths) | What Step 1.5 watches. Drops the three defaults that match nothing here (`schema.sql`, `src/models/`, `.env.example`), adds `scripts/`, `src/dashboard/`, `src/workers/` |
+| [.skills/doc-sections](../.skills/doc-sections) | The advice printed on a hit — watcher's own docs, each line naming the change that triggers it |
+
+Tailor them together: the list says what the gate watches and the sections say what to do about
+a hit, so tailoring only the list leaves advice written for someone else's stack
+([gregoryfoster/skills#261](https://github.com/gregoryfoster/skills/issues/261)).
+`deploy/` also reaching `tests/deploy/` is a kept over-match — for a spot-check that exits 1 and
+asks a human to look, over-matching is the cheap failure. Both files are guarded by
+[tests/test_doc_sensitive_paths.py](../tests/test_doc_sensitive_paths.py): an entry matching no
+tracked file fails, as does advice naming a doc that no longer exists.
 
 ## SocratiCode (Codebase Search)
 

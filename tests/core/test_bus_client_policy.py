@@ -17,15 +17,15 @@ lands on the reason for it.
 import ast
 import asyncio
 import importlib
-import pkgutil
+import pathlib
 import subprocess
 import sys
 
 import pytest
+from redis.asyncio import Redis
 from redis.exceptions import ConnectionError as RedisConnectionError
 from redis.exceptions import TimeoutError as RedisTimeoutError
 
-import src.workers as workers_pkg
 from src.core import bus, read_windows
 from src.core.bus import BUS_ENABLED_ENV, BUS_REDIS_URL_ENV
 
@@ -38,8 +38,38 @@ from src.core.bus import BUS_ENABLED_ENV, BUS_REDIS_URL_ENV
 _INLINE_PROBE_CEILING_SECONDS = 10.0
 
 
+def _modules_mentioning_block_ms() -> list[str]:
+    """Every module under ``src/`` whose source contains ``BLOCK_MS`` at all.
+
+    A **text** scan, deliberately over-matching, used only to decide which
+    modules are worth importing. CR round 1, finding 2: the first version walked
+    ``pkgutil.iter_modules(src.workers.__path__)``, which is non-recursive *and*
+    scoped to one package — so a consumer added under a subpackage, or anywhere
+    in ``src/core/`` (five subpackages already), defined a window this never saw.
+    A guard whose stated scope is wider than its implemented scope is worse than
+    an explicit list, because it reads as complete.
+
+    Matching the bare token rather than an assignment is the other half of that
+    fix: ``BLOCK_MS = read_windows.BLOBS_BLOCK_MS`` is an assignment, but
+    ``from ... import X as BLOCK_MS`` is not, and a regex precise enough to
+    exclude comments would miss the alias. Over-matching costs one import of a
+    module that turns out not to define the name (``src/api/main.py`` mentions it
+    in a comment); under-matching costs the whole invariant.
+    """
+    src_root = pathlib.Path(__file__).resolve().parents[2] / "src"
+    modules: list[str] = []
+    for path in sorted(src_root.rglob("*.py")):
+        if "BLOCK_MS" not in path.read_text(encoding="utf-8"):
+            continue
+        parts = path.relative_to(src_root.parent).with_suffix("").parts
+        if parts[-1] == "__init__":
+            parts = parts[:-1]
+        modules.append(".".join(parts))
+    return modules
+
+
 def _blocking_read_windows_ms() -> dict[str, int]:
-    """Every ``BLOCK_MS`` defined anywhere under ``src.workers``.
+    """Every ``BLOCK_MS`` actually defined anywhere under ``src/``.
 
     Discovered rather than listed. The invariant below is only as good as its
     knowledge of the loops, and Watcher's two windows already live in *different
@@ -49,11 +79,10 @@ def _blocking_read_windows_ms() -> dict[str, int]:
     would attribute here.
     """
     found: dict[str, int] = {}
-    for info in pkgutil.iter_modules(workers_pkg.__path__):
-        module = importlib.import_module(f"{workers_pkg.__name__}.{info.name}")
-        window = getattr(module, "BLOCK_MS", None)
+    for name in _modules_mentioning_block_ms():
+        window = getattr(importlib.import_module(name), "BLOCK_MS", None)
         if window is not None:
-            found[info.name] = window
+            found[name] = window
     return found
 
 
@@ -61,8 +90,43 @@ class TestBlockingReadDiscovery:
     def test_discovery_finds_the_known_blocking_loops(self) -> None:
         """Guard the guard: a discovery helper that finds nothing passes vacuously."""
         windows = _blocking_read_windows_ms()
-        assert {"fetch_facts", "registry_reconcile"} <= set(windows)
+        assert {"src.workers.fetch_facts", "src.workers.registry_reconcile"} <= set(windows)
         assert all(w > 0 for w in windows.values())
+
+    def test_the_scan_reaches_outside_src_workers(self) -> None:
+        """The scan's *reach* is the thing under test, not its current yield.
+
+        CR round 1, finding 2: the walk it replaced was non-recursive and
+        confined to ``src.workers``, so nothing would have flagged a consumer
+        placed one directory deeper. Asserting only on today's two modules would
+        pass just as happily under the old walk, so this asserts on the property
+        that differs — the scan considers a module under ``src/core/``, which is
+        where ``src.core.bus`` itself lives. Depth is proven separately, by
+        planting one three levels down and finding it.
+        """
+        considered = _modules_mentioning_block_ms()
+        assert "src.core.read_windows" in considered, "the scan never looked outside src.workers"
+
+    def test_a_window_defined_outside_src_workers_is_discovered(self, tmp_path) -> None:
+        """Plant one where the old walk could not see it and prove it is found.
+
+        Written into ``src/core/`` (nested, and not the workers package) and
+        removed again, because the guard's value is entirely about the module
+        that does not exist yet.
+        """
+        planted = (
+            pathlib.Path(__file__).resolve().parents[2]
+            / "src"
+            / "core"
+            / "notifications"
+            / "_cr_probe_block_ms.py"
+        )
+        planted.write_text("BLOCK_MS = 99_000\n", encoding="utf-8")
+        try:
+            windows = _blocking_read_windows_ms()
+        finally:
+            planted.unlink()
+        assert windows.get("src.core.notifications._cr_probe_block_ms") == 99_000
 
     def test_the_leaf_actually_holds_the_longest_window(self) -> None:
         """``read_windows`` claims to know the longest window; audit the claim.
@@ -93,8 +157,19 @@ class TestBlockingReadDiscovery:
             "from src.core import read_windows\n"
             "print(repr(sorted(m for m in sys.modules if m.startswith('src.'))))\n"
         )
+        # ``cwd`` pinned to the repo root (CR round 1, finding 4): the
+        # subprocess inherits pytest's working directory, and ``import src...``
+        # resolves only because that happens to be the root. Run from anywhere
+        # else, ``check=True`` would raise ``CalledProcessError`` and report an
+        # opaque subprocess traceback instead of the layering violation this
+        # exists to name — the exact diagnosis the leaf split was meant to spare
+        # someone.
         result = subprocess.run(
-            [sys.executable, "-c", code], capture_output=True, text=True, check=True
+            [sys.executable, "-c", code],
+            capture_output=True,
+            text=True,
+            check=True,
+            cwd=pathlib.Path(__file__).resolve().parents[2],
         )
         pulled = ast.literal_eval(result.stdout.strip())
         assert pulled == ["src.core", "src.core.read_windows"], (
@@ -207,16 +282,29 @@ class TestPolicyIsApplied:
         duplicated command is a duplicated fetch — a second real origin request
         against a government portal under Watcher's pinned User-Agent.
 
-        redis-py's own default ``Retry`` is also zero, which is the trap: the
-        object reads as a policy while behaving as none, and ``retry_on_timeout=
-        True`` raises it to one. Passing the zero explicitly makes it a decision
-        a future change has to argue with.
+        The library's default depends on *which constructor* is used, which is
+        the trap (CR round 1, finding 5). On the ``from_url`` path this code
+        takes, the connection-level default really is zero with ``NoBackoff`` —
+        an object that reads as a policy while behaving as none. But
+        ``Redis(host=...)`` defaults to ``Retry(ExponentialWithJitterBackoff(
+        base=1, cap=10), retries=3)``, so the same "harmless default" reasoning
+        would be wrong there. Passing the zero explicitly makes it a decision a
+        future change has to argue with on either path.
         """
         client = bus.bus_client_from_env()
         assert bus.BUS_RETRIES == 0
         # Private attribute: redis-py publishes no accessor for the retry count.
         assert client.connection_pool.make_connection().retry._retries == 0
         await client.aclose()
+
+    async def test_the_constructor_default_is_not_zero_so_the_explicit_one_matters(self) -> None:
+        """Pin the asymmetry the comment above rests on (CR round 1, finding 5).
+
+        If redis-py ever makes the two constructors agree, the explicit zero
+        stops being load-bearing and this says so instead of leaving a warning
+        that has quietly become false.
+        """
+        assert Redis().get_connection_kwargs()["retry"]._retries == 3
 
     async def test_the_retryable_set_is_left_at_the_library_default(self, allowed_env) -> None:
         """``retry_on_error`` is deliberately not passed.
@@ -254,10 +342,48 @@ class TestRedactUrl:
             ("redis://u:hunter2@[2001:db8::1]:6379/0", "redis://u:***@[2001:db8::1]:6379/0"),
             # No password: returned verbatim, so the host keeps its original case.
             ("redis://BROKER.Example:6379/0", "redis://BROKER.Example:6379/0"),
+            # CR round 1, finding 1: redis-py's ``from_url`` also accepts the
+            # credential as a *query argument*, and both forms parse into real
+            # ``connection_kwargs``. Redacting only userinfo let these through
+            # verbatim — an open failure in the one control whose whole job is to
+            # fail closed.
+            ("redis://broker:6379/0?password=hunter2", "redis://broker:6379/0?password=***"),
+            (
+                "rediss://broker:6380/0?ssl_password=sslsecret",
+                "rediss://broker:6380/0?ssl_password=***",
+            ),
+            # Both halves of a URL that carries the credential twice.
+            (
+                "redis://watcher:hunter2@broker:6379/0?password=hunter2",
+                "redis://watcher:***@broker:6379/0?password=***",
+            ),
+            # Non-secret query arguments survive, and so does their order.
+            (
+                "redis://broker:6379/0?password=hunter2&client_name=watcher",
+                "redis://broker:6379/0?password=***&client_name=watcher",
+            ),
+            (
+                "redis://broker:6379/0?client_name=watcher",
+                "redis://broker:6379/0?client_name=watcher",
+            ),
         ],
     )
     def test_redact_url_removes_the_password(self, url: str, expected: str) -> None:
         assert bus.redact_url(url) == expected
+
+    def test_every_secret_bearing_query_argument_redis_py_accepts_is_covered(self) -> None:
+        """Enumerate the leak surface from the library, not from memory.
+
+        ``password`` and ``ssl_password`` are the two connection kwargs carrying
+        a secret that ``from_url`` will take off a query string (``ssl_keyfile``
+        is a path, and ``credential_provider`` is an object no URL can express).
+        Asserting against the *matcher* rather than a literal pair means a future
+        redis-py that adds another ``*_password`` is covered on arrival.
+        """
+        for name in ("password", "ssl_password"):
+            assert bus._is_secret_query_key(name)
+        assert not bus._is_secret_query_key("client_name")
+        assert not bus._is_secret_query_key("ssl_keyfile")
 
     def test_redact_url_never_leaks_on_a_url_it_cannot_parse(self) -> None:
         """Fail closed. A redactor that re-raises or passes the input through on

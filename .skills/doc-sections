@@ -15,6 +15,7 @@
 AGENTS.md: the authoritative summary — conventions, watched-items rules, the detail-doc table (any structural change)
 README.md: orientation and curated links only; the deep material belongs in docs/
 docs/ARCHITECTURE.md: module layout, sibling services, bus topology (src/ layout, new streams or consumers)
+docs/BUS-CONNECTION-POLICY.md: client timeouts, the zero-retry rule, URL redaction, the startup PING (src/core/bus.py, src/core/read_windows.py, any new blocking consumer)
 docs/COMMANDS.md: every runnable command (scripts/, pyproject.toml scripts and deps)
 docs/DEPLOYMENT.md: systemd units, install runbook, timers, wheelhouse (deploy/, tests/deploy/)
 docs/ENVIRONMENT.md: env files, variables, the unit-only credentials (new config keys in src/core/config.py, deploy/)

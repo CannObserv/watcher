@@ -9,6 +9,7 @@ import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from redis.exceptions import ConnectionError as RedisConnectionError
 
 from src.core.bus import BUS_ENABLED_ENV, BUS_REDIS_URL_ENV, BusNotEnabled
 from src.core.notifier_client import (
@@ -333,7 +334,11 @@ class TestBusReachabilityProbe:
 
         class _Dead:
             async def ping(self):
-                raise ConnectionError("Error 111 connecting to broker:6379.")
+                # The redis exception, not the builtin of the same name (CR
+                # round 1, finding 7): with the builtin this would keep passing
+                # if the probe ever narrowed its ``except`` to redis errors,
+                # which is the change most likely to break it.
+                raise RedisConnectionError("Error 111 connecting to broker:6379.")
 
         forever = asyncio.create_task(asyncio.Event().wait())
 

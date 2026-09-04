@@ -53,7 +53,7 @@ The exe.dev proxy forwards 3000–9999; dev server at `https://watcher.exe.xyz:8
 
 **The bus.** Archiver operates the broker; watcher publishes four streams and consumes two — `content.blobs` (single-member group `watcher.blobs`, derived by co-core's `group_name` — #285) and `info.registry` (**groupless**, replayed from `0-0` every boot). `WATCHER_BUS_REDIS_URL` unset → publish tasks skip loudly. Stream inventory and ownership, the fetch contracts, `info_source_id` on the wire: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) → *Redis and the bus*.
 
-**The client carries an explicit connection policy (#287).** `socket_timeout` has a **floor**, not a ceiling — redis-py does not extend it for a blocking command, so a value at or below a loop's `BLOCK_MS` manufactures a timeout on every idle read. It is *derived* from `src/core/read_windows.py`, the leaf both `src/core/bus.py` and the workers import; never transcribe a window. Retries are an explicit **zero** — a redis-py retry re-sends the command, and a duplicated `content.fetch` is a duplicated origin request. Measurements, the startup PING, and why the loops need no error classification: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) → *Bus connection policy*.
+**Connection policy (#287).** `socket_timeout` is a **floor**, not a ceiling — derive it from `src/core/read_windows.py`, never transcribe a window; retries are an explicit **zero** (a redis-py retry re-sends the command). [docs/BUS-CONNECTION-POLICY.md](docs/BUS-CONNECTION-POLICY.md).
 
 ## Server Lifecycle
 
@@ -200,6 +200,7 @@ Cross-project search to the sister `notifier` index requires a per-instance `.cl
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — module layout, sibling services, the Archiver checkout constraint, bus topology and fetch contracts
 - [docs/COMMANDS.md](docs/COMMANDS.md) — every runnable command, the Archiver-sibling test setup, CI
 - [docs/CONTENT-PIPELINE.md](docs/CONTENT-PIPELINE.md) — fetch → extract → fingerprint, the fetch-command outbox, the revisions producer
+- [docs/BUS-CONNECTION-POLICY.md](docs/BUS-CONNECTION-POLICY.md) — #287 bus client timeouts, retries, redaction, startup PING
 - [docs/CONDITIONAL-GET.md](docs/CONDITIONAL-GET.md) — #269 validators: gate, snapshot, invalidation
 - [docs/CONVENTIONS.md](docs/CONVENTIONS.md) — logging configuration, ULID error handling, DB-trigger rules
 - [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) — systemd units, the install runbook, timers, wheelhouse auth

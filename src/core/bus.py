@@ -38,7 +38,7 @@ import os
 import time
 from collections.abc import Mapping
 from typing import Any, Protocol
-from urllib.parse import urlsplit, urlunsplit
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from redis.asyncio import Redis
 from redis.asyncio.retry import Retry
@@ -108,10 +108,19 @@ HEALTH_CHECK_INTERVAL_SECONDS = 30
 #: Nothing is given up by declining it. Both consumer loops already back off on
 #: any error and retry, the fetch-command outbox is the durable buffer behind the
 #: publisher, and the stale-pooled-connection case a retry would have covered is
-#: what ``health_check_interval`` above is for. redis-py's *default* ``Retry`` is
-#: also zero — the object reads as a policy while behaving as none, and
-#: ``retry_on_timeout=True`` raises it to one — so passing the zero explicitly
-#: makes it a decision a future change has to argue with.
+#: what ``health_check_interval`` above is for.
+#:
+#: The library's own default depends on **which constructor** is used, and only
+#: one of the two is zero (CR round 1, finding 5). On the ``from_url`` path this
+#: module takes, the connection-level default is ``Retry(NoBackoff(), 0)`` — an
+#: object that reads as a policy while behaving as none, and ``retry_on_timeout=
+#: True`` raises it to one. But ``Redis(host=...)`` defaults to
+#: ``Retry(ExponentialWithJitterBackoff(base=1, cap=10), retries=3)``, so a
+#: future switch to the constructor form would silently acquire three retries
+#: with jitter — exactly the duplicate-``XADD`` hazard argued against above.
+#: Passing the zero explicitly makes it a decision that has to be argued with on
+#: either path, and ``tests/core/test_bus_client_policy.py`` pins the asymmetry
+#: so the warning cannot quietly become false.
 BUS_RETRIES = 0
 
 # What an operator actually waits on an unreachable broker.
@@ -237,6 +246,11 @@ def bus_client_from_env() -> Redis | None:
         # ``retry_on_error`` is deliberately absent: redis-py's Retry already
         # carries exactly (ConnectionError, TimeoutError), so passing the same
         # pair would imply this widens something it does not.
+        #
+        # The backoff is never consulted at ``retries=0`` and is stated anyway:
+        # it is what decides the shape if ``BUS_RETRIES`` is ever raised, and a
+        # bare ``NoBackoff()`` would make raising the count silently mean
+        # "re-send immediately" (CR round 1, finding 6).
         retry=Retry(ExponentialBackoff(), retries=BUS_RETRIES),
     )
 
@@ -265,6 +279,46 @@ async def aclose_shared_bus_client() -> None:
 _REDACTED = "***"
 
 
+def _is_secret_query_key(key: str) -> bool:
+    """True for a query-string parameter whose value is a credential.
+
+    Substring rather than a literal pair (CR round 1, finding 1). redis-py's
+    ``from_url`` puts every query argument straight into the connection kwargs,
+    and the two that carry a secret today — ``password`` and ``ssl_password`` —
+    are both spelled with it. ``ssl_keyfile`` is a *path* and
+    ``credential_provider`` is an object no URL can express, so this is the whole
+    surface; matching the shape rather than the names means a future redis-py
+    that adds another ``*_password`` is covered on arrival rather than after an
+    incident.
+
+    Case-folded because the cost of over-redacting a query argument is a less
+    informative log line, and the cost of under-redacting one is the password in
+    journald.
+    """
+    return "password" in key.lower()
+
+
+def _redact_query(query: str) -> str:
+    """Replace every secret query-argument value, leaving the rest alone.
+
+    Returns ``query`` unchanged — byte-identical — when it carries no secret, so
+    the common case never pays a ``parse_qsl``/``urlencode`` round trip that
+    would re-quote parameters the operator wrote by hand.
+
+    ``safe="*"`` keeps the sentinel readable: ``urlencode`` would otherwise emit
+    ``%2A%2A%2A``, which is correct and unrecognisable.
+    """
+    if not query:
+        return query
+    pairs = parse_qsl(query, keep_blank_values=True)
+    if not any(_is_secret_query_key(key) for key, _ in pairs):
+        return query
+    return urlencode(
+        [(key, _REDACTED if _is_secret_query_key(key) else value) for key, value in pairs],
+        safe="*",
+    )
+
+
 class SupportsPing(Protocol):
     """The only thing the probe needs from a client.
 
@@ -276,13 +330,23 @@ class SupportsPing(Protocol):
 
 
 def redact_url(redis_url: str) -> str:
-    """Return ``redis_url`` with any password replaced.
+    """Return ``redis_url`` with every credential it can carry replaced.
+
+    Two carriers, not one (CR round 1, finding 1): the userinfo section, and the
+    query string — ``redis://broker:6379/0?password=…`` and
+    ``rediss://…?ssl_password=…`` are legal forms that redis-py's ``from_url``
+    parses into real connection kwargs, and redacting only userinfo let both
+    through verbatim. An open failure in the one control whose whole job is to
+    fail closed.
 
     The broker gains a ``requirepass`` when it moves to its own node
     (CannObserv/broker#1 D3), and every line below goes to journald. Fails
     *closed*: a URL that will not parse is replaced wholesale rather than passed
     through, because the moment redaction is hardest is the moment a malformed
     URL is the thing being reported.
+
+    A URL carrying neither is returned byte-identical, which is why the netloc
+    is reused verbatim when only the query needed rewriting.
 
     The host is rebuilt rather than sliced out, which costs two edge cases worth
     naming. ``urlsplit().hostname`` strips IPv6 brackets, so they have to be
@@ -293,17 +357,18 @@ def redact_url(redis_url: str) -> str:
     """
     try:
         parts = urlsplit(redis_url)
-        if parts.password is None:
+        query = _redact_query(parts.query)
+        if parts.password is None and query == parts.query:
             return redis_url
-        host = parts.hostname or ""
-        if ":" in host:  # IPv6 literal — urlsplit strips the brackets
-            host = f"[{host}]"
-        if parts.port:
-            host = f"{host}:{parts.port}"
-        userinfo = f"{parts.username or ''}:{_REDACTED}"
-        return urlunsplit(
-            (parts.scheme, f"{userinfo}@{host}", parts.path, parts.query, parts.fragment)
-        )
+        netloc = parts.netloc
+        if parts.password is not None:
+            host = parts.hostname or ""
+            if ":" in host:  # IPv6 literal — urlsplit strips the brackets
+                host = f"[{host}]"
+            if parts.port:
+                host = f"{host}:{parts.port}"
+            netloc = f"{parts.username or ''}:{_REDACTED}@{host}"
+        return urlunsplit((parts.scheme, netloc, parts.path, query, parts.fragment))
     except ValueError:
         return "<unparseable redis url>"
 

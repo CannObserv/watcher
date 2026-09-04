@@ -143,10 +143,15 @@ tighten :: one URL = one fingerprint = one change signal; the earlier `Watch` mo
 tighten :: gone. The user-facing noun is "Watched
 
 # Class B/D, Watched Items -> docs/CONDITIONAL-GET.md, which the Detail Docs
-# index already names as "gate, snapshot, invalidation". Gate at :38, the
-# 304-inherits-fingerprint trap at :45-46, the stale-extractor case at :70.
-# Conditional GET is off by default and item-scoped, so it is needed on some
-# tasks rather than nearly every one.
+# index already names as "gate, snapshot, invalidation". Conditional GET is off
+# by default and item-scoped, so it is needed on some tasks rather than nearly
+# every one. Evidence is quoted, not located: that doc has no `##` headings, and
+# a line number rots on the next edit to it, sending a re-judger somewhere
+# unrelated and letting them conclude this warrant was wrong (CR round 2,
+# finding 12). Grep the destination for:
+#   gate            "The gate (`WATCHER_CONDITIONAL_GET_ENABLED`) is off for this item"
+#   the 304 trap    "A 304 produces no bytes, so"
+#   stale extractor "inheriting a fingerprint the *old* extractor computed"
 duplicate :: **Conditional GET is gated and item-scoped (#269)** — off unless the item is
 duplicate :: named in `WATCHER_CONDITIONAL_GET_ENABLED`, and a 304 inherits the last
 duplicate :: fingerprint, so a spec/URL/extractor change must invalidate the stored pair:

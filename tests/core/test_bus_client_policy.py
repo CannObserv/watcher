@@ -107,12 +107,21 @@ class TestBlockingReadDiscovery:
         considered = _modules_mentioning_block_ms()
         assert "src.core.read_windows" in considered, "the scan never looked outside src.workers"
 
-    def test_a_window_defined_outside_src_workers_is_discovered(self, tmp_path) -> None:
+    def test_a_window_defined_outside_src_workers_is_discovered(self) -> None:
         """Plant one where the old walk could not see it and prove it is found.
 
-        Written into ``src/core/`` (nested, and not the workers package) and
-        removed again, because the guard's value is entirely about the module
-        that does not exist yet.
+        Written into ``src/core/`` — nested, and not the workers package —
+        because the guard's value is entirely about the module that does not
+        exist yet, and pointing the scan at a temporary root instead would prove
+        it recursive without proving it aimed at the real tree.
+
+        The tree is left byte-identical (CR round 2, finding 8).
+        ``sys.dont_write_bytecode`` is what does it: importing the plant would
+        otherwise leave a ``__pycache__/*.pyc`` behind that outlives the
+        ``.py``, and unlinking the source alone left that litter in ``src/``
+        after every run. Writing into ``src/`` at all is only acceptable because
+        the window is this narrow — ``scripts/dev_server.sh`` runs uvicorn with
+        ``--reload``, so a dev server alongside the suite reloads on the write.
         """
         planted = (
             pathlib.Path(__file__).resolve().parents[2]
@@ -121,12 +130,22 @@ class TestBlockingReadDiscovery:
             / "notifications"
             / "_cr_probe_block_ms.py"
         )
+        module = "src.core.notifications._cr_probe_block_ms"
         planted.write_text("BLOCK_MS = 99_000\n", encoding="utf-8")
+        previous = sys.dont_write_bytecode
+        sys.dont_write_bytecode = True
         try:
             windows = _blocking_read_windows_ms()
         finally:
+            sys.dont_write_bytecode = previous
             planted.unlink()
-        assert windows.get("src.core.notifications._cr_probe_block_ms") == 99_000
+            # The import is cached; a later call must not resurrect a module
+            # whose source is gone.
+            sys.modules.pop(module, None)
+            importlib.invalidate_caches()
+        assert windows.get(module) == 99_000
+        assert not (planted.parent / "__pycache__" / f"{planted.stem}.cpython-312.pyc").exists()
+        assert module not in _blocking_read_windows_ms()
 
     def test_the_leaf_actually_holds_the_longest_window(self) -> None:
         """``read_windows`` claims to know the longest window; audit the claim.

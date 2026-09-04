@@ -10,7 +10,7 @@
 
 **Issue:** [#162](https://github.com/CannObserv/watcher/issues/162) — expanded per 2026-05-18 to include WatchedItem create reuse + detail-page partial swap.
 
-**Supersedes / amends:** [docs/plans/2026-05-17-watched-item-crud-ui-plan.md:3312](../../docs/plans/2026-05-17-watched-item-crud-ui-plan.md#L3312) "no standalone create" — now in scope. The auto-create-on-first-Watch path remains.
+**Supersedes / amends:** [docs/plans/2026-05-17-watched-item-crud-ui-plan.md:3312](../../docs/plans/2026-05-17-watched-item-crud-ui-plan.md) "no standalone create" — now in scope. The auto-create-on-first-Watch path remains.
 
 **Depends on:** Archiver SDK ≥ v3.1.0 (`find_info_item` pg_trgm-backed typeahead; CannObserv/archiver#23). Already on path — confirmed at [/home/exedev/archiver/clients/python/src/archiver_client/client.py:483](../../../archiver/clients/python/src/archiver_client/client.py#L483).
 

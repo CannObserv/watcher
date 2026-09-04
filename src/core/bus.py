@@ -106,9 +106,29 @@ HEALTH_CHECK_INTERVAL_SECONDS = 30
 #: against a government portal under Watcher's pinned User-Agent.
 #:
 #: Nothing is given up by declining it. Both consumer loops already back off on
-#: any error and retry, the fetch-command outbox is the durable buffer behind the
-#: publisher, and the stale-pooled-connection case a retry would have covered is
-#: what ``health_check_interval`` above is for.
+#: any error and retry, and the fetch-command outbox is the durable buffer behind
+#: the publisher.
+#:
+#: ``health_check_interval`` is the other half, and what it buys is worth stating
+#: precisely, because it is the first thing anyone raising ``BUS_RETRIES`` will
+#: reason from (CR round 2, finding 9). It does **not** heal a dead session
+#: invisibly: ``check_health`` runs its PING through the *connection's* retry
+#: object — this one — so at zero retries a silently dropped session reaches the
+#: caller as a ``TimeoutError`` either way. What moves is **when**, and that is
+#: the whole point. Measured through a proxy dropping only the replies, which is
+#: the relay-timeout shape (the command lands, the answer never returns): with
+#: the interval on, the PING absorbs the dead session and the ``XADD`` is never
+#: written — the broker applied it **0** times; with it off, the same
+#: ``TimeoutError`` arrives *after* the broker applied the entry — **1** time,
+#: the ambiguous state a retry turns into a duplicate. So the two settings are
+#: complementary rather than alternatives: the interval shrinks the window in
+#: which an ambiguous outcome is possible, and the zero guarantees that whatever
+#: is left of that window never becomes a second ``XADD``.
+#:
+#: A cleanly *closed* connection needs neither — redis-py notices the FIN and
+#: reconnects through it transparently at zero retries (measured with
+#: ``CLIENT KILL``, with the interval on and off). Only the silent drop needs
+#: the PING.
 #:
 #: The library's own default depends on **which constructor** is used, and only
 #: one of the two is zero (CR round 1, finding 5). On the ``from_url`` path this

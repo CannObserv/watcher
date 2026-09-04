@@ -15,6 +15,7 @@ must be tailored alongside it (upstream's paired-tailoring rule) names docs
 that exist.
 """
 
+import os
 import shutil
 import subprocess
 import sys
@@ -122,6 +123,11 @@ class TestSensitivePaths:
         real work. The note went incomplete twice by hand — once when it was
         written, once when `tools/` was added a commit later — so the check is
         mechanical rather than editorial (CR-11).
+
+        A legitimate nested match trips this too — a future workspace member's
+        `packages/*/pyproject.toml` would be a reach outside the root file's
+        own tree. That is intended: the remedy is a header line saying so, the
+        same as for the mirrored test trees (CR-19).
         """
         header = "\n".join(
             line
@@ -201,6 +207,10 @@ def test_doc_check_accepts_the_tailoring() -> None:
 # reads differently, and both then print green. So run the real script over a
 # throwaway repo built to hit every branch of its matcher, and require the two
 # to agree file for file.
+# The file the census runs touch: it must match no entry below, or those runs
+# take the hit path and never reach the census. Defined before the tuple that
+# carries it so the two cannot drift apart (CR-16).
+UNWATCHED_FILE = "untouched/file.txt"
 SANDBOX_FILES = (
     "AGENTS.md",
     "deploy/watcher.service",
@@ -214,7 +224,7 @@ SANDBOX_FILES = (
     "abc/x.py",
     "a*c/x.py",
     "src/café.py",
-    "untouched/file.txt",  # UNWATCHED_FILE
+    UNWATCHED_FILE,
 )
 # Chosen for the branches, not for realism: a directory entry and a bare-name
 # entry, a name whose ".bak" sibling must NOT match, a nested package copy that
@@ -230,9 +240,6 @@ SANDBOX_ENTRIES = (
     "a*c/",
     "src/café.py",
 )
-# The file the census runs are allowed to touch: it must match no entry below,
-# or those runs take the hit path and never reach the census.
-UNWATCHED_FILE = "untouched/file.txt"
 LIVE_ENTRIES = ("AGENTS.md", "docs")
 DEAD_ENTRIES = ("schema.sql", "src/models/")
 
@@ -255,6 +262,35 @@ def _fs_encodable(name: str) -> bool:
     return True
 
 
+def _hermetic_env() -> dict[str, str]:
+    """Environment for every sandbox git call — ambient config neutralized.
+
+    Not fastidiousness: with an ordinary global ``core.excludesFile`` holding
+    ``*.bak``, ``git add -A`` silently declines to track `pyproject.toml.bak`,
+    and the two assertions that carry this sandbox's whole argument — that
+    `pyproject.toml` does not claim its `.bak` sibling, and that ``a*c/`` does
+    not glob — then pass because the files are absent. Measured: the suite
+    reported all green while committing one file of thirteen (CR-15). Config
+    also reaches the gate's own git calls, so it runs under this env too.
+
+    ``GIT_CONFIG_GLOBAL``/``GIT_CONFIG_SYSTEM`` need git >= 2.32, and
+    ``git init -b`` >= 2.28; both predate every supported runner (CR-18).
+    """
+    env = {
+        **os.environ,
+        "GIT_CONFIG_GLOBAL": os.devnull,
+        "GIT_CONFIG_SYSTEM": os.devnull,
+        "GIT_CONFIG_NOSYSTEM": "1",
+        # An inherited hook or template would run inside the sandbox.
+        "GIT_TEMPLATE_DIR": "",
+    }
+    # Set by git itself when pytest is invoked from a hook: they would point
+    # every command below at the *outer* repository.
+    for leaked in ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE"):
+        env.pop(leaked, None)
+    return env
+
+
 def _git(args: list[str], cwd: Path) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         ["git", *args],
@@ -262,6 +298,7 @@ def _git(args: list[str], cwd: Path) -> subprocess.CompletedProcess[str]:
         capture_output=True,
         text=True,
         encoding="utf-8",
+        env=_hermetic_env(),
         check=True,
     )
 
@@ -278,6 +315,7 @@ def _run_gate(repo: Path, entries: tuple[str, ...], base: str):
         capture_output=True,
         text=True,
         encoding="utf-8",
+        env=_hermetic_env(),
     )
 
 
@@ -343,6 +381,14 @@ def sandbox(tmp_path_factory: pytest.TempPathFactory):
     _git(["add", "-A"], repo)
     _git([*ident, "commit", "-q", "-m", "touch an unwatched file"], repo)
 
+    # The tests compare the gate's output against `files`; if git tracked
+    # anything else, every "not in predicted" assertion below is vacuous.
+    tracked = _git(["-c", "core.quotePath=false", "ls-files"], repo).stdout.splitlines()
+    assert sorted(tracked) == sorted(files), (
+        f"sandbox tracked {sorted(tracked)}, expected {sorted(files)} — "
+        "something dropped files the assertions depend on"
+    )
+
     # Never committed, so the list itself is in no diff the gate examines.
     return SimpleNamespace(repo=repo, files=files, base_all=base_all, base_files=base_files)
 
@@ -395,4 +441,5 @@ def test_an_all_dead_list_is_exit_2(sandbox) -> None:
     """
     result = _run_gate(sandbox.repo, DEAD_ENTRIES, sandbox.base_files)
     assert result.returncode == 2, f"rc={result.returncode}\n{result.stdout}"
-    assert "matches any" in result.stderr, result.stderr
+    # The file the operator must fix, not upstream's phrasing of why.
+    assert ".skills/doc-sensitive-paths" in result.stderr, result.stderr

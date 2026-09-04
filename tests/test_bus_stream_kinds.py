@@ -36,8 +36,35 @@ import pytest
 from co_core.pure.adapters.bus import streams
 from co_core.pure.adapters.bus.streams import stream_kind
 
-SRC = pathlib.Path(__file__).resolve().parent.parent / "src"
+ROOT = pathlib.Path(__file__).resolve().parent.parent
+# `src/` is where the bus code lives today, but the hazard's boundary is anything
+# that can reach the broker, and #262's gate exists precisely because "an agent
+# shell, a one-off script, a python -c" can (CR-30). Nothing under scripts/ touches
+# the bus yet; this is what notices the first one that does.
+SCANNED_ROOTS = (ROOT / "src", ROOT / "scripts")
 STREAMS_MODULE = "co_core.pure.adapters.bus.streams"
+STREAMS_PACKAGE = "co_core.pure.adapters.bus"
+
+# The resolvers that guarantee a *bounded* positive cap. Any other call satisfies
+# "maxlen comes from somewhere" while guaranteeing nothing — and a resolver that
+# can return 0 emits `XADD MAXLEN 0`, trimming a config/state stream to a single
+# entry so a consumer's replay-from-0-0 returns a partial set it cannot tell from
+# a complete one. That is the silent failure the taxonomy exists to prevent (CR-28).
+BOUNDED_MAXLEN_RESOLVERS = frozenset({"resolve_stream_maxlen"})
+
+# Every stream Watcher touches: four published, two consumed. AGENTS.md and
+# ARCHITECTURE.md say exactly that in prose; asserting the set — not just each
+# kind — is what makes an *addition* fail here rather than drift silently (CR-29).
+WATCHER_STREAMS = frozenset(
+    {
+        streams.CONTENT_BLOBS,
+        streams.CONTENT_REVISIONS,
+        streams.CONTENT_FETCH,
+        streams.CONTENT_FETCH_POLICY,
+        streams.INFO_REGISTRY,
+        streams.INFO_WATCH_STATUS,
+    }
+)
 
 # Every canonical stream name, so a topic written as a bare string still resolves.
 STREAM_VALUES = frozenset(
@@ -48,8 +75,9 @@ STREAM_VALUES = frozenset(
 
 
 def _modules():
-    for path in sorted(SRC.rglob("*.py")):
-        yield path, ast.parse(path.read_text())
+    for root in SCANNED_ROOTS:
+        for path in sorted(root.rglob("*.py")):
+            yield path, ast.parse(path.read_text())
 
 
 def _stream_aliases(tree: ast.Module) -> dict[str, str]:
@@ -66,20 +94,48 @@ def _stream_aliases(tree: ast.Module) -> dict[str, str]:
     return aliases
 
 
-def _resolve_topic(node: ast.expr | None, aliases: dict[str, str]) -> str | None:
+def _module_aliases(tree: ast.Module) -> set[str]:
+    """Local names bound to the streams *module*, however it was imported.
+
+    Hard-coding ``"streams"`` made ``import ... as s`` resolve to nothing, which
+    every rule then reports as "topic is not a streams constant" — a false
+    positive accusing the author of the wrong mistake (CR-31).
+    """
+    names = {"streams"}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                if alias.name == STREAMS_MODULE:
+                    names.add(alias.asname or alias.name.rsplit(".", 1)[-1])
+        elif isinstance(node, ast.ImportFrom) and node.module == STREAMS_PACKAGE:
+            for alias in node.names:
+                if alias.name == "streams":
+                    names.add(alias.asname or alias.name)
+    return names
+
+
+def _resolve_topic(
+    node: ast.expr | None, aliases: dict[str, str], modules: set[str] | None = None
+) -> str | None:
     """The canonical stream an expression names, or None if the guard cannot tell.
 
-    Three forms, because all three are things a person writes: the qualified
-    `streams.X`, a bare name imported from that module, and a literal.
+    Three forms, because all three are things a person writes: a qualified
+    ``<module>.X`` under any local module name, a bare constant imported from
+    that module, and a literal.
     """
+    modules = modules if modules is not None else {"streams"}
+    candidate = None
     if isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name):
-        if node.value.id == "streams":
-            return getattr(streams, node.attr, None)
-    if isinstance(node, ast.Name) and node.id in aliases:
-        return getattr(streams, aliases[node.id], None)
-    if isinstance(node, ast.Constant) and node.value in STREAM_VALUES:
-        return node.value
-    return None
+        if node.value.id in modules:
+            candidate = getattr(streams, node.attr, None)
+    elif isinstance(node, ast.Name) and node.id in aliases:
+        candidate = getattr(streams, aliases[node.id], None)
+    elif isinstance(node, ast.Constant):
+        candidate = node.value
+    # The module exports helpers and type aliases beside the stream constants, so
+    # a name resolving to *something* is not the same as resolving to a stream —
+    # `streams.group_name` and an imported `group_name` both resolve to a function.
+    return candidate if candidate in STREAM_VALUES else None
 
 
 def _topic_arg(call: ast.Call, position: int | None = None) -> ast.expr | None:
@@ -142,8 +198,13 @@ class TestReaderMatchesStreamKind:
     def test_every_grouped_consumer_reads_a_grouped_stream(self):
         found = 0
         for path, tree, call in _calls("AsyncBusConsumer"):
-            topic = _resolve_topic(_topic_arg(call), _stream_aliases(tree))
-            assert topic is not None, f"{path}: AsyncBusConsumer topic is not a streams constant"
+            argument = _topic_arg(call)
+            assert argument is not None, f"{path}: AsyncBusConsumer built without a topic= argument"
+            topic = _resolve_topic(argument, _stream_aliases(tree), _module_aliases(tree))
+            assert topic is not None, (
+                f"{path}: AsyncBusConsumer topic is not a recognizable stream — name it with a "
+                "streams constant so this guard can classify it"
+            )
             assert stream_kind(topic) != "config_state", (
                 f"{path}: {topic!r} is a config/state stream and takes no consumer group — "
                 "every worker needs every message, and a group there accumulates a PEL "
@@ -155,8 +216,15 @@ class TestReaderMatchesStreamKind:
     def test_every_tail_reader_reads_a_config_state_stream(self):
         found = 0
         for path, tree, call in _calls("AsyncBusTailReader"):
-            topic = _resolve_topic(_topic_arg(call), _stream_aliases(tree))
-            assert topic is not None, f"{path}: AsyncBusTailReader topic is not a streams constant"
+            argument = _topic_arg(call)
+            assert argument is not None, (
+                f"{path}: AsyncBusTailReader built without a topic= argument"
+            )
+            topic = _resolve_topic(argument, _stream_aliases(tree), _module_aliases(tree))
+            assert topic is not None, (
+                f"{path}: AsyncBusTailReader topic is not a recognizable stream — name it with a "
+                "streams constant so this guard can classify it"
+            )
             assert stream_kind(topic) == "config_state", (
                 f"{path}: {topic!r} is a {stream_kind(topic)} stream. A tail reader replays it "
                 "from 0-0 with no group and no ack, so a fact or command read this way is "
@@ -211,7 +279,9 @@ class TestConfigStatePublishesAreTrimmed:
     def test_every_config_state_publish_passes_maxlen(self):
         checked = set()
         for path, tree, call in _calls("BusPublish"):
-            topic = _resolve_topic(_topic_arg(call, position=0), _stream_aliases(tree))
+            argument = _topic_arg(call, position=0)
+            assert argument is not None, f"{path}: BusPublish built without a topic"
+            topic = _resolve_topic(argument, _stream_aliases(tree), _module_aliases(tree))
             assert topic is not None, (
                 f"{path}: BusPublish topic is not a recognizable stream, so this guard "
                 "cannot tell whether it needs a trim. Name it with a streams constant — "
@@ -236,11 +306,17 @@ class TestConfigStatePublishesAreTrimmed:
                 )
             else:
                 assert isinstance(maxlen, ast.Name), f"{path}: unexpected maxlen expression"
-                assert any(
-                    isinstance(value, ast.Call) for value in _assigned_values(tree, maxlen.id)
+                sources = _assigned_values(tree, maxlen.id)
+                assert sources, f"{path}: {maxlen.id} is not assigned in this module"
+                assert all(
+                    isinstance(value, ast.Call) and _callee(value) in BOUNDED_MAXLEN_RESOLVERS
+                    for value in sources
                 ), (
-                    f"{path}: {maxlen.id} must come from a resolver call "
-                    "(resolve_stream_maxlen), which is what guarantees a bounded value"
+                    f"{path}: {maxlen.id} must come from a bounded resolver "
+                    f"({', '.join(sorted(BOUNDED_MAXLEN_RESOLVERS))}). Any other call satisfies "
+                    "'maxlen comes from somewhere' while guaranteeing nothing — and a value of 0 "
+                    "trims the stream to one entry, so a boot replay returns a partial set no "
+                    "consumer can tell from a complete one."
                 )
             checked.add(topic)
         assert checked, "no config/state publishes found — has BusPublish been renamed?"
@@ -260,9 +336,27 @@ class TestTaxonomyCoverage:
                         if node.attr.startswith("_"):
                             continue  # co-core's private kind table, not a stream
                         referenced.add(getattr(streams, node.attr))
-        assert referenced, "no streams.* references found in src/"
+        assert referenced, "no streams.* references found"
         for topic in sorted(referenced):
             assert stream_kind(topic) in {"command", "fact", "config_state"}
+
+    def test_the_inventory_is_exactly_what_the_docs_describe(self):
+        """AGENTS.md and ARCHITECTURE.md say four published and two consumed.
+        Pinning each stream's *kind* catches a co-core reclassification but not
+        an addition, and the prose is wrong either way (CR-29)."""
+        referenced = set()
+        for _path, tree in _modules():
+            aliases, modules = _stream_aliases(tree), _module_aliases(tree)
+            for node in ast.walk(tree):
+                if isinstance(node, ast.Attribute | ast.Name | ast.Constant):
+                    topic = _resolve_topic(node, aliases, modules)
+                    if topic is not None:
+                        referenced.add(topic)
+        assert referenced == WATCHER_STREAMS, (
+            "the set of streams Watcher touches changed — update the inventory here and "
+            "the 'publishes four streams and consumes two' prose in AGENTS.md and "
+            "docs/ARCHITECTURE.md, which this set exists to keep honest"
+        )
 
     @pytest.mark.parametrize(
         ("topic", "kind"),
@@ -349,3 +443,35 @@ class TestTheScannerSeesEveryCallForm:
         module level', accusing the author of the wrong mistake."""
         values = _assigned_values(ast.parse(source), "X")
         assert values and all(isinstance(v, ast.Call) for v in values)
+
+    @pytest.mark.parametrize(
+        "source",
+        [
+            "from co_core.pure.adapters.bus import streams as s\nBusPublish(s.INFO_REGISTRY, f)",
+            "import co_core.pure.adapters.bus.streams as s\nBusPublish(s.INFO_REGISTRY, f)",
+            "import co_core.pure.adapters.bus.streams\nBusPublish(streams.INFO_REGISTRY, f)",
+        ],
+        ids=["from-import-as", "import-as", "import-plain"],
+    )
+    def test_the_streams_module_resolves_under_any_local_name(self, source):
+        """CR-31: hard-coding the name `streams` made an aliased import resolve
+        to nothing, which every rule then reported as 'not a streams constant' —
+        accusing the author of the wrong mistake."""
+        tree = ast.parse(source)
+        (call,) = [n for n in ast.walk(tree) if isinstance(n, ast.Call)]
+        topic = _resolve_topic(
+            _topic_arg(call, position=0), _stream_aliases(tree), _module_aliases(tree)
+        )
+        assert topic == streams.INFO_REGISTRY
+
+    def test_a_non_stream_export_does_not_resolve_as_a_topic(self):
+        """The streams module exports helpers beside the constants, so resolving
+        to *something* is not resolving to a stream — `group_name` resolved to a
+        function object and landed in the inventory set."""
+        tree = ast.parse("from co_core.pure.adapters.bus.streams import group_name\nf(group_name)")
+        (call,) = [n for n in ast.walk(tree) if isinstance(n, ast.Call)]
+        aliases, modules = _stream_aliases(tree), _module_aliases(tree)
+        assert _resolve_topic(call.args[0], aliases, modules) is None
+        assert (
+            _resolve_topic(ast.parse("streams.group_name").body[0].value, aliases, modules) is None
+        )

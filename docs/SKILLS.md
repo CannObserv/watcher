@@ -94,16 +94,20 @@ a miss byte-identical to a pass. Two committed files replace its built-in defaul
 
 | File | Role |
 |---|---|
-| [.skills/doc-sensitive-paths](../.skills/doc-sensitive-paths) | What Step 1.5 watches. Drops the three defaults that match nothing here (`schema.sql`, `src/models/`, `.env.example`), adds `scripts/`, `src/dashboard/`, `src/workers/` |
+| [.skills/doc-sensitive-paths](../.skills/doc-sensitive-paths) | What Step 1.5 watches. Drops the three defaults that match nothing here (`schema.sql`, `src/models/`, `.env.example`), adds `scripts/`, `src/dashboard/`, `src/workers/`, `tools/` |
 | [.skills/doc-sections](../.skills/doc-sections) | The advice printed on a hit — watcher's own docs, each line naming the change that triggers it |
 
 Tailor them together: the list says what the gate watches and the sections say what to do about
 a hit, so tailoring only the list leaves advice written for someone else's stack
 ([gregoryfoster/skills#261](https://github.com/gregoryfoster/skills/issues/261)).
-`deploy/` also reaching `tests/deploy/` is a kept over-match — for a spot-check that exits 1 and
-asks a human to look, over-matching is the cheap failure. Both files are guarded by
+`deploy/` reaching `tests/deploy/`, and `scripts/` reaching `tests/scripts/` and the vendored
+skill symlinks, are kept over-matches — for a spot-check that exits 1 and asks a human to look,
+over-matching is the cheap failure, and narrowing either means listing files individually, which
+is the under-match #252 fixed. Both files are guarded by
 [tests/test_doc_sensitive_paths.py](../tests/test_doc_sensitive_paths.py): an entry matching no
-tracked file fails, as does advice naming a doc that no longer exists.
+tracked file fails, as does advice naming a doc that no longer exists, and a differential test
+runs the real `doc-check.sh` over a throwaway repo so the guard's matcher cannot drift from the
+gate's.
 
 ## SocratiCode (Codebase Search)
 

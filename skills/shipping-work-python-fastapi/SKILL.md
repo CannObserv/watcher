@@ -78,8 +78,8 @@ bash "<SKILL_SCRIPTS>/doc-check.sh"
 
 Watcher tailors both halves rather than running on upstream's defaults, and each file **replaces** those defaults wholesale:
 
-- [.skills/doc-sensitive-paths](../../.skills/doc-sensitive-paths) — what the gate watches. Drops the three defaults that match nothing here (`schema.sql`, `src/models/`, `.env.example`) and adds `scripts/`, `src/dashboard/`, `src/workers/`. `deploy/` reaching `tests/deploy/` is a kept over-match, not an oversight
-- [.skills/doc-sections](../../.skills/doc-sections) — the advice printed on a hit, naming watcher's own docs. Tailor it *with* the path list ([#261](https://github.com/gregoryfoster/skills/issues/261)): a repo that tailors only the list gets advice written for a stack it may not have
+- [.skills/doc-sensitive-paths](../../.skills/doc-sensitive-paths) — what the gate watches: upstream's defaults minus the trees this repo does not have, plus the ones it does. The file itself is the inventory, and its header records which over-matches are deliberate; [docs/SKILLS.md](../../docs/SKILLS.md) explains the choices
+- [.skills/doc-sections](../../.skills/doc-sections) — the advice printed on a hit, naming watcher's own docs, one line per section as `<doc path>: <what to check>`. Tailor it *with* the path list ([#261](https://github.com/gregoryfoster/skills/issues/261)): a repo that tailors only the list gets advice written for a stack it may not have
 
 Both are guarded by [tests/test_doc_sensitive_paths.py](../../tests/test_doc_sensitive_paths.py), which fails on an entry that matches no tracked file and on advice naming a doc that no longer exists.
 

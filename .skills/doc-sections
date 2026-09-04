@@ -4,6 +4,12 @@
 # (gregoryfoster/skills#261) — the list says what the gate watches, this says
 # what to do about a hit. Each line names the change that usually triggers it.
 #
+# LINE CONTRACT: every line reads `<tracked doc path>: <what to check>`. The
+# leading path is what makes the advice auditable — tests/test_doc_sensitive_paths.py
+# fails any line whose first `:`-delimited token is not a tracked file, so a
+# section written as plain prose ("route table in AGENTS.md") is a test failure,
+# not a silent no-op.
+#
 # Guarded by tests/test_doc_sensitive_paths.py.
 
 AGENTS.md: the authoritative summary — conventions, watched-items rules, the detail-doc table (any structural change)

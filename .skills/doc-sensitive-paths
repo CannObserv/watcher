@@ -2,12 +2,18 @@
 # One path per line; `#`-comments and blank lines ignored. This file REPLACES
 # doc-check.sh's built-in defaults rather than extending them.
 #
-# Entries match whole path SEGMENTS at any depth (gregoryfoster/skills#252), so
-# `deploy/` also reaches `tests/deploy/`. That over-match is kept deliberately:
-# those two tests assert the installed unit and the unit-only notifier
-# credential, and both are documented in DEPLOYMENT.md / ENVIRONMENT.md. For a
-# spot-check that exits 1 and asks a human to look, over-matching is the cheap
-# failure; the miss that exits 0 is the expensive one.
+# Entries match whole path SEGMENTS at any depth (gregoryfoster/skills#252).
+# Two entries therefore reach further than their name suggests, and both
+# over-matches are kept deliberately — do not narrow them:
+#   deploy/   also reaches tests/deploy/, whose two tests assert the installed
+#             unit and the unit-only notifier credential; both are documented
+#             in DEPLOYMENT.md / ENVIRONMENT.md, so a hit there is a fair ask
+#   scripts/  also reaches tests/scripts/ and the six vendored skill symlinks
+#             under skills/*/scripts/. The entry earns its place on COMMANDS.md
+#             alone; the extra hits are the price of not anchoring it
+# For a spot-check that exits 1 and asks a human to look, over-matching is the
+# cheap failure; the miss that exits 0 is the expensive one. Narrowing either
+# one means listing files individually, which is the under-match #252 fixed.
 #
 # Dropped from the defaults because nothing in this repo matches them —
 # a dead entry reads as coverage of a tree we do not have:
@@ -29,3 +35,4 @@ src/api/
 src/core/
 src/dashboard/
 src/workers/
+tools/

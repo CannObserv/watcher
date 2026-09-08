@@ -1,11 +1,16 @@
 [Unit]
 Description=Watcher — Cannabis Observer monitoring service
-# redis-server ordering is SOFT (After+Wants, not Requires), matching
-# Archiver's pattern: the broker is Archiver-operated (archiver#109), and
-# Watcher only *publishes* to it — the content.fetch-policy producer (#245).
-# A missing broker degrades to a logged publish failure, never a boot failure.
-After=network.target postgresql.service redis-server.service
-Wants=redis-server.service
+# The redis-server ordering is GONE, not loosened (CannObserv/broker#1 Phase 3).
+# The broker moved to a neutral node reached over the tailnet, so there is no
+# local unit to order behind and `Wants=` would name a service that will never
+# exist on this host.
+#
+# The reasoning it replaces still holds and is restated rather than dropped:
+# Watcher only *publishes* to the bus (the content.fetch-policy producer, #245),
+# and a missing broker degrades to a logged publish failure, never a boot
+# failure. What changes is that the dependency is now a network hop carrying an
+# explicit connection policy (src/core/bus.py, #287) rather than a local unit.
+After=network.target postgresql.service
 
 [Service]
 Type=simple

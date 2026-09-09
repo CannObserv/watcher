@@ -213,25 +213,3 @@ class TestDeadLetterCommandForm:
         with pytest.raises(OutOfMemoryError):
             await consumer.dead_letter("1-1", {"payload_type": "junk"})
         client.xack.assert_not_awaited()
-
-
-class TestWatcherWritesNoDeadLetterToday:
-    """The honest half of the broker#2 answer: the grant is for a path that has
-    no caller yet. ``content.blobs.dlq`` is Watcher's under broker#1 Phase 5,
-    but the loop's current poison-frame policy is to ack past an undecodable
-    frame — there is no correlation obligation to discharge on a fact stream we
-    read with our own group (``src/workers/fetch_facts.py`` module docstring).
-    If that changes, this test is the one that fails.
-    """
-
-    def test_no_module_under_src_calls_the_dead_letter_seam(self):
-        import pathlib
-
-        roots = [pathlib.Path("src"), pathlib.Path("scripts")]
-        callers = [
-            path
-            for root in roots
-            for path in root.rglob("*.py")
-            if ".dead_letter(" in path.read_text()
-        ]
-        assert callers == [], f"a DLQ writer appeared: {callers} — broker#2's ACL grant now matters"

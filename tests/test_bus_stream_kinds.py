@@ -347,6 +347,62 @@ class TestConfigStatePublishesAreTrimmed:
         assert checked, "no config/state publishes found — has BusPublish been renamed?"
 
 
+class TestNoDeadLetterWriterExistsYet:
+    """Watcher writes no dead letter today, and broker#2's ACL grant is for a
+    path with no caller (#288).
+
+    ``content.blobs.dlq`` becomes Watcher's under CannObserv/broker#1 Phase 5,
+    but the blobs loop's current poison-frame policy is to *ack past* an
+    undecodable frame: on a fact stream read with our own group there is no
+    correlation obligation to discharge and no DLQ of ours to route to
+    (``src/workers/fetch_facts.py``). That sentence is load-bearing for
+    CannObserv/broker#2 — the ACL user for Watcher is being drafted from what a
+    ``MONITOR`` capture saw, and it saw no ``XADD content.blobs.dlq`` because
+    nothing issues one. This is what stops that staying true silently.
+
+    The observed command form, when the seam is finally wired, is two commands
+    and the ack lands on the **original** stream::
+
+        "XADD" "content.blobs.dlq" "*" <fields…>
+        "XACK" "content.blobs" "watcher.blobs" "<id>"
+
+    Two spellings reach a ``.dlq`` stream and both are matched: the co-core seam
+    ``consumer.dead_letter(...)``, and a hand-rolled ``xadd(dlq_name(topic), …)``
+    that bypasses it. ``dead_letter`` is matched in its **attribute** form only,
+    because it is a homonym here — ``src/core/sources/outbox.py`` defines an
+    unrelated one that stamps ``dead_lettered_at`` on a Postgres row and issues
+    no Redis command at all. That exclusion is exact for the bare-name call the
+    outbox has today and **not** for a future ``outbox.dead_letter(...)``, which
+    would trip this rule. The failure message therefore names both candidates
+    rather than claiming to tell them apart: a guard that accuses the wrong
+    subsystem gets deleted instead of read, and one line of triage is the price
+    of not silently excusing the call that matters.
+    """
+
+    def test_no_module_under_the_scanned_roots_writes_a_dead_letter(self):
+        writers = [
+            f"{path.relative_to(ROOT)}:{call.lineno} ({_callee(call)})"
+            for name in ("dead_letter", "dlq_name")
+            for path, _tree, call in _calls(name)
+            if name == "dlq_name" or isinstance(call.func, ast.Attribute)
+        ]
+        assert writers == [], (
+            f"a dead-letter writer appeared: {writers}.\n"
+            "  If it is AsyncBusConsumer.dead_letter or a dlq_name() call, Watcher now "
+            "issues XADD <topic>.dlq and CannObserv/broker#2's ACL user must grant it — "
+            "update docs/BUS-CONNECTION-POLICY.md and this test together.\n"
+            "  If it is the unrelated dead_letter() in src/core/sources/outbox.py (a "
+            "Postgres column stamp, no Redis command) reached through a module alias, "
+            "add that receiver to this rule's exclusion instead."
+        )
+
+    def test_the_scanned_roots_are_actually_readable(self):
+        """The guard above passes vacuously if the scan finds nothing — a cwd
+        change alone used to be enough. ``SCANNED_ROOTS`` is anchored on
+        ``__file__``, and this is what proves the anchor still resolves."""
+        assert sum(1 for _ in _modules()) > 0, f"scanned nothing under {SCANNED_ROOTS}"
+
+
 class TestTaxonomyCoverage:
     """A stream Watcher touches but co-core does not classify is the drift the
     kind table exists to prevent — ``stream_kind`` raises on one, which is the

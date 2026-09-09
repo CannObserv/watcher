@@ -53,7 +53,7 @@ The exe.dev proxy forwards 3000–9999; dev server at `https://watcher.exe.xyz:8
 
 **The bus.** Archiver operates the broker; watcher publishes four streams and consumes two — `content.blobs` (single-member group `watcher.blobs`, derived by co-core's `group_name` — #285) and `info.registry` (**groupless**, replayed from `0-0` every boot). `WATCHER_BUS_REDIS_URL` unset → publish tasks skip loudly. Stream inventory and ownership, the fetch contracts, `info_source_id` on the wire: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) → *Redis and the bus*.
 
-**Connection policy (#287, #288).** `socket_timeout` is a **floor**, not a ceiling — derive it from `src/core/read_windows.py`, never transcribe a window; retries are an explicit **zero** (a redis-py retry re-sends the command). A full broker refuses `XADD` with `OutOfMemoryError` — a `ResponseError`, **not** a connection error — and every producer must keep treating it as transient; nothing is dropped or dead-lettered on it, and Watcher writes no DLQ at all. [docs/BUS-CONNECTION-POLICY.md](docs/BUS-CONNECTION-POLICY.md).
+**Connection policy (#287, #288).** `socket_timeout` is a **floor**, not a ceiling — derive it from `src/core/read_windows.py`, never transcribe a window; retries are an explicit **zero** (a redis-py retry re-sends the command). A full broker refuses `XADD` with `OutOfMemoryError`, a `ResponseError` and **not** a connection error: keep it transient in every producer. [docs/BUS-CONNECTION-POLICY.md](docs/BUS-CONNECTION-POLICY.md).
 
 ## Server Lifecycle
 
@@ -187,7 +187,7 @@ Cross-project search to the sister `notifier` index requires a per-instance `.cl
 ## Detail Docs
 
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — module layout, sibling services, the Archiver checkout constraint, bus topology and fetch contracts
-- [docs/BUS-CONNECTION-POLICY.md](docs/BUS-CONNECTION-POLICY.md) — #287 bus client timeouts, retries, redaction, startup PING; #288 behaviour under the broker's `noeviction` cap and the observed command inventory
+- [docs/BUS-CONNECTION-POLICY.md](docs/BUS-CONNECTION-POLICY.md) — #287 bus client timeouts, retries, redaction, startup PING; #288 the `noeviction` cap and the observed command inventory
 - [docs/COMMANDS.md](docs/COMMANDS.md) — every runnable command, the Archiver-sibling test setup, CI
 - [docs/CONTENT-PIPELINE.md](docs/CONTENT-PIPELINE.md) — fetch → extract → fingerprint, the fetch-command outbox, the revisions producer
 - [docs/CONDITIONAL-GET.md](docs/CONDITIONAL-GET.md) — #269 validators: gate, snapshot, invalidation

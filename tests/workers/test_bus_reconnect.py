@@ -18,6 +18,17 @@ holds, which is the point: it becomes load-bearing the moment the broker is a
 front of the broker. Its wire shape is a ``ResponseError`` subclass, not a
 connection error, so a loop that classified errors by type — as neither of these
 does — would be the one to get it wrong.
+
+``OutOfMemoryError`` joins it for #288 (broker#1 R5, tracked by broker#6), the
+same shape from a different cause: the broker runs ``noeviction`` under an
+explicit ``maxmemory``, so a full instance refuses writes for every client on it.
+Measured against a capped scratch broker, of the commands these two loops issue
+only ``XGROUP CREATE`` is ``denyoom`` — ``XREADGROUP``, ``XACK``, ``XAUTOCLAIM``
+and ``XREAD`` all keep working — so the read parametrisations below are the
+hypothetical and ``ensure_group`` is the one that really fires. It is a boot-time
+call, which is what makes the re-arm load-bearing: a Watcher restarted while the
+broker is full must retry the group until the cap clears, not die before its
+first read.
 """
 
 import asyncio
@@ -27,7 +38,7 @@ from unittest.mock import MagicMock
 
 import pytest
 from redis.exceptions import ConnectionError as RedisConnectionError
-from redis.exceptions import NoPermissionError
+from redis.exceptions import NoPermissionError, OutOfMemoryError
 from redis.exceptions import TimeoutError as RedisTimeoutError
 
 import src.workers.fetch_facts as ff_mod
@@ -43,6 +54,7 @@ BROKER_FAILURES = [
     pytest.param(
         NoPermissionError("NOPERM this user has no permissions to run 'xreadgroup'"), id="noperm"
     ),
+    pytest.param(OutOfMemoryError("command not allowed when used memory > 'maxmemory'."), id="oom"),
 ]
 
 

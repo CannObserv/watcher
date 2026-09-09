@@ -15,6 +15,7 @@ import pytest
 from co_core.pure.adapters.bus import streams
 from co_core.pure.adapters.bus.envelope import from_wire
 from redis.exceptions import ConnectionError as RedisConnectionError
+from redis.exceptions import OutOfMemoryError
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -28,6 +29,16 @@ pytestmark = pytest.mark.integration
 FP = "sha256:" + "a" * 64
 ARCHIVER_SOURCE_ID = "01HZZ00000000000000000000S"
 COMMAND_ID = "01KZMNQR9B5CQZ1CRGR1E393R6"
+
+# Both refusals a live broker can hand this drain, and the pair a transient
+# classifier has to get right. The second is #288's: the broker runs
+# `maxmemory-policy noeviction` under an explicit cap, so a full instance
+# refuses XADD for every producer on it — with a `ResponseError` subclass,
+# not a connection error. Message text is redis-server's own, verbatim.
+BROKER_REFUSALS = [
+    pytest.param(RedisConnectionError("connection refused"), id="connection"),
+    pytest.param(OutOfMemoryError("command not allowed when used memory > 'maxmemory'."), id="oom"),
+]
 
 
 def _async_session_factory_returning(db_session: AsyncSession):
@@ -195,14 +206,19 @@ class TestClassification:
 
         assert second == {"published": 0, "failed": 0, "dead_lettered": 0}
 
-    async def test_broker_failure_retries_and_never_dead_letters(self, db_session, monkeypatch):
-        """A Redis outage is transient: keep the row, no data-loss cliff."""
+    @pytest.mark.parametrize("error", BROKER_REFUSALS)
+    async def test_broker_failure_retries_and_never_dead_letters(
+        self, error, db_session, monkeypatch
+    ):
+        """A broker that is down *or* full is transient: keep the row, no
+        data-loss cliff. ``content.revisions`` is the only stream with an outbox
+        that can dead-letter at all, so this is where #288's answer is visible."""
         _, _, pending = await _setup_pending_row(db_session)
         _wire(db_session, monkeypatch)
 
         class _Broken:
             async def xadd(self, *a, **kw):
-                raise RedisConnectionError("connection refused")
+                raise error
 
         result = await drain_pending_archiver_sync(batch_size=10, bus_client=_Broken())
 
@@ -218,8 +234,9 @@ class TestClassification:
         assert row.attempts == 1
         assert row.last_error
 
+    @pytest.mark.parametrize("error", BROKER_REFUSALS)
     async def test_transient_failure_is_exempt_from_the_attempt_ceiling(
-        self, db_session, monkeypatch
+        self, error, db_session, monkeypatch
     ):
         """Past the ceiling a transient error still retries — the outage may be long."""
         _, _, pending = await _setup_pending_row(db_session)
@@ -230,7 +247,7 @@ class TestClassification:
 
         class _Broken:
             async def xadd(self, *a, **kw):
-                raise RedisConnectionError("connection refused")
+                raise error
 
         result = await drain_pending_archiver_sync(batch_size=10, bus_client=_Broken())
 

@@ -219,6 +219,45 @@ class TestBlobsConsumerSurvivesABrokerFailure:
 
 
 @dataclass
+class _AnomalyThenSucceedingAck:
+    """Every read yields an undecodable frame, and the ack for it succeeds.
+
+    The anomaly branch's *normal* job, which nothing pinned before #289 wrapped
+    its ack in a guard — so a wrapping that swallowed the success case, or broke
+    the ``continue``, would have gone unnoticed in the module that is the
+    service's only fact inbox.
+    """
+
+    stop_event: asyncio.Event
+    stop_after_reads: int = 3
+    reads: int = 0
+    acked: list[str] = field(default_factory=list)
+
+    async def ensure_group(self, *, start_id: str) -> None:
+        await asyncio.sleep(0)
+
+    async def claim_stale(self, *, min_idle_ms: int, count: int) -> list[Any]:
+        await asyncio.sleep(0)
+        return []
+
+    async def read(self, *, count: int, block_ms: int | None) -> list[Any]:
+        await asyncio.sleep(0)
+        self.reads += 1
+        if self.reads >= self.stop_after_reads:
+            self.stop_event.set()
+        raise BusMessageMissingFieldError(
+            "event_type", topic="content.blobs", message_id=f"170000000000-{self.reads}"
+        )
+
+    async def ack(self, message_id: str) -> None:
+        await asyncio.sleep(0)
+        self.acked.append(message_id)
+
+    def seek(self, message_id: str) -> None:
+        pass
+
+
+@dataclass
 class _AnomalyThenFailingAck:
     """Every read yields an undecodable frame, and the ack for it fails (#289).
 
@@ -290,8 +329,10 @@ class TestBlobsConsumerSurvivesAFailedAnomalyAck:
             )
 
         # It kept going: the loop must not return on the first failed ack.
-        assert bus.reads >= 3
-        assert bus.ack_attempts >= 3
+        # Exact, not >=: the fake stops the loop on its third read, so a count
+        # above three is the loop spinning — the other half of finding 18.
+        assert bus.reads == 3
+        assert bus.ack_attempts == 3
 
     @pytest.mark.parametrize("error", BROKER_FAILURES)
     async def test_a_failed_ack_is_reported_as_such(self, error, monkeypatch, caplog):
@@ -314,7 +355,70 @@ class TestBlobsConsumerSurvivesAFailedAnomalyAck:
                 timeout=5,
             )
 
-        assert any("could not ack" in r.message for r in caplog.records)
+        assert any("could not ack" in r.getMessage() for r in caplog.records)
+
+    async def test_the_failed_ack_parks_the_loop_instead_of_spinning(self, monkeypatch):
+        """ "Backs off" is the half the sibling test cannot see.
+
+        Without the ``_back_off`` call the loop still "keeps reading" — it just
+        does it as fast as the event loop allows, hammering a broker that is
+        already failing. Verified by mutation: dropping that one line leaves
+        every other test in this class green.
+
+        So park on a backoff long enough that a spinning loop is unmistakable,
+        leave ``stop`` unset, and let the event loop run. One attempt means
+        parked; a spinning loop racks up hundreds.
+        """
+        stop = asyncio.Event()
+        bus = _AnomalyThenFailingAck(
+            error=RedisConnectionError("broker down"),
+            stop_event=stop,
+            stop_after_reads=10**9,  # never sets stop; this test owns shutdown
+        )
+        monkeypatch.setattr(ff_mod, "AsyncBusConsumer", lambda *a, **k: bus)
+
+        task = asyncio.create_task(
+            ff_mod.run_blobs_consumer(
+                MagicMock(),
+                _never_called_session_factory,
+                stop=stop,
+                block_ms=1,
+                error_backoff_seconds=30.0,
+            )
+        )
+        for _ in range(50):  # plenty of turns for a spin to show itself
+            await asyncio.sleep(0)
+
+        assert bus.ack_attempts == 1, f"loop is spinning: {bus.ack_attempts} acks in 50 turns"
+
+        stop.set()  # and the park is interruptible, so shutdown is not 30s
+        await asyncio.wait_for(task, timeout=5)
+
+
+class TestBlobsConsumerAcksPastAnUndecodableFrame:
+    """The anomaly branch's normal job, unpinned until #289 touched it."""
+
+    async def test_the_frame_is_acked_and_the_loop_carries_on(self, monkeypatch, caplog):
+        stop = asyncio.Event()
+        bus = _AnomalyThenSucceedingAck(stop_event=stop)
+        monkeypatch.setattr(ff_mod, "AsyncBusConsumer", lambda *a, **k: bus)
+
+        with caplog.at_level("WARNING", logger="src.workers.fetch_facts"):
+            await asyncio.wait_for(
+                ff_mod.run_blobs_consumer(
+                    MagicMock(),
+                    _never_called_session_factory,
+                    stop=stop,
+                    block_ms=1,
+                    error_backoff_seconds=_FAST_BACKOFF,
+                ),
+                timeout=5,
+            )
+
+        assert bus.acked == ["170000000000-1", "170000000000-2", "170000000000-3"]
+        assert any("undecodable frame" in r.getMessage() for r in caplog.records)
+        # The success path must not report an ack failure.
+        assert not any("could not ack" in r.getMessage() for r in caplog.records)
 
 
 class TestRegistryConsumerSurvivesABrokerFailure:

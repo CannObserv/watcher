@@ -141,7 +141,7 @@ today resolves to nothing.
 **Watcher's Redis use.** Archiver operates `redis-server` and owns the broker
 (archiver#109). Watcher publishes `content.fetch-policy` (#245) and — Phase 4,
 #241 — publishes `content.fetch` commands and consumes `content.blobs` facts
-via its own consumer group (`watcher`, started in the lifespan when
+via its own consumer group (`watcher.blobs`, started in the lifespan when
 `WATCHER_BUS_REDIS_URL` is set **and** `WATCHER_BUS_ENABLED=1`, #262). Since
 #254 it also consumes `info.registry` **grouplessly**, replayed from `0-0` at
 boot; without a usable bus neither consumer starts and the registry cannot

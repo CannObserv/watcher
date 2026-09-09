@@ -33,8 +33,10 @@ What that leaves in the code:
   User-Agent, `info_source_id`, one-open-command gate.
 - **The `content.blobs` consumer** —
   [`src/workers/fetch_facts.py`](../src/workers/fetch_facts.py), consumer group
-  `watcher` with a single member, started in the lifespan whenever
-  `WATCHER_BUS_REDIS_URL` is set. Correlates on `command_id` only, never dedupes
+  `watcher.blobs` with a single member — derived by `group_name`, never
+  hand-written (#285) — started in the lifespan when `WATCHER_BUS_REDIS_URL` is
+  set **and** `WATCHER_BUS_ENABLED=1` (#262: a URL is configuration, not
+  permission). Correlates on `command_id` only, never dedupes
   on fingerprint, branches `terminal` first on `fetch_failed`.
 - **The apply tasks** — `apply_fetch_blob` / `apply_fetch_failure` /
   `apply_fetch_not_modified` in

@@ -273,6 +273,51 @@ class TestClassification:
         records = [r for r in caplog.records if r.getMessage() == "drain: publish failed"]
         assert [r.transient for r in records] == [True]
 
+    async def test_a_refusals_backoff_does_not_depend_on_its_classification(
+        self, db_session, monkeypatch
+    ):
+        """``mark_failure`` runs on both branches, so the schedule is the same
+        either way — the entry #290 added buys the log field and the ceiling,
+        not a faster recovery.
+
+        Driven with a *non*-transient publish error beside the transient set:
+        if a future change moved the backoff onto one branch only, the two
+        would diverge here rather than in an operator's cutover window
+        (CR 6)."""
+        _, _, transient_row = await _setup_pending_row(db_session)
+        _, _, other_row = await _setup_pending_row(db_session)
+        _wire(db_session, monkeypatch)
+        refusals = iter(
+            [
+                NoPermissionError("NOPERM this user has no permissions to run the 'xadd' command"),
+                RuntimeError("not a broker refusal at all"),
+            ]
+        )
+
+        class _Broken:
+            async def xadd(self, *a, **kw):
+                raise next(refusals)
+
+        before = datetime.now(UTC)
+        result = await drain_pending_archiver_sync(batch_size=10, bus_client=_Broken())
+
+        assert result["failed"] == 2
+        rows = (
+            (
+                await db_session.execute(
+                    select(PendingArchiverSync).where(
+                        PendingArchiverSync.id.in_([transient_row.id, other_row.id])
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        # attempts=1 → 60 s for both; the classifier never reaches this number.
+        assert {r.attempts for r in rows} == {1}
+        for row in rows:
+            assert timedelta(seconds=55) <= row.next_attempt_at - before <= timedelta(seconds=65)
+
     async def test_one_bad_row_does_not_stop_the_batch(self, db_session, monkeypatch):
         await _setup_pending_row(db_session, source_media_type=None)
         await _setup_pending_row(db_session)

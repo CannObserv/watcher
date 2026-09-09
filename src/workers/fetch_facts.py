@@ -271,6 +271,13 @@ async def _back_off(stop: asyncio.Event, seconds: float) -> None:
     Extracted so the two error handlers in :func:`run_blobs_consumer` cannot
     drift: one of them was added by #289, and a copy-pasted second wait is how a
     later change to the backoff reaches only one of the paths that needs it.
+
+    **It covers two of the three copies in this repo.** ``run_registry_consumer``
+    still has the same wait inline (``src/workers/registry_reconcile.py``), and
+    the argument above applies to it verbatim — it is left alone only because
+    sharing this across the two worker modules is a wider change than #289.
+    Anyone touching the backoff should change that one too, or finish the
+    extraction.
     """
     try:
         await asyncio.wait_for(stop.wait(), timeout=seconds)

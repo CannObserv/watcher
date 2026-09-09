@@ -265,6 +265,19 @@ async def process_fact_message(
     return "ignored_unknown_type"
 
 
+async def _back_off(stop: asyncio.Event, seconds: float) -> None:
+    """Park for ``seconds``, cut short by shutdown.
+
+    Extracted so the two error handlers in :func:`run_blobs_consumer` cannot
+    drift: one of them was added by #289, and a copy-pasted second wait is how a
+    later change to the backoff reaches only one of the paths that needs it.
+    """
+    try:
+        await asyncio.wait_for(stop.wait(), timeout=seconds)
+    except TimeoutError:
+        pass
+
+
 async def run_blobs_consumer(
     client: Redis,
     session_factory,
@@ -284,6 +297,14 @@ async def run_blobs_consumer(
     error while processing must park-and-retry, never escape and kill the task
     — the message stays unacked, and resetting ``next_claim`` makes the next
     pass reclaim it promptly instead of waiting out the claim interval.
+
+    The undecodable-frame ack needs **its own** guard to satisfy that (#289).
+    It runs in a sibling ``except`` clause, so the handler below is structurally
+    unable to catch it: unguarded, an undecodable frame plus any broker blip on
+    the ack killed the task, and the two halves are individually ordinary. The
+    registry loop's equivalent branch needs no such guard — it advances a local
+    cursor (``seek``) rather than issuing a command — so do not add one there
+    for symmetry.
     """
     consumer = AsyncBusConsumer(
         client, topic=streams.CONTENT_BLOBS, group=CONSUMER_GROUP, consumer=CONSUMER_NAME
@@ -326,7 +347,25 @@ async def run_blobs_consumer(
                 extra={"message_id": message_id, "error": str(exc)},
             )
             if message_id and message_id != "?":
-                await consumer.ack(message_id)
+                try:
+                    await consumer.ack(message_id)
+                except asyncio.CancelledError:
+                    raise
+                except Exception:
+                    # This ack is the one fallible step that sits *outside* the
+                    # guard below — it runs in a sibling `except`, so that
+                    # handler cannot catch it (#289). Unguarded, an undecodable
+                    # frame plus any broker blip on the ack killed the task and
+                    # the fact inbox with it. Backing off here restores the
+                    # docstring's invariant; the frame stays unacked, is
+                    # re-read, and re-raises this branch to try again.
+                    logger.warning(
+                        "could not ack an undecodable frame — backing off",
+                        extra={"message_id": message_id},
+                        exc_info=True,
+                    )
+                    next_claim = loop.time()
+                    await _back_off(stop, error_backoff_seconds)
             continue
         except asyncio.CancelledError:
             raise
@@ -335,10 +374,7 @@ async def run_blobs_consumer(
             # An unacked in-process message should come back promptly, not
             # after the full claim interval.
             next_claim = loop.time()
-            try:
-                await asyncio.wait_for(stop.wait(), timeout=error_backoff_seconds)
-            except TimeoutError:
-                pass
+            await _back_off(stop, error_backoff_seconds)
             continue
 
 

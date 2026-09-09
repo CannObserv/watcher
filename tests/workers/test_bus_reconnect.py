@@ -37,6 +37,7 @@ from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
+from co_core.pure.adapters.bus.exceptions import BusMessageMissingFieldError
 from redis.exceptions import ConnectionError as RedisConnectionError
 from redis.exceptions import NoPermissionError, OutOfMemoryError
 from redis.exceptions import TimeoutError as RedisTimeoutError
@@ -215,6 +216,105 @@ class TestBlobsConsumerSurvivesABrokerFailure:
             ),
             timeout=5,
         )
+
+
+@dataclass
+class _AnomalyThenFailingAck:
+    """Every read yields an undecodable frame, and the ack for it fails (#289).
+
+    The two halves are individually ordinary — an undecodable frame is what the
+    ``BusMessageAnomaly`` branch exists for, and a broker blip on the ack is the
+    class of error the loop's backoff handler was written to absorb. Nothing
+    exercised them together, and together they used to kill the task: the ack in
+    that branch sits in an ``except`` clause of the ``try`` whose handler would
+    have caught it.
+    """
+
+    error: BaseException
+    stop_event: asyncio.Event
+    stop_after_reads: int = 3
+    reads: int = 0
+    ack_attempts: int = 0
+
+    async def ensure_group(self, *, start_id: str) -> None:
+        await asyncio.sleep(0)
+
+    async def claim_stale(self, *, min_idle_ms: int, count: int) -> list[Any]:
+        await asyncio.sleep(0)
+        return []
+
+    async def read(self, *, count: int, block_ms: int | None) -> list[Any]:
+        await asyncio.sleep(0)
+        self.reads += 1
+        if self.reads >= self.stop_after_reads:
+            self.stop_event.set()
+        raise BusMessageMissingFieldError(
+            "event_type", topic="content.blobs", message_id=f"170000000000-{self.reads}"
+        )
+
+    async def ack(self, message_id: str) -> None:
+        await asyncio.sleep(0)
+        self.ack_attempts += 1
+        raise self.error
+
+    def seek(self, message_id: str) -> None:
+        pass
+
+
+class TestBlobsConsumerSurvivesAFailedAnomalyAck:
+    """#289: the undecodable-frame ack was the one fallible step outside the
+    backoff guard, against an invariant ``run_blobs_consumer``'s own docstring
+    states ("Every fallible step is inside the backoff guard").
+
+    Not reachable through OOM — ``XACK`` is not ``denyoom`` (#288) — so this is
+    the connection/timeout/NOPERM shape, and NOPERM specifically arrives once
+    CannObserv/broker#1 D3 puts an ACL in front of the broker.
+    """
+
+    @pytest.mark.parametrize("error", BROKER_FAILURES)
+    async def test_a_failed_ack_backs_off_and_keeps_reading(self, error, monkeypatch, caplog):
+        stop = asyncio.Event()
+        bus = _AnomalyThenFailingAck(error=error, stop_event=stop)
+        monkeypatch.setattr(ff_mod, "AsyncBusConsumer", lambda *a, **k: bus)
+
+        with caplog.at_level("WARNING", logger="src.workers.fetch_facts"):
+            await asyncio.wait_for(
+                ff_mod.run_blobs_consumer(
+                    MagicMock(),
+                    _never_called_session_factory,
+                    stop=stop,
+                    block_ms=1,
+                    error_backoff_seconds=_FAST_BACKOFF,
+                ),
+                timeout=5,
+            )
+
+        # It kept going: the loop must not return on the first failed ack.
+        assert bus.reads >= 3
+        assert bus.ack_attempts >= 3
+
+    @pytest.mark.parametrize("error", BROKER_FAILURES)
+    async def test_a_failed_ack_is_reported_as_such(self, error, monkeypatch, caplog):
+        """The frame stays unacked and will be re-read, so the operator needs to
+        see the ack failing rather than only the undecodable frame — otherwise
+        the journal shows the same frame skipped forever with no cause."""
+        stop = asyncio.Event()
+        bus = _AnomalyThenFailingAck(error=error, stop_event=stop)
+        monkeypatch.setattr(ff_mod, "AsyncBusConsumer", lambda *a, **k: bus)
+
+        with caplog.at_level("WARNING", logger="src.workers.fetch_facts"):
+            await asyncio.wait_for(
+                ff_mod.run_blobs_consumer(
+                    MagicMock(),
+                    _never_called_session_factory,
+                    stop=stop,
+                    block_ms=1,
+                    error_backoff_seconds=_FAST_BACKOFF,
+                ),
+                timeout=5,
+            )
+
+        assert any("could not ack" in r.message for r in caplog.records)
 
 
 class TestRegistryConsumerSurvivesABrokerFailure:

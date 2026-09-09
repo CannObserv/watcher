@@ -97,7 +97,6 @@ class TestBlobsConsumerSurvivesABrokerFailure:
         stop = asyncio.Event()
         bus = _FlakyReads(failures=2, error=error, stop_event=stop)
         monkeypatch.setattr(ff_mod, "AsyncBusConsumer", lambda *a, **k: bus)
-        monkeypatch.setattr(ff_mod, "migrate_legacy_group", _no_legacy_group)
 
         with caplog.at_level("WARNING", logger="src.workers.fetch_facts"):
             await asyncio.wait_for(
@@ -126,7 +125,6 @@ class TestBlobsConsumerSurvivesABrokerFailure:
             stop_after_reads=1,
         )
         monkeypatch.setattr(ff_mod, "AsyncBusConsumer", lambda *a, **k: bus)
-        monkeypatch.setattr(ff_mod, "migrate_legacy_group", _no_legacy_group)
 
         await asyncio.wait_for(
             ff_mod.run_blobs_consumer(
@@ -187,10 +185,6 @@ class TestRegistryConsumerSurvivesABrokerFailure:
             )
 
         assert not any("dropping" in r.getMessage() for r in caplog.records)
-
-
-async def _no_legacy_group(client) -> str:
-    return ff_mod.NO_LEGACY_GROUP
 
 
 def _never_called_session_factory():

@@ -24,17 +24,18 @@ The consumer side is already covered by the ``noperm`` parametrisations in
 ``tests/workers/test_bus_reconnect.py``; the drain's own retry and
 ceiling-exemption behaviour by ``BROKER_REFUSALS`` in
 ``tests/workers/test_source_revisions_drain.py``. What is left, and what this
-file holds, is the classification itself and the other three publish paths.
+file holds, is the classification itself, the other three publish paths, and
+the ``requirepass`` half of D3 — which redis-py files under ``ConnectionError``
+and the drain therefore already caught, by taxonomy rather than by decision.
 
 ``integration`` is marked **per class**: the classification assertions need no
 database, and they are the guards that most want to run in the default pass.
 """
 
 from datetime import UTC, datetime, timedelta
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import MagicMock
 
 import pytest
-from redis.asyncio import Redis
 from redis.exceptions import (
     AuthenticationError,
     AuthorizationError,
@@ -56,7 +57,11 @@ from src.workers.source_revisions_drain import _TRANSIENT_PUBLISH_ERRORS
 from src.workers.tasks import check_watched_item
 from src.workers.watch_status import publish_watch_status
 from tests.conftest import make_watched_item
-from tests.workers.bus_helpers import mock_session_factory, wire_task_bus
+from tests.workers.bus_helpers import (
+    mock_session_factory,
+    refusing_client,
+    wire_task_bus,
+)
 
 NOW = datetime(2026, 9, 9, 12, 0, 0, tzinfo=UTC)
 
@@ -65,14 +70,8 @@ NOPERM_MESSAGE = "NOPERM this user has no permissions to run the 'xadd' command"
 
 
 def _noperm_client() -> MagicMock:
-    """A client whose every ``XADD`` is denied the way an ACL user denies it.
-
-    ``spec=Redis`` so a test that grows a second bus call fails by naming the
-    method it did not stub.
-    """
-    client = MagicMock(spec=Redis)
-    client.xadd = AsyncMock(side_effect=NoPermissionError(NOPERM_MESSAGE))
-    return client
+    """A client denied the way an ACL user denies: every ``XADD`` refused."""
+    return refusing_client(NoPermissionError(NOPERM_MESSAGE))
 
 
 class TestTheDeniedPublishIsNotAConnectionError:

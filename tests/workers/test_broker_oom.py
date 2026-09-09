@@ -37,7 +37,6 @@ import pytest
 from co_core.pure.adapters.bus import streams
 from co_core.pure.adapters.bus.streams import dlq_name, group_name
 from co_core_aio.bus import AsyncBusConsumer
-from redis.asyncio import Redis
 from redis.exceptions import OutOfMemoryError
 from sqlalchemy import select
 
@@ -53,7 +52,11 @@ from src.workers.source_revisions_drain import _TRANSIENT_PUBLISH_ERRORS
 from src.workers.tasks import check_watched_item
 from src.workers.watch_status import publish_watch_status
 from tests.conftest import make_watched_item
-from tests.workers.bus_helpers import mock_session_factory, wire_task_bus
+from tests.workers.bus_helpers import (
+    mock_session_factory,
+    refusing_client,
+    wire_task_bus,
+)
 
 NOW = datetime(2026, 9, 9, 12, 0, 0, tzinfo=UTC)
 
@@ -62,15 +65,8 @@ OOM_MESSAGE = "command not allowed when used memory > 'maxmemory'."
 
 
 def _oom_client() -> MagicMock:
-    """A client whose every ``XADD`` is refused the way the capped broker refuses.
-
-    ``spec=Redis`` so a test that grows a second bus call fails by naming the
-    method it did not stub, rather than with ``object MagicMock can't be used in
-    'await'`` from a bare mock's auto-attribute.
-    """
-    client = MagicMock(spec=Redis)
-    client.xadd = AsyncMock(side_effect=OutOfMemoryError(OOM_MESSAGE))
-    return client
+    """A client refused the way the capped broker refuses: every ``XADD``."""
+    return refusing_client(OutOfMemoryError(OOM_MESSAGE))
 
 
 class TestTheErrorIsNotAConnectionError:

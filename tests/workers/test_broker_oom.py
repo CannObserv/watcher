@@ -33,22 +33,26 @@ import pytest
 from co_core.pure.adapters.bus import streams
 from co_core.pure.adapters.bus.streams import dlq_name, group_name
 from co_core_aio.bus import AsyncBusConsumer
+from redis.asyncio import Redis
 from redis.exceptions import OutOfMemoryError
 from sqlalchemy import select
 
-import src.core.fetch_policy as fetch_policy_core
-import src.core.watch_status as watch_status_core
+import src.workers.fetch_policy as fetch_policy_mod
 import src.workers.tasks as tasks_mod
+import src.workers.watch_status as watch_status_mod
 from src.core.fetch_commands import create_fetch_command
 from src.core.models.domain import Domain
 from src.core.models.fetch_command import FetchCommand, FetchCommandStatus
 from src.workers.fetch_commands import publish_pending_fetch_commands, reap_fetch_commands
+from src.workers.fetch_policy import publish_fetch_policy
 from src.workers.source_revisions_drain import _TRANSIENT_PUBLISH_ERRORS
 from src.workers.tasks import check_watched_item
+from src.workers.watch_status import publish_watch_status
 from tests.conftest import make_watched_item
 
-pytestmark = pytest.mark.integration
-
+# Marked per class, not per module: the classification assertion and the
+# dead-letter command form need no database, and they are the guards that most
+# want to run in the default (unit) pass rather than only under -m integration.
 NOW = datetime(2026, 9, 9, 12, 0, 0, tzinfo=UTC)
 
 # The broker's own reply text, captured from redis-server 7.0.15.
@@ -56,10 +60,28 @@ OOM_MESSAGE = "command not allowed when used memory > 'maxmemory'."
 
 
 def _oom_client() -> MagicMock:
-    """A client whose every ``XADD`` is refused the way the capped broker refuses."""
-    client = MagicMock()
+    """A client whose every ``XADD`` is refused the way the capped broker refuses.
+
+    ``spec=Redis`` so a test that grows a second bus call fails by naming the
+    method it did not stub, rather than with ``object MagicMock can't be used in
+    'await'`` from a bare mock's auto-attribute.
+    """
+    client = MagicMock(spec=Redis)
     client.xadd = AsyncMock(side_effect=OutOfMemoryError(OOM_MESSAGE))
     return client
+
+
+def _wire_task_bus(module, db_session, monkeypatch) -> None:
+    """Point a periodic publisher's env gate and shared client at the fake.
+
+    ``bus_disabled_reason`` is monkeypatched rather than the env set: the task
+    asks ``src.core.bus`` (not the URL variable) since #262, and
+    ``tests/conftest.py`` clears what it did not set, so setting the pair here
+    would be both indirect and undone.
+    """
+    monkeypatch.setattr(module, "bus_disabled_reason", lambda: None)
+    monkeypatch.setattr(module, "get_shared_bus_client", _oom_client)
+    monkeypatch.setattr(module, "get_session_factory", lambda: _mock_session_factory(db_session))
 
 
 def _mock_session_factory(db_session):
@@ -85,6 +107,7 @@ class TestTheErrorIsNotAConnectionError:
         assert OutOfMemoryError in _TRANSIENT_PUBLISH_ERRORS
 
 
+@pytest.mark.integration
 class TestContentFetchUnderOOM:
     """``content.fetch`` is a **command** stream: a dropped publish is a fetch
     that never happens, and nothing downstream notices the absence. So the only
@@ -130,6 +153,38 @@ class TestContentFetchUnderOOM:
         assert result == {"reissued": 0, "capped": 0, "reapplied": 0}
         assert row.status == FetchCommandStatus.PENDING_PUBLISH
 
+    async def test_the_reapers_reissue_leaves_the_new_row_pending_publish(self, db_session):
+        """The third publish path, and the one that runs during recovery.
+
+        A stalled command is expired and re-issued under a fresh ``command_id``;
+        if that publish were treated as terminal the intent would burn a
+        ``reissue_count`` per pass and hit ``WATCHER_FETCH_MAX_REISSUES`` while
+        the origin was never at fault. It must land ``pending_publish`` for the
+        sweep, exactly like the other two paths.
+        """
+        wi = await make_watched_item(db_session, primary_url="https://lcb.wa.gov/notices")
+        stalled = await create_fetch_command(db_session, wi, now=NOW)
+        stalled.status = FetchCommandStatus.IN_FLIGHT
+        stalled.published_at = datetime.now(UTC) - timedelta(days=7)
+        await db_session.flush()
+
+        result = await reap_fetch_commands(session=db_session, bus_client=_oom_client())
+
+        assert result["reissued"] == 1
+        assert result["capped"] == 0
+        fresh = (
+            (
+                await db_session.execute(
+                    select(FetchCommand).where(FetchCommand.command_id != stalled.command_id)
+                )
+            )
+            .scalars()
+            .one()
+        )
+        assert fresh.status == FetchCommandStatus.PENDING_PUBLISH
+        assert fresh.reissue_count == stalled.reissue_count + 1
+        assert fresh.intent_id == stalled.intent_id
+
     async def test_the_command_publishes_once_the_cap_clears(self, db_session):
         """Recovery is the other half of "retryable": the same row, same
         ``command_id``, goes out on the next sweep after the broker frees memory."""
@@ -146,23 +201,33 @@ class TestContentFetchUnderOOM:
         assert await healthy.xlen(streams.CONTENT_FETCH) == 1
 
 
+@pytest.mark.integration
 class TestConfigStateProducersUnderOOM:
     """``content.fetch-policy`` and ``info.watch-status`` are LWW full sets with
     no outbox: the correct response to a refusal is to fail the job loudly and
     let the next periodic tick republish everything. What must NOT happen is a
-    swallowed exception, which would report a stale set as delivered."""
+    swallowed exception, which would report a stale set as delivered.
 
-    async def test_fetch_policy_publish_raises(self, db_session):
+    Driven through the **Procrastinate tasks**, not the core publish helpers.
+    The helpers raising is not the property — "the job is recorded failed and
+    the cron tick is the retry" is, and a ``try/except`` added to
+    ``src/workers/fetch_policy.py`` later would leave a helper-level test green
+    while doing exactly the thing the paragraph above forbids."""
+
+    async def test_the_fetch_policy_task_lets_the_refusal_escape(self, db_session, monkeypatch):
         db_session.add(Domain(name="lcb.wa.gov", min_interval=3.0))
         await db_session.flush()
+        _wire_task_bus(fetch_policy_mod, db_session, monkeypatch)
 
         with pytest.raises(OutOfMemoryError):
-            await fetch_policy_core.publish_full_policy_set(db_session, _oom_client())
+            await publish_fetch_policy()
 
-    async def test_watch_status_publish_raises(self, db_session):
+    async def test_the_watch_status_task_lets_the_refusal_escape(self, db_session, monkeypatch):
         await make_watched_item(db_session, primary_url="https://lcb.wa.gov/notices")
+        _wire_task_bus(watch_status_mod, db_session, monkeypatch)
+
         with pytest.raises(OutOfMemoryError):
-            await watch_status_core.publish_full_status_set(db_session, _oom_client())
+            await publish_watch_status()
 
 
 class TestDeadLetterCommandForm:
@@ -196,11 +261,14 @@ class TestDeadLetterCommandForm:
         pending = await client.xpending(streams.CONTENT_BLOBS, group)
         assert pending["pending"] == 0
 
-    async def test_the_dlq_write_is_denyoom_so_quarantine_fails_under_the_cap(self):
-        """The one asymmetry worth stating: reading and acking survive the cap,
-        but quarantining does not — ``XADD <topic>.dlq`` is refused like every
-        other write. A DLQ policy built later must treat the quarantine itself
-        as retryable, not as a step that always succeeds."""
+    async def test_a_refused_dlq_write_propagates_and_leaves_the_frame_unacked(self):
+        """That ``XADD <topic>.dlq`` is ``denyoom`` is an observation, not
+        something this test establishes — it came off the capped broker. What
+        the body checks is the consequence: the refusal propagates and the
+        original is **not** acked, so the frame is still there to quarantine
+        again. That is the asymmetry a DLQ policy has to plan for — reading and
+        acking survive the cap, quarantining does not, so the quarantine is
+        itself a retryable step rather than one that always succeeds."""
         client = _oom_client()
         client.xack = AsyncMock(return_value=1)
         consumer = AsyncBusConsumer(

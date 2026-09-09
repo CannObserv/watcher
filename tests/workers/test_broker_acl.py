@@ -31,21 +31,24 @@ database, and they are the guards that most want to run in the default pass.
 """
 
 from contextlib import asynccontextmanager
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from redis.asyncio import Redis
 from redis.exceptions import NoPermissionError, ResponseError
+from sqlalchemy import select
 
 import src.workers.fetch_policy as fetch_policy_mod
+import src.workers.tasks as tasks_mod
 import src.workers.watch_status as watch_status_mod
 from src.core.fetch_commands import create_fetch_command
 from src.core.models.domain import Domain
-from src.core.models.fetch_command import FetchCommandStatus
-from src.workers.fetch_commands import publish_pending_fetch_commands
+from src.core.models.fetch_command import FetchCommand, FetchCommandStatus
+from src.workers.fetch_commands import publish_pending_fetch_commands, reap_fetch_commands
 from src.workers.fetch_policy import publish_fetch_policy
 from src.workers.source_revisions_drain import _TRANSIENT_PUBLISH_ERRORS
+from src.workers.tasks import check_watched_item
 from src.workers.watch_status import publish_watch_status
 from tests.conftest import make_watched_item
 
@@ -102,7 +105,25 @@ class TestTheOtherProducersUnderNoPerm:
     """#288's table says the other three publish paths do not classify at all,
     and that leaving the row pending or waiting for the next tick is already
     the right answer for a denied publish. #290 inferred that rather than
-    checking it; these check it."""
+    checking it; these check it.
+
+    ``content.fetch`` publishes from **three** call sites, so all three are
+    driven here: a claim of "the other paths need nothing" that exercised only
+    the sweep would leave the reaper — the one path that runs during recovery —
+    asserted but untested (CR 1)."""
+
+    async def test_the_issue_path_leaves_the_row_pending_publish(self, db_session, monkeypatch):
+        """The first of the three, reached when a check issues a command."""
+        wi = await make_watched_item(db_session, primary_url="https://lcb.wa.gov/notices")
+        monkeypatch.setattr(
+            tasks_mod, "get_session_factory", lambda: _mock_session_factory(db_session)
+        )
+
+        result = await check_watched_item(str(wi.id), bus_client=_noperm_client())
+
+        assert result["published"] is False
+        rows = (await db_session.execute(select(FetchCommand))).scalars().all()
+        assert [r.status for r in rows] == [FetchCommandStatus.PENDING_PUBLISH]
 
     async def test_the_fetch_command_sweep_keeps_the_row_pending_publish(self, db_session):
         """``content.fetch`` is a command stream: a dropped publish is a fetch
@@ -119,6 +140,40 @@ class TestTheOtherProducersUnderNoPerm:
 
         assert row.status == FetchCommandStatus.PENDING_PUBLISH
         assert client.xadd.await_count == 10
+
+    async def test_the_reapers_reissue_leaves_the_new_row_pending_publish(self, db_session):
+        """The third path, and the one that runs during recovery.
+
+        A stalled command is expired and re-issued under a fresh ``command_id``;
+        if that publish were treated as terminal the intent would burn a
+        ``reissue_count`` per pass and hit ``WATCHER_FETCH_MAX_REISSUES`` while
+        the origin was never at fault — an ACL rule denying XADD is the one
+        cause guaranteed to be in force on every pass until an operator acts.
+        """
+        # One clock: NOW is frozen, so taking published_at off the live clock
+        # would build a row published before it was issued.
+        issued = datetime.now(UTC) - timedelta(days=7)
+        wi = await make_watched_item(db_session, primary_url="https://lcb.wa.gov/notices")
+        stalled = await create_fetch_command(db_session, wi, now=issued)
+        stalled.status = FetchCommandStatus.IN_FLIGHT
+        stalled.published_at = issued
+        await db_session.flush()
+
+        result = await reap_fetch_commands(session=db_session, bus_client=_noperm_client())
+
+        assert result["reissued"] == 1
+        assert result["capped"] == 0
+        fresh = (
+            (
+                await db_session.execute(
+                    select(FetchCommand).where(FetchCommand.command_id != stalled.command_id)
+                )
+            )
+            .scalars()
+            .one()
+        )
+        assert fresh.status == FetchCommandStatus.PENDING_PUBLISH
+        assert fresh.reissue_count == stalled.reissue_count + 1
 
     async def test_the_fetch_policy_task_lets_the_denial_escape(self, db_session, monkeypatch):
         """LWW full set, no outbox: the job must fail loudly so the next cron

@@ -186,10 +186,15 @@ so an at-least-once repeat is an idempotent no-op there.
 **Two failure classes, and conflating them is the bug the drain is shaped to
 avoid.** Building the payload is pure, so a failure is *deterministic* —
 identical every loop — and the row is stamped `dead_lettered_at` at once rather
-than spinning forever. Publishing can fail because the broker is down, which is
+than spinning forever. Publishing can fail because the broker is down, full
+(#288) or denying the command under its ACL (#290), all of which are
 *transient*: retry indefinitely, exempt from the ceiling, because an outage is
 not the row's fault and a data-loss cliff at attempt N discards real revisions.
-Mirrors Archiver's own producer split.
+Mirrors Archiver's own producer split. The classifier's membership and the two
+`ResponseError` subclasses that do not look like outages:
+[BUS-CONNECTION-POLICY.md](BUS-CONNECTION-POLICY.md). What classification does
+*not* change is the backoff — `mark_failure` runs on both branches, so recovery
+waits out the row's current interval either way (#291).
 
 That replaced an `attempts < 10` filter in `select_due` which was neither: it
 silently stopped selecting a row without marking it, so an outage lasting ten

@@ -30,7 +30,6 @@ file holds, is the classification itself and the other three publish paths.
 database, and they are the guards that most want to run in the default pass.
 """
 
-from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock
 
@@ -51,6 +50,7 @@ from src.workers.source_revisions_drain import _TRANSIENT_PUBLISH_ERRORS
 from src.workers.tasks import check_watched_item
 from src.workers.watch_status import publish_watch_status
 from tests.conftest import make_watched_item
+from tests.workers.bus_helpers import mock_session_factory, wire_task_bus
 
 NOW = datetime(2026, 9, 9, 12, 0, 0, tzinfo=UTC)
 
@@ -67,23 +67,6 @@ def _noperm_client() -> MagicMock:
     client = MagicMock(spec=Redis)
     client.xadd = AsyncMock(side_effect=NoPermissionError(NOPERM_MESSAGE))
     return client
-
-
-def _mock_session_factory(db_session):
-    @asynccontextmanager
-    async def _ctx():
-        yield db_session
-
-    factory = MagicMock()
-    factory.return_value = _ctx()
-    return factory
-
-
-def _wire_task_bus(module, db_session, monkeypatch) -> None:
-    """Point a periodic publisher's env gate and shared client at the fake."""
-    monkeypatch.setattr(module, "bus_disabled_reason", lambda: None)
-    monkeypatch.setattr(module, "get_shared_bus_client", _noperm_client)
-    monkeypatch.setattr(module, "get_session_factory", lambda: _mock_session_factory(db_session))
 
 
 class TestTheDeniedPublishIsNotAConnectionError:
@@ -116,7 +99,7 @@ class TestTheOtherProducersUnderNoPerm:
         """The first of the three, reached when a check issues a command."""
         wi = await make_watched_item(db_session, primary_url="https://lcb.wa.gov/notices")
         monkeypatch.setattr(
-            tasks_mod, "get_session_factory", lambda: _mock_session_factory(db_session)
+            tasks_mod, "get_session_factory", lambda: mock_session_factory(db_session)
         )
 
         result = await check_watched_item(str(wi.id), bus_client=_noperm_client())
@@ -181,14 +164,14 @@ class TestTheOtherProducersUnderNoPerm:
         delivered."""
         db_session.add(Domain(name="lcb.wa.gov", min_interval=3.0))
         await db_session.flush()
-        _wire_task_bus(fetch_policy_mod, db_session, monkeypatch)
+        wire_task_bus(fetch_policy_mod, db_session, monkeypatch, _noperm_client)
 
         with pytest.raises(NoPermissionError):
             await publish_fetch_policy()
 
     async def test_the_watch_status_task_lets_the_denial_escape(self, db_session, monkeypatch):
         await make_watched_item(db_session, primary_url="https://lcb.wa.gov/notices")
-        _wire_task_bus(watch_status_mod, db_session, monkeypatch)
+        wire_task_bus(watch_status_mod, db_session, monkeypatch, _noperm_client)
 
         with pytest.raises(NoPermissionError):
             await publish_watch_status()

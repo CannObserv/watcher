@@ -6,9 +6,7 @@ at once, while a publish that fails against the broker is *transient* and retrie
 forever. Getting that backwards either loses revisions or wedges the drain.
 """
 
-from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
-from unittest.mock import MagicMock
 
 import fakeredis
 import pytest
@@ -23,6 +21,7 @@ from src.core.models.change_revision import ChangeRevision
 from src.core.models.pending_archiver_sync import PendingArchiverSync
 from src.workers.source_revisions_drain import drain_pending_archiver_sync
 from tests.conftest import make_watched_item
+from tests.workers.bus_helpers import mock_session_factory
 
 pytestmark = pytest.mark.integration
 
@@ -46,18 +45,6 @@ BROKER_REFUSALS = [
         id="noperm",
     ),
 ]
-
-
-def _async_session_factory_returning(db_session: AsyncSession):
-    """Return a fake session-factory that yields the given test session."""
-
-    @asynccontextmanager
-    async def _ctx():
-        yield db_session
-
-    factory = MagicMock()
-    factory.return_value = _ctx()
-    return factory
 
 
 async def _setup_pending_row(db_session: AsyncSession, **over) -> tuple:
@@ -102,9 +89,7 @@ async def _setup_pending_row(db_session: AsyncSession, **over) -> tuple:
 def _wire(db_session, monkeypatch):
     from src.workers import source_revisions_drain as mod
 
-    monkeypatch.setattr(
-        mod, "get_session_factory", lambda: _async_session_factory_returning(db_session)
-    )
+    monkeypatch.setattr(mod, "get_session_factory", lambda: mock_session_factory(db_session))
 
 
 class TestPublish:

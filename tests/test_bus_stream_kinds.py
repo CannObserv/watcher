@@ -34,7 +34,8 @@ import pathlib
 
 import pytest
 from co_core.pure.adapters.bus import streams
-from co_core.pure.adapters.bus.streams import stream_kind
+from co_core.pure.adapters.bus.streams import dlq_name, stream_kind
+from co_core_aio.bus import AsyncBusConsumer
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 # `src/` is where the bus code lives today, but the hazard's boundary is anything
@@ -396,10 +397,31 @@ class TestNoDeadLetterWriterExistsYet:
             "add that receiver to this rule's exclusion instead."
         )
 
-    def test_the_scanned_roots_are_actually_readable(self):
-        """The guard above passes vacuously if the scan finds nothing — a cwd
-        change alone used to be enough. ``SCANNED_ROOTS`` is anchored on
-        ``__file__``, and this is what proves the anchor still resolves."""
+    def test_the_rule_still_has_something_to_look_for(self):
+        """Every other rule here ends in ``assert found, "…been renamed?"``. A
+        **negative** rule cannot: "nothing matched" is its passing state, which
+        is also exactly what a rule looking for the wrong names returns. So the
+        two ways it can go vacuous get their own assertions.
+
+        Upstream renames are the live risk — ``dead_letter`` is a co-core seam
+        and ``dlq_name`` a co-core helper, neither pinned by anything Watcher
+        owns. Rename either and this rule passes forever while Watcher quietly
+        grows the DLQ writer CannObserv/broker#2's ACL does not grant.
+        """
+        assert callable(getattr(AsyncBusConsumer, "dead_letter", None)), (
+            "AsyncBusConsumer.dead_letter is gone — the DLQ rule above is now "
+            "scanning for a name nothing can call, so it passes vacuously. "
+            "Re-derive the seam's new name from co_core_aio.bus."
+        )
+        assert callable(dlq_name), "streams.dlq_name is gone — same vacuity, other spelling"
+
+    def test_the_scanned_roots_are_readable(self):
+        """The other vacuity: a scan that reads no files matches nothing either.
+
+        ``SCANNED_ROOTS`` is anchored on ``__file__`` so the invocation
+        directory cannot cause this, which leaves a roots edit or a repo layout
+        change — cheap to assert, and the negative rule has no other backstop.
+        """
         assert sum(1 for _ in _modules()) > 0, f"scanned nothing under {SCANNED_ROOTS}"
 
 

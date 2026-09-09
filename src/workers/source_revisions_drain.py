@@ -30,7 +30,7 @@ from co_core.pure.adapters.bus.envelope import to_wire
 from co_core.pure.models.changes import SourceRevisionObservedEmit
 from co_core_aio.bus import AsyncBusPublisher
 from redis.asyncio import Redis
-from redis.exceptions import BusyLoadingError, OutOfMemoryError
+from redis.exceptions import BusyLoadingError, NoPermissionError, OutOfMemoryError
 from redis.exceptions import ConnectionError as RedisConnectionError
 from redis.exceptions import TimeoutError as RedisTimeoutError
 
@@ -45,9 +45,13 @@ from src.workers import bp
 
 logger = get_logger(__name__)
 
-# A broker that is unreachable, loading, or out of memory recovers on its own.
-# Anything else that escapes the publish call is treated as non-transient and
-# counts toward the backstop ceiling below.
+# A broker that is unreachable, loading, or out of memory recovers on its own;
+# one denying the command recovers when an operator widens the ACL rule
+# (broker#1 D3, #290). Both of the last two are ``ResponseError`` subclasses
+# rather than connection errors, and both are an outage rather than poison: the
+# event is valid and publishes unchanged once the condition clears. Anything
+# else that escapes the publish call is treated as non-transient and counts
+# toward the backstop ceiling below.
 _TRANSIENT_PUBLISH_ERRORS: tuple[type[BaseException], ...] = (
     ConnectionError,  # builtin
     TimeoutError,  # builtin
@@ -55,6 +59,7 @@ _TRANSIENT_PUBLISH_ERRORS: tuple[type[BaseException], ...] = (
     RedisTimeoutError,
     BusyLoadingError,
     OutOfMemoryError,
+    NoPermissionError,
 )
 
 # Backstop only, for a non-transient publish error that somehow persists. Set

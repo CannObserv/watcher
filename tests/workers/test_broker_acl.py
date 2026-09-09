@@ -35,7 +35,13 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from redis.asyncio import Redis
-from redis.exceptions import NoPermissionError, ResponseError
+from redis.exceptions import (
+    AuthenticationError,
+    AuthorizationError,
+    NoPermissionError,
+    ResponseError,
+)
+from redis.exceptions import ConnectionError as RedisConnectionError
 from sqlalchemy import select
 
 import src.workers.fetch_policy as fetch_policy_mod
@@ -81,6 +87,17 @@ class TestTheDeniedPublishIsNotAConnectionError:
 
     def test_the_revisions_drain_classifies_it_transient_anyway(self):
         assert NoPermissionError in _TRANSIENT_PUBLISH_ERRORS
+
+    def test_the_auth_half_of_d3_is_covered_through_the_connection_entry(self):
+        """D3 adds a ``requirepass`` as well as the ACL users, and redis-py
+        files a failed AUTH under ``ConnectionError`` — so the drain already
+        catches it, by taxonomy rather than by decision (CR 4). Pinned because
+        a reparenting under ``ResponseError`` would reopen #290's hole in the
+        one place nobody would look, and the tuple entry that saves it is not
+        the one that names the error."""
+        for exc_type in (AuthenticationError, AuthorizationError):
+            assert issubclass(exc_type, RedisConnectionError)
+            assert issubclass(exc_type, _TRANSIENT_PUBLISH_ERRORS)
 
 
 @pytest.mark.integration

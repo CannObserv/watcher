@@ -22,6 +22,11 @@ allowed``*). Two observations from that run are what the tests below encode:
 
 The message string is the broker's own, verbatim, so a test reading as a
 simulation still names the thing that was observed.
+
+``integration`` is marked **per class**, not on the module: the classification
+assertion and the dead-letter command form need no database, and they are the
+guards that most want to run in the default pass rather than only under
+``-m integration``.
 """
 
 from contextlib import asynccontextmanager
@@ -50,9 +55,6 @@ from src.workers.tasks import check_watched_item
 from src.workers.watch_status import publish_watch_status
 from tests.conftest import make_watched_item
 
-# Marked per class, not per module: the classification assertion and the
-# dead-letter command form need no database, and they are the guards that most
-# want to run in the default (unit) pass rather than only under -m integration.
 NOW = datetime(2026, 9, 9, 12, 0, 0, tzinfo=UTC)
 
 # The broker's own reply text, captured from redis-server 7.0.15.
@@ -71,6 +73,16 @@ def _oom_client() -> MagicMock:
     return client
 
 
+def _mock_session_factory(db_session):
+    @asynccontextmanager
+    async def _ctx():
+        yield db_session
+
+    factory = MagicMock()
+    factory.return_value = _ctx()
+    return factory
+
+
 def _wire_task_bus(module, db_session, monkeypatch) -> None:
     """Point a periodic publisher's env gate and shared client at the fake.
 
@@ -82,16 +94,6 @@ def _wire_task_bus(module, db_session, monkeypatch) -> None:
     monkeypatch.setattr(module, "bus_disabled_reason", lambda: None)
     monkeypatch.setattr(module, "get_shared_bus_client", _oom_client)
     monkeypatch.setattr(module, "get_session_factory", lambda: _mock_session_factory(db_session))
-
-
-def _mock_session_factory(db_session):
-    @asynccontextmanager
-    async def _ctx():
-        yield db_session
-
-    factory = MagicMock()
-    factory.return_value = _ctx()
-    return factory
 
 
 class TestTheErrorIsNotAConnectionError:
@@ -162,10 +164,14 @@ class TestContentFetchUnderOOM:
         the origin was never at fault. It must land ``pending_publish`` for the
         sweep, exactly like the other two paths.
         """
+        # One clock: NOW is frozen, so taking published_at off the live clock
+        # would build a row published before it was issued once real time moves
+        # past NOW — a state production cannot reach.
+        issued = datetime.now(UTC) - timedelta(days=7)
         wi = await make_watched_item(db_session, primary_url="https://lcb.wa.gov/notices")
-        stalled = await create_fetch_command(db_session, wi, now=NOW)
+        stalled = await create_fetch_command(db_session, wi, now=issued)
         stalled.status = FetchCommandStatus.IN_FLIGHT
-        stalled.published_at = datetime.now(UTC) - timedelta(days=7)
+        stalled.published_at = issued
         await db_session.flush()
 
         result = await reap_fetch_commands(session=db_session, bus_client=_oom_client())

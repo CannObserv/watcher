@@ -15,7 +15,7 @@ import pytest
 from co_core.pure.adapters.bus import streams
 from co_core.pure.adapters.bus.envelope import from_wire
 from redis.exceptions import ConnectionError as RedisConnectionError
-from redis.exceptions import OutOfMemoryError
+from redis.exceptions import NoPermissionError, OutOfMemoryError
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -30,14 +30,21 @@ FP = "sha256:" + "a" * 64
 ARCHIVER_SOURCE_ID = "01HZZ00000000000000000000S"
 COMMAND_ID = "01KZMNQR9B5CQZ1CRGR1E393R6"
 
-# Both refusals a live broker can hand this drain, and the pair a transient
+# Every refusal a live broker can hand this drain, and the set a transient
 # classifier has to get right. The second is #288's: the broker runs
 # `maxmemory-policy noeviction` under an explicit cap, so a full instance
 # refuses XADD for every producer on it — with a `ResponseError` subclass,
-# not a connection error. Message text is redis-server's own, verbatim.
+# not a connection error. Its message text is redis-server's own, verbatim.
+# The third is #290's, the same shape from a different cause: broker#1 D3 puts
+# per-service ACL users in front of the broker, and a rule that is mistyped or
+# too narrow denies XADD on a perfectly valid row.
 BROKER_REFUSALS = [
     pytest.param(RedisConnectionError("connection refused"), id="connection"),
     pytest.param(OutOfMemoryError("command not allowed when used memory > 'maxmemory'."), id="oom"),
+    pytest.param(
+        NoPermissionError("NOPERM this user has no permissions to run the 'xadd' command"),
+        id="noperm",
+    ),
 ]
 
 
@@ -210,9 +217,10 @@ class TestClassification:
     async def test_broker_failure_retries_and_never_dead_letters(
         self, error, db_session, monkeypatch
     ):
-        """A broker that is down *or* full is transient: keep the row, no
-        data-loss cliff. ``content.revisions`` is the only stream with an outbox
-        that can dead-letter at all, so this is where #288's answer is visible."""
+        """A broker that is down, full *or* denying the command is transient:
+        keep the row, no data-loss cliff. ``content.revisions`` is the only
+        stream with an outbox that can dead-letter at all, so this is where
+        #288's and #290's answers are visible."""
         _, _, pending = await _setup_pending_row(db_session)
         _wire(db_session, monkeypatch)
 
@@ -258,6 +266,27 @@ class TestClassification:
             )
         ).scalar_one()
         assert row.dead_lettered_at is None
+
+    @pytest.mark.parametrize("error", BROKER_REFUSALS)
+    async def test_a_broker_refusal_is_logged_transient(
+        self, error, db_session, monkeypatch, caplog
+    ):
+        """``transient`` is the field an operator greps to tell a config problem
+        from a poison row. Saying ``false`` on a refusal that clears the moment
+        the broker recovers points the wrong way at exactly the wrong time
+        (#290)."""
+        await _setup_pending_row(db_session)
+        _wire(db_session, monkeypatch)
+
+        class _Broken:
+            async def xadd(self, *a, **kw):
+                raise error
+
+        with caplog.at_level("WARNING", logger="src.workers.source_revisions_drain"):
+            await drain_pending_archiver_sync(batch_size=10, bus_client=_Broken())
+
+        records = [r for r in caplog.records if r.getMessage() == "drain: publish failed"]
+        assert [r.transient for r in records] == [True]
 
     async def test_one_bad_row_does_not_stop_the_batch(self, db_session, monkeypatch):
         await _setup_pending_row(db_session, source_media_type=None)

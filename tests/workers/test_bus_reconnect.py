@@ -54,18 +54,27 @@ class _FlakyReads:
     blocking ``XREAD`` is what paces these loops. A fake that returns without
     awaiting turns the loop into a tight spin that never cedes control, and a
     test driving it from a second task hangs rather than fails.
+
+    ``group_failures`` fails ``ensure_group`` the same way. It is a separate
+    counter because that call sits *before* the first read, on a path a read
+    failure can never reach.
     """
 
     failures: int
     error: BaseException
     stop_event: asyncio.Event
     stop_after_reads: int = 4
+    group_failures: int = 0
     reads: int = 0
+    groups: int = 0
     acked: list[str] = field(default_factory=list)
     seeks: list[str] = field(default_factory=list)
 
     async def ensure_group(self, *, start_id: str) -> None:
         await asyncio.sleep(0)
+        self.groups += 1
+        if self.groups <= self.group_failures:
+            raise self.error
 
     async def claim_stale(self, *, min_idle_ms: int, count: int) -> list[Any]:
         await asyncio.sleep(0)
@@ -113,6 +122,64 @@ class TestBlobsConsumerSurvivesABrokerFailure:
         # It read past both failures rather than dying on the first.
         assert bus.reads >= 3
         assert any("backing off" in r.getMessage() for r in caplog.records)
+
+    @pytest.mark.parametrize("error", BROKER_FAILURES)
+    async def test_a_failed_ensure_group_backs_off_and_still_reaches_the_read(
+        self, error, monkeypatch, caplog
+    ):
+        """A broker outage racing our boot must not kill the task before the loop
+        starts. ``ensure_group`` is called *inside* the backoff guard, and the
+        ``group_ready`` flag is what keeps it there — hoist either above the
+        ``try`` and the fact inbox dies for the process lifetime with ``/health``
+        still green.
+
+        Nothing pinned this until now: the fake's ``ensure_group`` never failed,
+        and the #285 migration that used to run beside it — the only other thing
+        in that pre-read block — went away with #286.
+        """
+        stop = asyncio.Event()
+        bus = _FlakyReads(failures=0, error=error, stop_event=stop, group_failures=2)
+        monkeypatch.setattr(ff_mod, "AsyncBusConsumer", lambda *a, **k: bus)
+
+        with caplog.at_level("WARNING", logger="src.workers.fetch_facts"):
+            await asyncio.wait_for(
+                ff_mod.run_blobs_consumer(
+                    MagicMock(),
+                    _never_called_session_factory,
+                    stop=stop,
+                    block_ms=1,
+                    error_backoff_seconds=_FAST_BACKOFF,
+                ),
+                timeout=5,
+            )
+
+        # It retried the group creation rather than dying on the first refusal...
+        assert bus.groups == 3
+        # ...and got past it to the reads, which is the state that matters.
+        assert bus.reads >= 1
+        assert any("backing off" in r.getMessage() for r in caplog.records)
+
+    async def test_the_group_is_created_once_and_not_per_pass(self, monkeypatch):
+        """``group_ready`` also has a cheaper job: ``ensure_group`` is idempotent
+        on the broker but not free, and re-issuing it every poll would put an
+        XGROUP CREATE on the hot path of a ~40 ms relay (#287)."""
+        stop = asyncio.Event()
+        bus = _FlakyReads(failures=0, error=RedisConnectionError("unused"), stop_event=stop)
+        monkeypatch.setattr(ff_mod, "AsyncBusConsumer", lambda *a, **k: bus)
+
+        await asyncio.wait_for(
+            ff_mod.run_blobs_consumer(
+                MagicMock(),
+                _never_called_session_factory,
+                stop=stop,
+                block_ms=1,
+                error_backoff_seconds=_FAST_BACKOFF,
+            ),
+            timeout=5,
+        )
+
+        assert bus.reads >= 4  # several passes...
+        assert bus.groups == 1  # ...one group creation
 
     async def test_the_backoff_is_interrupted_by_the_stop_event(self, monkeypatch):
         """Shutdown must not wait out a full backoff. The loop sleeps on

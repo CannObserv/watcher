@@ -67,7 +67,7 @@ from redis.asyncio import Redis
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.core.bus import resolve_stream_maxlen
+from src.core.bus import RETAINED_FULL_SETS, resolve_stream_maxlen
 from src.core.logging import get_logger
 from src.core.models.revoked_info_item import RevokedInfoItem
 from src.core.models.watched_item import WatchedItem, WatchHealthStatus
@@ -76,9 +76,15 @@ from src.core.scheduling.resolution import resolved_schedule_config
 logger = get_logger(__name__)
 
 WATCH_STATUS_STREAM_MAXLEN_ENV = "WATCHER_WATCH_STATUS_STREAM_MAXLEN"
-# ~50k frames holds thousands of full sets at today's corpus and still bounds
-# the consumer's boot replay; same default as Archiver's registry stream.
-DEFAULT_WATCH_STATUS_STREAM_MAXLEN = 50_000
+#: Sized against the item set, for the reason #292 filed against
+#: ``content.fetch-policy``: "holds thousands of full sets and still bounds the
+#: replay" was the wrong bound to be proud of. This stream is config/state too —
+#: Archiver tails it with no group and replays it from ``0-0`` at every boot — so
+#: at a 50_000 cap it had reached 30,452 entries for a four-item corpus, and the
+#: replay length tracked how long Watcher had been running rather than how many
+#: items there are. ``RETAINED_FULL_SETS`` raises the cap for a corpus that
+#: outgrows this number, so the small default is safe as the registry fills.
+DEFAULT_WATCH_STATUS_STREAM_MAXLEN = 500
 
 _HEALTH_WIRE = {
     WatchHealthStatus.OK: "ok",
@@ -166,9 +172,16 @@ async def publish_status_events(client: Redis, events: Sequence[WatchStatusEmit]
     Every publish carries ``maxlen`` (approximate trim) — the full set goes out
     every republish period forever, so retention must be producer-enforced or
     the stream grows without bound (CR-1).
+
+    Floored at ``RETAINED_FULL_SETS`` copies of *this* batch (#292), so a corpus
+    larger than the default raises the cap rather than being trimmed below one
+    full set — which would hand Archiver's boot replay a partial set it cannot
+    distinguish from a complete one.
     """
     maxlen = resolve_stream_maxlen(
-        WATCH_STATUS_STREAM_MAXLEN_ENV, DEFAULT_WATCH_STATUS_STREAM_MAXLEN
+        WATCH_STATUS_STREAM_MAXLEN_ENV,
+        DEFAULT_WATCH_STATUS_STREAM_MAXLEN,
+        floor=len(events) * RETAINED_FULL_SETS,
     )
     publisher = AsyncBusPublisher(client)
     for event in events:

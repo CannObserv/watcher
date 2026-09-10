@@ -24,6 +24,7 @@ from co_core.pure.adapters.bus import streams
 from co_core.pure.adapters.bus.envelope import from_wire
 from co_core.pure.models.changes import FetchPolicyState
 
+from src.core.bus import RETAINED_FULL_SETS
 from src.core.fetch_policy import (
     build_policy_events,
     clear_tombstone,
@@ -291,7 +292,14 @@ class TestTombstoneRows:
 class TestPolicyStreamRetention:
     """watcher#264 CR-3: the fetch-policy full set republishes every 5 minutes
     and had accumulated ~7k untrimmed entries in prod — every publish must
-    carry a maxlen."""
+    carry a maxlen.
+
+    #292: a maxlen that is merely *finite* is not the property the consumer
+    needs. The cap was 50_000 against a three-host set, so the stream reached
+    29,770 entries — 34 days of republish history — and a groupless consumer
+    replays all of it at boot (replicator#85: a 950-second boot replay). The cap
+    has to be sized against the *set*, not against the broker's comfort.
+    """
 
     async def test_every_publish_carries_maxlen(self, monkeypatch):
         captured = []
@@ -310,3 +318,62 @@ class TestPolicyStreamRetention:
         await publish_policy_events(object(), events)
         assert len(captured) == 2
         assert all(e.maxlen == fp_mod.DEFAULT_FETCH_POLICY_STREAM_MAXLEN for e in captured)
+
+    def test_default_cap_is_sized_against_the_host_set(self):
+        """A few hundred, not tens of thousands (#292).
+
+        The host set is three. Every entry above it is republish history a
+        booting consumer replays and then discards, so the default's job is to
+        leave many full republishes of headroom — not a month of them.
+        """
+        import src.core.fetch_policy as fp_mod
+
+        assert fp_mod.DEFAULT_FETCH_POLICY_STREAM_MAXLEN <= 1_000
+
+    async def test_cap_grows_with_the_set_so_it_always_holds_full_ones(self, monkeypatch):
+        """A corpus larger than the default must raise the cap, not be trimmed by it.
+
+        A cap below one full set is the failure the small default would otherwise
+        buy: the republish trims its own earlier frames, so a boot replay returns
+        a partial set no consumer can distinguish from a complete one.
+        """
+        captured = []
+
+        class _CapturingPublisher:
+            def __init__(self, client):
+                pass
+
+            async def execute(self, effect):
+                captured.append(effect)
+
+        import src.core.fetch_policy as fp_mod
+
+        monkeypatch.setattr(fp_mod, "AsyncBusPublisher", _CapturingPublisher)
+        monkeypatch.delenv(fp_mod.FETCH_POLICY_STREAM_MAXLEN_ENV, raising=False)
+        events = build_policy_events([_domain(f"host{i}.example") for i in range(400)], [], now=NOW)
+        await publish_policy_events(object(), events)
+        assert len(captured) == 400
+        assert all(e.maxlen == 400 * RETAINED_FULL_SETS for e in captured)
+
+    async def test_operator_cannot_configure_a_cap_below_a_full_set(self, monkeypatch):
+        """The env override is floored by the set size too.
+
+        Misconfiguration must degrade to *bounded*, never to below one full set —
+        the same direction the non-positive fallback already takes.
+        """
+        captured = []
+
+        class _CapturingPublisher:
+            def __init__(self, client):
+                pass
+
+            async def execute(self, effect):
+                captured.append(effect)
+
+        import src.core.fetch_policy as fp_mod
+
+        monkeypatch.setattr(fp_mod, "AsyncBusPublisher", _CapturingPublisher)
+        monkeypatch.setenv(fp_mod.FETCH_POLICY_STREAM_MAXLEN_ENV, "5")
+        events = build_policy_events([_domain("lcb.wa.gov")], [_tombstone("gone.example")], now=NOW)
+        await publish_policy_events(object(), events)
+        assert all(e.maxlen == 2 * RETAINED_FULL_SETS for e in captured)

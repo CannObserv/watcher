@@ -433,7 +433,19 @@ async def probe_bus_reachable(client: SupportsPing, redis_url: str) -> bool:
     return True
 
 
-def resolve_stream_maxlen(env_name: str, default: int) -> int:
+#: How many full republished sets a config/state stream keeps, when the set is
+#: what binds the cap rather than the constant default.
+#:
+#: It is the floor's multiplier, not the cap itself: at today's corpora the
+#: constants in the producers are larger and win. What it buys is that a
+#: *growing* corpus can never be trimmed below its own full set — ten of them
+#: survives nine consecutive republishes that failed part-way, and still keeps
+#: the boot replay at a small multiple of the set the consumer is rebuilding
+#: rather than at a multiple of how long the producer has been running (#292).
+RETAINED_FULL_SETS = 10
+
+
+def resolve_stream_maxlen(env_name: str, default: int, *, floor: int = 1) -> int:
     """Parse a stream-retention cap from ``env_name`` defensively; never unbounded.
 
     Config/state streams (``content.fetch-policy``, ``info.watch-status``)
@@ -443,10 +455,29 @@ def resolve_stream_maxlen(env_name: str, default: int) -> int:
     Archiver's ``resolve_registry_maxlen``). An invalid or non-positive value
     falls back to ``default`` with a warning — misconfiguration must degrade
     to bounded, not to unbounded.
+
+    ``floor`` is the other half, and #292 is why it exists. A cap that is merely
+    *finite* does not bound what a consumer pays: 50_000 against a three-host
+    policy set let ``content.fetch-policy`` reach 29,770 entries — 34 days of
+    republish history — and a groupless consumer replays every one of them at
+    boot (replicator#85 measured 950 seconds). Sizing the constant against the
+    set instead is what fixes that, and it introduces the opposite hazard: a
+    corpus that outgrows the constant would be trimmed below one full set, so the
+    republish would trim its own earlier frames and a boot replay would return a
+    partial set no consumer can distinguish from a complete one. The caller
+    therefore passes the set it is about to publish (``len(events) *
+    RETAINED_FULL_SETS``) and that wins over both the default and the operator's
+    value — the same direction as the non-positive fallback: degrade to bounded,
+    never to below a full set.
+
+    Keyword-only, and defaulted, so the shared resolver stays the single
+    spelling ``tests/test_bus_stream_kinds.py`` accepts for a bounded cap: a
+    ``max()`` wrapped round the call at each producer would read as derived while
+    satisfying nothing the guard can check.
     """
     raw = os.environ.get(env_name)
     if raw is None or not raw.strip():
-        return default
+        return max(default, floor)
     try:
         value = int(raw)
     except ValueError:
@@ -455,12 +486,12 @@ def resolve_stream_maxlen(env_name: str, default: int) -> int:
             env_name,
             extra={"value": raw, "default": default},
         )
-        return default
+        return max(default, floor)
     if value <= 0:
         logger.warning(
             "non-positive %s — falling back to default",
             env_name,
             extra={"value": raw, "default": default},
         )
-        return default
-    return value
+        return max(default, floor)
+    return max(value, floor)

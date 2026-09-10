@@ -32,6 +32,7 @@ from co_core.pure.adapters.bus.envelope import from_wire
 from co_core.pure.models.changes import WatchStatusState
 from ulid import ULID
 
+from src.core.bus import RETAINED_FULL_SETS
 from src.core.models.revoked_info_item import RevokedInfoItem
 from src.core.models.watched_item import WatchedItem, WatchHealthStatus
 from src.core.watch_status import (
@@ -306,7 +307,13 @@ class TestBuilderHardening:
 class TestStreamRetention:
     """CR-1: the module docstring promises retention rides the producer's
     maxlen — so every publish must actually carry one; unbounded is never an
-    option (the full set republishes every few minutes forever)."""
+    option (the full set republishes every few minutes forever).
+
+    #292 adds the other half: the cap must be sized against the *set*. A
+    50_000-entry cap against a four-item corpus let the stream reach 30,452
+    entries, and Archiver replays this stream from ``0-0`` at every boot, so the
+    replay length tracked republish history rather than item count.
+    """
 
     def test_resolver_defaults_and_overrides(self, monkeypatch):
         from src.core.bus import resolve_stream_maxlen
@@ -341,6 +348,49 @@ class TestStreamRetention:
         await publish_status_events(object(), events)
         assert len(captured) == 2
         assert all(e.maxlen == DEFAULT_WATCH_STATUS_STREAM_MAXLEN for e in captured)
+
+    def test_default_cap_is_sized_against_the_item_set(self):
+        """A few hundred, not tens of thousands (#292) — see the class docstring."""
+        assert DEFAULT_WATCH_STATUS_STREAM_MAXLEN <= 1_000
+
+    def test_resolver_floors_the_cap_at_the_callers_minimum(self, monkeypatch):
+        """``floor`` is what keeps a small default safe as a corpus grows.
+
+        Both directions: it raises a default that is now below a full set, and it
+        raises an operator value that is too.
+        """
+        from src.core.bus import resolve_stream_maxlen
+
+        monkeypatch.delenv(WATCH_STATUS_STREAM_MAXLEN_ENV, raising=False)
+        assert resolve_stream_maxlen(WATCH_STATUS_STREAM_MAXLEN_ENV, 500, floor=9_000) == 9_000
+        assert resolve_stream_maxlen(WATCH_STATUS_STREAM_MAXLEN_ENV, 500, floor=20) == 500
+        monkeypatch.setenv(WATCH_STATUS_STREAM_MAXLEN_ENV, "5")
+        assert resolve_stream_maxlen(WATCH_STATUS_STREAM_MAXLEN_ENV, 500, floor=20) == 20
+
+    async def test_cap_grows_with_the_set_so_it_always_holds_full_ones(self, monkeypatch):
+        """A corpus larger than the default raises the cap rather than being trimmed.
+
+        A cap below one full set means the republish trims its own earlier frames,
+        so Archiver's boot replay returns a partial set it cannot distinguish from
+        a complete one.
+        """
+        captured = []
+
+        class _CapturingPublisher:
+            def __init__(self, client):
+                pass
+
+            async def execute(self, effect):
+                captured.append(effect)
+
+        import src.core.watch_status as ws_mod
+
+        monkeypatch.setattr(ws_mod, "AsyncBusPublisher", _CapturingPublisher)
+        monkeypatch.delenv(WATCH_STATUS_STREAM_MAXLEN_ENV, raising=False)
+        events = build_status_events([_item() for _ in range(400)], [], now=NOW)
+        await publish_status_events(object(), events)
+        assert len(captured) == 400
+        assert all(e.maxlen == 400 * RETAINED_FULL_SETS for e in captured)
 
 
 class TestBuilderHardeningWithFloor:

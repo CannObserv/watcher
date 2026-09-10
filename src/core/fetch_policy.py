@@ -46,7 +46,7 @@ from redis.asyncio import Redis
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.core.bus import resolve_stream_maxlen
+from src.core.bus import RETAINED_FULL_SETS, resolve_stream_maxlen
 from src.core.logging import get_logger
 from src.core.models.domain import Domain
 from src.core.models.fetch_policy_tombstone import FetchPolicyTombstone
@@ -54,9 +54,20 @@ from src.core.models.fetch_policy_tombstone import FetchPolicyTombstone
 logger = get_logger(__name__)
 
 FETCH_POLICY_STREAM_MAXLEN_ENV = "WATCHER_FETCH_POLICY_STREAM_MAXLEN"
-# Producer-enforced retention (watcher#264 CR-3): the full set republishes
-# every 5 minutes forever, and prod had accumulated ~7k untrimmed entries.
-DEFAULT_FETCH_POLICY_STREAM_MAXLEN = 50_000
+#: Producer-enforced retention (watcher#264 CR-3): the full set republishes
+#: every 5 minutes forever, and prod had accumulated ~7k untrimmed entries.
+#:
+#: Sized against the **host set**, not the broker's comfort (#292). The first
+#: cut here was 50_000, which bounds the stream and bounds nothing a consumer
+#: pays: the policy set is three hosts, so 50_000 is ~16,600 full republishes —
+#: 34 days — and ``content.fetch-policy`` is read **groupless**, replayed from
+#: ``0-0`` at every consumer boot. The stream duly reached 29,770 entries and
+#: replicator#85 measured a 950-second boot replay, sixteen minutes in which
+#: ``ensure_group`` had run but neither consume loop reached its first read. A
+#: few hundred leaves many full republishes of headroom at three hosts while
+#: keeping the replay something a boot can absorb; ``RETAINED_FULL_SETS`` below
+#: is what keeps it safe if the corpus ever outgrows this number.
+DEFAULT_FETCH_POLICY_STREAM_MAXLEN = 500
 
 # Bus client construction lives in src.core.bus (#241 CR-4/CR-10) — import
 # BUS_REDIS_URL_ENV / bus_client_from_env from there.
@@ -134,9 +145,22 @@ async def publish_policy_events(client: Redis, events: Sequence[FetchPolicyEmit]
     Every publish carries ``maxlen`` (approximate trim) — same producer-enforced
     retention rule as ``info.watch-status`` (watcher#264 CR-1/CR-3): a
     periodically-republished full set on an untrimmed stream grows without bound.
+
+    The cap is floored at ``RETAINED_FULL_SETS`` copies of *this* batch (#292).
+    The default is deliberately small, which makes the opposite hazard real for
+    the first time: a policy set larger than the cap would have the republish
+    trimming its own earlier frames, and a consumer replaying from ``0-0`` would
+    read a partial set it cannot distinguish from a complete one. Deriving the
+    floor from ``events`` means the cap tracks the corpus instead of needing an
+    operator to notice it was outgrown.
+
+    Approximate trimming keeps this on the safe side twice over: ``MAXLEN ~``
+    only drops whole macro nodes, so the broker retains *at least* the cap.
     """
     maxlen = resolve_stream_maxlen(
-        FETCH_POLICY_STREAM_MAXLEN_ENV, DEFAULT_FETCH_POLICY_STREAM_MAXLEN
+        FETCH_POLICY_STREAM_MAXLEN_ENV,
+        DEFAULT_FETCH_POLICY_STREAM_MAXLEN,
+        floor=len(events) * RETAINED_FULL_SETS,
     )
     publisher = AsyncBusPublisher(client)
     for event in events:

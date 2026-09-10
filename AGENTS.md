@@ -132,6 +132,14 @@ yielding empty chunks raises `ExtractionError` and writes nothing —
 unconditionally, on both sides of a baseline:
 **[docs/CONTENT-PIPELINE.md](docs/CONTENT-PIPELINE.md)**.
 
+**An unchanged fingerprint still announces (#293).** A full fetch renews the
+blob behind the latest revision, so the cache-hit branch upserts a
+`PendingArchiverSync` for it — otherwise Archiver's stored horizon freezes at
+the first observation and a stable item becomes unreplicable. **Never the
+baseline** (that would be a *first* observation of the pair, not a refresh),
+and a renewal may only ever improve a queued row:
+[docs/CONTENT-PIPELINE.md](docs/CONTENT-PIPELINE.md).
+
 Fields, what each 409 is, the authoritative column list, schedule resolution, domain keying, media-type dispatch, template CRUD: [docs/WATCHED-ITEMS.md](docs/WATCHED-ITEMS.md). Lifecycle, delete guards, every dashboard surface: [docs/WATCHED-ITEMS-DASHBOARD.md](docs/WATCHED-ITEMS-DASHBOARD.md).
 
 ## Conventions

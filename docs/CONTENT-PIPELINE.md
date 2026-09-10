@@ -282,7 +282,10 @@ is a separate gap, not closed here.
 Traffic is bounded by full fetches, each of which already produced a
 `content.blobs` fact; a 304 touches no blob and correctly announces nothing.
 The apply result carries `renewal_enqueued` beside `changed` /
-`baseline_established`, and the pipeline logs each renewal at INFO.
+`baseline_established`, the `CHECK_NO_CHANGE` audit carries the same key when
+it fired (present-or-absent, never a `False` — the same shape the 304 path uses
+for `source`), and the pipeline logs each renewal at INFO. A declined renewal
+logs at WARNING and sets none of them.
 
 ### `info_source_id` on the wire (#252)
 

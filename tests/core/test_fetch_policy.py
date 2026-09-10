@@ -328,7 +328,10 @@ class TestPolicyStreamRetention:
         """
         import src.core.fetch_policy as fp_mod
 
-        assert fp_mod.DEFAULT_FETCH_POLICY_STREAM_MAXLEN <= 1_000
+        # A range, not a ceiling (CR 6): a constant of 5 would satisfy "not tens
+        # of thousands" while leaving the cap at the floor on every publish — the
+        # opposite mistake, and the headroom is the point.
+        assert 100 <= fp_mod.DEFAULT_FETCH_POLICY_STREAM_MAXLEN <= 1_000
 
     async def test_cap_grows_with_the_set_so_it_always_holds_full_ones(self, monkeypatch):
         """A corpus larger than the default must raise the cap, not be trimmed by it.

@@ -316,20 +316,24 @@ class TestStreamRetention:
     """
 
     def test_resolver_defaults_and_overrides(self, monkeypatch):
+        # The real constant, not a literal (CR 5): a hard-coded 50_000 here read
+        # as this stream's default long after #292 removed it.
+        default = DEFAULT_WATCH_STATUS_STREAM_MAXLEN
         from src.core.bus import resolve_stream_maxlen
 
         monkeypatch.delenv(WATCH_STATUS_STREAM_MAXLEN_ENV, raising=False)
-        assert resolve_stream_maxlen(WATCH_STATUS_STREAM_MAXLEN_ENV, 50_000) == 50_000
+        assert resolve_stream_maxlen(WATCH_STATUS_STREAM_MAXLEN_ENV, default) == default
         monkeypatch.setenv(WATCH_STATUS_STREAM_MAXLEN_ENV, "1234")
-        assert resolve_stream_maxlen(WATCH_STATUS_STREAM_MAXLEN_ENV, 50_000) == 1234
+        assert resolve_stream_maxlen(WATCH_STATUS_STREAM_MAXLEN_ENV, default) == 1234
 
     def test_resolver_never_returns_unbounded(self, monkeypatch, caplog):
+        default = DEFAULT_WATCH_STATUS_STREAM_MAXLEN
         from src.core.bus import resolve_stream_maxlen
 
         for bad in ("not-a-number", "0", "-5"):
             monkeypatch.setenv(WATCH_STATUS_STREAM_MAXLEN_ENV, bad)
             with caplog.at_level("WARNING"):
-                assert resolve_stream_maxlen(WATCH_STATUS_STREAM_MAXLEN_ENV, 50_000) == 50_000
+                assert resolve_stream_maxlen(WATCH_STATUS_STREAM_MAXLEN_ENV, default) == default
 
     async def test_every_publish_carries_maxlen(self, monkeypatch):
         captured = []
@@ -350,8 +354,14 @@ class TestStreamRetention:
         assert all(e.maxlen == DEFAULT_WATCH_STATUS_STREAM_MAXLEN for e in captured)
 
     def test_default_cap_is_sized_against_the_item_set(self):
-        """A few hundred, not tens of thousands (#292) — see the class docstring."""
-        assert DEFAULT_WATCH_STATUS_STREAM_MAXLEN <= 1_000
+        """A few hundred, not tens of thousands (#292) — see the class docstring.
+
+        A *range* (CR 6): an upper bound alone forbids the mistake #292 fixed
+        while blessing the opposite one. A constant of 5 would pass it and leave
+        the cap at the floor on every publish, destroying the many-full-sets
+        headroom the issue actually asked for.
+        """
+        assert 100 <= DEFAULT_WATCH_STATUS_STREAM_MAXLEN <= 1_000
 
     def test_resolver_floors_the_cap_at_the_callers_minimum(self, monkeypatch):
         """``floor`` is what keeps a small default safe as a corpus grows.

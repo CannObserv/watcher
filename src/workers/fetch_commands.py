@@ -506,7 +506,20 @@ async def apply_fetch_blob(
         # pair must describe the latest 200.
         record_validators(watched_item, etag=row.etag, last_modified=row.last_modified, now=now)
         stamp_full_fetch(watched_item, now=now)
-        await _record_check_success(session, watched_item, result, now=now, url=row.url)
+        await _record_check_success(
+            session,
+            watched_item,
+            result,
+            now=now,
+            url=row.url,
+            # A renewal is an unchanged check that still told Archiver
+            # something (#293), and the audit is the only operator-visible
+            # surface that says so — the dashboard activity feed reads these.
+            # Keyed on presence rather than a False: CHECK_NO_CHANGE is the
+            # common event and the renewal is the exception worth naming, the
+            # same shape the 304 path uses for `source` (CR 4).
+            audit_extra={"renewal_enqueued": True} if result.renewal_enqueued else None,
+        )
 
     return {
         "applied": True,

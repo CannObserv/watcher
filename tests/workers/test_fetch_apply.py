@@ -344,7 +344,25 @@ class TestApplyFetchBlob:
             "renewal_enqueued": True,
         }
         assert row.status == FetchCommandStatus.SUCCEEDED
-        assert len(await _audit_events(db_session, EventType.CHECK_NO_CHANGE)) == 1
+        # The audit is the operator-visible surface — the dashboard activity
+        # feed reads these — so a renewal has to be legible there, not only in
+        # the return dict and a log line (CR 4). Same idiom the 304 path uses
+        # to stay distinguishable from an unchanged extraction.
+        (event,) = await _audit_events(db_session, EventType.CHECK_NO_CHANGE)
+        assert event.payload["renewal_enqueued"] is True
+
+    async def test_an_ordinary_cache_hit_leaves_the_audit_unmarked(
+        self, db_session, monkeypatch, tmp_path
+    ):
+        """The key is absent, not False: CHECK_NO_CHANGE is the common event and
+        a renewal is the exception worth naming (CR 4)."""
+        wi, row = await _row_with_fact(db_session, tmp_path)
+        _wire(db_session, monkeypatch, result=WatchedItemResult(cache_hit=True))
+
+        await apply_fetch_blob(row.command_id, registry=ServiceRegistry())
+
+        (event,) = await _audit_events(db_session, EventType.CHECK_NO_CHANGE)
+        assert "renewal_enqueued" not in event.payload
 
     async def test_empty_extraction_reaches_error_health_unstubbed(
         self, db_session, monkeypatch, tmp_path

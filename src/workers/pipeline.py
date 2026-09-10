@@ -46,6 +46,15 @@ logger = get_logger(__name__)
 # from it is not).
 EXTRACTED_CONTENT_MEDIA_TYPE = "text/plain; charset=utf-8"
 
+# The provenance fields ``SourceRevisionObservedEmit`` requires — the ones a
+# renewal must not blank out on a queued row (#293, CR 1). Named here rather
+# than derived from the model: the wire coupling belongs to the drain (#253),
+# and importing the bus contract into the pipeline to answer this would move it.
+# `tests/test_renewal_wire_contract.py` pins the pair against co-core's own
+# model, so promoting a field to required there fails the suite rather than
+# silently reopening the vector (CR 9).
+WIRE_REQUIRED_PROVENANCE_FIELDS = ("blob_uri", "source_media_type", "content_media_type")
+
 
 class ExtractionError(Exception):
     """Raised when the dispatched extractor cannot process the fetched bytes.
@@ -267,14 +276,8 @@ async def _renew_blob_reference(
     and the consumer writes ``media_type`` in the same upsert — but nothing
     else enforces it, and the asymmetry is what makes it worth a guard.
     """
-    missing = [
-        name
-        for name, value in (
-            ("blob_uri", blob.blob_uri),
-            ("source_media_type", blob.source_media_type),
-        )
-        if value is None
-    ]
+    provenance = _provenance_columns(blob, outcome)
+    missing = [name for name in WIRE_REQUIRED_PROVENANCE_FIELDS if provenance[name] is None]
     if missing:
         logger.warning(
             "blob reference is unpublishable — declining to renew",
@@ -287,7 +290,6 @@ async def _renew_blob_reference(
         )
         return False
 
-    provenance = _provenance_columns(blob, outcome)
     await session.execute(
         pg_insert(PendingArchiverSync)
         .values(

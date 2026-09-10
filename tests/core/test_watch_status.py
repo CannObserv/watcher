@@ -367,6 +367,48 @@ class TestStreamRetention:
         monkeypatch.setenv(WATCH_STATUS_STREAM_MAXLEN_ENV, "5")
         assert resolve_stream_maxlen(WATCH_STATUS_STREAM_MAXLEN_ENV, 500, floor=20) == 20
 
+    def test_warning_reports_the_cap_it_actually_applied(self, monkeypatch, caplog):
+        """CR 2: the line says "falling back to default" — it must not name a
+        value other than the one applied.
+
+        Both flooring directions, because the bug is asymmetric: with a floor
+        above the default the effective cap is the floor, and with a floor below
+        an *explicit* value the effective cap is that value.
+        """
+        from src.core.bus import resolve_stream_maxlen
+
+        monkeypatch.setenv(WATCH_STATUS_STREAM_MAXLEN_ENV, "not-a-number")
+        with caplog.at_level("WARNING"):
+            caplog.clear()
+            assert resolve_stream_maxlen(WATCH_STATUS_STREAM_MAXLEN_ENV, 500, floor=9_000) == 9_000
+            assert caplog.records[-1].effective == 9_000
+            caplog.clear()
+            assert resolve_stream_maxlen(WATCH_STATUS_STREAM_MAXLEN_ENV, 500, floor=20) == 500
+            assert caplog.records[-1].effective == 500
+
+    def test_an_explicit_value_below_the_floor_is_not_raised_silently(self, monkeypatch, caplog):
+        """CR 3: an operator who set a cap and did not get it must be told.
+
+        The designed flooring case — the *default* raised by a large corpus —
+        stays silent, or the line fires every republish tick forever to report
+        the mechanism working.
+        """
+        from src.core.bus import resolve_stream_maxlen
+
+        monkeypatch.setenv(WATCH_STATUS_STREAM_MAXLEN_ENV, "5")
+        with caplog.at_level("WARNING"):
+            caplog.clear()
+            assert resolve_stream_maxlen(WATCH_STATUS_STREAM_MAXLEN_ENV, 500, floor=20) == 20
+            assert len(caplog.records) == 1
+            assert "below the full-set floor" in caplog.records[0].getMessage()
+            assert caplog.records[0].effective == 20
+
+        monkeypatch.delenv(WATCH_STATUS_STREAM_MAXLEN_ENV, raising=False)
+        with caplog.at_level("WARNING"):
+            caplog.clear()
+            assert resolve_stream_maxlen(WATCH_STATUS_STREAM_MAXLEN_ENV, 500, floor=9_000) == 9_000
+            assert caplog.records == []
+
     async def test_cap_grows_with_the_set_so_it_always_holds_full_ones(self, monkeypatch):
         """A corpus larger than the default raises the cap rather than being trimmed.
 

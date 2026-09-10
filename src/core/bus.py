@@ -445,6 +445,23 @@ async def probe_bus_reachable(client: SupportsPing, redis_url: str) -> bool:
 RETAINED_FULL_SETS = 10
 
 
+def _maxlen_extra(raw: str, default: int, floor: int, effective: int) -> dict[str, object]:
+    """The fields a retention-cap log line needs to describe its own outcome.
+
+    ``effective`` is the point (CR 2). Every one of these lines used to report
+    ``default`` as the value it fell back to, which stopped being true the moment
+    the floor could exceed it: an operator mid-incident read ``default: 500``
+    while the cap actually applied was the floor. A log line whose whole job is
+    to explain a misconfiguration must not misdescribe the result of it.
+
+    Passed in rather than recomputed here, because the three call sites do not
+    agree on what it is — a rejected value falls back to ``max(default, floor)``
+    while an explicit value below the floor becomes the floor itself, and a
+    helper that guessed got the second one wrong.
+    """
+    return {"value": raw, "default": default, "floor": floor, "effective": effective}
+
+
 def resolve_stream_maxlen(env_name: str, default: int, *, floor: int = 1) -> int:
     """Parse a stream-retention cap from ``env_name`` defensively; never unbounded.
 
@@ -477,6 +494,9 @@ def resolve_stream_maxlen(env_name: str, default: int, *, floor: int = 1) -> int
     """
     raw = os.environ.get(env_name)
     if raw is None or not raw.strip():
+        # The designed case when the floor binds — a corpus larger than the
+        # constant — so it is silent. Logging it would emit a line per republish
+        # tick per stream, forever, to report the cap working as intended.
         return max(default, floor)
     try:
         value = int(raw)
@@ -484,14 +504,24 @@ def resolve_stream_maxlen(env_name: str, default: int, *, floor: int = 1) -> int
         logger.warning(
             "invalid %s — falling back to default",
             env_name,
-            extra={"value": raw, "default": default},
+            extra=_maxlen_extra(raw, default, floor, max(default, floor)),
         )
         return max(default, floor)
     if value <= 0:
         logger.warning(
             "non-positive %s — falling back to default",
             env_name,
-            extra={"value": raw, "default": default},
+            extra=_maxlen_extra(raw, default, floor, max(default, floor)),
         )
         return max(default, floor)
+    if floor > value:
+        # An explicit value the floor overrides is the one flooring case that is
+        # *misconfiguration* rather than design: the operator asked for a cap and
+        # did not get it. Loud for the same reason as the two branches above, and
+        # bounded in volume by being reachable only while the variable is set.
+        logger.warning(
+            "%s is below the full-set floor — using the floor",
+            env_name,
+            extra=_maxlen_extra(raw, default, floor, floor),
+        )
     return max(value, floor)

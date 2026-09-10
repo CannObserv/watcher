@@ -156,6 +156,17 @@ class TestClearBackoffs:
         await db_session.refresh(just_failed)
         assert just_failed.next_attempt_at == scheduled
 
+    async def test_a_second_clear_finds_nothing_to_do(self, db_session):
+        """Self-limiting, and the reason a recovery costs one bulk write rather
+        than one per tick: a cleared row is due, so the predicate that found it
+        no longer matches (CR 13)."""
+        row, _, _ = await _make_pending(db_session, offset_seconds=3600)
+        row.attempts = 7
+        await db_session.flush()
+
+        assert await clear_backoffs(db_session) == 1
+        assert await clear_backoffs(db_session) == 0
+
 
 async def test_select_due_breaks_ties_by_id(db_session):
     """A bulk clear stamps one timestamp across many rows, so ``next_attempt_at``

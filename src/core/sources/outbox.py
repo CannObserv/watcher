@@ -61,10 +61,25 @@ async def clear_backoffs(session: AsyncSession, *, exclude_ids: Sequence[ULID] =
     *backoff*, not scheduling: a row delayed by something other than a failure
     is nothing this function knows how to reason about, so it is left alone.
 
-    ``exclude_ids`` is for the rows the caller already decided this pass. A row
-    that failed beside a success has been told something about itself rather
-    than about the broker, and pulling it forward would retry it every tick —
-    removing exactly the damping the backoff exists to provide.
+    ``exclude_ids`` is for the rows the caller already decided this pass: a row
+    that failed beside a success has been told something about itself, not
+    about the broker, so it serves the backoff it just earned. **That is one
+    pass, not a guarantee.** A row that keeps failing while its siblings
+    publish is pulled forward again on the next publishing pass, so its
+    effective interval is the drain's cadence rather than its own backoff.
+    Acceptable because publish-phase failure on this stream is broker-wide *by
+    construction* — every row ``XADD``s the same stream with uniform fields,
+    and a fault belonging to one row raises in the build phase, which
+    dead-letters before any publish is attempted (CR 11).
+
+    **The bulk update is self-limiting.** A cleared row is due, so
+    ``next_attempt_at > now`` stops matching it: one write per recovery, not
+    one per pass, however long the outage was.
+
+    **Single writer assumed.** This takes row locks across the outbox inside
+    the caller's transaction, which is safe because one process runs the drain
+    (AGENTS.md → *Single process is load-bearing*). A second concurrent drain
+    would contend with the ``FOR UPDATE`` in :func:`select_due`.
     """
     now = datetime.now(UTC)
     result = await session.execute(

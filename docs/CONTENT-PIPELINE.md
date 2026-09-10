@@ -193,8 +193,12 @@ not the row's fault and a data-loss cliff at attempt N discards real revisions.
 Mirrors Archiver's own producer split. The classifier's membership and the two
 `ResponseError` subclasses that do not look like outages:
 [BUS-CONNECTION-POLICY.md](BUS-CONNECTION-POLICY.md). What classification does
-*not* change is the backoff — `mark_failure` runs on both branches, so recovery
-waits out the row's current interval either way (#291).
+*not* change is the backoff — `mark_failure` runs on both branches, so a row's
+own interval is the same either way. What shortens it is the **next successful
+publish**: `clear_backoffs` pulls every failure-delayed row forward on any pass
+that publishes something, because one accepted `XADD` is the evidence about the
+broker that the waiting rows are missing (#291). Recovery after an outage is the
+next tick, not the 3600 s cap.
 
 That replaced an `attempts < 10` filter in `select_due` which was neither: it
 silently stopped selecting a row without marking it, so an outage lasting ten

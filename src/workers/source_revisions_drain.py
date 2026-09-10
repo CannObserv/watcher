@@ -40,7 +40,13 @@ from src.core.logging import get_logger
 from src.core.models.change_revision import ChangeRevision
 from src.core.models.pending_archiver_sync import PendingArchiverSync
 from src.core.models.watched_item import WatchedItem
-from src.core.sources.outbox import dead_letter, delete_pending, mark_failure, select_due
+from src.core.sources.outbox import (
+    clear_backoffs,
+    dead_letter,
+    delete_pending,
+    mark_failure,
+    select_due,
+)
 from src.workers import bp
 
 logger = get_logger(__name__)
@@ -128,7 +134,7 @@ async def drain_pending_archiver_sync(
         return {"skipped": "no_bus"}
 
     publisher = AsyncBusPublisher(client)
-    published = failed = dead_lettered = 0
+    published = failed = dead_lettered = backoffs_cleared = 0
     session_factory = get_session_factory()
 
     async with session_factory() as session:
@@ -208,6 +214,20 @@ async def drain_pending_archiver_sync(
             await delete_pending(session, row.id)
             published += 1
 
+        # Recovery, not durability (#291). One XADD accepted says the broker is
+        # taking writes again, which is what every row still serving a backoff
+        # is waiting to learn — and after a long outage that wait is the full
+        # 3600 s cap, served *after* the operator already fixed the fault. The
+        # rows this pass touched are excluded: their fate was decided here, and
+        # a row that failed beside a success needs its backoff to stay damped.
+        if published:
+            backoffs_cleared = await clear_backoffs(session, exclude_ids=[row.id for row in rows])
+            if backoffs_cleared:
+                logger.info(
+                    "drain: broker accepting writes, backed-off rows pulled forward",
+                    extra={"backoffs_cleared": backoffs_cleared},
+                )
+
         await session.commit()
 
     if published or failed or dead_lettered:
@@ -217,6 +237,12 @@ async def drain_pending_archiver_sync(
                 "published": published,
                 "failed": failed,
                 "dead_lettered": dead_lettered,
+                "backoffs_cleared": backoffs_cleared,
             },
         )
-    return {"published": published, "failed": failed, "dead_lettered": dead_lettered}
+    return {
+        "published": published,
+        "failed": failed,
+        "dead_lettered": dead_lettered,
+        "backoffs_cleared": backoffs_cleared,
+    }

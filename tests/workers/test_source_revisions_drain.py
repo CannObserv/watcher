@@ -196,7 +196,7 @@ class TestClassification:
         await drain_pending_archiver_sync(batch_size=10, bus_client=client)
         second = await drain_pending_archiver_sync(batch_size=10, bus_client=client)
 
-        assert second == {"published": 0, "failed": 0, "dead_lettered": 0}
+        assert second == {"published": 0, "failed": 0, "dead_lettered": 0, "backoffs_cleared": 0}
 
     @pytest.mark.parametrize("error", BROKER_REFUSALS)
     async def test_broker_failure_retries_and_never_dead_letters(
@@ -317,6 +317,101 @@ class TestClassification:
         assert {r.attempts for r in rows} == {1}
         for row in rows:
             assert timedelta(seconds=55) <= row.next_attempt_at - before <= timedelta(seconds=65)
+
+    async def test_a_successful_publish_pulls_backed_off_siblings_forward(
+        self, db_session, monkeypatch
+    ):
+        """#291: the pass that publishes anything has proved the broker is
+        accepting writes, which is exactly what every sibling is waiting to
+        find out. Without this the outage's last backoff — up to an hour — is
+        served in full after the fault is fixed."""
+        _, _, due = await _setup_pending_row(db_session)
+        _, _, backed_off = await _setup_pending_row(db_session)
+        backed_off.attempts = 7
+        backed_off.next_attempt_at = datetime.now(UTC) + timedelta(seconds=3600)
+        await db_session.commit()
+        _wire(db_session, monkeypatch)
+
+        result = await drain_pending_archiver_sync(
+            batch_size=10, bus_client=fakeredis.FakeAsyncRedis()
+        )
+
+        assert result["published"] == 1
+        assert result["backoffs_cleared"] == 1
+        await db_session.refresh(backed_off)
+        assert backed_off.next_attempt_at <= datetime.now(UTC)
+        assert backed_off.attempts == 7
+
+    async def test_the_pulled_forward_row_publishes_on_the_next_pass(self, db_session, monkeypatch):
+        """The operator-visible end of #291: the cutover is fixed, the next
+        minute's drain publishes the backlog. Before, that row sat until its
+        3600 s interval expired."""
+        _, _, due = await _setup_pending_row(db_session)
+        _, _, backed_off = await _setup_pending_row(db_session)
+        backed_off.attempts = 7
+        backed_off.next_attempt_at = datetime.now(UTC) + timedelta(seconds=3600)
+        await db_session.commit()
+        _wire(db_session, monkeypatch)
+        client = fakeredis.FakeAsyncRedis()
+
+        await drain_pending_archiver_sync(batch_size=10, bus_client=client)
+        _wire(db_session, monkeypatch)
+        second = await drain_pending_archiver_sync(batch_size=10, bus_client=client)
+
+        assert second["published"] == 1
+        assert await client.xlen(streams.CONTENT_REVISIONS) == 2
+        assert (await db_session.execute(select(PendingArchiverSync))).scalars().all() == []
+
+    async def test_a_pass_that_publishes_nothing_clears_no_backoff(self, db_session, monkeypatch):
+        """The evidence is a *successful* XADD. A pass where every publish was
+        refused proves the opposite, and clearing there would turn the backoff
+        into a tight retry loop against a broker that is still refusing."""
+        await _setup_pending_row(db_session)
+        _, _, backed_off = await _setup_pending_row(db_session)
+        backed_off.attempts = 7
+        scheduled = datetime.now(UTC) + timedelta(seconds=3600)
+        backed_off.next_attempt_at = scheduled
+        await db_session.commit()
+        _wire(db_session, monkeypatch)
+
+        class _Broken:
+            async def xadd(self, *a, **kw):
+                raise NoPermissionError("NOPERM this user has no permissions")
+
+        result = await drain_pending_archiver_sync(batch_size=10, bus_client=_Broken())
+
+        assert result["published"] == 0
+        assert result["backoffs_cleared"] == 0
+        await db_session.refresh(backed_off)
+        assert backed_off.next_attempt_at == scheduled
+
+    async def test_a_row_that_failed_beside_a_success_keeps_its_backoff(
+        self, db_session, monkeypatch
+    ):
+        """The damping case. A row that fails in the same pass that another
+        succeeds has been told something about *itself*, not about the broker,
+        so it serves its backoff — otherwise it retries every tick forever."""
+        _, _, failing = await _setup_pending_row(db_session)
+        _, _, succeeding = await _setup_pending_row(db_session)
+        _wire(db_session, monkeypatch)
+        healthy = fakeredis.FakeAsyncRedis()
+        first = {"done": False}
+
+        class _OneBadRow:
+            async def xadd(self, *a, **kw):
+                if not first["done"]:
+                    first["done"] = True
+                    raise NoPermissionError("NOPERM this user has no permissions")
+                return await healthy.xadd(*a, **kw)
+
+        result = await drain_pending_archiver_sync(batch_size=10, bus_client=_OneBadRow())
+
+        assert result["published"] == 1
+        assert result["failed"] == 1
+        assert result["backoffs_cleared"] == 0
+        rows = (await db_session.execute(select(PendingArchiverSync))).scalars().all()
+        assert len(rows) == 1
+        assert rows[0].next_attempt_at > datetime.now(UTC)
 
     async def test_one_bad_row_does_not_stop_the_batch(self, db_session, monkeypatch):
         await _setup_pending_row(db_session, source_media_type=None)

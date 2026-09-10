@@ -166,3 +166,38 @@ duplicate :: **Notifications.** One `notification_templates` table; a row's `vis
 duplicate :: `global` / `domain` / `watched_item` — decides where it fires. **Bodies are
 duplicate :: source Markdown and must be block-structured**, never `\n`-joined — guarded by
 duplicate :: `tests/core/notifications/test_content.py::TestMarkdownListContract`.
+
+# --- Judged losses from the #292 curation round -------------------------------
+# Three class-C tightenings, all verified with `--claims`: 141 atoms at base, 0
+# dropped. Every backticked identifier, issue ref and link target in these lines
+# still stands in AGENTS.md — what went is connective prose, and in two cases a
+# path whose depth lives in the doc the surviving pointer names.
+#
+# The editorial rule applied: prose is load-bearing only where no guard is.
+# `no title attributes` has no automated guard (checked: nothing in tests/ or
+# scripts/ forbids the attribute), so it stays inline stated as the rule with
+# nothing behind it. The touch-target idiom and HTMX detection each have guards
+# that fail the build, so their depth moved to the pointer.
+
+# --- Style & UI / Accessibility -> docs/STYLE.md §7 (L120-130) ---
+# Dropped: the `min-h-[44px]` / `.btn` / `min-h-0` enumeration. docs/STYLE.md §7
+# carries it in more detail (11 `44px` hits, 4 `min-h-[44px]`, 2 `min-h-0`),
+# including the #203 reference and the full list of classes that bake it in.
+# The two guard paths survive inline, which is what an agent needs to act.
+tighten :: **Accessibility:** WCAG 2.1 AA, and no `title` attributes. **Touch-target idiom (#203):**
+
+# --- Style & UI / HTMX -> docs/UI.md §3 (L425) ---
+# Dropped: the `src/dashboard/deps.py` link and the `partials/flash_oob.html`
+# path. docs/UI.md carries both (1 `is_htmx`, 1 `HX-Request`, 3 `flash_oob`).
+# `is_htmx(request)` itself is KEPT inline — it is the actionable atom, and the
+# point of the line is that an agent writes that call rather than reads a header.
+tighten :: **HTMX:** **Detect HTMX with `is_htmx(request)`** ([src/dashboard/deps.py](src/dashboard/deps.py))
+
+# --- Agent Skills -> docs/SKILLS.md (Directory Layout, Local Overrides, Linked Projects) ---
+# Two base lines merged into one. Dropped: the `skills/` + `.claude/skills/`
+# layout enumeration and the agentskills.io attribution — docs/SKILLS.md carries
+# all of it (11 `skills-vendor` hits, 2 agentskills.io, 1 settings.local.json,
+# 1 "Linked Projects"). The shadowing rule and the settings.local.json
+# requirement stay inline: those are the two facts that change what an agent does.
+tighten :: Skills live in `skills/` (agentskills.io) and `.claude/skills/` (Claude Code).
+tighten :: Cross-project search to the sister `notifier` index requires a per-instance

@@ -53,6 +53,8 @@ The exe.dev proxy forwards 3000–9999; dev server at `https://watcher.exe.xyz:8
 
 **The bus.** Archiver operates the broker; watcher publishes four streams and consumes two — `content.blobs` (single-member group `watcher.blobs`, derived by co-core's `group_name` — #285) and `info.registry` (**groupless**, replayed from `0-0` every boot). `WATCHER_BUS_REDIS_URL` unset → publish tasks skip loudly. Stream inventory and ownership, the fetch contracts, `info_source_id` on the wire: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) → *Redis and the bus*.
 
+**Retention is sized against the set (#292).** A config/state cap is floored per batch — never raise one without its floor; `tests/test_bus_stream_kinds.py` fails the build either way.
+
 **Connection policy (#287, #288, #290).** `socket_timeout` is a **floor**, not a ceiling — derive it from `src/core/read_windows.py`, never transcribe a window; retries are an explicit **zero** (a redis-py retry re-sends the command). A full broker refuses `XADD` with `OutOfMemoryError`, and an ACL user denies it with `NoPermissionError` — both `ResponseError`s and **not** connection errors: keep both transient in every producer. [docs/BUS-CONNECTION-POLICY.md](docs/BUS-CONNECTION-POLICY.md).
 
 ## Server Lifecycle
@@ -172,17 +174,15 @@ is only what is easy to get wrong.
 
 **Dark Mode:** Tailwind `dark:` variants on every color utility. Class-based toggle (`<html class="dark">`), localStorage key `watcher-color-scheme`.
 
-**Accessibility:** WCAG 2.1 AA, and no `title` attributes. **Touch-target idiom (#203):** component classes own the 44px guarantee — never restate `min-h-[44px]` on a `.btn`, never `min-h-0`. [docs/STYLE.md](docs/STYLE.md) §7–8 (guards: `tests/dashboard/test_touch_targets.py`, `scripts/check-touch-targets.sh`).
+**Accessibility:** WCAG 2.1 AA, and no `title` attributes — the rule here with no guard behind it. The touch-target idiom (#203) is guarded by `tests/dashboard/test_touch_targets.py` and `scripts/check-touch-targets.sh`, over [docs/STYLE.md](docs/STYLE.md) §7–8.
 
 **CSS:** Tailwind v4 with `@theme` in `input.css`; use the component classes rather than raw utilities, and never a CDN build.
 
-**HTMX:** **Detect HTMX with `is_htmx(request)`** ([src/dashboard/deps.py](src/dashboard/deps.py)), never a bare `HX-Request` read — guarded by `tests/dashboard/test_htmx_detection.py` (#211). OOB flash via `partials/flash_oob.html`.
+**HTMX:** **detect with `is_htmx(request)`**, never a bare `HX-Request` read — guarded by `tests/dashboard/test_htmx_detection.py` (#211). OOB flash: [docs/UI.md](docs/UI.md) §3.
 
 ## Agent Skills
 
-Skills live in `skills/` (agentskills.io) and `.claude/skills/` (Claude Code). Local overrides in `skills/` shadow vendor submodules in `skills-vendor/`.
-
-Cross-project search to the sister `notifier` index requires a per-instance `.claude/settings.local.json` (gitignored) — see "Linked Projects" in `docs/SKILLS.md`.
+Local overrides in `skills/` shadow vendor submodules in `skills-vendor/`. Layout, and the per-instance `.claude/settings.local.json` (gitignored) that cross-project search to the sister `notifier` index needs: [docs/SKILLS.md](docs/SKILLS.md).
 
 ## Detail Docs
 

@@ -104,3 +104,14 @@ tier with it. `AGENTS.md` carries the one-entity rule itself; this is the list o
 # not a lie — the content the heading names did not move, and renaming it would
 # break the warrant that now cites it.
 What the #191 collapse removed
+
+# --- Judged 2026-09-10 during the #292 curation. Same shape and same verdict as
+# the #276 block above: the docs tree names an incident-derived section after the
+# issue it came from, and these two postdate the last run that judged any.
+# Nothing left AGENTS.md into them this round — the three losses were warranted
+# `tighten` in .skills/context-loss-ok, and check-seams itself reports "nothing
+# left the policy file since --base". No link anywhere targets either anchor
+# (grepped docs/, AGENTS.md and the root *.md this run), so the slug is free to
+# carry the number and renaming would buy nothing.
+docs/BUS-CONNECTION-POLICY.md :: Behaviour under `OOM command not allowed` (#288)
+docs/BUS-CONNECTION-POLICY.md :: Behaviour under `NOPERM` (#290)

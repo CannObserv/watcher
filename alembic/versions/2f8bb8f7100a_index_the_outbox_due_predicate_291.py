@@ -16,6 +16,14 @@ Partial on ``dead_lettered_at IS NULL`` because both queries carry that
 predicate: a dead-lettered row is terminal, never a candidate for either, and
 so costs nothing to leave out.
 
+**Both key columns**, matching ``select_due``'s ``ORDER BY next_attempt_at,
+id``. The second is not padding. A bulk backoff clear stamps one timestamp
+across the outbox, which collapses the whole backlog into a single sort group:
+measured at 5 000 tied rows, ``(next_attempt_at)`` alone plans an Incremental
+Sort that reads all 5 000 to return a 100-row batch, while
+``(next_attempt_at, id)`` is a plain index scan of exactly 100. The tie case is
+the recovery case, so the index has to cover it.
+
 **Plain ``CREATE INDEX``, not ``CONCURRENTLY``.** The lock is ``SHARE`` on one
 table that normally holds single-digit rows, and the drain that would contend
 for it runs for milliseconds once a minute. ``CONCURRENTLY`` cannot run inside
@@ -43,7 +51,7 @@ def upgrade() -> None:
     op.create_index(
         "ix_pending_archiver_sync_due",
         "pending_archiver_sync",
-        ["next_attempt_at"],
+        ["next_attempt_at", "id"],
         unique=False,
         postgresql_where=sa.text("dead_lettered_at IS NULL"),
         if_not_exists=True,

@@ -357,7 +357,7 @@ class TestOutboxDuePredicateIsIndexed:
 
     def _due_index(self):
         for index in PendingArchiverSync.__table__.indexes:
-            if [c.name for c in index.columns] == ["next_attempt_at"]:
+            if index.name == "ix_pending_archiver_sync_due":
                 return index
         return None
 
@@ -365,6 +365,18 @@ class TestOutboxDuePredicateIsIndexed:
         assert self._due_index() is not None, (
             "select_due and clear_backoffs both scan next_attempt_at"
         )
+
+    def test_the_index_covers_the_order_by_select_due_uses(self):
+        """Both key columns, in `select_due`'s order. The tie case is not
+        hypothetical — a bulk clear stamps one timestamp across the whole
+        backlog, so `next_attempt_at` alone leaves a sort over every backed-off
+        row to return one batch, on the pass right after a recovery (CR 14).
+        Measured at 5 000 tied rows: index scan of all 5 000 plus an
+        Incremental Sort, against a 100-row index scan with the id.
+        """
+        index = self._due_index()
+        assert index is not None
+        assert [c.name for c in index.columns] == ["next_attempt_at", "id"]
 
     def test_the_index_is_partial_on_the_live_rows(self):
         index = self._due_index()

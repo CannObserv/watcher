@@ -25,10 +25,17 @@ class PendingArchiverSync(Base):
     # that publishes (#291). Partial on the same predicate: a dead-lettered row
     # is terminal, so it is never a candidate for either and costs nothing to
     # leave out of the index.
+    #
+    # Both key columns, in `select_due`'s ORDER BY order. `id` is not padding:
+    # a bulk backoff clear stamps one timestamp across the whole outbox, so
+    # `next_attempt_at` alone collapses into a single sort group and the
+    # planner reads every backed-off row to return one batch — on the pass
+    # right after a recovery, which is when the drain is trying to catch up.
     __table_args__ = (
         Index(
             "ix_pending_archiver_sync_due",
             "next_attempt_at",
+            "id",
             postgresql_where=text("dead_lettered_at IS NULL"),
         ),
     )

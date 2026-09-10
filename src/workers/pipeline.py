@@ -236,7 +236,7 @@ async def _renew_blob_reference(
     blob: BlobProvenance,
     outcome: ExtractionOutcome,
     now: datetime,
-) -> None:
+) -> bool:
     """Re-announce ``rev`` under this cycle's blob reference (#293).
 
     Replicator re-references the blob on every full re-fetch of unchanged bytes
@@ -255,7 +255,38 @@ async def _renew_blob_reference(
     a drain holding the row ``FOR UPDATE`` resolves in Postgres: the insert
     waits, then either updates the row the drain kept or inserts fresh after
     the drain deleted it, instead of a stale ORM UPDATE matching zero rows.
+
+    Returns whether it renewed. **A renewal may only ever improve a queued
+    row** (CR 1): this is the one writer that overwrites provenance rather than
+    creating it, so a reference missing a field the wire requires would replace
+    a publishable row with one the drain dead-letters — a real revision lost to
+    a refresh, where the change path's equivalent gap costs only an observation
+    that never existed. Declining also keeps a row that could only dead-letter
+    out of the outbox when there is nothing there to protect. Unreachable
+    today: ``aread_blob`` raises before the pipeline on a null ``blob_uri``,
+    and the consumer writes ``media_type`` in the same upsert — but nothing
+    else enforces it, and the asymmetry is what makes it worth a guard.
     """
+    missing = [
+        name
+        for name, value in (
+            ("blob_uri", blob.blob_uri),
+            ("source_media_type", blob.source_media_type),
+        )
+        if value is None
+    ]
+    if missing:
+        logger.warning(
+            "blob reference is unpublishable — declining to renew",
+            extra={
+                "watched_item_id": str(watched_item.id),
+                "change_revision_id": str(rev.id),
+                "command_id": blob.command_id,
+                "missing": missing,
+            },
+        )
+        return False
+
     provenance = _provenance_columns(blob, outcome)
     await session.execute(
         pg_insert(PendingArchiverSync)
@@ -284,6 +315,7 @@ async def _renew_blob_reference(
             "blob_expires_at": (blob.blob_expires_at.isoformat() if blob.blob_expires_at else None),
         },
     )
+    return True
 
 
 async def process_watched_item(
@@ -410,10 +442,10 @@ async def process_watched_item(
         # reaches this function.
         if not latest_is_announced:
             return WatchedItemResult(cache_hit=True)
-        await _renew_blob_reference(
+        renewed = await _renew_blob_reference(
             session, watched_item, last_rev, blob=blob, outcome=outcome, now=now
         )
-        return WatchedItemResult(cache_hit=True, renewal_enqueued=True)
+        return WatchedItemResult(cache_hit=True, renewal_enqueued=renewed)
 
     # Fingerprint changed: insert new ChangeRevision.
     rev = ChangeRevision(

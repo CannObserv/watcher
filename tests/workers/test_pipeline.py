@@ -674,6 +674,65 @@ class TestBlobReferenceRenewal:
         assert row.attempts == 1
         assert row.blob_expires_at == _RENEWED_BLOB.blob_expires_at
 
+    async def test_an_unpublishable_reference_never_degrades_a_queued_row(self, db_session):
+        """CR 1: the renewal is the only writer that can *overwrite* provenance.
+
+        The change path can only ever create a row, so a wire-required field it
+        lacks costs one observation that never existed. Here the same gap would
+        replace a publishable row with one the drain dead-letters — a real
+        revision lost to a refresh. Unreachable today (``aread_blob`` raises
+        before the pipeline on a null URI, and the consumer writes
+        ``media_type`` alongside it), so this pins the invariant rather than a
+        live path.
+        """
+        wi = await self._item(db_session)
+        await process_watched_item(db_session, wi, raw_content=_HTML, blob=_FIRST_BLOB)
+        await process_watched_item(db_session, wi, raw_content=_HTML_CHANGED, blob=_FIRST_BLOB)
+        await db_session.flush()
+        (queued,) = await self._outbox_rows(db_session, wi)
+        queued_id = queued.id
+
+        typeless = BlobProvenance(
+            command_id=_RENEWED_BLOB.command_id,
+            blob_uri=_RENEWED_BLOB.blob_uri,
+            source_media_type=None,
+            blob_expires_at=_RENEWED_BLOB.blob_expires_at,
+        )
+        result = await process_watched_item(
+            db_session, wi, raw_content=_HTML_CHANGED, blob=typeless
+        )
+        await db_session.flush()
+
+        assert result.cache_hit is True
+        assert result.renewal_enqueued is False
+        (row,) = await self._outbox_rows(db_session, wi)
+        assert row.id == queued_id
+        assert row.source_media_type == "text/html"
+        assert row.blob_expires_at == _FIRST_BLOB.blob_expires_at
+
+    async def test_an_unpublishable_reference_enqueues_nothing_when_drained(self, db_session):
+        """The same guard with no row to protect: a renewal that could only
+        dead-letter is not worth queueing."""
+        wi = await self._item(db_session)
+        await process_watched_item(db_session, wi, raw_content=_HTML, blob=_FIRST_BLOB)
+        await process_watched_item(db_session, wi, raw_content=_HTML_CHANGED, blob=_FIRST_BLOB)
+        await db_session.flush()
+        (queued,) = await self._outbox_rows(db_session, wi)
+        await db_session.delete(queued)
+        await db_session.flush()
+
+        uriless = BlobProvenance(
+            command_id=_RENEWED_BLOB.command_id,
+            blob_uri=None,
+            source_media_type="text/html",
+            blob_expires_at=_RENEWED_BLOB.blob_expires_at,
+        )
+        result = await process_watched_item(db_session, wi, raw_content=_HTML_CHANGED, blob=uriless)
+        await db_session.flush()
+
+        assert result.renewal_enqueued is False
+        assert await self._outbox_rows(db_session, wi) == []
+
 
 # ---------------------------------------------------------------------------
 # Extractor dispatch (#168 slice 2)

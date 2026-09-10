@@ -21,7 +21,10 @@ What the kind actually decides, and therefore what these tests pin:
   a deployment knob: the producer republishes the full set, so the trim rides on
   the publish (``BusPublish.maxlen``) rather than an out-of-band operator
   ``XTRIM``. A config/state publish without ``maxlen`` grows without bound and
-  the replay-at-boot cost rises forever.
+  the replay-at-boot cost rises forever. The cap is bounded **below** as well
+  (#292): without a ``floor=`` derived from the set, a corpus that outgrows the
+  constant has the republish trimming its own earlier frames, which is the 0-cap
+  partial replay reached by growth instead of by configuration.
 
 These read the source rather than the runtime, because the failure they guard
 against is a *new* call site written the wrong way — which no existing test
@@ -198,6 +201,20 @@ def _assigned_values(tree: ast.Module, name: str) -> list[ast.expr]:
     return values
 
 
+def _floors_every_binding(tree: ast.Module, name: str) -> bool:
+    """Whether every resolver call bound to ``name`` passes ``floor=`` (CR 4).
+
+    The second half of the retention contract, added with #292. ``_derives_from``
+    answers "bounded above"; this answers "never below one full set", which the
+    resolver can only guarantee if the caller tells it how large the set is.
+    Omitting the keyword is legal Python that silently keeps half the property.
+    """
+    values = _assigned_values(tree, name)
+    return bool(values) and all(
+        isinstance(v, ast.Call) and any(k.arg == "floor" for k in v.keywords) for v in values
+    )
+
+
 def _derives_from(tree: ast.Module, name: str, allowed: frozenset[str]) -> tuple[bool, list]:
     """Whether **every** binding of ``name`` is a call to one of ``allowed``.
 
@@ -343,6 +360,18 @@ class TestConfigStatePublishesAreTrimmed:
                     "other call satisfies 'maxlen comes from somewhere' while guaranteeing "
                     "nothing, and a value of 0 trims the stream to one entry, so a boot replay "
                     "returns a partial set no consumer can tell from a complete one."
+                )
+                # The cap is bounded above *and* below (#292, CR 4). A resolver
+                # call without `floor=` is a cap nothing stops from sitting under
+                # one full set once the corpus outgrows the constant — the same
+                # partial-replay failure as a 0 cap, reached by growth instead of
+                # by configuration, and invisible until a consumer boots.
+                assert _floors_every_binding(tree, maxlen.id), (
+                    f"{path}: every binding of {maxlen.id} must pass floor= — a config/state "
+                    "cap is bounded below as well as above. Without it the cap stays at the "
+                    "constant while the set grows past it, and the republish starts trimming "
+                    "its own earlier frames: a boot replay returns a partial set no consumer "
+                    "can tell from a complete one. Pass floor=len(events) * RETAINED_FULL_SETS."
                 )
             checked.add(topic)
         assert checked, "no config/state publishes found — has BusPublish been renamed?"

@@ -35,7 +35,7 @@ from src.core.models.watched_item import WatchedItem
 from src.core.notifications.events import WatchEvent, WatchEventType
 from src.core.notifications.notify import dispatch_event_notifications
 from src.core.registry import ServiceRegistry, get_registry
-from src.core.utils import watched_item_event_base_metadata
+from src.core.utils import format_utc_iso, watched_item_event_base_metadata
 
 logger = get_logger(__name__)
 
@@ -312,7 +312,9 @@ async def _renew_blob_reference(
             "watched_item_id": str(watched_item.id),
             "change_revision_id": str(rev.id),
             "command_id": blob.command_id,
-            "blob_expires_at": (blob.blob_expires_at.isoformat() if blob.blob_expires_at else None),
+            "blob_expires_at": (
+                format_utc_iso(blob.blob_expires_at) if blob.blob_expires_at else None
+            ),
         },
     )
     return True

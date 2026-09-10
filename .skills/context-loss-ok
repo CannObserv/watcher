@@ -169,9 +169,12 @@ duplicate :: `tests/core/notifications/test_content.py::TestMarkdownListContract
 
 # --- Judged losses from the #292 curation round -------------------------------
 # Three class-C tightenings, all verified with `--claims`: 141 atoms at base, 0
-# dropped. Every backticked identifier, issue ref and link target in these lines
-# still stands in AGENTS.md — what went is connective prose, and in two cases a
-# path whose depth lives in the doc the surviving pointer names.
+# dropped. Read that correctly (CR 8): `claims_dropped: 0` means no atom is
+# "present at base and nowhere now" — the SURFACE, not this file. Seven of them
+# did leave AGENTS.md (`deps.py`, `flash_oob`, `min-h-[44px]`, `min-h-0`,
+# `agentskills.io`, `.claude/skills/`, `44px`) and now live only in the
+# destination docs the surviving pointers name. A later re-judge should grep the
+# destination, not AGENTS.md, before calling one of these entries stale.
 #
 # The editorial rule applied: prose is load-bearing only where no guard is.
 # `no title attributes` has no automated guard (checked: nothing in tests/ or
@@ -179,14 +182,14 @@ duplicate :: `tests/core/notifications/test_content.py::TestMarkdownListContract
 # nothing behind it. The touch-target idiom and HTMX detection each have guards
 # that fail the build, so their depth moved to the pointer.
 
-# --- Style & UI / Accessibility -> docs/STYLE.md §7 (L120-130) ---
+# --- Style & UI / Accessibility -> docs/STYLE.md "7. Touch Targets" ---
 # Dropped: the `min-h-[44px]` / `.btn` / `min-h-0` enumeration. docs/STYLE.md §7
 # carries it in more detail (11 `44px` hits, 4 `min-h-[44px]`, 2 `min-h-0`),
 # including the #203 reference and the full list of classes that bake it in.
 # The two guard paths survive inline, which is what an agent needs to act.
 tighten :: **Accessibility:** WCAG 2.1 AA, and no `title` attributes. **Touch-target idiom (#203):**
 
-# --- Style & UI / HTMX -> docs/UI.md §3 (L425) ---
+# --- Style & UI / HTMX -> docs/UI.md "3. Flash / Notification UX" ---
 # Dropped: the `src/dashboard/deps.py` link and the `partials/flash_oob.html`
 # path. docs/UI.md carries both (1 `is_htmx`, 1 `HX-Request`, 3 `flash_oob`).
 # `is_htmx(request)` itself is KEPT inline — it is the actionable atom, and the

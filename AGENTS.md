@@ -53,7 +53,7 @@ The exe.dev proxy forwards 3000–9999; dev server at `https://watcher.exe.xyz:8
 
 **The bus.** Archiver operates the broker; watcher publishes four streams and consumes two — `content.blobs` (single-member group `watcher.blobs`, derived by co-core's `group_name` — #285) and `info.registry` (**groupless**, replayed from `0-0` every boot). `WATCHER_BUS_REDIS_URL` unset → publish tasks skip loudly. Stream inventory and ownership, the fetch contracts, `info_source_id` on the wire: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) → *Redis and the bus*.
 
-**Retention is sized against the set (#292).** A config/state cap is floored per batch — never raise one without its floor; `tests/test_bus_stream_kinds.py` fails the build either way.
+**Retention is sized against the set (#292).** A config/state cap is floored per batch — `tests/test_bus_stream_kinds.py` fails a publish missing `maxlen` *or* missing `floor=`.
 
 **Connection policy (#287, #288, #290).** `socket_timeout` is a **floor**, not a ceiling — derive it from `src/core/read_windows.py`, never transcribe a window; retries are an explicit **zero** (a redis-py retry re-sends the command). A full broker refuses `XADD` with `OutOfMemoryError`, and an ACL user denies it with `NoPermissionError` — both `ResponseError`s and **not** connection errors: keep both transient in every producer. [docs/BUS-CONNECTION-POLICY.md](docs/BUS-CONNECTION-POLICY.md).
 
@@ -174,7 +174,7 @@ is only what is easy to get wrong.
 
 **Dark Mode:** Tailwind `dark:` variants on every color utility. Class-based toggle (`<html class="dark">`), localStorage key `watcher-color-scheme`.
 
-**Accessibility:** WCAG 2.1 AA, and no `title` attributes — the rule here with no guard behind it. The touch-target idiom (#203) is guarded by `tests/dashboard/test_touch_targets.py` and `scripts/check-touch-targets.sh`, over [docs/STYLE.md](docs/STYLE.md) §7–8.
+**Accessibility:** WCAG 2.1 AA, and no `title` attributes. Touch-target idiom (#203), guarded by `tests/dashboard/test_touch_targets.py` and `scripts/check-touch-targets.sh`: [docs/STYLE.md](docs/STYLE.md) §7–8.
 
 **CSS:** Tailwind v4 with `@theme` in `input.css`; use the component classes rather than raw utilities, and never a CDN build.
 
@@ -182,7 +182,7 @@ is only what is easy to get wrong.
 
 ## Agent Skills
 
-Local overrides in `skills/` shadow vendor submodules in `skills-vendor/`. Layout, and the per-instance `.claude/settings.local.json` (gitignored) that cross-project search to the sister `notifier` index needs: [docs/SKILLS.md](docs/SKILLS.md).
+A skill is symlinked into both `skills/` and `.claude/skills/`; overrides in `skills/` shadow `skills-vendor/`. That, and the per-instance `.claude/settings.local.json` cross-project search to `notifier` needs: [docs/SKILLS.md](docs/SKILLS.md).
 
 ## Detail Docs
 

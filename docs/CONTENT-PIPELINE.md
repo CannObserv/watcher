@@ -261,6 +261,16 @@ the row `FOR UPDATE`:
 - a dead-lettered row is revived (`dead_lettered_at` / `last_error` cleared,
   `attempts` kept): the verdict was about values the renewal has replaced.
 
+**A renewal may only ever improve a row.** It is the one writer that overwrites
+provenance rather than creating it, so a reference missing a wire-required
+field (`blob_uri`, `source_media_type`) would replace a publishable row with
+one the drain dead-letters — a real revision lost to a refresh, where the
+change path's equivalent gap costs only an observation that never existed. The
+renewal declines and logs instead, and reports `renewal_enqueued=False`.
+Unreachable today (`aread_blob` raises before the pipeline on a null URI, and
+the consumer writes `media_type` in the same upsert); the guard is there
+because the asymmetry is not otherwise enforced.
+
 **The baseline is never renewed.** The first revision is the one the change
 path never enqueued, so re-announcing it would be Archiver's *first*
 observation of the pair — a registry insert and a `source_revision_captured`

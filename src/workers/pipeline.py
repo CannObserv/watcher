@@ -121,7 +121,7 @@ class ExtractionOutcome:
     content_media_type: str = EXTRACTED_CONTENT_MEDIA_TYPE
 
 
-def _provenance_columns(blob: BlobProvenance, outcome: ExtractionOutcome) -> dict:
+def _provenance_columns(blob: BlobProvenance, outcome: ExtractionOutcome) -> dict[str, object]:
     """The outbox columns that say where one observation came from (#253).
 
     One spelling for both writers. The change branch inserts them and the

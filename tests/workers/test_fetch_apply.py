@@ -52,6 +52,7 @@ def _stub_pipeline(monkeypatch, *, changed=True, raises=None, result=None) -> As
     """Seam for the pipeline call. ``result`` returns a prepared
     ``WatchedItemResult`` verbatim, for outcomes ``changed=`` cannot spell (a
     cache hit that renewed a blob reference, #293); it wins over ``changed``.
+    ``raises`` beats both — it is checked first, so a stub given both raises.
     """
 
     async def _proc(session, watched_item, *, raw_content, registry=None, blob=None):

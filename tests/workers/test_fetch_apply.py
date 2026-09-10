@@ -19,6 +19,7 @@ from src.core.fetch_commands import create_fetch_command, get_open_command
 from src.core.models.audit_log import AuditLog, EventType
 from src.core.models.domain import Domain
 from src.core.models.fetch_command import OPEN_STATUSES, FetchCommand, FetchCommandStatus
+from src.core.models.pending_archiver_sync import PendingArchiverSync
 from src.core.models.watched_item import WatchHealthStatus
 from src.core.notifications.events import WatchEventType
 from src.core.registry import ServiceRegistry
@@ -47,11 +48,16 @@ def _mock_session_factory(db_session):
     return factory
 
 
-def _stub_pipeline(monkeypatch, *, changed=True, raises=None) -> AsyncMock:
+def _stub_pipeline(monkeypatch, *, changed=True, raises=None, result=None) -> AsyncMock:
+    """Seam for the pipeline call. ``result`` returns a prepared
+    ``WatchedItemResult`` verbatim, for outcomes ``changed=`` cannot spell (a
+    cache hit that renewed a blob reference, #293); it wins over ``changed``.
+    """
+
     async def _proc(session, watched_item, *, raw_content, registry=None, blob=None):
         if raises is not None:
             raise raises
-        return WatchedItemResult(changed=changed)
+        return result if result is not None else WatchedItemResult(changed=changed)
 
     stub = AsyncMock(side_effect=_proc)
     monkeypatch.setattr(fc_mod, "process_watched_item", stub)
@@ -323,13 +329,10 @@ class TestApplyFetchBlob:
         """#293: the pipeline decides; the apply path surfaces the outcome beside
         ``changed`` / ``baseline_established`` and books the cycle as unchanged."""
         wi, row = await _row_with_fact(db_session, tmp_path)
-        monkeypatch.setattr(
-            fc_mod, "get_session_factory", lambda: _mock_session_factory(db_session)
-        )
-        monkeypatch.setattr(
-            fc_mod,
-            "process_watched_item",
-            AsyncMock(return_value=WatchedItemResult(cache_hit=True, renewal_enqueued=True)),
+        _wire(
+            db_session,
+            monkeypatch,
+            result=WatchedItemResult(cache_hit=True, renewal_enqueued=True),
         )
 
         result = await apply_fetch_blob(row.command_id, registry=ServiceRegistry())
@@ -468,6 +471,12 @@ class TestApplyFetchNotModified:
         assert row.status == FetchCommandStatus.NOT_MODIFIED
         # No bytes → the revision-producing half never runs.
         assert stub.await_count == 0
+        # …and nothing reached the outbox. Trivial before #293, when "unchanged"
+        # meant "no row" everywhere; now a full-fetch cache hit CAN enqueue one,
+        # so this is a live distinction rather than a restatement of the line
+        # above (CR 5). Pinned on the outcome, not on the stub.
+        queued = (await db_session.execute(select(PendingArchiverSync))).scalars().all()
+        assert queued == []
         # No WATCH_ERROR, and no notification at all on a steady OK item.
         assert dispatch.await_count == 0
 

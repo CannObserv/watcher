@@ -142,17 +142,25 @@ def build_policy_events(
 async def publish_policy_events(client: Redis, events: Sequence[FetchPolicyEmit]) -> int:
     """XADD each event to ``content.fetch-policy``; returns the count published.
 
+    **``events`` must be the complete policy set.** Not a description of how it
+    happens to be called — a precondition the retention floor depends on, which
+    is why ``tests/test_full_set_publishers.py`` pins this function's only caller
+    to :func:`publish_full_policy_set` (CR 1).
+
     Every publish carries ``maxlen`` (approximate trim) — same producer-enforced
     retention rule as ``info.watch-status`` (watcher#264 CR-1/CR-3): a
     periodically-republished full set on an untrimmed stream grows without bound.
 
-    The cap is floored at ``RETAINED_FULL_SETS`` copies of *this* batch (#292).
-    The default is deliberately small, which makes the opposite hazard real for
-    the first time: a policy set larger than the cap would have the republish
+    The cap is floored at ``RETAINED_FULL_SETS`` copies of the batch (#292). The
+    default is deliberately small, which makes the opposite hazard real for the
+    first time: a policy set larger than the cap would have the republish
     trimming its own earlier frames, and a consumer replaying from ``0-0`` would
     read a partial set it cannot distinguish from a complete one. Deriving the
     floor from ``events`` means the cap tracks the corpus instead of needing an
-    operator to notice it was outgrown.
+    operator to notice it was outgrown — and it is *only* the corpus while the
+    precondition above holds. A partial batch would floor the cap at a fraction
+    of the set and then trim the set down to it, which is the same silent
+    partial-replay failure arriving through the parameter meant to prevent it.
 
     Approximate trimming keeps this on the safe side twice over: ``MAXLEN ~``
     only drops whole macro nodes, so the broker retains *at least* the cap.

@@ -169,14 +169,21 @@ def build_status_events(
 async def publish_status_events(client: Redis, events: Sequence[WatchStatusEmit]) -> int:
     """XADD each event to ``info.watch-status``; returns the count published.
 
+    **``events`` must be the complete status set.** A precondition, not a
+    description of current callers: the retention floor below is derived from it,
+    and ``tests/test_full_set_publishers.py`` pins this function's only caller to
+    :func:`publish_full_status_set` for that reason (CR 1).
+
     Every publish carries ``maxlen`` (approximate trim) — the full set goes out
     every republish period forever, so retention must be producer-enforced or
     the stream grows without bound (CR-1).
 
-    Floored at ``RETAINED_FULL_SETS`` copies of *this* batch (#292), so a corpus
+    Floored at ``RETAINED_FULL_SETS`` copies of the batch (#292), so a corpus
     larger than the default raises the cap rather than being trimmed below one
     full set — which would hand Archiver's boot replay a partial set it cannot
-    distinguish from a complete one.
+    distinguish from a complete one. A *partial* batch would invert that: the
+    floor would be a fraction of the set and the publish would trim the set down
+    to it, which is why the precondition above is load-bearing.
     """
     maxlen = resolve_stream_maxlen(
         WATCH_STATUS_STREAM_MAXLEN_ENV,

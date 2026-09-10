@@ -339,3 +339,35 @@ class TestRetiredTransportColumns:
 
     def test_change_revision_has_no_archiver_revision_id(self):
         assert "archiver_revision_id" not in ChangeRevision.__table__.columns.keys()
+
+
+class TestOutboxDuePredicateIsIndexed:
+    """#291 CR 12: the outbox's two hot queries both filter `next_attempt_at`
+    beside `dead_lettered_at IS NULL`, and neither had an index.
+
+    `select_due` scans every minute and `clear_backoffs` adds a second
+    predicate on the same column. Free while the table is near-empty — which is
+    its normal state, since a row is deleted on success — but the case worth
+    indexing for is the one #291 exists for: an outage has grown the backlog
+    into the thousands and every tick scans it twice.
+
+    The partial predicate matches both queries, so a dead-lettered row costs
+    nothing to skip and nothing to store.
+    """
+
+    def _due_index(self):
+        for index in PendingArchiverSync.__table__.indexes:
+            if [c.name for c in index.columns] == ["next_attempt_at"]:
+                return index
+        return None
+
+    def test_next_attempt_at_carries_an_index(self):
+        assert self._due_index() is not None, (
+            "select_due and clear_backoffs both scan next_attempt_at"
+        )
+
+    def test_the_index_is_partial_on_the_live_rows(self):
+        index = self._due_index()
+        assert index is not None
+        where = index.dialect_options["postgresql"]["where"]
+        assert "dead_lettered_at" in str(where)

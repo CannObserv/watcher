@@ -2,7 +2,7 @@
 
 from datetime import UTC, datetime
 
-from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, func
+from sqlalchemy import DateTime, ForeignKey, Index, Integer, String, Text, func, text
 from sqlalchemy.orm import Mapped, mapped_column
 from ulid import ULID
 
@@ -19,6 +19,19 @@ class PendingArchiverSync(Base):
     """
 
     __tablename__ = "pending_archiver_sync"
+
+    # Both hot queries filter `next_attempt_at` beside `dead_lettered_at IS
+    # NULL` — `select_due` every minute, and `clear_backoffs` on every pass
+    # that publishes (#291). Partial on the same predicate: a dead-lettered row
+    # is terminal, so it is never a candidate for either and costs nothing to
+    # leave out of the index.
+    __table_args__ = (
+        Index(
+            "ix_pending_archiver_sync_due",
+            "next_attempt_at",
+            postgresql_where=text("dead_lettered_at IS NULL"),
+        ),
+    )
 
     id: Mapped[ULID] = mapped_column(ULIDType, primary_key=True, default=generate_ulid)
     change_revision_id: Mapped[ULID] = mapped_column(

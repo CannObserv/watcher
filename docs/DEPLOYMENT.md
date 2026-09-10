@@ -129,7 +129,8 @@ sudo systemctl restart watcher
 
 ## Archiver Sync
 
-Every detected change enqueues a `pending_archiver_sync` row; the
+Every detected change enqueues a `pending_archiver_sync` row, and a full fetch
+that renews the blob reference behind the latest revision upserts one (#293); the
 `drain_pending_archiver_sync` periodic task
 (`src/workers/source_revisions_drain.py`) publishes each as
 `source_revision_observed` on `content.revisions`, on a fixed **1-minute**

@@ -512,6 +512,7 @@ async def apply_fetch_blob(
         "applied": True,
         "changed": result.changed,
         "baseline_established": result.baseline_established,
+        "renewal_enqueued": result.renewal_enqueued,
     }
 
 

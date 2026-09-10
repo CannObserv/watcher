@@ -317,6 +317,32 @@ class TestApplyFetchBlob:
         assert blob.source_media_type == "application/pdf"
         assert blob.blob_expires_at == NOW + timedelta(days=7)
 
+    async def test_a_cache_hit_reports_whether_it_renewed_the_blob_reference(
+        self, db_session, monkeypatch, tmp_path
+    ):
+        """#293: the pipeline decides; the apply path surfaces the outcome beside
+        ``changed`` / ``baseline_established`` and books the cycle as unchanged."""
+        wi, row = await _row_with_fact(db_session, tmp_path)
+        monkeypatch.setattr(
+            fc_mod, "get_session_factory", lambda: _mock_session_factory(db_session)
+        )
+        monkeypatch.setattr(
+            fc_mod,
+            "process_watched_item",
+            AsyncMock(return_value=WatchedItemResult(cache_hit=True, renewal_enqueued=True)),
+        )
+
+        result = await apply_fetch_blob(row.command_id, registry=ServiceRegistry())
+
+        assert result == {
+            "applied": True,
+            "changed": False,
+            "baseline_established": False,
+            "renewal_enqueued": True,
+        }
+        assert row.status == FetchCommandStatus.SUCCEEDED
+        assert len(await _audit_events(db_session, EventType.CHECK_NO_CHANGE)) == 1
+
     async def test_empty_extraction_reaches_error_health_unstubbed(
         self, db_session, monkeypatch, tmp_path
     ):

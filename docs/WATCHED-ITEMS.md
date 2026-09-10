@@ -255,8 +255,9 @@ create/PATCH/re-probe path (API and dashboard) shares
 `ensure_domain_and_resolve_suspension` in
 `src/core/domains.py` (#196). SourceRevisions are published to Archiver as
 `source_revision_observed` facts on `content.revisions` (#253) on every detected
-change; the local `pending_archiver_sync` outbox + drain worker guarantees
-delivery during broker outages. Notifications dispatch inline from the pipeline **once per
+change, and again for the latest revision when a full fetch renews its blob
+reference (#293); the local `pending_archiver_sync` outbox + drain worker
+guarantees delivery during broker outages. Notifications dispatch inline from the pipeline **once per
 WatchedItem** on change detection (`notifications_dispatched ≤ 1`), with
 `change_revision_id` in WatchEvent metadata. `schedule_tick` skips items that
 are paused (`is_active=false`), archived, or `domain_suspended`, and applies the

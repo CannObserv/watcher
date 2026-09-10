@@ -234,6 +234,46 @@ other `None` case — an item with no `source_specs` at all — no longer produc
 revision to attribute: #260 made that item unextractable rather than a full-page
 watch under a spec present in no registry.
 
+### A renewed blob reference is re-announced (#293)
+
+Replicator re-references the blob on every full re-fetch of unchanged bytes —
+the store short-circuits, the object's `customTime` is refreshed, and a fresh
+`blob_available` goes out with a later `blob_expires_at` (replicator
+`docs/STORAGE.md`). The validator age ceiling
+([CONDITIONAL-GET.md](CONDITIONAL-GET.md)) forces such a re-fetch at least
+weekly even for an origin answering 304. So the blob was renewed weekly
+cluster-wide while Archiver's `content_cache_expires_at` for the pair stayed
+at the first observation, and its replication issuance refused every occasion
+once that horizon passed. archiver#201 is the consumer half: a re-observation
+refreshes the two cache columns together, forward-only, and emits nothing.
+
+The producer half is the cache-hit branch of `process_watched_item`. An
+unchanged fingerprint still writes no `ChangeRevision` and dispatches nothing,
+but it **upserts** a `PendingArchiverSync` for the item's latest revision
+carrying this cycle's provenance — the same six columns the change path
+writes (`_provenance_columns`), so the drain publishes the same shape under
+the same envelope key. `change_revision_id` is unique on the outbox, and the
+upsert is one statement so it resolves in Postgres against a drain holding
+the row `FOR UPDATE`:
+
+- a row the drain has not published yet takes the newer provenance in place
+  and is pulled to *now* — one row, the freshest reference;
+- a dead-lettered row is revived (`dead_lettered_at` / `last_error` cleared,
+  `attempts` kept): the verdict was about values the renewal has replaced.
+
+**The baseline is never renewed.** The first revision is the one the change
+path never enqueued, so re-announcing it would be Archiver's *first*
+observation of the pair — a registry insert and a `source_revision_captured`
+on `info.changes`, not a horizon refresh. The rule is "the latest revision has
+an older sibling", the same test the dashboard uses to keep baselines out of
+`changes_today`. That a stable item's baseline never reaches Archiver at all
+is a separate gap, not closed here.
+
+Traffic is bounded by full fetches, each of which already produced a
+`content.blobs` fact; a 304 touches no blob and correctly announces nothing.
+The apply result carries `renewal_enqueued` beside `changed` /
+`baseline_established`, and the pipeline logs each renewal at INFO.
+
 ### `info_source_id` on the wire (#252)
 
 co-core **0.8.0** (cannobserv#300) makes `info_source_id` required on all three

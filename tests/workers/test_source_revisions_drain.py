@@ -463,3 +463,57 @@ class TestGuards:
             )
         ).scalar_one_or_none()
         assert remaining is None
+
+
+class TestRenewal:
+    """#293: a renewed blob horizon rides a fresh outbox row for the same revision.
+
+    The wire shape is unchanged — same envelope key, same fingerprint, same
+    ``captured_at`` — and only the blob reference moves. Archiver dedupes on
+    the pair and takes the later horizon (archiver#201).
+    """
+
+    async def test_a_renewal_republishes_the_same_key_with_the_later_horizon(
+        self, db_session, monkeypatch
+    ):
+        wi, rev, pending = await _setup_pending_row(db_session)
+        first_horizon = pending.blob_expires_at
+        _wire(db_session, monkeypatch)
+        client = fakeredis.FakeAsyncRedis()
+        await drain_pending_archiver_sync(batch_size=10, bus_client=client)
+
+        later = first_horizon + timedelta(days=7)
+        db_session.add(
+            PendingArchiverSync(
+                change_revision_id=rev.id,
+                watched_item_id=wi.id,
+                next_attempt_at=datetime.now(UTC),
+                command_id="01KZMNQR9B5CQZ1CRGR1E393R7",
+                blob_uri="gs://co-gcs-blobs/abc",
+                blob_expires_at=later,
+                source_media_type="text/html",
+                content_media_type="text/plain; charset=utf-8",
+                spec_fingerprint="spec1:sha256:" + "b" * 64,
+            )
+        )
+        await db_session.commit()
+        _wire(db_session, monkeypatch)
+
+        result = await drain_pending_archiver_sync(batch_size=10, bus_client=client)
+
+        assert result["published"] == 1
+        entries = await client.xrange(streams.CONTENT_REVISIONS)
+        assert len(entries) == 2
+        frames = [{k.decode(): v.decode() for k, v in fields.items()} for _, fields in entries]
+        assert frames[0]["key"] == frames[1]["key"]
+        first, second = (
+            from_wire(frame, topic=streams.CONTENT_REVISIONS, message_id=mid.decode()).payload
+            for frame, (mid, _) in zip(frames, entries, strict=True)
+        )
+        assert first.extracted_fingerprint == second.extracted_fingerprint == FP
+        assert first.captured_at == second.captured_at == rev.captured_at
+        assert first.blob_expires_at == first_horizon
+        assert second.blob_expires_at == later
+        assert second.blob_uri == "gs://co-gcs-blobs/abc"
+        assert second.command_id == "01KZMNQR9B5CQZ1CRGR1E393R7"
+        assert (await db_session.execute(select(PendingArchiverSync))).scalars().all() == []

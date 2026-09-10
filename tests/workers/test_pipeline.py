@@ -518,6 +518,163 @@ class TestOutboxProvenance:
         assert row.content_media_type == "text/plain; charset=utf-8"
 
 
+# Two full fetches of the same bytes: Replicator re-references the blob on the
+# second and publishes a fresh fact with a later horizon (replicator
+# docs/STORAGE.md). Same URI, later expiry, new command.
+_FIRST_BLOB = BlobProvenance(
+    command_id="01J9AAAAAAAAAAAAAAAAAAAAAA",
+    blob_uri="gs://co-gcs-blobs/abc",
+    source_media_type="text/html",
+    blob_expires_at=datetime(2026, 9, 1, tzinfo=UTC),
+)
+_RENEWED_BLOB = BlobProvenance(
+    command_id="01J9BBBBBBBBBBBBBBBBBBBBBB",
+    blob_uri="gs://co-gcs-blobs/abc",
+    source_media_type="text/html",
+    blob_expires_at=datetime(2026, 9, 8, tzinfo=UTC),
+)
+
+
+@pytest.mark.integration
+class TestBlobReferenceRenewal:
+    """#293: an unchanged fingerprint re-announces the latest revision when a
+    full fetch renews the blob reference behind it.
+
+    Archiver's ``content_cache_expires_at`` for a pair froze at the first
+    observation because this branch announced nothing, so a stable item became
+    unreplicable once that horizon passed — while Replicator kept renewing the
+    blob on every full re-fetch. The renewal is the same outbox row shape for
+    the same ``ChangeRevision``; Archiver dedupes on the pair and moves the
+    horizon forward-only (archiver#201), so the wire is unchanged.
+    """
+
+    async def _item(self, db_session):
+        wi = await make_watched_item(db_session, name="Renewal")
+        wi.effective_url = "https://example.com"
+        wi.source_specs = [_SPEC_FULL_PAGE]
+        await db_session.flush()
+        return wi
+
+    async def _outbox_rows(self, db_session, wi) -> list[PendingArchiverSync]:
+        # populate_existing: the renewal is a Core upsert, so an identity the
+        # test loaded earlier must be re-read from the row, not the map.
+        result = await db_session.execute(
+            select(PendingArchiverSync)
+            .where(PendingArchiverSync.watched_item_id == wi.id)
+            .execution_options(populate_existing=True)
+        )
+        return list(result.scalars().all())
+
+    async def _revisions(self, db_session, wi) -> list[ChangeRevision]:
+        result = await db_session.execute(
+            select(ChangeRevision)
+            .where(ChangeRevision.watched_item_id == wi.id)
+            .order_by(ChangeRevision.captured_at.desc())
+        )
+        return list(result.scalars().all())
+
+    async def test_cache_hit_after_a_change_re_announces_the_latest_revision(self, db_session):
+        """The drained case: the change's row is gone, the renewal enqueues a new
+        one for the same revision, carrying the fresh fact's provenance."""
+        wi = await self._item(db_session)
+        await process_watched_item(db_session, wi, raw_content=_HTML, blob=_FIRST_BLOB)
+        await process_watched_item(db_session, wi, raw_content=_HTML_CHANGED, blob=_FIRST_BLOB)
+        await db_session.flush()
+        (queued,) = await self._outbox_rows(db_session, wi)
+        await db_session.delete(queued)  # the drain published it
+        await db_session.flush()
+
+        with patch(
+            "src.workers.pipeline.dispatch_event_notifications", new_callable=AsyncMock
+        ) as mock_dispatch:
+            result = await process_watched_item(
+                db_session, wi, raw_content=_HTML_CHANGED, blob=_RENEWED_BLOB
+            )
+        await db_session.flush()
+
+        assert result.cache_hit is True
+        assert result.changed is False
+        assert result.renewal_enqueued is True
+        mock_dispatch.assert_not_awaited()
+
+        revs = await self._revisions(db_session, wi)
+        assert len(revs) == 2  # a renewal is not a revision
+        (row,) = await self._outbox_rows(db_session, wi)
+        assert row.change_revision_id == revs[0].id
+        assert row.command_id == _RENEWED_BLOB.command_id
+        assert row.blob_uri == _RENEWED_BLOB.blob_uri
+        assert row.blob_expires_at == _RENEWED_BLOB.blob_expires_at
+        assert row.source_media_type == "text/html"
+        assert row.content_media_type == "text/plain; charset=utf-8"
+        assert row.spec_fingerprint == spec_fingerprint(_SPEC_FULL_PAGE)
+        assert row.dead_lettered_at is None
+
+    async def test_a_baseline_is_never_announced_by_a_cache_hit(self, db_session):
+        """The baseline is the one revision the change path never enqueued.
+        Announcing it here would be a *first* observation of the pair — a
+        registry insert and an ``info.changes`` event — not a renewal."""
+        wi = await self._item(db_session)
+        await process_watched_item(db_session, wi, raw_content=_HTML, blob=_FIRST_BLOB)
+        await db_session.flush()
+
+        result = await process_watched_item(db_session, wi, raw_content=_HTML, blob=_RENEWED_BLOB)
+        await db_session.flush()
+
+        assert result.cache_hit is True
+        assert result.renewal_enqueued is False
+        assert await self._outbox_rows(db_session, wi) == []
+
+    async def test_renewal_upserts_a_still_queued_row(self, db_session):
+        """``change_revision_id`` is unique: a renewal of a row the drain has not
+        published yet updates its provenance in place, never adds a second."""
+        wi = await self._item(db_session)
+        await process_watched_item(db_session, wi, raw_content=_HTML, blob=_FIRST_BLOB)
+        await process_watched_item(db_session, wi, raw_content=_HTML_CHANGED, blob=_FIRST_BLOB)
+        await db_session.flush()
+        (queued,) = await self._outbox_rows(db_session, wi)
+        queued_id = queued.id
+
+        result = await process_watched_item(
+            db_session, wi, raw_content=_HTML_CHANGED, blob=_RENEWED_BLOB
+        )
+        await db_session.flush()
+
+        assert result.renewal_enqueued is True
+        (row,) = await self._outbox_rows(db_session, wi)
+        assert row.id == queued_id
+        assert row.command_id == _RENEWED_BLOB.command_id
+        assert row.blob_expires_at == _RENEWED_BLOB.blob_expires_at
+        assert row.next_attempt_at <= datetime.now(UTC)
+
+    async def test_renewal_revives_a_dead_lettered_row(self, db_session):
+        """Dead-lettering is for a payload that is unbuildable *from the row's
+        values*; a renewal replaces those values, so the verdict no longer
+        applies. The attempt history stays — it is still true."""
+        wi = await self._item(db_session)
+        await process_watched_item(db_session, wi, raw_content=_HTML, blob=_FIRST_BLOB)
+        await process_watched_item(db_session, wi, raw_content=_HTML_CHANGED, blob=_FIRST_BLOB)
+        await db_session.flush()
+        (queued,) = await self._outbox_rows(db_session, wi)
+        queued.attempts = 1
+        queued.last_error = "unbuildable_payload: ValidationError(...)"
+        queued.dead_lettered_at = datetime.now(UTC)
+        queued.next_attempt_at = datetime(2099, 1, 1, tzinfo=UTC)
+        await db_session.flush()
+
+        result = await process_watched_item(
+            db_session, wi, raw_content=_HTML_CHANGED, blob=_RENEWED_BLOB
+        )
+        await db_session.flush()
+
+        assert result.renewal_enqueued is True
+        (row,) = await self._outbox_rows(db_session, wi)
+        assert row.dead_lettered_at is None
+        assert row.last_error is None
+        assert row.next_attempt_at <= datetime.now(UTC)
+        assert row.attempts == 1
+        assert row.blob_expires_at == _RENEWED_BLOB.blob_expires_at
+
+
 # ---------------------------------------------------------------------------
 # Extractor dispatch (#168 slice 2)
 # ---------------------------------------------------------------------------

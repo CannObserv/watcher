@@ -21,6 +21,7 @@ from co_core.pure.extract import (
 )
 from co_core.pure.extract.html import HtmlExtractor
 from sqlalchemy import select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.logging import get_logger
@@ -120,6 +121,24 @@ class ExtractionOutcome:
     content_media_type: str = EXTRACTED_CONTENT_MEDIA_TYPE
 
 
+def _provenance_columns(blob: BlobProvenance, outcome: ExtractionOutcome) -> dict:
+    """The outbox columns that say where one observation came from (#253).
+
+    One spelling for both writers. The change branch inserts them and the
+    renewal branch upserts them (#293); a renewal that carried a different
+    column set would publish an observation shaped unlike the one it renews,
+    and the drain builds the wire payload from exactly these columns.
+    """
+    return {
+        "command_id": blob.command_id,
+        "blob_uri": blob.blob_uri,
+        "blob_expires_at": blob.blob_expires_at,
+        "source_media_type": blob.source_media_type,
+        "content_media_type": outcome.content_media_type,
+        "spec_fingerprint": outcome.spec_fingerprint,
+    }
+
+
 def _extract_and_fingerprint(
     raw_content: bytes,
     source_specs: list[dict],
@@ -202,8 +221,69 @@ class WatchedItemResult:
     changed: bool = False
     notifications_dispatched: int = 0
     errors: list[str] = field(default_factory=list)
-    # No archiver_sync_enqueued flag since #251: a detected change always
-    # enqueues a PendingArchiverSync row, so `changed` already carries it.
+    # `changed` implies an outbox row since #251 (a detected change always
+    # enqueues one). This is the other writer: a cache hit that re-announced
+    # the latest revision because this cycle's full fetch renewed the blob
+    # reference behind it (#293). Never set beside `changed`.
+    renewal_enqueued: bool = False
+
+
+async def _renew_blob_reference(
+    session: AsyncSession,
+    watched_item: WatchedItem,
+    rev: ChangeRevision,
+    *,
+    blob: BlobProvenance,
+    outcome: ExtractionOutcome,
+    now: datetime,
+) -> None:
+    """Re-announce ``rev`` under this cycle's blob reference (#293).
+
+    Replicator re-references the blob on every full re-fetch of unchanged bytes
+    and publishes a fresh fact with a later ``blob_expires_at``; Archiver's row
+    for the pair took only the first observation's horizon, so a stable item
+    became unreplicable once it passed — while the bytes sat alive. The renewal
+    is the same row shape for the same revision: the drain publishes it under
+    the same envelope key, and Archiver dedupes on the pair and moves the
+    horizon forward-only (archiver#201).
+
+    An upsert on ``change_revision_id``, which is unique, rather than an ORM
+    add: a row the drain has not published yet takes the newer provenance in
+    place and is pulled to ``now``, and a dead-lettered row is revived — that
+    verdict was about values this observation has replaced. ``attempts`` is
+    left alone; the history it records is still true. Done as one statement so
+    a drain holding the row ``FOR UPDATE`` resolves in Postgres: the insert
+    waits, then either updates the row the drain kept or inserts fresh after
+    the drain deleted it, instead of a stale ORM UPDATE matching zero rows.
+    """
+    provenance = _provenance_columns(blob, outcome)
+    await session.execute(
+        pg_insert(PendingArchiverSync)
+        .values(
+            change_revision_id=rev.id,
+            watched_item_id=watched_item.id,
+            next_attempt_at=now,
+            **provenance,
+        )
+        .on_conflict_do_update(
+            index_elements=["change_revision_id"],
+            set_={
+                **provenance,
+                "next_attempt_at": now,
+                "dead_lettered_at": None,
+                "last_error": None,
+            },
+        )
+    )
+    logger.info(
+        "blob reference renewed — re-announcing the latest revision",
+        extra={
+            "watched_item_id": str(watched_item.id),
+            "change_revision_id": str(rev.id),
+            "command_id": blob.command_id,
+            "blob_expires_at": (blob.blob_expires_at.isoformat() if blob.blob_expires_at else None),
+        },
+    )
 
 
 async def process_watched_item(
@@ -221,8 +301,11 @@ async def process_watched_item(
     3. Empty extraction: raise `ExtractionError` — never a revision (#258).
     4. Query `change_revisions` for the last fingerprint.
     5. First run: insert baseline ChangeRevision, no notification.
-    6. Same fingerprint: cache hit, no action.
-    7. Changed: insert new ChangeRevision, optionally enqueue PendingArchiverSync,
+    6. Same fingerprint: cache hit — no revision, no notification. If the latest
+       revision has already been announced (it has an older sibling, so the
+       change path enqueued it), upsert a PendingArchiverSync for it carrying
+       this cycle's blob reference (#293). The baseline is never announced here.
+    7. Changed: insert new ChangeRevision, enqueue PendingArchiverSync,
        dispatch CHANGE_DETECTED once for the WatchedItem.
 
     `watched_item.last_changed_at` is updated on change.
@@ -286,14 +369,26 @@ async def process_watched_item(
             f"authored_specs={len(source_specs)})"
         )
 
-    last_rev = (
-        await session.execute(
-            select(ChangeRevision)
-            .where(ChangeRevision.watched_item_id == watched_item.id)
-            .order_by(ChangeRevision.captured_at.desc())
-            .limit(1)
+    # Two rows, not one: the second answers whether the latest revision is the
+    # baseline. The baseline is the one revision the change branch never
+    # enqueued, and the renewal below must not be Archiver's *first*
+    # observation of a pair — that is a registry insert plus an `info.changes`
+    # event, not a horizon refresh. "Has an older sibling" is the same test the
+    # dashboard uses to keep baselines out of `changes_today`.
+    latest_revs = (
+        (
+            await session.execute(
+                select(ChangeRevision)
+                .where(ChangeRevision.watched_item_id == watched_item.id)
+                .order_by(ChangeRevision.captured_at.desc())
+                .limit(2)
+            )
         )
-    ).scalar_one_or_none()
+        .scalars()
+        .all()
+    )
+    last_rev = latest_revs[0] if latest_revs else None
+    latest_is_announced = len(latest_revs) > 1
 
     if last_rev is None:
         # First run: establish baseline — no notification.
@@ -309,7 +404,16 @@ async def process_watched_item(
         return WatchedItemResult(baseline_established=True)
 
     if last_rev.content_fingerprint == outcome.content_fingerprint:
-        return WatchedItemResult(cache_hit=True)
+        # Cache hit. Bytes arrived, so Replicator renewed the blob reference
+        # behind this revision; tell Archiver, or its stored horizon freezes at
+        # the first observation (#293). Bounded by full fetches — a 304 never
+        # reaches this function.
+        if not latest_is_announced:
+            return WatchedItemResult(cache_hit=True)
+        await _renew_blob_reference(
+            session, watched_item, last_rev, blob=blob, outcome=outcome, now=now
+        )
+        return WatchedItemResult(cache_hit=True, renewal_enqueued=True)
 
     # Fingerprint changed: insert new ChangeRevision.
     rev = ChangeRevision(
@@ -335,12 +439,7 @@ async def process_watched_item(
             change_revision_id=rev.id,
             watched_item_id=watched_item.id,
             next_attempt_at=now,
-            command_id=blob.command_id,
-            blob_uri=blob.blob_uri,
-            blob_expires_at=blob.blob_expires_at,
-            source_media_type=blob.source_media_type,
-            content_media_type=outcome.content_media_type,
-            spec_fingerprint=outcome.spec_fingerprint,
+            **_provenance_columns(blob, outcome),
         )
     )
 

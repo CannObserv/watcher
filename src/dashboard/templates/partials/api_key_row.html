@@ -21,3 +21,5 @@
     </div>
   </td>
 </tr>
+{# Optional OOB flash appended when a rename confirms (#295). #}
+{% if flash_oob_message %}{% include "partials/flash_oob.html" %}{% endif %}

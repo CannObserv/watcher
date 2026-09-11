@@ -1,10 +1,7 @@
 """Dashboard settings routes — API key management."""
 
-import json
-from html import escape
-
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import RedirectResponse
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -20,10 +17,6 @@ router = APIRouter(
     tags=["settings"],
     dependencies=[Depends(get_dashboard_user)],
 )
-
-
-def _flash_trigger(level: str, body: str) -> dict[str, str]:
-    return {"HX-Trigger": json.dumps({"showFlash": {"level": level, "body": body}})}
 
 
 @router.get("")
@@ -160,8 +153,11 @@ async def api_key_edit_row_post(
     return templates.TemplateResponse(
         request,
         "partials/api_key_row.html",
-        {"key": key},
-        headers=_flash_trigger("success", f"Key <strong>{escape(label_val)}</strong> renamed."),
+        {
+            "key": key,
+            "flash_oob_level": "success",
+            "flash_oob_message": f"Key '{label_val}' renamed.",
+        },
     )
 
 
@@ -189,7 +185,12 @@ async def api_key_delete(
     user: AppUser = Depends(get_dashboard_user),
     session: AsyncSession = Depends(get_db_session),
 ):
-    """Delete an API key; return empty 200 with flash trigger."""
+    """Delete an API key; return only an out-of-band flash.
+
+    The Delete button swaps its row ``outerHTML`` with this response. HTMX takes
+    the OOB flash to ``#flash-region`` and swaps in what remains — nothing — so
+    the row disappears (#295).
+    """
     result = await session.execute(
         select(ApiKey).where(ApiKey.id == key_id, ApiKey.user_id == user.id)
     )
@@ -199,8 +200,8 @@ async def api_key_delete(
     label_val = key.label
     await session.delete(key)
     await session.commit()
-    return HTMLResponse(
-        content="",
-        status_code=200,
-        headers=_flash_trigger("info", f"Key <strong>{escape(label_val)}</strong> deleted."),
+    return templates.TemplateResponse(
+        request,
+        "partials/flash_oob.html",
+        {"flash_oob_level": "info", "flash_oob_message": f"Key '{label_val}' deleted."},
     )

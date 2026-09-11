@@ -1,9 +1,8 @@
 """Integration tests for API key management settings routes."""
 
-import json
-
 import httpx
 import pytest
+from bs4 import BeautifulSoup, Tag
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from src.core.models.api_key import ApiKey
@@ -13,14 +12,24 @@ from src.dashboard.deps import generate_api_key
 pytestmark = pytest.mark.integration
 
 HTMX_HEADERS = {"HX-Request": "true"}
-# A label that would become markup in the flash body if interpolated raw.
+# A label that would become markup in the flash if interpolated raw.
 MARKUP_LABEL = "<b>Ops</b> & CI"
-ESCAPED_LABEL = "&lt;b&gt;Ops&lt;/b&gt; &amp; CI"
 
 
-def _flash_body(response: httpx.Response) -> str:
-    """The HTML body of the ``showFlash`` event in a response's ``HX-Trigger``."""
-    return json.loads(response.headers["HX-Trigger"])["showFlash"]["body"]
+def _split_oob_flash(response: httpx.Response) -> tuple[BeautifulSoup, str]:
+    """Split an HTMX response the way HTMX does: what swaps into the target, and the flash.
+
+    Returns the response less its out-of-band ``#flash-region`` element, and
+    that flash's message *as text* — markup injected by a label would show up
+    as missing characters, not as the label. ``html.parser`` keeps a top-level
+    ``<tr>`` where HTMX's template parsing does.
+    """
+    rest = BeautifulSoup(response.text, "html.parser")
+    flashes = rest.select("#flash-region[hx-swap-oob]")
+    assert len(flashes) == 1, f"expected one out-of-band flash, found {len(flashes)}"
+    message = flashes[0].extract().select_one('[role="alert"] > span')
+    assert isinstance(message, Tag), "the flash carries no message"
+    return rest, message.get_text()
 
 
 @pytest.fixture
@@ -124,15 +133,17 @@ class TestApiKeysEdit:
         assert r.status_code == 200
         assert b"Renamed" in r.content
 
-    async def test_edit_row_post_flash_escapes_label(self, client, make_api_key):
-        """The flash body is an HTML fragment; a user-supplied label arrives escaped in it."""
+    async def test_edit_row_post_flashes_out_of_band(self, client, make_api_key):
+        """The row swaps back in; the confirmation rides out-of-band, label as text (#295)."""
         key = await make_api_key()
         r = await client.post(
             f"/settings/api-keys/{key.id}/edit-row",
             data={"label": MARKUP_LABEL},
             headers=HTMX_HEADERS,
         )
-        assert _flash_body(r) == f"Key <strong>{ESCAPED_LABEL}</strong> renamed."
+        rest, message = _split_oob_flash(r)
+        assert message == f"Key '{MARKUP_LABEL}' renamed."
+        assert rest.find("tr", id=f"api-key-row-{key.id}"), "the row is not what swaps in"
 
     async def test_edit_row_post_empty_label_returns_422(self, client, make_api_key):
         key = await make_api_key()
@@ -190,11 +201,15 @@ class TestApiKeysDelete:
         result = await db_session.execute(select(ApiKey).where(ApiKey.id == key.id))
         assert result.scalar_one_or_none() is None
 
-    async def test_delete_flash_escapes_label(self, client, make_api_key):
-        """The flash body is an HTML fragment; a stored label arrives escaped in it."""
+    async def test_delete_flashes_out_of_band_and_empties_the_row(self, client, make_api_key):
+        """Only the flash comes back, so the row's ``outerHTML`` swap removes it (#295)."""
         key = await make_api_key(MARKUP_LABEL)
         r = await client.delete(f"/settings/api-keys/{key.id}", headers=HTMX_HEADERS)
-        assert _flash_body(r) == f"Key <strong>{ESCAPED_LABEL}</strong> deleted."
+        rest, message = _split_oob_flash(r)
+        assert message == f"Key '{MARKUP_LABEL}' deleted."
+        assert rest.find(True) is None and not rest.get_text().strip(), (
+            f"the row would be replaced by {str(rest).strip()!r}, not removed"
+        )
 
     async def test_delete_nonexistent_returns_404(self, client):
         r = await client.delete("/settings/api-keys/nonexistent", headers=HTMX_HEADERS)

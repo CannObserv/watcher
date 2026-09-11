@@ -58,6 +58,12 @@ def _manifest_git_sources() -> list[tuple[str, dict]]:
     return _git_source_entries(tomllib.loads(_PYPROJECT.read_text()))
 
 
+_GIT_SOURCES = _manifest_git_sources()
+_each_git_source = pytest.mark.parametrize(
+    ("name", "entry"), _GIT_SOURCES, ids=[name for name, _ in _GIT_SOURCES]
+)
+
+
 def _locked_git_packages() -> set[str]:
     """Names of every package ``uv.lock`` resolved from a git source."""
     packages = tomllib.loads(_LOCK.read_text()).get("package", [])
@@ -72,7 +78,7 @@ class TestGitSources:
         ``notifier-client`` to a published package (both sides empty) stays
         green while a parser that finds nothing does not.
         """
-        swept = {name for name, _ in _manifest_git_sources()}
+        swept = {name for name, _ in _GIT_SOURCES}
         locked = _locked_git_packages()
         assert not locked - swept, (
             f"uv.lock resolves {sorted(locked - swept)} from git, but no [tool.uv.sources] "
@@ -107,9 +113,7 @@ class TestGitSources:
             "https://x.test/pkg.git",
         ]
 
-    @pytest.mark.parametrize(
-        ("name", "entry"), _manifest_git_sources(), ids=[n for n, _ in _manifest_git_sources()]
-    )
+    @_each_git_source
     def test_git_source_is_https(self, name: str, entry: dict):
         """An SSH host alias resolves on one machine; HTTPS resolves everywhere.
 
@@ -121,9 +125,7 @@ class TestGitSources:
             "SSH host alias exists only on the machine that defines it (#284)."
         )
 
-    @pytest.mark.parametrize(
-        ("name", "entry"), _manifest_git_sources(), ids=[n for n, _ in _manifest_git_sources()]
-    )
+    @_each_git_source
     def test_git_source_pins_a_tag(self, name: str, entry: dict):
         """The tag is the pin: a branch floats, and a rev need not name a release.
 

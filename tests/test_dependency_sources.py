@@ -113,11 +113,13 @@ class TestGitSources:
         ("name", "entry"), _manifest_git_sources(), ids=[n for n, _ in _manifest_git_sources()]
     )
     def test_git_source_pins_a_tag(self, name: str, entry: dict):
-        """The tag is the pin: a branch floats, and a rev hides the release."""
-        assert "tag" in entry and not {"branch", "rev"} & entry.keys(), (
-            f"{name}'s git source must pin a release `tag` and nothing else; got "
-            f"{sorted(entry.keys() - {'git', 'subdirectory'})} (#284)."
-        )
+        """The tag is the pin: a branch floats, and a rev hides the release.
+
+        uv refuses an entry naming more than one of ``tag``/``rev``/``branch``
+        ("expected at most one"), so a present ``tag`` is the whole check.
+        """
+        used = next((f"`{ref}`" for ref in ("rev", "branch") if ref in entry), "the default branch")
+        assert "tag" in entry, f"{name}'s git source must pin a release `tag`, not {used} (#284)."
 
 
 class TestWorkflowUrlRewrites:

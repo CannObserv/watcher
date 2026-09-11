@@ -261,6 +261,27 @@ sudo systemctl daemon-reload && sudo systemctl restart watcher-cleanup.timer
 | Journal logs >14 days | `journalctl --vacuum-time=14d` |
 | Playwright cache | audit only — logs size, warns if >2 GB, never deletes |
 
+### Job history — not this timer
+
+Procrastinate's finished jobs are pruned **in-process**, by the hourly
+`prune_job_history` periodic task (`src/workers/retention.py`, #296 D7):
+succeeded jobs after **7 days**; failed, cancelled and aborted after **30**.
+Unfinished jobs are never touched, events cascade with their job, and
+`watcher_app` already holds the `DELETE` it needs. Before #296 nothing pruned
+them, and the two tables were 96 % of the database — 679 k jobs back to March.
+
+A backlog that size is pruned once from a shell, not by the task's first run:
+`delete_old_jobs` is one `DELETE` over a sort of every event in the table, and
+the task runs inside the service's worker. The script steps the horizon down
+a week at a time, one statement per slice, with progress. It deletes
+irreversibly, so take a dump first:
+
+```bash
+source scripts/load-env.sh
+uv run python -m scripts.prune_job_history --dry-run
+WATCHER_ALLOW_PRODUCTION_DB=1 uv run python -m scripts.prune_job_history
+```
+
 ## Cannobserv wheelhouse
 
 **Cannobserv wheelhouse (#220).** `co-core` + `co-core-aio` (the shared cannabis-observer substrate) resolve from a local wheelhouse mirrored from the private GCS index `gs://co-gcs-pypi`, via `[tool.uv] find-links = ["./.wheelhouse"]` — **not** git sources. Populate it **before any `uv` command** (find-links makes every `uv` invocation require the dir; `.wheelhouse/.gitkeep` is tracked so a fresh clone has it):

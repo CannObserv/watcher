@@ -136,7 +136,7 @@ async def api_key_edit_row_post(
     user: AppUser = Depends(get_dashboard_user),
     session: AsyncSession = Depends(get_db_session),
 ):
-    """Save updated label; return read row (HTMX) or redirect."""
+    """Save updated label; return the read row with an OOB confirmation (HTMX) or redirect."""
     label_val = label.strip()
     if not label_val:
         raise HTTPException(status_code=422, detail="label is required")

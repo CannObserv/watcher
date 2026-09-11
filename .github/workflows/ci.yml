@@ -43,12 +43,6 @@ jobs:
       - name: Install Python
         run: uv python install 3.12
 
-      # notifier-client is pinned via an `ssh://git@github-notifier/...` source
-      # (an SSH host alias that exists only on the VM). CI has no such key or
-      # alias; rewrite to https for the public notifier repo.
-      - name: Rewrite notifier SSH source to HTTPS
-        run: git config --global url."https://github.com/".insteadOf "ssh://git@github-notifier/"
-
       # co-core / co-core-aio resolve from a wheelhouse mirrored from the private
       # GCS index (#220). Authenticate keyless via Workload Identity Federation —
       # the read-scoped `github-ci` provider impersonating the objectViewer-only
@@ -119,9 +113,6 @@ jobs:
 
       - name: Install Python
         run: uv python install 3.12
-
-      - name: Rewrite notifier SSH source to HTTPS
-        run: git config --global url."https://github.com/".insteadOf "ssh://git@github-notifier/"
 
       - name: Authenticate to Google Cloud (WIF, read-only)
         uses: google-github-actions/auth@v2
@@ -198,9 +189,6 @@ jobs:
 
       - name: Install Python
         run: uv python install 3.12
-
-      - name: Rewrite notifier SSH source to HTTPS
-        run: git config --global url."https://github.com/".insteadOf "ssh://git@github-notifier/"
 
       - name: Authenticate to Google Cloud (WIF, read-only)
         uses: google-github-actions/auth@v2

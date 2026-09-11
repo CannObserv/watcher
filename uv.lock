@@ -1117,12 +1117,11 @@ wheels = [
 
 [[package]]
 name = "notifier-client"
-version = "0.2.1"
-source = { git = "ssh://git@github-notifier/CannObserv/notifier.git?subdirectory=clients%2Fpython&rev=v0.2.1#c6b36b249cc6a70652c8e16fc7e4d4e4c661bd1e" }
+version = "0.3.1"
+source = { git = "https://github.com/CannObserv/notifier.git?subdirectory=clients%2Fpython&tag=v0.3.1#36537f730bb597d646a46677638646a2404350cc" }
 dependencies = [
     { name = "attrs" },
     { name = "httpx" },
-    { name = "python-dateutil" },
     { name = "python-ulid" },
 ]
 
@@ -2068,7 +2067,7 @@ requires-dist = [
     { name = "jinja2", specifier = ">=3.1.6,<4" },
     { name = "jsonschema", specifier = ">=4.21.0,<5" },
     { name = "lxml", specifier = ">=5.0,<7" },
-    { name = "notifier-client", git = "ssh://git@github-notifier/CannObserv/notifier.git?subdirectory=clients%2Fpython&rev=v0.2.1" },
+    { name = "notifier-client", git = "https://github.com/CannObserv/notifier.git?subdirectory=clients%2Fpython&tag=v0.3.1" },
     { name = "openpyxl", specifier = ">=3.1.0,<4" },
     { name = "procrastinate", specifier = ">=3.0,<4" },
     { name = "pypdf", specifier = ">=5.0,<7" },

@@ -96,4 +96,7 @@ packages = ["src"]
 find-links = ["./.wheelhouse"]
 
 [tool.uv.sources]
-notifier-client = { git = "ssh://git@github-notifier/CannObserv/notifier.git", subdirectory = "clients/python", rev = "v0.2.1" }
+# Public repo over HTTPS, pinned by release tag (#284). The tag is the pin — uv
+# enforces no version floor against a git source. Adopt a release: change the
+# tag, `uv sync`. Procedure: CannObserv/notifier docs/RELEASING.md.
+notifier-client = { git = "https://github.com/CannObserv/notifier.git", subdirectory = "clients/python", tag = "v0.3.1" }

@@ -38,9 +38,10 @@ from packaging.utils import canonicalize_name
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 _PYPROJECT = _REPO_ROOT / "pyproject.toml"
-# This repo's own top-level packages. `alembic/` is not one: `from alembic
-# import op` there names the declared library.
-_FIRST_PARTY = frozenset({"src", "tests"})
+# This repo's own top-level packages: every root directory with an
+# `__init__.py`. `alembic/` has none, so `from alembic import op` there names
+# the declared library — as Python itself resolves it.
+_FIRST_PARTY = frozenset(path.parent.name for path in _REPO_ROOT.glob("*/__init__.py"))
 
 # Imported directly, but deliberately left to arrive transitively:
 # distribution -> (the distribution that must keep providing it, why).
@@ -147,14 +148,19 @@ def _imported_modules(path: Path) -> list[tuple[str, int]]:
     return found
 
 
+def _is_third_party(module: str) -> bool:
+    """Whether *module* is neither the standard library nor this repo's own code."""
+    top = module.partition(".")[0]
+    return top not in sys.stdlib_module_names and top not in _FIRST_PARTY
+
+
 @cache
 def _third_party_imports(directory: str) -> tuple[tuple[str, frozenset[str], str], ...]:
     """``(module, owning distributions, "path:line")`` per third-party import under *directory*."""
     found = []
     for path in sorted((_REPO_ROOT / directory).rglob("*.py")):
         for module, line in _imported_modules(path):
-            top = module.partition(".")[0]
-            if top in sys.stdlib_module_names or top in _FIRST_PARTY:
+            if not _is_third_party(module):
                 continue
             site = f"{path.relative_to(_REPO_ROOT)}:{line}"
             found.append((module, _owning_distributions(module), site))
@@ -187,6 +193,26 @@ class TestImportsAreDeclared:
         A renamed or moved directory is swept as empty rather than refused.
         """
         assert _third_party_imports(directory), f"swept no third-party imports under {directory}/"
+
+    @pytest.mark.parametrize(
+        ("module", "third_party"),
+        [
+            ("src.api.main", False),
+            ("tests.conftest", False),
+            ("scripts.sync_wheelhouse", False),
+            ("json.decoder", False),
+            ("alembic.op", True),
+            ("pydantic", True),
+        ],
+    )
+    def test_first_party_is_every_root_package(self, module: str, third_party: bool):
+        """Guard the guard — a root package is this repo's own; ``alembic/`` is not one.
+
+        A first-party import read as third-party resolves to no distribution
+        and fails the sweep against the manifest. ``alembic/`` has no
+        ``__init__.py``, so ``from alembic import op`` there names the library.
+        """
+        assert _is_third_party(module) is third_party
 
     @pytest.mark.parametrize(
         ("source", "namespace", "owner"),

@@ -2,6 +2,7 @@
 
 import json
 
+import httpx
 import pytest
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
@@ -17,7 +18,7 @@ MARKUP_LABEL = "<b>Ops</b> & CI"
 ESCAPED_LABEL = "&lt;b&gt;Ops&lt;/b&gt; &amp; CI"
 
 
-def _flash_body(response) -> str:
+def _flash_body(response: httpx.Response) -> str:
     """The HTML body of the ``showFlash`` event in a response's ``HX-Trigger``."""
     return json.loads(response.headers["HX-Trigger"])["showFlash"]["body"]
 

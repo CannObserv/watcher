@@ -1,0 +1,15 @@
+[Unit]
+Description=Nightly Watcher database dump to GCS (#296)
+
+[Timer]
+# One a day, named by the dump's own time. Persistent=true runs a night a
+# reboot skipped, so a VM that was down at 03:17 still ships when it comes back;
+# the jitter keeps it off the minute other timers on the host share.
+OnCalendar=*-*-* 03:17:00 UTC
+RandomizedDelaySec=10min
+Persistent=true
+AccuracySec=1min
+Unit=watcher-backup.service
+
+[Install]
+WantedBy=timers.target

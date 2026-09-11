@@ -282,6 +282,10 @@ uv run python -m scripts.prune_job_history --dry-run
 WATCHER_ALLOW_PRODUCTION_DB=1 uv run python -m scripts.prune_job_history
 ```
 
+## Database Backup Timer
+
+`watcher-backup.timer` dumps the database to `gs://co-gcs-watcher-backup` nightly (03:17 UTC, `Persistent=true`) through `watcher-backup.service` — create-only, holding no database credential, sandboxed, and checking in to a notifier dead-man monitor on every run (#296 D8/D9). Provisioning, install, the capability trap in its sandbox, and the restore runbook with its go/no-go gates: [RECOVERY.md](RECOVERY.md). **Enable the timer only after a hand-started run has succeeded.**
+
 ## Cannobserv wheelhouse
 
 **Cannobserv wheelhouse (#220).** `co-core` + `co-core-aio` (the shared cannabis-observer substrate) resolve from a local wheelhouse mirrored from the private GCS index `gs://co-gcs-pypi`, via `[tool.uv] find-links = ["./.wheelhouse"]` — **not** git sources. Populate it **before any `uv` command** (find-links makes every `uv` invocation require the dir; `.wheelhouse/.gitkeep` is tracked so a fresh clone has it):

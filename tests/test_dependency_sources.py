@@ -9,7 +9,8 @@ nothing, and a rewrite means CI resolves a URL other than the one the VM does.
 A git source is also pinned by ``tag``: notifier's release procedure makes the
 tag the pin (adopt a release by changing it, stay put by doing nothing), and uv
 enforces no version floor against a git source. A ``branch`` floats; a ``rev``
-hides which release is in use behind a sha.
+accepts any commit-ish — a sha or a branch name as readily as a tag — so it
+cannot say that a release is what's pinned.
 
 These tests need no database and no network — they read ``pyproject.toml``,
 ``uv.lock`` and every workflow under ``.github/workflows/`` as text.
@@ -124,7 +125,7 @@ class TestGitSources:
         ("name", "entry"), _manifest_git_sources(), ids=[n for n, _ in _manifest_git_sources()]
     )
     def test_git_source_pins_a_tag(self, name: str, entry: dict):
-        """The tag is the pin: a branch floats, and a rev hides the release.
+        """The tag is the pin: a branch floats, and a rev need not name a release.
 
         uv refuses an entry naming more than one of ``tag``/``rev``/``branch``
         ("expected at most one"), so a present ``tag`` is the whole check.

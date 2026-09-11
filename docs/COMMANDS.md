@@ -283,12 +283,13 @@ factories write to) — `lint` and `migrations` stopped needing it when #254
 removed the `archiver-client` path dep. All three jobs authenticate to GCS
 **keyless via WIF** (`vars.GCP_WIF_PROVIDER` → `co-pypi-reader` SA) and sync
 the wheelhouse before `uv sync`; `notifier-client` installs as written, from
-its public HTTPS tag source — no URL rewrite (#284). Only the test job also syncs archiver's wheelhouse (its `uv
-run alembic` subprocess needs co-core); the migrations job does **not** — the
-#234 squash collapsed the pre-existing chain into a self-contained genesis
-baseline (`2addddea0b03`) that references no `information` schema, so `upgrade
-head` from empty is fully standalone (no archiver seeding, no cross-service
-ordering). **Squash cutover:** already-migrated DBs need a one-time `alembic
+its public HTTPS tag source — no URL rewrite (#284). Only the test job also
+syncs archiver's wheelhouse (its `uv run alembic` subprocess needs co-core);
+the migrations job does **not** — the #234 squash collapsed the pre-existing
+chain into a self-contained genesis baseline (`2addddea0b03`) that references
+no `information` schema, so `upgrade head` from empty is fully standalone (no
+archiver seeding, no cross-service ordering).
+**Squash cutover:** already-migrated DBs need a one-time `alembic
 stamp 2addddea0b03 --purge` before their next upgrade — see `docs/MIGRATIONS.md`
 → "Migration baseline (squash)". Integration tests hit live external services
 and are excluded in CI. **One-time GCP grant** (operator, for WIF) — bind watcher's repo

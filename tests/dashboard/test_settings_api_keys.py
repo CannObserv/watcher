@@ -1,5 +1,7 @@
 """Integration tests for API key management settings routes."""
 
+import json
+
 import pytest
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
@@ -10,6 +12,14 @@ from src.dashboard.deps import generate_api_key
 pytestmark = pytest.mark.integration
 
 HTMX_HEADERS = {"HX-Request": "true"}
+# A label that would become markup in the flash body if interpolated raw.
+MARKUP_LABEL = "<b>Ops</b> & CI"
+ESCAPED_LABEL = "&lt;b&gt;Ops&lt;/b&gt; &amp; CI"
+
+
+def _flash_body(response) -> str:
+    """The HTML body of the ``showFlash`` event in a response's ``HX-Trigger``."""
+    return json.loads(response.headers["HX-Trigger"])["showFlash"]["body"]
 
 
 @pytest.fixture
@@ -113,6 +123,16 @@ class TestApiKeysEdit:
         assert r.status_code == 200
         assert b"Renamed" in r.content
 
+    async def test_edit_row_post_flash_escapes_label(self, client, make_api_key):
+        """The flash body is an HTML fragment; a user-supplied label arrives escaped in it."""
+        key = await make_api_key()
+        r = await client.post(
+            f"/settings/api-keys/{key.id}/edit-row",
+            data={"label": MARKUP_LABEL},
+            headers=HTMX_HEADERS,
+        )
+        assert _flash_body(r) == f"Key <strong>{ESCAPED_LABEL}</strong> renamed."
+
     async def test_edit_row_post_empty_label_returns_422(self, client, make_api_key):
         key = await make_api_key()
         r = await client.post(
@@ -168,6 +188,12 @@ class TestApiKeysDelete:
         assert r.status_code == 200
         result = await db_session.execute(select(ApiKey).where(ApiKey.id == key.id))
         assert result.scalar_one_or_none() is None
+
+    async def test_delete_flash_escapes_label(self, client, make_api_key):
+        """The flash body is an HTML fragment; a stored label arrives escaped in it."""
+        key = await make_api_key(MARKUP_LABEL)
+        r = await client.delete(f"/settings/api-keys/{key.id}", headers=HTMX_HEADERS)
+        assert _flash_body(r) == f"Key <strong>{ESCAPED_LABEL}</strong> deleted."
 
     async def test_delete_nonexistent_returns_404(self, client):
         r = await client.delete("/settings/api-keys/nonexistent", headers=HTMX_HEADERS)

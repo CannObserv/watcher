@@ -18,7 +18,9 @@ shipping its longest dotted prefix, read from their installed file lists.
 
 **Scope:** ``src/`` and ``alembic/`` against ``[project.dependencies]``;
 ``tests/`` against those plus the ``dev`` group. ``scripts/`` is not swept —
-its scripts run under ``uv run --no-project`` with their own ``--with``.
+none of its scripts runs in the project environment; each names its own
+interpreter and requirements where it is invoked (``uv run --no-project
+--with …``, or the system ``python3``).
 
 **Precondition:** the environment is synced from ``uv.lock``, as for
 ``tests/test_dependency_extras.py``.

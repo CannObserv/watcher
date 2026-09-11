@@ -71,9 +71,17 @@ class TestGitSources:
         ``notifier-client`` to a published package (both sides empty) stays
         green while a parser that finds nothing does not.
         """
-        assert {name for name, _ in _manifest_git_sources()} == _locked_git_packages(), (
-            "pyproject.toml's git sources and uv.lock's git packages disagree — "
-            "run `uv lock`, or fix _git_source_entries if it stopped finding them."
+        swept = {name for name, _ in _manifest_git_sources()}
+        locked = _locked_git_packages()
+        assert not locked - swept, (
+            f"uv.lock resolves {sorted(locked - swept)} from git, but no [tool.uv.sources] "
+            "entry names it. A PEP 508 `pkg @ git+…` direct reference bypasses the sources "
+            "table and cannot pin a `tag` — declare it there instead (#284). If there is "
+            "no such reference, _git_source_entries stopped finding entries."
+        )
+        assert not swept - locked, (
+            f"[tool.uv.sources] names {sorted(swept - locked)} as git, but uv.lock does "
+            "not resolve it from git — the lock is stale; run `uv lock`."
         )
 
     def test_sweep_keeps_every_entry_of_a_marker_scoped_list(self):

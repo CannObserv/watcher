@@ -425,13 +425,13 @@ Use this pattern instead of OOB flash for validation errors that are specific to
 ## 3. Flash / Notification UX
 
 - **Inline flash**: `{% include "partials/flash.html" %}` — renders from `flash` context variable.
-- **OOB flash**: `{% include "partials/flash_oob.html" %}` — used in HTMX partial responses. Set `flash_oob_level` and `flash_oob_message` before including.
+- **OOB flash**: `{% include "partials/flash_oob.html" %}` — used in HTMX partial responses. Set `flash_oob_level` and `flash_oob_message` before including. A partial that confirms its own swap ends with `{% if flash_oob_message %}{% include "partials/flash_oob.html" %}{% endif %}` (`api_key_row.html`, `watched_item_status_toggle.html`); a response meant to remove its `outerHTML` target returns `flash_oob.html` alone — HTMX swaps in what remains, which is nothing. There is no `HX-Trigger` flash event: nothing listens for one (#295).
 - **Programmatic flash (JS)**: `window.watcher.showFlash(level, message)` — creates and appends a flash element to `#flash-region` from client-side JS. Wires up auto-dismiss and hover-pause. Use for purely client-side events (e.g., clipboard copy confirmation) where no server round-trip is needed.
 - **Levels**: `success`, `error`, `info`, `warning`.
 - **Auto-dismiss**: 5 seconds (`DISMISS_MS` in `app.js`). Hover pauses timer; mouseleave restarts.
 - **Close button**: `&times;` with `aria-label="Dismiss"`, removes parent on click. Uses `ms-4` (logical margin-inline-start).
 - **Animation**: `flash-in` keyframe — 0.2s fade + slide-up.
-- **XSS prevention**: Flash messages rendered via Jinja2 auto-escaping (`{{ flash.message }}`). No raw/safe filter used on user content.
+- **XSS prevention**: Flash messages rendered via Jinja2 auto-escaping (`{{ flash.message }}`). No raw/safe filter used on user content. Messages are plain text: interpolate raw values, never pre-built HTML.
 
 ## 4. Class Inventory
 

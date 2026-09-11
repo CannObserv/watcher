@@ -12,9 +12,10 @@ enforces no version floor against a git source. A ``branch`` floats; a ``rev``
 hides which release is in use behind a sha.
 
 These tests need no database and no network — they read ``pyproject.toml``,
-``uv.lock`` and ``.github/workflows/ci.yml`` as text.
+``uv.lock`` and every workflow under ``.github/workflows/`` as text.
 """
 
+import re
 import tomllib
 from pathlib import Path
 
@@ -23,7 +24,16 @@ import pytest
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 _PYPROJECT = _REPO_ROOT / "pyproject.toml"
 _LOCK = _REPO_ROOT / "uv.lock"
-_CI_WORKFLOW = _REPO_ROOT / ".github" / "workflows" / "ci.yml"
+_WORKFLOWS_DIR = _REPO_ROOT / ".github" / "workflows"
+_CI_WORKFLOW = _WORKFLOWS_DIR / "ci.yml"
+# Git config keys are case-insensitive, so `insteadof` rewrites exactly as
+# `insteadOf` does; `pushInsteadOf` rewrites pushes only, never a fetch.
+_URL_REWRITE = re.compile(r"(?<!push)insteadof", re.IGNORECASE)
+
+
+def _workflows() -> list[Path]:
+    """Every GitHub Actions workflow file, either extension."""
+    return sorted(path for path in _WORKFLOWS_DIR.iterdir() if path.suffix in {".yml", ".yaml"})
 
 
 def _git_source_entries(manifest: dict) -> list[tuple[str, dict]]:
@@ -110,13 +120,32 @@ class TestGitSources:
         )
 
 
-def test_ci_rewrites_no_git_url():
-    """CI installs the manifest as written, so green CI means the VM resolves it too.
+class TestWorkflowUrlRewrites:
+    def test_sweep_covers_ci(self):
+        """Guard the guard — the sweep finds the workflow that installs the project."""
+        assert _CI_WORKFLOW in _workflows()
 
-    A ``url.<base>.insteadOf`` rewrite is how CI worked around the SSH alias;
-    with every source on public HTTPS it has nothing left to rewrite.
-    """
-    assert "insteadOf" not in _CI_WORKFLOW.read_text(), (
-        "ci.yml rewrites a git URL. Fix the source in pyproject.toml instead — "
-        "a rewrite makes CI install something the VM does not (#284)."
+    @pytest.mark.parametrize(
+        ("line", "rewrites"),
+        [
+            ('git config --global url."https://github.com/".insteadOf "ssh://git@alias/"', True),
+            ('git config --global url."https://github.com/".insteadof "ssh://git@alias/"', True),
+            ('git config url."ssh://git@github.com/".pushInsteadOf "https://github.com/"', False),
+        ],
+        ids=["insteadOf", "insteadof", "pushInsteadOf"],
     )
+    def test_pattern_matches_what_git_reads(self, line: str, rewrites: bool):
+        """Guard the guard — git config keys are case-insensitive; a push rewrite is no fetch."""
+        assert bool(_URL_REWRITE.search(line)) is rewrites
+
+    @pytest.mark.parametrize("workflow", _workflows(), ids=lambda path: path.name)
+    def test_workflow_rewrites_no_git_url(self, workflow: Path):
+        """CI installs the manifest as written, so green CI means the VM resolves it too.
+
+        A ``url.<base>.insteadOf`` rewrite is how CI worked around the SSH alias;
+        with every source on public HTTPS it has nothing left to rewrite.
+        """
+        assert not _URL_REWRITE.search(workflow.read_text()), (
+            f"{workflow.name} rewrites a git URL. Fix the source in pyproject.toml "
+            "instead — a rewrite makes CI install something the VM does not (#284)."
+        )

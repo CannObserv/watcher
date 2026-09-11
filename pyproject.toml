@@ -6,9 +6,9 @@ readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
     "fastapi>=0.115.0,<1",
-    # Imported directly — every schema is pydantic v2. FastAPI's own range has
-    # no cap, so this is the only bound on a pydantic major (#294).
-    "pydantic>=2.7,<3",
+    # Imported directly — every schema is pydantic v2. Until #294 its bounds were
+    # co-core's (>=2.12,<3; FastAPI's range has no cap): a major is ours to adopt.
+    "pydantic>=2.12,<3",
     "python-json-logger>=4.0.0,<5",
     "uvicorn>=0.34.0,<1",
     "sqlalchemy[asyncio]>=2.0,<3",

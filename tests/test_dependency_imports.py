@@ -5,10 +5,10 @@ transitively (#294). Their absence from the manifest could not fail quietly —
 all six load on ``import src.api.main``, so a dependency dropping one reddens
 collection, the argument ``tests/test_dependency_extras.py`` makes for psycopg.
 What it cost was the **bound**: an undeclared module is capped, or not, by
-whichever dependency pulls it in. FastAPI's ``pydantic`` range has no upper
-bound, so a pydantic major would have arrived with a routine
-``uv lock --upgrade``; ``redis`` answered to co-core-aio's cap rather than to
-the redis-py version ``docs/BUS-CONNECTION-POLICY.md`` was measured on.
+whichever dependency pulls it in. ``pydantic``, which every schema here is
+written against, answered to co-core's range — FastAPI's has no cap; ``redis``
+answered to co-core-aio's cap rather than to the redis-py version
+``docs/BUS-CONNECTION-POLICY.md`` was measured on.
 
 **Resolution is by dotted prefix, not top-level name.** ``google`` is a
 namespace several distributions ship into, so asking which distribution

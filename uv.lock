@@ -2074,7 +2074,7 @@ requires-dist = [
     { name = "notifier-client", git = "https://github.com/CannObserv/notifier.git?subdirectory=clients%2Fpython&tag=v0.3.1" },
     { name = "openpyxl", specifier = ">=3.1.0,<4" },
     { name = "procrastinate", specifier = ">=3.0,<4" },
-    { name = "pydantic", specifier = ">=2.7,<3" },
+    { name = "pydantic", specifier = ">=2.12,<3" },
     { name = "pypdf", specifier = ">=5.0,<7" },
     { name = "python-json-logger", specifier = ">=4.0.0,<5" },
     { name = "python-multipart", specifier = ">=0.0.22,<1" },

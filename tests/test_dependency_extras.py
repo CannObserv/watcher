@@ -36,25 +36,15 @@ import pytest
 from packaging.requirements import Requirement
 from packaging.utils import canonicalize_name
 
+from tests._dependency_manifest import declared_requirements
+
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 _PYPROJECT = _REPO_ROOT / "pyproject.toml"
 
 
 def _declared_requirements() -> list[Requirement]:
-    """Every requirement in project.dependencies, optional-dependencies, groups.
-
-    ``dependency-groups`` entries may be ``{include-group = "..."}`` tables
-    (PEP 735) rather than requirement strings; those are skipped — the included
-    group is itself a key in the same table, so nothing is missed.
-    """
-    data = tomllib.loads(_PYPROJECT.read_text())
-    project = data["project"]
-    raw: list[str] = list(project.get("dependencies", []))
-    for extra_deps in project.get("optional-dependencies", {}).values():
-        raw.extend(extra_deps)
-    for group in data.get("dependency-groups", {}).values():
-        raw.extend(entry for entry in group if isinstance(entry, str))
-    return [Requirement(spec) for spec in raw]
+    """Every requirement ``pyproject.toml`` declares, in any table."""
+    return declared_requirements(tomllib.loads(_PYPROJECT.read_text()))
 
 
 def _requirements_with_extras() -> list[Requirement]:

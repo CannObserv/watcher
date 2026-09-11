@@ -38,6 +38,8 @@ import pytest
 from packaging.requirements import Requirement
 from packaging.utils import canonicalize_name
 
+from tests._dependency_manifest import declared_requirements
+
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 _PYPROJECT = _REPO_ROOT / "pyproject.toml"
 # This repo's own top-level packages: every root directory with an
@@ -70,13 +72,7 @@ def _requirement_names(specs: list) -> frozenset[str]:
 
 def _declared_anywhere(manifest: dict) -> frozenset[str]:
     """Every name *manifest* declares: dependencies, each optional extra, each group."""
-    project = manifest["project"]
-    tables = [
-        project.get("dependencies", []),
-        *project.get("optional-dependencies", {}).values(),
-        *manifest.get("dependency-groups", {}).values(),
-    ]
-    return _requirement_names([spec for table in tables for spec in table])
+    return frozenset(canonicalize_name(req.name) for req in declared_requirements(manifest))
 
 
 _MANIFEST = tomllib.loads(_PYPROJECT.read_text())
@@ -281,7 +277,9 @@ class TestTransitiveByDesign:
         """Guard the guard — a declaration anywhere keeps an entry installed.
 
         The real manifest has no optional extra and one group, so nothing else
-        here would notice a reader that consulted ``dependencies`` and ``dev`` alone.
+        would notice a reader that consulted ``dependencies`` and ``dev`` alone —
+        here or in ``tests/test_dependency_extras.py``, which reads through the
+        same ``declared_requirements``.
         """
         manifest = tomllib.loads(
             """

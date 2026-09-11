@@ -65,6 +65,17 @@ def _requirement_names(specs: list) -> frozenset[str]:
     )
 
 
+def _declared_anywhere(manifest: dict) -> frozenset[str]:
+    """Every name *manifest* declares: dependencies, each optional extra, each group."""
+    project = manifest["project"]
+    tables = [
+        project.get("dependencies", []),
+        *project.get("optional-dependencies", {}).values(),
+        *manifest.get("dependency-groups", {}).values(),
+    ]
+    return _requirement_names([spec for table in tables for spec in table])
+
+
 _MANIFEST = tomllib.loads(_PYPROJECT.read_text())
 _RUNTIME = _requirement_names(_MANIFEST["project"]["dependencies"])
 _WITH_DEV = _RUNTIME | _requirement_names(_MANIFEST["dependency-groups"]["dev"])
@@ -238,10 +249,29 @@ class TestTransitiveByDesign:
             f"no longer holds: {_TRANSITIVE_BY_DESIGN[dist][1]}"
         )
 
+    def test_declarations_are_read_from_every_table(self):
+        """Guard the guard — a declaration anywhere keeps an entry installed.
+
+        The real manifest has no optional extra and one group, so nothing else
+        here would notice a reader that consulted ``dependencies`` and ``dev`` alone.
+        """
+        manifest = tomllib.loads(
+            """
+            [project]
+            dependencies = ["a"]
+            [project.optional-dependencies]
+            extra = ["b"]
+            [dependency-groups]
+            dev = ["c"]
+            lint = ["d", { include-group = "dev" }]
+            """
+        )
+        assert _declared_anywhere(manifest) == {"a", "b", "c", "d"}
+
     @_each_allowlist_entry
     def test_it_stays_undeclared(self, dist: str, provider: str):
         """Declaring an entry keeps it installed after *provider* stops using it."""
-        assert dist not in _WITH_DEV, (
+        assert dist not in _declared_anywhere(_MANIFEST), (
             f"{dist} is declared in pyproject.toml, but must arrive only through "
             f"{provider}: {_TRANSITIVE_BY_DESIGN[dist][1]}"
         )

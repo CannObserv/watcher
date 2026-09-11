@@ -3,6 +3,8 @@
 import pytest
 from httpx import AsyncClient
 
+from src.core.public_base_url import PUBLIC_BASE_URL_ENV
+
 
 @pytest.mark.integration
 class TestPreviewEndpoint:
@@ -18,16 +20,27 @@ class TestPreviewEndpoint:
         assert "Change" in body
         assert "Example Watch" in body
 
-    async def test_default_body_contains_item_link(self, client: AsyncClient):
+    async def test_default_body_contains_item_link(self, client: AsyncClient, monkeypatch):
         """#221: the change body ends at the ITEM dashboard link (the
-        change_summary body block was retired)."""
+        change_summary body block was retired). The link is built on the
+        configured public base (#296 D6), as dispatch builds it."""
+        monkeypatch.setenv(PUBLIC_BASE_URL_ENV, "https://watcher.test")
         resp = await client.post(
             "/notifications/preview",
             data={"preview_event": "change_detected"},
         )
         assert resp.status_code == 200
-        assert "ITEM:" in resp.text
-        assert "/watched-items/" in resp.text
+        assert "ITEM: https://watcher.test/watched-items/" in resp.text
+
+    async def test_default_body_has_no_item_link_without_a_base(self, client: AsyncClient):
+        """The preview is what dispatch would send: with no public base
+        configured the link is omitted, not rendered relative (#296 D6)."""
+        resp = await client.post(
+            "/notifications/preview",
+            data={"preview_event": "change_detected"},
+        )
+        assert resp.status_code == 200
+        assert "ITEM:" not in resp.text
 
     async def test_includes_toggle_driven_slot_when_toggle_on(self, client: AsyncClient):
         resp = await client.post(

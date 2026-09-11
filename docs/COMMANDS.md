@@ -280,10 +280,10 @@ upgrade head` from an empty `postgres:16` then `alembic check` for drift). Only
 the **test** job checks out the sibling `archiver` repo (public; for
 `ARCHIVER_REPO_PATH`, whose alembic builds the `information` schema conftest's
 factories write to) — `lint` and `migrations` stopped needing it when #254
-removed the `archiver-client` path dep. All three jobs rewrite
-the `notifier-client` SSH source to HTTPS, authenticate to GCS **keyless via
-WIF** (`vars.GCP_WIF_PROVIDER` → `co-pypi-reader` SA), and sync the wheelhouse
-before `uv sync`. Only the test job also syncs archiver's wheelhouse (its `uv
+removed the `archiver-client` path dep. All three jobs authenticate to GCS
+**keyless via WIF** (`vars.GCP_WIF_PROVIDER` → `co-pypi-reader` SA) and sync
+the wheelhouse before `uv sync`; `notifier-client` installs as written, from
+its public HTTPS tag source — no URL rewrite (#284). Only the test job also syncs archiver's wheelhouse (its `uv
 run alembic` subprocess needs co-core); the migrations job does **not** — the
 #234 squash collapsed the pre-existing chain into a self-contained genesis
 baseline (`2addddea0b03`) that references no `information` schema, so `upgrade

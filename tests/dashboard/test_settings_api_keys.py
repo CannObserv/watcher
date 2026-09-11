@@ -124,6 +124,11 @@ class TestApiKeysEdit:
         assert b"My Key" in r.content
 
     async def test_edit_row_post_saves_label(self, client, make_api_key):
+        """The row that swaps back in carries the new label.
+
+        Asserted on the row, not the body: the out-of-band flash repeats the
+        label, so a body match passes a rename that saved nothing (#295 CR 1).
+        """
         key = await make_api_key()
         r = await client.post(
             f"/settings/api-keys/{key.id}/edit-row",
@@ -131,7 +136,10 @@ class TestApiKeysEdit:
             headers=HTMX_HEADERS,
         )
         assert r.status_code == 200
-        assert b"Renamed" in r.content
+        rest, _ = _split_oob_flash(r)
+        row = rest.find("tr", id=f"api-key-row-{key.id}")
+        assert isinstance(row, Tag), "the row is not what swaps in"
+        assert row.td.get_text() == "Renamed"
 
     async def test_edit_row_post_flashes_out_of_band(self, client, make_api_key):
         """The row swaps back in; the confirmation rides out-of-band, label as text (#295)."""

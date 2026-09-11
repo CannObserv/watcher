@@ -22,7 +22,10 @@ package we relied on it to pull in — needs no guard here. procrastinate's
 a default argument, evaluated at module import, and its ``import_or_wrapper``
 substitutes an object whose ``__getattr__`` re-raises the ``ImportError``. A
 missing psycopg therefore breaks ``import procrastinate`` outright and reddens
-the whole suite — it cannot fail quietly at worker startup.
+the whole suite — it cannot fail quietly at worker startup. A module this repo
+imports itself fails collection just as loudly; what leaving it undeclared
+costs is its version bound, which is why ``tests/test_dependency_imports.py``
+requires every such import declared, bar a reasoned allowlist (#294).
 """
 
 import tomllib

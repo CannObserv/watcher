@@ -18,6 +18,8 @@ against panel staleness, and independent of the announcement stream's period.
 
 import os
 
+# Undeclared on purpose (#294): _republish_cron must validate with the parser
+# procrastinate evaluates the cron with — tests/test_dependency_imports.py.
 from croniter import croniter
 from procrastinate.exceptions import AlreadyEnqueued
 

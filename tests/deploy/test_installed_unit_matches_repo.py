@@ -56,6 +56,48 @@ def _unset_environment(unit_text: str) -> set[str]:
     return names
 
 
+def _directive_values(unit_text: str, directive: str) -> list[str]:
+    """Return every value a directive is given, in file order.
+
+    ``EnvironmentFile=`` may repeat and takes an optional ``-`` prefix meaning
+    "skip if missing"; the prefix is stripped, because an optional file under
+    the checkout is exactly as loaded as a required one whenever it exists.
+    """
+    prefix = f"{directive}="
+    values: list[str] = []
+    for line in unit_text.splitlines():
+        stripped = line.strip()
+        if stripped.startswith(prefix):
+            values.append(stripped.removeprefix(prefix).removeprefix("-"))
+    return values
+
+
+def test_repo_unit_loads_no_env_file_from_the_checkout() -> None:
+    """#296 D5: the service must not inherit the workstation's secrets.
+
+    The checkout's ``.env`` is where the agent workspace keeps its credentials —
+    ``ANTHROPIC_API_KEY`` and a ``GH_TOKEN_*`` per sibling repo — and a
+    production unit that loads it hands all of them to the process serving the
+    dashboard. Nothing in it is production configuration: the service's own
+    settings live in ``/etc/watcher/.env``.
+
+    The move to a dedicated VM does not fix this on its own. The dev workspace
+    moves with the service (replicator#88 D2), so the new checkout's ``.env``
+    carries the same secrets again; only the unit can stop reading it.
+
+    Asserted against the unit's ``WorkingDirectory=`` rather than a literal
+    ``.env`` name, so a backup or an alternate file beside it is caught too.
+    """
+    text = REPO_UNIT.read_text()
+    (checkout,) = _directive_values(text, "WorkingDirectory")
+    under_checkout = [
+        path
+        for path in _directive_values(text, "EnvironmentFile")
+        if Path(path).is_relative_to(checkout)
+    ]
+    assert not under_checkout, f"unit loads env files from the checkout: {under_checkout}"
+
+
 def test_repo_unit_declares_the_production_opt_in() -> None:
     """The opt-in must live in the unit, never in an env file.
 

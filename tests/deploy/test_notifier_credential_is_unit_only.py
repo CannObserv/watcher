@@ -90,10 +90,12 @@ def test_repo_unit_loads_the_notifier_env_file() -> None:
 def test_repo_unit_loads_the_notifier_env_file_last() -> None:
     """Nothing loaded afterwards may override the production credential.
 
-    ``/home/exedev/watcher/.env`` is repo-local and git-ignored — precisely the
-    file a developer edits — and systemd applies env files in order. Loading it
-    after the credential would let a stray ``WATCHER_NOTIFIER_BASE_URL`` there
-    redirect production's notifications.
+    systemd applies env files in order, so a file loaded after the credential
+    could override it — a stray ``WATCHER_NOTIFIER_BASE_URL`` there would
+    redirect production's notifications. The file this guarded against, the
+    checkout's ``.env``, is no longer loaded at all (#296 D5,
+    ``test_repo_unit_loads_no_env_file_from_the_checkout``); the ordering stays
+    pinned for whatever is added next.
     """
     env_files = [
         line.strip()
@@ -313,9 +315,11 @@ def test_no_file_in_the_system_env_directory_carries_the_notifier_credential() -
 def test_no_env_shaped_file_in_the_repo_root_carries_the_notifier_credential() -> None:
     """The repo half, which must run wherever the file does (CR-10).
 
-    ``.env`` is the *second* file ``load-env.sh`` exports and an
-    ``EnvironmentFile=`` in the unit besides, so a key pasted there to debug a
-    dispatch re-arms #278 exactly. It is also a repo-level surface: tying its
+    ``.env`` is the *second* file ``load-env.sh`` exports, so a key pasted
+    there to debug a dispatch is held by every agent, suite and REPL — #278's
+    vector exactly. (Until #296 D5 it was an ``EnvironmentFile=`` in the unit
+    as well; it is no longer, which narrows the blast radius and changes
+    nothing about this guard.) It is also a repo-level surface: tying its
     check to ``/etc/watcher/.env``'s existence — as the combined sweep did —
     made it inert on every clone that is not this VM, which is precisely where
     someone edits ``.env`` without a production service to think about.

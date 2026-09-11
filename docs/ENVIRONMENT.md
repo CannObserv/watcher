@@ -16,10 +16,19 @@ The service loads env files in this order (later values override earlier):
 |---|---|---|
 | `/run/watcher/build-id` | `BUILD_ID` (auto-generated from git SHA) | optional |
 | `/etc/watcher/.env` | Production secrets (`DATABASE_URL`) | **yes** |
-| `.env` (repo root) | Dev/agent overrides (`GH_TOKEN`, `TEST_DATABASE_URL`) | optional |
 | `/etc/watcher/notifier.env` | The production notifier credential, unit-only (#278) | **yes** |
 
 `/etc/watcher/.env` is owned by `root:exedev` (mode 640) and survives repo resets, worktree switches, and redeployments.
+
+**The service does not load the repo-root `.env` (#296 D5).** That file is the
+agent workspace's: `GH_TOKEN_*`, `ANTHROPIC_API_KEY`, `TEST_DATABASE_URL`, the
+`WATCHER_DEV_*` opt-ins. Every one of them is marked *no* under **Prod** below,
+and until #296 the unit loaded the file anyway, so the process serving the
+dashboard held every token in it. `scripts/load-env.sh` still exports it into
+shells, which is what it is for. A production setting belongs in
+`/etc/watcher/.env`; a production credential belongs in a unit-only file.
+`tests/deploy/test_installed_unit_matches_repo.py` fails a unit that loads any
+env file from the checkout.
 
 `/etc/watcher/notifier.env` is `600 root:root` and holds
 `WATCHER_NOTIFIER_BASE_URL` + `WATCHER_NOTIFIER_API_KEY` and nothing else.

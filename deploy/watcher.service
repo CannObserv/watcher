@@ -33,10 +33,16 @@ ExecStartPre=/bin/bash -c 'echo BUILD_ID=$(git rev-parse --short HEAD) > /run/wa
 # → Logging.
 ExecStartPre=-/usr/local/bin/uv run --no-project --with 'google-cloud-storage>=2,<4' python /home/exedev/watcher/scripts/sync_wheelhouse.py
 
-# Load BUILD_ID, then system secrets, then optional repo-local overrides
+# Load BUILD_ID, then the service's own configuration.
+#
+# NOT the checkout's .env (#296 D5). That file is the agent workspace's secret
+# store — ANTHROPIC_API_KEY and a GH_TOKEN_* per sibling repo — and loading it
+# here handed every one of them to the process serving the dashboard. None of
+# it is production configuration. A production setting goes in
+# /etc/watcher/.env; a production credential goes in a unit-only file like
+# notifier.env below.
 EnvironmentFile=-/run/watcher/build-id
 EnvironmentFile=/etc/watcher/.env
-EnvironmentFile=-/home/exedev/watcher/.env
 
 # The production notifier credential, loaded by this unit and nothing else
 # (#278). /etc/watcher/.env is exported into every agent shell by
@@ -48,9 +54,9 @@ EnvironmentFile=-/home/exedev/watcher/.env
 # This file is 600 root:root: systemd parses EnvironmentFile= as root before
 # User= takes effect, so the exedev account never needs to read it.
 #
-# Last, deliberately: env files apply in order, so loading the repo-local
-# .env afterwards would let a stray value there redirect production's
-# notifications. And required, not optional (no `-`): an absent file must
+# Last, deliberately: env files apply in order, so any env file added after
+# it could let a stray value redirect production's notifications. And
+# required, not optional (no `-`): an absent file must
 # fail the start rather than leave the service up and quietly un-notifying.
 # src/core/notifier_client makes the same combination fatal in-app, which
 # covers the case systemd cannot see — a file present but empty.

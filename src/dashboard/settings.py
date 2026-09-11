@@ -1,10 +1,10 @@
 """Dashboard settings routes — API key management."""
 
 import json
+from html import escape
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
-from markupsafe import escape
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 

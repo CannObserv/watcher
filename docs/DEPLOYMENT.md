@@ -278,8 +278,8 @@ irreversibly, so take a dump first:
 
 ```bash
 source scripts/load-env.sh
-uv run python -m scripts.prune_job_history --dry-run
-WATCHER_ALLOW_PRODUCTION_DB=1 uv run python -m scripts.prune_job_history
+uv run python -m src.ops.prune_job_history --dry-run
+WATCHER_ALLOW_PRODUCTION_DB=1 uv run python -m src.ops.prune_job_history
 ```
 
 ## Database Backup Timer

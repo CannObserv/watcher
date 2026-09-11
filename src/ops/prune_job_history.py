@@ -8,8 +8,8 @@ worker. This steps the horizon down from the oldest job a week at a time
 instead, one statement per slice, from a shell, with progress:
 
     source scripts/load-env.sh
-    uv run python -m scripts.prune_job_history --dry-run
-    WATCHER_ALLOW_PRODUCTION_DB=1 uv run python -m scripts.prune_job_history
+    uv run python -m src.ops.prune_job_history --dry-run
+    WATCHER_ALLOW_PRODUCTION_DB=1 uv run python -m src.ops.prune_job_history
 
 It deletes history irreversibly: take a dump first. Only finished jobs are
 touched, so it is safe beside a running worker. The opt-in is the service's own

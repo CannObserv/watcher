@@ -5,7 +5,7 @@ here carries: refuse a production database unless the operator opts in, with
 the same guard the service uses (``src.core.db_safety``, #233).
 """
 
-from scripts import prune_job_history
+from src.ops import prune_job_history
 
 PRODUCTION_URL = "postgresql+asyncpg://watcher_app:pw@localhost:5432/watcher"
 

@@ -15,7 +15,7 @@ on both tables, so this needs no grant.
 Procrastinate's ``delete_old_jobs`` is one ``DELETE`` over a ``DISTINCT ON``
 scan of every job joined to its events. That is trivial at steady state and a
 sort of every event in the table on the original backlog, so the backlog is
-pruned once by ``scripts/prune_job_history.py``, which steps the horizon down
+pruned once by ``src/ops/prune_job_history.py``, which steps the horizon down
 from the oldest job with :func:`backlog_horizons`, before this task ever runs
 against it.
 """

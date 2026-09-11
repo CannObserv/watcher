@@ -101,8 +101,11 @@ class TestGitSources:
     @pytest.mark.parametrize(
         ("name", "entry"), _manifest_git_sources(), ids=[n for n, _ in _manifest_git_sources()]
     )
-    def test_git_source_is_public_https(self, name: str, entry: dict):
-        """An SSH host alias resolves on one machine; HTTPS resolves everywhere."""
+    def test_git_source_is_https(self, name: str, entry: dict):
+        """An SSH host alias resolves on one machine; HTTPS resolves everywhere.
+
+        Checks the scheme only — a private HTTPS repo passes here.
+        """
         url = entry["git"]
         assert url.startswith("https://"), (
             f"{name} is sourced from {url!r}. Use its public https:// URL — an "

@@ -7,7 +7,7 @@ import it at top level without creating a package↔module import cycle.
 from pathlib import Path
 from urllib.parse import quote as _url_quote
 
-from starlette.templating import Jinja2Templates
+from fastapi.templating import Jinja2Templates
 
 from src.core.config import BUILD_ID
 from src.core.notifications.default_templates import TEMPLATE_VARIABLES

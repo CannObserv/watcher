@@ -3,9 +3,8 @@
 import hashlib
 
 import pytest
-from fastapi import FastAPI
-from starlette.requests import Request
-from starlette.testclient import TestClient
+from fastapi import FastAPI, Request
+from fastapi.testclient import TestClient
 
 
 def _request(headers: dict[str, str]) -> Request:

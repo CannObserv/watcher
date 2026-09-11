@@ -34,6 +34,7 @@
 #   WATCHER_DEV_SERVER_DRY_RUN=1         print resolution, do not exec uvicorn
 #   WATCHER_DEV_NOTIFIER_BASE_URL        scratch notifier; opts in, needs the key below
 #   WATCHER_DEV_NOTIFIER_API_KEY         scratch notifier key ('development'-marked); required with the URL
+#   WATCHER_DEV_PUBLIC_BASE_URL          base for this server's notification links (e.g. its :8001 URL)
 #   WATCHER_DEV_SERVER_SKIP_ENV_FILES=1  skip sourcing env files (tests)
 set -euo pipefail
 
@@ -188,6 +189,19 @@ else
   NOTIFIER_ENABLED_REPORT="(cleared)"
 fi
 
+# And for the dashboard's public base URL (#296 D6). /etc/watcher/.env carries
+# production's, and a dev worker that inherited it would send notifications
+# linking readers into the live dashboard — at item ids that exist only in this
+# server's database. Cleared, links are omitted; WATCHER_DEV_PUBLIC_BASE_URL
+# points them at this server instead.
+if [[ -n "${WATCHER_DEV_PUBLIC_BASE_URL:-}" ]]; then
+  export WATCHER_PUBLIC_BASE_URL="$WATCHER_DEV_PUBLIC_BASE_URL"
+  PUBLIC_BASE_REPORT="$WATCHER_PUBLIC_BASE_URL"
+else
+  unset WATCHER_PUBLIC_BASE_URL
+  PUBLIC_BASE_REPORT="(cleared)"
+fi
+
 # pytest builds watcher_test with Base.metadata.create_all, not alembic, so
 # its alembic_version (if any) never matches the actual tables and a plain
 # `upgrade head` fails mid-history. The test DB is disposable by definition,
@@ -228,6 +242,7 @@ if [[ "${WATCHER_DEV_SERVER_DRY_RUN:-}" == "1" ]]; then
   echo "WATCHER_BUS_ENABLED=$BUS_ENABLED_REPORT"
   echo "WATCHER_NOTIFIER_BASE_URL=$NOTIFIER_REPORT"
   echo "WATCHER_NOTIFIER_ENABLED=$NOTIFIER_ENABLED_REPORT"
+  echo "WATCHER_PUBLIC_BASE_URL=$PUBLIC_BASE_REPORT"
   echo "PORT=$PORT"
   echo "MIGRATE=$MIGRATE_REPORT"
   echo "RESET=$RESET_REPORT"

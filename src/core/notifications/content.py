@@ -1,15 +1,18 @@
 """Notification body builder — resolves ContentOptions and composes custom bodies."""
 
+import os
+
 from jinja2 import Environment, StrictUndefined, TemplateError
 
 from src.api.schemas.content_config import ContentConfig, ContentOptions
-from src.core.notifications.constants import APP_URL
 from src.core.notifications.default_templates import (
     CHANGE_DETECTED_HEADER_LINES,
+    CHANGE_DETECTED_ITEM_LINE,
     DEFAULT_BODY_TEMPLATES,
     DEFAULT_TITLE_TEMPLATES,
 )
 from src.core.notifications.events import EVENT_TITLES, WatchEvent, WatchEventType
+from src.core.public_base_url import PublicBaseUrlInvalid, public_base_url
 from src.core.utils import format_utc_iso
 
 _jinja_env = Environment(autoescape=False)
@@ -53,8 +56,10 @@ def build_template_context(event: WatchEvent) -> dict:
     templates rely on:
       - `event_label` — human-readable event title (always set)
       - `occurred_at_iso` — ISO 8601 UTC timestamp (`...Z`), AGENTS.md format
+      - `app_url` — the dashboard's public base (`WATCHER_PUBLIC_BASE_URL`,
+        #296 D6); empty when not configured
       - `change_url` — WatchedItem dashboard URL when `change_revision_id` is in
-        metadata; empty otherwise
+        metadata and a base is configured; empty otherwise
 
     The diff-derived fields (`change_summary`, `diff_snippet`, `diff_full`,
     `chunks_changed`) were removed in #221 — the diff pipeline that fed them was
@@ -75,8 +80,9 @@ def build_template_context(event: WatchEvent) -> dict:
     # Derived fields take precedence over any same-named metadata keys.
     ctx["event_label"] = EVENT_TITLES[event.event_type.value]
     ctx["occurred_at_iso"] = format_utc_iso(event.occurred_at)
+    ctx["app_url"] = _dashboard_base()
     ctx["change_url"] = _format_change_url(
-        event.watched_item_id, event.metadata.get("change_revision_id")
+        event.watched_item_id, event.metadata.get("change_revision_id"), ctx["app_url"]
     )
     return ctx
 
@@ -169,7 +175,14 @@ def _build_change_detected_body(event: WatchEvent, options: ContentOptions) -> s
     ctx = build_template_context(event)
     metadata = event.metadata
 
-    items = [render_template(line, ctx) for line in CHANGE_DETECTED_HEADER_LINES]
+    # No base, no ITEM line (#296 D6): a relative link is useless in Slack or
+    # email. Skipped by identity rather than by rendered prefix, and it is the
+    # last header line, so the index anchors below are unaffected.
+    items = [
+        render_template(line, ctx)
+        for line in CHANGE_DETECTED_HEADER_LINES
+        if ctx["app_url"] or line != CHANGE_DETECTED_ITEM_LINE
+    ]
     if options.include_domain and metadata.get("domain_name"):
         items.insert(1, f"DOMAIN: {metadata['domain_name']}")
 
@@ -196,7 +209,20 @@ def _build_change_detected_body(event: WatchEvent, options: ContentOptions) -> s
     return "\n".join(f"- {item}" for item in items)
 
 
-def _format_change_url(watched_item_id: str, change_revision_id: str | None) -> str:
+def _dashboard_base() -> str:
+    """The configured public base, or "" — never raises (#296 D6).
+
+    The lifespan refuses to start on a malformed ``WATCHER_PUBLIC_BASE_URL``, so
+    the service never gets here with one. A dispatch path must still not fail on
+    it: a notification without its dashboard link beats no notification.
+    """
+    try:
+        return public_base_url(os.environ) or ""
+    except PublicBaseUrlInvalid:
+        return ""
+
+
+def _format_change_url(watched_item_id: str, change_revision_id: str | None, base: str) -> str:
     """Build the WatchedItem dashboard URL for a change, or "" when not a change event.
 
     #191: there is no per-change page (the `/watches/{id}/changes/...` route was
@@ -206,6 +232,6 @@ def _format_change_url(watched_item_id: str, change_revision_id: str | None) -> 
     Used by `build_template_context` to expose the URL as the `change_url`
     template variable, and by `_build_change_detected_body` for the CHANGE: line.
     """
-    if not change_revision_id:
+    if not change_revision_id or not base:
         return ""
-    return f"{APP_URL}/watched-items/{watched_item_id}"
+    return f"{base}/watched-items/{watched_item_id}"

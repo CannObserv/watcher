@@ -394,3 +394,34 @@ def test_an_inherited_notifier_opt_in_does_not_survive() -> None:
     assert result.returncode == 0, result.stderr
     assert "WATCHER_NOTIFIER_BASE_URL=(cleared)" in result.stdout
     assert "WATCHER_NOTIFIER_ENABLED=(cleared)" in result.stdout
+
+
+def test_inherited_public_base_url_is_cleared() -> None:
+    """#296 D6: a dev server's notifications must not link into production.
+
+    /etc/watcher/.env carries the production WATCHER_PUBLIC_BASE_URL, and the
+    dev server sources it. Inherited, every notification the dev worker sends
+    would point readers at the live dashboard — at an item id that exists only
+    in the dev database. Cleared, links are omitted, which is honest.
+    """
+    result = run(
+        {
+            "TEST_DATABASE_URL": TEST_URL,
+            "WATCHER_PUBLIC_BASE_URL": "https://co-watcher.exe.xyz",
+        }
+    )
+    assert result.returncode == 0, result.stderr
+    assert "WATCHER_PUBLIC_BASE_URL=(cleared)" in result.stdout
+
+
+def test_explicit_dev_public_base_url_is_forwarded() -> None:
+    """WATCHER_DEV_PUBLIC_BASE_URL points dev links at the dev server itself."""
+    result = run(
+        {
+            "TEST_DATABASE_URL": TEST_URL,
+            "WATCHER_PUBLIC_BASE_URL": "https://co-watcher.exe.xyz",
+            "WATCHER_DEV_PUBLIC_BASE_URL": "https://co-watcher.exe.xyz:8001",
+        }
+    )
+    assert result.returncode == 0, result.stderr
+    assert "WATCHER_PUBLIC_BASE_URL=https://co-watcher.exe.xyz:8001" in result.stdout

@@ -22,9 +22,20 @@ from src.core.notifications.content import (
     resolve_options,
 )
 from src.core.notifications.events import EVENT_TITLES, WatchEvent, WatchEventType
+from src.core.public_base_url import PUBLIC_BASE_URL_ENV
 
 OCCURRED_AT = datetime(2026, 4, 14, 12, 0, 0, tzinfo=UTC)
 WATCH_ID = "01HV0000000000000000000001"
+#: A host that is no deployment's, so no expected string here can be mistaken
+#: for where the dashboard actually lives (#296 D6).
+BASE = "https://watcher.test"
+
+
+@pytest.fixture(autouse=True)
+def _public_base_url(monkeypatch):
+    """Every test in this module renders against a configured base unless it
+    removes it; ``tests/conftest.py`` clears the variable at import."""
+    monkeypatch.setenv(PUBLIC_BASE_URL_ENV, BASE)
 
 
 def make_event(event_type=WatchEventType.CHANGE_DETECTED, metadata=None):
@@ -81,16 +92,44 @@ class TestChangeDetectedDefaultBody:
             "- Test Watch\n"
             "- URL: https://example.com\n"
             "- TIMESTAMP: 2026-04-14T12:00:00Z\n"
-            f"- ITEM: https://watcher.exe.xyz/watched-items/{WATCH_ID}"
+            f"- ITEM: {BASE}/watched-items/{WATCH_ID}"
         )
         assert body == expected
 
-    def test_item_link_unconditional(self):
+    def test_item_link_is_not_a_toggle(self):
         """The ITEM dashboard link is part of the always-present skeleton —
-        there is no toggle to suppress it."""
+        there is no toggle to suppress it. Only an unconfigured base removes
+        it (below)."""
         event = make_event(metadata={})
         body = build_body(event, ContentOptions())
-        assert f"ITEM: https://watcher.exe.xyz/watched-items/{WATCH_ID}" in body
+        assert f"ITEM: {BASE}/watched-items/{WATCH_ID}" in body
+
+    def test_item_link_follows_the_configured_base(self, monkeypatch):
+        """#296 D6: the host is configuration. The move to co-watcher changes
+        it, and a constant was also why a dev server linked into production."""
+        monkeypatch.setenv(PUBLIC_BASE_URL_ENV, "https://co-watcher.exe.xyz/")
+        body = build_body(make_event(metadata={}), ContentOptions())
+        assert f"- ITEM: https://co-watcher.exe.xyz/watched-items/{WATCH_ID}" in body
+
+    def test_item_link_is_omitted_without_a_base(self, monkeypatch):
+        """No base, no link — the rest of the skeleton is untouched. A relative
+        ``/watched-items/…`` is useless in Slack or email, and guessing a host
+        would point readers at a VM that no longer serves the dashboard.
+        Archiver's ``ARCHIVER_PUBLIC_BASE_URL`` makes the same call."""
+        monkeypatch.delenv(PUBLIC_BASE_URL_ENV)
+        body = build_body(make_event(metadata={}), ContentOptions())
+        assert body == (
+            "- Test Watch\n- URL: https://example.com\n- TIMESTAMP: 2026-04-14T12:00:00Z"
+        )
+
+    def test_a_malformed_base_never_breaks_a_dispatch(self, monkeypatch):
+        """The lifespan refuses a malformed value at startup; the render path
+        must still never raise on one, because a failed dispatch is worse than a
+        missing link."""
+        monkeypatch.setenv(PUBLIC_BASE_URL_ENV, "co-watcher.exe.xyz")
+        body = build_body(make_event(metadata={}), ContentOptions())
+        assert "ITEM:" not in body
+        assert body.startswith("- Test Watch")
 
     def test_full_layout_with_every_toggle_on(self):
         """With every surviving toggle on and full metadata, the body is one
@@ -123,7 +162,7 @@ class TestChangeDetectedDefaultBody:
             "- LAST CHANGED: 2026-04-09\n"
             "- INTERVAL: 1h\n"
             "- TIMESTAMP: 2026-04-14T12:00:00Z\n"
-            f"- ITEM: https://watcher.exe.xyz/watched-items/{WATCH_ID}\n"
+            f"- ITEM: {BASE}/watched-items/{WATCH_ID}\n"
             "- DESCRIPTION: Watch for license renewals\n"
             "- TAGS: cannabis, license"
         )
@@ -374,6 +413,7 @@ class TestBuildTemplateContext:
             "occurred_at",
             "occurred_at_iso",
             "event_label",
+            "app_url",
             "change_url",
         }
 
@@ -420,12 +460,25 @@ class TestBuildTemplateContext:
     def test_change_url_populated_when_change_revision_id_present(self):
         event = make_event(metadata={"change_revision_id": "01HV0000000000000000000099"})
         ctx = build_template_context(event)
-        assert ctx["change_url"] == f"https://watcher.exe.xyz/watched-items/{event.watched_item_id}"
+        assert ctx["change_url"] == f"{BASE}/watched-items/{event.watched_item_id}"
 
     def test_change_url_empty_when_change_revision_id_absent(self):
         event = make_event(metadata={})
         ctx = build_template_context(event)
         assert ctx["change_url"] == ""
+
+    def test_change_url_empty_without_a_base(self, monkeypatch):
+        monkeypatch.delenv(PUBLIC_BASE_URL_ENV)
+        event = make_event(metadata={"change_revision_id": "01HV0000000000000000000099"})
+        assert build_template_context(event)["change_url"] == ""
+
+    def test_app_url_is_in_the_context(self, monkeypatch):
+        """The seed template's ITEM line is ``{{ app_url }}/watched-items/…``,
+        so a custom template can build the same link — and test it with
+        ``{% if app_url %}``."""
+        assert build_template_context(make_event())["app_url"] == BASE
+        monkeypatch.delenv(PUBLIC_BASE_URL_ENV)
+        assert build_template_context(make_event())["app_url"] == ""
 
     def test_derived_fields_take_precedence_over_metadata(self):
         """Hostile metadata keys must not clobber derived fields."""
@@ -440,9 +493,7 @@ class TestBuildTemplateContext:
         ctx = build_template_context(event)
         assert ctx["event_label"] == EVENT_TITLES[event.event_type.value]
         assert ctx["occurred_at_iso"] == "2026-04-14T12:00:00Z"
-        assert ctx["change_url"] == (
-            f"https://watcher.exe.xyz/watched-items/{event.watched_item_id}"
-        )
+        assert ctx["change_url"] == (f"{BASE}/watched-items/{event.watched_item_id}")
 
 
 class TestBuildBodyWithTemplates:
@@ -472,7 +523,7 @@ class TestBuildBodyWithTemplates:
         event = make_event(metadata={"change_revision_id": "01HV0000000000000000000099"})
         opts = ContentOptions(body_template="link: {{ change_url }}")
         body = build_body(event, opts)
-        assert body == f"link: https://watcher.exe.xyz/watched-items/{WATCH_ID}"
+        assert body == f"link: {BASE}/watched-items/{WATCH_ID}"
 
 
 class TestBuildTitle:

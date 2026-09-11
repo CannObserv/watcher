@@ -161,6 +161,13 @@ os.environ.pop("WATCHER_NOTIFIER_ENABLED", None)
 os.environ.pop("WATCHER_DEV_NOTIFIER_BASE_URL", None)
 os.environ.pop("WATCHER_DEV_NOTIFIER_API_KEY", None)
 
+# The dashboard's public base URL (#296 D6) lives in /etc/watcher/.env, so a
+# suite launched from a loaded shell would inherit production's host and every
+# expected link would silently depend on which VM ran it. Unset is "no link";
+# tests that render one set a host of their own.
+os.environ.pop("WATCHER_PUBLIC_BASE_URL", None)
+os.environ.pop("WATCHER_DEV_PUBLIC_BASE_URL", None)
+
 
 def _make_mock_probe():
     """Return a mock probe that resolves URLs without real HTTP calls."""

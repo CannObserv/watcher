@@ -319,7 +319,10 @@ way when editing the composer.
 **WatchEvent identity fields** are `watched_item_id`, `item_name`, `item_url`
 (renamed from `watch_*` in #191). The same names are the user-facing notification
 template variables; the default-template "ITEM:" link (renamed from "WATCH:" in
-#221) and `change_url` point at `/watched-items/{watched_item_id}`. The
+#221) and `change_url` point at `/watched-items/{watched_item_id}` under
+`app_url`, the dashboard's public base (`WATCHER_PUBLIC_BASE_URL`, #296 D6). With
+no base configured both are omitted rather than guessed — a relative link is
+useless in Slack or email. The
 `AuditLog.watch_id` FK column was retired —
 audits carry the WatchedItem as `watched_item_id` inside the JSONB `payload`
 (filter via `GET /api/v1/audit?watched_item_id=<ulid>`).

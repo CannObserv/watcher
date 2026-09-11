@@ -33,6 +33,7 @@ from src.core.notifier_client import (
     NotifierNotEnabled,
     assert_environment_notifier_allowed,
 )
+from src.core.public_base_url import PublicBaseUrlInvalid, assert_public_base_url
 from src.dashboard import register_dashboard
 
 # Worker imports are safe at module top: src.workers.__init__ defers task-module
@@ -59,7 +60,9 @@ async def lifespan(application: FastAPI):
     Refuses the same way for a bus URL held without WATCHER_BUS_ENABLED=1
     (#262), for a notifier URL held without WATCHER_NOTIFIER_ENABLED=1 (#277), and
     for that flag held without a URL (#278) — which means the unit's
-    /etc/watcher/notifier.env did not load. The
+    /etc/watcher/notifier.env did not load — and for a malformed
+    WATCHER_PUBLIC_BASE_URL (#296 D6), which would otherwise ship every
+    notification with its dashboard link silently dropped. The
     enforcement point is here rather than at import of src.core.bus or
     src.core.notifier_client: an import-time check would abort alembic,
     everything under scripts/, and anything else that transitively imports the
@@ -73,11 +76,13 @@ async def lifespan(application: FastAPI):
         assert_environment_db_allowed(os.environ)
         assert_environment_bus_allowed(os.environ)
         assert_environment_notifier_allowed(os.environ)
+        assert_public_base_url(os.environ)
     except (
         ProductionDatabaseRefused,
         BusNotEnabled,
         NotifierNotEnabled,
         NotifierCredentialMissing,
+        PublicBaseUrlInvalid,
     ) as e:
         # Log before re-raising: under systemd the bare exception surfaces in
         # journalctl as a lifespan traceback, burying the actionable text.
@@ -144,8 +149,9 @@ async def lifespan(application: FastAPI):
         # mid-read costs at most one replayed announcement at next boot.
         registry_task.cancel()
     if reachability_task is not None:
-        # A single PING that is supposed to have finished long ago; cancelling a
-        # straggler only matters when the broker is black-holed at shutdown.
+        # The startup PING (and its bounded cold-boot retries, #296) should have
+        # finished long ago; cancelling a straggler matters only when the broker
+        # is black-holed, or the service stops inside the window.
         reachability_task.cancel()
     tasks = [
         t for t in (worker_task, consumer_task, registry_task, reachability_task) if t is not None

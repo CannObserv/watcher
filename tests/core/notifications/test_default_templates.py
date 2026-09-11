@@ -57,7 +57,10 @@ class TestDefaultBodyTemplates:
         assert "{{ item_name }}" in tmpl
         assert "URL: {{ item_url }}" in tmpl
         assert "TIMESTAMP: {{ occurred_at_iso }}" in tmpl
-        assert "ITEM: https://watcher.exe.xyz/watched-items/{{ watched_item_id }}" in tmpl
+        assert "ITEM: {{ app_url }}/watched-items/{{ watched_item_id }}" in tmpl
+        # #296 D6: the host is configuration, rendered per deployment — the seed
+        # a user copies must not carry one.
+        assert "exe.xyz" not in tmpl
         # Retired in #221 — must not reappear.
         assert "change_summary" not in tmpl
         assert "WATCH:" not in tmpl
@@ -109,6 +112,13 @@ class TestTemplateVariables:
             "occurred_at_iso",
         ):
             assert required in names
+
+    def test_app_url_is_an_always_scoped_variable(self):
+        """#296 D6: the seed's ITEM line reads ``{{ app_url }}``, so the UI's
+        variable reference must offer it, on every event type."""
+        var = next((v for v in TEMPLATE_VARIABLES if v.name == "app_url"), None)
+        assert var is not None, "TEMPLATE_VARIABLES missing app_url"
+        assert var.scope == "always"
 
     def test_change_url_is_change_detected_scoped(self):
         """change_url survives #221 as a change_detected-scoped variable for

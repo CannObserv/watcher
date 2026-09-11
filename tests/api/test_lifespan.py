@@ -18,6 +18,7 @@ from src.core.notifier_client import (
     NotifierCredentialMissing,
     NotifierNotEnabled,
 )
+from src.core.public_base_url import PUBLIC_BASE_URL_ENV, PublicBaseUrlInvalid
 
 
 @pytest.mark.asyncio
@@ -259,6 +260,36 @@ async def test_lifespan_refuses_the_notifier_flag_without_a_url(monkeypatch, cap
     get_client.assert_not_called()
     get_app.assert_not_called()
     assert any(WATCHER_NOTIFIER_BASE_URL_ENV in r.getMessage() for r in caplog.records)
+
+
+@pytest.mark.asyncio
+async def test_lifespan_refuses_a_malformed_public_base_url(monkeypatch, caplog):
+    """#296 D6: a malformed base is a typo, and it refuses the start.
+
+    Unset is allowed (links are omitted, and the check warns), but a value that
+    is set and wrong would otherwise ship every notification with its dashboard
+    link silently dropped. Logged CRITICAL for the same reason as the refusals
+    above: the handler's line is what an operator reads in journald.
+    """
+    monkeypatch.setenv(PUBLIC_BASE_URL_ENV, "co-watcher.exe.xyz")
+
+    with (
+        patch("src.api.main.get_app") as get_app,
+        patch("src.api.main.get_shared_bus_client") as get_client,
+    ):
+        from src.api.main import lifespan
+
+        with caplog.at_level("CRITICAL", logger="src.api.main"):
+            with pytest.raises(PublicBaseUrlInvalid):
+                async with lifespan(MagicMock()):
+                    pass
+
+    assert any(
+        record.levelname == "CRITICAL" and PUBLIC_BASE_URL_ENV in record.getMessage()
+        for record in caplog.records
+    )
+    get_client.assert_not_called()
+    get_app.assert_not_called()
 
 
 class TestBusReachabilityProbe:

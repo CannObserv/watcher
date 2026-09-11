@@ -20,7 +20,6 @@ Template context (shared with user templates) is built by
 
 from dataclasses import dataclass
 
-from src.core.notifications.constants import APP_URL
 from src.core.notifications.events import WatchEventType
 
 
@@ -49,6 +48,12 @@ TEMPLATE_VARIABLES: list[TemplateVariable] = [
         "occurred_at_iso",
         "str",
         "ISO 8601 UTC timestamp (e.g. `2026-04-23T00:38:33Z`)",
+        "always",
+    ),
+    TemplateVariable(
+        "app_url",
+        "str",
+        "Public base URL of this Watcher's dashboard; empty when not configured",
         "always",
     ),
     # change_detected-only
@@ -102,6 +107,12 @@ DEFAULT_TITLE_TEMPLATES: dict[str, str] = {
 # `event_label` already rides the subject line. The change body is now the
 # header alone.
 #
+#: The dashboard link. A template, not a URL (#296 D6): the base is
+#: ``WATCHER_PUBLIC_BASE_URL``, rendered per deployment as ``app_url``, so the
+#: seed a user copies names no host. The composer drops this line when no base
+#: is configured, which is why it is a named constant rather than a literal.
+CHANGE_DETECTED_ITEM_LINE = "ITEM: {{ app_url }}/watched-items/{{ watched_item_id }}"
+
 # Composer insertion anchors in HEADER (see `_build_change_detected_body`):
 #   - DOMAIN: immediately after item_name (index 1)
 #   - LAST CHANGED, INTERVAL: immediately before TIMESTAMP (in that order)
@@ -110,7 +121,7 @@ CHANGE_DETECTED_HEADER_LINES: tuple[str, ...] = (
     "{{ item_name }}",
     "URL: {{ item_url }}",
     "TIMESTAMP: {{ occurred_at_iso }}",
-    f"ITEM: {APP_URL}" + "/watched-items/{{ watched_item_id }}",
+    CHANGE_DETECTED_ITEM_LINE,
 )
 
 # Markdown bullet list — one fact per `<li>` so HTML-email channels (which

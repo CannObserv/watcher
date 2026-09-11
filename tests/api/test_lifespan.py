@@ -284,10 +284,10 @@ class TestBusReachabilityProbe:
 
     @pytest.mark.asyncio
     async def test_the_probe_does_not_block_the_lifespan(self, monkeypatch):
-        """Detached, not awaited. The worst case is
-        ``WORST_CASE_CONNECT_SECONDS`` of waiting, and the dashboard has no
-        business being unavailable because the bus is — so a broker that never
-        answers must not hold the HTTP surface closed.
+        """Detached, not awaited. The worst case is the cold-boot window
+        (``BOOT_REACHABILITY_WINDOW_SECONDS``, #296) plus one connect, and the
+        dashboard has no business being unavailable because the bus is — so a
+        broker that never answers must not hold the HTTP surface closed.
         """
         monkeypatch.setenv(BUS_REDIS_URL_ENV, "redis://:hunter2@broker:6379/0")
         monkeypatch.setenv(BUS_ENABLED_ENV, "1")
@@ -331,6 +331,10 @@ class TestBusReachabilityProbe:
         to journald, which is the one place an operator is guaranteed to look."""
         monkeypatch.setenv(BUS_REDIS_URL_ENV, "redis://watcher:hunter2@broker:6379/0")
         monkeypatch.setenv(BUS_ENABLED_ENV, "1")
+        # No cold-boot grace (#296): this asserts what the ERROR line carries,
+        # not when it arrives, and the real window would make the test wait it
+        # out. The retry itself is tested in tests/core/test_bus_client_policy.py.
+        monkeypatch.setattr("src.core.bus.BOOT_REACHABILITY_WINDOW_SECONDS", 0.0)
 
         class _Dead:
             async def ping(self):

@@ -34,15 +34,19 @@ set — never an env file, for the same reason as
 ``WATCHER_ALLOW_PRODUCTION_DB`` (#233).
 """
 
+import asyncio
 import os
 import time
-from collections.abc import Mapping
+from collections.abc import Awaitable, Callable, Mapping
 from typing import Any, Protocol
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from redis.asyncio import Redis
 from redis.asyncio.retry import Retry
 from redis.backoff import ExponentialBackoff
+from redis.exceptions import AuthenticationError, AuthorizationError
+from redis.exceptions import ConnectionError as RedisConnectionError
+from redis.exceptions import TimeoutError as RedisTimeoutError
 
 from src.core import read_windows
 from src.core.logging import get_logger
@@ -156,6 +160,23 @@ BUS_RETRIES = 0
 # dashboard does not serve, and the dashboard has no business being unavailable
 # because the bus is.
 WORST_CASE_CONNECT_SECONDS = (BUS_RETRIES + 1) * SOCKET_CONNECT_TIMEOUT_SECONDS
+
+#: How long the startup probe keeps retrying a transport failure before it
+#: reports the bus as down (#296).
+#:
+#: A cold boot on a dedicated VM races tailnet DNS: replicator#88 found the
+#: ``100.x`` address local while MagicDNS still answered ``EAI_NODATA`` for
+#: ``broker``, which disproved the address-wait fix and moved the race from the
+#: address to the name. A single PING there reports "the bus is NOT idle, it is
+#: down" on every reboot — a false alarm on the one line whose job is to be
+#: believed. Thirty seconds is replicator's figure for the same race
+#: (``REPLICATOR_REDIS_FLOOR_WAIT``); the consumers back off on their own in the
+#: meantime, so the window delays only the diagnosis, never the recovery.
+BOOT_REACHABILITY_WINDOW_SECONDS = 30.0
+
+#: Pause between startup PINGs. A name that fails to resolve fails fast, so
+#: this, not the connect timeout, sets the retry cadence.
+_PROBE_RETRY_INTERVAL_SECONDS = 1.0
 
 _shared_client: Redis | None = None
 
@@ -393,8 +414,33 @@ def redact_url(redis_url: str) -> str:
         return "<unparseable redis url>"
 
 
-async def probe_bus_reachable(client: SupportsPing, redis_url: str) -> bool:
-    """PING the broker once at startup and say so, loudly, either way (#287).
+def _worth_waiting_for(exc: Exception) -> bool:
+    """Whether a failed startup PING could succeed on its own a moment later.
+
+    Transport failures only — a name that has not resolved yet, a route not yet
+    up, a broker still loading its dataset (``BusyLoadingError``). redis-py files
+    ``AuthenticationError`` and ``AuthorizationError`` under ``ConnectionError``
+    too, and waiting cannot fix a wrong password, so both are excluded by name:
+    otherwise a bad credential would read as a slow boot for thirty seconds.
+    """
+    if isinstance(exc, AuthenticationError | AuthorizationError):
+        return False
+    return isinstance(exc, RedisConnectionError | RedisTimeoutError)
+
+
+async def probe_bus_reachable(
+    client: SupportsPing,
+    redis_url: str,
+    *,
+    sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
+    clock: Callable[[], float] = time.monotonic,
+) -> bool:
+    """PING the broker at startup and say so, loudly, either way (#287).
+
+    A transport failure is retried for up to ``BOOT_REACHABILITY_WINDOW_SECONDS``
+    before it is reported (#296) — the cold-boot name race, see the constant.
+    Anything else is reported on the first attempt. ``sleep`` and ``clock`` are
+    seams for the tests, which drive the whole window in no wall time.
 
     ``from_url`` is **lazy**: it returns against a broker with nothing listening
     and raises nothing, so the lifespan's wiring never sees an unreachable
@@ -410,27 +456,51 @@ async def probe_bus_reachable(client: SupportsPing, redis_url: str) -> bool:
     ``BaseException`` is deliberately not caught: a ``CancelledError`` at
     shutdown must propagate or the lifespan's gather would never join it.
     """
-    started = time.monotonic()
-    try:
-        await client.ping()
-    except Exception as e:
-        logger.error(
-            "Bus broker is configured but unreachable — the bus is NOT idle, it is down",
+    started = clock()
+    attempts = 0
+    while True:
+        attempts += 1
+        attempt_started = clock()
+        try:
+            await client.ping()
+        except Exception as e:
+            waited = clock() - started
+            if (
+                _worth_waiting_for(e)
+                and waited + _PROBE_RETRY_INTERVAL_SECONDS <= BOOT_REACHABILITY_WINDOW_SECONDS
+            ):
+                if attempts == 1:
+                    logger.info(
+                        "Bus broker not reachable yet — retrying for up to %ss before "
+                        "reporting it down (a cold boot races tailnet DNS)",
+                        BOOT_REACHABILITY_WINDOW_SECONDS,
+                        extra={
+                            "redis_url": redact_url(redis_url),
+                            "error": f"{type(e).__name__}: {e}",
+                        },
+                    )
+                await sleep(_PROBE_RETRY_INTERVAL_SECONDS)
+                continue
+            logger.error(
+                "Bus broker is configured but unreachable — the bus is NOT idle, it is down",
+                extra={
+                    "redis_url": redact_url(redis_url),
+                    "error": f"{type(e).__name__}: {e}",
+                    "waited_ms": round(waited * 1000),
+                    "attempts": attempts,
+                },
+            )
+            return False
+        logger.info(
+            "Bus broker reachable",
             extra={
                 "redis_url": redact_url(redis_url),
-                "error": f"{type(e).__name__}: {e}",
-                "waited_ms": round((time.monotonic() - started) * 1000),
+                "rtt_ms": round((clock() - attempt_started) * 1000),
+                "waited_ms": round((clock() - started) * 1000),
+                "attempts": attempts,
             },
         )
-        return False
-    logger.info(
-        "Bus broker reachable",
-        extra={
-            "redis_url": redact_url(redis_url),
-            "rtt_ms": round((time.monotonic() - started) * 1000),
-        },
-    )
-    return True
+        return True
 
 
 #: How many full republished sets a config/state stream keeps, when the set is

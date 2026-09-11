@@ -10,7 +10,14 @@ Description=Watcher — Cannabis Observer monitoring service
 # and a missing broker degrades to a logged publish failure, never a boot
 # failure. What changes is that the dependency is now a network hop carrying an
 # explicit connection policy (src/core/bus.py, #287) rather than a local unit.
-After=network.target postgresql.service
+#
+# tailscaled is ORDERING ONLY (#296): the broker and notifier are MagicDNS
+# names on the tailnet, so starting first only buys connection failures. No
+# Wants=/Requires=: a Tailscale upgrade restarts the agent, and that must not
+# take the dashboard down with it. Ordering does not close the cold-boot race
+# on its own — MagicDNS answers after the address (replicator#88) — which is
+# what the startup probe's retry window in src/core/bus.py is for.
+After=network.target postgresql.service tailscaled.service
 
 [Service]
 Type=simple

@@ -23,6 +23,7 @@ import sys
 
 import pytest
 from redis.asyncio import Redis
+from redis.exceptions import AuthenticationError
 from redis.exceptions import ConnectionError as RedisConnectionError
 from redis.exceptions import TimeoutError as RedisTimeoutError
 
@@ -410,6 +411,23 @@ class TestRedactUrl:
         assert "hunter2" not in bus.redact_url("redis://[not-a-valid-url:hunter2@@@")
 
 
+class _FakeClock:
+    """A monotonic clock that only moves when the probe sleeps.
+
+    Lets a test drive the full retry window in no wall time, and assert on how
+    long the probe *would* have waited.
+    """
+
+    def __init__(self) -> None:
+        self.now = 0.0
+
+    def __call__(self) -> float:
+        return self.now
+
+    async def sleep(self, seconds: float) -> None:
+        self.now += seconds
+
+
 class TestProbeBusReachable:
     """``from_url`` is **lazy**: it returns against a broker with nothing
     listening and raises nothing. So the lifespan's wiring never sees an
@@ -428,12 +446,126 @@ class TestProbeBusReachable:
             async def ping(self):
                 raise RedisConnectionError("Error 111 connecting to broker:6379.")
 
-        ok = await bus.probe_bus_reachable(_Dead(), "redis://:hunter2@broker:6379/0")
+        clock = _FakeClock()
+        ok = await bus.probe_bus_reachable(
+            _Dead(), "redis://:hunter2@broker:6379/0", sleep=clock.sleep, clock=clock
+        )
 
         assert ok is False
         assert len(records) == 1
         assert records[0][1]["redis_url"] == "redis://:***@broker:6379/0"
         assert "hunter2" not in repr(records)
+
+    async def test_probe_rides_out_the_cold_boot_name_race(self, monkeypatch) -> None:
+        """#296: on a cold boot MagicDNS answers after the tailnet address is up.
+
+        replicator#88 measured it: the address wait passed and ``broker`` still
+        returned ``EAI_NODATA``. A single PING there logs "the bus is NOT idle, it
+        is down" on every reboot — a false alarm that trains an operator to
+        ignore the one line that matters. Transport failures are retried inside a
+        bounded window, and a broker that answers inside it is reported as
+        reachable with no ERROR at all.
+        """
+        errors: list[str] = []
+        infos: list[dict] = []
+        monkeypatch.setattr(bus.logger, "error", lambda msg, *a, **k: errors.append(msg))
+        monkeypatch.setattr(
+            bus.logger, "info", lambda msg, *a, **k: infos.append(k.get("extra", {}))
+        )
+
+        class _ResolvesOnTheThirdTry:
+            calls = 0
+
+            async def ping(self):
+                self.calls += 1
+                if self.calls < 3:
+                    raise RedisConnectionError(
+                        "Error -5 connecting to broker:6379. No address associated with hostname."
+                    )
+                return True
+
+        clock = _FakeClock()
+        client = _ResolvesOnTheThirdTry()
+        ok = await bus.probe_bus_reachable(
+            client, "redis://broker:6379/0", sleep=clock.sleep, clock=clock
+        )
+
+        assert ok is True
+        assert errors == []
+        assert client.calls == 3
+        assert infos[-1]["attempts"] == 3
+
+    async def test_probe_reports_down_once_the_window_is_spent(self, monkeypatch) -> None:
+        """The retry is bounded: a broker that is really down is still an ERROR,
+        exactly once, and no later than the window."""
+        records: list[dict] = []
+        monkeypatch.setattr(
+            bus.logger, "error", lambda msg, *a, **k: records.append(k.get("extra", {}))
+        )
+        monkeypatch.setattr(bus.logger, "info", lambda *a, **k: None)
+
+        class _Dead:
+            async def ping(self):
+                raise RedisConnectionError("Error 111 connecting to broker:6379.")
+
+        clock = _FakeClock()
+        ok = await bus.probe_bus_reachable(
+            _Dead(), "redis://broker:6379/0", sleep=clock.sleep, clock=clock
+        )
+
+        assert ok is False
+        assert len(records) == 1
+        assert records[0]["attempts"] > 1
+        assert clock.now <= bus.BOOT_REACHABILITY_WINDOW_SECONDS
+
+    async def test_probe_does_not_wait_out_a_credential_failure(self, monkeypatch) -> None:
+        """Waiting cannot fix a wrong password. redis-py files
+        ``AuthenticationError`` under ``ConnectionError``, so the retry has to
+        exclude it by name or a bad credential would read as a slow boot."""
+        records: list[dict] = []
+        monkeypatch.setattr(
+            bus.logger, "error", lambda msg, *a, **k: records.append(k.get("extra", {}))
+        )
+
+        class _WrongPassword:
+            calls = 0
+
+            async def ping(self):
+                self.calls += 1
+                raise AuthenticationError("WRONGPASS invalid username-password pair")
+
+        clock = _FakeClock()
+        client = _WrongPassword()
+        ok = await bus.probe_bus_reachable(
+            client, "redis://broker:6379/0", sleep=clock.sleep, clock=clock
+        )
+
+        assert ok is False
+        assert client.calls == 1
+        assert clock.now == 0
+        assert records[0]["attempts"] == 1
+
+    async def test_probe_does_not_retry_what_it_does_not_recognise(self, monkeypatch) -> None:
+        """Only transport failures are a cold-boot symptom; anything else is
+        reported on the first attempt."""
+        monkeypatch.setattr(bus.logger, "error", lambda *a, **k: None)
+
+        class _Weird:
+            calls = 0
+
+            async def ping(self):
+                self.calls += 1
+                raise RuntimeError("something no one anticipated")
+
+        clock = _FakeClock()
+        client = _Weird()
+        assert (
+            await bus.probe_bus_reachable(
+                client, "redis://broker:6379/0", sleep=clock.sleep, clock=clock
+            )
+            is False
+        )
+        assert client.calls == 1
 
     async def test_probe_logs_info_with_latency_when_reachable(self, monkeypatch) -> None:
         """The success line carries the round trip: the relocated broker is

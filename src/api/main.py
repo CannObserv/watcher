@@ -99,10 +99,11 @@ async def lifespan(application: FastAPI):
         # partition then reads as an idle cluster, which is what a healthy idle
         # Watcher also looks like. One PING says which it is, at ERROR.
         #
-        # Detached because the worst case is ``WORST_CASE_CONNECT_SECONDS`` of
-        # waiting, and the dashboard has no business being unavailable because
-        # the bus is. Held on ``app.state`` so a test can await it rather than
-        # yield the loop and hope it ran.
+        # Detached because the worst case is ``BOOT_REACHABILITY_WINDOW_SECONDS``
+        # of retrying a cold boot's name race (#296) plus one connect, and the
+        # dashboard has no business being unavailable because the bus is. Held
+        # on ``app.state`` so a test can await it rather than yield the loop and
+        # hope it ran.
         reachability_task = asyncio.create_task(
             probe_bus_reachable(bus_client, os.environ.get(BUS_REDIS_URL_ENV, ""))
         )

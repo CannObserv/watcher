@@ -98,6 +98,29 @@ def test_repo_unit_loads_no_env_file_from_the_checkout() -> None:
     assert not under_checkout, f"unit loads env files from the checkout: {under_checkout}"
 
 
+def test_repo_unit_orders_after_tailscaled_without_depending_on_it() -> None:
+    """#296: start after the tailnet agent, but never be bound to it.
+
+    Every peer this service talks to — the broker, notifier — is a MagicDNS name
+    on the tailnet, so starting before ``tailscaled`` only guarantees a burst of
+    connection failures. Ordering is all that is wanted, and it is all that is
+    safe: ``Requires=``/``BindsTo=`` would stop the dashboard whenever a
+    Tailscale upgrade restarts the agent, and ``Wants=`` would make this unit
+    responsible for starting a daemon it does not own. replicator#88 pins the
+    same shape.
+
+    Ordering does not close the race on its own — the name answers after the
+    address (replicator#88) — which is what ``probe_bus_reachable``'s window is
+    for. This test pins the half systemd can do.
+    """
+    text = REPO_UNIT.read_text()
+    after = " ".join(_directive_values(text, "After")).split()
+    assert "tailscaled.service" in after
+    for directive in ("Wants", "Requires", "BindsTo", "Requisite", "PartOf"):
+        bound = " ".join(_directive_values(text, directive)).split()
+        assert "tailscaled.service" not in bound, f"{directive}= must not name tailscaled"
+
+
 def test_repo_unit_declares_the_production_opt_in() -> None:
     """The opt-in must live in the unit, never in an env file.
 

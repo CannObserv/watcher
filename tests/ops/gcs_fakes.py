@@ -14,9 +14,10 @@ The calls this repo makes, and nothing it does not:
 - ``Client.list_blobs(bucket, prefix=, max_results=)`` — lazy; the request
   happens on iteration, and a missing bucket raises ``NotFound`` there.
 - ``Bucket.get_blob(name)`` — ``None`` for an absent object, not an exception;
-  metadata loaded on the returned blob. (Watcher's addition: the backup reads it
-  to tell a re-upload of the same dump from a name collision, the restore to
-  check a download against its recorded sha256.)
+  metadata and the server-set ``time_created`` loaded on the returned blob.
+  (Watcher's addition: the backup reads it to tell a re-upload of the same dump
+  from a name collision, the restore to check a download against its recorded
+  sha256, and a dump's name against the bucket's clock.)
 - ``Blob.download_to_file`` — ``NotFound`` for an absent object. Into a handle,
   not a filename: the restore opens it ``O_EXCL`` at 0600 (#296 CR 3).
 """
@@ -24,6 +25,7 @@ The calls this repo makes, and nothing it does not:
 from __future__ import annotations
 
 from collections.abc import Iterator
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import BinaryIO
 
@@ -39,6 +41,8 @@ class FakeBlob:
         self.metadata: dict[str, str] | None = None
         self.content_type: str | None = None
         self.size: int | None = None
+        # The server's clock, not the writer's: set by the bucket on create.
+        self.time_created: datetime | None = None
 
     def upload_from_filename(
         self,
@@ -57,6 +61,7 @@ class FakeBlob:
         self._bucket.content_types[self.name] = content_type
         # Metadata rides the upload as object metadata, not a second call.
         self._bucket.metadata[self.name] = dict(self.metadata or {})
+        self._bucket.created[self.name] = datetime.now(UTC)
         self._bucket.preconditions.append(if_generation_match)
 
     def download_to_file(self, file_obj: BinaryIO, timeout: float | None = None) -> None:
@@ -72,6 +77,7 @@ class FakeBucket:
         self.objects: dict[str, bytes] = {}
         self.content_types: dict[str, str | None] = {}
         self.metadata: dict[str, dict[str, str]] = {}
+        self.created: dict[str, datetime] = {}
         self.preconditions: list[int | None] = []
 
     def blob(self, name: str) -> FakeBlob:
@@ -84,6 +90,7 @@ class FakeBucket:
         blob = self.blob(name)
         blob.metadata = dict(self.metadata.get(name, {})) or None
         blob.size = len(self.objects[name])
+        blob.time_created = self.created.get(name)
         return blob
 
 

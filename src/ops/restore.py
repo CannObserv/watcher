@@ -38,7 +38,9 @@ import subprocess
 import sys
 import tempfile
 from collections.abc import Mapping
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import NamedTuple
 
 from google.api_core.exceptions import NotFound
 from google.cloud import storage
@@ -46,6 +48,7 @@ from google.cloud import storage
 from src.core.logging import configure_logging, get_logger
 from src.ops.backup import (
     BUCKET_ENV,
+    KEY_TIME_FORMAT,
     LIST_TIMEOUT_SECONDS,
     OBJECT_SUFFIX,
     PG_DUMP_TIMEOUT_SECONDS,
@@ -56,8 +59,13 @@ from src.ops.backup import (
     sha256_file,
     verify_dump,
 )
+from src.ops.backup import iso as backup_iso
 
 logger = get_logger("src.ops.restore")
+
+#: How far a dump's name may run ahead of the bucket's creation time for it:
+#: the dumping host's clock is not the bucket's.
+CLOCK_SKEW_TOLERANCE = timedelta(minutes=10)
 
 # What `--list` prints beside each name, in this order.
 _LISTED_METADATA = ("dumped_at", "alembic_head", "size_bytes", "source_host", "sha256")
@@ -72,25 +80,68 @@ def _under(prefix: str | None) -> str:
     return f"{prefix.strip('/')}/" if prefix else ""
 
 
-def list_snapshots(
-    client: storage.Client, bucket: str, prefix: str | None
-) -> list[tuple[str, dict]]:
+class Snapshot(NamedTuple):
+    """One shipped dump: its name, the metadata the backup wrote, and the
+    bucket's own record of when the object was created."""
+
+    name: str
+    metadata: dict
+    created: datetime | None
+
+    @property
+    def named_at(self) -> datetime | None:
+        """The time the name claims; None for a name the backup never writes."""
+        stamp = Path(self.name).name.removesuffix(OBJECT_SUFFIX)
+        try:
+            return datetime.strptime(stamp, KEY_TIME_FORMAT).replace(tzinfo=UTC)
+        except ValueError:
+            return None
+
+    @property
+    def suspect(self) -> bool:
+        """Whether the name claims a time the bucket's own clock contradicts.
+
+        An honest dump is named when ``pg_dump`` starts and created when the
+        upload lands, so its name is never later than its creation — beyond
+        clock skew. A later name is a skewed writer clock or a forgery, and a
+        compromised writer planting ``2099…`` would otherwise own ``--latest``
+        until the lifecycle rule removed it, 30 days on.
+        """
+        named_at = self.named_at
+        if named_at is None or self.created is None:
+            return True
+        return named_at > self.created + CLOCK_SKEW_TOLERANCE
+
+
+def list_snapshots(client: storage.Client, bucket: str, prefix: str | None) -> list[Snapshot]:
     """Every dump under ``prefix`` (every host's, if None), in name order, with
     the metadata the backup wrote. Within one host, name order is time order."""
     blobs = client.list_blobs(bucket, prefix=_under(prefix) or None, timeout=LIST_TIMEOUT_SECONDS)
     return sorted(
-        (blob.name, dict(blob.metadata or {}))
-        for blob in blobs
-        if blob.name.endswith(OBJECT_SUFFIX)
+        (
+            Snapshot(blob.name, dict(blob.metadata or {}), blob.time_created)
+            for blob in blobs
+            if blob.name.endswith(OBJECT_SUFFIX)
+        ),
+        key=lambda snapshot: snapshot.name,
     )
 
 
 def latest_key(client: storage.Client, bucket: str, prefix: str) -> str:
-    """The newest dump the named host shipped."""
+    """The newest dump the named host shipped, passing over suspect names."""
     snapshots = list_snapshots(client, bucket, prefix)
-    if not snapshots:
-        raise RestoreError(f"no dumps under gs://{bucket}/{_under(prefix)}")
-    return snapshots[-1][0]
+    suspect = [snapshot.name for snapshot in snapshots if snapshot.suspect]
+    if suspect:
+        logger.warning(
+            "Passing over dumps named later than the bucket created them — a skewed "
+            "clock or a forgery: %s",
+            ", ".join(suspect),
+        )
+    candidates = [snapshot for snapshot in snapshots if not snapshot.suspect]
+    if not candidates:
+        passed = f" (passed over {len(suspect)} suspect)" if suspect else ""
+        raise RestoreError(f"no dumps under gs://{bucket}/{_under(prefix)}{passed}")
+    return candidates[-1].name
 
 
 def _private_dir(dest_dir: Path) -> None:
@@ -214,8 +265,14 @@ def main(argv: list[str] | None = None, *, environ: Mapping[str, str] = os.envir
     try:
         if args.list:
             snapshots = list_snapshots(client, bucket, args.prefix)
-            for name, meta in snapshots:
-                print(name, *(f"{field}={meta.get(field, '')}" for field in _LISTED_METADATA))
+            for snapshot in snapshots:
+                created = backup_iso(snapshot.created) if snapshot.created else ""
+                print(
+                    snapshot.name,
+                    *(f"{field}={snapshot.metadata.get(field, '')}" for field in _LISTED_METADATA),
+                    f"created={created}",
+                    *(["SUSPECT(named after the bucket created it)"] if snapshot.suspect else []),
+                )
             if not snapshots:
                 print(f"no dumps under gs://{bucket}/{_under(args.prefix)}", file=sys.stderr)
             return 0

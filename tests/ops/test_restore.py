@@ -6,14 +6,17 @@ the move exercises on real data.
 """
 
 import hashlib
+import logging
 import os
+import re
 import stat
 import subprocess
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
 from src.ops import restore
-from src.ops.backup import BUCKET_ENV, PREFIX_ENV
+from src.ops.backup import BUCKET_ENV, KEY_TIME_FORMAT, PREFIX_ENV
 from src.ops.restore import RestoreError
 from tests.ops.gcs_fakes import FakeBucket, FakeClient
 from tests.ops.test_backup import DUMP_BYTES, FakePg
@@ -21,10 +24,26 @@ from tests.ops.test_backup import DUMP_BYTES, FakePg
 BUCKET = "co-gcs-watcher-backup"
 
 
-def _ship(bucket: FakeBucket, key: str, data: bytes = DUMP_BYTES, **meta) -> None:
-    """Put an object where the backup would, with the digest it records."""
+def _ship(
+    bucket: FakeBucket,
+    key: str,
+    data: bytes = DUMP_BYTES,
+    *,
+    created: datetime | None = None,
+    **meta,
+) -> None:
+    """Put an object where the backup would, with the digest it records.
+
+    Created a minute after the time its name claims, as an honest upload is —
+    unless ``created`` says otherwise (a forged, future-dated name).
+    """
     bucket.objects[key] = data
     bucket.metadata[key] = {"sha256": hashlib.sha256(data).hexdigest(), **meta}
+    if created is None:
+        match = re.search(r"(\d{8}T\d{6}Z)\.dump$", key)
+        stamp = datetime.strptime(match.group(1), KEY_TIME_FORMAT) if match else datetime.now()
+        created = stamp.replace(tzinfo=UTC) + timedelta(minutes=1)
+    bucket.created[key] = created
 
 
 @pytest.fixture
@@ -43,11 +62,11 @@ class TestFindingASnapshot:
         _ship(bucket, "co-watcher/20260911T031702Z.dump", alembic_head="a")
         _ship(bucket, "watcher/20260910T000000Z.dump")
         listed = restore.list_snapshots(client, BUCKET, "co-watcher")
-        assert [name for name, _ in listed] == [
+        assert [snapshot.name for snapshot in listed] == [
             "co-watcher/20260911T031702Z.dump",
             "co-watcher/20260912T031702Z.dump",
         ]
-        assert listed[1][1]["alembic_head"] == "b"
+        assert listed[1].metadata["alembic_head"] == "b"
 
     def test_latest_is_the_newest_name(self, client, bucket) -> None:
         _ship(bucket, "co-watcher/20260911T031702Z.dump")
@@ -59,6 +78,42 @@ class TestFindingASnapshot:
     def test_no_snapshot_is_an_error(self, client) -> None:
         with pytest.raises(RestoreError, match="no dumps"):
             restore.latest_key(client, BUCKET, "co-watcher")
+
+    def test_latest_passes_over_a_name_later_than_its_upload(self, client, bucket, caplog) -> None:
+        """A name is the writer's claim; the creation time is the bucket's. An
+        honest dump is named before it is uploaded, so a name later than its
+        object's creation is a skewed clock or a forgery — and a compromised
+        writer planting ``2099…`` would otherwise own ``--latest`` for the 30
+        days the lifecycle rule takes to remove it."""
+        _ship(bucket, "watcher/20260911T031702Z.dump")
+        _ship(
+            bucket,
+            "watcher/20990101T000000Z.dump",
+            created=datetime(2026, 9, 11, 12, 0, tzinfo=UTC),
+        )
+        with caplog.at_level(logging.WARNING, logger="src.ops.restore"):
+            assert restore.latest_key(client, BUCKET, "watcher") == "watcher/20260911T031702Z.dump"
+        assert any("20990101T000000Z" in r.getMessage() for r in caplog.records)
+
+    def test_a_name_within_clock_skew_of_its_upload_is_still_a_candidate(
+        self, client, bucket
+    ) -> None:
+        """The dumping host's clock and the bucket's are not the same clock."""
+        _ship(
+            bucket,
+            "watcher/20260911T031702Z.dump",
+            created=datetime(2026, 9, 11, 3, 16, 30, tzinfo=UTC),
+        )
+        assert restore.latest_key(client, BUCKET, "watcher") == "watcher/20260911T031702Z.dump"
+
+    def test_only_suspect_names_is_no_dump_at_all(self, client, bucket) -> None:
+        _ship(
+            bucket,
+            "watcher/20990101T000000Z.dump",
+            created=datetime(2026, 9, 11, 12, 0, tzinfo=UTC),
+        )
+        with pytest.raises(RestoreError, match="no dumps"):
+            restore.latest_key(client, BUCKET, "watcher")
 
 
 class TestFetch:
@@ -216,6 +271,20 @@ class TestMain:
         out = capsys.readouterr().out
         assert "watcher/20260911T031702Z.dump" in out
         assert "co-watcher/20260912T031702Z.dump" in out
+
+    def test_list_flags_a_name_later_than_its_upload(self, wired, bucket, capsys) -> None:
+        _ship(bucket, "watcher/20260911T031702Z.dump")
+        _ship(
+            bucket,
+            "watcher/20990101T000000Z.dump",
+            created=datetime(2026, 9, 11, 12, 0, tzinfo=UTC),
+        )
+        assert restore.main(["--list", "--prefix", "watcher"]) == 0
+        lines = capsys.readouterr().out.splitlines()
+        (forged,) = [line for line in lines if "20990101T000000Z" in line]
+        (honest,) = [line for line in lines if "20260911T031702Z" in line]
+        assert "SUSPECT" in forged
+        assert "SUSPECT" not in honest
 
     def test_an_empty_listing_says_so(self, wired, bucket, capsys) -> None:
         _ship(bucket, "watcher/20260911T031702Z.dump")

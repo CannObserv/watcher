@@ -222,6 +222,12 @@ to put it) — step 3 supplies that.
 
 `--object <key>` restores a specific dump instead of the newest.
 
+**A name is the writer's claim; `created` is the bucket's.** An honest dump is
+named when `pg_dump` starts and created when the upload lands, so `--latest`
+passes over — and `--list` marks `SUSPECT` — any dump named more than ten
+minutes after the bucket created it: a skewed clock, or a compromised writer
+planting a future-dated name to own `--latest` until the lifecycle rule takes it.
+
 ### Go / no-go gates
 
 Before anything connects to a restored database:

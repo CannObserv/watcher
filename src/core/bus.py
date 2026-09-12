@@ -172,6 +172,11 @@ WORST_CASE_CONNECT_SECONDS = (BUS_RETRIES + 1) * SOCKET_CONNECT_TIMEOUT_SECONDS
 #: believed. Thirty seconds is replicator's figure for the same race
 #: (``REPLICATOR_REDIS_FLOOR_WAIT``); the consumers back off on their own in the
 #: meantime, so the window delays only the diagnosis, never the recovery.
+#:
+#: It bounds when the last attempt may *start*. That attempt runs to its own
+#: timeouts — ``SOCKET_CONNECT_TIMEOUT_SECONDS``, then ``SOCKET_TIMEOUT_SECONDS``
+#: for the read — so against a black-holed broker the ERROR lands up to one
+#: attempt past the window. Bounded, and the probe is detached.
 BOOT_REACHABILITY_WINDOW_SECONDS = 30.0
 
 #: Pause between startup PINGs. A name that fails to resolve fails fast, so

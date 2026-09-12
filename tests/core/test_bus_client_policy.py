@@ -495,9 +495,44 @@ class TestProbeBusReachable:
         assert client.calls == 3
         assert infos[-1]["attempts"] == 3
 
+    async def test_the_window_bounds_when_an_attempt_starts_not_when_it_ends(
+        self, monkeypatch
+    ) -> None:
+        """Against a black-holed broker each PING runs to its own timeouts — a
+        connect, then a read — so the ERROR lands up to one whole attempt past
+        the window. No attempt ever *starts* after it. The lifespan comment
+        once said "the window plus one connect", which understated this; the
+        clock here moves inside the PING, which the fake clock alone never did.
+        """
+        records: list[dict] = []
+        monkeypatch.setattr(
+            bus.logger, "error", lambda msg, *a, **k: records.append(k.get("extra", {}))
+        )
+        monkeypatch.setattr(bus.logger, "info", lambda *a, **k: None)
+        clock = _FakeClock()
+        attempt_seconds = bus.SOCKET_CONNECT_TIMEOUT_SECONDS + bus.SOCKET_TIMEOUT_SECONDS
+        starts: list[float] = []
+
+        class _BlackHoled:
+            async def ping(self):
+                starts.append(clock.now)
+                clock.now += attempt_seconds
+                raise RedisTimeoutError("Timeout connecting to server")
+
+        ok = await bus.probe_bus_reachable(
+            _BlackHoled(), "redis://broker:6379/0", sleep=clock.sleep, clock=clock
+        )
+
+        assert ok is False
+        assert len(records) == 1
+        assert all(start <= bus.BOOT_REACHABILITY_WINDOW_SECONDS for start in starts)
+        assert clock.now > bus.BOOT_REACHABILITY_WINDOW_SECONDS
+        assert clock.now <= bus.BOOT_REACHABILITY_WINDOW_SECONDS + attempt_seconds
+
     async def test_probe_reports_down_once_the_window_is_spent(self, monkeypatch) -> None:
         """The retry is bounded: a broker that is really down is still an ERROR,
-        exactly once, and no later than the window."""
+        exactly once. This one refuses at once, so the ERROR lands inside the
+        window; one that times out lands up to an attempt past it (above)."""
         records: list[dict] = []
         monkeypatch.setattr(
             bus.logger, "error", lambda msg, *a, **k: records.append(k.get("extra", {}))

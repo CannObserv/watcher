@@ -224,8 +224,12 @@ class TestUpload:
             _run(client, tmp_path)
 
     def test_a_missing_bucket_fails_before_anything_is_written(self, tmp_path) -> None:
+        """Before anything is dumped, too: the bucket is the cheap thing to
+        check, and a misspelled one should not cost a pg_dump of production."""
+        pg = FakePg()
         with pytest.raises(BackupError, match="not found"):
-            _run(FakeClient(FakeBucket(BUCKET), missing=True), tmp_path)
+            _run(FakeClient(FakeBucket(BUCKET), missing=True), tmp_path, runner=pg)
+        assert pg.calls == []
 
 
 # --- the entry point ---

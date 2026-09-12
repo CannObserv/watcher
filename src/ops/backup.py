@@ -318,7 +318,10 @@ def run_backup(
     host: str | None = None,
     now: Callable[[], datetime] = lambda: datetime.now(UTC),
 ) -> dict:
-    """One run: dump, verify, preflight, create. Returns the summary it logged.
+    """One run: preflight, dump, verify, create. Returns the summary it logged.
+
+    The bucket is checked first — it is the cheap call, and a misspelled one
+    should fail before it costs a ``pg_dump`` of production.
 
     ``runner`` defaults to ``subprocess.run`` looked up at call time, not bound
     as a default — so a test that replaces it can never fall through to the
@@ -331,9 +334,9 @@ def run_backup(
     host = host or socket.gethostname()
     runner = runner if runner is not None else subprocess.run
     try:
+        preflight(client, bucket, prefix)
         dump = take_dump(database, workdir, run_as=run_as, runner=runner, now=now)
         key = object_key(prefix, dump.dumped_at)
-        preflight(client, bucket, prefix)
         outcome = upload(client, bucket, key, dump, host=host)
     except Exception as exc:
         error = str(exc) if isinstance(exc, BackupError) else f"{type(exc).__name__}: {exc}"

@@ -55,6 +55,10 @@ class TestApplyRetention:
                 "succeeded, 8 days": ("succeeded", 24 * 8),
                 "failed, 20 days": ("failed", 24 * 20),
                 "failed, 31 days": ("failed", 24 * 31),
+                # Inside the failed horizon: cancelled and aborted keep 30 days
+                # too, so moving their flags onto the 7-day call must fail here.
+                "cancelled, 20 days": ("cancelled", 24 * 20),
+                "aborted, 20 days": ("aborted", 24 * 20),
                 "cancelled, 31 days": ("cancelled", 24 * 31),
                 "aborted, 31 days": ("aborted", 24 * 31),
             },
@@ -62,7 +66,12 @@ class TestApplyRetention:
 
         await retention.apply_retention(JobManager(connector))
 
-        assert _remaining(connector, labels) == {"succeeded, 1 day", "failed, 20 days"}
+        assert _remaining(connector, labels) == {
+            "succeeded, 1 day",
+            "failed, 20 days",
+            "cancelled, 20 days",
+            "aborted, 20 days",
+        }
 
     async def test_unfinished_jobs_are_never_touched(self) -> None:
         """Only final states are history. A job still ``todo`` or ``doing`` is
@@ -162,11 +171,15 @@ class TestPruneJobHistoryTask:
         apply.assert_awaited_once_with(context.app.job_manager)
 
     def test_registered_as_an_hourly_periodic_task(self) -> None:
+        """Hourly, at :23 — off the minute the other ticks share — under a
+        stable periodic id, which is what de-duplicates a tick across restarts."""
         reset_app()
         try:
             app = get_app()
             assert "prune_job_history" in app.tasks
-            periodic = {name for name, _ in app.periodic_registry.periodic_tasks}
-            assert "prune_job_history" in periodic
+            periodic = app.periodic_registry.periodic_tasks
+            task = periodic[("prune_job_history", "prune_job_history")]
+            assert task.cron == "23 * * * *"
+            assert task.periodic_id == "prune_job_history"
         finally:
             reset_app()

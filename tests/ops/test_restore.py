@@ -14,6 +14,8 @@ import subprocess
 from datetime import UTC, datetime, timedelta
 
 import pytest
+from google.api_core.exceptions import Forbidden
+from google.auth.exceptions import RefreshError
 
 from src.ops import restore
 from src.ops.backup import BUCKET_ENV, KEY_TIME_FORMAT, PREFIX_ENV
@@ -44,6 +46,15 @@ def _ship(
         stamp = datetime.strptime(match.group(1), KEY_TIME_FORMAT) if match else datetime.now()
         created = stamp.replace(tzinfo=UTC) + timedelta(minutes=1)
     bucket.created[key] = created
+
+
+def _raiser(error: Exception):
+    """A stand-in for any callable, raising ``error`` however it is called."""
+
+    def raise_it(*_args, **_kwargs):
+        raise error
+
+    return raise_it
 
 
 @pytest.fixture
@@ -285,6 +296,61 @@ class TestMain:
         (honest,) = [line for line in lines if "20260911T031702Z" in line]
         assert "SUSPECT" in forged
         assert "SUSPECT" not in honest
+
+    def test_no_bucket_is_a_usage_error(self, wired, monkeypatch, capsys) -> None:
+        monkeypatch.delenv(BUCKET_ENV)
+        assert restore.main(["--list"]) == 2
+        assert BUCKET_ENV in capsys.readouterr().err
+
+    def test_a_dump_with_nowhere_to_go_is_a_usage_error(self, wired, bucket, capsys) -> None:
+        _ship(bucket, "watcher/20260911T031702Z.dump")
+        assert restore.main(["--object", "watcher/20260911T031702Z.dump"]) == 2
+        assert "say where" in capsys.readouterr().err
+
+    def test_object_fetches_exactly_that_dump(self, wired, bucket, tmp_path) -> None:
+        _ship(bucket, "watcher/20260910T031702Z.dump")
+        _ship(bucket, "watcher/20260911T031702Z.dump")
+        dest = tmp_path / "d"
+        key = "watcher/20260910T031702Z.dump"
+        assert restore.main(["--object", key, "--download-only", str(dest)]) == 0
+        assert [p.name for p in dest.iterdir()] == ["20260910T031702Z.dump"]
+
+    def test_a_restore_that_lands_names_the_next_step(self, wired, bucket, capsys) -> None:
+        _ship(bucket, "watcher/20260911T031702Z.dump")
+        code = restore.main(["--latest", "--prefix", "watcher", "--into", "watcher_dev"])
+        assert code == 0
+        assert "setup-db-roles.sql" in capsys.readouterr().out
+
+    @pytest.mark.parametrize(
+        "where",
+        ["client", "listing", "restore"],
+    )
+    def test_any_failure_is_one_line_and_exit_1(
+        self, wired, bucket, monkeypatch, capsys, where
+    ) -> None:
+        """At the worst moment the operator gets a sentence, not a stack trace:
+        a revoked key surfaces from google.auth (``RefreshError``), a missing
+        grant from the listing (``Forbidden``), a wedged ``pg_restore`` as
+        ``TimeoutExpired`` — none of them a ``RestoreError``."""
+        _ship(bucket, "watcher/20260911T031702Z.dump")
+        if where == "client":
+            monkeypatch.setattr(restore.storage, "Client", _raiser(RefreshError("revoked")))
+        elif where == "listing":
+            monkeypatch.setattr(FakeClient, "list_blobs", _raiser(Forbidden("no list")))
+        else:
+            pg = FakePg()
+
+            def runner(argv, **kwargs):
+                if "stdin" in kwargs:
+                    raise subprocess.TimeoutExpired(argv, 1800)
+                return pg(argv, **kwargs)
+
+            monkeypatch.setattr(restore.subprocess, "run", runner)
+        code = restore.main(["--latest", "--prefix", "watcher", "--into", "watcher_dev"])
+        assert code == 1
+        err = capsys.readouterr().err
+        assert err.startswith("restore failed:")
+        assert "Traceback" not in err
 
     def test_an_empty_listing_says_so(self, wired, bucket, capsys) -> None:
         _ship(bucket, "watcher/20260911T031702Z.dump")

@@ -260,9 +260,10 @@ def main(argv: list[str] | None = None, *, environ: Mapping[str, str] = os.envir
             file=sys.stderr,
         )
         return 2
-    client = storage.Client()
 
     try:
+        # Inside the try: a missing or revoked key raises from google.auth here.
+        client = storage.Client()
         if args.list:
             snapshots = list_snapshots(client, bucket, args.prefix)
             for snapshot in snapshots:
@@ -287,9 +288,15 @@ def main(argv: list[str] | None = None, *, environ: Mapping[str, str] = os.envir
         with tempfile.TemporaryDirectory(prefix="watcher-restore-") as work:
             path = fetch(client, bucket, key, Path(work), runner=subprocess.run)
             restore_into(path, args.into, run_as=args.run_as, runner=subprocess.run)
-    except RestoreError as exc:
-        logger.error("Restore failed: %s", exc)
-        print(f"restore failed: {exc}", file=sys.stderr)
+    except Exception as exc:
+        # One exit and one sentence for every failure, whatever raised it:
+        # google.auth's RefreshError, the listing's Forbidden, the download's
+        # DataCorruption and a wedged pg_restore's TimeoutExpired are none of
+        # them a RestoreError, and a traceback is the wrong thing to hand an
+        # operator mid-incident.
+        error = str(exc) if isinstance(exc, RestoreError) else f"{type(exc).__name__}: {exc}"
+        logger.error("Restore failed: %s", error)
+        print(f"restore failed: {error}", file=sys.stderr)
         return 1
     print(f"restored gs://{bucket}/{key} into {args.into}")
     print("next: re-run scripts/setup-db-roles.sql against it, then the gates in docs/RECOVERY.md")

@@ -57,15 +57,35 @@ class TestPublicBaseUrl:
             "https://",  # no host
             "https://co-watcher.exe.xyz?next=/",  # a query would be appended into
             "https://co-watcher.exe.xyz#top",
+            "https://co-watcher.exe.xyz/?",  # bare: urlsplit reports an empty query
+            "https://co-watcher.exe.xyz/#",
+            "https://[co-watcher.exe.xyz",  # urlsplit raises ValueError itself
+            "https://co-watcher.exe.xyz:abc",  # .port raises; unread, it passed
+            "https://co-watcher.exe.xyz:99999",
+            "https://co watcher.exe.xyz",  # whitespace inside survives urlsplit
+            "https://co-watcher.exe.xyz/a\tb",
         ],
     )
     def test_malformed_values_are_refused(self, value: str) -> None:
+        """Every one a typo, and every one a refusal of *this* type — a bare
+        ``ValueError`` would slip past the lifespan's except clause (no CRITICAL
+        line naming the variable) and past the render path's guard."""
         with pytest.raises(PublicBaseUrlInvalid):
             public_base_url({PUBLIC_BASE_URL_ENV: value})
 
     def test_the_refusal_names_the_variable(self) -> None:
         with pytest.raises(PublicBaseUrlInvalid, match=PUBLIC_BASE_URL_ENV):
             public_base_url({PUBLIC_BASE_URL_ENV: "co-watcher.exe.xyz"})
+
+    @pytest.mark.parametrize(
+        "value", ["https://ops:s3cret@co-watcher.exe.xyz", "https://ops:s3cret@[co-watcher"]
+    )
+    def test_a_credential_is_refused_and_never_echoed(self, value: str) -> None:
+        """Every link would publish it — into Slack, into email. And the refusal
+        is logged CRITICAL to journald, so it must not quote the value either."""
+        with pytest.raises(PublicBaseUrlInvalid) as refused:
+            public_base_url({PUBLIC_BASE_URL_ENV: value})
+        assert "s3cret" not in str(refused.value)
 
 
 class TestAssertPublicBaseUrl:

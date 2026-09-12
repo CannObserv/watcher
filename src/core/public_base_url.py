@@ -35,24 +35,46 @@ class PublicBaseUrlInvalid(ValueError):
 def public_base_url(environ: Mapping[str, str]) -> str | None:
     """Return the configured base without a trailing slash, or ``None`` if unset.
 
-    Accepts ``http``/``https`` with a host, and an optional port and path prefix
-    (the dev server lives on ``:8001``). Refuses a query or fragment, because
-    every caller appends ``/watched-items/…`` and either would swallow it.
+    Accepts ``http``/``https`` with a host, and an optional numeric port and
+    path prefix (the dev server lives on ``:8001``). Refuses, always as
+    ``PublicBaseUrlInvalid`` — never a bare ``ValueError`` from ``urlsplit`` or
+    ``.port``, which the lifespan and the render path would not recognise:
+
+    - a ``?`` or ``#`` anywhere, since every caller appends ``/watched-items/…``
+      and either would swallow it — bare ones included, which ``urlsplit``
+      reports as empty;
+    - a username or password, which every link would publish;
+    - whitespace, which ``urlsplit`` keeps in the host.
+
+    A value holding ``@`` is never quoted back: the refusal is logged CRITICAL.
     """
     raw = (environ.get(PUBLIC_BASE_URL_ENV) or "").strip()
     if not raw:
         return None
-    parts = urlsplit(raw)
+    shown = "(value withheld: it holds an '@')" if "@" in raw else repr(raw)
+    try:
+        parts = urlsplit(raw)
+        _ = parts.port  # raises on a non-numeric or out-of-range port
+    except ValueError as exc:
+        raise PublicBaseUrlInvalid(
+            f"{PUBLIC_BASE_URL_ENV}={shown} does not parse as a URL ({exc})"
+        ) from None
     if parts.scheme not in ("http", "https") or not parts.hostname:
         raise PublicBaseUrlInvalid(
-            f"{PUBLIC_BASE_URL_ENV}={raw!r} is not an absolute http(s) URL with a host "
+            f"{PUBLIC_BASE_URL_ENV}={shown} is not an absolute http(s) URL with a host "
             "(e.g. https://co-watcher.exe.xyz)"
         )
-    if parts.query or parts.fragment:
+    if parts.username is not None or parts.password is not None:
         raise PublicBaseUrlInvalid(
-            f"{PUBLIC_BASE_URL_ENV}={raw!r} carries a query or fragment; links are built "
+            f"{PUBLIC_BASE_URL_ENV} carries a username or password; every link would publish it"
+        )
+    if "?" in raw or "#" in raw:
+        raise PublicBaseUrlInvalid(
+            f"{PUBLIC_BASE_URL_ENV}={shown} carries a query or fragment; links are built "
             "by appending a path, so it must be a bare base"
         )
+    if any(char.isspace() for char in raw):
+        raise PublicBaseUrlInvalid(f"{PUBLIC_BASE_URL_ENV}={shown} contains whitespace")
     return raw.rstrip("/")
 
 

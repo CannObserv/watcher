@@ -263,15 +263,18 @@ async def test_lifespan_refuses_the_notifier_flag_without_a_url(monkeypatch, cap
 
 
 @pytest.mark.asyncio
-async def test_lifespan_refuses_a_malformed_public_base_url(monkeypatch, caplog):
+@pytest.mark.parametrize("value", ["co-watcher.exe.xyz", "https://[co-watcher.exe.xyz"])
+async def test_lifespan_refuses_a_malformed_public_base_url(monkeypatch, caplog, value):
     """#296 D6: a malformed base is a typo, and it refuses the start.
 
     Unset is allowed (links are omitted, and the check warns), but a value that
     is set and wrong would otherwise ship every notification with its dashboard
     link silently dropped. Logged CRITICAL for the same reason as the refusals
-    above: the handler's line is what an operator reads in journald.
+    above: the handler's line is what an operator reads in journald — including
+    for the value ``urlsplit`` itself raises on, which once escaped as a bare
+    ``ValueError`` past the except clause.
     """
-    monkeypatch.setenv(PUBLIC_BASE_URL_ENV, "co-watcher.exe.xyz")
+    monkeypatch.setenv(PUBLIC_BASE_URL_ENV, value)
 
     with (
         patch("src.api.main.get_app") as get_app,

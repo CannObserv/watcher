@@ -122,11 +122,12 @@ class TestChangeDetectedDefaultBody:
             "- Test Watch\n- URL: https://example.com\n- TIMESTAMP: 2026-04-14T12:00:00Z"
         )
 
-    def test_a_malformed_base_never_breaks_a_dispatch(self, monkeypatch):
+    @pytest.mark.parametrize("value", ["co-watcher.exe.xyz", "https://[co-watcher.exe.xyz"])
+    def test_a_malformed_base_never_breaks_a_dispatch(self, monkeypatch, value):
         """The lifespan refuses a malformed value at startup; the render path
         must still never raise on one, because a failed dispatch is worse than a
-        missing link."""
-        monkeypatch.setenv(PUBLIC_BASE_URL_ENV, "co-watcher.exe.xyz")
+        missing link. The bracket case is one ``urlsplit`` itself raises on."""
+        monkeypatch.setenv(PUBLIC_BASE_URL_ENV, value)
         body = build_body(make_event(metadata={}), ContentOptions())
         assert "ITEM:" not in body
         assert body.startswith("- Test Watch")

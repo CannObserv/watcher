@@ -99,7 +99,7 @@ DEFAULT_TITLE_TEMPLATES: dict[str, str] = {
 # composer (`content.build_body`) consume this tuple — single source of
 # truth for the always-present header lines. Toggle-driven sections are
 # interleaved by the composer at the canonical positions; the ITEM dashboard
-# link is part of the unconditional skeleton.
+# link is part of the skeleton, present whenever a public base is configured.
 #
 # The old body block (`{{ event_label }}` / `{{ change_summary }}`) was
 # retired in #221: `change_summary` could only ever render "details pending"
@@ -124,13 +124,31 @@ CHANGE_DETECTED_HEADER_LINES: tuple[str, ...] = (
     CHANGE_DETECTED_ITEM_LINE,
 )
 
+
 # Markdown bullet list — one fact per `<li>` so HTML-email channels (which
 # render the source Markdown through CommonMark in the Notifier, #137) keep each
 # fact on its own line rather than collapsing them into one run-on line (#224/#225).
 # The composer (`content._build_change_detected_body`) prefixes the same `- ` and
 # appends toggle-driven items, so this seed stays in lockstep with dispatch output
 # (guarded by test_content.test_seed_template_matches_dispatcher_output_with_default_options).
-_CHANGE_DETECTED_BODY = "\n".join(f"- {line}" for line in CHANGE_DETECTED_HEADER_LINES)
+#
+# The ITEM bullet carries its own guard (#296 D6): the composer drops the line
+# when no base is configured, and a template copied from this seed must drop it
+# too rather than render a relative `/watched-items/…` link. The newline sits
+# inside the guard, so no empty bullet is left behind (the no-base twin of the
+# test above guards that).
+def _seed_bullets(lines: tuple[str, ...]) -> str:
+    parts: list[str] = []
+    for index, line in enumerate(lines):
+        separator = "" if index == 0 else "\n"
+        bullet = f"{separator}- {line}"
+        if line == CHANGE_DETECTED_ITEM_LINE:
+            bullet = f"{{% if app_url %}}{bullet}{{% endif %}}"
+        parts.append(bullet)
+    return "".join(parts)
+
+
+_CHANGE_DETECTED_BODY = _seed_bullets(CHANGE_DETECTED_HEADER_LINES)
 
 
 DEFAULT_BODY_TEMPLATES: dict[str, str] = {

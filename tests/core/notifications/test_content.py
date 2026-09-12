@@ -21,6 +21,10 @@ from src.core.notifications.content import (
     render_template_strict,
     resolve_options,
 )
+from src.core.notifications.default_templates import (
+    DEFAULT_BODY_TEMPLATES,
+    compose_body_prefill,
+)
 from src.core.notifications.events import EVENT_TITLES, WatchEvent, WatchEventType
 from src.core.public_base_url import PUBLIC_BASE_URL_ENV
 
@@ -185,14 +189,27 @@ class TestChangeDetectedDefaultBody:
         with default options must equal what build_body produces at dispatch
         time. Catches drift between the seed shown to the user and the body
         actually delivered."""
-        from src.core.notifications.default_templates import DEFAULT_BODY_TEMPLATES
-
         event = make_event(metadata={})  # no optional sections in either path
         seed_rendered = render_template(
             DEFAULT_BODY_TEMPLATES["change_detected"], build_template_context(event)
         )
         dispatch_output = build_body(event, ContentOptions())
         assert seed_rendered == dispatch_output
+
+    def test_seed_matches_dispatcher_output_without_a_base(self, monkeypatch):
+        """#296 D6: with no base configured the composer drops the ITEM line.
+        A template a user copied from the seed must drop it too — otherwise
+        every dev server renders a relative ``/watched-items/…`` link, and the
+        invariant above holds only when a base is set."""
+        monkeypatch.delenv(PUBLIC_BASE_URL_ENV, raising=False)
+        event = make_event(metadata={})
+        seed_rendered = render_template(
+            DEFAULT_BODY_TEMPLATES["change_detected"], build_template_context(event)
+        )
+        assert "/watched-items/" not in seed_rendered
+        assert seed_rendered == build_body(event, ContentOptions())
+        custom = ContentOptions(body_template=compose_body_prefill("change_detected"))
+        assert "ITEM:" not in build_body(event, custom)
 
 
 class TestDomainSlot:

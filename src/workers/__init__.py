@@ -5,6 +5,7 @@ Call get_app() to get the configured App instance.
 """
 
 import os
+from collections.abc import Mapping
 
 import procrastinate
 
@@ -19,18 +20,24 @@ _app: procrastinate.App | None = None
 bp = procrastinate.Blueprint()
 
 
-def _get_conninfo() -> str:
-    """Get libpq-style connection string for procrastinate."""
-    url = os.environ.get("PROCRASTINATE_DATABASE_URL")
+def get_conninfo(environ: Mapping[str, str] = os.environ) -> str:
+    """Get libpq-style connection string for procrastinate.
+
+    Public, and taking ``environ``, because the backlog prune
+    (``src.ops.prune_job_history``) must connect exactly where the worker
+    would — one rule, not a copy of it (#296 CR 20).
+    """
+    url = environ.get("PROCRASTINATE_DATABASE_URL")
     if url:
         return url
-    sa_url = os.environ.get("DATABASE_URL", "")
+    sa_url = environ.get("DATABASE_URL", "")
     if sa_url.startswith("postgresql+asyncpg://"):
         return sa_url.replace("postgresql+asyncpg://", "postgresql://", 1)
     if sa_url.startswith("postgresql://"):
         return sa_url
     raise RuntimeError(
-        "PROCRASTINATE_DATABASE_URL or DATABASE_URL environment variable is not set."
+        "PROCRASTINATE_DATABASE_URL, or a postgresql:// or postgresql+asyncpg:// "
+        "DATABASE_URL, is required."
     )
 
 
@@ -48,7 +55,7 @@ def get_app() -> procrastinate.App:
         import src.workers.watch_status  # noqa: F401
 
         _app = procrastinate.App(
-            connector=procrastinate.PsycopgConnector(conninfo=_get_conninfo()),
+            connector=procrastinate.PsycopgConnector(conninfo=get_conninfo()),
         )
         _app.add_tasks_from(bp, namespace="")
         logger.info("procrastinate app created")

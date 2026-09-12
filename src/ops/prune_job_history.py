@@ -34,18 +34,19 @@ from src.core.db_safety import (
     ProductionDatabaseRefused,
     assert_environment_db_allowed,
 )
-from src.workers.retention import SUCCEEDED_RETENTION_HOURS, apply_retention, backlog_horizons
+from src.core.logging import configure_logging
+from src.workers import get_conninfo
+from src.workers.retention import (
+    FAILED_RETENTION_HOURS,
+    SUCCEEDED_RETENTION_HOURS,
+    apply_retention,
+    backlog_horizons,
+)
 
 _OLDEST_HOURS_SQL = (
     "SELECT EXTRACT(EPOCH FROM now() - min(at)) / 3600 AS hours FROM procrastinate_events"
 )
 _COUNT_SQL = "SELECT count(*) AS n FROM procrastinate_jobs"
-
-
-def _conninfo(environ: Mapping[str, str]) -> str:
-    """The libpq DSN the worker would use — ``src.workers._get_conninfo``'s rule."""
-    url = environ.get("PROCRASTINATE_DATABASE_URL") or environ.get("DATABASE_URL", "")
-    return url.replace("postgresql+asyncpg://", "postgresql://", 1)
 
 
 async def _prune(conninfo: str, *, step_hours: int, dry_run: bool) -> None:
@@ -82,6 +83,7 @@ def main(argv: list[str] | None = None, *, environ: Mapping[str, str] = os.envir
     parser.add_argument("--dry-run", action="store_true", help="print the plan only")
     args = parser.parse_args(argv)
 
+    configure_logging()
     if not environ.get("DATABASE_URL"):
         print("DATABASE_URL is not set — source scripts/load-env.sh", file=sys.stderr)
         return 2
@@ -98,8 +100,17 @@ def main(argv: list[str] | None = None, *, environ: Mapping[str, str] = os.envir
         print(f"--step-days must be positive, got {args.step_days}", file=sys.stderr)
         return 2
 
-    print(f"policy: succeeded > {SUCCEEDED_RETENTION_HOURS / 24:.0f} days, failed > 30 days")
-    asyncio.run(_prune(_conninfo(environ), step_hours=args.step_days * 24, dry_run=args.dry_run))
+    try:
+        conninfo = get_conninfo(environ)  # the worker's rule, so both connect alike
+    except RuntimeError as e:
+        print(e, file=sys.stderr)
+        return 2
+
+    print(
+        f"policy: succeeded > {SUCCEEDED_RETENTION_HOURS // 24} days; "
+        f"failed, cancelled and aborted > {FAILED_RETENTION_HOURS // 24} days"
+    )
+    asyncio.run(_prune(conninfo, step_hours=args.step_days * 24, dry_run=args.dry_run))
     return 0
 
 

@@ -8,5 +8,6 @@ before the hourly retention task takes over (#296 D7).
 
 The backup modules touch the database only through ``pg_dump`` /
 ``pg_restore`` / ``psql``; the prune goes through procrastinate's own API.
-Runbook: docs/RECOVERY.md.
+Runbooks: docs/RECOVERY.md for the backup and restore; docs/DEPLOYMENT.md →
+*Job history* for the prune.
 """

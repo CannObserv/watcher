@@ -31,6 +31,10 @@ A systemd unit file is provided at `deploy/watcher.service`.
 sudo mkdir -p /etc/watcher
 # Add production secrets (at minimum DATABASE_URL)
 echo 'DATABASE_URL=postgresql+asyncpg://watcher:watcher@localhost:5432/watcher' | sudo tee /etc/watcher/.env
+# The dashboard's public base — THIS host's (#296 D6). Unset only WARNs, and every
+# notification loses its link; a value copied from another VM's file passes every
+# check and points readers at that VM.
+echo 'WATCHER_PUBLIC_BASE_URL=https://co-watcher.exe.xyz' | sudo tee -a /etc/watcher/.env
 sudo chmod 640 /etc/watcher/.env
 sudo chown root:exedev /etc/watcher/.env
 

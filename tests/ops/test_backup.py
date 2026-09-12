@@ -338,17 +338,20 @@ class TestMain:
         assert pg.calls == []
 
     def test_a_check_in_that_cannot_be_sent_never_fails_a_shipped_backup(
-        self, monkeypatch, client, bucket
+        self, monkeypatch, client, bucket, tmp_path
     ) -> None:
         """The dump is in the bucket; the monitoring path must not turn that
         into a failed unit (src.ops.checkin's contract). Driven through the
         real ``post_checkin`` with a base URL ``urlsplit`` refuses."""
+        credentials = tmp_path / "credentials"
+        credentials.mkdir()
+        (credentials / checkin.KEY_CREDENTIAL).write_text("nk_backup")
         monkeypatch.setattr(backup.storage, "Client", lambda: client)
         monkeypatch.setattr(backup.subprocess, "run", FakePg())
         monkeypatch.setenv(backup.BUCKET_ENV, BUCKET)
         monkeypatch.setenv(checkin.BASE_URL_ENV, "http://[notifier.invalid:9000")
         monkeypatch.setenv(checkin.MONITOR_ID_ENV, "01M24A8CA2GT0M7WE57NEMD0EW")
-        monkeypatch.setenv(checkin.API_KEY_ENV, "nk_backup")
+        monkeypatch.setenv(checkin.CREDENTIALS_DIRECTORY_ENV, str(credentials))
         assert backup.main(["--database", "watcher"]) == 0
         assert len(bucket.objects) == 1
 

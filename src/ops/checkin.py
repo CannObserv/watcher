@@ -26,13 +26,19 @@ port *and* a development-marked key: a two-fault path, not a slip.
 job's exit status: a monitoring path that fails the thing it monitors trains an
 operator to ignore both.
 
-All three values live in ``/etc/watcher/backup-notifier.env`` (0400 root:root),
-loaded by the backup unit alone. ``/etc/watcher/notifier.env`` stays
+**The key is a credential, never an environment variable** (#297). The base
+URL and monitor id are configuration, in ``/etc/watcher/backup.env``; the key
+is the unit's ``notifier-key`` credential, which systemd reads from the
+root-only ``/etc/watcher/backup-notifier.key`` and hands the run as a private
+file under ``$CREDENTIALS_DIRECTORY``. So it is in no process environment —
+not the job's, not a child's, not ``/proc/<pid>/environ`` — and the variable
+it once was is not read at all. ``/etc/watcher/notifier.env`` stays
 ``watcher.service``'s and nothing else's (#278).
 """
 
 import re
 from collections.abc import Callable, Mapping
+from pathlib import Path
 from typing import Literal
 from urllib.parse import urlsplit
 
@@ -44,8 +50,10 @@ logger = get_logger(__name__)
 
 BASE_URL_ENV = "WATCHER_BACKUP_NOTIFIER_BASE_URL"
 MONITOR_ID_ENV = "WATCHER_BACKUP_MONITOR_ID"
-API_KEY_ENV = "WATCHER_BACKUP_NOTIFIER_API_KEY"
-_ALL_ENV = (BASE_URL_ENV, MONITOR_ID_ENV, API_KEY_ENV)
+#: Set by systemd for a unit with credentials; the key is the file named below.
+CREDENTIALS_DIRECTORY_ENV = "CREDENTIALS_DIRECTORY"
+KEY_CREDENTIAL = "notifier-key"
+_KEY_LABEL = f"the {KEY_CREDENTIAL} credential"
 TIMEOUT_SECONDS = 10.0
 
 #: One immediate retry on a transport error or a 5xx. A dropped check-in reads as
@@ -61,6 +69,23 @@ def _http_post(url: str, payload: dict, headers: dict, timeout: float) -> int:
     """One POST, returning the status code. The seam the tests replace."""
     with httpx.Client(timeout=timeout) as client:
         return client.post(url, json=payload, headers=headers).status_code
+
+
+def _read_key(environ: Mapping[str, str]) -> str:
+    """The key credential's contents, or "" when there is none to read.
+
+    Under the unit the file always exists — a missing source fails the start —
+    and is empty until the monitor does. Outside one there is no directory.
+    Anything else (a directory where the file should be, a permission error)
+    propagates to ``post_checkin``'s guard.
+    """
+    directory = environ.get(CREDENTIALS_DIRECTORY_ENV, "").strip()
+    if not directory:
+        return ""
+    try:
+        return (Path(directory) / KEY_CREDENTIAL).read_text().strip()
+    except FileNotFoundError:
+        return ""
 
 
 def _is_http_base(base: str) -> bool:
@@ -102,21 +127,29 @@ def _post_checkin(
     environ: Mapping[str, str],
     post: Post,
 ) -> bool:
-    values = {name: environ.get(name, "").strip() for name in _ALL_ENV}
-    if not any(values.values()):
+    base = environ.get(BASE_URL_ENV, "").strip()
+    monitor_id = environ.get(MONITOR_ID_ENV, "").strip()
+    api_key = _read_key(environ)
+    sources = f"{BASE_URL_ENV}, {MONITOR_ID_ENV} and {_KEY_LABEL}"
+    present = {
+        BASE_URL_ENV: bool(base),
+        MONITOR_ID_ENV: bool(monitor_id),
+        _KEY_LABEL: bool(api_key),
+    }
+    if not any(present.values()):
         logger.warning(
             "backup check-in not configured (%s unset) — a stopped backup will not be noticed",
-            ", ".join(_ALL_ENV),
+            sources,
         )
         return False
-    if not all(values.values()):
+    if not all(present.values()):
+        missing = ", ".join(name for name, there in present.items() if not there)
         logger.error(
-            "backup check-in half-configured — %s must all be set; not checking in",
-            ", ".join(_ALL_ENV),
-            extra={f"has_{name.lower()}": bool(value) for name, value in values.items()},
+            "backup check-in half-configured — %s must all be set (missing: %s); not checking in",
+            sources,
+            missing,
         )
         return False
-    base, monitor_id, api_key = (values[name] for name in _ALL_ENV)
     if not _is_http_base(base):
         logger.error("%s is not an http(s) URL with a host; not checking in", BASE_URL_ENV)
         return False

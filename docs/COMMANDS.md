@@ -22,7 +22,10 @@ Two env files, loaded in order:
 source scripts/load-env.sh
 ```
 
-The systemd service loads both automatically (see `deploy/watcher.service`).
+The systemd service loads **only** `/etc/watcher/.env`, plus its unit-only
+`notifier.env` — never the repo `.env`, whose agent tokens are no production
+configuration (#296 D5; `deploy/watcher.service`, [ENVIRONMENT.md](ENVIRONMENT.md)).
+A production setting put in the repo `.env` is one the service never sees.
 
 `scripts/load-env.sh` is **sourced, not executed** — the exports have to land in your
 shell. It parses each file rather than sourcing it, so a secrets file is never run, and
@@ -207,6 +210,23 @@ uv run procrastinate --app=src.workers.app schema --apply
 uv run procrastinate --app=src.workers.app worker
 
 # The worker also runs embedded in FastAPI via lifespan — no separate process needed for dev
+```
+
+## Backup, restore and job history (#296)
+
+Operator entry points in `src/ops/`, each with its runbook:
+
+```bash
+# Nightly dump to GCS — the timer runs it; one run by hand (docs/RECOVERY.md):
+sudo systemctl start watcher-backup.service
+
+# Restore — always name the host that shipped the dump (docs/RECOVERY.md → Restore):
+sudo bash -c "set -a; . /etc/watcher/backup.env; set +a; .venv/bin/python -m src.ops.restore --list"
+
+# One-off job-history backlog prune; the hourly task holds it after
+# (docs/DEPLOYMENT.md → Job history). The opt-in covers the dry run too:
+source scripts/load-env.sh
+WATCHER_ALLOW_PRODUCTION_DB=1 uv run python -m src.ops.prune_job_history --dry-run
 ```
 
 ## Tailwind CSS

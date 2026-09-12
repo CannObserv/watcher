@@ -15,7 +15,6 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 from google.api_core.exceptions import Forbidden
-from google.auth.exceptions import RefreshError
 
 from src.ops import restore
 from src.ops.backup import BUCKET_ENV, KEY_TIME_FORMAT, PREFIX_ENV
@@ -46,6 +45,13 @@ def _ship(
         stamp = datetime.strptime(match.group(1), KEY_TIME_FORMAT) if match else datetime.now()
         created = stamp.replace(tzinfo=UTC) + timedelta(minutes=1)
     bucket.created[key] = created
+
+
+class RefreshError(Exception):
+    """Stands in for ``google.auth.exceptions.RefreshError`` (a revoked key): like
+    it, neither a RestoreError nor a GoogleAPICallError. Local because
+    google-auth is only transitive here, and tests import only what is declared
+    (#294)."""
 
 
 def _raiser(error: Exception):

@@ -13,7 +13,6 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
-from google.auth.exceptions import DefaultCredentialsError
 
 from src.ops import backup, checkin
 from src.ops.backup import BackupError
@@ -46,6 +45,12 @@ TOC = """\
 3551; 0 1523300 TABLE DATA public watched_items watcher
 3560; 0 1523400 TABLE DATA public procrastinate_jobs watcher
 """
+
+
+class DefaultCredentialsError(Exception):
+    """Stands in for ``google.auth.exceptions.DefaultCredentialsError``: like it,
+    neither a BackupError nor a GoogleAPICallError. Local because google-auth is
+    only transitive here, and tests import only what is declared (#294)."""
 
 
 class FakePg:

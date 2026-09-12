@@ -62,9 +62,9 @@ CONTENT_TYPE = "application/octet-stream"
 #: A dump that lacks either data section is not a backup of this database.
 REQUIRED_TABLES = ("public.alembic_version", "public.watched_items")
 
-# Bounds on the slow calls. The database is ~20 MB after retention (#296 D7);
-# these are generous for that and short enough that a wedged call is a failed
-# unit rather than a hang.
+# Bounds on the slow calls. The dump measured 1.7 MB after the #296 D7 prune
+# (2026-09-12); these are generous for that and short enough that a wedged
+# call is a failed unit rather than a hang.
 PG_DUMP_TIMEOUT_SECONDS = 1800
 QUERY_TIMEOUT_SECONDS = 60
 UPLOAD_TIMEOUT_SECONDS = 600.0

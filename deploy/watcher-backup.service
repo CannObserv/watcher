@@ -50,8 +50,9 @@ AmbientCapabilities=CAP_SETUID CAP_SETGID
 # The tree is read-only to this unit anyway; say so rather than let Python try.
 Environment=PYTHONDONTWRITEBYTECODE=1
 
-# ~20 MB after retention (#296 D7). An hour is generous for the dump and the
-# upload, and short enough that a wedged run is a failed unit, not a hang.
+# The dump measured 1.7 MB after the #296 D7 prune (2026-09-12). An hour is
+# generous for the dump and the upload, and short enough that a wedged run is
+# a failed unit, not a hang.
 TimeoutStartSec=3600
 
 # The venv's interpreter directly rather than `uv run`: uv wants a writable

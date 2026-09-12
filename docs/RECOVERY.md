@@ -23,9 +23,9 @@ the case this closes.
 | **Failure is loud, silence too** | A failed run is a failed unit *and* an `alert` check-in to notifier; a good one checks in `ok`. The dead-man monitor alarms when neither arrives (D9). |
 | **Metadata travels with the object** | `dumped_at`, `sha256`, `size_bytes`, `alembic_head`, `server_version`, `pg_dump_version`, `toc_entries`, `source_host` — what a restore checks without trusting the file. |
 
-**RPO is 24 hours** — one dump a night. The dump is small (27.6 MB measured
-before the #296 D7 prune, which removes 95 % of the rows), so going hourly is a
-one-line timer change if that ever needs tightening.
+**RPO is 24 hours** — one dump a night. The dump is small — 27.6 MB before the
+#296 D7 prune, 1.7 MB after it (both measured) — so going hourly is a one-line
+timer change if that ever needs tightening.
 
 ## The sandbox, and the one capability trap
 

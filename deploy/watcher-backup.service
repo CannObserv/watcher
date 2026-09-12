@@ -8,28 +8,45 @@ Wants=network-online.target
 
 [Service]
 Type=oneshot
-# root, for one reason: the GCS writer key is 0400 root:root. Everything the job
-# does to the database it does as `postgres`, dropped to with setpriv, over the
-# local socket with peer auth — so no database credential exists for it at all.
-User=root
+# Its own unprivileged user, allocated by systemd for each run (#297): nothing
+# to provision, no account to log in to, and a uid no other process holds. The
+# database knows it as the role of the same name — pg_read_all_data and nothing
+# more (scripts/setup-backup-role.sql) — reached by peer auth over the local
+# socket, so no database credential exists for the job at all.
+DynamicUser=yes
+User=watcher_backup
 WorkingDirectory=/home/exedev/watcher
 
-# WATCHER_BACKUP_BUCKET and GOOGLE_APPLICATION_CREDENTIALS (the writer key).
+# The two keys, as credentials rather than environment: systemd reads each
+# 0400 root:root file and hands the run a private copy under
+# $CREDENTIALS_DIRECTORY, readable by this run alone and gone when it exits.
+# Both files must exist — a missing LoadCredential= source fails the start
+# (243/CREDENTIALS), and systemd 255 ignores an empty SetCredential= fallback —
+# so until the monitor exists the check-in key is an empty file, and the job
+# warns that a stopped backup will not be noticed.
+LoadCredential=gcs:/etc/watcher/co-watcher-backup.json
+LoadCredential=notifier-key:/etc/watcher/backup-notifier.key
+# The SDK takes a path; this is the private copy's. An env file that set the
+# variable too would win over this line, and aim the job at a key it cannot read.
+Environment=GOOGLE_APPLICATION_CREDENTIALS=%d/gcs
+
+# WATCHER_BACKUP_BUCKET, and the check-in's base URL and monitor id — no secret.
 # NOT /etc/watcher/.env: that file carries the database URLs and the bus URL,
 # none of which this unit needs and all of which it must not have. And never
 # /etc/watcher/notifier.env, which is watcher.service's alone (#278). No leading
 # '-': a backup unit without its configuration must fail loudly.
 EnvironmentFile=/etc/watcher/backup.env
-# WATCHER_BACKUP_NOTIFIER_BASE_URL, _MONITOR_ID and _NOTIFIER_API_KEY, 0400
-# root:root (#296 D9) — all three or none. Optional only until the monitor
-# exists: without it the job warns that a stopped backup will not be noticed,
-# and still ships.
-EnvironmentFile=-/etc/watcher/backup-notifier.env
 
 # The sandbox. A read-only filesystem but for a private /tmp (the dump is
 # written there, through an fd this process opens); no new privileges.
 ProtectSystem=strict
-ProtectHome=read-only
+# An empty /home, with only the checkout bound back in, read-only: the venv and
+# nothing else of exedev's — no ~/.ssh, no other checkout. The venv's python is
+# a link to /usr/bin/python3.12, outside /home; a uv-managed interpreter under
+# ~/.local/share/uv would be hidden, and tests/deploy/test_backup_units.py fails
+# on a host where that is so.
+ProtectHome=tmpfs
+BindReadOnlyPaths=/home/exedev/watcher
 PrivateTmp=yes
 NoNewPrivileges=yes
 ProtectKernelTunables=yes
@@ -39,14 +56,10 @@ RestrictNamespaces=yes
 LockPersonality=yes
 # The local socket for pg_dump, and IP for GCS and the notifier check-in.
 RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
-# Three capabilities, each used: DAC_READ_SEARCH to read the venv under the
-# 0750 home; SETUID/SETGID for setpriv to drop to postgres. They are AMBIENT as
-# well because under systemd 255 any of the seccomp-backed protections above,
-# beside NoNewPrivileges=yes, strips CAP_SETUID from the effective set before
-# the exec — setpriv then fails setresuid with EPERM (found on the VM, pinned in
-# tests/deploy/test_backup_units.py). The postgres child holds none at all.
-CapabilityBoundingSet=CAP_DAC_READ_SEARCH CAP_SETUID CAP_SETGID
-AmbientCapabilities=CAP_SETUID CAP_SETGID
+# No capabilities at all. Root needed three — DAC_READ_SEARCH for the venv under
+# the 0750 home, SETUID/SETGID for setpriv to drop to postgres — and the empty
+# /home and the job's own role replace all of them.
+CapabilityBoundingSet=
 # The tree is read-only to this unit anyway; say so rather than let Python try.
 Environment=PYTHONDONTWRITEBYTECODE=1
 
@@ -57,4 +70,4 @@ TimeoutStartSec=3600
 
 # The venv's interpreter directly rather than `uv run`: uv wants a writable
 # cache and may sync the environment, both refused by the sandbox (broker#4).
-ExecStart=/home/exedev/watcher/.venv/bin/python -m src.ops.backup --database watcher --run-as postgres
+ExecStart=/home/exedev/watcher/.venv/bin/python -m src.ops.backup --database watcher

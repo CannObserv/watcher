@@ -63,6 +63,17 @@ def _http_post(url: str, payload: dict, headers: dict, timeout: float) -> int:
         return client.post(url, json=payload, headers=headers).status_code
 
 
+def _is_http_base(base: str) -> bool:
+    """An http(s) URL with a host and, if any, a numeric port. ``urlsplit``
+    raises on a bad bracket and ``.port`` on a bad port; both are a typo."""
+    try:
+        parts = urlsplit(base)
+        _ = parts.port
+    except ValueError:
+        return False
+    return parts.scheme in ("http", "https") and bool(parts.hostname)
+
+
 def post_checkin(
     status: Literal["ok", "alert"],
     variables: dict,
@@ -70,7 +81,27 @@ def post_checkin(
     environ: Mapping[str, str],
     post: Post = _http_post,
 ) -> bool:
-    """Report this run; return whether the check-in landed. Never raises."""
+    """Report this run; return whether the check-in landed. Never raises.
+
+    The guarantee is this wrapper's, not the callee's care: whatever escapes the
+    configuration checks — a non-ASCII key failing header encoding, a URL httpx
+    parses differently from ``urlsplit`` — is logged by type (never by message,
+    which may quote the value) and reported as a check-in that did not land.
+    """
+    try:
+        return _post_checkin(status, variables, environ=environ, post=post)
+    except Exception as e:
+        logger.error("backup check-in failed: %s — not checking in", type(e).__name__)
+        return False
+
+
+def _post_checkin(
+    status: Literal["ok", "alert"],
+    variables: dict,
+    *,
+    environ: Mapping[str, str],
+    post: Post,
+) -> bool:
     values = {name: environ.get(name, "").strip() for name in _ALL_ENV}
     if not any(values.values()):
         logger.warning(
@@ -86,8 +117,7 @@ def post_checkin(
         )
         return False
     base, monitor_id, api_key = (values[name] for name in _ALL_ENV)
-    parts = urlsplit(base)
-    if parts.scheme not in ("http", "https") or not parts.hostname:
+    if not _is_http_base(base):
         logger.error("%s is not an http(s) URL with a host; not checking in", BASE_URL_ENV)
         return False
     if not _MONITOR_ID_RE.match(monitor_id):

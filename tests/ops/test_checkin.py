@@ -118,3 +118,35 @@ class TestPostCheckin:
         with caplog.at_level(logging.WARNING, logger="src.ops.checkin"):
             assert checkin.post_checkin("ok", {}, environ=CONFIGURED, post=post) is False
         assert len(post.calls) == 2
+
+    @pytest.mark.parametrize(
+        "base", ["http://[notifier.invalid:9000", "http://notifier.invalid:9o00"]
+    )
+    def test_a_base_that_cannot_be_parsed_is_refused_not_raised(self, caplog, base) -> None:
+        """``urlsplit`` raises on a bad bracket and ``.port`` on a bad port —
+        a typo in the env file, which must read as one, not as a traceback."""
+        post = _Recorder()
+        environ = {**CONFIGURED, checkin.BASE_URL_ENV: base}
+        with caplog.at_level(logging.ERROR, logger="src.ops.checkin"):
+            assert checkin.post_checkin("ok", {}, environ=environ, post=post) is False
+        assert post.calls == []
+        assert any(checkin.BASE_URL_ENV in r.getMessage() for r in caplog.records)
+
+    @pytest.mark.parametrize(
+        "error",
+        [
+            UnicodeEncodeError("ascii", "nk_bäckup", 4, 5, "ordinal not in range(128)"),
+            httpx.InvalidURL("bad"),
+            RuntimeError("anything else"),
+        ],
+    )
+    def test_an_error_that_is_not_transport_is_contained(self, caplog, error) -> None:
+        """Only a transport error is worth the retry, but nothing may escape: a
+        non-ASCII key fails header encoding, an odd URL fails httpx's parser,
+        and a check-in that raises would fail the backup it reports on."""
+        post = _Recorder(error)
+        with caplog.at_level(logging.ERROR, logger="src.ops.checkin"):
+            assert checkin.post_checkin("ok", {}, environ=CONFIGURED, post=post) is False
+        assert len(post.calls) == 1
+        assert any(type(error).__name__ in r.getMessage() for r in caplog.records)
+        assert all("nk_b" not in r.getMessage() for r in caplog.records)

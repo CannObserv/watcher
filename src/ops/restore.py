@@ -9,9 +9,11 @@ empty database, in one transaction, so a failure leaves nothing half-loaded.
 The restore reads the archive on stdin, so ``postgres`` never needs to read a
 file root wrote, and it preserves owners and grants: the dump carries the
 two-role model's table ACLs and default privileges (#259). What it cannot carry
-is the database-level ``GRANT CONNECT`` — ``pg_dump`` without ``--create`` has
-no database to put it on — so the runbook re-runs ``scripts/setup-db-roles.sql``
-after every restore. docs/RECOVERY.md is that runbook.
+is the roles themselves, or the database-level ``GRANT CONNECT`` — ``pg_dump``
+without ``--create`` has no database to put it on — so on a fresh cluster the
+runbook creates ``watcher``, runs ``scripts/setup-db-roles.sql`` before the
+restore (whose grants name ``watcher_app``), and again after it.
+docs/RECOVERY.md is that runbook.
 
 This is also the migration's transfer path (#296 D10): the cutover dump moves
 through the bucket, so the procedure an incident would need is the one the move

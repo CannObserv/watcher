@@ -180,18 +180,45 @@ sudo bash -c "$ENV; .venv/bin/python -m src.ops.restore --latest --prefix $SRC -
 ```
 
 Into a database — **an existing, empty one**; the restore is one transaction, so
-a failure leaves it empty rather than half-loaded:
+a failure leaves it empty rather than half-loaded.
+
+**The roles come first.** The dump names `watcher` (the owner, and the
+migration role) and grants to `watcher_app`, but carries neither role — so on a
+fresh cluster, which co-watcher and every replacement host is, `createdb -O
+watcher` fails and the restore aborts at its first grant. And both passwords are
+the ones `/etc/watcher/.env` **already holds**: `setup-db-roles.sql` sets
+`watcher_app`'s to whatever it is handed, so a new one breaks `DATABASE_URL`.
 
 ```bash
+# The passwords /etc/watcher/.env already carries — never new ones.
+MIGRATE_PW='<the password in WATCHER_MIGRATION_DATABASE_URL>'
+APP_PW='<the password in DATABASE_URL>'
+
+# 1. Fresh cluster only: the owner role (an existing cluster has it). \getenv,
+#    so the password is never in argv.
+sudo -u postgres WATCHER_MIGRATE_PASSWORD="$MIGRATE_PW" psql -v ON_ERROR_STOP=1 <<'SQL'
+\getenv pw WATCHER_MIGRATE_PASSWORD
+CREATE ROLE watcher LOGIN PASSWORD :'pw';
+SQL
+
+# 2. The database, owned by it.
 sudo -u postgres createdb -O watcher watcher          # or a *_dev name to rehearse
+
+# 3. watcher_app and its CONNECT, before the restore whose grants name it. Safe
+#    on an empty database. Redirected, not -f (postgres cannot read /home/exedev).
+sudo -u postgres WATCHER_APP_PASSWORD="$APP_PW" psql -d watcher < scripts/setup-db-roles.sql
+
+# 4. The restore.
 sudo bash -c "$ENV; .venv/bin/python -m src.ops.restore --latest --prefix $SRC --into watcher --run-as postgres"
 
-# The dump carries the table grants and default privileges, but not the
-# database-level GRANT CONNECT (pg_dump without --create has nowhere to put it).
-# Re-run the roles script, as MIGRATIONS.md does — redirected, not -f:
-sudo -u postgres WATCHER_APP_PASSWORD="$APP_PW" \
-  psql -d watcher < scripts/setup-db-roles.sql
+# 5. The roles script again — idempotent; it re-asserts every grant against the
+#    restored tables, which is what the gates below then check.
+sudo -u postgres WATCHER_APP_PASSWORD="$APP_PW" psql -d watcher < scripts/setup-db-roles.sql
 ```
+
+The dump carries the table grants and default privileges; what it cannot carry
+is the database-level `GRANT CONNECT` (`pg_dump` without `--create` has nowhere
+to put it) — step 3 supplies that.
 
 `--object <key>` restores a specific dump instead of the newest.
 

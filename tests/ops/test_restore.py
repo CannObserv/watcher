@@ -161,11 +161,12 @@ class TestRestoreInto:
             return subprocess.CompletedProcess(argv, 0, stdout="", stderr="")
 
         restore.restore_into(dump, "watcher", run_as="postgres", runner=runner)
-        assert seen["argv"][:5] == [
+        assert seen["argv"][:6] == [
             "setpriv",
             "--reuid=postgres",
             "--regid=postgres",
             "--init-groups",
+            "--reset-env",
             "--",
         ]
         assert {"--single-transaction", "--exit-on-error", "--dbname=watcher"} <= set(seen["argv"])

@@ -43,6 +43,14 @@ keeps it through the exec, and the `postgres` child holds no capabilities at all
 (`CapPrm`/`CapEff`/`CapAmb` all zero). `tests/deploy/test_backup_units.py` pins
 the shape.
 
+**Nor any of the unit's environment.** `setpriv --reset-env` hands the child
+only its passwd entry's `HOME`/`SHELL`/`USER`/`LOGNAME` and a default `PATH`.
+Without it the check-in key rode into `pg_dump`'s environment, readable by any
+`postgres`-uid process through `/proc/<pid>/environ` — and a key that forges
+`ok` is the one thing the dead-man switch cannot survive. Checked in this
+sandbox (2026-09-12): a marker variable reached the child without the flag, not
+with it, and `psql` still connected by peer auth.
+
 ## Provisioning — needs the GCP project owner
 
 The node has no `gcloud` and no credential that can create any of this. Mirrors

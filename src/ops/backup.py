@@ -106,10 +106,24 @@ class Dump:
 
 
 def as_user(argv: list[str], run_as: str | None) -> list[str]:
-    """Prefix ``argv`` to run as ``run_as`` via ``setpriv``; unchanged when None."""
+    """Prefix ``argv`` to run as ``run_as`` via ``setpriv``; unchanged when None.
+
+    ``--reset-env`` hands the child only its passwd entry's ``HOME``/``SHELL``/
+    ``USER``/``LOGNAME`` and a default ``PATH``. Without it the ``postgres``
+    child held the unit's whole environment — the check-in key included —
+    readable by any process of that uid through ``/proc/<pid>/environ``.
+    """
     if run_as is None:
         return argv
-    return ["setpriv", f"--reuid={run_as}", f"--regid={run_as}", "--init-groups", "--", *argv]
+    return [
+        "setpriv",
+        f"--reuid={run_as}",
+        f"--regid={run_as}",
+        "--init-groups",
+        "--reset-env",
+        "--",
+        *argv,
+    ]
 
 
 def parse_toc(text: str) -> Toc:

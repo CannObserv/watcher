@@ -109,10 +109,19 @@ class TestPure:
             "--reuid=postgres",
             "--regid=postgres",
             "--init-groups",
+            "--reset-env",
             "--",
             "pg_dump",
             "watcher",
         ]
+
+    def test_the_dropped_to_user_inherits_none_of_the_units_environment(self) -> None:
+        """Without ``--reset-env`` the ``postgres`` child held the unit's whole
+        environment — the check-in key included — readable by any process of
+        that uid through ``/proc/<pid>/environ``. A key that forges ``ok`` is
+        the one thing the dead-man switch cannot survive."""
+        argv = backup.as_user(["pg_dump"], "postgres")
+        assert "--reset-env" in argv[: argv.index("--")]
 
     def test_as_user_without_a_user_is_the_command_itself(self) -> None:
         assert backup.as_user(["pg_dump", "x"], None) == ["pg_dump", "x"]

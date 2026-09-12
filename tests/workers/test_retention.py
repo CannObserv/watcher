@@ -91,6 +91,33 @@ class TestApplyRetention:
 
         assert _remaining(connector, labels) == {"succeeded, 40 days"}
 
+    async def test_a_horizon_past_the_failed_policy_is_one_statement(self) -> None:
+        """Every ``delete_old_jobs`` sorts every event in the table, whatever
+        its horizon. At or past the failed horizon, the all-statuses DELETE
+        already takes the succeeded jobs at the same age, so a succeeded-only
+        one first is a second full sort that deletes nothing."""
+        job_manager = JobManager(InMemoryConnector())
+        job_manager.delete_old_jobs = AsyncMock(wraps=job_manager.delete_old_jobs)
+
+        await retention.apply_retention(
+            job_manager, horizon_hours=retention.FAILED_RETENTION_HOURS + 24
+        )
+
+        job_manager.delete_old_jobs.assert_awaited_once_with(
+            nb_hours=retention.FAILED_RETENTION_HOURS + 24,
+            include_failed=True,
+            include_cancelled=True,
+            include_aborted=True,
+        )
+
+    async def test_the_policy_itself_is_two_statements(self) -> None:
+        job_manager = JobManager(InMemoryConnector())
+        job_manager.delete_old_jobs = AsyncMock(wraps=job_manager.delete_old_jobs)
+
+        await retention.apply_retention(job_manager)
+
+        assert job_manager.delete_old_jobs.await_count == 2
+
     async def test_a_horizon_inside_the_policy_is_refused(self) -> None:
         """A horizon shorter than the policy would delete history the policy
         keeps; the backlog prune can only ever be gentler than the task."""
@@ -103,8 +130,9 @@ class TestApplyRetention:
 
 class TestBacklogHorizons:
     def test_steps_down_to_the_policy_and_ends_on_it(self) -> None:
+        """The first step is one below the oldest job: a horizon *at* the
+        oldest has nothing older than it, and was a full sort for nothing."""
         assert retention.backlog_horizons(oldest_hours=24 * 30, step_hours=24 * 7) == [
-            24 * 30,
             24 * 23,
             24 * 16,
             24 * 9,

@@ -274,17 +274,31 @@ Unfinished jobs are never touched, events cascade with their job, and
 `watcher_app` already holds the `DELETE` it needs. Before #296 nothing pruned
 them, and the two tables were 96 % of the database — 679 k jobs back to March.
 
-A backlog that size is pruned once from a shell, not by the task's first run:
-`delete_old_jobs` is one `DELETE` over a sort of every event in the table, and
-the task runs inside the service's worker. The script steps the horizon down
-a week at a time, one statement per slice, with progress. It deletes
-irreversibly, so take a dump first:
+A backlog that size is pruned once from a shell, not by the task's first run.
+Every `delete_old_jobs` call sorts every event in the table (its age filter sits
+outside the sort), and the task runs inside the service's worker, one job at a
+time — so the first run over 679 k jobs would have been one long transaction
+there. The script steps the horizon down a week at a time, from one step below
+the oldest job, one statement per slice, with progress: each step repeats the
+sort, but bounds the rows each transaction deletes. It deletes irreversibly, so
+take a dump first:
 
 ```bash
 source scripts/load-env.sh
 WATCHER_ALLOW_PRODUCTION_DB=1 uv run python -m src.ops.prune_job_history --dry-run
 WATCHER_ALLOW_PRODUCTION_DB=1 uv run python -m src.ops.prune_job_history
 ```
+
+**If a backlog ever comes back** — a restore of the pre-prune safety dump, say —
+prune it this way **before** the service starts. Procrastinate defers a missed
+periodic tick up to ten minutes late at boot, so a start soon after :23 runs the
+task at once: the #296 restart at 23:26 did exactly that, harmlessly, because
+the backlog was already gone.
+
+**The disk does not shrink.** Deleted rows free space for Postgres to reuse, not
+back to the filesystem: the two tables' files keep their size until a
+dump-and-restore (the #296 move does one) or a `VACUUM FULL`. A `pg_dump` is
+compact either way — 1.7 MB after the prune.
 
 ## Database Backup Timer
 

@@ -2,10 +2,12 @@
 
 ``src.workers.retention.prune_job_history`` keeps finished jobs to 7 days
 (succeeded) and 30 days (failed, cancelled, aborted). Its first run against the
-original backlog — 679 k jobs and 1.83 M events back to March — would be one
-``DELETE`` over a sort of every event in the table, inside the service's
-worker. This steps the horizon down from the oldest job a week at a time
-instead, one statement per slice, from a shell, with progress:
+original backlog — 679 k jobs and 1.83 M events back to March — would have
+deleted all of it in one transaction, inside the service's worker. This steps
+the horizon down a week at a time instead, from one step below the oldest job,
+one statement per slice, from a shell, with progress. Every step still sorts
+every event (procrastinate filters outside its sort); what the steps bound is
+the rows each transaction deletes:
 
     source scripts/load-env.sh
     WATCHER_ALLOW_PRODUCTION_DB=1 uv run python -m src.ops.prune_job_history --dry-run

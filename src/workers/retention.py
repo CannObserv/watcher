@@ -13,12 +13,15 @@ never touched: ``delete_old_jobs`` only considers final states. Events go with
 their job (``ON DELETE CASCADE``), and ``watcher_app`` already holds ``DELETE``
 on both tables, so this needs no grant.
 
-Procrastinate's ``delete_old_jobs`` is one ``DELETE`` over a ``DISTINCT ON``
-scan of every job joined to its events. That is trivial at steady state and a
-sort of every event in the table on the original backlog, so the backlog is
-pruned once by ``src/ops/prune_job_history.py``, which steps the horizon down
-from the oldest job with :func:`backlog_horizons`, before this task ever runs
-against it.
+Procrastinate's ``delete_old_jobs`` is one ``DELETE`` whose subquery sorts every
+event in the table (``DISTINCT ON`` job, newest event first) — the status and
+age filters sit outside it — so every call costs a full sort, whatever its
+horizon. At steady state that sort is small. On the original backlog it was
+1.83 M events, and deleting 640 k jobs with their events in one statement would
+have been one long transaction inside the service's worker, which runs one job
+at a time. So the backlog was pruned once from a shell by
+``src/ops/prune_job_history.py``: its steps (:func:`backlog_horizons`) bound the
+rows each transaction deletes — not the sort, which every step repeats.
 """
 
 from procrastinate import JobContext
@@ -46,7 +49,10 @@ async def apply_retention(job_manager: JobManager, *, horizon_hours: int | None 
             f"horizon {succeeded_hours}h is inside the {SUCCEEDED_RETENTION_HOURS}h policy"
         )
     failed_hours = max(FAILED_RETENTION_HOURS, succeeded_hours)
-    await job_manager.delete_old_jobs(nb_hours=succeeded_hours)
+    # At or past the failed horizon the second DELETE takes the succeeded jobs
+    # at the same age, so a first one would be a full sort that deletes nothing.
+    if succeeded_hours < failed_hours:
+        await job_manager.delete_old_jobs(nb_hours=succeeded_hours)
     await job_manager.delete_old_jobs(
         nb_hours=failed_hours,
         include_failed=True,
@@ -56,15 +62,17 @@ async def apply_retention(job_manager: JobManager, *, horizon_hours: int | None 
 
 
 def backlog_horizons(*, oldest_hours: int, step_hours: int) -> list[int]:
-    """Horizons for pruning a backlog: from the oldest job down to the policy.
+    """Horizons for pruning a backlog: from one step below the oldest job down
+    to the policy.
 
     Each step deletes one slice of history in its own statement, so no single
-    transaction carries the whole backlog. Ends exactly on the policy.
+    transaction carries the whole backlog. It starts a step below the oldest,
+    since nothing is older than the oldest, and ends exactly on the policy.
     """
     if step_hours <= 0:
         raise ValueError(f"step must be positive, got {step_hours}h")
     horizons: list[int] = []
-    horizon = oldest_hours
+    horizon = oldest_hours - step_hours
     while horizon > SUCCEEDED_RETENTION_HOURS:
         horizons.append(horizon)
         horizon -= step_hours

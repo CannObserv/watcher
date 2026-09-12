@@ -99,6 +99,11 @@ WATCHER_BACKUP_NOTIFIER_API_KEY=<production-marked key>
 EOF
 ```
 
+**What a check-in carries**, for the monitor's alert template: an `alert` sends
+`source_host`, `outcome` (`failed`) and `error`; an `ok` sends the run's
+summary — `outcome` (`uploaded` or `unchanged`), `object`, `dumped_at`,
+`size_bytes`, `sha256`, `alembic_head`, `source_host`.
+
 All three or none: half a configuration is logged as an ERROR and checks in
 nothing. Two traps, both from broker#3. **A monitor left `enabled: false` still
 delivers `alert` check-ins but alarms on nothing when they stop** — findings

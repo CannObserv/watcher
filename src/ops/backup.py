@@ -314,7 +314,9 @@ def upload(client: storage.Client, bucket: str, key: str, dump: Dump, *, host: s
         )
     except PreconditionFailed:
         existing = client.bucket(bucket).get_blob(key, timeout=LIST_TIMEOUT_SECONDS)
-        if existing is not None and (existing.metadata or {}).get("sha256") == dump.sha256:
+        if existing is None:
+            raise BackupError(f"{key} already exists, and could not be read back") from None
+        if (existing.metadata or {}).get("sha256") == dump.sha256:
             return "unchanged"
         raise BackupError(f"{key} already exists with different contents") from None
     return "uploaded"
@@ -383,8 +385,9 @@ def main(argv: list[str] | None = None, *, environ: Mapping[str, str] = os.envir
     host = socket.gethostname()
 
     def fail(code: int, error: str) -> int:
+        # The variables a monitor's alert template can use; RECOVERY.md lists them.
         post_checkin(
-            "alert", {"source": host, "outcome": "failed", "error": error}, environ=environ
+            "alert", {"source_host": host, "outcome": "failed", "error": error}, environ=environ
         )
         return code
 

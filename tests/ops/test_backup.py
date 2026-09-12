@@ -13,6 +13,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
+from google.auth.exceptions import DefaultCredentialsError
 
 from src.ops import backup, checkin
 from src.ops.backup import BackupError
@@ -255,6 +256,16 @@ class TestUpload:
         with pytest.raises(BackupError, match="already exists"):
             _run(client, tmp_path)
 
+    def test_a_412_on_an_object_that_cannot_be_read_back_is_a_failure(
+        self, client, bucket, tmp_path, monkeypatch
+    ) -> None:
+        """``unchanged`` needs the object's recorded sha256 in hand. With
+        nothing to compare, a 412 is a collision like any other."""
+        _run(client, tmp_path)
+        monkeypatch.setattr(FakeBucket, "get_blob", lambda self, name, timeout=None: None)
+        with pytest.raises(BackupError, match="could not be read back"):
+            _run(client, tmp_path)
+
     def test_a_missing_bucket_fails_before_anything_is_written(self, tmp_path) -> None:
         """Before anything is dumped, too: the bucket is the cheap thing to
         check, and a misspelled one should not cost a pg_dump of production."""
@@ -293,6 +304,33 @@ class TestMain:
         ((status, variables),) = wired
         assert status == "alert"
         assert "pg_dump" in variables["error"]
+
+    def test_both_check_ins_name_the_host_the_same_way(self, wired, monkeypatch) -> None:
+        """A monitor's alert template is written against these names; ``ok``
+        said ``source_host`` while ``alert`` said ``source``, so a template
+        naming one read the other as empty. RECOVERY.md lists them."""
+        assert backup.main(["--database", "watcher"]) == 0
+        monkeypatch.setattr(backup.subprocess, "run", FakePg(fail="pg_dump"))
+        assert backup.main(["--database", "watcher"]) == 1
+        (_, ok), (_, alert) = wired
+        assert ok["source_host"] == alert["source_host"]
+        assert set(alert) == {"source_host", "outcome", "error"}
+
+    def test_a_client_that_cannot_be_built_fails_before_the_dump(self, wired, monkeypatch) -> None:
+        """A missing or unreadable key raises from google.auth when the client
+        is built — before anything touches the database."""
+        pg = FakePg()
+
+        def no_key():
+            raise DefaultCredentialsError("no key")
+
+        monkeypatch.setattr(backup.subprocess, "run", pg)
+        monkeypatch.setattr(backup.storage, "Client", no_key)
+        assert backup.main(["--database", "watcher"]) == 1
+        ((status, variables),) = wired
+        assert status == "alert"
+        assert "DefaultCredentialsError" in variables["error"]
+        assert pg.calls == []
 
     def test_a_check_in_that_cannot_be_sent_never_fails_a_shipped_backup(
         self, monkeypatch, client, bucket

@@ -302,7 +302,7 @@ compact either way — 1.7 MB after the prune.
 
 ## Database Backup Timer
 
-`watcher-backup.timer` dumps the database to `gs://co-gcs-watcher-backup` nightly (03:17 UTC, `Persistent=true`) through `watcher-backup.service` — create-only, holding no database credential, sandboxed, and checking in to a notifier dead-man monitor on every run (#296 D8/D9). Provisioning, install, the capability trap in its sandbox, and the restore runbook with its go/no-go gates: [RECOVERY.md](RECOVERY.md). **Enable the timer only after a hand-started run has succeeded.**
+`watcher-backup.timer` dumps the database to `gs://co-gcs-watcher-backup` nightly (03:17 UTC, `Persistent=true`) through `watcher-backup.service` — create-only, holding no database credential, run as its own dynamic user with no capabilities (#297), and checking in to a notifier dead-man monitor on every run (#296 D8/D9). Provisioning (the role script and the three files), install, why its sandbox has this shape, and the restore runbook with its go/no-go gates: [RECOVERY.md](RECOVERY.md). **Enable the timer only after a hand-started run has succeeded.**
 
 ## Cannobserv wheelhouse
 

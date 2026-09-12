@@ -221,7 +221,7 @@ Operator entry points in `src/ops/`, each with its runbook:
 sudo systemctl start watcher-backup.service
 
 # Restore — always name the host that shipped the dump (docs/RECOVERY.md → Restore):
-sudo bash -c "set -a; . /etc/watcher/backup.env; set +a; .venv/bin/python -m src.ops.restore --list"
+sudo bash -c "set -a; . /etc/watcher/backup.env; set +a; export GOOGLE_APPLICATION_CREDENTIALS=/etc/watcher/co-watcher-backup.json; .venv/bin/python -m src.ops.restore --list"
 
 # One-off job-history backlog prune; the hourly task holds it after
 # (docs/DEPLOYMENT.md → Job history). The opt-in covers the dry run too:

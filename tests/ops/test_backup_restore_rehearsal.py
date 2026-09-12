@@ -193,12 +193,18 @@ async def test_a_restore_into_a_populated_database_changes_nothing(
     databases, tmp_path: Path
 ) -> None:
     """One transaction: a restore that fails partway leaves the target exactly
-    as it was, never half-loaded."""
+    as it was, never half-loaded.
+
+    The target holds ``watched_items`` but not ``alembic_version``, so the
+    restore *succeeds* at creating ``alembic_version`` (first in the dump's
+    order) before it fails on ``watched_items``. Only ``--single-transaction``
+    takes that first table back out — seeding both tables made the very first
+    ``CREATE`` fail, so the test passed with the flag removed."""
     source, target = databases
-    for url in (source, target):
+    for url, seed in ((source, SEED[:4]), (target, SEED[2:4])):
         engine = create_async_engine(url)
         async with engine.begin() as conn:
-            for statement in SEED[:4]:
+            for statement in seed:
                 await conn.execute(text(statement))
         await engine.dispose()
 
@@ -225,4 +231,6 @@ async def test_a_restore_into_a_populated_database_changes_nothing(
     engine = create_async_engine(target)
     async with engine.connect() as conn:
         assert (await conn.execute(text("SELECT count(*) FROM watched_items"))).scalar() == 25
+        leftover = await conn.execute(text("SELECT to_regclass('public.alembic_version')"))
+        assert leftover.scalar() is None, "the restore's first CREATE outlived its failure"
     await engine.dispose()

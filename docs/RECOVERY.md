@@ -126,27 +126,35 @@ sudo systemctl enable --now watcher-backup.timer   # only once the run above suc
 ```
 
 Two runs never share a name — it is the second the dump began — so `unchanged`
-appears only for a retried upload of the same file. **Prove the create-only
-grant by observation instead**: a create over an existing name must answer
-**412, not 403**, under an identity holding no `delete` (broker#4 recorded the
-same):
+appears only for a retried upload of the same file. **Prove the grant is
+create-only by observation**, on an object of the probe's own: create it, then
+try to overwrite it and to delete it. Under `objectCreator` + `objectViewer`
+both must answer **403**; a success means the identity holds
+`storage.objects.delete` and could erase its own history. Only the probe object
+is ever at risk. (A create-only upload over an existing name proves nothing
+here: GCS answers `if_generation_match=0` with 412 whatever the grant, which is
+what broker#4 observed and what the job's own collision path relies on.)
 
 ```bash
 sudo bash -c "set -a; . /etc/watcher/backup.env; set +a; .venv/bin/python -" <<'PY'
-from google.api_core.exceptions import Forbidden, PreconditionFailed
+from datetime import UTC, datetime
+from google.api_core.exceptions import Forbidden
 from google.cloud import storage
-client = storage.Client()
-bucket = client.bucket("co-gcs-watcher-backup")
-name = sorted(blob.name for blob in client.list_blobs(bucket))[-1]
-try:
-    bucket.blob(name).upload_from_string(b"x", if_generation_match=0)
-    print("WRITTEN — the grant is too wide")
-except PreconditionFailed:
-    print("412 — create-only holds")
-except Forbidden as exc:
-    print(f"403 — {exc}")
+bucket = storage.Client().bucket("co-gcs-watcher-backup")
+blob = bucket.blob(f"probe/{datetime.now(UTC):%Y%m%dT%H%M%SZ}")
+blob.upload_from_string(b"probe", if_generation_match=0)  # the create: must succeed
+for attempt, act in (("overwrite", lambda: blob.upload_from_string(b"again")),
+                     ("delete", blob.delete)):
+    try:
+        act()
+        print(f"{attempt}: ALLOWED — the grant is too wide")
+    except Forbidden:
+        print(f"{attempt}: 403 — create-only holds")
 PY
 ```
+
+The probe object has no `.dump` suffix, so no listing shows it, and the
+lifecycle rule removes it with everything else.
 
 ## Restore
 

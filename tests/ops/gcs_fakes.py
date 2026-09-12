@@ -17,13 +17,15 @@ The calls this repo makes, and nothing it does not:
   metadata loaded on the returned blob. (Watcher's addition: the backup reads it
   to tell a re-upload of the same dump from a name collision, the restore to
   check a download against its recorded sha256.)
-- ``Blob.download_to_filename`` — ``NotFound`` for an absent object.
+- ``Blob.download_to_file`` — ``NotFound`` for an absent object. Into a handle,
+  not a filename: the restore opens it ``O_EXCL`` at 0600 (#296 CR 3).
 """
 
 from __future__ import annotations
 
 from collections.abc import Iterator
 from pathlib import Path
+from typing import BinaryIO
 
 from google.api_core.exceptions import NotFound, PreconditionFailed
 
@@ -57,10 +59,11 @@ class FakeBlob:
         self._bucket.metadata[self.name] = dict(self.metadata or {})
         self._bucket.preconditions.append(if_generation_match)
 
-    def download_to_filename(self, filename: str, timeout: float | None = None) -> None:
+    def download_to_file(self, file_obj: BinaryIO, timeout: float | None = None) -> None:
+        """Into a handle the caller opened, so the caller owns its mode and flags."""
         if self.name not in self._bucket.objects:
             raise NotFound("no such object")
-        Path(filename).write_bytes(self._bucket.objects[self.name])
+        file_obj.write(self._bucket.objects[self.name])
 
 
 class FakeBucket:

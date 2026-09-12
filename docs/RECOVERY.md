@@ -157,8 +157,10 @@ SRC=watcher                                   # the host that shipped the dump
 # What is there — every host's dumps, or one host's with --prefix
 sudo bash -c "$ENV; .venv/bin/python -m src.ops.restore --list"
 
-# Fetch and verify only — sha256 against the recorded digest, then pg_restore --list
-sudo bash -c "$ENV; .venv/bin/python -m src.ops.restore --latest --prefix $SRC --download-only /tmp/restore"
+# Fetch and verify only — sha256 against the recorded digest, then pg_restore --list.
+# The whole database, as root: a 0600 file in a 0700 directory, and a directory
+# that exists but is not root's own and private is refused. Never under /tmp.
+sudo bash -c "$ENV; .venv/bin/python -m src.ops.restore --latest --prefix $SRC --download-only /root/watcher-restore"
 ```
 
 Into a database — **an existing, empty one**; the restore is one transaction, so

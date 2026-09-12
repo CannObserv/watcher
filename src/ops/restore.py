@@ -25,12 +25,13 @@ real, verifiable dump of the wrong database. ``--latest`` takes ``--prefix``;
 ``--list`` without one shows every host's dumps.
 
     python -m src.ops.restore --list
-    python -m src.ops.restore --latest --prefix watcher --download-only /tmp/restore
+    python -m src.ops.restore --latest --prefix watcher --download-only /root/watcher-restore
     python -m src.ops.restore --latest --prefix watcher --into watcher --run-as postgres
 """
 
 import argparse
 import os
+import stat
 import subprocess
 import sys
 import tempfile
@@ -90,27 +91,62 @@ def latest_key(client: storage.Client, bucket: str, prefix: str) -> str:
     return snapshots[-1][0]
 
 
+def _private_dir(dest_dir: Path) -> None:
+    """Create ``dest_dir`` 0700, or accept an existing one only if it is this
+    user's own, a real directory, and closed to everyone else.
+
+    The fetch runs as root and writes the whole production database: a
+    directory another user made first (``/tmp/restore``) would let them read
+    it, or plant a link for root to write through.
+    """
+    dest_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
+    st = dest_dir.lstat()
+    if not stat.S_ISDIR(st.st_mode):
+        raise RestoreError(f"{dest_dir} is not a directory; refusing it")
+    if st.st_uid != os.geteuid():
+        raise RestoreError(f"{dest_dir} is owned by uid {st.st_uid}, not this user; refusing it")
+    if st.st_mode & 0o077:
+        raise RestoreError(
+            f"{dest_dir} is not private (mode {stat.S_IMODE(st.st_mode):o}); "
+            "use a new directory, or chmod 700 it"
+        )
+
+
 def fetch(client: storage.Client, bucket: str, key: str, dest_dir: Path, *, runner: Runner) -> Path:
-    """Download ``key`` into ``dest_dir`` and prove it is the dump that was shipped."""
+    """Download ``key`` into ``dest_dir`` and prove it is the dump that was shipped.
+
+    The file is created ``O_EXCL | O_NOFOLLOW`` at 0600 in a private directory,
+    so nothing already at the name — a stale dump, a planted link — is written
+    through, and no other user can read the result. A failed fetch removes it.
+    """
     blob = client.bucket(bucket).get_blob(key, timeout=LIST_TIMEOUT_SECONDS)
     if blob is None:
         raise RestoreError(f"gs://{bucket}/{key} not found")
     expected = (blob.metadata or {}).get("sha256")
     if not expected:
         raise RestoreError(f"gs://{bucket}/{key} carries no recorded sha256; refusing it")
-    dest_dir.mkdir(parents=True, exist_ok=True)
+    _private_dir(dest_dir)
     path = dest_dir / Path(key).name
     try:
-        blob.download_to_filename(str(path), timeout=UPLOAD_TIMEOUT_SECONDS)
-    except NotFound as exc:
-        raise RestoreError(f"gs://{bucket}/{key} not found") from exc
-    actual = sha256_file(path)
-    if actual != expected:
-        raise RestoreError(f"{key}: sha256 {actual} does not match the recorded {expected}")
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+    except FileExistsError as exc:
+        raise RestoreError(f"{path} already exists; refusing to write over it") from exc
     try:
-        verify_dump(path, runner=runner)
-    except BackupError as exc:
-        raise RestoreError(str(exc)) from exc
+        with os.fdopen(fd, "wb") as handle:
+            try:
+                blob.download_to_file(handle, timeout=UPLOAD_TIMEOUT_SECONDS)
+            except NotFound as exc:
+                raise RestoreError(f"gs://{bucket}/{key} not found") from exc
+        actual = sha256_file(path)
+        if actual != expected:
+            raise RestoreError(f"{key}: sha256 {actual} does not match the recorded {expected}")
+        try:
+            verify_dump(path, runner=runner)
+        except BackupError as exc:
+            raise RestoreError(str(exc)) from exc
+    except BaseException:
+        path.unlink(missing_ok=True)
+        raise
     return path
 
 

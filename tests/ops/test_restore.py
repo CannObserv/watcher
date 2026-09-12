@@ -6,6 +6,8 @@ the move exercises on real data.
 """
 
 import hashlib
+import os
+import stat
 import subprocess
 
 import pytest
@@ -90,6 +92,58 @@ class TestFetch:
             restore.fetch(
                 client, BUCKET, "co-watcher/x.dump", tmp_path, runner=FakePg(fail="pg_restore")
             )
+
+
+class TestFetchIsPrivate:
+    """A fetched dump is the whole production database, fetched as root.
+
+    sudo's umask is 0022, so a plain ``mkdir`` and the SDK's plain ``open``
+    left a 0644 dump in a 0755 directory — and a directory someone else made
+    first under ``/tmp`` let them plant a symlink for root to write through.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _sudo_umask(self):
+        previous = os.umask(0o022)
+        yield
+        os.umask(previous)
+
+    def test_the_directory_and_the_dump_are_private(self, client, bucket, tmp_path) -> None:
+        _ship(bucket, "watcher/x.dump")
+        dest = tmp_path / "fetched"
+        path = restore.fetch(client, BUCKET, "watcher/x.dump", dest, runner=FakePg())
+        assert stat.S_IMODE(dest.stat().st_mode) == 0o700
+        assert stat.S_IMODE(path.stat().st_mode) == 0o600
+
+    def test_a_directory_others_can_enter_is_refused(self, client, bucket, tmp_path) -> None:
+        _ship(bucket, "watcher/x.dump")
+        dest = tmp_path / "shared"
+        dest.mkdir(mode=0o755)
+        with pytest.raises(RestoreError, match="private"):
+            restore.fetch(client, BUCKET, "watcher/x.dump", dest, runner=FakePg())
+        assert list(dest.iterdir()) == []
+
+    def test_a_directory_someone_else_owns_is_refused(
+        self, client, bucket, tmp_path, monkeypatch
+    ) -> None:
+        _ship(bucket, "watcher/x.dump")
+        dest = tmp_path / "theirs"
+        dest.mkdir(mode=0o700)
+        someone_else = os.geteuid() + 1
+        monkeypatch.setattr(restore.os, "geteuid", lambda: someone_else)
+        with pytest.raises(RestoreError, match="owned"):
+            restore.fetch(client, BUCKET, "watcher/x.dump", dest, runner=FakePg())
+
+    def test_a_planted_link_is_not_written_through(self, client, bucket, tmp_path) -> None:
+        _ship(bucket, "watcher/x.dump")
+        dest = tmp_path / "fetched"
+        dest.mkdir(mode=0o700)
+        victim = tmp_path / "victim"
+        victim.write_bytes(b"precious")
+        (dest / "x.dump").symlink_to(victim)
+        with pytest.raises(RestoreError, match="exists"):
+            restore.fetch(client, BUCKET, "watcher/x.dump", dest, runner=FakePg())
+        assert victim.read_bytes() == b"precious"
 
 
 class TestRestoreInto:

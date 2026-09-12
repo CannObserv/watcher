@@ -17,14 +17,20 @@ This is also the migration's transfer path (#296 D10): the cutover dump moves
 through the bucket, so the procedure an incident would need is the one the move
 exercises on real data.
 
+**The source host is always named.** A restore runs on a different host from
+the one that shipped the dump — the cutover's co-watcher, an incident's
+replacement — so the backup's default prefix (this hostname) is here the one
+prefix never wanted, and once the new host's own timer has run it would find a
+real, verifiable dump of the wrong database. ``--latest`` takes ``--prefix``;
+``--list`` without one shows every host's dumps.
+
     python -m src.ops.restore --list
-    python -m src.ops.restore --latest --download-only /tmp/restore
-    python -m src.ops.restore --latest --into watcher --run-as postgres
+    python -m src.ops.restore --latest --prefix watcher --download-only /tmp/restore
+    python -m src.ops.restore --latest --prefix watcher --into watcher --run-as postgres
 """
 
 import argparse
 import os
-import socket
 import subprocess
 import sys
 import tempfile
@@ -40,7 +46,6 @@ from src.ops.backup import (
     LIST_TIMEOUT_SECONDS,
     OBJECT_SUFFIX,
     PG_DUMP_TIMEOUT_SECONDS,
-    PREFIX_ENV,
     UPLOAD_TIMEOUT_SECONDS,
     BackupError,
     Runner,
@@ -59,9 +64,17 @@ class RestoreError(Exception):
     """Anything that means nothing was restored."""
 
 
-def list_snapshots(client: storage.Client, bucket: str, prefix: str) -> list[tuple[str, dict]]:
-    """Every dump under ``prefix``, oldest first, with the metadata the backup wrote."""
-    blobs = client.list_blobs(bucket, prefix=f"{prefix.strip('/')}/", timeout=LIST_TIMEOUT_SECONDS)
+def _under(prefix: str | None) -> str:
+    """The listing prefix for a host's dumps; "" for the whole bucket."""
+    return f"{prefix.strip('/')}/" if prefix else ""
+
+
+def list_snapshots(
+    client: storage.Client, bucket: str, prefix: str | None
+) -> list[tuple[str, dict]]:
+    """Every dump under ``prefix`` (every host's, if None), in name order, with
+    the metadata the backup wrote. Within one host, name order is time order."""
+    blobs = client.list_blobs(bucket, prefix=_under(prefix) or None, timeout=LIST_TIMEOUT_SECONDS)
     return sorted(
         (blob.name, dict(blob.metadata or {}))
         for blob in blobs
@@ -70,9 +83,10 @@ def list_snapshots(client: storage.Client, bucket: str, prefix: str) -> list[tup
 
 
 def latest_key(client: storage.Client, bucket: str, prefix: str) -> str:
+    """The newest dump the named host shipped."""
     snapshots = list_snapshots(client, bucket, prefix)
     if not snapshots:
-        raise RestoreError(f"no dumps under gs://{bucket}/{prefix.strip('/')}/")
+        raise RestoreError(f"no dumps under gs://{bucket}/{_under(prefix)}")
     return snapshots[-1][0]
 
 
@@ -136,6 +150,12 @@ def main(argv: list[str] | None = None, *, environ: Mapping[str, str] = os.envir
     where = parser.add_mutually_exclusive_group()
     where.add_argument("--into", metavar="DATABASE", help="restore into this empty database")
     where.add_argument("--download-only", metavar="DIR", type=Path, help="fetch and verify only")
+    parser.add_argument(
+        "--prefix",
+        metavar="HOST",
+        default=None,
+        help="the host whose dumps to use (required with --latest; never this host's by default)",
+    )
     parser.add_argument("--run-as", default=None, help="OS user for pg_restore (peer auth)")
     args = parser.parse_args(argv)
 
@@ -144,18 +164,27 @@ def main(argv: list[str] | None = None, *, environ: Mapping[str, str] = os.envir
     if not bucket:
         print(f"{BUCKET_ENV} not set", file=sys.stderr)
         return 2
-    prefix = environ.get(PREFIX_ENV) or socket.gethostname()
+    if args.latest and not args.prefix:
+        print(
+            "say whose: --latest needs --prefix HOST, the host that shipped the dump "
+            "(--list shows every host's)",
+            file=sys.stderr,
+        )
+        return 2
     client = storage.Client()
 
     try:
         if args.list:
-            for name, meta in list_snapshots(client, bucket, prefix):
+            snapshots = list_snapshots(client, bucket, args.prefix)
+            for name, meta in snapshots:
                 print(name, *(f"{field}={meta.get(field, '')}" for field in _LISTED_METADATA))
+            if not snapshots:
+                print(f"no dumps under gs://{bucket}/{_under(args.prefix)}", file=sys.stderr)
             return 0
         if not (args.into or args.download_only):
             print("say where: --into DATABASE or --download-only DIR", file=sys.stderr)
             return 2
-        key = args.object or latest_key(client, bucket, prefix)
+        key = args.object or latest_key(client, bucket, args.prefix)
         if args.download_only:
             path = fetch(client, bucket, key, args.download_only, runner=subprocess.run)
             print(f"verified: {path}")

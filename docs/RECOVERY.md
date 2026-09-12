@@ -142,15 +142,23 @@ PY
 
 ## Restore
 
+**Name the source host.** A restore runs on a different host from the one that
+shipped the dump — co-watcher at the cutover, a replacement in an incident — and
+dumps live under the shipping host's name (`watcher/…` from the shared VM). So
+`--latest` requires `--prefix HOST` and never defaults to the restoring host:
+once that host's own timer has run, its newest dump is a real, verifiable dump
+of the wrong database.
+
 ```bash
 cd /home/exedev/watcher
 ENV='set -a; . /etc/watcher/backup.env; set +a'
+SRC=watcher                                   # the host that shipped the dump
 
-# What is there
+# What is there — every host's dumps, or one host's with --prefix
 sudo bash -c "$ENV; .venv/bin/python -m src.ops.restore --list"
 
 # Fetch and verify only — sha256 against the recorded digest, then pg_restore --list
-sudo bash -c "$ENV; .venv/bin/python -m src.ops.restore --latest --download-only /tmp/restore"
+sudo bash -c "$ENV; .venv/bin/python -m src.ops.restore --latest --prefix $SRC --download-only /tmp/restore"
 ```
 
 Into a database — **an existing, empty one**; the restore is one transaction, so
@@ -158,7 +166,7 @@ a failure leaves it empty rather than half-loaded:
 
 ```bash
 sudo -u postgres createdb -O watcher watcher          # or a *_dev name to rehearse
-sudo bash -c "$ENV; .venv/bin/python -m src.ops.restore --latest --into watcher --run-as postgres"
+sudo bash -c "$ENV; .venv/bin/python -m src.ops.restore --latest --prefix $SRC --into watcher --run-as postgres"
 
 # The dump carries the table grants and default privileges, but not the
 # database-level GRANT CONNECT (pg_dump without --create has nowhere to put it).

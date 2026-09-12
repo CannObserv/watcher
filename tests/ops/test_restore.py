@@ -11,6 +11,7 @@ import subprocess
 import pytest
 
 from src.ops import restore
+from src.ops.backup import BUCKET_ENV, PREFIX_ENV
 from src.ops.restore import RestoreError
 from tests.ops.gcs_fakes import FakeBucket, FakeClient
 from tests.ops.test_backup import DUMP_BYTES, FakePg
@@ -121,3 +122,47 @@ class TestRestoreInto:
         dump.write_bytes(DUMP_BYTES)
         with pytest.raises(RestoreError, match="pg_restore"):
             restore.restore_into(dump, "watcher", run_as=None, runner=FakePg(fail="pg_restore"))
+
+
+class TestMain:
+    @pytest.fixture
+    def wired(self, monkeypatch, client):
+        monkeypatch.setattr(restore.storage, "Client", lambda: client)
+        monkeypatch.setattr(restore.subprocess, "run", FakePg())
+        monkeypatch.setenv(BUCKET_ENV, BUCKET)
+        # What a restoring host's own backup.env may hold: it names the host
+        # the restore runs on, which is never the one it restores from.
+        monkeypatch.setenv(PREFIX_ENV, "co-watcher")
+
+    def test_latest_needs_the_source_host_named(self, wired, bucket, tmp_path, capsys) -> None:
+        """A restore runs on another host — the cutover's co-watcher, an
+        incident's replacement — so a default prefix is the restoring host's,
+        and that is the one prefix never wanted."""
+        _ship(bucket, "watcher/20260911T031702Z.dump")
+        assert restore.main(["--latest", "--download-only", str(tmp_path / "d")]) == 2
+        assert "--prefix" in capsys.readouterr().err
+
+    def test_latest_takes_the_named_hosts_newest_not_this_hosts(
+        self, wired, bucket, tmp_path
+    ) -> None:
+        """Once the new host's own timer has run, its dump is the newest name in
+        the bucket — and it passes every check, being a real dump of a real
+        (near-empty) database. Only the named source's dumps are candidates."""
+        _ship(bucket, "watcher/20260911T031702Z.dump")
+        _ship(bucket, "co-watcher/20260912T031702Z.dump", DUMP_BYTES + b"the new host's own")
+        dest = tmp_path / "d"
+        assert restore.main(["--latest", "--prefix", "watcher", "--download-only", str(dest)]) == 0
+        assert [p.name for p in dest.iterdir()] == ["20260911T031702Z.dump"]
+
+    def test_list_without_a_prefix_shows_every_host(self, wired, bucket, capsys) -> None:
+        _ship(bucket, "watcher/20260911T031702Z.dump")
+        _ship(bucket, "co-watcher/20260912T031702Z.dump")
+        assert restore.main(["--list"]) == 0
+        out = capsys.readouterr().out
+        assert "watcher/20260911T031702Z.dump" in out
+        assert "co-watcher/20260912T031702Z.dump" in out
+
+    def test_an_empty_listing_says_so(self, wired, bucket, capsys) -> None:
+        _ship(bucket, "watcher/20260911T031702Z.dump")
+        assert restore.main(["--list", "--prefix", "co-watcher"]) == 0
+        assert "no dumps under gs://co-gcs-watcher-backup/co-watcher/" in capsys.readouterr().err

@@ -7,6 +7,7 @@ from ulid import ULID
 
 from src.core.models.audit_log import AuditLog, EventType
 from src.core.models.watched_item import WatchedItem
+from src.workers.retention import FAILED_RETENTION_HOURS
 from tests.conftest import make_info_item
 
 
@@ -53,6 +54,13 @@ class TestPartialEndpoints:
         response = await client.get("/partials/system-health")
         assert response.status_code == 200
         assert b"Task Queue" in response.content
+
+    async def test_the_failed_count_names_its_window(self, client):
+        """#296 D7 deletes failed jobs after FAILED_RETENTION_HOURS, so the tile
+        counts failures inside that window, not all-time ones — and says so.
+        Asserted against the constant, so the label cannot drift from it."""
+        response = await client.get("/partials/system-health")
+        assert f"Failed ({FAILED_RETENTION_HOURS // 24} d)" in response.text
 
 
 class TestAuditLog:

@@ -11,7 +11,8 @@
         <dd class="text-sm font-medium text-blue-600 dark:text-blue-400">{{ queue.doing }}</dd>
       </div>
       <div class="flex justify-between">
-        <dt class="text-sm text-gray-600 dark:text-gray-400">Failed</dt>
+        {# Failed jobs are pruned after 30 days (#296 D7, src/workers/retention.py), so this counts a window. #}
+        <dt class="text-sm text-gray-600 dark:text-gray-400">Failed (30 d)</dt>
         <dd class="text-sm font-medium text-red-600 dark:text-red-400">{{ queue.failed }}</dd>
       </div>
       <div class="flex justify-between">

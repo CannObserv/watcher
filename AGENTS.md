@@ -79,14 +79,14 @@ bash scripts/dev_server.sh
 
 ## Environment Files
 
-Two env files load in order (later overrides earlier):
+Shells load two env files in order (later overrides earlier); the service loads only the first (#296 D5):
 
 1. `/etc/watcher/.env` — production secrets (`DATABASE_URL`, `GOOGLE_APPLICATION_CREDENTIALS`). Persistent, managed manually on the VM.
 2. `.env` (repo root, git-ignored) — dev/agent secrets (`GH_TOKEN`, `TEST_DATABASE_URL`). Never commit.
 
 Plus `/etc/watcher/notifier.env` (600 root:root, `WATCHER_NOTIFIER_BASE_URL` + `WATCHER_NOTIFIER_API_KEY`): `deploy/watcher.service` loads it, nothing else may read it. **Never source, copy, or re-add those names to a shared env file** (#278) — a backup beside the original counts. Non-production runs use notifier's dev tenant via `WATCHER_DEV_NOTIFIER_*`: [docs/ENVIRONMENT.md](docs/ENVIRONMENT.md).
 
-Load both for shell commands (pytest, psql, gh):
+Load both into a shell (pytest, psql, gh):
 
 ```bash
 source scripts/load-env.sh
@@ -202,7 +202,7 @@ A skill is symlinked into both `skills/` and `.claude/skills/`; overrides in `sk
 - [docs/CONVENTIONS.md](docs/CONVENTIONS.md) — logging configuration, ULID error handling, DB-trigger rules
 - [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) — systemd units, the install runbook, timers, wheelhouse auth
 - [docs/ENVIRONMENT.md](docs/ENVIRONMENT.md) — every env file and variable, load order, the unit-only credentials
-- [docs/RECOVERY.md](docs/RECOVERY.md) — #296 nightly GCS backup (create-only, no DB credential, dead-man check-in), restore, go/no-go gates
+- [docs/RECOVERY.md](docs/RECOVERY.md) — nightly DB backup to GCS, restore, go/no-go gates
 - [docs/MIGRATIONS.md](docs/MIGRATIONS.md) — the manual upgrade step, the two-role grant model, one-time orderings
 - [docs/SKILLS.md](docs/SKILLS.md) — skill triggers, vendored skill repos, SocratiCode workflow
 - [docs/STYLE.md](docs/STYLE.md) — the design system: brand, color, dark mode, tokens, layout, touch targets, accessibility

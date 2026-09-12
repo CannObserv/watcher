@@ -50,10 +50,20 @@ TOC = """\
 class FakePg:
     """Answers pg_dump, psql and pg_restore the way the real ones do."""
 
-    def __init__(self, *, toc: str = TOC, head: str = "2f8bb8f7100a", fail: str = "") -> None:
+    def __init__(
+        self,
+        *,
+        toc: str = TOC,
+        head: str = "2f8bb8f7100a",
+        fail: str = "",
+        truncated: bool = False,
+    ) -> None:
         self.toc = toc
         self.head = head
         self.fail = fail
+        # A custom-format archive cut short still lists: its table of contents
+        # precedes the data. Only reading the data through finds the cut.
+        self.truncated = truncated
         self.calls: list[list[str]] = []
 
     def __call__(self, argv: list[str], **kwargs) -> subprocess.CompletedProcess:
@@ -66,6 +76,11 @@ class FakePg:
             return subprocess.CompletedProcess(argv, 0, stdout=None, stderr=b"")
         if program == "psql":
             return subprocess.CompletedProcess(argv, 0, stdout=f"{self.head}\n", stderr="")
+        if program == "pg_restore" and "--file=/dev/null" in argv:
+            if self.truncated:
+                error = "pg_restore: error: could not read from input file: end of file\n"
+                return subprocess.CompletedProcess(argv, 1, stdout="", stderr=error)
+            return subprocess.CompletedProcess(argv, 0, stdout="", stderr="")
         if program == "pg_restore":
             return subprocess.CompletedProcess(argv, 0, stdout=self.toc, stderr="")
         raise AssertionError(f"unexpected program {program}")
@@ -147,6 +162,23 @@ class TestVerify:
         path.write_bytes(b"not a dump")
         with pytest.raises(BackupError, match="pg_restore"):
             backup.verify_dump(path, runner=FakePg(fail="pg_restore"))
+
+    def test_every_data_block_is_read_not_only_the_table_of_contents(self, tmp_path) -> None:
+        path = tmp_path / "x.dump"
+        path.write_bytes(DUMP_BYTES)
+        pg = FakePg()
+        backup.verify_dump(path, runner=pg)
+        assert ["pg_restore", "--file=/dev/null", str(path)] in pg.calls
+
+    def test_an_archive_that_lists_but_does_not_read_through_is_refused(self, tmp_path) -> None:
+        """``--list`` reads the header and the table of contents, which custom
+        format writes before the data — so a truncated archive lists cleanly
+        (measured: cut anywhere from 30 % to 99 %). pg_dump's exit code was the
+        only guard; reading every block is the second."""
+        path = tmp_path / "x.dump"
+        path.write_bytes(DUMP_BYTES)
+        with pytest.raises(BackupError, match="end of file"):
+            backup.verify_dump(path, runner=FakePg(truncated=True))
 
     def test_a_dump_without_watchers_tables_is_refused(self, tmp_path) -> None:
         """A readable archive of the wrong database is not a backup of this one."""

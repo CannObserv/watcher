@@ -16,7 +16,7 @@ the case this closes.
 | Property | How |
 |---|---|
 | **No database credential** | The unit runs as root (to read its 0400 key) under a sandbox; `pg_dump` and a `psql` for the schema version drop to the `postgres` OS user with `setpriv` and connect over the local socket by peer auth. `setpriv`, not `runuser` — runuser goes through PAM, which cannot open a session under `ProtectSystem=strict`. |
-| **Verified before it ships** | `pg_restore --list` must read the archive and find the data sections of `public.alembic_version` and `public.watched_items`. A readable dump of the wrong database is refused. |
+| **Verified before it ships** | `pg_restore --list` must read the archive and find the data sections of `public.alembic_version` and `public.watched_items` — a readable dump of the wrong database is refused — and `pg_restore --file=/dev/null` must then read every data block through. `--list` alone passes a truncated archive: the table of contents precedes the data. |
 | **Named by its own time** | `<host>/<YYYYMMDDTHHMMSSZ>.dump` — the start of `pg_dump`, which is when it took its snapshot. A listing is a timeline. |
 | **Create, never overwrite or delete** | `if_generation_match=0` in code; `objectCreator` + `objectViewer` at IAM, no `delete`. A 412 is `unchanged` only if the object's recorded sha256 matches — two dumps are never the same bytes, so anything else is a name collision and a failure. |
 | **Retention is the bucket's** | Lifecycle deletes at 30 days, soft-delete left on. A compromised host cannot erase its own history. |

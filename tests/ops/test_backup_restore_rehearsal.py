@@ -16,6 +16,7 @@ import os
 import re
 import shutil
 import subprocess
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -155,6 +156,37 @@ async def test_a_dump_survives_the_round_trip_with_its_grants(databases, tmp_pat
     assert after["head_writable"] is False
     assert after["ddl"] is False
     assert after["future_tables"] >= 1
+
+
+async def test_a_truncated_dump_is_refused_though_it_still_lists(databases, tmp_path: Path) -> None:
+    """The premise, on a real archive: ``pg_restore --list`` passes a dump cut
+    short, because the table of contents precedes the data. ``verify_dump``
+    must not — it reads every block through."""
+    source, _ = databases
+    engine = create_async_engine(source)
+    async with engine.begin() as conn:
+        # Enough rows that the cut lands in the data, well past the TOC.
+        for statement in (
+            *SEED[:3],
+            "INSERT INTO watched_items (name) SELECT md5(g::text) FROM generate_series(1, 20000) g",
+        ):
+            await conn.execute(text(statement))
+    await engine.dispose()
+
+    dump = backup.take_dump(
+        _libpq(source),
+        tmp_path / "backup",
+        run_as=None,
+        runner=subprocess.run,
+        now=lambda: datetime.now(UTC),
+    )
+    cut = tmp_path / "cut.dump"
+    cut.write_bytes(dump.path.read_bytes()[: dump.size_bytes * 9 // 10])
+
+    listed = subprocess.run(["pg_restore", "--list", str(cut)], capture_output=True, check=False)
+    assert listed.returncode == 0, "premise: a truncated archive still lists"
+    with pytest.raises(backup.BackupError, match="end of file"):
+        backup.verify_dump(cut, runner=subprocess.run)
 
 
 async def test_a_restore_into_a_populated_database_changes_nothing(

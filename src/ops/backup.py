@@ -13,7 +13,8 @@ dumb in the ways that keep a backup honest:
 - **It verifies before it ships.** ``pg_restore --list`` must read the archive
   and find the data sections of ``public.alembic_version`` and
   ``public.watched_items``: a readable dump of the wrong database is refused,
-  never uploaded under a name that says backup.
+  never uploaded under a name that says backup. Then every data block is read
+  through, since a truncated archive still lists.
 - **The object is named by the dump's start time** — when ``pg_dump`` took its
   snapshot — so a listing is a timeline and the newest name is the newest data.
 - **It creates, and never overwrites or deletes.** ``if_generation_match=0`` in
@@ -213,7 +214,14 @@ def run_pg_dump(database: str, out: Path, *, run_as: str | None, runner: Runner)
 
 
 def verify_dump(path: Path, *, runner: Runner) -> Toc:
-    """Refuse an archive ``pg_restore`` cannot read, or one of the wrong database."""
+    """Refuse an archive ``pg_restore`` cannot read, or one of the wrong database.
+
+    Two reads. ``--list`` reads the header and the table of contents, which
+    says whose database it is. But custom format writes that table before the
+    data, so a truncated archive lists cleanly — measured, cut anywhere from
+    30 % to 99 % — and a second read, ``--file=/dev/null``, decompresses every
+    data block through to the end.
+    """
     result = runner(
         ["pg_restore", "--list", str(path)],
         capture_output=True,
@@ -227,6 +235,15 @@ def verify_dump(path: Path, *, runner: Runner) -> Toc:
     missing = [table for table in REQUIRED_TABLES if table not in toc.tables_with_data]
     if missing:
         raise BackupError(f"dump has no data for {', '.join(missing)}; refusing to ship it")
+    full = runner(
+        ["pg_restore", "--file=/dev/null", str(path)],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=PG_DUMP_TIMEOUT_SECONDS,
+    )
+    if full.returncode != 0:
+        raise BackupError(f"pg_restore could not read {path.name} through: {_tail(full.stderr)}")
     return toc
 
 

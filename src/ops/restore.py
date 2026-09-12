@@ -55,7 +55,6 @@ from src.ops.backup import (
     UPLOAD_TIMEOUT_SECONDS,
     BackupError,
     Runner,
-    as_user,
     sha256_file,
     verify_dump,
 )
@@ -73,6 +72,31 @@ _LISTED_METADATA = ("dumped_at", "alembic_head", "size_bytes", "source_host", "s
 
 class RestoreError(Exception):
     """Anything that means nothing was restored."""
+
+
+def as_user(argv: list[str], run_as: str | None) -> list[str]:
+    """Prefix ``argv`` to run as ``run_as`` via ``setpriv``; unchanged when None.
+
+    The restore is run by hand as root — it reads the root-only key — and
+    loads as ``postgres``, the one privilege drop left in ``src/ops`` since the
+    backup became its own unprivileged user (#297). ``setpriv``, not
+    ``runuser``: runuser goes through PAM, and PAM cannot open a session under
+    ``ProtectSystem=strict`` (tried on the VM). ``--reset-env`` hands the child
+    only its passwd entry's ``HOME``/``SHELL``/``USER``/``LOGNAME`` and a
+    default ``PATH``, so nothing of the operator's root shell reaches a process
+    any ``postgres``-uid process can read through ``/proc/<pid>/environ``.
+    """
+    if run_as is None:
+        return argv
+    return [
+        "setpriv",
+        f"--reuid={run_as}",
+        f"--regid={run_as}",
+        "--init-groups",
+        "--reset-env",
+        "--",
+        *argv,
+    ]
 
 
 def _under(prefix: str | None) -> str:

@@ -4,12 +4,13 @@ Production had never been backed up — no timer, no dump directory — until th
 The job follows CannObserv/broker#4 wherever Postgres allows, and is built to be
 dumb in the ways that keep a backup honest:
 
-- **It holds no database credential.** The unit runs as root under a sandbox
-  (so it can read its 0400 key), and the two commands that talk to the server —
-  ``pg_dump`` and a ``psql`` for the schema version — drop to the ``postgres``
-  OS user and connect over the local socket with peer auth. ``setpriv``, not
-  ``runuser``: runuser goes through PAM, and PAM cannot open a session under
-  ``ProtectSystem=strict`` (tried on the VM). Tests pass a DSN instead.
+- **It holds no database credential, and no privilege** (#297). The unit runs
+  as its own dynamic user, ``watcher_backup``, with no capabilities; the two
+  commands that talk to the server — ``pg_dump`` and a ``psql`` for the schema
+  version — connect as that user over the local socket, by peer auth, to the
+  role of the same name, which holds ``pg_read_all_data`` and nothing else
+  (``scripts/setup-backup-role.sql``). Nothing drops privileges because nothing
+  holds any. Its keys arrive as systemd credentials. Tests pass a DSN instead.
 - **It verifies before it ships.** ``pg_restore --list`` must read the archive
   and find the data sections of ``public.alembic_version`` and
   ``public.watched_items``: a readable dump of the wrong database is refused,
@@ -106,27 +107,6 @@ class Dump:
 # --- pure ---
 
 
-def as_user(argv: list[str], run_as: str | None) -> list[str]:
-    """Prefix ``argv`` to run as ``run_as`` via ``setpriv``; unchanged when None.
-
-    ``--reset-env`` hands the child only its passwd entry's ``HOME``/``SHELL``/
-    ``USER``/``LOGNAME`` and a default ``PATH``. Without it the ``postgres``
-    child held the unit's whole environment — the check-in key included —
-    readable by any process of that uid through ``/proc/<pid>/environ``.
-    """
-    if run_as is None:
-        return argv
-    return [
-        "setpriv",
-        f"--reuid={run_as}",
-        f"--regid={run_as}",
-        "--init-groups",
-        "--reset-env",
-        "--",
-        *argv,
-    ]
-
-
 def parse_toc(text: str) -> Toc:
     """The header fields and the tables with a data section."""
     versions: dict[str, str] = {}
@@ -174,21 +154,18 @@ def _tail(text: str | bytes | None) -> str:
 # --- effects on the database and the file ---
 
 
-def read_alembic_head(database: str, *, run_as: str | None, runner: Runner) -> str | None:
+def read_alembic_head(database: str, *, runner: Runner) -> str | None:
     """The schema version, recorded so a restore can be checked against it."""
-    argv = as_user(
-        [
-            "psql",
-            "--no-password",
-            "--no-psqlrc",
-            "--quiet",
-            "--tuples-only",
-            "--no-align",
-            f"--dbname={database}",
-            "--command=SELECT version_num FROM alembic_version",
-        ],
-        run_as,
-    )
+    argv = [
+        "psql",
+        "--no-password",
+        "--no-psqlrc",
+        "--quiet",
+        "--tuples-only",
+        "--no-align",
+        f"--dbname={database}",
+        "--command=SELECT version_num FROM alembic_version",
+    ]
     result = runner(
         argv, capture_output=True, text=True, check=False, timeout=QUERY_TIMEOUT_SECONDS
     )
@@ -197,10 +174,9 @@ def read_alembic_head(database: str, *, run_as: str | None, runner: Runner) -> s
     return result.stdout.strip() or None
 
 
-def run_pg_dump(database: str, out: Path, *, run_as: str | None, runner: Runner) -> None:
-    """Custom format to ``out``. Written through an fd this process opened, so
-    ``postgres`` writes a file it could not otherwise create or read."""
-    argv = as_user(["pg_dump", "--format=custom", "--no-password", f"--dbname={database}"], run_as)
+def run_pg_dump(database: str, out: Path, *, runner: Runner) -> None:
+    """Custom format to ``out``, through an fd this process opened."""
+    argv = ["pg_dump", "--format=custom", "--no-password", f"--dbname={database}"]
     with out.open("wb") as handle:
         result = runner(
             argv,
@@ -251,17 +227,16 @@ def take_dump(
     database: str,
     workdir: Path,
     *,
-    run_as: str | None,
     runner: Runner,
     now: Callable[[], datetime],
 ) -> Dump:
     """Dump, verify, describe. The start time names it: ``pg_dump`` takes its
     snapshot as it begins."""
     dumped_at = now().astimezone(UTC).replace(microsecond=0)
-    alembic_head = read_alembic_head(database, run_as=run_as, runner=runner)
+    alembic_head = read_alembic_head(database, runner=runner)
     workdir.mkdir(parents=True, exist_ok=True)
     path = workdir / "watcher.dump"
-    run_pg_dump(database, path, run_as=run_as, runner=runner)
+    run_pg_dump(database, path, runner=runner)
     toc = verify_dump(path, runner=runner)
     return Dump(
         path=path,
@@ -332,7 +307,6 @@ def run_backup(
     prefix: str,
     client: storage.Client,
     workdir: Path,
-    run_as: str | None,
     runner: Runner | None = None,
     host: str | None = None,
     now: Callable[[], datetime] = lambda: datetime.now(UTC),
@@ -354,7 +328,7 @@ def run_backup(
     runner = runner if runner is not None else subprocess.run
     try:
         preflight(client, bucket, prefix)
-        dump = take_dump(database, workdir, run_as=run_as, runner=runner, now=now)
+        dump = take_dump(database, workdir, runner=runner, now=now)
         key = object_key(prefix, dump.dumped_at)
         outcome = upload(client, bucket, key, dump, host=host)
     except Exception as exc:
@@ -378,7 +352,6 @@ def main(argv: list[str] | None = None, *, environ: Mapping[str, str] = os.envir
     """Timer entrypoint. Exit 0 only when the dump is in the bucket."""
     parser = argparse.ArgumentParser(description="Watcher database dump to GCS")
     parser.add_argument("--database", default="watcher", help="name, or a DSN in tests")
-    parser.add_argument("--run-as", default=None, help="OS user for pg_dump/psql (peer auth)")
     args = parser.parse_args(argv)
 
     configure_logging()
@@ -413,7 +386,6 @@ def main(argv: list[str] | None = None, *, environ: Mapping[str, str] = os.envir
                 prefix=prefix,
                 client=client,
                 workdir=Path(work),
-                run_as=args.run_as,
                 host=host,
             )
         except BackupError as exc:

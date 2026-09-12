@@ -137,7 +137,6 @@ async def test_a_dump_survives_the_round_trip_with_its_grants(databases, tmp_pat
         prefix="rehearsal",
         client=client,
         workdir=tmp_path / "backup",
-        run_as=None,
         host="rehearsal",
     )
     assert summary["outcome"] == "uploaded"
@@ -176,7 +175,6 @@ async def test_a_truncated_dump_is_refused_though_it_still_lists(databases, tmp_
     dump = backup.take_dump(
         _libpq(source),
         tmp_path / "backup",
-        run_as=None,
         runner=subprocess.run,
         now=lambda: datetime.now(UTC),
     )
@@ -215,7 +213,6 @@ async def test_a_restore_into_a_populated_database_changes_nothing(
         prefix="rehearsal",
         client=client,
         workdir=tmp_path / "backup",
-        run_as=None,
         host="rehearsal",
     )
     path = restore.fetch(

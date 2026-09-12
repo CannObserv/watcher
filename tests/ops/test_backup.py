@@ -54,7 +54,8 @@ class DefaultCredentialsError(Exception):
 
 
 class FakePg:
-    """Answers pg_dump, psql and pg_restore the way the real ones do."""
+    """Answers pg_dump, psql and pg_restore the way the real ones do — behind
+    ``setpriv`` too, as the restore runs them."""
 
     def __init__(
         self,
@@ -109,7 +110,6 @@ def _run(client, tmp_path: Path, **overrides) -> dict:
         prefix="co-watcher",
         client=client,
         workdir=tmp_path,
-        run_as="postgres",
         runner=FakePg(),
         host="co-watcher",
         now=lambda: NOW,
@@ -122,31 +122,6 @@ def _run(client, tmp_path: Path, **overrides) -> dict:
 
 
 class TestPure:
-    def test_as_user_drops_privileges_with_setpriv(self) -> None:
-        """``setpriv``, not ``runuser``: runuser goes through PAM, and PAM cannot
-        open a session under the unit's ProtectSystem=strict (verified on the VM)."""
-        assert backup.as_user(["pg_dump", "watcher"], "postgres") == [
-            "setpriv",
-            "--reuid=postgres",
-            "--regid=postgres",
-            "--init-groups",
-            "--reset-env",
-            "--",
-            "pg_dump",
-            "watcher",
-        ]
-
-    def test_the_dropped_to_user_inherits_none_of_the_units_environment(self) -> None:
-        """Without ``--reset-env`` the ``postgres`` child held the unit's whole
-        environment — the check-in key included — readable by any process of
-        that uid through ``/proc/<pid>/environ``. A key that forges ``ok`` is
-        the one thing the dead-man switch cannot survive."""
-        argv = backup.as_user(["pg_dump"], "postgres")
-        assert "--reset-env" in argv[: argv.index("--")]
-
-    def test_as_user_without_a_user_is_the_command_itself(self) -> None:
-        assert backup.as_user(["pg_dump", "x"], None) == ["pg_dump", "x"]
-
     def test_parse_toc(self) -> None:
         toc = backup.parse_toc(TOC)
         assert toc.server_version == "16.13 (Ubuntu 16.13-0ubuntu0.24.04.1)"
@@ -198,7 +173,7 @@ class TestVerify:
 class TestTakeDump:
     def test_describes_the_dump(self, tmp_path) -> None:
         pg = FakePg()
-        dump = backup.take_dump("watcher", tmp_path, run_as="postgres", runner=pg, now=lambda: NOW)
+        dump = backup.take_dump("watcher", tmp_path, runner=pg, now=lambda: NOW)
         assert dump.path.read_bytes() == DUMP_BYTES
         assert dump.size_bytes == len(DUMP_BYTES)
         assert len(dump.sha256) == 64
@@ -206,27 +181,21 @@ class TestTakeDump:
         assert dump.alembic_head == "2f8bb8f7100a"
         assert dump.toc.entries == 312
 
-    def test_the_database_is_read_as_postgres_and_holds_no_credential(self, tmp_path) -> None:
-        """Peer auth over the socket, dropping to ``postgres`` for the two
-        commands that talk to the server. pg_restore --list reads only the file,
-        so it runs as the job's own user."""
+    def test_the_database_is_read_as_the_jobs_own_user(self, tmp_path) -> None:
+        """No privilege is dropped because none is held (#297): the unit's
+        dynamic user is the one the database knows, by peer auth over the
+        socket, so every command runs as the job itself and none holds a
+        credential."""
         pg = FakePg()
-        backup.take_dump("watcher", tmp_path, run_as="postgres", runner=pg, now=lambda: NOW)
-        by_program = {
-            (call[call.index("--") + 1] if call[0] == "setpriv" else call[0]): call
-            for call in pg.calls
-        }
-        assert by_program["pg_dump"][0] == "setpriv"
-        assert by_program["psql"][0] == "setpriv"
-        assert by_program["pg_restore"][0] == "pg_restore"
-        assert "--format=custom" in by_program["pg_dump"]
-        assert "--no-password" in by_program["pg_dump"]
+        backup.take_dump("watcher", tmp_path, runner=pg, now=lambda: NOW)
+        assert {call[0] for call in pg.calls} == {"psql", "pg_dump", "pg_restore"}
+        (dump_call,) = [call for call in pg.calls if call[0] == "pg_dump"]
+        assert "--format=custom" in dump_call
+        assert "--no-password" in dump_call
 
     def test_a_failed_pg_dump_is_a_failure(self, tmp_path) -> None:
         with pytest.raises(BackupError, match="pg_dump"):
-            backup.take_dump(
-                "watcher", tmp_path, run_as=None, runner=FakePg(fail="pg_dump"), now=lambda: NOW
-            )
+            backup.take_dump("watcher", tmp_path, runner=FakePg(fail="pg_dump"), now=lambda: NOW)
 
 
 # --- the bucket ---
@@ -298,10 +267,16 @@ class TestMain:
         return checkins
 
     def test_success_exits_zero_and_checks_in_ok(self, wired) -> None:
-        assert backup.main(["--database", "watcher", "--run-as", "postgres"]) == 0
+        assert backup.main(["--database", "watcher"]) == 0
         ((status, variables),) = wired
         assert status == "ok"
         assert variables["outcome"] == "uploaded"
+
+    def test_there_is_no_user_to_run_as(self, wired) -> None:
+        """``--run-as`` went with root (#297): a job that holds no capability
+        cannot drop to another user, and has no need to."""
+        with pytest.raises(SystemExit):
+            backup.main(["--database", "watcher", "--run-as", "postgres"])
 
     def test_failure_exits_non_zero_and_checks_in_alert(self, wired, monkeypatch) -> None:
         monkeypatch.setattr(backup.subprocess, "run", FakePg(fail="pg_dump"))

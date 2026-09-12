@@ -218,6 +218,35 @@ class TestFetchIsPrivate:
         assert victim.read_bytes() == b"precious"
 
 
+class TestAsUser:
+    """The restore is run by hand as root, and loads as ``postgres`` (#297 left
+    this the one privilege drop in ``src/ops``)."""
+
+    def test_drops_privileges_with_setpriv(self) -> None:
+        """``setpriv``, not ``runuser``: runuser goes through PAM, and PAM cannot
+        open a session under ProtectSystem=strict (verified on the VM)."""
+        assert restore.as_user(["pg_restore", "watcher"], "postgres") == [
+            "setpriv",
+            "--reuid=postgres",
+            "--regid=postgres",
+            "--init-groups",
+            "--reset-env",
+            "--",
+            "pg_restore",
+            "watcher",
+        ]
+
+    def test_the_dropped_to_user_inherits_none_of_the_callers_environment(self) -> None:
+        """Whatever the operator's root shell holds stays there: without
+        ``--reset-env`` it would be readable by any ``postgres``-uid process
+        through ``/proc/<pid>/environ``."""
+        argv = restore.as_user(["pg_restore"], "postgres")
+        assert "--reset-env" in argv[: argv.index("--")]
+
+    def test_without_a_user_is_the_command_itself(self) -> None:
+        assert restore.as_user(["pg_restore", "x"], None) == ["pg_restore", "x"]
+
+
 class TestRestoreInto:
     def test_one_transaction_through_stdin_as_postgres(self, tmp_path) -> None:
         """All or nothing, so a failed restore leaves an empty database rather

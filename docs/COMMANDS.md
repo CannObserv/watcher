@@ -217,6 +217,10 @@ uv run procrastinate --app=src.workers.app worker
 Operator entry points in `src/ops/`, each with its runbook:
 
 ```bash
+# The backup's read-only database role — once per cluster, before its first run
+# (docs/RECOVERY.md → Install and first run). Idempotent; its report is the check:
+sudo -u postgres psql -d watcher < scripts/setup-backup-role.sql
+
 # Nightly dump to GCS — the timer runs it; one run by hand (docs/RECOVERY.md):
 sudo systemctl start watcher-backup.service
 

@@ -15,6 +15,11 @@
 --   watcher_backup  LOGIN, no password, a member of pg_read_all_data — SELECT
 --                   on every table and sequence and USAGE on every schema,
 --                   which is everything pg_dump reads and all it can do.
+--                   Cluster-wide, though: it reads in every database the role
+--                   may CONNECT to, and PUBLIC may connect to any by default.
+--                   On watcher's clusters that is watcher's own and its
+--                   scratch *_test databases; another service's database on
+--                   the same cluster would be readable too.
 --                   Reached only by peer auth over the local socket (pg_hba's
 --                   `local all all peer`) from the OS user of the same name:
 --                   the dynamic user deploy/watcher-backup.service allocates

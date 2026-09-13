@@ -95,3 +95,20 @@ def test_holds_no_password(sql: str, statements: str) -> None:
 def test_destroys_nothing(statements: str) -> None:
     for verb in ("DROP ", "REVOKE ", "REASSIGN ", "TRUNCATE ", "DELETE FROM"):
         assert verb not in statements, verb
+
+
+def test_the_report_shows_every_attribute_the_operator_is_told_to_check(sql: str) -> None:
+    """The runbook names the value every attribute column must read — t for
+    login and inherit, f for the rest. A report that omits a column cannot
+    show it either way."""
+    report = sql.split("COMMIT;", 1)[1]
+    for column in (
+        "rolcanlogin",
+        "rolinherit",
+        "rolsuper",
+        "rolcreatedb",
+        "rolcreaterole",
+        "rolreplication",
+        "rolbypassrls",
+    ):
+        assert column in report, column

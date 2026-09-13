@@ -167,8 +167,9 @@ takes the wrong port *and* a development-marked key. Use the production key.
 ## Install and first run
 
 **The role first**, once per cluster: a role is cluster state, which no dump
-carries, so a host restored from a dump needs it too. Its report must show the
-role with `LOGIN` and `INHERIT` and no other attribute, and three zeros.
+carries, so a host restored from a dump needs it too. Its report must read `t`
+for `login`, `inherit`, `no_password`, `reads_all_data` and `can_connect`, `f`
+for every other column, and three zeros.
 
 ```bash
 sudo -u postgres psql -d watcher < scripts/setup-backup-role.sql

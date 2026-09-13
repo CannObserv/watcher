@@ -63,15 +63,20 @@ SELECT format('GRANT CONNECT ON DATABASE %I TO %I', current_database(), :'backup
 
 COMMIT;
 
--- Report. Read-only. The role row must show LOGIN and INHERIT and nothing
--- else, and every count below it must be 0: a relation the role cannot read, a
--- table under row security, or a large object (pg_read_all_data is documented
--- to cover tables, views and sequences — not large objects) each fails the
+-- Report. Read-only. The role row must read t for login, inherit,
+-- no_password, reads_all_data and can_connect, and f for every other column.
+-- Every count below it must be 0: a relation the role cannot read, a table
+-- under row security, or a large object (pg_read_all_data is documented to
+-- cover tables, views and sequences — not large objects) each fails the
 -- nightly pg_dump. All three were 0 on production when this was written.
 SELECT
   r.rolname,
-  r.rolsuper AS superuser,
+  r.rolcanlogin AS login,
   r.rolinherit AS inherit,
+  r.rolsuper AS superuser,
+  r.rolcreatedb AS createdb,
+  r.rolcreaterole AS createrole,
+  r.rolreplication AS replication,
   r.rolbypassrls AS bypassrls,
   a.rolpassword IS NULL AS no_password,
   pg_has_role(r.rolname, 'pg_read_all_data', 'USAGE') AS reads_all_data,

@@ -19,7 +19,8 @@ WorkingDirectory=/home/exedev/watcher
 
 # The two keys, as credentials rather than environment: systemd reads each
 # 0400 root:root file and hands the run a private copy under
-# $CREDENTIALS_DIRECTORY, readable by this run alone and gone when it exits.
+# $CREDENTIALS_DIRECTORY — 0440 root, with an ACL for this run's user, and gone
+# when it exits.
 # Both files must exist — a missing LoadCredential= source fails the start
 # (243/CREDENTIALS), and systemd 255 ignores an empty SetCredential= fallback —
 # so until the monitor exists the check-in key is an empty file, and the job

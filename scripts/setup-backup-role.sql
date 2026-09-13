@@ -43,14 +43,18 @@ WHERE NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = :'backup_role');
 \gexec
 
 -- Re-asserted every run, so a role that acquired an attribute by hand loses it
--- again. INHERIT is the one it needs: pg_read_all_data's rights reach it only
--- through inheritance. NOBYPASSRLS keeps a table under row security a loud
--- pg_dump failure rather than a dump of only the rows a policy shows.
--- PASSWORD NULL: no password rule in pg_hba can ever admit it.
+-- again. NOBYPASSRLS keeps a table under row security a loud pg_dump failure
+-- rather than a dump of only the rows a policy shows. PASSWORD NULL: no
+-- password rule in pg_hba can ever admit it. INHERIT is only the default for
+-- memberships granted later — the grant below carries its own.
 ALTER ROLE :"backup_role" WITH LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE
   NOREPLICATION NOBYPASSRLS INHERIT PASSWORD NULL;
 
-GRANT pg_read_all_data TO :"backup_role";
+-- WITH INHERIT TRUE, explicitly: pg_read_all_data's rights reach the role only
+-- through an inheriting membership, and on PostgreSQL 16 a re-grant that omits
+-- the option keeps whatever the existing membership has. This is what repairs
+-- one left non-inheriting, which would hold the membership and none of its rights.
+GRANT pg_read_all_data TO :"backup_role" WITH INHERIT TRUE;
 
 -- Already granted to PUBLIC on this cluster; stated so a later REVOKE ... FROM
 -- PUBLIC hardening pass does not silently stop the backups.

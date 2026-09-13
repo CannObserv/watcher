@@ -55,6 +55,16 @@ def test_the_role_reads_everything_and_writes_nothing(statements: str) -> None:
     assert not re.search(r"GRANT\s+(INSERT|UPDATE|DELETE|TRUNCATE|CREATE|ALL)\b", statements)
 
 
+def test_the_membership_is_inherited_explicitly(statements: str) -> None:
+    """On PostgreSQL 16 a re-grant that omits an option keeps the existing
+    membership's value, and the role's INHERIT attribute only sets the default
+    for *new* grants. Only an explicit ``WITH INHERIT TRUE`` repairs a
+    membership left non-inheriting, whose rights would not reach the role."""
+    assert re.search(
+        r'GRANT\s+PG_READ_ALL_DATA\s+TO\s+:"BACKUP_ROLE"\s+WITH\s+INHERIT\s+TRUE\s*;', statements
+    )
+
+
 def test_every_attribute_is_re_asserted(statements: str) -> None:
     """A role that acquired an attribute by hand loses it on the next run.
     INHERIT is the one it needs: the predefined role's rights reach it only

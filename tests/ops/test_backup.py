@@ -327,8 +327,42 @@ class TestMain:
         monkeypatch.setenv(checkin.BASE_URL_ENV, "http://[notifier.invalid:9000")
         monkeypatch.setenv(checkin.MONITOR_ID_ENV, "01M24A8CA2GT0M7WE57NEMD0EW")
         monkeypatch.setenv(checkin.CREDENTIALS_DIRECTORY_ENV, str(credentials))
+        # As the unit sets it: the key path is the run's own credential copy.
+        monkeypatch.setenv(backup.KEY_PATH_ENV, str(credentials / "gcs"))
         assert backup.main(["--database", "watcher"]) == 0
         assert len(bucket.objects) == 1
+
+    def test_a_key_path_outside_the_runs_credentials_is_refused_by_name(
+        self, wired, monkeypatch, tmp_path
+    ) -> None:
+        """An env file's GOOGLE_APPLICATION_CREDENTIALS beats the unit's
+        ``%d/gcs`` and aims the job at the root-only original. Built anyway, the
+        client fails "Permission denied" on the key — which reads as an
+        instruction to loosen its mode, the one thing #297 exists to prevent.
+        So it is refused before the client, and the check-in says where."""
+        built: list[int] = []
+        monkeypatch.setattr(backup.storage, "Client", lambda: built.append(1))
+        monkeypatch.setenv(checkin.CREDENTIALS_DIRECTORY_ENV, str(tmp_path / "credentials"))
+        monkeypatch.setenv(backup.KEY_PATH_ENV, "/etc/watcher/co-watcher-backup.json")
+        assert backup.main(["--database", "watcher"]) == 2
+        assert built == []
+        ((status, variables),) = wired
+        assert status == "alert"
+        assert "/etc/watcher/backup.env" in variables["error"]
+
+    def test_no_key_path_at_all_under_the_unit_is_refused(
+        self, wired, monkeypatch, tmp_path
+    ) -> None:
+        """The unit's own line removed: the SDK would go looking for a key."""
+        monkeypatch.setenv(checkin.CREDENTIALS_DIRECTORY_ENV, str(tmp_path / "credentials"))
+        monkeypatch.delenv(backup.KEY_PATH_ENV, raising=False)
+        assert backup.main(["--database", "watcher"]) == 2
+
+    def test_the_runs_own_credential_copy_is_used(self, wired, monkeypatch, tmp_path) -> None:
+        credentials = tmp_path / "credentials"
+        monkeypatch.setenv(checkin.CREDENTIALS_DIRECTORY_ENV, str(credentials))
+        monkeypatch.setenv(backup.KEY_PATH_ENV, str(credentials / "gcs"))
+        assert backup.main(["--database", "watcher"]) == 0
 
     def test_no_bucket_is_a_failure_and_says_so(self, wired, monkeypatch) -> None:
         """No default bucket: guessing one is how bytes land where nobody reads."""

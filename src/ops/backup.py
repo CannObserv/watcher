@@ -48,13 +48,15 @@ from google.api_core.exceptions import NotFound, PreconditionFailed
 from google.cloud import storage
 
 from src.core.logging import configure_logging, get_logger
-from src.ops.checkin import post_checkin
+from src.ops.checkin import CREDENTIALS_DIRECTORY_ENV, post_checkin
 
 # Literal rather than __name__: the timer runs this module via ``python -m``.
 logger = get_logger("src.ops.backup")
 
 BUCKET_ENV = "WATCHER_BACKUP_BUCKET"
 PREFIX_ENV = "WATCHER_BACKUP_PREFIX"
+#: Where the GCS SDK finds its key. The unit sets it to its credential copy.
+KEY_PATH_ENV = "GOOGLE_APPLICATION_CREDENTIALS"
 OBJECT_SUFFIX = ".dump"
 # Basic-format ISO 8601, UTC. Sorts as it reads, and no ':' for a shell to trip on.
 KEY_TIME_FORMAT = "%Y%m%dT%H%M%SZ"
@@ -135,6 +137,28 @@ def object_key(prefix: str, dumped_at: datetime) -> str:
 def iso(at: datetime) -> str:
     """ISO 8601, UTC, second precision, ``Z``."""
     return at.astimezone(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
+def misplaced_key(environ: Mapping[str, str]) -> str | None:
+    """Why the GCS key path is not this run's credential copy; None when it is.
+
+    Under the unit the path is ``%d/gcs``, the private copy systemd made — but
+    an ``EnvironmentFile=`` beats ``Environment=``, so a stray line in
+    ``/etc/watcher/backup.env`` aims the job at the root-only original. The
+    SDK then fails "Permission denied" on the key, which reads as a reason to
+    loosen its mode: the one thing #297 exists to prevent. Outside a unit with
+    credentials (a test, a hand run) there is no copy to compare against.
+    """
+    directory = environ.get(CREDENTIALS_DIRECTORY_ENV, "").strip()
+    if not directory:
+        return None
+    key = environ.get(KEY_PATH_ENV, "").strip()
+    if key and Path(key).is_relative_to(directory):
+        return None
+    return (
+        f"{KEY_PATH_ENV} is {key!r}, not this run's credential copy under {directory}: "
+        "remove it from /etc/watcher/backup.env, which overrides the unit's own"
+    )
 
 
 def sha256_file(path: Path) -> str:
@@ -370,6 +394,9 @@ def main(argv: list[str] | None = None, *, environ: Mapping[str, str] = os.envir
         logger.error("%s not set — nowhere to ship the dump", BUCKET_ENV)
         return fail(2, f"{BUCKET_ENV} not set")
     prefix = environ.get(PREFIX_ENV) or host
+    if misplaced := misplaced_key(environ):
+        logger.error("%s — not starting", misplaced)
+        return fail(2, misplaced)
 
     with tempfile.TemporaryDirectory(prefix="watcher-backup-") as work:
         try:

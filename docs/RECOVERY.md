@@ -119,10 +119,12 @@ WATCHER_BACKUP_BUCKET=co-gcs-watcher-backup
 EOF
 ```
 
-**No `GOOGLE_APPLICATION_CREDENTIALS` in `backup.env`.** The unit points it at
-its private copy (`%d/gcs`), and an env file's value would win — aiming the job
-at the root-only original, which its uid cannot read. The job would fail loudly
-(`PermissionError`, an `alert` check-in), but it would fail every night.
+**No `GOOGLE_APPLICATION_CREDENTIALS` in `backup.env`** — broker#4's host
+steps put one there; this unit sets its own. It points at the run's private copy
+(`%d/gcs`), and an env file's value would win, aiming the job at the root-only
+original. Left to the SDK that fails `Permission denied` on the key, which reads
+as a reason to loosen its mode — so the job refuses first: exit 2 and an `alert`
+naming this file, before any client is built.
 
 **The dead-man monitor** is notifier's (notifier#56): a monitor on the watcher
 tenant, `interval_seconds` 86400 plus a grace for the timer's jitter and a slow

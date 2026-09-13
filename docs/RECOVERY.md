@@ -340,7 +340,7 @@ on a live source a nightly dump's counts drift by design.
   credential copy's path; `/home` holding only the checkout, and `.env`,
   `/etc/watcher/.env`, `notifier.env` and the service's GCS key all
   unreadable. `psql` connected as `watcher_backup`, not a superuser, and
-  `take_dump` of production read 1.8 MB, 178 TOC entries, alembic
+  `take_dump` of production read 1,805,866 bytes, 178 TOC entries, alembic
   `2f8bb8f7100a`, 17 tables with data — its table of contents **byte-identical**
   to a superuser `pg_dump`'s taken beside it (sha256 of the entries, `8c7318ee…`).
   A GCS preflight listed through the sandbox on the stand-in key, and the

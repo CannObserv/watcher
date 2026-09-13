@@ -223,8 +223,8 @@ class TestAsUser:
     this the one privilege drop in ``src/ops``)."""
 
     def test_drops_privileges_with_setpriv(self) -> None:
-        """``setpriv``, not ``runuser``: runuser goes through PAM, and PAM cannot
-        open a session under ProtectSystem=strict (verified on the VM)."""
+        """``setpriv``: a plain exec with no PAM session, the same from a login
+        shell, ``sudo`` or a sandbox."""
         assert restore.as_user(["pg_restore", "watcher"], "postgres") == [
             "setpriv",
             "--reuid=postgres",

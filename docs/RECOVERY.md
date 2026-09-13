@@ -325,12 +325,23 @@ on a live source a nightly dump's counts drift by design.
   production on the shared VM under the root unit's exact confinement —
   27.6 MB, 178 TOC entries, alembic `2f8bb8f7100a`, 17 tables with data;
   discarded.
-- **The #297 shape, in a runtime probe unit (2026-09-12)**: its exact identity,
-  credential and sandbox lines on systemd 255 — `CapEff` 0 in the job and a
-  child, `%d/gcs` expanded, an empty key file loaded as an empty credential,
-  `/home` holding only the checkout, `.env` and `notifier.env` unreadable, and
-  peer auth resolving the dynamic user's name (the role not yet created). A
-  missing `LoadCredential=` source failed `243`; an empty `SetCredential=`
-  fallback was ignored.
+- **The #297 shape, first in a throwaway unit (2026-09-12)**: on systemd 255 a
+  missing `LoadCredential=` source failed `243/CREDENTIALS`, an empty
+  `SetCredential=` fallback was ignored, and an empty key file loaded as an
+  empty credential — which is why both key files must exist.
+- **Then inside the installed unit (2026-09-13)**, a runtime drop-in replacing
+  only `ExecStart`, the env file and the two key sources (stand-ins for the
+  unprovisioned ones; every identity and sandbox line the unit's own):
+  `watcher_backup`, `CapPrm`/`CapEff`/`CapBnd`/`CapAmb` 0 in the job and a
+  child; no key in the environment, `GOOGLE_APPLICATION_CREDENTIALS` the
+  credential copy's path; `/home` holding only the checkout, and `.env`,
+  `/etc/watcher/.env`, `notifier.env` and the service's GCS key all
+  unreadable. `psql` connected as `watcher_backup`, not a superuser, and
+  `take_dump` of production read 1.8 MB, 178 TOC entries, alembic
+  `2f8bb8f7100a`, 17 tables with data — its table of contents **byte-identical**
+  to a superuser `pg_dump`'s taken beside it (sha256 of the entries, `8c7318ee…`).
+  A GCS preflight listed through the sandbox on the stand-in key, and the
+  check-in, handed the empty key, warned and posted nothing. Discarded with the
+  run's private `/tmp`.
 - **Against a real object**: pending the provisioning above — the first run
   and a restore of its object, recorded here when done.

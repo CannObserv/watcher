@@ -27,6 +27,10 @@ the schema, and a new `watcher_app` serves it with `SELECT/INSERT/UPDATE/DELETE`
 and no DDL. **The code half is already deployed and is a no-op until this runs**
 — the fallback above means a single-role database behaves exactly as before.
 
+A third role on the cluster, `watcher_backup`, is neither of these: the nightly
+backup's read-only login (`pg_read_all_data`, peer auth only), created by
+`scripts/setup-backup-role.sql` — see [RECOVERY.md](RECOVERY.md) (#297).
+
 `scripts/setup-db-roles.sql` is purely additive: it creates one role, grants it
 strictly less than exists today, and reassigns no ownership. `watcher` remains
 the owner, which is why rollback is an env-file edit rather than a repair. It

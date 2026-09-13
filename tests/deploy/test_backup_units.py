@@ -21,6 +21,8 @@ from pathlib import Path
 
 import pytest
 
+from src.ops.checkin import KEY_CREDENTIAL
+
 REPO = Path(__file__).resolve().parents[2]
 SERVICE = REPO / "deploy" / "watcher-backup.service"
 TIMER = REPO / "deploy" / "watcher-backup.timer"
@@ -126,11 +128,13 @@ class TestServiceCredentials:
     def test_keys_arrive_as_credentials_not_environment(self) -> None:
         """systemd reads each root-only file and hands the run a private copy
         under $CREDENTIALS_DIRECTORY. The GCS SDK takes a path, so it gets the
-        copy's; the check-in reads its key from the directory itself."""
+        copy's; the check-in reads its key from the directory itself — by the
+        name ``src.ops.checkin`` reads, imported rather than spelled again, so
+        renaming either side fails here instead of leaving the job keyless."""
         text = SERVICE.read_text()
         assert set(_values(text, "LoadCredential")) == {
             f"gcs:{GCS_KEY}",
-            f"notifier-key:{CHECKIN_KEY}",
+            f"{KEY_CREDENTIAL}:{CHECKIN_KEY}",
         }
         assert "GOOGLE_APPLICATION_CREDENTIALS=%d/gcs" in _values(text, "Environment")
 

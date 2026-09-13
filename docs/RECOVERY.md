@@ -126,18 +126,44 @@ original. Left to the SDK that fails `Permission denied` on the key, which reads
 as a reason to loosen its mode — so the job refuses first: exit 2 and an `alert`
 naming this file, before any client is built.
 
-**The dead-man monitor** is notifier's (notifier#56): a monitor on the watcher
-tenant, `interval_seconds` 86400 plus a grace for the timer's jitter and a slow
-run, and a check-in key. Then the key into its file — `tee`, so the existing
-`0400 root:root` file keeps its mode — and the other two into `backup.env`:
+**The dead-man monitor** is notifier's (notifier#56), on the **watcher
+tenant**, so its alarms reach watcher's existing default Mailgun and Slack
+channels. A monitor may use only its own tenant's channels, and a second tenant
+holding copies of those URLs would need every rotation done twice, with nothing
+to say when one was missed. Its check-in key is a **second** production key on
+that tenant, distinct from `watcher.service`'s — and `seed_tenant.py` can only
+mint a key with a new tenant, so the key **waits on notifier#62**
+(`seed_tenant.py --tenant-id`). The monitor:
+
+| Field | Value | Why |
+|---|---|---|
+| `interval_seconds` | `86400` | one run a night |
+| `grace_seconds` | `7200` | the timer's 10-minute jitter, plus the unit's one-hour timeout — a run killed by it cannot check in |
+| `renotify_seconds` | `86400` | repeat the alarm daily for as long as it is missing |
+| `channel_ids` | the watcher tenant's default Mailgun and Slack channels | |
+| `title_template` / `body_template` | `watcher backup {{ outcome }} on {{ source_host }}` / `{{ error }}` | rendered for an `alert` only |
+| `enabled` | `true`, stated | the first trap below |
+
+Then the key into its file — read at a prompt, so it reaches neither shell
+history nor argv, and through `tee`, so the file keeps its `0400 root:root` —
+and the other two into `backup.env`:
 
 ```bash
-printf '%s' '<production-marked key>' | sudo tee /etc/watcher/backup-notifier.key >/dev/null
+read -rsp 'check-in key: ' KEY; echo
+printf '%s' "$KEY" | sudo tee /etc/watcher/backup-notifier.key >/dev/null; unset KEY
 sudo tee -a /etc/watcher/backup.env >/dev/null <<'EOF'
 WATCHER_BACKUP_NOTIFIER_BASE_URL=http://notifier:9000
 WATCHER_BACKUP_MONITOR_ID=<monitor id>
 EOF
+sudo systemctl start watcher-backup.service
 ```
+
+A check-in that lands leaves nothing in the journal — the job logs only one that
+did not — so the proof is on notifier's side: `GET /api/v1/monitors/<id>` reads
+`state` `ok` and a fresh `last_checkin_at`. Then **see the alarm fire** before
+relying on it: `PATCH` the monitor to `interval_seconds` 60 and `grace_seconds`
+0, wait for *"has stopped reporting"*, check in for *"has recovered"*, and
+`PATCH` it back.
 
 **What a check-in carries**, for the monitor's alert template: an `alert` sends
 `source_host`, `outcome` (`failed`) and `error`; an `ok` sends the run's

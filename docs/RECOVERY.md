@@ -346,5 +346,13 @@ on a live source a nightly dump's counts drift by design.
   A GCS preflight listed through the sandbox on the stand-in key, and the
   check-in, handed the empty key, warned and posted nothing. Discarded with the
   run's private `/tmp`.
-- **Against a real object**: pending the provisioning above — the first run
-  and a restore of its object, recorded here when done.
+- **Against a real object (2026-09-13)**, on the shared VM once the bucket and
+  writer key existed. The first hand-started run of the installed unit shipped
+  `watcher/20260913T193654Z.dump` — 1,810,347 bytes, alembic `2f8bb8f7100a`,
+  `source_host` `watcher` — and, with no monitor yet, the check-in warned and
+  posted nothing. The create-only probe created its object and got **403** on
+  both the overwrite and the delete. `--list` showed the dump, and a
+  `--download-only` fetch matched its recorded sha256 and read through; the
+  copy was then deleted. The timer was enabled after that run. Still to do: a
+  restore of a real object **into a database**, which the cutover will do
+  anyway, and a real check-in once the monitor exists.

@@ -131,9 +131,8 @@ tenant**, so its alarms reach watcher's existing default Mailgun and Slack
 channels. A monitor may use only its own tenant's channels, and a second tenant
 holding copies of those URLs would need every rotation done twice, with nothing
 to say when one was missed. Its check-in key is a **second** production key on
-that tenant, distinct from `watcher.service`'s — and `seed_tenant.py` can only
-mint a key with a new tenant, so the key **waits on notifier#62**
-(`seed_tenant.py --tenant-id`). The monitor:
+that tenant, distinct from `watcher.service`'s, minted on the notifier host with
+`seed_tenant.py --tenant-id <watcher tenant id>` (notifier#62). The monitor:
 
 | Field | Value | Why |
 |---|---|---|
@@ -158,9 +157,10 @@ EOF
 sudo systemctl start watcher-backup.service
 ```
 
-A check-in that lands leaves nothing in the journal — the job logs only one that
-did not — so the proof is on notifier's side: `GET /api/v1/monitors/<id>` reads
-`state` `ok` and a fresh `last_checkin_at`. Then **see the alarm fire** before
+A check-in that lands shows in the journal only as httpx's own line —
+`POST …/monitors/<id>/checkin "HTTP/1.1 202 Accepted"` — so the proof is on
+notifier's side: `GET /api/v1/monitors/<id>` reads `state` `ok`, a fresh
+`last_checkin_at`, and the run's summary as `last_variables`. Then **see the alarm fire** before
 relying on it: `PATCH` the monitor to `interval_seconds` 60 and `grace_seconds`
 0, wait for *"has stopped reporting"*, check in for *"has recovered"*, and
 `PATCH` it back.
@@ -379,6 +379,13 @@ on a live source a nightly dump's counts drift by design.
   posted nothing. The create-only probe created its object and got **403** on
   both the overwrite and the delete. `--list` showed the dump, and a
   `--download-only` fetch matched its recorded sha256 and read through; the
-  copy was then deleted. The timer was enabled after that run. Still to do: a
-  restore of a real object **into a database**, which the cutover will do
-  anyway, and a real check-in once the monitor exists.
+  copy was then deleted. The timer was enabled after that run, and its first
+  firing (03:20 UTC the next night) shipped on its own. Still to do: a restore
+  of a real object **into a database**, which the cutover will do anyway.
+- **The dead-man monitor (2026-09-14)**, `watcher-backup` on the watcher
+  tenant, alerting to its global Slack and Mailgun channels. A hand-started run
+  checked in (`202`; `pending` → `ok`, the run's summary as `last_variables`).
+  A labelled test `alert` rendered the templates and was delivered to both
+  channels. With the window cut to 60 s, the sweep marked it `missing` 32 s
+  past the deadline and alerted; the next real run's check-in recovered it, and
+  the window went back to 24 h plus 2 h.

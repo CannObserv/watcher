@@ -380,8 +380,14 @@ on a live source a nightly dump's counts drift by design.
   both the overwrite and the delete. `--list` showed the dump, and a
   `--download-only` fetch matched its recorded sha256 and read through; the
   copy was then deleted. The timer was enabled after that run, and its first
-  firing (03:20 UTC the next night) shipped on its own. Still to do: a restore
-  of a real object **into a database**, which the cutover will do anyway.
+  firing (03:20 UTC the next night) shipped on its own. That object restored
+  into a scratch `_test` database on the same cluster in 1.6 s, fetch
+  included: every go/no-go gate passed, the structure matched production's
+  exactly (17 tables, 4 sequences, 18 functions, 42 indexes, 7 triggers), and
+  row counts differed only in `audit_log` and `fetch_commands`, append-only
+  logs that had grown since the dump. The roles already existed, so the roles
+  script was not re-run — it would have reset `watcher_app`'s password
+  cluster-wide.
 - **The dead-man monitor (2026-09-14)**, `watcher-backup` on the watcher
   tenant, alerting to its global Slack and Mailgun channels. A hand-started run
   checked in (`202`; `pending` → `ok`, the run's summary as `last_variables`).

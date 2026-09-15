@@ -47,7 +47,8 @@ APP_PW="$(openssl rand -base64 24 | tr -d '/+=')"
 
 # Redirected, not `-f`: the postgres OS user cannot read under /home/exedev,
 # so `-f scripts/...` fails with "Permission denied". The shell does the read.
-sudo -u postgres WATCHER_APP_PASSWORD="$APP_PW" \
+# The password rides the environment: `sudo -u postgres VAR=…` puts it in `ps`.
+WATCHER_APP_PASSWORD="$APP_PW" sudo --preserve-env=WATCHER_APP_PASSWORD -u postgres \
   psql -d watcher < scripts/setup-db-roles.sql
 ```
 

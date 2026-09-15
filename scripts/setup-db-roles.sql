@@ -4,8 +4,8 @@
 -- database while the service is up, and a wrong grant here locks the running
 -- service out of its own schema.
 --
---   sudo -u postgres WATCHER_APP_PASSWORD='<generated>' \
---     psql -d watcher < scripts/setup-db-roles.sql
+--   WATCHER_APP_PASSWORD="$APP_PW" sudo --preserve-env=WATCHER_APP_PASSWORD \
+--     -u postgres psql -d watcher < scripts/setup-db-roles.sql
 --
 -- Redirected, not `-f`: the `postgres` OS user cannot read anything under
 -- /home/exedev, so `-f` fails with "Permission denied" on this host. The

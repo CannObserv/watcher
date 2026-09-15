@@ -282,13 +282,16 @@ the ones `/etc/watcher/.env` **already holds**: `setup-db-roles.sql` sets
 `watcher_app`'s to whatever it is handed, so a new one breaks `DATABASE_URL`.
 
 ```bash
-# The passwords /etc/watcher/.env already carries — never new ones.
-MIGRATE_PW='<the password in WATCHER_MIGRATION_DATABASE_URL>'
-APP_PW='<the password in DATABASE_URL>'
+# The passwords /etc/watcher/.env already carries — never new ones, and read
+# from it rather than typed, so neither lands in shell history.
+set -a; . /etc/watcher/.env; set +a
+u="${WATCHER_MIGRATION_DATABASE_URL#*://watcher:}"; MIGRATE_PW="${u%%@*}"
+u="${DATABASE_URL#*://watcher_app:}"; APP_PW="${u%%@*}"
 
-# 1. Fresh cluster only: the owner role (an existing cluster has it). \getenv,
-#    so the password is never in argv.
-sudo -u postgres WATCHER_MIGRATE_PASSWORD="$MIGRATE_PW" psql -v ON_ERROR_STOP=1 <<'SQL'
+# 1. Fresh cluster only: the owner role (an existing cluster has it). Environment
+#    and \getenv, never argv: `sudo -u postgres VAR=…` shows the value in `ps`.
+WATCHER_MIGRATE_PASSWORD="$MIGRATE_PW" sudo --preserve-env=WATCHER_MIGRATE_PASSWORD -u postgres \
+  psql -v ON_ERROR_STOP=1 <<'SQL'
 \getenv pw WATCHER_MIGRATE_PASSWORD
 CREATE ROLE watcher LOGIN PASSWORD :'pw';
 SQL
@@ -298,14 +301,16 @@ sudo -u postgres createdb -O watcher watcher          # or a *_dev name to rehea
 
 # 3. watcher_app and its CONNECT, before the restore whose grants name it. Safe
 #    on an empty database. Redirected, not -f (postgres cannot read /home/exedev).
-sudo -u postgres WATCHER_APP_PASSWORD="$APP_PW" psql -d watcher < scripts/setup-db-roles.sql
+WATCHER_APP_PASSWORD="$APP_PW" sudo --preserve-env=WATCHER_APP_PASSWORD -u postgres \
+  psql -d watcher < scripts/setup-db-roles.sql
 
 # 4. The restore.
 sudo bash -c "$ENV; .venv/bin/python -m src.ops.restore --latest --prefix $SRC --into watcher --run-as postgres"
 
 # 5. The roles script again — idempotent; it re-asserts every grant against the
 #    restored tables, which is what the gates below then check.
-sudo -u postgres WATCHER_APP_PASSWORD="$APP_PW" psql -d watcher < scripts/setup-db-roles.sql
+WATCHER_APP_PASSWORD="$APP_PW" sudo --preserve-env=WATCHER_APP_PASSWORD -u postgres \
+  psql -d watcher < scripts/setup-db-roles.sql
 
 # 6. The backup's role, so this host's own backups can run (Install and first run).
 sudo -u postgres psql -d watcher < scripts/setup-backup-role.sql

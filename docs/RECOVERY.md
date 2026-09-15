@@ -400,3 +400,9 @@ on a live source a nightly dump's counts drift by design.
   channels. With the window cut to 60 s, the sweep marked it `missing` 32 s
   past the deadline and alerted; the next real run's check-in recovered it, and
   the window went back to 24 h plus 2 h.
+- **Across hosts, on co-watcher (2026-09-15)**: the cutover's path on a fresh
+  cluster (#296 step 16), roles first as above. `--latest --prefix watcher`
+  restored the old VM's nightly `watcher/20260915T032405Z.dump` (alembic
+  `2f8bb8f7100a`; source cluster `C.UTF-8`, like this one) into `watcher_dev`
+  in 1.8 s, fetch included. Every gate passed, every table's row count equalled
+  the dump's own `COPY` rows, and the dev server served the restored items.

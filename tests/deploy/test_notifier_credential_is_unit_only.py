@@ -20,11 +20,16 @@ three opt-in flags, applied to the secret itself. ``scripts/load-env.sh`` does
 not know the path, so no shell inherits it.
 
 The on-host assertions skip on any machine that does not run the service, the
-same way ``test_installed_unit_matches_repo`` does. The repo ``.env`` check is
-deliberately *not* one of them — it guards a file that travels with the clone.
+same way ``test_installed_unit_matches_repo`` does, except that the credential
+file's mode is checked wherever the file exists (#296 D1). The repo ``.env``
+check is deliberately *not* one of them — it guards a file that travels with
+the clone.
 """
 
+import os
+import shutil
 import stat
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -338,6 +343,56 @@ def test_no_env_shaped_file_in_the_repo_root_carries_the_notifier_credential() -
     assert not report, report
 
 
+SERVICE_UNIT = "watcher.service"
+
+#: ``systemctl is-enabled`` states in which the unit starts without being asked:
+#: at boot, or until the next one. Anything else (``disabled``, ``masked``,
+#: ``not-found``, or no systemctl at all) is a host that will not start it.
+STARTS_ON_ITS_OWN = frozenset({"enabled", "enabled-runtime"})
+
+
+def _unit_state(unit: str) -> str:
+    """Return ``systemctl is-enabled`` for ``unit``, or "" without systemctl."""
+    systemctl = shutil.which("systemctl")
+    if systemctl is None:
+        return ""
+    result = subprocess.run(
+        [systemctl, "is-enabled", unit],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    return result.stdout.strip()
+
+
+def _notifier_env_findings(env_file: Path, unit_state: str) -> list[str]:
+    """What is wrong with the credential file, read with ``stat`` alone.
+
+    Absent is a finding only when the unit starts on its own: the unit requires
+    the file, so that host fails its next start. co-watcher before cutover
+    holds ``/etc/watcher/.env`` and, by design, no credential (#296 D1).
+    Exposure is a finding whenever the file exists, whatever the unit's state.
+    """
+    if not env_file.exists():
+        if unit_state in STARTS_ON_ITS_OWN:
+            return [
+                f"{env_file} is missing, and {SERVICE_UNIT} is {unit_state} — "
+                "the unit requires it and will fail to start. (#278)"
+            ]
+        return []
+    info = env_file.stat()
+    findings = []
+    if info.st_uid != 0:
+        findings.append(f"{env_file} must be owned by root")
+    if info.st_mode & (stat.S_IRWXG | stat.S_IRWXO):
+        findings.append(
+            f"{env_file} is group- or world-accessible "
+            f"({stat.filemode(info.st_mode)}); the whole point of the split is that "
+            "the exedev account cannot read the production notifier credential (#278)"
+        )
+    return findings
+
+
 def test_notifier_env_file_is_readable_only_by_root() -> None:
     """systemd parses ``EnvironmentFile=`` as root, so ``exedev`` needs no access.
 
@@ -347,18 +402,55 @@ def test_notifier_env_file_is_readable_only_by_root() -> None:
     server and every agent shell run as.
 
     Mode is read with ``stat``, never the contents — this test has no business
-    holding the key it guards.
+    holding the key it guards. Keyed on the unit rather than the shared file
+    (#296 D1): see ``_notifier_env_findings``.
     """
-    if not SHARED_ENV_FILE.exists():
-        pytest.skip(f"{SHARED_ENV_FILE} not present — not a host running the service")
-    assert NOTIFIER_ENV_FILE.exists(), (
-        f"{NOTIFIER_ENV_FILE} is missing on a host that runs the service — "
-        "watcher.service requires it and will fail to start. (#278)"
-    )
-    info = NOTIFIER_ENV_FILE.stat()
-    assert info.st_uid == 0, f"{NOTIFIER_ENV_FILE} must be owned by root"
-    assert not info.st_mode & (stat.S_IRWXG | stat.S_IRWXO), (
-        f"{NOTIFIER_ENV_FILE} is group- or world-accessible "
-        f"({stat.filemode(info.st_mode)}); the whole point of the split is that "
-        "the exedev account cannot read the production notifier credential (#278)"
-    )
+    state = _unit_state(SERVICE_UNIT)
+    if not NOTIFIER_ENV_FILE.exists() and state not in STARTS_ON_ITS_OWN:
+        pytest.skip(
+            f"{NOTIFIER_ENV_FILE} absent and {SERVICE_UNIT} is {state or 'unknown'} "
+            "— not a host that starts the service"
+        )
+    findings = _notifier_env_findings(NOTIFIER_ENV_FILE, state)
+    assert not findings, "; ".join(findings)
+
+
+class TestNotifierEnvFindings:
+    """Absence and exposure are separate questions (#296 D1).
+
+    co-watcher holds ``/etc/watcher/.env`` from step 11 but, by design, no
+    ``notifier.env`` until cutover, with the unit installed and disabled. Keyed
+    on the shared file, the guard called that a broken service host. Absence is
+    a finding only where the unit starts on its own; exposure is a finding
+    wherever the file exists, which includes the step 19 hand copy, made before
+    anything is enabled.
+    """
+
+    @pytest.mark.parametrize("state", ["disabled", "masked", "not-found", ""])
+    def test_an_absent_file_is_fine_while_the_service_is_not_enabled(self, tmp_path, state) -> None:
+        assert _notifier_env_findings(tmp_path / "notifier.env", state) == []
+
+    @pytest.mark.parametrize("state", ["enabled", "enabled-runtime"])
+    def test_an_absent_file_fails_where_the_service_starts_on_its_own(
+        self, tmp_path, state
+    ) -> None:
+        findings = _notifier_env_findings(tmp_path / "notifier.env", state)
+        assert len(findings) == 1
+        assert "missing" in findings[0]
+
+    def test_a_present_file_is_checked_before_the_service_is_enabled(self, tmp_path) -> None:
+        env_file = tmp_path / "notifier.env"
+        env_file.write_text("")
+        env_file.chmod(0o644)
+        findings = _notifier_env_findings(env_file, "disabled")
+        assert any("group- or world-accessible" in finding for finding in findings)
+
+    def test_a_file_not_owned_by_root_is_a_finding(self, tmp_path) -> None:
+        if os.geteuid() == 0:
+            pytest.skip("running as root: a temporary file is root's own")
+        env_file = tmp_path / "notifier.env"
+        env_file.write_text("")
+        env_file.chmod(0o600)
+        findings = _notifier_env_findings(env_file, "enabled")
+        assert len(findings) == 1
+        assert "owned by root" in findings[0]

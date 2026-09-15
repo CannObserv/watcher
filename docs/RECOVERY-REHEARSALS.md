@@ -1,9 +1,12 @@
 # Recovery rehearsals
 
-An annex of [RECOVERY.md](RECOVERY.md): each backup-and-restore run done by hand,
-dated, with what it proved. The suite's own rehearsal, run on every integration
-run, is listed there; "above" and "the gates" below mean that doc's *Restore*
-section and its go/no-go gates.
+An annex of [RECOVERY.md](RECOVERY.md): each rehearsal done by hand, dated,
+with what it proved. The suite's own rehearsal, which every integration run
+repeats, is listed there. The entries use that doc's terms: "above" and the
+gates mean its *Restore* section and go/no-go gates; "the roles script" is
+`scripts/setup-db-roles.sql`; "the root unit" is the backup unit before #297,
+and "the #297 shape" its sandbox since, both in *The sandbox*; the create-only
+probe is the one in *Install and first run*.
 
 - **Inside the real sandbox, by hand (2026-09-11)**: `take_dump` against
   production on the shared VM under the root unit's exact confinement —

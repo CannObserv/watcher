@@ -120,7 +120,9 @@ docs/BUS-CONNECTION-POLICY.md :: Behaviour under `NOPERM` (#290)
 # dated rehearsals to docs/RECOVERY-REHEARSALS.md. Each line below points at a
 # RECOVERY.md section that stayed (Install and first run, Restore and its gates,
 # Provisioning, the runbook as a whole), or is the annex's own link to its
-# parent, or broker's sibling doc of the same name.
+# parent, or broker's sibling doc of the same name. They fire only under
+# `check-seams.sh --file docs/RECOVERY.md`: the default AGENTS.md sweep lists
+# them as matching nothing, which is expected. Do not prune them on that alone.
 docs/COMMANDS.md :: (docs/RECOVERY.md → Install and first run). Idempotent; its report is the check:
 docs/COMMANDS.md :: # Nightly dump to GCS — the timer runs it; one run by hand (docs/RECOVERY.md):
 docs/COMMANDS.md :: # Restore — always name the host that shipped the dump (docs/RECOVERY.md → Restore):
@@ -135,6 +137,7 @@ src/ops/__init__.py :: Runbooks: docs/RECOVERY.md for the backup and restore
 src/ops/backup.py :: docs/RECOVERY.md is the runbook around both.
 src/ops/restore.py :: docs/RECOVERY.md is that runbook.
 src/ops/restore.py :: then the gates in docs/RECOVERY.md
+
 # --- Provenance in headings, predating this run. Renaming either would move an
 # anchor in a doc this curation does not otherwise touch.
 docs/COMMANDS.md :: Backup, restore and job history (#296)

@@ -357,4 +357,4 @@ on a live source a nightly dump's counts drift by design.
   restore leaves the target untouched.
 - **By hand, dated, with what each run proved**:
   [RECOVERY-REHEARSALS.md](RECOVERY-REHEARSALS.md), from the first sandboxed
-  dump (2026-09-11) to the cross-host restore on co-watcher.
+  dump (2026-09-11) on.

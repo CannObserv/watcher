@@ -12,8 +12,9 @@ gated :: watcher publishes four streams and consumes two
 # (L79-89), which asserts message, level, logger and timestamp by name.
 gated :: Records are JSON with a four-key floor
 
-# The two files are the numbered list immediately below the sentence.
-enumerated :: Two env files load in order
+# The two files are the numbered list immediately below the sentence. Re-judged
+# 2026-09-15: #296 D5 reworded the line, which expired the entry.
+enumerated :: Shells load two env files in order
 
 # All three flags are named in the same sentence, each with its issue.
 enumerated :: Three unit-only opt-ins gate the production resources

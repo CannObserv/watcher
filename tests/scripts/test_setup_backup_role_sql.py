@@ -7,8 +7,9 @@ database, so what is checkable without a database is checked here — above all
 that the role can read and can do nothing else.
 
 Text assertions, deliberately: whether a role with these rights takes a
-complete dump was proven on the VM against production (docs/RECOVERY.md →
-*Rehearsals*), since the suite's own role cannot grant a predefined role.
+complete dump was proven on the VM against production
+(docs/RECOVERY-REHEARSALS.md), since the suite's own role cannot grant a
+predefined role.
 """
 
 import re

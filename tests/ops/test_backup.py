@@ -5,7 +5,7 @@ job refuses to ship, when it checks in. What a fake cannot answer (whether the
 SDK accepts these arguments, whether the unit's sandbox reaches the bucket, and
 whether a real ``pg_dump`` round-trips the two-role model) is answered by
 ``test_backup_restore_rehearsal.py`` against a real server, and by the first
-real run recorded in docs/RECOVERY.md.
+real run recorded in docs/RECOVERY-REHEARSALS.md.
 """
 
 import subprocess

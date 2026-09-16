@@ -23,9 +23,18 @@ import pytest
 
 SCRIPT = Path(__file__).resolve().parents[2] / "scripts" / "dev_server.sh"
 
-PROD_URL = "postgresql+asyncpg://watcher:watcher@localhost:5432/watcher"
-TEST_URL = "postgresql+asyncpg://watcher:watcher@localhost:5432/watcher_test"
-DEV_URL = "postgresql+asyncpg://watcher:watcher@localhost:5432/watcher_dev"
+# Distinctive, so a leak test cannot be satisfied by the role or database name
+# happening to be spelled "watcher" too.
+PASSWORD = "pw-8f3a1c"
+PROD_URL = f"postgresql+asyncpg://watcher:{PASSWORD}@localhost:5432/watcher"
+TEST_URL = f"postgresql+asyncpg://watcher:{PASSWORD}@localhost:5432/watcher_test"
+DEV_URL = f"postgresql+asyncpg://watcher:{PASSWORD}@localhost:5432/watcher_dev"
+
+# What the script may print: the same URL with the password replaced. The
+# expected strings are spelled out rather than derived, so a test cannot agree
+# with a broken redaction (#296 step 25).
+TEST_URL_SHOWN = "postgresql+asyncpg://watcher:***@localhost:5432/watcher_test"
+DEV_URL_SHOWN = "postgresql+asyncpg://watcher:***@localhost:5432/watcher_dev"
 
 
 def run(env: dict[str, str]) -> subprocess.CompletedProcess[str]:
@@ -51,7 +60,7 @@ def test_resolves_to_test_database_by_default() -> None:
     """With only TEST_DATABASE_URL set, the dev server targets the test DB."""
     result = run({"TEST_DATABASE_URL": TEST_URL, "DATABASE_URL": PROD_URL})
     assert result.returncode == 0, result.stderr
-    assert f"DATABASE_URL={TEST_URL}" in result.stdout
+    assert f"DATABASE_URL={TEST_URL_SHOWN}" in result.stdout
 
 
 def test_dedicated_dev_url_wins_over_test_url() -> None:
@@ -68,7 +77,7 @@ def test_dedicated_dev_url_wins_over_test_url() -> None:
         }
     )
     assert result.returncode == 0, result.stderr
-    assert f"DATABASE_URL={DEV_URL}" in result.stdout
+    assert f"DATABASE_URL={DEV_URL_SHOWN}" in result.stdout
 
 
 def test_refuses_when_resolution_equals_production() -> None:
@@ -111,14 +120,14 @@ def test_overrides_inherited_migration_url() -> None:
     assert result.returncode == 0, result.stderr
     # Line-exact: PROD_URL is a prefix of TEST_URL, so a substring check on the
     # whole report would pass on the very output it is meant to reject.
-    assert f"WATCHER_MIGRATION_DATABASE_URL={TEST_URL}" in result.stdout.splitlines()
+    assert f"WATCHER_MIGRATION_DATABASE_URL={TEST_URL_SHOWN}" in result.stdout.splitlines()
 
 
 def test_migration_url_follows_the_dedicated_dev_database() -> None:
     """It tracks the resolved dev URL, not TEST_DATABASE_URL specifically."""
     result = run({"WATCHER_DEV_DATABASE_URL": DEV_URL, "TEST_DATABASE_URL": TEST_URL})
     assert result.returncode == 0, result.stderr
-    assert f"WATCHER_MIGRATION_DATABASE_URL={DEV_URL}" in result.stdout
+    assert f"WATCHER_MIGRATION_DATABASE_URL={DEV_URL_SHOWN}" in result.stdout
 
 
 def test_refuses_to_bind_the_production_port() -> None:
@@ -167,10 +176,11 @@ def test_requires_a_test_or_dev_database_name(url: str) -> None:
 
 @pytest.mark.parametrize("suffix", ["_test", "_dev"])
 def test_accepts_test_and_dev_suffixed_names(suffix: str) -> None:
-    url = f"postgresql+asyncpg://watcher:watcher@localhost:5432/watcher{suffix}"
+    url = f"postgresql+asyncpg://watcher:{PASSWORD}@localhost:5432/watcher{suffix}"
+    shown = f"postgresql+asyncpg://watcher:***@localhost:5432/watcher{suffix}"
     result = run({"TEST_DATABASE_URL": url, "DATABASE_URL": PROD_URL})
     assert result.returncode == 0, result.stderr
-    assert f"DATABASE_URL={url}" in result.stdout
+    assert f"DATABASE_URL={shown}" in result.stdout
 
 
 def test_sources_env_files_when_not_skipped(tmp_path: Path) -> None:
@@ -193,7 +203,7 @@ def test_sources_env_files_when_not_skipped(tmp_path: Path) -> None:
         capture_output=True,
     )
     assert result.returncode == 0, result.stderr
-    assert f"DATABASE_URL={TEST_URL}" in result.stdout
+    assert f"DATABASE_URL={TEST_URL_SHOWN}" in result.stdout
 
 
 def test_reports_planned_migration_of_the_dev_database() -> None:
@@ -207,7 +217,7 @@ def test_reports_planned_migration_of_the_dev_database() -> None:
     """
     result = run({"TEST_DATABASE_URL": TEST_URL})
     assert result.returncode == 0, result.stderr
-    assert f"MIGRATE={TEST_URL}" in result.stdout
+    assert f"MIGRATE={TEST_URL_SHOWN}" in result.stdout
 
 
 def test_test_database_fallback_is_rebuilt_from_scratch() -> None:
@@ -234,7 +244,7 @@ def test_persistent_dev_database_is_not_reset() -> None:
     result = run({"WATCHER_DEV_DATABASE_URL": DEV_URL, "TEST_DATABASE_URL": TEST_URL})
     assert result.returncode == 0, result.stderr
     assert "RESET=(none)" in result.stdout
-    assert f"MIGRATE={DEV_URL}" in result.stdout
+    assert f"MIGRATE={DEV_URL_SHOWN}" in result.stdout
 
 
 def test_migration_can_be_skipped() -> None:
@@ -425,3 +435,96 @@ def test_explicit_dev_public_base_url_is_forwarded() -> None:
     )
     assert result.returncode == 0, result.stderr
     assert "WATCHER_PUBLIC_BASE_URL=https://co-watcher.exe.xyz:8001" in result.stdout
+
+
+def test_report_never_prints_a_database_password() -> None:
+    """The dry-run report is pasted into issues and scrollback (#296 step 25).
+
+    Every URL it echoes came from an env file, so each one carries a real
+    password: DATABASE_URL and WATCHER_MIGRATION_DATABASE_URL are the two role
+    credentials, and the MIGRATE line repeats one of them. Printing the
+    database is the point; printing the password is a leak with no reader.
+    """
+    result = run(
+        {
+            "TEST_DATABASE_URL": TEST_URL,
+            "WATCHER_MIGRATION_DATABASE_URL": PROD_URL,
+            "WATCHER_DEV_BUS_REDIS_URL": f"redis://watcher:{PASSWORD}@broker:6379/15",
+        }
+    )
+    assert result.returncode == 0, result.stderr
+    assert PASSWORD not in result.stdout
+    assert PASSWORD not in result.stderr
+    # …and the report still says which database and which broker, redacted.
+    assert f"DATABASE_URL={TEST_URL_SHOWN}" in result.stdout
+    assert "WATCHER_BUS_REDIS_URL=redis://watcher:***@broker:6379/15" in result.stdout
+
+
+def test_report_leaves_a_passwordless_url_intact() -> None:
+    """Redaction rewrites credentials, not URLs: a peer-auth URL is unchanged."""
+    url = "postgresql+asyncpg://localhost:5432/watcher_test"
+    result = run({"TEST_DATABASE_URL": url})
+    assert result.returncode == 0, result.stderr
+    assert f"DATABASE_URL={url}" in result.stdout.splitlines()
+
+
+def _script_lines() -> list[tuple[int, str]]:
+    return list(enumerate(SCRIPT.read_text().splitlines(), start=1))
+
+
+#: The variables that hold a URL with its password, as spelled in the script.
+RAW_URL_VARS = (
+    "DATABASE_URL",
+    "WATCHER_MIGRATION_DATABASE_URL",
+    "DEV_URL",
+    "WATCHER_BUS_REDIS_URL",
+)
+
+
+def _mentions_raw_url(line: str) -> bool:
+    return any(f"${var}" in line or f"${{{var}" in line for var in RAW_URL_VARS)
+
+
+def test_no_echo_prints_a_raw_url() -> None:
+    """Guards the runtime lines too, which the dry run exits before reaching.
+
+    The report is testable by running the script; ``dev_server: port 8001 →
+    <url>`` and the reset/migrate lines are not, since they print on the way to
+    exec'ing uvicorn. So this reads the source instead: an ``echo`` may name a
+    URL variable only through ``redact``.
+    """
+    offenders = [
+        (n, line)
+        for n, line in _script_lines()
+        if line.lstrip().startswith("echo ") and _mentions_raw_url(line) and "redact" not in line
+    ]
+    assert not offenders, f"echo prints an unredacted URL: {offenders}"
+    redacted = [
+        line
+        for _, line in _script_lines()
+        if line.lstrip().startswith("echo ") and "redact" in line
+    ]
+    assert redacted, "no echo goes through redact — the check would pass vacuously"
+
+
+def test_no_report_variable_takes_a_raw_url() -> None:
+    """A *_REPORT is printed verbatim, so assigning a raw URL to one is the
+    same leak one step removed."""
+    offenders = [
+        (n, line)
+        for n, line in _script_lines()
+        if "_REPORT=" in line and _mentions_raw_url(line) and "redact" not in line
+    ]
+    assert not offenders, f"report variable holds an unredacted URL: {offenders}"
+
+
+def test_no_command_receives_a_url_in_argv() -> None:
+    """``psql "$DATABASE_URL"`` puts the password in ``ps`` output for every
+    user on the box — the argv hazard docs/RECOVERY.md documents for the
+    restore path, in the one script that runs it daily."""
+    offenders = [
+        (n, line)
+        for n, line in _script_lines()
+        if "psql " in line and _mentions_raw_url(line) and "without_password" not in line
+    ]
+    assert not offenders, f"psql is handed an unredacted URL: {offenders}"

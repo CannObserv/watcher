@@ -89,6 +89,45 @@ db_name() {
   printf '%s' "$url"
 }
 
+# Every URL below arrives from an env file, so every one carries a password
+# (#296 step 25). The database is what a reader needs; the password is a leak
+# with no reader — this report gets pasted into issues and scrollback, and
+# `psql "$URL"` puts it in `ps` output for every user on the box. The parsing
+# care is db_name()'s: the query string is checked first, so an '@' inside it
+# is never mistaken for a credentials terminator. A URL with no password, or
+# no '://', comes back unchanged from all three.
+_rewrite_password() {
+  local url="$1" replacement="$2" scheme rest creds tail
+  case "$url" in *://*) ;; *) printf '%s' "$url"; return ;; esac
+  scheme="${url%%://*}"
+  rest="${url#*://}"
+  case "${rest%%\?*}" in *@*) ;; *) printf '%s' "$url"; return ;; esac
+  creds="${rest%%@*}"
+  tail="${rest#*@}"
+  case "$creds" in *:*) ;; *) printf '%s' "$url"; return ;; esac
+  if [[ -n "$replacement" ]]; then
+    printf '%s://%s:%s@%s' "$scheme" "${creds%%:*}" "$replacement" "$tail"
+  else
+    printf '%s://%s@%s' "$scheme" "${creds%%:*}" "$tail"
+  fi
+}
+
+# redact <url> — for printing.
+redact() { _rewrite_password "$1" '***'; }
+
+# url_without_password <url> — for argv; the password travels in PGPASSWORD.
+url_without_password() { _rewrite_password "$1" ''; }
+
+# url_password <url> — the password alone, empty if there is none.
+url_password() {
+  local url="$1" rest creds
+  case "$url" in *://*) ;; *) return ;; esac
+  rest="${url#*://}"
+  case "${rest%%\?*}" in *@*) ;; *) return ;; esac
+  creds="${rest%%@*}"
+  case "$creds" in *:*) printf '%s' "${creds#*:}" ;; esac
+}
+
 DEV_DB_NAME="$(db_name "$DEV_URL")"
 
 # Positive assertion, not a comparison against known production URLs. String
@@ -139,7 +178,7 @@ export WATCHER_MIGRATION_DATABASE_URL="$DEV_URL"
 if [[ -n "${WATCHER_DEV_BUS_REDIS_URL:-}" ]]; then
   export WATCHER_BUS_REDIS_URL="$WATCHER_DEV_BUS_REDIS_URL"
   export WATCHER_BUS_ENABLED=1
-  BUS_REPORT="$WATCHER_BUS_REDIS_URL"
+  BUS_REPORT="$(redact "$WATCHER_BUS_REDIS_URL")"
   BUS_ENABLED_REPORT="1"
 else
   unset WATCHER_BUS_REDIS_URL
@@ -225,18 +264,18 @@ if [[ "${WATCHER_DEV_SKIP_MIGRATE:-}" == "1" ]]; then
 elif [[ -n "${WATCHER_DEV_DATABASE_URL:-}" ]]; then
   DO_RESET=0
   DO_MIGRATE=1
-  MIGRATE_REPORT="$DATABASE_URL"
+  MIGRATE_REPORT="$(redact "$DATABASE_URL")"
   RESET_REPORT="(none)"
 else
   DO_RESET=1
   DO_MIGRATE=1
-  MIGRATE_REPORT="$DATABASE_URL"
+  MIGRATE_REPORT="$(redact "$DATABASE_URL")"
   RESET_REPORT="public-schema"
 fi
 
 if [[ "${WATCHER_DEV_SERVER_DRY_RUN:-}" == "1" ]]; then
-  echo "DATABASE_URL=$DATABASE_URL"
-  echo "WATCHER_MIGRATION_DATABASE_URL=$WATCHER_MIGRATION_DATABASE_URL"
+  echo "DATABASE_URL=$(redact "$DATABASE_URL")"
+  echo "WATCHER_MIGRATION_DATABASE_URL=$(redact "$WATCHER_MIGRATION_DATABASE_URL")"
   echo "PROCRASTINATE_DATABASE_URL=(cleared)"
   echo "WATCHER_BUS_REDIS_URL=$BUS_REPORT"
   echo "WATCHER_BUS_ENABLED=$BUS_ENABLED_REPORT"
@@ -252,16 +291,18 @@ fi
 cd "$REPO_ROOT"
 
 if [[ "$DO_RESET" == "1" ]]; then
-  echo "dev_server: resetting public schema of $DATABASE_URL"
-  psql "${DATABASE_URL/+asyncpg/}" -q -c "DROP SCHEMA public CASCADE; CREATE SCHEMA public;"
+  echo "dev_server: resetting public schema of $(redact "$DATABASE_URL")"
+  RESET_URL="${DATABASE_URL/+asyncpg/}"
+  PGPASSWORD="$(url_password "$RESET_URL")" psql "$(url_without_password "$RESET_URL")" \
+    -q -c "DROP SCHEMA public CASCADE; CREATE SCHEMA public;"
 fi
 
 if [[ "$DO_MIGRATE" == "1" ]]; then
-  echo "dev_server: alembic upgrade head → $DATABASE_URL"
+  echo "dev_server: alembic upgrade head → $(redact "$DATABASE_URL")"
   uv run alembic upgrade head
 fi
 
-echo "dev_server: port $PORT → $DATABASE_URL"
+echo "dev_server: port $PORT → $(redact "$DATABASE_URL")"
 # --log-config keeps uvicorn's own loggers on the app's JSON formatter, same as
 # deploy/watcher.service (#244). Relative path: we cd'd to REPO_ROOT above.
 exec uv run uvicorn src.api.main:app --host 0.0.0.0 --port "$PORT" --reload \

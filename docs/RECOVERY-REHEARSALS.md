@@ -59,3 +59,15 @@ probe is the one in *Install and first run*.
   `2f8bb8f7100a`; source cluster `C.UTF-8`, like this one) into `watcher_dev`
   in 1.8 s, fetch included. Every gate passed, every table's row count equalled
   the dump's own `COPY` rows, and the dev server served the restored items.
+- **co-watcher's own nightly, and the dead-man on the live monitor
+  (2026-09-16)**, the #296 step 23 soak. The timer's first unattended run
+  shipped `co-watcher/20260916T032228Z.dump` at 03:22:28Z and checked in `ok`.
+  It restored into a rebuilt empty `watcher_dev` in 1.9 s, fetch included:
+  every gate passed and all 17 tables equalled the dump's own `COPY` rows.
+  Then the window was cut to `interval_seconds` 60 / `grace_seconds` 0: the
+  sweep alerted at 13:21:02Z and the state read `missing`, a hand-started run
+  recovered it at 13:21:28Z with `last_variables` naming its `co-watcher/`
+  object, and the window went back to 24 h plus 2 h (next deadline
+  2026-09-17T15:21Z). The monitor is read and patched with the check-in key
+  itself, over `X-API-Key` — `Authorization: Bearer` answers 403 and reads as
+  a key problem rather than a header one.

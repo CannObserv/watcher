@@ -28,6 +28,14 @@ dashboard (`WATCHER_PUBLIC_BASE_URL`), and from *inside* the VM that name
 resolves to the VM's own address and skips the proxy — so a proxy check has to
 come from outside.
 
+**The old name is gone, and it is not ours any more.** The shared `lax` VM was
+deleted on 2026-09-16 (#296 step 30, D12) and its tailnet node removed with it.
+`watcher.exe.xyz` is therefore **released into exe.dev's global namespace, where
+any account may claim it** — so every link delivered before the cutover is dead,
+and anything that answers at that host in future is a stranger's, not a stale
+copy of ours. Never treat it as this service, and never re-point anything at it.
+The node name `watcher-lax` it carried at the end belongs to nothing.
+
 ## Who this node talks to
 
 | Peer | Address | Used for |

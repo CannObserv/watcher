@@ -1,0 +1,4 @@
+# #296 step 25: the touch-target script is named verbatim in docs/STYLE.md:154,
+# beside the pytest suite that enforces the same idiom. AGENTS.md keeps the test
+# path — the one an agent runs — and drops the script.
+duplicate :: scripts/check-touch-targets.sh

@@ -204,3 +204,57 @@ tighten :: **HTMX:** **Detect HTMX with `is_htmx(request)`** ([src/dashboard/dep
 # requirement stay inline: those are the two facts that change what an agent does.
 tighten :: Skills live in `skills/` (agentskills.io) and `.claude/skills/` (Claude Code).
 tighten :: Cross-project search to the sister `notifier` index requires a per-instance
+
+# ============================================================================
+# #296 step 25 curation (AGENTS.md 6252 -> 5975). Every entry below is a class-C
+# rewrite in place: the claims survive, the words do not. --claims passes, so
+# each line's atoms are accounted for somewhere in the surface.
+# ============================================================================
+
+# --- Environment & Tooling: the Tailwind pin, said in fewer words ---
+tighten :: Python ≥3.12, uv, pytest, ruff; Node.js + npm (Tailwind CLI
+
+# --- Code Exploration Policy: two lines merged into one, same two rules ---
+# The health-hook clause is KEPT verbatim inside the merged line: docs/SKILLS.md
+# names it deliberate belt-and-braces, so it is not a candidate for removal.
+tighten :: SocratiCode is indexed on this repo
+tighten :: A second, daily health hook **reports only**
+tighten :: For broad semantic questions
+
+# --- Infrastructure / Server Lifecycle: same rules, less connective tissue ---
+tighten :: **Connection policy (#287, #288, #290).**
+tighten :: Do not directly edit sibling repos
+
+# --- Common Commands: one word ---
+tighten :: fails rather than defaulting
+tighten :: to production.
+
+# --- Watched Items #254: where pause lives and the callerless POST both move
+# to docs/WATCHED-ITEMS.md, which already carries them (lines 144-150, 246).
+tighten :: item-level pause lives in Archiver's
+tighten :: dashboard alone, and every announcement-owned field
+tighten :: still works but has had no caller since
+tighten :: archiver#158. What each 409 is:
+
+# --- Watched Items #293: the mechanism (horizon freeze, upsert target) lives in
+# docs/CONTENT-PIPELINE.md § "A renewed blob reference is re-announced (#293)".
+# The two invariants an agent must not get wrong — never the baseline, and a
+# renewal may only improve a row — stay inline.
+tighten :: A full fetch renews the
+tighten :: blob behind the latest revision
+tighten :: otherwise Archiver's stored horizon freezes
+tighten :: a stable item becomes unreplicable
+tighten :: observation of the pair, not a refresh
+tighten :: improve a queued row:
+
+# --- Style & UI: five prose bullets -> five imperative rules. Each rule's detail
+# was already authoritative in docs/STYLE.md / docs/UI.md, and in fuller form
+# there than here (UI.md:361 carries the HX-Boosted guard this never mentioned).
+tighten :: Component library and the
+tighten :: Both authoritative; what follows
+tighten :: is only what is easy to get wrong.
+tighten :: **Brand:** Cannabis Observer
+tighten :: **Dark Mode:** Tailwind `dark:` variants
+tighten :: **Accessibility:** WCAG 2.1 AA, and no
+tighten :: **CSS:** Tailwind v4 with `@theme`
+tighten :: **HTMX:** **detect with `is_htmx(request)`**

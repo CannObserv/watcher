@@ -12,7 +12,7 @@ TDD required. Red → Green → Refactor. No production code without a failing t
 
 ## Environment & Tooling
 
-Python ≥3.12, uv, pytest, ruff; Node.js + npm (Tailwind CLI — `sudo npm install -g @tailwindcss/cli@4.2.4`, pinned — a newer CLI rebuilds `output.css` differently and `check-css.sh` calls it stale).
+Python ≥3.12, uv, pytest, ruff; Node.js + npm (Tailwind CLI — `sudo npm install -g @tailwindcss/cli@4.2.4`; the pin is load-bearing, a newer CLI rebuilds `output.css` and `check-css.sh` calls it stale).
 
 **Cannobserv wheelhouse.** Populate it before any `uv` command — `[tool.uv]
 find-links` makes every invocation require the directory:
@@ -28,10 +28,9 @@ Auth, upgrade procedure and the pinned version: [docs/DEPLOYMENT.md](docs/DEPLOY
 
 ## Code Exploration Policy
 
-SocratiCode is indexed on this repo (`.socraticodecontextartifacts.json` present). Its MCP tools are **deferred** — schemas load only after a `ToolSearch` prefetch. The SessionStart hook prints the prefetch query; run it before exploring.
-A second, daily health hook **reports only** — confirm with `codebase_status` before acting on it.
+SocratiCode indexes this repo. Its MCP tools are **deferred**: schemas load only after a `ToolSearch` prefetch, which the SessionStart hook prints — run it before exploring. A second, daily health hook **reports only** — confirm with `codebase_status` before acting on it.
 
-**Negative rule.** For broad semantic questions ("where is X", "how does Y work", "what depends on Z"), use SocratiCode MCP tools first. Reach for `grep`/`ripgrep` only on exact strings (error messages, log lines, known symbols). Reserve the Explore subagent for path-pattern walks (e.g. "all `*.py` under `src/api/routes/`"), not semantic search.
+**Negative rule.** Broad semantic questions ("where is X", "how does Y work", "what depends on Z") go to SocratiCode first; `grep`/`ripgrep` only for exact strings (error messages, log lines, known symbols); the Explore subagent only for path-pattern walks (`*.py` under `src/api/routes/`), never semantic search.
 
 The goal→tool table, index scope and rebuild, and the literal prefetch query: [docs/SKILLS.md](docs/SKILLS.md).
 
@@ -55,7 +54,7 @@ The exe.dev proxy forwards 3000–9999; dev server at `https://co-watcher.exe.xy
 
 **Retention is sized against the set (#292).** A config/state cap is floored per batch — `tests/test_bus_stream_kinds.py` fails a publish missing `maxlen` *or* missing `floor=`.
 
-**Connection policy (#287, #288, #290).** `socket_timeout` is a **floor**, not a ceiling — derive it from `src/core/read_windows.py`, never transcribe a window; retries are an explicit **zero** (a redis-py retry re-sends the command). A full broker refuses `XADD` with `OutOfMemoryError`, and an ACL user denies it with `NoPermissionError` — both `ResponseError`s and **not** connection errors: keep both transient in every producer. [docs/BUS-CONNECTION-POLICY.md](docs/BUS-CONNECTION-POLICY.md).
+**Connection policy (#287, #288, #290).** `socket_timeout` is a **floor**, not a ceiling — derive it from `src/core/read_windows.py`, never transcribe a window; retries are an explicit **zero** (a redis-py retry re-sends the command). A full broker refuses `XADD` with `OutOfMemoryError`, an ACL user with `NoPermissionError` — both `ResponseError`s, **not** connection errors: keep both transient in every producer. [docs/BUS-CONNECTION-POLICY.md](docs/BUS-CONNECTION-POLICY.md).
 
 ## Server Lifecycle
 
@@ -73,7 +72,7 @@ bash scripts/dev_server.sh
 
 **Archiver owns the canonical registry**; watcher consumes it over the bus and makes **no HTTP calls to Archiver at all** — re-adding an SDK is a design regression. Don't add Archiver code to this repo: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) → *Sibling services*.
 
-**Cross-repo policy.** Do not directly edit sibling repos (`archiver`, `notifier`) within a watcher conversation. If a change to a sibling is needed: identify the gap, recommend it, get approval, then file a GH issue in that repo. Implementation happens in a separate session scoped to the sibling.
+**Cross-repo policy.** Never edit sibling repos (`archiver`, `notifier`) from a watcher conversation. Identify the gap, recommend it, get approval, then file a GH issue in that repo; implementation is a separate session scoped to it.
 
 **Nothing in `src/` mirrors to Archiver** (#159, #236) — don't reintroduce a sync obligation: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) → *No cross-repo mirror discipline*.
 
@@ -110,8 +109,8 @@ uv run alembic upgrade head                  # apply migrations
 the models against production. Build a scratch database first (#259):
 [docs/COMMANDS.md](docs/COMMANDS.md) → *Autogenerate wants a scratch database*.
 Alembic connects with `WATCHER_MIGRATION_DATABASE_URL`, else `DATABASE_URL`;
-`alembic.ini` carries no URL, so an unloaded shell fails rather than defaulting
-to production.
+`alembic.ini` carries no URL, so an unloaded shell fails rather than reaching
+production.
 
 ## Watched Items
 
@@ -122,22 +121,19 @@ Item".
 **The `info.registry` reconcile is the creation path**, and the registry owns
 cadence and active state while Watcher owns mechanism (#254): an announcement is
 authoritative for a named set of columns, everything else survives reconciliation,
-and **a local pause is not sticky** — item-level pause lives in Archiver's
-dashboard alone, and every announcement-owned field 409s locally on a reconciled
-item. `POST /api/v1/watched-items` still works but has had no caller since
-archiver#158. What each 409 is: [docs/WATCHED-ITEMS.md](docs/WATCHED-ITEMS.md).
+and **a local pause is not sticky** — every announcement-owned field 409s
+locally on a reconciled item. What each 409 is, where pause does live, and the
+callerless `POST /api/v1/watched-items`:
+[docs/WATCHED-ITEMS.md](docs/WATCHED-ITEMS.md).
 
 **Empty extraction is a failure, not a change (#258).** Every `source_spec`
 yielding empty chunks raises `ExtractionError` and writes nothing —
 unconditionally, on both sides of a baseline:
 **[docs/CONTENT-PIPELINE.md](docs/CONTENT-PIPELINE.md)**.
 
-**An unchanged fingerprint still announces (#293).** A full fetch renews the
-blob behind the latest revision, so the cache-hit branch upserts a
-`PendingArchiverSync` for it — otherwise Archiver's stored horizon freezes at
-the first observation and a stable item becomes unreplicable. **Never the
-baseline** (that would be a *first* observation of the pair, not a refresh),
-and a renewal may only ever improve a queued row:
+**An unchanged fingerprint still announces (#293).** The cache-hit branch
+upserts a `PendingArchiverSync` for the latest revision — **never the
+baseline**, and a renewal may only ever improve a queued row:
 [docs/CONTENT-PIPELINE.md](docs/CONTENT-PIPELINE.md).
 
 Fields, what each 409 is, the authoritative column list, schedule resolution, domain keying, media-type dispatch, template CRUD: [docs/WATCHED-ITEMS.md](docs/WATCHED-ITEMS.md). Lifecycle, delete guards, every dashboard surface: [docs/WATCHED-ITEMS-DASHBOARD.md](docs/WATCHED-ITEMS-DASHBOARD.md).
@@ -174,19 +170,15 @@ Records are JSON with a four-key floor — `timestamp`/`level`/`logger`/`message
 
 ## Style & UI
 
-Design system: [docs/STYLE.md](docs/STYLE.md). Component library and the
-HTMX/flash patterns: [docs/UI.md](docs/UI.md). Both authoritative; what follows
-is only what is easy to get wrong.
+Design system: [docs/STYLE.md](docs/STYLE.md); component library and HTMX/flash
+patterns: [docs/UI.md](docs/UI.md). Both authoritative — below is only what is
+easy to get wrong.
 
-**Brand:** Cannabis Observer — `co-purple-600` (#6d4488) primary accent. Never use brand colors for semantic status (green/yellow/red/blue).
-
-**Dark Mode:** Tailwind `dark:` variants on every color utility. Class-based toggle (`<html class="dark">`), localStorage key `watcher-color-scheme`.
-
-**Accessibility:** WCAG 2.1 AA, and no `title` attributes. Touch-target idiom (#203), guarded by `tests/dashboard/test_touch_targets.py` and `scripts/check-touch-targets.sh`: [docs/STYLE.md](docs/STYLE.md) §7–8.
-
-**CSS:** Tailwind v4 with `@theme` in `input.css`; use the component classes rather than raw utilities, and never a CDN build.
-
-**HTMX:** **detect with `is_htmx(request)`**, never a bare `HX-Request` read — guarded by `tests/dashboard/test_htmx_detection.py` (#211). OOB flash: [docs/UI.md](docs/UI.md) §3.
+- **Brand `co-purple-600` is never a status color** — green/yellow/red/blue own those.
+- **`dark:` on every color utility**; class toggle (`<html class="dark">`), not a media query.
+- **No `title` attributes** (WCAG 2.1 AA). Touch targets follow the #203 idiom, guarded by `tests/dashboard/test_touch_targets.py`.
+- **Component classes over raw utilities**; Tailwind v4 `@theme` in `input.css`, never a CDN build.
+- **Detect HTMX with `is_htmx(request)`**, never a bare `HX-Request` read (#211).
 
 ## Agent Skills
 
@@ -204,6 +196,7 @@ A skill is symlinked into both `skills/` and `.claude/skills/`; overrides in `sk
 - [docs/ENVIRONMENT.md](docs/ENVIRONMENT.md) — every env file and variable, load order, the unit-only credentials
 - [docs/RECOVERY.md](docs/RECOVERY.md) — nightly DB backup to GCS, restore, go/no-go gates
 - [docs/MIGRATIONS.md](docs/MIGRATIONS.md) — the manual upgrade step, the two-role grant model, one-time orderings
+- [docs/reference/tailscale.md](docs/reference/tailscale.md) — this node: identity, peers, the cold-boot race, the ACL rules
 - [docs/SKILLS.md](docs/SKILLS.md) — skill triggers, vendored skill repos, SocratiCode workflow
 - [docs/STYLE.md](docs/STYLE.md) — the design system: brand, color, dark mode, tokens, layout, touch targets, accessibility
 - [docs/UI.md](docs/UI.md) — the component library and the HTMX/flash interaction patterns

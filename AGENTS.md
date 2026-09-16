@@ -48,9 +48,9 @@ The goal→tool table, index scope and rebuild, and the literal prefetch query: 
 
 The exe.dev proxy forwards 3000–9999; dev server at `https://co-watcher.exe.xyz:8001/`.
 
-**Single process is load-bearing.** One uvicorn process runs everything — API, embedded Procrastinate worker, `content.blobs` fact consumer, cache sweeper. **Never run `uvicorn --workers N` or a second worker unit against prod.** Why the fact consumer makes this load-bearing, and the escalation path that is *not built*: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) → *Single process*.
+**Single process is load-bearing.** One uvicorn process runs everything — API, embedded Procrastinate worker, `content.blobs` fact consumer, cache sweeper. **Never `uvicorn --workers N`, never a second worker unit against prod.** Why the fact consumer makes it load-bearing, and the escalation path that is *not built*: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) → *Single process*.
 
-**The bus.** Archiver operates the broker; watcher publishes four streams and consumes two — `content.blobs` (single-member group `watcher.blobs`, derived by co-core's `group_name` — #285) and `info.registry` (**groupless**, replayed from `0-0` every boot). `WATCHER_BUS_REDIS_URL` unset → publish tasks skip loudly. Stream inventory and ownership, the fetch contracts, `info_source_id` on the wire: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) → *Redis and the bus*.
+**The bus.** Archiver operates the broker; watcher publishes four streams and consumes two — `content.blobs` (single-member group `watcher.blobs`, derived by co-core's `group_name` — #285) and `info.registry` (**groupless**, replayed from `0-0` every boot). `WATCHER_BUS_REDIS_URL` unset → publish tasks skip loudly. Inventory, ownership, fetch contracts, `info_source_id` on the wire: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) → *Redis and the bus*.
 
 **Retention is sized against the set (#292).** A config/state cap is floored per batch — `tests/test_bus_stream_kinds.py` fails a publish missing `maxlen` *or* missing `floor=`.
 
@@ -70,7 +70,7 @@ bash scripts/dev_server.sh
 
 **Never launch uvicorn by hand with the prod env loaded** — it shares the prod DB and runs a second worker on the prod queue (#233). `scripts/dev_server.sh` and `src/core/db_safety.py` both refuse any DB whose name lacks a `_test`/`_dev` suffix. Full rationale: [docs/COMMANDS.md](docs/COMMANDS.md) → *Development*.
 
-**Archiver owns the canonical registry**; watcher consumes it over the bus and makes **no HTTP calls to Archiver at all** — re-adding an SDK is a design regression. Don't add Archiver code to this repo: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) → *Sibling services*.
+**Archiver owns the canonical registry**; watcher consumes it over the bus and makes **no HTTP calls to Archiver at all** — re-adding an SDK is a design regression, and Archiver code does not belong in this repo: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) → *Sibling services*.
 
 **Cross-repo policy.** Never edit sibling repos (`archiver`, `notifier`) from a watcher conversation. Identify the gap, recommend it, get approval, then file a GH issue in that repo; implementation is a separate session scoped to it.
 
@@ -91,9 +91,9 @@ Load both into a shell (pytest, psql, gh):
 source scripts/load-env.sh
 ```
 
-**Naming rule for new variables.** Anything naming a shared external resource takes a **service-prefixed** name with a separate dev key (`WATCHER_BUS_REDIS_URL` / `WATCHER_DEV_BUS_REDIS_URL`). A bare `REDIS_URL` is silently inherited from `/etc/watcher/.env` — the #233 hazard in env-var form: [docs/ENVIRONMENT.md](docs/ENVIRONMENT.md) → *Environment Variables*.
+**Naming rule.** Anything naming a shared external resource takes a **service-prefixed** name plus a dev key (`WATCHER_BUS_REDIS_URL` / `WATCHER_DEV_BUS_REDIS_URL`): a bare `REDIS_URL` is silently inherited from `/etc/watcher/.env`, the #233 hazard in env-var form. [docs/ENVIRONMENT.md](docs/ENVIRONMENT.md) → *Environment Variables*.
 
-**A URL is configuration, not permission.** Three unit-only opt-ins gate the production resources — `WATCHER_ALLOW_PRODUCTION_DB` (#233), `WATCHER_BUS_ENABLED` (#262), `WATCHER_NOTIFIER_ENABLED` (#277). Never put one in an env file; a URL held without its flag aborts startup — and for the notifier, so does the **flag held without a URL**, which means the unit lost `/etc/watcher/notifier.env` (#278). `scripts/dev_server.sh` and `tests/conftest.py` clear what they did not set.
+**A URL is configuration, not permission.** Three unit-only opt-ins gate production resources — `WATCHER_ALLOW_PRODUCTION_DB` (#233), `WATCHER_BUS_ENABLED` (#262), `WATCHER_NOTIFIER_ENABLED` (#277) — and never belong in an env file. A URL without its flag aborts startup — and for the notifier, so does the **flag held without a URL**, which means the unit lost `/etc/watcher/notifier.env` (#278). `scripts/dev_server.sh` and `tests/conftest.py` clear what they did not set.
 
 ## Common Commands
 
@@ -123,7 +123,8 @@ cadence and active state while Watcher owns mechanism (#254): an announcement is
 authoritative for a named set of columns, everything else survives reconciliation,
 and **a local pause is not sticky** — every announcement-owned field 409s
 locally on a reconciled item. What each 409 is, where pause does live, and the
-callerless `POST /api/v1/watched-items`:
+`POST /api/v1/watched-items` — still the only creation path, with no caller
+since archiver#158:
 [docs/WATCHED-ITEMS.md](docs/WATCHED-ITEMS.md).
 
 **Empty extraction is a failure, not a change (#258).** Every `source_spec`
@@ -131,9 +132,10 @@ yielding empty chunks raises `ExtractionError` and writes nothing —
 unconditionally, on both sides of a baseline:
 **[docs/CONTENT-PIPELINE.md](docs/CONTENT-PIPELINE.md)**.
 
-**An unchanged fingerprint still announces (#293).** The cache-hit branch
-upserts a `PendingArchiverSync` for the latest revision — **never the
-baseline**, and a renewal may only ever improve a queued row:
+**An unchanged fingerprint still announces (#293)** — after a **full fetch**,
+which renews the blob, so its cache-hit branch upserts a `PendingArchiverSync`
+for the latest revision. A 304 renews nothing and announces nothing. **Never
+the baseline**, and a renewal may only ever improve a queued row:
 [docs/CONTENT-PIPELINE.md](docs/CONTENT-PIPELINE.md).
 
 Fields, what each 409 is, the authoritative column list, schedule resolution, domain keying, media-type dispatch, template CRUD: [docs/WATCHED-ITEMS.md](docs/WATCHED-ITEMS.md). Lifecycle, delete guards, every dashboard surface: [docs/WATCHED-ITEMS-DASHBOARD.md](docs/WATCHED-ITEMS-DASHBOARD.md).
@@ -171,14 +173,12 @@ Records are JSON with a four-key floor — `timestamp`/`level`/`logger`/`message
 ## Style & UI
 
 Design system: [docs/STYLE.md](docs/STYLE.md); component library and HTMX/flash
-patterns: [docs/UI.md](docs/UI.md). Both authoritative — below is only what is
-easy to get wrong.
-
-- **Brand `co-purple-600` is never a status color** — green/yellow/red/blue own those.
-- **`dark:` on every color utility**; class toggle (`<html class="dark">`), not a media query.
-- **No `title` attributes** (WCAG 2.1 AA). Touch targets follow the #203 idiom, guarded by `tests/dashboard/test_touch_targets.py`.
-- **Component classes over raw utilities**; Tailwind v4 `@theme` in `input.css`, never a CDN build.
-- **Detect HTMX with `is_htmx(request)`**, never a bare `HX-Request` read (#211).
+patterns: [docs/UI.md](docs/UI.md). **Read one of them before writing a
+template** — both carry every rule below in fuller form than this file did:
+brand color is never a status color (STYLE §2), every color utility takes its
+`dark:` variant (§3), WCAG 2.1 AA and no `title` attributes (§7–8), never a CDN
+build (§10), component classes over raw utilities (UI §4), and
+`is_htmx(request)` rather than a bare `HX-Request` read (UI §2, #211).
 
 ## Agent Skills
 
@@ -186,19 +186,19 @@ A skill is symlinked into both `skills/` and `.claude/skills/`; overrides in `sk
 
 ## Detail Docs
 
-- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — module layout, sibling services, the Archiver checkout constraint, bus topology and fetch contracts
-- [docs/BUS-CONNECTION-POLICY.md](docs/BUS-CONNECTION-POLICY.md) — #287 bus client timeouts, retries, redaction, startup PING; #288 the `noeviction` cap and the observed command inventory
+- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — module layout, sibling services, bus topology, fetch contracts
+- [docs/BUS-CONNECTION-POLICY.md](docs/BUS-CONNECTION-POLICY.md) — #287 timeouts, retries, redaction, startup PING; #288 the `noeviction` cap
 - [docs/COMMANDS.md](docs/COMMANDS.md) — every runnable command, the Archiver-sibling test setup, CI
-- [docs/CONTENT-PIPELINE.md](docs/CONTENT-PIPELINE.md) — fetch → extract → fingerprint, the fetch-command outbox, the revisions producer
+- [docs/CONTENT-PIPELINE.md](docs/CONTENT-PIPELINE.md) — fetch → extract → fingerprint, the outbox, the revisions producer
 - [docs/CONDITIONAL-GET.md](docs/CONDITIONAL-GET.md) — #269 validators: gate, snapshot, invalidation
-- [docs/CONVENTIONS.md](docs/CONVENTIONS.md) — logging configuration, ULID error handling, DB-trigger rules
+- [docs/CONVENTIONS.md](docs/CONVENTIONS.md) — logging configuration, ULID errors, DB triggers
 - [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) — systemd units, the install runbook, timers, wheelhouse auth
 - [docs/ENVIRONMENT.md](docs/ENVIRONMENT.md) — every env file and variable, load order, the unit-only credentials
 - [docs/RECOVERY.md](docs/RECOVERY.md) — nightly DB backup to GCS, restore, go/no-go gates
-- [docs/MIGRATIONS.md](docs/MIGRATIONS.md) — the manual upgrade step, the two-role grant model, one-time orderings
-- [docs/reference/tailscale.md](docs/reference/tailscale.md) — this node: identity, peers, the cold-boot race, the ACL rules
+- [docs/MIGRATIONS.md](docs/MIGRATIONS.md) — the manual upgrade step, the two-role grants, one-time orderings
+- [docs/reference/tailscale.md](docs/reference/tailscale.md) — this node: identity, peers, the cold-boot race, ACL rules
 - [docs/SKILLS.md](docs/SKILLS.md) — skill triggers, vendored skill repos, SocratiCode workflow
 - [docs/STYLE.md](docs/STYLE.md) — the design system: brand, color, dark mode, tokens, layout, touch targets, accessibility
-- [docs/UI.md](docs/UI.md) — the component library and the HTMX/flash interaction patterns
-- [docs/WATCHED-ITEMS.md](docs/WATCHED-ITEMS.md) — the entity: fields, schedule resolution, registry reconciliation, notifications
-- [docs/WATCHED-ITEMS-DASHBOARD.md](docs/WATCHED-ITEMS-DASHBOARD.md) — the operator surface: routes, lifecycle guards, list and detail views, audit parity
+- [docs/UI.md](docs/UI.md) — the component library, the HTMX/flash patterns
+- [docs/WATCHED-ITEMS.md](docs/WATCHED-ITEMS.md) — the entity: fields, schedule resolution, reconciliation, notifications
+- [docs/WATCHED-ITEMS-DASHBOARD.md](docs/WATCHED-ITEMS-DASHBOARD.md) — the operator surface: routes, lifecycle guards, views, audit parity

@@ -17,4 +17,4 @@ gated :: Records are JSON with a four-key floor
 enumerated :: Shells load two env files in order
 
 # All three flags are named in the same sentence, each with its issue.
-enumerated :: Three unit-only opt-ins gate the production resources
+enumerated :: Three unit-only opt-ins gate production resources

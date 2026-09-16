@@ -63,8 +63,11 @@ BUS_ENABLED_ENV = "WATCHER_BUS_ENABLED"
 # Until now this was a bare ``Redis.from_url`` with library defaults, which
 # loopback made harmless: a local broker either answers in microseconds or
 # refuses immediately. Neither is true across the tailnet hop to the relocated
-# broker, where the measured path is a ~40 ms DERP relay that never establishes
-# a direct connection (24 pings, two runs, all relayed). A *stalled* broker — as
+# broker, where the path was measured at a ~40 ms DERP relay that never
+# established a direct connection (24 pings, two runs, all relayed). Since #296
+# moved this service to pdx the same hop is direct and ~1 ms warm; these values
+# are unchanged, because they come from the read windows and retry budgets
+# rather than the round trip (docs/BUS-CONNECTION-POLICY.md). A *stalled* broker — as
 # distinct from a refusing one — would hold a read open with no bound, and
 # because ``get_shared_bus_client`` pins one client for the process, the wedge
 # sits inside a service whose ``/health`` knows nothing about the bus.

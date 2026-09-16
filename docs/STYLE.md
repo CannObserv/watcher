@@ -49,6 +49,10 @@ Status badges and flashes use **Tailwind defaults only** — never brand purple/
 
 ## 3. Dark Mode
 
+- **The authoring rule: every color utility carries its `dark:` variant.** A
+  utility that sets a color without one renders a light-mode color in dark mode
+  — the class-based toggle (`<html class="dark">`) below cannot rescue it,
+  because there is no media-query path to fall back on.
 - **Mechanism**: Tailwind `darkMode: class` via `@custom-variant dark (&:where(.dark, .dark *));` in `input.css`. **Purely class-based** — there is no `@media (prefers-color-scheme)` dark path, so `<html>` carries `.dark` (dark) or no class (light); "system" is resolved to one of those by JS, not by CSS.
 - **localStorage key**: `watcher-color-scheme` — three states:
 
@@ -185,6 +189,9 @@ pytest` suite) and `scripts/check-touch-targets.sh` fail on redundant
 ## 10. Performance
 
 - **No CDN scripts**: All JS vendored locally in `src/dashboard/static/js/`.
+- **No CDN Tailwind build**: the CSS is built locally by the pinned CLI
+  (`bash scripts/build-css.sh`) into `output.css`; a CDN build resolves
+  `@theme` differently and silently drops the component layer.
 - **`defer`**: All `<script>` tags use `defer` — except the inline FOUC-prevention script in `<head>` (must run synchronously).
 - **Cache-busting**: `BUILD_ID` env var (default `"dev"`) exposed as `{{ build_id }}` in templates. All static assets loaded with `?v={{ build_id }}`. Set in `src/dashboard/__init__.py`.
 - **System font stack**: No custom fonts loaded. Tailwind default font stack.

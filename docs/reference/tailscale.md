@@ -19,8 +19,9 @@ convenience. This is the reference for it (#296 step 25).
 `watcher` because peers' ACLs and `WATCHER_BUS_REDIS_URL` name it; the OS
 hostname is `co-watcher` because the backup's object prefix defaults to it, and
 a host named `watcher` would have written into the retired VM's timeline
-(`docs/RECOVERY.md` → *Restore*). Neither can be renamed to match the other
-without breaking one of those.
+(`docs/RECOVERY.md` → *Restore*). A rename is survivable — `WATCHER_BACKUP_PREFIX`
+overrides the prefix — but it is never *just* a rename: set that variable in the
+same change, or the next nightly lands in the wrong timeline.
 
 The exe.dev proxy is a separate path: `https://co-watcher.exe.xyz` is the public
 dashboard (`WATCHER_PUBLIC_BASE_URL`), and from *inside* the VM that name
@@ -54,7 +55,9 @@ few seconds later. Measured on the 2026-09-15 reboot: the bus PING answered in
 7.31 ms, warm p50 1.55 ms. A single slow first reading is therefore normal and
 not evidence of a problem; a *sustained* relay is.
 
-Check which path is live:
+Every number above came from this host and is re-derivable here; the reboot and
+latency figures are the #296 step 22/24 records, posted on that issue and on
+broker#8. Check which path is live:
 
 ```bash
 tailscale status | grep broker      # "direct 16.145.19.221:13487" vs "relay sea"

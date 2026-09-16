@@ -142,3 +142,9 @@ src/ops/restore.py :: then the gates in docs/RECOVERY.md
 # anchor in a doc this curation does not otherwise touch.
 docs/COMMANDS.md :: Backup, restore and job history (#296)
 docs/CONTENT-PIPELINE.md :: A renewed blob reference is re-announced (#293)
+
+# --- #296 step 25: fires only under `check-seams.sh --file docs/STYLE.md`.
+# UI.md's opening cross-link to STYLE.md predates this run and still holds —
+# the demotion ADDED to STYLE.md (the dark-variant authoring rule, the CDN
+# prohibition) and moved nothing out of it, so nothing it points at has gone.
+docs/UI.md :: [STYLE.md](STYLE.md), which stays the design system

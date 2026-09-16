@@ -258,3 +258,19 @@ tighten :: **Dark Mode:** Tailwind `dark:` variants
 tighten :: **Accessibility:** WCAG 2.1 AA, and no
 tighten :: **CSS:** Tailwind v4 with `@theme`
 tighten :: **HTMX:** **detect with `is_htmx(request)`**
+
+# --- #296 step 25, second pass: after the fresh-eyes review restored five rules
+# that the first pass had weakened, these paid for them. All wayfinding or
+# connective tissue; no rule changed scope.
+tighten :: **Single process is load-bearing.**
+tighten :: **The bus.** Archiver operates the broker
+tighten :: **Archiver owns the canonical registry**
+tighten :: **A URL is configuration, not permission.** Three unit-only opt-ins gate the production
+tighten :: the Archiver checkout constraint, bus topology and fetch contracts
+tighten :: #288 the `noeviction` cap and the
+tighten :: fetch → extract → fingerprint, the fetch-command outbox
+tighten :: logging configuration, ULID error handling, DB-trigger rules
+tighten :: the manual upgrade step, the two-role grant model
+tighten :: the component library and the HTMX/flash interaction patterns
+tighten :: the entity: fields, schedule resolution, registry reconciliation
+tighten :: routes, lifecycle guards, list and detail views, audit parity

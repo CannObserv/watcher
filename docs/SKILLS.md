@@ -238,7 +238,7 @@ Prefetch query (run via `ToolSearch` once per session if the SessionStart remind
 
 ### Linked Projects
 
-Cross-project search to the sister `notifier` index is enabled via `SOCRATICODE_LINKED_PROJECTS=/home/exedev/notifier` in `.claude/settings.local.json` (gitignored — per-instance config, not a project commitment). The value may be relative (resolved from the project root) or absolute; absolute is recommended since the MCP server's CWD isn't guaranteed across hosts. Pass `includeLinked: true` on `codebase_search` to fan out across both indexes; results carry a `[watcher]` / `[notifier]` label.
+Cross-project search to the sister `notifier` index is enabled via `SOCRATICODE_LINKED_PROJECTS=/home/exedev/notifier` in `.claude/settings.local.json` (gitignored — per-instance config, not a project commitment). **Inert on co-watcher (#296):** that checkout stayed on the retired VM, so the variable names a path that does not exist here and `includeLinked: true` quietly returns `[watcher]` results only — no error, just no fan-out. Re-enabling it means cloning notifier locally and repointing the variable; until then, treat linked results as unavailable rather than empty. The value may be relative (resolved from the project root) or absolute; absolute is recommended since the MCP server's CWD isn't guaranteed across hosts. Pass `includeLinked: true` on `codebase_search` to fan out across both indexes; results carry a `[watcher]` / `[notifier]` label.
 
 Upstream reference: [giancarloerra/socraticode#agent-instructions](https://github.com/giancarloerra/socraticode#agent-instructions)
 

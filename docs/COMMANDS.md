@@ -224,7 +224,9 @@ sudo -u postgres psql -d watcher < scripts/setup-backup-role.sql
 # Nightly dump to GCS — the timer runs it; one run by hand (docs/RECOVERY.md):
 sudo systemctl start watcher-backup.service
 
-# Restore — always name the host that shipped the dump (docs/RECOVERY.md → Restore):
+# Restore — always name the host that shipped the dump (docs/RECOVERY.md → Restore).
+# This host ships under `co-watcher/`; `watcher/` is the retired VM's timeline, whose
+# newest object post-dates the #296 cutover — `--latest --prefix watcher` is the wrong DB:
 sudo bash -c "set -a; . /etc/watcher/backup.env; set +a; export GOOGLE_APPLICATION_CREDENTIALS=/etc/watcher/co-watcher-backup.json; .venv/bin/python -m src.ops.restore --list"
 
 # One-off job-history backlog prune; the hourly task holds it after
@@ -236,8 +238,10 @@ WATCHER_ALLOW_PRODUCTION_DB=1 uv run python -m src.ops.prune_job_history --dry-r
 ## Tailwind CSS
 
 ```bash
-# One-time VM setup (tailwindcss CLI — global npm)
-sudo npm install -g @tailwindcss/cli
+# VM setup (tailwindcss CLI — global npm). Already installed on co-watcher.
+# Keep the pin: output.css carries its builder's version in the banner, and a
+# newer CLI rebuilds it differently, which check-css.sh reads as stale.
+sudo npm install -g @tailwindcss/cli@4.2.4
 
 # Build Tailwind CSS
 bash scripts/build-css.sh

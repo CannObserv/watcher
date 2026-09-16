@@ -248,10 +248,17 @@ lifecycle rule removes it with everything else.
 
 **Name the source host.** A restore runs on a different host from the one that
 shipped the dump — co-watcher at the cutover, a replacement in an incident — and
-dumps live under the shipping host's name (`watcher/…` from the shared VM). So
-`--latest` requires `--prefix HOST` and never defaults to the restoring host:
-once that host's own timer has run, its newest dump is a real, verifiable dump
-of the wrong database.
+dumps live under the shipping host's name. So `--latest` requires `--prefix
+HOST` and never defaults to the restoring host: once that host's own timer has
+run, its newest dump is a real, verifiable dump of the wrong database.
+
+> **This bucket holds two timelines. `co-watcher/` is the live one.** `watcher/`
+> is the retired shared VM's, and it is *not* frozen at the #296 cutover: that
+> host's timer was still enabled and shipped one more dump the next morning
+> (2026-09-16), so `--prefix watcher --latest` returns a recent, valid,
+> sha256-clean dump of the **pre-cutover** database. Restoring it would roll
+> production back to 2026-09-15 and look healthy doing it. Use `--prefix
+> co-watcher` for anything that is meant to be current.
 
 The restore is run by hand, as root — it reads the key file itself, where the
 backup unit is handed a copy — so it names the key explicitly: `backup.env`
@@ -260,7 +267,8 @@ does not.
 ```bash
 cd /home/exedev/watcher
 ENV='set -a; . /etc/watcher/backup.env; set +a; export GOOGLE_APPLICATION_CREDENTIALS=/etc/watcher/co-watcher-backup.json'
-SRC=watcher                                   # the host that shipped the dump
+SRC=co-watcher                                # the host that shipped the dump
+                                              # (`watcher` is the retired VM's)
 
 # What is there — every host's dumps, or one host's with --prefix
 sudo bash -c "$ENV; .venv/bin/python -m src.ops.restore --list"
@@ -347,6 +355,19 @@ SELECT count(*) FROM pg_default_acl WHERE array_to_string(defaclacl, ',') LIKE '
 When the source is still alive and **quiesced** (the #296 cutover), also compare
 row counts on every table outside `procrastinate_*` between source and target;
 on a live source a nightly dump's counts drift by design.
+
+**When the source is unreachable, count the dump instead.** co-watcher could not
+reach the old VM, and in an incident the replacement host cannot reach a dead
+one — so the dump is its own second opinion, carrying the rows it copied:
+
+```bash
+pg_restore --data-only -f - <object>.dump \
+  | awk '/^COPY /{t=$2; n=0; next} t && /^\\\.$/{print n"\t"t; t=""} t{n++}'
+```
+
+Compare that against `SELECT count(*)` per table in the restored database —
+**every** table, `procrastinate_*` included, since a quiesced dump's counts are
+exact. This is the form steps 16, 19 and 23 used; `-f -` is required.
 
 ## Rehearsals
 

@@ -12,7 +12,7 @@ TDD required. Red → Green → Refactor. No production code without a failing t
 
 ## Environment & Tooling
 
-Python ≥3.12, uv, pytest, ruff; Node.js + npm (Tailwind CLI — `sudo npm install -g @tailwindcss/cli`, one-time VM setup).
+Python ≥3.12, uv, pytest, ruff; Node.js + npm (Tailwind CLI — `sudo npm install -g @tailwindcss/cli@4.2.4`, pinned — a newer CLI rebuilds `output.css` differently and `check-css.sh` calls it stale).
 
 **Cannobserv wheelhouse.** Populate it before any `uv` command — `[tool.uv]
 find-links` makes every invocation require the directory:
@@ -47,7 +47,7 @@ The goal→tool table, index scope and rebuild, and the literal prefetch query: 
 
 `ARCHIVER_REPO_PATH` redirects everything needing the sibling repo (#254): [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
-The exe.dev proxy forwards 3000–9999; dev server at `https://watcher.exe.xyz:8001/`.
+The exe.dev proxy forwards 3000–9999; dev server at `https://co-watcher.exe.xyz:8001/`.
 
 **Single process is load-bearing.** One uvicorn process runs everything — API, embedded Procrastinate worker, `content.blobs` fact consumer, cache sweeper. **Never run `uvicorn --workers N` or a second worker unit against prod.** Why the fact consumer makes this load-bearing, and the escalation path that is *not built*: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) → *Single process*.
 

@@ -24,8 +24,13 @@ run now fails instead.
 
 Splits the single `watcher` role in two: `watcher` keeps owning and migrating
 the schema, and a new `watcher_app` serves it with `SELECT/INSERT/UPDATE/DELETE`
-and no DDL. **The code half is already deployed and is a no-op until this runs**
-— the fallback above means a single-role database behaves exactly as before.
+and no DDL.
+
+> **Done on co-watcher** — both roles exist and `DATABASE_URL` already names
+> `watcher_app`, with `WATCHER_MIGRATION_DATABASE_URL` on `watcher`. What
+> follows is for a **rebuilt or restored cluster**, where it is required rather
+> than optional: grants are not schema state, so no migration recreates them,
+> and step 1 rotates a live password if run against a working database.
 
 A third role on the cluster, `watcher_backup`, is neither of these: the nightly
 backup's read-only login (`pg_read_all_data`, peer auth only), created by
@@ -243,7 +248,12 @@ publishing `info_source_id` on its facts (CannObserv/replicator#28) *before*
 watcher restarts onto co-core 0.8.0, or the fact consumer cannot decode them.
 See [CONTENT-PIPELINE.md](CONTENT-PIPELINE.md) → "`info_source_id` on the wire".
 
-## Migration baseline (squash) — one-time stamp
+## Migration baseline (squash) — one-time stamp — **history; nothing to run**
+
+> co-watcher's database was created after the squash (it restored from a
+> post-squash dump and reads `2f8bb8f7100a`), so the gate below **cannot** pass
+> here and is not meant to: a "mismatch" on this host is the healthy answer.
+> This section applies only to a database that predates #234.
 
 The pre-#234 migration chain was squashed into a single genesis baseline
 (`2addddea0b03`, #234). This removed a transitional cross-schema FK into the
@@ -273,9 +283,9 @@ psql "${DATABASE_URL/+asyncpg/}" -c "SELECT version_num FROM alembic_version"
   Reconcile it first (upgrade it to `c5d6e7f8a9b0` using the pre-squash version
   files from git history, or investigate why it diverged) before squashing.
 
-> Production is expected to already be at `c5d6e7f8a9b0` — this gate should pass
-> on the first read. A mismatch means something unusual happened to the DB; do
-> not improvise the stamp, reconcile as above.
+> On a pre-#234 database this gate passes on the first read, and a mismatch
+> means something unusual happened to it: do not improvise the stamp, reconcile
+> as above. On co-watcher it simply does not apply — see the note above.
 
 ```bash
 # Only after confirming the version is c5d6e7f8a9b0:

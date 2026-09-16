@@ -24,7 +24,8 @@ A systemd unit file is provided at `deploy/watcher.service`.
 > that the URL and the flag are *held together*, not that the host answers, so a
 > watcher off the tailnet **starts clean** and then fails every dispatch at call
 > time. Join the tailnet, then confirm `curl http://notifier:9000/health`
-> answers before starting the unit.
+> answers before starting the unit. This node's identity, its peers, the
+> cold-boot race and the ACL rules: [reference/tailscale.md](reference/tailscale.md).
 
 ```bash
 # Create system env directory
@@ -206,7 +207,7 @@ When `BUILD_ID` is not set (e.g., running locally without the systemd unit), the
 
 ## Disk Cleanup Timer
 
-A weekly cleanup timer removes stale caches and rotates journal logs to keep the 19 GB VM disk healthy.
+A weekly cleanup timer removes stale caches and rotates journal logs to keep the 25 GB VM disk healthy.
 
 Files:
 - `deploy/watcher-cleanup.service` — oneshot service, runs as `exedev`
@@ -312,4 +313,4 @@ Auth is ADC: on the VM/deploy the `co-pypi-reader` SA key at `GOOGLE_APPLICATION
 
 ## notifier-client
 
-**notifier-client (#284).** The notifier SDK is a **pinned git-tag source** in `[tool.uv.sources]` — `https://github.com/CannObserv/notifier.git`, `subdirectory = "clients/python"`, `tag = "vX.Y.Z"`. The repo is public, so it needs no credential: no SSH key, no host alias, no CI URL rewrite (the `ssh://git@github-notifier/` alias it replaced existed only on this VM). **The tag is the pin** — uv enforces no version floor against a git source, so `"notifier-client"` stays bare in `[project.dependencies]`; a floor there would document intent and enforce nothing. **Upgrade:** change the tag, `uv sync` (refreshes `uv.lock`, freezing the commit), read notifier's [`clients/python/CHANGELOG.md`](https://github.com/CannObserv/notifier/blob/main/clients/python/CHANGELOG.md). A `Removed` dependency can no longer take a module this repo imports: `tests/test_dependency_imports.py` requires every third-party import declared here, bar an allowlist that names each exception's provider — `croniter`, via procrastinate (#294). **To stay put, do nothing.** `tests/test_dependency_sources.py` fails a git source that is not HTTPS (the scheme only — it cannot tell a public repo from a private one) or not pinned by `tag`, and any workflow under `.github/workflows/` that rewrites a git URL (`insteadOf` in any capitalisation — git config keys are case-insensitive). Currently pinned: **v0.3.1** — public API unchanged from 0.2.1; it dropped `python-dateutil` from the SDK's dependencies, which nothing here imports (it still resolves via `procrastinate` and `co-core`'s `dateparser`). Release procedure and the trigger for graduating to a published package: notifier's [`docs/RELEASING.md`](https://github.com/CannObserv/notifier/blob/main/docs/RELEASING.md).
+**notifier-client (#284).** The notifier SDK is a **pinned git-tag source** in `[tool.uv.sources]` — `https://github.com/CannObserv/notifier.git`, `subdirectory = "clients/python"`, `tag = "vX.Y.Z"`. The repo is public, so it needs no credential: no SSH key, no host alias, no CI URL rewrite (the `ssh://git@github-notifier/` alias it replaced existed only on the retired shared VM). **The tag is the pin** — uv enforces no version floor against a git source, so `"notifier-client"` stays bare in `[project.dependencies]`; a floor there would document intent and enforce nothing. **Upgrade:** change the tag, `uv sync` (refreshes `uv.lock`, freezing the commit), read notifier's [`clients/python/CHANGELOG.md`](https://github.com/CannObserv/notifier/blob/main/clients/python/CHANGELOG.md). A `Removed` dependency can no longer take a module this repo imports: `tests/test_dependency_imports.py` requires every third-party import declared here, bar an allowlist that names each exception's provider — `croniter`, via procrastinate (#294). **To stay put, do nothing.** `tests/test_dependency_sources.py` fails a git source that is not HTTPS (the scheme only — it cannot tell a public repo from a private one) or not pinned by `tag`, and any workflow under `.github/workflows/` that rewrites a git URL (`insteadOf` in any capitalisation — git config keys are case-insensitive). Currently pinned: **v0.3.1** — public API unchanged from 0.2.1; it dropped `python-dateutil` from the SDK's dependencies, which nothing here imports (it still resolves via `procrastinate` and `co-core`'s `dateparser`). Release procedure and the trigger for graduating to a published package: notifier's [`docs/RELEASING.md`](https://github.com/CannObserv/notifier/blob/main/docs/RELEASING.md).

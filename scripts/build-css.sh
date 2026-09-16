@@ -7,7 +7,7 @@ OUTPUT="$ROOT_DIR/src/dashboard/static/css/output.css"
 VENDOR_DIR="$ROOT_DIR/src/dashboard/static/css/vendor"
 
 if ! command -v tailwindcss &>/dev/null; then
-  echo "Error: tailwindcss not found. Run: sudo npm install -g @tailwindcss/cli"
+  echo "Error: tailwindcss not found. Run: sudo npm install -g @tailwindcss/cli@4.2.4"
   exit 1
 fi
 

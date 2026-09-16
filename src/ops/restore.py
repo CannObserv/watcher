@@ -27,8 +27,12 @@ real, verifiable dump of the wrong database. ``--latest`` takes ``--prefix``;
 ``--list`` without one shows every host's dumps.
 
     python -m src.ops.restore --list
-    python -m src.ops.restore --latest --prefix watcher --download-only /root/watcher-restore
-    python -m src.ops.restore --latest --prefix watcher --into watcher --run-as postgres
+    python -m src.ops.restore --latest --prefix co-watcher --download-only /root/watcher-restore
+    python -m src.ops.restore --latest --prefix co-watcher --into watcher --run-as postgres
+
+The prefix in those examples is deliberate: ``co-watcher/`` is the live host's
+timeline, while ``watcher/`` is the retired shared VM's and holds a dump shipped
+the morning *after* the #296 cutover — valid, recent, and the wrong database.
 """
 
 import argparse

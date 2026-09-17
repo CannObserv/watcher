@@ -6,15 +6,24 @@
 # Gated by tests/test_bus_stream_kinds.py::test_the_stream_inventory_is_complete
 # (L369-382), which asserts the referenced set equals WATCHER_STREAMS and whose
 # failure message names this AGENTS.md sentence by its wording.
-gated :: watcher publishes four streams and consumes two
+AGENTS.md :: gated :: watcher publishes four streams and consumes two
 
 # Gated by tests/core/test_logging.py::test_log_record_includes_structured_fields
 # (L79-89), which asserts message, level, logger and timestamp by name.
-gated :: Records are JSON with a four-key floor
+AGENTS.md :: gated :: Records are JSON with a four-key floor
 
 # The two files are the numbered list immediately below the sentence. Re-judged
 # 2026-09-15: #296 D5 reworded the line, which expired the entry.
-enumerated :: Shells load two env files in order
+AGENTS.md :: enumerated :: Shells load two env files in order
 
 # All three flags are named in the same sentence, each with its issue.
-enumerated :: Three unit-only opt-ins gate production resources
+AGENTS.md :: enumerated :: Three unit-only opt-ins gate production resources
+
+# --- 2026-09-17 (#299) -------------------------------------------------------
+# Every entry above is pinned to AGENTS.md, where its text lives. Unpinned, a
+# per-doc `--file docs/<doc>.md` run could only ever report them ambiguous
+# ("re-worded, or judged for another file"), because that run cannot tell those
+# two apart (skills#279). Pinned, they sit such a run out entirely — and an
+# entry whose text really has gone stale gets the "re-judge and prune" verdict
+# the acknowledgement grammar promises (#251). This repo curates more than one
+# surface, so per-doc runs are routine here.

@@ -4,10 +4,11 @@ description: Explores user intent, requirements, and design before any implement
 compatibility: Designed for Claude. Requires git and gh CLI. Python project using FastAPI, Pydantic, uv, ruff, pytest.
 metadata:
   author: gregoryfoster
-  version: "2.0"
+  version: "2.1"
   triggers: brainstorm, design this, let's design
   overrides: obra-superpowers/brainstorming
-  override-reason: "Project-specific conventions: docs/plans/ path (not docs/superpowers/specs/), #<n> [type]: desc commit convention, a GitHub issue on the architectural path, writing-plans optional not mandatory, invokes using-git-worktrees after design approval for multi-step implementation, TDD as the bounded path's implementation workflow, and the exe.dev proxy note for the visual companion's port. Vendor body otherwise tracked; visual-companion.md, spec-document-reviewer-prompt.md and scripts/ are vendor symlinks."
+  synced-from: "obra-superpowers v6.3.0 (b36e082)"
+  override-reason: "Project-specific conventions: docs/plans/ path (not docs/superpowers/specs/), #<n> [type]: desc commit convention, a GitHub issue on the architectural path, writing-plans optional not mandatory, invokes using-git-worktrees after design approval for multi-step implementation, TDD as the bounded path's implementation workflow, and the exe.dev proxy note for the visual companion's port. Also drops upstream's 'use elements-of-style:writing-clearly-and-concisely if available' pointer — that skill is not vendored here, so the line is dead text. Vendor body otherwise tracked; visual-companion.md, spec-document-reviewer-prompt.md and scripts/ are vendor symlinks. The vendor ships no version:, so the stamp above is watcher's own and synced-from: is the only comparand the doctor can use (#303)."
 ---
 
 <!-- forked from obra-superpowers@b36e082 (v6.3.0) -->

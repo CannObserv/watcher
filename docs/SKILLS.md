@@ -78,10 +78,22 @@ be an ancestor of the pinned commit. Falling *behind* the pin is fine — that i
 down on the fork's own schedule; a stamp that names no commit, or one ahead of the pin, is a
 marker that cannot be diffed against.
 
+**The same commit is recorded twice, and a re-sync bumps both** (#301, #303). The marker is for
+the reader; `synced-from: "<repo> <tag> (<commit>)"` in the frontmatter metadata is what
+`.skills/doctor.sh` reads, and it is the doctor's *second* drift comparison — a diff of that
+commit against the vendor now, scoped to the override's own real files. It is the only
+comparison that can see a vendor `SKILL.md` change that carried no `version:` bump, which is
+most of them (gregoryfoster/skills#286). For `brainstorming` it is the only comparison that can
+run at all: `obra/superpowers` ships no `version:`, so the stamp comparison has nothing on the
+vendor side and `version:` there is watcher's own number. Leaving `synced-from:` at the old
+commit re-reports drift that was just paid down; dropping it gives up the comparand entirely,
+and the doctor reports an override nothing can compare as the same failure as no drift
+detection at all.
+
 | Skill | Override reason |
 |---|---|
 | `shipping-work-python-fastapi` | `SKILL.md` only: watcher commit convention in Step 2, Step 1 pointed at [scripts/pre-ship.sh](../scripts/pre-ship.sh), and Step 1.5 naming watcher's `.skills/` tailoring. All six `scripts/` entries are vendor symlinks — the ship gate is **not** forked |
-| `brainstorming` | `SKILL.md` only: `docs/plans/` path, `#<n> [type]:` commit format, a GitHub issue on the architectural path, `writing-plans` optional rather than mandatory, `using-git-worktrees` after design approval, TDD as the bounded path's workflow, and the exe.dev proxy note for the visual companion's port. `visual-companion.md`, `spec-document-reviewer-prompt.md` and `scripts/` are vendor symlinks |
+| `brainstorming` | `SKILL.md` only: `docs/plans/` path, `#<n> [type]:` commit format, a GitHub issue on the architectural path, `writing-plans` optional rather than mandatory, `using-git-worktrees` after design approval, TDD as the bounded path's workflow, the exe.dev proxy note for the visual companion's port, and upstream's `elements-of-style` pointer dropped as dead text (that skill is not vendored here). `visual-companion.md`, `spec-document-reviewer-prompt.md` and `scripts/` are vendor symlinks |
 
 **The ship gate's env loading lives outside the skill.** [scripts/pre-ship.sh](../scripts/pre-ship.sh)
 is watcher's wrapper, in the location upstream's Step 1 resolution loop probes first. It sources

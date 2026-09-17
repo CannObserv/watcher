@@ -6,11 +6,12 @@ metadata:
   author: gregoryfoster
   version: "1.4"
   triggers: ship it, push GH, close GH, wrap up
+  synced-from: "gregoryfoster-skills 1.4 (d04cebf)"
   overrides: gregoryfoster-skills/shipping-work-python-fastapi
   override-reason: "Carries the watcher commit convention in Step 2, points Step 1 at scripts/pre-ship.sh — the env-loading wrapper that supplies /etc/watcher/.env and the repo .env to the vendored gate — and names watcher's .skills/ tailoring in Step 1.5. Drops the vendor self-budget note (its guard test does not exist in this repo). All scripts/ entries are vendor symlinks — the gate itself is not forked."
 ---
 
-<!-- forked from gregoryfoster-skills@a727638 -->
+<!-- forked from gregoryfoster-skills@d04cebf -->
 
 # Shipping Work — Python/FastAPI — watcher
 
@@ -80,6 +81,8 @@ Watcher tailors both halves rather than running on upstream's defaults, and each
 
 - [.skills/doc-sensitive-paths](../../.skills/doc-sensitive-paths) — what the gate watches: upstream's defaults minus the trees this repo does not have, plus the ones it does. The file itself is the inventory, and its header records which over-matches are deliberate; [docs/SKILLS.md](../../docs/SKILLS.md) explains the choices
 - [.skills/doc-sections](../../.skills/doc-sections) — the advice printed on a hit, naming watcher's own docs, one line per section as `<doc path>: <what to check>`. Tailor it *with* the path list ([#261](https://github.com/gregoryfoster/skills/issues/261)): a repo that tailors only the list gets advice written for a stack it may not have
+
+Keep them tailored together. A hit names the half that is still on upstream's defaults whenever exactly one of the two is tailored ([gregoryfoster/skills#284](https://github.com/gregoryfoster/skills/issues/284)), so deleting either file turns every doc-check hit into that note.
 
 Both are guarded by [tests/test_doc_sensitive_paths.py](../../tests/test_doc_sensitive_paths.py), which fails on an entry that matches no tracked file and on advice naming a doc that no longer exists.
 

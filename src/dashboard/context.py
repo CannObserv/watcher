@@ -98,9 +98,11 @@ async def get_queue_health(session: AsyncSession) -> dict:
     when it finished.
 
     ``procrastinate_events`` is indexed on ``job_id`` only, so this is a scan.
-    The #296 D7 retention keeps the table about a week deep (110 k rows, 13 MB
-    when measured), which EXPLAIN ANALYZE on production put at ~18 ms fully
-    cached — cheap at the tile's 30 s poll. A join back to
+    The #296 D7 retention bounds the table by throughput over its horizons —
+    not by the age of its oldest row, since ``delete_old_jobs`` ages a job by
+    its *latest* event and early ones survive on a job that finished recently.
+    Measured on production at 111 k rows and 13 MB, which EXPLAIN ANALYZE put
+    at ~18 ms fully cached — cheap at the tile's 30 s poll. A join back to
     ``procrastinate_jobs`` measured the same scan plus the lookups, so this
     takes the plain count.
 

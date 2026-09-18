@@ -186,7 +186,7 @@ A skill is symlinked into both `skills/` and `.claude/skills/`; overrides in `sk
 
 ## Detail Docs
 
-- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — module layout, sibling services, bus topology, fetch contracts
+- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — module layout, sibling services, bus topology, fetch contracts, the probe destination guard
 - [docs/BUS-CONNECTION-POLICY.md](docs/BUS-CONNECTION-POLICY.md) — #287 timeouts, retries, redaction, startup PING; #288 the `noeviction` cap
 - [docs/COMMANDS.md](docs/COMMANDS.md) — every runnable command, the Archiver-sibling test setup, CI
 - [docs/CONTENT-PIPELINE.md](docs/CONTENT-PIPELINE.md) — fetch → extract → fingerprint, the outbox, the revisions producer

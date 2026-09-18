@@ -251,7 +251,7 @@ revision is always enqueued. Full detail, including why a fresh item starts
 **[docs/CONTENT-PIPELINE.md](../docs/CONTENT-PIPELINE.md)**. On any PATCH that sets
 `effective_url` (the URL-succession path), `domain_name` is re-derived from the
 URL **without** re-probing and `domain_suspended` is re-evaluated; every
-create/PATCH/re-probe path (API and dashboard) shares
+create/PATCH/URL-change path (API and dashboard) shares
 `ensure_domain_and_resolve_suspension` in
 `src/core/domains.py` (#196). SourceRevisions are published to Archiver as
 `source_revision_observed` facts on `content.revisions` (#253) on every detected

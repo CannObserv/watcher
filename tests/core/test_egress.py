@@ -196,6 +196,16 @@ class TestResolutionFailures:
 
         assert inner.requests == []
 
+    async def test_an_empty_answer_is_not_a_pass(self):
+        """Zero addresses must refuse, not run the check loop zero times (CR 2)."""
+        inner = RecordingTransport()
+        transport = GuardedTransport(inner, resolve=resolver({"void.example.com": []}))
+
+        with pytest.raises(httpx.ConnectError):
+            await _head(transport, "https://void.example.com/")
+
+        assert inner.requests == []
+
     def test_a_refusal_is_not_an_httpx_error(self):
         """The routes' 'unreachable' branches must not swallow the refusal (#305)."""
         assert not issubclass(DestinationRefused, httpx.HTTPError)

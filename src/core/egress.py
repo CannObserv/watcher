@@ -160,7 +160,15 @@ class GuardedTransport(httpx.AsyncBaseTransport):
 
     async def _refuse_blocked_destination(self, url: httpx.URL) -> None:
         host = url.host
-        for address in await self._addresses(host, url.port or _default_port(url)):
+        addresses = await self._addresses(host, url.port or _default_port(url))
+        if not addresses:
+            # An empty answer is "I could not determine where this goes", and in
+            # a guard that must not mean "send it": zero addresses would run the
+            # loop below zero times and let the request through unchecked.
+            # ``getaddrinfo`` raises rather than answering empty, so this is the
+            # arm that keeps an unreachable state from becoming a fail-open one.
+            raise httpx.ConnectError(f"{host} resolved to no addresses")
+        for address in addresses:
             network = _containing(address, self._blocked)
             if network is None:
                 continue

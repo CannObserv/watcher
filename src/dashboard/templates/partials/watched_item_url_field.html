@@ -1,7 +1,7 @@
 {# WatchedItem effective_url field — standard field/value/actions row with an
-   inline re-probe edit form. Mirrors watched_item_field.html's url layout but
-   posts to the dedicated /effective-url route (which re-probes for the canonical
-   URL + domain). Expects: watched_item; optional url_mode ("view"|"edit"). #}
+   inline edit form. Mirrors watched_item_field.html's url layout but posts to
+   the dedicated /effective-url route (which re-derives the domain locally; no
+   probe since #241). Expects: watched_item; optional url_mode ("view"|"edit"). #}
 {% set url_mode = url_mode|default("view") %}
 <div class="p-4" id="field-effective-url">
   {% if url_mode == "edit" %}

@@ -21,7 +21,7 @@
   <div class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 divide-y divide-gray-200 dark:divide-gray-700">
     {# Name #}
     {{ watched_item_field(field_contexts["name"]) }}
-    {# URL — field/value/actions row with an inline re-probe Edit affordance #}
+    {# URL — field/value/actions row with an inline Edit affordance #}
     {% include "partials/watched_item_url_field.html" %}
     {# Domain — field/value #}
     {% if watched_item.domain_name %}

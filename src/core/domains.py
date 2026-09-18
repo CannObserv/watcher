@@ -3,8 +3,8 @@
 These mirror the create-time probe path's domain handling but take a URL or
 hostname that is already known (Archiver is authoritative for ``effective_url``),
 so no network probe is performed. Centralising the upsert + suspension logic
-keeps the API create branch, the API PATCH branch, and the dashboard re-probe
-route from drifting (#196).
+keeps the API create branch, the API PATCH branch, and the dashboard
+/effective-url route from drifting (#196).
 """
 
 from typing import NamedTuple

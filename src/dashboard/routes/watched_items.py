@@ -533,7 +533,8 @@ async def watched_item_url_field_partial(
     """Serve the WatchedItem URL field partial in view or edit mode.
 
     Powers the inline Edit affordance on the detail page's URL row; the edit
-    form posts to the sibling ``/effective-url`` route which re-probes.
+    form posts to the sibling ``/effective-url`` route, which re-derives the
+    target locally (no probe since #241).
 
     A registry-owned item (``applied_generation`` set) is forced to view mode
     (#254 CR-27). The template already drops the Edit button, but this route is
@@ -561,15 +562,18 @@ async def watched_item_update_url(
     url: str = Form(""),
     session: AsyncSession = Depends(get_db_session),
 ):
-    """Re-probe a new URL and update the WatchedItem's effective_url + domain_name.
+    """Set a new URL on the WatchedItem and re-derive its domain_name.
 
-    Mirrors the create-time probe path: the submitted URL is probed for its
-    canonical effective_url and domain, the Domain row is created if new, and
-    ``source_specs`` are left untouched. Rejects archived items. ``domain_suspended``
-    is re-evaluated against the target Domain so a re-probe can't silently re-arm
-    fetching against a suspended domain — and if the target is suspended the
-    operator gets a warning flash instead of the success reload. Probe failures
-    surface as a flash.
+    **Nothing is probed here (#241, restated as #305 CR 6 — the docstring said
+    "re-probe" for three releases after the probe left).** ``resolve_watch_target``
+    derives ``effective_url`` and ``domain_name`` syntactically, the item
+    re-enters ``PROBING``, and the apply path resolves any redirect from the next
+    fact. The Domain row is created if new and ``source_specs`` are left
+    untouched. Rejects archived items. ``domain_suspended`` is re-evaluated
+    against the target Domain so a URL change can't silently re-arm fetching
+    against a suspended domain — and if the target is suspended the operator gets
+    a warning flash instead of the success reload. A URL that fails validation
+    surfaces as a flash.
     """
     hx = is_htmx(request)
     wi = await get_watched_item_detail(session, watched_item_id)

@@ -30,6 +30,17 @@ def build_probe_client(
     destination — see :mod:`src.core.egress` (#305). ``inner`` and ``resolve``
     are the seams a test replaces to assert a refusal happened before anything
     left the host.
+
+    **Passing a transport costs environment proxies** (CR 5). httpx builds its
+    proxy map from ``HTTP_PROXY``/``HTTPS_PROXY`` only when it builds the
+    transport itself — ``allow_env_proxies = trust_env and transport is None``
+    — so setting one of those would be honoured everywhere in this service
+    except here. Nothing sets them today (not the shell, not
+    ``/etc/watcher/.env``, not the unit), and ``AsyncHTTPTransport`` keeps its
+    own ``trust_env=True``, so SSL-env handling is unaffected; it is the
+    client-level proxy map alone that is gone. Recorded rather than restored:
+    a probe reaching a public origin directly is what the guard assumes, and a
+    proxy would put the destination check on the wrong side of the hop.
     """
     return httpx.AsyncClient(
         transport=GuardedTransport(inner or httpx.AsyncHTTPTransport(), resolve=resolve),

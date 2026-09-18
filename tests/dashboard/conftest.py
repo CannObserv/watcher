@@ -175,11 +175,9 @@ async def retry_job(session: AsyncSession, job_id: int, *, retry_at: datetime) -
     )
 
 
-async def run_job_to_success(
-    session: AsyncSession, *, task_name: str = "check_watched_item"
-) -> int:
+async def run_job_to_success(session: AsyncSession) -> int:
     """Defer, run and succeed a job on its first try. Returns its id."""
-    job_id = await defer_job(session, task_name=task_name)
+    job_id = await defer_job(session)
     await start_job(session, job_id)
     await finish_job(session, job_id)
     return job_id

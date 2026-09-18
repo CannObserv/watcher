@@ -804,3 +804,27 @@ class TestDomainToggleActive:
             "/domains/archived-toggle.com/toggle-active", data={"active": "false"}
         )
         assert response.status_code == 409
+
+
+class TestDomainCreateDestinationRefused:
+    """A refused destination is not 'Could not reach URL' (#305)."""
+
+    async def test_refusal_shows_its_own_error_and_creates_nothing(self, client, db_session):
+        from src.api.deps import get_probe_fn
+        from src.api.main import app
+        from src.core.egress import DestinationRefused
+
+        async def refusing_probe(url: str):
+            raise DestinationRefused("resolves to 127.0.0.1, inside the refused range 127.0.0.0/8")
+
+        app.dependency_overrides[get_probe_fn] = lambda: refusing_probe
+
+        response = await client.post(
+            "/domains", data={"url": "http://127.0.0.1:9999/"}, follow_redirects=False
+        )
+
+        assert response.status_code == 200
+        body = response.content.lower()
+        assert b"could not reach url" not in body
+        assert b"refuse" in body or b"internal" in body
+        assert (await db_session.execute(select(Domain))).scalars().all() == []

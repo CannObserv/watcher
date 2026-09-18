@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
 from src.api.deps import get_probe_fn
+from src.core.egress import DestinationRefused
 from src.core.probe import ProbeResult
 
 router = APIRouter(prefix="/probe", tags=["probe"])
@@ -37,6 +38,11 @@ async def probe_endpoint(
     """Probe a URL: follow redirects, return effective URL and domain."""
     try:
         result: ProbeResult = await probe_fn(data.url)
+    except DestinationRefused as exc:
+        # Its own 422, ahead of the httpx branch: the URL was not unreachable,
+        # it was declined (#305). The address is echoed because the caller is an
+        # authenticated operator debugging their own URL.
+        raise HTTPException(status_code=422, detail=f"Destination refused: {exc}") from exc
     except httpx.HTTPError as exc:
         raise HTTPException(status_code=422, detail=f"URL unreachable: {exc}") from exc
 

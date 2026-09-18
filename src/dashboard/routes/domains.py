@@ -17,6 +17,7 @@ from src.api.schemas.validators import validate_event_list
 from src.core.domains import (
     backfill_domain_schedule_config,
 )
+from src.core.egress import DestinationRefused
 from src.core.fetch_policy import clear_tombstone, record_tombstone
 from src.core.models.audit_log import EventType, audit
 from src.core.models.domain import Domain
@@ -158,6 +159,21 @@ async def domain_create_submit(
 
     try:
         result = await probe_fn(url.strip())
+    except DestinationRefused:
+        # Ahead of the blanket handler below: "could not reach" would be a lie
+        # and would send the operator to check a working address (#305).
+        flash = {
+            "type": "error",
+            "message": (
+                "That URL resolves to an internal address (loopback, private network "
+                "or tailnet) and was refused."
+            ),
+        }
+        return templates.TemplateResponse(
+            request,
+            "pages/domain_form.html",
+            {"active_page": "domains", "flash": flash, "url": url},
+        )
     except Exception:
         flash = {
             "type": "error",

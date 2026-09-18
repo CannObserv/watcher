@@ -5,6 +5,9 @@ from datetime import UTC, datetime
 import pytest
 from sqlalchemy import select
 
+from src.api.deps import get_probe_fn
+from src.api.main import app
+from src.core.egress import DestinationRefused
 from src.core.models.domain import Domain
 from tests.conftest import make_watched_item
 
@@ -810,10 +813,6 @@ class TestDomainCreateDestinationRefused:
     """A refused destination is not 'Could not reach URL' (#305)."""
 
     async def test_refusal_shows_its_own_error_and_creates_nothing(self, client, db_session):
-        from src.api.deps import get_probe_fn
-        from src.api.main import app
-        from src.core.egress import DestinationRefused
-
         async def refusing_probe(url: str):
             raise DestinationRefused("resolves to 127.0.0.1, inside the refused range 127.0.0.0/8")
 

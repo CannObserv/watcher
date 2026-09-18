@@ -9,9 +9,17 @@ import asyncpg
 import pytest
 from procrastinate.schema import SchemaManager
 from sqlalchemy import text
+from sqlalchemy.engine import make_url
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from tests.conftest import TEST_DATABASE_URL
+
+# asyncpg takes a plain DSN, not SQLAlchemy's ``+driver`` form. Asking
+# SQLAlchemy to drop the driver rather than replacing one spelling of it keeps
+# this working whatever driver TEST_DATABASE_URL names.
+_ASYNCPG_DSN = (
+    make_url(TEST_DATABASE_URL).set(drivername="postgresql").render_as_string(hide_password=False)
+)
 
 # Everything Procrastinate's schema creates, in dependency order: the functions
 # reference the types, the triggers go with their tables. Run before applying
@@ -56,9 +64,7 @@ async def _run_script(sql: str) -> None:
     several statements at once through the simple protocol its ``execute``
     uses — SQLAlchemy drives the extended one, a statement at a time.
     """
-    connection = await asyncpg.connect(
-        TEST_DATABASE_URL.replace("postgresql+asyncpg://", "postgresql://")
-    )
+    connection = await asyncpg.connect(_ASYNCPG_DSN)
     try:
         await connection.execute(sql)
     finally:

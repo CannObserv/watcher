@@ -275,6 +275,63 @@ class TestFailureFacts:
         assert fail.calls == []
 
 
+class TestUnrecognisedFailureReasons:
+    """``reason`` is a stable-but-additive token, so an unknown one is opaque.
+
+    co-core types it ``str`` rather than ``Literal`` precisely so a producer
+    adding a token never crashes an older consumer, and the contract tells
+    consumers to "branch on ``terminal`` first and treat an unknown ``reason``
+    as opaque". Nothing in this repo enumerates the tokens, so the promise is
+    only as good as a test that a *novel* one lands on the generic path.
+
+    Live occasion: CannObserv/replicator#95 adds a destination-guard refusal
+    (watcher#304). The token below is deliberately synthetic rather than that
+    one — pinning the property, not a single string, is what keeps the next
+    addition free too.
+    """
+
+    async def test_a_novel_terminal_token_records_verbatim_and_defers_the_failure(self, db_session):
+        _, row = await _issued_row(db_session)
+        blob, fail, unchanged = _DeferSpy(), _DeferSpy(), _DeferSpy()
+
+        outcome = await process_fact_message(
+            db_session,
+            # A token no version of co-core has ever emitted, and a shape the
+            # guard-style refusals share: refused before any request, so no
+            # status code (cf. ``invalid_request_options``).
+            _failure_for(row, reason="token_from_a_newer_producer", status_code=None),
+            defer_blob=blob,
+            defer_failure=fail,
+            defer_not_modified=unchanged,
+        )
+
+        assert outcome == "failure_recorded"
+        assert row.status == FetchCommandStatus.FAILED
+        assert row.failure_reason == "token_from_a_newer_producer"
+        assert row.status_code is None
+        # The generic failure apply, not the one success-shaped exception.
+        assert fail.calls == [row.command_id]
+        assert unchanged.calls == []
+        assert blob.calls == []
+
+    async def test_a_novel_non_terminal_token_still_branches_on_terminal_first(self, db_session):
+        # ``terminal`` is the field that decides, not the token: an unrecognised
+        # reason on a command that is still retrying must not close the row.
+        _, row = await _issued_row(db_session)
+        fail = _DeferSpy()
+
+        outcome = await process_fact_message(
+            db_session,
+            _failure_for(row, terminal=False, reason="token_from_a_newer_producer"),
+            defer_failure=fail,
+        )
+
+        assert outcome == "nonterminal_recorded"
+        assert row.status == FetchCommandStatus.IN_FLIGHT
+        assert row.failure_reason is None
+        assert fail.calls == []
+
+
 class TestNotModifiedFacts:
     """#249 part 1: ``not_modified`` rides ``FetchFailedEvent`` but is a success.
 

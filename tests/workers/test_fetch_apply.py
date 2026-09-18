@@ -445,6 +445,46 @@ class TestApplyFetchFailure:
         assert second == {"skipped": True, "reason": "already_applied"}
         assert len(await _audit_events(db_session, EventType.CHECK_FETCH_FAILED)) == 1
 
+    async def test_an_unrecognised_reason_journals_generically(self, db_session, monkeypatch):
+        """A token this code has never heard of takes the plain failure path.
+
+        The apply branches on exactly one token (``invalid_request_options``,
+        which clears validators). Everything else is journalled verbatim, so a
+        producer adding a reason — CannObserv/replicator#95's destination guard
+        is the live one (watcher#304) — needs no change here. Pinned because the
+        failure mode is silent: a token accidentally routed through the
+        validator-clearing branch would buy a full re-fetch on every occurrence.
+        """
+        wi = await make_watched_item(db_session, primary_url="https://lcb.wa.gov/notices")
+        wi.etag = 'W/"v7"'
+        wi.last_modified = "Wed, 13 Aug 2026 10:00:00 GMT"
+        wi.validator_source_key = "sha256:whatever"
+        row = await create_fetch_command(db_session, wi, now=NOW)
+        row.status = FetchCommandStatus.FAILED
+        row.failure_reason = "token_from_a_newer_producer"
+        row.failure_detail = "refused before the request was issued"
+        await db_session.flush()
+        monkeypatch.setattr(
+            fc_mod, "get_session_factory", lambda: _mock_session_factory(db_session)
+        )
+        monkeypatch.setattr(fc_mod, "dispatch_event_notifications", AsyncMock(return_value=0))
+
+        result = await apply_fetch_failure(row.command_id)
+
+        assert result == {"applied": True, "reason": "token_from_a_newer_producer"}
+        assert wi.health_status == WatchHealthStatus.ERROR
+        assert wi.last_checked_at is not None
+        events = await _audit_events(db_session, EventType.CHECK_FETCH_FAILED)
+        assert len(events) == 1
+        assert events[0].payload["reason"] == "token_from_a_newer_producer"
+        # Absent status_code stays absent rather than arriving as a null key:
+        # the guard-style refusals never reach an origin, so there is none.
+        assert "status_code" not in events[0].payload
+        # Says nothing about our validators — only the one token may clear them.
+        assert wi.etag == 'W/"v7"'
+        assert wi.last_modified == "Wed, 13 Aug 2026 10:00:00 GMT"
+        assert wi.validator_source_key == "sha256:whatever"
+
 
 class TestApplyFetchNotModified:
     """#249 part 1: a 304 is a successful check that found no change.

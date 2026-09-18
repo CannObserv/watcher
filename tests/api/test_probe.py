@@ -31,8 +31,7 @@ class TestProbeDestinationRefused:
 
         async def refusing_probe(url: str):
             raise DestinationRefused(
-                "http://127.0.0.1:9999/ resolves to 127.0.0.1, inside the refused "
-                "range 127.0.0.0/8"
+                "http://127.0.0.1:9999/ resolves to 127.0.0.1, inside the refused range 127.0.0.0/8"
             )
 
         app.dependency_overrides[get_probe_fn] = lambda: refusing_probe

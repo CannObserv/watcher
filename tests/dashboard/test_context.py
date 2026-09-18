@@ -103,6 +103,11 @@ class TestGetDashboardStats:
         assert stats["changes_today"] == 0
 
 
+def _utc_midnight() -> datetime:
+    """The instant ``get_queue_health`` opens its window on."""
+    return datetime.now(UTC).replace(hour=0, minute=0, second=0, microsecond=0)
+
+
 @pytest.mark.integration
 class TestGetQueueHealth:
     async def test_returns_queue_stats(self, db_session):
@@ -180,15 +185,29 @@ class TestGetQueueHealth:
         queue = await get_queue_health(procrastinate_session)
         assert queue["succeeded_today"] == 2
 
-    async def test_a_success_before_utc_midnight_is_not_today(self, procrastinate_session):
-        """The window opens at UTC midnight, which the tile's label names."""
+    async def test_a_success_a_microsecond_before_utc_midnight_is_not_today(
+        self, procrastinate_session
+    ):
+        """The window opens at UTC midnight, which the tile's label names.
+
+        A microsecond out, not a day: a query counting a rolling 24 hours, or
+        one opening at the host's local midnight, passes the looser version.
+        """
         job_id = await run_job_to_success(procrastinate_session)
         await backdate_job_events(
-            procrastinate_session, job_id, at=datetime.now(UTC) - timedelta(days=1)
+            procrastinate_session, job_id, at=_utc_midnight() - timedelta(microseconds=1)
         )
 
         queue = await get_queue_health(procrastinate_session)
         assert queue["succeeded_today"] == 0
+
+    async def test_a_success_exactly_at_utc_midnight_is_today(self, procrastinate_session):
+        """The boundary belongs to today — the filter is ``>=``, not ``>``."""
+        job_id = await run_job_to_success(procrastinate_session)
+        await backdate_job_events(procrastinate_session, job_id, at=_utc_midnight())
+
+        queue = await get_queue_health(procrastinate_session)
+        assert queue["succeeded_today"] == 1
 
     async def test_counts_unfinished_and_failed_jobs_by_status(self, procrastinate_session):
         """The other three numbers read the jobs table, where status lives."""

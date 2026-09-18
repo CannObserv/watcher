@@ -4,7 +4,9 @@
 679 k finished jobs back to March, three events each, growing ~5 k a day, and
 nothing anywhere deleting them. The history is diagnostic, not data. Its one
 reader is the dashboard's queue tile, whose failed count therefore covers the
-failed-retention window, and is labelled with it.
+failed-retention window, and is labelled with it. The same tile counts today's
+``succeeded`` events (#298) — a window the succeeded horizon, seven days back,
+never reaches into.
 
 The policy is two horizons. **Succeeded** jobs go after 7 days. **Failed,
 cancelled and aborted** ones go after 30, because a failure is the thing someone

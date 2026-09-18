@@ -86,10 +86,26 @@ async def get_dashboard_stats(session: AsyncSession) -> dict:
 
 
 async def get_queue_health(session: AsyncSession) -> dict:
-    """Query procrastinate_jobs table for queue status counts.
+    """Query the Procrastinate tables for queue status counts.
 
-    Returns zeros if the procrastinate_jobs table doesn't exist (e.g., test
-    environments without procrastinate migrations applied).
+    ``succeeded_today`` counts completion *events*, not jobs (#298). A job's
+    ``scheduled_at`` is not when it ran: Procrastinate sets it only for a job
+    deferred with ``schedule_at``/``schedule_in`` — nothing here does — or for
+    one re-queued by ``procrastinate_retry_job_v2``. Plain and periodic defers
+    both leave it NULL, so filtering on it counted successes that had failed
+    first and nothing else, and the healthier the queue the closer to zero the
+    tile read. Each succeeded job has exactly one ``succeeded`` event, stamped
+    when it finished.
+
+    ``procrastinate_events`` is indexed on ``job_id`` only, so this is a scan.
+    The #296 D7 retention keeps the table about a week deep (110 k rows, 13 MB
+    when measured), which EXPLAIN ANALYZE on production put at ~18 ms fully
+    cached — cheap at the tile's 30 s poll. A join back to
+    ``procrastinate_jobs`` measured the same scan plus the lookups, so this
+    takes the plain count.
+
+    Returns zeros if the Procrastinate tables don't exist (e.g., test
+    environments without procrastinate's schema applied).
     """
     today_start = datetime.now(UTC).replace(hour=0, minute=0, second=0, microsecond=0)
     default = {"todo": 0, "doing": 0, "failed": 0, "succeeded_today": 0}
@@ -102,8 +118,8 @@ async def get_queue_health(session: AsyncSession) -> dict:
 
         succeeded_today = await session.scalar(
             text(
-                "SELECT count(*) FROM procrastinate_jobs "
-                "WHERE status = 'succeeded' AND scheduled_at >= :today_start"
+                "SELECT count(*) FROM procrastinate_events "
+                "WHERE type = 'succeeded' AND at >= :today_start"
             ),
             {"today_start": today_start},
         )

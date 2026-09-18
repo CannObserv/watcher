@@ -16,7 +16,8 @@
         <dd class="text-sm font-medium text-red-600 dark:text-red-400">{{ queue.failed }}</dd>
       </div>
       <div class="flex justify-between">
-        <dt class="text-sm text-gray-600 dark:text-gray-400">Succeeded (today)</dt>
+        {# Completions since UTC midnight, counted from procrastinate_events — a job's scheduled_at is not when it ran (#298). #}
+        <dt class="text-sm text-gray-600 dark:text-gray-400">Succeeded (today, UTC)</dt>
         <dd class="text-sm font-medium text-green-600 dark:text-green-400">{{ queue.succeeded_today }}</dd>
       </div>
     </dl>

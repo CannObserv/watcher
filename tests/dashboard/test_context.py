@@ -3,6 +3,7 @@
 from datetime import UTC, datetime, timedelta
 
 import pytest
+from sqlalchemy import text
 from ulid import ULID
 
 from src.core.models.audit_log import AuditLog, EventType
@@ -20,6 +21,15 @@ from src.dashboard.context import (
     get_queue_health,
 )
 from tests.conftest import make_info_item, make_watched_item
+from tests.dashboard.conftest import (
+    backdate_job_events,
+    defer_job,
+    defer_periodic_job,
+    finish_job,
+    retry_job,
+    run_job_to_success,
+    start_job,
+)
 
 
 @pytest.mark.integration
@@ -101,6 +111,98 @@ class TestGetQueueHealth:
         assert "doing" in queue
         assert "failed" in queue
         assert "succeeded_today" in queue
+
+    async def test_the_procrastinate_tables_are_really_present(self, procrastinate_session):
+        """The premise of every test below.
+
+        ``get_queue_health`` returns zeros when the schema is missing, and a
+        test that reads those zeros passes against any query — which is how the
+        ``scheduled_at`` filter went unnoticed (#298).
+        """
+        for table in ("procrastinate_jobs", "procrastinate_events"):
+            regclass = await procrastinate_session.scalar(
+                text("SELECT to_regclass(:table)"), {"table": table}
+            )
+            assert regclass == table
+
+    async def test_counts_a_first_try_success(self, procrastinate_session):
+        """A plain defer leaves ``scheduled_at`` NULL, so a filter on it counted
+        none of these — the healthier the queue, the closer to zero the tile
+        read (#298)."""
+        job_id = await run_job_to_success(procrastinate_session)
+
+        scheduled_at = await procrastinate_session.scalar(
+            text("SELECT scheduled_at FROM procrastinate_jobs WHERE id = :job_id"),
+            {"job_id": job_id},
+        )
+        assert scheduled_at is None
+
+        queue = await get_queue_health(procrastinate_session)
+        assert queue["succeeded_today"] == 1
+
+    async def test_counts_a_periodic_success(self, procrastinate_session):
+        """Watcher's queue is filled by cron ticks, and a periodic defer leaves
+        ``scheduled_at`` NULL too (#298)."""
+        job_id = await defer_periodic_job(procrastinate_session)
+        await start_job(procrastinate_session, job_id)
+        await finish_job(procrastinate_session, job_id)
+
+        scheduled_at = await procrastinate_session.scalar(
+            text("SELECT scheduled_at FROM procrastinate_jobs WHERE id = :job_id"),
+            {"job_id": job_id},
+        )
+        assert scheduled_at is None
+
+        queue = await get_queue_health(procrastinate_session)
+        assert queue["succeeded_today"] == 1
+
+    async def test_counts_a_success_after_a_retry(self, procrastinate_session):
+        """The retry is the one path that sets ``scheduled_at`` — the only case
+        the old query got right, and it must stay counted."""
+        job_id = await defer_job(procrastinate_session)
+        await start_job(procrastinate_session, job_id)
+        await retry_job(procrastinate_session, job_id, retry_at=datetime.now(UTC))
+        await start_job(procrastinate_session, job_id)
+        await finish_job(procrastinate_session, job_id)
+
+        queue = await get_queue_health(procrastinate_session)
+        assert queue["succeeded_today"] == 1
+
+    async def test_counts_both_defer_paths_together(self, procrastinate_session):
+        """Two successes today, one of each shape: the tile reads 2."""
+        await run_job_to_success(procrastinate_session)
+        retried = await defer_job(procrastinate_session)
+        await start_job(procrastinate_session, retried)
+        await retry_job(procrastinate_session, retried, retry_at=datetime.now(UTC))
+        await start_job(procrastinate_session, retried)
+        await finish_job(procrastinate_session, retried)
+
+        queue = await get_queue_health(procrastinate_session)
+        assert queue["succeeded_today"] == 2
+
+    async def test_a_success_before_utc_midnight_is_not_today(self, procrastinate_session):
+        """The window opens at UTC midnight, which the tile's label names."""
+        job_id = await run_job_to_success(procrastinate_session)
+        await backdate_job_events(
+            procrastinate_session, job_id, at=datetime.now(UTC) - timedelta(days=1)
+        )
+
+        queue = await get_queue_health(procrastinate_session)
+        assert queue["succeeded_today"] == 0
+
+    async def test_counts_unfinished_and_failed_jobs_by_status(self, procrastinate_session):
+        """The other three numbers read the jobs table, where status lives."""
+        await defer_job(procrastinate_session)
+        doing = await defer_job(procrastinate_session)
+        await start_job(procrastinate_session, doing)
+        failed = await defer_job(procrastinate_session)
+        await start_job(procrastinate_session, failed)
+        await finish_job(procrastinate_session, failed, status="failed")
+
+        queue = await get_queue_health(procrastinate_session)
+        assert queue["todo"] == 1
+        assert queue["doing"] == 1
+        assert queue["failed"] == 1
 
 
 @pytest.mark.integration

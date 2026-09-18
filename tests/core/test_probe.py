@@ -119,7 +119,13 @@ class TestProbeDestinationGuard:
         assert result.content_type == "text/html"
 
     async def test_the_default_client_carries_the_guard(self):
-        """No seam: the client probe_url actually builds is a guarded one."""
+        """No seam: the client probe_url actually builds is a guarded one.
+
+        ``_transport`` is private, and deliberately so here (CR 9): httpx exposes
+        no public accessor, and the alternative — asserting a refusal against a
+        real socket — is the one thing this test must not do. If a future httpx
+        renames it, the AttributeError is this line's fault and not the guard's.
+        """
         client = build_probe_client()
         try:
             assert isinstance(client._transport, GuardedTransport)

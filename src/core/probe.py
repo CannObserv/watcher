@@ -5,6 +5,7 @@ from urllib.parse import urlparse
 
 import httpx
 
+from src.core.egress import GuardedTransport, Resolver, resolve_addresses
 from src.core.fetch_commands import WATCHER_USER_AGENT
 from src.core.logging import get_logger
 
@@ -15,6 +16,25 @@ PROBE_TIMEOUT = 15.0
 # fingerprint-critical — probes produce no revisions — but a reader finding two
 # disagreeing version strings can't tell which one matters.
 PROBE_USER_AGENT = f"{WATCHER_USER_AGENT} (probe)"
+
+
+def build_probe_client(
+    inner: httpx.AsyncBaseTransport | None = None,
+    *,
+    resolve: Resolver = resolve_addresses,
+) -> httpx.AsyncClient:
+    """The client every probe goes out on: redirects followed, destinations guarded.
+
+    The guard is a transport rather than a check on the submitted URL because
+    ``follow_redirects=True`` means the submitted URL does not decide the
+    destination — see :mod:`src.core.egress` (#305). ``inner`` and ``resolve``
+    are the seams a test replaces to assert a refusal happened before anything
+    left the host.
+    """
+    return httpx.AsyncClient(
+        transport=GuardedTransport(inner or httpx.AsyncHTTPTransport(), resolve=resolve),
+        follow_redirects=True,
+    )
 
 
 @dataclass(frozen=True)
@@ -41,9 +61,11 @@ async def probe_url(url: str) -> ProbeResult:
         status_code, and content_type.
 
     Raises:
-        httpx.HTTPError: On connection or timeout failure.
+        httpx.HTTPError: On connection, resolution or timeout failure.
+        DestinationRefused: If any hop resolves into a range this host does not
+            probe — loopback, RFC 1918, link-local, ULA or the tailnet (#305).
     """
-    async with httpx.AsyncClient(follow_redirects=True) as client:
+    async with build_probe_client() as client:
         response = await client.head(
             url,
             headers={"user-agent": PROBE_USER_AGENT},

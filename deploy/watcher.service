@@ -129,5 +129,39 @@ RestartSec=5
 # trade — SIGTERM is a deliberate signal, and a genuine crash exits non-143.
 SuccessExitStatus=143
 
+# Memory reservation against a co-tenant agent session (#307).
+#
+# Dev and prod share this VM, and exe.dev session processes inherit
+# oom_score_adj -1000 from exe-init and sshd. The OOM killer therefore cannot
+# ever pick the session that is spiking — it picks this service instead. That is
+# how CannObserv/broker's VM presented on 2026-09-16: nothing that spiked was
+# killed, the kernel failed atomic allocations in tailscaled and ksoftirqd, and
+# the bus was down 57m 48s.
+#
+# This host measures 3.8 GiB with no swap (skills-vendor/.../preflight.sh
+# --check warns under 4 GiB on both counts), so there is no swap to absorb a
+# spike and reclaim is the only lever. MemoryLow= is a soft floor: memory under
+# it is protected from reclaim while something else on the box grows, and it is
+# given back when the kernel has no other option. 512M is ~4x this service's
+# steady working set.
+#
+# A reservation, NOT a cap. MemoryHigh= throttles reclaim rather than failing an
+# allocation, so a unit that hits it slows to a crawl while still reporting
+# `active` — strictly worse for a dashboard than an honest failure. The cap
+# belongs on the install that spikes: the `systemd-run --user --scope
+# -p MemoryMax=1536M` around the pinned SocratiCode pre-install, which is what
+# stops a driver launch installing a server at all (docs/DEPLOYMENT.md).
+MemoryLow=512M
+
+# Move this service behind everything else on the box. Everything here runs at
+# the default 0 — an npm install, a node server, a docker build — while the
+# agent session sits at -1000 and is unpickable, which left this service as the
+# most attractive candidate on the host.
+#
+# Deliberately not -1000: an unkillable service on a 3.8 GiB host with no swap
+# means the kernel runs out of candidates and wedges the box rather than
+# shedding one process.
+OOMScoreAdjust=-500
+
 [Install]
 WantedBy=multi-user.target

@@ -103,6 +103,75 @@ pipeline that `json.loads` every `MESSAGE` must tolerate them; reading journald'
 own fields (`_SYSTEMD_UNIT`, `SYSLOG_IDENTIFIER`, `MESSAGE`) is unaffected. See
 [CONVENTIONS.md](CONVENTIONS.md) → *`ExecStartPre` output is plain text*.
 
+### Host memory posture (#307)
+
+**Measured 2026-09-18 on `co-watcher`: 3.8 GiB total, no swap, one active
+production unit.** Both of `preflight.sh --check`'s memory warnings fire here, so
+this host is in the "small *and* shared" case rather than the "measured, no
+action" one:
+
+```bash
+bash skills-vendor/gregoryfoster-skills/skills/init-socraticode/scripts/preflight.sh --check
+```
+
+The hazard is not that something is large — it is who the kernel picks when
+something is. exe.dev session processes inherit `oom_score_adj` **-1000** from
+`exe-init` and `sshd`, so the OOM killer can never choose the agent session that
+is spiking and takes the host's production service instead. On
+CannObserv/broker's VM on 2026-09-16 nothing that spiked was killed: the kernel
+failed atomic allocations in `tailscaled` and `ksoftirqd`, the bus was down 57m
+48s, and a downstream consumer never reconnected. Three things answer that, and
+none substitutes for another.
+
+**1. Don't install a server at every launch.** SocratiCode's plugin launches
+`npx -y --prefer-online socraticode@latest`, and `--prefer-online` revalidates
+against the registry *every* launch — a warm cache is not a warm path on any day
+the package moved. Measured on broker: 75 MB pinned, 129 MB warm-npx, **1.2 G**
+for a cold install, with all 126 `MemoryHigh` throttle events in the install and
+none in indexing. `.claude/hooks/socraticode-health.sh` runs the driver from
+SessionStart once per UTC day, so that path is live here. Install once, under a
+cap, and the driver prefers it:
+
+```bash
+npm view socraticode version        # pick a literal; never @latest
+systemd-run --user --scope -p MemoryHigh=1200M -p MemoryMax=1536M \
+  -- npm install --prefix ~/.socraticode/pin socraticode@<version>
+
+# Says which path won, without launching a server:
+node skills-vendor/gregoryfoster-skills/skills/init-socraticode/scripts/mcp-driver.mjs resolve
+```
+
+Pinned here at **1.14.0**. This pins the *driver*, not the *session*: Claude Code
+cannot override a plugin's MCP command, so the plugin keeps launching `@latest`.
+The daily health hook measures that gap and reports a defect only when the two
+differ by a minor or major release — a patch apart is the intended steady state,
+since a pin is meant to lag. Re-pin with the same `npm install --prefix` line, as
+a decision rather than on a schedule.
+
+**2. The service takes a reservation, never a cap.** `deploy/watcher.service`
+carries `MemoryLow=512M` and `OOMScoreAdjust=-500`
+(`tests/deploy/test_installed_unit_matches_repo.py` pins all three facts,
+including the *absence* of a cap). `MemoryHigh=` on a production unit throttles
+reclaim rather than failing an allocation, so the unit slows to a crawl while
+still reporting `active` — worse for a dashboard than an honest failure. The cap
+belongs on the install that spikes, which is where step 1 put it.
+`OOMScoreAdjust` is deliberately not -1000: an unkillable service on a 3.8 GiB
+host with no swap wedges the box instead of shedding one process.
+
+**3. The kernel needs a reserve, and something must act before it is desperate.**
+`vm.min_free_kbytes` shipped at ~8 MB here, which is what lets an atomic
+allocation in `tailscaled` fail while memory is nominally available;
+`/etc/sysctl.d/60-watcher-memory.conf` raises it to 64 MB. `earlyoom` then sheds
+a process while userspace can still make progress — and because it ranks by
+`oom_score`, the combination of an unpickable session (-1000) and a de-prioritised
+service (-500) means it picks the `npm`/`node`/`docker` process that is actually
+spiking, at the default 0.
+
+```bash
+sudo sysctl --system                 # apply the reserve
+systemctl is-active earlyoom         # the shedder
+```
+
 ## Database Migrations
 
 Split out to [MIGRATIONS.md](MIGRATIONS.md) — the manual `alembic upgrade head`

@@ -222,6 +222,8 @@ class TestGetQueueHealth:
         assert queue["todo"] == 1
         assert queue["doing"] == 1
         assert queue["failed"] == 1
+        # Today's failure is an event too, on the same table the tile now counts.
+        assert queue["succeeded_today"] == 0
 
 
 @pytest.mark.integration

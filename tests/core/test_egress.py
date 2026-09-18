@@ -1,5 +1,7 @@
 """Unit tests for the probe destination guard (#305)."""
 
+import asyncio
+
 import httpx
 import pytest
 
@@ -94,9 +96,7 @@ class TestRefusedLiterals:
 class TestRefusedNames:
     async def test_a_hostname_resolving_to_loopback_is_refused(self):
         inner = RecordingTransport()
-        transport = GuardedTransport(
-            inner, resolve=resolver({"localhost": ["127.0.0.1", "::1"]})
-        )
+        transport = GuardedTransport(inner, resolve=resolver({"localhost": ["127.0.0.1", "::1"]}))
 
         with pytest.raises(DestinationRefused):
             await _head(transport, "http://localhost:9999/")
@@ -117,9 +117,7 @@ class TestRefusedNames:
 
     async def test_a_public_name_probes_normally(self):
         inner = RecordingTransport()
-        transport = GuardedTransport(
-            inner, resolve=resolver({"example.com": [PUBLIC_ADDRESS]})
-        )
+        transport = GuardedTransport(inner, resolve=resolver({"example.com": [PUBLIC_ADDRESS]}))
 
         response = await _head(transport, "https://example.com/page")
 
@@ -181,6 +179,22 @@ class TestResolutionFailures:
 
         with pytest.raises(httpx.HTTPError):
             await _head(transport, "https://bad.example.com/")
+
+    async def test_a_hanging_resolve_is_bounded(self):
+        """The guard resolves ahead of httpx, so it owns the deadline httpx used
+        to provide (CR 1)."""
+        inner = RecordingTransport()
+
+        async def never_answers(host: str, port: int):
+            await asyncio.sleep(3600)
+            raise AssertionError("unreachable")
+
+        transport = GuardedTransport(inner, resolve=never_answers, resolve_timeout=0.01)
+
+        with pytest.raises(httpx.ConnectTimeout):
+            await _head(transport, "https://slow-dns.example.com/")
+
+        assert inner.requests == []
 
     def test_a_refusal_is_not_an_httpx_error(self):
         """The routes' 'unreachable' branches must not swallow the refusal (#305)."""

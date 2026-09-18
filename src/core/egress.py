@@ -86,6 +86,17 @@ DEFAULT_BLOCKED_DESTINATIONS: tuple[str, ...] = (
     "ff00::/8",  # multicast
 )
 
+# How long the guard's own resolve may take. It exists because resolving here
+# moved the resolve *out* of every timeout the probe has: httpcore wraps name
+# resolution in the connect timeout (``anyio.fail_after`` around
+# ``anyio.connect_tcp``), and a check ahead of the inner transport is ahead of
+# that too, so without this a blackholed nameserver parks an operator's request
+# for as long as the C resolver retries. Deliberately its own number rather than
+# ``PROBE_TIMEOUT``: ``probe`` imports this module, and the two bound different
+# operations — 15s is a generous ceiling for a government portal's response, and
+# a resolve that takes five seconds is broken rather than slow.
+RESOLVE_TIMEOUT = 5.0
+
 Network = ipaddress.IPv4Network | ipaddress.IPv6Network
 Resolver = Callable[[str, int], Awaitable[Sequence[str]]]
 
@@ -133,10 +144,12 @@ class GuardedTransport(httpx.AsyncBaseTransport):
         *,
         blocked: tuple[Network, ...] = BLOCKED_NETWORKS,
         resolve: Resolver = resolve_addresses,
+        resolve_timeout: float = RESOLVE_TIMEOUT,
     ) -> None:
         self._inner = inner
         self._blocked = blocked
         self._resolve = resolve
+        self._resolve_timeout = resolve_timeout
 
     async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
         await self._refuse_blocked_destination(request.url)
@@ -189,9 +202,21 @@ class GuardedTransport(httpx.AsyncBaseTransport):
         because that is the honest answer at this surface — the host could not
         be reached — and the distinction replicator needs between them only
         matters to something that will try again.
+
+        **The deadline is this module's, for the same reason** (see
+        :data:`RESOLVE_TIMEOUT`). Cancelling the wait does not cancel the
+        resolve: ``loop.getaddrinfo`` runs in the default executor, so the
+        thread runs to completion and only the waiter gives up — which is the
+        point, since the waiter is what an operator is holding a request open
+        for.
         """
         try:
-            return await self._resolve(host, port)
+            async with asyncio.timeout(self._resolve_timeout):
+                return await self._resolve(host, port)
+        except TimeoutError as exc:
+            raise httpx.ConnectTimeout(
+                f"{host} did not resolve within {self._resolve_timeout}s"
+            ) from exc
         except socket.gaierror as exc:
             raise httpx.ConnectError(f"{host} could not be resolved: {exc}") from exc
         except UnicodeError as exc:

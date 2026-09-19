@@ -128,7 +128,7 @@ gate's.
 
 ## SocratiCode (Codebase Search)
 
-This project is indexed with SocratiCode. Always use its MCP tools to explore the codebase before reading files directly.
+This project is indexed with SocratiCode, into the cohort's **shared store on `co-index`** rather than a local one — see *Shared index* below. Always use its MCP tools to explore the codebase before reading files directly.
 
 **Core principle: search before reading.** The index gives you a map of the codebase in milliseconds; raw file reading is expensive and context-consuming.
 
@@ -248,9 +248,138 @@ Prefetch query (run via `ToolSearch` once per session if the SessionStart remind
 
 `select:mcp__plugin_socraticode_socraticode__codebase_search,mcp__plugin_socraticode_socraticode__codebase_symbol,mcp__plugin_socraticode_socraticode__codebase_symbols,mcp__plugin_socraticode_socraticode__codebase_flow,mcp__plugin_socraticode_socraticode__codebase_impact,mcp__plugin_socraticode_socraticode__codebase_graph_query,mcp__plugin_socraticode_socraticode__codebase_graph_circular,mcp__plugin_socraticode_socraticode__codebase_graph_stats,mcp__plugin_socraticode_socraticode__codebase_graph_visualize,mcp__plugin_socraticode_socraticode__codebase_status,mcp__plugin_socraticode_socraticode__codebase_context,mcp__plugin_socraticode_socraticode__codebase_context_search`
 
-### Linked Projects
+### Shared index on `co-index` (#300)
 
-Cross-project search to the sister `notifier` index is enabled via `SOCRATICODE_LINKED_PROJECTS=/home/exedev/notifier` in `.claude/settings.local.json` (gitignored — per-instance config, not a project commitment). **Inert on co-watcher (#296):** that checkout stayed on the retired VM, so the variable names a path that does not exist here and `includeLinked: true` quietly returns `[watcher]` results only — no error, just no fan-out. Re-enabling it means cloning notifier locally and repointing the variable; until then, treat linked results as unavailable rather than empty. The value may be relative (resolved from the project root) or absolute; absolute is recommended since the MCP server's CWD isn't guaranteed across hosts. Pass `includeLinked: true` on `codebase_search` to fan out across both indexes; results carry a `[watcher]` / `[notifier]` label.
+Watcher hosts no semantic index. Both the vector store and the embedding model live
+on the cohort's fifth VM, `co-index` (`index` on the tailnet), shared with archiver,
+broker, replicator and notifier. Tracking issue:
+[CannObserv/notifier#57](https://github.com/CannObserv/notifier/issues/57); design and
+decisions D0–D14 in `docs/plans/2026-09-11-shared-qdrant-vm-design.md` there.
+
+**Why not locally.** #307 measured this host at **3.8 GiB with no swap**, sharing memory
+with `watcher.service` and with agent sessions the OOM killer cannot pick
+(`oom_score_adj` -1000 from exe-init/sshd — so it takes the service instead). A cold
+local index pulls the Qdrant and Ollama images plus the embedding model and peaks around
+**1.2 G** at the cgroup, measured on CannObserv/broker. Adoption is not tidiness here; it
+is the difference between a host that can support an index and one that cannot.
+
+**The client contract is two committed files**, so every checkout addresses the same
+collections wherever the working tree sits on disk:
+
+| File | Carries | Tracked |
+|---|---|---|
+| `.socraticode.json` | `projectId` (names the collections: `codebase_watcher`, `watcher_symgraph_*`) and `linkedProjects` | yes |
+| `.claude/settings.json` → `env` | the six non-secret client variables (`QDRANT_MODE`/`QDRANT_URL`, `OLLAMA_MODE`/`OLLAMA_URL`, `EMBEDDING_MODEL`/`EMBEDDING_DIMENSIONS`) | yes |
+| `.claude/settings.local.json` | `QDRANT_API_KEY`, and nothing else | **never** — git-ignored |
+
+[tests/deploy/test_socraticode_config.py](../tests/deploy/test_socraticode_config.py) pins
+every value above, and asks `git` — not `.gitignore` — whether the key file is both
+ignored *and* untracked. Qdrant holds a single global `service.api_key`: no key list, no
+per-client identity, no per-collection scope, so every cohort VM holds the same secret and
+a leak anywhere is a rotation everywhere **with no overlap window**. Install it with
+notifier's `scripts/install_qdrant_key.sh` (key on **stdin**, never argv; never under
+`bash -x`), run from an operator machine — `tag:index:22` was retired after the soak, so
+this VM cannot reach `co-index` over SSH. Expect `installed 64 chars`; any other length is
+a truncated transfer, which 401s exactly like a wrong key.
+
+Validate the contract with no server and no network:
+
+```bash
+D=skills-vendor/gregoryfoster-skills/skills/init-socraticode/scripts/mcp-driver.mjs
+node $D validate-store .      # external mode, projectId, what the path hash would have been
+node $D validate-manifest .   # the 10 context artifacts still resolve
+node $D resolve               # which server a launch would get (the #307 pin)
+```
+
+**Traps, every one of them measured during the cohort's rollout.** All five fail *green*:
+
+1. **A missing linked directory is dropped silently.** `loadLinkedProjects` filters on
+   `fs.existsSync` with no warning, and `searchMultipleCollections` swallows a
+   per-collection failure the same way — so a green `codebase_search` is never evidence
+   that every sibling answered.
+2. **`projectId` renames your collections.** Resolution order is `SOCRATICODE_PROJECT_ID`
+   env > `.socraticode.json` > SHA-256 of the absolute path. Adopting the file orphans
+   anything indexed under the path hash — here that would have been `3c54a78f3ffa`, and
+   nothing was: the local store was verified empty before the file landed.
+3. **`QDRANT_URL`, never `QDRANT_HOST`.** The fallback builds
+   `${KEY ? https : http}://${QDRANT_HOST}:${QDRANT_PORT}` with `QDRANT_PORT` defaulting to
+   **16333**, not 6333 — so a key with no URL assumes https against the wrong port and the
+   error reads like a network fault.
+4. **Full MagicDNS name only.** `https://index.taild0fb76.ts.net:6333`, not
+   `https://index:6333` — the short name is not in the certificate's SAN. Qdrant serves TLS
+   because SocratiCode *refuses* to send the key over a non-TLS, non-localhost connection
+   (notifier#57 D14).
+5. **Never set `QDRANT_COLLECTION_PREFIX` or `SOCRATICODE_BRANCH_AWARE`.** The prefix is
+   prepended to the instance-global `socraticode_metadata` collection too, so one VM
+   setting it splits the cohort namespace; branch-awareness appends the branch name to the
+   project id, giving a fresh collection set per branch. The test file guards both across
+   every env surface on this host.
+
+**The `env` block applies only in a trusted folder.** Untrusted, `QDRANT_MODE` reverts to
+`managed` and `OLLAMA_MODE` to `auto`, and SocratiCode tries to start Docker containers
+rather than reporting missing configuration. That failure is loud only while no local store
+exists — archiver (CannObserv/archiver#226) adopted with its managed containers still up
+and ended with two collections named `codebase_archiver`, the stale local one answering
+~23 % short with no warning at either layer. Hence the order used here: the managed
+container was stopped and the local store confirmed empty **before** `.socraticode.json`
+landed. Docker is still installed on this VM; `systemctl disable --now docker.socket
+docker.service` is the follow-up once the shared index verifies, and it also stops
+`scripts/cleanup.sh`'s `docker image prune -f` from waking `dockerd` on the weekly timer.
+
+**An already-running server never picks the `env` block up.** The server that indexes must
+start *after* the block exists — a fresh session, or an out-of-band launch. Cap it: the
+everyday launch paths (plugin, health hook, preflight) are uncapped, and broker took a
+production VM down launching one (CannObserv/broker#17, design in broker#27).
+
+```bash
+systemd-run --user --scope -p MemoryHigh=1200M -p MemoryMax=1536M -p CPUQuota=100% \
+  choom -n 500 -- node $D index .
+```
+
+`OOMScoreAdjust`/`choom` is not optional — a session-launched process inherits -1000 and a
+cgroup cap on it stalls rather than kills. Archiver's capped index ran 50 min wall on a
+comparable 3.9 GiB box with no bus impact; watcher is larger than broker's 25 graph files,
+so budget accordingly.
+
+### Linked projects and cross-repo search
+
+`linkedProjects` in `.socraticode.json` names the other four cohort repos by **relative**
+path — `../archiver`, `../broker`, `../replicator`, `../notifier`. Pass
+`includeLinked: true` on `codebase_search` to fan out; results carry a `[watcher]` /
+`[archiver]` / … label.
+
+Each entry is used for exactly two things: the directory's own `.socraticode.json` gives
+the **project id** (→ collection name), and the directory **basename** gives the display
+label. No path reaches the search — every byte of sibling source comes from Qdrant. So a
+sibling needs a **link stub**, not a clone:
+
+```
+/home/exedev/<sibling>/.socraticode.json    →  { "projectId": "<sibling>" }
+```
+
+`../broker`, `../replicator` and `../notifier` are stubs on this VM, each with a `README.md`
+saying so. `../archiver` is a real checkout, which is the weaker arrangement and is
+currently broken in exactly the way that predicts: a clone carries the sibling's *own*
+committed `projectId`, and this one predates archiver#226, so it has no `.socraticode.json`
+at all and resolves to a path hash — a collection nobody indexed. Cross-repo hits from
+archiver are therefore **absent, not empty**, until someone runs `git -C /home/exedev/archiver
+pull` in a session scoped to that repo. A stub cannot drift behind a `git pull` nobody ran;
+a clone can, and did.
+
+Note what this does *not* trip: the health check counts a linked path as resolved when the
+**directory** exists, so it reports `4 of 4` while archiver answers nothing. Resolution is
+the floor, not the proof.
+
+`SOCRATICODE_LINKED_PROJECTS` is **not** an override — `loadLinkedProjects` unions it with
+the file into one `Set`. The absolute `/home/exedev/notifier` this repo carried in
+`settings.local.json` was therefore never a conflict, just a no-op that `fs.existsSync`
+dropped without a word; #300 removed it in favour of the committed relative entries.
+
+Confirm the set resolves — this is the only thing that will tell you a stub is missing:
+
+```bash
+node $D health-check .   # → linkedProjects: configured 4, missing []
+```
 
 Upstream reference: [giancarloerra/socraticode#agent-instructions](https://github.com/giancarloerra/socraticode#agent-instructions)
 

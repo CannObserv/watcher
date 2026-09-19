@@ -28,11 +28,11 @@ Auth, upgrade procedure and the pinned version: [docs/DEPLOYMENT.md](docs/DEPLOY
 
 ## Code Exploration Policy
 
-SocratiCode indexes this repo into the cohort's **shared store on `co-index`, never locally** (#300, #307) — so `includeLinked: true` also answers from archiver, broker, replicator and notifier with no sibling source on disk. Its MCP tools are **deferred**: schemas load only after a `ToolSearch` prefetch, which the SessionStart hook prints — run it before exploring. A second, daily health hook **reports only** — confirm with `codebase_status` before acting on it.
+SocratiCode indexes this repo into the cohort's **shared store on `co-index`, never locally** (#300) — so `includeLinked: true` also answers from archiver, broker, replicator and notifier with no sibling source on disk. Its MCP tools are **deferred**: schemas load only after a `ToolSearch` prefetch, which the SessionStart hook prints — run it before exploring. A second, daily health hook **reports only** — confirm with `codebase_status` before acting on it.
 
-**Negative rule, once the index answers.** Broad semantic questions ("where is X", "how does Y work", "what depends on Z") go to SocratiCode first; `grep`/`ripgrep` only for exact strings (error messages, log lines, known symbols); the Explore subagent only for path-pattern walks (`*.py` under `src/api/routes/`), never semantic search. **Empty is not absent:** an unreachable collection is skipped silently and never surfaced in the result, so verify the store before trusting a miss, then `grep` for that session.
+**Negative rule.** Broad semantic questions ("where is X", "how does Y work", "what depends on Z") go to SocratiCode first; `grep`/`ripgrep` only for exact strings (error messages, log lines, known symbols); the Explore subagent only for path-pattern walks (`*.py` under `src/api/routes/`), never semantic search. **Empty is not absent:** an unreachable collection is skipped silently and never surfaced in the result, so verify the store before trusting a miss, then `grep` for that session.
 
-The client contract and its traps: [docs/SOCRATICODE.md](docs/SOCRATICODE.md). Goal→tool table, index scope, prefetch query: [docs/SKILLS.md](docs/SKILLS.md).
+Client contract and traps: [docs/SOCRATICODE.md](docs/SOCRATICODE.md); goal→tool table, index scope, prefetch query: [docs/SKILLS.md](docs/SKILLS.md).
 
 ## Infrastructure
 
@@ -184,7 +184,7 @@ build (§10), component classes over raw utilities (UI §4), and
 
 ## Agent Skills
 
-A skill is symlinked into both `skills/` and `.claude/skills/`; overrides in `skills/` shadow `skills-vendor/`. That, and what is left in the per-instance `.claude/settings.local.json`: [docs/SKILLS.md](docs/SKILLS.md).
+A skill is symlinked into both `skills/` and `.claude/skills/`; overrides in `skills/` shadow `skills-vendor/`: [docs/SKILLS.md](docs/SKILLS.md).
 
 ## Detail Docs
 

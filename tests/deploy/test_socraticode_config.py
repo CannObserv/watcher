@@ -63,7 +63,12 @@ EXPECTED_ENV = {
 #: the project id - a fresh six-collection set, re-indexed from empty, per branch.
 NAMESPACE_GUARD_VARS = ["QDRANT_COLLECTION_PREFIX", "SOCRATICODE_BRANCH_AWARE"]
 
-#: Everywhere a variable could reach the MCP server's environment on this host.
+#: Every env surface on this host. The first four are the ones that actually
+#: reach the MCP server -- it launches from an agent session, so it inherits
+#: whatever `scripts/load-env.sh` put in that shell plus the two `env` blocks
+#: Claude Code applies. `deploy/watcher.service` cannot reach it and is here as
+#: defence in depth, because a variable set there is still wrong.
+#:
 #: VM-local files are skipped loudly rather than passing vacuously in CI.
 ENV_SURFACE_FILES = [
     Path("/etc/watcher/.env"),
@@ -72,6 +77,22 @@ ENV_SURFACE_FILES = [
     REPO_ROOT / ".claude" / "settings.local.json",
     REPO_ROOT / "deploy" / "watcher.service",
 ]
+
+
+def _surface_id(path: Path) -> str:
+    """Disambiguate the two `.env` files.
+
+    `path.name` collides -- /etc/watcher/.env and the repo's .env both render as
+    `.env`, so pytest disambiguates them as `.env0`/`.env1` and the failure says
+    which ordinal, not which file. This test's whole job is to name the file
+    holding a variable that splits the cohort namespace, and telling the
+    production env file from the repo one is the most important distinction it
+    draws. VM-local paths keep their absolute form; tracked ones go repo-relative.
+    """
+    try:
+        return str(path.relative_to(REPO_ROOT))
+    except ValueError:
+        return str(path)
 
 
 @pytest.fixture(scope="module")
@@ -129,7 +150,7 @@ def test_linked_projects_exclude_this_repo(config):
     assert f"../{REPO_ROOT.name}" not in config["linkedProjects"]
 
 
-@pytest.mark.parametrize("path", ENV_SURFACE_FILES, ids=lambda p: p.name)
+@pytest.mark.parametrize("path", ENV_SURFACE_FILES, ids=_surface_id)
 def test_linked_projects_env_var_is_not_set(path: Path):
     """`SOCRATICODE_LINKED_PROJECTS` unions with the file; it does not shadow it.
 
@@ -145,7 +166,7 @@ def test_linked_projects_env_var_is_not_set(path: Path):
     if not path.exists():
         pytest.skip(f"{path} not present on this machine")
     declares = "SOCRATICODE_LINKED_PROJECTS" in path.read_text()
-    assert not declares, f"{path.name} sets SOCRATICODE_LINKED_PROJECTS"
+    assert not declares, f"{_surface_id(path)} sets SOCRATICODE_LINKED_PROJECTS"
 
 
 @pytest.mark.parametrize("variable", sorted(EXPECTED_ENV))
@@ -234,7 +255,7 @@ def test_settings_local_is_git_ignored():
     assert ignored, f"{SETTINGS_LOCAL_NAME} is not git-ignored: it would be committed"
 
 
-@pytest.mark.parametrize("path", ENV_SURFACE_FILES, ids=lambda p: p.name)
+@pytest.mark.parametrize("path", ENV_SURFACE_FILES, ids=_surface_id)
 @pytest.mark.parametrize("variable", NAMESPACE_GUARD_VARS)
 def test_namespace_guards_are_not_set_anywhere(variable: str, path: Path):
     """VM-local where the file is VM-local; skips loudly rather than passing vacuously.
@@ -249,4 +270,4 @@ def test_namespace_guards_are_not_set_anywhere(variable: str, path: Path):
     if not path.exists():
         pytest.skip(f"{path} not present on this machine")
     declares = variable in path.read_text()
-    assert not declares, f"{path.name} sets {variable}"
+    assert not declares, f"{_surface_id(path)} sets {variable}"

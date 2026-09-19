@@ -19,6 +19,7 @@ docs/BUS-CONNECTION-POLICY.md: client timeouts, the zero-retry rule, URL redacti
 docs/COMMANDS.md: every runnable command (scripts/, pyproject.toml scripts and deps)
 docs/DEPLOYMENT.md: systemd units, install runbook, timers, wheelhouse (deploy/, tests/deploy/)
 docs/ENVIRONMENT.md: env files, variables, the unit-only credentials (new config keys in src/core/config.py, deploy/)
+docs/SOCRATICODE.md: the shared-index client contract, the green-failing traps, link stubs (.socraticode.json, .claude/settings.json env block, sibling checkouts)
 docs/MIGRATIONS.md: manual upgrade steps, grants, one-time orderings (alembic/versions/)
 docs/WATCHED-ITEMS.md: fields, schedule resolution, registry reconciliation, notifications (src/core/watched_items.py, registry, notifications)
 docs/WATCHED-ITEMS-DASHBOARD.md: routes, lifecycle guards, list and detail views (src/dashboard/)

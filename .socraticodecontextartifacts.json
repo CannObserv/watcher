@@ -33,7 +33,12 @@
     {
       "name": "skills-doc",
       "path": "./docs/SKILLS.md",
-      "description": "Agent skills index. Catalogues the skills available under skills/ (agentskills.io) and .claude/skills/ (Claude Code) directories, the vendored submodule repos they symlink into, and the SessionStart hook inventory registered in .claude/settings.json (socraticode-reminder prefetch, socraticode-health once-per-day index check, skills-submodule-update refresh) with the vendored install-hook.sh/install-refresh.sh commands that install and audit them. Also carries the SocratiCode goal-to-tool table, index scope (.socraticodeignore), the ToolSearch prefetch query, and the shared-index client contract (#300): the store lives on co-index, not here, configured by the committed .socraticode.json and the env block in .claude/settings.json with QDRANT_API_KEY in the git-ignored settings.local.json, plus the sibling link stubs that make includeLinked cross-repo search work and the five green-failing traps."
+      "description": "Agent skills index. Catalogues the skills available under skills/ (agentskills.io) and .claude/skills/ (Claude Code) directories, the vendored submodule repos they symlink into, and the SessionStart hook inventory registered in .claude/settings.json (socraticode-reminder prefetch, socraticode-health once-per-day index check, skills-submodule-update refresh) with the vendored install-hook.sh/install-refresh.sh commands that install and audit them. Also carries the SocratiCode goal-to-tool table, the search-before-reading workflow, index scope (.socraticodeignore) and the ToolSearch prefetch query. The shared-index client contract moved to docs/SOCRATICODE.md (#300)."
+    },
+    {
+      "name": "socraticode-doc",
+      "path": "./docs/SOCRATICODE.md",
+      "description": "The shared SocratiCode index on co-index (#300): why watcher hosts no local store (#307 measured 3.8 GiB, no swap, a production unit resident), the two committed client files (.socraticode.json projectId/linkedProjects, the six-variable env block in .claude/settings.json) and the per-host QDRANT_API_KEY in the git-ignored settings.local.json. Carries the five traps that report themselves as green (path-hash fallback, QDRANT_HOST's port 16333, the short MagicDNS name outside the certificate SAN, QDRANT_COLLECTION_PREFIX and SOCRATICODE_BRANCH_AWARE namespace splitting), the capped out-of-band index invocation and its measured cost, the sibling link stubs that make includeLinked cross-repo search work, and why ../archiver must stay a real checkout because ARCHIVER_REPO_PATH points at it."
     },
     {
       "name": "design-and-plans",

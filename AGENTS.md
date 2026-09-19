@@ -32,7 +32,7 @@ SocratiCode indexes this repo into the cohort's **shared store on `co-index`, ne
 
 **Negative rule, once the index answers.** Broad semantic questions ("where is X", "how does Y work", "what depends on Z") go to SocratiCode first; `grep`/`ripgrep` only for exact strings (error messages, log lines, known symbols); the Explore subagent only for path-pattern walks (`*.py` under `src/api/routes/`), never semantic search. **Empty is not absent:** an unreachable collection is skipped silently and never surfaced in the result, so verify the store before trusting a miss, then `grep` for that session.
 
-Goal→tool table, index scope, the client contract and its traps, the prefetch query: [docs/SKILLS.md](docs/SKILLS.md).
+The client contract and its traps: [docs/SOCRATICODE.md](docs/SOCRATICODE.md). Goal→tool table, index scope, prefetch query: [docs/SKILLS.md](docs/SKILLS.md).
 
 ## Infrastructure
 
@@ -200,6 +200,7 @@ A skill is symlinked into both `skills/` and `.claude/skills/`; overrides in `sk
 - [docs/MIGRATIONS.md](docs/MIGRATIONS.md) — the manual upgrade step, the two-role grants, one-time orderings
 - [docs/reference/tailscale.md](docs/reference/tailscale.md) — this node: identity, peers, the cold-boot race, ACL rules
 - [docs/SKILLS.md](docs/SKILLS.md) — skill triggers, vendored skill repos, SocratiCode workflow
+- [docs/SOCRATICODE.md](docs/SOCRATICODE.md) — the shared index on co-index: client contract, the green-failing traps, link stubs
 - [docs/STYLE.md](docs/STYLE.md) — the design system: brand, color, dark mode, tokens, layout, touch targets, accessibility
 - [docs/UI.md](docs/UI.md) — the component library, the HTMX/flash patterns
 - [docs/WATCHED-ITEMS.md](docs/WATCHED-ITEMS.md) — the entity: fields, schedule resolution, reconciliation, notifications

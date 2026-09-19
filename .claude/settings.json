@@ -47,5 +47,13 @@
     "allow": [
       "Read(/home/exedev/.claude/projects/**)"
     ]
+  },
+  "env": {
+    "QDRANT_MODE": "external",
+    "QDRANT_URL": "https://index.taild0fb76.ts.net:6333",
+    "OLLAMA_MODE": "external",
+    "OLLAMA_URL": "http://index:11434",
+    "EMBEDDING_MODEL": "nomic-embed-text",
+    "EMBEDDING_DIMENSIONS": "768"
   }
 }

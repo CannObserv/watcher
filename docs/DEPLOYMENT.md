@@ -27,6 +27,11 @@ A systemd unit file is provided at `deploy/watcher.service`.
 > answers before starting the unit. This node's identity, its peers, the
 > cold-boot race and the ACL rules: [reference/tailscale.md](reference/tailscale.md).
 
+> **Set the host's memory posture too** (#307). This VM is 3.8 GiB with no swap
+> and shares memory with agent sessions the OOM killer cannot pick, so the
+> kernel reserve and the shedder are part of the install, not tuning done later:
+> [§ Host memory posture](#host-memory-posture-307).
+
 ```bash
 # Create system env directory
 sudo mkdir -p /etc/watcher
@@ -167,10 +172,50 @@ a process while userspace can still make progress — and because it ranks by
 service (-500) means it picks the `npm`/`node`/`docker` process that is actually
 spiking, at the default 0.
 
+Neither of those two lives in this repo, so **a rebuilt VM loses both silently** —
+nothing fails, the box is simply back to an 8 MB reserve and no shedder. Recreate
+them as part of the install:
+
 ```bash
-sudo sysctl --system                 # apply the reserve
-systemctl is-active earlyoom         # the shedder
+# 1. The kernel reserve. The shipped default here was ~8 MB, which is what lets
+#    an ATOMIC allocation fail in an unrelated process while memory is nominally
+#    available. 64 MB is ~1.6% of this host.
+sudo tee /etc/sysctl.d/60-watcher-memory.conf >/dev/null <<'CONF'
+# Kernel free-memory reserve for co-watcher (watcher#307). See
+# docs/DEPLOYMENT.md -> Host memory posture.
+vm.min_free_kbytes = 65536
+CONF
+sudo sysctl --system
+
+# 2. The shedder. Acts while userspace can still make progress, before the
+#    kernel is reduced to picking a production service.
+sudo apt-get install -y earlyoom
+sudo tee /etc/default/earlyoom >/dev/null <<'CONF'
+# earlyoom for co-watcher (watcher#307). --avoid names the processes whose
+# death IS the outage: `uv` is watcher.service's main process and `uvicorn` its
+# server child, postgres backs it, tailscaled carries every peer hop.
+# --prefer names the node family, which is what actually spikes here.
+EARLYOOM_ARGS="-r 3600 --avoid '^(uv|uvicorn|postgres|tailscaled|systemd|sshd|exe-init)$' --prefer '^(node|npm|MainThread)$'"
+CONF
+sudo systemctl restart earlyoom && sudo systemctl enable earlyoom
 ```
+
+Verify:
+
+```bash
+cat /proc/sys/vm/min_free_kbytes    # 65536
+systemctl is-active earlyoom        # active
+```
+
+**The `--avoid` list is only half the protection, and not the same half for each
+name.** earlyoom ranks by `oom_score`, so it already honours an
+`OOMScoreAdjust`: `watcher.service` carries -500 (above) and Debian ships **-900**
+for postgres in `/lib/systemd/system/postgresql@.service`. `tailscaled` carries
+**no adjustment at all** — 0, the default, level with every `npm`/`node` process
+and below them once they grow — so for it the regex is the only thing standing
+between a spike and a dead tunnel, and every peer this service reaches is a
+MagicDNS name behind it. Neither postgres nor tailscaled has a `MemoryLow=`
+reservation either; #309 tracks both.
 
 ## Database Migrations
 

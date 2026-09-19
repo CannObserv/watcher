@@ -169,6 +169,43 @@ def test_linked_projects_env_var_is_not_set(path: Path):
     assert not declares, f"{_surface_id(path)} sets SOCRATICODE_LINKED_PROJECTS"
 
 
+@pytest.mark.parametrize("entry", sorted(COHORT_SIBLINGS))
+def test_a_resolvable_sibling_declares_the_right_project_id(entry: str):
+    """Resolution is the floor, not the proof — the gap #300 measured.
+
+    `loadLinkedProjects` keeps an entry when the *directory* exists, and
+    `searchMultipleCollections` swallows a per-collection miss, so a sibling can
+    resolve, be searched, and contribute nothing while `health-check` reports
+    `4 of 4 resolved` and the tool result says no more. That is exactly what
+    `../archiver` did: a clone predating archiver#226 carried no
+    `.socraticode.json`, fell through to the SHA-256 of its path
+    (`codebase_7a9d625938ee`, indexed by nobody), and returned zero hits on a
+    query aimed squarely at its own domain.
+
+    So this asserts the one thing resolution does not: that a directory which
+    *is* there names the collection its basename implies. It is host state, not
+    repo state, hence the skip — CI links no siblings, and an absent sibling is
+    a legitimate configuration that upstream drops silently by design.
+    """
+    path = (REPO_ROOT / entry).resolve()
+    if not path.is_dir():
+        pytest.skip(f"{entry} is not present on this machine")
+
+    config = path / ".socraticode.json"
+    expected = path.name
+    assert config.is_file(), (
+        f"{path} exists but has no .socraticode.json, so it resolves to a path "
+        f"hash instead of `{expected}` — searched, skipped, and silent. Either "
+        f"pull the checkout (if it is a clone whose repo committed one) or write "
+        f'a stub: {{ "projectId": "{expected}" }}'
+    )
+    declared = json.loads(config.read_text()).get("projectId")
+    assert declared == expected, (
+        f"{path} declares projectId {declared!r}, so cross-repo hits would come "
+        f"from collection codebase_{declared} rather than codebase_{expected}"
+    )
+
+
 @pytest.mark.parametrize("variable", sorted(EXPECTED_ENV))
 def test_client_variables_are_committed(variable: str, settings_env: dict):
     """Non-secret and self-documenting, so they travel with the checkout.

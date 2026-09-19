@@ -337,9 +337,21 @@ systemd-run --user --scope -p MemoryHigh=1200M -p MemoryMax=1536M -p CPUQuota=10
 ```
 
 `OOMScoreAdjust`/`choom` is not optional — a session-launched process inherits -1000 and a
-cgroup cap on it stalls rather than kills. Archiver's capped index ran 50 min wall on a
-comparable 3.9 GiB box with no bus impact; watcher is larger than broker's 25 graph files,
-so budget accordingly.
+cgroup cap on it stalls rather than kills.
+
+**Measured here, 2026-09-19.** That exact invocation ran **69 min wall** on the pinned
+1.14.0 server, installing nothing, and left five green collections in the shared store:
+
+| Collection | Points |
+|---|---|
+| `codebase_watcher` | 3820 |
+| `context_watcher` | 1495 |
+| `watcher_symgraph_file` | 344 |
+| `watcher_symgraph_index` | 157 |
+| `watcher_symgraph_meta` | 1 |
+
+`watcher.service` was untouched throughout, and the store holds no path-hash collection
+for this repo — the rename in trap 2 orphaned nothing, because there was nothing to orphan.
 
 ### Linked projects and cross-repo search
 
@@ -358,17 +370,22 @@ sibling needs a **link stub**, not a clone:
 ```
 
 `../broker`, `../replicator` and `../notifier` are stubs on this VM, each with a `README.md`
-saying so. `../archiver` is a real checkout, which is the weaker arrangement and is
-currently broken in exactly the way that predicts: a clone carries the sibling's *own*
-committed `projectId`, and this one predates archiver#226, so it has no `.socraticode.json`
-at all and resolves to a path hash — a collection nobody indexed. Cross-repo hits from
-archiver are therefore **absent, not empty**, until someone runs `git -C /home/exedev/archiver
-pull` in a session scoped to that repo. A stub cannot drift behind a `git pull` nobody ran;
-a clone can, and did.
+saying so — `/home/exedev/notifier` is **1202 bytes, two files, zero source**, and notifier
+hits come back with real paths and line numbers all the same.
+
+`../archiver` is a real checkout, which is the weaker arrangement and is broken in exactly
+the way that predicts. A clone carries the sibling's *own* committed `projectId`; this one
+predates archiver#226, so it has no `.socraticode.json` at all and falls through to the
+SHA-256 of its absolute path — `codebase_7a9d625938ee`, which nothing has ever indexed.
+Measured 2026-09-19: a query aimed squarely at archiver's registry domain returned
+`[watcher]`, `[replicator]` and `[broker]` hits and **not one `[archiver]` hit**. A stub
+cannot drift behind a `git pull` nobody ran; a clone can, and did. The fix is
+`git -C /home/exedev/archiver pull`, in a session scoped to that repo.
 
 Note what this does *not* trip: the health check counts a linked path as resolved when the
 **directory** exists, so it reports `4 of 4` while archiver answers nothing. Resolution is
-the floor, not the proof.
+the floor, not the proof — which is trap 1 restated, and the reason `includeLinked` needs a
+query whose answer you already know before you trust it.
 
 `SOCRATICODE_LINKED_PROJECTS` is **not** an override — `loadLinkedProjects` unions it with
 the file into one `Set`. The absolute `/home/exedev/notifier` this repo carried in

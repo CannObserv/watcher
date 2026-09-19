@@ -50,9 +50,13 @@ echo ""
 # Ask systemd, do not probe. The binary stayed installed when #300 moved the
 # semantic index to the shared store on co-index and tore the daemon down, so
 # `command -v docker` is still true while `docker image prune` exits non-zero —
-# which under `set -e` would abort every step below this one. And while
-# docker.socket is enabled, any docker CLI call socket-activates dockerd plus
-# containerd for ~120 MB, which is not a free question to ask on this host (#307).
+# which under `set -e` would abort every step below this one.
+#
+# Asking also avoids waking a daemon that is down: where docker.socket is
+# inactive no CLI call is made, so nothing socket-activates dockerd plus
+# containerd for ~120 MB on this 3.8 GiB swapless host (#307). Where the socket
+# IS active the prune runs and does wake it — but there Docker is in use and
+# the prune is the point. #310 removes this branch and the packages entirely.
 if systemctl is-active --quiet docker.socket || systemctl is-active --quiet docker.service; then
     echo "--- Docker dangling images ---"
     docker image prune -f || true

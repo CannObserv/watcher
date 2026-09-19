@@ -376,7 +376,7 @@ sudo systemctl daemon-reload && sudo systemctl restart watcher-cleanup.timer
 | `~/.npm/_npx`, `~/.npm/_cacache` | `rm -rf` |
 | uv build cache | `uv cache prune` |
 | APT package cache | `apt-get clean` |
-| Docker dangling images | `docker image prune -f` |
+| Docker dangling images | `docker image prune -f` — skipped unless systemd reports the daemon up (#300) |
 | Journal logs >14 days | `journalctl --vacuum-time=14d` |
 | Playwright cache | audit only — logs size, warns if >2 GB, never deletes |
 

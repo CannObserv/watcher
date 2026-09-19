@@ -45,10 +45,17 @@ sudo /bin/apt-get clean
 echo "done"
 echo ""
 
-# Docker dangling images (conservative — no volumes, no stopped containers)
-if command -v docker &>/dev/null; then
+# Docker dangling images (conservative — no volumes, no stopped containers).
+#
+# Ask systemd, do not probe. The binary stayed installed when #300 moved the
+# semantic index to the shared store on co-index and tore the daemon down, so
+# `command -v docker` is still true while `docker image prune` exits non-zero —
+# which under `set -e` would abort every step below this one. And while
+# docker.socket is enabled, any docker CLI call socket-activates dockerd plus
+# containerd for ~120 MB, which is not a free question to ask on this host (#307).
+if systemctl is-active --quiet docker.socket || systemctl is-active --quiet docker.service; then
     echo "--- Docker dangling images ---"
-    docker image prune -f
+    docker image prune -f || true
     echo ""
 fi
 

@@ -322,9 +322,18 @@ exists — archiver (CannObserv/archiver#226) adopted with its managed container
 and ended with two collections named `codebase_archiver`, the stale local one answering
 ~23 % short with no warning at either layer. Hence the order used here: the managed
 container was stopped and the local store confirmed empty **before** `.socraticode.json`
-landed. Docker is still installed on this VM; `systemctl disable --now docker.socket
-docker.service` is the follow-up once the shared index verifies, and it also stops
-`scripts/cleanup.sh`'s `docker image prune -f` from waking `dockerd` on the weekly timer.
+landed. **Docker was then torn down here** (2026-09-19, once the shared index verified):
+container, image and the empty `socraticode_qdrant_data` volume removed, then
+`systemctl disable --now docker.socket docker.service` and `containerd` stopped — ~85 MB
+of resident `containerd` and 277 MB of image. `docker ps` now answers *Cannot connect to
+the Docker daemon*, which is the loud failure trap 6 assumes rather than a stale local
+collection answering quietly.
+
+That teardown is why `scripts/cleanup.sh` asks systemd before pruning images instead of
+testing for the binary: the binary is still installed, the daemon is not, and the script
+runs under `set -euo pipefail` — so an unguarded `docker image prune -f` would abort the
+weekly run at that line and silently skip the journal vacuum below it
+([tests/deploy/test_cleanup_docker_guard.py](../tests/deploy/test_cleanup_docker_guard.py)).
 
 **An already-running server never picks the `env` block up.** The server that indexes must
 start *after* the block exists — a fresh session, or an out-of-band launch. Cap it: the
@@ -373,14 +382,21 @@ sibling needs a **link stub**, not a clone:
 saying so — `/home/exedev/notifier` is **1202 bytes, two files, zero source**, and notifier
 hits come back with real paths and line numbers all the same.
 
-`../archiver` is a real checkout, which is the weaker arrangement and is broken in exactly
-the way that predicts. A clone carries the sibling's *own* committed `projectId`; this one
-predates archiver#226, so it has no `.socraticode.json` at all and falls through to the
-SHA-256 of its absolute path — `codebase_7a9d625938ee`, which nothing has ever indexed.
-Measured 2026-09-19: a query aimed squarely at archiver's registry domain returned
-`[watcher]`, `[replicator]` and `[broker]` hits and **not one `[archiver]` hit**. A stub
-cannot drift behind a `git pull` nobody ran; a clone can, and did. The fix is
-`git -C /home/exedev/archiver pull`, in a session scoped to that repo.
+**`../archiver` is the exception, and must stay a real checkout.** `tests/conftest.py`
+defaults `ARCHIVER_REPO_PATH` to `/home/exedev/archiver` and runs that repo's alembic to
+build the `information` schema — so the same path serves two unrelated consumers, and
+replacing it with a stub turns four tests red
+(`tests/test_conftest_archiver_migrations.py`). That was tried on 2026-09-19 and reverted.
+Check `ARCHIVER_REPO_PATH` before touching this one; the other three have no such
+consumer.
+
+Which means the clone-drift hazard is real here rather than avoidable. That checkout
+predated archiver#226, so it carried no `.socraticode.json` and fell through to the SHA-256
+of its absolute path — `codebase_7a9d625938ee`, which nothing has ever indexed. Measured
+before the pull: a query aimed squarely at archiver's registry domain returned `[watcher]`,
+`[replicator]` and `[broker]` hits and **not one `[archiver]` hit**. After
+`git -C /home/exedev/archiver pull`, the same query returns five. **Keeping that clone
+current is now a search dependency, not just hygiene.**
 
 Note what this does *not* trip: the health check counts a linked path as resolved when the
 **directory** exists, so it reports `4 of 4` while archiver answers nothing. Resolution is

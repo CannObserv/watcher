@@ -50,6 +50,18 @@ def test_the_journal_vacuum_still_runs():
     assert "--vacuum-time=14d" in CLEANUP.read_text()
 
 
+def test_the_steps_the_branch_sat_between_both_survived_it():
+    """A seam has two sides, and a line range can miss in either direction.
+
+    The Docker branch sat between the APT cache clean and the journal vacuum, so
+    a range that starts a few lines early takes the APT step instead — which the
+    test above, pinning only the lower side, would not notice.
+    """
+    text = CLEANUP.read_text()
+    assert "sudo /bin/apt-get clean" in text, "the step above the removed branch went with it"
+    assert text.index("sudo /bin/apt-get clean") < text.index("--vacuum-time=14d")
+
+
 @pytest.mark.skipif(BASH is None, reason="needs bash to parse the script")
 def test_the_script_still_parses():
     """The one property above that no amount of reading the text establishes.

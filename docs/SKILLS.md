@@ -205,9 +205,9 @@ symlink and its registration independently and exits 3 if either is missing, or
 if the hook is a copy where a vendored source exists to link at instead.
 
 **The health hook reports; it never repairs.** No re-index, no file edit, no
-config rewrite — it runs before an agent has context. Findings land on stdout and in
-`.git/socraticode-health.log` (tail-bounded to 200 lines); act on them with
-`codebase_index` or by re-running `init-socraticode`.
+config rewrite — it runs before an agent has context. Findings land on stdout
+and in `.git/socraticode-health.log` (tail-bounded to 200 lines); act on them
+with `codebase_index` or by re-running `init-socraticode`.
 
 **It costs one session start per UTC day.** Measured here at **~8s** against a
 warm MCP server; a cold start pays for `npx -y socraticode` on top, bounded by

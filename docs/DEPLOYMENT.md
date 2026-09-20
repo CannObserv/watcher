@@ -210,9 +210,9 @@ systemctl is-active earlyoom        # active
 
 **Docker is not among the spikers here any more.** #300 tore the daemon down
 when the semantic index moved to the shared store on `co-index`, and #310
-purged the packages themselves — so a stray invocation (an agent session, a copied-in
-script, a vendored skill's preflight) can no longer socket-activate `dockerd`
-plus `containerd` for ~120 MB here. `preflight.sh --check` reports it as *Docker
+purged the packages themselves — so a stray invocation (an agent session, a
+copied-in script, a vendored skill's preflight) can no longer socket-activate
+`dockerd` plus `containerd` for ~120 MB here. `preflight.sh --check` reports it as *Docker
 not needed*; a rebuilt VM that reinstalls `docker.io` gets that path back.
 
 **The `--avoid` list is only half the protection, and not the same half for each

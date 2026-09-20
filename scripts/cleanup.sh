@@ -5,6 +5,7 @@ set -euo pipefail
 LOG_DIR="/var/log/watcher"
 LOG_FILE="$LOG_DIR/cleanup-$(date -u +%Y%m%d-%H%M%S).log"
 PLAYWRIGHT_THRESHOLD_BYTES=$((2 * 1024 * 1024 * 1024))
+NPM_CACHE_THRESHOLD_BYTES=$((2 * 1024 * 1024 * 1024))
 
 mkdir -p "$LOG_DIR"
 exec > >(tee -a "$LOG_FILE") 2>&1
@@ -28,10 +29,31 @@ if [ -d "$HOME/.vscode-server/cli/servers" ]; then
     echo ""
 fi
 
-# npm caches
+# npm caches: thresholded, not wiped (#314).
+#
+# `_npx` is the installed package tree and `_cacache` the tarballs it installs
+# from. The SocratiCode plugin's MCP server launches `npx -y socraticode` inside
+# Claude Code's 30s connect timeout, so an empty cache turns session start into
+# a ~1,700-tarball cold install that does not fit in the budget: the session
+# comes up with no semantic index, and every health check still passes, because
+# those go through the pinned install rather than the plugin's npx.
+#
+# Measured 2026-09-20: 553 MB warm, on a 25 G disk at 36% used. The ceiling
+# stays so a runaway cache is still collected.
 echo "--- npm caches ---"
-rm -rf "$HOME/.npm/_npx" "$HOME/.npm/_cacache"
-echo "done"
+NPM_CACHE_BYTES=0
+for NPM_CACHE_DIR in "$HOME/.npm/_npx" "$HOME/.npm/_cacache"; do
+    if [ -d "$NPM_CACHE_DIR" ]; then
+        NPM_CACHE_BYTES=$((NPM_CACHE_BYTES + $(du -sb "$NPM_CACHE_DIR" | cut -f1)))
+    fi
+done
+echo "size: $(numfmt --to=iec "$NPM_CACHE_BYTES")"
+if [ "$NPM_CACHE_BYTES" -gt "$NPM_CACHE_THRESHOLD_BYTES" ]; then
+    rm -rf "$HOME/.npm/_npx" "$HOME/.npm/_cacache"
+    echo "over threshold — cleared"
+else
+    echo "under threshold — kept (a cold cache costs the next session its MCP server)"
+fi
 echo ""
 
 # uv cache prune

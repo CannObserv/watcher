@@ -129,11 +129,14 @@ failed atomic allocations in `tailscaled` and `ksoftirqd`, the bus was down 57m
 none substitutes for another.
 
 **1. Don't install a server at every launch.** SocratiCode's plugin launches
-`npx -y --prefer-online socraticode@latest`, and `--prefer-online` revalidates
-against the registry *every* launch — a warm cache is not a warm path on any day
-the package moved. Measured on broker: 75 MB pinned, 129 MB warm-npx, **1.2 G**
-for a cold install, with all 126 `MemoryHigh` throttle events in the install and
-none in indexing. `.claude/hooks/socraticode-health.sh` runs the driver from
+`npx -y socraticode` (`~/.claude/plugins/cache/socraticode/socraticode/<ver>/.mcp.json`;
+earlier plugin releases passed `--prefer-online socraticode@latest`, which
+revalidated against the registry on *every* launch). Without `--prefer-online` a
+warm npm cache is a warm path — which is why `scripts/cleanup.sh` stopped wiping
+it weekly (#314): cold, that launch does not fit Claude Code's 30s MCP connect
+timeout, and the session comes up with no tools. Measured on broker: 75 MB
+pinned, 129 MB warm-npx, **1.2 G** for a cold install, with all 126 `MemoryHigh`
+throttle events in the install and none in indexing. `.claude/hooks/socraticode-health.sh` runs the driver from
 SessionStart once per UTC day, so that path is live here. Install once, under a
 cap, and the driver prefers it:
 
@@ -147,10 +150,12 @@ node skills-vendor/gregoryfoster-skills/skills/init-socraticode/scripts/mcp-driv
 ```
 
 Pinned here at **1.14.0**. This pins the *driver*, not the *session*: Claude Code
-cannot override a plugin's MCP command, so the plugin keeps launching `@latest`.
-The daily health hook measures that gap and reports a defect only when the two
-differ by a minor or major release — a patch apart is the intended steady state,
-since a pin is meant to lag. Re-pin with the same `npm install --prefix` line, as
+cannot override a plugin's MCP command, so the plugin keeps launching its own
+`npx`. That is why a session can lose its MCP server while the health hook and
+`preflight.sh --check` both pass — they reach the pin, the session does not
+(#314). The daily health hook measures the version gap and reports a defect only
+when the two differ by a minor or major release — a patch apart is the intended
+steady state, since a pin is meant to lag. Re-pin with the same `npm install --prefix` line, as
 a decision rather than on a schedule.
 
 **2. The service takes a reservation, never a cap.** `deploy/watcher.service`
@@ -381,7 +386,7 @@ sudo systemctl daemon-reload && sudo systemctl restart watcher-cleanup.timer
 | Target | Action |
 |---|---|
 | VS Code server installs >30 days old | `rm -rf` |
-| `~/.npm/_npx`, `~/.npm/_cacache` | `rm -rf` |
+| `~/.npm/_npx`, `~/.npm/_cacache` | `rm -rf` **only above 2 GB** — below that the cache is kept, because the plugin's MCP server cold-installs through it at session start (#314) |
 | uv build cache | `uv cache prune` |
 | APT package cache | `apt-get clean` |
 | Journal logs >14 days | `journalctl --vacuum-time=14d` |

@@ -85,15 +85,12 @@ container was stopped and the local store confirmed empty **before** `.socratico
 landed. **Docker was then torn down here** (2026-09-19, once the shared index verified):
 container, image and the empty `socraticode_qdrant_data` volume removed, then
 `systemctl disable --now docker.socket docker.service` and `containerd` stopped — ~85 MB
-of resident `containerd` and 277 MB of image. `docker ps` now answers *Cannot connect to
-the Docker daemon*, which is the loud failure trap 6 assumes rather than a stale local
-collection answering quietly.
-
-That teardown is why `scripts/cleanup.sh` asks systemd before pruning images instead of
-testing for the binary: the binary is still installed, the daemon is not, and the script
-runs under `set -euo pipefail` — so an unguarded `docker image prune -f` would abort the
-weekly run at that line and silently skip the journal vacuum below it
-([tests/deploy/test_cleanup_docker_guard.py](../tests/deploy/test_cleanup_docker_guard.py)).
+of resident `containerd` and 277 MB of image. #310 then purged the packages themselves
+(360 MB over `docker.io`, `containerd`, `docker-buildx`, `docker-compose-v2`), so a
+managed-mode revert no longer reaches a daemon to fail against: `docker` is now `command
+not found`. That is trap 6's loud failure with nothing left to try, rather than a stale
+local collection answering quietly — and it is why nothing on this host, `scripts/cleanup.sh`
+included, prunes images any more.
 
 **An already-running server never picks the `env` block up.** The server that indexes must
 start *after* the block exists — a fresh session, or an out-of-band launch. Cap it: the

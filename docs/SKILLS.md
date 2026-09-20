@@ -204,8 +204,8 @@ Append `--check` to any of the three to audit without writing: each reports its
 symlink and its registration independently and exits 3 if either is missing, or
 if the hook is a copy where a vendored source exists to link at instead.
 
-**The health hook reports; it never repairs.** No re-index, no Docker start, no
-file edit — it runs before an agent has context. Findings land on stdout and in
+**The health hook reports; it never repairs.** No re-index, no file edit, no
+config rewrite — it runs before an agent has context. Findings land on stdout and in
 `.git/socraticode-health.log` (tail-bounded to 200 lines); act on them with
 `codebase_index` or by re-running `init-socraticode`.
 

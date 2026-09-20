@@ -169,8 +169,9 @@ allocation in `tailscaled` fail while memory is nominally available;
 `/etc/sysctl.d/60-watcher-memory.conf` raises it to 64 MB. `earlyoom` then sheds
 a process while userspace can still make progress — and because it ranks by
 `oom_score`, the combination of an unpickable session (-1000) and a de-prioritised
-service (-500) means it picks the `npm`/`node`/`docker` process that is actually
-spiking, at the default 0.
+service (-500) means it picks the `npm`/`node` process that is actually spiking,
+at the default 0 — the family `--prefer` names below, and since #310 the only
+one left here.
 
 Neither of those two lives in this repo, so **a rebuilt VM loses both silently** —
 nothing fails, the box is simply back to an 8 MB reserve and no shedder. Recreate
@@ -206,6 +207,13 @@ Verify:
 cat /proc/sys/vm/min_free_kbytes    # 65536
 systemctl is-active earlyoom        # active
 ```
+
+**Docker is not among the spikers here any more.** #300 tore the daemon down
+when the semantic index moved to the shared store on `co-index`, and #310
+purged the packages themselves — so a stray invocation (an agent session, a copied-in
+script, a vendored skill's preflight) can no longer socket-activate `dockerd`
+plus `containerd` for ~120 MB here. `preflight.sh --check` reports it as *Docker
+not needed*; a rebuilt VM that reinstalls `docker.io` gets that path back.
 
 **The `--avoid` list is only half the protection, and not the same half for each
 name.** earlyoom ranks by `oom_score`, so it already honours an

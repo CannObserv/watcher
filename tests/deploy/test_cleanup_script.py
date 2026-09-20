@@ -15,10 +15,17 @@ itself on a daemon that is down — it would be `command not found`, aborting th
 weekly run at that line and silently skipping the journal vacuum below it.
 """
 
+import shutil
+import subprocess
 from pathlib import Path
+
+import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 CLEANUP = REPO_ROOT / "scripts" / "cleanup.sh"
+
+#: Resolved once; absent only on a host that cannot run the script either.
+BASH = shutil.which("bash")
 
 
 def test_pipefail_is_what_makes_every_guard_load_bearing():
@@ -41,3 +48,17 @@ def test_the_script_never_calls_docker():
 def test_the_journal_vacuum_still_runs():
     """The step the removed guard existed to protect — pinned to outlive it."""
     assert "--vacuum-time=14d" in CLEANUP.read_text()
+
+
+@pytest.mark.skipif(BASH is None, reason="needs bash to parse the script")
+def test_the_script_still_parses():
+    """The one property above that no amount of reading the text establishes.
+
+    #310 removed the Docker branch as a line range. Clip one line short and an
+    orphan `fi` is left behind; one line long and an `if` loses its close. Both
+    satisfy every substring assertion in this file, and both abort the weekly
+    run at parse time — before the first step, not partway down it. `bash -n` is
+    the cheapest thing that can tell the difference.
+    """
+    result = subprocess.run([BASH, "-n", str(CLEANUP)], capture_output=True, text=True)
+    assert result.returncode == 0, f"scripts/cleanup.sh does not parse:\n{result.stderr}"

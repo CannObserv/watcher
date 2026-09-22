@@ -260,43 +260,28 @@ git submodule update --init --recursive
 git submodule update --remote --merge skills-vendor/gregoryfoster-skills skills-vendor/obra-superpowers
 ```
 
-## Tests require the Archiver sibling repo
+## The test database
 
-Watcher's `tests/conftest.py` provisions the cross-schema `information.*`
-test tables by subprocess-invoking Archiver's own alembic against
-`TEST_DATABASE_URL`. Without the sibling repo on disk, tests fail at
-session start with "Archiver repo not found at /home/exedev/archiver".
+`tests/conftest.py` builds watcher's tables in `TEST_DATABASE_URL` with
+`Base.metadata.create_all` and drops them at session end; per-test isolation is
+`db_session`'s savepoint rollback. Tests that bypass `db_session` and write
+directly via `engine.connect()` leak rows into subsequent sessions — don't do
+that.
 
-Setup:
-
-```bash
-# Default location:
-git clone <archiver-repo> /home/exedev/archiver
-cd /home/exedev/archiver && uv sync
-```
-
-Override via `ARCHIVER_REPO_PATH=/some/other/path` if you keep the sibling repo
-elsewhere. Since #254 that is the *only* thing pointing at the sibling checkout:
-the `archiver-client` path dependency that used to be pinned separately in
-`[tool.uv.sources]` — and ignored the variable, so relocating meant editing two
-places or getting passing tests over a broken `uv sync` — went with the SDK.
-
-This test-only schema is the *only* `information` schema Watcher has: the
-production database's dead copy was dropped in #271 (see `docs/MIGRATIONS.md` →
-"Drop the dead `information` schema"), and no migration may create or drop one —
-`tests/test_migration_chain.py` fails the suite if a version file tries.
-
-The `information` schema persists between pytest sessions to enable
-the cache-check (#150); per-test row isolation is still handled by
-`db_session`'s savepoint rollback. Tests that bypass `db_session` and
-write directly via `engine.connect()` will leak rows into subsequent
-sessions — don't do that.
+**No sibling checkout (#311).** The suite used to subprocess-run the Archiver
+checkout's alembic, located by `ARCHIVER_REPO_PATH`, to build an `information`
+schema its factories wrote rows into. Those rows only minted two ULIDs:
+production has had no `information` schema since #271 (see `docs/MIGRATIONS.md`
+→ "Drop the dead `information` schema"), and the WatchedItem links carry no FK.
+`make_watched_item` now mints both links, `test_engine` drops a leftover
+`information` schema from a pre-#311 session, and
+`tests/test_archiver_isolation.py` fails if the test database carries one
+again. No migration may create or drop it either — `tests/test_migration_chain.py`.
 
 **pytest-xdist is unsupported.** The fixture writes to a single
-`TEST_DATABASE_URL`; multiple xdist workers would race on `alembic
-upgrade head` and on watcher-table teardown. Tracked in #150 —
-worker-id-suffixed databases + a coordination lock are the rework when
-xdist is actually adopted.
+`TEST_DATABASE_URL`; multiple xdist workers would race on creating and
+dropping the watcher tables. Tracked in #150 — worker-id-suffixed databases
+are the rework when xdist is actually adopted.
 
 ## CI (#220)
 
@@ -304,16 +289,14 @@ GitHub Actions (`.github/workflows/ci.yml`) runs on push/PR to `main`: a
 **lint** job (`ruff check` + `ruff format --check`), a **test** job
 (`pytest -m "not integration"` against a `postgres:16` service), and a
 **migrations** job (independent migration-chain smoke-check, #234 — `alembic
-upgrade head` from an empty `postgres:16` then `alembic check` for drift). Only
-the **test** job checks out the sibling `archiver` repo (public; for
-`ARCHIVER_REPO_PATH`, whose alembic builds the `information` schema conftest's
-factories write to) — `lint` and `migrations` stopped needing it when #254
-removed the `archiver-client` path dep. All three jobs authenticate to GCS
-**keyless via WIF** (`vars.GCP_WIF_PROVIDER` → `co-pypi-reader` SA) and sync
-the wheelhouse before `uv sync`; `notifier-client` installs as written, from
-its public HTTPS tag source — no URL rewrite (#284). Only the test job also
-syncs archiver's wheelhouse (its `uv run alembic` subprocess needs co-core);
-the migrations job does **not** — the #234 squash collapsed the pre-existing
+upgrade head` from an empty `postgres:16` then `alembic check` for drift). No
+job checks out a sibling repo — #254 removed the `archiver-client` path dep
+that `lint` and `migrations` needed, and #311 the `test` job's archiver alembic
+run. All three jobs authenticate to GCS **keyless via WIF**
+(`vars.GCP_WIF_PROVIDER` → `co-pypi-reader` SA) and sync the wheelhouse before
+`uv sync`; `notifier-client` installs as written, from
+its public HTTPS tag source — no URL rewrite (#284). The migrations job needs
+nothing from archiver either — the #234 squash collapsed the pre-existing
 chain into a self-contained genesis baseline (`2addddea0b03`) that references
 no `information` schema, so `upgrade head` from empty is fully standalone (no
 archiver seeding, no cross-service ordering).

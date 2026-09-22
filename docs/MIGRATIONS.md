@@ -318,11 +318,12 @@ is the whole reason to remove it rather than leave it for whoever next audits
 privileges. Zero rows: tidying, not risk.
 
 **Operator action on production only — deliberately not a migration.**
-`tests/conftest.py` builds a real `information` schema in `TEST_DATABASE_URL` by
-invoking Archiver's own alembic and keeps it alive between sessions for the #150
-cache-check (see [COMMANDS.md](COMMANDS.md) → "Tests require the Archiver sibling
-repo"). A migration dropping the schema would therefore break every local test
-run and CI's `test` job. `tests/test_migration_chain.py` fails the suite if a
+At the time, `tests/conftest.py` built a real `information` schema in
+`TEST_DATABASE_URL` by invoking Archiver's own alembic and kept it alive between
+sessions for the #150 cache-check, so a migration dropping the schema would have
+broken every local test run and CI's `test` job. #311 has since removed that
+schema from the test database too (see [COMMANDS.md](COMMANDS.md) → "The test
+database"). `tests/test_migration_chain.py` fails the suite if a
 version file ever creates or drops the schema — in raw SQL or through
 SQLAlchemy's `CreateSchema`/`DropSchema` constructs.
 

@@ -150,21 +150,24 @@ sibling needs a **link stub**, not a clone:
 saying so — `/home/exedev/notifier` is **1202 bytes, two files, zero source**, and notifier
 hits come back with real paths and line numbers all the same.
 
-**`../archiver` is the exception, and must stay a real checkout.** `tests/conftest.py`
-defaults `ARCHIVER_REPO_PATH` to `/home/exedev/archiver` and runs that repo's alembic to
-build the `information` schema — so the same path serves two unrelated consumers, and
-replacing it with a stub turns four tests red
-(`tests/test_conftest_archiver_migrations.py`). That was tried on 2026-09-19 and reverted.
-Check `ARCHIVER_REPO_PATH` before touching this one; the other three have no such
-consumer.
+**`../archiver` is still a clone, and may become a stub.** Until #311 it had to stay a real
+checkout: `tests/conftest.py` defaulted `ARCHIVER_REPO_PATH` to `/home/exedev/archiver`
+and ran that repo's alembic to build an `information` schema, so the same path served two
+unrelated consumers and replacing it with a stub turned tests red (tried 2026-09-19,
+reverted). #311 removed the test consumer; nothing in this repo reads the checkout now, so
+here a stub and a clone are equivalent.
 
-Which means the clone-drift hazard is real here rather than avoidable. That checkout
+What a clone keeps is the clone-drift hazard: it carries archiver's *own* committed
+`.socraticode.json`, so it is only as right as its last pull. That checkout
 predated archiver#226, so it carried no `.socraticode.json` and fell through to the SHA-256
 of its absolute path — `codebase_7a9d625938ee`, which nothing has ever indexed. Measured
 before the pull: a query aimed squarely at archiver's registry domain returned `[watcher]`,
 `[replicator]` and `[broker]` hits and **not one `[archiver]` hit**. After
-`git -C /home/exedev/archiver pull`, the same query returns five. **Keeping that clone
-current is now a search dependency, not just hygiene.**
+`git -C /home/exedev/archiver pull`, the same query returns five. **While it stays a
+clone, keeping it current is a search dependency, not just hygiene** —
+`test_a_resolvable_sibling_declares_the_right_project_id` in
+`tests/deploy/test_socraticode_config.py` fails when any present sibling's
+`.socraticode.json` is missing or names the wrong project, so that drift is loud.
 
 Note what this does *not* trip: the health check counts a linked path as resolved when the
 **directory** exists, so it reports `4 of 4` while archiver answers nothing. Resolution is

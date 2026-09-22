@@ -238,10 +238,10 @@ and the `information`-schema drop (#234).
 
 ## Archiver Service
 
-The Archiver is a sibling service (port 8020, `archiver.service`; its repo is
-checked out alongside this one — `/home/exedev/archiver` on this VM, located for the
-test harness by `ARCHIVER_REPO_PATH`) that owns the canonical InfoItem / InfoSource /
-SourceRevision / RepSpec registry.
+The Archiver is a sibling service on its own VM (`co-registrar`, `archiver.service` on
+port 8000 there, per archiver's own AGENTS.md) that owns the canonical InfoItem /
+InfoSource / SourceRevision / RepSpec registry. Nothing in this repo reads its checkout —
+the test harness stopped needing one in #311.
 
 **Watcher makes no HTTP calls to it.** The SDK, its API key, and the lifespan pre-warm
 were removed in #254 together with the last outbound call (`get_info_item` on WatchedItem
@@ -251,9 +251,9 @@ Archiver's state — but with the broker down or the producer not running, the r
 simply never converges, and the log line to look for is the `info.registry` consumer
 failing to start.
 
-See the Archiver repo's `docs/DEPLOYMENT.md` for the full Archiver install
-(key generation, env-var registration, systemd unit). After installing
-`archiver.service`, restart `watcher.service`:
+See the Archiver repo's `docs/DEPLOYMENT.md` for the full Archiver install on its
+VM (key generation, env-var registration, systemd unit). After installing
+`archiver.service` there, restart `watcher.service` here:
 
 ```bash
 sudo systemctl restart watcher

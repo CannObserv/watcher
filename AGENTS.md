@@ -42,9 +42,8 @@ Client contract and traps: [docs/SOCRATICODE.md](docs/SOCRATICODE.md); goal→to
 |---|---|---|
 | API (live) | 8000 | `systemctl` (`watcher.service`) |
 | API (dev) | 8001 | manual uvicorn |
-| Archiver | 8020 | `systemctl` (`archiver.service`) |
 
-`ARCHIVER_REPO_PATH` redirects everything needing the sibling repo (#254): [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+Archiver runs on its own VM (`co-registrar`), reached only over the bus; nothing here reads its checkout, tests included (#311): [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) → *Sibling services*.
 
 The exe.dev proxy forwards 3000–9999; dev server at `https://co-watcher.exe.xyz:8001/`.
 
@@ -190,7 +189,7 @@ A skill is symlinked into both `skills/` and `.claude/skills/`; overrides in `sk
 
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — module layout, sibling services, bus topology, fetch contracts, the probe destination guard
 - [docs/BUS-CONNECTION-POLICY.md](docs/BUS-CONNECTION-POLICY.md) — #287 timeouts, retries, redaction, startup PING; #288 the `noeviction` cap
-- [docs/COMMANDS.md](docs/COMMANDS.md) — every runnable command, the Archiver-sibling test setup, CI
+- [docs/COMMANDS.md](docs/COMMANDS.md) — every runnable command, the test database, CI
 - [docs/CONTENT-PIPELINE.md](docs/CONTENT-PIPELINE.md) — fetch → extract → fingerprint, the outbox, the revisions producer
 - [docs/CONDITIONAL-GET.md](docs/CONDITIONAL-GET.md) — #269 validators: gate, snapshot, invalidation
 - [docs/CONVENTIONS.md](docs/CONVENTIONS.md) — logging configuration, ULID errors, DB triggers

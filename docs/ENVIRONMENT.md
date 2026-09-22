@@ -94,7 +94,7 @@ pattern — see **Redis and the bus**.
 | `WATCHER_NOTIFIER_ENABLED` | `deploy/watcher.service` **only** | prod only | `=1` opts this process into building a notifier client at all (`src/core/notifier_client/client.py`, #277). Without it `get_notifier_client()` raises `NotifierNotEnabled` — **and a URL held without it aborts startup**, so a unit that lost the line fails loudly instead of going quiet on notifications. Must live in the systemd unit, never an env file, for the same reason as the two flags above and with the largest blast radius of the three: a stray database row is recoverable and a stray bus frame is inert, but a stray notification is delivered to real subscribers, cannot be recalled, and *succeeds* — leaving no error behind to notice. `scripts/dev_server.sh` sets it for itself when `WATCHER_DEV_NOTIFIER_BASE_URL` names a scratch notifier. Since #278 the **flag without a URL** aborts startup too: only the unit sets it, and the credential it goes with is in the unit's own env file, so that combination means the file did not load |
 | `WATCHER_ALLOW_PRODUCTION_DB` | `deploy/watcher.service` **only** | prod only | `=1` opts into serving a database whose name lacks a `_test`/`_dev` suffix (`src/core/db_safety.py`, #233). Must live in the systemd unit, never an env file — env files are sourced by hand-run dev servers, which are exactly what the guard stops |
 | `WATCHER_DEV_DATABASE_URL` | `.env` | no | Persistent dev database for `scripts/dev_server.sh`; wins over `TEST_DATABASE_URL` |
-| `WATCHER_BUS_REDIS_URL` | `/etc/watcher/.env` | prod | Redis URL of the Archiver-operated broker (`redis://localhost:6379/0`) for the `content.fetch-policy` and `info.watch-status` producers (#245, #264). Unset → both periodic publish tasks skip with an ERROR log: Replicator paces every host at its own conservative default, and Archiver's watched-item panel / drift detector go stale. **Not sufficient on its own since #262** — see `WATCHER_BUS_ENABLED` |
+| `WATCHER_BUS_REDIS_URL` | `/etc/watcher/.env` | prod | Redis URL of the broker, over the tailnet (`redis://watcher:<password>@broker:6379/0`) for the `content.fetch-policy` and `info.watch-status` producers (#245, #264). Unset → both periodic publish tasks skip with an ERROR log: Replicator paces every host at its own conservative default, and Archiver's watched-item panel / drift detector go stale. **Not sufficient on its own since #262** — see `WATCHER_BUS_ENABLED` |
 | `WATCHER_BUS_ENABLED` | `deploy/watcher.service` **only** | prod only | `=1` opts this process into building a bus client at all (`src/core/bus.py`, #262). Without it `bus_client_from_env()` returns `None`, so nothing publishes and neither consumer starts — **and a URL held without it aborts startup** with `BusNotEnabled`, so a unit that lost the line fails loudly instead of going quiet. Must live in the systemd unit, never an env file: `WATCHER_BUS_REDIS_URL` does live in one, so every process that sources `/etc/watcher/.env` inherits the production broker address, and the flag is the only thing separating the service from an agent shell or a REPL. `scripts/dev_server.sh` sets it for itself when `WATCHER_DEV_BUS_REDIS_URL` names a scratch bus |
 | `WATCHER_WATCH_STATUS_REPUBLISH_CRON` | env | no | Cron expression for the `info.watch-status` full-set republish (default `*/5 * * * *`, #264). The period is the recovery bound for a dropped frame — this stream has no outbox by design; loss is corrected by the next full set. A malformed value falls back to the default with an ERROR log |
 | `WATCHER_WATCH_STATUS_STREAM_MAXLEN` | env | no | Producer-enforced retention cap for `info.watch-status` (`XADD MAXLEN ~`, default `500`). The full set republishes forever, so an untrimmed stream grows without bound; invalid/non-positive values fall back to the default with a warning — never to unbounded. **Floored at 10 full sets** of whatever batch is being published, so a corpus larger than the cap raises it rather than being trimmed below one full set (#292) — which is why a value *below* the floor is silently raised too |
@@ -158,22 +158,22 @@ The notifier pair was **renamed** rather than retired in the same pass:
 `WATCHER_BUS_REDIS_URL` already followed. A bare `NOTIFIER_*` name in a shell
 today resolves to nothing.
 
-**Watcher's Redis use.** Archiver operates `redis-server` and owns the broker
-(archiver#109). Watcher publishes `content.fetch-policy` (#245) and — Phase 4,
-#241 — publishes `content.fetch` commands and consumes `content.blobs` facts
-via its own consumer group (`watcher.blobs`, started in the lifespan when
-`WATCHER_BUS_REDIS_URL` is set **and** `WATCHER_BUS_ENABLED=1`, #262). Since
-#254 it also consumes `info.registry` **grouplessly**, replayed from `0-0` at
-boot; without a usable bus neither consumer starts and the registry cannot
-converge. Since #264 it publishes
-`info.watch-status` — the return leg of the registry channel: applied
+**Watcher's Redis use.** The broker is its own VM, operated from
+CannObserv/broker (archiver#193 D6; archiver#109 before that). Watcher publishes
+`content.fetch-policy` (#245) and — Phase 4, #241 — publishes `content.fetch`
+commands and consumes `content.blobs` facts via its own consumer group
+(`watcher.blobs`, started in the lifespan when `WATCHER_BUS_REDIS_URL` is set
+**and** `WATCHER_BUS_ENABLED=1`, #262). Since #254 it also consumes
+`info.registry` **grouplessly**, replayed from `0-0` at boot; without a usable
+bus neither consumer starts and the registry cannot converge. Since #264 it
+publishes `info.watch-status` — the return leg of the registry channel: applied
 generation, scheduler state, and observation freshness per InfoItem, full-set
-republished on `WATCHER_WATCH_STATUS_REPUBLISH_CRON` (default every 5
-minutes) including tombstones from `revoked_info_items`. **Health primitive:
-last-entry age** — `redis-cli XREVRANGE info.watch-status + - COUNT 1` should
-never be older than the republish period while the service is up; an aging
-stream with a live service means the publish task is failing (check
-Procrastinate job errors), and Archiver's panel renders drift from exactly
-this staleness. All queued work stays on Procrastinate over
-Postgres. See [ARCHITECTURE.md](ARCHITECTURE.md) § *Redis and the bus* for the ownership split.
+republished on `WATCHER_WATCH_STATUS_REPUBLISH_CRON` (default every 5 minutes)
+including tombstones from `revoked_info_items`. **Health primitive: last-entry
+age** — `redis-cli XREVRANGE info.watch-status + - COUNT 1` should never be
+older than the republish period while the service is up; an aging stream with a
+live service means the publish task is failing (check Procrastinate job errors),
+and Archiver's panel renders drift from exactly this staleness. All queued work
+stays on Procrastinate over Postgres. See [ARCHITECTURE.md](ARCHITECTURE.md) §
+*Redis and the bus* for the ownership split.
 

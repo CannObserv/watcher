@@ -82,6 +82,28 @@ node $D resolve               # which server a launch would get (the #307 pin)
    passes. Measured 2026-09-20 (#314), which is why `scripts/cleanup.sh` no longer wipes
    `~/.npm/_cacache` weekly. A session that lost the server reconnects with `/mcp`.
 
+**The inverse trap: a red that succeeded.** A session's `codebase_context_index` awaits a
+re-embed of *every* artifact — `indexAllArtifacts` skips nothing unchanged — and sends no
+MCP progress notifications. On co-index's shared CPU embedder (~0.4 s per chunk, measured
+2026-09-22; `design-and-plans` alone is ~1,370 chunks) that can outlast Claude Code's
+**1800 s tool idle timeout**: the client aborts and reports failure, and the server keeps
+going. Measured: aborted 13:37:47Z, finished 14:24:37Z, blocking the session for the full
+30 minutes. So:
+
+- **Usually there is nothing to run.** While the session server's file watcher is live
+  (`/tmp/socraticode-locks/<projectId>-watch.lock`), a save triggers `updateProjectIndex`
+  ~2 s later, and it ends in `ensureArtifactsIndexed`, which re-embeds only artifacts whose
+  content or configuration changed. Measured: a `docs/SOCRATICODE.md` save at 14:38:39Z
+  reached `codebase_watcher` at 14:38:49Z and `context_watcher` at 14:38:57Z. Staleness the
+  health hook reports comes from edits made while no watcher ran; `codebase_update` catches
+  it up the same incremental way.
+- **Don't re-run on the error.** The `context_watcher` point in the `socraticode_metadata`
+  collection carries `lastIndexedAt` and each artifact's `contentHash` — read it first.
+- **A full re-index belongs off the session's critical path.** An MCP call cannot be
+  backgrounded, so delegate it to a background subagent. Two writers cannot race: the
+  second fails fast on the per-project lock
+  (`/tmp/socraticode-locks/<projectId>-context.lock`).
+
 **The `env` block applies only in a trusted folder.** Untrusted, `QDRANT_MODE` reverts to
 `managed` and `OLLAMA_MODE` to `auto`, and SocratiCode tries to start Docker containers
 rather than reporting missing configuration. That failure is loud only while no local store

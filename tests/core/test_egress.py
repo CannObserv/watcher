@@ -104,6 +104,24 @@ class TestRefusedNames:
 
         assert inner.requests == []
 
+    async def test_a_name_resolving_to_ipv4_mapped_loopback_is_refused(self):
+        """``::ffff:127.0.0.1`` is loopback spelled as IPv6, on the resolved path too.
+
+        Since #316 each path unmaps on its own call to ``_address``, where
+        ``_containing`` once did it for both; the literal case in
+        ``TestRefusedLiterals`` cannot see ``_checkable`` parsing with a bare
+        ``ipaddress.ip_address`` and letting this through (CR 1).
+        """
+        inner = RecordingTransport()
+        transport = GuardedTransport(
+            inner, resolve=resolver({"mapped.example.com": ["::ffff:127.0.0.1"]})
+        )
+
+        with pytest.raises(DestinationRefused, match="127.0.0.0/8"):
+            await _head(transport, "http://mapped.example.com:9999/")
+
+        assert inner.requests == []
+
     async def test_every_resolved_address_is_checked_not_just_the_first(self):
         """A name answering with one public and one private address is refused."""
         inner = RecordingTransport()

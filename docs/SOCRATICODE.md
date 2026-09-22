@@ -146,28 +146,30 @@ sibling needs a **link stub**, not a clone:
 /home/exedev/<sibling>/.socraticode.json    →  { "projectId": "<sibling>" }
 ```
 
-`../broker`, `../replicator` and `../notifier` are stubs on this VM, each with a `README.md`
+All four siblings are stubs on this VM, each with a `README.md`
 saying so — `/home/exedev/notifier` is **1202 bytes, two files, zero source**, and notifier
 hits come back with real paths and line numbers all the same.
 
-**`../archiver` is still a clone, and may become a stub.** Until #311 it had to stay a real
-checkout: `tests/conftest.py` defaulted `ARCHIVER_REPO_PATH` to `/home/exedev/archiver`
-and ran that repo's alembic to build an `information` schema, so the same path served two
-unrelated consumers and replacing it with a stub turned tests red (tried 2026-09-19,
-reverted). #311 removed the test consumer; nothing in this repo reads the checkout now, so
-here a stub and a clone are equivalent.
+**`../archiver` was the last clone, and became a stub on 2026-09-22.** Until #311 it had
+to stay a real checkout: `tests/conftest.py` defaulted `ARCHIVER_REPO_PATH` to
+`/home/exedev/archiver` and ran that repo's alembic to build an `information` schema, so
+the same path served two unrelated consumers and replacing it with a stub turned tests red
+(tried 2026-09-19, reverted). #311 removed the test consumer and the clone was replaced the
+same day; an `includeLinked` query on archiver's registry domain then returned six
+`[archiver]` hits through the stub. No server restart is needed after such a swap — every
+search re-reads each linked `.socraticode.json` from disk.
 
-What a clone keeps is the clone-drift hazard: it carries archiver's *own* committed
-`.socraticode.json`, so it is only as right as its last pull. That checkout
-predated archiver#226, so it carried no `.socraticode.json` and fell through to the SHA-256
+Why a stub rather than a clone is the clone-drift hazard, measured here: a clone carries
+archiver's *own* committed `.socraticode.json`, so it is only as right as its last pull.
+That checkout predated archiver#226, so it carried no `.socraticode.json` and fell through to the SHA-256
 of its absolute path — `codebase_7a9d625938ee`, which nothing has ever indexed. Measured
 before the pull: a query aimed squarely at archiver's registry domain returned `[watcher]`,
 `[replicator]` and `[broker]` hits and **not one `[archiver]` hit**. After
-`git -C /home/exedev/archiver pull`, the same query returns five. **While it stays a
-clone, keeping it current is a search dependency, not just hygiene** —
-`test_a_resolvable_sibling_declares_the_right_project_id` in
+`git -C /home/exedev/archiver pull`, the same query returned five. A stub cannot fall
+behind a pull, and `test_a_resolvable_sibling_declares_the_right_project_id` in
 `tests/deploy/test_socraticode_config.py` fails when any present sibling's
-`.socraticode.json` is missing or names the wrong project, so that drift is loud.
+`.socraticode.json` is missing or names the wrong project — a clone that reappears
+included.
 
 Note what this does *not* trip: the health check counts a linked path as resolved when the
 **directory** exists, so it reports `4 of 4` while archiver answers nothing. Resolution is

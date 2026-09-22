@@ -11,9 +11,11 @@ the two ULIDs. That coupled every integration run to someone else's checkout,
 ``uv`` environment and wheelhouse, and handed tests a table production does not
 have — a query against ``information.*`` would pass here and fail live.
 
-``test_engine`` now drops any leftover copy (the #150 cache kept it alive
-between sessions by design), so this also proves an existing test database
-self-heals.
+``test_engine`` drops any leftover copy at session start (the #150 cache kept it
+alive between sessions by design), so a pre-#311 database is seen only on its
+first run after upgrade. What this guards from then on is anything that builds
+the schema *after* ``test_engine`` — which is exactly what reintroducing
+information-backed factories would have to do.
 """
 
 import pytest

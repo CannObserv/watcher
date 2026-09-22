@@ -8,6 +8,7 @@ import pytest
 from src.core.egress import (
     BLOCKED_NETWORKS,
     DEFAULT_BLOCKED_DESTINATIONS,
+    RESOLVE_TIMEOUT,
     DestinationRefused,
     GuardedTransport,
     resolve_addresses,
@@ -205,6 +206,71 @@ class TestResolutionFailures:
             await _head(transport, "https://void.example.com/")
 
         assert inner.requests == []
+
+    @pytest.mark.parametrize(
+        ("label", "answer"),
+        [
+            ("an exhausted generator", lambda: (value for value in [])),
+            ("an empty iterator", lambda: iter(())),
+            ("None", lambda: None),
+        ],
+    )
+    async def test_an_empty_answer_of_any_shape_is_not_a_pass(self, label, answer):
+        """Emptiness is judged on what the loop iterates, not on what came back (#316).
+
+        ``not <generator>`` is ``False`` whatever it will yield, so testing the
+        resolver's return value let an empty iterator through the same zero-trip
+        loop CR 2 closed for the empty list. ``Resolver`` says ``Sequence``; the
+        direction a guard fails in must not rest on the seam honouring that.
+        """
+        inner = RecordingTransport()
+
+        async def resolve(host: str, port: int):
+            return answer()
+
+        transport = GuardedTransport(inner, resolve=resolve)
+
+        with pytest.raises(httpx.ConnectError, match="no addresses"):
+            await _head(transport, "https://void.example.com/")
+
+        assert inner.requests == [], f"{label} let a request leave the host"
+
+    @pytest.mark.parametrize(
+        ("label", "answer"),
+        [
+            ("a hostname", "localhost"),
+            ("an empty string", ""),
+        ],
+    )
+    async def test_an_answer_that_is_not_an_address_is_not_a_pass(self, label, answer):
+        """The arm #305 called unreachable failed *open* (#316).
+
+        ``_containing`` answered ``None`` — "in no blocked range" — for anything
+        it could not parse, so a resolver answering with a name rather than an
+        address let the request through. Unreachable through ``getaddrinfo``,
+        not through the seam.
+        """
+        inner = RecordingTransport()
+        transport = GuardedTransport(inner, resolve=resolver({"named.example.com": [answer]}))
+
+        with pytest.raises(httpx.ConnectError, match="not an address"):
+            await _head(transport, "https://named.example.com/")
+
+        assert inner.requests == [], f"{label} let a request leave the host"
+
+    def test_the_resolve_cap_survives_one_libc_retry(self):
+        """A cap equal to glibc's per-try timeout fails the resolve it should pass (#316).
+
+        glibc's per-try timeout defaults to 5 s (``resolv.conf`` ``timeout:5``;
+        co-watcher's is Tailscale MagicDNS with default options), so one dropped
+        UDP packet makes a healthy resolve finish a little after 5 s, on libc's
+        second try. The retry only *starts* at 5 s, so the cap needs room for a
+        whole second try, not a hair over the first. Replicator's copy is 10 s
+        for the same arithmetic (CannObserv/replicator#100).
+        """
+        glibc_per_try_seconds = 5.0
+
+        assert RESOLVE_TIMEOUT >= 2 * glibc_per_try_seconds
 
     def test_a_refusal_is_not_an_httpx_error(self):
         """The routes' 'unreachable' branches must not swallow the refusal (#305)."""

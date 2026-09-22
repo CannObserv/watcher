@@ -41,6 +41,14 @@ one-shot operator probe rather than a retrying worker loop:
   reached — and both already handle ``httpx.HTTPError``, so a name that does not
   resolve keeps surfacing as one.
 
+**An answer the guard cannot check is refused, never passed** (#316, their
+#100). The check is a loop over the resolved addresses, so an empty answer, or
+one that is not an address, would skip it rather than fail it. ``getaddrinfo``
+gives neither, but the resolver is a seam, and the direction a guard fails in
+must not rest on its seam's manners. The answer is parsed once, at the
+boundary, by :func:`_checkable` — the same shape as replicator's, raising
+``httpx.ConnectError`` where theirs raises ``TransientFetchError``.
+
 **The residual, stated rather than closed: DNS rebinding.** The check resolves
 and inspects every address, then hands the *name* to the inner transport, which
 resolves again — a TOCTOU window an origin controlling its own DNS can aim at.
@@ -93,10 +101,18 @@ DEFAULT_BLOCKED_DESTINATIONS: tuple[str, ...] = (
 # that too, so without this a blackholed nameserver parks an operator's request
 # for as long as the C resolver retries. Deliberately its own number rather than
 # ``PROBE_TIMEOUT``: ``probe`` imports this module, and the two bound different
-# operations — 15s is a generous ceiling for a government portal's response, and
-# a resolve that takes five seconds is broken rather than slow.
-RESOLVE_TIMEOUT = 5.0
+# operations — 15s is a generous ceiling for a government portal's response.
+#
+# **10 s, not 5 (#316).** 5 s is glibc's per-try default (``resolv.conf``
+# ``timeout:5``; co-watcher's is Tailscale MagicDNS with default options), so a
+# cap equal to it fails exactly the resolve one dropped UDP packet makes slow —
+# the one libc finishes on its second try, which only *starts* at 5 s. 10 s
+# leaves room for that whole second try and stays well under libc's full budget
+# (~20 s across two nameservers). Replicator's copy is 10 s for the same
+# arithmetic (CannObserv/replicator#100), so the two agree on purpose.
+RESOLVE_TIMEOUT = 10.0
 
+Address = ipaddress.IPv4Address | ipaddress.IPv6Address
 Network = ipaddress.IPv4Network | ipaddress.IPv6Network
 Resolver = Callable[[str, int], Awaitable[Sequence[str]]]
 
@@ -160,28 +176,20 @@ class GuardedTransport(httpx.AsyncBaseTransport):
 
     async def _refuse_blocked_destination(self, url: httpx.URL) -> None:
         host = url.host
-        addresses = await self._addresses(host, url.port or _default_port(url))
-        if not addresses:
-            # An empty answer is "I could not determine where this goes", and in
-            # a guard that must not mean "send it": zero addresses would run the
-            # loop below zero times and let the request through unchecked.
-            # ``getaddrinfo`` raises rather than answering empty, so this is the
-            # arm that keeps an unreachable state from becoming a fail-open one.
-            raise httpx.ConnectError(f"{host} resolved to no addresses")
-        for address in addresses:
+        for address in await self._addresses(host, url.port or _default_port(url)):
             network = _containing(address, self._blocked)
             if network is None:
                 continue
             logger.warning(
                 "probe destination refused",
-                extra={"host": host, "address": address, "network": str(network)},
+                extra={"host": host, "address": str(address), "network": str(network)},
             )
             raise DestinationRefused(
                 f"{url} resolves to {address}, inside the refused range {network} — "
                 f"Watcher does not probe its own host, its private network, or the tailnet"
             )
 
-    async def _addresses(self, host: str, port: int) -> Sequence[str]:
+    async def _addresses(self, host: str, port: int) -> list[Address]:
         """The addresses to check — the literal itself when the URL names one.
 
         A URL naming an address must not take the resolver path at all: DNS is
@@ -191,12 +199,12 @@ class GuardedTransport(httpx.AsyncBaseTransport):
         in hand.
         """
         try:
-            ipaddress.ip_address(host)
+            literal = _address(host)
         except ValueError:
             return await self._resolve_or_classify(host, port)
-        return [host]
+        return [literal]
 
-    async def _resolve_or_classify(self, host: str, port: int) -> Sequence[str]:
+    async def _resolve_or_classify(self, host: str, port: int) -> list[Address]:
         """Resolve, keeping a name failure the kind of failure it used to be.
 
         Resolving here moves where an unresolvable host surfaces. Before this
@@ -220,7 +228,7 @@ class GuardedTransport(httpx.AsyncBaseTransport):
         """
         try:
             async with asyncio.timeout(self._resolve_timeout):
-                return await self._resolve(host, port)
+                answer = await self._resolve(host, port)
         except TimeoutError as exc:
             raise httpx.ConnectTimeout(
                 f"{host} did not resolve within {self._resolve_timeout}s"
@@ -229,32 +237,64 @@ class GuardedTransport(httpx.AsyncBaseTransport):
             raise httpx.ConnectError(f"{host} could not be resolved: {exc}") from exc
         except UnicodeError as exc:
             raise httpx.ConnectError(f"{host} is not an encodable hostname: {exc}") from exc
+        return _checkable(host, answer)
 
 
 def _default_port(url: httpx.URL) -> int:
     return 443 if url.scheme == "https" else 80
 
 
-def _containing(address: str, blocked: tuple[Network, ...]) -> Network | None:
-    """The first blocked range holding ``address``, or ``None``.
+def _checkable(host: str, answer: Sequence[str]) -> list[Address]:
+    """The resolver's answer as addresses the guard can check, or a refusal (#316).
 
-    **The unparseable branch is unreachable, and says so rather than implying a
-    policy.** Both callers hand this a string that has already parsed: a URL
-    literal checked by ``_addresses``, or an address ``getaddrinfo`` returned.
-    There is no input that reaches the ``except`` below, so it is not a
-    fail-open decision about unmodelled destinations — it is the arm that keeps
-    a guard from raising ``ValueError`` out of a transport if that ever stops
-    being true. If it starts executing, the bug is upstream of here.
+    **Both refusals close a hole the refusing loop would otherwise leave open.**
+    The guard refuses from *inside* a loop over the answer, so an empty answer
+    runs it zero times and passes the request unchecked (#305 CR 2); and before
+    #316 an answer that did not parse reached :func:`_containing` as ``None`` —
+    "in no blocked range" — and passed too. Neither comes from ``getaddrinfo``;
+    both can come from a resolver seam that is not ``getaddrinfo``.
+
+    **Emptiness is judged on the list, not on the answer.** ``not <generator>``
+    is ``False`` whatever it yields, so testing the answer let an empty iterator
+    through the same zero-trip loop; ``or ()`` keeps a ``None`` answer on this
+    refusal rather than a ``TypeError``.
+
+    ``ConnectError`` for both, like every other resolution failure here: the
+    honest answer at this surface is that the host could not be reached.
     """
     try:
-        parsed = ipaddress.ip_address(address)
-    except ValueError:  # pragma: no cover - getaddrinfo does not produce these
-        return None
-    # An IPv4-mapped IPv6 address (::ffff:127.0.0.1) is the same destination
-    # spelled differently, and the /8 above would not hold it.
+        addresses = [_address(value) for value in answer or ()]
+    except ValueError as exc:
+        raise httpx.ConnectError(
+            f"{host} resolved to something that is not an address: {exc}"
+        ) from exc
+    if not addresses:
+        raise httpx.ConnectError(f"{host} resolved to no addresses")
+    return addresses
+
+
+def _address(value: str) -> Address:
+    """Parse ``value`` as the destination it names; ``ValueError`` if it names none.
+
+    An IPv4-mapped IPv6 address (``::ffff:127.0.0.1``) is the same destination
+    spelled differently, and the ``/8`` in the table would not hold it — so it is
+    unmapped here, once, for both the literal and the resolved path.
+    """
+    parsed = ipaddress.ip_address(value)
     if isinstance(parsed, ipaddress.IPv6Address) and parsed.ipv4_mapped is not None:
-        parsed = parsed.ipv4_mapped
+        return parsed.ipv4_mapped
+    return parsed
+
+
+def _containing(address: Address, blocked: tuple[Network, ...]) -> Network | None:
+    """The first blocked range holding ``address``, or ``None``.
+
+    Takes an address already parsed, so it has no answer to give about one that
+    is not — that question is asked, and refused, at the resolver's boundary in
+    :func:`_checkable`. This function answered it with ``None`` until #316: an
+    arm #305 called unreachable, and which failed open.
+    """
     for network in blocked:
-        if parsed.version == network.version and parsed in network:
+        if address.version == network.version and address in network:
             return network
     return None

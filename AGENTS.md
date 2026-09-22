@@ -43,15 +43,13 @@ Client contract and traps: [docs/SOCRATICODE.md](docs/SOCRATICODE.md); goal→to
 | API (live) | 8000 | `systemctl` (`watcher.service`) |
 | API (dev) | 8001 | manual uvicorn |
 
-Archiver runs on its own VM (`co-registrar`), reached only over the bus; nothing here reads its checkout, tests included (#311): [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) → *Sibling services*.
-
 The exe.dev proxy forwards 3000–9999; dev server at `https://co-watcher.exe.xyz:8001/`.
 
 **Single process is load-bearing.** One uvicorn process runs everything — API, embedded Procrastinate worker, `content.blobs` fact consumer, cache sweeper. **Never `uvicorn --workers N`, never a second worker unit against prod.** Why the fact consumer makes it load-bearing, and the escalation path that is *not built*: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) → *Single process*.
 
 **Host memory is the shared resource (#307).** Measured 2026-09-18: **3.8 GiB, no swap**, prod unit alongside agent sessions that are *unkillable* (`oom_score_adj` -1000 from exe-init/sshd) — so the kernel's killer takes the service, not the spiker. SocratiCode is **pinned pre-installed** (`~/.socraticode/pin`, 1.14.0): never let a launch install a server — a cold install peaks at 1.2 G. The unit takes a **reservation, never a cap** (`MemoryLow=`/`OOMScoreAdjust=`; `MemoryHigh=` stalls it while it still reports `active`). Verify with `preflight.sh --check` and `mcp-driver.mjs resolve`; re-pin as a decision, not on a schedule: [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) → *Host memory posture*.
 
-**The bus.** The broker is its own VM (tailnet node `broker`), operated from CannObserv/broker — archiver is a client like us; watcher publishes four streams and consumes two — `content.blobs` (single-member group `watcher.blobs`, derived by co-core's `group_name` — #285) and `info.registry` (**groupless**, replayed from `0-0` every boot). `WATCHER_BUS_REDIS_URL` unset → publish tasks skip loudly. Inventory, ownership, fetch contracts, `info_source_id` on the wire: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) → *Redis and the bus*.
+**The bus.** The broker is its own VM (`broker`, CannObserv/broker); watcher publishes four streams and consumes two — `content.blobs` (single-member group `watcher.blobs`, derived by co-core's `group_name` — #285) and `info.registry` (**groupless**, replayed from `0-0` every boot). `WATCHER_BUS_REDIS_URL` unset → publish tasks skip loudly. Inventory, ownership, fetch contracts, `info_source_id` on the wire: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) → *Redis and the bus*.
 
 **Retention is sized against the set (#292).** A config/state cap is floored per batch — `tests/test_bus_stream_kinds.py` fails a publish missing `maxlen` *or* missing `floor=`.
 
@@ -71,7 +69,7 @@ bash scripts/dev_server.sh
 
 **Never launch uvicorn by hand with the prod env loaded** — it shares the prod DB and runs a second worker on the prod queue (#233). `scripts/dev_server.sh` and `src/core/db_safety.py` both refuse any DB whose name lacks a `_test`/`_dev` suffix. Full rationale: [docs/COMMANDS.md](docs/COMMANDS.md) → *Development*.
 
-**Archiver owns the canonical registry**; watcher consumes it over the bus and makes **no HTTP calls to Archiver at all** — re-adding an SDK is a design regression, and Archiver code does not belong in this repo: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) → *Sibling services*.
+**Archiver owns the canonical registry**; watcher consumes it over the bus, makes **no HTTP calls to Archiver at all** and reads no Archiver checkout (#311) — re-adding an SDK is a design regression, and Archiver code does not belong in this repo: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) → *Sibling services*.
 
 **Cross-repo policy.** Never edit sibling repos (`archiver`, `notifier`) from a watcher conversation. Identify the gap, recommend it, get approval, then file a GH issue in that repo; implementation is a separate session scoped to it.
 

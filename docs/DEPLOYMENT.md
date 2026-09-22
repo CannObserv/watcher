@@ -240,8 +240,7 @@ and the `information`-schema drop (#234).
 
 The Archiver is a sibling service on its own VM (`co-registrar`, `archiver.service` on
 port 8000 there, per archiver's own AGENTS.md) that owns the canonical InfoItem /
-InfoSource / SourceRevision / RepSpec registry. Nothing in this repo reads its checkout —
-the test harness stopped needing one in #311.
+InfoSource / SourceRevision / RepSpec registry.
 
 **Watcher makes no HTTP calls to it.** The SDK, its API key, and the lifespan pre-warm
 were removed in #254 together with the last outbound call (`get_info_item` on WatchedItem

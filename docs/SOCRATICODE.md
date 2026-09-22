@@ -47,7 +47,7 @@ Validate the contract with no server and no network:
 ```bash
 D=skills-vendor/gregoryfoster-skills/skills/init-socraticode/scripts/mcp-driver.mjs
 node $D validate-store .      # external mode, projectId, what the path hash would have been
-node $D validate-manifest .   # the 10 context artifacts still resolve
+node $D validate-manifest .   # every context artifact still resolves
 node $D resolve               # which server a launch would get (the #307 pin)
 ```
 
@@ -96,7 +96,8 @@ going. Measured: aborted 13:37:47Z, finished 14:24:37Z, blocking the session for
   content or configuration changed. Measured: a `docs/SOCRATICODE.md` save at 14:38:39Z
   reached `codebase_watcher` at 14:38:49Z and `context_watcher` at 14:38:57Z. Staleness the
   health hook reports comes from edits made while no watcher ran; `codebase_update` catches
-  it up the same incremental way.
+  it up the same incremental way — not the `re-run codebase_context_index` the hook itself
+  prints (gregoryfoster/skills#317).
 - **Don't re-run on the error.** The `context_watcher` point in the `socraticode_metadata`
   collection carries `lastIndexedAt` and each artifact's `contentHash` — read it first.
 - **A full re-index belongs off the session's critical path.** An MCP call cannot be

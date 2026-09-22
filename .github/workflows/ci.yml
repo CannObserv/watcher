@@ -27,10 +27,9 @@ jobs:
       contents: read
       id-token: write
     steps:
-      # No sibling checkout: the `archiver-client` path dep that required one was
-      # removed with the Archiver SDK (#254), and only the `test` job still needs
-      # the repo — for ARCHIVER_REPO_PATH, whose alembic builds the `information`
-      # schema conftest's factories write to.
+      # No sibling checkout, in this job or any other: #254 removed the
+      # `archiver-client` path dep, and #311 the `test` job's subprocess run of
+      # archiver's alembic.
       - uses: actions/checkout@v5
         with:
           path: watcher
@@ -93,18 +92,11 @@ jobs:
 
     env:
       TEST_DATABASE_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/watcher_test
-      # conftest subprocess-invokes the sibling archiver repo's alembic to build
-      # the cross-schema `information.*` test tables.
-      ARCHIVER_REPO_PATH: ${{ github.workspace }}/archiver
 
     steps:
       - uses: actions/checkout@v5
         with:
           path: watcher
-      - uses: actions/checkout@v5
-        with:
-          repository: CannObserv/archiver
-          path: archiver
 
       - name: Install uv
         uses: astral-sh/setup-uv@v5
@@ -120,14 +112,8 @@ jobs:
           workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
           service_account: co-pypi-reader@co-gcs.iam.gserviceaccount.com
 
-      # Both repos resolve co-core from their own wheelhouse: watcher's for
-      # `uv sync` here, archiver's for the conftest `uv run alembic` subprocess.
       - name: Sync cannobserv wheelhouse (watcher)
         working-directory: watcher
-        run: uv run --no-project --with 'google-cloud-storage>=2,<4' python scripts/sync_wheelhouse.py
-
-      - name: Sync cannobserv wheelhouse (archiver, for conftest alembic)
-        working-directory: archiver
         run: uv run --no-project --with 'google-cloud-storage>=2,<4' python scripts/sync_wheelhouse.py
 
       - name: uv sync
@@ -177,7 +163,7 @@ jobs:
           path: watcher
       # No sibling checkout (#254 removed the `archiver-client` path dep that was
       # its only reason here). This job runs no archiver alembic and seeds no
-      # `information` schema either: the #234 squash collapsed the pre-existing
+      # `information` schema: the #234 squash collapsed the pre-existing
       # chain into a self-contained genesis baseline that references no
       # archiver-owned schema, so `upgrade head` from an empty database is fully
       # standalone.

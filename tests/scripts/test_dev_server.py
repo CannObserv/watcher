@@ -227,8 +227,7 @@ def test_test_database_fallback_is_rebuilt_from_scratch() -> None:
     so its ``alembic_version`` (if any) never matches the actual tables and a
     plain ``upgrade head`` fails mid-history. The test DB is disposable by
     definition, so the launch path drops and recreates the ``public`` schema
-    to get a deterministic, migration-built state. The ``information`` schema
-    (Archiver's, persisted between pytest sessions) is untouched.
+    to get a deterministic, migration-built state.
     """
     result = run({"TEST_DATABASE_URL": TEST_URL})
     assert result.returncode == 0, result.stderr

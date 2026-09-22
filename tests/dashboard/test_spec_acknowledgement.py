@@ -24,7 +24,6 @@ from ulid import ULID
 from src.core.models.audit_log import AuditLog, EventType
 from src.core.models.watched_item import WatchedItem
 from src.dashboard.context import unacknowledged_spec_change
-from tests.conftest import make_info_item
 
 pytestmark = pytest.mark.integration
 
@@ -32,10 +31,10 @@ NOW = datetime(2026, 8, 27, 12, 0, 0, tzinfo=UTC)
 
 
 async def _wi(db_session, **kwargs):
-    item = await make_info_item(db_session)
+    item_id = ULID()
     wi = WatchedItem(
         archiver_info_source_id=str(ULID()),
-        archiver_info_item_id=item.info_item_id,
+        archiver_info_item_id=item_id,
         name=kwargs.pop("name", "Ack"),
         **kwargs,
     )

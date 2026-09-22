@@ -246,9 +246,7 @@ fi
 # `upgrade head` fails mid-history. The test DB is disposable by definition,
 # so when resolution fell back to TEST_DATABASE_URL the public schema is
 # dropped and rebuilt from migrations — a deterministic state every launch.
-# (The `information` schema — Archiver's, persisted between pytest sessions —
-# lives outside `public` and is untouched.) An explicit
-# WATCHER_DEV_DATABASE_URL is the persistent alternative: assumed
+# An explicit WATCHER_DEV_DATABASE_URL is the persistent alternative: assumed
 # alembic-managed, migrated in place, never reset.
 #
 # Migrating here keeps the safe path usable; an operator who finds it broken

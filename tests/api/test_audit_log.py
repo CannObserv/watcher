@@ -5,7 +5,6 @@ from sqlalchemy import text
 from ulid import ULID
 
 from src.core.models.audit_log import EventType
-from tests.conftest import make_info_item
 
 pytestmark = pytest.mark.integration
 
@@ -16,14 +15,14 @@ async def _create_watched_item_via_api(client, db_session, *, name="W"):
     The create route emits a ``WATCHED_ITEM_CREATED`` audit entry keyed by
     ``watched_item_id`` in the payload (#191 — the dedicated FK column is gone).
     """
-    item = await make_info_item(db_session, name=name)
+    item_id = ULID()
     await db_session.commit()
     resp = await client.post(
         "/api/v1/watched-items",
         json={
             "url": "https://example.com/page",
             "archiver_info_source_id": str(ULID()),
-            "archiver_info_item_id": str(item.info_item_id),
+            "archiver_info_item_id": str(item_id),
             "name": name,
             # Required and non-empty since #260.
             "source_specs": [{"schema_version": 1, "extraction": {"algorithm": "full_page"}}],

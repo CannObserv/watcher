@@ -8,15 +8,14 @@ from ulid import ULID
 from src.core.models.audit_log import AuditLog, EventType
 from src.core.models.watched_item import WatchedItem
 from src.workers.retention import FAILED_RETENTION_HOURS
-from tests.conftest import make_info_item
 
 
 async def _make_wi(db_session, *, name="Test WI", url="https://example.com"):
     """Create + flush a WatchedItem with effective_url; return it."""
-    item = await make_info_item(db_session, name=name)
+    item_id = ULID()
     wi = WatchedItem(
         archiver_info_source_id=str(ULID()),
-        archiver_info_item_id=item.info_item_id,
+        archiver_info_item_id=item_id,
         name=name,
         effective_url=url,
     )

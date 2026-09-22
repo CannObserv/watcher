@@ -21,7 +21,7 @@ from src.dashboard.routes.watched_items import (
     _apply_watched_item_field_update,
     _watched_item_field_context,
 )
-from tests.conftest import make_info_item, make_watched_item
+from tests.conftest import make_watched_item
 
 pytestmark = pytest.mark.integration
 
@@ -42,11 +42,11 @@ class TestListPage:
         assert b"/watches/new" not in body
 
     async def test_list_renders_items(self, client, db_session):
-        item = await make_info_item(db_session)
+        item_id = ULID()
         db_session.add(
             WatchedItem(
                 archiver_info_source_id=str(ULID()),
-                archiver_info_item_id=item.info_item_id,
+                archiver_info_item_id=item_id,
                 name="Listed",
             )
         )
@@ -69,11 +69,11 @@ class TestListPage:
     async def test_removed_columns_absent(self, client, db_session):
         """Information Item, Content Type, Tags, Last Reviewed columns are gone."""
 
-        item = await make_info_item(db_session)
+        item_id = ULID()
         db_session.add(
             WatchedItem(
                 archiver_info_source_id=str(ULID()),
-                archiver_info_item_id=item.info_item_id,
+                archiver_info_item_id=item_id,
                 name="ColTest",
             )
         )
@@ -89,11 +89,11 @@ class TestListPage:
     async def test_new_column_headers_present(self, client, db_session):
         """Last Check, Next Check, Status headers appear; Aspect Review removed."""
 
-        item = await make_info_item(db_session)
+        item_id = ULID()
         db_session.add(
             WatchedItem(
                 archiver_info_source_id=str(ULID()),
-                archiver_info_item_id=item.info_item_id,
+                archiver_info_item_id=item_id,
                 name="ColTest2",
             )
         )
@@ -108,10 +108,10 @@ class TestListPage:
     async def test_next_check_has_data_attribute_when_last_checked(self, client, db_session):
         """Rows with last_checked_at render a data-next-check ISO timestamp."""
 
-        item = await make_info_item(db_session)
+        item_id = ULID()
         wi = WatchedItem(
             archiver_info_source_id=str(ULID()),
-            archiver_info_item_id=item.info_item_id,
+            archiver_info_item_id=item_id,
             name="WithCheck",
             last_checked_at=datetime.now(UTC),
             default_schedule_config={"interval": "1h"},
@@ -126,10 +126,10 @@ class TestListPage:
         """#204: an item with no schedule config shows the inherited system default
         (1d) in the Interval column, not a blank em dash."""
 
-        item = await make_info_item(db_session)
+        item_id = ULID()
         wi = WatchedItem(
             archiver_info_source_id=str(ULID()),
-            archiver_info_item_id=item.info_item_id,
+            archiver_info_item_id=item_id,
             name="InheritInterval",
             default_schedule_config=None,
         )
@@ -147,10 +147,10 @@ class TestListPage:
         """#204: a checked item with no schedule config still renders a Next Check —
         the interval resolves to the system default, so next check is computable."""
 
-        item = await make_info_item(db_session)
+        item_id = ULID()
         wi = WatchedItem(
             archiver_info_source_id=str(ULID()),
-            archiver_info_item_id=item.info_item_id,
+            archiver_info_item_id=item_id,
             name="InheritNextCheck",
             last_checked_at=datetime.now(UTC),
             default_schedule_config=None,
@@ -165,10 +165,10 @@ class TestListPage:
         """#204: an explicit interval renders the value with no '· default' marker —
         the inherited marker is reserved for items that fall back to a default."""
 
-        item = await make_info_item(db_session)
+        item_id = ULID()
         wi = WatchedItem(
             archiver_info_source_id=str(ULID()),
-            archiver_info_item_id=item.info_item_id,
+            archiver_info_item_id=item_id,
             name="ExplicitInterval",
             default_schedule_config={"interval": "6h"},
         )
@@ -182,10 +182,10 @@ class TestListPage:
 
     async def test_domain_inherited_interval_shows_domain_marker(self, client, db_session):
         """#205: an item inheriting its domain's cadence shows '7d · domain', not '· default'."""
-        item = await make_info_item(db_session)
+        item_id = ULID()
         wi = WatchedItem(
             archiver_info_source_id=str(ULID()),
-            archiver_info_item_id=item.info_item_id,
+            archiver_info_item_id=item_id,
             name="InheritDomain",
             default_schedule_config=None,
             domain_default_schedule_config={"interval": "7d"},
@@ -202,10 +202,10 @@ class TestListPage:
         """#206 (the #204 CR finding-2 fix): a list item whose temporal profile is
         currently active shows the profile cadence + '· profile', matching
         schedule_tick — not the base 1d the UI used to display."""
-        item = await make_info_item(db_session)
+        item_id = ULID()
         wi = WatchedItem(
             archiver_info_source_id=str(ULID()),
-            archiver_info_item_id=item.info_item_id,
+            archiver_info_item_id=item_id,
             name="ProfileRamp",
             default_schedule_config={"interval": "1d"},
             last_checked_at=datetime.now(UTC) - timedelta(minutes=5),
@@ -229,11 +229,11 @@ class TestListPage:
     async def test_status_column_consolidated(self, client, db_session):
         """One labeled Status column holds the toggle + badge; no separate Actions column (#190)."""
 
-        item = await make_info_item(db_session)
+        item_id = ULID()
         db_session.add(
             WatchedItem(
                 archiver_info_source_id=str(ULID()),
-                archiver_info_item_id=item.info_item_id,
+                archiver_info_item_id=item_id,
                 name="ConsolidatedRow",
                 effective_url="https://example.com",
                 is_active=True,
@@ -252,10 +252,10 @@ class TestListPage:
     async def test_aspect_review_column_removed(self, client, db_session):
         """Aspect Review column removed from list view (#173)."""
 
-        item = await make_info_item(db_session)
+        item_id = ULID()
         wi = WatchedItem(
             archiver_info_source_id=str(ULID()),
-            archiver_info_item_id=item.info_item_id,
+            archiver_info_item_id=item_id,
             name="HtmxRow",
         )
         db_session.add(wi)
@@ -267,10 +267,10 @@ class TestListPage:
 
 class TestDetailPage:
     async def test_returns_200(self, client, db_session):
-        item = await make_info_item(db_session)
+        item_id = ULID()
         wi = WatchedItem(
             archiver_info_source_id=str(ULID()),
-            archiver_info_item_id=item.info_item_id,
+            archiver_info_item_id=item_id,
             name="Detail Test",
         )
         db_session.add(wi)
@@ -286,10 +286,10 @@ class TestDetailPage:
         assert response.status_code == 404
 
     async def test_shows_effective_url(self, client, db_session):
-        item = await make_info_item(db_session)
+        item_id = ULID()
         wi = WatchedItem(
             archiver_info_source_id=str(ULID()),
-            archiver_info_item_id=item.info_item_id,
+            archiver_info_item_id=item_id,
             name="URL Test",
             effective_url="https://example.org/foo",
         )
@@ -302,10 +302,10 @@ class TestDetailPage:
     async def test_no_binding_tree(self, client, db_session):
         """Binding tree removed in step 7 — no info_item_picker partials."""
 
-        item = await make_info_item(db_session)
+        item_id = ULID()
         wi = WatchedItem(
             archiver_info_source_id=str(ULID()),
-            archiver_info_item_id=item.info_item_id,
+            archiver_info_item_id=item_id,
             name="No Tree WI",
         )
         db_session.add(wi)
@@ -319,10 +319,10 @@ class TestDetailPage:
         assert b'type="radio"' not in body
 
     async def test_renders_danger_zone(self, client, db_session):
-        item = await make_info_item(db_session)
+        item_id = ULID()
         wi = WatchedItem(
             archiver_info_source_id=str(ULID()),
-            archiver_info_item_id=item.info_item_id,
+            archiver_info_item_id=item_id,
             name="Danger",
         )
         db_session.add(wi)
@@ -341,10 +341,10 @@ class TestDetailPage:
         is gone — the per-Watch tier folded in #191, the model unified in #200).
         """
 
-        item = await make_info_item(db_session)
+        item_id = ULID()
         wi = WatchedItem(
             archiver_info_source_id=str(ULID()),
-            archiver_info_item_id=item.info_item_id,
+            archiver_info_item_id=item_id,
             name="WithConfig",
         )
         db_session.add(wi)
@@ -370,10 +370,10 @@ class TestDetailPage:
     async def test_temporal_profile_panel_renders(self, client, db_session):
         """#191 CR-5: the WatchedItem detail surfaces its 1:1 temporal profile."""
 
-        item = await make_info_item(db_session)
+        item_id = ULID()
         wi = WatchedItem(
             archiver_info_source_id=str(ULID()),
-            archiver_info_item_id=item.info_item_id,
+            archiver_info_item_id=item_id,
             name="WithProfile",
         )
         db_session.add(wi)
@@ -396,10 +396,10 @@ class TestDetailPage:
     async def test_temporal_profile_panel_empty_state(self, client, db_session):
         """No profile → the panel shows the default-interval hint."""
 
-        item = await make_info_item(db_session)
+        item_id = ULID()
         wi = WatchedItem(
             archiver_info_source_id=str(ULID()),
-            archiver_info_item_id=item.info_item_id,
+            archiver_info_item_id=item_id,
             name="NoProfile",
         )
         db_session.add(wi)
@@ -411,10 +411,10 @@ class TestDetailPage:
     async def test_domain_suspended_banner_renders(self, client, db_session):
         """Domain Inactive alert shows when watched_item.domain_suspended=True."""
 
-        item = await make_info_item(db_session)
+        item_id = ULID()
         wi = WatchedItem(
             archiver_info_source_id=str(ULID()),
-            archiver_info_item_id=item.info_item_id,
+            archiver_info_item_id=item_id,
             name="Suspended Item",
             domain_suspended=True,
         )
@@ -429,10 +429,10 @@ class TestDetailPage:
         """Domain link appears and points to /domains/<name> when domain_name is set."""
 
         db_session.add(Domain(name="detail-domain.com"))
-        item = await make_info_item(db_session)
+        item_id = ULID()
         wi = WatchedItem(
             archiver_info_source_id=str(ULID()),
-            archiver_info_item_id=item.info_item_id,
+            archiver_info_item_id=item_id,
             name="Domain Link Item",
             domain_name="detail-domain.com",
         )
@@ -447,10 +447,10 @@ class TestDetailPage:
     async def test_new_watch_button_hidden_when_archived(self, client, db_session):
         """New Watch button absent on archived WI."""
 
-        item = await make_info_item(db_session)
+        item_id = ULID()
         wi = WatchedItem(
             archiver_info_source_id=str(ULID()),
-            archiver_info_item_id=item.info_item_id,
+            archiver_info_item_id=item_id,
             name="Archived",
             effective_url="https://example.com/target",
             archived_at=datetime.now(UTC),
@@ -464,10 +464,10 @@ class TestDetailPage:
     async def test_new_watch_button_hidden_when_no_effective_url(self, client, db_session):
         """New Watch button absent when WatchedItem has no effective_url."""
 
-        item = await make_info_item(db_session)
+        item_id = ULID()
         wi = WatchedItem(
             archiver_info_source_id=str(ULID()),
-            archiver_info_item_id=item.info_item_id,
+            archiver_info_item_id=item_id,
             name="NoPrimary",
         )
         db_session.add(wi)
@@ -741,10 +741,10 @@ class TestDetailPage:
     async def test_aspect_review_status_route_gone(self, client, db_session):
         """The /aspect-review-status route was removed in step 7."""
 
-        item = await make_info_item(db_session)
+        item_id = ULID()
         wi = WatchedItem(
             archiver_info_source_id=str(ULID()),
-            archiver_info_item_id=item.info_item_id,
+            archiver_info_item_id=item_id,
             name="Review Gone",
         )
         db_session.add(wi)
@@ -762,19 +762,19 @@ class TestListPageSearchAndPagination:
         assert response.status_code == 200
 
     async def test_search_filters_by_name(self, client, db_session):
-        item_a = await make_info_item(db_session, name="Alpha Item")
-        item_b = await make_info_item(db_session, name="Beta Item")
+        item_a_id = ULID()
+        item_b_id = ULID()
         db_session.add(
             WatchedItem(
                 archiver_info_source_id=str(ULID()),
-                archiver_info_item_id=item_a.info_item_id,
+                archiver_info_item_id=item_a_id,
                 name="Alpha WI",
             )
         )
         db_session.add(
             WatchedItem(
                 archiver_info_source_id=str(ULID()),
-                archiver_info_item_id=item_b.info_item_id,
+                archiver_info_item_id=item_b_id,
                 name="Beta WI",
             )
         )
@@ -787,11 +787,11 @@ class TestListPageSearchAndPagination:
         assert b"Beta WI" not in body
 
     async def test_search_is_case_insensitive(self, client, db_session):
-        item = await make_info_item(db_session)
+        item_id = ULID()
         db_session.add(
             WatchedItem(
                 archiver_info_source_id=str(ULID()),
-                archiver_info_item_id=item.info_item_id,
+                archiver_info_item_id=item_id,
                 name="Cannabis Observer",
             )
         )
@@ -803,11 +803,11 @@ class TestListPageSearchAndPagination:
 
     async def test_pagination_returns_page_two(self, client, db_session):
         for name in ("AAA", "BBB", "CCC"):
-            item = await make_info_item(db_session, name=name)
+            item_id = ULID()
             db_session.add(
                 WatchedItem(
                     archiver_info_source_id=str(ULID()),
-                    archiver_info_item_id=item.info_item_id,
+                    archiver_info_item_id=item_id,
                     name=name,
                 )
             )
@@ -821,11 +821,11 @@ class TestListPageSearchAndPagination:
         assert b"BBB" not in body
 
     async def test_include_archived_false_hides_archived(self, client, db_session):
-        item = await make_info_item(db_session)
+        item_id = ULID()
         db_session.add(
             WatchedItem(
                 archiver_info_source_id=str(ULID()),
-                archiver_info_item_id=item.info_item_id,
+                archiver_info_item_id=item_id,
                 name="Archived WI",
                 archived_at=datetime.now(UTC),
             )
@@ -837,11 +837,11 @@ class TestListPageSearchAndPagination:
         assert b"Archived WI" not in response.content
 
     async def test_include_archived_true_shows_archived(self, client, db_session):
-        item = await make_info_item(db_session)
+        item_id = ULID()
         db_session.add(
             WatchedItem(
                 archiver_info_source_id=str(ULID()),
-                archiver_info_item_id=item.info_item_id,
+                archiver_info_item_id=item_id,
                 name="ShowArchived WI",
                 archived_at=datetime.now(UTC),
             )
@@ -853,11 +853,11 @@ class TestListPageSearchAndPagination:
         assert b"ShowArchived WI" in response.content
 
     async def test_include_archived_false_explicit_param(self, client, db_session):
-        item = await make_info_item(db_session)
+        item_id = ULID()
         db_session.add(
             WatchedItem(
                 archiver_info_source_id=str(ULID()),
-                archiver_info_item_id=item.info_item_id,
+                archiver_info_item_id=item_id,
                 name="HiddenArchived",
                 archived_at=datetime.now(UTC),
             )
@@ -871,11 +871,11 @@ class TestListPageSearchAndPagination:
 
     async def test_full_page_hx_target_and_include_in_pagination_context(self, client, db_session):
         for name in ("PA", "PB", "PC"):
-            item = await make_info_item(db_session, name=name)
+            item_id = ULID()
             db_session.add(
                 WatchedItem(
                     archiver_info_source_id=str(ULID()),
-                    archiver_info_item_id=item.info_item_id,
+                    archiver_info_item_id=item_id,
                     name=name,
                 )
             )
@@ -899,11 +899,11 @@ class TestListPageSearchAndPagination:
         assert b"Filter by name" in body
 
     async def test_no_aspect_review_column(self, client, db_session):
-        item = await make_info_item(db_session)
+        item_id = ULID()
         db_session.add(
             WatchedItem(
                 archiver_info_source_id=str(ULID()),
-                archiver_info_item_id=item.info_item_id,
+                archiver_info_item_id=item_id,
                 name="NoAR",
             )
         )
@@ -918,10 +918,10 @@ class TestListPageSearchAndPagination:
 
 class TestArchiveRestore:
     async def test_archive_redirects_back(self, client, db_session):
-        item = await make_info_item(db_session)
+        item_id = ULID()
         wi = WatchedItem(
             archiver_info_source_id=str(ULID()),
-            archiver_info_item_id=item.info_item_id,
+            archiver_info_item_id=item_id,
             name="ToArchive",
         )
         db_session.add(wi)
@@ -934,10 +934,10 @@ class TestArchiveRestore:
     async def test_archive_marks_watched_item(self, client, db_session):
         """#191: archiving the single-entity WatchedItem stamps archived_at + inactive."""
 
-        item = await make_info_item(db_session)
+        item_id = ULID()
         wi = WatchedItem(
             archiver_info_source_id=str(ULID()),
-            archiver_info_item_id=item.info_item_id,
+            archiver_info_item_id=item_id,
             name="Parent",
         )
         db_session.add(wi)
@@ -950,10 +950,10 @@ class TestArchiveRestore:
         assert wi.is_active is False
 
     async def test_restore_clears_archived_at(self, client, db_session):
-        item = await make_info_item(db_session)
+        item_id = ULID()
         wi = WatchedItem(
             archiver_info_source_id=str(ULID()),
-            archiver_info_item_id=item.info_item_id,
+            archiver_info_item_id=item_id,
             name="Arc",
             archived_at=datetime.now(UTC),
             is_active=False,
@@ -1092,10 +1092,10 @@ class TestFieldHelpers:
 
 class TestFieldRoutes:
     async def test_get_field_partial_view_mode(self, client, db_session):
-        item = await make_info_item(db_session)
+        item_id = ULID()
         wi = WatchedItem(
             archiver_info_source_id=str(ULID()),
-            archiver_info_item_id=item.info_item_id,
+            archiver_info_item_id=item_id,
             name="FieldTest",
         )
         db_session.add(wi)
@@ -1109,9 +1109,9 @@ class TestFieldRoutes:
         assert b"FieldTest" in response.content
 
     async def test_post_field_updates(self, client, db_session):
-        item = await make_info_item(db_session)
+        item_id = ULID()
         wi = WatchedItem(
-            archiver_info_source_id=str(ULID()), archiver_info_item_id=item.info_item_id, name="Old"
+            archiver_info_source_id=str(ULID()), archiver_info_item_id=item_id, name="Old"
         )
         db_session.add(wi)
         await db_session.flush()
@@ -1128,10 +1128,10 @@ class TestFieldRoutes:
     async def test_post_content_media_type_override(self, client, db_session):
         """#168: the detail-page content_media_type override round-trips and
         recomputes the generated essence + emits a WATCHED_ITEM_UPDATED audit."""
-        item = await make_info_item(db_session)
+        item_id = ULID()
         wi = WatchedItem(
             archiver_info_source_id=str(ULID()),
-            archiver_info_item_id=item.info_item_id,
+            archiver_info_item_id=item_id,
             name="Override",
             content_media_type="text/html",
         )
@@ -1166,10 +1166,10 @@ class TestFieldRoutes:
     async def test_interval_field_partial_shows_active_profile_cadence(self, client, db_session):
         """#206 CR-1: the inline interval field partial honors an active profile
         (· profile), matching the full detail page — not the base cadence."""
-        item = await make_info_item(db_session)
+        item_id = ULID()
         wi = WatchedItem(
             archiver_info_source_id=str(ULID()),
-            archiver_info_item_id=item.info_item_id,
+            archiver_info_item_id=item_id,
             name="FieldProfile",
             default_schedule_config={"interval": "1d"},
         )
@@ -1193,10 +1193,10 @@ class TestFieldRoutes:
         assert "· profile".encode() in response.content
 
     async def test_post_interval_updates_jsonb(self, client, db_session):
-        item = await make_info_item(db_session)
+        item_id = ULID()
         wi = WatchedItem(
             archiver_info_source_id=str(ULID()),
-            archiver_info_item_id=item.info_item_id,
+            archiver_info_item_id=item_id,
             name="Sched",
         )
         db_session.add(wi)
@@ -1212,10 +1212,10 @@ class TestFieldRoutes:
         assert wi.default_schedule_config == {"interval": "45m"}
 
     async def test_invalid_interval_rejected(self, client, db_session):
-        item = await make_info_item(db_session)
+        item_id = ULID()
         wi = WatchedItem(
             archiver_info_source_id=str(ULID()),
-            archiver_info_item_id=item.info_item_id,
+            archiver_info_item_id=item_id,
             name="Sched",
         )
         db_session.add(wi)
@@ -1229,9 +1229,9 @@ class TestFieldRoutes:
         assert response.status_code == 400
 
     async def test_unknown_field_400(self, client, db_session):
-        item = await make_info_item(db_session)
+        item_id = ULID()
         wi = WatchedItem(
-            archiver_info_source_id=str(ULID()), archiver_info_item_id=item.info_item_id, name="X"
+            archiver_info_source_id=str(ULID()), archiver_info_item_id=item_id, name="X"
         )
         db_session.add(wi)
         await db_session.flush()
@@ -1322,10 +1322,10 @@ class TestListScheduleMaps:
 
 class TestTagsEditor:
     async def test_get_tags_partial(self, client, db_session):
-        item = await make_info_item(db_session)
+        item_id = ULID()
         wi = WatchedItem(
             archiver_info_source_id=str(ULID()),
-            archiver_info_item_id=item.info_item_id,
+            archiver_info_item_id=item_id,
             name="T",
             default_tags=["a", "b"],
         )
@@ -1338,9 +1338,9 @@ class TestTagsEditor:
         assert b'<span class="chip"><span>' in response.content
 
     async def test_add_tag(self, client, db_session):
-        item = await make_info_item(db_session)
+        item_id = ULID()
         wi = WatchedItem(
-            archiver_info_source_id=str(ULID()), archiver_info_item_id=item.info_item_id, name="T"
+            archiver_info_source_id=str(ULID()), archiver_info_item_id=item_id, name="T"
         )
         db_session.add(wi)
         await db_session.flush()
@@ -1355,10 +1355,10 @@ class TestTagsEditor:
         assert "newtag" in (wi.default_tags or [])
 
     async def test_remove_tag(self, client, db_session):
-        item = await make_info_item(db_session)
+        item_id = ULID()
         wi = WatchedItem(
             archiver_info_source_id=str(ULID()),
-            archiver_info_item_id=item.info_item_id,
+            archiver_info_item_id=item_id,
             name="T",
             default_tags=["x", "y", "z"],
         )
@@ -1374,10 +1374,10 @@ class TestTagsEditor:
         assert wi.default_tags == ["x", "z"]
 
     async def test_mark_reviewed_stamps_now(self, client, db_session):
-        item = await make_info_item(db_session)
+        item_id = ULID()
         wi = WatchedItem(
             archiver_info_source_id=str(ULID()),
-            archiver_info_item_id=item.info_item_id,
+            archiver_info_item_id=item_id,
             name="Stamp",
         )
         db_session.add(wi)
@@ -1394,10 +1394,8 @@ class TestTagsEditor:
 async def _make_wi(db_session, **kwargs):
     """Create + commit a WatchedItem; return it."""
 
-    item = await make_info_item(db_session, name=kwargs.pop("info_name", "PauseWI"))
-    wi = WatchedItem(
-        archiver_info_source_id=str(ULID()), archiver_info_item_id=item.info_item_id, **kwargs
-    )
+    item_id = ULID()
+    wi = WatchedItem(archiver_info_source_id=str(ULID()), archiver_info_item_id=item_id, **kwargs)
     db_session.add(wi)
     await db_session.flush()
     await db_session.commit()

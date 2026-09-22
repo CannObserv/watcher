@@ -9,7 +9,7 @@ from ulid import ULID
 
 from src.core.models.audit_log import AuditLog, EventType
 from src.core.models.watched_item import WatchedItem
-from tests.conftest import make_info_item, make_watched_item
+from tests.conftest import make_watched_item
 
 pytestmark = pytest.mark.integration
 
@@ -36,10 +36,10 @@ async def _make_watched_item(db_session, **overrides):
     """Helper: create a WatchedItem + parent InfoItem via the test fixtures."""
     from src.core.models.watched_item import WatchedItem
 
-    item = await make_info_item(db_session)
+    item_id = ULID()
     wi = WatchedItem(
         archiver_info_source_id=str(ULID()),
-        archiver_info_item_id=item.info_item_id,
+        archiver_info_item_id=item_id,
         name=overrides.pop("name", "Test WI"),
     )
     for k, v in overrides.items():
@@ -455,15 +455,15 @@ class TestWatchedItemRevisions:
 
 class TestCreateWatchedItem:
     async def test_creates_with_url_derived_name_fallback(self, client, db_session):
-        item = await make_info_item(db_session, name="Source Item")
+        item_id = ULID()
         await db_session.commit()
         response = await client.post(
             "/api/v1/watched-items",
-            json=_create_body(item.info_item_id),
+            json=_create_body(item_id),
         )
         assert response.status_code == 201, response.text
         body = response.json()
-        assert body["archiver_info_item_id"] == str(item.info_item_id)
+        assert body["archiver_info_item_id"] == str(item_id)
         # #254: the name falls back to the URL, not the InfoItem's name — the SDK
         # call that could read the latter is gone, and the announcement that
         # replaced it carries no name field either.
@@ -477,11 +477,11 @@ class TestCreateWatchedItem:
         Both representations read back as Python None, so the route response is no
         guard — assert the on-disk value matches ``IS NULL``.
         """
-        item = await make_info_item(db_session, name="NullCfg")
+        item_id = ULID()
         await db_session.commit()
         response = await client.post(
             "/api/v1/watched-items",
-            json=_create_body(item.info_item_id),
+            json=_create_body(item_id),
         )
         assert response.status_code == 201, response.text
         wi_id = response.json()["id"]
@@ -494,12 +494,12 @@ class TestCreateWatchedItem:
         assert is_sql_null is True
 
     async def test_uses_supplied_name(self, client, db_session):
-        item = await make_info_item(db_session, name="Source")
+        item_id = ULID()
         await db_session.commit()
         response = await client.post(
             "/api/v1/watched-items",
             json=_create_body(
-                item.info_item_id,
+                item_id,
                 name="Overridden",
                 default_schedule_config={"interval": "10m"},
                 default_tags=["regulatory"],
@@ -512,11 +512,11 @@ class TestCreateWatchedItem:
         assert body["default_tags"] == ["regulatory"]
 
     async def test_duplicate_archiver_info_item_id_returns_409(self, client, db_session):
-        item = await make_info_item(db_session, name="X")
+        item_id = ULID()
         await db_session.commit()
-        r1 = await client.post("/api/v1/watched-items", json=_create_body(item.info_item_id))
+        r1 = await client.post("/api/v1/watched-items", json=_create_body(item_id))
         assert r1.status_code == 201
-        r2 = await client.post("/api/v1/watched-items", json=_create_body(item.info_item_id))
+        r2 = await client.post("/api/v1/watched-items", json=_create_body(item_id))
         assert r2.status_code == 409
         assert "already" in r2.json()["detail"].lower()
 
@@ -537,9 +537,9 @@ class TestCreateWatchedItem:
         assert response.status_code == 201, response.text
 
     async def test_emits_audit_event(self, client, db_session):
-        item = await make_info_item(db_session, name="A")
+        item_id = ULID()
         await db_session.commit()
-        await client.post("/api/v1/watched-items", json=_create_body(item.info_item_id))
+        await client.post("/api/v1/watched-items", json=_create_body(item_id))
         events = (
             (
                 await db_session.execute(
@@ -555,13 +555,13 @@ class TestCreateWatchedItem:
     async def test_creates_with_url_and_source_specs(self, client, db_session):
         """url + source_specs set effective_url and source_specs on the WatchedItem."""
 
-        item = await make_info_item(db_session, name="WithUrl")
+        item_id = ULID()
         await db_session.commit()
         response = await client.post(
             "/api/v1/watched-items",
             json={
                 "archiver_info_source_id": str(ULID()),
-                "archiver_info_item_id": str(item.info_item_id),
+                "archiver_info_item_id": str(item_id),
                 "url": "https://example.com/page",
                 "source_specs": [{"schema_version": 1, "extraction": {"algorithm": "full_page"}}],
             },
@@ -575,7 +575,7 @@ class TestCreateWatchedItem:
 
     async def test_response_includes_effective_url_and_source_specs(self, client, db_session):
         """WatchedItem response always includes effective_url and source_specs."""
-        item = await make_info_item(db_session, name="RespFields")
+        item_id = ULID()
         await db_session.commit()
         specs = [{"schema_version": 1, "extraction": {"algorithm": "full_page"}}]
         response = await client.post(
@@ -583,7 +583,7 @@ class TestCreateWatchedItem:
             json={
                 "url": "https://example.com/page",
                 "archiver_info_source_id": str(ULID()),
-                "archiver_info_item_id": str(item.info_item_id),
+                "archiver_info_item_id": str(item_id),
                 "source_specs": specs,
             },
         )
@@ -604,9 +604,9 @@ class TestCreateWatchedItem:
         affordance only ever admitted a state the pipeline had no ratified
         behaviour for.
         """
-        item = await make_info_item(db_session, name="NoSpecs")
+        item_id = ULID()
         await db_session.commit()
-        body = _create_body(item.info_item_id)
+        body = _create_body(item_id)
         del body["source_specs"]
 
         response = await client.post("/api/v1/watched-items", json=body)
@@ -616,11 +616,11 @@ class TestCreateWatchedItem:
 
     async def test_create_with_empty_source_specs_is_422(self, client, db_session):
         """The same state spelled explicitly is refused the same way."""
-        item = await make_info_item(db_session, name="EmptySpecs")
+        item_id = ULID()
         await db_session.commit()
 
         response = await client.post(
-            "/api/v1/watched-items", json=_create_body(item.info_item_id, source_specs=[])
+            "/api/v1/watched-items", json=_create_body(item_id, source_specs=[])
         )
 
         assert response.status_code == 422, response.text
@@ -634,13 +634,13 @@ class TestCreateWatchedItem:
         """
         from src.core.models.domain import Domain
 
-        item = await make_info_item(db_session, name="OnInactive")
+        item_id = ULID()
         db_session.add(Domain(name="inactive-create.example", is_active=False))
         await db_session.commit()
         response = await client.post(
             "/api/v1/watched-items",
             json=_create_body(
-                item.info_item_id,
+                item_id,
                 url="https://inactive-create.example/page",
                 name="On Inactive Domain",
             ),
@@ -650,12 +650,12 @@ class TestCreateWatchedItem:
 
     async def test_create_on_active_domain_not_suspended(self, client, db_session):
         """Items created on a healthy (or fresh) domain are not domain-suspended."""
-        item = await make_info_item(db_session, name="OnActive")
+        item_id = ULID()
         await db_session.commit()
         response = await client.post(
             "/api/v1/watched-items",
             json=_create_body(
-                item.info_item_id,
+                item_id,
                 url="https://active-create.example/page",
                 name="On Active Domain",
             ),
@@ -665,12 +665,12 @@ class TestCreateWatchedItem:
 
     async def test_create_stores_archiver_info_source_id(self, client, db_session):
         """archiver_info_source_id is persisted when supplied on create."""
-        item = await make_info_item(db_session, name="SrcId")
+        item_id = ULID()
         await db_session.commit()
         src_id = "01ABCDEFGHJKMNPQRSTVWXYZ00"
         response = await client.post(
             "/api/v1/watched-items",
-            json=_create_body(item.info_item_id, archiver_info_source_id=src_id),
+            json=_create_body(item_id, archiver_info_source_id=src_id),
         )
         assert response.status_code == 201, response.text
         assert response.json()["archiver_info_source_id"] == src_id
@@ -734,18 +734,18 @@ class TestIssue188IsActive:
 
     async def test_create_defaults_active(self, client, db_session):
         """A WatchedItem created without is_active is active."""
-        item = await make_info_item(db_session, name="ActiveDefault")
+        item_id = ULID()
         await db_session.commit()
-        response = await client.post("/api/v1/watched-items", json=_create_body(item.info_item_id))
+        response = await client.post("/api/v1/watched-items", json=_create_body(item_id))
         assert response.status_code == 201, response.text
         assert response.json()["is_active"] is True
 
     async def test_create_paused(self, client, db_session):
         """is_active=False provisions a paused (not archived) WatchedItem."""
-        item = await make_info_item(db_session, name="Paused")
+        item_id = ULID()
         await db_session.commit()
         response = await client.post(
-            "/api/v1/watched-items", json=_create_body(item.info_item_id, is_active=False)
+            "/api/v1/watched-items", json=_create_body(item_id, is_active=False)
         )
         assert response.status_code == 201, response.text
         body = response.json()
@@ -755,11 +755,11 @@ class TestIssue188IsActive:
 
     async def test_create_paused_info_item_linked(self, client, db_session):
         """is_active=False on the InfoItem-linked path provisions a paused WatchedItem."""
-        item = await make_info_item(db_session, name="PausedLinked")
+        item_id = ULID()
         await db_session.commit()
         response = await client.post(
             "/api/v1/watched-items",
-            json=_create_body(item.info_item_id, is_active=False),
+            json=_create_body(item_id, is_active=False),
         )
         assert response.status_code == 201, response.text
         assert response.json()["is_active"] is False
@@ -909,19 +909,17 @@ class TestListFilterByArchiverInfoItemId:
         """?archiver_info_item_id= returns only the WatchedItem with that ULID."""
         from src.core.models.watched_item import WatchedItem
 
-        item = await make_info_item(db_session, name="Filtered")
+        item_id = ULID()
         wi = WatchedItem(
             archiver_info_source_id=str(ULID()),
-            archiver_info_item_id=item.info_item_id,
+            archiver_info_item_id=item_id,
             name="Match",
         )
         db_session.add(wi)
         await _make_watched_item(db_session, name="Other")
         await db_session.commit()
 
-        response = await client.get(
-            f"/api/v1/watched-items?archiver_info_item_id={item.info_item_id}"
-        )
+        response = await client.get(f"/api/v1/watched-items?archiver_info_item_id={item_id}")
         assert response.status_code == 200
         names = [r["name"] for r in response.json()]
         assert names == ["Match"]
@@ -1127,11 +1125,11 @@ class TestCreateInfoItemLinkedDomainDerivation:
     """#196 — InfoItem-linked create with a url must derive domain_name + suspension."""
 
     async def test_infoitem_linked_create_with_url_derives_domain_name(self, client, db_session):
-        item = await make_info_item(db_session, name="LinkedWithUrl")
+        item_id = ULID()
         await db_session.commit()
         response = await client.post(
             "/api/v1/watched-items",
-            json=_create_body(item.info_item_id, url="https://linked-create.example/page"),
+            json=_create_body(item_id, url="https://linked-create.example/page"),
         )
         assert response.status_code == 201, response.text
         assert response.json()["domain_name"] == "linked-create.example"
@@ -1139,11 +1137,11 @@ class TestCreateInfoItemLinkedDomainDerivation:
     async def test_infoitem_linked_create_with_url_upserts_domain(self, client, db_session):
         from src.core.models.domain import Domain
 
-        item = await make_info_item(db_session, name="LinkedUpsert")
+        item_id = ULID()
         await db_session.commit()
         await client.post(
             "/api/v1/watched-items",
-            json=_create_body(item.info_item_id, url="https://linked-upsert.example/page"),
+            json=_create_body(item_id, url="https://linked-upsert.example/page"),
         )
         domain = (
             await db_session.execute(select(Domain).where(Domain.name == "linked-upsert.example"))
@@ -1156,11 +1154,11 @@ class TestCreateInfoItemLinkedDomainDerivation:
         from src.core.models.domain import Domain
 
         db_session.add(Domain(name="linked-inactive.example", is_active=False))
-        item = await make_info_item(db_session, name="LinkedInactive")
+        item_id = ULID()
         await db_session.commit()
         response = await client.post(
             "/api/v1/watched-items",
-            json=_create_body(item.info_item_id, url="https://linked-inactive.example/page"),
+            json=_create_body(item_id, url="https://linked-inactive.example/page"),
         )
         assert response.status_code == 201, response.text
         assert response.json()["domain_suspended"] is True
@@ -1175,11 +1173,11 @@ class TestCreateInfoItemLinkedDomainDerivation:
         db_session.add(
             Domain(name="cadence-create.example", default_schedule_config={"interval": "7d"})
         )
-        item = await make_info_item(db_session, name="LinkedCadence")
+        item_id = ULID()
         await db_session.commit()
         response = await client.post(
             "/api/v1/watched-items",
-            json=_create_body(item.info_item_id, url="https://cadence-create.example/page"),
+            json=_create_body(item_id, url="https://cadence-create.example/page"),
         )
         assert response.status_code == 201, response.text
         wi = (
@@ -1344,11 +1342,11 @@ class TestAsyncCreate:
     async def test_create_stores_the_url_without_probing(self, client, db_session):
         from src.core.models.watched_item import WatchedItem, WatchHealthStatus
 
-        item = await make_info_item(db_session, name="AsyncCreate")
+        item_id = ULID()
         await db_session.commit()
         response = await client.post(
             "/api/v1/watched-items",
-            json=_create_body(item.info_item_id, url="https://async.example/page"),
+            json=_create_body(item_id, url="https://async.example/page"),
         )
         assert response.status_code == 201, response.text
         data = response.json()
@@ -1365,10 +1363,10 @@ class TestAsyncCreate:
         # The API's HttpUrlStr schema rejects this before the route runs; the
         # route-level ValueError handler (CR-3) is the same guard for the
         # dashboard Form paths, covered in tests/core/test_watched_items.py.
-        item = await make_info_item(db_session, name="BadUrl")
+        item_id = ULID()
         await db_session.commit()
         response = await client.post(
-            "/api/v1/watched-items", json=_create_body(item.info_item_id, url="not a url")
+            "/api/v1/watched-items", json=_create_body(item_id, url="not a url")
         )
         assert response.status_code == 422
 
@@ -1498,12 +1496,12 @@ class TestScheduleConfigValidation:
         assert wi.default_schedule_config is None
 
     async def test_create_rejects_an_unparseable_interval(self, client, db_session):
-        item = await make_info_item(db_session, name="Bogus")
+        item_id = ULID()
         await db_session.commit()
 
         response = await client.post(
             "/api/v1/watched-items",
-            json=_create_body(item.info_item_id, default_schedule_config={"interval": "soon"}),
+            json=_create_body(item_id, default_schedule_config={"interval": "soon"}),
         )
 
         assert response.status_code == 422

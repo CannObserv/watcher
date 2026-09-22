@@ -276,13 +276,12 @@ class TestDeleteDomain:
     async def test_delete_domain_with_watched_items_returns_409(self, client, db_session):
         from src.core.models.domain import Domain
         from src.core.models.watched_item import WatchedItem
-        from tests.conftest import make_info_item
 
         db_session.add(Domain(name="example.com"))
-        item = await make_info_item(db_session, name="W")
+        item_id = ULID()
         wi = WatchedItem(
             archiver_info_source_id=str(ULID()),
-            archiver_info_item_id=item.info_item_id,
+            archiver_info_item_id=item_id,
             name="W",
             effective_url="https://example.com/p",
             domain_name="example.com",

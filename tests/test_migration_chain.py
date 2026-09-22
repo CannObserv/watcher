@@ -130,12 +130,14 @@ def test_information_ddl_pattern_ignores_prose() -> None:
 def test_no_migration_creates_or_drops_the_information_schema() -> None:
     """No migration may CREATE or DROP the `information` schema (#271).
 
-    Production's dead copy was removed by an operator, deliberately not by a
-    migration: `tests/conftest.py` builds a real `information` schema in
-    `TEST_DATABASE_URL` from Archiver's alembic and keeps it alive between
-    sessions (#150). A migration dropping it would break every test run and
-    CI's `test` job; one creating it would put Watcher back in the business of
-    mirroring Archiver's registry, which #234 ended.
+    The schema is Archiver's, in Archiver's database. One creating it would put
+    Watcher back in the business of mirroring Archiver's registry, which #234
+    ended; production's dead copy was removed by an operator (#271), deliberately
+    not by a migration, because at the time the test suite built a real copy
+    from Archiver's alembic. Since #311 it builds none — `test_engine` drops any
+    leftover, which is test setup, not a migration — and
+    `tests/test_archiver_isolation.py` keeps the test database schema-for-schema
+    with production.
     """
     offenders = _versions_matching(_INFORMATION_SCHEMA_DDL)
     assert not offenders, (

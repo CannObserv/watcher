@@ -11,9 +11,9 @@ read the *production* ``DATABASE_URL`` that ``/etc/watcher/.env`` supplies.
 the most dangerous one, because it is the credential that holds DDL rights: an
 unpinned value would let a suite that invokes Alembic migrate production while
 ``DATABASE_URL`` innocently pointed at the test database. The suite genuinely
-needs DDL — ``test_engine`` does ``create_all``/``drop_all`` and Archiver's
-migrations run as a subprocess — so the rule is *DDL on ``_test`` databases
-only*, and this is what enforces the second half.
+needs DDL — ``test_engine`` does ``create_all``/``drop_all`` and drops any
+leftover ``information`` schema (#311) — so the rule is *DDL on ``_test``
+databases only*, and this is what enforces the second half.
 """
 
 import os

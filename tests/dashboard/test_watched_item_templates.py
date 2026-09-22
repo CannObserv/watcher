@@ -15,12 +15,9 @@ pytestmark = pytest.mark.integration
 
 async def _seed(db_session, name="WI"):
     from src.core.models.watched_item import WatchedItem
-    from tests.conftest import make_info_item
 
-    item = await make_info_item(db_session)
-    wi = WatchedItem(
-        archiver_info_source_id=str(ULID()), archiver_info_item_id=item.info_item_id, name=name
-    )
+    item_id = ULID()
+    wi = WatchedItem(archiver_info_source_id=str(ULID()), archiver_info_item_id=item_id, name=name)
     db_session.add(wi)
     await db_session.flush()
     await db_session.commit()

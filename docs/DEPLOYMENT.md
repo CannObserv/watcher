@@ -9,7 +9,7 @@ A systemd unit file is provided at `deploy/watcher.service`.
 
 ### Installation
 
-> **Install the Archiver service first** — see [§ Archiver Service](#archiver-service) below. Watcher no longer holds an Archiver SDK and will boot without one (#254), but it consumes `info.registry` off the Archiver-operated broker, so until that is up `watched_items` cannot reconcile and no registry state arrives.
+> **Install the Archiver service first** — see [§ Archiver Service](#archiver-service) below. Watcher no longer holds an Archiver SDK and will boot without one (#254), but `info.registry` is Archiver's stream on the broker, so until Archiver is producing, `watched_items` cannot reconcile and no registry state arrives.
 
 > **Join the tailnet first, too** (#280). Notifier runs on its own VM since
 > notifier#43 and binds its **tailnet address alone** — its launch scripts

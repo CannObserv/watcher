@@ -12,7 +12,7 @@ repos:
         name: ruff format check
         entry: uv run ruff format --check .
         language: system
-        types: [python]
+        types_or: [python, markdown]
         pass_filenames: false
 
       - id: tailwind-css

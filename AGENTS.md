@@ -151,6 +151,7 @@ Types: feat, fix, refactor, docs, test, chore.
 **Logging:**
 ```python
 from src.core.logging import get_logger
+
 logger = get_logger(__name__)
 ```
 Entry points only: call `configure_logging()` once.

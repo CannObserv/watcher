@@ -43,7 +43,7 @@ from co_core_aio.bus import AsyncBusConsumer
 from src.core.bus import RETAINED_FULL_SETS
 from src.core.fetch_policy import DEFAULT_FETCH_POLICY_STREAM_MAXLEN
 from src.core.watch_status import DEFAULT_WATCH_STATUS_STREAM_MAXLEN
-from src.workers.watch_status import DEFAULT_REPUBLISH_CRON
+from src.workers.watch_status import DEFAULT_REPUBLISH_CRON, REPUBLISH_CRON_ENV
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 
@@ -570,6 +570,36 @@ class TestBrokerMirroredConstants:
     call sites say what they say.
     """
 
+    @staticmethod
+    def _fetch_policy_cron() -> ast.Constant:
+        """The fetch-policy period as written, or a failure naming why it is not
+        readable — a pin that reads source passes vacuously when its target moves."""
+        cron = _periodic_cron("src/workers/fetch_policy.py", "publish_fetch_policy")
+        assert isinstance(cron, ast.Constant), (
+            "the publish_fetch_policy periodic was not found, or its cron stopped being a "
+            "literal — this pin reads it from source and would otherwise pass vacuously"
+        )
+        return cron
+
+    def test_the_watch_status_cron_still_derives_from_the_pinned_default(self):
+        """Pinning ``DEFAULT_REPUBLISH_CRON`` guards the period only while the
+        decorator still reads it.
+
+        The same hole ``TestGroupNamesAreDerived`` exists for, one file over: a
+        literal written straight onto ``@bp.periodic`` leaves the pinned constant
+        dead at ``*/5`` while the period in force is whatever was typed, and every
+        other assertion in this class passes. That is the one edit CannObserv's
+        mirror seam has to make fail here, so the derivation is pinned rather than
+        only the value it derives from.
+        """
+        cron = _periodic_cron("src/workers/watch_status.py", "publish_watch_status")
+        assert isinstance(cron, ast.Call) and _callee(cron) == "_republish_cron", (
+            "publish_watch_status must take its cron from _republish_cron(), which reads "
+            f"{REPUBLISH_CRON_ENV} and falls back to the DEFAULT_REPUBLISH_CRON this class "
+            "pins. A literal here silently detaches the period in force from the constant "
+            f"broker mirrors as LWW_REPUBLISH_PERIOD_SECONDS ({BROKER_BUS_HEALTH})."
+        )
+
     @pytest.mark.parametrize(
         ("value", "expected", "broker_symbol"),
         [
@@ -590,11 +620,7 @@ class TestBrokerMirroredConstants:
 
     def test_the_fetch_policy_cron_matches_the_period_broker_holds(self):
         """The one that is a decorator literal rather than a named constant."""
-        cron = _periodic_cron("src/workers/fetch_policy.py", "publish_fetch_policy")
-        assert isinstance(cron, ast.Constant), (
-            "the publish_fetch_policy periodic was not found, or its cron stopped being a "
-            "literal — this pin reads it from source and would otherwise pass vacuously"
-        )
+        cron = self._fetch_policy_cron()
         assert cron.value == "*/5 * * * *", (
             f"this period is mirrored by LWW_REPUBLISH_PERIOD_SECONDS in {BROKER_BUS_HEALTH}, "
             "which derives LWW_WARN_LAST_ENTRY_AGE_SECONDS from it at 3x. Lengthen it here "
@@ -609,8 +635,7 @@ class TestBrokerMirroredConstants:
         ``WATCHER_WATCH_STATUS_REPUBLISH_CRON`` on a deploy. While one constant
         describes both, they have to be the same period, and broker's comment
         acknowledges only the environment half."""
-        cron = _periodic_cron("src/workers/fetch_policy.py", "publish_fetch_policy")
-        assert isinstance(cron, ast.Constant)
+        cron = self._fetch_policy_cron()
         assert cron.value == DEFAULT_REPUBLISH_CRON, (
             "the two full-set republish periods diverged. Broker models both with one "
             f"constant ({BROKER_BUS_HEALTH}), so one of its two streams now has the wrong "

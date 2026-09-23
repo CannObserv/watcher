@@ -24,9 +24,10 @@ logger = get_logger(__name__)
 # on stream age for a growing fraction of ticks — never all of them, which is the
 # producer-is-down signature that threshold is actually for), and the divisor that
 # turns the retained window into a count of republishes, which is how it reads the
-# set size it cannot mirror (CannObserv/broker#44). Broker holds **one** period for both LWW streams, so
-# this has to stay equal to watch-status's — see DEFAULT_REPUBLISH_CRON in
-# src/workers/watch_status.py. Both are pinned by tests/test_bus_stream_kinds.py.
+# set size it cannot mirror (CannObserv/broker#44). Broker holds **one** period for
+# both LWW streams, so this has to stay equal to watch-status's — see
+# DEFAULT_REPUBLISH_CRON in src/workers/watch_status.py. Both are pinned by
+# tests/test_bus_stream_kinds.py.
 @bp.periodic(cron="*/5 * * * *", periodic_id="publish_fetch_policy")
 @bp.task(name="publish_fetch_policy", queue="default")
 async def publish_fetch_policy(**periodic_kwargs) -> dict:

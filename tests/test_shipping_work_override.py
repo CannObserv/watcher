@@ -22,6 +22,7 @@ import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SKILL_MD = REPO_ROOT / "skills" / "shipping-work-python-fastapi" / "SKILL.md"
+VENDOR_REPO = REPO_ROOT / "skills-vendor" / "gregoryfoster-skills"
 FENCE_RE = re.compile(
     r"<!--\s*skill:required\s+id=skill-scripts\s*-->\s*```bash\n(.*?)```", re.DOTALL
 )
@@ -65,6 +66,10 @@ def _resolve() -> dict[str, str]:
 def resolved() -> dict[str, str]:
     if shutil.which("bash") is None:
         pytest.skip("bash not available")
+    # CI's pytest job checks out without submodules: every skill-directory
+    # candidate is then a dangling symlink and the block stops at `${SD:?}`.
+    if not (VENDOR_REPO / ".git").exists():
+        pytest.skip("gregoryfoster-skills submodule not initialized")
     return _resolve()
 
 

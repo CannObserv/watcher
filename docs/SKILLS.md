@@ -103,6 +103,12 @@ line cannot decide whether the gate runs — then `exec`s the vendored gate thro
 symlink. Forking the gate to add those lines is the failure mode this replaced: the fork stops
 receiving upstream fixes without saying so.
 
+**No `.skills/pre-ship-uv-args`, deliberately** (#318). Vendor 1.5 reads extra `uv run`
+arguments from that file ([gregoryfoster/skills#304](https://github.com/gregoryfoster/skills/issues/304))
+for a project whose tests need a non-default group (`--group seed`). Watcher's only
+`[dependency-groups]` entry is `dev`, which uv includes by default, so the file would be empty.
+Add one only when a test starts importing from a group uv does not install by default.
+
 **The doc spot-check is tailored, not forked** (#281). `doc-check.sh` matches its
 sensitive-path entries against whole path *segments* at any depth
 ([gregoryfoster/skills#252](https://github.com/gregoryfoster/skills/issues/252)) — under the

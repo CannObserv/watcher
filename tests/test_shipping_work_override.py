@@ -82,6 +82,12 @@ def test_every_placeholder_a_step_invokes_is_resolved(resolved: dict[str, str]) 
 
 
 def test_every_resolved_path_opens_a_file(resolved: dict[str, str]) -> None:
+    """Guards the block's own `[ -f ]` check, not the #320 failure.
+
+    The block prints a path only after that check passes, so this fails only
+    if an edit to the block loosens it. The 127 itself — a placeholder with no
+    printed path — is `test_every_placeholder_a_step_invokes_is_resolved`.
+    """
     missing = {name: path for name, path in resolved.items() if not (REPO_ROOT / path).is_file()}
     assert not missing, f"resolved to paths that do not exist (exit 127 at run time): {missing}"
 

@@ -27,9 +27,10 @@ A systemd unit file is provided at `deploy/watcher.service`.
 > answers before starting the unit. This node's identity, its peers, the
 > cold-boot race and the ACL rules: [reference/tailscale.md](reference/tailscale.md).
 
-> **Set the host's memory posture too** (#307). This VM is 3.8 GiB with no swap
-> and shares memory with agent sessions the OOM killer cannot pick, so the
-> kernel reserve and the shedder are part of the install, not tuning done later:
+> **Set the host's memory posture too** (#307, #309). This VM has no swap and
+> shares memory with agent sessions the OOM killer cannot pick, so the kernel
+> reserve, the shedder and the slice reservations are part of the install, not
+> tuning done later:
 > [§ Host memory posture](#host-memory-posture-307).
 
 ```bash
@@ -110,10 +111,11 @@ own fields (`_SYSTEMD_UNIT`, `SYSLOG_IDENTIFIER`, `MESSAGE`) is unaffected. See
 
 ### Host memory posture (#307)
 
-**Measured 2026-09-18 on `co-watcher`: 3.8 GiB total, no swap, one active
-production unit.** Both of `preflight.sh --check`'s memory warnings fire here, so
-this host is in the "small *and* shared" case rather than the "measured, no
-action" one:
+**Measured 2026-09-23 on `co-watcher`: 7.75 GiB total (resized from 3.8 GiB,
+#309), no swap, one active production unit.** `preflight.sh --check` no longer
+calls the host small, but still warns on the missing swap — and it checks the
+effective slice reservation below. This host is in the "shared" case rather than
+the "measured, no action" one:
 
 ```bash
 bash skills-vendor/gregoryfoster-skills/skills/init-socraticode/scripts/preflight.sh --check
@@ -165,8 +167,10 @@ including the *absence* of a cap). `MemoryHigh=` on a production unit throttles
 reclaim rather than failing an allocation, so the unit slows to a crawl while
 still reporting `active` — worse for a dashboard than an honest failure. The cap
 belongs on the install that spikes, which is where step 1 put it.
-`OOMScoreAdjust` is deliberately not -1000: an unkillable service on a 3.8 GiB
-host with no swap wedges the box instead of shedding one process.
+`OOMScoreAdjust` is deliberately not -1000: an unkillable service on a host with
+no swap wedges the box instead of shedding one process. **The reservation holds
+only because `system.slice` grants it** — see step 4; for #307's whole life it
+protected nothing.
 
 **3. The kernel needs a reserve, and something must act before it is desperate.**
 `vm.min_free_kbytes` shipped at ~8 MB here, which is what lets an atomic
@@ -220,15 +224,67 @@ copied-in script, a vendored skill's preflight) can no longer socket-activate
 `dockerd` plus `containerd` for ~120 MB here. `preflight.sh --check` reports it as *Docker
 not needed*; a rebuilt VM that reinstalls `docker.io` gets that path back.
 
-**The `--avoid` list is only half the protection, and not the same half for each
-name.** earlyoom ranks by `oom_score`, so it already honours an
-`OOMScoreAdjust`: `watcher.service` carries -500 (above) and Debian ships **-900**
-for postgres in `/lib/systemd/system/postgresql@.service`. `tailscaled` carries
-**no adjustment at all** — 0, the default, level with every `npm`/`node` process
-and below them once they grow — so for it the regex is the only thing standing
-between a spike and a dead tunnel, and every peer this service reaches is a
-MagicDNS name behind it. Neither postgres nor tailscaled has a `MemoryLow=`
-reservation either; #309 tracks both.
+**4. The dependency chain takes reservations too — and so do the slices above it
+(#309).** Killing or starving what watcher depends on is the same outage by
+another route. Measured 2026-09-23, after the resize:
+
+| cgroup | `memory.current` | `MemoryLow` | `OOMScoreAdjust` (live, per process) | Set by |
+|---|---|---|---|---|
+| `init.scope` (agent sessions) | 3093M | — | -1000 | exe-init / sshd |
+| `system.slice` | 644M | **1G** | — | `deploy/dropins/system.slice.d/` |
+| └ `watcher.service` | 282M | 512M | -500 (`uv`, `uvicorn`) | `deploy/watcher.service` |
+| └ `system-postgresql.slice` | 122M | **384M** | — | `deploy/dropins/system-postgresql.slice.d/` |
+| &nbsp;&nbsp;└ `postgresql@16-main.service` | 122M | **384M** | -900 postmaster, **0** backends | drop-in; OOM from Debian's unit |
+| └ `tailscaled.service` | 92M | **128M** | **-400** | `deploy/dropins/tailscaled.service.d/` |
+
+**A unit keeps no more `memory.low` than every slice above it grants.** cgroup v2
+bounds a cgroup's *effective* protection by its ancestors', and `cgroup2` here is
+mounted by `exe-init` without `memory_recursiveprot` (which would not help anyway:
+it hands a parent's protection down, never lifts the parent's bound). With
+`system.slice` at 0, watcher's 512M was written, reported by `systemctl show`, and
+protected nothing. `init.scope` — the agent sessions, a root-level sibling — is
+the competitor, so the slice's reservation deliberately moves reclaim pressure
+onto the sessions. 1G is the sum of its children's; about 13% of the host.
+
+**Postgres's -900 is the postmaster's alone.** Debian's unit resets every backend,
+the checkpointer and the walwriter to 0: a killed backend costs a crash recovery
+(every connection drops), a killed postmaster costs the database. The drop-in
+leaves that alone; earlyoom's `--avoid '^postgres$'` covers the backends, the
+kernel's killer does not. The unit is also `Restart=no`. If `shared_buffers` is
+ever raised from 128M, both postgres reservations must follow it.
+
+**`tailscaled` sits at -400**: below the default 0, where every `npm`/`node`
+process sits, but behind watcher's -500 — the dashboard is reached through the
+exe.dev proxy, not the tailnet, so it should outlive the tunnel. Every peer this
+service reaches is a MagicDNS name behind it.
+
+Install from the checkout — like the sysctl and earlyoom settings, **a rebuilt VM
+loses these silently**:
+
+```bash
+for u in system.slice system-postgresql.slice postgresql@16-main.service tailscaled.service; do
+  sudo install -D -m 644 deploy/dropins/$u.d/10-watcher-memory.conf \
+    /etc/systemd/system/$u.d/10-watcher-memory.conf
+done
+sudo systemctl daemon-reload        # MemoryLow= applies live
+sudo systemctl restart tailscaled   # OOMScoreAdjust= applies at exec only
+```
+
+Verify the kernel, not the unit file — `systemctl show` reports the file, which
+is how #307's reservation went unnoticed:
+
+```bash
+for c in system.slice system.slice/watcher.service system.slice/system-postgresql.slice \
+         system.slice/system-postgresql.slice/postgresql@16-main.service system.slice/tailscaled.service; do
+  echo "$c $(cat /sys/fs/cgroup/$c/memory.low)"
+done
+cat /proc/$(systemctl show tailscaled -p MainPID --value)/oom_score_adj   # -400
+uv run pytest tests/deploy/test_memory_dropins.py   # the sums, drift, and live values
+```
+
+**earlyoom's `--avoid` list is the userspace half.** earlyoom ranks by
+`oom_score`, so it already honours each `OOMScoreAdjust` above; the regex is what
+covers postgres's backends at 0. It acts at 10% free — about 800 MB on this host.
 
 ## Database Migrations
 

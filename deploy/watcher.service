@@ -138,12 +138,17 @@ SuccessExitStatus=143
 # killed, the kernel failed atomic allocations in tailscaled and ksoftirqd, and
 # the bus was down 57m 48s.
 #
-# This host measures 3.8 GiB with no swap (skills-vendor/.../preflight.sh
-# --check warns under 4 GiB on both counts), so there is no swap to absorb a
-# spike and reclaim is the only lever. MemoryLow= is a soft floor: memory under
-# it is protected from reclaim while something else on the box grows, and it is
-# given back when the kernel has no other option. 512M is ~4x this service's
-# steady working set.
+# This host has no swap (7.75 GiB since #309's resize; 3.8 GiB when #307
+# landed), so there is no swap to absorb a spike and reclaim is the only lever.
+# MemoryLow= is a soft floor: memory under it is protected from reclaim while
+# something else on the box grows, and it is given back when the kernel has no
+# other option. 512M is ~2x this service's working set (282M, 2026-09-23).
+#
+# INERT ON ITS OWN (#309). A unit keeps no more memory.low than every slice
+# above it grants, and this host's cgroup2 has no memory_recursiveprot, so this
+# line protected nothing until system.slice took a reservation covering it:
+# deploy/dropins/system.slice.d/. Raising this means raising that too —
+# tests/deploy/test_memory_dropins.py checks the sum.
 #
 # A reservation, NOT a cap. MemoryHigh= throttles reclaim rather than failing an
 # allocation, so a unit that hits it slows to a crawl while still reporting
@@ -158,7 +163,7 @@ MemoryLow=512M
 # agent session sits at -1000 and is unpickable, which left this service as the
 # most attractive candidate on the host.
 #
-# Deliberately not -1000: an unkillable service on a 3.8 GiB host with no swap
+# Deliberately not -1000: an unkillable service on a host with no swap
 # means the kernel runs out of candidates and wedges the box rather than
 # shedding one process.
 OOMScoreAdjust=-500

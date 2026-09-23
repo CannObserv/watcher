@@ -286,9 +286,10 @@ def test_repo_unit_reserves_memory_against_a_co_tenant_session() -> None:
     kernel failed atomic allocations in ``tailscaled`` and ``ksoftirqd``, and the
     bus was down 57m 48s.
 
-    A cap on the session is not a substitute. This host is 3.8 GiB with no swap,
-    so the reservation is the only directive that keeps this service's working
-    set out of reclaim while something else on the box is growing.
+    A cap on the session is not a substitute. This host has no swap, so the
+    reservation is the only directive that keeps this service's working set out
+    of reclaim while something else on the box is growing — and only while
+    ``system.slice`` grants it (#309, ``test_memory_dropins.py``).
     """
     text = REPO_UNIT.read_text()
     values = _directive_values(text, "MemoryLow")
@@ -323,7 +324,7 @@ def test_repo_unit_lowers_its_oom_score() -> None:
     server, a docker build — while the agent session sits at -1000 and is
     unpickable. A negative score moves this service behind all of them.
 
-    Deliberately not -1000: an unkillable service on a 3.8 GiB host with no swap
+    Deliberately not -1000: an unkillable service on a host with no swap
     means the kernel runs out of candidates and wedges the box instead of
     shedding one process.
     """

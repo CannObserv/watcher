@@ -5,7 +5,7 @@ The cron republish is the load-bearing half of the last-write-wins contract
 retention, so the whole set — every Domain plus every tombstone — goes out
 every tick. Mutation paths (domain create/edit/delete) additionally defer this
 same task so an operator change reaches Replicator in seconds, not at the next
-quarter-hour; the two paths share one publish function, so they cannot drift.
+tick; the two paths share one publish function, so they cannot drift.
 """
 
 from src.core.bus import bus_disabled_reason, get_shared_bus_client
@@ -17,6 +17,15 @@ from src.workers import bp
 logger = get_logger(__name__)
 
 
+# **Mirrored on the broker node.** ``LWW_REPUBLISH_PERIOD_SECONDS`` in
+# ``broker:src/broker/bus_health.py`` is 300 seconds because of this literal, and
+# the probe derives two things from it: ``LWW_WARN_LAST_ENTRY_AGE_SECONDS`` at 3x
+# (lengthen this past 15 minutes and the probe false-WARNs on stream age every
+# tick), and the divisor that turns the retained window into a count of
+# republishes, which is how it reads the set size it cannot mirror
+# (CannObserv/broker#44). Broker holds **one** period for both LWW streams, so
+# this has to stay equal to watch-status's — see DEFAULT_REPUBLISH_CRON in
+# src/workers/watch_status.py. Both are pinned by tests/test_bus_stream_kinds.py.
 @bp.periodic(cron="*/5 * * * *", periodic_id="publish_fetch_policy")
 @bp.task(name="publish_fetch_policy", queue="default")
 async def publish_fetch_policy(**periodic_kwargs) -> dict:
@@ -54,7 +63,7 @@ async def defer_policy_republish() -> None:
 
     Best-effort by design: the mutation has already committed, and the periodic
     tick republishes everything anyway — so a failed defer degrades to at most
-    ~15 minutes of staleness. It must never fail the request that triggered it.
+    one period of staleness. It must never fail the request that triggered it.
     """
     try:
         await publish_fetch_policy.configure().defer_async()

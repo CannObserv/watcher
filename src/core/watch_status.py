@@ -84,6 +84,15 @@ WATCH_STATUS_STREAM_MAXLEN_ENV = "WATCHER_WATCH_STATUS_STREAM_MAXLEN"
 #: replay length tracked how long Watcher had been running rather than how many
 #: items there are. ``RETAINED_FULL_SETS`` raises the cap for a corpus that
 #: outgrows this number, so the small default is safe as the registry fills.
+#:
+#: **Mirrored on the broker node**, by the same ``LWW_PRODUCER_MAXLEN`` in
+#: ``broker:src/broker/bus_health.py`` that mirrors
+#: ``DEFAULT_FETCH_POLICY_STREAM_MAXLEN`` — one constant for both LWW
+#: streams, so the two cannot be retuned apart without a broker change
+#: first. This is the stream where the floor governs first: its set grows
+#: with the registry, and past 50 items ``RETAINED_FULL_SETS`` overtakes
+#: this number and the probe starts reading the set off the stream instead
+#: (CannObserv/broker#44). ``tests/test_bus_stream_kinds.py`` pins it.
 DEFAULT_WATCH_STATUS_STREAM_MAXLEN = 500
 
 _HEALTH_WIRE = {

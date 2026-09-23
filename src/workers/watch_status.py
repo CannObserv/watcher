@@ -31,6 +31,21 @@ from src.workers import bp
 
 logger = get_logger(__name__)
 
+# **Mirrored on the broker node, and this is the copy that moves without a
+# commit.** ``LWW_REPUBLISH_PERIOD_SECONDS`` in ``broker:src/broker/bus_health.py``
+# is 300 seconds because of the default below — but the period actually in force
+# is whatever REPUBLISH_CRON_ENV holds on the deployed unit, so a deploy-time
+# value falsifies broker's constant with nothing in either repo's history to show
+# for it. No test can see that; the pin in tests/test_bus_stream_kinds.py covers
+# only the default.
+#
+# What breaks there: the probe derives ``LWW_WARN_LAST_ENTRY_AGE_SECONDS`` from
+# the period at 3x, so a period past 15 minutes false-WARNs on stream age every
+# tick, and it divides the retained window by the period to read the set size it
+# cannot mirror — lengthen the period and it reads the set low, which drags the
+# length threshold down with it (CannObserv/broker#44). Broker holds one period
+# for both LWW streams, so this must also stay equal to the literal on
+# publish_fetch_policy. Changing either is a broker change first.
 REPUBLISH_CRON_ENV = "WATCHER_WATCH_STATUS_REPUBLISH_CRON"
 DEFAULT_REPUBLISH_CRON = "*/5 * * * *"
 

@@ -520,6 +520,20 @@ async def probe_bus_reachable(
 #: survives nine consecutive republishes that failed part-way, and still keeps
 #: the boot replay at a small multiple of the set the consumer is rebuilding
 #: rather than at a multiple of how long the producer has been running (#292).
+#:
+#: **Mirrored on the broker node** as ``LWW_RETAINED_FULL_SETS`` in
+#: ``broker:src/broker/bus_health.py`` (CannObserv/broker#44). It is the
+#: multiplier in the cap the probe expects — ``max(default, 10 x set)`` —
+#: and therefore also what decides *when* the mirrored default stops
+#: governing at all. Raised here and not there, the probe's threshold goes
+#: stale-low and warns early on a cap that is being applied correctly;
+#: lowered, stale-high, and it hides the backlog the cut was for, which is
+#: the direction CannObserv/broker#40 was filed about. The third term of
+#: that cap — the set size — is deliberately *not* mirrored: it changes
+#: with no edit anywhere, so the probe reads it off the stream span each
+#: tick. That reading assumes one republish per period, which the
+#: mutation-defer paths in ``src/workers/`` can exceed
+#: (CannObserv/broker#51).
 RETAINED_FULL_SETS = 10
 
 

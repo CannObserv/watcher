@@ -67,6 +67,15 @@ FETCH_POLICY_STREAM_MAXLEN_ENV = "WATCHER_FETCH_POLICY_STREAM_MAXLEN"
 #: few hundred leaves many full republishes of headroom at three hosts while
 #: keeping the replay something a boot can absorb; ``RETAINED_FULL_SETS`` below
 #: is what keeps it safe if the corpus ever outgrows this number.
+#:
+#: **Mirrored on the broker node.** ``LWW_PRODUCER_MAXLEN`` in
+#: ``broker:src/broker/bus_health.py`` is a copy of this number, and since
+#: CannObserv/broker#44 its ``FullSetFloor`` computes the probe's length
+#: threshold from it together with ``RETAINED_FULL_SETS``. Moving it here
+#: alone makes that threshold wrong in silence — early-warning if raised,
+#: quiet over a real backlog if lowered. The env override below moves the cap
+#: in force without touching this line at all, which no test can see. File on
+#: CannObserv/broker before changing either.
 DEFAULT_FETCH_POLICY_STREAM_MAXLEN = 500
 
 # Bus client construction lives in src.core.bus (#241 CR-4/CR-10) — import

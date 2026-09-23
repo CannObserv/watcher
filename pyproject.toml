@@ -73,11 +73,13 @@ filterwarnings = [
 [tool.ruff]
 line-length = 100
 target-version = "py312"
-# ruff 0.16 formats Markdown code fences by default (#315). Two paths stay out:
-# docs/plans/ is a dated record, and reformatting its samples rewrites what was
-# proposed; skills/ serves vendored content through symlinks, and its file
+# extend-, not exclude: the bare key replaces ruff's defaults (node_modules/,
+# venv/, .tox/, ...), which .gitignore does not cover.
+# ruff 0.16 formats Markdown code fences by default (#315); two entries exist for
+# it. docs/plans/ is a dated record, and reformatting its samples rewrites what
+# was proposed; skills/ serves vendored content through symlinks, and its file
 # symlinks dangle in CI, whose checkout skips the skills-vendor/ submodules.
-exclude = ["skills-vendor/", "skills/", "docs/plans/", "alembic/versions/"]
+extend-exclude = ["skills-vendor/", "skills/", "docs/plans/", "alembic/versions/"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "W", "UP"]

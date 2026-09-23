@@ -297,3 +297,17 @@ default :: - Small, focused functions
 
 # --- 2026-09-23: RECOVERY-REHEARSALS.md indexed by extending RECOVERY.md's line.
 AGENTS.md :: index :: - [docs/RECOVERY.md](docs/RECOVERY.md) — nightly DB backup to GCS, restore, go/no-go gates
+
+# --- 2026-09-23 curation (#309 follow-up): host memory split to docs/HOST-MEMORY.md.
+# Class C, --claims-checked: host-memory line retargeted to the new doc and its
+# verify/re-pin tail and GiB figure dropped (in HOST-MEMORY.md); the bus line drops
+# the content.blobs group derivation (ARCHITECTURE.md carries `group_name`, #285);
+# retention folds its repeated ARCHITECTURE.md pointer into "same section".
+AGENTS.md :: tighten :: **Host memory is the shared resource (#307).** 7.75 GiB, no swap, and agent sessions are *unkillable* (`oom_score_adj` -1000), so the kernel's killer takes the service. SocratiCode is **pinned pre-installed** (`~/.socraticode/pin`): never let a launch install a server. The unit takes a **reservation, never a cap** (`MemoryLow=`/`OOMScoreAdjust=`; `MemoryHigh=` stalls it while it still reports `active`), holding only while **every slice above grants as much** (#309). Verify with `preflight.sh --check` and `mcp-driver.mjs resolve`; re-pin as a decision, not on a schedule: [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) → *Host memory posture*.
+AGENTS.md :: tighten :: **The bus.** The broker is its own VM (`broker`, CannObserv/broker); watcher publishes four streams and consumes two — `content.blobs` (single-member group `watcher.blobs`, derived by co-core's `group_name` — #285) and `info.registry` (**groupless**, replayed from `0-0` every boot). `WATCHER_BUS_REDIS_URL` unset → publish tasks skip loudly. Inventory, ownership, fetch contracts, `info_source_id` on the wire: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) → *Redis and the bus*.
+AGENTS.md :: tighten :: **Retention is sized against the set (#292), and mirrored on the broker (#319).** `tests/test_bus_stream_kinds.py` fails a config/state publish missing `maxlen` *or* `floor=`, and fails a retune of any mirrored number — the broker's probe thresholds are computed from copies, so the fix is cross-repo. The env overrides move the same numbers unseen: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) → *Redis and the bus*.
+# The split itself: the moved heading loses its #307 slug (a class 3b seam),
+# and the two pointers into it follow the section to HOST-MEMORY.md.
+docs/DEPLOYMENT.md :: rename :: ### Host memory posture (#307)
+docs/DEPLOYMENT.md :: retarget :: > [§ Host memory posture](#host-memory-posture-307).
+docs/DEPLOYMENT.md :: retarget :: # docs/DEPLOYMENT.md -> Host memory posture.

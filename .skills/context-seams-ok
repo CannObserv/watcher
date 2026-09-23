@@ -153,7 +153,10 @@ docs/UI.md :: [STYLE.md](STYLE.md), which stays the design system
 # Both point at *archiver's* AGENTS.md, a different repo's policy file.
 docs/ARCHITECTURE.md :: Two sibling services, separately managed and neither co-located
 docs/DEPLOYMENT.md :: port 8000 there, per archiver's own AGENTS.md
-# Provenance headings in docs this run does not touch; DEPLOYMENT.md:33 links
-# the #307 slug, so a rename is its own change.
-docs/DEPLOYMENT.md :: Host memory posture (#307)
+# Provenance heading in a doc this run does not touch. (DEPLOYMENT.md's
+# "Host memory posture (#307)" left with the section: HOST-MEMORY.md split.)
 docs/SOCRATICODE.md :: Shared index on `co-index` (#300)
+
+# --- 2026-09-23 curation (HOST-MEMORY.md split): both targets stayed in DEPLOYMENT.md.
+docs/COMMANDS.md :: (docs/DEPLOYMENT.md → Job history)
+docs/HOST-MEMORY.md :: install, not tuning done later: [DEPLOYMENT.md](DEPLOYMENT.md) → *Installation*

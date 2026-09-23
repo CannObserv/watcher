@@ -155,7 +155,7 @@ SuccessExitStatus=143
 # `active` — strictly worse for a dashboard than an honest failure. The cap
 # belongs on the install that spikes: the `systemd-run --user --scope
 # -p MemoryMax=1536M` around the pinned SocratiCode pre-install, which is what
-# stops a driver launch installing a server at all (docs/DEPLOYMENT.md).
+# stops a driver launch installing a server at all (docs/HOST-MEMORY.md).
 MemoryLow=512M
 
 # Move this service behind everything else on the box. Everything here runs at

@@ -178,9 +178,14 @@ def test_live_reservation_survives_every_ancestor(cgroup: Path) -> None:
     ``systemctl show`` reported watcher's 512M for #307's whole life while the
     kernel granted 0. At every level from the unit up to ``system.slice``, the
     parent's ``memory.low`` must cover the sum of its children's.
+
+    Gated on the host, not on the cgroup: a laptop that happens to run
+    ``tailscaled`` is not this host, and on this host a missing unit is a
+    finding, not a reason to skip.
     """
-    if not (CGROUP_ROOT / cgroup).is_dir():
-        pytest.skip(f"{CGROUP_ROOT / cgroup} not present — not this host, or unit inactive")
+    if not _on_host():
+        pytest.skip(f"{INSTALLED / WATCHER} not present — not a host running the service")
+    assert (CGROUP_ROOT / cgroup).is_dir(), f"{CGROUP_ROOT / cgroup} missing — is the unit up?"
     _assert_reservation_survives_every_ancestor(cgroup)
 
 

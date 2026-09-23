@@ -58,8 +58,8 @@ selected path's prerequisites:
   design doc; then the GitHub issue is opened and the worktree set up.
   Conversational design approval only permits writing the design doc;
   written-design-doc approval only permits opening the issue and setting
-  up the worktree (multi-step work). If a `writing-plans` plan is wanted, the partner
-  reviews it before implementation starts.
+  up the worktree (multi-step work). If a `writing-plans` plan is wanted,
+  the partner reviews it before implementation starts.
 
 A reply approves the stage actually presented. Approval of an idea or
 feature scope does not approve artifacts that do not exist yet. Resume

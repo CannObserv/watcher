@@ -121,11 +121,11 @@ authoritative for a named set of columns, everything else survives
 reconciliation, and **a local pause is not sticky** — every announcement-owned
 field 409s locally on a reconciled item.
 
-**Empty extraction is a failure, not a change (#258)** — an empty
-`source_spec` raises `ExtractionError`, writes nothing, either side of a
-baseline. **An unchanged fingerprint still
-announces (#293)** after a full fetch — never a 304, never the baseline — and a
-renewal may only improve a queued row:
+**Empty extraction is a failure, not a change (#258)** — a `source_spec`
+yielding empty chunks raises `ExtractionError` and writes nothing, either side
+of a baseline. **An unchanged fingerprint still announces (#293)** after a full
+fetch — never a 304, never the baseline — and a renewal may only improve a
+queued row:
 [docs/CONTENT-PIPELINE.md](docs/CONTENT-PIPELINE.md).
 
 What each 409 is, where pause does live, the authoritative column list: [docs/WATCHED-ITEMS.md](docs/WATCHED-ITEMS.md); delete guards: [docs/WATCHED-ITEMS-DASHBOARD.md](docs/WATCHED-ITEMS-DASHBOARD.md).

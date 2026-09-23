@@ -149,7 +149,15 @@ uv run ruff check .
 
 # Fix auto-fixable issues
 uv run ruff check --fix .
+
+# Format (CI runs the --check form)
+uv run ruff format --check .
+uv run ruff format .
 ```
+
+`ruff format` also formats the `python` fences in Markdown (ruff ≥0.16, #315):
+every Markdown file is in scope except `docs/plans/` and `skills/` — the
+reasons sit beside `extend-exclude` in `pyproject.toml`.
 
 ## Database
 

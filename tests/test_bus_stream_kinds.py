@@ -40,7 +40,19 @@ from co_core.pure.adapters.bus import streams
 from co_core.pure.adapters.bus.streams import dlq_name, stream_kind
 from co_core_aio.bus import AsyncBusConsumer
 
+from src.core.bus import RETAINED_FULL_SETS
+from src.core.fetch_policy import DEFAULT_FETCH_POLICY_STREAM_MAXLEN
+from src.core.watch_status import DEFAULT_WATCH_STATUS_STREAM_MAXLEN
+from src.workers.watch_status import DEFAULT_REPUBLISH_CRON
+
 ROOT = pathlib.Path(__file__).resolve().parent.parent
+
+#: The file on the broker node that holds a copy of the numbers below. Named in
+#: every failure message here because the remedy is a cross-repo one: the copy
+#: has to move in the same commit-pair, and cross-repo drift is filed, never
+#: committed from one side.
+BROKER_BUS_HEALTH = "broker:src/broker/bus_health.py"
+
 # `src/` is where the bus code lives today, but the hazard's boundary is anything
 # that can reach the broker, and #262's gate exists precisely because "an agent
 # shell, a one-off script, a python -c" can (CR-30). Nothing under scripts/ touches
@@ -238,6 +250,29 @@ def _derives_from(tree: ast.Module, name: str, allowed: frozenset[str]) -> tuple
     values = _assigned_values(tree, name)
     callees = [_callee(v) if isinstance(v, ast.Call) else None for v in values]
     return bool(values) and all(c in allowed for c in callees), callees
+
+
+def _periodic_cron(relative_path: str, periodic_id: str) -> ast.expr | None:
+    """The ``cron=`` expression on the ``@bp.periodic`` decorator for ``periodic_id``.
+
+    Read from source rather than from procrastinate's registry, because the
+    value that has to match broker's copy is the one *written* here — the
+    registry hands back whatever the environment resolved at import, which for
+    ``publish_watch_status`` is the thing that can differ from the default
+    without a commit.
+    """
+    tree = ast.parse((ROOT / relative_path).read_text())
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
+            continue
+        for decorator in node.decorator_list:
+            if not isinstance(decorator, ast.Call):
+                continue
+            keywords = {k.arg: k.value for k in decorator.keywords}
+            declared = keywords.get("periodic_id")
+            if isinstance(declared, ast.Constant) and declared.value == periodic_id:
+                return keywords.get("cron")
+    return None
 
 
 class TestReaderMatchesStreamKind:
@@ -507,6 +542,81 @@ class TestTaxonomyCoverage:
         groupless. If co-core reclassifies one, that prose is wrong and this
         fails rather than the description quietly drifting."""
         assert stream_kind(topic) == kind
+
+
+class TestBrokerMirroredConstants:
+    """Every number broker's bus-health probe holds a copy of, pinned here.
+
+    Since CannObserv/broker#44 the probe does not merely *display* these: its
+    ``FullSetFloor`` computes the length threshold for both LWW streams from all
+    three of them, and derives the last-entry age threshold from the period. So
+    a retune here moves a live threshold there, and the move is invisible from
+    this repo in both directions — raised and unmirrored, the probe warns early
+    on a cap that is being applied correctly; lowered, it goes quiet over the
+    backlog CannObserv/broker#40 was filed to expose.
+
+    A comment beside each constant is the other half and it is not sufficient on
+    its own, for the reason ARCHITECTURE.md gives about the group-name
+    convention: "a rule with no artifact loses to whatever is typed at the call
+    site". Before this class every one of these could be retuned with the whole
+    suite still green.
+
+    What is **not** pinnable here: the three environment variables that move the
+    same numbers at deploy time with no commit —
+    ``WATCHER_FETCH_POLICY_STREAM_MAXLEN`` and
+    ``WATCHER_WATCH_STATUS_STREAM_MAXLEN`` (``resolve_stream_maxlen`` puts
+    ``max(env, floor)`` in force, not the default below) and
+    ``WATCHER_WATCH_STATUS_REPUBLISH_CRON``. Those are why the comments at the
+    call sites say what they say.
+    """
+
+    @pytest.mark.parametrize(
+        ("value", "expected", "broker_symbol"),
+        [
+            (RETAINED_FULL_SETS, 10, "LWW_RETAINED_FULL_SETS"),
+            (DEFAULT_FETCH_POLICY_STREAM_MAXLEN, 500, "LWW_PRODUCER_MAXLEN"),
+            (DEFAULT_WATCH_STATUS_STREAM_MAXLEN, 500, "LWW_PRODUCER_MAXLEN"),
+            (DEFAULT_REPUBLISH_CRON, "*/5 * * * *", "LWW_REPUBLISH_PERIOD_SECONDS"),
+        ],
+        ids=["retained-full-sets", "fetch-policy-maxlen", "watch-status-maxlen", "republish-cron"],
+    )
+    def test_the_value_broker_mirrors_has_not_moved(self, value, expected, broker_symbol):
+        assert value == expected, (
+            f"this number is mirrored by {broker_symbol} in {BROKER_BUS_HEALTH}, which "
+            "computes a live length or age threshold from it (CannObserv/broker#44). "
+            "Changing it here alone makes that threshold wrong in silence. File on "
+            "CannObserv/broker first, then update both sides and this pin."
+        )
+
+    def test_the_fetch_policy_cron_matches_the_period_broker_holds(self):
+        """The one that is a decorator literal rather than a named constant."""
+        cron = _periodic_cron("src/workers/fetch_policy.py", "publish_fetch_policy")
+        assert isinstance(cron, ast.Constant), (
+            "the publish_fetch_policy periodic was not found, or its cron stopped being a "
+            "literal — this pin reads it from source and would otherwise pass vacuously"
+        )
+        assert cron.value == "*/5 * * * *", (
+            f"this period is mirrored by LWW_REPUBLISH_PERIOD_SECONDS in {BROKER_BUS_HEALTH}, "
+            "which derives LWW_WARN_LAST_ENTRY_AGE_SECONDS from it at 3x. Lengthen it here "
+            "alone and the probe false-WARNs on stream age every tick. File on "
+            "CannObserv/broker first."
+        )
+
+    def test_both_republish_periods_agree(self):
+        """Broker holds **one** ``LWW_REPUBLISH_PERIOD_SECONDS`` for both LWW
+        streams, and these two can move independently — ``content.fetch-policy``
+        by editing a decorator literal, ``info.watch-status`` by setting
+        ``WATCHER_WATCH_STATUS_REPUBLISH_CRON`` on a deploy. While one constant
+        describes both, they have to be the same period, and broker's comment
+        acknowledges only the environment half."""
+        cron = _periodic_cron("src/workers/fetch_policy.py", "publish_fetch_policy")
+        assert isinstance(cron, ast.Constant)
+        assert cron.value == DEFAULT_REPUBLISH_CRON, (
+            "the two full-set republish periods diverged. Broker models both with one "
+            f"constant ({BROKER_BUS_HEALTH}), so one of its two streams now has the wrong "
+            "age threshold and the wrong set reading. Splitting them is a broker change "
+            "first."
+        )
 
 
 class TestTheScannerSeesEveryCallForm:

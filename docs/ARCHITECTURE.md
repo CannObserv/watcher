@@ -18,7 +18,7 @@ src/ops/         Operator entry points beside the service: nightly backup, resto
 tools/           Operational scripts
 tests/           Mirrors src/ structure
 deploy/          Systemd units and deployment config
-docs/            Reference docs (COMMANDS, CONTENT-PIPELINE, DEPLOYMENT, SKILLS, STYLE) + plans/
+docs/            Reference docs (index: AGENTS.md → Detail Docs) + plans/
 scripts/         Build scripts (Tailwind, vendor CSS, cleanup)
 skills/          Agent skills (committed overrides + symlinks → skills-vendor/)
 skills-vendor/   Git submodules for external skill repos

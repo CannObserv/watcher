@@ -294,3 +294,6 @@ tighten :: - [docs/WATCHED-ITEMS.md](docs/WATCHED-ITEMS.md) — the entity: fiel
 default :: - Explicit imports only
 # Class D: restates a trained default; no rule of this repo's rides on it.
 default :: - Small, focused functions
+
+# --- 2026-09-23: RECOVERY-REHEARSALS.md indexed by extending RECOVERY.md's line.
+AGENTS.md :: index :: - [docs/RECOVERY.md](docs/RECOVERY.md) — nightly DB backup to GCS, restore, go/no-go gates

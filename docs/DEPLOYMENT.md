@@ -238,30 +238,24 @@ another route. Measured 2026-09-23, after the resize:
 | └ `tailscaled.service` | 92M | **128M** | **-400** | `deploy/dropins/tailscaled.service.d/` |
 
 **A unit keeps no more `memory.low` than every slice above it grants.** cgroup v2
-bounds a cgroup's *effective* protection by its ancestors', and `cgroup2` here is
-mounted by `exe-init` without `memory_recursiveprot` (which would not help anyway:
-it hands a parent's protection down, never lifts the parent's bound). With
-`system.slice` at 0, watcher's 512M was written, reported by `systemctl show`, and
-protected nothing. `init.scope` — the agent sessions, a root-level sibling — is
-the competitor, so the slice's reservation deliberately moves reclaim pressure
-onto the sessions. 1G is the sum of its children's; about 13% of the host.
+bounds effective protection by every ancestor's, and `exe-init` mounts `cgroup2`
+without `memory_recursiveprot` (which only hands a parent's protection down
+anyway). With `system.slice` at 0, watcher's 512M showed in `systemctl show` and
+protected nothing. The competitor is `init.scope` — the agent sessions — so the
+slice's 1G (its children's sum, ~13% of the host) deliberately moves reclaim onto
+them.
 
-**Postgres's -900 is the postmaster's alone.** Debian's unit resets every backend,
-the checkpointer and the walwriter to 0: a killed backend costs a crash recovery
-(every connection drops), a killed postmaster costs the database. The drop-in
-leaves that alone; earlyoom's `--avoid '^postgres$'` covers the backends, the
-kernel's killer does not. The unit is also `Restart=no`. The drop-in targets the
-`postgresql@` template, so a major upgrade's new cluster inherits it; while two
-clusters run side by side the slice must cover both. If `shared_buffers` is ever
-raised from 128M, both postgres reservations must follow it.
+**Postgres's -900 is the postmaster's alone**: Debian resets backends to 0, so a
+killed backend costs a crash recovery, not the database. earlyoom's `--avoid`
+covers them; the kernel's killer does not. The unit is `Restart=no`. The drop-in
+targets the `postgresql@` template so a major upgrade's cluster inherits it —
+while two run side by side, the slice must cover both — and both reservations
+follow `shared_buffers` (128M) if it is raised.
 
-**`tailscaled` sits at -400**: below the default 0, where every `npm`/`node`
-process sits, but behind watcher's -500 — the dashboard is reached through the
-exe.dev proxy, not the tailnet, so it should outlive the tunnel. Every peer this
-service reaches is a MagicDNS name behind it.
+**`tailscaled` at -400** sits below every `npm`/`node` process but behind
+watcher: the dashboard is reached through the exe.dev proxy, not the tailnet.
 
-Install from the checkout — like the sysctl and earlyoom settings, **a rebuilt VM
-loses these silently**:
+Install from the checkout — **a rebuilt VM loses these silently**:
 
 ```bash
 for u in system.slice system-postgresql.slice postgresql@.service tailscaled.service; do
@@ -272,21 +266,15 @@ sudo systemctl daemon-reload        # MemoryLow= applies live
 sudo systemctl restart tailscaled   # OOMScoreAdjust= applies at exec only
 ```
 
-Verify the kernel, not the unit file — `systemctl show` reports the file, which
-is how #307's reservation went unnoticed:
+Verify the kernel, not `systemctl show` — the test reads `/sys/fs/cgroup` and
+`/proc` at every level:
 
 ```bash
-for c in system.slice system.slice/watcher.service system.slice/system-postgresql.slice \
-         system.slice/system-postgresql.slice/postgresql@16-main.service system.slice/tailscaled.service; do
-  echo "$c $(cat /sys/fs/cgroup/$c/memory.low)"
-done
-cat /proc/$(systemctl show tailscaled -p MainPID --value)/oom_score_adj   # -400
-uv run pytest tests/deploy/test_memory_dropins.py   # the sums, drift, and live values
+uv run pytest tests/deploy/test_memory_dropins.py   # sums, drift, live values
 ```
 
-**earlyoom's `--avoid` list is the userspace half.** earlyoom ranks by
-`oom_score`, so it already honours each `OOMScoreAdjust` above; the regex is what
-covers postgres's backends at 0. It acts at 10% free — about 800 MB on this host.
+**earlyoom's `--avoid` list is the userspace half**: it ranks by `oom_score`, so
+it honours each adjustment above, and acts at 10% free — ~800 MB here.
 
 ## Database Migrations
 

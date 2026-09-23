@@ -22,6 +22,8 @@ from pathlib import Path
 
 import pytest
 
+from tests.deploy.systemd_units import directive_values, memory_size_to_bytes
+
 REPO_UNIT = Path(__file__).resolve().parents[2] / "deploy" / "watcher.service"
 INSTALLED_UNIT = Path("/etc/systemd/system/watcher.service")
 
@@ -56,25 +58,6 @@ def _unset_environment(unit_text: str) -> set[str]:
     return names
 
 
-def _directive_values(unit_text: str, directive: str) -> list[str]:
-    """Return every value a directive is given, verbatim and in file order.
-
-    Verbatim because a leading ``-`` is not punctuation in general: it is an
-    ``EnvironmentFile=`` prefix meaning "skip if missing", but it is the sign of
-    the number in ``OOMScoreAdjust=-500``. Stripping it here once cost that
-    assertion its meaning — it read -500 as 500 and passed a unit that had made
-    the service *more* attractive to the OOM killer, not less. The one caller
-    that wants the prefix gone strips it itself.
-    """
-    prefix = f"{directive}="
-    values: list[str] = []
-    for line in unit_text.splitlines():
-        stripped = line.strip()
-        if stripped.startswith(prefix):
-            values.append(stripped.removeprefix(prefix))
-    return values
-
-
 def test_repo_unit_loads_no_env_file_from_the_checkout() -> None:
     """#296 D5: the service must not inherit the workstation's secrets.
 
@@ -92,7 +75,7 @@ def test_repo_unit_loads_no_env_file_from_the_checkout() -> None:
     ``.env`` name, so a backup or an alternate file beside it is caught too.
     """
     text = REPO_UNIT.read_text()
-    (checkout,) = _directive_values(text, "WorkingDirectory")
+    (checkout,) = directive_values(text, "WorkingDirectory")
     under_checkout = [
         path
         for path in (
@@ -100,7 +83,7 @@ def test_repo_unit_loads_no_env_file_from_the_checkout() -> None:
             # optional env file under the checkout is exactly as loaded as a
             # required one whenever it exists.
             value.removeprefix("-")
-            for value in _directive_values(text, "EnvironmentFile")
+            for value in directive_values(text, "EnvironmentFile")
         )
         if Path(path).is_relative_to(checkout)
     ]
@@ -123,10 +106,10 @@ def test_repo_unit_orders_after_tailscaled_without_depending_on_it() -> None:
     for. This test pins the half systemd can do.
     """
     text = REPO_UNIT.read_text()
-    after = " ".join(_directive_values(text, "After")).split()
+    after = " ".join(directive_values(text, "After")).split()
     assert "tailscaled.service" in after
     for directive in ("Wants", "Requires", "BindsTo", "Requisite", "PartOf"):
-        bound = " ".join(_directive_values(text, directive)).split()
+        bound = " ".join(directive_values(text, directive)).split()
         assert "tailscaled.service" not in bound, f"{directive}= must not name tailscaled"
 
 
@@ -261,20 +244,6 @@ def test_installed_unit_matches_repo() -> None:
     )
 
 
-def _memory_size_to_bytes(value: str) -> int:
-    """Parse a systemd memory size (``512M``, ``1G``, ``1048576``) into bytes.
-
-    Only the suffixes systemd itself documents for ``MemoryLow=`` are accepted.
-    An unparseable value raises rather than defaulting to zero: a typo in a
-    reservation must fail this test loudly, not quietly assert nothing.
-    """
-    multipliers = {"K": 1024, "M": 1024**2, "G": 1024**3, "T": 1024**4}
-    suffix = value[-1:].upper()
-    if suffix in multipliers:
-        return int(value[:-1]) * multipliers[suffix]
-    return int(value)
-
-
 def test_repo_unit_reserves_memory_against_a_co_tenant_session() -> None:
     """#307: the service gets the reservation, because the session cannot be killed.
 
@@ -292,10 +261,10 @@ def test_repo_unit_reserves_memory_against_a_co_tenant_session() -> None:
     ``system.slice`` grants it (#309, ``test_memory_dropins.py``).
     """
     text = REPO_UNIT.read_text()
-    values = _directive_values(text, "MemoryLow")
+    values = directive_values(text, "MemoryLow")
     assert values, "unit declares no MemoryLow= reservation"
     (reserved,) = values
-    assert _memory_size_to_bytes(reserved) > 0, f"MemoryLow={reserved} reserves nothing"
+    assert memory_size_to_bytes(reserved) > 0, f"MemoryLow={reserved} reserves nothing"
 
 
 def test_repo_unit_takes_no_throttling_cap() -> None:
@@ -313,7 +282,7 @@ def test_repo_unit_takes_no_throttling_cap() -> None:
     """
     text = REPO_UNIT.read_text()
     for directive in ("MemoryHigh", "MemoryMax"):
-        for value in _directive_values(text, directive):
+        for value in directive_values(text, directive):
             assert value == "infinity", f"{directive}={value} throttles the service"
 
 
@@ -329,7 +298,7 @@ def test_repo_unit_lowers_its_oom_score() -> None:
     shedding one process.
     """
     text = REPO_UNIT.read_text()
-    values = _directive_values(text, "OOMScoreAdjust")
+    values = directive_values(text, "OOMScoreAdjust")
     assert values, "unit declares no OOMScoreAdjust="
     (adjust,) = values
     assert -1000 < int(adjust) < 0, f"OOMScoreAdjust={adjust} must be negative but not -1000"

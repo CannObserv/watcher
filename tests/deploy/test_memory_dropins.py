@@ -25,10 +25,7 @@ from pathlib import Path
 
 import pytest
 
-from tests.deploy.test_installed_unit_matches_repo import (
-    _directive_values,
-    _memory_size_to_bytes,
-)
+from tests.deploy.systemd_units import directive_values, memory_size_to_bytes
 
 REPO = Path(__file__).resolve().parents[2]
 DROPINS = REPO / "deploy" / "dropins"
@@ -69,16 +66,16 @@ def _memory_low(unit: str) -> int:
 
     Strict on purpose: systemd does not strip a trailing ``# comment`` from a
     value, so ``MemoryLow=384M  # margin`` fails to parse and the directive is
-    ignored with a log line nobody reads. ``_memory_size_to_bytes`` raises on
+    ignored with a log line nobody reads. ``memory_size_to_bytes`` raises on
     the same input.
     """
-    (value,) = _directive_values(_text(unit), "MemoryLow")
-    return _memory_size_to_bytes(value)
+    (value,) = directive_values(_text(unit), "MemoryLow")
+    return memory_size_to_bytes(value)
 
 
 def _watcher_memory_low() -> int:
-    (value,) = _directive_values(WATCHER_UNIT.read_text(), "MemoryLow")
-    return _memory_size_to_bytes(value)
+    (value,) = directive_values(WATCHER_UNIT.read_text(), "MemoryLow")
+    return memory_size_to_bytes(value)
 
 
 @pytest.mark.parametrize("unit", TARGETS)
@@ -91,7 +88,7 @@ def test_dropin_is_a_reservation_not_a_cap(unit: str) -> None:
     text = _text(unit)
     assert _memory_low(unit) > 0, f"{unit}: MemoryLow reserves nothing"
     for directive in ("MemoryHigh", "MemoryMax", "MemoryMin"):
-        assert not _directive_values(text, directive), f"{unit}: sets {directive}="
+        assert not directive_values(text, directive), f"{unit}: sets {directive}="
 
 
 @pytest.mark.parametrize("unit", TARGETS)
@@ -130,7 +127,7 @@ def test_postgres_dropin_leaves_debians_oom_adjustment_alone() -> None:
     recovery, a killed postmaster costs the database) — that is Debian's call,
     and this file does not second-guess it.
     """
-    assert not _directive_values(_text(POSTGRES), "OOMScoreAdjust")
+    assert not directive_values(_text(POSTGRES), "OOMScoreAdjust")
 
 
 def test_tailscaled_ranks_between_watcher_and_the_default() -> None:
@@ -141,8 +138,8 @@ def test_tailscaled_ranks_between_watcher_and_the_default() -> None:
     reached through the exe.dev proxy, not the tailnet, so it should outlive
     the tunnel.
     """
-    (watcher,) = _directive_values(WATCHER_UNIT.read_text(), "OOMScoreAdjust")
-    (tailscaled,) = _directive_values(_text(TAILSCALED), "OOMScoreAdjust")
+    (watcher,) = directive_values(WATCHER_UNIT.read_text(), "OOMScoreAdjust")
+    (tailscaled,) = directive_values(_text(TAILSCALED), "OOMScoreAdjust")
     assert int(watcher) < int(tailscaled) < 0
 
 

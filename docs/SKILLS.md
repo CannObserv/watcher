@@ -92,11 +92,11 @@ detection at all.
 
 | Skill | Override reason |
 |---|---|
-| `shipping-work-python-fastapi` | `SKILL.md` only: watcher commit convention in Step 2, Step 1 pointed at [scripts/pre-ship.sh](../scripts/pre-ship.sh), and Step 1.5 naming watcher's `.skills/` tailoring. All six `scripts/` entries are vendor symlinks — the ship gate is **not** forked |
+| `shipping-work-python-fastapi` | `SKILL.md` only: watcher commit convention in Step 2 and Step 1.5 naming watcher's `.skills/` tailoring. Step 1's `skill-scripts` block is upstream's, verbatim: it resolves each script on its own, so [scripts/pre-ship.sh](../scripts/pre-ship.sh) wins for `pre-ship.sh` alone and the other five fall through to the skill directory — a one-directory block sent them to `scripts/` and exit 127 (#320), which [tests/test_shipping_work_override.py](../tests/test_shipping_work_override.py) now runs the block to catch. All six `scripts/` entries are vendor symlinks — the ship gate is **not** forked |
 | `brainstorming` | `SKILL.md` only: `docs/plans/` path, `#<n> [type]:` commit format, a GitHub issue on the architectural path, `writing-plans` optional rather than mandatory, `using-git-worktrees` after design approval, TDD as the bounded path's workflow, the exe.dev proxy note for the visual companion's port, and upstream's `elements-of-style` pointer dropped as dead text (that skill is not vendored here). `visual-companion.md`, `spec-document-reviewer-prompt.md` and `scripts/` are vendor symlinks |
 
 **The ship gate's env loading lives outside the skill.** [scripts/pre-ship.sh](../scripts/pre-ship.sh)
-is watcher's wrapper, in the location upstream's Step 1 resolution loop probes first. It sources
+is watcher's wrapper, in the location upstream's Step 1 resolution loop probes first for that script. It sources
 [scripts/load-env.sh](../scripts/load-env.sh) — the shared loader the whole repo now uses, which
 parses each env file rather than sourcing it, so a secrets file cannot execute and a malformed
 line cannot decide whether the gate runs — then `exec`s the vendored gate through the `skills/`

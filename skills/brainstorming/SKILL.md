@@ -4,14 +4,14 @@ description: Explores user intent, requirements, and design before any implement
 compatibility: Designed for Claude. Requires git and gh CLI. Python project using FastAPI, Pydantic, uv, ruff, pytest.
 metadata:
   author: gregoryfoster
-  version: "2.1"
+  version: "2.2"
   triggers: brainstorm, design this, let's design
   overrides: obra-superpowers/brainstorming
-  synced-from: "obra-superpowers v6.3.0 (b36e082)"
-  override-reason: "Project-specific conventions: docs/plans/ path (not docs/superpowers/specs/), #<n> [type]: desc commit convention, a GitHub issue on the architectural path, writing-plans optional not mandatory, invokes using-git-worktrees after design approval for multi-step implementation, TDD as the bounded path's implementation workflow, and the exe.dev proxy note for the visual companion's port. Also drops upstream's 'use elements-of-style:writing-clearly-and-concisely if available' pointer — that skill is not vendored here, so the line is dead text. Vendor body otherwise tracked; visual-companion.md, spec-document-reviewer-prompt.md and scripts/ are vendor symlinks. The vendor ships no version:, so the stamp above is watcher's own and synced-from: is the only comparand the doctor can use (#303)."
+  synced-from: "obra-superpowers v6.4.1 (5bf4e78)"
+  override-reason: "Project-specific conventions: docs/plans/ path (not docs/superpowers/specs/), #<n> [type]: desc commit convention, a GitHub issue on the architectural path (so the HARD-GATE's architectural stages and the handoffs that name them end at the design doc, issue and worktree rather than the written plan), writing-plans optional not mandatory, invokes using-git-worktrees after design approval for multi-step implementation, TDD as the bounded path's implementation workflow, and the exe.dev proxy note for the visual companion's port. Also drops upstream's 'use elements-of-style:writing-clearly-and-concisely if available' pointer — that skill is not vendored here, so the line is dead text. Vendor body otherwise tracked; visual-companion.md, spec-document-reviewer-prompt.md and scripts/ are vendor symlinks. The vendor ships no version:, so the stamp above is watcher's own and synced-from: is the only comparand the doctor can use (#303)."
 ---
 
-<!-- forked from obra-superpowers@b36e082 (v6.3.0) -->
+<!-- forked from obra-superpowers@5bf4e78 (v6.4.1) -->
 
 # Brainstorming Ideas Into Designs — watcher
 
@@ -21,12 +21,51 @@ Start by classifying how much process the request needs, then work
 through your path: understand the context, refine the idea, present a
 design, and get your human partner's approval.
 
+## Establish Shared Understanding
+
+The outcome of brainstorming is an understanding your human partner can
+recognize and correct, grounded in what they want to accomplish.
+
+1. **Discover intent.** Use the request and available context to identify
+   the intended outcome, who it is for, and what success looks like. When
+   that information is missing, ask one focused question about purpose or
+   intended use before proposing features or an approach. Knowing the app
+   genre does not tell you why your partner wants it. Gathering missing
+   requirements does not ask them to authorize the task again.
+2. **Write back your understanding.** Summarize the intended outcome,
+   relevant constraints, and success criteria in a short note your partner
+   can assess. Separate what they said from assumptions. Invite correction
+   and incorporate their answer before treating this as the design brief.
+3. **Carry intent into the design.** Preserve the agreed understanding in
+   the selected path's design artifact: the written design doc for
+   architectural work, or the in-chat design/probe for bounded work and
+   spikes. Check proposed features and technical choices against that
+   understanding.
+
+When the request already supplies the purpose and constraints, reflect
+that understanding instead of asking the same questions again. Keep the
+note concise; its accuracy and the opportunity to correct it matter.
+
 <HARD-GATE>
-Do NOT invoke any implementation skill, write any code, scaffold any
-project, or take any implementation action until you have told your
-human partner what you intend and they have approved it. This applies
-to EVERY task on EVERY path below — the ceremony scales with the task;
-the approval gate never does.
+Before taking any implementation action, including invoking an
+implementation skill, writing product code, scaffolding, installing
+product dependencies, or creating an external project, complete the
+selected path's prerequisites:
+
+- Spike: the human partner approves the question and probe.
+- Bounded: the human partner approves the short in-chat design.
+- Architectural: the human partner reviews and approves the written
+  design doc; then the GitHub issue is opened and the worktree set up.
+  Conversational design approval only permits writing the design doc;
+  written-design-doc approval only permits opening the issue and setting
+  up the worktree. If a `writing-plans` plan is wanted, the partner
+  reviews it before implementation starts.
+
+A reply approves the stage actually presented. Approval of an idea or
+feature scope does not approve artifacts that do not exist yet. Resume
+at the earliest incomplete stage; do not turn one approval into permission
+to skip the rest of the selected path. Read-only project exploration is
+allowed while those prerequisites remain incomplete.
 </HARD-GATE>
 
 ## Three Paths
@@ -63,18 +102,17 @@ stop, say so, and step up. Nothing downgrades mid-task.
 
 ## Anti-Pattern: "Too Simple To Need Approval"
 
-Every path ends with your human partner approving your intent before
-implementation. A todo list, a single-function utility, a config
-change — the design may be two sentences in chat, but you MUST present
-it and get approval. "Simple" tasks are where unexamined assumptions
-cause the most wasted work. What scales with simplicity is the
-artifact, never the approval.
+Every path ends with your human partner approving the required design
+before implementation. A bounded change may need only two sentences in
+chat. A new todo-list project is architectural and requires the written
+design doc, GitHub issue and worktree handoffs. Scale the artifact to the
+selected path; complete that path's reviews before implementation.
 
 ## Red Flags
 
 | Thought | Reality |
 |---------|---------|
-| "This is too simple to need a design" | Simple means a short design, not no design. Two sentences in chat, then approval. |
+| "This is too simple to need a design" | Follow the selected path: a bounded change gets a short chat design; an architectural change gets the written design doc, GitHub issue and worktree handoffs. |
 | "I'll call it bounded and skip the design doc" | Reaching for a label to skip work IS the doubt — take the heavier path. |
 | "It's bounded and the design is obvious — I'll start while they read it" | The gate is the approval, not the design's length. Present, then stop until you hear yes. |
 | "I understand this kind of app, so it's bounded" | Bounded measures the repo, not your familiarity. A new project has no existing flow — it is architectural. |
@@ -307,7 +345,7 @@ If they agree to the companion, read the detailed guide before proceeding:
 [`visual-companion.md`](visual-companion.md) (symlinked to vendor, as is `scripts/`).
 
 **Resolve the guide's script paths against this skill directory, not your cwd.** The guide
-writes them as `scripts/start-server.sh`; from the project root — where you actually run —
+writes them as `bash scripts/start-server.sh`; from the project root — where you actually run —
 that hits watcher's own `scripts/` and fails with a bare "No such file or directory". Use:
 
 ```bash
@@ -326,7 +364,7 @@ user's browser:
 
 ```bash
 BRAINSTORM_PORT=7391 bash skills/brainstorming/scripts/start-server.sh \
-  --project-dir "$PWD" --host 0.0.0.0 --url-host watcher.exe.xyz
+  --project-dir "$PWD" --host 0.0.0.0 --url-host co-watcher.exe.xyz
 ```
 
 Pick any free port in 3000–9999 — 8000 (systemd) and 8001 (dev server) are taken. Hand the

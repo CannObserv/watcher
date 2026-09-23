@@ -4,14 +4,14 @@ description: "For Python/FastAPI projects (uv + ruff + pytest; Alembic migration
 compatibility: "Designed for Python FastAPI projects using uv, ruff, pytest. Requires git, gh, uv. pytest-cov is optional — pre-ship.sh auto-detects it and adds --no-cov when present. Watcher variant: also requires /etc/watcher/.env (system secrets), loaded by scripts/pre-ship.sh before it delegates to the vendored gate."
 metadata:
   author: gregoryfoster
-  version: "1.4"
+  version: "1.5"
   triggers: ship it, push GH, close GH, wrap up
-  synced-from: "gregoryfoster-skills 1.4 (d04cebf)"
+  synced-from: "gregoryfoster-skills 1.5 (d521f81)"
   overrides: gregoryfoster-skills/shipping-work-python-fastapi
-  override-reason: "Carries the watcher commit convention in Step 2, points Step 1 at scripts/pre-ship.sh — the env-loading wrapper that supplies /etc/watcher/.env and the repo .env to the vendored gate — and names watcher's .skills/ tailoring in Step 1.5. Drops the vendor self-budget note (its guard test does not exist in this repo). All scripts/ entries are vendor symlinks — the gate itself is not forked."
+  override-reason: "Carries the watcher commit convention in Step 2 and names watcher's .skills/ tailoring in Step 1.5. Step 1 is the vendor block verbatim: it resolves each script on its own, so scripts/pre-ship.sh — the env-loading wrapper that supplies /etc/watcher/.env and the repo .env to the vendored gate — wins for pre-ship.sh alone and the other five fall through to the skill directory. Drops the vendor self-budget note (its guard test does not exist in this repo). All scripts/ entries are vendor symlinks — the gate itself is not forked."
 ---
 
-<!-- forked from gregoryfoster-skills@d04cebf -->
+<!-- forked from gregoryfoster-skills@d521f81 -->
 
 # Shipping Work — Python/FastAPI — watcher
 
@@ -49,19 +49,23 @@ Determine which GitHub issue(s) to close (priority order):
 
 ### Step 1 — Run pre-ship checks
 
+<!-- skill:required id=skill-scripts -->
 ```bash
-N=shipping-work-python-fastapi S=pre-ship.sh SD=
+N=shipping-work-python-fastapi
 { [ ! -x .skills/doctor.sh ] || bash .skills/doctor.sh; } || exit 1
-for d in scripts ".claude/skills/$N/scripts" "$HOME/.claude/skills/$N/scripts"; do
-  [ -f "$d/$S" ] && { SD="$d"; break; }
+for S in doc-check.sh check-status.sh push.sh comment-issue.sh close-issue.sh pre-ship.sh; do SD=
+  for d in scripts ".claude/skills/$N/scripts" "$HOME/.claude/skills/$N/scripts"; do
+    [ -f "$d/$S" ] && { SD="$d"; break; }
+  done
+  [ -n "$SD" ] || echo "$S not found in scripts/, .claude/skills/$N/scripts/, or ~/.claude/skills/$N/scripts/" >&2
+  echo "<$S>=${SD:?}/$S"
 done
-echo "SKILL_SCRIPTS=${SD:?not found in scripts/, .claude/skills/$N/scripts/, or ~/.claude/skills/$N/scripts/}"
-bash "${SD:?not found in scripts/, .claude/skills/$N/scripts/, or ~/.claude/skills/$N/scripts/}/$S"
+bash "${SD:?}/$S"
 ```
 
-The first line is a preflight: when `.skills/doctor.sh` is present, it heals any dangling vendor symlinks (or reports an actionable error); when absent, the group is a no-op. `|| exit 1` skips `pre-ship.sh` if the doctor reports unrecoverable state so the original "No such file or directory" noise doesn't drown out the doctor's message. The loop then resolves the script against the skill directory rather than the cwd — a bare `scripts/` path resolves relative to the project root, where the script does not exist ([#63](https://github.com/gregoryfoster/skills/issues/63)). A project-local `scripts/` copy still wins if one exists; `${SD:?…}` fails loudly with the searched paths when no candidate resolves. Resolution runs *after* the doctor so a freshly healed symlink chain is visible to it.
+The first line is a preflight: when `.skills/doctor.sh` is present, it heals any dangling vendor symlinks (or reports an actionable error); when absent, the group is a no-op. `|| exit 1` skips `pre-ship.sh` if the doctor reports unrecoverable state so the original "No such file or directory" noise doesn't drown out the doctor's message. The loop then resolves each script against the skill directory rather than the cwd — a bare `scripts/` path resolves relative to the project root, where the script does not exist ([#63](https://github.com/gregoryfoster/skills/issues/63)). A project-local `scripts/<name>` still wins, for that script alone: a `scripts/pre-ship.sh` wrapper must not send the other five looking beside it ([#301](https://github.com/gregoryfoster/skills/issues/301)). A script found nowhere stops the block here, by name. `pre-ship.sh` is listed last, so the final line runs it. Resolution runs *after* the doctor so a freshly healed symlink chain is visible to it.
 
-Step 1 prints `SKILL_SCRIPTS=<path>`. In every later step `<SKILL_SCRIPTS>` is a **placeholder** for that literal path — substitute the value printed here (same convention as `init-project-fastapi` Phase 0). Each Bash invocation runs in a fresh shell, so the shell variable itself is not inherited.
+In every later step a `<name.sh>` is a **placeholder** for the path printed for that script — substitute it literally (same convention as `init-project-fastapi` Phase 0). Each Bash invocation runs in a fresh shell, so nothing the block set is inherited.
 
 ```
 NO CONTINUATION IF CHECKS FAIL
@@ -69,10 +73,12 @@ NO CONTINUATION IF CHECKS FAIL
 
 If checks fail: stop, report the failure, fix before proceeding. Do not push failing code under any circumstances.
 
+`pre-ship.sh` runs ruff, then `uv run pytest -x` with `integration`-marked tests deselected on top of the project's own `addopts` marker expression — never by passing `-m`, which would replace it ([#304](https://github.com/gregoryfoster/skills/issues/304)). A project whose own hook adds `uv run` arguments (`--group seed`) commits them to `.skills/pre-ship-uv-args` (whitespace-separated, `#`-comments ignored); every uv call in the gate gets them.
+
 ### Step 1.5 — Documentation spot-check
 
 ```bash
-bash "<SKILL_SCRIPTS>/doc-check.sh"
+bash "<doc-check.sh>"
 ```
 
 `doc-check.sh` lists files changed on this branch vs the upstream default branch and flags any that match the project's sensitive-path list. Entries match path *segments*, not just the start of the path, so `src/core/` also covers `packages/<pkg>/src/core/` and `pyproject.toml` covers each workspace member's ([gregoryfoster/skills#252](https://github.com/gregoryfoster/skills/issues/252)). When sensitive paths change, the matching doc sections may need updates too.
@@ -86,15 +92,15 @@ Keep them tailored together. A hit names the half that is still on upstream's de
 
 Both are guarded by [tests/test_doc_sensitive_paths.py](../../tests/test_doc_sensitive_paths.py), which fails on an entry that matches no tracked file and on advice naming a doc that no longer exists.
 
-If the script exits 1: review the listed files, decide whether each requires a doc update, and either commit the docs now or note them as deliberate skips. If the script exits 2: an infra/tooling problem prevented the doc check from running — investigate the underlying error rather than proceeding. Two exit-2 cases are worth naming. When no entry in the list matches any tracked file, the script says so instead of passing, because a list that cannot hit anything would otherwise print the same clean green as a genuinely doc-neutral branch. The same goes for anything under `.skills/` that the script cannot use, the directory included: a tailoring never silently reverts to the built-in defaults, so an exit 2 there means the override is unusable, not absent. Fix the file; do not wave the step through.
+If the script exits 1: review the listed files, decide whether each requires a doc update, and either commit the docs now or note them as deliberate skips. If the script exits 2 — or any code not named here, such as 127 when its path did not resolve — the doc check did not run: investigate the underlying error rather than proceeding. Two exit-2 cases are worth naming. When no entry in the list matches any tracked file, the script says so instead of passing, because a list that cannot hit anything would otherwise print the same clean green as a genuinely doc-neutral branch. The same goes for anything under `.skills/` that the script cannot use, the directory included: a tailoring never silently reverts to the built-in defaults, so an exit 2 there means the override is unusable, not absent. Fix the file; do not wave the step through.
 
 ### Step 2 — Ensure a clean working tree
 
 ```bash
-bash "<SKILL_SCRIPTS>/check-status.sh"
+bash "<check-status.sh>"
 ```
 
-If the script exits 2, `git status` itself failed: the tree state is **unknown**, which is not the same as clean. Investigate git's error rather than proceeding ([#257](https://github.com/gregoryfoster/skills/issues/257)).
+If the script exits 2, `git status` itself failed: the tree state is **unknown**, which is not the same as clean. Any code but 0 or 1 is no verdict either (127: the script was not found). Investigate the error rather than proceeding ([#257](https://github.com/gregoryfoster/skills/issues/257)).
 
 If uncommitted changes exist, commit them following the watcher convention:
 
@@ -125,7 +131,7 @@ If Step 2.5 did not apply (single checkout) and you're on a feature branch, merg
 ### Step 4 — Push
 
 ```bash
-bash "<SKILL_SCRIPTS>/push.sh"
+bash "<push.sh>"
 ```
 
 Confirm push succeeded before proceeding.
@@ -135,7 +141,7 @@ Confirm push succeeded before proceeding.
 For each issue in scope:
 
 ```bash
-bash "<SKILL_SCRIPTS>/comment-issue.sh" <number> "<summary>"
+bash "<comment-issue.sh>" <number> "<summary>"
 ```
 
 Comment must include:
@@ -153,7 +159,7 @@ Before closing any issue, verify the original requirements against what was impl
 </HARD-GATE>
 
 ```bash
-bash "<SKILL_SCRIPTS>/close-issue.sh" <number>
+bash "<close-issue.sh>" <number>
 ```
 
 ### Step 7 — Report
@@ -186,4 +192,4 @@ If nothing applies, omit this step entirely.
 - If `gh` CLI hits errors (e.g., Projects API changes), use `--json` flag workarounds as needed
 - The project's AGENTS.md is authoritative for commit conventions — read it before committing
 - `pre-ship.sh` auto-derives its per-SHA stamp prefix from `$(basename "$(git rev-parse --show-toplevel)")` — no project-name substitution needed
-- Step 1's resolution loop finds [scripts/pre-ship.sh](../../scripts/pre-ship.sh) — watcher's env-loading wrapper — as its first candidate. The wrapper loads `/etc/watcher/.env` and the repo `.env`, then delegates to the vendored gate through `skills/shipping-work-python-fastapi/scripts/pre-ship.sh`. Every script in this skill's `scripts/` is a symlink to vendor, so upstream gate fixes arrive with a submodule bump
+- Step 1's loop finds [scripts/pre-ship.sh](../../scripts/pre-ship.sh) — watcher's env-loading wrapper — as `pre-ship.sh`'s first candidate, and **only** `pre-ship.sh`'s: watcher has no `scripts/` copy of the other five, so each falls through to `.claude/skills/shipping-work-python-fastapi/scripts/`. A block resolving one directory for all six sent them to `scripts/` and exit 127 ([#320](https://github.com/CannObserv/watcher/issues/320)); [tests/test_shipping_work_override.py](../../tests/test_shipping_work_override.py) runs the block and holds every placeholder to a real file. The wrapper loads `/etc/watcher/.env` and the repo `.env`, then delegates to the vendored gate through `skills/shipping-work-python-fastapi/scripts/pre-ship.sh`. Every script in this skill's `scripts/` is a symlink to vendor, so upstream gate fixes arrive with a submodule bump

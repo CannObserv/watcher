@@ -80,18 +80,12 @@ retarget :: - [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) — systemd units, enviro
 # `source: "registry"`, `announcement_applied` with its `changes` diff, the
 # non-empty condition, and the silent `0-0` boot replay. Read against the
 # destination before warranting, not inferred from the topic.
-AGENTS.md :: duplicate :: Every applied announcement is audited: a create as
-AGENTS.md :: duplicate :: (`source: registry`), an update as `watched_item.announcement_applied`
-AGENTS.md :: duplicate :: `changes` diff — emitted **only when non-empty**
 # The remaining three are reflow, not loss: removing the sentence above re-wraps
 # the paragraph around it. Every surviving word — the `POST` caller note, the
 # archiver#158 reference, the whole pointer list — is still inline in AGENTS.md,
 # on differently-bounded lines. The pointer's dropped topic ("the
 # spec-acknowledgement meaning of `last_reviewed_at`") is covered by the same
 # destination section.
-AGENTS.md :: duplicate :: boot replay stay silent (#274). `POST /api/v1/watched-items` still works
-AGENTS.md :: duplicate :: but has had no caller since archiver#158. What each 409 is, the authoritative
-AGENTS.md :: duplicate :: column list, the spec-acknowledgement meaning of `last_reviewed_at`, schedule
 
 # --- #280 curation: the #191 collapse residue -> docs/WATCHED-ITEMS.md -------
 # The enumeration of what the collapse removed was demoted verbatim into
@@ -103,9 +97,6 @@ AGENTS.md :: duplicate :: column list, the spec-acknowledgement meaning of `last
 # loss — every surviving word is still inline, on differently-bounded lines,
 # which the closed warrant set spells `duplicate` (same reading the #274
 # entries above take).
-AGENTS.md :: duplicate :: table, its `/watches*` routes, the override resolution chain and the per-Watch
-AGENTS.md :: duplicate :: one URL = one fingerprint = one change signal; the earlier `Watch` model — its
-AGENTS.md :: duplicate :: notification tier — is gone. The user-facing noun is "Watched
 
 # --- #280 curation: two pointers to docs/WATCHED-ITEMS.md merged into one ----
 # The section named the same doc twice and listed "schedule resolution" in both.
@@ -113,16 +104,12 @@ AGENTS.md :: duplicate :: notification tier — is gone. The user-facing noun is
 # dropped: fields, what each 409 is, the authoritative column list, schedule
 # resolution, domain keying, media-type dispatch, template CRUD. Only the
 # duplicate link and the repeated topic are gone.
-AGENTS.md :: duplicate :: archiver#158. What each 409 is, the authoritative column list, schedule
-AGENTS.md :: duplicate :: resolution, domain keying: [docs/WATCHED-ITEMS.md](docs/WATCHED-ITEMS.md).
-AGENTS.md :: duplicate :: Fields, schedule resolution, media-type dispatch, template CRUD: [docs/WATCHED-ITEMS.md](docs/WATCHED-ITEMS.md). Lifecycle, delete guards, every dashboard surface: [docs/WATCHED-ITEMS-DASHBOARD.md](docs/WATCHED-ITEMS-DASHBOARD.md).
 
 # --- #280 curation: the Detail Docs parenthetical -> docs/ARCHITECTURE.md ----
 # Added earlier on this same branch, then removed here: docs/ARCHITECTURE.md
 # "Sibling services" now opens with the notifier relocation in full, so the
 # index entry was restating its own destination. The index line is otherwise
 # verbatim what it was before this branch.
-AGENTS.md :: duplicate :: - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — module layout, sibling services (notifier is off-VM, over the tailnet), the Archiver checkout constraint, bus topology and fetch contracts
 
 # --- 2026-09-04 curation (#287 CR follow-up): AGENTS.md 6170 -> under budget ---
 # Every line below was read against its replacement or its destination before
@@ -212,7 +199,6 @@ tighten :: Cross-project search to the sister `notifier` index requires a per-in
 # ============================================================================
 
 # --- Environment & Tooling: the Tailwind pin, said in fewer words ---
-tighten :: Python ≥3.12, uv, pytest, ruff; Node.js + npm (Tailwind CLI
 
 # --- Code Exploration Policy: two lines merged into one, same two rules ---
 # The health-hook clause is KEPT verbatim inside the merged line: docs/SKILLS.md
@@ -264,7 +250,6 @@ tighten :: **HTMX:** **detect with `is_htmx(request)`**
 # connective tissue; no rule changed scope.
 tighten :: **Single process is load-bearing.**
 tighten :: **The bus.** Archiver operates the broker
-tighten :: **Archiver owns the canonical registry**
 tighten :: **A URL is configuration, not permission.** Three unit-only opt-ins gate the production
 tighten :: the Archiver checkout constraint, bus topology and fetch contracts
 tighten :: #288 the `noeviction` cap and the

@@ -39,7 +39,8 @@ DROPIN_NAME = "10-watcher-memory.conf"
 
 SYSTEM_SLICE = "system.slice"
 POSTGRES_SLICE = "system-postgresql.slice"
-POSTGRES = "postgresql@16-main.service"
+# The template, not an instance: a major upgrade renames the running unit.
+POSTGRES = "postgresql@.service"
 TAILSCALED = "tailscaled.service"
 WATCHER = "watcher.service"
 
@@ -48,10 +49,9 @@ TARGETS = (SYSTEM_SLICE, POSTGRES_SLICE, POSTGRES, TAILSCALED)
 
 # The cgroups whose reservation must survive every ancestor, as paths under
 # /sys/fs/cgroup. A unit here is only as protected as the least generous slice
-# on its path.
+# on its path. Postgres instances are discovered live — see _postgres_cgroups.
 PROTECTED_CGROUPS = (
     Path(SYSTEM_SLICE) / WATCHER,
-    Path(SYSTEM_SLICE) / POSTGRES_SLICE / POSTGRES,
     Path(SYSTEM_SLICE) / TAILSCALED,
 )
 
@@ -181,6 +181,33 @@ def test_live_reservation_survives_every_ancestor(cgroup: Path) -> None:
     """
     if not (CGROUP_ROOT / cgroup).is_dir():
         pytest.skip(f"{CGROUP_ROOT / cgroup} not present — not this host, or unit inactive")
+    _assert_reservation_survives_every_ancestor(cgroup)
+
+
+def _postgres_cgroups() -> list[Path]:
+    """Every running ``postgresql@<cluster>.service`` cgroup, as a relative path."""
+    slice_dir = CGROUP_ROOT / SYSTEM_SLICE / POSTGRES_SLICE
+    if not slice_dir.is_dir():
+        return []
+    return sorted(p.relative_to(CGROUP_ROOT) for p in slice_dir.glob("postgresql@*.service"))
+
+
+def test_live_postgres_instances_are_all_reserved() -> None:
+    """Every running cluster carries the template's reservation.
+
+    Discovered rather than named: a test pinned to ``postgresql@16-main`` skips
+    once a major upgrade renames the unit, and reads green while the new cluster
+    runs unreserved. On the host, no running instance at all is a failure.
+    """
+    if not _on_host():
+        pytest.skip(f"{INSTALLED / WATCHER} not present — not a host running the service")
+    instances = _postgres_cgroups()
+    assert instances, f"no postgresql@*.service cgroup under {POSTGRES_SLICE} — is postgres up?"
+    for cgroup in instances:
+        _assert_reservation_survives_every_ancestor(cgroup)
+
+
+def _assert_reservation_survives_every_ancestor(cgroup: Path) -> None:
     assert _cgroup_memory_low(cgroup) > 0, f"{cgroup} has no live memory.low"
     node = cgroup
     while node.parent != Path("."):
@@ -219,9 +246,12 @@ def test_live_oom_order() -> None:
     """
     if not _on_host():
         pytest.skip(f"{INSTALLED / WATCHER} not present — not a host running the service")
-    postgres = _live_oom_score_adj(POSTGRES)
+    instances = _postgres_cgroups()
+    assert instances, f"no postgresql@*.service cgroup under {POSTGRES_SLICE} — is postgres up?"
     watcher = _live_oom_score_adj(WATCHER)
     tailscaled = _live_oom_score_adj(TAILSCALED)
-    assert postgres < watcher < tailscaled < 0, (
-        f"postmaster {postgres}, watcher {watcher}, tailscaled {tailscaled}"
-    )
+    for cgroup in instances:
+        postgres = _live_oom_score_adj(cgroup.name)
+        assert postgres < watcher < tailscaled < 0, (
+            f"{cgroup.name} postmaster {postgres}, watcher {watcher}, tailscaled {tailscaled}"
+        )

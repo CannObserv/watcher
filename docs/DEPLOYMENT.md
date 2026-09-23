@@ -234,7 +234,7 @@ another route. Measured 2026-09-23, after the resize:
 | `system.slice` | 644M | **1G** | — | `deploy/dropins/system.slice.d/` |
 | └ `watcher.service` | 282M | 512M | -500 (`uv`, `uvicorn`) | `deploy/watcher.service` |
 | └ `system-postgresql.slice` | 122M | **384M** | — | `deploy/dropins/system-postgresql.slice.d/` |
-| &nbsp;&nbsp;└ `postgresql@16-main.service` | 122M | **384M** | -900 postmaster, **0** backends | drop-in; OOM from Debian's unit |
+| &nbsp;&nbsp;└ `postgresql@16-main.service` | 122M | **384M** | -900 postmaster, **0** backends | `deploy/dropins/postgresql@.service.d/` (the template); OOM from Debian's unit |
 | └ `tailscaled.service` | 92M | **128M** | **-400** | `deploy/dropins/tailscaled.service.d/` |
 
 **A unit keeps no more `memory.low` than every slice above it grants.** cgroup v2
@@ -250,8 +250,10 @@ onto the sessions. 1G is the sum of its children's; about 13% of the host.
 the checkpointer and the walwriter to 0: a killed backend costs a crash recovery
 (every connection drops), a killed postmaster costs the database. The drop-in
 leaves that alone; earlyoom's `--avoid '^postgres$'` covers the backends, the
-kernel's killer does not. The unit is also `Restart=no`. If `shared_buffers` is
-ever raised from 128M, both postgres reservations must follow it.
+kernel's killer does not. The unit is also `Restart=no`. The drop-in targets the
+`postgresql@` template, so a major upgrade's new cluster inherits it; while two
+clusters run side by side the slice must cover both. If `shared_buffers` is ever
+raised from 128M, both postgres reservations must follow it.
 
 **`tailscaled` sits at -400**: below the default 0, where every `npm`/`node`
 process sits, but behind watcher's -500 — the dashboard is reached through the
@@ -262,7 +264,7 @@ Install from the checkout — like the sysctl and earlyoom settings, **a rebuilt
 loses these silently**:
 
 ```bash
-for u in system.slice system-postgresql.slice postgresql@16-main.service tailscaled.service; do
+for u in system.slice system-postgresql.slice postgresql@.service tailscaled.service; do
   sudo install -D -m 644 deploy/dropins/$u.d/10-watcher-memory.conf \
     /etc/systemd/system/$u.d/10-watcher-memory.conf
 done

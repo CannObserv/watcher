@@ -30,7 +30,7 @@ Auth, upgrade procedure and the pinned version: [docs/DEPLOYMENT.md](docs/DEPLOY
 
 SocratiCode indexes this repo into the cohort's **shared store on `co-index`, never locally** (#300); `includeLinked: true` also answers from the sibling repos, none on disk. Its MCP tools are **deferred**: schemas load only after a `ToolSearch` prefetch, which the SessionStart hook prints — run it before exploring. A second, daily health hook **reports only** — confirm with `codebase_status` before acting on it.
 
-**Negative rule.** Broad semantic questions ("where is X", "how does Y work", "what depends on Z") go to SocratiCode first; `grep`/`ripgrep` only for exact strings (error messages, log lines, known symbols); the Explore subagent only for path-pattern walks (`*.py` under `src/api/routes/`), never semantic search. **Empty is not absent:** an unreachable collection is skipped silently and never surfaced in the result, so verify the store before trusting a miss, then `grep` for that session.
+**Negative rule.** Broad semantic questions ("where is X", "how does Y work", "what depends on Z") go to SocratiCode first; `grep`/`ripgrep` only for exact strings (error messages, log lines, known symbols); the Explore subagent only for path-pattern walks (`*.py` under `src/api/routes/`), never semantic search. **Empty is not absent:** an unreachable collection is skipped silently and never surfaced in the result, so verify the store before trusting a miss, then `grep` for that session. Client contract and traps: [docs/SOCRATICODE.md](docs/SOCRATICODE.md).
 
 ## Infrastructure
 

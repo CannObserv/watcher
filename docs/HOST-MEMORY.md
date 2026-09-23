@@ -83,7 +83,7 @@ them as part of the install:
 ```bash
 # 1. The kernel reserve. The shipped default here was ~8 MB, which is what lets
 #    an ATOMIC allocation fail in an unrelated process while memory is nominally
-#    available. 64 MB is ~1.6% of this host.
+#    available. 64 MB is ~0.8% of this host (7.75 GiB; ~1.6% before #309's resize).
 sudo tee /etc/sysctl.d/60-watcher-memory.conf >/dev/null <<'CONF'
 # Kernel free-memory reserve for co-watcher (watcher#307). See
 # docs/HOST-MEMORY.md.

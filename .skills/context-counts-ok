@@ -10,7 +10,7 @@ AGENTS.md :: gated :: watcher publishes four streams and consumes two
 
 # Gated by tests/core/test_logging.py::test_log_record_includes_structured_fields
 # (L79-89), which asserts message, level, logger and timestamp by name.
-AGENTS.md :: gated :: Records are JSON with a four-key floor
+AGENTS.md :: gated :: JSON records with a four-key floor pinned by
 
 # The two files are the numbered list immediately below the sentence. Re-judged
 # 2026-09-15: #296 D5 reworded the line, which expired the entry.

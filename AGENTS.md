@@ -28,11 +28,9 @@ Auth, upgrade procedure and the pinned version: [docs/DEPLOYMENT.md](docs/DEPLOY
 
 ## Code Exploration Policy
 
-SocratiCode indexes this repo into the cohort's **shared store on `co-index`, never locally** (#300) — so `includeLinked: true` also answers from archiver, broker, replicator and notifier with no sibling source on disk. Its MCP tools are **deferred**: schemas load only after a `ToolSearch` prefetch, which the SessionStart hook prints — run it before exploring. A second, daily health hook **reports only** — confirm with `codebase_status` before acting on it.
+SocratiCode indexes this repo into the cohort's **shared store on `co-index`, never locally** (#300); `includeLinked: true` also answers from the sibling repos, none on disk. Its MCP tools are **deferred**: schemas load only after a `ToolSearch` prefetch, which the SessionStart hook prints — run it before exploring. A second, daily health hook **reports only** — confirm with `codebase_status` before acting on it.
 
 **Negative rule.** Broad semantic questions ("where is X", "how does Y work", "what depends on Z") go to SocratiCode first; `grep`/`ripgrep` only for exact strings (error messages, log lines, known symbols); the Explore subagent only for path-pattern walks (`*.py` under `src/api/routes/`), never semantic search. **Empty is not absent:** an unreachable collection is skipped silently and never surfaced in the result, so verify the store before trusting a miss, then `grep` for that session.
-
-Client contract and traps: [docs/SOCRATICODE.md](docs/SOCRATICODE.md); goal→tool table, index scope, prefetch query: [docs/SKILLS.md](docs/SKILLS.md).
 
 ## Infrastructure
 
@@ -45,15 +43,15 @@ Client contract and traps: [docs/SOCRATICODE.md](docs/SOCRATICODE.md); goal→to
 
 The exe.dev proxy forwards 3000–9999; dev server at `https://co-watcher.exe.xyz:8001/`.
 
-**Single process is load-bearing.** One uvicorn process runs everything — API, embedded Procrastinate worker, `content.blobs` fact consumer, cache sweeper. **Never `uvicorn --workers N`, never a second worker unit against prod.** Why the fact consumer makes it load-bearing, and the escalation path that is *not built*: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) → *Single process*.
+**Single process is load-bearing.** One uvicorn process runs everything — API, embedded Procrastinate worker, `content.blobs` fact consumer, cache sweeper. **Never `uvicorn --workers N`, never a second worker unit against prod.** Why, and the escalation path that is *not built*: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) → *Single process*.
 
-**Host memory is the shared resource (#307).** Measured 2026-09-18: **3.8 GiB, no swap**, prod unit alongside agent sessions that are *unkillable* (`oom_score_adj` -1000 from exe-init/sshd) — so the kernel's killer takes the service, not the spiker. SocratiCode is **pinned pre-installed** (`~/.socraticode/pin`, 1.14.0): never let a launch install a server — a cold install peaks at 1.2 G. The unit takes a **reservation, never a cap** (`MemoryLow=`/`OOMScoreAdjust=`; `MemoryHigh=` stalls it while it still reports `active`). Verify with `preflight.sh --check` and `mcp-driver.mjs resolve`; re-pin as a decision, not on a schedule: [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) → *Host memory posture*.
+**Host memory is the shared resource (#307).** 3.8 GiB, no swap, and agent sessions are *unkillable* (`oom_score_adj` -1000), so the kernel's killer takes the service. SocratiCode is **pinned pre-installed** (`~/.socraticode/pin`): never let a launch install a server. The unit takes a **reservation, never a cap** (`MemoryLow=`/`OOMScoreAdjust=`; `MemoryHigh=` stalls it while it still reports `active`). Verify with `preflight.sh --check` and `mcp-driver.mjs resolve`; re-pin as a decision, not on a schedule: [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) → *Host memory posture*.
 
 **The bus.** The broker is its own VM (`broker`, CannObserv/broker); watcher publishes four streams and consumes two — `content.blobs` (single-member group `watcher.blobs`, derived by co-core's `group_name` — #285) and `info.registry` (**groupless**, replayed from `0-0` every boot). `WATCHER_BUS_REDIS_URL` unset → publish tasks skip loudly. Inventory, ownership, fetch contracts, `info_source_id` on the wire: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) → *Redis and the bus*.
 
-**Retention is sized against the set (#292).** A config/state cap is floored per batch — `tests/test_bus_stream_kinds.py` fails a publish missing `maxlen` *or* missing `floor=`. **The numbers themselves are mirrored on the broker node** (#319): its bus-health probe computes both LWW streams' length threshold from copies of `RETAINED_FULL_SETS` and the two `DEFAULT_*_STREAM_MAXLEN`, and its stream-age threshold from the `*/5` republish period, so the same test fails a retune of any of them and the fix is a cross-repo one. The three env overrides move the same numbers at deploy time and no test sees them.
+**Retention is sized against the set (#292), and mirrored on the broker (#319).** `tests/test_bus_stream_kinds.py` fails a config/state publish missing `maxlen` *or* `floor=`, and a retune of any mirrored number — the broker's probe thresholds are computed from copies, so the fix is cross-repo. The env overrides move the same numbers unseen: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) → *Redis and the bus*.
 
-**Connection policy (#287, #288, #290).** `socket_timeout` is a **floor**, not a ceiling — derive it from `src/core/read_windows.py`, never transcribe a window; retries are an explicit **zero** (a redis-py retry re-sends the command). A full broker refuses `XADD` with `OutOfMemoryError`, an ACL user with `NoPermissionError` — both `ResponseError`s, **not** connection errors: keep both transient in every producer. [docs/BUS-CONNECTION-POLICY.md](docs/BUS-CONNECTION-POLICY.md).
+**Connection policy (#287, #288, #290).** `socket_timeout` is a **floor** derived from `src/core/read_windows.py`, never transcribed; retries are an explicit **zero** (a retry re-sends the command). `OutOfMemoryError` (full broker) and `NoPermissionError` (ACL) are `ResponseError`s, **not** connection errors — keep both transient in every producer: [docs/BUS-CONNECTION-POLICY.md](docs/BUS-CONNECTION-POLICY.md).
 
 ## Server Lifecycle
 
@@ -117,27 +115,20 @@ production.
 one URL = one fingerprint = one change signal. The user-facing noun is "Watched
 Item".
 
-**The `info.registry` reconcile is the creation path**, and the registry owns
-cadence and active state while Watcher owns mechanism (#254): an announcement is
-authoritative for a named set of columns, everything else survives reconciliation,
-and **a local pause is not sticky** — every announcement-owned field 409s
-locally on a reconciled item. What each 409 is, where pause does live, and the
-`POST /api/v1/watched-items` — still the only creation path, with no caller
-since archiver#158:
-[docs/WATCHED-ITEMS.md](docs/WATCHED-ITEMS.md).
+**The `info.registry` reconcile is the creation path**; the registry owns
+cadence and active state, Watcher owns mechanism (#254). An announcement is
+authoritative for a named set of columns, everything else survives
+reconciliation, and **a local pause is not sticky** — every announcement-owned
+field 409s locally on a reconciled item.
 
-**Empty extraction is a failure, not a change (#258).** Every `source_spec`
-yielding empty chunks raises `ExtractionError` and writes nothing —
-unconditionally, on both sides of a baseline:
-**[docs/CONTENT-PIPELINE.md](docs/CONTENT-PIPELINE.md)**.
-
-**An unchanged fingerprint still announces (#293)** — after a **full fetch**,
-which renews the blob, so its cache-hit branch upserts a `PendingArchiverSync`
-for the latest revision. A 304 renews nothing and announces nothing. **Never
-the baseline**, and a renewal may only ever improve a queued row:
+**Empty extraction is a failure, not a change (#258)** — an empty
+`source_spec` raises `ExtractionError`, writes nothing, either side of a
+baseline. **An unchanged fingerprint still
+announces (#293)** after a full fetch — never a 304, never the baseline — and a
+renewal may only improve a queued row:
 [docs/CONTENT-PIPELINE.md](docs/CONTENT-PIPELINE.md).
 
-Fields, what each 409 is, the authoritative column list, schedule resolution, domain keying, media-type dispatch, template CRUD: [docs/WATCHED-ITEMS.md](docs/WATCHED-ITEMS.md). Lifecycle, delete guards, every dashboard surface: [docs/WATCHED-ITEMS-DASHBOARD.md](docs/WATCHED-ITEMS-DASHBOARD.md).
+What each 409 is, where pause does live, the authoritative column list: [docs/WATCHED-ITEMS.md](docs/WATCHED-ITEMS.md); delete guards: [docs/WATCHED-ITEMS-DASHBOARD.md](docs/WATCHED-ITEMS-DASHBOARD.md).
 
 ## Conventions
 
@@ -156,7 +147,7 @@ logger = get_logger(__name__)
 ```
 Entry points only: call `configure_logging()` once.
 
-Records are JSON with a four-key floor — `timestamp`/`level`/`logger`/`message` — pinned by `tests/core/test_logging.py`. The floor, and why uvicorn's own loggers need `--log-config` plus a filter: [docs/CONVENTIONS.md](docs/CONVENTIONS.md).
+JSON records with a four-key floor pinned by `tests/core/test_logging.py`; why uvicorn's loggers need `--log-config` plus a filter: [docs/CONVENTIONS.md](docs/CONVENTIONS.md).
 
 **Date & Time:** All UTC. ISO 8601: `YYYY-MM-DDTHH:MM:SS.ffffffZ` (timestamps), `YYYY-MM-DD` (dates).
 
@@ -164,8 +155,6 @@ Records are JSON with a four-key floor — `timestamp`/`level`/`logger`/`message
 - No inline module imports; all at file top
 - Docstrings for public modules, classes, functions
 - Test structure mirrors source (`src/foo.py` → `tests/test_foo.py`)
-- Explicit imports only
-- Small, focused functions
 - Optional JSONB columns: declare as `JSONB(none_as_null=True)` so Python `None` persists as SQL `NULL`, not a JSONB `'null'` literal (otherwise `WHERE col IS NULL` silently misses those rows — #198)
 
 **ULID format errors:** path parameter → 404 (`parse_ulid`), filter query parameter → 400 (`parse_filter_ulid`). **DB triggers:** currently none; one added in a migration must also be recreated in `tests/conftest.py`'s `test_engine` fixture (integration tests build the schema with `create_all`). Both: [docs/CONVENTIONS.md](docs/CONVENTIONS.md).
@@ -174,11 +163,11 @@ Records are JSON with a four-key floor — `timestamp`/`level`/`logger`/`message
 
 Design system: [docs/STYLE.md](docs/STYLE.md); component library and HTMX/flash
 patterns: [docs/UI.md](docs/UI.md). **Read one of them before writing a
-template** — both carry every rule below in fuller form than this file did:
-brand color is never a status color (STYLE §2), every color utility takes its
-`dark:` variant (§3), WCAG 2.1 AA and no `title` attributes (§7–8), never a CDN
-build (§10), component classes over raw utilities (UI §4), and
-`is_htmx(request)` rather than a bare `HX-Request` read (UI §2, #211).
+template**; their rules, in brief: brand color is never a status color (STYLE
+§2), every color utility takes its `dark:` variant (§3), WCAG 2.1 AA and no
+`title` attributes (§7–8), never a CDN build (§10), component classes over raw
+utilities (UI §4), and `is_htmx(request)` rather than a bare `HX-Request` read
+(UI §2, #211).
 
 ## Agent Skills
 
@@ -197,9 +186,9 @@ A skill is symlinked into both `skills/` and `.claude/skills/`; overrides in `sk
 - [docs/RECOVERY.md](docs/RECOVERY.md) — nightly DB backup to GCS, restore, go/no-go gates
 - [docs/MIGRATIONS.md](docs/MIGRATIONS.md) — the manual upgrade step, the two-role grants, one-time orderings
 - [docs/reference/tailscale.md](docs/reference/tailscale.md) — this node: identity, peers, the cold-boot race, ACL rules
-- [docs/SKILLS.md](docs/SKILLS.md) — skill triggers, vendored skill repos, SocratiCode workflow
+- [docs/SKILLS.md](docs/SKILLS.md) — skill triggers, vendored skill repos, SocratiCode goal→tool table, index scope, prefetch query
 - [docs/SOCRATICODE.md](docs/SOCRATICODE.md) — the shared index on co-index: client contract, the green-failing traps, link stubs
 - [docs/STYLE.md](docs/STYLE.md) — the design system: brand, color, dark mode, tokens, layout, touch targets, accessibility
 - [docs/UI.md](docs/UI.md) — the component library, the HTMX/flash patterns
-- [docs/WATCHED-ITEMS.md](docs/WATCHED-ITEMS.md) — the entity: fields, schedule resolution, reconciliation, notifications
+- [docs/WATCHED-ITEMS.md](docs/WATCHED-ITEMS.md) — the entity: fields, schedule resolution, reconciliation, domain keying, media-type dispatch, template CRUD, notifications
 - [docs/WATCHED-ITEMS-DASHBOARD.md](docs/WATCHED-ITEMS-DASHBOARD.md) — the operator surface: routes, lifecycle guards, views, audit parity

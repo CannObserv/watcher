@@ -274,3 +274,38 @@ tighten :: the manual upgrade step, the two-role grant model
 tighten :: the component library and the HTMX/flash interaction patterns
 tighten :: the entity: fields, schedule resolution, registry reconciliation
 tighten :: routes, lifecycle guards, list and detail views, audit parity
+
+# --- 2026-09-23 curation (6474 -> under 6000). Every line below was rewritten in
+# place, not dropped: each one's atoms are carried by the new line or by the doc
+# it points at (--claims passes). Read against its replacement one by one.
+tighten :: Client contract and traps: [docs/SOCRATICODE.md](docs/SOCRATICODE.md); goal→tool table
+tighten :: **Host memory is the shared resource (#307).** Measured 2026-09-18
+tighten :: **Retention is sized against the set (#292).** A config/state cap is floored per batch
+tighten :: **The `info.registry` reconcile is the creation path**, and the registry owns
+tighten :: cadence and active state while Watcher owns mechanism (#254): an announcement is
+tighten :: authoritative for a named set of columns, everything else survives reconciliation,
+tighten :: and **a local pause is not sticky** — every announcement-owned field 409s
+tighten :: locally on a reconciled item. What each 409 is, where pause does live, and the
+tighten :: `POST /api/v1/watched-items` — still the only creation path, with no caller
+tighten :: since archiver#158:
+tighten :: Fields, what each 409 is, the authoritative column list, schedule resolution, domain keying
+AGENTS.md :: tighten :: [docs/WATCHED-ITEMS.md](docs/WATCHED-ITEMS.md).
+tighten :: **Empty extraction is a failure, not a change (#258).** Every `source_spec`
+tighten :: yielding empty chunks raises `ExtractionError` and writes nothing —
+tighten :: unconditionally, on both sides of a baseline:
+AGENTS.md :: tighten :: **[docs/CONTENT-PIPELINE.md](docs/CONTENT-PIPELINE.md)**.
+tighten :: **An unchanged fingerprint still announces (#293)** — after a **full fetch**,
+tighten :: which renews the blob, so its cache-hit branch upserts a `PendingArchiverSync`
+tighten :: for the latest revision. A 304 renews nothing and announces nothing. **Never
+tighten :: Records are JSON with a four-key floor — `timestamp`/`level`/`logger`/`message`
+tighten :: template** — both carry every rule below in fuller form than this file did:
+tighten :: brand color is never a status color (STYLE §2), every color utility takes its
+tighten :: `dark:` variant (§3), WCAG 2.1 AA and no `title` attributes (§7–8), never a CDN
+tighten :: build (§10), component classes over raw utilities (UI §4), and
+tighten :: `is_htmx(request)` rather than a bare `HX-Request` read (UI §2, #211).
+tighten :: - [docs/SKILLS.md](docs/SKILLS.md) — skill triggers, vendored skill repos, SocratiCode workflow
+tighten :: - [docs/WATCHED-ITEMS.md](docs/WATCHED-ITEMS.md) — the entity: fields, schedule resolution, reconciliation, notifications
+# ruff's F set (pyproject select) flags a star import as F403.
+default :: - Explicit imports only
+# Class D: restates a trained default; no rule of this repo's rides on it.
+default :: - Small, focused functions

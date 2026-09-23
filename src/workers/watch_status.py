@@ -40,8 +40,10 @@ logger = get_logger(__name__)
 # only the default.
 #
 # What breaks there: the probe derives ``LWW_WARN_LAST_ENTRY_AGE_SECONDS`` from
-# the period at 3x, so a period past 15 minutes false-WARNs on stream age every
-# tick, and it divides the retained window by the period to read the set size it
+# the period at 3x, and the age resets at each republish — so a period past 15
+# minutes false-WARNs on stream age for a growing fraction of ticks, never all of
+# them, which is the producer-is-down signature that threshold is actually for. It
+# also divides the retained window by the period to read the set size it
 # cannot mirror — lengthen the period and it reads the set low, which drags the
 # length threshold down with it (CannObserv/broker#44). Broker holds one period
 # for both LWW streams, so this must also stay equal to the literal on

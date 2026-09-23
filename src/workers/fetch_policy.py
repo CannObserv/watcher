@@ -20,8 +20,9 @@ logger = get_logger(__name__)
 # **Mirrored on the broker node.** ``LWW_REPUBLISH_PERIOD_SECONDS`` in
 # ``broker:src/broker/bus_health.py`` is 300 seconds because of this literal, and
 # the probe derives two things from it: ``LWW_WARN_LAST_ENTRY_AGE_SECONDS`` at 3x
-# (lengthen this past 15 minutes and the probe false-WARNs on stream age every
-# tick), and the divisor that turns the retained window into a count of
+# (the age resets at each republish, so lengthening this past 15 minutes false-WARNs
+# on stream age for a growing fraction of ticks — never all of them, which is the
+# producer-is-down signature the threshold is actually for), and the divisor that turns the retained window into a count of
 # republishes, which is how it reads the set size it cannot mirror
 # (CannObserv/broker#44). Broker holds **one** period for both LWW streams, so
 # this has to stay equal to watch-status's — see DEFAULT_REPUBLISH_CRON in

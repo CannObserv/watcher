@@ -1,8 +1,8 @@
 # Observo-derived extraction and the change diff — design
 
-**Status:** approved in conversation 2026-09-24; not started. **Issue:** #222 (to be
-retitled and split — see **#222 disposition**). **Cross-repo work:** filed as issues
-in co-core, broker, Observo and Archiver after this doc is reviewed; none of it is
+**Status:** approved 2026-09-24; issues filed, not started. **Issue:** #222 (retitled and
+split — see **#222 disposition**). **Cross-repo work:** filed 2026-09-24 as issues
+in co-core, broker, Observo and Archiver (numbers in **Section 6**); none of it is
 implemented from a Watcher session.
 
 **Context read for this design (all 2026-09-24):** archiver#179 (`content.process`,
@@ -331,15 +331,15 @@ assets).
 
 | # | Repo | Work | Depends on |
 |---|---|---|---|
-| 1 | co-core | `canonical_text`; media-type dispatch lifted; the three models; two streams in `streams.py`; `processor_version` scheme | — |
+| 1 | co-core | **cannobserv#486** — `canonical_text`; media-type dispatch lifted; the three models; two streams in `streams.py`; `processor_version` scheme | — |
 | 2 | co-core | cannobserv#475 — `BlobStore` lifted (open) | — |
-| 3 | Watcher | Step 0 | 1 |
-| 4 | broker | `observo` ACL user, two streams, participants table, tailnet | 1 |
-| 5 | Observo | Section 3 items 2–7 | 1, 2, 4, observo#628 step 2 |
-| 6 | Watcher | `process_commands` + `PROCESSING`, issuer, consumer, reaper, shadow comparator | 1, 5 |
-| 7 | Watcher | Section 4 — ships in shadow (#222 proper) | 6 |
-| 8 | Watcher | Switch after zero mismatches; soak; delete local extraction | 7 |
-| 9 | Archiver | Informational: archiver#179 notes the reusable contract; `content.revisions` unchanged | 1 |
+| 3 | Watcher | **#324** — Step 0 | 1 |
+| 4 | broker | **broker#62** — `observo` ACL user, two streams, participants table, tailnet | 1 |
+| 5 | Observo | **observo#629** — Section 3 items 2–7 | 1, 2, 4, observo#628 step 2 |
+| 6 | Watcher | **#325** — `process_commands` + `PROCESSING`, issuer, consumer, reaper, shadow comparator | 1, 5 |
+| 7 | Watcher | **#222** — Section 4, ships in shadow | 6 |
+| 8 | Watcher | **#326** — switch after zero mismatches; soak; delete local extraction | 7 |
+| 9 | Archiver | Informational — commented on archiver#179 (2026-09-24); `content.revisions` unchanged | 1 |
 
 **Critical path** 1 → 5 → 6; 3 and 4 run in parallel with 5.
 

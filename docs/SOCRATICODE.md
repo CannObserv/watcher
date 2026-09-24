@@ -307,8 +307,9 @@ Tracking issue: [CannObserv/notifier#57](https://github.com/CannObserv/notifier/
 design and decisions D0–D14 in `docs/plans/2026-09-11-shared-qdrant-vm-design.md` there.
 
 **Why not locally.** A cold local index pulls two images and the embedding model and peaks
-around **1.2 G** at the cgroup (measured on CannObserv/broker), on a swapless host whose
-unkillable agent sessions leave the kernel's killer only `watcher.service` to take (#307;
+around **1.2 G** at the cgroup (measured on CannObserv/broker), on a swapless host where
+agent sessions, and any index they launch, sit at `oom_score_adj` -1000: the pressure they
+make lands on everything else, `watcher.service` included (#307;
 [HOST-MEMORY.md](HOST-MEMORY.md)).
 
 **The client contract is two committed files**, so every checkout addresses the same

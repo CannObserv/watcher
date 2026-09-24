@@ -63,10 +63,6 @@ DEFAULT_VALIDATOR_MAX_AGE_HOURS = 168.0
 # over the bound came from somewhere else and is not replayable either.
 MAX_VALIDATOR_LENGTH = 1024
 
-# The distribution that owns extraction (fetch → extract → fingerprint lives in
-# co-core; watcher only calls it).
-CO_CORE_DISTRIBUTION = "co-core"
-
 # Bumped by hand when *watcher's* own extraction changes in a way co-core's
 # version cannot see — how chunks are joined, which extractor a media type
 # dispatches to, the spec fallback order.

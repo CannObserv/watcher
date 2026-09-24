@@ -17,7 +17,6 @@ import pytest
 from co_core.pure.extract import processor_version
 
 from src.core.validators import (
-    CO_CORE_DISTRIBUTION,
     CONDITIONAL_GET_ENV,
     DEFAULT_VALIDATOR_MAX_AGE_HOURS,
     EXTRACTION_GENERATION,
@@ -194,6 +193,9 @@ class TestValidatorSourceKey:
         assert validator_source_key(effective_url=URL, source_specs=None)
 
 
+_CO_CORE_DISTRIBUTION = "co-core"
+
+
 class TestExtractionGeneration:
     """CR-3: a co-core upgrade must invalidate stored validators on its own.
 
@@ -206,7 +208,10 @@ class TestExtractionGeneration:
     """
 
     def test_carries_the_installed_co_core_version(self):
-        assert version(CO_CORE_DISTRIBUTION) in EXTRACTION_GENERATION
+        # The version is read off the imported package (`co_core.__version__`);
+        # pinning it against the installed distribution's metadata catches the
+        # two ever disagreeing, e.g. a stale editable install.
+        assert version(_CO_CORE_DISTRIBUTION) in EXTRACTION_GENERATION
 
     def test_carries_the_local_generation(self):
         assert str(LOCAL_EXTRACTION_GENERATION) in EXTRACTION_GENERATION

@@ -82,6 +82,12 @@ DRIVER_PIN_MANIFEST = (
     Path.home() / ".socraticode" / "pin" / "node_modules" / "socraticode" / "package.json"
 )
 
+#: Where a VS Code session gets the spec before the plugin's args are expanded.
+#: `claudeCode.environmentVariables` is machine-scoped, so it cannot be a
+#: committed workspace setting. VM-local, so its test skips in CI.
+VSCODE_SERVER = Path.home() / ".vscode-server"
+VSCODE_MACHINE_SETTINGS = VSCODE_SERVER / "data" / "Machine" / "settings.json"
+
 #: Every env surface on this host. The first four are the ones that actually
 #: reach the MCP server -- it launches from an agent session, so it inherits
 #: whatever `scripts/load-env.sh` put in that shell plus the two `env` blocks
@@ -304,6 +310,31 @@ def test_session_spec_matches_the_driver_pin(settings_env: dict):
     session = match.group(1) if match else None
     assert session == pinned, (
         f"the driver is pinned at socraticode {pinned}, the session launches {session}: re-pin both"
+    )
+
+
+def test_vscode_launches_claude_with_the_session_spec(settings_env: dict):
+    """The settings `env` block alone does not reach the session's launch.
+
+    Measured 2026-09-24 on Claude Code 2.1.280: a reloaded VS Code session's
+    server carried `SOCRATICODE_SPEC=socraticode@1.14.0` in its environment and
+    ran `npm exec socraticode@latest` - the plugin's args are expanded before
+    the project block is merged, which then reaches the child anyway. Present
+    at exec, the same variable launched 1.14.0. Without this copy the session
+    floats while preflight, reading the merged environment, reports it pinned.
+    """
+    if not VSCODE_SERVER.is_dir():
+        pytest.skip(f"{VSCODE_SERVER} not present on this machine")
+    assert VSCODE_MACHINE_SETTINGS.is_file(), (
+        f"{VSCODE_MACHINE_SETTINGS} is missing: VS Code sessions launch socraticode@latest"
+    )
+    entries = json.loads(VSCODE_MACHINE_SETTINGS.read_text()).get(
+        "claudeCode.environmentVariables", []
+    )
+    launched = next((e.get("value") for e in entries if e.get("name") == "SOCRATICODE_SPEC"), None)
+    assert launched == settings_env.get("SOCRATICODE_SPEC"), (
+        f"VS Code launches Claude with SOCRATICODE_SPEC={launched!r}, the repo declares "
+        f"{settings_env.get('SOCRATICODE_SPEC')!r}: the session launches the former"
     )
 
 

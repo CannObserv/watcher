@@ -53,7 +53,7 @@
     {
       "name": "alembic-migrations",
       "path": "./alembic/versions/",
-      "description": "Database schema history as Alembic migrations (28 files, no separate schema.sql exists — this is the canonical source of truth for schema). Tells the migration narrative: watches/audit_log creation, snapshots+chunks, temporal_profiles, notification_configs, domains+effective_domain, notification_template_library, encryption rollouts, content-type column changes, screenshot_browser, visual_change_score, last_changed_at trigger (trg_changes_update_last_changed_at), is_archived, decay_window, and more."
+      "description": "Database schema history as Alembic migrations; no separate schema.sql exists, so this is the canonical source of truth for schema. Starts from a genesis baseline squashing the pre-#234 chain (app_users, audit_log, domains, api_keys, watched_items, change_revisions, notification_templates, temporal_profiles, pending_archiver_sync), then: fetch_commands (#241) with their blob expiry (#253), info_source_id (#252) and conditional-GET validator and forced-full-fetch columns (#269); fetch_policy_tombstones (#245); required Archiver links (#251); the archiver outbox's dead-letter state and observation provenance (#253) and its due-predicate index (#291); registry reconcile state (#254); last_observed_at (#264); and drops of retired transport columns (#261), inert domain limiter columns (#272) and post-squash cruft. No database triggers remain — the last orphaned trigger function was dropped."
     },
     {
       "name": "systemd-unit",

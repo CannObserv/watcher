@@ -21,8 +21,8 @@ something is. exe.dev session processes inherit `oom_score_adj` **-1000** from
 is spiking and takes the host's production service instead. On
 CannObserv/broker's VM on 2026-09-16 nothing that spiked was killed: the kernel
 failed atomic allocations in `tailscaled` and `ksoftirqd`, the bus was down 57m
-48s, and a downstream consumer never reconnected. Three things answer that, and
-none substitutes for another.
+48s, and a downstream consumer never reconnected. The steps below answer that,
+and none substitutes for another.
 
 **1. Don't install a server at any launch — pin both.** Two things launch
 SocratiCode here, each pinned on its own, both at **1.14.0**:

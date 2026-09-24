@@ -563,6 +563,22 @@ class TestRevisionExtractionIdentity:
         assert baseline.spec_fingerprint == spec_fingerprint(_SPEC_FULL_PAGE)
         assert baseline.processor_version == EXTRACTION_GENERATION
 
+    async def test_underivable_spec_stores_null_not_a_lost_revision(self, db_session):
+        # co-core rejects a float in a spec; the identity is a diagnostic, so the
+        # revision is still written — with NULL, which Option A reads as unknown.
+        spec = {"schema_version": 1, "extraction": {"algorithm": "full_page"}, "weight": 1.5}
+        wi = await make_watched_item(db_session, name="Identity underivable")
+        wi.effective_url = "https://example.com"
+        wi.source_specs = [spec]
+        await db_session.flush()
+
+        await process_watched_item(db_session, wi, raw_content=_HTML, blob=_BLOB)
+        await db_session.flush()
+
+        (baseline,) = await self._revisions(db_session, wi)
+        assert baseline.spec_fingerprint is None
+        assert baseline.processor_version == EXTRACTION_GENERATION
+
     async def test_change_carries_the_spec_that_matched(self, db_session):
         wi = await make_watched_item(db_session, name="Identity change")
         wi.effective_url = "https://example.com"

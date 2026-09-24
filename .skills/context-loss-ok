@@ -316,3 +316,6 @@ docs/DEPLOYMENT.md :: retarget :: # docs/DEPLOYMENT.md -> Host memory posture.
 # The index line's "the outbox, the revisions producer" now describes the new
 # doc, which carries its own index line; CONTENT-PIPELINE keeps the fetch half.
 AGENTS.md :: retarget :: - [docs/CONTENT-PIPELINE.md](docs/CONTENT-PIPELINE.md) — fetch → extract → fingerprint, the outbox, the revisions producer
+# CR 9: the demoted retention paragraph's "(same section)" pointed at this very
+# section once it lived here; it now names the paragraph that follows it.
+AGENTS.md :: retarget :: **Retention is sized against the set (#292), and mirrored on the broker (#319).** `tests/test_bus_stream_kinds.py` fails a config/state publish missing `maxlen` *or* `floor=`, and fails a retune of any mirrored number — the broker's probe thresholds are computed from copies, so the fix is cross-repo. The env overrides move the same numbers unseen (same section).

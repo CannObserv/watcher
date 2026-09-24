@@ -158,10 +158,11 @@ SuccessExitStatus=143
 # stops a driver launch installing a server at all (docs/HOST-MEMORY.md).
 MemoryLow=512M
 
-# Move this service behind everything else on the box. Everything here runs at
-# the default 0 — an npm install, a node server, a docker build — while the
-# agent session sits at -1000 and is unpickable, which left this service as the
-# most attractive candidate on the host.
+# Move this service behind everything else the killer can take. The agent
+# session sits at -1000 and is unpickable, and so is everything it launches;
+# what is left — the system daemons, postgres's backends — runs at the default
+# 0, where this service's size made it the most attractive candidate on the
+# host (docs/HOST-MEMORY.md, #323).
 #
 # Deliberately not -1000: an unkillable service on a host with no swap
 # means the kernel runs out of candidates and wedges the box rather than

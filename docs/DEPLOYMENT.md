@@ -112,8 +112,8 @@ own fields (`_SYSTEMD_UNIT`, `SYSLOG_IDENTIFIER`, `MESSAGE`) is unaffected. See
 ### Host memory posture
 
 Split out to [HOST-MEMORY.md](HOST-MEMORY.md) — the #307 reservation, the
-#309 slice drop-ins and dependency-chain table, the kernel reserve, earlyoom,
-and the pinned SocratiCode install.
+#309 slice drop-ins and dependency-chain table, the kernel reserve, why earlyoom
+is declined (#323), and the pinned SocratiCode install.
 
 ## Database Migrations
 

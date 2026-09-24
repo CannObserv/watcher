@@ -28,7 +28,7 @@
     {
       "name": "host-memory-doc",
       "path": "./docs/HOST-MEMORY.md",
-      "description": "Host memory posture for co-watcher (#307, #309): no swap, agent sessions unkillable at oom_score_adj -1000. The watcher.service MemoryLow reservation and why it is not a cap; the slice drop-ins in deploy/dropins/ (system.slice, system-postgresql.slice, postgresql@ template, tailscaled) and the rule that a unit keeps no more memory.low than every slice above it grants; the dependency-chain table; vm.min_free_kbytes, earlyoom, and the pinned SocratiCode install."
+      "description": "Host memory posture for co-watcher (#307, #309): no swap, agent sessions unkillable at oom_score_adj -1000. The watcher.service MemoryLow reservation and why it is not a cap; the slice drop-ins in deploy/dropins/ (system.slice, system-postgresql.slice, postgresql@ template, tailscaled) and the rule that a unit keeps no more memory.low than every slice above it grants; the dependency-chain table; vm.min_free_kbytes, why earlyoom is declined on a -1000 host (#323), and the pinned SocratiCode install."
     },
     {
       "name": "environment-doc",

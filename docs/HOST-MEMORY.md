@@ -118,50 +118,69 @@ no swap wedges the box instead of shedding one process. **The reservation holds
 only because `system.slice` grants it** — see step 4; for #307's whole life it
 protected nothing.
 
-**3. The kernel needs a reserve, and something must act before it is desperate.**
+**3. The kernel needs a reserve; earlyoom cannot act for it here.**
 `vm.min_free_kbytes` shipped at ~8 MB here, which is what lets an atomic
 allocation in `tailscaled` fail while memory is nominally available;
-`/etc/sysctl.d/60-watcher-memory.conf` raises it to 64 MB. `earlyoom` then sheds
-a process while userspace can still make progress — and because it ranks by
-`oom_score`, the combination of an unpickable session (-1000) and a de-prioritised
-service (-500) means it picks the `npm`/`node` process that is actually spiking,
-at the default 0 — the family `--prefer` names below, and since #310 the only
-one left here.
-
-Neither of those two lives in this repo, so **a rebuilt VM loses both silently** —
-nothing fails, the box is simply back to an 8 MB reserve and no shedder. Recreate
-them as part of the install:
+`/etc/sysctl.d/60-watcher-memory.conf` raises it to 64 MB. It does not live in
+this repo, so **a rebuilt VM loses it silently** — nothing fails, the box is
+simply back to an 8 MB reserve. Recreate it as part of the install:
 
 ```bash
-# 1. The kernel reserve. The shipped default here was ~8 MB, which is what lets
-#    an ATOMIC allocation fail in an unrelated process while memory is nominally
-#    available. 64 MB is ~0.8% of this host (7.75 GiB; ~1.6% before #309's resize).
+# The shipped default here was ~8 MB, which is what lets an ATOMIC allocation
+# fail in an unrelated process while memory is nominally available. 64 MB is
+# ~0.8% of this host (7.75 GiB; ~1.6% before #309's resize).
 sudo tee /etc/sysctl.d/60-watcher-memory.conf >/dev/null <<'CONF'
 # Kernel free-memory reserve for co-watcher (watcher#307). See
 # docs/HOST-MEMORY.md.
 vm.min_free_kbytes = 65536
 CONF
 sudo sysctl --system
-
-# 2. The shedder. Acts while userspace can still make progress, before the
-#    kernel is reduced to picking a production service.
-sudo apt-get install -y earlyoom
-sudo tee /etc/default/earlyoom >/dev/null <<'CONF'
-# earlyoom for co-watcher (watcher#307). --avoid names the processes whose
-# death IS the outage: `uv` is watcher.service's main process and `uvicorn` its
-# server child, postgres backs it, tailscaled carries every peer hop.
-# --prefer names the node family, which is what actually spikes here.
-EARLYOOM_ARGS="-r 3600 --avoid '^(uv|uvicorn|postgres|tailscaled|systemd|sshd|exe-init)$' --prefer '^(node|npm|MainThread)$'"
-CONF
-sudo systemctl restart earlyoom && sudo systemctl enable earlyoom
+cat /proc/sys/vm/min_free_kbytes    # 65536
 ```
 
-Verify:
+**earlyoom is declined here (#323).** #307 installed it to shed the `npm`/`node`
+process that was actually spiking. It never could: everything a session
+launches inherits the session's -1000, and earlyoom 1.7 skips a -1000 process
+exactly as the kernel does, `--prefer` or not (`kill.c`, after the bonus is
+added). What it could reach is the kernel's own list — measured 2026-09-24,
+with 1.7 GiB of RSS at -1000 and 634 MiB eligible:
+
+| `oom_score` | process (adj) |
+|---|---|
+| 734, 733 | `systemd --user`, `(sd-pam)` (+100) |
+| 666–671 | postgres's backends and auxiliaries; logind, timesyncd, cron (0) |
+| 503 | journald (-250) |
+| 404 | `tailscaled` (-400) |
+| 348, 336 | watcher's `uvicorn`, `uv` (-500) |
+
+#307's `--avoid` moved postgres, `tailscaled` and watcher down that list, never
+off it. earlyoom starts at 10% available (~790 MiB here) and works down it, so a
+session that holds the host past 90% without exhausting it would end watcher's
+database connections — a crash recovery once it escalates to SIGKILL at 5% — and
+then watcher itself, where the kernel takes nothing until memory is actually
+gone. Apart from those three, nothing on the list holds more than ~35 MB. The
+one session process it *can* reach is one launched under `choom -n 500`, which
+is how step 1's installs run, and their `MemoryMax=1536M` scope already
+contains them. CannObserv/replicator#112 declined it on the same class of host.
+
+`tests/deploy/test_earlyoom_decline.py` pins both halves live: earlyoom is not
+running (`apt install earlyoom` starts it at once, on stock arguments), and this
+session's root still reads -1000. A host set up from the old runbook: `sudo
+systemctl disable --now earlyoom`. If the premise flips — notifier's sessions
+sit at 0, and what decides it is unknown — revisit the decline, and never
+`$`-anchor `--prefer`: `comm` is truncated to 15 characters, so the server is
+`npm exec socrat` and `^npm$` misses it (gregoryfoster/skills' `host-memory.md`
+§4 lists the other traps). Re-measuring kills nothing and needs no root:
 
 ```bash
-cat /proc/sys/vm/min_free_kbytes    # 65536
-systemctl is-active earlyoom        # active
+apt-get download earlyoom && dpkg-deb -x earlyoom_*.deb x   # in a scratch dir
+timeout -s INT 2 ./x/usr/bin/earlyoom --dryrun -d -r 0 -m 99,98 -s 100,100 \
+  --prefer '^(sshd|exe-init|MainThread|claude|node)$' 2>&1 | grep -E 'new victim|^sending'
 ```
+
+The `-d` table prints badness from *before* the -1000 skip, so a preferred
+`sshd` shows 300 and is still passed over: read the `new victim` lines, not the
+column.
 
 **Docker is not among the spikers here any more.** #300 tore the daemon down
 when the semantic index moved to the shared store on `co-index`, and #310
@@ -192,13 +211,13 @@ slice's 1G (its children's sum, ~13% of the host) deliberately moves reclaim ont
 them.
 
 **Postgres's -900 is the postmaster's alone**: Debian resets backends to 0, so a
-killed backend costs a crash recovery, not the database. earlyoom's `--avoid`
-covers them; the kernel's killer does not. The unit is `Restart=no`. The drop-in
-targets the `postgresql@` template so a major upgrade's cluster inherits it —
-while two run side by side, the slice must cover both — and both reservations
-follow `shared_buffers` (128M) if it is raised.
+killed backend costs a crash recovery, not the database, and at 0 they rank
+ahead of watcher. The unit is `Restart=no`. The drop-in targets the
+`postgresql@` template so a major upgrade's cluster inherits it — while two run
+side by side, the slice must cover both — and both reservations follow
+`shared_buffers` (128M) if it is raised.
 
-**`tailscaled` at -400** sits below every `npm`/`node` process but behind
+**`tailscaled` at -400** goes after everything at the default 0 but before
 watcher: the dashboard is reached through the exe.dev proxy, not the tailnet.
 
 Install from the checkout — **a rebuilt VM loses these silently**:
@@ -218,6 +237,3 @@ Verify the kernel, not `systemctl show` — the test reads `/sys/fs/cgroup` and
 ```bash
 uv run pytest tests/deploy/test_memory_dropins.py   # sums, drift, live values
 ```
-
-**earlyoom's `--avoid` list is the userspace half**: it ranks by `oom_score`, so
-it honours each adjustment above, and acts at 10% free — ~800 MB here.

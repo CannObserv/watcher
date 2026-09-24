@@ -289,9 +289,10 @@ def test_repo_unit_takes_no_throttling_cap() -> None:
 def test_repo_unit_lowers_its_oom_score() -> None:
     """#307: make the killer prefer anything else on the box.
 
-    Everything else here runs at the default 0 — an ``npm install``, a `node`
-    server, a docker build — while the agent session sits at -1000 and is
-    unpickable. A negative score moves this service behind all of them.
+    The agent session sits at -1000 and is unpickable, and so is everything it
+    launches — an ``npm install``, a ``node`` server (#323). What the killer can
+    take runs at the default 0: the system daemons, postgres's backends. A
+    negative score moves this service behind all of them.
 
     Deliberately not -1000: an unkillable service on a host with no swap
     means the kernel runs out of candidates and wedges the box instead of

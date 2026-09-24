@@ -133,10 +133,10 @@ def test_postgres_dropin_leaves_debians_oom_adjustment_alone() -> None:
 def test_tailscaled_ranks_between_watcher_and_the_default() -> None:
     """``tailscaled`` below the default 0, but behind watcher.
 
-    At 0 it ranks level with every ``npm``/``node`` process on the box, and
-    below them once they grow. Behind watcher by design: the dashboard is
-    reached through the exe.dev proxy, not the tailnet, so it should outlive
-    the tunnel.
+    At 0 it ranks with the system daemons and postgres's backends; a session's
+    ``npm``/``node`` sits at -1000 and never ranks (#323). Behind watcher by
+    design: the dashboard is reached through the exe.dev proxy, not the
+    tailnet, so it should outlive the tunnel.
     """
     (watcher,) = directive_values(WATCHER_UNIT.read_text(), "OOMScoreAdjust")
     (tailscaled,) = directive_values(_text(TAILSCALED), "OOMScoreAdjust")

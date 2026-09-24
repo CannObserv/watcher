@@ -11,3 +11,10 @@
 # excluding skills-vendor/ already covers them.
 skills-vendor/
 .claude/skills/
+
+# Dated prose (#300). docs/plans/ is registered as the `design-and-plans`
+# context artifact, so it stays searchable through codebase_context_search
+# (artifactName "design-and-plans"); left here, superseded plans outranked the
+# code that replaced them in codebase_search. Measured case: docs/SOCRATICODE.md
+# → Repo-specific notes → Index scope here.
+docs/plans/

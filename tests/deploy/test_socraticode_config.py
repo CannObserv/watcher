@@ -305,8 +305,10 @@ def test_session_spec_matches_the_driver_pin(settings_env: dict):
     """A re-pin is several edits now: the pre-install and each `SOCRATICODE_SPEC`.
 
     Miss one and the session installs the version the driver does not run -
-    two builds writing one store - which `health-check` reports only once they
-    differ by a minor release, and only once a day. Host state, hence the skip.
+    two builds writing one store. `health-check` measures the pin only against
+    a floating spec, so with a fixed one nothing unattended catches it; only
+    preflight's "Launch pins disagree", when someone runs it. Host state, hence
+    the skip.
     """
     if not DRIVER_PIN_MANIFEST.is_file():
         pytest.skip(f"{DRIVER_PIN_MANIFEST} not present on this machine")

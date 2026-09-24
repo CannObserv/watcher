@@ -30,8 +30,8 @@ dependencies = [
     "python-multipart>=0.0.22,<1",
     "html5lib>=1.1",
     "notifier-client",
-    "co-core[extract]>=0.13.1,<0.14",
-    "co-core-aio[bus]>=0.13.1,<0.14",
+    "co-core[extract]>=0.19.4,<0.20",
+    "co-core-aio[bus]>=0.19.4,<0.20",
     # Imported directly by the bus layer; docs/BUS-CONNECTION-POLICY.md was
     # measured on redis-py 7.4.1, so a major is ours to adopt, not co-core-aio's (#294).
     "redis>=7.4,<8",

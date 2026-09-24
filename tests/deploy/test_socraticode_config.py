@@ -308,3 +308,46 @@ def test_namespace_guards_are_not_set_anywhere(variable: str, path: Path):
         pytest.skip(f"{path} not present on this machine")
     declares = variable in path.read_text()
     assert not declares, f"{_surface_id(path)} sets {variable}"
+
+
+IGNORE_FILE = REPO_ROOT / ".socraticodeignore"
+MANIFEST = REPO_ROOT / ".socraticodecontextartifacts.json"
+
+#: Trees kept out of the code index and the graph. The vendored skill trees
+#: (#240) are agent instructions whose prose outranked this repo's own code;
+#: docs/plans/ (#300) is dated prose whose superseded plans outranked the code
+#: that replaced them.
+EXPECTED_EXCLUSIONS = ["skills-vendor/", ".claude/skills/", "docs/plans/"]
+
+
+@pytest.fixture(scope="module")
+def ignore_patterns() -> list[str]:
+    lines = IGNORE_FILE.read_text().splitlines()
+    return [line.strip() for line in lines if line.strip() and not line.startswith("#")]
+
+
+@pytest.mark.parametrize("pattern", EXPECTED_EXCLUSIONS)
+def test_index_excludes(pattern: str, ignore_patterns: list[str]):
+    """An exclusion that disappears is silent: the next full index simply
+    re-embeds the tree and it outranks source again."""
+    assert pattern in ignore_patterns, f".socraticodeignore no longer excludes {pattern}"
+
+
+def test_first_party_skills_stay_indexed(ignore_patterns: list[str]):
+    """`skills/` holds this repo's committed skill overrides. The upstream
+    template excludes it; here that would drop first-party content, and its
+    vendor symlinks already resolve under the excluded skills-vendor/."""
+    assert "skills/" not in ignore_patterns
+
+
+@pytest.mark.parametrize("pattern", [p for p in EXPECTED_EXCLUSIONS if p.startswith("docs/")])
+def test_excluded_docs_stay_searchable_as_an_artifact(pattern: str):
+    """Excluding a docs tree is safe only while the context store still holds it.
+
+    The repo-root `.socraticodeignore` governs the code index, the manifest the
+    context store; drop the artifact too and the tree is unsearchable, which no
+    tool reports.
+    """
+    artifacts = json.loads(MANIFEST.read_text())["artifacts"]
+    paths = {a["path"].removeprefix("./").rstrip("/") + "/" for a in artifacts}
+    assert pattern in paths, f"{pattern} is excluded from the code index but is not an artifact"

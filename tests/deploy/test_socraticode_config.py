@@ -337,6 +337,14 @@ def test_index_excludes(pattern: str, ignore_patterns: list[str]):
     assert pattern in ignore_patterns, f".socraticodeignore no longer excludes {pattern}"
 
 
+@pytest.mark.parametrize("pattern", EXPECTED_EXCLUSIONS)
+def test_no_negation_re_includes_an_excluded_tree(pattern: str, ignore_patterns: list[str]):
+    """A later `!docs/plans/<file>` quietly undoes part of an exclusion while
+    `test_index_excludes` still sees the pattern and passes."""
+    negations = [p for p in ignore_patterns if p.startswith("!" + pattern)]
+    assert not negations, f".socraticodeignore re-includes part of {pattern}: {negations}"
+
+
 def test_first_party_skills_stay_indexed(ignore_patterns: list[str]):
     """`skills/` holds this repo's committed skill overrides. The upstream
     template excludes it; here that would drop first-party content, and its

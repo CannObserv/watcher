@@ -158,10 +158,12 @@ off it. earlyoom starts at 10% available (~790 MiB here) and works down it, so a
 session that holds the host past 90% without exhausting it would end watcher's
 database connections — a crash recovery once it escalates to SIGKILL at 5% — and
 then watcher itself, where the kernel takes nothing until memory is actually
-gone. Apart from those three, nothing on the list holds more than ~35 MB. The
-one session process it *can* reach is one launched under `choom -n 500`, which
-is how step 1's installs run, and their `MemoryMax=1536M` scope already
-contains them. CannObserv/replicator#112 declined it on the same class of host.
+gone. Apart from those three, nothing on the list holds more than ~35 MB.
+What contains a spiking session here is step 1: the pin keeps a launch from
+installing a server at all, and a deliberate install runs under `choom -n 500`
+inside a `MemoryMax=1536M` scope — the one session process earlyoom *could*
+reach, and one the scope already contains. CannObserv/replicator#112 declined
+it on the same class of host.
 
 `tests/deploy/test_earlyoom_decline.py` pins both halves live: earlyoom is not
 running (`apt install earlyoom` starts it at once, on stock arguments), and this

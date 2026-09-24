@@ -29,9 +29,8 @@ A systemd unit file is provided at `deploy/watcher.service`.
 
 > **Set the host's memory posture too** (#307, #309). This VM has no swap and
 > shares memory with agent sessions the OOM killer cannot pick, so the kernel
-> reserve, the shedder and the slice reservations are part of the install, not
-> tuning done later:
-> [HOST-MEMORY.md](HOST-MEMORY.md).
+> reserve and the slice reservations are part of the install, not tuning done
+> later: [HOST-MEMORY.md](HOST-MEMORY.md).
 
 ```bash
 # Create system env directory

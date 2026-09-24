@@ -4,6 +4,7 @@ Unit tests: _extraction_config_from_spec, _extract_with_spec.
 Integration tests: process_watched_item baseline + change detection paths.
 """
 
+import hashlib
 from datetime import UTC, datetime
 from unittest.mock import AsyncMock, patch
 
@@ -503,6 +504,16 @@ class TestCanonicalTextAdoption:
         outcome = _extract_and_fingerprint(_HTML, [_SPEC_FULL_PAGE])
         assert outcome.content_fingerprint == canonical_text_fingerprint(chunks)
         assert outcome.content_size_bytes == len(canonical_text(chunks))
+
+    def test_bytes_equal_the_join_they_replaced(self):
+        # The pre-#324 expression, verbatim: every stored fingerprint was
+        # computed over it, so equality here is what keeps them valid.
+        chunks = _extract_with_spec(_HTML, _SPEC_FULL_PAGE).chunks
+        assert canonical_text(chunks) == "\n".join(c.text for c in chunks).encode()
+        outcome = _extract_and_fingerprint(_HTML, [_SPEC_FULL_PAGE])
+        assert outcome.content_fingerprint == (
+            "sha256:" + hashlib.sha256("\n".join(c.text for c in chunks).encode()).hexdigest()
+        )
 
     def test_outcome_reports_the_processor_version(self):
         # Spelled through co-core's helper so Observo's fact and watcher's local

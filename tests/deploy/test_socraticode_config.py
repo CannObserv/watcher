@@ -6,9 +6,10 @@ cohort's shared Qdrant on `co-index`; both are committed so every checkout
 addresses the same collections wherever the working tree sits on disk.
 
 Hosting one here was ruled out on measurement, not taste: #307 found this host
-at 3.8 GiB with no swap, sharing memory with `watcher.service` and with agent
-sessions the OOM killer cannot touch (`oom_score_adj` -1000), while a cold
-local index peaks at ~1.2 G pulling two images and an embedding model.
+at 3.8 GiB with no swap (7.75 GiB since #309's resize, still swapless), sharing
+memory with `watcher.service` and with agent sessions the OOM killer cannot
+touch (`oom_score_adj` -1000), while a cold local index peaks at ~1.2 G pulling
+two images and an embedding model.
 
 Each assertion below pins a failure mode that reports itself as *green*:
 
@@ -21,7 +22,10 @@ Each assertion below pins a failure mode that reports itself as *green*:
   namespace while every health check still says green (trap 5);
 - an ungitignored `.claude/settings.local.json` puts the cohort's single Qdrant
   key one `git add -A` from GitHub, which is what happened in CannObserv/broker
-  (notifier#68, broker#18).
+  (notifier#68, broker#18);
+- a vanished `.socraticodeignore` exclusion re-embeds its tree on the next
+  update, and an excluded docs tree with no context artifact is unsearchable -
+  neither says so (#240, #300).
 
 Upstream design and decisions D0-D14: `docs/plans/2026-09-11-shared-qdrant-vm-design.md`
 in CannObserv/notifier, tracked by CannObserv/notifier#57.

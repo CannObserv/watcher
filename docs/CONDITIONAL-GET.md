@@ -63,7 +63,9 @@ next command is unconditional, and the item self-heals. Every other reason says
 nothing about our request options and leaves the pair alone.
 
 **The extraction generation is derived, not declared.** `EXTRACTION_GENERATION`
-is `"{installed co-core version}+{LOCAL_EXTRACTION_GENERATION}"`. co-core owns
+is co-core's `processor_version(LOCAL_EXTRACTION_GENERATION)` —
+`"{co-core version}+{LOCAL_EXTRACTION_GENERATION}"`, the same string a
+`content.derived` fact reports, so the two compare alike (#324). co-core owns
 extraction and arrives through the wheelhouse with no human in the loop, so a
 hand-bumped constant reproduced the `WATCHER_USER_AGENT` hazard one step
 quieter: an extractor change nobody bumped for would leave every 304-ing item

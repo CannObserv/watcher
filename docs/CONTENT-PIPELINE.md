@@ -149,6 +149,29 @@ false "content changed" is silent. The guard is in `process_watched_item`, not
 `_extract_and_fingerprint` — the extractor reports what it found, the caller
 judges it.
 
+### The fingerprint's bytes are co-core's (#324)
+
+Step 0 of the Observo-derived extraction design
+([design doc](plans/2026-09-24-observo-extraction-and-diff-design.md)).
+`content_fingerprint` is `co_core.pure.extract.canonical_text_fingerprint` over
+the chunks — byte-identical to the local join it replaced, so every stored
+fingerprint is already the address derived text will be stored under; co-core's
+per-extractor goldens trip on a fingerprint-moving change.
+
+`ChangeRevision` gained two **nullable** columns (`ccc7de7cabf8`):
+`spec_fingerprint` (previously discarded with the outbox row) and
+`processor_version` (`EXTRACTION_GENERATION`, spelled through co-core's
+`processor_version()` so a revision from a `content.derived` fact compares
+alike). NULL means *unknown* — pre-migration rows, or a spec co-core cannot
+derive from — and the design's Option A treats unknown as neither a spec label
+nor a re-baseline. Nothing reads either column yet.
+
+`src/core/media_type.py` re-exports `co_core.pure.extract.media_type`; its test
+pins *identity*, because the issuer resolves the dispatch essence onto the
+`content.process` command and the processor may re-resolve it. One behaviour
+change: `spec_schema_version` replaces `int(...)`, so a boolean `schema_version`
+raises `ExtractionError` where it read as `1`.
+
 ### Reporting revisions on `content.revisions` (#253)
 
 `SourceRevisionObservedEvent` carries values the outbox row never held, so

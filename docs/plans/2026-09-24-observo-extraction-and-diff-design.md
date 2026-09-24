@@ -1,6 +1,6 @@
 # Observo-derived extraction and the change diff — design
 
-**Status:** approved 2026-09-24; issues filed, not started. **Issue:** #222 (retitled and
+**Status:** approved 2026-09-24; cannobserv#486 shipped in co-core 0.19.4 and step 0 (#324) shipped the same day; #325 is next. **Issue:** #222 (retitled and
 split — see **#222 disposition**). **Cross-repo work:** filed 2026-09-24 as issues
 in co-core, broker, Observo and Archiver (numbers in **Section 6**); none of it is
 implemented from a Watcher session.
@@ -61,7 +61,19 @@ transform, and it is the one Watcher still runs in-process.
 
 ## Section 1 — the contract
 
-Defined in co-core, names proposed:
+**Shipped in co-core 0.19.4 (cannobserv#486, 2026-09-24) with six amendments**,
+argued in [cannobserv's deltas doc](https://github.com/CannObserv/cannobserv/blob/main/docs/plans/2026-09-24-content-process-contract-co-core-deltas.md)
+and folded into the tables below: the command carries one *resolved*
+`media_type` (the issuer runs `resolve_dispatch_essence`; the URL tiebreaker
+needs the origin URL, which the processor never sees); `empty ⇔
+canonical_text(chunks) == b""`; the spec's version is `spec_schema_version`;
+`input_digest` is bare hex and `output_digest` is `sha256:<hex>`;
+`ProcessingFailedEvent` carries `info_source_id`; and the essence → extractor
+map (`extractor_for_essence`) is lifted with the resolution. Normative text:
+co-core `docs/CHANGE_BUS.md` § *Watcher-issued processing*. #325 and
+observo#629 build against this shape.
+
+Defined in co-core:
 
 - **`content.process`** — commands, issuer → processor. Observo's group:
   `group_name(CONTENT_PROCESS, "observo")` → `observo.process`.
@@ -74,28 +86,31 @@ Defined in co-core, names proposed:
 |---|---|
 | `command_id` | fresh ULID per occasion (MUST-1 analogue) |
 | `info_source_id` | reporting only, never routing (#252 posture) |
-| `input_uri`, `input_digest` | the raw blob as the `content.blobs` fact named it |
-| `processor` | `"extract"` |
+| `input_uri`, `input_digest` | the raw blob as the `content.blobs` fact named it; `input_digest` **bare hex** (Replicator's spelling) |
+| `processor` | `"extract"` (`str` on the consumer class, `Literal` on `*Emit` — a second issuer may name another) |
 | `source_spec` | **one** spec document (D3) |
-| `media_type_hint`, `media_type_override` | the fact's normalized `media_type`; the item's operator override |
+| `media_type` | the **resolved** dispatch essence — `resolve_dispatch_essence(content_media_type, effective_url)` with the operator override applied, `None` ⇒ HTML. Resolution is idempotent, so a processor re-running it on the wire value gets the same answer |
 
 **`ProcessingCompleteEvent`**
 
 | Field | Notes |
 |---|---|
 | `command_id`, `info_source_id` | echoed |
-| `output_digest`, `output_uri` | `sha256:…` and `gs://…/blobs/<sha256>.bin`; both null when `empty` |
-| `output_size_bytes`, `output_media_type` | `text/plain; charset=utf-8` |
-| `empty` | `true` ⇒ the spec bound nothing; nothing was stored (D5) |
-| `spec_fingerprint`, `schema_version` | co-core's derivation over the spec that ran |
+| `output_digest`, `output_uri` | **`sha256:<hex>`** (equals the stored `content_fingerprint`) and `gs://…/blobs/<sha256>.bin`; both null when `empty` — a validator on the consumer-facing class rejects the contradiction |
+| `output_size_bytes`, `output_media_type` | `CANONICAL_TEXT_MEDIA_TYPE` (`text/plain; charset=utf-8`); `*Emit` refuses any other |
+| `empty` | **`canonical_text(chunks) == b""`** — bytes, not chunk count (a one-page scanned PDF is one empty chunk); nothing stored (D5) |
+| `spec_fingerprint`, `spec_schema_version` | co-core's derivations over the spec that ran (`schema_version` is every payload's wire-format field) |
 | `processor_version` | `"{co-core version}+{Observo local extraction generation}"` (D4) |
 
-**`ProcessingFailedEvent`**: `command_id`, `reason`, `terminal`, `detail`. Reasons:
-`extraction_error` (terminal), `unsupported_media_type` (terminal),
-`input_unreadable` (terminal for this command; the issuer re-fetches),
-`input_digest_mismatch` (terminal), `transient` (non-terminal — Observo publishes
-this only if it chooses to surface a retry; otherwise it publishes nothing and the
-pending entry is reclaimed).
+**`ProcessingFailedEvent`**: `command_id`, `info_source_id`, `reason`, `terminal`,
+`detail`. Reasons: `extraction_error`, `unsupported_media_type`,
+`unsupported_processor`, `input_digest_mismatch` (all terminal, no re-fetch);
+`input_unreadable` (terminal for this command — the bytes are gone, the issuer
+re-fetches, capped); `invalid_input` (terminal, **no re-fetch** — `input_uri` is
+not a reference the processor's store recognizes); `transient` (non-terminal —
+Observo publishes this only if it chooses to surface a retry; otherwise it
+publishes nothing and the pending entry is reclaimed). Idempotency keys:
+`command_id` for the command, `command_id:occurred_at` for both facts.
 
 **Guarantees**
 
@@ -178,7 +193,7 @@ latest derived fact, feeding `validator_source_key` (below).
 
 | Fact | Handling |
 |---|---|
-| blob fact | stamp `last_full_fetch_at`, copy validators (#269 unchanged), fetch row → `PROCESSING`, issue process command for spec[0] |
+| blob fact | stamp `last_full_fetch_at`, copy validators (#269 unchanged), fetch row → `PROCESSING`, resolve the dispatch essence (`resolve_dispatch_essence`, override applied) and issue the process command for spec[0] carrying it |
 | derived, non-empty | supersession guard; then baseline / equal (#293 renewal) / change (Option A) |
 | derived, `empty` | spec[i+1] exists → issue it (new `command_id`, same `intent_id`); else the existing extraction-failure path: `CHECK_EXTRACTION_FAILED`, ERROR health, `clear_validators` |
 | `processing_failed`, terminal | extraction-failure path, `failure_detail` in the audit |
@@ -223,9 +238,11 @@ table both change; `group_name`, never a literal.
    an `objectViewer` grant. observo#491's `gs://` refusal governs operator-typed job
    URLs; bus inputs are a separate path and that rule is not extended to them. Verify
    the bytes hash to `input_digest`; mismatch is terminal.
-4. **Extraction** — co-core HTML/PDF/CSV extractors from one spec, co-core's
-   media-type dispatch; co-core pin raised, and **matched to Watcher's version at
-   cutover** (Section 5). `processor_version` per D4.
+4. **Extraction** — co-core HTML/PDF/CSV extractors from one spec, chosen by
+   `dispatch.extractor_for_essence` on the `media_type` the command carries
+   (the issuer resolved it; cannobserv#486 D1); co-core pin raised, and
+   **matched to Watcher's version at cutover** (Section 5). `processor_version`
+   per D4, spelled through co-core's `processor_version()`.
 5. **Output** — `canonical_text` bytes to `gs://co-gcs-observo/blobs/<sha256>.bin`
    through observo#628 step 2's write path and `blobs` table; write-if-absent, never
    deleted; `empty` writes nothing.

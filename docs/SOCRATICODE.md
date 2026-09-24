@@ -297,7 +297,7 @@ returns. Measured 2026-09-24: the session's file watcher took the `docs/plans/` 
 from 3,857 to 2,490 chunks, and the query above lost every plan hit, with no
 `codebase_remove` — the collection was never empty. With no watcher running,
 `codebase_update` does the same. (#240's vendor hits outlived its edit until a clean
-rebuild, on an older server.)
+rebuild; why — no update ran, or the server of the day did not purge — was not recorded.)
 
 ### Shared index on `co-index` (#300)
 

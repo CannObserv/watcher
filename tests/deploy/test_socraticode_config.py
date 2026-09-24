@@ -319,14 +319,16 @@ def test_session_spec_matches_the_driver_pin(settings_env: dict):
 
 
 def test_vscode_launches_claude_with_the_session_spec(settings_env: dict):
-    """The settings `env` block alone does not reach the session's launch.
+    """The settings `env` block alone did not reach this host's session launch.
 
-    Measured 2026-09-24 on Claude Code 2.1.280: a reloaded VS Code session's
-    server carried `SOCRATICODE_SPEC=socraticode@1.14.0` in its environment and
-    ran `npm exec socraticode@latest` - the plugin's args are expanded before
-    the project block is merged, which then reaches the child anyway. Present
-    at exec, the same variable launched 1.14.0. Without this copy the session
-    floats while preflight, reading the merged environment, reports it pinned.
+    Measured 2026-09-24 on the VS Code extension's 2.1.280: a reloaded
+    session's server carried `SOCRATICODE_SPEC=socraticode@1.14.0` in its
+    environment and ran `npm exec socraticode@latest` - its args were expanded
+    without the block, whose merged environment still reached the child.
+    Present at exec, the same variable launched 1.14.0. co-replicator's 2.1.280
+    was pinned by the block alone, for reasons not yet known
+    (gregoryfoster/skills#332), so this copy stays. Without it the session can
+    float while preflight, reading the merged environment, reports it pinned.
     """
     if not VSCODE_SERVER.is_dir():
         pytest.skip(f"{VSCODE_SERVER} not present on this machine")

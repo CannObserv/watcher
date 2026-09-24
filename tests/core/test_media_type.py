@@ -1,6 +1,10 @@
 """Tests for media-type dispatch helpers (#168 slice 2)."""
 
+import co_core.pure.extract as co_extract
+
+from src.core import media_type as watcher_media_type
 from src.core.media_type import (
+    AMBIGUOUS_MEDIA_TYPES,
     extension_media_type,
     extraction_overrides_for_essence,
     media_type_essence_of,
@@ -8,6 +12,29 @@ from src.core.media_type import (
 )
 
 _XLSX = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+
+
+class TestDispatchIsCoCores:
+    """#324: the dispatch rule lives in co-core; this module only re-exports it.
+
+    cannobserv#486 D1: the issuer resolves the essence and puts it on the
+    ``content.process`` command, and the processor may re-resolve it. That is
+    safe only if both run the *same* function — a byte-identical copy drifts
+    the first time either side edits it. Identity, not equality of results.
+    """
+
+    def test_every_public_name_is_the_co_core_object(self):
+        for name in (
+            "AMBIGUOUS_MEDIA_TYPES",
+            "extension_media_type",
+            "extraction_overrides_for_essence",
+            "media_type_essence_of",
+            "resolve_dispatch_essence",
+        ):
+            assert getattr(watcher_media_type, name) is getattr(co_extract, name), name
+
+    def test_ambiguous_set_is_the_shared_one(self):
+        assert AMBIGUOUS_MEDIA_TYPES is co_extract.AMBIGUOUS_MEDIA_TYPES
 
 
 class TestMediaTypeEssenceOf:

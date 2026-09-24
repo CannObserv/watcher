@@ -44,7 +44,8 @@ import hashlib
 import json
 import os
 from datetime import datetime, timedelta
-from importlib.metadata import PackageNotFoundError, version
+
+from co_core.pure.extract import processor_version
 
 from src.core.logging import get_logger
 
@@ -91,15 +92,12 @@ def extraction_generation() -> str:
     would put the human step back exactly where it failed. A wasted full fetch
     costs a page; a missed one costs an inherited fingerprint nobody can see.
 
-    A missing distribution degrades to a sentinel rather than raising: the issue
-    path must not fall over for a packaging problem, and an unknown version
-    simply forces unconditional fetches, which is the safe direction.
+    Spelled through co-core's ``processor_version`` (#324, cannobserv#486): the
+    identical string a processor reports on a ``content.derived`` fact, so the
+    shadow comparator and the diff design's Option A compare like with like.
+    The format is co-core's to define, not transcribed here.
     """
-    try:
-        co_core = version(CO_CORE_DISTRIBUTION)
-    except PackageNotFoundError:
-        co_core = "unknown"
-    return f"{co_core}+{LOCAL_EXTRACTION_GENERATION}"
+    return processor_version(LOCAL_EXTRACTION_GENERATION)
 
 
 EXTRACTION_GENERATION = extraction_generation()

@@ -8,7 +8,15 @@ from datetime import UTC, datetime
 from unittest.mock import AsyncMock, patch
 
 import pytest
-from co_core.pure.extract import derivation_of, spec_fingerprint
+from co_core.pure.extract import (
+    CANONICAL_TEXT_MEDIA_TYPE,
+    canonical_text,
+    canonical_text_fingerprint,
+    derivation_of,
+    processor_version,
+    spec_fingerprint,
+    spec_schema_version,
+)
 from co_core.pure.extract.csv_excel import CsvExcelExtractor
 from co_core.pure.extract.html import HtmlExtractor
 from co_core.pure.extract.pdf import PdfExtractor
@@ -16,6 +24,7 @@ from sqlalchemy import select
 
 from src.core.models.change_revision import ChangeRevision
 from src.core.models.pending_archiver_sync import PendingArchiverSync
+from src.core.validators import EXTRACTION_GENERATION, LOCAL_EXTRACTION_GENERATION
 from src.workers.pipeline import (
     BlobProvenance,
     ExtractionError,
@@ -477,6 +486,98 @@ class TestSpecFingerprintOnOutcome:
         outcome = _extract_and_fingerprint(_HTML, [_SPEC_FULL_PAGE])
 
         assert outcome.content_media_type == "text/plain; charset=utf-8"
+
+
+class TestCanonicalTextAdoption:
+    """#324: the fingerprint's bytes are co-core's `canonical_text`, not a local join.
+
+    The derived text is about to be stored permanently by hash and compared
+    across two services (cannobserv#486), so the bytes the hash covers are
+    defined once, in co-core. Every stored ``content_fingerprint`` must already
+    equal ``canonical_text_fingerprint`` of the same chunks — the equality the
+    design's diff and shadow comparator both stand on.
+    """
+
+    def test_fingerprint_is_canonical_text_fingerprint_of_the_chunks(self):
+        chunks = _extract_with_spec(_HTML, _SPEC_FULL_PAGE).chunks
+        outcome = _extract_and_fingerprint(_HTML, [_SPEC_FULL_PAGE])
+        assert outcome.content_fingerprint == canonical_text_fingerprint(chunks)
+        assert outcome.content_size_bytes == len(canonical_text(chunks))
+
+    def test_outcome_reports_the_processor_version(self):
+        # Spelled through co-core's helper so Observo's fact and watcher's local
+        # extraction agree character for character (design Section 5, shadow).
+        outcome = _extract_and_fingerprint(_HTML, [_SPEC_FULL_PAGE])
+        assert outcome.processor_version == processor_version(LOCAL_EXTRACTION_GENERATION)
+        assert outcome.processor_version == EXTRACTION_GENERATION
+
+    def test_content_media_type_is_the_canonical_constant(self):
+        outcome = _extract_and_fingerprint(_HTML, [_SPEC_FULL_PAGE])
+        assert outcome.content_media_type == CANONICAL_TEXT_MEDIA_TYPE
+
+    def test_schema_version_is_derived_by_co_core(self):
+        # `spec_schema_version` coerces a digit string the way the local
+        # `int(...)` always did, and rejects a bool where `int(True)` silently
+        # read 1 — the processor and the issuer must not default differently.
+        spec = {"schema_version": "2", "extraction": {"algorithm": "full_page"}}
+        assert _extract_and_fingerprint(_HTML, [spec]).schema_version == 2
+        assert _extract_and_fingerprint(_HTML, [spec]).schema_version == spec_schema_version(spec)
+        malformed = {"schema_version": True, "extraction": {"algorithm": "full_page"}}
+        with pytest.raises(ValueError):
+            _extract_and_fingerprint(_HTML, [malformed])
+
+
+@pytest.mark.integration
+class TestRevisionExtractionIdentity:
+    """#324: a revision records which spec and which processor produced it.
+
+    Both were computed and discarded with the outbox row. The design's Option A
+    reads them off the previous and current revisions to tell a spec-induced
+    or processor-induced fingerprint move from a content change; NULL on a row
+    written before this landed means *unknown* and triggers neither.
+    """
+
+    async def _revisions(self, db_session, wi):
+        return (
+            (
+                await db_session.execute(
+                    select(ChangeRevision)
+                    .where(ChangeRevision.watched_item_id == wi.id)
+                    .order_by(ChangeRevision.captured_at)
+                )
+            )
+            .scalars()
+            .all()
+        )
+
+    async def test_baseline_carries_spec_and_processor_identity(self, db_session):
+        wi = await make_watched_item(db_session, name="Identity baseline")
+        wi.effective_url = "https://example.com"
+        wi.source_specs = [_SPEC_FULL_PAGE]
+        await db_session.flush()
+
+        await process_watched_item(db_session, wi, raw_content=_HTML, blob=_BLOB)
+        await db_session.flush()
+
+        (baseline,) = await self._revisions(db_session, wi)
+        assert baseline.spec_fingerprint == spec_fingerprint(_SPEC_FULL_PAGE)
+        assert baseline.processor_version == EXTRACTION_GENERATION
+
+    async def test_change_carries_the_spec_that_matched(self, db_session):
+        wi = await make_watched_item(db_session, name="Identity change")
+        wi.effective_url = "https://example.com"
+        wi.source_specs = [_SPEC_MISSES, _SPEC_FULL_PAGE]
+        await db_session.flush()
+
+        with patch("src.workers.pipeline.dispatch_event_notifications", new_callable=AsyncMock):
+            await process_watched_item(db_session, wi, raw_content=_HTML, blob=_BLOB)
+            await db_session.flush()
+            await process_watched_item(db_session, wi, raw_content=_HTML_CHANGED, blob=_BLOB)
+            await db_session.flush()
+
+        _baseline, change = await self._revisions(db_session, wi)
+        assert change.spec_fingerprint == spec_fingerprint(_SPEC_FULL_PAGE)
+        assert change.processor_version == EXTRACTION_GENERATION
 
 
 @pytest.mark.integration

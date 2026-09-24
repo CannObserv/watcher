@@ -7,14 +7,17 @@ is a baseline (no notification); subsequent changes dispatch CHANGE_DETECTED
 once for the WatchedItem (the single monitored entity, #191).
 """
 
-import hashlib
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 
 from co_core.pure.extract import (
+    CANONICAL_TEXT_MEDIA_TYPE,
     ExtractionResult,
     Extractor,
+    canonical_text,
+    canonical_text_fingerprint,
     spec_fingerprint,
+    spec_schema_version,
 )
 from co_core.pure.extract import (
     extraction_config_from_spec as _extraction_config_from_spec,
@@ -36,15 +39,9 @@ from src.core.notifications.events import WatchEvent, WatchEventType
 from src.core.notifications.notify import dispatch_event_notifications
 from src.core.registry import ServiceRegistry, get_registry
 from src.core.utils import format_utc_iso, watched_item_event_base_metadata
+from src.core.validators import EXTRACTION_GENERATION
 
 logger = get_logger(__name__)
-
-# The media type of the EXTRACTED content, not of what the origin served. Every
-# extractor in the registry produces text, joined and UTF-8 encoded; the wire
-# keeps this and ``source_media_type`` as separate fields precisely because they
-# differ for one revision (an HTML page is served text/html; the text extracted
-# from it is not).
-EXTRACTED_CONTENT_MEDIA_TYPE = "text/plain; charset=utf-8"
 
 # The provenance fields ``SourceRevisionObservedEmit`` requires — the ones a
 # renewal must not blank out on a queued row (#293, CR 1). Named here rather
@@ -127,7 +124,14 @@ class ExtractionOutcome:
     # fallback from spec[0] to spec[1] moves it (cannobserv#309). ``None`` when
     # co-core cannot derive one; a diagnostic must never fail the pipeline.
     spec_fingerprint: str | None = None
-    content_media_type: str = EXTRACTED_CONTENT_MEDIA_TYPE
+    # The media type of the EXTRACTED text, not of what the origin served; the
+    # wire keeps it beside ``source_media_type`` because they differ for one
+    # revision. co-core's constant (#324): a derived fact reports the same one.
+    content_media_type: str = CANONICAL_TEXT_MEDIA_TYPE
+    # Identity of the extraction itself (#324): the same string a processor
+    # reports as ``processor_version`` on a derived fact, so a revision written
+    # by local extraction and one written from Observo's fact compare alike.
+    processor_version: str = EXTRACTION_GENERATION
 
 
 def _provenance_columns(blob: BlobProvenance, outcome: ExtractionOutcome) -> dict[str, object]:
@@ -182,12 +186,15 @@ def _extract_and_fingerprint(
         used_spec = spec
         if result.chunks:
             break
-    content_bytes = "\n".join(c.text for c in result.chunks).encode()
-    fingerprint = "sha256:" + hashlib.sha256(content_bytes).hexdigest()
+    # The bytes the fingerprint covers are co-core's to define (#324,
+    # cannobserv#486): the derived text is stored permanently by hash and
+    # compared across services, so the join is not spelled here. Byte-identical
+    # to the local join it replaces, which is what keeps every stored
+    # fingerprint valid.
     return ExtractionOutcome(
-        content_fingerprint=fingerprint,
-        content_size_bytes=len(content_bytes),
-        schema_version=int(used_spec.get("schema_version", 1)),
+        content_fingerprint=canonical_text_fingerprint(result.chunks),
+        content_size_bytes=len(canonical_text(result.chunks)),
+        schema_version=spec_schema_version(used_spec),
         spec_fingerprint=(
             _spec_fingerprint_or_none(used_spec, spec_id=spec_id) if source_specs else None
         ),
@@ -435,6 +442,8 @@ async def process_watched_item(
                 captured_at=now,
                 content_size_bytes=outcome.content_size_bytes,
                 schema_version=outcome.schema_version,
+                spec_fingerprint=outcome.spec_fingerprint,
+                processor_version=outcome.processor_version,
             )
         )
         return WatchedItemResult(baseline_established=True)
@@ -458,6 +467,8 @@ async def process_watched_item(
         captured_at=now,
         content_size_bytes=outcome.content_size_bytes,
         schema_version=outcome.schema_version,
+        spec_fingerprint=outcome.spec_fingerprint,
+        processor_version=outcome.processor_version,
     )
     session.add(rev)
     await session.flush()  # populate rev.id before the outbox row references it

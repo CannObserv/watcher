@@ -10,10 +10,11 @@ The rules under test, and why each exists, are in
 
 import logging
 from datetime import UTC, datetime, timedelta
-from importlib.metadata import PackageNotFoundError, version
+from importlib.metadata import version
 from types import SimpleNamespace
 
 import pytest
+from co_core.pure.extract import processor_version
 
 from src.core.validators import (
     CO_CORE_DISTRIBUTION,
@@ -210,14 +211,12 @@ class TestExtractionGeneration:
     def test_carries_the_local_generation(self):
         assert str(LOCAL_EXTRACTION_GENERATION) in EXTRACTION_GENERATION
 
-    def test_a_missing_distribution_does_not_raise(self, monkeypatch):
-        # Wheelhouse trouble must not take the issue path down; an unknown
-        # version simply invalidates, which is the safe direction.
-        def _boom(_name):
-            raise PackageNotFoundError(_name)
-
-        monkeypatch.setattr("src.core.validators.version", _boom)
-        assert extraction_generation()
+    def test_is_spelled_through_co_core_processor_version(self):
+        # #324: the same string Observo reports as `processor_version` on a
+        # derived fact, so the shadow comparator and Option A compare like with
+        # like. The format is co-core's to define, not transcribed here.
+        assert EXTRACTION_GENERATION == processor_version(LOCAL_EXTRACTION_GENERATION)
+        assert extraction_generation() == EXTRACTION_GENERATION
 
 
 class TestConditionalGetEnabled:

@@ -33,3 +33,13 @@ class ChangeRevision(Base):
     captured_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     content_size_bytes: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     schema_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    # Which extraction produced the fingerprint (#324): co-core's derivation over
+    # the spec the fallback loop actually bound, and the processor's version
+    # string (co-core version + local generation). The diff design reads both
+    # off the previous and current revisions to tell a spec- or processor-
+    # induced fingerprint move from a content change. NULL on a row written
+    # before this landed means *unknown* and must trigger neither label nor
+    # re-baseline. `spec_fingerprint` is also NULL when co-core cannot derive
+    # one (a malformed spec is a diagnostic, never a lost revision).
+    spec_fingerprint: Mapped[str | None] = mapped_column(Text, nullable=True)
+    processor_version: Mapped[str | None] = mapped_column(Text, nullable=True)

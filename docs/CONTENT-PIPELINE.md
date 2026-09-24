@@ -183,7 +183,6 @@ columns on `pending_archiver_sync`, the drain's two failure classes, what
 retired with the scratch-cache transport, and the #293 renewal that re-announces
 an unchanged fingerprint's blob reference.
 
-
 ### `info_source_id` on the wire (#252)
 
 co-core **0.8.0** (cannobserv#300) makes `info_source_id` required on all three

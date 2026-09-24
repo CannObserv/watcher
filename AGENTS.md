@@ -26,13 +26,21 @@ Auth, upgrade procedure and the pinned version: [docs/DEPLOYMENT.md](docs/DEPLOY
 `co-core` owns fetch → extract → fingerprint; watcher no longer fetches at all —
 [docs/CONTENT-PIPELINE.md](docs/CONTENT-PIPELINE.md).
 
+<!-- BEGIN socraticode-policy -->
 ## Code Exploration Policy
 
-SocratiCode indexes this repo into the cohort's **shared store on `co-index`, never locally** (#300); `includeLinked: true` also answers from the sibling repos, none on disk. Its MCP tools are **deferred**: schemas load only after a `ToolSearch` prefetch, which the SessionStart hook prints — run it before exploring. A second, daily health hook **reports only** — confirm with `codebase_status` before acting on it.
+SocratiCode indexes into the cohort's **shared store on `co-index`, never locally** (#300); `includeLinked: true` also answers from sibling repos, none on disk. Its MCP tools are **deferred**: run the SessionStart hook's `ToolSearch` prefetch first. The daily health hook **reports only** — confirm with `codebase_status` before acting on it.
 
-**Negative rule.** Broad semantic questions ("where is X", "how does Y work", "what depends on Z") go to SocratiCode first; `grep`/`ripgrep` only for exact strings (error messages, log lines, known symbols); the Explore subagent only for path-pattern walks (`*.py` under `src/api/routes/`), never semantic search. **Empty is not absent:** an unreachable collection is skipped silently and never surfaced in the result, so verify the store before trusting a miss, then `grep` for that session.
+**Negative rule.** Semantic questions go to SocratiCode first; `grep`/`rg` only for exact strings; the Explore subagent only for path-pattern walks (`*.py` under `src/api/routes/`). **Empty is not absent:** an unreachable collection is skipped silently, so verify the store before trusting a miss, then `grep` for that session.
 
-Client contract and traps: [docs/SOCRATICODE.md](docs/SOCRATICODE.md).
+| Goal | Tool |
+|---|---|
+| Where is X / how does Y work / what touches Z | `codebase_search` |
+| Exact string (errors, log lines, known symbols) | `grep` / `rg` |
+| Imports/dependents of a file · blast radius | `codebase_graph_query` / `codebase_impact` |
+
+Full tool table, index scope, client contract and traps: [docs/SOCRATICODE.md](docs/SOCRATICODE.md).
+<!-- END socraticode-policy -->
 
 ## Infrastructure
 
@@ -189,8 +197,8 @@ A skill is symlinked into both `skills/` and `.claude/skills/`; overrides in `sk
 - [docs/RECOVERY.md](docs/RECOVERY.md) — nightly DB backup to GCS, restore, go/no-go gates; dated [rehearsals](docs/RECOVERY-REHEARSALS.md)
 - [docs/MIGRATIONS.md](docs/MIGRATIONS.md) — the manual upgrade step, the two-role grants, one-time orderings
 - [docs/reference/tailscale.md](docs/reference/tailscale.md) — this node: identity, peers, the cold-boot race, ACL rules
-- [docs/SKILLS.md](docs/SKILLS.md) — skill triggers, vendored skill repos, SocratiCode goal→tool table, index scope, prefetch query
-- [docs/SOCRATICODE.md](docs/SOCRATICODE.md) — the shared index on co-index: client contract, the green-failing traps, link stubs
+- [docs/SKILLS.md](docs/SKILLS.md) — skill triggers, vendored skill repos, the SessionStart hooks
+- [docs/SOCRATICODE.md](docs/SOCRATICODE.md) — tool table, index scope, the co-index client contract, green-failing traps, link stubs
 - [docs/STYLE.md](docs/STYLE.md) — the design system: brand, color, dark mode, tokens, layout, touch targets, accessibility
 - [docs/UI.md](docs/UI.md) — the component library, the HTMX/flash patterns
 - [docs/WATCHED-ITEMS.md](docs/WATCHED-ITEMS.md) — the entity: fields, schedule resolution, reconciliation, domain keying, media-type dispatch, template CRUD, notifications

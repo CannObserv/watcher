@@ -28,7 +28,9 @@ Each assertion below pins a failure mode that reports itself as *green*:
   neither says so (#240, #300);
 - a floating `SOCRATICODE_SPEC`, or one re-pinned apart from the driver's
   pre-install, installs a server at session start while every check on the
-  pinned driver passes (#322).
+  pinned driver passes; and one declared only in the settings `env` block
+  never reaches the plugin's launch, while preflight, reading it back from
+  the session's environment, reports the session pinned (#322).
 
 Upstream design and decisions D0-D14: `docs/plans/2026-09-11-shared-qdrant-vm-design.md`
 in CannObserv/notifier, tracked by CannObserv/notifier#57.
@@ -284,22 +286,24 @@ def test_no_api_key_in_the_committed_settings(settings_env: dict):
 
 
 def test_session_spec_is_an_exact_version(settings_env: dict):
-    """Unset, the session floats on `socraticode@latest` - the #307 install peak.
+    """The repo's declared spec - the value every other copy is checked against.
 
-    Before #322 this host was half pinned: the health hook, `index` and
-    `preflight.sh --check` ran the pre-install and passed, while every session
-    start still installed through npx. Nothing red reported the gap; preflight
-    printed a warning and PASSED.
+    Alone it does not pin the session (see
+    test_vscode_launches_claude_with_the_session_spec), but preflight and the
+    health hook read it, and the machine setting must match it. Before #322
+    this host was half pinned: the health hook, `index` and `preflight.sh
+    --check` ran the pre-install and passed, while every session start still
+    installed through npx.
     """
     spec = settings_env.get("SOCRATICODE_SPEC")
-    assert spec is not None, "SOCRATICODE_SPEC is unset: the session launches socraticode@latest"
+    assert spec is not None, "SOCRATICODE_SPEC is unset: no spec for the session to be held to"
     assert EXACT_SESSION_SPEC.fullmatch(spec), f"SOCRATICODE_SPEC={spec!r} is not an exact version"
 
 
 def test_session_spec_matches_the_driver_pin(settings_env: dict):
-    """A re-pin is two edits now: the pre-install and `SOCRATICODE_SPEC`.
+    """A re-pin is several edits now: the pre-install and each `SOCRATICODE_SPEC`.
 
-    Do one alone and the session installs the version the driver does not run -
+    Miss one and the session installs the version the driver does not run -
     two builds writing one store - which `health-check` reports only once they
     differ by a minor release, and only once a day. Host state, hence the skip.
     """

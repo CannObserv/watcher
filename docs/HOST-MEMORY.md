@@ -38,7 +38,7 @@ SocratiCode here, each pinned on its own, both at **1.14.0**:
   environment **at exec**: `claudeCode.environmentVariables` in
   `~/.vscode-server/data/Machine/settings.json` sets
   `SOCRATICODE_SPEC=socraticode@1.14.0` (#322). `.claude/settings.json`'s `env`
-  block carries the same value, and alone it pins nothing — below.
+  block carries the same value; alone, it did not pin the session here — below.
 
 `--prefer-online` revalidates against the registry on *every* launch, so a
 floating spec installs on any day the package moved. An exact one resolves from
@@ -57,14 +57,19 @@ plugin 1.6.1, whose hardcoded `npx -y socraticode` could not be pinned at all.
 plugin marketplace update socraticode`, then `claude plugin update
 socraticode@socraticode`, fixes it.
 
-**The settings `env` block is not enough.** Claude Code expands the plugin's
-args before it merges the project block, then hands the merged environment to
-the server anyway. Measured 2026-09-24 on 2.1.280, after a window reload: the
-server's environment held `SOCRATICODE_SPEC=socraticode@1.14.0`, its argv
-`npm exec socraticode@latest`. Present at exec (inherited, or `--settings`),
-the same variable launched 1.14.0 on 2.1.280 and 2.1.281. The machine setting
-is machine-scoped, so it cannot be a committed workspace setting; a terminal
-`claude` needs the variable exported in its shell.
+**The settings `env` block is not enough here.** Measured 2026-09-24 on the VS
+Code extension's 2.1.280, after a window reload: the server's environment held
+`SOCRATICODE_SPEC=socraticode@1.14.0`, its argv `npm exec socraticode@latest` —
+the plugin's args were expanded without the block, whose merged environment
+still reached the child. Present at exec (inherited, or `--settings`), the same
+variable launched 1.14.0 on 2.1.280 and 2.1.281; with the machine setting, a
+fully reconnected session (extension 2.1.281 by then) launched `npm exec
+socraticode@1.14.0`. On co-replicator's 2.1.280 the block alone did pin the
+session (gregoryfoster/skills#327); why the hosts differ is unknown
+(gregoryfoster/skills#332), and whether the block alone works on 2.1.281 is
+unmeasured — so keep the machine setting. It is machine-scoped, so it cannot be
+a committed workspace setting; a terminal `claude` needs the variable exported
+in its shell.
 
 Re-pin as a decision, never on a schedule, and do all four steps —
 `tests/deploy/test_socraticode_config.py` fails when the pre-install, the

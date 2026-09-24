@@ -37,6 +37,7 @@ in CannObserv/notifier, tracked by CannObserv/notifier#57.
 """
 
 import json
+import os
 import re
 import subprocess
 from pathlib import Path
@@ -79,10 +80,10 @@ NAMESPACE_GUARD_VARS = ["QDRANT_COLLECTION_PREFIX", "SOCRATICODE_BRANCH_AWARE"]
 #: resolve against the registry, and install on any day the package moved.
 EXACT_SESSION_SPEC = re.compile(r"socraticode@(\d+\.\d+\.\d+)")
 
-#: The driver's pre-install (#307). VM-local, so its test skips in CI.
-DRIVER_PIN_MANIFEST = (
-    Path.home() / ".socraticode" / "pin" / "node_modules" / "socraticode" / "package.json"
-)
+#: The driver's pre-install (#307), resolved as mcp-driver.mjs pinDir() does:
+#: SOCRATICODE_PIN_DIR when set and non-empty. VM-local, so its test skips in CI.
+DRIVER_PIN_DIR = Path(os.environ.get("SOCRATICODE_PIN_DIR") or Path.home() / ".socraticode" / "pin")
+DRIVER_PIN_MANIFEST = DRIVER_PIN_DIR / "node_modules" / "socraticode" / "package.json"
 
 #: Where a VS Code session gets the spec before the plugin's args are expanded.
 #: `claudeCode.environmentVariables` is machine-scoped, so it cannot be a

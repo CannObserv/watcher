@@ -174,7 +174,7 @@ and in `.git/socraticode-health.log` (tail-bounded to 200 lines); act on them
 with `codebase_index` or by re-running `init-socraticode`.
 
 **It costs one session start per UTC day.** Measured here at **~8s** against a
-warm MCP server; a cold start pays for `npx -y socraticode` on top, bounded by
+warm MCP server; a cold start pays for the pinned server's launch on top, bounded by
 the `HEALTH_TIMEOUT_MS=60000` ceiling the hook exports. A day-stamped lock in
 `.git/` means every other session that day is free. If a session start stalls
 for several seconds with no output, this is why — it is not hung.

@@ -25,13 +25,17 @@ Each assertion below pins a failure mode that reports itself as *green*:
   (notifier#68, broker#18);
 - a vanished `.socraticodeignore` exclusion re-embeds its tree on the next
   update, and an excluded docs tree with no context artifact is unsearchable -
-  neither says so (#240, #300).
+  neither says so (#240, #300);
+- a floating `SOCRATICODE_SPEC`, or one re-pinned apart from the driver's
+  pre-install, installs a server at session start while every check on the
+  pinned driver passes (#322).
 
 Upstream design and decisions D0-D14: `docs/plans/2026-09-11-shared-qdrant-vm-design.md`
 in CannObserv/notifier, tracked by CannObserv/notifier#57.
 """
 
 import json
+import re
 import subprocess
 from pathlib import Path
 
@@ -66,6 +70,17 @@ EXPECTED_ENV = {
 #: well as the per-project ones, and branch-awareness appends the branch name to
 #: the project id - a fresh six-collection set, re-indexed from empty, per branch.
 NAMESPACE_GUARD_VARS = ["QDRANT_COLLECTION_PREFIX", "SOCRATICODE_BRANCH_AWARE"]
+
+#: The plugin's live manifest launches `npx -y --prefer-online
+#: ${SOCRATICODE_SPEC:-socraticode@latest}` (#322). Only an exact version
+#: resolves from the npx cache; `latest`, a range or a bare name makes npm
+#: resolve against the registry, and install on any day the package moved.
+EXACT_SESSION_SPEC = re.compile(r"socraticode@(\d+\.\d+\.\d+)")
+
+#: The driver's pre-install (#307). VM-local, so its test skips in CI.
+DRIVER_PIN_MANIFEST = (
+    Path.home() / ".socraticode" / "pin" / "node_modules" / "socraticode" / "package.json"
+)
 
 #: Every env surface on this host. The first four are the ones that actually
 #: reach the MCP server -- it launches from an agent session, so it inherits
@@ -260,6 +275,36 @@ def test_no_api_key_in_the_committed_settings(settings_env: dict):
     promising more than it checks is how broker's assertion read as true.
     """
     assert "QDRANT_API_KEY" not in settings_env
+
+
+def test_session_spec_is_an_exact_version(settings_env: dict):
+    """Unset, the session floats on `socraticode@latest` - the #307 install peak.
+
+    Before #322 this host was half pinned: the health hook, `index` and
+    `preflight.sh --check` ran the pre-install and passed, while every session
+    start still installed through npx. Nothing red reported the gap; preflight
+    printed a warning and PASSED.
+    """
+    spec = settings_env.get("SOCRATICODE_SPEC")
+    assert spec is not None, "SOCRATICODE_SPEC is unset: the session launches socraticode@latest"
+    assert EXACT_SESSION_SPEC.fullmatch(spec), f"SOCRATICODE_SPEC={spec!r} is not an exact version"
+
+
+def test_session_spec_matches_the_driver_pin(settings_env: dict):
+    """A re-pin is two edits now: the pre-install and `SOCRATICODE_SPEC`.
+
+    Do one alone and the session installs the version the driver does not run -
+    two builds writing one store - which `health-check` reports only once they
+    differ by a minor release, and only once a day. Host state, hence the skip.
+    """
+    if not DRIVER_PIN_MANIFEST.is_file():
+        pytest.skip(f"{DRIVER_PIN_MANIFEST} not present on this machine")
+    pinned = json.loads(DRIVER_PIN_MANIFEST.read_text())["version"]
+    match = EXACT_SESSION_SPEC.fullmatch(settings_env.get("SOCRATICODE_SPEC", ""))
+    session = match.group(1) if match else None
+    assert session == pinned, (
+        f"the driver is pinned at socraticode {pinned}, the session launches {session}: re-pin both"
+    )
 
 
 def _git(*args: str) -> subprocess.CompletedProcess:

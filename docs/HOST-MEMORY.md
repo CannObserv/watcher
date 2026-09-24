@@ -24,35 +24,65 @@ failed atomic allocations in `tailscaled` and `ksoftirqd`, the bus was down 57m
 48s, and a downstream consumer never reconnected. Three things answer that, and
 none substitutes for another.
 
-**1. Don't install a server at every launch.** SocratiCode's plugin launches
-`npx -y socraticode` (`~/.claude/plugins/cache/socraticode/socraticode/<ver>/.mcp.json`;
-earlier plugin releases passed `--prefer-online socraticode@latest`, which
-revalidated against the registry on *every* launch). Without `--prefer-online` a
-warm npm cache is a warm path — which is why `scripts/cleanup.sh` stopped wiping
-it weekly (#314): cold, that launch does not fit Claude Code's 30s MCP connect
-timeout, and the session comes up with no tools. Measured on broker: 75 MB
-pinned, 129 MB warm-npx, **1.2 G** for a cold install, with all 126 `MemoryHigh`
-throttle events in the install and none in indexing. `.claude/hooks/socraticode-health.sh` runs the driver from
-SessionStart once per UTC day, so that path is live here. Install once, under a
-cap, and the driver prefers it:
+**1. Don't install a server at any launch — pin both.** Two things launch
+SocratiCode here, each pinned on its own, both at **1.14.0**:
+
+- **The driver** — `mcp-driver.mjs`, which `.claude/hooks/socraticode-health.sh`
+  runs from SessionStart once per UTC day, and `index`, `status`, `verify` —
+  prefers a pre-install at `~/.socraticode/pin`.
+- **The session** runs the plugin's own launch, `npx -y --prefer-online
+  ${SOCRATICODE_SPEC:-socraticode@latest}`, from
+  `~/.claude/plugins/cache/socraticode/socraticode/<ver>/.claude-plugin/mcp.json`
+  (the manifest `plugin.json` names; the two at the plugin root still hardcode
+  `@latest` and are not live). `.claude/settings.json`'s `env` block sets
+  `SOCRATICODE_SPEC=socraticode@1.14.0` (#322).
+
+`--prefer-online` revalidates against the registry on *every* launch, so a
+floating spec installs on any day the package moved. An exact one resolves from
+the npx cache without installing, as long as the cache survives — which is why
+`scripts/cleanup.sh` stopped wiping it weekly (#314). Cold, the session's launch
+does not fit Claude Code's 30s MCP connect timeout, and the session comes up with
+no tools while the health hook and `preflight.sh --check` both pass: they reach
+the pin, the session reaches npx. Measured on broker: 75 MB pinned, 129 MB
+warm-npx, **1.2 G** for a cold install, with all 126 `MemoryHigh` throttle events
+in the install and none in indexing.
+
+The plugin build decides whether the variable does anything. It shipped after
+the 1.14.0 release with no version bump, and until 2026-09-24 this host ran
+plugin 1.6.1, whose hardcoded `npx -y socraticode` could not be pinned at all.
+`preflight.sh --check` says when the installed plugin never reads it; `claude
+plugin marketplace update socraticode`, then `claude plugin update
+socraticode@socraticode`, fixes it.
+
+Re-pin as a decision, never on a schedule, and do all three steps —
+`tests/deploy/test_socraticode_config.py` fails when the pre-install and
+`SOCRATICODE_SPEC` disagree:
 
 ```bash
 npm view socraticode version        # pick a literal; never @latest
+# 1. The driver's pre-install:
 systemd-run --user --scope -p MemoryHigh=1200M -p MemoryMax=1536M \
-  -- npm install --prefix ~/.socraticode/pin socraticode@<version>
+  choom -n 500 -- npm install --prefix ~/.socraticode/pin socraticode@<version>
+# 2. The session's npx entry, under the same cap. npx keys its cache directory
+#    on the spec string, so this is the entry the session's launch reuses;
+#    skip it and the first session after the re-pin installs uncapped:
+systemd-run --user --scope -p MemoryHigh=1200M -p MemoryMax=1536M \
+  choom -n 500 -- npm exec --yes --prefer-online --package=socraticode@<version> -- true
+# 3. SOCRATICODE_SPEC in .claude/settings.json: socraticode@<version>
 
-# Says which path won, without launching a server:
+# Says which path the driver takes, without launching a server:
 node skills-vendor/gregoryfoster-skills/skills/init-socraticode/scripts/mcp-driver.mjs resolve
 ```
 
-Pinned here at **1.14.0**. This pins the *driver*, not the *session*: Claude Code
-cannot override a plugin's MCP command, so the plugin keeps launching its own
-`npx`. That is why a session can lose its MCP server while the health hook and
-`preflight.sh --check` both pass — they reach the pin, the session does not
-(#314). The daily health hook measures the version gap and reports a defect only
-when the two differ by a minor or major release — a patch apart is the intended
-steady state, since a pin is meant to lag. Re-pin with the same `npm install --prefix` line, as
-a decision rather than on a schedule.
+**Verify what launched, never a manifest.** The variable reaches only servers
+launched after it is written, so restart the session first. Then `ps -eo args |
+grep 'npm exec socraticode'` reads `npm exec socraticode@1.14.0`, and
+`preflight.sh --check` prints *Plugin session launches socraticode 1.14.0 …, as
+the driver pin does — no launch installs*. `claude mcp list` prints the command
+too, but only from a session's shell: run bare, the CLI treats this folder as
+untrusted, skips the whole `env` block and reports `@latest` (measured
+2026-09-24). The daily health hook compares the driver's pin with the session's
+version: a minor or major release apart is a defect, a patch a note.
 
 **2. The service takes a reservation, never a cap.** `deploy/watcher.service`
 carries `MemoryLow=512M` and `OOMScoreAdjust=-500`

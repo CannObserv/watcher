@@ -32,11 +32,12 @@ fi
 # npm caches: thresholded, not wiped (#314).
 #
 # `_npx` is the installed package tree and `_cacache` the tarballs it installs
-# from. The SocratiCode plugin's MCP server launches `npx -y socraticode` inside
-# Claude Code's 30s connect timeout, so an empty cache turns session start into
-# a ~1,700-tarball cold install that does not fit in the budget: the session
-# comes up with no semantic index, and every health check still passes, because
-# those go through the pinned install rather than the plugin's npx.
+# from. The SocratiCode plugin's MCP server launches through npx inside Claude
+# Code's 30s connect timeout (SOCRATICODE_SPEC pins its version, not its path —
+# #322), so an empty cache turns session start into a ~1,700-tarball cold
+# install that does not fit in the budget: the session comes up with no
+# semantic index, and every health check still passes, because those go
+# through the pinned install rather than the plugin's npx.
 #
 # Measured 2026-09-20: 553 MB warm, on a 25 G disk at 36% used. The ceiling
 # stays so a runaway cache is still collected.

@@ -15,7 +15,6 @@ from co_core.pure.extract import (
     ExtractionResult,
     Extractor,
     canonical_text,
-    canonical_text_fingerprint,
     spec_fingerprint,
     spec_schema_version,
 )
@@ -23,6 +22,7 @@ from co_core.pure.extract import (
     extraction_config_from_spec as _extraction_config_from_spec,
 )
 from co_core.pure.extract.html import HtmlExtractor
+from co_core.pure.util.hashing import prefixed_sha256, sha256
 from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -190,10 +190,12 @@ def _extract_and_fingerprint(
     # cannobserv#486): the derived text is stored permanently by hash and
     # compared across services, so the join is not spelled here. Byte-identical
     # to the local join it replaces, which is what keeps every stored
-    # fingerprint valid.
+    # fingerprint valid. Built once and hashed the way co-core's
+    # `canonical_text_fingerprint` does; a test pins the two equal.
+    content_bytes = canonical_text(result.chunks)
     return ExtractionOutcome(
-        content_fingerprint=canonical_text_fingerprint(result.chunks),
-        content_size_bytes=len(canonical_text(result.chunks)),
+        content_fingerprint=prefixed_sha256(sha256(content_bytes)),
+        content_size_bytes=len(content_bytes),
         schema_version=spec_schema_version(used_spec),
         spec_fingerprint=(
             _spec_fingerprint_or_none(used_spec, spec_id=spec_id) if source_specs else None

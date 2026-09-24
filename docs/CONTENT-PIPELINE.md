@@ -9,10 +9,13 @@ summaries and points here for the mechanics.
 Two normative contracts live in the **Replicator** repo. Link, never copy:
 
 - [`content-fetch-issuer-contract.md`](https://github.com/CannObserv/replicator/blob/main/docs/contracts/content-fetch-issuer-contract.md)
-  — the seven MUSTs: per-occasion `command_id`, persist-before-publish, correlate
+  — the eight MUSTs: per-occasion `command_id`, persist-before-publish, correlate
   on `command_id` only, idempotent upsert, no fingerprint dedupe, handle
-  `fetch_failed` + keep a reaper, copy blob bytes before expiry. Note `blob_uri`
-  is a host-local `file://` — VM-local by contract.
+  `fetch_failed` + keep a reaper, copy blob bytes before expiry, handle
+  `not_modified` before sending a validator. `blob_uri` is `file://` on
+  Replicator's host under the default backend and `gs://co-gcs-blobs/…` under
+  the object-store backend production runs (replicator#7) — branch on the
+  scheme, parse nothing below it.
 - [`replicator-boundaries.md`](https://github.com/CannObserv/replicator/blob/main/docs/contracts/replicator-boundaries.md)
   — what belongs on which side of the fetch boundary.
 

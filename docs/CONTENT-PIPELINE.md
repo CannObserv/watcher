@@ -4,7 +4,8 @@ How a WatchedItem becomes bytes, a fingerprint, and a SourceRevision — and wha
 Watcher owns on each side of that path. Two boundaries meet here: Replicator
 does the fetching, Archiver holds the registry, and Watcher issues commands to
 one while projecting rows from the other. AGENTS.md carries the one-line
-summaries and points here for the mechanics.
+summaries and points here for the mechanics. The revisions half — the outbox,
+the drain and the #293 renewal — is [CONTENT-REVISIONS.md](CONTENT-REVISIONS.md).
 
 Two normative contracts live in the **Replicator** repo. Link, never copy:
 

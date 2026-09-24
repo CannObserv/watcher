@@ -122,6 +122,7 @@ def test_earlyoom_is_not_running_here() -> None:
     assert _systemctl("is-active", EARLYOOM) in ("inactive", "failed"), (
         f"{EARLYOOM} is running. Stop it: {fix}"
     )
-    assert _systemctl("is-enabled", EARLYOOM) != "enabled", (
-        f"{EARLYOOM} is enabled. Disable it: {fix}"
-    )
+    # Allow-listed: enabled-runtime, alias, linked and indirect all start it too.
+    # not-found is a purged package.
+    state = _systemctl("is-enabled", EARLYOOM)
+    assert state in ("disabled", "masked", "not-found"), f"{EARLYOOM} is {state}. Disable it: {fix}"

@@ -175,7 +175,7 @@ sit at 0, and what decides it is unknown — revisit the decline, and never
 ```bash
 apt-get download earlyoom && dpkg-deb -x earlyoom_*.deb x   # in a scratch dir
 timeout -s INT 2 ./x/usr/bin/earlyoom --dryrun -d -r 0 -m 99,98 -s 100,100 \
-  --prefer '^(sshd|exe-init|MainThread|claude|node)$' 2>&1 | grep -E 'new victim|^sending'
+  --prefer '^(sshd|exe-init|MainThread|claude|node)' 2>&1 | grep -E 'new victim|^sending'
 ```
 
 The `-d` table prints badness from *before* the -1000 skip, so a preferred

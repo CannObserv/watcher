@@ -18,10 +18,10 @@ contract, not a convenience**: a NULL on a row written before this landed means
 — so no backfill, and no default that would fabricate an identity for the 59
 existing rows.
 
-No deploy-order constraint: the ORM writes both columns on insert and reads
-them nowhere yet, so the standard upgrade-then-restart order is safe (a
-restarted process before the upgrade would fail its inserts; the usual order
-avoids that).
+**Standard order: upgrade, then restart.** The new code writes both columns on
+every revision insert, so a process restarted onto it before the upgrade would
+fail those inserts. The reverse is safe: the old code never names the columns,
+and nullable columns accept its inserts.
 """
 
 from collections.abc import Sequence

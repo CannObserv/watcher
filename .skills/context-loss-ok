@@ -311,3 +311,8 @@ AGENTS.md :: tighten :: **Retention is sized against the set (#292), and mirrore
 docs/DEPLOYMENT.md :: rename :: ### Host memory posture (#307)
 docs/DEPLOYMENT.md :: retarget :: > [§ Host memory posture](#host-memory-posture-307).
 docs/DEPLOYMENT.md :: retarget :: # docs/DEPLOYMENT.md -> Host memory posture.
+
+# --- #325 prep: CONTENT-PIPELINE.md split -> docs/CONTENT-REVISIONS.md ---
+# The index line's "the outbox, the revisions producer" now describes the new
+# doc, which carries its own index line; CONTENT-PIPELINE keeps the fetch half.
+AGENTS.md :: retarget :: - [docs/CONTENT-PIPELINE.md](docs/CONTENT-PIPELINE.md) — fetch → extract → fingerprint, the outbox, the revisions producer

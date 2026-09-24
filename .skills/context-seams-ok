@@ -162,3 +162,11 @@ docs/COMMANDS.md :: (docs/DEPLOYMENT.md → Job history)
 docs/HOST-MEMORY.md :: install, not tuning done later: [DEPLOYMENT.md](DEPLOYMENT.md) → *Installation*
 # CR 8: the layout table points at the index instead of listing five of its docs.
 docs/ARCHITECTURE.md :: Reference docs (index: AGENTS.md → Detail Docs)
+
+# --- 2026-09-24 curation (CONTENT-REVISIONS.md split, #325 prep) ---
+# Issue numbers in ### titles are CONTENT-PIPELINE's standing convention (every
+# sibling carries one); the moved title is verbatim, the stub names both issues
+# it forwards to, and #324's title follows the same form.
+docs/CONTENT-PIPELINE.md :: The fingerprint's bytes are co-core's (#324)
+docs/CONTENT-PIPELINE.md :: Reporting revisions on `content.revisions` (#253, #293)
+docs/CONTENT-REVISIONS.md :: A renewed blob reference is re-announced (#293)

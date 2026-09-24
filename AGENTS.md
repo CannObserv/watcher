@@ -59,8 +59,6 @@ The exe.dev proxy forwards 3000–9999; dev server at `https://co-watcher.exe.xy
 
 **The bus.** The broker is its own VM (`broker`, CannObserv/broker); watcher publishes four streams and consumes two — `content.blobs` (group `watcher.blobs`) and `info.registry` (**groupless**, replayed from `0-0` every boot). `WATCHER_BUS_REDIS_URL` unset → publish tasks skip loudly. Inventory, ownership, fetch contracts, `info_source_id` on the wire: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) → *Redis and the bus*.
 
-**Retention is sized against the set (#292), and mirrored on the broker (#319).** `tests/test_bus_stream_kinds.py` fails a config/state publish missing `maxlen` *or* `floor=`, and fails a retune of any mirrored number — the broker's probe thresholds are computed from copies, so the fix is cross-repo. The env overrides move the same numbers unseen (same section).
-
 **Connection policy (#287, #288, #290).** `socket_timeout` is a **floor** derived from `src/core/read_windows.py`, never transcribed; retries are an explicit **zero** (a retry re-sends the command). `OutOfMemoryError` (full broker) and `NoPermissionError` (ACL) are `ResponseError`s, **not** connection errors — keep both transient in every producer: [docs/BUS-CONNECTION-POLICY.md](docs/BUS-CONNECTION-POLICY.md).
 
 ## Server Lifecycle
@@ -136,7 +134,8 @@ yielding empty chunks raises `ExtractionError` and writes nothing, either side
 of a baseline. **An unchanged fingerprint still announces (#293)** after a full
 fetch — never a 304, never the baseline — and a renewal may only improve a
 queued row:
-[docs/CONTENT-PIPELINE.md](docs/CONTENT-PIPELINE.md).
+[docs/CONTENT-PIPELINE.md](docs/CONTENT-PIPELINE.md),
+[docs/CONTENT-REVISIONS.md](docs/CONTENT-REVISIONS.md).
 
 What each 409 is, where pause does live, the authoritative column list: [docs/WATCHED-ITEMS.md](docs/WATCHED-ITEMS.md).
 
@@ -188,7 +187,8 @@ A skill is symlinked into both `skills/` and `.claude/skills/`; overrides in `sk
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — module layout, sibling services, bus topology, fetch contracts, the probe destination guard
 - [docs/BUS-CONNECTION-POLICY.md](docs/BUS-CONNECTION-POLICY.md) — #287 timeouts, retries, redaction, startup PING; #288 the `noeviction` cap
 - [docs/COMMANDS.md](docs/COMMANDS.md) — every runnable command, the test database, CI
-- [docs/CONTENT-PIPELINE.md](docs/CONTENT-PIPELINE.md) — fetch → extract → fingerprint, the outbox, the revisions producer
+- [docs/CONTENT-PIPELINE.md](docs/CONTENT-PIPELINE.md) — fetch → extract → fingerprint, the `fetch_commands` outbox
+- [docs/CONTENT-REVISIONS.md](docs/CONTENT-REVISIONS.md) — the revisions producer: outbox, drain, #293 renewal
 - [docs/CONDITIONAL-GET.md](docs/CONDITIONAL-GET.md) — #269 validators: gate, snapshot, invalidation
 - [docs/CONVENTIONS.md](docs/CONVENTIONS.md) — logging configuration, ULID errors, DB triggers
 - [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) — systemd units, the install runbook, timers, wheelhouse auth

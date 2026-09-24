@@ -204,9 +204,13 @@ latest derived fact, feeding `validator_source_key` (below).
 ### What leaves Watcher
 
 - `_extract_and_fingerprint`, `_extract_with_spec`, `_spec_fingerprint_or_none`,
-  the registry's extractor slot, `resolve_dispatch_essence` /
-  `extraction_overrides_for_essence` (lifted into co-core), and the `co-core[extract]`
-  extra with its PDF/Excel dependencies (a #307 memory win).
+  the registry's extractor slot, the pipeline's use of
+  `extraction_overrides_for_essence`, and the `co-core[extract]` extra with its
+  PDF/Excel dependencies (a #307 memory win).
+- **Stays:** `resolve_dispatch_essence` (via the `src/core/media_type.py`
+  re-export of co-core's stdlib-only module). Under cannobserv#486 D1 the issuer
+  resolves the essence onto every command, and `WatchedItemResponse` still
+  computes `media_type_essence` from it.
 - Raw-blob reads on the apply path. `aread_blob` survives for one purpose: reading
   derived text from Observo's bucket (Section 4).
 - `process_watched_item` reduces to a pure fingerprint comparison plus the Option A

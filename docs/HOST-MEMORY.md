@@ -34,8 +34,11 @@ SocratiCode here, each pinned on its own, both at **1.14.0**:
   ${SOCRATICODE_SPEC:-socraticode@latest}`, from
   `~/.claude/plugins/cache/socraticode/socraticode/<ver>/.claude-plugin/mcp.json`
   (the manifest `plugin.json` names; the two at the plugin root still hardcode
-  `@latest` and are not live). `.claude/settings.json`'s `env` block sets
-  `SOCRATICODE_SPEC=socraticode@1.14.0` (#322).
+  `@latest` and are not live). The variable must be in Claude Code's
+  environment **at exec**: `claudeCode.environmentVariables` in
+  `~/.vscode-server/data/Machine/settings.json` sets
+  `SOCRATICODE_SPEC=socraticode@1.14.0` (#322). `.claude/settings.json`'s `env`
+  block carries the same value, and alone it pins nothing — below.
 
 `--prefer-online` revalidates against the registry on *every* launch, so a
 floating spec installs on any day the package moved. An exact one resolves from
@@ -54,9 +57,18 @@ plugin 1.6.1, whose hardcoded `npx -y socraticode` could not be pinned at all.
 plugin marketplace update socraticode`, then `claude plugin update
 socraticode@socraticode`, fixes it.
 
-Re-pin as a decision, never on a schedule, and do all three steps —
-`tests/deploy/test_socraticode_config.py` fails when the pre-install and
-`SOCRATICODE_SPEC` disagree:
+**The settings `env` block is not enough.** Claude Code expands the plugin's
+args before it merges the project block, then hands the merged environment to
+the server anyway. Measured 2026-09-24 on 2.1.280, after a window reload: the
+server's environment held `SOCRATICODE_SPEC=socraticode@1.14.0`, its argv
+`npm exec socraticode@latest`. Present at exec (inherited, or `--settings`),
+the same variable launched 1.14.0 on 2.1.280 and 2.1.281. The machine setting
+is machine-scoped, so it cannot be a committed workspace setting; a terminal
+`claude` needs the variable exported in its shell.
+
+Re-pin as a decision, never on a schedule, and do all four steps —
+`tests/deploy/test_socraticode_config.py` fails when the pre-install, the
+settings block and the machine setting disagree:
 
 ```bash
 npm view socraticode version        # pick a literal; never @latest
@@ -69,20 +81,22 @@ systemd-run --user --scope -p MemoryHigh=1200M -p MemoryMax=1536M \
 systemd-run --user --scope -p MemoryHigh=1200M -p MemoryMax=1536M \
   choom -n 500 -- npm exec --yes --prefer-online --package=socraticode@<version> -- true
 # 3. SOCRATICODE_SPEC in .claude/settings.json: socraticode@<version>
+# 4. The same value in ~/.vscode-server/data/Machine/settings.json, then
+#    reload the window
 
 # Says which path the driver takes, without launching a server:
 node skills-vendor/gregoryfoster-skills/skills/init-socraticode/scripts/mcp-driver.mjs resolve
 ```
 
-**Verify what launched, never a manifest.** The variable reaches only servers
-launched after it is written, so restart the session first. Then `ps -eo args |
-grep 'npm exec socraticode'` reads `npm exec socraticode@1.14.0`, and
-`preflight.sh --check` prints *Plugin session launches socraticode 1.14.0 …, as
-the driver pin does — no launch installs*. `claude mcp list` prints the command
-too, but only from a session's shell: run bare, the CLI treats this folder as
-untrusted, skips the whole `env` block and reports `@latest` (measured
-2026-09-24). The daily health hook compares the driver's pin with the session's
-version: a minor or major release apart is a defect, a patch a note.
+**Verify the process, never a report.** Only the launched argv is evidence:
+`ps -eo args | grep 'npm exec socraticode'` must read `npm exec
+socraticode@1.14.0`. `preflight.sh --check`, the daily health hook and `claude
+mcp list` run from a session's shell all take the version from
+`SOCRATICODE_SPEC` in their own environment — which the settings block puts
+there whether or not the launch saw it. With the session on `@latest`, preflight
+still printed *Plugin session launches socraticode 1.14.0 … no launch installs*.
+Run bare, `claude mcp list` treats this folder as untrusted and reports
+`@latest` either way.
 
 **2. The service takes a reservation, never a cap.** `deploy/watcher.service`
 carries `MemoryLow=512M` and `OOMScoreAdjust=-500`

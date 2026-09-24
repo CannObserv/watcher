@@ -363,13 +363,14 @@ node $D resolve               # which server a launch would get (the #307 pin)
    setting it splits the cohort namespace; branch-awareness appends the branch name to the
    project id, giving a fresh collection set per branch. The test file guards both across
    every env surface on this host.
-6. **The session's server is the plugin's `npx`, not the pin.** `SOCRATICODE_SPEC` pins
-   its version (#322), not its path: `~/.socraticode/pin` is reached by the health hook
-   and `preflight.sh --check` but never by the session. A cold npm cache makes that launch
-   a ~1,700-tarball install, which does not fit Claude Code's 30s connect timeout: the
-   session reports `CONNECTION_CLOSED` and runs with no tools while every check on the pin
-   passes. Measured 2026-09-20 (#314), which is why `scripts/cleanup.sh` no longer wipes
-   `~/.npm/_cacache` weekly. A session that lost the server reconnects with `/mcp`.
+6. **The session's server is the plugin's `npx`, not the pin.** `SOCRATICODE_SPEC` set
+   before Claude Code starts pins its version (#322), never its path: the pin is reached
+   by the health hook and `preflight.sh --check`, not the session. A cold npm cache makes
+   that launch a ~1,700-tarball install, which does not fit Claude Code's 30s connect
+   timeout: the session reports `CONNECTION_CLOSED` and runs with no tools while every
+   check on the pin passes. Measured 2026-09-20 (#314), which is why `scripts/cleanup.sh`
+   no longer wipes `~/.npm/_cacache` weekly. A session that lost the server reconnects
+   with `/mcp`.
 
 **The inverse trap: a red that succeeded** (*Per-tool notes*, `codebase_context_index`).
 Measured here at ~0.4 s per chunk on co-index's shared CPU embedder: aborted 13:37:47Z,

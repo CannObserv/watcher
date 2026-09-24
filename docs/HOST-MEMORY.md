@@ -93,10 +93,13 @@ node skills-vendor/gregoryfoster-skills/skills/init-socraticode/scripts/mcp-driv
 socraticode@1.14.0`. `preflight.sh --check`, the daily health hook and `claude
 mcp list` run from a session's shell all take the version from
 `SOCRATICODE_SPEC` in their own environment — which the settings block puts
-there whether or not the launch saw it. With the session on `@latest`, preflight
-still printed *Plugin session launches socraticode 1.14.0 … no launch installs*.
-Run bare, `claude mcp list` treats this folder as untrusted and reports
-`@latest` either way.
+there whether or not the launch saw it. Observed 2026-09-24: preflight printed
+*Plugin session launches socraticode 1.14.0 … no launch installs* while the
+session's server was plugin 1.6.1's unpinned `npm exec socraticode`, and the
+driver reports whatever version the environment names. Its hint still
+prescribes the settings block alone (gregoryfoster/skills#332). Run bare,
+`claude mcp list` treats this folder as untrusted and reports `@latest` either
+way.
 
 **2. The service takes a reservation, never a cap.** `deploy/watcher.service`
 carries `MemoryLow=512M` and `OOMScoreAdjust=-500`

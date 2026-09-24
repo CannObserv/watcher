@@ -5,10 +5,10 @@ spiking, "at the default 0". It cannot here. exe.dev starts every session from
 ``exe-init`` or ``sshd`` at ``oom_score_adj`` -1000, everything a session
 launches inherits it, and earlyoom 1.7 skips a -1000 process exactly as the
 kernel does, ``--prefer`` or not (``kill.c``, after the bonus is added). What
-it can reach is the small daemons, then postgres's backends, ``tailscaled`` and
-watcher itself, starting at 10% available, when the kernel would take none of
-them until memory actually ran out. CannObserv/replicator#112 declined it on the
-same class of host.
+it can reach is the kernel's own list — the user manager, postgres's processes
+and the small daemons, journald, ``tailscaled``, then watcher — starting at 10%
+available, when the kernel would take none of them until memory actually ran
+out. CannObserv/replicator#112 declined it on the same class of host.
 
 Both halves are pinned live, on the host only. earlyoom must not be running:
 ``apt install earlyoom`` starts it at once, on stock arguments. And sessions
@@ -114,7 +114,7 @@ def test_earlyoom_is_not_running_here() -> None:
     """Off, and staying off across a reboot.
 
     On a -1000 host it can only work down the list of what the kernel would
-    take anyway, starting sooner: postgres through crash recovery, then watcher.
+    take anyway, starting sooner: watcher's database connections, then watcher.
     """
     if not _on_host():
         pytest.skip(f"{INSTALLED_UNIT} not present — not a host running the service")

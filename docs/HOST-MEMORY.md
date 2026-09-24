@@ -87,7 +87,7 @@ systemd-run --user --scope -p MemoryHigh=1200M -p MemoryMax=1536M \
   choom -n 500 -- npm exec --yes --prefer-online --package=socraticode@<version> -- true
 # 3. SOCRATICODE_SPEC in .claude/settings.json: socraticode@<version>
 # 4. The same value in ~/.vscode-server/data/Machine/settings.json, then
-#    reload the window
+#    restart the session (verified here by closing the window and reconnecting)
 
 # Says which path the driver takes, without launching a server:
 node skills-vendor/gregoryfoster-skills/skills/init-socraticode/scripts/mcp-driver.mjs resolve

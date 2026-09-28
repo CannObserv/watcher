@@ -264,3 +264,20 @@ class TestNames:
             for r in caplog.records
             if r.levelno == logging.ERROR
         )
+
+    def test_the_retired_name_beside_the_new_one_warns_and_checks_in(
+        self, configured, caplog
+    ) -> None:
+        """A rename done by appending leaves the old line behind: the new name
+        wins and the check-in lands, but the stale line — which may name the
+        old service — is called out so ``backup.env`` does not mislead whoever
+        reads it next."""
+        post = _Recorder(202)
+        environ = {**configured, checkin.RETIRED_BASE_URL_ENV: "http://notifier.invalid:9000"}
+        with caplog.at_level(logging.WARNING, logger="src.ops.checkin"):
+            assert checkin.post_checkin("ok", {}, environ=environ, post=post) is True
+        assert post.calls[0][0].startswith(BASE)
+        assert any(
+            r.levelno == logging.WARNING and checkin.RETIRED_BASE_URL_ENV in r.getMessage()
+            for r in caplog.records
+        )

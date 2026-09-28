@@ -71,3 +71,14 @@ probe is the one in *Install and first run*.
   2026-09-17T15:21Z). The monitor is read and patched with the check-in key
   itself, over `X-API-Key` — `Authorization: Bearer` answers 403 and reads as
   a key problem rather than a header one.
+- **The monitor moves to co-status (2026-09-28)**, #330 and CannObserv/status#2.
+  co-status imported the monitor disabled, with the same id. co-watcher
+  switched its base URL to `http://status:9000` and its key to co-status's,
+  and a hand-started run at 18:28:51Z checked in `202` on the disabled copy,
+  uploading `co-watcher/20260928T182850Z.dump`. co-status enabled its copy at
+  18:31:18Z. Notifier's copy was then disabled from co-watcher with the old key
+  on `curl`'s stdin, and read back `enabled: false`. After the #332 renames
+  were deployed, a second run at 18:39:23Z read `WATCHER_BACKUP_CHECKIN_BASE_URL`
+  and the `checkin-key` credential and checked in `202` again. The alarm itself
+  was not re-drilled on this monitor; status#2 Phase 4 drilled co-status's
+  alarm in production on another monitor.

@@ -44,6 +44,7 @@ To add a new external skill repo: follow the `managing-skills` skill.
 | `dispatching-parallel-agents` | 2+ independent tasks in parallel |
 | `using-git-worktrees` | feature work needing isolation |
 | `managing-skills` | add skill repo, manage external skills |
+| `using-mayfly-chat` | mayfly, open a channel, join the channel, chat with `<repo>`, agent chat, a mayfly.chat URL handed over. Needs Node.js 18+. **Never commit a channel URL** — it is read, write and delete access, and this repo has no structural test for it; run the leak check in the skill's `references/security.md` before committing anything a session produced |
 | `init-socraticode` | init socraticode, set up code search, index this project, audit the SocratiCode install |
 | `socraticode` (codebase MCP) | see **Code Exploration Policy** above |
 

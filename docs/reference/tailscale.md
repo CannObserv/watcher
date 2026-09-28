@@ -92,6 +92,8 @@ the temporary one-way edge used to copy the workspace was removed on
 Mint a key that is `tag:watcher` only, pre-approved, tagged, and **not**
 ephemeral — an ephemeral node disappears from the tailnet on a clean shutdown
 and takes its ACL grants with it. Then confirm, in this order: `tailscale
-status` shows the tag; `curl http://notifier:9000/health` answers; the bus PING
-in the service log succeeds on boot. Removing the VM does **not** remove its
+status` shows the tag; `curl http://notifier:9000/health` answers; `curl
+http://status:9000/health` answers with `environment` `production` — without it
+the backup's check-in fails and only co-status's missed-check-in alarm says so
+(#330); the bus PING in the service log succeeds on boot. Removing the VM does **not** remove its
 node record — that is a separate deletion in the admin console (#296 step 30).

@@ -2,8 +2,9 @@
 
 A backup that fails loudly still says nothing when it stops running — a
 disabled timer, a dead VM and a wedged interpreter all produce zero failures
-and zero traffic. So the job reports every run, success or not, to a notifier
-monitor that alarms when a report fails to arrive (broker#3, notifier#56).
+and zero traffic. So the job reports every run, success or not, to a dead-man
+monitor that alarms when a report fails to arrive (broker#3, notifier#56) — on
+co-status since #330, which kept notifier's check-in contract.
 
 The key is a systemd credential, never an environment variable (#297): the
 unit's ``LoadCredential=`` hands the run a private copy under
@@ -21,7 +22,7 @@ from src.ops import checkin
 MONITOR = "01M24A8CA2GT0M7WE57NEMD0EW"
 #: RFC 2606's reserved TLD: never resolves, so never stale, and it keeps this
 #: file clean under tests/test_notifier_isolation.py's sweep (#280).
-BASE = "http://notifier.invalid:9000"
+BASE = "http://status.invalid:9000"
 KEY = "nk_backup"
 
 
@@ -79,7 +80,7 @@ class TestPostCheckin:
         """Configuration, not a constant (#280's rule for src/) — so it is
         validated rather than trusted."""
         post = _Recorder()
-        environ = {**configured, checkin.BASE_URL_ENV: "notifier.invalid:9000"}
+        environ = {**configured, checkin.BASE_URL_ENV: "status.invalid:9000"}
         with caplog.at_level(logging.ERROR, logger="src.ops.checkin"):
             assert checkin.post_checkin("ok", {}, environ=environ, post=post) is False
         assert post.calls == []
@@ -162,9 +163,7 @@ class TestPostCheckin:
             assert checkin.post_checkin("ok", {}, environ=configured, post=post) is False
         assert len(post.calls) == 2
 
-    @pytest.mark.parametrize(
-        "base", ["http://[notifier.invalid:9000", "http://notifier.invalid:9o00"]
-    )
+    @pytest.mark.parametrize("base", ["http://[status.invalid:9000", "http://status.invalid:9o00"])
     def test_a_base_that_cannot_be_parsed_is_refused_not_raised(
         self, configured, caplog, base
     ) -> None:
@@ -233,3 +232,35 @@ class TestKeyCredential:
             assert checkin.post_checkin("ok", {}, environ=environ, post=post) is False
         assert post.calls == []
         assert any("IsADirectoryError" in r.getMessage() for r in caplog.records)
+
+
+class TestNames:
+    """The names are the host's contract — ``backup.env`` and the unit's
+    ``LoadCredential=`` spell them — and name no service, so the next move of
+    the monitor is configuration alone (#332)."""
+
+    def test_the_base_url_variable(self) -> None:
+        assert checkin.BASE_URL_ENV == "WATCHER_BACKUP_CHECKIN_BASE_URL"
+
+    def test_the_key_credential(self) -> None:
+        assert checkin.KEY_CREDENTIAL == "checkin-key"
+
+    def test_the_retired_base_url_name_is_named_in_the_error(self, configured, caplog) -> None:
+        """A ``backup.env`` that kept the old name is half-configured, and the
+        error says which rename it missed rather than only that the base is
+        unset."""
+        post = _Recorder()
+        environ = {
+            name: value for name, value in configured.items() if name != checkin.BASE_URL_ENV
+        }
+        environ[checkin.RETIRED_BASE_URL_ENV] = BASE
+        with caplog.at_level(logging.ERROR, logger="src.ops.checkin"):
+            assert checkin.post_checkin("ok", {}, environ=environ, post=post) is False
+        assert post.calls == []
+        assert checkin.RETIRED_BASE_URL_ENV == "WATCHER_BACKUP_NOTIFIER_BASE_URL"
+        assert any(
+            checkin.RETIRED_BASE_URL_ENV in r.getMessage()
+            and checkin.BASE_URL_ENV in r.getMessage()
+            for r in caplog.records
+            if r.levelno == logging.ERROR
+        )

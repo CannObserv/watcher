@@ -324,7 +324,7 @@ class TestMain:
         monkeypatch.setattr(backup.storage, "Client", lambda: client)
         monkeypatch.setattr(backup.subprocess, "run", FakePg())
         monkeypatch.setenv(backup.BUCKET_ENV, BUCKET)
-        monkeypatch.setenv(checkin.BASE_URL_ENV, "http://[notifier.invalid:9000")
+        monkeypatch.setenv(checkin.BASE_URL_ENV, "http://[status.invalid:9000")
         monkeypatch.setenv(checkin.MONITOR_ID_ENV, "01M24A8CA2GT0M7WE57NEMD0EW")
         monkeypatch.setenv(checkin.CREDENTIALS_DIRECTORY_ENV, str(credentials))
         # As the unit sets it: the key path is the run's own credential copy.

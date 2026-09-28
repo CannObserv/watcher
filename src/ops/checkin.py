@@ -1,10 +1,13 @@
-"""Report a backup run to notifier's dead-man monitor (#296 D9).
+"""Report a backup run to its dead-man monitor (#296 D9).
 
 A backup that fails loudly still says nothing when it stops running: a disabled
 timer, a dead VM and a wedged interpreter all produce zero failures and zero
-traffic. So the job checks in on **every** run, success or not, and notifier
+traffic. So the job checks in on **every** run, success or not, and the monitor
 alarms when a check-in fails to arrive — broker#3's design, the one whose alarm
-was proven to fire rather than assumed to (notifier#56).
+was proven to fire rather than assumed to (notifier#56). The monitor began on
+notifier and moved to co-status (#330, CannObserv/status#2), which kept
+notifier's check-in contract exactly; the names here name no service (#332), so
+the next move is configuration alone.
 
 ``POST /api/v1/monitors/{id}/checkin`` with ``{"status": "ok"|"alert",
 "variables": {...}}``. An ``ok`` dispatches nothing and resets the timer; an
@@ -14,13 +17,12 @@ contract: a replay overwrites the previous check-in.
 **The host is configuration**, and here watcher departs from broker#3, which
 made it a constant so a one-character port typo could not point a dead-man's
 switch at notifier_dev (``:9001``, whose ``/health`` is byte-identical). This
-repo's rule wins in this repo: a notifier URL in ``src/`` is a real connection
+repo's rule wins in this repo: a service URL in ``src/`` is a real connection
 target, so a literal is the defect whatever host it names
-(``tests/test_notifier_isolation.py``, #280). And notifier#56 found the typo is
-not silent anyway: keys live per database, so a production-marked key sent to
-``:9001`` is a **401** — no check-in lands, and the monitor (anchored on its own
-creation until the first check-in) alarms. Inverting the alarm takes the wrong
-port *and* a development-marked key: a two-fault path, not a slip.
+(``tests/test_notifier_isolation.py``, #280). And the typo is not silent: on
+notifier a production-marked key sent to ``:9001`` was a **401** (notifier#56),
+and co-status's ``:9001`` does not answer from co-watcher at all. Either way
+no check-in lands, and the monitor alarms.
 
 **Failure never propagates.** A check-in never raises and never changes the
 job's exit status: a monitoring path that fails the thing it monitors trains an
@@ -28,8 +30,8 @@ operator to ignore both.
 
 **The key is a credential, never an environment variable** (#297). The base
 URL and monitor id are configuration, in ``/etc/watcher/backup.env``; the key
-is the unit's ``notifier-key`` credential, which systemd reads from the
-root-only ``/etc/watcher/backup-notifier.key`` and hands the run as a private
+is the unit's ``checkin-key`` credential, which systemd reads from the
+root-only ``/etc/watcher/backup-checkin.key`` and hands the run as a private
 file under ``$CREDENTIALS_DIRECTORY``. So it is in no process environment —
 not the job's, not a child's, not ``/proc/<pid>/environ`` — and the variable
 it once was is not read at all. ``/etc/watcher/notifier.env`` stays
@@ -48,11 +50,14 @@ from src.core.logging import get_logger
 
 logger = get_logger(__name__)
 
-BASE_URL_ENV = "WATCHER_BACKUP_NOTIFIER_BASE_URL"
+BASE_URL_ENV = "WATCHER_BACKUP_CHECKIN_BASE_URL"
+#: The base URL's name until #332. Not read; named in the error when a
+#: ``backup.env`` still carries it instead of the new one.
+RETIRED_BASE_URL_ENV = "WATCHER_BACKUP_NOTIFIER_BASE_URL"
 MONITOR_ID_ENV = "WATCHER_BACKUP_MONITOR_ID"
 #: Set by systemd for a unit with credentials; the key is the file named below.
 CREDENTIALS_DIRECTORY_ENV = "CREDENTIALS_DIRECTORY"
-KEY_CREDENTIAL = "notifier-key"
+KEY_CREDENTIAL = "checkin-key"
 _KEY_LABEL = f"the {KEY_CREDENTIAL} credential"
 TIMEOUT_SECONDS = 10.0
 
@@ -128,6 +133,14 @@ def _post_checkin(
     post: Post,
 ) -> bool:
     base = environ.get(BASE_URL_ENV, "").strip()
+    if not base and environ.get(RETIRED_BASE_URL_ENV, "").strip():
+        logger.error(
+            "%s is no longer read — rename it to %s in /etc/watcher/backup.env (#332); "
+            "not checking in",
+            RETIRED_BASE_URL_ENV,
+            BASE_URL_ENV,
+        )
+        return False
     monitor_id = environ.get(MONITOR_ID_ENV, "").strip()
     api_key = _read_key(environ)
     sources = f"{BASE_URL_ENV}, {MONITOR_ID_ENV} and {_KEY_LABEL}"

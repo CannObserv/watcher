@@ -26,7 +26,7 @@ WorkingDirectory=/home/exedev/watcher
 # so until the monitor exists the check-in key is an empty file, and the job
 # warns that a stopped backup will not be noticed.
 LoadCredential=gcs:/etc/watcher/co-watcher-backup.json
-LoadCredential=notifier-key:/etc/watcher/backup-notifier.key
+LoadCredential=checkin-key:/etc/watcher/backup-checkin.key
 # The SDK takes a path; this is the private copy's. An env file that set the
 # variable too would win over this line, and aim the job at a key it cannot read.
 Environment=GOOGLE_APPLICATION_CREDENTIALS=%d/gcs
@@ -55,7 +55,7 @@ ProtectKernelModules=yes
 ProtectControlGroups=yes
 RestrictNamespaces=yes
 LockPersonality=yes
-# The local socket for pg_dump, and IP for GCS and the notifier check-in.
+# The local socket for pg_dump, and IP for GCS and the co-status check-in.
 RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
 # No capabilities at all. Root needed three — DAC_READ_SEARCH for the venv under
 # the 0750 home, SETUID/SETGID for setpriv to drop to postgres — and the empty

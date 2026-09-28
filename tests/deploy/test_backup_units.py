@@ -31,7 +31,7 @@ INSTALLED = Path("/etc/systemd/system")
 
 CHECKOUT = "/home/exedev/watcher"
 GCS_KEY = "/etc/watcher/co-watcher-backup.json"
-CHECKIN_KEY = "/etc/watcher/backup-notifier.key"
+CHECKIN_KEY = "/etc/watcher/backup-checkin.key"
 
 
 def _values(text: str, directive: str) -> list[str]:
@@ -145,7 +145,7 @@ class TestServiceCredentials:
         notifier.env, which is watcher.service's alone (#278)."""
         assert _values(SERVICE.read_text(), "EnvironmentFile") == ["/etc/watcher/backup.env"]
 
-    @pytest.mark.parametrize("key", [GCS_KEY, CHECKIN_KEY], ids=["gcs", "notifier-key"])
+    @pytest.mark.parametrize("key", [GCS_KEY, CHECKIN_KEY], ids=["gcs", "checkin-key"])
     def test_an_installed_key_is_readable_only_by_root(self, key: str) -> None:
         """Only systemd reads the file; the job reads its private copy. Mode is
         read with ``stat``, never the contents."""

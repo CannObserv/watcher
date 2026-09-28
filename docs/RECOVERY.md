@@ -41,7 +41,7 @@ anything that could write the tree had its code run as uid 0. Now:
 | **Its own user** | `DynamicUser=yes`, `User=watcher_backup`: systemd allocates the uid when the run starts and releases it when it ends. Nothing to provision on a new host, no account to log in to, and while no run is active no process can be `watcher_backup` at all. |
 | **No capabilities** | `CapabilityBoundingSet=` is empty and nothing is ambient. Observed in the unit: `CapPrm`/`CapEff`/`CapBnd`/`CapAmb` all zero, `NoNewPrivs` 1, seccomp on — in the job and in a child it spawns. |
 | **A read-only database role** | `scripts/setup-backup-role.sql` creates `watcher_backup`: `LOGIN`, `INHERIT`, a member of `pg_read_all_data` (SELECT on every table and sequence, USAGE on every schema), `PASSWORD NULL`. pg_hba's `local all all peer` admits it from the OS user of the same name, and no password rule ever can. The job no longer reaches superuser at all. Its reads are cluster-wide — every database it may connect to, which PUBLIC may by default — and on watcher's clusters that is `watcher` and its scratch `_test` databases (checked 2026-09-13); another service's database on the same cluster would be readable too. |
-| **Keys as credentials** | `LoadCredential=gcs:/etc/watcher/co-watcher-backup.json` and `notifier-key:/etc/watcher/backup-notifier.key`: systemd reads each root-only file and hands the run a private copy under `$CREDENTIALS_DIRECTORY` (`/run/credentials/watcher-backup.service/`, `0440 root` with an ACL for the run's uid). The GCS SDK gets the copy's path, `GOOGLE_APPLICATION_CREDENTIALS=%d/gcs`; the check-in reads its file. Neither key is in any process environment, so neither is in a child's or in `/proc/<pid>/environ`. |
+| **Keys as credentials** | `LoadCredential=gcs:/etc/watcher/co-watcher-backup.json` and `checkin-key:/etc/watcher/backup-checkin.key`: systemd reads each root-only file and hands the run a private copy under `$CREDENTIALS_DIRECTORY` (`/run/credentials/watcher-backup.service/`, `0440 root` with an ACL for the run's uid). The GCS SDK gets the copy's path, `GOOGLE_APPLICATION_CREDENTIALS=%d/gcs`; the check-in reads its file. Neither key is in any process environment, so neither is in a child's or in `/proc/<pid>/environ`. |
 | **An empty home** | `ProtectHome=tmpfs` with `BindReadOnlyPaths=/home/exedev/watcher`: `/home` holds the checkout and nothing else — no `~/.ssh`, no other checkout — and the checkout's `.env` (`0640 exedev`) is unreadable to the run's uid. This is what replaced `CAP_DAC_READ_SEARCH`: the venv needed traversing a `0750` home, and now the home is not there. |
 
 Plus what was already there: `ProtectSystem=strict`, `PrivateTmp`,
@@ -54,7 +54,7 @@ pins every line of it. `systemd-analyze security --offline` scores the unit 3.9
 file is missing fails the start, `243/CREDENTIALS`, before any of the job runs;
 and an empty `SetCredential=` — the documented fallback — is ignored, so it
 cannot make one optional. Both files therefore **must exist**, and until the
-dead-man monitor does, `backup-notifier.key` is an **empty** file: the job reads
+dead-man monitor does, `backup-checkin.key` is an **empty** file: the job reads
 an empty key as unset, and warns each night that a stopped backup will not be
 noticed. A missing GCS key is the same `243`: a failed unit and no check-in at
 all, so the monitor's silence alarm is what reports it.
@@ -112,7 +112,7 @@ without it (see *The sandbox* above), and filled in when the monitor exists.
 
 ```bash
 sudo install -m 0400 -o root -g root co-watcher-backup.json /etc/watcher/co-watcher-backup.json
-sudo install -m 0400 -o root -g root /dev/null /etc/watcher/backup-notifier.key
+sudo install -m 0400 -o root -g root /dev/null /etc/watcher/backup-checkin.key
 sudo install -m 0644 -o root -g root /dev/null /etc/watcher/backup.env
 sudo tee /etc/watcher/backup.env >/dev/null <<'EOF'
 WATCHER_BACKUP_BUCKET=co-gcs-watcher-backup
@@ -131,7 +131,7 @@ naming this file, before any client is built.
 on notifier (notifier#56) on the watcher tenant and was imported with its id,
 fields and two channels; co-status keeps notifier's check-in contract exactly —
 path, body, 202 — so the move was configuration only: the base URL in
-`backup.env` and the key in `backup-notifier.key`. Its check-in key is a
+`backup.env` and the key in `backup-checkin.key`. Its check-in key is a
 co-status key for that tenant, minted on the co-status host; the notifier key
 it replaced (a second production key on notifier's watcher tenant, notifier#62)
 retires with the handover. A monitor for a new host is created on co-status,
@@ -152,9 +152,9 @@ and the other two into `backup.env`:
 
 ```bash
 read -rsp 'check-in key: ' KEY; echo
-printf '%s' "$KEY" | sudo tee /etc/watcher/backup-notifier.key >/dev/null; unset KEY
+printf '%s' "$KEY" | sudo tee /etc/watcher/backup-checkin.key >/dev/null; unset KEY
 sudo tee -a /etc/watcher/backup.env >/dev/null <<'EOF'
-WATCHER_BACKUP_NOTIFIER_BASE_URL=http://status:9000
+WATCHER_BACKUP_CHECKIN_BASE_URL=http://status:9000
 WATCHER_BACKUP_MONITOR_ID=<monitor id>
 EOF
 sudo systemctl start watcher-backup.service
@@ -187,7 +187,7 @@ the monitor's JSON.
 **The base URL is configuration — a departure from broker#3**, which made it a
 constant so a port typo could not aim a dead-man's switch at notifier_dev
 (`:9001`, whose `/health` is byte-identical). This repo's rule is that a
-notifier URL in `src/` is configuration, a literal being the defect whatever
+service URL in `src/` is configuration, a literal being the defect whatever
 host it names (`tests/test_notifier_isolation.py`, #280). The typo is not silent
 anyway. On notifier, keys lived per database, so a production-marked key on
 `:9001` was a **401** (notifier#56). On co-status (#330), `status:9001` does

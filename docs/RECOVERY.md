@@ -20,7 +20,7 @@ the case this closes.
 | **Named by its own time** | `<host>/<YYYYMMDDTHHMMSSZ>.dump` — the start of `pg_dump`, which is when it took its snapshot. A listing is a timeline. |
 | **Create, never overwrite or delete** | `if_generation_match=0` in code; `objectCreator` + `objectViewer` at IAM, no `delete`. A 412 is `unchanged` only if the object's recorded sha256 matches — two dumps are never the same bytes, so anything else is a name collision and a failure. |
 | **Retention is the bucket's** | Lifecycle deletes at 30 days, soft-delete left on. A compromised host cannot erase its own history. |
-| **Failure is loud, silence too** | A failed run is a failed unit *and* an `alert` check-in to notifier; a good one checks in `ok`. The dead-man monitor alarms when neither arrives (D9). |
+| **Failure is loud, silence too** | A failed run is a failed unit *and* an `alert` check-in to co-status (#330); a good one checks in `ok`. The dead-man monitor alarms when neither arrives (D9). |
 | **Metadata travels with the object** | `dumped_at`, `sha256`, `size_bytes`, `alembic_head`, `server_version`, `pg_dump_version`, `toc_entries`, `source_host` — what a restore checks without trusting the file. |
 
 **RPO is 24 hours** — one dump a night. The dump is small — 27.6 MB before the
@@ -126,13 +126,16 @@ original. Left to the SDK that fails `Permission denied` on the key, which reads
 as a reason to loosen its mode — so the job refuses first: exit 2 and an `alert`
 naming this file, before any client is built.
 
-**The dead-man monitor** is notifier's (notifier#56), on the **watcher
-tenant**, so its alarms reach watcher's existing default Mailgun and Slack
-channels. A monitor may use only its own tenant's channels, and a second tenant
-holding copies of those URLs would need every rotation done twice, with nothing
-to say when one was missed. Its check-in key is a **second** production key on
-that tenant, distinct from `watcher.service`'s, minted on the notifier host with
-`seed_tenant.py --tenant-id <watcher tenant id>` (notifier#62). The monitor:
+**The dead-man monitor is co-status's** (#330, CannObserv/status#2):
+`co-watcher-backup` in tenant `co-watcher`, at `http://status:9000`. It began
+on notifier (notifier#56) on the watcher tenant and was imported with its id,
+fields and two channels; co-status keeps notifier's check-in contract exactly —
+path, body, 202 — so the move was configuration only: the base URL in
+`backup.env` and the key in `backup-notifier.key`. Its check-in key is a
+co-status key for that tenant, minted on the co-status host; the notifier key
+it replaced (a second production key on notifier's watcher tenant, notifier#62)
+retires with the handover. A monitor for a new host is created on co-status,
+not here. The monitor:
 
 | Field | Value | Why |
 |---|---|---|
@@ -151,7 +154,7 @@ and the other two into `backup.env`:
 read -rsp 'check-in key: ' KEY; echo
 printf '%s' "$KEY" | sudo tee /etc/watcher/backup-notifier.key >/dev/null; unset KEY
 sudo tee -a /etc/watcher/backup.env >/dev/null <<'EOF'
-WATCHER_BACKUP_NOTIFIER_BASE_URL=http://notifier:9000
+WATCHER_BACKUP_NOTIFIER_BASE_URL=http://status:9000
 WATCHER_BACKUP_MONITOR_ID=<monitor id>
 EOF
 sudo systemctl start watcher-backup.service
@@ -159,11 +162,11 @@ sudo systemctl start watcher-backup.service
 
 A check-in that lands shows in the journal only as httpx's own line —
 `POST …/monitors/<id>/checkin "HTTP/1.1 202 Accepted"` — so the proof is on
-notifier's side: `GET /api/v1/monitors/<id>` reads `state` `ok`, a fresh
-`last_checkin_at`, and the run's summary as `last_variables`. Then **see the alarm fire** before
-relying on it: `PATCH` the monitor to `interval_seconds` 60 and `grace_seconds`
-0, wait for *"has stopped reporting"*, check in for *"has recovered"*, and
-`PATCH` it back.
+the monitor's side: a fresh last check-in with the run's summary as its
+variables. Then **see the alarm fire** before relying on it — on notifier that
+was a `PATCH` to `interval_seconds` 60 and `grace_seconds` 0, waiting for *"has
+stopped reporting"*, checking in for *"has recovered"*, and `PATCH`ing it back;
+on co-status, arrange it on status#2.
 
 **What a check-in carries**, for the monitor's alert template: an `alert` sends
 `source_host`, `outcome` (`failed`) and `error`; an `ok` sends the run's
@@ -186,9 +189,10 @@ constant so a port typo could not aim a dead-man's switch at notifier_dev
 (`:9001`, whose `/health` is byte-identical). This repo's rule is that a
 notifier URL in `src/` is configuration, a literal being the defect whatever
 host it names (`tests/test_notifier_isolation.py`, #280). The typo is not silent
-anyway: keys live per database, so a production-marked key on `:9001` is a
-**401** (notifier#56) — nothing lands, and the monitor alarms. Inverting it
-takes the wrong port *and* a development-marked key. Use the production key.
+anyway. On notifier, keys lived per database, so a production-marked key on
+`:9001` was a **401** (notifier#56). On co-status (#330), `status:9001` does
+not answer from co-watcher at all (checked 2026-09-28): the check-in times out.
+Either way nothing lands, and the monitor alarms.
 
 ## Install and first run
 

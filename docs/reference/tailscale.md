@@ -1,6 +1,6 @@
 # Tailscale — this node
 
-Watcher reaches the broker and the notifier over the tailnet, not over the
+Watcher reaches the broker, the notifier and co-status over the tailnet, not over the
 public internet, so the node's identity is infrastructure rather than
 convenience. This is the reference for it (#296 step 25).
 
@@ -42,6 +42,7 @@ The node name `watcher-lax` it carried at the end belongs to nothing.
 |---|---|---|
 | `broker` | `100.97.91.19` | the Redis bus — `WATCHER_BUS_REDIS_URL`, four streams out, two in |
 | `notifier` | `100.98.9.17` | `http://notifier:9000` (prod) and `:9001` (dev tenant) |
+| `status` | `100.88.216.92` | `http://status:9000` — co-status, the backup's dead-man check-in (#330); the ACL grants `tag:watcher → tag:status:9000` only |
 
 Notifier binds its **tailnet address alone**, so a watcher off the tailnet
 cannot reach it from loopback or from exe.dev's internal network — it starts

@@ -8,7 +8,8 @@ mid-apply, outside any window: the single process that runs the API, the
 Procrastinate worker and both bus consumers, and the cluster under all three
 databases. The drop-in makes the answer independent of whether
 ``NEEDRESTART_MODE=l`` survives every process between the operator and the
-hook. Shape from CannObserv/notifier#91 and CannObserv/broker#65.
+hook — though a ``NEEDRESTART_MODE`` or ``-r`` that *does* arrive still wins over
+the config. Shape from CannObserv/notifier#91 and CannObserv/broker#65.
 
 It governs needrestart's hook only, not maintainer scripts: ``postgresql-16``
 restarts its own cluster on upgrade whatever this file says.
@@ -18,7 +19,9 @@ Tracked in ``deploy/``, installed as:
 - ``needrestart.conf.d/watcher.conf`` -> ``/etc/needrestart/conf.d/``
 
 Pure assertions on the tracked copy run everywhere; installed-parity and live
-assertions skip where the node is not this one, CI included.
+assertions are gated on the host running ``watcher.service``, like the other
+drift checks in this package, and skip elsewhere, CI included. On this host a
+missing drop-in is a finding, not a reason to skip.
 """
 
 import shutil
@@ -31,6 +34,8 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 DROPIN = REPO_ROOT / "deploy" / "needrestart.conf.d" / "watcher.conf"
 INSTALLED = Path("/etc/needrestart/conf.d/watcher.conf")
 MAIN_CONF = Path("/etc/needrestart/needrestart.conf")
+INSTALLED_UNIT = Path("/etc/systemd/system/watcher.service")
+INSTALL_HINT = f"Install with:\n  sudo install -D -m 644 {DROPIN} {INSTALLED}"
 
 # needrestart's config is Perl, eval'd into `%nrconf`. Evaluating it the same
 # way is the only honest parse: a syntax error makes needrestart die, and the
@@ -47,12 +52,17 @@ def _restart_mode(conf: Path) -> str:
     perl = shutil.which("perl")
     if perl is None:
         pytest.skip("perl not available on this host")
-    return subprocess.run(
+    result = subprocess.run(
         [perl, "-e", _EVAL, str(conf)],
         capture_output=True,
         text=True,
-        check=True,
-    ).stdout
+    )
+    assert result.returncode == 0, f"perl failed to evaluate {conf}:\n{result.stderr}"
+    return result.stdout
+
+
+def _on_host() -> bool:
+    return INSTALLED_UNIT.exists()
 
 
 def test_dropin_sets_list_only_restart_mode() -> None:
@@ -73,21 +83,26 @@ def test_dropin_sets_nothing_else() -> None:
 
 
 def test_installed_copy_matches_tracked() -> None:
-    """The installed drop-in is byte-identical to the tracked one."""
-    try:
-        installed = INSTALLED.read_text()
-    except FileNotFoundError:
-        pytest.skip(f"{INSTALLED} not installed on this host")
-    assert installed == DROPIN.read_text()
+    """The installed drop-in is byte-identical to the tracked one.
+
+    Gated on the host, not on the drop-in: gating on the file under test would
+    pass silently on exactly the host that never received it.
+    """
+    if not _on_host():
+        pytest.skip(f"{INSTALLED_UNIT} not present — not a host running the service")
+    assert INSTALLED.exists(), f"{INSTALLED} is missing.\n{INSTALL_HINT}"
+    assert INSTALLED.read_text() == DROPIN.read_text(), (
+        f"{INSTALLED} has drifted from {DROPIN}.\n{INSTALL_HINT}"
+    )
 
 
 def test_live_config_chain_resolves_to_list_only() -> None:
     """The main config globs ``conf.d/*.conf`` in sort order, so a later file
     could override this one. Evaluate the chain needrestart itself reads —
-    only once the drop-in is installed, since before that the stock chain
-    leaves the key unset and that is the state this file exists to change."""
+    on the host running the service, where the stock chain leaving the key
+    unset is the state this file exists to change."""
+    if not _on_host():
+        pytest.skip(f"{INSTALLED_UNIT} not present — not a host running the service")
     if not MAIN_CONF.exists():
         pytest.skip("needrestart not installed on this host")
-    if not INSTALLED.exists():
-        pytest.skip(f"{INSTALLED} not installed on this host")
-    assert _restart_mode(MAIN_CONF) == "l"
+    assert _restart_mode(MAIN_CONF) == "l", f"{INSTALLED} not in effect.\n{INSTALL_HINT}"

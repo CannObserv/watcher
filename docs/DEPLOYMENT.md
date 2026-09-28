@@ -65,6 +65,14 @@ sudo cp deploy/watcher.service /etc/systemd/system/watcher.service
 sudo systemctl daemon-reload
 sudo systemctl enable watcher
 sudo systemctl start watcher
+
+# needrestart lists restarts, never performs them (#331): without it a libc6
+# security update restarts watcher and PostgreSQL mid-apply. Takes effect at
+# the next apt run; `sudo needrestart -m u -r l -b` prints "Disabling Ubuntu
+# mode" once it is read, and restarts nothing. It does not reach maintainer
+# scripts — postgresql-16's own upgrade still restarts its cluster.
+sudo install -D -m 644 deploy/needrestart.conf.d/watcher.conf \
+     /etc/needrestart/conf.d/watcher.conf
 ```
 
 ### Managing the Service

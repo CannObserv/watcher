@@ -133,14 +133,21 @@ def _post_checkin(
     post: Post,
 ) -> bool:
     base = environ.get(BASE_URL_ENV, "").strip()
-    if not base and environ.get(RETIRED_BASE_URL_ENV, "").strip():
-        logger.error(
-            "%s is no longer read — rename it to %s in /etc/watcher/backup.env (#332); "
-            "not checking in",
+    if environ.get(RETIRED_BASE_URL_ENV, "").strip():
+        if not base:
+            logger.error(
+                "%s is no longer read — rename it to %s in /etc/watcher/backup.env (#332); "
+                "not checking in",
+                RETIRED_BASE_URL_ENV,
+                BASE_URL_ENV,
+            )
+            return False
+        logger.warning(
+            "%s is no longer read — %s is used; remove the stale line from "
+            "/etc/watcher/backup.env (#332)",
             RETIRED_BASE_URL_ENV,
             BASE_URL_ENV,
         )
-        return False
     monitor_id = environ.get(MONITOR_ID_ENV, "").strip()
     api_key = _read_key(environ)
     sources = f"{BASE_URL_ENV}, {MONITOR_ID_ENV} and {_KEY_LABEL}"

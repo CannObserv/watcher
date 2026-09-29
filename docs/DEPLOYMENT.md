@@ -73,7 +73,7 @@ sudo systemctl start watcher
 # scripts — postgresql-16's own upgrade still restarts its cluster. Watcher's
 # shared engine pings each pooled connection on checkout (#335), so requests
 # should ride through it; not yet measured — on the first such update, watch
-# `/ready` and the dashboard for 5xx across the restart and record it on #335.
+# `/ready` and the dashboard for 5xx across the restart and record it on #338.
 sudo install -D -m 644 deploy/needrestart.conf.d/watcher.conf \
      /etc/needrestart/conf.d/watcher.conf
 ```

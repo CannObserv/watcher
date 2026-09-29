@@ -69,6 +69,7 @@ async def _setup_pending_row(db_session: AsyncSession, **over) -> tuple:
         "command_id": COMMAND_ID,
         "blob_uri": "file:///var/lib/replicator/blobs/abc.bin",
         "blob_expires_at": now + timedelta(days=7),
+        "blob_fingerprint": "e" * 64,
         "source_media_type": "text/html",
         "content_media_type": "text/plain; charset=utf-8",
         "spec_fingerprint": "spec1:sha256:" + "b" * 64,
@@ -135,6 +136,7 @@ class TestPublish:
         assert payload.source_media_type == "text/html"
         assert payload.blob_uri == pending.blob_uri
         assert payload.blob_expires_at == pending.blob_expires_at
+        assert payload.blob_fingerprint == pending.blob_fingerprint
         assert payload.command_id == COMMAND_ID
         assert payload.spec_fingerprint == pending.spec_fingerprint
 
@@ -159,6 +161,57 @@ class TestPublish:
         result = await drain_pending_archiver_sync(batch_size=10, bus_client=client)
 
         assert result["published"] == 1
+
+    async def test_a_row_without_a_blob_fingerprint_still_publishes(self, db_session, monkeypatch):
+        """#329: rows enqueued before the column landed drain as they always did."""
+        await _setup_pending_row(db_session, blob_fingerprint=None)
+        _wire(db_session, monkeypatch)
+        client = fakeredis.FakeAsyncRedis()
+
+        result = await drain_pending_archiver_sync(batch_size=10, bus_client=client)
+
+        assert result["published"] == 1
+        entries = await client.xrange(streams.CONTENT_REVISIONS)
+        payload = from_wire(
+            {k.decode(): v.decode() for k, v in entries[0][1].items()},
+            topic=streams.CONTENT_REVISIONS,
+            message_id=entries[0][0].decode(),
+        ).payload
+        assert payload.blob_fingerprint is None
+
+    @pytest.mark.parametrize("digest", ["sha256:" + "e" * 64, "e" * 12, "E" * 64])
+    async def test_an_off_spec_blob_fingerprint_is_dropped_not_dead_lettered(
+        self, digest, db_session, monkeypatch, caplog
+    ):
+        """#329: an optional field must not cost a revision.
+
+        The Emit twin refuses anything but bare lowercase hex, which would
+        dead-letter the whole observation. Archiver's ingest logs and drops an
+        off-spec digest and keeps the revision; the drain does the same, sending
+        ``None`` rather than reshaping the value.
+        """
+        _, _, pending = await _setup_pending_row(db_session, blob_fingerprint=digest)
+        _wire(db_session, monkeypatch)
+        client = fakeredis.FakeAsyncRedis()
+
+        with caplog.at_level("WARNING", logger="src.workers.source_revisions_drain"):
+            result = await drain_pending_archiver_sync(batch_size=10, bus_client=client)
+
+        assert result["published"] == 1
+        assert result["dead_lettered"] == 0
+        entries = await client.xrange(streams.CONTENT_REVISIONS)
+        payload = from_wire(
+            {k.decode(): v.decode() for k, v in entries[0][1].items()},
+            topic=streams.CONTENT_REVISIONS,
+            message_id=entries[0][0].decode(),
+        ).payload
+        assert payload.blob_fingerprint is None
+        (record,) = [
+            r
+            for r in caplog.records
+            if r.getMessage() == "drain: off-spec blob_fingerprint — sending none"
+        ]
+        assert record.change_revision_id == str(pending.change_revision_id)
 
 
 class TestClassification:

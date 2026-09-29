@@ -9,7 +9,7 @@ fingerprint and the change decision that enqueues the rows described here.
 ## Reporting revisions on `content.revisions` (#253)
 
 `SourceRevisionObservedEvent` carries values the outbox row never held, so
-`pending_archiver_sync` gained six columns, written at enqueue time by
+`pending_archiver_sync` gained six columns (and a seventh in #329), written at enqueue time by
 `process_watched_item`:
 
 | Column | Source |
@@ -18,6 +18,7 @@ fingerprint and the change decision that enqueues the rows described here.
 | `source_media_type` | that fact's normalized `media_type` — what the origin served |
 | `content_media_type` | the **extracted** content's type (`text/plain; charset=utf-8`) — a different thing, which is why the wire keeps both |
 | `spec_fingerprint` | co-core's derivation over the spec the fallback loop actually bound |
+| `blob_fingerprint` (#329) | that fact's `content_fingerprint` — Replicator's **raw-bytes** sha256, via `fetch_commands.content_fingerprint` |
 
 `fetch_commands.blob_expires_at` was added to feed the first row: the fact has
 carried it since cannobserv#301 and the consumer was dropping it. It is echoed
@@ -25,6 +26,15 @@ onward under the same name, **never** derived from the issuer contract's MUST-7
 TTL — that is Replicator's policy, on a clock that runs from last fetch
 reference, an event no consumer observes. NULL means the horizon is unknown, and
 Archiver records absence rather than a guess.
+
+`blob_fingerprint` is how Archiver persists a revision into Replicator's
+permanent store by digest (replicator#114, archiver#283). It is echoed
+verbatim, **never** parsed out of `blob_uri`, and is not `extracted_fingerprint`
+— different bytes, different service. Optional on the wire until
+cannobserv#494; the drain sends an off-spec value (anything but 64 lowercase
+hex) as `None` with a warning rather than dead-lettering the revision, which is
+Archiver's own ingest rule. When #494 lands, `tests/test_renewal_wire_contract.py`
+fails until the field joins `WIRE_REQUIRED_PROVENANCE_FIELDS`.
 
 Snapshotted rather than joined from `fetch_commands` at drain time: the command
 row's lifecycle is not the outbox row's — delivery to Archiver is the thing being

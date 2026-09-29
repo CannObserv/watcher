@@ -111,6 +111,9 @@ class BlobProvenance:
     blob_uri: str | None
     source_media_type: str | None
     blob_expires_at: datetime | None = None
+    # Replicator's raw-bytes digest, the fact's ``content_fingerprint`` verbatim
+    # (#329) — never parsed out of ``blob_uri``, never the extracted fingerprint.
+    blob_fingerprint: str | None = None
 
 
 @dataclass
@@ -146,6 +149,7 @@ def _provenance_columns(blob: BlobProvenance, outcome: ExtractionOutcome) -> dic
         "command_id": blob.command_id,
         "blob_uri": blob.blob_uri,
         "blob_expires_at": blob.blob_expires_at,
+        "blob_fingerprint": blob.blob_fingerprint,
         "source_media_type": blob.source_media_type,
         "content_media_type": outcome.content_media_type,
         "spec_fingerprint": outcome.spec_fingerprint,

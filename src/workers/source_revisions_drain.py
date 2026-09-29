@@ -28,6 +28,7 @@ from co_core.effects.bus import BusPublish
 from co_core.pure.adapters.bus import streams
 from co_core.pure.adapters.bus.envelope import to_wire
 from co_core.pure.models.changes import SourceRevisionObservedEmit
+from co_core.pure.util.blobstore import validate_fingerprint
 from co_core_aio.bus import AsyncBusPublisher
 from redis.asyncio import Redis
 from redis.exceptions import BusyLoadingError, NoPermissionError, OutOfMemoryError
@@ -75,6 +76,31 @@ _TRANSIENT_PUBLISH_ERRORS: tuple[type[BaseException], ...] = (
 MAX_PUBLISH_ATTEMPTS = 100_000
 
 
+def _wire_blob_fingerprint(row: PendingArchiverSync) -> str | None:
+    """The row's raw-bytes digest, or ``None`` when the wire would refuse it (#329).
+
+    The Emit twin accepts only the blob fact's bare lowercase hex, and a refusal
+    in the build phase dead-letters the whole observation. An optional field
+    must not cost a revision, so an off-spec value is logged and sent as
+    ``None`` — Archiver's own ingest rule (archiver#280). Never reshaped: a
+    stripped prefix or a lowercased digest would be a value nobody sent.
+    """
+    if row.blob_fingerprint is None:
+        return None
+    try:
+        return validate_fingerprint(row.blob_fingerprint)
+    except ValueError:
+        logger.warning(
+            "drain: off-spec blob_fingerprint — sending none",
+            extra={
+                "pending_id": str(row.id),
+                "change_revision_id": str(row.change_revision_id),
+                "command_id": row.command_id,
+            },
+        )
+        return None
+
+
 def _build_emit(
     row: PendingArchiverSync,
     rev: ChangeRevision,
@@ -91,7 +117,8 @@ def _build_emit(
     Not the blob's fingerprint. ``BlobAvailableEvent.content_fingerprint`` is
     Replicator's sha256 of the raw bytes; this is sha256 of the text extracted
     under ``source_specs``. Different inputs, different services, never
-    cross-matched.
+    cross-matched. The raw digest travels separately as ``blob_fingerprint``
+    (#329), via ``_wire_blob_fingerprint``.
 
     Raises ``ValidationError`` when the row lacks a wire-required value — the
     caller dead-letters, because no amount of retrying will add it.
@@ -106,6 +133,7 @@ def _build_emit(
         source_media_type=row.source_media_type,
         blob_uri=row.blob_uri,
         blob_expires_at=row.blob_expires_at,
+        blob_fingerprint=_wire_blob_fingerprint(row),
         command_id=row.command_id,
         spec_fingerprint=row.spec_fingerprint,
     )

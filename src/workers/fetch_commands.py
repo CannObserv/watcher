@@ -459,6 +459,7 @@ async def apply_fetch_blob(
                     blob_uri=row.blob_uri,
                     source_media_type=row.media_type,
                     blob_expires_at=row.blob_expires_at,
+                    blob_fingerprint=row.content_fingerprint,
                 ),
             )
         except ExtractionError as exc:

@@ -68,6 +68,9 @@ class PendingArchiverSync(Base):
     blob_expires_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True, default=None
     )
+    # Replicator's raw-bytes digest, echoed from the blob fact (#329). Archiver
+    # persists the revision by it; NULL on rows enqueued before it landed.
+    blob_fingerprint: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
     # What the origin served, echoed from the blob fact's normalized media_type.
     source_media_type: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
     # ...of the EXTRACTED content, which is a different thing (see the wire's

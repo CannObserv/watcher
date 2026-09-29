@@ -323,6 +323,8 @@ class TestApplyFetchBlob:
         assert blob.blob_uri == row.blob_uri
         assert blob.source_media_type == "application/pdf"
         assert blob.blob_expires_at == NOW + timedelta(days=7)
+        # The raw-bytes digest, from the fact verbatim (#329) — never blob_uri.
+        assert blob.blob_fingerprint == "ab" * 32
 
     async def test_a_cache_hit_reports_whether_it_renewed_the_blob_reference(
         self, db_session, monkeypatch, tmp_path

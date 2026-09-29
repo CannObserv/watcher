@@ -622,6 +622,7 @@ class TestOutboxProvenance:
             blob_uri="file:///var/lib/replicator/blobs/abc.bin",
             source_media_type="text/html",
             blob_expires_at=datetime(2026, 8, 16, tzinfo=UTC),
+            blob_fingerprint="c" * 64,
         )
 
         await process_watched_item(db_session, wi, raw_content=_HTML, blob=blob)
@@ -642,6 +643,7 @@ class TestOutboxProvenance:
         assert row.blob_uri == blob.blob_uri
         assert row.source_media_type == "text/html"
         assert row.blob_expires_at == blob.blob_expires_at
+        assert row.blob_fingerprint == blob.blob_fingerprint
         assert row.spec_fingerprint == spec_fingerprint(_SPEC_FULL_PAGE)
         assert row.content_media_type == "text/plain; charset=utf-8"
 
@@ -654,12 +656,14 @@ _FIRST_BLOB = BlobProvenance(
     blob_uri="gs://co-gcs-blobs/abc",
     source_media_type="text/html",
     blob_expires_at=datetime(2026, 9, 1, tzinfo=UTC),
+    blob_fingerprint="d" * 64,
 )
 _RENEWED_BLOB = BlobProvenance(
     command_id="01J9BBBBBBBBBBBBBBBBBBBBBB",
     blob_uri="gs://co-gcs-blobs/abc",
     source_media_type="text/html",
     blob_expires_at=datetime(2026, 9, 8, tzinfo=UTC),
+    blob_fingerprint="d" * 64,
 )
 
 
@@ -732,6 +736,7 @@ class TestBlobReferenceRenewal:
         assert row.command_id == _RENEWED_BLOB.command_id
         assert row.blob_uri == _RENEWED_BLOB.blob_uri
         assert row.blob_expires_at == _RENEWED_BLOB.blob_expires_at
+        assert row.blob_fingerprint == _RENEWED_BLOB.blob_fingerprint
         assert row.source_media_type == "text/html"
         assert row.content_media_type == "text/plain; charset=utf-8"
         assert row.spec_fingerprint == spec_fingerprint(_SPEC_FULL_PAGE)

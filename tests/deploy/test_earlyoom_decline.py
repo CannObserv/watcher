@@ -1,20 +1,24 @@
-"""earlyoom is declined on this host, on a premise that belongs to exe.dev (#323).
+"""earlyoom is declined on this host (#323), for a reason #337 changed.
 
 #307 installed earlyoom to pick the ``npm``/``node`` process that was actually
-spiking, "at the default 0". It cannot here. exe.dev starts every session from
-``exe-init`` or ``sshd`` at ``oom_score_adj`` -1000, everything a session
-launches inherits it, and earlyoom 1.7 skips a -1000 process exactly as the
-kernel does, ``--prefer`` or not (``kill.c``, after the bonus is added). What
-it can reach is the kernel's own list — the user manager, postgres's processes
-and the small daemons, journald, ``tailscaled``, then watcher — starting at 10%
-available, when the kernel would take none of them until memory actually ran
-out. CannObserv/replicator#112 declined it on the same class of host.
+spiking. Until #337 it could not: ``exe-init`` build 8579326 started every
+session at ``oom_score_adj`` -1000, and earlyoom 1.7 skips a -1000 process
+exactly as the kernel does. exe-init 14fd603 (swapped in 2026-09-29) starts
+sessions at 0, so the kernel's own order is now the right one — the sessions
+rank ahead of watcher at -500 — and earlyoom's only addition would be to fire
+at 10% available, where the kernel waits for memory to actually run out.
+Measured after the restart: a tuned ``--prefer`` picks the editor's extension
+host the agent session runs under. CannObserv/replicator#112 declined it too.
 
 Both halves are pinned live, on the host only. earlyoom must not be running:
 ``apt install earlyoom`` starts it at once, on stock arguments. And sessions
-must still read -1000, because that premise is not this repo's to hold:
-notifier's sessions sit at 0, and what decides it was never determined. If a
-session here stops reading -1000, the decline no longer holds.
+must read 0, because that premise is exe.dev's, not this repo's: the -1000
+came from their ``exe-init`` build and a rebuilt VM could bring it back. If a
+session here reads -1000 again, the kernel can no longer pick it and watcher
+is the largest candidate left (docs/HOST-MEMORY.md).
+
+On the host the premise check fails rather than skips when it cannot find a
+session root (#333): a skip there asserts nothing on the one host it exists for.
 """
 
 import os
@@ -28,9 +32,13 @@ import pytest
 INSTALLED_UNIT = Path("/etc/systemd/system/watcher.service")
 EARLYOOM = "earlyoom.service"
 
-# What exe.dev starts a session from; the -1000 is theirs, inherited or not.
+# What exe.dev starts a session from; the session's adj is theirs to set.
 SESSION_PARENTS = frozenset({"exe-init", "sshd"})
-OOM_EXEMPT = -1000
+# PID 1's own cgroup. A session outliving its exe-init ancestor is reparented to
+# PID 1 and stays here; a service under PID 1 sits in system.slice instead.
+SESSION_CGROUP = "/init.scope"
+# What exe-init 14fd603 starts a session at (#337).
+SESSION_ADJ = 0
 
 
 def _on_host() -> bool:
@@ -56,19 +64,22 @@ def _session_root_adj(proc: Path, pid: int) -> int | None:
     return None
 
 
-def _fake_process(proc: Path, pid: int, ppid: int, comm: str, adj: int) -> None:
+def _fake_process(
+    proc: Path, pid: int, ppid: int, comm: str, adj: int, cgroup: str = SESSION_CGROUP
+) -> None:
     (proc / str(pid)).mkdir(parents=True)
     (proc / str(pid) / "status").write_text(f"Name:\t{comm}\nPPid:\t{ppid}\n")
     (proc / str(pid) / "comm").write_text(f"{comm}\n")
     (proc / str(pid) / "oom_score_adj").write_text(f"{adj}\n")
+    (proc / str(pid) / "cgroup").write_text(f"0::{cgroup}\n")
 
 
 def test_a_session_under_exe_init_reports_its_root(tmp_path: Path) -> None:
     """The root, not the leaf: a leaf can be ``choom``'d, the root cannot."""
-    _fake_process(tmp_path, 218, 1, "exe-init", -1000)
-    _fake_process(tmp_path, 576, 218, "bash", -1000)
-    _fake_process(tmp_path, 900, 576, "npm install", 500)
-    assert _session_root_adj(tmp_path, 900) == -1000
+    _fake_process(tmp_path, 217, 1, "exe-init", -1000)
+    _fake_process(tmp_path, 540, 217, "bash", 0)
+    _fake_process(tmp_path, 900, 540, "npm install", 500)
+    assert _session_root_adj(tmp_path, 900) == 0
 
 
 def test_a_session_under_sshd_reports_its_root(tmp_path: Path) -> None:
@@ -79,25 +90,61 @@ def test_a_session_under_sshd_reports_its_root(tmp_path: Path) -> None:
     assert _session_root_adj(tmp_path, 701) == 0
 
 
-def test_no_session_ancestor_is_none(tmp_path: Path) -> None:
-    """CI, a systemd unit, cron: nothing to measure."""
+def test_an_orphaned_session_reports_its_root(tmp_path: Path) -> None:
+    """#333: a session whose ``exe-init`` ancestor exited, reparented to PID 1.
+
+    Measured on co-watcher 2026-09-28: the chain ended ``sh`` → PID 1, every
+    process in it in ``/init.scope``. Still a session, and its adj still counts.
+    """
     _fake_process(tmp_path, 1, 0, "systemd", 0)
-    _fake_process(tmp_path, 315, 1, "systemd", 100)
-    _fake_process(tmp_path, 316, 315, "python3", 0)
+    _fake_process(tmp_path, 645, 1, "sh", -1000)
+    _fake_process(tmp_path, 649, 645, "MainThread", -1000)
+    assert _session_root_adj(tmp_path, 649) == -1000
+
+
+def test_a_service_under_pid_1_is_not_a_session(tmp_path: Path) -> None:
+    """The same parent as an orphan; ``system.slice`` tells them apart."""
+    _fake_process(tmp_path, 1, 0, "systemd", 0)
+    _fake_process(tmp_path, 400, 1, "uv", -500, "/system.slice/watcher.service")
+    _fake_process(tmp_path, 401, 400, "uvicorn", -500, "/system.slice/watcher.service")
+    assert _session_root_adj(tmp_path, 401) is None
+
+
+def test_no_session_ancestor_is_none(tmp_path: Path) -> None:
+    """CI, cron, the user manager: nothing to measure.
+
+    The user manager's own cgroup ends in ``init.scope`` too; only PID 1's counts.
+    """
+    _fake_process(tmp_path, 1, 0, "systemd", 0)
+    _fake_process(
+        tmp_path, 315, 1, "systemd", 100, "/user.slice/user-1000.slice/user@1000.service/init.scope"
+    )
+    _fake_process(
+        tmp_path, 316, 315, "python3", 0, "/user.slice/user-1000.slice/user@1000.service/app.slice"
+    )
     assert _session_root_adj(tmp_path, 316) is None
 
 
-def test_sessions_here_are_still_exempt() -> None:
-    """The premise of the decline, read off this session's own root."""
+def test_sessions_here_are_killable() -> None:
+    """The premise of the decline, read off this session's own root.
+
+    Fails rather than skips on the host (#333): gate on the host, never on the
+    thing under test.
+    """
     if not _on_host():
         pytest.skip(f"{INSTALLED_UNIT} not present — not a host running the service")
     adj = _session_root_adj(Path("/proc"), os.getpid())
-    if adj is None:
-        pytest.skip("not run from an exe.dev session")
-    assert adj == OOM_EXEMPT, (
-        f"this session's root reads oom_score_adj={adj}, not {OOM_EXEMPT}: exe.dev no "
-        "longer exempts sessions here, so earlyoom's --prefer can now reach them and "
-        "#323's decline no longer holds. Revisit it in docs/HOST-MEMORY.md §3"
+    assert adj is not None, (
+        "no exe.dev session root above this process — neither a child of "
+        f"{sorted(SESSION_PARENTS)} nor a PID 1 child in {SESSION_CGROUP}. Run it "
+        "from an agent or SSH session; if it was run from one, exe.dev changed how "
+        "a session starts and this walk needs to learn it (#333)"
+    )
+    assert adj == SESSION_ADJ, (
+        f"this session's root reads oom_score_adj={adj}, not {SESSION_ADJ}: exe.dev "
+        "starts sessions exempt again, so the kernel can no longer pick one and "
+        "watcher is the largest candidate left. Check `exe-init --version` against "
+        "#337 and revisit the earlyoom decline in docs/HOST-MEMORY.md §3"
     )
 
 

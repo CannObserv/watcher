@@ -51,7 +51,8 @@ def _session_root_adj(proc: Path, pid: int) -> int | None:
     Walks the ancestry to the first process whose parent is in
     ``SESSION_PARENTS`` and reads that one, not ``pid`` itself: a leaf can be
     ``choom``'d (HOST-MEMORY.md step 1's capped installs are), the session root
-    cannot. ``None`` when no ancestor is a session.
+    cannot. A PID 1 child in ``SESSION_CGROUP`` is a root too — a session whose
+    ``exe-init`` ancestor exited (#333). ``None`` when no ancestor is a session.
     """
     while pid > 1:
         status = (proc / str(pid) / "status").read_text()
@@ -60,6 +61,10 @@ def _session_root_adj(proc: Path, pid: int) -> int | None:
             return None
         if (proc / str(ppid) / "comm").read_text().strip() in SESSION_PARENTS:
             return int((proc / str(pid) / "oom_score_adj").read_text())
+        if ppid == 1:
+            cgroup = (proc / str(pid) / "cgroup").read_text().strip()
+            if cgroup == f"0::{SESSION_CGROUP}":
+                return int((proc / str(pid) / "oom_score_adj").read_text())
         pid = ppid
     return None
 

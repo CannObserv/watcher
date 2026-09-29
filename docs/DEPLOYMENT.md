@@ -70,7 +70,10 @@ sudo systemctl start watcher
 # security update restarts watcher and PostgreSQL mid-apply. Takes effect at
 # the next apt run; `sudo needrestart -m u -r l -b` prints "Disabling Ubuntu
 # mode" once it is read, and restarts nothing. It does not reach maintainer
-# scripts — postgresql-16's own upgrade still restarts its cluster.
+# scripts — postgresql-16's own upgrade still restarts its cluster. Watcher's
+# shared engine pings each pooled connection on checkout (#335), so requests
+# should ride through it; not yet measured — on the first such update, watch
+# `/ready` and the dashboard for 5xx across the restart and record it on #335.
 sudo install -D -m 644 deploy/needrestart.conf.d/watcher.conf \
      /etc/needrestart/conf.d/watcher.conf
 ```

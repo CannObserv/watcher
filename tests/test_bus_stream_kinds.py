@@ -169,6 +169,18 @@ def _topic_arg(call: ast.Call, position: int | None = None) -> ast.expr | None:
     return None
 
 
+def _publish_maxlen(call: ast.Call) -> ast.expr | None:
+    """The ``maxlen`` a ``BusPublish`` passes, keyword or third positional (CR 1).
+
+    ``BusPublish`` is a plain dataclass, not keyword-only, so ``BusPublish(t, f,
+    500)`` is a capped publish that reading keywords alone takes for uncapped.
+    """
+    for keyword in call.keywords:
+        if keyword.arg == "maxlen":
+            return keyword.value
+    return call.args[2] if len(call.args) > 2 else None
+
+
 def _callee(call: ast.Call) -> str | None:
     """The called name, qualified or not — `X()` and `mod.X()` both yield "X".
 
@@ -372,7 +384,7 @@ class TestConfigStatePublishesAreTrimmed:
             )
             if stream_kind(topic) != "config_state":
                 continue
-            maxlen = next((k.value for k in call.keywords if k.arg == "maxlen"), None)
+            maxlen = _publish_maxlen(call)
             assert maxlen is not None, (
                 f"{path}: publish to config/state stream {topic!r} without maxlen. The "
                 "republished full set grows without bound and the boot replay grows with "
@@ -455,7 +467,7 @@ class TestUncappedStreamsStayUncapped:
             if topic not in self.UNCAPPED:
                 continue
             found.add(topic)
-            maxlen = next((k.value for k in call.keywords if k.arg == "maxlen"), None)
+            maxlen = _publish_maxlen(call)
             capped = maxlen is not None and not (
                 isinstance(maxlen, ast.Constant) and maxlen.value is None
             )
@@ -754,6 +766,23 @@ class TestTheScannerSeesEveryCallForm:
         tree = ast.parse(source)
         (call,) = [n for n in ast.walk(tree) if isinstance(n, ast.Call)]
         assert _resolve_topic(_topic_arg(call, position=0), _stream_aliases(tree)) == expected
+
+    @pytest.mark.parametrize(
+        ("source", "expected"),
+        [
+            ("BusPublish(t, f, maxlen=500)", 500),
+            ("BusPublish(t, f, 500)", 500),
+            ("BusPublish(t, f)", None),
+        ],
+        ids=["keyword", "positional", "absent"],
+    )
+    def test_a_publish_maxlen_is_found_however_it_is_passed(self, source, expected):
+        """``BusPublish`` is not keyword-only, so ``maxlen`` may ride positionally:
+        read as absent, it slipped a capped publish past the #327 rule and
+        accused a trimmed config/state publish of having no trim (CR 1)."""
+        (call,) = [n for n in ast.walk(ast.parse(source)) if isinstance(n, ast.Call)]
+        found = _publish_maxlen(call)
+        assert (found.value if found is not None else None) == expected
 
     def test_an_unrecognizable_topic_resolves_to_nothing(self):
         """And the rules assert on that rather than continuing past it."""

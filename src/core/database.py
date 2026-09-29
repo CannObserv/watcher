@@ -98,7 +98,11 @@ def get_engine() -> AsyncEngine:
     global _engine
     if _engine is None:
         url = get_database_url()
-        _engine = create_async_engine(url, echo=False)
+        # pool_pre_ping (#335): a Postgres restart under a running service
+        # (an apt run restarting postgresql-16) kills every pooled connection;
+        # without a checkout-time ping each one fails a request before the pool
+        # is invalidated. Procrastinate's own pool already checks on checkout.
+        _engine = create_async_engine(url, echo=False, pool_pre_ping=True)
         logger.info("database engine created", extra={"url": url.split("@")[-1]})
     return _engine
 

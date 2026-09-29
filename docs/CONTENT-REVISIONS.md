@@ -117,9 +117,14 @@ refreshes the two cache columns together, forward-only, and emits nothing.
 The producer half is the cache-hit branch of `process_watched_item`. An
 unchanged fingerprint still writes no `ChangeRevision` and dispatches nothing,
 but it **upserts** a `PendingArchiverSync` for the item's latest revision
-carrying this cycle's provenance — the same six columns the change path
+carrying this cycle's provenance — the same seven columns the change path
 writes (`_provenance_columns`), so the drain publishes the same shape under
-the same envelope key. `change_revision_id` is unique on the outbox, and the
+the same envelope key. **The digest travels with the URI it arrived beside
+(#329).** Unchanged extracted text does not mean unchanged raw bytes, so a
+renewal can carry a different `blob_fingerprint` for the same revision.
+Archiver pairs the two — the digest moves with `content_cache_uri` until the
+revision is persisted, and a URI without one clears it (archiver#280) —
+because Replicator refuses a persist whose digest does not match its blob. `change_revision_id` is unique on the outbox, and the
 upsert is one statement so it resolves in Postgres against a drain holding
 the row `FOR UPDATE`:
 

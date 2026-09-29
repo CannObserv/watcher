@@ -24,7 +24,10 @@ What the kind actually decides, and therefore what these tests pin:
   the replay-at-boot cost rises forever. The cap is bounded **below** as well
   (#292): without a ``floor=`` derived from the set, a corpus that outgrows the
   constant has the republish trimming its own earlier frames, which is the 0-cap
-  partial replay reached by growth instead of by configuration.
+  partial replay reached by growth instead of by configuration. The command
+  and fact streams Watcher publishes are the inverse, by decision (#327): **no**
+  cap on the publish and no ``XTRIM``/``XDEL`` anywhere — a length cap there
+  deletes undelivered commands or unread facts.
 
 These read the source rather than the runtime, because the failure they guard
 against is a *new* call site written the wrong way — which no existing test

@@ -412,6 +412,84 @@ class TestConfigStatePublishesAreTrimmed:
         assert checked, "no config/state publishes found — has BusPublish been renamed?"
 
 
+class TestUncappedStreamsStayUncapped:
+    """``content.fetch`` and ``content.revisions`` have no retention, by decision (#327).
+
+    ``maxmemory`` is their only bound — the same call as archiver#267 and
+    replicator#119 — until a trigger in ``docs/ARCHITECTURE.md`` fires. Two ways
+    to break that silently, one test each:
+
+    * **A cap on the publish.** ``content.fetch`` is a command stream: ``MAXLEN``
+      deletes commands ``replicator.fetch`` has not been delivered and orphans the
+      pending entries naming them, which replicator drops with no fact published.
+      ``content.revisions`` is a fact stream: a length cap loses facts some group
+      has not read. The broker's ACL cannot refuse this — ``MAXLEN`` rides ``+xadd``.
+    * **An out-of-band trim.** Watcher issues no ``XTRIM`` or ``XDEL`` (#317), and
+      CannObserv/broker#41 withdraws the grant on that answer. A new call would
+      fail ``NOPERM`` in production only; the planned remedies (``XDEL`` on
+      terminal commands, ``MINID`` below every group's settled position) each
+      start with a grant request to broker naming #327.
+    """
+
+    UNCAPPED = frozenset({streams.CONTENT_FETCH, streams.CONTENT_REVISIONS})
+    TRIM_COMMANDS = frozenset({"xtrim", "xdel"})
+
+    @classmethod
+    def _is_trim(cls, call: ast.Call) -> bool:
+        """redis-py's ``xtrim``/``xdel``, or a raw ``execute_command("XTRIM", …)``."""
+        if (_callee(call) or "").lower() in cls.TRIM_COMMANDS:
+            return True
+        first = call.args[0] if call.args else None
+        return (
+            isinstance(first, ast.Constant)
+            and isinstance(first.value, str)
+            and first.value.lower() in cls.TRIM_COMMANDS
+        )
+
+    def test_neither_stream_is_published_with_maxlen(self):
+        found = set()
+        for path, tree, call in _calls("BusPublish"):
+            topic = _resolve_topic(
+                _topic_arg(call, position=0), _stream_aliases(tree), _module_aliases(tree)
+            )
+            if topic not in self.UNCAPPED:
+                continue
+            found.add(topic)
+            maxlen = next((k.value for k in call.keywords if k.arg == "maxlen"), None)
+            capped = maxlen is not None and not (
+                isinstance(maxlen, ast.Constant) and maxlen.value is None
+            )
+            assert not capped, (
+                f"{path.relative_to(ROOT)}:{call.lineno}: {topic!r} published with maxlen. "
+                "Retention on this stream is maxmemory alone by decision (#327); a length "
+                "cap deletes undelivered commands or unread facts. See docs/ARCHITECTURE.md "
+                "→ 'No retention on content.fetch or content.revisions'."
+            )
+        assert found == self.UNCAPPED, f"publishes found only for {found} — renamed?"
+
+    def test_nothing_trims_or_deletes_stream_entries(self):
+        trims = []
+        for path, tree in _modules():
+            for node in ast.walk(tree):
+                if isinstance(node, ast.Call) and self._is_trim(node):
+                    trims.append(f"{path.relative_to(ROOT)}:{node.lineno}")
+        assert trims == [], (
+            f"a stream trim appeared: {trims}. Watcher holds no +xtrim/+xdel once "
+            "CannObserv/broker#41 lands, so this fails NOPERM in production only. If a "
+            "#327 trigger fired, file the grant request on broker first and update "
+            "docs/ARCHITECTURE.md and this test together."
+        )
+
+    def test_the_trim_rule_sees_both_spellings(self):
+        """The negative rule's vacuity check: both forms must actually match."""
+        for source in (
+            "client.xtrim('s', minid='0-1')",
+            "client.execute_command('XDEL', 's', '1-0')",
+        ):
+            assert self._is_trim(ast.parse(source).body[0].value), source
+        assert not self._is_trim(ast.parse("client.xadd('s', {})").body[0].value)
+
+
 class TestNoDeadLetterWriterExistsYet:
     """Watcher writes no dead letter today, and broker#2's ACL grant is for a
     path with no caller (#288).

@@ -10,12 +10,17 @@ has not run yet, the migration URL is simply the application's.
 import logging
 
 import pytest
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import create_async_engine
 
 from src.core.database import (
     MIGRATION_DATABASE_URL_ENV,
     get_database_url,
+    get_engine,
     get_migration_database_url,
+    reset_engine,
 )
+from tests.conftest import TEST_DATABASE_URL
 
 _APP_URL = "postgresql+asyncpg://watcher_app:pw@localhost:5432/watcher"
 _MIGRATE_URL = "postgresql+asyncpg://watcher:pw@localhost:5432/watcher"
@@ -120,3 +125,37 @@ class TestDivergenceWarning:
         with caplog.at_level(logging.WARNING, logger="src.core.database"):
             get_migration_database_url()
         assert caplog.records == []
+
+
+class TestSharedEnginePool:
+    """The shared engine survives connections that died in the pool (#335).
+
+    A mid-life Postgres restart (an apt run restarting ``postgresql-16``)
+    kills every pooled connection. Without a checkout-time ping the next
+    request on each one fails before SQLAlchemy invalidates the pool. A
+    terminated backend is that restart, one connection wide.
+    """
+
+    async def test_checkout_replaces_a_connection_whose_backend_died(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("DATABASE_URL", TEST_DATABASE_URL)
+        reset_engine()
+        engine = get_engine()
+        killer = create_async_engine(TEST_DATABASE_URL)
+        try:
+            async with engine.connect() as conn:
+                pid = (await conn.execute(text("SELECT pg_backend_pid()"))).scalar_one()
+            # Back in the pool; terminate it and wait for the backend to exit.
+            async with killer.connect() as conn:
+                terminated = await conn.execute(
+                    text("SELECT pg_terminate_backend(:pid, 5000)"), {"pid": pid}
+                )
+                assert terminated.scalar_one() is True
+
+            async with engine.connect() as conn:
+                assert (await conn.execute(text("SELECT 1"))).scalar_one() == 1
+        finally:
+            await killer.dispose()
+            await engine.dispose()
+            reset_engine()

@@ -131,12 +131,14 @@ SuccessExitStatus=143
 
 # Memory reservation against a co-tenant agent session (#307).
 #
-# Dev and prod share this VM, and exe.dev session processes inherit
-# oom_score_adj -1000 from exe-init and sshd. The OOM killer therefore cannot
-# ever pick the session that is spiking — it picks this service instead. That is
-# how CannObserv/broker's VM presented on 2026-09-16: nothing that spiked was
+# Dev and prod share this VM. Under exe-init 8579326, exe.dev session processes
+# inherited oom_score_adj -1000, so the OOM killer could never pick the session
+# that was spiking — it picked this service instead. That is how
+# CannObserv/broker's VM presented on 2026-09-16: nothing that spiked was
 # killed, the kernel failed atomic allocations in tailscaled and ksoftirqd, and
-# the bus was down 57m 48s.
+# the bus was down 57m 48s. exe-init 14fd603 starts sessions at 0 (#337); the
+# reservation stays, because a killable session still competes for reclaim and
+# a rebuilt VM can bring the old build back.
 #
 # This host has no swap (7.75 GiB since #309's resize; 3.8 GiB when #307
 # landed), so there is no swap to absorb a spike and reclaim is the only lever.
@@ -158,11 +160,11 @@ SuccessExitStatus=143
 # stops a driver launch installing a server at all (docs/HOST-MEMORY.md).
 MemoryLow=512M
 
-# Move this service behind everything else the killer can take. The agent
-# session sits at -1000 and is unpickable, and so is everything it launches;
-# what is left — the system daemons, postgres's backends — runs at the default
-# 0, where this service's size made it the most attractive candidate on the
-# host (docs/HOST-MEMORY.md, #323).
+# Move this service behind everything else the killer can take: the agent
+# session and everything it launches (0 since #337, -1000 before), the system
+# daemons and postgres's backends, all at the default 0, where this service's
+# size would make it one of the most attractive candidates on the host
+# (docs/HOST-MEMORY.md, #323).
 #
 # Deliberately not -1000: an unkillable service on a host with no swap
 # means the kernel runs out of candidates and wedges the box rather than

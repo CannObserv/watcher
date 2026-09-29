@@ -308,9 +308,10 @@ design and decisions D0–D14 in `docs/plans/2026-09-11-shared-qdrant-vm-design.
 
 **Why not locally.** A cold local index pulls two images and the embedding model and peaks
 around **1.2 G** at the cgroup (measured on CannObserv/broker), on a swapless host where
-agent sessions, and any index they launch, sit at `oom_score_adj` -1000: the pressure they
-make lands on everything else, `watcher.service` included (#307;
-[HOST-MEMORY.md](HOST-MEMORY.md)).
+agent sessions, and any index they launch, sat at `oom_score_adj` -1000 when this was
+decided: the pressure they made landed on everything else, `watcher.service` included
+(#307; [HOST-MEMORY.md](HOST-MEMORY.md)). Sessions read 0 since #337, which makes the
+index killable, not affordable.
 
 **The client contract is two committed files**, so every checkout addresses the same
 collections wherever the working tree sits on disk:
@@ -401,8 +402,9 @@ systemd-run --user --scope -p MemoryHigh=1200M -p MemoryMax=1536M -p CPUQuota=10
   choom -n 500 -- node $D index .
 ```
 
-`OOMScoreAdjust`/`choom` is not optional — a session-launched process inherits -1000 and a
-cgroup cap on it stalls rather than kills. Measured here 2026-09-19: **69 min wall** on
+`OOMScoreAdjust`/`choom` is not optional — under exe-init 8579326 a session-launched
+process inherited -1000 and a cgroup cap on it stalled rather than killed. Sessions read 0
+since #337; keep the `choom` anyway, since a rebuilt VM can bring the old build back. Measured here 2026-09-19: **69 min wall** on
 the pinned 1.14.0 server, installing nothing, `watcher.service` untouched, five green
 collections and no path-hash collection for this repo.
 

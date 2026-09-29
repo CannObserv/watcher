@@ -16,13 +16,17 @@ bash skills-vendor/gregoryfoster-skills/skills/init-socraticode/scripts/prefligh
 ```
 
 The hazard is not that something is large — it is who the kernel picks when
-something is. exe.dev session processes inherit `oom_score_adj` **-1000** from
-`exe-init` and `sshd`, so the OOM killer can never choose the agent session that
-is spiking and takes the host's production service instead. On
-CannObserv/broker's VM on 2026-09-16 nothing that spiked was killed: the kernel
-failed atomic allocations in `tailscaled` and `ksoftirqd`, the bus was down 57m
-48s, and a downstream consumer never reconnected. The steps below answer that,
-and none substitutes for another.
+something is. Until #337, exe.dev session processes inherited `oom_score_adj`
+**-1000** from `exe-init` build 8579326, so the OOM killer could never choose the
+agent session that was spiking and took the host's production service instead.
+On CannObserv/broker's VM on 2026-09-16 nothing that spiked was killed: the
+kernel failed atomic allocations in `tailscaled` and `ksoftirqd`, the bus was
+down 57m 48s, and a downstream consumer never reconnected. exe-init 14fd603,
+swapped in on 2026-09-29, starts sessions at **0** (`exe-init` itself stays at
+-1000), so the kernel can now take the session. The steps below were built for
+the -1000 host and all stay: the premise is exe.dev's, a rebuilt VM can bring
+the old build back, and at 0 a spiking session still competes with watcher for
+reclaim. None substitutes for another.
 
 **1. Don't install a server at any launch — pin both.** Two things launch
 SocratiCode here, each pinned on its own, both at **1.14.0**:
@@ -118,7 +122,7 @@ no swap wedges the box instead of shedding one process. **The reservation holds
 only because `system.slice` grants it** — see step 4; for #307's whole life it
 protected nothing.
 
-**3. The kernel needs a reserve; earlyoom cannot act for it here.**
+**3. The kernel needs a reserve; earlyoom does not act for it here.**
 `vm.min_free_kbytes` shipped at ~8 MB here, which is what lets an atomic
 allocation in `tailscaled` fail while memory is nominally available;
 `/etc/sysctl.d/60-watcher-memory.conf` raises it to 64 MB. It does not live in
@@ -138,11 +142,12 @@ sudo sysctl --system
 cat /proc/sys/vm/min_free_kbytes    # 65536
 ```
 
-**earlyoom is declined here (#323).** #307 installed it to shed the `npm`/`node`
-process that was actually spiking. It never could: everything a session
-launches inherits the session's -1000, and earlyoom 1.7 skips a -1000 process
+**earlyoom is declined here (#323), and stays declined now that sessions are
+killable (#337).** #307 installed it to shed the `npm`/`node` process that was
+actually spiking. Under exe-init 8579326 it never could: everything a session
+launched inherited the session's -1000, and earlyoom 1.7 skips a -1000 process
 exactly as the kernel does, `--prefer` or not (`kill.c`, after the bonus is
-added). What it could reach is the kernel's own list — measured 2026-09-24,
+added). What it could reach was the kernel's own list — measured 2026-09-24,
 with 1.7 GiB of RSS at -1000 and 634 MiB eligible:
 
 | `oom_score` | process (adj) |
@@ -154,25 +159,36 @@ with 1.7 GiB of RSS at -1000 and 634 MiB eligible:
 | 348, 336 | watcher's `uvicorn`, `uv` (-500) |
 
 #307's `--avoid` moved postgres, `tailscaled` and watcher down that list, never
-off it. earlyoom starts at 10% available (~790 MiB here) and works down it, so a
-session that holds the host past 90% without exhausting it would end watcher's
-database connections — a crash recovery once it escalates to SIGKILL at 5% — and
-then watcher itself, where the kernel takes nothing until memory is actually
-gone. Apart from those three, nothing on the list holds more than ~35 MB.
-What contains a spiking session here is step 1: the pin keeps a launch from
-installing a server at all, and a deliberate install runs under `choom -n 500`
-inside a `MemoryMax=1536M` scope — the one session process earlyoom *could*
-reach, and one the scope already contains. CannObserv/replicator#112 declined
-it on the same class of host.
+off it: earlyoom would have ended watcher's database connections at 10%
+available (~790 MiB here), then watcher itself.
+
+exe-init 14fd603 puts the sessions back on the list. Measured 2026-09-29 after
+the restart, 6.1 GiB available: `systemd --user` and `(sd-pam)` still lead (734,
+733; ~14 MB between them), then the session processes at 0 — the editor's
+extension host (`MainThread`, 465 MB) at 706, `claude` (283 MB) at 690 — and
+watcher at -500 sits far below all of them. The kernel's own order is now the
+right one, and it waits for memory to actually run out. A dry run of earlyoom
+on stock arguments picks `systemd --user`; with `--prefer
+'^(node|npm|MainThread|claude)'` and #307's `--avoid` it picks that 465 MB
+extension host — the process the agent session runs under — at 10% available,
+where nothing has failed yet. So it adds an early kill of the session, not
+protection for watcher. CannObserv/replicator#112 declined it on the same class
+of host. What contains a spiking session is still step 1: the pin keeps a launch
+from installing a server at all, and a deliberate install runs under `choom -n
+500` inside a `MemoryMax=1536M` scope.
 
 `tests/deploy/test_earlyoom_decline.py` pins both halves live: earlyoom is not
 running (`apt install earlyoom` starts it at once, on stock arguments), and this
-session's root still reads -1000. A host set up from the old runbook: `sudo
-systemctl disable --now earlyoom`. If the premise flips — notifier's sessions
-sit at 0, and what decides it is unknown — revisit the decline, and never
-`$`-anchor `--prefer`: `comm` is truncated to 15 characters, so the server is
-`npm exec socrat` and `^npm$` misses it (gregoryfoster/skills' `host-memory.md`
-§4 lists the other traps). Re-measuring kills nothing and needs no root:
+session's root reads 0. That check fails rather than skips on the host when it
+finds no session root, and counts a session orphaned under PID 1 in
+`/init.scope` as one (#333). A host set up from the old runbook: `sudo systemctl
+disable --now earlyoom`. If sessions read -1000 again, check `exe-init
+--version` against #337 before anything else: that is exe.dev's old build, and
+the kernel can then pick nothing a session launches. If earlyoom is ever
+revisited, never `$`-anchor `--prefer`: `comm` is truncated to 15 characters, so
+the server is `npm exec socrat` and `^npm$` misses it (gregoryfoster/skills'
+`host-memory.md` §4 lists the other traps). Re-measuring kills nothing and needs
+no root:
 
 ```bash
 apt-get download earlyoom && dpkg-deb -x earlyoom_*.deb x   # in a scratch dir
@@ -200,7 +216,7 @@ another route. Measured 2026-09-23, after the resize:
 
 | cgroup | `memory.current` | `MemoryLow` | `OOMScoreAdjust` (live, per process) | Set by |
 |---|---|---|---|---|
-| `init.scope` (agent sessions) | 3093M | — | -1000 | exe-init / sshd |
+| `init.scope` (agent sessions) | 3093M | — | -1000 (0 since #337) | exe-init / sshd |
 | `system.slice` | 644M | **1G** | — | `deploy/dropins/system.slice.d/` |
 | └ `watcher.service` | 282M | 512M | -500 (`uv`, `uvicorn`) | `deploy/watcher.service` |
 | └ `system-postgresql.slice` | 122M | **384M** | — | `deploy/dropins/system-postgresql.slice.d/` |

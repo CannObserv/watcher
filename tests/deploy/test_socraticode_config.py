@@ -7,9 +7,9 @@ addresses the same collections wherever the working tree sits on disk.
 
 Hosting one here was ruled out on measurement, not taste: #307 found this host
 at 3.8 GiB with no swap (7.75 GiB since #309's resize, still swapless), sharing
-memory with `watcher.service` and with agent sessions the OOM killer cannot
-touch (`oom_score_adj` -1000), while a cold local index peaks at ~1.2 G pulling
-two images and an embedding model.
+memory with `watcher.service` and with agent sessions the OOM killer could not
+touch (`oom_score_adj` -1000 until #337, 0 since), while a cold local index
+peaks at ~1.2 G pulling two images and an embedding model.
 
 Each assertion below pins a failure mode that reports itself as *green*:
 

@@ -245,15 +245,16 @@ def test_installed_unit_matches_repo() -> None:
 
 
 def test_repo_unit_reserves_memory_against_a_co_tenant_session() -> None:
-    """#307: the service gets the reservation, because the session cannot be killed.
+    """#307: the service gets the reservation against a co-tenant session.
 
-    Dev and prod share this VM (AGENTS.md → Infrastructure), and exe.dev session
-    processes inherit ``oom_score_adj`` **-1000** from ``exe-init`` and ``sshd``.
-    The OOM killer therefore can never pick the agent session that is spiking —
-    it picks the host's production service instead. That is what happened on
+    Dev and prod share this VM (AGENTS.md → Infrastructure). Under ``exe-init``
+    8579326, exe.dev session processes inherited ``oom_score_adj`` **-1000**, so
+    the OOM killer could never pick the agent session that was spiking — it
+    picked the host's production service instead. That is what happened on
     CannObserv/broker's VM on 2026-09-16: nothing that spiked was killed, the
     kernel failed atomic allocations in ``tailscaled`` and ``ksoftirqd``, and the
-    bus was down 57m 48s.
+    bus was down 57m 48s. Sessions read 0 since #337; a killable session still
+    competes for reclaim, and a rebuilt VM can bring the old build back.
 
     A cap on the session is not a substitute. This host has no swap, so the
     reservation is the only directive that keeps this service's working set out
@@ -289,10 +290,10 @@ def test_repo_unit_takes_no_throttling_cap() -> None:
 def test_repo_unit_lowers_its_oom_score() -> None:
     """#307: make the killer prefer anything else on the box.
 
-    The agent session sits at -1000 and is unpickable, and so is everything it
-    launches — an ``npm install``, a ``node`` server (#323). What the killer can
-    take runs at the default 0: the system daemons, postgres's backends. A
-    negative score moves this service behind all of them.
+    The agent session and everything it launches — an ``npm install``, a
+    ``node`` server — sit at the default 0 since #337 (-1000 before, #323), as do
+    the system daemons and postgres's backends. A negative score moves this
+    service behind all of them.
 
     Deliberately not -1000: an unkillable service on a host with no swap
     means the kernel runs out of candidates and wedges the box instead of

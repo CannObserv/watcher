@@ -165,8 +165,10 @@ def _systemctl(*args: str) -> str:
 def test_earlyoom_is_not_running_here() -> None:
     """Off, and staying off across a reboot.
 
-    On a -1000 host it can only work down the list of what the kernel would
-    take anyway, starting sooner: watcher's database connections, then watcher.
+    With sessions at 0 the kernel already picks a spiking session ahead of
+    watcher; earlyoom would only pick it sooner, at 10% available, before
+    anything has failed. On a -1000 host it is worse: it works down the kernel's
+    list starting sooner — watcher's database connections, then watcher.
     """
     if not _on_host():
         pytest.skip(f"{INSTALLED_UNIT} not present — not a host running the service")

@@ -650,13 +650,16 @@ class TestOutboxProvenance:
 
 # Two full fetches of the same bytes: Replicator re-references the blob on the
 # second and publishes a fresh fact with a later horizon (replicator
-# docs/STORAGE.md). Same URI, later expiry, new command.
+# docs/STORAGE.md). Same URI, later expiry, new command. The digests differ on
+# purpose: unchanged *extracted* text does not mean unchanged raw bytes, and
+# Archiver pairs the digest with the URI it arrives beside (archiver#280), so a
+# renewal that kept the old one would fail every persist (#329).
 _FIRST_BLOB = BlobProvenance(
     command_id="01J9AAAAAAAAAAAAAAAAAAAAAA",
     blob_uri="gs://co-gcs-blobs/abc",
     source_media_type="text/html",
     blob_expires_at=datetime(2026, 9, 1, tzinfo=UTC),
-    blob_fingerprint="d" * 64,
+    blob_fingerprint="f" * 64,
 )
 _RENEWED_BLOB = BlobProvenance(
     command_id="01J9BBBBBBBBBBBBBBBBBBBBBB",
@@ -777,6 +780,7 @@ class TestBlobReferenceRenewal:
         assert row.id == queued_id
         assert row.command_id == _RENEWED_BLOB.command_id
         assert row.blob_expires_at == _RENEWED_BLOB.blob_expires_at
+        assert row.blob_fingerprint == _RENEWED_BLOB.blob_fingerprint
         assert row.next_attempt_at <= datetime.now(UTC)
 
     async def test_renewal_revives_a_dead_lettered_row(self, db_session):
@@ -806,6 +810,7 @@ class TestBlobReferenceRenewal:
         assert row.next_attempt_at <= datetime.now(UTC)
         assert row.attempts == 1
         assert row.blob_expires_at == _RENEWED_BLOB.blob_expires_at
+        assert row.blob_fingerprint == _RENEWED_BLOB.blob_fingerprint
 
     async def test_an_unpublishable_reference_never_degrades_a_queued_row(self, db_session):
         """CR 1: the renewal is the only writer that can *overwrite* provenance.
@@ -842,6 +847,7 @@ class TestBlobReferenceRenewal:
         assert row.id == queued_id
         assert row.source_media_type == "text/html"
         assert row.blob_expires_at == _FIRST_BLOB.blob_expires_at
+        assert row.blob_fingerprint == _FIRST_BLOB.blob_fingerprint  # the pair stays whole
 
     async def test_an_unpublishable_reference_enqueues_nothing_when_drained(self, db_session):
         """The same guard with no row to protect: a renewal that could only

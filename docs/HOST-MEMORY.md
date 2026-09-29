@@ -190,6 +190,9 @@ purged the packages themselves — so a stray invocation (an agent session, a
 copied-in script, a vendored skill's preflight) can no longer socket-activate
 `dockerd` plus `containerd` for ~120 MB here. `preflight.sh --check` reports it as *Docker
 not needed*; a rebuilt VM that reinstalls `docker.io` gets that path back.
+#336 removed the leftover `docker` group (`exedev` was a member) on 2026-09-29:
+membership is root-equivalent the moment a daemon returns, so a reinstall must
+not re-add `exedev` without a decision.
 
 **4. The dependency chain takes reservations too — and so do the slices above it
 (#309).** Killing or starving what watcher depends on is the same outage by

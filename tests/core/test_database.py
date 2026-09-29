@@ -5,6 +5,9 @@ application role (``DATABASE_URL``), Alembic connects with the schema owner
 (``WATCHER_MIGRATION_DATABASE_URL``). The fallback is the whole point of the
 resolver — on a single-role database, and on any host where the operator step
 has not run yet, the migration URL is simply the application's.
+
+The shared engine's pool is here too (#335): it pings a connection on checkout,
+so a Postgres restart under the running service costs no request.
 """
 
 import logging

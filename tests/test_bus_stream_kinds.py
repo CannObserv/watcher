@@ -479,6 +479,52 @@ class TestUncappedStreamsStayUncapped:
             )
         assert found == self.UNCAPPED, f"publishes found only for {found} — renamed?"
 
+    @classmethod
+    def _capping_xadd(cls, call: ast.Call, tree: ast.Module) -> bool:
+        """A raw redis-py ``xadd`` on an uncapped stream that trims as it adds (CR 3).
+
+        ``BusPublish`` is the only publish path today, which is why the rule above
+        scans it alone; a hand-rolled ``xadd`` is the new call site this file
+        exists to catch. ``maxlen`` is positional index 3, ``minid`` index 6.
+        """
+        if _callee(call) != "xadd":
+            return False
+        topic = _resolve_topic(
+            _topic_arg(call, position=0), _stream_aliases(tree), _module_aliases(tree)
+        )
+        if topic not in cls.UNCAPPED:
+            return False
+        trims = [k.value for k in call.keywords if k.arg in ("maxlen", "minid")]
+        trims += [call.args[i] for i in (3, 6) if len(call.args) > i]
+        return any(not (isinstance(t, ast.Constant) and t.value is None) for t in trims)
+
+    def test_no_raw_xadd_caps_either_stream(self):
+        capped = [
+            f"{path.relative_to(ROOT)}:{call.lineno}"
+            for path, tree, call in _calls("xadd")
+            if self._capping_xadd(call, tree)
+        ]
+        assert capped == [], (
+            f"a raw xadd caps an uncapped stream: {capped}. Retention is maxmemory "
+            "alone by decision (#327) — and publish through BusPublish, not xadd."
+        )
+
+    @pytest.mark.parametrize(
+        ("source", "expected"),
+        [
+            ("client.xadd(streams.CONTENT_FETCH, f, maxlen=10)", True),
+            ("client.xadd(streams.CONTENT_REVISIONS, f, '*', 10)", True),
+            ("client.xadd(streams.CONTENT_FETCH, f, minid='0-1')", True),
+            ("client.xadd(streams.CONTENT_FETCH, f)", False),
+            ("client.xadd(streams.INFO_WATCH_STATUS, f, maxlen=10)", False),
+        ],
+        ids=["maxlen", "positional", "minid", "uncapped", "other-stream"],
+    )
+    def test_the_xadd_rule_sees_every_cap(self, source, expected):
+        tree = ast.parse(source)
+        (call,) = [n for n in ast.walk(tree) if isinstance(n, ast.Call)]
+        assert self._capping_xadd(call, tree) is expected
+
     def test_nothing_trims_or_deletes_stream_entries(self):
         trims = []
         for path, tree in _modules():

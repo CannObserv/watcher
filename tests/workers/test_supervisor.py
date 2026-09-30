@@ -7,9 +7,12 @@ reconnect has no retry (``PsycopgConnector.listen_notify``, unchanged through
 task, so every periodic task stopped with the process still serving.
 
 The chain is driven here through a real ``procrastinate.App`` on its own
-``InMemoryConnector``, failing exactly where the reproduction on #338's scratch
-cluster failed — so a procrastinate upgrade that changes the shape of that
-failure changes these tests' outcome too.
+``InMemoryConnector``. Only the failure is faked — ``listen_notify`` raises the
+``ConnectorException`` #338's scratch cluster logged; the worker, its side-task
+monitor and ``run_worker_async`` are procrastinate's own, so an upgrade that
+changes how the worker reacts to a failed side task changes these tests'
+outcome. One that makes ``PsycopgConnector`` retry would not show here: the
+scratch-cluster check in docs/DEPLOYMENT.md is what covers that.
 """
 
 import asyncio

@@ -5,6 +5,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
+from asyncpg.exceptions import CannotConnectNowError
 from httpx import ASGITransport, AsyncClient, Response
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -135,11 +136,17 @@ class TestReadyEndpoint:
     @pytest.mark.usefixtures("worker")
     @pytest.mark.parametrize(
         "exc",
-        [ConnectionRefusedError(111, "Connection refused"), ConnectionResetError(104, "reset")],
+        [
+            ConnectionRefusedError(111, "Connection refused"),
+            ConnectionResetError(104, "reset"),
+            CannotConnectNowError("the database system is shutting down"),
+        ],
     )
-    async def test_a_bare_connect_error_is_503_not_500(self, exc):
-        """#340: asyncpg's connect path raises OS errors SQLAlchemy never wraps,
-        so an outage answered 500 — a crash — instead of 503, not ready."""
+    async def test_an_unwrapped_connect_error_is_503_not_500(self, exc):
+        """#340: SQLAlchemy does not wrap what asyncpg raises while connecting —
+        bare OS errors, and ``PostgresError``s such as the cluster refusing
+        connections while it shuts down or starts — so an outage answered 500,
+        a crash, instead of 503, not ready."""
         from src.api.main import app
 
         response = await _get_ready(app, _session_raising(exc))

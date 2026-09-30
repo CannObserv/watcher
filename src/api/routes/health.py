@@ -3,7 +3,6 @@
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
 from sqlalchemy import text
-from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.api.deps import get_db_session
@@ -28,9 +27,11 @@ async def ready(request: Request, session: AsyncSession = Depends(get_db_session
     by procrastinate's own shutdown (up to the pool's checkout timeout), since
     the run has not returned until that finishes.
 
-    A failed ping is 503, not 500: asyncpg's connect path raises bare
-    ``OSError``s (refused, reset) that SQLAlchemy never wraps, and those used
-    to escape as a 500 during exactly the outage this probe exists to report.
+    A failed ping is 503 whatever it raised, never 500. SQLAlchemy does not
+    wrap what asyncpg raises while connecting — bare ``OSError``s (refused,
+    reset) and ``PostgresError``s (``CannotConnectNowError`` while the cluster
+    shuts down or starts) — and those escaped as a 500 during exactly the
+    outage this probe exists to report.
     """
     db_ok = False
     supervisor = getattr(request.app.state, "worker_supervisor", None)
@@ -39,7 +40,7 @@ async def ready(request: Request, session: AsyncSession = Depends(get_db_session
     try:
         await session.execute(text("SELECT 1"))
         db_ok = True
-    except (SQLAlchemyError, OSError):
+    except Exception:  # any failed ping is "not ready" — see the docstring
         db_ok = False
 
     if db_ok and queue_ok:

@@ -72,9 +72,9 @@ sudo systemctl daemon-reload && sudo systemctl restart watcher
 # Dev server (port 8001) — the ONLY sanctioned launch path (#233).
 # Targets TEST_DATABASE_URL (or WATCHER_DEV_DATABASE_URL), migrates it,
 # applies the procrastinate schema (#341), and refuses any DB whose name lacks
-# a _test/_dev suffix. Never hand-run uvicorn
-# with the prod env loaded: /etc/watcher/.env points DATABASE_URL at
-# production, and the embedded worker would consume the prod task queue.
+# a _test/_dev suffix. Never hand-run uvicorn with the prod env loaded:
+# /etc/watcher/.env points DATABASE_URL at production, and the embedded worker
+# would consume the prod task queue.
 bash scripts/dev_server.sh
 
 # Knobs: WATCHER_DEV_PORT (default 8001; 8000 refused — it belongs to
@@ -88,13 +88,15 @@ points `DATABASE_URL` at production, and a hand-run "dev" server would share
 the prod DB, run a second Procrastinate worker on the prod queue, and split
 the rate-limiter budget (#233). The script targets `TEST_DATABASE_URL` (or
 `WATCHER_DEV_DATABASE_URL`), migrates it, and refuses anything whose DB name
-lacks a `_test`/`_dev` suffix. No migration creates procrastinate's tables, so
-the script applies them too (#341): always after the `TEST_DATABASE_URL`
-branch's public-schema reset, and on a persistent `WATCHER_DEV_DATABASE_URL`
-only when `procrastinate_jobs` is missing — `schema --apply` is not idempotent.
-Without them the embedded worker's `register_worker` fails at boot. The same rule is enforced in-app by
+lacks a `_test`/`_dev` suffix. The same rule is enforced in-app by
 `src/core/db_safety.py`; only `deploy/watcher.service` opts into prod via
 `WATCHER_ALLOW_PRODUCTION_DB=1` (in the unit, never an env file).
+
+No migration creates procrastinate's tables, so the script applies them too
+(#341): always after the `TEST_DATABASE_URL` branch's public-schema reset, and
+on a persistent `WATCHER_DEV_DATABASE_URL` only when `procrastinate_jobs` is
+missing — `schema --apply` is not idempotent. Without them the embedded
+worker's `register_worker` fails at boot.
 
 The database is not the only production resource an env file hands out. The
 script clears an inherited `WATCHER_BUS_REDIS_URL` (#262) and an inherited

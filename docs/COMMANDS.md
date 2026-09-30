@@ -70,8 +70,9 @@ sudo systemctl daemon-reload && sudo systemctl restart watcher
 
 ```bash
 # Dev server (port 8001) — the ONLY sanctioned launch path (#233).
-# Targets TEST_DATABASE_URL (or WATCHER_DEV_DATABASE_URL), migrates it, and
-# refuses any DB whose name lacks a _test/_dev suffix. Never hand-run uvicorn
+# Targets TEST_DATABASE_URL (or WATCHER_DEV_DATABASE_URL), migrates it,
+# applies the procrastinate schema (#341), and refuses any DB whose name lacks
+# a _test/_dev suffix. Never hand-run uvicorn
 # with the prod env loaded: /etc/watcher/.env points DATABASE_URL at
 # production, and the embedded worker would consume the prod task queue.
 bash scripts/dev_server.sh
@@ -87,7 +88,11 @@ points `DATABASE_URL` at production, and a hand-run "dev" server would share
 the prod DB, run a second Procrastinate worker on the prod queue, and split
 the rate-limiter budget (#233). The script targets `TEST_DATABASE_URL` (or
 `WATCHER_DEV_DATABASE_URL`), migrates it, and refuses anything whose DB name
-lacks a `_test`/`_dev` suffix. The same rule is enforced in-app by
+lacks a `_test`/`_dev` suffix. No migration creates procrastinate's tables, so
+the script applies them too (#341): always after the `TEST_DATABASE_URL`
+branch's public-schema reset, and on a persistent `WATCHER_DEV_DATABASE_URL`
+only when `procrastinate_jobs` is missing — `schema --apply` is not idempotent.
+Without them the embedded worker's `register_worker` fails at boot. The same rule is enforced in-app by
 `src/core/db_safety.py`; only `deploy/watcher.service` opts into prod via
 `WATCHER_ALLOW_PRODUCTION_DB=1` (in the unit, never an env file).
 
@@ -210,7 +215,8 @@ the signal to take seriously anywhere else.
 ## Task Queue (Procrastinate)
 
 ```bash
-# Apply procrastinate schema (first time, after DB setup)
+# Apply procrastinate schema (first time, after DB setup; dev_server.sh does
+# this itself for the dev database, #341)
 source scripts/load-env.sh
 uv run procrastinate --app=src.workers.app schema --apply
 

@@ -42,6 +42,7 @@ from src.dashboard import register_dashboard
 from src.workers import get_app
 from src.workers.fetch_facts import start_blobs_consumer
 from src.workers.registry_reconcile import start_registry_consumer
+from src.workers.supervisor import start_worker
 
 configure_logging()
 logger = get_logger(__name__)
@@ -134,7 +135,14 @@ async def lifespan(application: FastAPI):
 
     proc_app = get_app()
     await proc_app.open_async()
-    worker_task = asyncio.create_task(proc_app.run_worker_async(install_signal_handlers=False))
+    # #340: supervised, not a bare task. A cluster restart stops the worker
+    # (its LISTEN reconnect has no retry) and a missing schema kills it at boot;
+    # unobserved, either left the process serving with no queue. Shares the stop
+    # event, so a worker returning during shutdown is not restarted. On
+    # app.state for /ready, which reports its liveness as ``queue``.
+    worker = start_worker(proc_app, stop=consumer_stop)
+    application.state.worker_supervisor = worker
+    worker_task = worker.task
     yield
     consumer_stop.set()
     worker_task.cancel()

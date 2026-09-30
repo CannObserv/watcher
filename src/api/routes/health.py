@@ -1,6 +1,6 @@
 """Health and readiness check endpoints."""
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
@@ -19,24 +19,30 @@ async def health() -> dict:
 
 
 @router.get("/ready")
-async def ready(session: AsyncSession = Depends(get_db_session)) -> JSONResponse:
-    """Readiness probe — checks DB connectivity and queue accessibility.
+async def ready(request: Request, session: AsyncSession = Depends(get_db_session)) -> JSONResponse:
+    """Readiness probe — checks DB connectivity and the embedded worker.
 
-    Returns 200 when all dependencies are reachable, 503 otherwise.
-    The queue check is a best-effort stub; procrastinate does not expose a
-    lightweight ping, so queue is always reported as True unless further
-    introspection is added.
+    Returns 200 when both are up, 503 otherwise. ``queue`` is the worker
+    supervisor's liveness (#340): false while a dead worker waits out its
+    restart backoff, and in a process that never started one. It lags a death
+    by procrastinate's own shutdown (up to the pool's checkout timeout), since
+    the run has not returned until that finishes.
+
+    A failed ping is 503, not 500: asyncpg's connect path raises bare
+    ``OSError``s (refused, reset) that SQLAlchemy never wraps, and those used
+    to escape as a 500 during exactly the outage this probe exists to report.
     """
     db_ok = False
-    queue_ok = True  # procrastinate has no lightweight ping; always reported available
+    supervisor = getattr(request.app.state, "worker_supervisor", None)
+    queue_ok = bool(supervisor is not None and supervisor.alive)
 
     try:
         await session.execute(text("SELECT 1"))
         db_ok = True
-    except SQLAlchemyError:
+    except (SQLAlchemyError, OSError):
         db_ok = False
 
-    if db_ok:
+    if db_ok and queue_ok:
         return JSONResponse(
             status_code=200,
             content={"status": "ready", "db": db_ok, "queue": queue_ok},

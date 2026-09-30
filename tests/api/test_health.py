@@ -1,10 +1,11 @@
 """Tests for /health and /ready operational endpoints."""
 
 from collections.abc import AsyncGenerator
+from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
-from httpx import ASGITransport, AsyncClient
+from httpx import ASGITransport, AsyncClient, Response
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -42,7 +43,51 @@ class TestHealthEndpoint:
         assert response.status_code == 404
 
 
+@pytest.fixture
+def worker(request):
+    """Install a worker supervisor on ``app.state``, as the lifespan does.
+
+    ASGITransport never runs the lifespan, so without this ``/ready`` sees no
+    worker at all. Parametrize indirectly with ``False`` for a dead one.
+    """
+    from src.api.main import app
+
+    app.state.worker_supervisor = SimpleNamespace(alive=getattr(request, "param", True))
+    yield
+    del app.state.worker_supervisor
+
+
+def _session_raising(exc: BaseException):
+    mock_session = AsyncMock(spec=AsyncSession)
+    mock_session.execute = AsyncMock(side_effect=exc)
+
+    async def override_session() -> AsyncGenerator[AsyncSession]:
+        yield mock_session
+
+    return override_session
+
+
+def _session_ok():
+    mock_session = AsyncMock(spec=AsyncSession)
+    mock_session.execute = AsyncMock(return_value=None)
+
+    async def override_session() -> AsyncGenerator[AsyncSession]:
+        yield mock_session
+
+    return override_session
+
+
+async def _get_ready(app, override) -> Response:
+    app.dependency_overrides[get_db_session] = override
+    try:
+        async with await _make_client(app) as c:
+            return await c.get("/ready")
+    finally:
+        app.dependency_overrides.pop(get_db_session, None)
+
+
 class TestReadyEndpoint:
+    @pytest.mark.usefixtures("worker")
     async def test_ready_returns_200_when_db_available(self):
         """/ready returns 200 with status ready when DB responds."""
         from src.api.main import app
@@ -64,7 +109,43 @@ class TestReadyEndpoint:
         data = response.json()
         assert data["status"] == "ready"
         assert data["db"] is True
-        assert "queue" in data
+        assert data["queue"] is True
+
+    @pytest.mark.parametrize("worker", [False], indirect=True)
+    @pytest.mark.usefixtures("worker")
+    async def test_a_dead_worker_is_not_ready(self):
+        """#340: ``queue`` used to be a hardcoded ``true``, so a worker stopped by
+        a cluster restart left ``/ready`` at 200 with every periodic task gone."""
+        from src.api.main import app
+
+        response = await _get_ready(app, _session_ok())
+
+        assert response.status_code == 503
+        assert response.json() == {"status": "not_ready", "db": True, "queue": False}
+
+    async def test_no_worker_is_not_ready(self):
+        """A process whose lifespan never started a worker has no queue."""
+        from src.api.main import app
+
+        response = await _get_ready(app, _session_ok())
+
+        assert response.status_code == 503
+        assert response.json()["queue"] is False
+
+    @pytest.mark.usefixtures("worker")
+    @pytest.mark.parametrize(
+        "exc",
+        [ConnectionRefusedError(111, "Connection refused"), ConnectionResetError(104, "reset")],
+    )
+    async def test_a_bare_connect_error_is_503_not_500(self, exc):
+        """#340: asyncpg's connect path raises OS errors SQLAlchemy never wraps,
+        so an outage answered 500 — a crash — instead of 503, not ready."""
+        from src.api.main import app
+
+        response = await _get_ready(app, _session_raising(exc))
+
+        assert response.status_code == 503
+        assert response.json()["db"] is False
 
     async def test_ready_returns_503_when_db_unavailable(self):
         """/ready returns 503 with status not_ready when DB raises."""

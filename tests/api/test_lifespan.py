@@ -415,3 +415,36 @@ class TestBusReachabilityProbe:
                 pass
 
         probe.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_the_worker_runs_supervised_and_stops_with_the_lifespan():
+    """#340: the worker runs under the supervisor on ``app.state`` — which
+    ``/ready`` reads — and shutdown ends it rather than restarting it."""
+    started = asyncio.Event()
+    fake_proc_app = MagicMock()
+    fake_proc_app.open_async = AsyncMock()
+    fake_proc_app.close_async = AsyncMock()
+
+    async def _worker_run(install_signal_handlers: bool = True) -> None:
+        started.set()
+        await asyncio.Event().wait()
+
+    fake_proc_app.run_worker_async = _worker_run
+
+    with (
+        patch("src.api.main.get_app", return_value=fake_proc_app),
+        patch("src.api.main.get_shared_bus_client", return_value=None),
+        patch("src.api.main.aclose_shared_bus_client", AsyncMock()),
+    ):
+        from src.api.main import lifespan
+
+        application = MagicMock()
+        async with lifespan(application):
+            await asyncio.wait_for(started.wait(), timeout=5)
+            supervisor = application.state.worker_supervisor
+            assert supervisor.alive
+
+    assert supervisor.task.done()
+    assert not supervisor.alive
+    assert supervisor.restarts == 0

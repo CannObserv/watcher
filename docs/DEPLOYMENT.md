@@ -88,12 +88,14 @@ sudo systemctl restart watcher
 
 # After any PostgreSQL cluster restart (an apt run touching postgresql-16, a
 # manual one): the embedded worker stops (#338) and the supervisor restarts it
-# (#340). Expect one ERROR "procrastinate worker stopped unexpectedly …
-# restarting" per death, then "Starting worker on all queues". The stop itself
-# can take up to the pool's 30s checkout timeout (7s and 30s measured on a
-# scratch cluster, 2026-09-30), and /ready's "queue" stays true until it
-# finishes: the journal line is the signal, /ready only confirms. No "Starting
-# worker" within a few minutes of the cluster's return → restart watcher.
+# (#340). Expect an ERROR "procrastinate worker stopped unexpectedly" or
+# "procrastinate worker died … restarting" — died when the stop's own
+# unregister could not get a pool connection — one more "died" per restart
+# attempted while the cluster is still down, then "Starting worker on all
+# queues". The stop waits for running jobs and that connection (7s and 30s
+# measured on a scratch cluster, 2026-09-30), and /ready's "queue" stays true
+# until it finishes: the journal line is the signal, /ready only confirms. No
+# "Starting worker" within a few minutes of the cluster's return → restart.
 sudo journalctl -u watcher --since -10min | grep -E 'supervisor|Starting worker'
 curl -s localhost:8000/ready   # {"status":"ready","db":true,"queue":true}
 

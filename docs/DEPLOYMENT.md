@@ -74,8 +74,7 @@ sudo systemctl start watcher
 # a scratch cluster (#338, 2026-09-30): requests ride through it — 5xx only
 # while the cluster is down, none after, thanks to the checkout ping (#335) —
 # but the embedded Procrastinate worker stops and nothing restarts it (#340).
-# Until #340 ships: after any apt run that touches postgresql-16, run
-# `sudo systemctl restart watcher`.
+# Until #340 ships, restart watcher after it: *Managing the Service*.
 sudo install -D -m 644 deploy/needrestart.conf.d/watcher.conf \
      /etc/needrestart/conf.d/watcher.conf
 ```
@@ -84,6 +83,10 @@ sudo install -D -m 644 deploy/needrestart.conf.d/watcher.conf \
 
 ```bash
 # Restart after code changes
+sudo systemctl restart watcher
+
+# Restart after any apt run that touches postgresql-16, until #340 ships: the
+# cluster restart stops the embedded worker silently (#338).
 sudo systemctl restart watcher
 
 # Check status

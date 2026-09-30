@@ -113,10 +113,15 @@ class TestReadyEndpoint:
         assert response.status_code == 503
         assert response.json() == {"status": "not_ready", "db": True, "queue": False}
 
-    async def test_no_worker_is_not_ready(self):
-        """A process whose lifespan never started a worker has no queue."""
+    async def test_no_worker_is_not_ready(self, monkeypatch):
+        """A process whose lifespan never started a worker has no queue.
+
+        Removed explicitly: a lifespan test that runs the real ``app`` leaves
+        its (dead) supervisor on ``app.state``, and this would then pass on
+        ``alive=False`` rather than on absence."""
         from src.api.main import app
 
+        monkeypatch.delattr(app.state, "worker_supervisor", raising=False)
         response = await _get_ready(app, _session_ok())
 
         assert response.status_code == 503

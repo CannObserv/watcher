@@ -73,9 +73,7 @@ sudo systemctl start watcher
 # scripts — postgresql-16's own upgrade still restarts its cluster. Measured on
 # a scratch cluster (#338, 2026-09-30): requests ride through it — 5xx only
 # while the cluster is down, none after, thanks to the checkout ping (#335) —
-# but the embedded Procrastinate worker stops: its LISTEN reconnect has no
-# retry. Since #340 the lifespan's supervisor restarts it in-process with
-# backoff (1s doubling to 60s) — check it came back: *Managing the Service*.
+# but the worker stops and restarts (#340): *Managing the Service*.
 sudo install -D -m 644 deploy/needrestart.conf.d/watcher.conf \
      /etc/needrestart/conf.d/watcher.conf
 ```
@@ -86,16 +84,13 @@ sudo install -D -m 644 deploy/needrestart.conf.d/watcher.conf \
 # Restart after code changes
 sudo systemctl restart watcher
 
-# After any PostgreSQL cluster restart (an apt run touching postgresql-16, a
-# manual one): the embedded worker stops (#338) and the supervisor restarts it
-# (#340). Expect an ERROR "procrastinate worker stopped unexpectedly" or
-# "procrastinate worker died … restarting" — died when the stop's own
-# unregister could not get a pool connection — one more "died" per restart
-# attempted while the cluster is still down, then "Starting worker on all
-# queues". The stop waits for running jobs and that connection (7s and 30s
-# measured on a scratch cluster, 2026-09-30), and /ready's "queue" stays true
-# until it finishes: the journal line is the signal, /ready only confirms. No
-# "Starting worker" within a few minutes of the cluster's return → restart.
+# After any PostgreSQL cluster restart (apt or manual) the embedded worker
+# stops (#338) and the supervisor restarts it with backoff (#340): an ERROR
+# "procrastinate worker stopped unexpectedly" or "… died" (one per attempt
+# while the cluster is down), then "Starting worker on all queues". The stop
+# waits for running jobs and an unregister (7s, 30s measured 2026-09-30), and
+# /ready's "queue" stays true meanwhile — trust the journal. No "Starting
+# worker" minutes after the cluster is back → restart watcher.
 sudo journalctl -u watcher --since -10min | grep -E 'supervisor|Starting worker'
 curl -s localhost:8000/ready   # {"status":"ready","db":true,"queue":true}
 

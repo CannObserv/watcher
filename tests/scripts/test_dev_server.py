@@ -252,6 +252,40 @@ def test_migration_can_be_skipped() -> None:
     assert result.returncode == 0, result.stderr
     assert "MIGRATE=(skipped)" in result.stdout
     assert "RESET=(none)" in result.stdout
+    assert "PROCRASTINATE_SCHEMA=(skipped)" in result.stdout
+
+
+def test_reset_branch_always_reapplies_the_procrastinate_schema() -> None:
+    """#341: the public-schema drop takes procrastinate's tables with it.
+
+    No migration creates them — procrastinate owns its own DDL — so a launch
+    that resets and then only runs alembic boots a worker whose
+    ``register_worker`` raises ``UndefinedTable`` at once, and every check,
+    drain, reap and periodic publish silently never runs.
+    """
+    result = run({"TEST_DATABASE_URL": TEST_URL})
+    assert result.returncode == 0, result.stderr
+    assert "PROCRASTINATE_SCHEMA=apply" in result.stdout.splitlines()
+
+
+def test_persistent_branch_applies_the_procrastinate_schema_only_when_missing() -> None:
+    """``schema --apply`` is not idempotent over an existing schema, so a
+    persistent dev database gets it on first launch and never again."""
+    result = run({"WATCHER_DEV_DATABASE_URL": DEV_URL})
+    assert result.returncode == 0, result.stderr
+    assert "PROCRASTINATE_SCHEMA=apply-if-missing" in result.stdout.splitlines()
+
+
+def test_schema_apply_runs_after_the_migration() -> None:
+    """The dry run exits before the executed path, so read the source: the
+    apply must follow ``alembic upgrade head`` (the reset leaves nothing for it
+    to collide with, and the persistent branch's probe must see the migrated
+    database) and go through the worker's own app, which connects where the
+    embedded worker will."""
+    text = SCRIPT.read_text()
+    migrate = text.index("uv run alembic upgrade head")
+    apply = text.index("uv run procrastinate --app=src.workers.app schema --apply")
+    assert migrate < apply < text.index("exec uv run uvicorn")
 
 
 def test_bus_url_is_cleared_unless_dev_bus_is_explicit() -> None:

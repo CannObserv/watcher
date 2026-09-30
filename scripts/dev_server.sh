@@ -252,23 +252,36 @@ fi
 # Migrating here keeps the safe path usable; an operator who finds it broken
 # tends to reach for the old recipe that pointed at production.
 #
+# Procrastinate's tables are not alembic's (#341): no migration creates them, and
+# they live in `public`, so the reset drops them and the migration never puts
+# them back — the embedded worker's register_worker then raises UndefinedTable
+# at boot. They are applied after migrating: always after a reset, and on the
+# persistent branch only when missing, because `schema --apply` is not
+# idempotent over an existing schema.
+#
 # Decided once, so the dry-run report (which tests assert on) and the executed
 # path cannot drift apart.
 if [[ "${WATCHER_DEV_SKIP_MIGRATE:-}" == "1" ]]; then
   DO_RESET=0
   DO_MIGRATE=0
+  DO_SCHEMA=never
   MIGRATE_REPORT="(skipped)"
   RESET_REPORT="(none)"
+  SCHEMA_REPORT="(skipped)"
 elif [[ -n "${WATCHER_DEV_DATABASE_URL:-}" ]]; then
   DO_RESET=0
   DO_MIGRATE=1
+  DO_SCHEMA=if-missing
   MIGRATE_REPORT="$(redact "$DATABASE_URL")"
   RESET_REPORT="(none)"
+  SCHEMA_REPORT="apply-if-missing"
 else
   DO_RESET=1
   DO_MIGRATE=1
+  DO_SCHEMA=always
   MIGRATE_REPORT="$(redact "$DATABASE_URL")"
   RESET_REPORT="public-schema"
+  SCHEMA_REPORT="apply"
 fi
 
 if [[ "${WATCHER_DEV_SERVER_DRY_RUN:-}" == "1" ]]; then
@@ -283,21 +296,37 @@ if [[ "${WATCHER_DEV_SERVER_DRY_RUN:-}" == "1" ]]; then
   echo "PORT=$PORT"
   echo "MIGRATE=$MIGRATE_REPORT"
   echo "RESET=$RESET_REPORT"
+  echo "PROCRASTINATE_SCHEMA=$SCHEMA_REPORT"
   exit 0
 fi
 
 cd "$REPO_ROOT"
 
+# libpq spelling of the dev URL, for psql; the password travels in PGPASSWORD.
+PSQL_URL="${DATABASE_URL/+asyncpg/}"
+
 if [[ "$DO_RESET" == "1" ]]; then
   echo "dev_server: resetting public schema of $(redact "$DATABASE_URL")"
-  RESET_URL="${DATABASE_URL/+asyncpg/}"
-  PGPASSWORD="$(url_password "$RESET_URL")" psql "$(url_without_password "$RESET_URL")" \
+  PGPASSWORD="$(url_password "$PSQL_URL")" psql "$(url_without_password "$PSQL_URL")" \
     -q -c "DROP SCHEMA public CASCADE; CREATE SCHEMA public;"
 fi
 
 if [[ "$DO_MIGRATE" == "1" ]]; then
   echo "dev_server: alembic upgrade head → $(redact "$DATABASE_URL")"
   uv run alembic upgrade head
+fi
+
+if [[ "$DO_SCHEMA" == "if-missing" ]]; then
+  HAS_SCHEMA="$(PGPASSWORD="$(url_password "$PSQL_URL")" psql "$(url_without_password "$PSQL_URL")" \
+    -qtA -c "SELECT to_regclass('procrastinate_jobs') IS NOT NULL")"
+  if [[ "$HAS_SCHEMA" == "t" ]]; then DO_SCHEMA=never; else DO_SCHEMA=always; fi
+fi
+
+if [[ "$DO_SCHEMA" == "always" ]]; then
+  # Connects via get_conninfo(): DATABASE_URL, with PROCRASTINATE_DATABASE_URL
+  # cleared above — exactly where the embedded worker will.
+  echo "dev_server: procrastinate schema --apply → $(redact "$DATABASE_URL")"
+  uv run procrastinate --app=src.workers.app schema --apply
 fi
 
 echo "dev_server: port $PORT → $(redact "$DATABASE_URL")"

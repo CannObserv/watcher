@@ -93,18 +93,7 @@ class TestReadyEndpoint:
         """/ready returns 200 with status ready when DB responds."""
         from src.api.main import app
 
-        mock_session = AsyncMock(spec=AsyncSession)
-        mock_session.execute = AsyncMock(return_value=None)
-
-        async def override_session() -> AsyncGenerator[AsyncSession]:
-            yield mock_session
-
-        app.dependency_overrides[get_db_session] = override_session
-        try:
-            async with await _make_client(app) as c:
-                response = await c.get("/ready")
-        finally:
-            app.dependency_overrides.pop(get_db_session, None)
+        response = await _get_ready(app, _session_ok())
 
         assert response.status_code == 200
         data = response.json()
@@ -154,30 +143,19 @@ class TestReadyEndpoint:
         assert response.status_code == 503
         assert response.json()["db"] is False
 
+    @pytest.mark.usefixtures("worker")
     async def test_ready_returns_503_when_db_unavailable(self):
-        """/ready returns 503 with status not_ready when DB raises."""
+        """/ready returns 503 with status not_ready when DB raises — with a live
+        worker, so the 503 is the database's alone."""
         from src.api.main import app
 
-        mock_session = AsyncMock(spec=AsyncSession)
-        mock_session.execute = AsyncMock(
-            side_effect=OperationalError("conn failed", {}, Exception("conn failed"))
+        response = await _get_ready(
+            app,
+            _session_raising(OperationalError("conn failed", {}, Exception("conn failed"))),
         )
 
-        async def override_session() -> AsyncGenerator[AsyncSession]:
-            yield mock_session
-
-        app.dependency_overrides[get_db_session] = override_session
-        try:
-            async with await _make_client(app) as c:
-                response = await c.get("/ready")
-        finally:
-            app.dependency_overrides.pop(get_db_session, None)
-
         assert response.status_code == 503
-        data = response.json()
-        assert data["status"] == "not_ready"
-        assert data["db"] is False
-        assert "queue" in data
+        assert response.json() == {"status": "not_ready", "db": False, "queue": True}
 
     async def test_ready_not_under_api_v1(self):
         """/ready must NOT be mounted under /api/v1/."""

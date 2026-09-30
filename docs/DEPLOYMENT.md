@@ -85,8 +85,9 @@ sudo install -D -m 644 deploy/needrestart.conf.d/watcher.conf \
 # Restart after code changes
 sudo systemctl restart watcher
 
-# Restart after any apt run that touches postgresql-16, until #340 ships: the
-# cluster restart stops the embedded worker silently (#338).
+# Restart after any PostgreSQL cluster restart (an apt run touching
+# postgresql-16, a manual one), until #340 ships: it stops the embedded worker
+# silently (#338).
 sudo systemctl restart watcher
 
 # Check status

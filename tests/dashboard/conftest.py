@@ -72,7 +72,7 @@ async def _run_script(sql: str) -> None:
 
 
 @pytest.fixture(scope="session")
-async def _procrastinate_schema() -> AsyncGenerator[None]:
+async def _procrastinate_schema(test_engine) -> AsyncGenerator[None]:
     """Build Procrastinate's own tables in the test database, once (#298).
 
     ``Base.metadata.create_all`` never makes them — Procrastinate owns its
@@ -87,9 +87,16 @@ async def _procrastinate_schema() -> AsyncGenerator[None]:
     rolling the enums back per test would leave asyncpg holding prepared
     statements whose type OIDs no longer exist. Per-test isolation is
     ``db_session``'s rollback, which still covers every row seeded below.
+
+    The pool is disposed after the rebuild. Since #341 a dev launch leaves the
+    tables in the test database, so a test that ran earlier can have queried
+    them through a pooled connection, and asyncpg keeps that plan cached
+    against the tables just dropped: the next query through it raises
+    ``InvalidCachedStatementError``.
     """
     await _run_script(_DROP_PROCRASTINATE_SCHEMA)
     await _run_script(SchemaManager.get_schema())
+    await test_engine.dispose()
     yield
     await _run_script(_DROP_PROCRASTINATE_SCHEMA)
 

@@ -476,7 +476,7 @@ async def apply_fetch_blob(
             # next command fetches in full and re-asserts the failure.
             clear_validators(watched_item)
             # …but bytes DID arrive, and that is what this stamp records (CR-2).
-            stamp_full_fetch(watched_item, now=now)
+            stamp_full_fetch(watched_item, now=now, blob_expires_at=row.blob_expires_at)
             await _record_check_failure(
                 session,
                 watched_item,
@@ -506,7 +506,7 @@ async def apply_fetch_blob(
         # next command may replay. Always an overwrite, NULLs included — the
         # pair must describe the latest 200.
         record_validators(watched_item, etag=row.etag, last_modified=row.last_modified, now=now)
-        stamp_full_fetch(watched_item, now=now)
+        stamp_full_fetch(watched_item, now=now, blob_expires_at=row.blob_expires_at)
         await _record_check_success(
             session,
             watched_item,

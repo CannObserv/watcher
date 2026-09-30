@@ -155,6 +155,7 @@ class TestValidatorReplay:
         wi.etag = over.pop("etag", 'W/"v2"')
         wi.last_modified = over.pop("last_modified", "Wed, 13 Aug 2026 10:00:00 GMT")
         wi.last_full_fetch_at = over.pop("last_full_fetch_at", NOW - timedelta(hours=1))
+        wi.blob_expires_at = over.pop("blob_expires_at", wi.last_full_fetch_at + timedelta(days=7))
         wi.validator_source_key = over.pop(
             "validator_source_key",
             validator_source_key(effective_url=wi.effective_url, source_specs=wi.source_specs),

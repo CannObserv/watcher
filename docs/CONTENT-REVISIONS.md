@@ -106,9 +106,9 @@ watch under a spec present in no registry.
 Replicator re-references the blob on every full re-fetch of unchanged bytes —
 the store short-circuits, the object's `customTime` is refreshed, and a fresh
 `blob_available` goes out with a later `blob_expires_at` (replicator
-`docs/STORAGE.md`). The validator age ceiling
-([CONDITIONAL-GET.md](CONDITIONAL-GET.md)) forces such a re-fetch at least
-weekly even for an origin answering 304. So the blob was renewed weekly
+`docs/STORAGE.md`). The validator rules
+([CONDITIONAL-GET.md](CONDITIONAL-GET.md)) force such a re-fetch by the blob's
+half-life even for an origin answering 304 (#339). So the blob was renewed
 cluster-wide while Archiver's `content_cache_expires_at` for the pair stayed
 at the first observation, and its replication issuance refused every occasion
 once that horizon passed. archiver#201 is the consumer half: a re-observation

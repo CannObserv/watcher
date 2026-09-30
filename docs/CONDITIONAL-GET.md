@@ -16,9 +16,9 @@ marks a healthy item ERROR and notifies a user about it on every no-change check
 
 The item-level write is **always an overwrite, `None` included**: the pair must
 describe the latest 200, so an origin that stops offering a validator must not
-leave the old one replayable. A 304 apply touches neither the pair nor
-`last_full_fetch_at` — no bytes arrived, and the stored pair is current by
-definition.
+leave the old one replayable. A 304 apply touches neither the pair,
+`last_full_fetch_at`, nor `blob_expires_at` — no bytes arrived, and the stored
+pair is current by definition.
 
 **Replay is snapshotted at issue, not read at publish.** `create_fetch_command`
 resolves the pair and stores it as `request_etag` / `request_last_modified`;
@@ -29,7 +29,7 @@ headers than the command it is replaying — and a 304 with no record of which
 validator earned it is undiagnosable. Values go out **verbatim and unparsed**:
 `W/` prefix, quotes, and the origin's own date spelling.
 
-**Six rules decide whether an occasion may replay** — `src/core/validators.py`,
+**Seven rules decide whether an occasion may replay** — `src/core/validators.py`,
 one pure predicate. Listed by subject; the predicate short-circuits, and the
 order it happens to evaluate them in is not a contract:
 
@@ -41,6 +41,7 @@ order it happens to evaluate them in is not a contract:
 | `validator_source_key` disagrees with the item's current key | The URL moved, `source_specs` were re-announced, or the extraction generation changed. One key rather than a clear scattered across every writer of those fields |
 | No `last_full_fetch_at` | Unknown provenance is not replayable |
 | The pair is older than `WATCHER_VALIDATOR_MAX_AGE_HOURS` (default 168) | The residual net below |
+| No `blob_expires_at`, or half of it has elapsed since `last_full_fetch_at` | A 304 renews no blob — see below (#339) |
 
 **The fingerprint-continuity question, answered.** A 304 produces no bytes, so
 nothing is extracted and no fingerprint is recomputed — the item's fingerprint is
@@ -53,6 +54,20 @@ cases they cannot see — an origin whose ETag tracks a template rather than the
 watched region, or a wrong-but-stable validator. Four items at ~122 KB make a
 weekly forced fetch free, which is why the default is set for confidence rather
 than for bytes.
+
+**A 304 renews no blob (#339).** Archiver re-issues a terminal `persist_failed`
+only when a re-observation refreshes the blob reference, and watcher's refresh
+is the #293 renewal ([CONTENT-REVISIONS.md](CONTENT-REVISIONS.md)), which only
+a full fetch produces. So `stamp_full_fetch` records the fact's
+`blob_expires_at` beside `last_full_fetch_at`, and replay stops at the
+**half-life** between them. The bound is read off the fact, never transcribed:
+Replicator's temp horizon is its setting (7 days today), and the age ceiling
+used to equal it, which put every forced fetch after the expiry it was meant to
+beat. Half, because the renewal then lands inside the horizon whenever the
+item's cadence interval plus fetch lag is under the other half. No value of the
+age ceiling can defeat it; that knob is the drift net only. A NULL horizon —
+pre-#301 facts, and every item until its first full fetch after the column
+landed — is unknown, and unknown is not replayable.
 
 **The one loop hazard.** `invalid_request_options` is terminal *and* pre-request:
 Replicator refuses the command's headers before contacting the origin. An
@@ -94,6 +109,6 @@ re-asserts the failure until the spec is fixed.
 `last_observed_at` (the content was confirmed current — a 304 counts), and
 `last_full_fetch_at` (bytes actually arrived — stamped by every blob apply,
 including one whose extraction then failed, because it records the fetch and not
-its outcome). The gap between the last two is
+its outcome; `blob_expires_at` is stamped with it, from the same fact). The gap between the last two is
 how long a fingerprint has been inherited rather than recomputed; the WatchedItem
 detail page renders it as *Last Full Fetch*.

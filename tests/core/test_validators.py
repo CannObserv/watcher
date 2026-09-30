@@ -2,7 +2,7 @@
 
 Pure unit tests: every rule that decides whether a command carries
 ``If-None-Match`` / ``If-Modified-Since`` lives in one predicate with no bus and
-no database, so the six invalidation rules are testable in isolation.
+no database, so the seven invalidation rules are testable in isolation.
 
 The rules under test, and why each exists, are in
 ``src/core/validators.py`` and docs/CONTENT-PIPELINE.md.
@@ -43,6 +43,10 @@ OTHER_ID = "01K2ZQWERTYUIOPASDFGHJKLZY"
 SPECS = [{"selector": "#content", "schema_version": 1}]
 URL = "https://lcb.wa.gov/notices"
 
+# Replicator's temp horizon as observed in production — an example, not a
+# contract: the rule under test must scale with whatever the fact carries.
+HORIZON = timedelta(days=7)
+
 
 def _item(**kwargs):
     """A WatchedItem-shaped stand-in carrying only what the predicate reads."""
@@ -54,6 +58,7 @@ def _item(**kwargs):
         "last_modified": "Wed, 13 Aug 2026 10:00:00 GMT",
         "validator_source_key": validator_source_key(effective_url=URL, source_specs=SPECS),
         "last_full_fetch_at": NOW - timedelta(hours=1),
+        "blob_expires_at": NOW - timedelta(hours=1) + HORIZON,
     }
     base.update(kwargs)
     return SimpleNamespace(**base)
@@ -275,7 +280,7 @@ class TestValidatorMaxAge:
 
 
 class TestReplayableValidators:
-    """The six rules, one predicate."""
+    """The seven rules, one predicate."""
 
     def test_replays_the_stored_pair_when_everything_agrees(self, monkeypatch):
         monkeypatch.setenv(CONDITIONAL_GET_ENV, "true")
@@ -333,6 +338,44 @@ class TestReplayableValidators:
         monkeypatch.setenv(CONDITIONAL_GET_ENV, "true")
         assert replayable_validators(_item(last_full_fetch_at=None), now=NOW) == (None, None)
 
+    def test_an_unknown_blob_horizon_sends_nothing(self, monkeypatch):
+        # Rule 7, #339: with no horizon there is no telling when the blob
+        # behind the latest revision needs renewing — the same stance as a
+        # missing last_full_fetch_at.
+        monkeypatch.setenv(CONDITIONAL_GET_ENV, "true")
+        assert replayable_validators(_item(blob_expires_at=None), now=NOW) == (None, None)
+
+    def test_past_the_blob_half_life_sends_nothing(self, monkeypatch):
+        # A 304 produces no blob and so no #293 renewal; past half the horizon
+        # the next occasion fetches in full so Archiver's horizon moves first.
+        monkeypatch.setenv(CONDITIONAL_GET_ENV, "true")
+        fetched = NOW - HORIZON / 2 - timedelta(minutes=1)
+        item = _item(last_full_fetch_at=fetched, blob_expires_at=fetched + HORIZON)
+        assert replayable_validators(item, now=NOW) == (None, None)
+
+    def test_inside_the_blob_half_life_still_replays(self, monkeypatch):
+        monkeypatch.setenv(CONDITIONAL_GET_ENV, "true")
+        fetched = NOW - HORIZON / 2 + timedelta(minutes=1)
+        item = _item(last_full_fetch_at=fetched, blob_expires_at=fetched + HORIZON)
+        assert replayable_validators(item, now=NOW)[0] == 'W/"abc"'
+
+    def test_the_half_life_scales_with_the_observed_horizon(self, monkeypatch):
+        # The horizon is Replicator's setting, not a watcher constant: a 48h
+        # horizon forces a full fetch after 24h, well inside the age ceiling.
+        monkeypatch.setenv(CONDITIONAL_GET_ENV, "true")
+        fetched = NOW - timedelta(hours=25)
+        item = _item(last_full_fetch_at=fetched, blob_expires_at=fetched + timedelta(hours=48))
+        assert replayable_validators(item, now=NOW) == (None, None)
+
+    def test_no_age_ceiling_carries_a_pair_past_the_half_life(self, monkeypatch):
+        # The #339 relationship, pinned: the ceiling is the drift net only, so
+        # no value of the knob can hold a pair past the renewal point.
+        monkeypatch.setenv(CONDITIONAL_GET_ENV, "true")
+        monkeypatch.setenv(VALIDATOR_MAX_AGE_ENV, "100000")
+        fetched = NOW - HORIZON / 2 - timedelta(minutes=1)
+        item = _item(last_full_fetch_at=fetched, blob_expires_at=fetched + HORIZON)
+        assert replayable_validators(item, now=NOW) == (None, None)
+
     def test_an_unsendable_stored_value_is_dropped(self, monkeypatch):
         monkeypatch.setenv(CONDITIONAL_GET_ENV, "true")
         item = _item(etag='"abc"\r\nX-Evil: 1')
@@ -364,8 +407,21 @@ class TestRecordAndClear:
 
     def test_stamp_full_fetch_records_when_bytes_arrived(self):
         item = _item(last_full_fetch_at=None)
-        stamp_full_fetch(item, now=NOW)
+        stamp_full_fetch(item, now=NOW, blob_expires_at=NOW + HORIZON)
         assert item.last_full_fetch_at == NOW
+
+    def test_stamp_full_fetch_records_the_blob_horizon_with_it(self):
+        # One fact, one pair: the half-life is measured between the two, so
+        # they must never describe different fetches (#339).
+        item = _item()
+        stamp_full_fetch(item, now=NOW, blob_expires_at=NOW + HORIZON)
+        assert item.blob_expires_at == NOW + HORIZON
+
+    def test_stamp_full_fetch_overwrites_with_an_unknown_horizon(self):
+        # An old horizon beside a new stamp would place the half-life wrongly.
+        item = _item()
+        stamp_full_fetch(item, now=NOW, blob_expires_at=None)
+        assert item.blob_expires_at is None
 
     def test_record_clears_a_pair_the_origin_stopped_sending(self):
         # Always overwrite, including None: the pair must describe the latest 200.

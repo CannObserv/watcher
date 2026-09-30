@@ -909,6 +909,7 @@ class TestForcedFetchLineage:
         # Real clock: _reissue resolves validators against datetime.now, so a
         # fixture-era stamp would age the pair out and pass for the wrong reason.
         wi.last_full_fetch_at = datetime.now(UTC) - timedelta(hours=1)
+        wi.blob_expires_at = wi.last_full_fetch_at + timedelta(days=7)
         wi.validator_source_key = validator_source_key(
             effective_url=wi.effective_url, source_specs=wi.source_specs
         )
@@ -935,6 +936,7 @@ class TestForcedFetchLineage:
         wi, row = await _row_with_fact(db_session, tmp_path)
         wi.etag = 'W/"v2"'
         wi.last_full_fetch_at = datetime.now(UTC) - timedelta(hours=1)
+        wi.blob_expires_at = wi.last_full_fetch_at + timedelta(days=7)
         wi.validator_source_key = validator_source_key(
             effective_url=wi.effective_url, source_specs=wi.source_specs
         )
@@ -983,6 +985,18 @@ class TestValidatorStorage:
         assert wi.validator_source_key == validator_source_key(
             effective_url=wi.effective_url, source_specs=wi.source_specs
         )
+
+    async def test_blob_apply_records_the_blob_horizon(self, db_session, tmp_path, monkeypatch):
+        # #339: the horizon the next command's half-life is measured against,
+        # from the same fact as the stamp.
+        wi, row = await _row_with_fact(
+            db_session, tmp_path, blob_expires_at=NOW + timedelta(days=7)
+        )
+        _wire(db_session, monkeypatch)
+
+        await apply_fetch_blob(row.command_id)
+
+        assert wi.blob_expires_at == NOW + timedelta(days=7)
 
     async def test_a_200_without_validators_clears_the_stored_pair(
         self, db_session, tmp_path, monkeypatch
@@ -1064,6 +1078,37 @@ class TestValidatorStorage:
         assert wi.validator_source_key is None
         # CR-2: bytes DID arrive — the stamp records the fetch, not the outcome.
         assert wi.last_full_fetch_at is not None
+
+    async def test_extraction_failure_still_records_the_blob_horizon(
+        self, db_session, tmp_path, monkeypatch
+    ):
+        # The horizon travels with the stamp, never apart from it (#339).
+        wi, row = await _row_with_fact(
+            db_session, tmp_path, blob_expires_at=NOW + timedelta(days=7)
+        )
+        _wire(db_session, monkeypatch, raises=ExtractionError("no chunks"))
+        monkeypatch.setattr(fc_mod, "dispatch_event_notifications", AsyncMock(return_value=0))
+
+        await apply_fetch_blob(row.command_id)
+
+        assert wi.blob_expires_at == NOW + timedelta(days=7)
+
+    async def test_not_modified_apply_keeps_the_blob_horizon(self, db_session, monkeypatch):
+        # A 304 brings no blob, so nothing renewed and the half-life keeps running.
+        wi = await make_watched_item(db_session, primary_url="https://lcb.wa.gov/notices")
+        wi.last_full_fetch_at = NOW - timedelta(hours=6)
+        wi.blob_expires_at = NOW - timedelta(hours=6) + timedelta(days=7)
+        row = await create_fetch_command(db_session, wi, now=NOW)
+        row.status = FetchCommandStatus.NOT_MODIFIED
+        row.status_code = 304
+        await db_session.flush()
+        monkeypatch.setattr(
+            fc_mod, "get_session_factory", lambda: _mock_session_factory(db_session)
+        )
+
+        await apply_fetch_not_modified(row.command_id)
+
+        assert wi.blob_expires_at == NOW - timedelta(hours=6) + timedelta(days=7)
 
     async def test_probe_resolution_keys_the_pair_to_the_final_url(
         self, db_session, tmp_path, monkeypatch

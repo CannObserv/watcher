@@ -18,10 +18,17 @@ content is unchanged, which is the period conditional GET was supposed to help).
 produces no bytes, so nothing is extracted and no fingerprint is recomputed — the
 item's fingerprint is inherited from the last 200. That is the point of the
 optimisation, but it means a drift introduced by an *extraction* change would go
-unnoticed for as long as the origin keeps answering 304. Three of the six rules
-below make that deterministic rather than probabilistic; the last is the
+unnoticed for as long as the origin keeps answering 304. Three of the seven
+rules below make that deterministic rather than probabilistic; rule 6 is the
 residual net for what none of them can see. (Rules 3-5 are the deterministic
 set; rules 1-2 are the gate and the operator's override, not drift protections.)
+
+**A 304 also renews nothing (#339).** Archiver re-issues a failed persist only
+when a re-observation refreshes the blob reference, and watcher's refresh is
+the #293 renewal — which runs on a full fetch alone. Rule 7 forces one before
+the blob behind the latest revision expires, measured against the horizon
+Replicator put on the fact rather than any constant here: the horizon is
+Replicator's setting, and a ceiling transcribed from it drifts the day it moves.
 
 The rules ``replayable_validators`` applies (listed by subject, not by the order
 they are evaluated in — the predicate short-circuits and the order is an
@@ -38,6 +45,9 @@ implementation detail):
    silently stale fingerprint.
 5. No ``last_full_fetch_at`` — unknown provenance is not replayable.
 6. The pair is older than ``WATCHER_VALIDATOR_MAX_AGE_HOURS``.
+7. The blob's horizon is unknown, or half of it has elapsed since the full
+   fetch that produced it. Half, so the renewal lands inside the horizon
+   whenever the item's cadence interval plus fetch lag is under the other half.
 """
 
 import hashlib
@@ -55,7 +65,8 @@ CONDITIONAL_GET_ENV = "WATCHER_CONDITIONAL_GET_ENABLED"
 VALIDATOR_MAX_AGE_ENV = "WATCHER_VALIDATOR_MAX_AGE_HOURS"
 
 # A week. Four items at ~122 KB make a forced full fetch cost nothing, so the
-# ceiling is set for confidence rather than for bandwidth.
+# ceiling is set for confidence rather than for bandwidth. The drift net only:
+# blob renewal is rule 7's, so no value here can outlast the blob (#339).
 DEFAULT_VALIDATOR_MAX_AGE_HOURS = 168.0
 
 # Mirrors Replicator's ``MAX_HEADER_VALUE_LENGTH`` (currently 1024): its read
@@ -258,6 +269,12 @@ def replayable_validators(
     if now - last_full_fetch_at > validator_max_age():
         return (None, None)
 
+    blob_expires_at = watched_item.blob_expires_at
+    if blob_expires_at is None:
+        return (None, None)
+    if now >= last_full_fetch_at + (blob_expires_at - last_full_fetch_at) / 2:
+        return (None, None)
+
     return (etag, last_modified)
 
 
@@ -285,15 +302,20 @@ def record_validators(
     )
 
 
-def stamp_full_fetch(watched_item, *, now: datetime) -> None:
-    """Record that bytes arrived (CR-2).
+def stamp_full_fetch(watched_item, *, now: datetime, blob_expires_at: datetime | None) -> None:
+    """Record that bytes arrived, and how long their blob lives (CR-2, #339).
 
     Deliberately separate from ``record_validators``: "we got bytes" is a fetch
     fact, true even when extraction then failed and no pair was stored. Folding
     it into the validator write left the column — rendered as *Last Full Fetch*
     — claiming no bytes had arrived on exactly the cycle where they had.
+
+    The horizon is written here, ``None`` included, because rule 7 measures the
+    half-life between the two columns: a horizon left from an older fetch beside
+    a newer stamp would place it wrongly.
     """
     watched_item.last_full_fetch_at = now
+    watched_item.blob_expires_at = blob_expires_at
 
 
 def clear_validators(watched_item) -> None:

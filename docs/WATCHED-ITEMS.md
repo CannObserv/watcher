@@ -31,7 +31,9 @@ that lives in the audit trail, where `CHECK_NO_CHANGE` carries
 freshness set: when *bytes* last arrived, advanced only by a blob apply, so a
 304 moves the other two and not this one; the gap between it and
 `last_observed_at` is how long the item's fingerprint has been inherited rather
-than recomputed, and the detail page shows it as **Last Full Fetch**); the
+than recomputed, and the detail page shows it as **Last Full Fetch**);
+`blob_expires_at` (#339 — that fetch's blob horizon, stamped with it; replay
+stops at the half-life between the two); the
 conditional-GET validator state `etag` / `last_modified` / `validator_source_key`
 (#269 — the pair the next command replays and the identity of what the bytes were
 going to mean when it was stored; see

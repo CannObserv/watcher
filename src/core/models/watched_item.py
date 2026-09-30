@@ -175,6 +175,12 @@ class WatchedItem(Base, TimestampMixin):
     last_full_fetch_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True, default=None
     )
+    # The retrievability horizon of that full fetch's blob, stamped with it
+    # (#339). A 304 renews nothing, so validators stop replaying at its
+    # half-life — measured against Replicator's horizon, whatever it is set to.
+    blob_expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, default=None
+    )
     last_changed_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True, default=None
     )

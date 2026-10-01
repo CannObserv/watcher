@@ -37,3 +37,17 @@ def memory_size_to_bytes(value: str) -> int:
     if suffix in multipliers:
         return int(value[:-1]) * multipliers[suffix]
     return int(value)
+
+
+def time_span_to_seconds(value: str) -> float:
+    """Parse a systemd time span given in seconds (``90``, ``90s``).
+
+    Only the plain-seconds forms are accepted. ``1min 30s`` and the other
+    compound spans systemd also reads raise rather than being misread: a stop
+    budget parsed as 1 would fail the budget test for the wrong reason, and one
+    parsed as 0 could pass it.
+    """
+    number = value.removesuffix("s")
+    if not number.isdigit():
+        raise ValueError(f"unsupported time span {value!r}: write it in seconds")
+    return float(number)

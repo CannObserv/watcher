@@ -12,6 +12,15 @@ Restarted in-process rather than by exiting for ``Restart=on-failure``: an exit
 drops in-flight API requests and consumer work to recover a component that
 comes back on its own once the cluster does — the pool rides out the outage,
 only the listener gives up.
+
+Every stop — the lifespan's, or one of these deaths — is bounded (#334).
+Procrastinate's default waits for running jobs for ever, and a job still
+running when systemd's ``TimeoutStopSec`` ran out was SIGKILLed with the
+process and left ``doing``. At :data:`SHUTDOWN_GRACEFUL_SECONDS` the worker
+cancels what is left and records it ``aborted``; ``tests/deploy`` holds the
+window to at most half the unit's budget, which also has to cover uvicorn's
+request drain and the unregister. A SIGKILL can still orphan a job;
+``src.workers.stalled_jobs`` recovers those.
 """
 
 import asyncio
@@ -25,6 +34,9 @@ logger = get_logger(__name__)
 RESTART_INITIAL_SECONDS = 1.0
 #: Backoff ceiling. A run that lasted at least this long resets the backoff.
 RESTART_MAX_SECONDS = 60.0
+#: How long a stop waits for running jobs before cancelling them. Three times
+#: the longest job measured (10.0 s, ``publish_fetch_policy``, 2026-10-01).
+SHUTDOWN_GRACEFUL_SECONDS = 30.0
 
 
 class _WorkerApp(Protocol):
@@ -57,11 +69,13 @@ class WorkerSupervisor:
         stop: asyncio.Event,
         initial: float = RESTART_INITIAL_SECONDS,
         maximum: float = RESTART_MAX_SECONDS,
+        shutdown_graceful_timeout: float = SHUTDOWN_GRACEFUL_SECONDS,
     ) -> None:
         self._app = proc_app
         self._stop = stop
         self._initial = initial
         self._maximum = maximum
+        self._shutdown_graceful_timeout = shutdown_graceful_timeout
         self.alive = False
         self.restarts = 0
         self.task: asyncio.Task | None = None
@@ -75,7 +89,10 @@ class WorkerSupervisor:
             error: Exception | None = None
             self.alive = True
             try:
-                await self._app.run_worker_async(install_signal_handlers=False)
+                await self._app.run_worker_async(
+                    install_signal_handlers=False,
+                    shutdown_graceful_timeout=self._shutdown_graceful_timeout,
+                )
             except Exception as exc:  # CancelledError is a BaseException: it propagates
                 error = exc
             finally:
@@ -107,11 +124,18 @@ def start_worker(
     stop: asyncio.Event,
     initial: float = RESTART_INITIAL_SECONDS,
     maximum: float = RESTART_MAX_SECONDS,
+    shutdown_graceful_timeout: float = SHUTDOWN_GRACEFUL_SECONDS,
 ) -> WorkerSupervisor:
     """Spawn the supervised worker as a lifespan task (caller owns ``stop``).
 
     The task is on the returned supervisor's ``task``.
     """
-    supervisor = WorkerSupervisor(proc_app, stop=stop, initial=initial, maximum=maximum)
+    supervisor = WorkerSupervisor(
+        proc_app,
+        stop=stop,
+        initial=initial,
+        maximum=maximum,
+        shutdown_graceful_timeout=shutdown_graceful_timeout,
+    )
     supervisor.task = asyncio.create_task(supervisor.run(), name="procrastinate-worker")
     return supervisor

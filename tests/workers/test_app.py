@@ -1,5 +1,7 @@
 """Tests for procrastinate App setup and task registration."""
 
+import inspect
+
 import pytest
 
 from src.workers import get_app, get_conninfo, reset_app
@@ -51,3 +53,14 @@ class TestGetAppRegistration:
         )
         task_keys = {name for name, _ in app.periodic_registry.periodic_tasks}
         assert "schedule_tick" in task_keys
+
+    def test_every_task_is_a_coroutine_function(self):
+        """#334: a stop that outlives ``SHUTDOWN_GRACEFUL_SECONDS`` aborts the
+        running jobs by cancelling them, and only an ``async def`` task can be
+        cancelled. A sync one runs on in its thread; the worker waits for it,
+        systemd SIGKILLs the process, and the job is left ``doing``."""
+        app = get_app()
+        sync = sorted(
+            name for name, task in app.tasks.items() if not inspect.iscoroutinefunction(task.func)
+        )
+        assert sync == []

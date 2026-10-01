@@ -28,7 +28,9 @@ async def test_lifespan_does_not_start_changes_drain(monkeypatch):
     fake_proc_app.open_async = AsyncMock()
     fake_proc_app.close_async = AsyncMock()
 
-    async def _worker_run(install_signal_handlers: bool = True) -> None:
+    async def _worker_run(
+        install_signal_handlers: bool = True, shutdown_graceful_timeout: float | None = None
+    ) -> None:
         try:
             await asyncio.Event().wait()
         except asyncio.CancelledError:
@@ -60,7 +62,9 @@ async def test_registry_consumer_is_dormant_without_a_bus_url(monkeypatch):
     fake_proc_app.open_async = AsyncMock()
     fake_proc_app.close_async = AsyncMock()
 
-    async def _worker_run(install_signal_handlers: bool = True) -> None:
+    async def _worker_run(
+        install_signal_handlers: bool = True, shutdown_graceful_timeout: float | None = None
+    ) -> None:
         try:
             await asyncio.Event().wait()
         except asyncio.CancelledError:
@@ -92,7 +96,9 @@ async def test_registry_consumer_starts_and_stops_with_a_bus_url(monkeypatch):
     fake_proc_app.open_async = AsyncMock()
     fake_proc_app.close_async = AsyncMock()
 
-    async def _worker_run(install_signal_handlers: bool = True) -> None:
+    async def _worker_run(
+        install_signal_handlers: bool = True, shutdown_graceful_timeout: float | None = None
+    ) -> None:
         try:
             await asyncio.Event().wait()
         except asyncio.CancelledError:
@@ -165,7 +171,9 @@ async def test_lifespan_accepts_a_bus_url_with_the_opt_in(monkeypatch):
     fake_proc_app.open_async = AsyncMock()
     fake_proc_app.close_async = AsyncMock()
 
-    async def _worker_run(install_signal_handlers: bool = True) -> None:
+    async def _worker_run(
+        install_signal_handlers: bool = True, shutdown_graceful_timeout: float | None = None
+    ) -> None:
         try:
             await asyncio.Event().wait()
         except asyncio.CancelledError:
@@ -307,7 +315,9 @@ class TestBusReachabilityProbe:
         fake.open_async = AsyncMock()
         fake.close_async = AsyncMock()
 
-        async def _worker_run(install_signal_handlers: bool = True) -> None:
+        async def _worker_run(
+            install_signal_handlers: bool = True, shutdown_graceful_timeout: float | None = None
+        ) -> None:
             try:
                 await asyncio.Event().wait()
             except asyncio.CancelledError:
@@ -426,7 +436,9 @@ async def test_the_worker_runs_supervised_and_stops_with_the_lifespan():
     fake_proc_app.open_async = AsyncMock()
     fake_proc_app.close_async = AsyncMock()
 
-    async def _worker_run(install_signal_handlers: bool = True) -> None:
+    async def _worker_run(
+        install_signal_handlers: bool = True, shutdown_graceful_timeout: float | None = None
+    ) -> None:
         started.set()
         await asyncio.Event().wait()
 

@@ -129,6 +129,16 @@ RestartSec=5
 # trade — SIGTERM is a deliberate signal, and a genuine crash exits non-143.
 SuccessExitStatus=143
 
+# The stop budget, stated rather than inherited (#334): systemd's default is
+# the same 90s, but a job still running when it runs out is SIGKILLed with the
+# process and left in `doing`. The embedded worker aborts its running jobs at
+# SHUTDOWN_GRACEFUL_SECONDS (src/workers/supervisor.py), and
+# tests/deploy/test_installed_unit_matches_repo.py holds that to at most half
+# of this — the rest is uvicorn's request drain, the abort's status writes and
+# the unregister. Lowering this means lowering that. src/workers/stalled_jobs.py
+# recovers what a SIGKILL still orphans.
+TimeoutStopSec=90s
+
 # Memory reservation against a co-tenant agent session (#307).
 #
 # Dev and prod share this VM. Under exe-init 8579326, exe.dev session processes

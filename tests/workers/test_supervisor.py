@@ -22,7 +22,12 @@ import procrastinate
 from procrastinate.exceptions import ConnectorException
 from procrastinate.testing import InMemoryConnector
 
-from src.workers.supervisor import WorkerSupervisor, next_delay, start_worker
+from src.workers.supervisor import (
+    SHUTDOWN_GRACEFUL_SECONDS,
+    WorkerSupervisor,
+    next_delay,
+    start_worker,
+)
 
 FAST = {"initial": 0.01, "maximum": 0.05}
 
@@ -121,6 +126,32 @@ async def test_a_boot_time_failure_is_logged_at_once_not_at_shutdown(caplog):
                 await _shutdown(stop, supervisor.task)
 
 
+async def test_a_stop_aborts_a_job_still_running_at_the_graceful_timeout():
+    """#334: procrastinate's default waits for running jobs for ever, so a job
+    that outlived the unit's ``TimeoutStopSec`` was SIGKILLed with the process
+    and stayed ``doing``. Bounded, the worker cancels it, records it
+    ``aborted`` and unregisters — the stop finishes on its own."""
+    connector = InMemoryConnector()
+    app = procrastinate.App(connector=connector)
+    started = asyncio.Event()
+
+    @app.task(name="hangs", queue="default")
+    async def hangs() -> None:
+        started.set()
+        await asyncio.Event().wait()
+
+    stop = asyncio.Event()
+    async with app.open_async():
+        job_id = await hangs.defer_async()
+        supervisor = start_worker(app, stop=stop, shutdown_graceful_timeout=0.05, **FAST)
+        await asyncio.wait_for(started.wait(), timeout=5)
+
+        await asyncio.wait_for(_shutdown(stop, supervisor.task), timeout=5)
+
+    assert connector.jobs[job_id]["status"] == "aborted"
+    assert connector.workers == {}
+
+
 class _FakeApp:
     """Stands in for ``procrastinate.App``; each run ends as scripted."""
 
@@ -129,7 +160,10 @@ class _FakeApp:
         self.runs = 0
 
     async def run_worker_async(self, **kwargs) -> None:
-        assert kwargs == {"install_signal_handlers": False}
+        assert kwargs == {
+            "install_signal_handlers": False,
+            "shutdown_graceful_timeout": SHUTDOWN_GRACEFUL_SECONDS,
+        }
         self.runs += 1
         outcome = self.outcomes.pop(0) if self.outcomes else "forever"
         if outcome == "forever":

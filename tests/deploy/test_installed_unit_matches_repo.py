@@ -22,7 +22,12 @@ from pathlib import Path
 
 import pytest
 
-from tests.deploy.systemd_units import directive_values, memory_size_to_bytes
+from src.workers.supervisor import SHUTDOWN_GRACEFUL_SECONDS
+from tests.deploy.systemd_units import (
+    directive_values,
+    memory_size_to_bytes,
+    time_span_to_seconds,
+)
 
 REPO_UNIT = Path(__file__).resolve().parents[2] / "deploy" / "watcher.service"
 INSTALLED_UNIT = Path("/etc/systemd/system/watcher.service")
@@ -189,6 +194,21 @@ def test_repo_unit_treats_sigterm_exit_as_success() -> None:
     """
     text = REPO_UNIT.read_text()
     assert "SuccessExitStatus=143" in text
+
+
+def test_repo_unit_stops_after_the_worker_has_aborted_its_jobs() -> None:
+    """#334: a job still running when ``TimeoutStopSec`` runs out is SIGKILLed
+    with the process and left ``doing``.
+
+    The worker aborts what is still running at ``SHUTDOWN_GRACEFUL_SECONDS``,
+    but that window is not the whole stop: uvicorn drains in-flight requests
+    before the lifespan shuts down, and after the abort the worker still writes
+    each job's outcome and unregisters. Half the budget is the window's; the
+    other half is everything else's. Explicit in the unit rather than systemd's
+    default, so the number this compares against is one the repo states.
+    """
+    (value,) = directive_values(REPO_UNIT.read_text(), "TimeoutStopSec")
+    assert SHUTDOWN_GRACEFUL_SECONDS * 2 <= time_span_to_seconds(value)
 
 
 def test_systemd_has_loaded_the_installed_unit() -> None:

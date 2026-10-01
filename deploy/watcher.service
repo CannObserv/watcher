@@ -135,8 +135,10 @@ SuccessExitStatus=143
 # SHUTDOWN_GRACEFUL_SECONDS (src/workers/supervisor.py), and
 # tests/deploy/test_installed_unit_matches_repo.py holds that to at most half
 # of this — the rest is uvicorn's request drain, the abort's status writes and
-# the unregister. Lowering this means lowering that. src/workers/stalled_jobs.py
-# recovers what a SIGKILL still orphans.
+# the unregister. Lowering this means lowering that. The drain is unbounded
+# (no --timeout-graceful-shutdown) and short only because no endpoint streams:
+# add one, and add that flag. src/workers/stalled_jobs.py recovers what a
+# SIGKILL still orphans.
 TimeoutStopSec=90s
 
 # Memory reservation against a co-tenant agent session (#307).

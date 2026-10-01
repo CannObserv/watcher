@@ -140,6 +140,25 @@ class TestRecoverStalled:
 
         assert statuses == ["todo", "todo", "failed"]
 
+    async def test_a_job_whose_abort_was_requested_is_failed_not_retried(self, caplog) -> None:
+        """``procrastinate_retry_job_v2`` fails a ``doing`` job with
+        ``abort_requested`` rather than requeue it, so a retry here would log
+        "retried" for a job the database failed. Only procrastinate's CLI or
+        admin can request one — watcher never does."""
+        app = _app()
+        job_id, _ = await _start(app)
+        app.connector.jobs[job_id]["abort_requested"] = True
+        await app.job_manager.prune_stalled_workers(0)
+
+        with caplog.at_level(logging.WARNING, logger="src.workers.stalled_jobs"):
+            result = await stalled_jobs.recover_stalled(app.job_manager)
+
+        assert _job(app, job_id)["status"] == "failed"
+        assert result == {"retried": 0, "failed": 1}
+        (record,) = [r for r in caplog.records if r.name == "src.workers.stalled_jobs"]
+        assert record.levelno == logging.ERROR
+        assert record.reason == "abort_requested"
+
     async def test_each_recovery_is_logged_with_the_job(self, caplog) -> None:
         app = _app()
         retried_id, _ = await _start(app)

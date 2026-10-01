@@ -33,6 +33,9 @@ procrastinate's ``attempts``, which a task's own retries raise too, so a job
 retried twice already is failed at its first orphaning; for each task that
 retries, something else re-defers the work — ``reap_fetch_commands`` the
 applies, ``schedule_tick`` a ``check_watched_item`` whose item is still due.
+So is a job whose abort was requested before its worker died:
+``procrastinate_retry_job_v2`` fails such a job rather than requeue it, so
+failing it here keeps the log and the count true to the row.
 """
 
 from procrastinate import JobContext
@@ -49,9 +52,14 @@ STALLED_AFTER_SECONDS = 120
 #: A stalled job with this many attempts behind it is failed, not retried.
 FAIL_AT_ATTEMPTS = 2
 
+_FAILED_BECAUSE = {
+    "attempts_cap": "stalled job failed: its worker died with it running, at the attempts cap",
+    "abort_requested": "stalled job failed: its worker died before honouring a requested abort",
+}
+
 
 async def recover_stalled(job_manager: JobManager) -> dict[str, int]:
-    """Retry each stalled job, or fail it at :data:`FAIL_AT_ATTEMPTS`; return the counts."""
+    """Retry each stalled job, or fail it (attempts cap, requested abort); return the counts."""
     retried = failed = 0
     stalled = list(
         await job_manager.get_stalled_jobs(seconds_since_heartbeat=STALLED_AFTER_SECONDS)
@@ -63,9 +71,14 @@ async def recover_stalled(job_manager: JobManager) -> dict[str, int]:
             "worker_id": job.worker_id,
             "attempts": job.attempts,
         }
-        fail = job.attempts >= FAIL_AT_ATTEMPTS
+        if job.abort_requested:
+            reason = "abort_requested"
+        elif job.attempts >= FAIL_AT_ATTEMPTS:
+            reason = "attempts_cap"
+        else:
+            reason = None
         try:
-            if fail:
+            if reason:
                 await job_manager.finish_job(job, status=Status.FAILED, delete_job=False)
             else:
                 await job_manager.retry_job(job)
@@ -76,11 +89,10 @@ async def recover_stalled(job_manager: JobManager) -> dict[str, int]:
                 exc_info=True,
             )
             continue
-        if fail:
+        if reason:
             failed += 1
             logger.error(
-                "stalled job failed: its worker died with it running, at the attempts cap",
-                extra={**extra, "action": "failed", "reason": "attempts_cap"},
+                _FAILED_BECAUSE[reason], extra={**extra, "action": "failed", "reason": reason}
             )
         else:
             retried += 1

@@ -18,11 +18,29 @@ from unittest.mock import MagicMock
 
 import procrastinate
 import pytest
-from procrastinate import utils
+from procrastinate import exceptions, utils
 from procrastinate.testing import InMemoryConnector
 
 from src.workers import get_app, get_conninfo, reset_app, stalled_jobs
 from tests.conftest import TEST_DATABASE_URL
+
+
+class _RetryConflicts(InMemoryConnector):
+    """``procrastinate_jobs_queueing_lock_idx_v1`` covers ``todo`` rows only, so
+    retrying an orphaned ``publish_watch_status`` while a coalesced republish
+    waits in ``todo`` raises — as here, for the job ids listed."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.conflicting: set[int] = set()
+
+    async def retry_job_run(self, job_id: int, **kwargs) -> None:
+        if job_id in self.conflicting:
+            raise exceptions.UniqueViolation(
+                constraint_name="procrastinate_jobs_queueing_lock_idx_v1",
+                queueing_lock="publish_watch_status",
+            )
+        await super().retry_job_run(job_id, **kwargs)
 
 
 def _app(connector=None) -> procrastinate.App:
@@ -139,6 +157,26 @@ class TestRecoverStalled:
         assert by_job[retried_id].action == "retried"
         assert by_job[failed_id].levelno == logging.ERROR
         assert by_job[failed_id].action == "failed"
+
+    async def test_one_job_that_cannot_be_recovered_does_not_stop_the_rest(self, caplog) -> None:
+        """Left as it is, the conflicting job is the next tick's — by then the
+        queued republish has run and released the lock."""
+        connector = _RetryConflicts()
+        app = _app(connector)
+        conflicting, _ = await _start(app)
+        other, _ = await _start(app)
+        await app.job_manager.prune_stalled_workers(0)
+        connector.conflicting.add(conflicting)
+
+        with caplog.at_level(logging.ERROR, logger="src.workers.stalled_jobs"):
+            result = await stalled_jobs.recover_stalled(app.job_manager)
+
+        assert _job(app, conflicting)["status"] == "doing"
+        assert _job(app, other)["status"] == "todo"
+        assert result == {"retried": 1, "failed": 0}
+        (record,) = [r for r in caplog.records if r.name == "src.workers.stalled_jobs"]
+        assert record.job_id == conflicting
+        assert isinstance(record.exc_info[1], exceptions.UniqueViolation)
 
 
 class TestRecoverStalledJobsTask:

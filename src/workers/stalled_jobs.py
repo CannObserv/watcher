@@ -18,6 +18,12 @@ the only live worker, and ``JobContext`` carries no worker id to exclude that
 worker's own jobs by, so a heartbeat write that lags must not make a job still
 running beside it look abandoned.
 
+Each job is recovered on its own: one that raises is logged and left ``doing``
+for the next tick. The one known cause is a ``queueing_lock`` conflict —
+procrastinate's unique index covers ``todo`` rows only, so an orphaned
+``publish_watch_status`` cannot rejoin the queue while a coalesced republish
+waits there, and by the next tick that republish has run.
+
 A job that reaches the sweep with :data:`FAIL_AT_ATTEMPTS` attempts is failed
 instead: one that is itself the cause of the kill — an OOM on one huge blob —
 would otherwise loop retry → kill → restart for ever. Failed rows are kept 30
@@ -56,15 +62,26 @@ async def recover_stalled(job_manager: JobManager) -> dict[str, int]:
             "worker_id": job.worker_id,
             "attempts": job.attempts,
         }
-        if job.attempts >= FAIL_AT_ATTEMPTS:
-            await job_manager.finish_job(job, status=Status.FAILED, delete_job=False)
+        fail = job.attempts >= FAIL_AT_ATTEMPTS
+        try:
+            if fail:
+                await job_manager.finish_job(job, status=Status.FAILED, delete_job=False)
+            else:
+                await job_manager.retry_job(job)
+        except Exception:
+            logger.error(
+                "stalled job not recovered; the next sweep tries again",
+                extra={**extra, "action": "none"},
+                exc_info=True,
+            )
+            continue
+        if fail:
             failed += 1
             logger.error(
                 "stalled job failed: its worker died with it running, again",
                 extra={**extra, "action": "failed"},
             )
         else:
-            await job_manager.retry_job(job)
             retried += 1
             logger.warning(
                 "stalled job retried: its worker died with it running",

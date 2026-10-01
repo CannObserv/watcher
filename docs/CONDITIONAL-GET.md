@@ -52,8 +52,10 @@ URL move, or an extractor bump moves `validator_source_key` and forces a full
 fetch wherever that change is written. The age ceiling is what remains for the
 cases they cannot see — an origin whose ETag tracks a template rather than the
 watched region, or a wrong-but-stable validator. Four items at ~122 KB make a
-weekly forced fetch free, which is why the default is set for confidence rather
-than for bytes.
+forced fetch free, which is why the default is set for confidence rather than
+for bytes. **At today's 7-day blob horizon the ceiling never fires**: rule 7
+forces the full fetch at 84h, first. It binds again only when set below half
+the horizon, or if Replicator's horizon grows past twice it.
 
 **A 304 renews no blob (#339).** Archiver re-issues a terminal `persist_failed`
 only when a re-observation refreshes the blob reference, and watcher's refresh

@@ -66,7 +66,8 @@ VALIDATOR_MAX_AGE_ENV = "WATCHER_VALIDATOR_MAX_AGE_HOURS"
 
 # A week. Four items at ~122 KB make a forced full fetch cost nothing, so the
 # ceiling is set for confidence rather than for bandwidth. The drift net only:
-# blob renewal is rule 7's, so no value here can outlast the blob (#339).
+# blob renewal is rule 7's, so no value here can outlast the blob (#339). At a
+# 7-day horizon rule 7 fires at 84h, so this binds only when set below that.
 DEFAULT_VALIDATOR_MAX_AGE_HOURS = 168.0
 
 # Mirrors Replicator's ``MAX_HEADER_VALUE_LENGTH`` (currently 1024): its read

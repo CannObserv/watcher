@@ -15,8 +15,9 @@ and retries them — procrastinate's own recipe. Every task here is idempotent
 (the apply path's status guard, the outbox drains, the publishers), so a re-run
 is safe. The window is not procrastinate's default 30 s: the sweep runs inside
 the only live worker, and ``JobContext`` carries no worker id to exclude that
-worker's own jobs by, so a heartbeat write that lags must not make a job still
-running beside it look abandoned.
+worker's own jobs by. At procrastinate's default concurrency of 1 the one such
+job is the sweep itself, and a heartbeat write that lags must not have it retry
+itself — a bumped ``attempts`` and a false "stalled job retried".
 
 Each job is recovered on its own: one that raises is logged and left ``doing``
 for the next tick. The one known cause is a ``queueing_lock`` conflict —

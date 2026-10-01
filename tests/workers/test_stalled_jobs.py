@@ -116,8 +116,8 @@ class TestRecoverStalled:
     async def test_a_heartbeat_a_minute_late_is_not_yet_stalled(self) -> None:
         """Procrastinate's default window is 30 s. The sweep runs inside the only
         live worker, and ``JobContext`` carries no worker id to exclude its own
-        jobs by — so a heartbeat write that lags past 30 s must not hand the
-        sweep a job that is still running beside it."""
+        jobs by — at concurrency 1, the sweep's own job — so a heartbeat write
+        that lags past 30 s must not hand the sweep a job its worker still runs."""
         app = _app()
         job_id, worker_id = await _start(app)
         _heartbeat_age(app, worker_id, 60)

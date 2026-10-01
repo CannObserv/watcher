@@ -93,12 +93,12 @@ sudo systemctl restart watcher
 # trust the journal. No "Starting worker" minutes after the cluster is back →
 # restart watcher.
 sudo journalctl -u watcher --since -10min | grep -E 'supervisor|Starting worker'
+curl -s localhost:8000/ready   # {"status":"ready","db":true,"queue":true}
 
 # A job a dead worker left in `doing` (SIGKILL, OOM, a restart above) is retried
 # by the 5-minute sweep once its worker is 120s silent (#334): WARNING "stalled
 # job retried"; ERROR "stalled job failed" means it was orphaned a third time.
 sudo journalctl -u watcher --since -1h | grep 'stalled job'
-curl -s localhost:8000/ready   # {"status":"ready","db":true,"queue":true}
 
 # Check status
 sudo systemctl status watcher

@@ -24,8 +24,9 @@ async def ready(request: Request, session: AsyncSession = Depends(get_db_session
     Returns 200 when both are up, 503 otherwise. ``queue`` is the worker
     supervisor's liveness (#340): false while a dead worker waits out its
     restart backoff, and in a process that never started one. It lags a death
-    by procrastinate's own shutdown — running jobs, then an unregister that
-    needs a pool connection — since the run has not returned until that ends.
+    by procrastinate's own shutdown — running jobs, aborted at
+    ``SHUTDOWN_GRACEFUL_SECONDS`` (#334), then an unregister that needs a pool
+    connection — since the run has not returned until that ends.
 
     A failed ping is 503 whatever it raised, never 500. SQLAlchemy does not
     wrap what asyncpg raises while connecting — bare ``OSError``s (refused,

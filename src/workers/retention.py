@@ -11,7 +11,8 @@ never reaches into.
 The policy is two horizons. **Succeeded** jobs go after 7 days. **Failed,
 cancelled and aborted** ones go after 30, because a failure is the thing someone
 comes back to read. Unfinished jobs (``todo``, ``doing``) are live work and are
-never touched: ``delete_old_jobs`` only considers final states. Events go with
+never touched: ``delete_old_jobs`` only considers final states. (A ``doing`` job
+whose worker died is ``src.workers.stalled_jobs``' to end, #334.) Events go with
 their job (``ON DELETE CASCADE``), and ``watcher_app`` already holds ``DELETE``
 on both tables, so this needs no grant.
 

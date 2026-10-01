@@ -88,10 +88,16 @@ sudo systemctl restart watcher
 # stops (#338) and the supervisor restarts it with backoff (#340): an ERROR
 # "procrastinate worker stopped unexpectedly" or "… died" (one per attempt
 # while the cluster is down), then "Starting worker on all queues". The stop
-# waits for running jobs and an unregister (7s, 30s measured 2026-09-30), and
-# /ready's "queue" stays true meanwhile — trust the journal. No "Starting
-# worker" minutes after the cluster is back → restart watcher.
+# waits for running jobs (aborting any left at 30s, #334) and an unregister
+# (7s, 30s measured 2026-09-30), and /ready's "queue" stays true meanwhile —
+# trust the journal. No "Starting worker" minutes after the cluster is back →
+# restart watcher.
 sudo journalctl -u watcher --since -10min | grep -E 'supervisor|Starting worker'
+
+# A job a dead worker left in `doing` (SIGKILL, OOM, a restart above) is retried
+# by the 5-minute sweep once its worker is 120s silent (#334): WARNING "stalled
+# job retried"; ERROR "stalled job failed" means it was orphaned a third time.
+sudo journalctl -u watcher --since -1h | grep 'stalled job'
 curl -s localhost:8000/ready   # {"status":"ready","db":true,"queue":true}
 
 # Check status

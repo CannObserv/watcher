@@ -79,8 +79,8 @@ async def recover_stalled(job_manager: JobManager) -> dict[str, int]:
         if fail:
             failed += 1
             logger.error(
-                "stalled job failed: its worker died with it running, again",
-                extra={**extra, "action": "failed"},
+                "stalled job failed: its worker died with it running, at the attempts cap",
+                extra={**extra, "action": "failed", "reason": "attempts_cap"},
             )
         else:
             retried += 1

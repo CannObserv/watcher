@@ -157,6 +157,8 @@ class TestRecoverStalled:
         assert by_job[retried_id].action == "retried"
         assert by_job[failed_id].levelno == logging.ERROR
         assert by_job[failed_id].action == "failed"
+        # Not "orphaned again": a task's own retries raise ``attempts`` too.
+        assert by_job[failed_id].reason == "attempts_cap"
 
     async def test_one_job_that_cannot_be_recovered_does_not_stop_the_rest(self, caplog) -> None:
         """Left as it is, the conflicting job is the next tick's — by then the

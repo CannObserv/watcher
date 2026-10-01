@@ -48,6 +48,11 @@ implementation detail):
 7. The blob's horizon is unknown, or half of it has elapsed since the full
    fetch that produced it. Half, so the renewal lands inside the horizon
    whenever the item's cadence interval plus fetch lag is under the other half.
+   Measured from ``last_full_fetch_at`` — the apply, not Replicator's
+   ``fact_at`` the horizon counts from — so the midpoint sits late by half the
+   apply lag: seconds normally, hours after a worker outage, against a margin
+   of half the horizon. A blob applied at all was applied before it expired, so
+   the midpoint still falls before the expiry.
 """
 
 import hashlib

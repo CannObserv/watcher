@@ -97,7 +97,8 @@ curl -s localhost:8000/ready   # {"status":"ready","db":true,"queue":true}
 
 # A job a dead worker left in `doing` (SIGKILL, OOM, a restart above) is retried
 # by the 5-minute sweep once its worker is 120s silent (#334): WARNING "stalled
-# job retried"; ERROR "stalled job failed" means it was orphaned a third time.
+# job retried"; ERROR "stalled job failed" means it was orphaned a third time;
+# ERROR "… not recovered" repeats per sweep until its conflict clears.
 sudo journalctl -u watcher --since -1h | grep 'stalled job'
 
 # Check status

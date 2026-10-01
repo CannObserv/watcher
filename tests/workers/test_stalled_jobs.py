@@ -206,17 +206,24 @@ class TestRecoverStalledJobsTask:
 
 @pytest.mark.integration
 async def test_procrastinates_own_sql_orphans_and_recovers_the_job(_procrastinate_schema) -> None:
-    """Characterizes procrastinate 3.7.2's SQL: pruning a worker NULLs its jobs'
-    ``worker_id`` (the foreign key), the heartbeat query still returns them, and
-    ``procrastinate_retry_job_v2`` takes a ``doing`` job back to ``todo``."""
+    """Characterizes procrastinate 3.7.2's SQL: deleting a worker row — what the
+    boot-time prune does — NULLs its jobs' ``worker_id`` (the foreign key), the
+    heartbeat query still returns them, and ``procrastinate_retry_job_v2`` takes
+    a ``doing`` job back to ``todo``.
+
+    Deletes only its own worker row, not ``prune_stalled_workers(0)``: that
+    would delete every worker in ``watcher_test``, a dev server's included
+    (``scripts/dev_server.sh`` defaults to that database)."""
     app = _app(
         procrastinate.PsycopgConnector(conninfo=get_conninfo({"DATABASE_URL": TEST_DATABASE_URL}))
     )
     async with app.open_async():
         job_id = None
         try:
-            job_id, _ = await _start(app)
-            await app.job_manager.prune_stalled_workers(0)
+            job_id, worker_id = await _start(app)
+            await app.connector.execute_query_async(
+                "DELETE FROM procrastinate_workers WHERE id = %(id)s", id=worker_id
+            )
             (orphan,) = await app.job_manager.list_jobs_async(id=job_id)
             assert orphan.status == "doing" and orphan.worker_id is None
 

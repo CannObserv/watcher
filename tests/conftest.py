@@ -29,10 +29,13 @@ import os
 from collections.abc import AsyncGenerator
 from urllib.parse import urlparse
 
+import asyncpg
 import pytest
 from httpx import ASGITransport, AsyncClient
+from procrastinate.schema import SchemaManager
 from sqlalchemy import event, select, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.engine import make_url
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from ulid import ULID
 
@@ -217,6 +220,95 @@ async def db_session(test_engine) -> AsyncGenerator[AsyncSession]:
 
         await session.close()
         await txn.rollback()
+
+
+# asyncpg takes a plain DSN, not SQLAlchemy's ``+driver`` form. Asking
+# SQLAlchemy to drop the driver rather than replacing one spelling of it keeps
+# this working whatever driver TEST_DATABASE_URL names.
+_ASYNCPG_DSN = (
+    make_url(TEST_DATABASE_URL).set(drivername="postgresql").render_as_string(hide_password=False)
+)
+
+# Everything Procrastinate's schema creates, in dependency order: the functions
+# reference the types, the triggers go with their tables. Run before applying
+# the schema as well as after, so a session killed mid-run doesn't wedge the
+# next one. Scoped to the current schema and the ``procrastinate_`` prefix —
+# the array types (``_procrastinate_…``) go with their element type.
+_DROP_PROCRASTINATE_SCHEMA = r"""
+DO $$
+DECLARE
+    obj record;
+BEGIN
+    FOR obj IN
+        SELECT p.oid::regprocedure AS ident FROM pg_proc p
+        JOIN pg_namespace n ON n.oid = p.pronamespace
+        WHERE n.nspname = current_schema() AND p.proname LIKE 'procrastinate\_%'
+    LOOP
+        EXECUTE 'DROP FUNCTION IF EXISTS ' || obj.ident || ' CASCADE';
+    END LOOP;
+    FOR obj IN
+        SELECT c.oid::regclass AS ident FROM pg_class c
+        JOIN pg_namespace n ON n.oid = c.relnamespace
+        WHERE n.nspname = current_schema() AND c.relkind = 'r'
+          AND c.relname LIKE 'procrastinate\_%'
+    LOOP
+        EXECUTE 'DROP TABLE IF EXISTS ' || obj.ident || ' CASCADE';
+    END LOOP;
+    FOR obj IN
+        SELECT t.oid::regtype AS ident FROM pg_type t
+        JOIN pg_namespace n ON n.oid = t.typnamespace
+        WHERE n.nspname = current_schema() AND t.typname LIKE 'procrastinate\_%'
+    LOOP
+        EXECUTE 'DROP TYPE IF EXISTS ' || obj.ident || ' CASCADE';
+    END LOOP;
+END $$;
+"""
+
+
+async def _run_script(sql: str) -> None:
+    """Run a multi-statement script on its own connection.
+
+    Procrastinate ships its schema as one script, and asyncpg only takes
+    several statements at once through the simple protocol its ``execute``
+    uses — SQLAlchemy drives the extended one, a statement at a time.
+    """
+    connection = await asyncpg.connect(_ASYNCPG_DSN)
+    try:
+        await connection.execute(sql)
+    finally:
+        await connection.close()
+
+
+@pytest.fixture(scope="session")
+async def _procrastinate_schema(test_engine) -> AsyncGenerator[None]:
+    """Build Procrastinate's own tables in the test database, once (#298).
+
+    Shared by the dashboard's queue tile and the stalled-job sweep's
+    characterization test (#334): each reads tables procrastinate's own SQL
+    writes. ``Base.metadata.create_all`` never makes them — Procrastinate owns
+    its schema and applies it with its own CLI — so ``get_queue_health``
+    otherwise hits ``ProgrammingError`` and returns zeros. A test reading those
+    zeros passes against any query at all, which is how a queue tile that
+    counted almost nothing went unnoticed. Applying the shipped ``schema.sql``
+    also makes drift impossible, the same reasoning as running Archiver's own
+    alembic for the ``information`` schema (tests/conftest.py).
+
+    Session-scoped and committed, not built inside the test transaction:
+    rolling the enums back per test would leave asyncpg holding prepared
+    statements whose type OIDs no longer exist. Per-test isolation is
+    ``db_session``'s rollback, which still covers every row seeded below.
+
+    The pool is disposed after the rebuild. Since #341 a dev launch leaves the
+    tables in the test database, so a test that ran earlier can have queried
+    them through a pooled connection, and asyncpg keeps that plan cached
+    against the tables just dropped: the next query through it raises
+    ``InvalidCachedStatementError``.
+    """
+    await _run_script(_DROP_PROCRASTINATE_SCHEMA)
+    await _run_script(SchemaManager.get_schema())
+    await test_engine.dispose()
+    yield
+    await _run_script(_DROP_PROCRASTINATE_SCHEMA)
 
 
 # ---------------------------------------------------------------------------

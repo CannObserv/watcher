@@ -40,6 +40,7 @@ from src.core.models.process_command import (
     ProcessCommand,
     ProcessCommandStatus,
 )
+from src.core.utils import format_utc_iso
 from src.workers.fetch_facts import (
     BLOCK_MS,
     ERROR_BACKOFF_SECONDS,
@@ -118,7 +119,7 @@ async def process_derived_message(
                     "command_id": row.command_id,
                     "status": row.status,
                     "event_type": payload.event_type,
-                    "occurred_at": payload.occurred_at.isoformat(),
+                    "occurred_at": format_utc_iso(payload.occurred_at),
                 },
             )
         return "late" if row.status == ProcessCommandStatus.EXPIRED else "already_settled"

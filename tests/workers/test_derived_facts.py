@@ -153,7 +153,8 @@ class TestCompleteFacts:
 
 
 class TestFirstTerminalFactWins:
-    async def test_a_repeated_success_is_discarded(self, db_session):
+    async def test_a_repeated_success_is_discarded(self, db_session, caplog):
+        caplog.set_level(logging.INFO)
         row = await _issued(db_session)
         defer = _DeferSpy()
         await process_derived_message(db_session, _complete(row), defer=defer)
@@ -165,6 +166,7 @@ class TestFirstTerminalFactWins:
 
         assert outcome == "already_settled"
         assert row.fact_at == NOW
+        assert any(getattr(r, "occurred_at", "").endswith("Z") for r in caplog.records)  # CR 6
         assert row.processor_version == "0.19.7+1"
         assert defer.calls == [row.command_id]  # one apply, not two
 

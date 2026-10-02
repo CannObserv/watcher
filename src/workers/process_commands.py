@@ -55,6 +55,7 @@ from src.core.process_commands import (
     reissue_process_command,
     select_pending_process_publish,
 )
+from src.core.utils import format_utc_iso
 from src.workers import bp
 from src.workers.pipeline import WatchedItemResult
 from src.workers.retry import APPLY_RETRY
@@ -409,8 +410,8 @@ async def reap_process_commands(
                 "processor not consuming — holding in-flight process commands",
                 extra={
                     "held": held,
-                    "oldest_issued_at": oldest_held.issued_at.isoformat(),
-                    "latest_fact_at": latest_fact.isoformat() if latest_fact else None,
+                    "oldest_issued_at": format_utc_iso(oldest_held.issued_at),
+                    "latest_fact_at": format_utc_iso(latest_fact) if latest_fact else None,
                 },
             )
         result = {

@@ -74,7 +74,9 @@ def _check_echo(row: ProcessCommand, payload) -> None:
         )
 
 
-async def process_derived_message(session, message: BusMessage, *, defer: DeferFn = None) -> str:
+async def process_derived_message(
+    session, message: BusMessage, *, defer: DeferFn | None = None
+) -> str:
     """Settle one decoded fact onto its row; returns an outcome tag.
 
     Commits before the caller acks: the row is the durable record, the ack only

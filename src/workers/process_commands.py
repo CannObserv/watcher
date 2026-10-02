@@ -16,7 +16,7 @@ processor outage costs comparator coverage and nothing else.
   terminal fact has settled a row: an empty outcome with a spec left chains
   the next spec (D3); anything else ends the lineage and is judged.
 * ``reap_process_commands`` — the backstop for silence, under #325's downtime
-  rule: **no re-issue while the processor is not consuming** (a command in the
+  rule: **no re-issue until the processor has read past a command** (one in the
   processor's group is not lost, and a re-issue only adds a duplicate to a
   stream that is never trimmed), a hard limit for the command that will never
   get a fact (CannObserv/processor#17), and a re-defer for a lost apply.
@@ -416,7 +416,7 @@ async def reap_process_commands(
 
         if held:
             logger.warning(
-                "processor not consuming — holding in-flight process commands",
+                "processor has not reached held process commands — down, or draining its backlog",
                 extra={
                     "held": held,
                     "oldest_issued_at": format_utc_iso(oldest_held.issued_at),

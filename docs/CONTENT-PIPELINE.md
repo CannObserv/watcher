@@ -222,7 +222,7 @@ In-flight past `WATCHER_PROCESS_COMMAND_TIMEOUT_SECONDS` (1800) is re-issued
 *after* it — capped at `WATCHER_FETCH_MAX_REISSUES`. Otherwise it is held (a
 command in `processor.process` is not lost, and a processor draining its
 backlog in order has simply not reached it; a duplicate would sit in a stream
-nothing trims) and one warning per pass says `processor not consuming`. Past
+nothing trims) and one warning per pass says `processor has not reached held process commands`. Past
 `WATCHER_PROCESS_COMMAND_HARD_LIMIT_SECONDS` (86400) the lineage ends
 uncompared either way: a refused failure fact leaves one command with no reply,
 and a quiet period has no other fact to go on. A settled row whose apply never

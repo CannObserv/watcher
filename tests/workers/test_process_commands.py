@@ -318,8 +318,10 @@ class TestReapProcessCommands:
         assert result["reissued"] == 0
         assert row.status == ProcessCommandStatus.IN_FLIGHT
         assert await client.xlen("content.process") == 0
-        assert "processor not consuming" in caplog.text
-        (held_line,) = [r for r in caplog.records if "not consuming" in r.getMessage()]
+        # Down or still draining its backlog in order, the processor has not
+        # reached it — the one line says that much and no more (CR 10).
+        assert "processor has not reached" in caplog.text
+        (held_line,) = [r for r in caplog.records if "has not reached" in r.getMessage()]
         # AGENTS.md: ISO 8601 with a Z, never +00:00 (CR 6).
         assert held_line.oldest_issued_at.endswith("Z")
 

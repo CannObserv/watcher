@@ -485,7 +485,7 @@ class TestUncappedStreamsStayUncapped:
                 f"{path.relative_to(ROOT)}:{call.lineno}: {topic!r} published with maxlen. "
                 "Retention on this stream is maxmemory alone by decision (#327); a length "
                 "cap deletes undelivered commands or unread facts. See docs/ARCHITECTURE.md "
-                "→ 'No retention on content.fetch or content.revisions'."
+                "→ 'No retention on content.fetch, content.process or content.revisions'."
             )
         assert found == self.UNCAPPED, f"publishes found only for {found} — renamed?"
 

@@ -170,8 +170,9 @@ publishes `info.watch-status` — the return leg of the registry channel: applie
 generation, scheduler state, and observation freshness per InfoItem, full-set
 republished on `WATCHER_WATCH_STATUS_REPUBLISH_CRON` (default every 5 minutes)
 including tombstones from `revoked_info_items`. **Health primitive: last-entry
-age** — `redis-cli XREVRANGE info.watch-status + - COUNT 1` should never be
-older than the republish period while the service is up; an aging stream with a
+age** — `XINFO STREAM info.watch-status` (its `last-entry`) should never be
+older than the republish period while the service is up; `XREVRANGE` is not in
+watcher's ACL, so use `XINFO STREAM` or `XRANGE` (broker#77). An aging stream with a
 live service means the publish task is failing (check Procrastinate job errors),
 and Archiver's panel renders drift from exactly this staleness. All queued work
 stays on Procrastinate over Postgres. See [ARCHITECTURE.md](ARCHITECTURE.md) §

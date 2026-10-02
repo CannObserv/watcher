@@ -119,6 +119,14 @@ async def issue_shadow_process_command(
     """
     if extract_mode() is not ExtractMode.SHADOW:
         return None
+    if not watched_item.source_specs:
+        # Nothing to send, and local already reports the item ERROR every cycle
+        # (#260): a WARNING here too would only repeat it (CR 7).
+        logger.debug(
+            "watched item has no source_specs — not shadowing the occasion",
+            extra={"fetch_command_id": fetch_row.command_id},
+        )
+        return None
     if local.outcome is not LocalOutcome.EXTRACTION_FAILED and local.fingerprint is None:
         # Reading a missing fingerprint as "local failed" would manufacture a
         # mismatch; with nothing to compare against, there is nothing to send.

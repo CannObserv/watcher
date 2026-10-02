@@ -6,6 +6,7 @@ under the bus's actual delivery semantics: duplicates (status guard),
 no ordering (supersession guard), and expiring blobs (re-issue, not error).
 """
 
+import logging
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock
@@ -1305,6 +1306,22 @@ class TestShadowIssue:
         assert result["applied"] is True
         assert wi.health_status == WatchHealthStatus.OK
         assert await self._process_rows(db_session, row) == []
+
+    async def test_a_specless_item_is_skipped_quietly(
+        self, db_session, monkeypatch, tmp_path, caplog
+    ):
+        # CR 7: local already reports a spec-less item as ERROR every cycle
+        # (#260); a second WARNING per cycle from the shadow leg is only noise.
+        _, row = await self._row(db_session, tmp_path, monkeypatch, specs=[])
+        _wire(db_session, monkeypatch, raises=ExtractionError("no source_specs"))
+
+        with caplog.at_level(logging.WARNING, logger="src.workers.process_commands"):
+            await apply_fetch_blob(
+                row.command_id, registry=ServiceRegistry(), bus_client=fakeredis.FakeAsyncRedis()
+            )
+
+        assert await self._process_rows(db_session, row) == []
+        assert not [r for r in caplog.records if r.name == "src.workers.process_commands"]
 
     async def test_a_shadow_failure_never_fails_the_apply(self, db_session, monkeypatch, tmp_path):
         wi, row = await self._row(db_session, tmp_path, monkeypatch)

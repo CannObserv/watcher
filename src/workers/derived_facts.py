@@ -90,7 +90,9 @@ async def process_derived_message(session, message: BusMessage, *, defer: DeferF
         )
         return "ignored_unknown_type"
 
-    row = await session.get(ProcessCommand, payload.command_id)
+    # Locked (CR 2): the reaper may be expiring this row right now. Whichever
+    # commits first, the other sees its outcome — never both acting on it.
+    row = await session.get(ProcessCommand, payload.command_id, with_for_update=True)
     if row is None:
         # Broadcast stream: another issuer's command, or a row since deleted
         # with its watched item. Nothing of ours to settle.

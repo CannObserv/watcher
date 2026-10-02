@@ -17,7 +17,7 @@ from co_core.pure.adapters.bus import streams
 from co_core.pure.adapters.bus.envelope import from_wire, to_wire
 from co_core.pure.extract import CANONICAL_TEXT_MEDIA_TYPE
 from co_core.pure.models.changes import ProcessingCompleteEmit
-from sqlalchemy import select
+from sqlalchemy import event, select
 
 import src.workers.fetch_commands as fc_mod
 import src.workers.process_commands as pc_mod
@@ -293,9 +293,7 @@ class TestReapProcessCommands:
         # that queued during its outage; the second is stale but still queued
         # behind it. A fact for an *earlier* command says nothing about this one.
         two_hours_ago = datetime.now(UTC) - timedelta(hours=2)
-        await _command(
-            db_session, issued_at=two_hours_ago, **_completed(fact_at=datetime.now(UTC))
-        )
+        await _command(db_session, issued_at=two_hours_ago, **_completed(fact_at=datetime.now(UTC)))
         queued = await _command(db_session, issued_at=two_hours_ago + timedelta(minutes=1))
         client = fakeredis.FakeAsyncRedis()
 
@@ -502,3 +500,54 @@ class TestShadowEndToEnd:
         rows = await _rows(db_session, row.intent_id)
         assert rows[-1].shadow_verdict == ShadowVerdict.MATCH
         assert len(await self._commands(client)) == 2  # spec[0], spec[1] — nothing else
+
+
+class TestReaperLocksWhatItReaps:
+    """CR 2: the reaper and the consumer must not both act on one in-flight row.
+
+    Unlocked, a reaper that loaded the row before the consumer settled it would
+    commit EXPIRED over COMPLETED — the answer lost, a duplicate re-issued.
+    ``FOR UPDATE`` on both sides lets Postgres re-check ``status = in_flight``
+    after the wait, so whichever runs second sees the first one's outcome.
+    """
+
+    def _stale(self):
+        return datetime.now(UTC) - timedelta(hours=1)
+
+    async def test_each_stale_row_is_reread_locked(self, db_session):
+        await _command(db_session, issued_at=self._stale())
+        statements: list[str] = []
+
+        def _capture(conn, cursor, statement, *args):
+            statements.append(statement)
+
+        engine = db_session.bind.engine.sync_engine
+        event.listen(engine, "before_cursor_execute", _capture)
+        try:
+            await reap_process_commands(session=db_session, bus_client=fakeredis.FakeAsyncRedis())
+        finally:
+            event.remove(engine, "before_cursor_execute", _capture)
+
+        locked = [
+            sql for sql in statements if "FROM process_commands" in sql and "FOR UPDATE" in sql
+        ]
+        assert locked, statements
+
+    async def test_a_row_settled_meanwhile_is_left_alone(self, db_session, monkeypatch):
+        await _command(db_session, issued_at=datetime.now(UTC), **_completed())  # read past it
+        row = await _command(db_session, issued_at=self._stale())
+        real_refresh = db_session.refresh
+
+        async def _settled_by_the_consumer(obj, **kwargs):
+            await real_refresh(obj, **kwargs)
+            if obj is row:
+                obj.status = ProcessCommandStatus.COMPLETED  # what the locked read would see
+
+        monkeypatch.setattr(db_session, "refresh", _settled_by_the_consumer)
+        client = fakeredis.FakeAsyncRedis()
+
+        result = await reap_process_commands(session=db_session, bus_client=client)
+
+        assert result["reissued"] == 0
+        assert row.status == ProcessCommandStatus.COMPLETED
+        assert await client.xlen("content.process") == 0

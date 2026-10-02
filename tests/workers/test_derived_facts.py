@@ -26,6 +26,7 @@ from co_core.pure.adapters.bus.streams import group_name
 from co_core.pure.extract import CANONICAL_TEXT_MEDIA_TYPE
 from co_core.pure.models.changes import ProcessingCompleteEmit, ProcessingFailedEmit
 from co_core_aio.bus import AsyncBusPublisher
+from sqlalchemy import event
 
 import src.workers.derived_facts as df_mod
 from src.core.fetch_commands import create_fetch_command
@@ -317,3 +318,25 @@ class TestRunDerivedConsumer:
         await asyncio.wait_for(_until_acked(), timeout=5)
         stop.set()
         await asyncio.wait_for(task, timeout=5)
+
+
+class TestSettlingLocksTheRow:
+    """CR 2, the consumer's half: the row is read ``FOR UPDATE`` before settling."""
+
+    async def test_the_row_read_locks(self, db_session):
+        row = await _issued(db_session)
+        statements: list[str] = []
+
+        def _capture(conn, cursor, statement, *args):
+            statements.append(statement)
+
+        engine = db_session.bind.engine.sync_engine
+        fact = _complete(row)
+        event.listen(engine, "before_cursor_execute", _capture)
+        try:
+            await process_derived_message(db_session, fact, defer=_DeferSpy())
+        finally:
+            event.remove(engine, "before_cursor_execute", _capture)
+
+        reads = [sql for sql in statements if sql.lstrip().startswith("SELECT")]
+        assert reads and "FOR UPDATE" in reads[0], reads

@@ -358,6 +358,12 @@ async def reap_process_commands(
         )
         oldest_held = None
         for row in stale:
+            # CR 2: the consumer may be settling this row right now. Re-read it
+            # locked — per row, since each commit below ends the transaction —
+            # and act only if it is still in flight.
+            await db.refresh(row, with_for_update=True)
+            if row.status != ProcessCommandStatus.IN_FLIGHT:
+                continue
             if row.issued_at < hard_cutoff:
                 _give_up(db, row, now=now, why="hard limit")
                 await db.commit()

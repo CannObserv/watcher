@@ -285,15 +285,31 @@ async def _back_off(stop: asyncio.Event, seconds: float) -> None:
         pass
 
 
-async def run_blobs_consumer(
-    client: Redis,
+class ProcessFn(Protocol):
+    """One decoded fact → an outcome tag; commits before the loop acks."""
+
+    async def __call__(self, session, message: BusMessage) -> str: ...
+
+
+async def run_fact_consumer(
+    consumer: AsyncBusConsumer,
     session_factory,
     *,
     stop: asyncio.Event,
+    topic: str,
+    process: ProcessFn,
     block_ms: int = BLOCK_MS,
     error_backoff_seconds: float = ERROR_BACKOFF_SECONDS,
 ) -> None:
-    """Poll → process → ack, until ``stop`` is set.
+    """Poll → process → ack on one fact stream, until ``stop`` is set.
+
+    The loop both fact inboxes run — ``content.blobs`` here and
+    ``content.derived`` (``src/workers/derived_facts.py``, #325) — so the error
+    handling below exists once: a second copy is how a later fix reaches only
+    one of the paths that needs it (see ``_back_off``). Each caller builds its
+    own ``AsyncBusConsumer`` from a streams constant and a ``group_name``
+    binding, because ``tests/test_bus_stream_kinds.py`` reads exactly that call
+    site; ``topic`` only labels the log lines.
 
     ``ensure_group(start_id="$")``: facts published before our group existed
     predate any command Watcher issued and can never correlate. After a crash,
@@ -313,9 +329,6 @@ async def run_blobs_consumer(
     cursor (``seek``) rather than issuing a command — so do not add one there
     for symmetry.
     """
-    consumer = AsyncBusConsumer(
-        client, topic=streams.CONTENT_BLOBS, group=CONSUMER_GROUP, consumer=CONSUMER_NAME
-    )
     loop = asyncio.get_running_loop()
     next_claim = loop.time()  # first pass drains any crash leftovers immediately
     group_ready = False  # created inside the guard: a broker outage racing our
@@ -340,17 +353,19 @@ async def run_blobs_consumer(
 
             for message in messages:
                 async with session_factory() as session:
-                    outcome = await process_fact_message(session, message)
+                    outcome = await process(session, message)
                 await consumer.ack(message.message_id)
                 logger.info(
-                    "content.blobs fact processed",
+                    "%s fact processed",
+                    topic,
                     extra={"message_id": message.message_id, "outcome": outcome},
                 )
         except BusMessageAnomaly as exc:
             # Undecodable frame: ack past it (see module docstring).
             message_id = getattr(exc, "message_id", None)
             logger.warning(
-                "undecodable frame on content.blobs — skipping",
+                "undecodable frame on %s — skipping",
+                topic,
                 extra={"message_id": message_id, "error": str(exc)},
             )
             if message_id and message_id != "?":
@@ -368,7 +383,7 @@ async def run_blobs_consumer(
                     # re-read, and re-raises this branch to try again.
                     logger.warning(
                         "could not ack an undecodable frame — backing off",
-                        extra={"message_id": message_id},
+                        extra={"message_id": message_id, "topic": topic},
                         exc_info=True,
                     )
                     next_claim = loop.time()
@@ -377,7 +392,7 @@ async def run_blobs_consumer(
         except asyncio.CancelledError:
             raise
         except Exception:
-            logger.warning("content.blobs consumer error — backing off", exc_info=True)
+            logger.warning("%s consumer error — backing off", topic, exc_info=True)
             # An unacked in-process message should come back promptly, not
             # after the full claim interval.
             next_claim = loop.time()
@@ -385,14 +400,37 @@ async def run_blobs_consumer(
             continue
 
 
-def start_blobs_consumer(client: Redis, session_factory, *, stop: asyncio.Event) -> asyncio.Task:
-    """Spawn the consumer loop as a lifespan task (caller owns client + stop).
+async def run_blobs_consumer(
+    client: Redis,
+    session_factory,
+    *,
+    stop: asyncio.Event,
+    block_ms: int = BLOCK_MS,
+    error_backoff_seconds: float = ERROR_BACKOFF_SECONDS,
+) -> None:
+    """The ``content.blobs`` inbox: :func:`run_fact_consumer` over ``process_fact_message``."""
+    await run_fact_consumer(
+        AsyncBusConsumer(
+            client, topic=streams.CONTENT_BLOBS, group=CONSUMER_GROUP, consumer=CONSUMER_NAME
+        ),
+        session_factory,
+        stop=stop,
+        topic=streams.CONTENT_BLOBS,
+        # Resolved per message, not bound here, so a test can patch the module
+        # attribute under a running loop.
+        process=lambda session, message: process_fact_message(session, message),
+        block_ms=block_ms,
+        error_backoff_seconds=error_backoff_seconds,
+    )
 
-    The done-callback is the dead-man's switch (CR-1): the lifespan never awaits
-    this task until shutdown, so an escaped exception would otherwise kill the
-    fact inbox silently while the process keeps serving.
+
+def watch_consumer_task(task: asyncio.Task, *, stop: asyncio.Event, topic: str) -> asyncio.Task:
+    """Attach the dead-man's switch to a fact-consumer task (CR-1).
+
+    The lifespan never awaits these tasks until shutdown, so an escaped
+    exception would otherwise kill a fact inbox silently while the process
+    keeps serving.
     """
-    task = asyncio.create_task(run_blobs_consumer(client, session_factory, stop=stop))
 
     def _observe(t: asyncio.Task) -> None:
         if t.cancelled() or stop.is_set():
@@ -400,11 +438,18 @@ def start_blobs_consumer(client: Redis, session_factory, *, stop: asyncio.Event)
         exc = t.exception()
         if exc is not None:
             logger.critical(
-                "content.blobs consumer task DIED — facts will pile up in the PEL until restart",
+                "%s consumer task DIED — facts will pile up in the PEL until restart",
+                topic,
                 exc_info=exc,
             )
         else:
-            logger.critical("content.blobs consumer task exited unexpectedly")
+            logger.critical("%s consumer task exited unexpectedly", topic)
 
     task.add_done_callback(_observe)
     return task
+
+
+def start_blobs_consumer(client: Redis, session_factory, *, stop: asyncio.Event) -> asyncio.Task:
+    """Spawn the consumer loop as a lifespan task (caller owns client + stop)."""
+    task = asyncio.create_task(run_blobs_consumer(client, session_factory, stop=stop))
+    return watch_consumer_task(task, stop=stop, topic=streams.CONTENT_BLOBS)

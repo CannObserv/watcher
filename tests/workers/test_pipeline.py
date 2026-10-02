@@ -993,3 +993,59 @@ class TestExtractorRegistryWiring:
         assert isinstance(reg.get_extractor("application/pdf"), PdfExtractor)
         assert isinstance(reg.get_extractor("text/csv"), CsvExcelExtractor)
         assert isinstance(reg.get_extractor("application/json"), HtmlExtractor)
+
+
+@pytest.mark.integration
+class TestResultCarriesTheLocalAnswer:
+    """The result names what local extraction concluded (#325).
+
+    Shadow mode's comparator judges the processor's ``output_digest`` against
+    it, so every branch that extracted — baseline, both cache-hit returns, and
+    change — reports the fingerprint it computed and the spec that bound.
+    """
+
+    SPEC = {"schema_version": 1, "extraction": {"algorithm": "full_page"}}
+
+    async def _item(self, db_session, name):
+        wi = await make_watched_item(db_session, name=name, source_specs=[self.SPEC])
+        await db_session.flush()
+        return wi
+
+    async def _latest_fingerprint(self, db_session, wi):
+        return (
+            await db_session.execute(
+                select(ChangeRevision.content_fingerprint)
+                .where(ChangeRevision.watched_item_id == wi.id)
+                .order_by(ChangeRevision.captured_at.desc())
+                .limit(1)
+            )
+        ).scalar_one()
+
+    @patch("src.workers.pipeline.dispatch_event_notifications", new_callable=AsyncMock)
+    async def test_every_branch_reports_fingerprint_and_spec(self, _dispatch, db_session):
+        wi = await self._item(db_session, "LocalAnswer")
+        expected_spec = spec_fingerprint(self.SPEC)
+
+        baseline = await process_watched_item(db_session, wi, raw_content=_HTML, blob=_BLOB)
+        await db_session.flush()
+        assert baseline.content_fingerprint == await self._latest_fingerprint(db_session, wi)
+        assert baseline.spec_fingerprint == expected_spec
+
+        unannounced_hit = await process_watched_item(db_session, wi, raw_content=_HTML, blob=_BLOB)
+        assert unannounced_hit.cache_hit is True
+        assert unannounced_hit.content_fingerprint == baseline.content_fingerprint
+        assert unannounced_hit.spec_fingerprint == expected_spec
+
+        changed = await process_watched_item(db_session, wi, raw_content=_HTML_CHANGED, blob=_BLOB)
+        await db_session.flush()
+        assert changed.changed is True
+        assert changed.content_fingerprint == await self._latest_fingerprint(db_session, wi)
+        assert changed.content_fingerprint != baseline.content_fingerprint
+        assert changed.spec_fingerprint == expected_spec
+
+        announced_hit = await process_watched_item(
+            db_session, wi, raw_content=_HTML_CHANGED, blob=_BLOB
+        )
+        assert announced_hit.cache_hit is True
+        assert announced_hit.content_fingerprint == changed.content_fingerprint
+        assert announced_hit.spec_fingerprint == expected_spec

@@ -111,6 +111,7 @@ async def test_registry_consumer_starts_and_stops_with_a_bus_url(monkeypatch):
 
     registry_task = asyncio.create_task(_forever())
     blobs_task = asyncio.create_task(_forever())
+    derived_task = asyncio.create_task(_forever())
 
     with (
         patch("src.api.main.get_app", return_value=fake_proc_app),
@@ -118,6 +119,7 @@ async def test_registry_consumer_starts_and_stops_with_a_bus_url(monkeypatch):
         patch("src.api.main.aclose_shared_bus_client", AsyncMock()),
         patch("src.api.main.start_blobs_consumer", MagicMock(return_value=blobs_task)),
         patch("src.api.main.start_registry_consumer", MagicMock(return_value=registry_task)),
+        patch("src.api.main.start_derived_consumer", MagicMock(return_value=derived_task)),
     ):
         from src.api.main import lifespan
 
@@ -126,6 +128,8 @@ async def test_registry_consumer_starts_and_stops_with_a_bus_url(monkeypatch):
 
     assert registry_task.cancelled()
     assert blobs_task.cancelled()
+    # #325: the content.derived inbox runs beside content.blobs, same lifecycle.
+    assert derived_task.cancelled()
 
 
 @pytest.mark.asyncio

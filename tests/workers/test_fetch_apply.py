@@ -15,13 +15,16 @@ import pytest
 from sqlalchemy import select
 
 import src.workers.fetch_commands as fc_mod
+import src.workers.process_commands as pc_mod
 from src.core.fetch_commands import create_fetch_command, get_open_command
 from src.core.models.audit_log import AuditLog, EventType
 from src.core.models.domain import Domain
 from src.core.models.fetch_command import OPEN_STATUSES, FetchCommand, FetchCommandStatus
 from src.core.models.pending_archiver_sync import PendingArchiverSync
+from src.core.models.process_command import LocalOutcome, ProcessCommand, ProcessCommandStatus
 from src.core.models.watched_item import WatchHealthStatus
 from src.core.notifications.events import WatchEventType
+from src.core.process_commands import EXTRACT_MODE_ENV
 from src.core.registry import ServiceRegistry
 from src.core.validators import CONDITIONAL_GET_ENV, validator_source_key
 from src.workers.fetch_commands import (
@@ -1180,3 +1183,162 @@ class TestValidatorStorage:
         await apply_fetch_failure(row.command_id)
 
         assert wi.etag == 'W/"v2"'
+
+
+class TestShadowIssue:
+    """Under ``WATCHER_EXTRACT_MODE=shadow`` every applied blob also goes to the
+    processor (#325) — after local extraction has decided, carrying its answer.
+
+    Local stays authoritative: nothing the shadow leg does may change the
+    apply's outcome, and in ``local`` mode it issues nothing at all.
+    """
+
+    SPECS = [{"extraction": {"algorithm": "full_page"}, "schema_version": 1}]
+    LOCAL_DIGEST = "sha256:" + "12" * 32
+    LOCAL_SPEC = "spec1:sha256:" + "34" * 32
+
+    async def _row(self, db_session, tmp_path, monkeypatch, *, mode="shadow", specs=SPECS):
+        if mode is None:
+            monkeypatch.delenv(EXTRACT_MODE_ENV, raising=False)
+        else:
+            monkeypatch.setenv(EXTRACT_MODE_ENV, mode)
+        wi, row = await _row_with_fact(db_session, tmp_path)
+        wi.source_specs = specs
+        await db_session.flush()
+        return wi, row
+
+    def _result(self, **flags):
+        return WatchedItemResult(
+            content_fingerprint=self.LOCAL_DIGEST, spec_fingerprint=self.LOCAL_SPEC, **flags
+        )
+
+    async def _process_rows(self, db_session, fetch_row) -> list[ProcessCommand]:
+        stmt = select(ProcessCommand).where(ProcessCommand.fetch_command_id == fetch_row.command_id)
+        return list((await db_session.execute(stmt)).scalars().all())
+
+    @pytest.mark.parametrize(
+        ("flags", "outcome"),
+        [
+            ({"baseline_established": True}, LocalOutcome.BASELINE),
+            ({"cache_hit": True}, LocalOutcome.UNCHANGED),
+            ({"changed": True}, LocalOutcome.CHANGED),
+        ],
+    )
+    async def test_issues_spec_zero_carrying_the_local_answer(
+        self, db_session, monkeypatch, tmp_path, flags, outcome
+    ):
+        wi, row = await self._row(db_session, tmp_path, monkeypatch)
+        _wire(db_session, monkeypatch, result=self._result(**flags))
+        client = fakeredis.FakeAsyncRedis()
+
+        result = await apply_fetch_blob(
+            row.command_id, registry=ServiceRegistry(), bus_client=client
+        )
+
+        assert result["applied"] is True
+        assert row.status == FetchCommandStatus.SUCCEEDED
+        (command,) = await self._process_rows(db_session, row)
+        assert command.status == ProcessCommandStatus.IN_FLIGHT
+        assert command.spec_index == 0
+        assert command.input_digest == row.content_fingerprint
+        assert command.local_outcome == outcome
+        assert command.local_fingerprint == self.LOCAL_DIGEST
+        assert command.local_spec_fingerprint == self.LOCAL_SPEC
+        assert await client.xlen("content.process") == 1
+
+    async def test_local_extraction_failure_is_shadowed_too(
+        self, db_session, monkeypatch, tmp_path
+    ):
+        # The processor should fail (or come back empty) on the same bytes; the
+        # comparator can only check that if the occasion is sent.
+        wi, row = await self._row(db_session, tmp_path, monkeypatch)
+        _wire(db_session, monkeypatch, raises=ExtractionError("no chunks"))
+        client = fakeredis.FakeAsyncRedis()
+
+        result = await apply_fetch_blob(
+            row.command_id, registry=ServiceRegistry(), bus_client=client
+        )
+
+        assert result == {"error": "extraction_failed"}
+        (command,) = await self._process_rows(db_session, row)
+        assert command.local_outcome == LocalOutcome.EXTRACTION_FAILED
+        assert command.local_fingerprint is None
+        assert await client.xlen("content.process") == 1
+
+    @pytest.mark.parametrize("mode", [None, "local"])
+    async def test_local_mode_issues_nothing(self, db_session, monkeypatch, tmp_path, mode):
+        _, row = await self._row(db_session, tmp_path, monkeypatch, mode=mode)
+        _wire(db_session, monkeypatch, result=self._result(changed=True))
+        client = fakeredis.FakeAsyncRedis()
+
+        await apply_fetch_blob(row.command_id, registry=ServiceRegistry(), bus_client=client)
+
+        assert await self._process_rows(db_session, row) == []
+        assert await client.xlen("content.process") == 0
+
+    async def test_a_result_without_a_local_fingerprint_is_not_shadowed(
+        self, db_session, monkeypatch, tmp_path
+    ):
+        # Reading a missing fingerprint as "local failed" would manufacture a
+        # mismatch; with nothing to compare against, send nothing.
+        _, row = await self._row(db_session, tmp_path, monkeypatch)
+        _wire(db_session, monkeypatch, result=WatchedItemResult(changed=True))
+
+        await apply_fetch_blob(
+            row.command_id, registry=ServiceRegistry(), bus_client=fakeredis.FakeAsyncRedis()
+        )
+
+        assert await self._process_rows(db_session, row) == []
+
+    async def test_unsendable_occasion_leaves_the_apply_intact(
+        self, db_session, monkeypatch, tmp_path
+    ):
+        wi, row = await self._row(db_session, tmp_path, monkeypatch)
+        row.content_fingerprint = "sha256:" + "ab" * 32  # the Emit refuses a prefix
+        await db_session.flush()
+        _wire(db_session, monkeypatch, result=self._result(changed=True))
+
+        result = await apply_fetch_blob(
+            row.command_id, registry=ServiceRegistry(), bus_client=fakeredis.FakeAsyncRedis()
+        )
+
+        assert result["applied"] is True
+        assert wi.health_status == WatchHealthStatus.OK
+        assert await self._process_rows(db_session, row) == []
+
+    async def test_a_shadow_failure_never_fails_the_apply(self, db_session, monkeypatch, tmp_path):
+        wi, row = await self._row(db_session, tmp_path, monkeypatch)
+        _wire(db_session, monkeypatch, result=self._result(changed=True))
+
+        async def _boom(*args, **kwargs):
+            raise RuntimeError("shadow leg bug")
+
+        monkeypatch.setattr(pc_mod, "create_process_command", _boom)
+
+        result = await apply_fetch_blob(
+            row.command_id, registry=ServiceRegistry(), bus_client=fakeredis.FakeAsyncRedis()
+        )
+
+        assert result["applied"] is True
+        assert row.status == FetchCommandStatus.SUCCEEDED
+        assert wi.health_status == WatchHealthStatus.OK
+
+    async def test_publish_failure_leaves_the_row_for_the_sweep(
+        self, db_session, monkeypatch, tmp_path
+    ):
+        _, row = await self._row(db_session, tmp_path, monkeypatch)
+        _wire(db_session, monkeypatch, result=self._result(changed=True))
+        client = fakeredis.FakeAsyncRedis()
+
+        async def _down(*args, **kwargs):
+            raise ConnectionError("broker down")
+
+        monkeypatch.setattr(pc_mod, "publish_process_command", _down)
+
+        result = await apply_fetch_blob(
+            row.command_id, registry=ServiceRegistry(), bus_client=client
+        )
+
+        assert result["applied"] is True
+        (command,) = await self._process_rows(db_session, row)
+        assert command.status == ProcessCommandStatus.PENDING_PUBLISH

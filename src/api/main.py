@@ -40,6 +40,7 @@ from src.dashboard import register_dashboard
 # registration into get_app(), and fetch_facts only touches bp-registered tasks
 # (#241 CR-7; previously inline in the lifespan).
 from src.workers import get_app
+from src.workers.derived_facts import start_derived_consumer
 from src.workers.fetch_facts import start_blobs_consumer
 from src.workers.registry_reconcile import start_registry_consumer
 from src.workers.supervisor import start_worker
@@ -97,6 +98,7 @@ async def lifespan(application: FastAPI):
     bus_client = get_shared_bus_client()
     consumer_stop = asyncio.Event()
     consumer_task = None
+    derived_task = None
     registry_task = None
     reachability_task = None
     if bus_client is not None:
@@ -116,6 +118,11 @@ async def lifespan(application: FastAPI):
         application.state.bus_reachability_task = reachability_task
         consumer_task = start_blobs_consumer(bus_client, get_session_factory(), stop=consumer_stop)
         logger.info("content.blobs consumer started")
+        # #325: the processing leg's fact inbox. Started whatever
+        # WATCHER_EXTRACT_MODE says, so facts for commands issued before the
+        # mode went back to `local` still settle and are judged.
+        derived_task = start_derived_consumer(bus_client, get_session_factory(), stop=consumer_stop)
+        logger.info("content.derived consumer started")
         # #254: the info.registry reconcile — Watcher's registry inbox. Groupless
         # tail, replayed from 0-0 at boot, so a fresh process converges from the
         # snapshot alone. Shares the stop event: both are registry/fact inboxes
@@ -128,8 +135,8 @@ async def lifespan(application: FastAPI):
         # Not a degraded mode any more: with no fact inbox, issued commands
         # can never be applied and every one of them will be reaped.
         logger.error(
-            "content.blobs and info.registry consumers NOT started: %s is not set — "
-            "no check can complete and the registry cannot reconcile",
+            "content.blobs, content.derived and info.registry consumers NOT started: "
+            "%s is not set — no check can complete and the registry cannot reconcile",
             BUS_REDIS_URL_ENV,
         )
 
@@ -151,6 +158,10 @@ async def lifespan(application: FastAPI):
         # is safe (commit-then-ack means a cancelled ack just redelivers, and
         # the upsert + apply guard make redelivery a no-op).
         consumer_task.cancel()
+    if derived_task is not None:
+        # The content.blobs reasoning verbatim: commit-then-ack, and a
+        # redelivered fact finds its row settled and is dropped.
+        derived_task.cancel()
     if registry_task is not None:
         # Same reasoning, and cheaper still: the reconcile commits before it
         # returns and the generation guard makes a re-read a no-op, so a cancel
@@ -162,7 +173,9 @@ async def lifespan(application: FastAPI):
         # is black-holed, or the service stops inside the window.
         reachability_task.cancel()
     tasks = [
-        t for t in (worker_task, consumer_task, registry_task, reachability_task) if t is not None
+        t
+        for t in (worker_task, consumer_task, derived_task, registry_task, reachability_task)
+        if t is not None
     ]
     await asyncio.gather(*tasks, return_exceptions=True)
     await aclose_shared_bus_client()

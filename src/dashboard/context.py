@@ -216,6 +216,7 @@ WATCHED_ITEM_EVENT_CHOICES: list[tuple[str, str]] = [
         EventType.CHECK_EXTRACTION_FAILED,
         EventType.CHECK_REDIRECT_OBSERVED,
         EventType.CHECK_COMMAND_ISSUED,
+        EventType.CHECK_SHADOW_MISMATCH,
         EventType.WATCHED_ITEM_CREATED,
         EventType.WATCHED_ITEM_UPDATED,
         EventType.WATCHED_ITEM_PAUSED,

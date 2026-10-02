@@ -19,11 +19,7 @@
 
 from datetime import UTC, datetime, timedelta
 
-import procrastinate
-from redis.exceptions import ConnectionError as RedisConnectionError
-from redis.exceptions import TimeoutError as RedisTimeoutError
 from sqlalchemy import func, select
-from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.blobs import BlobUnreadable, UnsupportedBlobScheme, aread_blob
@@ -45,12 +41,14 @@ from src.core.models.fetch_command import (
     FetchCommand,
     FetchCommandStatus,
 )
+from src.core.models.process_command import LocalOutcome
 from src.core.models.watched_item import (
     CONTENT_MEDIA_TYPE_MAX_LEN,
     WatchedItem,
     WatchHealthStatus,
 )
 from src.core.notifications.events import WatchEvent, WatchEventType
+from src.core.process_commands import LocalExtraction
 from src.core.registry import ServiceRegistry, get_registry
 from src.core.utils import watched_item_event_base_metadata
 from src.core.validators import clear_validators, record_validators, stamp_full_fetch
@@ -62,6 +60,8 @@ from src.workers.pipeline import (
     WatchedItemResult,
     process_watched_item,
 )
+from src.workers.process_commands import issue_shadow_process_command, local_extraction_of
+from src.workers.retry import APPLY_RETRY
 from src.workers.watch_status import defer_status_republish
 
 logger = get_logger(__name__)
@@ -173,23 +173,6 @@ async def _record_check_success(
         )
         await dispatch_event_notifications(session=session, event=recovery_event)
         await session.commit()
-
-
-# Transient-infra retry for the apply tasks (CR-2): DB restarts
-# (OperationalError), broker/notifier blips. Mirrors check_watched_item's
-# shape; permanent errors (bugs) still fail the job — the reaper's re-defer
-# is the last-resort resurrection for those.
-_APPLY_RETRY = procrastinate.RetryStrategy(
-    max_attempts=3,
-    exponential_wait=5,
-    retry_exceptions={
-        ConnectionError,
-        TimeoutError,
-        RedisConnectionError,
-        RedisTimeoutError,
-        OperationalError,
-    },
-)
 
 
 @bp.periodic(cron="* * * * *", periodic_id="publish_pending_fetch_commands")
@@ -318,7 +301,7 @@ async def _fail_blob_unreadable(session, watched_item, row, *, now: datetime, de
     queue="default",
     # CR-2: a transient infra error must not strand the row IN_FLIGHT with its
     # fact recorded — retry here first; the reaper's re-defer is the backstop.
-    retry=_APPLY_RETRY,
+    retry=APPLY_RETRY,
 )
 async def apply_fetch_blob(
     command_id: str, registry: ServiceRegistry | None = None, bus_client=None
@@ -486,6 +469,15 @@ async def apply_fetch_blob(
                 audit_kwargs={"error": str(exc)},
                 error_metadata={"error": "extraction_failed"},
             )
+            # #325: the processor should fail on the same bytes too — the
+            # comparator can only check that if the occasion is sent.
+            await issue_shadow_process_command(
+                session,
+                row,
+                watched_item,
+                LocalExtraction(outcome=LocalOutcome.EXTRACTION_FAILED),
+                bus_client=bus_client,
+            )
             return {"error": "extraction_failed"}
 
         # #157 breadcrumb: the origin redirected. Audit only — Archiver stays
@@ -521,6 +513,11 @@ async def apply_fetch_blob(
             # same shape the 304 path uses for `source` (CR 4).
             audit_extra={"renewal_enqueued": True} if result.renewal_enqueued else None,
         )
+        # #325: local has decided and committed; in shadow mode the processor
+        # now derives the same occasion for the comparator. Never raises.
+        await issue_shadow_process_command(
+            session, row, watched_item, local_extraction_of(result), bus_client=bus_client
+        )
 
     return {
         "applied": True,
@@ -530,7 +527,7 @@ async def apply_fetch_blob(
     }
 
 
-@bp.task(name="apply_fetch_failure", queue="default", retry=_APPLY_RETRY)
+@bp.task(name="apply_fetch_failure", queue="default", retry=APPLY_RETRY)
 async def apply_fetch_failure(command_id: str) -> dict:
     """Surface a terminal ``fetch_failed`` on the WatchedItem (#241 apply path).
 
@@ -586,7 +583,7 @@ async def apply_fetch_failure(command_id: str) -> dict:
     return {"applied": True, "reason": row.failure_reason}
 
 
-@bp.task(name="apply_fetch_not_modified", queue="default", retry=_APPLY_RETRY)
+@bp.task(name="apply_fetch_not_modified", queue="default", retry=APPLY_RETRY)
 async def apply_fetch_not_modified(command_id: str) -> dict:
     """Close a 304 as a successful check that found no change (#249 part 1).
 

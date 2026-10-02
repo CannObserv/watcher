@@ -172,7 +172,7 @@ async def has_open_command(session: AsyncSession, watched_item_id) -> bool:
     return await get_open_command(session, watched_item_id) is not None
 
 
-def _env_number[T: (int, float)](
+def env_number[T: (int, float)](
     env: str, default: T, cast: Callable[[str], T], *, warn_non_positive: str = ""
 ) -> T:
     """One knob read, with the fallback both knobs need (CR-1, CR-3).
@@ -209,7 +209,7 @@ def fetch_command_timeout_seconds() -> float:
     retries. Read here so the reaper and the check-now rejection quote the same
     number.
     """
-    return _env_number(
+    return env_number(
         FETCH_COMMAND_TIMEOUT_ENV,
         DEFAULT_FETCH_COMMAND_TIMEOUT_SECONDS,
         float,
@@ -224,7 +224,7 @@ def fetch_max_reissues() -> int:
     lineage counter — the reaper's stall sweep and the blob-unreadable apply
     (#275) — and they must quote the same number.
     """
-    return _env_number(FETCH_MAX_REISSUES_ENV, DEFAULT_FETCH_MAX_REISSUES, int)
+    return env_number(FETCH_MAX_REISSUES_ENV, DEFAULT_FETCH_MAX_REISSUES, int)
 
 
 async def select_pending_publish(session: AsyncSession, *, limit: int = 100) -> list[FetchCommand]:

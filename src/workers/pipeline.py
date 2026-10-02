@@ -248,6 +248,18 @@ class WatchedItemResult:
     # the latest revision because this cycle's full fetch renewed the blob
     # reference behind it (#293). Never set beside `changed`.
     renewal_enqueued: bool = False
+    # What extraction concluded, on every branch that extracted (#325): shadow
+    # mode's comparator judges the processor's `output_digest` against it.
+    content_fingerprint: str | None = None
+    spec_fingerprint: str | None = None
+
+
+def _local_answer(outcome: ExtractionOutcome) -> dict[str, str | None]:
+    """The result fields that report what extraction concluded (#325)."""
+    return {
+        "content_fingerprint": outcome.content_fingerprint,
+        "spec_fingerprint": outcome.spec_fingerprint,
+    }
 
 
 async def _renew_blob_reference(
@@ -452,7 +464,7 @@ async def process_watched_item(
                 processor_version=outcome.processor_version,
             )
         )
-        return WatchedItemResult(baseline_established=True)
+        return WatchedItemResult(baseline_established=True, **_local_answer(outcome))
 
     if last_rev.content_fingerprint == outcome.content_fingerprint:
         # Cache hit. Bytes arrived, so Replicator renewed the blob reference
@@ -460,11 +472,11 @@ async def process_watched_item(
         # the first observation (#293). Bounded by full fetches — a 304 never
         # reaches this function.
         if not latest_is_announced:
-            return WatchedItemResult(cache_hit=True)
+            return WatchedItemResult(cache_hit=True, **_local_answer(outcome))
         renewed = await _renew_blob_reference(
             session, watched_item, last_rev, blob=blob, outcome=outcome, now=now
         )
-        return WatchedItemResult(cache_hit=True, renewal_enqueued=renewed)
+        return WatchedItemResult(cache_hit=True, renewal_enqueued=renewed, **_local_answer(outcome))
 
     # Fingerprint changed: insert new ChangeRevision.
     rev = ChangeRevision(
@@ -518,4 +530,4 @@ async def process_watched_item(
     )
     await dispatch_event_notifications(session=session, event=event)
 
-    return WatchedItemResult(changed=True, notifications_dispatched=1)
+    return WatchedItemResult(changed=True, notifications_dispatched=1, **_local_answer(outcome))

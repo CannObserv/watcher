@@ -76,15 +76,17 @@ GROUP_NAME_DERIVERS = frozenset({"group_name"})
 # a complete one. That is the silent failure the taxonomy exists to prevent (CR-28).
 BOUNDED_MAXLEN_RESOLVERS = frozenset({"resolve_stream_maxlen"})
 
-# Every stream Watcher touches: four published, two consumed. AGENTS.md and
+# Every stream Watcher touches: five published, three consumed. AGENTS.md and
 # ARCHITECTURE.md say exactly that in prose; asserting the set — not just each
 # kind — is what makes an *addition* fail here rather than drift silently (CR-29).
 WATCHER_STREAMS = frozenset(
     {
         streams.CONTENT_BLOBS,
+        streams.CONTENT_DERIVED,
         streams.CONTENT_REVISIONS,
         streams.CONTENT_FETCH,
         streams.CONTENT_FETCH_POLICY,
+        streams.CONTENT_PROCESS,
         streams.INFO_REGISTRY,
         streams.INFO_WATCH_STATUS,
     }
@@ -446,7 +448,12 @@ class TestUncappedStreamsStayUncapped:
       start with a grant request to broker naming #327.
     """
 
-    UNCAPPED = frozenset({streams.CONTENT_FETCH, streams.CONTENT_REVISIONS})
+    # ``content.process`` (#325) for ``content.fetch``'s reason: a cap deletes
+    # commands ``processor.process`` has not been delivered. broker#62 grants no
+    # ``+xtrim`` on it at all, so a cap there is a contract change, not a knob.
+    UNCAPPED = frozenset(
+        {streams.CONTENT_FETCH, streams.CONTENT_PROCESS, streams.CONTENT_REVISIONS}
+    )
     TRIM_COMMANDS = frozenset({"xtrim", "xdel"})
 
     @classmethod
@@ -647,7 +654,7 @@ class TestTaxonomyCoverage:
             assert stream_kind(topic) in {"command", "fact", "config_state"}
 
     def test_the_inventory_is_exactly_what_the_docs_describe(self):
-        """AGENTS.md and ARCHITECTURE.md say four published and two consumed.
+        """AGENTS.md and ARCHITECTURE.md say five published and three consumed.
         Pinning each stream's *kind* catches a co-core reclassification but not
         an addition, and the prose is wrong either way (CR-29)."""
         referenced = set()
@@ -660,7 +667,7 @@ class TestTaxonomyCoverage:
                         referenced.add(topic)
         assert referenced == WATCHER_STREAMS, (
             "the set of streams Watcher touches changed — update the inventory here and "
-            "the 'publishes four streams and consumes two' prose in AGENTS.md and "
+            "the 'publishes five streams and consumes three' prose in AGENTS.md and "
             "docs/ARCHITECTURE.md, which this set exists to keep honest"
         )
 
@@ -668,8 +675,10 @@ class TestTaxonomyCoverage:
         ("topic", "kind"),
         [
             (streams.CONTENT_BLOBS, "fact"),
+            (streams.CONTENT_DERIVED, "fact"),
             (streams.CONTENT_REVISIONS, "fact"),
             (streams.CONTENT_FETCH, "command"),
+            (streams.CONTENT_PROCESS, "command"),
             (streams.CONTENT_FETCH_POLICY, "config_state"),
             (streams.INFO_REGISTRY, "config_state"),
             (streams.INFO_WATCH_STATUS, "config_state"),
@@ -677,7 +686,7 @@ class TestTaxonomyCoverage:
     )
     def test_watchers_inventory_has_the_kinds_the_docs_claim(self, topic, kind):
         """AGENTS.md and ARCHITECTURE.md describe this inventory in prose —
-        four published streams and two consumed, one of the consumed pair
+        five published streams and three consumed, one of the consumed three
         groupless. If co-core reclassifies one, that prose is wrong and this
         fails rather than the description quietly drifting."""
         assert stream_kind(topic) == kind

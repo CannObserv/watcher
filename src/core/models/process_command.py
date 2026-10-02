@@ -102,8 +102,9 @@ class ProcessCommand(Base, TimestampMixin):
             postgresql_where=text("status IN ('pending_publish', 'in_flight')"),
         ),
         Index("ix_process_commands_fetch_command_id", "fetch_command_id"),
-        # The reaper's "is the processor consuming" read is max(fact_at) over
-        # every row, every five minutes; the index makes it one probe.
+        # Serves the reaper's max(fact_at), which dates the processor's latest
+        # answer in its held-commands warning. The decision itself reads
+        # published_at (CR 1) and has no index of its own yet (CR 11).
         Index("ix_process_commands_fact_at", "fact_at"),
     )
 
@@ -139,8 +140,10 @@ class ProcessCommand(Base, TimestampMixin):
     reissue_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
     # --- fact fields (written by the content.derived consumer) ---
-    # The latest fact's ``occurred_at``, transient ones included: the reaper
-    # reads the newest across all rows as "the processor is consuming".
+    # The latest fact's ``occurred_at`` — the processor's clock, transient
+    # facts included. Set means "answered": the reaper re-issues a stale command
+    # only once a command published after it has one (CR 1). Never written by
+    # Watcher itself, so it always says when the processor last spoke.
     fact_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True, default=None
     )

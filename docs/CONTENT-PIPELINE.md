@@ -226,8 +226,8 @@ nothing trims) and one warning per pass says `processor not consuming`. Past
 `WATCHER_PROCESS_COMMAND_HARD_LIMIT_SECONDS` (86400) the lineage ends
 uncompared either way: a refused failure fact leaves one command with no reply,
 and a quiet period has no other fact to go on. A settled row whose apply never
-ran is re-deferred, touching `updated_at` — never `fact_at`, the liveness
-signal. **The shadow leg is a side lineage**: nothing here touches a fetch row,
+ran is re-deferred once per window, touching `updated_at` — never `fact_at`,
+the processor\'s own answer time. **The shadow leg is a side lineage**: nothing here touches a fetch row,
 an item's health, or the fetch re-issue lineage.
 
 **The switch gate (#326)** is zero mismatches across a window that contains a

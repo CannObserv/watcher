@@ -323,8 +323,9 @@ async def reap_process_commands(
       arrives to say the processor is up.
 
     A settled row whose apply never ran (job lost, retries exhausted) gets the
-    apply re-deferred, once per window: ``updated_at`` is touched rather than
-    ``fact_at``, which the consuming signal reads.
+    apply re-deferred, once per window: ``updated_at`` is touched to start the
+    window again, never ``fact_at``, which is the processor's own record of when
+    it answered.
     """
     timeout = process_command_timeout_seconds()
     hard_limit = process_command_hard_limit_seconds()

@@ -297,14 +297,17 @@ async def reap_process_commands(
 
     A command is **stale** when its latest signal (``coalesce(fact_at,
     published_at)``) is older than ``WATCHER_PROCESS_COMMAND_TIMEOUT_SECONDS``.
-    What happens to it depends on whether the processor is **consuming** — any
-    fact, for any command, inside that same window:
+    What happens to it depends on whether the processor has **read past it** —
+    answered some command published *after* it:
 
-    * consuming → this one command is stuck: expire it and re-issue under a
+    * read past → this one command is stuck: expire it and re-issue under a
       fresh ``command_id``, capped at ``WATCHER_FETCH_MAX_REISSUES``; at the cap
       the lineage ends uncompared;
-    * not consuming → hold it. The command waits in the processor's group, and
-      one warning per pass is the service-level signal;
+    * not read past → hold it. It waits in the processor's group: either the
+      processor is down, or it is back and draining the backlog in stream order
+      — and "any recent fact" would read that recovery as license to re-issue
+      everything still queued (CR 1). One warning per pass is the
+      service-level signal;
     * either way, past ``WATCHER_PROCESS_COMMAND_HARD_LIMIT_SECONDS`` since it
       was issued, the lineage ends uncompared — the command whose failure fact
       was refused gets no fact at all, and in a quiet period nothing else
@@ -327,7 +330,16 @@ async def reap_process_commands(
     reissued, capped, hard_limited, held, reapplied = 0, 0, 0, 0, 0
     try:
         latest_fact = (await db.execute(select(func.max(ProcessCommand.fact_at)))).scalar()
-        consuming = latest_fact is not None and latest_fact >= cutoff
+        # The newest command the processor has answered, by publish time. The
+        # stream is read in order, so anything published before it and still
+        # unanswered was passed over, not queued.
+        read_past = (
+            await db.execute(
+                select(func.max(ProcessCommand.published_at)).where(
+                    ProcessCommand.fact_at.is_not(None)
+                )
+            )
+        ).scalar()
         last_signal = func.coalesce(ProcessCommand.fact_at, ProcessCommand.published_at)
         stale = list(
             (
@@ -351,7 +363,7 @@ async def reap_process_commands(
                 await db.commit()
                 hard_limited += 1
                 continue
-            if not consuming:
+            if read_past is None or row.published_at >= read_past:
                 held += 1
                 oldest_held = oldest_held or row
                 continue

@@ -20,9 +20,9 @@ over the sections below.
   `PROCESSING`, the derived-fact apply table, Option A, the `input_unreadable`
   re-fetch and `WatchedItem.processor_version` move to the switch (#326).
 - **Downtime is delay, never failure (replaces Section 5's "Observo down" row).**
-  No re-issue while the processor is not consuming (no fact for any command in
-  the window): a held command is not lost, and a duplicate sits in a stream
-  nothing trims. One service-level signal, not per-item ERROR. A hard limit
+  No re-issue until the processor has read past a command (answered one
+  published after it): a held command is not lost, a recovering processor
+  drains its backlog in order, and a duplicate sits in a stream nothing trims. One service-level signal, not per-item ERROR. A hard limit
   (24 h) ends a lineage that will never get a fact.
 - **The first terminal fact per `command_id` wins.** The processor may publish
   an outcome more than once (lost ack) and publishes `extraction_error` with a

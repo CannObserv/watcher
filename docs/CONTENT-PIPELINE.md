@@ -218,10 +218,11 @@ processor never judged the bytes (`input_unreadable`, `invalid_input`,
 
 **Downtime is delay, never failure** (`reap_process_commands`, every 5 min).
 In-flight past `WATCHER_PROCESS_COMMAND_TIMEOUT_SECONDS` (1800) is re-issued
-**only while the processor is consuming** — a fact for *any* command inside the
-window — capped at `WATCHER_FETCH_MAX_REISSUES`. Otherwise it is held (a command
-in `processor.process` is not lost; a duplicate would sit in a stream nothing
-trims) and one warning per pass says `processor not consuming`. Past
+**only once the processor has read past it** — answered a command published
+*after* it — capped at `WATCHER_FETCH_MAX_REISSUES`. Otherwise it is held (a
+command in `processor.process` is not lost, and a processor draining its
+backlog in order has simply not reached it; a duplicate would sit in a stream
+nothing trims) and one warning per pass says `processor not consuming`. Past
 `WATCHER_PROCESS_COMMAND_HARD_LIMIT_SECONDS` (86400) the lineage ends
 uncompared either way: a refused failure fact leaves one command with no reply,
 and a quiet period has no other fact to go on. A settled row whose apply never

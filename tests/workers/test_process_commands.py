@@ -269,7 +269,8 @@ class TestReapProcessCommands:
         return datetime.now(UTC) - timedelta(hours=1)
 
     async def _fresh_fact_elsewhere(self, db_session):
-        """Another command answered recently: the processor is consuming."""
+        """A command published *after* the stale one was answered: the processor
+        read past it, so the stale one is stuck rather than queued."""
         return await _command(db_session, **_completed(fact_at=datetime.now(UTC)))
 
     async def test_stuck_command_is_reissued_while_the_processor_consumes(self, db_session):
@@ -286,6 +287,25 @@ class TestReapProcessCommands:
         assert new.spec_index == row.spec_index
         assert new.status == ProcessCommandStatus.IN_FLIGHT
         assert await client.xlen("content.process") == 1
+
+    async def test_a_backlog_draining_in_order_is_not_reissued(self, db_session, caplog):
+        # CR 1. The processor is back and has answered the first of two commands
+        # that queued during its outage; the second is stale but still queued
+        # behind it. A fact for an *earlier* command says nothing about this one.
+        two_hours_ago = datetime.now(UTC) - timedelta(hours=2)
+        await _command(
+            db_session, issued_at=two_hours_ago, **_completed(fact_at=datetime.now(UTC))
+        )
+        queued = await _command(db_session, issued_at=two_hours_ago + timedelta(minutes=1))
+        client = fakeredis.FakeAsyncRedis()
+
+        with caplog.at_level(logging.WARNING):
+            result = await reap_process_commands(session=db_session, bus_client=client)
+
+        assert result["reissued"] == 0
+        assert result["held"] == 1
+        assert queued.status == ProcessCommandStatus.IN_FLIGHT
+        assert await client.xlen("content.process") == 0
 
     async def test_nothing_is_reissued_while_the_processor_is_down(self, db_session, caplog):
         # No fact for any command inside the window: the command waits in the

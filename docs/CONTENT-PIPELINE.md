@@ -176,6 +176,72 @@ pins *identity*, because the issuer resolves the dispatch essence onto the
 change: `spec_schema_version` replaces `int(...)`, so a boolean `schema_version`
 raises `ExtractionError` where it read as `1`.
 
+### Shadow extraction on `content.process` (#325)
+
+The processor (CannObserv/processor, on `co-processor`) runs the same co-core
+extraction behind the `content.process` / `content.derived` pair
+(cannobserv#486; [design](plans/2026-09-24-observo-extraction-and-diff-design.md)
+Sections 1, 2, 5). **`WATCHER_EXTRACT_MODE`**: `local` (default) issues
+nothing; `shadow` sends every applied blob to the processor *after* local
+extraction has decided and committed — including a local extraction failure,
+since the processor must fail on the same bytes. An unrecognised value
+(`processor` included, until #326 builds it) reads as `local`, with a warning.
+
+**`process_commands`** (`2bc94dabe269`) is `fetch_commands`' discipline again:
+persist-before-publish, the every-minute `publish_pending_process_commands`
+sweep, correlation on `command_id` only. One row per (blob, spec) occasion —
+one `source_spec` per command (D3), so the fallback loop is a **chain**: an
+`empty` outcome with a spec left issues spec[i+1] under the same `intent_id`,
+from the item's *current* specs. The row snapshots the whole wire command; the
+dispatch essence is resolved by Watcher (cannobserv#486 D1), `None` when nothing
+is informative; `input_digest` is the blob fact's bare hex, refused at the
+occasion when it is not. It also carries local's answer (`local_outcome`,
+`local_fingerprint`, `local_spec_fingerprint`) — shadow's columns, deleted with
+the local path.
+
+**The `watcher.derived` consumer settles a row on its first terminal fact.** A
+lost ack makes the processor publish the same outcome again under a fresh
+`occurred_at` — a distinct envelope key — and its give-up (processor#17) may
+follow a success it could not ack, so any later fact for a settled row is
+logged and dropped; a fact for an expired row is late and dropped. A
+non-terminal `transient` only refreshes `fact_at`. It runs on the same loop as
+`content.blobs` (`run_fact_consumer`), in every mode.
+
+**The comparator** (`judge_shadow`) runs on the row that ends a lineage and
+writes `shadow_verdict`: **match** — the digest equals local's fingerprint
+(and, where both know it, the same spec bound), or nothing was derived on
+either side; **mismatch** — anything else the two extractors could disagree
+on, `extraction_error` against a local success included; **uncompared** — the
+processor never judged the bytes (`input_unreadable`, `invalid_input`,
+`input_digest_mismatch`, `unsupported_*`, or a timeout). A mismatch logs
+`shadow extraction mismatch` and audits `check.shadow_mismatch`.
+
+**Downtime is delay, never failure** (`reap_process_commands`, every 5 min).
+In-flight past `WATCHER_PROCESS_COMMAND_TIMEOUT_SECONDS` (1800) is re-issued
+**only while the processor is consuming** — a fact for *any* command inside the
+window — capped at `WATCHER_FETCH_MAX_REISSUES`. Otherwise it is held (a command
+in `processor.process` is not lost; a duplicate would sit in a stream nothing
+trims) and one warning per pass says `processor not consuming`. Past
+`WATCHER_PROCESS_COMMAND_HARD_LIMIT_SECONDS` (86400) the lineage ends
+uncompared either way: a refused failure fact leaves one command with no reply,
+and a quiet period has no other fact to go on. A settled row whose apply never
+ran is re-deferred, touching `updated_at` — never `fact_at`, the liveness
+signal. **The shadow leg is a side lineage**: nothing here touches a fetch row,
+an item's health, or the fetch re-issue lineage.
+
+**The switch gate (#326)** is zero mismatches across a window that contains a
+real change:
+
+```sql
+SELECT shadow_verdict, local_outcome, count(*) FROM process_commands
+WHERE issued_at > :window_start AND shadow_verdict IS NOT NULL GROUP BY 1, 2;
+```
+
+Not built here, because shadow cannot exercise it: the `PROCESSING` fetch
+status, the derived fact deciding the change (Option A, `processor_version`
+refresh on an equal digest), the `input_unreadable` re-fetch, and item-level
+*processing delayed* health. Those are the switch's.
+
 ### Reporting revisions on `content.revisions` (#253, #293)
 
 Split out to [CONTENT-REVISIONS.md](CONTENT-REVISIONS.md) — the six provenance

@@ -40,7 +40,7 @@ The node name `watcher-lax` it carried at the end belongs to nothing.
 
 | Peer | Address | Used for |
 |---|---|---|
-| `broker` | `100.97.91.19` | the Redis bus — `WATCHER_BUS_REDIS_URL`, four streams out, two in |
+| `broker` | `100.97.91.19` | the Redis bus — `WATCHER_BUS_REDIS_URL`, five streams out, three in |
 | `notifier` | `100.98.9.17` | `http://notifier:9000` (prod) and `:9001` (dev tenant) |
 | `status` | `100.88.216.92` | `http://status:9000` — co-status, the backup's dead-man check-in (#330); the ACL grants `tag:watcher → tag:status:9000` only |
 

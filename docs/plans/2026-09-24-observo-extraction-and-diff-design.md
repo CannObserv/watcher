@@ -1,9 +1,39 @@
 # Observo-derived extraction and the change diff — design
 
-**Status:** approved 2026-09-24; cannobserv#486 shipped in co-core 0.19.4 and step 0 (#324) shipped the same day; #325 is next. **Issue:** #222 (retitled and
+**Status:** approved 2026-09-24; cannobserv#486 shipped in co-core 0.19.4 and step 0 (#324) shipped the same day; #325 (shadow) shipped 2026-10-02 — read **Amendments** first. **Issue:** #222 (retitled and
 split — see **#222 disposition**). **Cross-repo work:** filed 2026-09-24 as issues
 in co-core, broker, Observo and Archiver (numbers in **Section 6**); none of it is
 implemented from a Watcher session.
+
+## Amendments (2026-10-02, #325)
+
+Agreed on #325 with the processor's maintainers; where they conflict, these win
+over the sections below.
+
+- **The processor is CannObserv/processor** (`co-processor`), not Observo
+  (observo#629 → processor#1). Its group is `processor.process`
+  (CannObserv/broker#75); its output bucket is `gs://co-gcs-processor`, read as
+  `co-gcs-blob-reader`. Read "Observo" below as "the processor".
+- **Shadow is a side lineage.** Local extraction closes the fetch row; the
+  process leg never touches fetch rows, item health, or the fetch re-issue
+  lineage, so a processor outage in shadow costs comparator coverage only.
+  `PROCESSING`, the derived-fact apply table, Option A, the `input_unreadable`
+  re-fetch and `WatchedItem.processor_version` move to the switch (#326).
+- **Downtime is delay, never failure (replaces Section 5's "Observo down" row).**
+  No re-issue while the processor is not consuming (no fact for any command in
+  the window): a held command is not lost, and a duplicate sits in a stream
+  nothing trims. One service-level signal, not per-item ERROR. A hard limit
+  (24 h) ends a lineage that will never get a fact.
+- **The first terminal fact per `command_id` wins.** The processor may publish
+  an outcome more than once (lost ack) and publishes `extraction_error` with a
+  `dead-lettered:` detail when it gives up (processor#17). Dedupe on the row,
+  never the envelope key or the fingerprint comparison.
+- **An equal `output_digest` with a new `processor_version` refreshes the
+  baseline's version** (processor spec Open Question 1), so Option A compares
+  against `WatchedItem.processor_version` read before the fact updates it;
+  `ChangeRevision.processor_version` is never rewritten. Lands with #326.
+- **co-core is pinned `==0.19.7`** on both sides through shadow; a bump is
+  planned with the processor and lands after its parity corpus passes.
 
 **Context read for this design (all 2026-09-24):** archiver#179 (`content.process`,
 open, no comments), replicator#69 (closed; the boundaries charter's *Asked and

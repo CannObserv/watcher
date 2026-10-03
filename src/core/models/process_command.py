@@ -103,9 +103,15 @@ class ProcessCommand(Base, TimestampMixin):
         ),
         Index("ix_process_commands_fetch_command_id", "fetch_command_id"),
         # Serves the reaper's max(fact_at), which dates the processor's latest
-        # answer in its held-commands warning. The decision itself reads
-        # published_at (CR 1) and has no index of its own yet (CR 11).
+        # answer in its held-commands warning.
         Index("ix_process_commands_fact_at", "fact_at"),
+        # Serves the decision itself: the newest answered command by publish
+        # time — how far the processor has read (#325 CR 1, CR 11; #326).
+        Index(
+            "ix_process_commands_read_past",
+            "published_at",
+            postgresql_where=text("fact_at IS NOT NULL"),
+        ),
     )
 
     command_id: Mapped[str] = mapped_column(String(26), primary_key=True)

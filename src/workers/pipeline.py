@@ -7,6 +7,7 @@ is a baseline (no notification); subsequent changes dispatch CHANGE_DETECTED
 once for the WatchedItem (the single monitored entity, #191).
 """
 
+import enum
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 
@@ -32,6 +33,7 @@ from src.core.media_type import (
     extraction_overrides_for_essence,
     resolve_dispatch_essence,
 )
+from src.core.models.audit_log import EventType, audit
 from src.core.models.change_revision import ChangeRevision
 from src.core.models.pending_archiver_sync import PendingArchiverSync
 from src.core.models.watched_item import WatchedItem
@@ -134,7 +136,7 @@ class ExtractionOutcome:
     # Identity of the extraction itself (#324): the same string a processor
     # reports as ``processor_version`` on a derived fact, so a revision written
     # by local extraction and one written from Observo's fact compare alike.
-    processor_version: str = EXTRACTION_GENERATION
+    processor_version: str | None = EXTRACTION_GENERATION
 
 
 def _provenance_columns(blob: BlobProvenance, outcome: ExtractionOutcome) -> dict[str, object]:
@@ -248,10 +250,57 @@ class WatchedItemResult:
     # the latest revision because this cycle's full fetch renewed the blob
     # reference behind it (#293). Never set beside `changed`.
     renewal_enqueued: bool = False
+    # Option A (D6, #326): the fingerprint moved because the extractor did, so
+    # a revision was written and announced but nobody was notified. Never set
+    # beside `changed`.
+    rebaselined: bool = False
     # What extraction concluded, on every branch that extracted (#325): shadow
     # mode's comparator judges the processor's `output_digest` against it.
     content_fingerprint: str | None = None
     spec_fingerprint: str | None = None
+
+
+class ExtractionChange(enum.StrEnum):
+    """Why a fingerprint may have moved other than the page changing (D6)."""
+
+    SPEC = "spec"
+    PROCESSOR = "processor"
+
+
+def extraction_change(
+    last_rev: ChangeRevision,
+    outcome: ExtractionOutcome,
+    *,
+    known_processor_version: str | None,
+) -> ExtractionChange | None:
+    """Option A's classifier for a fingerprint change (D6, #326).
+
+    * The spec that bound moved → ``SPEC``: notify, labelled. Checked first,
+      because re-baselining a spec edit would mask a coincident page change.
+    * The extractor moved, the spec did not → ``PROCESSOR``: re-baseline
+      silently.
+    * Otherwise ``None``: a content change, notified as ever.
+
+    Spec identity is compared against the previous **revision**. Processor
+    identity is compared against the **item's** (``known_processor_version``,
+    read before this outcome moves it): an equal digest under a new version
+    refreshes the item and never rewrites a revision, so the revision's own
+    version may be older than the extractor the item has already met. ``None``
+    on either side is *unknown* and triggers neither.
+    """
+    if (
+        last_rev.spec_fingerprint is not None
+        and outcome.spec_fingerprint is not None
+        and last_rev.spec_fingerprint != outcome.spec_fingerprint
+    ):
+        return ExtractionChange.SPEC
+    if (
+        known_processor_version is not None
+        and outcome.processor_version is not None
+        and known_processor_version != outcome.processor_version
+    ):
+        return ExtractionChange.PROCESSOR
+    return None
 
 
 def _local_answer(outcome: ExtractionOutcome) -> dict[str, str | None]:
@@ -360,14 +409,18 @@ async def process_watched_item(
     1. No `source_specs`: raise `ExtractionError` — nothing to extract (#260).
     2. Extract content using `watched_item.source_specs`; fingerprint.
     3. Empty extraction: raise `ExtractionError` — never a revision (#258).
-    4. Query `change_revisions` for the last fingerprint.
-    5. First run: insert baseline ChangeRevision, no notification.
-    6. Same fingerprint: cache hit — no revision, no notification. If the latest
-       revision has already been announced (it has an older sibling, so the
-       change path enqueued it), upsert a PendingArchiverSync for it carrying
-       this cycle's blob reference (#293). The baseline is never announced here.
-    7. Changed: insert new ChangeRevision, enqueue PendingArchiverSync,
-       dispatch CHANGE_DETECTED once for the WatchedItem.
+    4. `apply_extraction_outcome` — the history comparison:
+       a. Query `change_revisions` for the last fingerprint.
+       b. First run: insert baseline ChangeRevision, no notification.
+       c. Same fingerprint: cache hit — no revision, no notification. If the
+          latest revision has already been announced (it has an older sibling,
+          so the change path enqueued it), upsert a PendingArchiverSync for it
+          carrying this cycle's blob reference (#293). The baseline is never
+          announced here.
+       d. Changed: insert new ChangeRevision, enqueue PendingArchiverSync, then
+          Option A (#326): an extractor-only move writes `CHECK_REBASELINED`
+          and notifies nobody; anything else dispatches CHANGE_DETECTED once
+          for the WatchedItem, labelled when the bound spec moved.
 
     `watched_item.last_changed_at` is updated on change.
     `last_checked_at` and `health_status` are managed by the caller (tasks.py).
@@ -378,7 +431,6 @@ async def process_watched_item(
     the apply path always supplies it, and the publisher requires it.
     """
     reg = registry if registry is not None else get_registry()
-    now = datetime.now(UTC)
     source_specs: list[dict] = watched_item.source_specs or []
 
     # #260: a spec-less item is unextractable, not a whole-page watch. The API
@@ -429,6 +481,31 @@ async def process_watched_item(
             f"every source_spec yielded empty content (essence={essence!r}, "
             f"authored_specs={len(source_specs)})"
         )
+
+    return await apply_extraction_outcome(session, watched_item, outcome, blob=blob)
+
+
+async def apply_extraction_outcome(
+    session: AsyncSession,
+    watched_item: WatchedItem,
+    outcome: ExtractionOutcome,
+    *,
+    blob: BlobProvenance,
+) -> WatchedItemResult:
+    """Compare one outcome against the item's history and act on it.
+
+    The half of a check cycle that never sees bytes: local extraction calls it
+    with what it computed, and processor mode (#326) with what a
+    ``content.derived`` fact reported. Baseline, cache hit (#293 renewal), or
+    change — and a change goes through Option A (``extraction_change``) first.
+
+    ``watched_item.processor_version`` is read as the comparison base and then
+    set to the outcome's, on every branch: an unchanged outcome under a new
+    extractor teaches the item that version without a revision.
+    """
+    now = datetime.now(UTC)
+    known_processor_version = watched_item.processor_version
+    watched_item.processor_version = outcome.processor_version
 
     # Two rows, not one: the second answers whether the latest revision is the
     # baseline. The baseline is the one revision the change branch never
@@ -508,15 +585,46 @@ async def process_watched_item(
         )
     )
 
+    change = extraction_change(last_rev, outcome, known_processor_version=known_processor_version)
+    if change is ExtractionChange.PROCESSOR:
+        # Option A (D6): the extractor moved and the spec did not. The revision
+        # stands — it is the baseline the next outcome compares against, and
+        # Archiver records it like any other — but nothing is sent, and the
+        # change clock stays where the last *content* change left it. Accepted
+        # residual: a real change coincident with the upgrade is absorbed.
+        audit(
+            session,
+            EventType.CHECK_REBASELINED,
+            watched_item_id=str(watched_item.id),
+            change_revision_id=str(rev.id),
+            previous_fingerprint=last_rev.content_fingerprint,
+            content_fingerprint=outcome.content_fingerprint,
+            previous_processor_version=known_processor_version,
+            processor_version=outcome.processor_version,
+        )
+        logger.info(
+            "extractor change moved the fingerprint — re-baselined without notifying",
+            extra={
+                "watched_item_id": str(watched_item.id),
+                "change_revision_id": str(rev.id),
+                "previous_processor_version": known_processor_version,
+                "processor_version": outcome.processor_version,
+            },
+        )
+        return WatchedItemResult(rebaselined=True, **_local_answer(outcome))
+
     watched_item.last_changed_at = now
 
     # #191: dispatch CHANGE_DETECTED once for the WatchedItem (the monitored entity).
     # No registry id in the metadata: Archiver allocates it on its side of
     # content.revisions and never tells us, so the key was permanently null
-    # (#253; the column it mirrored was dropped in #261).
+    # (#253; the column it mirrored was dropped in #261). `extraction_changed`
+    # is Option A's label: "spec" when the bound spec moved, else None — a
+    # "processor" change never reaches a notification.
     change_meta: dict = {
         "change_revision_id": str(rev.id),
         "content_fingerprint": outcome.content_fingerprint,
+        "extraction_changed": change.value if change is not None else None,
         **watched_item_event_base_metadata(watched_item),
     }
 

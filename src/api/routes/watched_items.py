@@ -21,6 +21,7 @@ from src.core.fetch_commands import fetch_command_timeout_seconds, get_open_comm
 from src.core.logging import get_logger
 from src.core.models.audit_log import EventType, audit
 from src.core.models.change_revision import ChangeRevision
+from src.core.models.fetch_command import FetchCommandStatus
 from src.core.models.watched_item import WatchedItem
 from src.core.watched_items import (
     ArchivedItemActivationError,
@@ -459,6 +460,18 @@ async def check_now(watched_item_id: str, session: AsyncSession = Depends(get_db
         raise HTTPException(status_code=422, detail="WatchedItem has no effective url")
 
     open_command = await get_open_command(session, wi.id)
+    if open_command is not None and open_command.status == FetchCommandStatus.PROCESSING:
+        # #326: the bytes are in and the processor has them. Its own reaper —
+        # not the fetch timeout — decides when an unanswered check ends.
+        age = int((datetime.now(UTC) - open_command.issued_at).total_seconds())
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"A check for this WatchedItem is awaiting the processor (issued {age}s "
+                f"ago). It completes when the processor answers, or fails automatically "
+                f"if it never does; no action needed."
+            ),
+        )
     if open_command is not None:
         # Say when it clears (CR-25). The normal round-trip is under a second,
         # so an operator who sees this is looking at a stalled command — and

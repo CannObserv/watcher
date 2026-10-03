@@ -14,6 +14,7 @@ from jinja2 import TemplateError, UndefinedError
 
 from src.api.schemas.content_config import ContentConfig, ContentOptions
 from src.core.notifications.content import (
+    SPEC_CHANGED_NOTE,
     build_body,
     build_template_context,
     build_title,
@@ -318,6 +319,27 @@ class TestTagsSlot:
         event = make_event(metadata={"tags": []})
         body = build_body(event, ContentOptions(include_tags=True))
         assert "TAGS" not in body
+
+
+class TestExtractionChangedLabel:
+    """Option A (D6, #326): a change seen after the bound spec moved says so.
+
+    Not a toggle: it qualifies the change itself, so a reader who acts on the
+    notification needs it whatever else they chose to see.
+    """
+
+    def test_a_spec_change_carries_the_note(self):
+        event = make_event(metadata={"extraction_changed": "spec"})
+        body = build_body(event, ContentOptions())
+        assert f"- {SPEC_CHANGED_NOTE}" in body.split("\n")
+
+    @pytest.mark.parametrize("value", [None, "processor"])
+    def test_anything_else_carries_none(self, value):
+        event = make_event(metadata={"extraction_changed": value})
+        assert SPEC_CHANGED_NOTE not in build_body(event, ContentOptions())
+
+    def test_the_note_names_the_cause(self):
+        assert "source spec changed" in SPEC_CHANGED_NOTE
 
 
 class TestMarkdownListContract:

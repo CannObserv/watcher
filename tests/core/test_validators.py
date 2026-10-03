@@ -16,6 +16,7 @@ from types import SimpleNamespace
 import pytest
 from co_core.pure.extract import processor_version
 
+from src.core.extract_mode import EXTRACT_MODE_ENV
 from src.core.validators import (
     CONDITIONAL_GET_ENV,
     DEFAULT_VALIDATOR_MAX_AGE_HOURS,
@@ -27,6 +28,7 @@ from src.core.validators import (
     clear_validators,
     conditional_get_enabled,
     extraction_generation,
+    item_generation,
     record_validators,
     replayable_validators,
     sendable_validator,
@@ -59,6 +61,7 @@ def _item(**kwargs):
         "validator_source_key": validator_source_key(effective_url=URL, source_specs=SPECS),
         "last_full_fetch_at": NOW - timedelta(hours=1),
         "blob_expires_at": NOW - timedelta(hours=1) + HORIZON,
+        "processor_version": None,
     }
     base.update(kwargs)
     return SimpleNamespace(**base)
@@ -227,6 +230,44 @@ class TestExtractionGeneration:
         # like. The format is co-core's to define, not transcribed here.
         assert EXTRACTION_GENERATION == processor_version(LOCAL_EXTRACTION_GENERATION)
         assert extraction_generation() == EXTRACTION_GENERATION
+
+
+class TestItemGeneration:
+    """Which extraction a stored pair is keyed to (#326).
+
+    Locally decided, it is the installed co-core's — an upgrade invalidates
+    every pair with no human step. Processor-decided, Watcher has no extractor
+    of its own: the generation is the version the processor last reported for
+    the item, so a processor upgrade invalidates once the next full fetch
+    reports it (the design's accepted residual).
+    """
+
+    @pytest.mark.parametrize("mode", [None, "local", "shadow"])
+    def test_locally_decided_is_the_installed_generation(self, monkeypatch, mode):
+        if mode is None:
+            monkeypatch.delenv(EXTRACT_MODE_ENV, raising=False)
+        else:
+            monkeypatch.setenv(EXTRACT_MODE_ENV, mode)
+        item = _item(processor_version="9.9.9+9")
+        assert item_generation(item) == EXTRACTION_GENERATION
+
+    def test_processor_decided_is_the_items_reported_version(self, monkeypatch):
+        monkeypatch.setenv(EXTRACT_MODE_ENV, "processor")
+        assert item_generation(_item(processor_version="0.19.8+1")) == "0.19.8+1"
+
+    def test_processor_decided_with_no_report_yet_is_none(self, monkeypatch):
+        monkeypatch.setenv(EXTRACT_MODE_ENV, "processor")
+        assert item_generation(_item(processor_version=None)) is None
+
+    def test_a_processor_upgrade_stops_the_replay(self, monkeypatch):
+        monkeypatch.setenv(EXTRACT_MODE_ENV, "processor")
+        monkeypatch.setenv(CONDITIONAL_GET_ENV, "true")
+        item = _item(processor_version="0.19.7+1")
+        record_validators(item, etag='"x"', last_modified=None, now=NOW)
+        assert replayable_validators(item, now=NOW) == ('"x"', None)
+
+        item.processor_version = "0.19.8+1"
+        assert replayable_validators(item, now=NOW) == (None, None)
 
 
 class TestConditionalGetEnabled:

@@ -1,29 +1,33 @@
-"""content.process worker tasks (#325): shadow issue, sweep, apply, reaper.
+"""content.process worker tasks (#325, #326): sweep, apply, reaper.
 
-The processing leg of a fetch occasion, in **shadow mode**
-(``WATCHER_EXTRACT_MODE=shadow``): local extraction still decides every change,
-and each applied blob is also sent to the processor so the comparator can judge
-its answer against local's. In shadow the leg is a **side lineage** — nothing
-here touches a fetch row, an item's health, or the fetch re-issue lineage, so a
-processor outage costs comparator coverage and nothing else.
+The processing leg of a fetch occasion. Each lineage is one of two kinds,
+fixed when its blob applied (``src/workers/process_issue.py`` issues both):
 
-* ``issue_shadow_process_command`` — called by ``apply_fetch_blob`` once local
-  extraction has decided (success or failure): persist the spec[0] command with
-  local's answer, commit, publish. Never raises into the apply.
+* **shadow** (``WATCHER_EXTRACT_MODE=shadow``, #325) — local extraction
+  decided and closed the fetch row; the leg is a **side lineage** that touches
+  no fetch row, health or fetch re-issue lineage, and ends in the comparator's
+  verdict. A processor outage costs comparator coverage and nothing else.
+* **decisive** (``processor``, #326) — the fetch row waits ``PROCESSING`` and
+  the lineage's end closes it: the derived text goes through the history
+  comparison and Option A, a failure is the extraction-failure path, an
+  unreadable input re-fetches, and a timeout fails the check.
+
 * ``publish_pending_process_commands`` — the second half of persist-before-
   publish, every minute, ``publish_pending_fetch_commands``' shape.
 * ``apply_process_fact`` — deferred by the ``content.derived`` consumer once a
   terminal fact has settled a row: an empty outcome with a spec left chains
-  the next spec (D3); anything else ends the lineage and is judged.
+  the next spec (D3); anything else ends the lineage — judged, or decided.
 * ``reap_process_commands`` — the backstop for silence, under #325's downtime
   rule: **no re-issue until the processor has read past a command** (one in the
   processor's group is not lost, and a re-issue only adds a duplicate to a
   stream that is never trimmed), a hard limit for the command that will never
-  get a fact (CannObserv/processor#17), and a re-defer for a lost apply.
+  get a fact (CannObserv/processor#17), and a re-defer for a lost apply. A held
+  decisive command is *delay*, never failure: its item stays as it was.
 """
 
 from datetime import UTC, datetime, timedelta
 
+from co_core.pure.extract import CANONICAL_TEXT_MEDIA_TYPE, spec_schema_version
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -32,22 +36,23 @@ from src.core.database import get_session_factory
 from src.core.fetch_commands import fetch_max_reissues
 from src.core.logging import get_logger
 from src.core.models.audit_log import EventType, audit
-from src.core.models.fetch_command import FetchCommand
+from src.core.models.fetch_command import (
+    PROCESSING_FAILED_REASON,
+    PROCESSING_TIMEOUT_REASON,
+    FetchCommand,
+    FetchCommandStatus,
+)
 from src.core.models.process_command import (
     SETTLED_PROCESS_STATUSES,
-    LocalOutcome,
     ProcessCommand,
     ProcessCommandStatus,
     ShadowVerdict,
 )
 from src.core.models.watched_item import WatchedItem
 from src.core.process_commands import (
-    ExtractMode,
-    LocalExtraction,
+    INPUT_UNREADABLE_REASON,
     UnsendableProcessCommand,
     chain_process_command,
-    create_process_command,
-    extract_mode,
     judge_shadow,
     process_command_hard_limit_seconds,
     process_command_timeout_seconds,
@@ -57,103 +62,20 @@ from src.core.process_commands import (
 )
 from src.core.utils import format_utc_iso
 from src.workers import bp
-from src.workers.pipeline import WatchedItemResult
+from src.workers.fetch_commands import (
+    close_succeeded,
+    fail_blob_unreadable,
+    fail_extraction,
+    record_check_failure,
+    reissue_fetch_command,
+)
+from src.workers.pipeline import BlobProvenance, ExtractionOutcome, apply_extraction_outcome
+from src.workers.process_issue import persist_and_publish
 from src.workers.retry import APPLY_RETRY
 
 logger = get_logger(__name__)
 
-PROCESSING_TIMEOUT = "processing_timeout"
-
-
-def local_extraction_of(result: WatchedItemResult) -> LocalExtraction:
-    """Local extraction's answer, as the pipeline reported it."""
-    if result.baseline_established:
-        outcome = LocalOutcome.BASELINE
-    elif result.changed:
-        outcome = LocalOutcome.CHANGED
-    else:
-        outcome = LocalOutcome.UNCHANGED
-    return LocalExtraction(
-        outcome=outcome,
-        fingerprint=result.content_fingerprint,
-        spec_fingerprint=result.spec_fingerprint,
-    )
-
-
-async def _persist_and_publish(session: AsyncSession, row: ProcessCommand, client) -> None:
-    """Commit the row, then XADD it; a failed publish leaves it for the sweep."""
-    await session.commit()
-    publish_client = client if client is not None else get_shared_bus_client()
-    if publish_client is None:
-        logger.error(
-            "process command cannot publish: %s is not set",
-            BUS_REDIS_URL_ENV,
-            extra={"command_id": row.command_id},
-        )
-        return
-    try:
-        await publish_process_command(publish_client, row)
-        await session.commit()
-    except Exception:
-        logger.warning(
-            "process command publish failed; the sweep will retry it",
-            extra={"command_id": row.command_id},
-            exc_info=True,
-        )
-
-
-async def issue_shadow_process_command(
-    session: AsyncSession,
-    fetch_row: FetchCommand,
-    watched_item: WatchedItem,
-    local: LocalExtraction,
-    *,
-    bus_client=None,
-) -> str | None:
-    """Send an applied blob to the processor beside local's answer (shadow mode only).
-
-    Called after the apply has committed its own outcome, so a failure here
-    loses one comparison and nothing else: every exception is logged and
-    swallowed, and the session rolled back to the apply's committed state.
-    Returns the new ``command_id``, or ``None`` when nothing was issued.
-    """
-    if extract_mode() is not ExtractMode.SHADOW:
-        return None
-    if not watched_item.source_specs:
-        # Nothing to send, and local already reports the item ERROR every cycle
-        # (#260): a WARNING here too would only repeat it (CR 7).
-        logger.debug(
-            "watched item has no source_specs — not shadowing the occasion",
-            extra={"fetch_command_id": fetch_row.command_id},
-        )
-        return None
-    if local.outcome is not LocalOutcome.EXTRACTION_FAILED and local.fingerprint is None:
-        # Reading a missing fingerprint as "local failed" would manufacture a
-        # mismatch; with nothing to compare against, there is nothing to send.
-        logger.warning(
-            "local result carries no fingerprint — not shadowing the occasion",
-            extra={"fetch_command_id": fetch_row.command_id},
-        )
-        return None
-    try:
-        row = await create_process_command(
-            session, fetch_row, watched_item, now=datetime.now(UTC), local=local
-        )
-        await _persist_and_publish(session, row, bus_client)
-        return row.command_id
-    except UnsendableProcessCommand as exc:
-        logger.warning(
-            "occasion is unsendable to the processor — not shadowing it",
-            extra={"fetch_command_id": fetch_row.command_id, "error": str(exc)},
-        )
-    except Exception:
-        logger.warning(
-            "shadow process command failed — local outcome stands",
-            extra={"fetch_command_id": fetch_row.command_id},
-            exc_info=True,
-        )
-    await session.rollback()
-    return None
+PROCESSING_TIMEOUT = PROCESSING_TIMEOUT_REASON
 
 
 @bp.periodic(cron="* * * * *", periodic_id="publish_pending_process_commands")
@@ -244,12 +166,14 @@ def _record_verdict(
 
 @bp.task(name="apply_process_fact", queue="default", retry=APPLY_RETRY)
 async def apply_process_fact(command_id: str, bus_client=None) -> dict:
-    """Act on a settled process command: chain the next spec, or judge the lineage.
+    """Act on a settled process command: chain the next spec, or end the lineage.
 
     Deferred by the ``content.derived`` consumer after the first terminal fact
     settled the row; guarded on ``applied_at`` so a re-defer is a no-op. Runs in
-    any mode — a fact for a command issued under ``shadow`` is still judged
-    after the mode is turned back to ``local``.
+    any mode, and the lineage's own kind decides what ending it means: a
+    decisive lineage (its fetch row ``PROCESSING``, #326) closes the check
+    (``_decide``); a shadow one is judged — still, after the mode is turned
+    back to ``local`` or on to ``processor``.
 
     An empty outcome with a spec left is the fallback loop's next turn (D3):
     a fresh command for spec[i+1] under the same intent, from the item's
@@ -267,6 +191,10 @@ async def apply_process_fact(command_id: str, bus_client=None) -> dict:
             return {"skipped": True, "reason": f"status_{row.status}"}
         now = datetime.now(UTC)
         row.applied_at = now
+        # Decisive iff the blob apply left the fetch row open for this answer
+        # (#326) — fixed at issue, whatever the mode reads now.
+        fetch = await session.get(FetchCommand, row.fetch_command_id)
+        decisive = fetch is not None and fetch.status == FetchCommandStatus.PROCESSING
 
         if row.status == ProcessCommandStatus.COMPLETED and row.empty:
             watched_item = await session.get(WatchedItem, row.watched_item_id)
@@ -277,12 +205,15 @@ async def apply_process_fact(command_id: str, bus_client=None) -> dict:
                     nxt = await chain_process_command(session, row, specs[next_index], now=now)
                 except UnsendableProcessCommand as exc:
                     logger.warning(
-                        "next spec is unsendable — judging the lineage as it stands",
+                        "next spec is unsendable — ending the lineage as it stands",
                         extra={"command_id": command_id, "error": str(exc)},
                     )
                 else:
-                    await _persist_and_publish(session, nxt, bus_client)
+                    await persist_and_publish(session, nxt, bus_client)
                     return {"chained": nxt.command_id, "spec_index": next_index}
+
+        if decisive:
+            return await _decide(session, row, fetch, now=now, bus_client=bus_client)
 
         verdict, detail = judge_shadow(row)
         _record_verdict(session, row, verdict, detail)
@@ -290,11 +221,178 @@ async def apply_process_fact(command_id: str, bus_client=None) -> dict:
     return {"verdict": verdict.value, "detail": detail}
 
 
-def _give_up(session: AsyncSession, row: ProcessCommand, *, now: datetime, why: str) -> None:
-    """End a lineage the processor never answered: expired, uncompared."""
+def derived_outcome(row: ProcessCommand) -> ExtractionOutcome:
+    """The outcome a non-empty ``processing_complete`` fact reports (#326).
+
+    ``output_digest`` is ``canonical_text``'s fingerprint — the same bytes,
+    hashed the same way, local extraction stores (cannobserv#486) — so it *is*
+    the ``ChangeRevision.content_fingerprint``. The fallbacks cover only a
+    column the consumer always writes; the wire requires every one.
+    """
+    return ExtractionOutcome(
+        content_fingerprint=row.output_digest,
+        content_size_bytes=row.output_size_bytes or 0,
+        schema_version=(
+            row.spec_schema_version
+            if row.spec_schema_version is not None
+            else spec_schema_version(row.source_spec)
+        ),
+        spec_fingerprint=row.spec_fingerprint,
+        content_media_type=row.output_media_type or CANONICAL_TEXT_MEDIA_TYPE,
+        processor_version=row.processor_version,
+    )
+
+
+async def _decide(
+    session: AsyncSession,
+    row: ProcessCommand,
+    fetch: FetchCommand,
+    *,
+    now: datetime,
+    bus_client,
+) -> dict:
+    """Close a processor-decided check from the fact that ended its lineage (#326).
+
+    The design's apply table, Section 2:
+
+    * a newer occasion for the item has already closed → ``SUPERSEDED``, nothing
+      written (the blob leg's ordering guard, on the derived leg);
+    * derived text → the history comparison and Option A
+      (``apply_extraction_outcome``), with the raw blob's provenance from the
+      fetch fact; the row closes ``SUCCEEDED``;
+    * ``input_unreadable`` → the bytes are gone, not judged: re-fetch, capped
+      at ``WATCHER_FETCH_MAX_REISSUES`` across both legs (#275);
+    * anything else — empty on the last spec (D5, the #258 rule), any other
+      terminal reason, ``extraction_error`` from a give-up (processor#17)
+      included — is the extraction-failure path. ``detail`` is recorded, never
+      branched on.
+    """
+    watched_item = await session.get(WatchedItem, row.watched_item_id)
+    newest_applied = (
+        await session.execute(
+            select(func.max(FetchCommand.issued_at)).where(
+                FetchCommand.watched_item_id == fetch.watched_item_id,
+                FetchCommand.applied_at.is_not(None),
+            )
+        )
+    ).scalar_one_or_none()
+    if newest_applied is not None and newest_applied > fetch.issued_at:
+        fetch.status = FetchCommandStatus.SUPERSEDED
+        await session.commit()
+        return {"skipped": True, "reason": "superseded"}
+
+    if row.status == ProcessCommandStatus.COMPLETED and not row.empty:
+        result = await apply_extraction_outcome(
+            session,
+            watched_item,
+            derived_outcome(row),
+            blob=BlobProvenance(
+                command_id=fetch.command_id,
+                blob_uri=fetch.blob_uri,
+                source_media_type=fetch.media_type,
+                blob_expires_at=fetch.blob_expires_at,
+                blob_fingerprint=fetch.content_fingerprint,
+            ),
+        )
+        await close_succeeded(
+            session, watched_item, fetch, result, now=now, audit_extra={"source": "processor"}
+        )
+        return {
+            "applied": True,
+            "changed": result.changed,
+            "baseline_established": result.baseline_established,
+            "renewal_enqueued": result.renewal_enqueued,
+            "rebaselined": result.rebaselined,
+        }
+
+    if row.failure_reason == INPUT_UNREADABLE_REASON:
+        # The lineage spans both legs: whichever re-issued more is the count.
+        lineage = max(fetch.reissue_count, row.reissue_count)
+        detail = row.failure_detail or INPUT_UNREADABLE_REASON
+        if lineage >= fetch_max_reissues():
+            logger.error(
+                "processor still cannot read the blob at the re-issue cap — failing the check",
+                extra={"command_id": row.command_id, "reissues": lineage, "detail": detail},
+            )
+            return await fail_blob_unreadable(
+                session, watched_item, fetch, now=now, detail=detail, reissues=lineage
+            )
+        logger.warning(
+            "processor cannot read the blob — re-fetching",
+            extra={"command_id": row.command_id, "fetch_command_id": fetch.command_id},
+        )
+        fetch.status = FetchCommandStatus.EXPIRED
+        new_id = await reissue_fetch_command(
+            session, watched_item, fetch, bus_client, lineage_count=lineage
+        )
+        return {"reissued": new_id}
+
+    if row.status == ProcessCommandStatus.COMPLETED:
+        detail = f"empty on every source_spec ({row.spec_index + 1} tried)"
+    else:
+        detail = ": ".join(part for part in (row.failure_reason, row.failure_detail) if part)
+    logger.warning(
+        "processor derived no text — failing the check",
+        extra={"command_id": row.command_id, "detail": detail},
+    )
+    return await fail_extraction(
+        session,
+        watched_item,
+        fetch,
+        now=now,
+        error=detail,
+        reason=PROCESSING_FAILED_REASON,
+        detail=detail,
+    )
+
+
+async def _give_up(
+    session: AsyncSession, row: ProcessCommand, *, now: datetime, why: str
+) -> FetchCommand | None:
+    """End a lineage the processor never answered.
+
+    A shadow lineage ends expired and uncompared. A decisive one (#326) also
+    fails its check: the fetch row closes ``processing_timeout`` and the item
+    goes ERROR, so the one-open-command gate lifts — returned for the caller,
+    which owns the commit and the failure bookkeeping.
+    """
     row.status = ProcessCommandStatus.EXPIRED
     row.applied_at = now
+    fetch = await session.get(FetchCommand, row.fetch_command_id)
+    if fetch is not None and fetch.status == FetchCommandStatus.PROCESSING:
+        fetch.status = FetchCommandStatus.FAILED
+        fetch.failure_reason = PROCESSING_TIMEOUT_REASON
+        fetch.failure_detail = why
+        fetch.applied_at = now
+        logger.error(
+            "processor never answered — failing the check",
+            extra={"command_id": row.command_id, "fetch_command_id": fetch.command_id, "why": why},
+        )
+        return fetch
     _record_verdict(session, row, ShadowVerdict.UNCOMPARED, f"{PROCESSING_TIMEOUT}: {why}")
+    return None
+
+
+async def _end_lineage(
+    session: AsyncSession, row: ProcessCommand, *, now: datetime, why: str
+) -> None:
+    """``_give_up``, committed — with the ERROR surface when it closed a check."""
+    fetch = await _give_up(session, row, now=now, why=why)
+    if fetch is None:
+        await session.commit()
+        return
+    watched_item = await session.get(WatchedItem, fetch.watched_item_id)
+    # A timeout says nothing about the stored validators: the pair is the last
+    # *extracted* 200's, and a 304 against it is still a true answer.
+    await record_check_failure(
+        session,
+        watched_item,
+        now=now,
+        url=fetch.url,
+        audit_event=EventType.CHECK_EXTRACTION_FAILED,
+        audit_kwargs={"reason": PROCESSING_TIMEOUT_REASON, "detail": why},
+        error_metadata={"reason": PROCESSING_TIMEOUT_REASON},
+    )
 
 
 @bp.periodic(cron="*/5 * * * *", periodic_id="reap_process_commands")
@@ -367,6 +465,8 @@ async def reap_process_commands(
             .all()
         )
         oldest_held = None
+        # Items whose check waits on a held decisive command (#326).
+        delayed: list[str] = []
         for row in stale:
             # CR 2: the consumer may be settling this row right now. Re-read it
             # locked — per row, since each commit below ends the transaction —
@@ -375,22 +475,23 @@ async def reap_process_commands(
             if row.status != ProcessCommandStatus.IN_FLIGHT:
                 continue
             if row.issued_at < hard_cutoff:
-                _give_up(db, row, now=now, why="hard limit")
-                await db.commit()
+                await _end_lineage(db, row, now=now, why="hard limit")
                 hard_limited += 1
                 continue
             if read_past is None or row.published_at >= read_past:
                 held += 1
                 oldest_held = oldest_held or row
+                fetch = await db.get(FetchCommand, row.fetch_command_id)
+                if fetch is not None and fetch.status == FetchCommandStatus.PROCESSING:
+                    delayed.append(str(row.watched_item_id))
                 continue
             if row.reissue_count >= max_reissues:
-                _give_up(db, row, now=now, why="re-issue cap")
-                await db.commit()
+                await _end_lineage(db, row, now=now, why="re-issue cap")
                 capped += 1
                 continue
             row.status = ProcessCommandStatus.EXPIRED
             nxt = await reissue_process_command(db, row, now=now)
-            await _persist_and_publish(db, nxt, bus_client)
+            await persist_and_publish(db, nxt, bus_client)
             reissued += 1
 
         unapplied = list(
@@ -422,6 +523,14 @@ async def reap_process_commands(
                     "oldest_issued_at": format_utc_iso(oldest_held.issued_at),
                     "latest_fact_at": format_utc_iso(latest_fact) if latest_fact else None,
                 },
+            )
+        if delayed:
+            # Delay, never failure: the items stay as they were — no ERROR, no
+            # WATCH_ERROR — until the processor answers or the hard limit ends
+            # the wait. This line is the per-item signal.
+            logger.warning(
+                "processing delayed — checks are waiting on the processor",
+                extra={"watched_item_ids": delayed},
             )
         result = {
             "reissued": reissued,

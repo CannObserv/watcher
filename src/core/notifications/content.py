@@ -147,6 +147,13 @@ def build_body(
     )
 
 
+# Option A's label (D6, #326): the spec that bound moved between the two
+# revisions, so part of the difference may be the selector's, not the page's.
+SPEC_CHANGED_NOTE = (
+    "NOTE: the source spec changed — some of this difference may come from the new selector"
+)
+
+
 def _build_change_detected_body(event: WatchEvent, options: ContentOptions) -> str:
     """Compose the change_detected body as a Markdown bullet list.
 
@@ -165,7 +172,10 @@ def _build_change_detected_body(event: WatchEvent, options: ContentOptions) -> s
 
     Fact order (canonical); `?` items are toggle- and metadata-gated:
       item_name, DOMAIN?, URL, LAST CHANGED?, INTERVAL?, TIMESTAMP, ITEM,
-      DESCRIPTION?, TAGS?
+      NOTE?, DESCRIPTION?, TAGS?
+
+    NOTE is metadata-gated only (``extraction_changed == "spec"``, #326): it
+    qualifies the change itself, so no toggle hides it.
 
     Insertion anchors:
       - DOMAIN: after item_name
@@ -201,6 +211,8 @@ def _build_change_detected_body(event: WatchEvent, options: ContentOptions) -> s
     for offset, line in enumerate(pre_timestamp):
         items.insert(timestamp_idx + offset, line)
 
+    if metadata.get("extraction_changed") == "spec":
+        items.append(SPEC_CHANGED_NOTE)
     if options.include_description and metadata.get("description"):
         items.append(f"DESCRIPTION: {metadata['description']}")
     if options.include_tags and metadata.get("tags"):

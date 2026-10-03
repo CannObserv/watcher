@@ -20,10 +20,18 @@ from co_core.pure.models.changes import ProcessingCompleteEmit
 from sqlalchemy import event, select
 
 import src.workers.fetch_commands as fc_mod
+import src.workers.pipeline as pipeline_mod
 import src.workers.process_commands as pc_mod
-from src.core.fetch_commands import FETCH_MAX_REISSUES_ENV, create_fetch_command
+from src.core.extract_mode import EXTRACT_MODE_ENV
+from src.core.fetch_commands import (
+    FETCH_MAX_REISSUES_ENV,
+    create_fetch_command,
+    get_open_command,
+)
 from src.core.models.audit_log import AuditLog, EventType
+from src.core.models.change_revision import ChangeRevision
 from src.core.models.fetch_command import FetchCommand, FetchCommandStatus
+from src.core.models.pending_archiver_sync import PendingArchiverSync
 from src.core.models.process_command import (
     LocalOutcome,
     ProcessCommand,
@@ -32,7 +40,6 @@ from src.core.models.process_command import (
 )
 from src.core.models.watched_item import WatchedItem, WatchHealthStatus
 from src.core.process_commands import (
-    EXTRACT_MODE_ENV,
     PROCESS_COMMAND_HARD_LIMIT_ENV,
     PROCESS_COMMAND_TIMEOUT_ENV,
     LocalExtraction,
@@ -556,3 +563,441 @@ class TestReaperLocksWhatItReaps:
         assert result["reissued"] == 0
         assert row.status == ProcessCommandStatus.COMPLETED
         assert await client.xlen("content.process") == 0
+
+
+async def _decisive(
+    db_session,
+    *,
+    specs=(SPEC_A, SPEC_B),
+    issued_at=None,
+    fetch_over=None,
+    item_over=None,
+    status=ProcessCommandStatus.IN_FLIGHT,
+    **fields,
+) -> ProcessCommand:
+    """A processor-mode occasion: the fetch row PROCESSING, its command in flight."""
+    issued_at = issued_at or datetime.now(UTC)
+    wi = await make_watched_item(
+        db_session,
+        primary_url="https://lcb.wa.gov/boardmeetings",
+        source_specs=list(specs),
+        **(item_over or {}),
+    )
+    fetch = await create_fetch_command(db_session, wi, now=issued_at)
+    fetch.status = FetchCommandStatus.PROCESSING
+    fetch.published_at = fetch.fact_at = issued_at
+    fetch.content_fingerprint = RAW_DIGEST
+    fetch.blob_uri = f"gs://co-gcs-blobs/blobs/{RAW_DIGEST}.bin"
+    fetch.media_type = "text/html"
+    for key, value in (fetch_over or {}).items():
+        setattr(fetch, key, value)
+    await db_session.flush()
+    row = await create_process_command(
+        db_session, fetch, wi, now=issued_at, local=None, reissue_count=fetch.reissue_count
+    )
+    row.status = status
+    if status != ProcessCommandStatus.PENDING_PUBLISH:
+        row.published_at = issued_at
+    for key, value in fields.items():
+        setattr(row, key, value)
+    await db_session.flush()
+    return row
+
+
+def _quiet(monkeypatch) -> AsyncMock:
+    """Stub every notification the decisive path can send; returns the change spy."""
+    monkeypatch.setattr(fc_mod, "dispatch_event_notifications", AsyncMock(return_value=0))
+    change = AsyncMock(return_value=0)
+    monkeypatch.setattr(pipeline_mod, "dispatch_event_notifications", change)
+    return change
+
+
+async def _audits(db_session, event_type) -> list[AuditLog]:
+    stmt = select(AuditLog).where(AuditLog.event_type == event_type)
+    return list((await db_session.execute(stmt)).scalars().all())
+
+
+async def _revisions(db_session, watched_item_id) -> list[ChangeRevision]:
+    stmt = (
+        select(ChangeRevision)
+        .where(ChangeRevision.watched_item_id == watched_item_id)
+        .order_by(ChangeRevision.captured_at)
+    )
+    return list((await db_session.execute(stmt)).scalars().all())
+
+
+class TestDecisiveApply:
+    """Processor mode (#326): the derived fact decides and closes the check.
+
+    A lineage is decisive when its fetch row is ``PROCESSING`` — fixed when the
+    blob applied, so a fact still decides after the mode is turned back, and a
+    shadow lineage is still only judged after it is turned on.
+    """
+
+    async def _fetch(self, db_session, row) -> FetchCommand:
+        return await db_session.get(FetchCommand, row.fetch_command_id)
+
+    async def _item(self, db_session, row) -> WatchedItem:
+        return await db_session.get(WatchedItem, row.watched_item_id)
+
+    async def test_a_first_answer_baselines_and_closes_the_check(self, db_session, monkeypatch):
+        row = await _decisive(
+            db_session, fetch_over={"etag": '"v1"'}, **_completed(spec_fingerprint="spec1:x")
+        )
+        _wire(db_session, monkeypatch)
+        change = _quiet(monkeypatch)
+
+        result = await apply_process_fact(row.command_id)
+
+        fetch, item = await self._fetch(db_session, row), await self._item(db_session, row)
+        assert result["applied"] is True and result["baseline_established"] is True
+        assert fetch.status == FetchCommandStatus.SUCCEEDED
+        assert fetch.applied_at is not None
+        assert item.health_status == WatchHealthStatus.OK
+        assert item.last_checked_at is not None
+        assert item.processor_version == "0.19.7+1"
+        # The pair is stored with the outcome it vouches for.
+        assert item.etag == '"v1"'
+        (baseline,) = await _revisions(db_session, item.id)
+        assert baseline.content_fingerprint == LOCAL_DIGEST
+        assert baseline.spec_fingerprint == "spec1:x"
+        assert baseline.processor_version == "0.19.7+1"
+        change.assert_not_awaited()
+        (event,) = await _audits(db_session, EventType.CHECK_SNAPSHOT_CREATED)
+        assert event.payload["source"] == "processor"
+        assert row.shadow_verdict is None  # decided, not judged
+
+    async def test_a_new_digest_is_a_change(self, db_session, monkeypatch):
+        row = await _decisive(db_session, **_completed(output_digest=OTHER_DIGEST))
+        item = await self._item(db_session, row)
+        db_session.add(
+            ChangeRevision(
+                watched_item_id=item.id,
+                content_fingerprint=LOCAL_DIGEST,
+                captured_at=datetime.now(UTC) - timedelta(days=1),
+                content_size_bytes=10,
+                schema_version=1,
+                processor_version="0.19.7+1",
+            )
+        )
+        item.processor_version = "0.19.7+1"
+        await db_session.flush()
+        _wire(db_session, monkeypatch)
+        change = _quiet(monkeypatch)
+
+        result = await apply_process_fact(row.command_id)
+
+        assert result["changed"] is True
+        change.assert_awaited_once()
+        sync = (
+            await db_session.execute(
+                select(PendingArchiverSync).where(PendingArchiverSync.watched_item_id == item.id)
+            )
+        ).scalar_one()
+        # Raw-blob provenance still comes from the fetch fact.
+        assert sync.blob_uri == (await self._fetch(db_session, row)).blob_uri
+        assert sync.blob_fingerprint == RAW_DIGEST
+        assert sync.source_media_type == "text/html"
+
+    async def test_a_processor_upgrade_alone_re_baselines(self, db_session, monkeypatch):
+        row = await _decisive(
+            db_session, **_completed(output_digest=OTHER_DIGEST, processor_version="0.20.0+1")
+        )
+        item = await self._item(db_session, row)
+        db_session.add(
+            ChangeRevision(
+                watched_item_id=item.id,
+                content_fingerprint=LOCAL_DIGEST,
+                captured_at=datetime.now(UTC) - timedelta(days=1),
+                content_size_bytes=10,
+                schema_version=1,
+                processor_version="0.19.7+1",
+            )
+        )
+        item.processor_version = "0.19.7+1"
+        await db_session.flush()
+        _wire(db_session, monkeypatch)
+        change = _quiet(monkeypatch)
+
+        result = await apply_process_fact(row.command_id)
+
+        assert result["rebaselined"] is True
+        change.assert_not_awaited()
+        assert len(await _audits(db_session, EventType.CHECK_REBASELINED)) == 1
+        (event,) = await _audits(db_session, EventType.CHECK_SNAPSHOT_CREATED)
+        assert event.payload["rebaselined"] is True
+
+    async def test_empty_with_a_spec_left_chains_and_stays_open(self, db_session, monkeypatch):
+        row = await _decisive(db_session, **_empty())
+        _wire(db_session, monkeypatch)
+        client = fakeredis.FakeAsyncRedis()
+
+        result = await apply_process_fact(row.command_id, bus_client=client)
+
+        assert result["spec_index"] == 1
+        _first, nxt = await _rows(db_session, row.intent_id)
+        assert nxt.local_outcome is None
+        assert (await self._fetch(db_session, row)).status == FetchCommandStatus.PROCESSING
+
+    async def test_empty_on_the_last_spec_is_an_extraction_failure(self, db_session, monkeypatch):
+        row = await _decisive(
+            db_session,
+            specs=(SPEC_A,),
+            item_over={"etag": '"old"', "validator_source_key": "sha256:k"},
+            **_empty(),
+        )
+        _wire(db_session, monkeypatch)
+        _quiet(monkeypatch)
+
+        result = await apply_process_fact(row.command_id)
+
+        fetch, item = await self._fetch(db_session, row), await self._item(db_session, row)
+        assert result == {"error": "extraction_failed"}
+        assert fetch.status == FetchCommandStatus.FAILED
+        assert fetch.failure_reason == "processing_failed"
+        assert "empty" in fetch.failure_detail
+        assert item.health_status == WatchHealthStatus.ERROR
+        assert item.etag is None  # #269: the next fetch is in full
+        assert await _revisions(db_session, item.id) == []
+        assert len(await _audits(db_session, EventType.CHECK_EXTRACTION_FAILED)) == 1
+
+    @pytest.mark.parametrize(
+        "reason", ["extraction_error", "unsupported_media_type", "invalid_input"]
+    )
+    async def test_a_terminal_failure_is_an_extraction_failure(
+        self, db_session, monkeypatch, reason
+    ):
+        # invalid_input included: the processor refused the reference itself,
+        # and a re-fetch would mint the same kind of reference again.
+        row = await _decisive(
+            db_session,
+            status=ProcessCommandStatus.FAILED,
+            fact_at=datetime.now(UTC),
+            failure_reason=reason,
+            failure_detail="dead-lettered: parser blew up",
+        )
+        _wire(db_session, monkeypatch)
+        _quiet(monkeypatch)
+        client = fakeredis.FakeAsyncRedis()
+
+        result = await apply_process_fact(row.command_id, bus_client=client)
+
+        fetch = await self._fetch(db_session, row)
+        assert result == {"error": "extraction_failed"}
+        assert fetch.status == FetchCommandStatus.FAILED
+        assert fetch.failure_reason == "processing_failed"
+        (event,) = await _audits(db_session, EventType.CHECK_EXTRACTION_FAILED)
+        assert event.payload["detail"] == f"{reason}: dead-lettered: parser blew up"
+        assert await client.xlen("content.fetch") == 0
+
+    async def test_input_unreadable_re_fetches_under_the_same_intent(self, db_session, monkeypatch):
+        row = await _decisive(
+            db_session,
+            status=ProcessCommandStatus.FAILED,
+            fact_at=datetime.now(UTC),
+            failure_reason="input_unreadable",
+            failure_detail="blob gone",
+        )
+        _wire(db_session, monkeypatch)
+        _quiet(monkeypatch)
+        client = fakeredis.FakeAsyncRedis()
+
+        result = await apply_process_fact(row.command_id, bus_client=client)
+
+        fetch = await self._fetch(db_session, row)
+        assert fetch.status == FetchCommandStatus.EXPIRED
+        reissued = await db_session.get(FetchCommand, result["reissued"])
+        assert reissued.intent_id == fetch.intent_id
+        assert reissued.reissue_count == 1
+        assert await client.xlen("content.fetch") == 1
+        item = await self._item(db_session, row)
+        assert item.health_status != WatchHealthStatus.ERROR
+
+    async def test_input_unreadable_at_the_cap_fails_the_check(self, db_session, monkeypatch):
+        monkeypatch.setenv(FETCH_MAX_REISSUES_ENV, "2")
+        # The process leg re-issued past the fetch leg: the lineage counts both.
+        row = await _decisive(
+            db_session,
+            fetch_over={"reissue_count": 1},
+            status=ProcessCommandStatus.FAILED,
+            fact_at=datetime.now(UTC),
+            failure_reason="input_unreadable",
+            reissue_count=2,
+        )
+        _wire(db_session, monkeypatch)
+        _quiet(monkeypatch)
+        client = fakeredis.FakeAsyncRedis()
+
+        result = await apply_process_fact(row.command_id, bus_client=client)
+
+        fetch = await self._fetch(db_session, row)
+        assert result["error"] == "blob_unreadable"
+        assert fetch.status == FetchCommandStatus.FAILED
+        assert fetch.failure_reason == "blob_unreadable"
+        assert (await self._item(db_session, row)).health_status == WatchHealthStatus.ERROR
+        assert await client.xlen("content.fetch") == 0
+
+    async def test_a_superseded_occasion_writes_nothing(self, db_session, monkeypatch):
+        row = await _decisive(db_session, **_completed())
+        item = await self._item(db_session, row)
+        fetch = await self._fetch(db_session, row)
+        newer = await create_fetch_command(
+            db_session, item, now=fetch.issued_at + timedelta(minutes=5)
+        )
+        newer.status = FetchCommandStatus.SUCCEEDED
+        newer.applied_at = newer.issued_at
+        await db_session.flush()
+        _wire(db_session, monkeypatch)
+        _quiet(monkeypatch)
+
+        result = await apply_process_fact(row.command_id)
+
+        assert result == {"skipped": True, "reason": "superseded"}
+        assert fetch.status == FetchCommandStatus.SUPERSEDED
+        assert await _revisions(db_session, item.id) == []
+
+    async def test_a_shadow_lineage_is_still_only_judged(self, db_session, monkeypatch):
+        # Issued under shadow, its fetch row closed by local: turning processor
+        # mode on must not let the late answer decide a check already decided.
+        monkeypatch.setenv(EXTRACT_MODE_ENV, "processor")
+        row = await _command(db_session, **_completed())
+        _wire(db_session, monkeypatch)
+
+        result = await apply_process_fact(row.command_id)
+
+        assert result == {"verdict": "match", "detail": None}
+        assert (await self._fetch(db_session, row)).status == FetchCommandStatus.SUCCEEDED
+
+
+class TestDecisiveReaper:
+    """The reaper's give-ups close a decisive check (#326's downtime rule).
+
+    Held, an item waits — *processing delayed*, never ERROR. Past the hard
+    limit or the re-issue cap, the fetch row fails ``processing_timeout`` and
+    the item goes ERROR, so the one-open-command gate lifts.
+    """
+
+    def _stale(self):
+        return datetime.now(UTC) - timedelta(hours=1)
+
+    async def _fetch(self, db_session, row) -> FetchCommand:
+        return await db_session.get(FetchCommand, row.fetch_command_id)
+
+    async def test_held_items_wait_without_error(self, db_session, monkeypatch, caplog):
+        row = await _decisive(db_session, issued_at=self._stale())
+        _quiet(monkeypatch)
+
+        with caplog.at_level(logging.WARNING):
+            result = await reap_process_commands(
+                session=db_session, bus_client=fakeredis.FakeAsyncRedis()
+            )
+
+        assert result["held"] == 1
+        item = await db_session.get(WatchedItem, row.watched_item_id)
+        assert item.health_status != WatchHealthStatus.ERROR
+        assert (await self._fetch(db_session, row)).status == FetchCommandStatus.PROCESSING
+        (line,) = [r for r in caplog.records if "processing delayed" in r.getMessage()]
+        assert line.watched_item_ids == [str(row.watched_item_id)]
+
+    async def test_the_hard_limit_fails_the_check(self, db_session, monkeypatch):
+        monkeypatch.setenv(PROCESS_COMMAND_HARD_LIMIT_ENV, "7200")
+        row = await _decisive(db_session, issued_at=datetime.now(UTC) - timedelta(hours=3))
+        _quiet(monkeypatch)
+
+        result = await reap_process_commands(
+            session=db_session, bus_client=fakeredis.FakeAsyncRedis()
+        )
+
+        fetch = await self._fetch(db_session, row)
+        assert result["hard_limited"] == 1
+        assert row.status == ProcessCommandStatus.EXPIRED
+        assert fetch.status == FetchCommandStatus.FAILED
+        assert fetch.failure_reason == "processing_timeout"
+        assert fetch.applied_at is not None
+        item = await db_session.get(WatchedItem, row.watched_item_id)
+        assert item.health_status == WatchHealthStatus.ERROR
+        (event,) = await _audits(db_session, EventType.CHECK_EXTRACTION_FAILED)
+        assert event.payload["reason"] == "processing_timeout"
+
+    async def test_the_re_issue_cap_fails_the_check(self, db_session, monkeypatch):
+        monkeypatch.setenv(FETCH_MAX_REISSUES_ENV, "2")
+        await _command(db_session, issued_at=datetime.now(UTC), **_completed())  # read past
+        row = await _decisive(db_session, issued_at=self._stale(), reissue_count=2)
+        _quiet(monkeypatch)
+
+        result = await reap_process_commands(
+            session=db_session, bus_client=fakeredis.FakeAsyncRedis()
+        )
+
+        assert result["capped"] == 1
+        assert (await self._fetch(db_session, row)).failure_reason == "processing_timeout"
+
+
+class TestProcessorEndToEnd:
+    """Blob applied → command → fake processor → fact → the check decided (#326)."""
+
+    HTML = b"<html><body><main>Board meets Tuesday</main></body></html>"
+    HTML_CHANGED = b"<html><body><main>Board meets Thursday</main></body></html>"
+    SPECS = [{"extraction": {"algorithm": "css", "selector": "main"}, "schema_version": 1}]
+
+    async def _occasion(self, db_session, monkeypatch, wi, html, client):
+        fetch = await create_fetch_command(db_session, wi, now=datetime.now(UTC))
+        fetch.status = FetchCommandStatus.IN_FLIGHT
+        fetch.published_at = fetch.fact_at = datetime.now(UTC)
+        fetch.blob_uri = "gs://co-gcs-blobs/blobs/never-read.bin"
+        fetch.content_fingerprint = hashlib.sha256(html).hexdigest()
+        fetch.media_type = "text/html"
+        await db_session.flush()
+        result = await apply_fetch_blob(fetch.command_id, bus_client=client)
+        assert "processing" in result
+        return fetch
+
+    def _answer(self, command, html):
+        extractor = ServiceRegistry().get_extractor(command.media_type)
+        outcome = _extract_and_fingerprint(html, [command.source_spec], extractor=extractor)
+        event = ProcessingCompleteEmit(
+            occurred_at=datetime.now(UTC),
+            command_id=command.command_id,
+            info_source_id=command.info_source_id,
+            empty=False,
+            output_digest=outcome.content_fingerprint,
+            output_uri="gs://co-gcs-processor/blobs/x.bin",
+            output_size_bytes=outcome.content_size_bytes,
+            output_media_type=CANONICAL_TEXT_MEDIA_TYPE,
+            spec_schema_version=outcome.schema_version,
+            processor_version=outcome.processor_version,
+            spec_fingerprint=outcome.spec_fingerprint,
+        )
+        return from_wire(to_wire(event), topic=streams.CONTENT_DERIVED, message_id="1-1")
+
+    async def _latest_command(self, client):
+        ((_, fields),) = (await client.xrevrange(streams.CONTENT_PROCESS, count=1))[:1]
+        frame = {k.decode(): v.decode() for k, v in fields.items()}
+        return from_wire(frame, topic=streams.CONTENT_PROCESS).payload
+
+    async def test_baseline_then_a_change(self, db_session, monkeypatch):
+        monkeypatch.setenv(EXTRACT_MODE_ENV, "processor")
+        _wire(db_session, monkeypatch)
+        monkeypatch.setattr(fc_mod, "get_session_factory", pc_mod.get_session_factory)
+        change = _quiet(monkeypatch)
+        client = fakeredis.FakeAsyncRedis()
+        wi = await make_watched_item(
+            db_session, primary_url="https://lcb.wa.gov/boardmeetings", source_specs=self.SPECS
+        )
+
+        async def _apply_now(command_id):
+            await apply_process_fact(command_id, bus_client=client)
+
+        for html in (self.HTML, self.HTML_CHANGED):
+            fetch = await self._occasion(db_session, monkeypatch, wi, html, client)
+            command = await self._latest_command(client)
+            await process_derived_message(db_session, self._answer(command, html), defer=_apply_now)
+            assert fetch.status == FetchCommandStatus.SUCCEEDED
+
+        baseline, changed = await _revisions(db_session, wi.id)
+        local = _extract_and_fingerprint(self.HTML_CHANGED, self.SPECS)
+        # The processor's digest is the stored fingerprint, byte for byte.
+        assert changed.content_fingerprint == local.content_fingerprint
+        assert wi.health_status == WatchHealthStatus.OK
+        change.assert_awaited_once()
+        assert await get_open_command(db_session, wi.id) is None

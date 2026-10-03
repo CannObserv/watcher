@@ -127,6 +127,12 @@ class TestTemplateVariables:
         assert var is not None, "TEMPLATE_VARIABLES missing change_url"
         assert var.scope == "change_detected"
 
+    def test_extraction_changed_is_change_detected_scoped(self):
+        """#326: a user template can carry Option A's label as the default body does."""
+        var = next((v for v in TEMPLATE_VARIABLES if v.name == "extraction_changed"), None)
+        assert var is not None, "TEMPLATE_VARIABLES missing extraction_changed"
+        assert var.scope == "change_detected"
+
     def test_removed_diff_variables_absent(self):
         """The diff/significance/summary variables were removed in #221."""
         names = {v.name for v in TEMPLATE_VARIABLES}

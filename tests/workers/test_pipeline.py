@@ -23,16 +23,19 @@ from co_core.pure.extract.html import HtmlExtractor
 from co_core.pure.extract.pdf import PdfExtractor
 from sqlalchemy import select
 
+from src.core.models.audit_log import AuditLog, EventType
 from src.core.models.change_revision import ChangeRevision
 from src.core.models.pending_archiver_sync import PendingArchiverSync
 from src.core.validators import EXTRACTION_GENERATION, LOCAL_EXTRACTION_GENERATION
 from src.workers.pipeline import (
     BlobProvenance,
     ExtractionError,
+    ExtractionOutcome,
     WatchedItemResult,
     _extract_and_fingerprint,
     _extract_with_spec,
     _extraction_config_from_spec,
+    apply_extraction_outcome,
     process_watched_item,
 )
 from tests.conftest import make_watched_item
@@ -1049,3 +1052,196 @@ class TestResultCarriesTheLocalAnswer:
         assert announced_hit.cache_hit is True
         assert announced_hit.content_fingerprint == changed.content_fingerprint
         assert announced_hit.spec_fingerprint == expected_spec
+
+
+@pytest.mark.integration
+class TestOptionA:
+    """D6: a fingerprint move the extractor caused is not a content change (#326).
+
+    The outcome is applied as the processor reports it (``apply_extraction_
+    outcome``), so these tests hand it the identity fields directly. Spec
+    identity is compared against the previous *revision*; processor identity
+    against ``WatchedItem.processor_version`` read before the outcome moves it
+    — an equal digest under a new version refreshes the item, never the
+    revision, so the revision's own version can be stale.
+    """
+
+    SPEC_FP = "spec1:sha256:" + "11" * 32
+    OTHER_SPEC_FP = "spec1:sha256:" + "22" * 32
+    BASE_FP = "sha256:" + "aa" * 32
+    NEXT_FP = "sha256:" + "bb" * 32
+
+    def _outcome(self, fingerprint, *, spec=SPEC_FP, version="0.19.7+1"):
+        return ExtractionOutcome(
+            content_fingerprint=fingerprint,
+            content_size_bytes=10,
+            schema_version=1,
+            spec_fingerprint=spec,
+            processor_version=version,
+        )
+
+    async def _baselined(self, db_session, name, **outcome_kwargs):
+        wi = await make_watched_item(db_session, name=name, source_specs=[_SPEC_FULL_PAGE])
+        await db_session.flush()
+        await apply_extraction_outcome(
+            db_session, wi, self._outcome(self.BASE_FP, **outcome_kwargs), blob=_BLOB
+        )
+        await db_session.flush()
+        return wi
+
+    async def _revisions(self, db_session, wi):
+        stmt = (
+            select(ChangeRevision)
+            .where(ChangeRevision.watched_item_id == wi.id)
+            .order_by(ChangeRevision.captured_at)
+        )
+        return list((await db_session.execute(stmt)).scalars().all())
+
+    async def _rebaselined_audits(self, db_session, wi):
+        stmt = select(AuditLog).where(
+            AuditLog.event_type == EventType.CHECK_REBASELINED,
+            AuditLog.payload["watched_item_id"].astext == str(wi.id),
+        )
+        return list((await db_session.execute(stmt)).scalars().all())
+
+    async def test_baseline_records_the_items_processor_version(self, db_session):
+        wi = await self._baselined(db_session, "OptionA baseline")
+        assert wi.processor_version == "0.19.7+1"
+
+    async def test_local_extraction_records_its_own_generation(self, db_session):
+        wi = await make_watched_item(
+            db_session, name="OptionA local", source_specs=[_SPEC_FULL_PAGE]
+        )
+        await db_session.flush()
+        await process_watched_item(db_session, wi, raw_content=_HTML, blob=_BLOB)
+        assert wi.processor_version == EXTRACTION_GENERATION
+
+    @patch("src.workers.pipeline.dispatch_event_notifications", new_callable=AsyncMock)
+    async def test_a_processor_change_alone_re_baselines_silently(self, dispatch, db_session):
+        wi = await self._baselined(db_session, "OptionA processor")
+        before = wi.last_changed_at
+
+        result = await apply_extraction_outcome(
+            db_session, wi, self._outcome(self.NEXT_FP, version="0.20.0+1"), blob=_BLOB
+        )
+        await db_session.flush()
+
+        assert result.rebaselined is True
+        assert result.changed is False
+        assert result.notifications_dispatched == 0
+        dispatch.assert_not_awaited()
+        _baseline, rebaseline = await self._revisions(db_session, wi)
+        assert rebaseline.content_fingerprint == self.NEXT_FP
+        assert rebaseline.processor_version == "0.20.0+1"
+        assert wi.processor_version == "0.20.0+1"
+        # Not a content change: the item's change clock does not move.
+        assert wi.last_changed_at == before
+        (event,) = await self._rebaselined_audits(db_session, wi)
+        assert event.payload["previous_processor_version"] == "0.19.7+1"
+        assert event.payload["processor_version"] == "0.20.0+1"
+        assert event.payload["change_revision_id"] == str(rebaseline.id)
+
+    @patch("src.workers.pipeline.dispatch_event_notifications", new_callable=AsyncMock)
+    async def test_a_re_baseline_is_still_announced_to_archiver(self, _dispatch, db_session):
+        # The derived text moved, so the registry's record of it must move too;
+        # only the notification is withheld.
+        wi = await self._baselined(db_session, "OptionA outbox")
+        await apply_extraction_outcome(
+            db_session, wi, self._outcome(self.NEXT_FP, version="0.20.0+1"), blob=_BLOB
+        )
+        await db_session.flush()
+        _baseline, rebaseline = await self._revisions(db_session, wi)
+        stmt = select(PendingArchiverSync).where(
+            PendingArchiverSync.change_revision_id == rebaseline.id
+        )
+        assert (await db_session.execute(stmt)).scalar_one_or_none() is not None
+
+    @patch("src.workers.pipeline.dispatch_event_notifications", new_callable=AsyncMock)
+    async def test_a_spec_change_notifies_with_a_label(self, dispatch, db_session):
+        wi = await self._baselined(db_session, "OptionA spec")
+
+        result = await apply_extraction_outcome(
+            db_session, wi, self._outcome(self.NEXT_FP, spec=self.OTHER_SPEC_FP), blob=_BLOB
+        )
+
+        assert result.changed is True
+        event = dispatch.call_args.kwargs["event"]
+        assert event.metadata["extraction_changed"] == "spec"
+
+    @patch("src.workers.pipeline.dispatch_event_notifications", new_callable=AsyncMock)
+    async def test_a_spec_change_beside_a_processor_change_still_notifies(
+        self, dispatch, db_session
+    ):
+        # Re-baselining here would let a spec edit mask a coincident page change.
+        wi = await self._baselined(db_session, "OptionA both")
+
+        result = await apply_extraction_outcome(
+            db_session,
+            wi,
+            self._outcome(self.NEXT_FP, spec=self.OTHER_SPEC_FP, version="0.20.0+1"),
+            blob=_BLOB,
+        )
+
+        assert result.changed is True
+        assert dispatch.call_args.kwargs["event"].metadata["extraction_changed"] == "spec"
+        assert await self._rebaselined_audits(db_session, wi) == []
+
+    @patch("src.workers.pipeline.dispatch_event_notifications", new_callable=AsyncMock)
+    async def test_a_content_change_carries_no_label(self, dispatch, db_session):
+        wi = await self._baselined(db_session, "OptionA content")
+
+        result = await apply_extraction_outcome(
+            db_session, wi, self._outcome(self.NEXT_FP), blob=_BLOB
+        )
+
+        assert result.changed is True
+        assert dispatch.call_args.kwargs["event"].metadata["extraction_changed"] is None
+
+    @patch("src.workers.pipeline.dispatch_event_notifications", new_callable=AsyncMock)
+    async def test_unknown_identity_triggers_neither(self, dispatch, db_session):
+        # NULL on either side means unknown: notify as before Option A.
+        wi = await self._baselined(db_session, "OptionA unknown", spec=None)
+        wi.processor_version = None
+
+        result = await apply_extraction_outcome(
+            db_session,
+            wi,
+            self._outcome(self.NEXT_FP, spec=self.OTHER_SPEC_FP, version="0.20.0+1"),
+            blob=_BLOB,
+        )
+
+        assert result.changed is True
+        assert dispatch.call_args.kwargs["event"].metadata["extraction_changed"] is None
+
+    @patch("src.workers.pipeline.dispatch_event_notifications", new_callable=AsyncMock)
+    async def test_an_equal_digest_refreshes_the_items_version_only(self, dispatch, db_session):
+        wi = await self._baselined(db_session, "OptionA refresh")
+
+        result = await apply_extraction_outcome(
+            db_session, wi, self._outcome(self.BASE_FP, version="0.20.0+1"), blob=_BLOB
+        )
+        await db_session.flush()
+
+        assert result.cache_hit is True
+        assert wi.processor_version == "0.20.0+1"
+        (baseline,) = await self._revisions(db_session, wi)
+        # The revision records what wrote it; it is never rewritten.
+        assert baseline.processor_version == "0.19.7+1"
+
+    @patch("src.workers.pipeline.dispatch_event_notifications", new_callable=AsyncMock)
+    async def test_the_comparison_base_is_the_item_not_the_revision(self, dispatch, db_session):
+        # After a refresh the revision still says 0.19.7+1. A change under the
+        # version the item already knows is content, not the upgrade.
+        wi = await self._baselined(db_session, "OptionA base")
+        await apply_extraction_outcome(
+            db_session, wi, self._outcome(self.BASE_FP, version="0.20.0+1"), blob=_BLOB
+        )
+        await db_session.flush()
+
+        result = await apply_extraction_outcome(
+            db_session, wi, self._outcome(self.NEXT_FP, version="0.20.0+1"), blob=_BLOB
+        )
+
+        assert result.changed is True
+        assert result.rebaselined is False
+        dispatch.assert_awaited_once()

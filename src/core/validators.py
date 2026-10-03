@@ -39,7 +39,8 @@ implementation detail):
 3. Nothing stored, or nothing sendable once guarded.
 4. ``validator_source_key`` disagrees with the item's current key: the URL
    moved, the ``source_specs`` were re-announced, or the extraction generation
-   changed (a co-core upgrade, or a bump of ``LOCAL_EXTRACTION_GENERATION``).
+   changed (a co-core upgrade, or a bump of ``LOCAL_EXTRACTION_GENERATION``;
+   processor-decided, the processor's reported version — ``item_generation``).
    One key rather than a clear scattered across every writer of those fields —
    a path that forgets to call a clear is the failure mode that ends in a
    silently stale fingerprint.
@@ -62,6 +63,7 @@ from datetime import datetime, timedelta
 
 from co_core.pure.extract import processor_version
 
+from src.core.extract_mode import ExtractMode, extract_mode
 from src.core.logging import get_logger
 
 logger = get_logger(__name__)
@@ -115,6 +117,26 @@ def extraction_generation() -> str:
 
 EXTRACTION_GENERATION = extraction_generation()
 
+
+def item_generation(watched_item) -> str | None:
+    """The extraction generation an item's validator key is held to (#326).
+
+    While Watcher extracts (``local``, ``shadow``) it is the installed
+    co-core's: an upgrade invalidates every pair with no human step. Once the
+    processor decides, Watcher has no extractor to read a version from, so it
+    is the version the processor last reported for this item
+    (``WatchedItem.processor_version``). The residual is the design's: a
+    processor upgrade is learned on the item's next full fetch, so a 304-ing
+    item inherits its fingerprint until rule 6 or 7 forces one.
+
+    ``None`` before the processor has answered for the item — a real value,
+    which a later report then moves.
+    """
+    if extract_mode() is ExtractMode.PROCESSOR:
+        return watched_item.processor_version
+    return EXTRACTION_GENERATION
+
+
 # Printable US-ASCII and SP. Narrower than RFC 9110 permits, matching the
 # refusal list Replicator applies to a command's ``headers``: this excludes CR,
 # LF, NUL, HTAB and all of obs-text (\x80-\xff), which latin-1 header decoding
@@ -165,7 +187,7 @@ def validator_source_key(
     *,
     effective_url: str,
     source_specs: list | None,
-    generation: str = EXTRACTION_GENERATION,
+    generation: str | None = EXTRACTION_GENERATION,
 ) -> str:
     """Identity of "what these bytes were going to mean" when a pair was stored.
 
@@ -265,6 +287,7 @@ def replayable_validators(
     current_key = validator_source_key(
         effective_url=watched_item.effective_url,
         source_specs=watched_item.source_specs,
+        generation=item_generation(watched_item),
     )
     if watched_item.validator_source_key != current_key:
         return (None, None)
@@ -305,6 +328,7 @@ def record_validators(
     watched_item.validator_source_key = validator_source_key(
         effective_url=watched_item.effective_url,
         source_specs=watched_item.source_specs,
+        generation=item_generation(watched_item),
     )
 
 

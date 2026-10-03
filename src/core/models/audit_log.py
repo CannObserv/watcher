@@ -32,6 +32,10 @@ class EventType:
     # local extraction's. The switch to processor-decided extraction (#326) is
     # gated on there being none across a window that contains a real change.
     CHECK_SHADOW_MISMATCH = "check.shadow_mismatch"
+    # #326, Option A (D6): the fingerprint moved because the extractor did —
+    # a new processor version, the spec unchanged — so the revision is
+    # recorded and announced, and nobody is notified.
+    CHECK_REBASELINED = "check.rebaselined"
     NOTIFICATION_DISPATCHED = "notification.dispatched"
     NOTIFICATION_TEST = "notification.test"
     # #200: every notification target is a NotificationTemplate (any visibility);

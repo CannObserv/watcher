@@ -20,6 +20,7 @@ from co_core.pure.adapters.bus import streams
 from co_core.pure.adapters.bus.envelope import from_wire
 from co_core.pure.models.changes import ContentProcessCommand
 
+from src.core.extract_mode import EXTRACT_MODE_ENV, ExtractMode, extract_mode
 from src.core.fetch_commands import create_fetch_command
 from src.core.models.fetch_command import FetchCommand
 from src.core.models.process_command import (
@@ -31,16 +32,13 @@ from src.core.models.process_command import (
 from src.core.process_commands import (
     DEFAULT_PROCESS_COMMAND_HARD_LIMIT_SECONDS,
     DEFAULT_PROCESS_COMMAND_TIMEOUT_SECONDS,
-    EXTRACT_MODE_ENV,
     PROCESS_COMMAND_HARD_LIMIT_ENV,
     PROCESS_COMMAND_TIMEOUT_ENV,
     PROCESSOR,
-    ExtractMode,
     LocalExtraction,
     UnsendableProcessCommand,
     chain_process_command,
     create_process_command,
-    extract_mode,
     judge_shadow,
     process_command_hard_limit_seconds,
     process_command_timeout_seconds,
@@ -96,11 +94,18 @@ class TestExtractMode:
         monkeypatch.setenv(EXTRACT_MODE_ENV, raw)
         assert extract_mode() is ExtractMode.SHADOW
 
-    @pytest.mark.parametrize("raw", ["processor", "observo", "shdaow", ""])
+    @pytest.mark.parametrize("raw", ["processor", "PROCESSOR", " processor "])
+    def test_reads_processor(self, monkeypatch, raw):
+        # #326: the decisive mode. The design called it `observo`; Processor
+        # replaced Observo, and the value names the service that decides.
+        monkeypatch.setenv(EXTRACT_MODE_ENV, raw)
+        assert extract_mode() is ExtractMode.PROCESSOR
+
+    @pytest.mark.parametrize("raw", ["observo", "shdaow", ""])
     def test_unknown_value_falls_back_to_local_loudly(self, monkeypatch, caplog, raw):
-        # A knob must not wedge the path it governs: an unrecognised value — the
-        # switch's own `processor` included, until #326 builds it — keeps local
-        # extraction deciding, and says so.
+        # A knob must not wedge the path it governs: an unrecognised value —
+        # the design's retired `observo` included — keeps local extraction
+        # deciding, and says so.
         monkeypatch.setenv(EXTRACT_MODE_ENV, raw)
         with caplog.at_level(logging.WARNING):
             assert extract_mode() is ExtractMode.LOCAL
@@ -163,6 +168,24 @@ class TestCreateProcessCommand:
         assert row.local_outcome == LocalOutcome.UNCHANGED
         assert row.local_fingerprint == LOCAL.fingerprint
         assert row.local_spec_fingerprint == LOCAL.spec_fingerprint
+
+    async def test_a_decisive_command_carries_no_local_answer(self, db_session):
+        # #326: in processor mode nothing ran locally, so nothing is recorded.
+        wi, fetch = await _occasion(db_session)
+        row = await create_process_command(db_session, fetch, wi, now=NOW, local=None)
+
+        assert row.local_outcome is None
+        assert row.local_fingerprint is None
+
+    async def test_a_decisive_lineage_inherits_the_fetch_re_issue_count(self, db_session):
+        # The cap is per lineage, and a decisive lineage spans both legs: a
+        # fetch already re-issued twice leaves the process leg one turn, not 3.
+        wi, fetch = await _occasion(db_session)
+        fetch.reissue_count = 2
+        row = await create_process_command(
+            db_session, fetch, wi, now=NOW, local=None, reissue_count=fetch.reissue_count
+        )
+        assert row.reissue_count == 2
 
     async def test_resolves_the_dispatch_essence(self, db_session):
         # cannobserv#486 D1: the processor cannot run the URL tiebreaker — its

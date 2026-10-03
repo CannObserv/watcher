@@ -22,14 +22,13 @@ This module is the issuer half, built to ``fetch_commands``' discipline:
   (``UnsendableProcessCommand``) rather than at publish, where an unbuildable
   row would fail the sweep every minute forever.
 
-``WATCHER_EXTRACT_MODE`` decides whether any of this runs. ``local`` (the
-default) issues nothing; ``shadow`` issues a command for every applied blob while
-local extraction keeps deciding, and the comparator judges the processor's
-answers against it. The decisive mode is #326's.
+``WATCHER_EXTRACT_MODE`` (``src/core/extract_mode.py``) decides whether any
+of this runs. ``local`` (the default) issues nothing; ``shadow`` issues a
+command for every applied blob while local extraction keeps deciding, and the
+comparator judges the processor's answers against it; ``processor`` issues one
+in place of local extraction, and its answer decides (#326).
 """
 
-import enum
-import os
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
@@ -66,42 +65,16 @@ PROCESSOR = "extract"
 # reason means the processor never judged what local extraction judged.
 EXTRACTION_ERROR_REASON = "extraction_error"
 
-EXTRACT_MODE_ENV = "WATCHER_EXTRACT_MODE"
+# The one terminal reason that says the *input* is gone, not that the bytes
+# were judged: the raw blob expired or was never readable. Processor-decided,
+# it re-fetches under the #275 cap (#326); every other terminal reason is the
+# extraction-failure path.
+INPUT_UNREADABLE_REASON = "input_unreadable"
 
 PROCESS_COMMAND_TIMEOUT_ENV = "WATCHER_PROCESS_COMMAND_TIMEOUT_SECONDS"
 DEFAULT_PROCESS_COMMAND_TIMEOUT_SECONDS = 1800.0
 PROCESS_COMMAND_HARD_LIMIT_ENV = "WATCHER_PROCESS_COMMAND_HARD_LIMIT_SECONDS"
 DEFAULT_PROCESS_COMMAND_HARD_LIMIT_SECONDS = 86400.0
-
-
-class ExtractMode(enum.StrEnum):
-    """Who decides a change: local extraction, with or without the processor shadowing it."""
-
-    LOCAL = "local"
-    SHADOW = "shadow"
-
-
-def extract_mode() -> ExtractMode:
-    """The configured ``WATCHER_EXTRACT_MODE``; ``local`` when unset.
-
-    An unrecognised value falls back to ``local`` with a warning rather than
-    raising: the knob is read on the apply path, and **a knob must not be able
-    to wedge the path it governs** (``env_number``'s rule). That includes
-    ``processor`` — the decisive mode is #326's, and a value naming it before it
-    exists must leave local extraction deciding, loudly.
-    """
-    raw = os.environ.get(EXTRACT_MODE_ENV)
-    if raw is None:
-        return ExtractMode.LOCAL
-    try:
-        return ExtractMode(raw.strip().lower())
-    except ValueError:
-        logger.warning(
-            "unrecognised %s — local extraction keeps deciding",
-            EXTRACT_MODE_ENV,
-            extra={"value": raw, "accepted": [m.value for m in ExtractMode]},
-        )
-        return ExtractMode.LOCAL
 
 
 def process_command_timeout_seconds() -> float:
@@ -180,12 +153,18 @@ async def create_process_command(
     *,
     now: datetime,
     local: LocalExtraction | None,
+    reissue_count: int = 0,
 ) -> ProcessCommand:
     """Persist the spec[0] command for a fetch occasion (caller commits before publishing).
 
     A new intent. The essence is resolved **here**, from the item as the apply
     path left it (the media type is seeded from this occasion's header before
     local extraction runs), so local and processor dispatch on the same value.
+
+    ``local`` is shadow mode's yardstick; a decisive command (#326) has none.
+    ``reissue_count`` seeds the lineage's counter: a decisive lineage spans
+    both legs, so it starts where the fetch leg's left off and the shared
+    ``WATCHER_FETCH_MAX_REISSUES`` caps the whole of it.
 
     Raises ``UnsendableProcessCommand`` when the occasion has nothing to send —
     no spec, no blob — or the blob fact's digest is not the bare hex the
@@ -212,7 +191,7 @@ async def create_process_command(
             ),
             status=ProcessCommandStatus.PENDING_PUBLISH,
             issued_at=now,
-            reissue_count=0,
+            reissue_count=reissue_count,
             local_outcome=local.outcome if local else None,
             local_fingerprint=local.fingerprint if local else None,
             local_spec_fingerprint=local.spec_fingerprint if local else None,

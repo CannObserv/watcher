@@ -7,7 +7,9 @@ import pytest
 from sqlalchemy import select, text
 from ulid import ULID
 
+from src.core.fetch_commands import create_fetch_command
 from src.core.models.audit_log import AuditLog, EventType
+from src.core.models.fetch_command import FetchCommandStatus
 from src.core.models.watched_item import WatchedItem
 from tests.conftest import make_watched_item
 
@@ -1267,6 +1269,25 @@ class TestCheckNow:
         # two-second wait from a stall — the message must say when it clears.
         assert "issued" in detail and "s ago" in detail
         assert "1800s" in detail  # the reaper timeout, quoted from one place
+
+    async def test_409_while_the_processor_has_the_check(self, client, db_session):
+        """#326: a PROCESSING row is open too — and the wait is the processor's.
+
+        The fetch reaper's timeout does not govern it, so quoting that would be
+        wrong; the message says where the check is instead.
+        """
+        wi = await _make_watched_item(db_session, name="Processing")
+        wi.effective_url = "https://example.com"
+        row = await create_fetch_command(db_session, wi, now=datetime.now(UTC))
+        row.status = FetchCommandStatus.PROCESSING
+        await db_session.commit()
+
+        response = await client.post(f"/api/v1/watched-items/{wi.id}/check-now")
+
+        assert response.status_code == 409
+        detail = response.json()["detail"].lower()
+        assert "awaiting the processor" in detail
+        assert "issued" in detail and "s ago" in detail
 
     async def test_409_when_domain_suspended(self, client, db_session):
         """CR-16: parity with pause — the task skips a suspended item too."""

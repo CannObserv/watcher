@@ -49,6 +49,9 @@ class FetchCommandStatus(enum.StrEnum):
 
     PENDING_PUBLISH = "pending_publish"  # row committed, XADD not yet confirmed
     IN_FLIGHT = "in_flight"  # published; awaiting a fact
+    # Processor mode (#326): the blob is applied and its content.process
+    # command issued; the derived fact closes the row.
+    PROCESSING = "processing"
     SUCCEEDED = "succeeded"  # blob applied through the pipeline
     NOT_MODIFIED = "not_modified"  # origin answered 304; closed, no blob (#249)
     FAILED = "failed"  # terminal fetch_failed (or re-issue cap hit)
@@ -78,6 +81,12 @@ INVALID_REQUEST_OPTIONS_REASON = "invalid_request_options"
 # build cannot read — not an origin that stalled.
 BLOB_UNREADABLE_REASON = "blob_unreadable"
 
+# Watcher's own reasons for a row the processing leg closed (#326): the
+# processor answered that it could not derive the text — a terminal failure, or
+# empty on every spec — or never answered at all within the lineage's limits.
+PROCESSING_FAILED_REASON = "processing_failed"
+PROCESSING_TIMEOUT_REASON = "processing_timeout"
+
 # The statuses that make a command "open": they gate scheduling (no new issue
 # while one is open) and are what the reaper scans.
 #
@@ -85,7 +94,15 @@ BLOB_UNREADABLE_REASON = "blob_unreadable"
 # #249) is closed by default rather than by remembering to exclude it. Keep it
 # that way: the failure mode of the inverse spelling is an item whose scheduling
 # gate never lifts.
-OPEN_STATUSES = (FetchCommandStatus.PENDING_PUBLISH, FetchCommandStatus.IN_FLIGHT)
+#
+# ``PROCESSING`` is open (#326): the check is not over until the derived fact
+# lands, and the process reaper — not this table's — is what closes a row the
+# processor never answers.
+OPEN_STATUSES = (
+    FetchCommandStatus.PENDING_PUBLISH,
+    FetchCommandStatus.IN_FLIGHT,
+    FetchCommandStatus.PROCESSING,
+)
 
 
 class FetchCommand(Base, TimestampMixin):
@@ -97,7 +114,7 @@ class FetchCommand(Base, TimestampMixin):
         Index(
             "ix_fetch_commands_open",
             "watched_item_id",
-            postgresql_where=text("status IN ('pending_publish', 'in_flight')"),
+            postgresql_where=text("status IN ('pending_publish', 'in_flight', 'processing')"),
         ),
     )
 

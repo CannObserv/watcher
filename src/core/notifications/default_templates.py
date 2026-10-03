@@ -61,6 +61,12 @@ TEMPLATE_VARIABLES: list[TemplateVariable] = [
     TemplateVariable(
         "change_url", "str", "WatchedItem dashboard URL for this change", "change_detected"
     ),
+    TemplateVariable(
+        "extraction_changed",
+        "str | None",
+        '"spec" when the source spec that matched changed with the content; otherwise empty',
+        "change_detected",
+    ),
     # watch_error-only
     TemplateVariable("status_code", "int", "HTTP status code returned", "watch_error"),
     # Contextual — populated when relevant metadata exists on the watch

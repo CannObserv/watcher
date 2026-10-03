@@ -16,7 +16,8 @@ import pytest
 from sqlalchemy import select
 
 import src.workers.fetch_commands as fc_mod
-import src.workers.process_commands as pc_mod
+import src.workers.process_issue as pi_mod
+from src.core.extract_mode import EXTRACT_MODE_ENV
 from src.core.fetch_commands import create_fetch_command, get_open_command
 from src.core.models.audit_log import AuditLog, EventType
 from src.core.models.domain import Domain
@@ -25,7 +26,6 @@ from src.core.models.pending_archiver_sync import PendingArchiverSync
 from src.core.models.process_command import LocalOutcome, ProcessCommand, ProcessCommandStatus
 from src.core.models.watched_item import WatchHealthStatus
 from src.core.notifications.events import WatchEventType
-from src.core.process_commands import EXTRACT_MODE_ENV
 from src.core.registry import ServiceRegistry
 from src.core.validators import CONDITIONAL_GET_ENV, validator_source_key
 from src.workers.fetch_commands import (
@@ -1315,13 +1315,13 @@ class TestShadowIssue:
         _, row = await self._row(db_session, tmp_path, monkeypatch, specs=[])
         _wire(db_session, monkeypatch, raises=ExtractionError("no source_specs"))
 
-        with caplog.at_level(logging.WARNING, logger="src.workers.process_commands"):
+        with caplog.at_level(logging.WARNING, logger="src.workers.process_issue"):
             await apply_fetch_blob(
                 row.command_id, registry=ServiceRegistry(), bus_client=fakeredis.FakeAsyncRedis()
             )
 
         assert await self._process_rows(db_session, row) == []
-        assert not [r for r in caplog.records if r.name == "src.workers.process_commands"]
+        assert not [r for r in caplog.records if r.name == "src.workers.process_issue"]
 
     async def test_a_shadow_failure_never_fails_the_apply(self, db_session, monkeypatch, tmp_path):
         wi, row = await self._row(db_session, tmp_path, monkeypatch)
@@ -1330,7 +1330,7 @@ class TestShadowIssue:
         async def _boom(*args, **kwargs):
             raise RuntimeError("shadow leg bug")
 
-        monkeypatch.setattr(pc_mod, "create_process_command", _boom)
+        monkeypatch.setattr(pi_mod, "create_process_command", _boom)
 
         result = await apply_fetch_blob(
             row.command_id, registry=ServiceRegistry(), bus_client=fakeredis.FakeAsyncRedis()
@@ -1350,7 +1350,7 @@ class TestShadowIssue:
         async def _down(*args, **kwargs):
             raise ConnectionError("broker down")
 
-        monkeypatch.setattr(pc_mod, "publish_process_command", _down)
+        monkeypatch.setattr(pi_mod, "publish_process_command", _down)
 
         result = await apply_fetch_blob(
             row.command_id, registry=ServiceRegistry(), bus_client=client
@@ -1359,3 +1359,138 @@ class TestShadowIssue:
         assert result["applied"] is True
         (command,) = await self._process_rows(db_session, row)
         assert command.status == ProcessCommandStatus.PENDING_PUBLISH
+
+
+class TestProcessorModeBlobApply:
+    """Under ``WATCHER_EXTRACT_MODE=processor`` the blob fact no longer decides (#326).
+
+    Watcher reads no raw blob and extracts nothing: the apply records what the
+    fetch fact itself says, moves the row to ``PROCESSING`` — still open, so
+    nothing is issued behind it — and hands spec[0] to the processor. The
+    derived fact closes the check (``apply_process_fact``).
+    """
+
+    SPECS = [{"extraction": {"algorithm": "full_page"}, "schema_version": 1}]
+
+    async def _row(self, db_session, tmp_path, monkeypatch, *, specs=SPECS, **fact_over):
+        monkeypatch.setenv(EXTRACT_MODE_ENV, "processor")
+        wi, row = await _row_with_fact(db_session, tmp_path, **fact_over)
+        # Nothing exists at the URI: a read would raise BlobUnreadable.
+        row.blob_uri = f"file://{tmp_path}/never-read.bin"
+        wi.source_specs = specs
+        await db_session.flush()
+        return wi, row
+
+    async def _process_rows(self, db_session, fetch_row) -> list[ProcessCommand]:
+        stmt = select(ProcessCommand).where(ProcessCommand.fetch_command_id == fetch_row.command_id)
+        return list((await db_session.execute(stmt)).scalars().all())
+
+    async def test_hands_spec_zero_to_the_processor(self, db_session, monkeypatch, tmp_path):
+        wi, row = await self._row(db_session, tmp_path, monkeypatch, reissue_count=1)
+        stub = _wire(db_session, monkeypatch)
+        client = fakeredis.FakeAsyncRedis()
+
+        result = await apply_fetch_blob(row.command_id, bus_client=client)
+
+        (command,) = await self._process_rows(db_session, row)
+        assert result == {"processing": command.command_id}
+        assert stub.await_count == 0  # no local extraction
+        assert row.status == FetchCommandStatus.PROCESSING
+        assert row.applied_at is None
+        assert command.status == ProcessCommandStatus.IN_FLIGHT
+        assert command.spec_index == 0
+        assert command.local_outcome is None
+        assert command.reissue_count == 1  # the lineage spans both legs
+        assert await client.xlen("content.process") == 1
+
+    async def test_the_check_stays_open_until_the_derived_fact(
+        self, db_session, monkeypatch, tmp_path
+    ):
+        wi, row = await self._row(db_session, tmp_path, monkeypatch)
+        _wire(db_session, monkeypatch)
+
+        await apply_fetch_blob(row.command_id, bus_client=fakeredis.FakeAsyncRedis())
+
+        assert await get_open_command(db_session, wi.id) is row
+        # Health and the check clock belong to the outcome, which is not in yet.
+        assert wi.health_status == WatchHealthStatus.UNKNOWN
+        assert wi.last_checked_at is None
+        assert await _audit_events(db_session, EventType.CHECK_SNAPSHOT_CREATED) == []
+
+    async def test_records_the_fetch_but_not_yet_the_validators(
+        self, db_session, monkeypatch, tmp_path
+    ):
+        # Bytes arrived — that is the fetch fact's to say. The pair is stored
+        # with the outcome it vouches for, keyed to the extractor that produced
+        # it, when the derived fact closes the row.
+        wi, row = await self._row(
+            db_session, tmp_path, monkeypatch, etag='"v2"', blob_expires_at=NOW + timedelta(days=7)
+        )
+        _wire(db_session, monkeypatch)
+
+        await apply_fetch_blob(row.command_id, bus_client=fakeredis.FakeAsyncRedis())
+
+        assert wi.last_full_fetch_at is not None
+        assert wi.blob_expires_at == NOW + timedelta(days=7)
+        assert wi.etag is None
+        assert wi.validator_source_key is None
+
+    async def test_a_duplicate_defer_is_a_no_op(self, db_session, monkeypatch, tmp_path):
+        _, row = await self._row(db_session, tmp_path, monkeypatch)
+        _wire(db_session, monkeypatch)
+        client = fakeredis.FakeAsyncRedis()
+
+        await apply_fetch_blob(row.command_id, bus_client=client)
+        second = await apply_fetch_blob(row.command_id, bus_client=client)
+
+        assert second == {"skipped": True, "reason": "status_processing"}
+        assert len(await self._process_rows(db_session, row)) == 1
+
+    async def test_a_specless_item_fails_at_once(self, db_session, monkeypatch, tmp_path):
+        # Nothing to send (#260): the extraction-failure path, without a
+        # round trip — and the row closes, so the gate lifts.
+        wi, row = await self._row(db_session, tmp_path, monkeypatch, specs=[])
+        _wire(db_session, monkeypatch)
+        monkeypatch.setattr(fc_mod, "dispatch_event_notifications", AsyncMock(return_value=0))
+
+        result = await apply_fetch_blob(row.command_id, bus_client=fakeredis.FakeAsyncRedis())
+
+        assert result == {"error": "extraction_failed"}
+        assert row.status == FetchCommandStatus.FAILED
+        assert row.failure_reason == "processing_failed"
+        assert "source_specs" in row.failure_detail
+        assert wi.health_status == WatchHealthStatus.ERROR
+        assert await self._process_rows(db_session, row) == []
+        (event,) = await _audit_events(db_session, EventType.CHECK_EXTRACTION_FAILED)
+        assert event.payload["reason"] == "processing_failed"
+
+    async def test_a_publish_failure_leaves_both_rows_for_the_sweep(
+        self, db_session, monkeypatch, tmp_path
+    ):
+        _, row = await self._row(db_session, tmp_path, monkeypatch)
+        _wire(db_session, monkeypatch)
+
+        async def _down(*args, **kwargs):
+            raise ConnectionError("broker down")
+
+        monkeypatch.setattr(pi_mod, "publish_process_command", _down)
+
+        await apply_fetch_blob(row.command_id, bus_client=fakeredis.FakeAsyncRedis())
+
+        (command,) = await self._process_rows(db_session, row)
+        assert command.status == ProcessCommandStatus.PENDING_PUBLISH
+        assert row.status == FetchCommandStatus.PROCESSING
+
+    async def test_a_probing_item_still_resolves_from_the_fetch_fact(
+        self, db_session, monkeypatch, tmp_path
+    ):
+        wi, row = await self._row(
+            db_session, tmp_path, monkeypatch, final_url="https://lcb.wa.gov/notices/"
+        )
+        wi.health_status = WatchHealthStatus.PROBING
+        await db_session.flush()
+        _wire(db_session, monkeypatch)
+
+        await apply_fetch_blob(row.command_id, bus_client=fakeredis.FakeAsyncRedis())
+
+        assert wi.effective_url == "https://lcb.wa.gov/notices/"

@@ -181,6 +181,14 @@ class WatchedItem(Base, TimestampMixin):
     blob_expires_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True, default=None
     )
+    # The extraction identity of this item's latest successful outcome (#326):
+    # the processor's reported ``processor_version``, or local's generation
+    # while Watcher extracts. Option A's comparison base — read before an
+    # outcome moves it — and, processor-decided, the generation half of
+    # ``validator_source_key``. Unlike ``ChangeRevision.processor_version`` it
+    # moves on an unchanged outcome too, so an upgrade that reproduced the same
+    # text is learned without a revision.
+    processor_version: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
     last_changed_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True, default=None
     )

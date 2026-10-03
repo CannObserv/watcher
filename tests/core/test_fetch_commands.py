@@ -30,9 +30,10 @@ from src.core.fetch_commands import (
     create_fetch_command,
     fetch_command_timeout_seconds,
     fetch_max_reissues,
+    get_open_command,
     publish_fetch_command,
 )
-from src.core.models.fetch_command import FetchCommand, FetchCommandStatus
+from src.core.models.fetch_command import OPEN_STATUSES, FetchCommand, FetchCommandStatus
 from src.core.validators import CONDITIONAL_GET_ENV, validator_source_key
 from tests.conftest import make_watched_item
 
@@ -254,6 +255,21 @@ class TestValidatorReplay:
         (message,) = await _decode_commands(client)
         command = message.payload
         assert command.headers["if-none-match"] == 'W/"v2"'
+
+
+@_integration
+class TestOpenCommandGate:
+    async def test_a_command_awaiting_the_processor_is_open(self, db_session):
+        # #326: in processor mode the blob fact no longer closes the row — the
+        # derived fact does. Until then the item has a check in progress, and
+        # a second fetch must not be issued behind it.
+        assert FetchCommandStatus.PROCESSING in OPEN_STATUSES
+        wi = await make_watched_item(db_session, primary_url="https://lcb.wa.gov/notices")
+        row = await create_fetch_command(db_session, wi, now=NOW)
+        row.status = FetchCommandStatus.PROCESSING
+        await db_session.flush()
+
+        assert await get_open_command(db_session, wi.id) is row
 
 
 class TestFetchMaxReissues:

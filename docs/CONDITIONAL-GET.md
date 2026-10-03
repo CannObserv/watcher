@@ -93,6 +93,15 @@ invalidate every stored validator by itself — one full fetch per item. Bump
 (how chunks are joined, media-type dispatch, spec fallback order), which
 co-core's version cannot see.
 
+**Processor-decided, the generation is the item's** (#326, `item_generation`):
+with `WATCHER_EXTRACT_MODE=processor` Watcher runs no extractor, so the key's
+generation half is `WatchedItem.processor_version` — what the processor last
+reported for the item. The pair is recorded when the derived fact closes the
+check, keyed to the extractor that produced the fingerprint it vouches for.
+Residual (the design's): a processor upgrade is learned on the item's next full
+fetch, so a 304-ing item inherits its fingerprint until rule 6 or 7 forces one.
+Switching modes moves every key once — one full fetch per item.
+
 **A forced full fetch is lineage.** `fetch_commands.forced_full_fetch` records
 that an occasion was asked for as an unconditional re-read, and `_reissue`
 carries it onto the replacement alongside `intent_id`. Without it, a check-now

@@ -37,7 +37,11 @@ stops at the half-life between the two); the
 conditional-GET validator state `etag` / `last_modified` / `validator_source_key`
 (#269 — the pair the next command replays and the identity of what the bytes were
 going to mean when it was stored; see
-[docs/CONDITIONAL-GET.md](CONDITIONAL-GET.md)); and its
+[docs/CONDITIONAL-GET.md](CONDITIONAL-GET.md)); `processor_version` (#326 —
+the extraction identity of the latest successful outcome, refreshed even when
+the fingerprint is unchanged: Option A's comparison base, and the key's
+generation when the processor decides — see
+[docs/CONTENT-PIPELINE.md](CONTENT-PIPELINE.md)); and its
 notification surface (the
 item-scoped `NotificationTemplate` rows — `visibility='watched_item'`,
 `watched_item_id` set; see **Notifications** below). Schedule resolution is

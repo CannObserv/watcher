@@ -1,6 +1,6 @@
 # Observo-derived extraction and the change diff — design
 
-**Status:** approved 2026-09-24; cannobserv#486 shipped in co-core 0.19.4 and step 0 (#324) shipped the same day; #325 (shadow) shipped 2026-10-02 — read **Amendments** first. **Issue:** #222 (retitled and
+**Status:** approved 2026-09-24; cannobserv#486 shipped in co-core 0.19.4 and step 0 (#324) shipped the same day; #325 (shadow) shipped 2026-10-02; #326's processor-decided path built 2026-10-03, switch pending — read **Amendments** first. **Issue:** #222 (retitled and
 split — see **#222 disposition**). **Cross-repo work:** filed 2026-09-24 as issues
 in co-core, broker, Observo and Archiver (numbers in **Section 6**); none of it is
 implemented from a Watcher session.
@@ -34,6 +34,31 @@ over the sections below.
   `ChangeRevision.processor_version` is never rewritten. Lands with #326.
 - **co-core is pinned `==0.19.7`** on both sides through shadow; a bump is
   planned with the processor and lands after its parity corpus passes.
+
+## Amendments (2026-10-03, #326 build)
+
+The processor-decided path is built; the switch itself waits on the gate.
+Where they conflict, these win over the sections below.
+
+- **The mode's value is `processor`**, not `observo`.
+- **Validators are recorded when the derived fact closes the check**, not at
+  the blob fact (Section 2's apply table): the pair lands with the outcome it
+  vouches for, keyed to the extractor that produced it. The fetch stamp
+  (`last_full_fetch_at`, horizon) stays on the blob fact.
+- **Option A runs in every mode.** `WatchedItem.processor_version` is written by
+  local outcomes too (local's generation), and backfilled from each item's
+  latest revision, so a co-core upgrade under local extraction re-baselines
+  rather than notifying — D6's purpose — and the switch compares like with like
+  from the first fact.
+- **A re-baseline is announced** on `content.revisions` like any revision; only
+  the notification is withheld. `last_changed_at` does not move.
+- **`invalid_input` and every other non-`input_unreadable` terminal reason**
+  take the extraction-failure path (`failure_reason = processing_failed`).
+  `processing_timeout` (hard limit or re-issue cap) audits
+  `check.extraction_failed` and leaves the validators alone.
+- **"Processing delayed"** is a reaper log line naming the items, plus the
+  check-now 409 wording; no new health status (`info.watch-status` carries
+  three values).
 
 **Context read for this design (all 2026-09-24):** archiver#179 (`content.process`,
 open, no comments), replicator#69 (closed; the boundaries charter's *Asked and

@@ -167,8 +167,8 @@ per-extractor goldens trip on a fingerprint-moving change.
 `processor_version` (`EXTRACTION_GENERATION`, spelled through co-core's
 `processor_version()` so a revision from a `content.derived` fact compares
 alike). NULL means *unknown* — pre-migration rows, or a spec co-core cannot
-derive from — and the design's Option A treats unknown as neither a spec label
-nor a re-baseline. Nothing reads either column yet.
+derive from — and Option A (#326, below) treats unknown as neither a spec
+label nor a re-baseline.
 
 `src/core/media_type.py` re-exports `co_core.pure.extract.media_type`; its test
 pins *identity*, because the issuer resolves the dispatch essence onto the
@@ -184,8 +184,8 @@ extraction behind the `content.process` / `content.derived` pair
 Sections 1, 2, 5). **`WATCHER_EXTRACT_MODE`**: `local` (default) issues
 nothing; `shadow` sends every applied blob to the processor *after* local
 extraction has decided and committed — including a local extraction failure,
-since the processor must fail on the same bytes. An unrecognised value
-(`processor` included, until #326 builds it) reads as `local`, with a warning.
+since the processor must fail on the same bytes; `processor` lets it decide
+(below). An unrecognised value reads as `local`, with a warning.
 
 **`process_commands`** (`2bc94dabe269`) is `fetch_commands`' discipline again:
 persist-before-publish, the every-minute `publish_pending_process_commands`
@@ -238,10 +238,50 @@ SELECT shadow_verdict, local_outcome, count(*) FROM process_commands
 WHERE issued_at > :window_start AND shadow_verdict IS NOT NULL GROUP BY 1, 2;
 ```
 
-Not built here, because shadow cannot exercise it: the `PROCESSING` fetch
-status, the derived fact deciding the change (Option A, `processor_version`
-refresh on an equal digest), the `input_unreadable` re-fetch, and item-level
-*processing delayed* health. Those are the switch's.
+### Processor-decided extraction (#326)
+
+**`WATCHER_EXTRACT_MODE=processor`** — built, **not yet switched on**: the gate
+above still needs a window with a real change. Rollback is `shadow`, then
+`local`. A lineage's kind is fixed when its blob applies — **decisive iff its
+fetch row is `PROCESSING`** — so a fact decides (or is judged) as issued,
+whatever the mode reads when it lands.
+
+- **Blob leg** (`_hand_to_processor`): the raw blob is never opened. Probe
+  resolution, the media-type seed, the redirect audit and `stamp_full_fetch`
+  run as before; the fetch row goes `PROCESSING` (in `OPEN_STATUSES`, so the
+  gate holds) in **one commit** with the spec[0] command. Nothing to send
+  (no spec, a prefixed digest) fails the check at once.
+- **Derived leg** (`apply_process_fact` → `_decide`): the supersession guard,
+  then derived text → `apply_extraction_outcome` (the history comparison, #293
+  renewal with the raw blob's provenance, Option A) and the row closes
+  `SUCCEEDED`; validators are recorded **here**, with the outcome they vouch
+  for. Empty on the last spec or any terminal failure (`extraction_error`,
+  `invalid_input`, …) → the extraction-failure path, `failure_reason =
+  processing_failed`, the processor's reason and detail in the audit — never
+  branched on. `input_unreadable` → re-fetch under the #275 cap, counted
+  across both legs (a decisive lineage starts at the fetch row's count).
+- **Downtime**: a held decisive command is delay — the item is untouched and
+  the reaper logs `processing delayed` with the item ids. The hard limit or the
+  re-issue cap fails the check: `processing_timeout`, ERROR, gate lifted.
+  Check-now on a `PROCESSING` row 409s with *awaiting the processor*.
+
+**Option A** (D6; `extraction_change` in `src/workers/pipeline.py`) runs on
+every change, in every mode. The bound spec moved → notify with a `NOTE:` line
+(`extraction_changed = "spec"` in the event metadata and a template variable).
+Only the extractor moved — the outcome's `processor_version` against
+**`WatchedItem.processor_version`**, read before the outcome refreshes it —
+→ a re-baseline: the revision is written and announced on `content.revisions`,
+nobody is notified, `last_changed_at` stays, and `check.rebaselined` is
+audited. An equal digest under a new version refreshes the item's version
+only; `ChangeRevision.processor_version` is never rewritten. NULL on either
+side triggers neither. The column (`c3f9a1d27b84`) was backfilled from each
+item's latest revision. Residual: the re-baseline revision counts in the
+dashboard's `changes_today`.
+
+**After the soak**, still to do on #326: delete `_extract_and_fingerprint`,
+`_extract_with_spec`, `_spec_fingerprint_or_none`, the registry extractor
+slot, `extraction_overrides_for_essence`, the mode variable and its
+`local_*`/`shadow_*` columns, and the `co-core[extract]` extra.
 
 ### Reporting revisions on `content.revisions` (#253, #293)
 

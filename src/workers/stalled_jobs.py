@@ -32,7 +32,9 @@ days (``src.workers.retention``) and counted on the dashboard. The count is
 procrastinate's ``attempts``, which a task's own retries raise too, so a job
 retried twice already is failed at its first orphaning; for each task that
 retries, something else re-defers the work — ``reap_fetch_commands`` the
-applies, ``schedule_tick`` a ``check_watched_item`` whose item is still due.
+fetch applies, ``reap_process_commands`` ``apply_process_fact`` (which, when the
+processor decides, is what closes the check — #326), ``schedule_tick`` a
+``check_watched_item`` whose item is still due.
 So is a job whose abort was requested before its worker died:
 ``procrastinate_retry_job_v2`` fails such a job rather than requeue it, so
 failing it here keeps the log and the count true to the row.

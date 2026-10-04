@@ -1,6 +1,8 @@
 # watcher
 
-Monitors cannabis industry activity: licenses, regulatory filings, compliance events, and entity relationships.
+Monitors web resources for change. Each Watched Item is a URL that Archiver registers;
+Watcher has it fetched on a schedule (Replicator performs the fetch), fingerprints the
+content, reports each change on the bus, and notifies through Notifier.
 
 ## Architecture
 

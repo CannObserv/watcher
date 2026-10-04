@@ -8,7 +8,7 @@
     {
       "name": "readme",
       "path": "./README.md",
-      "description": "Top-level project README. Brief project description and setup instructions for the watcher web service that monitors cannabis industry activity (licenses, regulatory filings, compliance events)."
+      "description": "Top-level project README. Brief project description and setup instructions for the watcher web service, a general-purpose monitor that fingerprints registered URLs on a schedule and reports each change."
     },
     {
       "name": "style-guide",

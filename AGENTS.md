@@ -4,7 +4,7 @@ Be terse. Prefer fragments over full sentences. Skip filler and preamble. Sacrif
 
 ## Project Overview
 
-Web service for monitoring cannabis industry activity: licenses, regulatory filings, compliance events, and entity relationships.
+General-purpose web monitoring service: fingerprints the URLs Archiver registers on a schedule and reports each change.
 
 ## Development Methodology
 

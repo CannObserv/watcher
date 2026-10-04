@@ -46,10 +46,12 @@ Where they conflict, these win over the sections below.
   vouches for, keyed to the extractor that produced it. The fetch stamp
   (`last_full_fetch_at`, horizon) stays on the blob fact.
 - **Option A runs in every mode.** `WatchedItem.processor_version` is written by
-  local outcomes too (local's generation), and backfilled from each item's
-  latest revision, so a co-core upgrade under local extraction re-baselines
-  rather than notifying — D6's purpose — and the switch compares like with like
-  from the first fact.
+  every successful local outcome too (local's generation), so a co-core upgrade
+  under local extraction re-baselines rather than notifying — D6's purpose —
+  and the switch compares like with like from the first fact. **Not
+  backfilled** from revisions: a revision's version is the extractor's at the
+  last change, which can trail the installed one, and as the base it would
+  silently re-baseline the next real change.
 - **A re-baseline is announced** on `content.revisions` like any revision; only
   the notification is withheld. `last_changed_at` does not move.
 - **`invalid_input` and every other non-`input_unreadable` terminal reason**

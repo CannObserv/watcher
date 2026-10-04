@@ -8,12 +8,13 @@ Three changes for ``WATCHER_EXTRACT_MODE=processor``:
 
 * ``watched_items.processor_version`` — the extraction identity of the item's
   latest successful outcome: Option A's comparison base and, processor-decided,
-  the generation half of ``validator_source_key``. **Backfilled** from each
-  item's latest ``change_revisions.processor_version`` (#324 records local's
-  generation, spelled as the processor spells its own), so the first change
-  after the switch compares against the extractor that wrote the baseline
-  rather than against nothing — the design's "a mismatch that slips through
-  is caught by Option A" holds from the first fact.
+  the generation half of ``validator_source_key``. **Not backfilled** (CR 1):
+  the latest revision's version is the extractor's at the last *change*, which
+  can trail the installed one (0.19.4 → 0.19.7 between #324 and #325), and
+  read as the base it would turn the next real change into a silent
+  re-baseline. NULL is *unknown* — notify as before — and every successful
+  local or shadow check writes the true value, unchanged ones included, well
+  before any switch to ``processor``.
 * ``ix_fetch_commands_open`` gains ``'processing'`` — the new open status. Its
   predicate must cover every open status for the scheduling gate's lookup to
   use it; correctness never depended on it.
@@ -40,20 +41,8 @@ _OPEN_AFTER = "status IN ('pending_publish', 'in_flight', 'processing')"
 
 
 def upgrade() -> None:
-    """Add and backfill the column; widen the open index; add the read-past index."""
+    """Add the column; widen the open index; add the read-past index."""
     op.add_column("watched_items", sa.Column("processor_version", sa.Text(), nullable=True))
-    op.execute(
-        """
-        UPDATE watched_items AS wi
-           SET processor_version = latest.processor_version
-          FROM (
-                SELECT DISTINCT ON (watched_item_id) watched_item_id, processor_version
-                  FROM change_revisions
-                 ORDER BY watched_item_id, captured_at DESC
-               ) AS latest
-         WHERE latest.watched_item_id = wi.id
-        """
-    )
     op.drop_index(
         "ix_fetch_commands_open",
         table_name="fetch_commands",

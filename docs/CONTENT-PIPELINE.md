@@ -274,8 +274,10 @@ Only the extractor moved — the outcome's `processor_version` against
 nobody is notified, `last_changed_at` stays, and `check.rebaselined` is
 audited. An equal digest under a new version refreshes the item's version
 only; `ChangeRevision.processor_version` is never rewritten. NULL on either
-side triggers neither. The column (`c3f9a1d27b84`) was backfilled from each
-item's latest revision. Residual: the re-baseline revision counts in the
+side triggers neither. The column (`c3f9a1d27b84`) is **not backfilled**: a
+revision's version is the extractor's at the last change, which can trail the
+installed one and would swallow the next real change; every successful check
+in any mode fills it. Residual: the re-baseline revision counts in the
 dashboard's `changes_today`.
 
 **After the soak**, still to do on #326: delete `_extract_and_fingerprint`,

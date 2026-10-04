@@ -316,8 +316,10 @@ def record_validators(
 ) -> None:
     """Store the pair from the fact that closed the item's latest command.
 
-    Called only from the blob apply path, and only after its ordering guard, so
-    a late older fact can never overwrite a newer pair (MUST-5). The fetch stamp
+    Called only when a check closes successfully (``close_succeeded``), and only
+    after that path's ordering guard — the blob apply's, or the derived leg's
+    supersession check when the processor decides (#326) — so a late older
+    fact can never overwrite a newer pair (MUST-5). The fetch stamp
     is ``stamp_full_fetch``'s, not this function's. **Always an overwrite,
     ``None`` included**: the pair must describe the latest 200, and an
     origin that stopped offering a validator must not leave the old one

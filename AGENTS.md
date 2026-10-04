@@ -4,7 +4,7 @@ Be terse. Prefer fragments over full sentences. Skip filler and preamble. Sacrif
 
 ## Project Overview
 
-General-purpose web monitoring service: fingerprints the URLs Archiver registers on a schedule and reports each change.
+General-purpose web monitoring service: fingerprints the content at URLs Archiver registers on a schedule and reports each change.
 
 ## Development Methodology
 

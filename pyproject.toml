@@ -1,7 +1,7 @@
 [project]
 name = "watcher"
 version = "0.1.0"
-description = "General-purpose web monitoring service: fingerprints registered URLs on a schedule and reports each change."
+description = "General-purpose web monitoring service: fingerprints the content at registered URLs on a schedule and reports each change."
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [

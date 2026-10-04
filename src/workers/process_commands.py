@@ -414,9 +414,11 @@ async def reap_process_commands(
       everything still queued (CR 1). One warning per pass is the
       service-level signal;
     * either way, past ``WATCHER_PROCESS_COMMAND_HARD_LIMIT_SECONDS`` since it
-      was issued, the lineage ends uncompared — the command whose failure fact
-      was refused gets no fact at all, and in a quiet period nothing else
-      arrives to say the processor is up.
+      was issued, the lineage ends — uncompared, or for a decisive one with
+      the check failed — because the command whose failure fact was refused
+      gets no fact at all, and in a quiet period nothing else arrives to say
+      the processor is up. A command still ``pending_publish`` past it ends
+      the same way: the bus never accepted it (CR 6).
 
     A settled row whose apply never ran (job lost, retries exhausted) gets the
     apply re-deferred, once per window: ``updated_at`` is touched to start the
@@ -491,6 +493,38 @@ async def reap_process_commands(
             nxt = await reissue_process_command(db, row, now=now)
             await persist_and_publish(db, nxt, bus_client)
             reissued += 1
+
+        # CR 6: a command the bus never accepted gets no fact either. The sweep
+        # retries a refused publish forever (an ACL refusal is transient by
+        # policy), so the hard limit ends it too — or a decisive check would
+        # sit PROCESSING with nothing left to close it. Residual: the unlocked
+        # sweep can still overwrite this EXPIRED with its in-flight write, in
+        # one sweep's window, after a day of refusals.
+        unpublished = list(
+            (
+                await db.execute(
+                    select(ProcessCommand)
+                    .where(
+                        ProcessCommand.status == ProcessCommandStatus.PENDING_PUBLISH,
+                        ProcessCommand.issued_at < hard_cutoff,
+                    )
+                    .order_by(ProcessCommand.issued_at)
+                    .limit(batch_size)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        for row in unpublished:
+            await db.refresh(row, with_for_update=True)
+            if row.status != ProcessCommandStatus.PENDING_PUBLISH:
+                continue
+            logger.error(
+                "process command never reached the bus — ending its lineage",
+                extra={"command_id": row.command_id, "issued_at": format_utc_iso(row.issued_at)},
+            )
+            await _end_lineage(db, row, now=now, why="hard limit, never published")
+            hard_limited += 1
 
         unapplied = list(
             (

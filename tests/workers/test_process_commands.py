@@ -933,6 +933,59 @@ class TestDecisiveReaper:
         assert (await self._fetch(db_session, row)).failure_reason == "processing_timeout"
 
 
+class TestUnpublishedPastTheHardLimit:
+    """CR 6: a command the bus never accepted still ends at the hard limit.
+
+    The sweep retries a refused publish every minute (a broker ACL
+    ``NoPermissionError`` is transient by policy), so without this a decisive
+    check would sit ``PROCESSING`` forever: never re-checked, never ERROR.
+    """
+
+    async def test_a_decisive_check_fails(self, db_session, monkeypatch):
+        monkeypatch.setenv(PROCESS_COMMAND_HARD_LIMIT_ENV, "7200")
+        row = await _decisive(
+            db_session,
+            issued_at=datetime.now(UTC) - timedelta(hours=3),
+            status=ProcessCommandStatus.PENDING_PUBLISH,
+        )
+        _quiet(monkeypatch)
+
+        result = await reap_process_commands(
+            session=db_session, bus_client=fakeredis.FakeAsyncRedis()
+        )
+
+        fetch = await db_session.get(FetchCommand, row.fetch_command_id)
+        assert result["hard_limited"] == 1
+        assert row.status == ProcessCommandStatus.EXPIRED
+        assert fetch.status == FetchCommandStatus.FAILED
+        assert fetch.failure_reason == "processing_timeout"
+        item = await db_session.get(WatchedItem, row.watched_item_id)
+        assert item.health_status == WatchHealthStatus.ERROR
+
+    async def test_a_shadow_lineage_ends_uncompared(self, db_session, monkeypatch):
+        monkeypatch.setenv(PROCESS_COMMAND_HARD_LIMIT_ENV, "7200")
+        row = await _command(
+            db_session,
+            issued_at=datetime.now(UTC) - timedelta(hours=3),
+            status=ProcessCommandStatus.PENDING_PUBLISH,
+        )
+
+        await reap_process_commands(session=db_session, bus_client=fakeredis.FakeAsyncRedis())
+
+        assert row.status == ProcessCommandStatus.EXPIRED
+        assert row.shadow_verdict == ShadowVerdict.UNCOMPARED
+
+    async def test_a_recent_unpublished_command_is_left_to_the_sweep(self, db_session, monkeypatch):
+        row = await _decisive(db_session, status=ProcessCommandStatus.PENDING_PUBLISH)
+
+        result = await reap_process_commands(
+            session=db_session, bus_client=fakeredis.FakeAsyncRedis()
+        )
+
+        assert result["hard_limited"] == 0
+        assert row.status == ProcessCommandStatus.PENDING_PUBLISH
+
+
 class TestProcessorEndToEnd:
     """Blob applied → command → fake processor → fact → the check decided (#326)."""
 

@@ -65,7 +65,12 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    """Reverse the three changes."""
+    """Reverse the three changes.
+
+    Set ``WATCHER_EXTRACT_MODE`` back to ``shadow`` and let every ``processing``
+    fetch row close first: pre-#326 code reads that status as closed and only
+    judges its process rows, so a row left in it never completes (CR 3).
+    """
     op.drop_index(
         "ix_process_commands_read_past",
         table_name="process_commands",

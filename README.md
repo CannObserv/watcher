@@ -2,7 +2,8 @@
 
 Monitors web resources for change. Each Watched Item is a URL that Archiver registers;
 Watcher has it fetched on a schedule (Replicator performs the fetch), fingerprints the
-content, reports each change on the bus, and notifies through Notifier.
+content, reports each change on the bus, and notifies any configured targets through
+Notifier.
 
 ## Architecture
 

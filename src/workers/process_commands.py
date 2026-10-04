@@ -75,8 +75,6 @@ from src.workers.retry import APPLY_RETRY
 
 logger = get_logger(__name__)
 
-PROCESSING_TIMEOUT = PROCESSING_TIMEOUT_REASON
-
 
 @bp.periodic(cron="* * * * *", periodic_id="publish_pending_process_commands")
 @bp.task(name="publish_pending_process_commands", queue="default")
@@ -369,7 +367,7 @@ async def _give_up(
             extra={"command_id": row.command_id, "fetch_command_id": fetch.command_id, "why": why},
         )
         return fetch
-    _record_verdict(session, row, ShadowVerdict.UNCOMPARED, f"{PROCESSING_TIMEOUT}: {why}")
+    _record_verdict(session, row, ShadowVerdict.UNCOMPARED, f"{PROCESSING_TIMEOUT_REASON}: {why}")
     return None
 
 

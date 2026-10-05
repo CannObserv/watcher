@@ -156,6 +156,11 @@ async def load_change_diff(
         else:
             current = await _read_stored(session, current_fp, "current", cap, log_extra=log_extra)
         unified = await asyncio.to_thread(compute_unified_diff, previous, current)
+        if not unified:
+            # The fingerprints differ, so the bytes do; the segmentation
+            # collapsed whitespace the difference lived in (CR 11). Say so —
+            # an empty diff would render as nothing at all.
+            raise _Unavailable("whitespace-only change")
     except _Unavailable as exc:
         logger.info(
             "change diff unavailable",

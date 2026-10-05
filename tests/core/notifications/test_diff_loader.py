@@ -75,6 +75,15 @@ class TestLoadChangeDiff:
             result = await load_change_diff(AsyncMock(), _meta())
         assert result == ChangeDiff(unified=compute_unified_diff(PREVIOUS, CURRENT))
 
+    async def test_a_whitespace_only_change_says_so(self):
+        # The fingerprints differ but the sentence segmentation collapses the
+        # difference: an empty diff must explain itself, never render as nothing.
+        before, after = b"Board meets.  Quorum is two.", b"Board meets. Quorum is two."
+        locate, read = _store(before)
+        with locate, read:
+            result = await load_change_diff(AsyncMock(), _meta(before, after), current_text=after)
+        assert result == ChangeDiff(unavailable="whitespace-only change")
+
     async def test_current_text_in_hand_is_used_without_a_lookup(self):
         # Local/shadow extraction notifies before the processor has answered,
         # so the current text is not stored yet — but it is in memory.

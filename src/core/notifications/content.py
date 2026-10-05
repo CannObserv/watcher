@@ -80,7 +80,7 @@ def build_template_context(
     Both diff fields are empty without a `diff` (none computed: not a change,
     or no recipient asked) and read `(diff unavailable: <reason>)` when one was
     attempted and could not be made (#222). The dispatcher loads `diff` from
-    the stored canonical texts (`diff.load_change_diff`); the preview computes
+    the stored canonical texts (`diff_loader.load_change_diff`); the preview computes
     it from canned text (`preview_fixtures.preview_diff`). `change_summary` and
     `chunks_changed` stay retired: the canonical text keeps no chunk boundaries
     (#222 D8).

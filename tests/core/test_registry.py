@@ -69,9 +69,15 @@ class TestServiceRegistryDispatchesFromCoCore:
         assert extractor is added.return_value
 
     def test_default_map_cannot_write_to_the_co_core_table(self):
-        with pytest.raises(TypeError):
-            ServiceRegistry()._extractor_map["application/x-test-342"] = HtmlExtractor  # type: ignore[index]
-        assert "application/x-test-342" not in dispatch.EXTRACTOR_BY_ESSENCE
+        key = "application/x-test-342"
+        try:
+            with pytest.raises(TypeError):
+                ServiceRegistry()._extractor_map[key] = HtmlExtractor  # type: ignore[index]
+            assert key not in dispatch.EXTRACTOR_BY_ESSENCE
+        finally:
+            # On a regression the write lands in co-core's process-wide table;
+            # undo it so one failure does not leak into every later test.
+            dispatch.EXTRACTOR_BY_ESSENCE.pop(key, None)
 
     def test_fallback_is_the_co_core_default(self):
         extractor = ServiceRegistry().get_extractor("application/x-unlisted-test")

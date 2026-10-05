@@ -9,9 +9,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ulid import ULID
 
 from src.api.schemas.content_config import ContentConfig
-from src.core.notifications import diff as diff_mod
+from src.core.notifications import diff_loader as loader_mod
 from src.core.notifications.content import build_body, resolve_options
-from src.core.notifications.diff import ChangeDiff, StoredText, compute_unified_diff
+from src.core.notifications.diff import ChangeDiff, compute_unified_diff
+from src.core.notifications.diff_loader import StoredText
 from src.core.notifications.events import WatchEvent, WatchEventType
 from src.core.notifications.notify import dispatch_event_notifications
 from src.core.notifications.preview_fixtures import (
@@ -178,8 +179,8 @@ class TestPreviewDispatchParity:
         client.__aexit__ = AsyncMock(return_value=False)
 
         with (
-            patch.object(diff_mod, "stored_text_location", side_effect=locate),
-            patch.object(diff_mod, "aread_blob", side_effect=lambda uri: by_fp[uri]),
+            patch.object(loader_mod, "stored_text_location", side_effect=locate),
+            patch.object(loader_mod, "aread_blob", side_effect=lambda uri: by_fp[uri]),
             patch("src.core.notifications.notify.get_notifier_client", return_value=client),
             patch("src.core.notifications.notify.audit"),
         ):

@@ -29,7 +29,8 @@ from src.core.notifications.content import (
     build_title,
     resolve_options,
 )
-from src.core.notifications.diff import ChangeDiff, diff_requested, load_change_diff
+from src.core.notifications.diff import ChangeDiff, diff_requested
+from src.core.notifications.diff_loader import load_change_diff
 from src.core.notifications.events import WatchEvent, WatchEventType
 from src.core.notifier_client import build_idempotency_key, get_notifier_client
 

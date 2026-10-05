@@ -13,11 +13,13 @@ from datetime import UTC, datetime
 from unittest.mock import AsyncMock, patch
 
 import pytest
+from sqlalchemy import select
 
 from src.api.schemas.content_config import ContentOptions
 from src.core.blobs import BlobUnreadable, UnsupportedBlobScheme
 from src.core.fetch_commands import create_fetch_command
 from src.core.models.process_command import LocalOutcome, ProcessCommandStatus
+from src.core.models.watched_item import WatchedItem
 from src.core.notifications import diff as diff_mod
 from src.core.notifications.diff import (
     DIFF_MAX_INPUT_BYTES_ENV,
@@ -268,3 +270,18 @@ class TestStoredTextLocation:
 
     async def test_no_row_is_none(self, db_session):
         assert await stored_text_location(db_session, _fp(b"never stored")) is None
+
+    async def test_a_database_error_leaves_the_callers_transaction_usable(self, db_session):
+        """The lookup shares the pipeline's open transaction. A server-side
+        error there (a NUL is not storable text) must cost the diff, never the
+        revision and audit rows the caller still has to write and commit."""
+        wi = await make_watched_item(db_session, source_specs=[{"selector": "main"}])
+        result = await load_change_diff(
+            db_session,
+            {"previous_fingerprint": "sha256:\x00", "current_fingerprint": _fp(CURRENT)},
+            current_text=CURRENT,
+        )
+        assert result.unavailable == "error"
+        # The item written before the error is still there, in a usable transaction.
+        stmt = select(WatchedItem.id).where(WatchedItem.id == wi.id)
+        assert (await db_session.execute(stmt)).scalar_one() == wi.id

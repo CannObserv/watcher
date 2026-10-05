@@ -143,19 +143,25 @@ async def stored_text_location(session: AsyncSession, fingerprint: str) -> Store
 
     Any completed answer will do: the store is content-addressed and
     write-if-absent, so every row reporting this digest names the same bytes.
+
+    **Under a savepoint** (CR 1): the session is the pipeline's, mid-apply. A
+    server-side error would abort its whole transaction, and the revision and
+    audit rows the caller has yet to commit would go with it — swallowing the
+    exception here is not enough; the rollback must stop at the savepoint.
     """
-    row = (
-        await session.execute(
-            select(ProcessCommand.output_uri, ProcessCommand.output_size_bytes)
-            .where(
-                ProcessCommand.output_digest == fingerprint,
-                ProcessCommand.status == ProcessCommandStatus.COMPLETED,
-                ProcessCommand.output_uri.is_not(None),
+    async with session.begin_nested():
+        row = (
+            await session.execute(
+                select(ProcessCommand.output_uri, ProcessCommand.output_size_bytes)
+                .where(
+                    ProcessCommand.output_digest == fingerprint,
+                    ProcessCommand.status == ProcessCommandStatus.COMPLETED,
+                    ProcessCommand.output_uri.is_not(None),
+                )
+                .order_by(ProcessCommand.fact_at.desc().nulls_last())
+                .limit(1)
             )
-            .order_by(ProcessCommand.fact_at.desc().nulls_last())
-            .limit(1)
-        )
-    ).first()
+        ).first()
     if row is None:
         return None
     return StoredText(uri=row.output_uri, size_bytes=row.output_size_bytes)

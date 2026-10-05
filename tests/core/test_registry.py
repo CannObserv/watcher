@@ -2,6 +2,7 @@
 
 from unittest.mock import MagicMock
 
+from co_core.pure.extract import dispatch
 from co_core.pure.extract.csv_excel import CsvExcelExtractor
 from co_core.pure.extract.html import HtmlExtractor
 from co_core.pure.extract.pdf import PdfExtractor
@@ -44,6 +45,33 @@ class TestServiceRegistryDefaults:
         assert isinstance(registry.get_extractor("application/json"), HtmlExtractor)
         assert isinstance(registry.get_extractor(None), HtmlExtractor)
         assert isinstance(registry.get_extractor("application/octet-stream"), HtmlExtractor)
+
+
+class TestServiceRegistryDispatchesFromCoCore:
+    """#342: Watcher and Processor dispatch from one table, co-core's.
+
+    A hand copy diverges the first time co-core adds an essence (cannobserv#523's
+    XML and feed extractors): Processor would pick the new extractor in shadow mode
+    and Watcher the HTML fallback. Pinned by reference — an entry added to the
+    shared table must reach Watcher's dispatch — not by equal contents today.
+    """
+
+    def test_default_map_is_the_co_core_table(self, monkeypatch):
+        added = MagicMock(return_value=MagicMock())
+        monkeypatch.setitem(dispatch.EXTRACTOR_BY_ESSENCE, "application/x-test-342", added)
+        extractor = ServiceRegistry().get_extractor("application/x-test-342")
+        assert extractor is added.return_value
+
+    def test_fallback_is_the_co_core_default(self):
+        extractor = ServiceRegistry().get_extractor("application/json")
+        assert type(extractor) is dispatch.DEFAULT_EXTRACTOR
+
+    def test_custom_map_ignores_the_shared_table(self, monkeypatch):
+        added = MagicMock(return_value=MagicMock())
+        monkeypatch.setitem(dispatch.EXTRACTOR_BY_ESSENCE, "application/x-test-342", added)
+        registry = ServiceRegistry(extractor_map={})
+        assert type(registry.get_extractor("application/x-test-342")) is dispatch.DEFAULT_EXTRACTOR
+        added.assert_not_called()
 
 
 class TestServiceRegistryCustomInjection:

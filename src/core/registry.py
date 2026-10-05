@@ -2,24 +2,17 @@
 
 Held no SDK client since #254: the Archiver SDK was removed with Watcher's last
 outbound HTTP call to Archiver, and the registry is now purely the extractor
-dispatch table plus its test seam.
+dispatch plus its test seam.
+
+The table itself is co-core's ``EXTRACTOR_BY_ESSENCE`` (#342), held by
+reference: Processor dispatches from the same object, so an essence co-core
+adds (cannobserv#523's XML and feeds) reaches both sides with the pin, and
+shadow mode compares like with like. A local copy would route the new essence
+to the HTML fallback here while Processor used the new extractor.
 """
 
 from co_core.pure.extract import Extractor
-from co_core.pure.extract.csv_excel import CsvExcelExtractor
-from co_core.pure.extract.html import HtmlExtractor
-from co_core.pure.extract.pdf import PdfExtractor
-
-# Keyed by media-type essence (#168 slice 2). Dispatch is total: anything not
-# listed (including None, application/json, and ambiguous types) falls back to the
-# HTML extractor — the historical default — rather than raising.
-_DEFAULT_EXTRACTOR_MAP: dict[str, type[Extractor]] = {
-    "text/html": HtmlExtractor,
-    "application/xhtml+xml": HtmlExtractor,
-    "application/pdf": PdfExtractor,
-    "text/csv": CsvExcelExtractor,
-    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": CsvExcelExtractor,
-}
+from co_core.pure.extract.dispatch import DEFAULT_EXTRACTOR, EXTRACTOR_BY_ESSENCE
 
 
 class ServiceRegistry:
@@ -36,17 +29,18 @@ class ServiceRegistry:
         that needed one (#254).
         """
         self._extractor_map: dict[str, type[Extractor]] = (
-            extractor_map if extractor_map is not None else _DEFAULT_EXTRACTOR_MAP
+            extractor_map if extractor_map is not None else EXTRACTOR_BY_ESSENCE
         )
 
     def get_extractor(self, media_type_essence: str | None) -> Extractor:
-        """Return a fresh extractor for a media-type essence (total; HTML fallback).
+        """Return a fresh extractor for a media-type essence (total; co-core's fallback).
 
         Raw observed media is open-world, so an unrecognised or missing essence
-        resolves to the HTML extractor rather than raising — preserving the
-        pre-#168 behaviour for everything that isn't explicitly PDF/CSV.
+        resolves to co-core's ``DEFAULT_EXTRACTOR`` (HTML) rather than raising.
+        Not ``extractor_for_essence``: that reads the shared table directly and
+        would bypass an injected ``extractor_map``.
         """
-        extractor_cls = self._extractor_map.get(media_type_essence or "", HtmlExtractor)
+        extractor_cls = self._extractor_map.get(media_type_essence or "", DEFAULT_EXTRACTOR)
         return extractor_cls()
 
 

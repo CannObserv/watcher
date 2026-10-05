@@ -219,9 +219,12 @@ octet-stream/text-plain/absent headers) is **not stored** — it's a pure functi
 `media_type.resolve_dispatch_essence(content_media_type, effective_url)`, the single
 source of truth used by **both** the pipeline (`process_watched_item` picks the
 extractor) **and** the API (`WatchedItemResponse.media_type_essence` is a computed
-field). `ServiceRegistry.get_extractor` maps essence → extractor and is total:
-`text/html`→HTML, `application/pdf`→PDF, `text/csv`/spreadsheet→CSV/Excel,
-everything else (incl. `application/json`, `.xls`)→HTML fallback. A dispatched
+field). `ServiceRegistry.get_extractor` maps essence → extractor from co-core's
+`EXTRACTOR_BY_ESSENCE` — the same object Processor dispatches from, held by
+reference so a co-core release that adds an essence reaches both sides at once
+(#342) — and is total: anything unlisted falls back to co-core's
+`DEFAULT_EXTRACTOR` (HTML). Read the table in co-core
+(`co_core.pure.extract.dispatch`), not here. A dispatched
 extractor that raises on mismatched bytes is caught as `ExtractionError` and
 recorded like a fetch failure (ERROR health + `CHECK_EXTRACTION_FAILED` audit +
 `WATCH_ERROR`), so a mislabeled non-HTML target surfaces a signal instead of

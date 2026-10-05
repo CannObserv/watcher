@@ -137,6 +137,11 @@ class ExtractionOutcome:
     # reports as ``processor_version`` on a derived fact, so a revision written
     # by local extraction and one written from Observo's fact compare alike.
     processor_version: str | None = EXTRACTION_GENERATION
+    # The canonical text itself, when this process extracted it (#222): a
+    # change notifies before the processor has stored it, so the diff needs
+    # the bytes in hand. Never persisted; ``None`` for a derived outcome,
+    # whose text the processor already holds.
+    content: bytes | None = field(default=None, repr=False, compare=False)
 
 
 def _provenance_columns(blob: BlobProvenance, outcome: ExtractionOutcome) -> dict[str, object]:
@@ -206,6 +211,7 @@ def _extract_and_fingerprint(
         spec_fingerprint=(
             _spec_fingerprint_or_none(used_spec, spec_id=spec_id) if source_specs else None
         ),
+        content=content_bytes,
     )
 
 
@@ -620,10 +626,12 @@ async def apply_extraction_outcome(
     # content.revisions and never tells us, so the key was permanently null
     # (#253; the column it mirrored was dropped in #261). `extraction_changed`
     # is Option A's label: "spec" when the bound spec moved, else None — a
-    # "processor" change never reaches a notification.
+    # "processor" change never reaches a notification. The two fingerprints
+    # are the two texts' storage addresses (#222): the diff reads them back.
     change_meta: dict = {
         "change_revision_id": str(rev.id),
-        "content_fingerprint": outcome.content_fingerprint,
+        "previous_fingerprint": last_rev.content_fingerprint,
+        "current_fingerprint": outcome.content_fingerprint,
         "extraction_changed": change.value if change is not None else None,
         **watched_item_event_base_metadata(watched_item),
     }
@@ -636,6 +644,6 @@ async def apply_extraction_outcome(
         occurred_at=now,
         metadata=change_meta,
     )
-    await dispatch_event_notifications(session=session, event=event)
+    await dispatch_event_notifications(session=session, event=event, current_text=outcome.content)
 
     return WatchedItemResult(changed=True, notifications_dispatched=1, **_local_answer(outcome))

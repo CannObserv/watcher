@@ -13,15 +13,49 @@
 {% set scope_id = form_id ~ "-" ~ scope %}
 {% set title_area_id = "title-template-" ~ scope_id %}
 {% set body_area_id = "body-template-" ~ scope_id %}
+{% set _shown = opts or default_content_options %}
+{# A diff exists only for a change (#222): the default card offers the toggles
+   (they govern change notifications), an override card only for that event. #}
+{% set _offers_diff = not (event_type is defined and event_type) or event_type == "change_detected" %}
 
 <div class="space-y-4">
+
+  {% if _offers_diff %}
+  {# ────── Changes: the diff (#222) ──────
+     Restored from 89d64eb over the processor-stored canonical text. The
+     snippet is on by default (capped); full is verbose and opt-in.
+     Significance stays retired (#222 D8). #}
+  <fieldset>
+    <legend class="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400 mb-2">Changes</legend>
+    <div class="space-y-2 text-sm">
+      <label class="flex items-center gap-2 text-gray-700 dark:text-gray-300 cursor-pointer">
+        <input type="checkbox" name="{{ prefix }}include_diff_snippet" value="1"
+               {% if _shown.include_diff_snippet %}checked{% endif %}
+               class="rounded border-gray-300 dark:border-gray-600">
+        Diff snippet
+      </label>
+      <div class="ps-6 flex items-center gap-2 text-xs text-gray-600 dark:text-gray-400">
+        <label for="{{ scope_id }}-snippet-lines">Lines:</label>
+        <input type="number" id="{{ scope_id }}-snippet-lines"
+               name="{{ prefix }}diff_snippet_lines" min="1" max="200"
+               value="{{ _shown.diff_snippet_lines }}"
+               class="form-input w-20 text-xs">
+      </div>
+      <label class="flex items-center gap-2 text-gray-700 dark:text-gray-300 cursor-pointer">
+        <input type="checkbox" name="{{ prefix }}include_diff_full" value="1"
+               {% if _shown.include_diff_full %}checked{% endif %}
+               class="rounded border-gray-300 dark:border-gray-600">
+        Full diff <span class="text-xs text-gray-500 dark:text-gray-400">(verbose)</span>
+      </label>
+    </div>
+  </fieldset>
+  {% endif %}
 
   {# ────── Additive Context toggles ──────
      Order mirrors the change_detected render order (see
      content._build_change_detected_body): Domain, Last changed, Check interval
-     in the header; Description, Tags as trailing paragraphs. The diff/
-     significance ("Changes") group and the redundant Change-URL ("Link") group
-     were removed in #221. #}
+     in the header; Description, Tags as trailing paragraphs. The redundant
+     Change-URL ("Link") group was removed in #221. #}
   <fieldset>
     <legend class="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400 mb-2">Context</legend>
     <div class="space-y-2 text-sm">

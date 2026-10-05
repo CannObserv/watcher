@@ -53,6 +53,25 @@ class TestPreviewEndpoint:
         assert resp.status_code == 200
         assert "DOMAIN: example.com" in resp.text
 
+    async def test_default_change_preview_carries_the_diff_snippet(self, client: AsyncClient):
+        """#222: the preview diffs canned texts through the dispatcher's own
+        ``compute_unified_diff`` — the snippet is on by default."""
+        resp = await client.post(
+            "/notifications/preview",
+            data={"preview_event": "change_detected", "content_config__include_diff_snippet": "1"},
+        )
+        assert resp.status_code == 200
+        assert "```diff" in resp.text
+        assert "@@" in resp.text
+
+    async def test_no_diff_when_the_snippet_is_unchecked(self, client: AsyncClient):
+        resp = await client.post(
+            "/notifications/preview",
+            data={"preview_event": "change_detected", "content_config__include_domain": "1"},
+        )
+        assert resp.status_code == 200
+        assert "```diff" not in resp.text
+
     async def test_user_body_template_renders(self, client: AsyncClient):
         resp = await client.post(
             "/notifications/preview",

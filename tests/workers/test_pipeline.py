@@ -252,7 +252,7 @@ class TestProcessWatchedItem:
 
         dispatched_events = []
 
-        async def capture(*, session, event):
+        async def capture(*, session, event, current_text=None):
             dispatched_events.append(event)
 
         with patch("src.workers.pipeline.dispatch_event_notifications", side_effect=capture):
@@ -1040,6 +1040,59 @@ class TestResultCarriesTheLocalAnswer:
 
 
 @pytest.mark.integration
+class TestChangeEventCarriesTheDiffAddresses:
+    """#222: a change names both texts by their storage address — the
+    fingerprint *is* where the processor keeps the canonical text — and local
+    extraction hands the current text it already holds to dispatch, because the
+    processor has not answered for it yet."""
+
+    async def _changed(self, db_session, name):
+        wi = await make_watched_item(db_session, name=name, source_specs=[_SPEC_FULL_PAGE])
+        await process_watched_item(db_session, wi, raw_content=_HTML, blob=_BLOB)
+        await db_session.flush()
+        with patch(
+            "src.workers.pipeline.dispatch_event_notifications", new_callable=AsyncMock
+        ) as dispatch:
+            await process_watched_item(db_session, wi, raw_content=_HTML_CHANGED, blob=_BLOB)
+        baseline, change = (
+            (
+                await db_session.execute(
+                    select(ChangeRevision)
+                    .where(ChangeRevision.watched_item_id == wi.id)
+                    .order_by(ChangeRevision.captured_at)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        return dispatch, baseline, change
+
+    async def test_previous_and_current_fingerprints(self, db_session):
+        dispatch, baseline, change = await self._changed(db_session, "Diff addresses")
+        meta = dispatch.call_args.kwargs["event"].metadata
+        assert meta["previous_fingerprint"] == baseline.content_fingerprint
+        assert meta["current_fingerprint"] == change.content_fingerprint
+        assert "content_fingerprint" not in meta
+
+    async def test_local_extraction_hands_over_the_current_text(self, db_session):
+        dispatch, _baseline, change = await self._changed(db_session, "Diff in hand")
+        current = dispatch.call_args.kwargs["current_text"]
+        assert f"sha256:{hashlib.sha256(current).hexdigest()}" == change.content_fingerprint
+
+    @patch("src.workers.pipeline.dispatch_event_notifications", new_callable=AsyncMock)
+    async def test_a_derived_outcome_has_no_text_in_hand(self, dispatch, db_session):
+        wi = await make_watched_item(
+            db_session, name="Diff derived", source_specs=[_SPEC_FULL_PAGE]
+        )
+        for fp in ("sha256:" + "aa" * 32, "sha256:" + "bb" * 32):
+            outcome = ExtractionOutcome(
+                content_fingerprint=fp, content_size_bytes=10, schema_version=1
+            )
+            await apply_extraction_outcome(db_session, wi, outcome, blob=_BLOB)
+            await db_session.flush()
+        assert dispatch.call_args.kwargs["current_text"] is None
+
+
 class TestOptionA:
     """D6: a fingerprint move the extractor caused is not a content change (#326).
 

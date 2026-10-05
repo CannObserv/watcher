@@ -1,5 +1,7 @@
 """Tests for the default notification template registry."""
 
+import pytest
+
 from src.core.notifications.default_templates import (
     DEFAULT_BODY_TEMPLATES,
     DEFAULT_TITLE_TEMPLATES,
@@ -133,16 +135,24 @@ class TestTemplateVariables:
         assert var is not None, "TEMPLATE_VARIABLES missing extraction_changed"
         assert var.scope == "change_detected"
 
-    def test_removed_diff_variables_absent(self):
-        """The diff/significance/summary variables were removed in #221."""
+    @pytest.mark.parametrize(
+        "name", ["diff_snippet", "diff_full", "previous_fingerprint", "current_fingerprint"]
+    )
+    def test_diff_variables_are_change_detected_scoped(self, name):
+        """#222 restores the diff variables, and names the two texts it diffs."""
+        var = next((v for v in TEMPLATE_VARIABLES if v.name == name), None)
+        assert var is not None, f"TEMPLATE_VARIABLES missing {name}"
+        assert var.scope == "change_detected"
+
+    def test_retired_variables_absent(self):
+        """Removed in #221 and not restored by #222: the canonical text keeps no
+        chunk boundaries, and nothing defines significance (D8)."""
         names = {v.name for v in TEMPLATE_VARIABLES}
         for removed in (
             "change_summary",
             "added",
             "modified",
             "removed",
-            "diff_snippet",
-            "diff_full",
             "chunks_changed",
             "significance",
             "change_id",

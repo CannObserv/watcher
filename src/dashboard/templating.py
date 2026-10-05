@@ -9,6 +9,7 @@ from urllib.parse import quote as _url_quote
 
 from fastapi.templating import Jinja2Templates
 
+from src.api.schemas.content_config import ContentOptions
 from src.core.config import BUILD_ID
 from src.core.notifications.default_templates import TEMPLATE_VARIABLES
 from src.core.notifications.events import EVENT_TITLES
@@ -22,4 +23,7 @@ templates.env.globals["build_id"] = BUILD_ID
 templates.env.globals["event_titles"] = EVENT_TITLES
 templates.env.globals["template_variables"] = TEMPLATE_VARIABLES
 templates.env.globals["page_sizes"] = PAGE_SIZES
+# What a Content card shows when nothing is stored: the defaults a dispatch
+# would use, not all-off — the diff snippet is on by default (#222).
+templates.env.globals["default_content_options"] = ContentOptions()
 templates.env.filters["url_quote"] = lambda s: _url_quote(str(s), safe="")

@@ -46,20 +46,23 @@ async def test_notification_new_page_loads(client: AsyncClient):
 
 
 @pytest.mark.integration
-async def test_notification_new_page_has_no_changes_or_link_section(
+async def test_notification_new_page_has_changes_but_no_link_section(
     client: AsyncClient,
 ):
-    """#221: the Content card's diff/significance ("Changes") group and the
-    redundant Change URL ("Link") group were removed — the ITEM dashboard link
-    is unconditional in the default body, so there is nothing to toggle."""
+    """#222 restores the Changes group (snippet on by default, full off) now
+    the diff is real; significance stays retired (D8), and so does the
+    redundant Change URL ("Link") group #221 removed — the ITEM dashboard link
+    is unconditional in the default body."""
     resp = await client.get("/notifications/new")
     assert resp.status_code == 200
     body = resp.content.decode()
+    assert ">Changes<" in body
+    assert re.search(r'name="content_config__include_diff_snippet"[^>]*\bchecked', body)
+    assert 'name="content_config__diff_snippet_lines"' in body
+    assert 'name="content_config__include_diff_full"' in body
+    assert not re.search(r'name="content_config__include_diff_full"[^>]*\bchecked', body)
     assert 'name="content_config__include_change_dashboard_url"' not in body
-    assert 'name="content_config__include_diff_snippet"' not in body
-    assert 'name="content_config__include_diff_full"' not in body
     assert 'name="content_config__include_significance"' not in body
-    # Surviving Context section still renders.
     assert ">Context<" in body
     assert 'name="content_config__include_domain"' in body
 

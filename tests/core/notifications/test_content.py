@@ -1,10 +1,10 @@
 """Tests for the notification content builder.
 
-#221: the diff/significance/change_summary machinery was stripped (Phase 5
-removed the diff pipeline that fed it; restoration tracked in #222). The
-change_detected body is now the header skeleton plus the surviving Context
-toggles (Domain, Last changed, Check interval, Description, Tags). The header
-link is labelled ITEM (was WATCH).
+#221 stripped the diff/significance/change_summary machinery; #222 restores the
+diff (snippet + full) over the processor-stored canonical text. The
+change_detected body is the header skeleton plus the Context toggles (Domain,
+Last changed, Check interval, Description, Tags) as one Markdown list, then the
+diff as a fenced block. The header link is labelled ITEM (was WATCH).
 """
 
 from datetime import UTC, datetime
@@ -15,6 +15,7 @@ from jinja2 import TemplateError, UndefinedError
 from src.api.schemas.content_config import ContentConfig, ContentOptions
 from src.core.notifications.content import (
     SPEC_CHANGED_NOTE,
+    _truncate_unified_diff_lines,
     build_body,
     build_template_context,
     build_title,
@@ -26,6 +27,7 @@ from src.core.notifications.default_templates import (
     DEFAULT_BODY_TEMPLATES,
     compose_body_prefill,
 )
+from src.core.notifications.diff import ChangeDiff
 from src.core.notifications.events import EVENT_TITLES, WatchEvent, WatchEventType
 from src.core.public_base_url import PUBLIC_BASE_URL_ENV
 
@@ -455,6 +457,8 @@ class TestBuildTemplateContext:
             "event_label",
             "app_url",
             "change_url",
+            "diff_snippet",
+            "diff_full",
         }
 
     def test_event_label_matches_event_titles(self):
@@ -634,3 +638,154 @@ class TestRenderTemplateStrict:
     def test_raises_on_undefined_variable(self):
         with pytest.raises(UndefinedError):
             render_template_strict("{{ unknown_var }}", {})
+
+
+_SAMPLE_UNIFIED_DIFF = (
+    "--- previous\n"
+    "+++ current\n"
+    "@@ -1,4 +1,4 @@\n"
+    " alpha\n"
+    "-beta\n"
+    "+beta-changed\n"
+    " gamma\n"
+    " delta\n"
+    "@@ -9,2 +9,3 @@\n"
+    " epsilon\n"
+    "+zeta"
+)
+DIFF = ChangeDiff(unified=_SAMPLE_UNIFIED_DIFF)
+
+
+def _long_diff(n: int = 30) -> ChangeDiff:
+    hunk = "\n".join(f"-old-{i}\n+new-{i}" for i in range(n))
+    return ChangeDiff(unified=f"--- previous\n+++ current\n@@ -1,{n} +1,{n} @@\n{hunk}")
+
+
+class TestDiffSlot:
+    """#222: the diff renders after the fact list as a Markdown ```diff block —
+    its own block, so the list contract (#225) holds for every list line."""
+
+    def test_snippet_renders_after_the_list(self):
+        body = build_body(make_event(metadata={}), ContentOptions(), diff=DIFF)
+        listing, fenced = body.split("\n\n", 1)
+        assert all(line.startswith("- ") for line in listing.split("\n"))
+        assert fenced.startswith("```diff\n")
+        assert fenced.endswith("```")
+        assert "-beta" in fenced
+        assert "+zeta" in fenced
+
+    def test_snippet_is_capped_at_a_hunk_boundary(self):
+        body = build_body(
+            make_event(metadata={}),
+            ContentOptions(diff_snippet_lines=9),
+            diff=DIFF,
+        )
+        # Header (2) + first hunk (6) fit beside the footer; the second is cut whole.
+        assert "+beta-changed" in body
+        assert "+zeta" not in body
+        assert "... (3 more lines)" in body
+
+    def test_cap_below_the_first_hunk_keeps_its_header(self):
+        body = build_body(make_event(metadata={}), ContentOptions(diff_snippet_lines=4), diff=DIFF)
+        assert "@@ -1,4 +1,4 @@" in body
+        assert "more lines)" in body
+
+    def test_full_supersedes_the_snippet_cap(self):
+        opts = ContentOptions(include_diff_full=True, diff_snippet_lines=1)
+        body = build_body(make_event(metadata={}), opts, diff=DIFF)
+        assert "+zeta" in body
+        assert "more line" not in body
+
+    def test_omitted_when_both_toggles_off(self):
+        opts = ContentOptions(include_diff_snippet=False)
+        body = build_body(make_event(metadata={}), opts, diff=DIFF)
+        assert "```" not in body
+
+    def test_omitted_when_no_diff_was_computed(self):
+        body = build_body(make_event(metadata={}), ContentOptions(), diff=None)
+        assert "```" not in body
+        assert "DIFF" not in body
+
+    def test_unavailable_is_said_as_a_list_item(self):
+        body = build_body(
+            make_event(metadata={}),
+            ContentOptions(),
+            diff=ChangeDiff(unavailable="content too large"),
+        )
+        assert body.split("\n")[-1] == "- DIFF: unavailable (content too large)"
+        assert "```" not in body
+
+    def test_unavailable_is_silent_when_no_diff_was_asked_for(self):
+        body = build_body(
+            make_event(metadata={}),
+            ContentOptions(include_diff_snippet=False),
+            diff=ChangeDiff(unavailable="content too large"),
+        )
+        assert "DIFF" not in body
+
+    def test_the_spec_note_stays_in_the_list_above_the_diff(self):
+        event = make_event(metadata={"extraction_changed": "spec"})
+        listing, _fenced = build_body(event, ContentOptions(), diff=DIFF).split("\n\n", 1)
+        assert listing.split("\n")[-1] == f"- {SPEC_CHANGED_NOTE}"
+
+    def test_non_change_events_never_carry_a_diff(self):
+        event = make_event(WatchEventType.WATCH_ERROR, metadata={"status_code": 500})
+        assert "```" not in build_body(event, ContentOptions(include_diff_full=True), diff=DIFF)
+
+
+class TestDiffTemplateVariables:
+    def test_snippet_and_full_are_fenced(self):
+        ctx = build_template_context(make_event(metadata={}), diff=DIFF)
+        assert ctx["diff_snippet"].startswith("```diff\n")
+        assert ctx["diff_full"].startswith("```diff\n")
+        assert "+zeta" in ctx["diff_full"]
+
+    def test_snippet_capped_at_the_default_full_never(self):
+        ctx = build_template_context(make_event(metadata={}), diff=_long_diff())
+        assert "more line" in ctx["diff_snippet"]
+        assert "more line" not in ctx["diff_full"]
+
+    def test_empty_without_a_diff(self):
+        ctx = build_template_context(make_event(metadata={}))
+        assert ctx["diff_snippet"] == ""
+        assert ctx["diff_full"] == ""
+
+    def test_unavailable_says_why(self):
+        ctx = build_template_context(
+            make_event(metadata={}), diff=ChangeDiff(unavailable="previous text not stored")
+        )
+        assert ctx["diff_snippet"] == "(diff unavailable: previous text not stored)"
+        assert ctx["diff_full"] == "(diff unavailable: previous text not stored)"
+
+    def test_custom_template_honours_the_user_cap(self):
+        opts = ContentOptions(body_template="{{ diff_snippet }}", diff_snippet_lines=4)
+        assert "more line" in build_body(make_event(metadata={}), opts, diff=_long_diff())
+        opts_full = ContentOptions(body_template="{{ diff_full }}")
+        assert "more line" not in build_body(make_event(metadata={}), opts_full, diff=_long_diff())
+
+    def test_metadata_cannot_clobber_the_diff(self):
+        ctx = build_template_context(make_event(metadata={"diff_full": "spoof"}), diff=DIFF)
+        assert ctx["diff_full"].startswith("```diff")
+
+
+class TestTruncateUnifiedDiffLines:
+    LINES = _SAMPLE_UNIFIED_DIFF.split("\n")
+
+    def test_fits_untouched(self):
+        assert _truncate_unified_diff_lines(self.LINES, len(self.LINES)) == (self.LINES, 0)
+
+    def test_whole_hunks_only(self):
+        kept, omitted = _truncate_unified_diff_lines(self.LINES, 10)
+        assert kept == self.LINES[:8]
+        assert omitted == 3
+
+    def test_first_hunk_too_big_keeps_headers_and_its_at_line(self):
+        kept, omitted = _truncate_unified_diff_lines(self.LINES, 4)
+        assert kept == self.LINES[:3]
+        assert omitted == len(self.LINES) - 3
+
+    def test_no_hunks_truncates_on_lines(self):
+        lines = [f"line {i}" for i in range(10)]
+        kept, omitted = _truncate_unified_diff_lines(lines, 5)
+        assert kept == lines[:4]
+        assert omitted == 6

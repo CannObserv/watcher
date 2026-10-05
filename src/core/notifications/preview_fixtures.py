@@ -12,14 +12,20 @@ mirrors `watched_item_event_base_metadata`; the per-event extras mirror what
 `pipeline.py` / `tasks.py` layer on. `tests/core/notifications/test_preview_fixtures.py`
 guards this against drift.
 
-The diff pipeline (Snapshot → Change → unified diff) was removed in Phase 5
-(#156); the diff/significance fixture fields and `compute_preview_unified_diff`
-were removed in #221 along with the toggles that consumed them (restoration
-tracked in #222).
+**Diff parity (#222).** The diff is never event metadata — the dispatcher
+computes it from the two stored canonical texts the event's fingerprints name.
+The preview stands in two canned texts, names them by their real digests, and
+diffs them with the dispatcher's own ``compute_unified_diff`` (``preview_diff``),
+so the preview shows exactly what a delivered notification would.
+`test_preview_fixtures.TestPreviewDispatchParity` drives the dispatcher over
+this fixture and compares bodies.
 """
 
 from datetime import UTC, datetime
 
+from co_core.pure.util.hashing import prefixed_sha256, sha256
+
+from src.core.notifications.diff import ChangeDiff, compute_unified_diff
 from src.core.notifications.events import WatchEvent, WatchEventType
 
 _PREVIEW_WATCH_ID = "01KPPFATBNYQGBB38SQ06DN9HY"
@@ -39,12 +45,40 @@ _SHARED_CONTEXT = {
 }
 
 
+# Canonical extracted text — chunk texts joined by "\n" (cannobserv#486), the
+# shape the processor stores and the dispatcher diffs. Not HTML: the diff is
+# over what the fingerprint hashes, never the raw page.
+PREVIEW_PREVIOUS_TEXT = b"""\
+Regulatory Filings
+Last updated: 2026-04-10
+Hours
+Mon-Fri: 9:00 - 17:00
+Contact
+contact@example.com
+Recent filings
+Application 2026-04-08
+Renewal 2026-04-09"""
+
+PREVIEW_CURRENT_TEXT = b"""\
+Regulatory Filings
+Last updated: 2026-04-15
+New licensing program
+Apply for a license at https://example.com/apply
+Contact
+support@example.com
+Recent filings
+Application 2026-04-08
+Renewal 2026-04-12
+Renewal 2026-04-15"""
+
+
 MOCK_EVENT_FIXTURES: dict[str, dict] = {
     WatchEventType.CHANGE_DETECTED.value: {
         **_SHARED_CONTEXT,
         # Layered by pipeline.py on change detection.
         "change_revision_id": "01KPPFATBNYQGBB38SQ06DN9HZ",
-        "content_fingerprint": "sha256:9f2c1e",
+        "previous_fingerprint": prefixed_sha256(sha256(PREVIEW_PREVIOUS_TEXT)),
+        "current_fingerprint": prefixed_sha256(sha256(PREVIEW_CURRENT_TEXT)),
     },
     WatchEventType.WATCH_ERROR.value: {
         **_SHARED_CONTEXT,
@@ -73,3 +107,13 @@ def build_preview_event(event_type: str) -> WatchEvent:
         occurred_at=_PREVIEW_OCCURRED_AT,
         metadata=metadata,
     )
+
+
+def preview_diff(event_type: str) -> ChangeDiff | None:
+    """The diff the dispatcher would compute for the preview event, or ``None``.
+
+    Only a change carries one; computed inline, since the canned texts are tiny.
+    """
+    if event_type != WatchEventType.CHANGE_DETECTED.value:
+        return None
+    return ChangeDiff(unified=compute_unified_diff(PREVIEW_PREVIOUS_TEXT, PREVIEW_CURRENT_TEXT))

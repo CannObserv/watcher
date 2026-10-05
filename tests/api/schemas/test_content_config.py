@@ -16,6 +16,36 @@ class TestContentOptions:
         assert opts.include_tags is False
         assert opts.include_description is False
 
+    def test_diff_snippet_on_full_off_by_default(self):
+        """#222: the diff is real again, so the capped snippet is on by default
+        and the verbose full diff is opt-in."""
+        opts = ContentOptions()
+        assert opts.include_diff_snippet is True
+        assert opts.diff_snippet_lines == 25
+        assert opts.include_diff_full is False
+
+    @pytest.mark.parametrize("lines", [0, 201])
+    def test_snippet_lines_bounded(self, lines):
+        with pytest.raises(ValidationError):
+            ContentOptions(diff_snippet_lines=lines)
+
+    def test_stored_pre_221_keys_are_honoured_again(self):
+        """Templates saved before #221 still carry the diff keys; restoring the
+        fields brings back exactly what the operator chose. Retired keys are
+        ignored, not rejected."""
+        opts = ContentOptions.model_validate(
+            {
+                "include_diff_snippet": False,
+                "include_diff_full": True,
+                "diff_snippet_lines": 15,
+                "include_significance": True,
+                "include_change_dashboard_url": True,
+            }
+        )
+        assert (opts.include_diff_snippet, opts.include_diff_full) == (False, True)
+        assert opts.diff_snippet_lines == 15
+        assert not hasattr(opts, "include_significance")
+
     def test_explicit_values(self):
         opts = ContentOptions(include_domain=True, include_tags=True)
         assert opts.include_domain is True

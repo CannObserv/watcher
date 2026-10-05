@@ -15,6 +15,7 @@ from notifier_client.generated.models.dispatch_out_status import DispatchOutStat
 from sqlalchemy.ext.asyncio import AsyncSession
 from ulid import ULID
 
+from src.core.notifications.diff import ChangeDiff
 from src.core.notifications.events import WatchEvent, WatchEventType
 from src.core.notifications.notify import dispatch_event_notifications
 
@@ -291,3 +292,76 @@ class TestRemoteDispatchPath:
         assert len(results_captured) == 1
         assert results_captured[0]["success"] is False
         assert results_captured[0]["reason"] == "Delivery failed via notifier"
+
+
+class TestChangeDiff:
+    """#222: the diff is computed once per event, before the recipient loop,
+    and only when some recipient's options ask for one."""
+
+    DIFF = ChangeDiff(unified="--- previous\n+++ current\n@@ -1 +1 @@\n-old\n+new")
+
+    def _templates(self, *configs):
+        out = []
+        for cfg in configs:
+            t = _fake_template(remote_channel_id=str(ULID()))
+            t.content_config = cfg
+            out.append(t)
+        return out
+
+    async def _dispatch(self, monkeypatch, templates, *, event=None, load=None, **kwargs):
+        monkeypatch.setenv("WATCHER_NOTIFIER_BASE_URL", "http://notifier.invalid:9000")
+        monkeypatch.setenv("WATCHER_NOTIFIER_API_KEY", "nk_test")
+        event = event or _make_event(change_revision_id=str(ULID()))
+        load = load or AsyncMock(return_value=self.DIFF)
+        client = _mock_notifier_client()
+        with (
+            patch("src.core.notifications.notify.get_notifier_client", return_value=client),
+            patch("src.core.notifications.notify.audit"),
+            patch("src.core.notifications.notify.load_change_diff", load),
+        ):
+            await dispatch_event_notifications(
+                session=_setup_session(templates=templates), event=event, **kwargs
+            )
+        return client, load
+
+    async def test_default_options_carry_the_snippet(self, monkeypatch):
+        client, load = await self._dispatch(monkeypatch, self._templates(None))
+        load.assert_awaited_once()
+        assert "```diff" in client.dispatch.call_args.kwargs["body_template"]
+        assert "+new" in client.dispatch.call_args.kwargs["body_template"]
+
+    async def test_computed_once_for_many_recipients(self, monkeypatch):
+        _client, load = await self._dispatch(monkeypatch, self._templates(None, None, None))
+        assert load.await_count == 1
+
+    async def test_not_computed_when_nobody_asks(self, monkeypatch):
+        off = {"default": {"include_diff_snippet": False}}
+        client, load = await self._dispatch(monkeypatch, self._templates(off, off))
+        load.assert_not_awaited()
+        assert "```" not in client.dispatch.call_args.kwargs["body_template"]
+
+    async def test_not_computed_for_other_events(self, monkeypatch):
+        event = _make_event(WatchEventType.WATCH_ERROR)
+        _client, load = await self._dispatch(monkeypatch, self._templates(None), event=event)
+        load.assert_not_awaited()
+
+    async def test_only_the_asking_recipient_gets_it(self, monkeypatch):
+        off = {"default": {"include_diff_snippet": False}}
+        client, _load = await self._dispatch(monkeypatch, self._templates(None, off))
+        bodies = [c.kwargs["body_template"] for c in client.dispatch.call_args_list]
+        assert ["```diff" in b for b in bodies] == [True, False]
+
+    async def test_current_text_in_hand_reaches_the_loader(self, monkeypatch):
+        _client, load = await self._dispatch(
+            monkeypatch, self._templates(None), current_text=b"in hand"
+        )
+        assert load.call_args.kwargs["current_text"] == b"in hand"
+
+    async def test_unavailable_still_sends(self, monkeypatch):
+        load = AsyncMock(return_value=ChangeDiff(unavailable="previous text not stored"))
+        client, _load = await self._dispatch(monkeypatch, self._templates(None), load=load)
+        client.dispatch.assert_awaited_once()
+        assert (
+            "DIFF: unavailable (previous text not stored)"
+            in (client.dispatch.call_args.kwargs["body_template"])
+        )

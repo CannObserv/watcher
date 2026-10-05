@@ -136,6 +136,24 @@ class TestOverrideCardRoute:
             in resp.text
         )
 
+    async def test_change_detected_card_offers_the_diff(self, client: AsyncClient):
+        resp = await client.get(
+            "/notifications/overrides/card",
+            params={"form_id": "tpl-new", "event_type": "change_detected"},
+        )
+        assert 'name="content_config__override__change_detected__include_diff_full"' in resp.text
+
+    async def test_other_cards_do_not(self, client: AsyncClient):
+        """A diff toggle appears only where it has an observable effect (#222):
+        no event but a change carries a diff."""
+        resp = await client.get(
+            "/notifications/overrides/card",
+            params={"form_id": "tpl-new", "event_type": "watch_error"},
+        )
+        assert resp.status_code == 200
+        assert "include_diff" not in resp.text
+        assert ">Changes<" not in resp.text
+
     async def test_rejects_invalid_event_type(self, client: AsyncClient):
         resp = await client.get(
             "/notifications/overrides/card",

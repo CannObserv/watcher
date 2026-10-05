@@ -29,7 +29,8 @@ from src.core.notifications.content import (
     build_title,
     resolve_options,
 )
-from src.core.notifications.events import WatchEvent
+from src.core.notifications.diff import ChangeDiff, diff_requested, load_change_diff
+from src.core.notifications.events import WatchEvent, WatchEventType
 from src.core.notifier_client import build_idempotency_key, get_notifier_client
 
 logger = get_logger(__name__)
@@ -111,6 +112,8 @@ async def dispatch_via_notifier(
 async def dispatch_event_notifications(
     session: AsyncSession,
     event: WatchEvent,
+    *,
+    current_text: bytes | None = None,
 ) -> None:
     """Dispatch a WatchEvent to all active, opted-in notification templates.
 
@@ -133,6 +136,14 @@ async def dispatch_event_notifications(
     Every candidate is dispatched via the notifier service. Candidates that lack
     a `remote_channel_id` are recorded as failed audit results (the local Apprise
     fallback was removed in #137).
+
+    **The change diff (#222)** is loaded at most once per event, by the first
+    candidate whose options would show it, and reused for the rest — a
+    recipient that never asks costs nothing. ``current_text`` is the canonical
+    text local extraction already holds (the processor has not stored it yet);
+    ``load_change_diff`` trusts it only if it hashes to the event's fingerprint.
+    The loader never raises: an unavailable diff is said in the body, and the
+    notification still goes out.
     """
     # #191: the event identifies a WatchedItem (the single monitored entity).
     watched_item_id = ULID.from_str(event.watched_item_id)
@@ -179,6 +190,8 @@ async def dispatch_event_notifications(
         return
 
     results = []
+    diff: ChangeDiff | None = None
+    diff_loaded = False
     # Outside the per-candidate try below, deliberately (CR-6, #277): a client
     # that cannot be built is a process-level misconfiguration, not a failed
     # dispatch, so it must not be recorded as one per candidate. The two
@@ -198,8 +211,17 @@ async def dispatch_event_notifications(
                     else None
                 )
                 options = resolve_options(cfg, event_value)
+                if (
+                    not diff_loaded
+                    and event.event_type == WatchEventType.CHANGE_DETECTED
+                    and diff_requested(options)
+                ):
+                    diff_loaded = True
+                    diff = await load_change_diff(
+                        session, event.metadata, current_text=current_text
+                    )
                 rendered_title = build_title(event, options)
-                rendered_body = build_body(event, options)
+                rendered_body = build_body(event, options, diff=diff)
                 if not candidate.remote_channel_id:
                     logger.warning(
                         "candidate has no remote_channel_id; skipping dispatch",

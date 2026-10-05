@@ -1,13 +1,25 @@
 """Tests for the notification preview mock-event fixtures."""
 
+import hashlib
 from datetime import UTC, datetime
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from sqlalchemy.ext.asyncio import AsyncSession
+from ulid import ULID
 
+from src.api.schemas.content_config import ContentConfig
+from src.core.notifications import diff as diff_mod
+from src.core.notifications.content import build_body, resolve_options
+from src.core.notifications.diff import ChangeDiff, StoredText, compute_unified_diff
 from src.core.notifications.events import WatchEvent, WatchEventType
+from src.core.notifications.notify import dispatch_event_notifications
 from src.core.notifications.preview_fixtures import (
     MOCK_EVENT_FIXTURES,
+    PREVIEW_CURRENT_TEXT,
+    PREVIEW_PREVIOUS_TEXT,
     build_preview_event,
+    preview_diff,
 )
 from src.core.utils import watched_item_event_base_metadata
 
@@ -36,7 +48,12 @@ def _real_change_detected_keys() -> set[str]:
     but omitted here would NOT fail this test; it would only weaken the guard.
     """
     base = set(watched_item_event_base_metadata(_FakeWatchedItem()).keys())
-    return base | {"change_revision_id", "content_fingerprint", "extraction_changed"}
+    return base | {
+        "change_revision_id",
+        "previous_fingerprint",
+        "current_fingerprint",
+        "extraction_changed",
+    }
 
 
 class TestMockEventFixtures:
@@ -54,11 +71,26 @@ class TestMockEventFixtures:
         # And the change-identity key is present so change_url renders.
         assert "change_revision_id" in fx_keys
 
-    def test_change_detected_has_no_diff_phantom_keys(self):
-        """The removed diff/significance keys must not reappear (regression guard)."""
+    def test_change_detected_has_no_phantom_keys(self):
+        """The retired chunk/significance keys stay retired (#222 D8), and the
+        diff itself is computed at dispatch, never carried as metadata."""
         fx = MOCK_EVENT_FIXTURES["change_detected"]
-        for phantom in ("added", "modified", "removed", "significance", "change_id"):
+        for phantom in (
+            "added",
+            "modified",
+            "removed",
+            "significance",
+            "change_id",
+            "unified_diff",
+        ):
             assert phantom not in fx
+
+    def test_fixture_fingerprints_address_the_canned_texts(self):
+        fx = MOCK_EVENT_FIXTURES["change_detected"]
+        prev = hashlib.sha256(PREVIEW_PREVIOUS_TEXT).hexdigest()
+        curr = hashlib.sha256(PREVIEW_CURRENT_TEXT).hexdigest()
+        assert fx["previous_fingerprint"] == f"sha256:{prev}"
+        assert fx["current_fingerprint"] == f"sha256:{curr}"
 
     def test_watch_error_has_status_code(self):
         fx = MOCK_EVENT_FIXTURES["watch_error"]
@@ -89,3 +121,73 @@ class TestBuildPreviewEvent:
     def test_unknown_event_type_raises(self):
         with pytest.raises(KeyError):
             build_preview_event("not_a_real_event_type")
+
+
+class TestPreviewDiff:
+    def test_change_detected_diffs_the_canned_texts(self):
+        assert preview_diff("change_detected") == ChangeDiff(
+            unified=compute_unified_diff(PREVIEW_PREVIOUS_TEXT, PREVIEW_CURRENT_TEXT)
+        )
+
+    def test_other_events_have_none(self):
+        assert preview_diff("watch_error") is None
+
+
+class TestPreviewDispatchParity:
+    """#222 acceptance: the preview renders the diff the dispatcher would send.
+
+    The dispatcher is driven end to end over the preview event — template
+    query, ``load_change_diff`` (locate, read, hash check, ``difflib``) and
+    render — with a store serving the canned texts. Its body must equal the
+    preview's, byte for byte, for every diff toggle shape.
+    """
+
+    @pytest.mark.parametrize(
+        "content_config",
+        [
+            None,
+            {"default": {"include_diff_full": True}},
+            {"default": {"diff_snippet_lines": 6}},
+            {"default": {"include_diff_snippet": False, "body_template": "{{ diff_snippet }}"}},
+        ],
+    )
+    async def test_dispatched_body_equals_the_preview(self, monkeypatch, content_config):
+        monkeypatch.setenv("WATCHER_NOTIFIER_BASE_URL", "http://notifier.invalid:9000")
+        monkeypatch.setenv("WATCHER_NOTIFIER_API_KEY", "nk_test")
+        event = build_preview_event("change_detected")
+        by_fp = {
+            event.metadata["previous_fingerprint"]: PREVIEW_PREVIOUS_TEXT,
+            event.metadata["current_fingerprint"]: PREVIEW_CURRENT_TEXT,
+        }
+
+        async def locate(_session, fp):
+            return StoredText(uri=fp, size_bytes=len(by_fp[fp])) if fp in by_fp else None
+
+        template = MagicMock()
+        template.id = ULID()
+        template.visibility = "global"
+        template.content_config = content_config
+        template.remote_channel_id = str(ULID())
+        result = MagicMock()
+        result.scalars.return_value.all.return_value = [template]
+        session = AsyncMock(spec=AsyncSession)
+        session.get = AsyncMock(return_value=MagicMock(domain_name=None))
+        session.execute = AsyncMock(return_value=result)
+        client = AsyncMock()
+        client.__aenter__ = AsyncMock(return_value=client)
+        client.__aexit__ = AsyncMock(return_value=False)
+
+        with (
+            patch.object(diff_mod, "stored_text_location", side_effect=locate),
+            patch.object(diff_mod, "aread_blob", side_effect=lambda uri: by_fp[uri]),
+            patch("src.core.notifications.notify.get_notifier_client", return_value=client),
+            patch("src.core.notifications.notify.audit"),
+        ):
+            await dispatch_event_notifications(session=session, event=event)
+
+        cfg = ContentConfig.model_validate(content_config) if content_config else None
+        options = resolve_options(cfg, "change_detected")
+        preview = build_body(event, options, strict=True, diff=preview_diff("change_detected"))
+        dispatched = client.dispatch.call_args.kwargs["body_template"]
+        assert dispatched == preview
+        assert "```diff" in dispatched

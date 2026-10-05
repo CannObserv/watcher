@@ -1,9 +1,16 @@
 """Unit tests for _parse_content_config_from_form.
 
-#221: the diff/significance toggles were removed. Parsing now covers the
-surviving Context toggles (domain, temporal_context, last_changed_at, tags,
-description) plus title/body templates and per-event overrides.
+#221 removed the diff/significance toggles; #222 restores the diff ones
+(snippet, its line cap, full). Parsing covers those, the Context toggles
+(domain, temporal_context, last_changed_at, tags, description), title/body
+templates and per-event overrides.
+
+A checkbox is absent when unchecked, and the snippet is on by default, so a
+config is stored whenever the form differs from the defaults — not whenever a
+toggle is on: an unchecked snippet is a choice the defaults would undo.
 """
+
+import pytest
 
 from src.dashboard.forms import parse_content_config_from_form
 
@@ -12,6 +19,9 @@ _TEMPORAL = "content_config__include_temporal_context"
 _LAST_CHANGED = "content_config__include_last_changed_at"
 _TAGS = "content_config__include_tags"
 _DESCRIPTION = "content_config__include_description"
+_SNIPPET = "content_config__include_diff_snippet"
+_SNIPPET_LINES = "content_config__diff_snippet_lines"
+_FULL = "content_config__include_diff_full"
 
 
 def _form(**kwargs):
@@ -19,12 +29,51 @@ def _form(**kwargs):
     return dict(kwargs)
 
 
-class TestNoTogglesEnabled:
-    def test_all_defaults_returns_none(self):
-        assert parse_content_config_from_form(_form()) is None
+class TestDefaultsAreNotStored:
+    def test_the_default_form_returns_none(self):
+        # As a fresh form submits it: the snippet box checked, its cap at 25.
+        assert (
+            parse_content_config_from_form(_form(**{_SNIPPET: "1", _SNIPPET_LINES: "25"})) is None
+        )
 
-    def test_empty_form_returns_none(self):
-        assert parse_content_config_from_form({}) is None
+    def test_snippet_without_a_cap_field_is_the_default(self):
+        assert parse_content_config_from_form(_form(**{_SNIPPET: "1"})) is None
+
+    def test_an_unchecked_snippet_is_stored(self):
+        result = parse_content_config_from_form({})
+        assert result is not None
+        assert result["default"]["include_diff_snippet"] is False
+
+
+class TestDiffToggles:
+    def test_full_diff(self):
+        result = parse_content_config_from_form(_form(**{_SNIPPET: "1", _FULL: "1"}))
+        assert result["default"]["include_diff_full"] is True
+
+    def test_snippet_lines(self):
+        result = parse_content_config_from_form(_form(**{_SNIPPET: "1", _SNIPPET_LINES: "40"}))
+        assert result["default"]["diff_snippet_lines"] == 40
+
+    @pytest.mark.parametrize(("raw", "expected"), [("0", 1), ("999", 200), ("x", 25), ("", 25)])
+    def test_snippet_lines_clamped_or_defaulted(self, raw, expected):
+        result = parse_content_config_from_form(
+            _form(**{_SNIPPET: "1", _DOMAIN: "1", _SNIPPET_LINES: raw})
+        )
+        assert result["default"]["diff_snippet_lines"] == expected
+
+    def test_override_diff_fields(self):
+        prefix = "content_config__override__change_detected__"
+        form = _form(
+            **{
+                _SNIPPET: "1",
+                f"{prefix}include_diff_full": "1",
+                f"{prefix}diff_snippet_lines": "7",
+            }
+        )
+        ov = parse_content_config_from_form(form)["overrides"]["change_detected"]
+        assert ov["include_diff_full"] is True
+        assert ov["include_diff_snippet"] is False
+        assert ov["diff_snippet_lines"] == 7
 
 
 class TestTogglesEnabled:

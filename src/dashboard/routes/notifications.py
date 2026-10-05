@@ -29,7 +29,7 @@ from src.core.notifications.notify import (
     DispatchCandidate,
     dispatch_via_notifier,
 )
-from src.core.notifications.preview_fixtures import build_preview_event
+from src.core.notifications.preview_fixtures import build_preview_event, preview_diff
 from src.core.notifications.templates import (
     create_template,
     delete_template,
@@ -199,7 +199,7 @@ async def notifications_preview(request: Request):
         )
 
     try:
-        body = build_body(event, options, strict=True)
+        body = build_body(event, options, strict=True, diff=preview_diff(et.value))
     except TemplateError as exc:
         return templates.TemplateResponse(
             request,

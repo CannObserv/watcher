@@ -54,8 +54,9 @@ class TestDomainNcCreatePersistsContentConfig:
     async def test_create_without_toggles_stores_null_content_config(
         self, client: AsyncClient, db_session
     ):
-        """`_parse_content_config_from_form` returns None when no toggles or
-        templates are set; NotificationTemplate.content_config stays null."""
+        """`_parse_content_config_from_form` returns None when the form holds
+        only the defaults — the diff snippet checked, as the form renders it
+        (#222); NotificationTemplate.content_config stays null."""
         await _ensure_domain(db_session, "example.com")
         resp = await client.post(
             "/domains/example.com/notifications/new",
@@ -64,6 +65,7 @@ class TestDomainNcCreatePersistsContentConfig:
                 "remote_channel_id": VALID_CHANNEL_ID,
                 "channel_hint": "json",
                 "events": ["change_detected"],
+                "content_config__include_diff_snippet": "1",
             },
             follow_redirects=False,
         )

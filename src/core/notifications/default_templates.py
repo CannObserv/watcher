@@ -10,7 +10,8 @@ directly through Jinja. The `change_detected` body is the exception:
 `src.core.notifications.content.build_body` composes it line-by-line in
 Python from the shared `CHANGE_DETECTED_HEADER_LINES` tuple (single source of
 truth) and interleaves optional toggle-driven sections (DOMAIN, LAST CHANGED,
-INTERVAL in the header; DESCRIPTION, TAGS as trailing paragraphs).
+INTERVAL in the header; DESCRIPTION, TAGS as trailing list items), then the
+diff as a fenced block after the list (#222).
 `DEFAULT_BODY_TEMPLATES['change_detected']` is derived from the same tuple
 and serves only as the UI seed (`compose_body_prefill`).
 
@@ -65,6 +66,30 @@ TEMPLATE_VARIABLES: list[TemplateVariable] = [
         "extraction_changed",
         "str | None",
         '"spec" when the source spec that matched changed with the content; otherwise empty',
+        "change_detected",
+    ),
+    TemplateVariable(
+        "diff_snippet",
+        "str",
+        "Unified diff in a Markdown ```diff block, capped (hunk-boundary aware)",
+        "change_detected",
+    ),
+    TemplateVariable(
+        "diff_full",
+        "str",
+        "Unified diff in a Markdown ```diff block, no cap",
+        "change_detected",
+    ),
+    TemplateVariable(
+        "previous_fingerprint",
+        "str",
+        "sha256 of the previous extracted text (its storage address)",
+        "change_detected",
+    ),
+    TemplateVariable(
+        "current_fingerprint",
+        "str",
+        "sha256 of the current extracted text (its storage address)",
         "change_detected",
     ),
     # watch_error-only

@@ -6,7 +6,7 @@ Integration tests: process_watched_item baseline + change detection paths.
 
 import hashlib
 from datetime import UTC, datetime
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from co_core.pure.extract import (
@@ -19,11 +19,17 @@ from co_core.pure.extract import (
     spec_schema_version,
 )
 from co_core.pure.extract.html import HtmlExtractor
+from notifier_client.types import DispatchOutStatus
 from sqlalchemy import select
+from ulid import ULID
 
+from src.core.fetch_commands import create_fetch_command
 from src.core.models.audit_log import AuditLog, EventType
 from src.core.models.change_revision import ChangeRevision
+from src.core.models.notification_template import VISIBILITY_GLOBAL, NotificationTemplate
 from src.core.models.pending_archiver_sync import PendingArchiverSync
+from src.core.models.process_command import LocalOutcome, ProcessCommandStatus
+from src.core.process_commands import LocalExtraction, create_process_command
 from src.core.validators import EXTRACTION_GENERATION, LOCAL_EXTRACTION_GENERATION
 from src.workers.pipeline import (
     BlobProvenance,
@@ -1091,6 +1097,85 @@ class TestChangeEventCarriesTheDiffAddresses:
             await apply_extraction_outcome(db_session, wi, outcome, blob=_BLOB)
             await db_session.flush()
         assert dispatch.call_args.kwargs["current_text"] is None
+
+
+async def _audits_of(db_session, event_type, wi) -> list[AuditLog]:
+    stmt = select(AuditLog).where(
+        AuditLog.event_type == event_type,
+        AuditLog.payload["watched_item_id"].astext == str(wi.id),
+    )
+    return list((await db_session.execute(stmt)).scalars())
+
+
+class TestChangeDiffEndToEnd:
+    """#222 acceptance: a change with Full diff enabled delivers the diff.
+
+    Nothing between the pipeline and the notifier is mocked: the real
+    dispatcher selects the template, the real loader finds the previous text
+    through its ``process_commands`` row (under its savepoint) and takes the
+    current text from the pipeline's hand, and the real renderer fences the
+    diff. Only the two edges are stubbed — the notifier client and the GCS read.
+    """
+
+    async def test_full_diff_reaches_the_notifier(self, db_session):
+        wi = await make_watched_item(db_session, name="Diff e2e", source_specs=[_SPEC_FULL_PAGE])
+        await process_watched_item(db_session, wi, raw_content=_HTML, blob=_BLOB)
+        previous = _extract_and_fingerprint(_HTML, [_SPEC_FULL_PAGE]).content
+        uri = f"gs://co-gcs-processor/blobs/{hashlib.sha256(previous).hexdigest()}.bin"
+
+        fetch = await create_fetch_command(db_session, wi, now=datetime.now(UTC))
+        fetch.blob_uri, fetch.content_fingerprint = _BLOB.blob_uri, "61" * 32
+        await db_session.flush()
+        answered = await create_process_command(
+            db_session,
+            fetch,
+            wi,
+            now=datetime.now(UTC),
+            local=LocalExtraction(outcome=LocalOutcome.BASELINE),
+        )
+        answered.status = ProcessCommandStatus.COMPLETED
+        answered.output_digest = f"sha256:{hashlib.sha256(previous).hexdigest()}"
+        answered.output_uri = uri
+        answered.output_size_bytes = len(previous)
+        db_session.add(
+            NotificationTemplate(
+                title="Diff e2e",
+                visibility=VISIBILITY_GLOBAL,
+                remote_channel_id=str(ULID()),
+                channel_hint="json",
+                events=["change_detected"],
+                content_config={"default": {"include_diff_full": True}},
+            )
+        )
+        await db_session.flush()
+
+        client = AsyncMock()
+        client.__aenter__ = AsyncMock(return_value=client)
+        client.__aexit__ = AsyncMock(return_value=False)
+        client.dispatch.return_value = MagicMock(
+            id=str(ULID()), status=DispatchOutStatus.SUCCEEDED, attempts=[]
+        )
+        with (
+            patch("src.core.notifications.notify.get_notifier_client", return_value=client),
+            patch(
+                "src.core.notifications.diff_loader.aread_blob",
+                new=AsyncMock(side_effect=lambda u: {uri: previous}[u]),
+            ),
+        ):
+            result = await process_watched_item(
+                db_session, wi, raw_content=_HTML_CHANGED, blob=_BLOB
+            )
+        await db_session.flush()
+
+        assert result.changed is True
+        body = client.dispatch.call_args.kwargs["body_template"]
+        fenced = body.split("\n\n", 1)[1]
+        assert fenced.startswith("```diff\n--- previous\n+++ current\n")
+        assert "-Hello world" in fenced
+        assert "+Content changed" in fenced
+        assert "DIFF: unavailable" not in body
+        (dispatched,) = await _audits_of(db_session, EventType.NOTIFICATION_DISPATCHED, wi)
+        assert dispatched.payload["results"][0]["success"] is True
 
 
 class TestOptionA:

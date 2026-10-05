@@ -214,9 +214,11 @@ async def load_change_diff(
     try:
         cap = diff_max_input_bytes()
         previous = await _read_stored(session, previous_fp, "previous", cap)
+        # Cap before hash (CR 3): hashing runs on the event loop, and a text
+        # the cap refuses is refused whichever copy is read.
+        if current_text is not None and len(current_text) > cap:
+            raise _Unavailable("content too large")
         if current_text is not None and _address(current_text) == current_fp:
-            if len(current_text) > cap:
-                raise _Unavailable("content too large")
             current = current_text
         else:
             current = await _read_stored(session, current_fp, "current", cap)

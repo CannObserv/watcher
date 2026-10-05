@@ -220,6 +220,23 @@ class TestLoadChangeDiff:
             result = await load_change_diff(AsyncMock(), _meta(current=big), current_text=big)
         assert result.unavailable == "content too large"
 
+    async def test_oversized_text_in_hand_is_refused_before_it_is_hashed(self, monkeypatch):
+        # Hashing is CPU on the event loop; a text the cap refuses anyway
+        # must not pay for it.
+        monkeypatch.setenv(DIFF_MAX_INPUT_BYTES_ENV, str(len(PREVIOUS)))
+        big = CURRENT + b"\n" + b"x" * 64
+        hashed = []
+        real = diff_mod._address
+        locate, read = _store(PREVIOUS)
+        with (
+            locate,
+            read,
+            patch.object(diff_mod, "_address", side_effect=lambda t: hashed.append(t) or real(t)),
+        ):
+            result = await load_change_diff(AsyncMock(), _meta(current=big), current_text=big)
+        assert result.unavailable == "content too large"
+        assert big not in hashed
+
     async def test_difflib_runs_off_the_event_loop(self):
         locate, read = _store(PREVIOUS, CURRENT)
         real = asyncio.to_thread

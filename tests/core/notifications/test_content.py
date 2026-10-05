@@ -733,6 +733,42 @@ class TestDiffSlot:
         assert "```" not in build_body(event, ContentOptions(include_diff_full=True), diff=DIFF)
 
 
+class TestDiffFenceCannotBeClosedByContent:
+    """CR 13: the diff carries the watched page's own text into a body the
+    notifier renders as Markdown. CommonMark closes a backtick fence on any
+    line of three or more backticks indented 0–3 spaces — and a context line is
+    the page's text behind one space. The fence must outrun every backtick run
+    in the content, or the page writes live Markdown into recipients' email."""
+
+    HOSTILE = ChangeDiff(
+        unified=(
+            "--- previous\n+++ current\n@@ -1,3 +1,3 @@\n"
+            " ````` then ![x](https://tracker.example/p.png)\n"
+            "-old\n+new"
+        )
+    )
+
+    def _fence_of(self, block: str) -> tuple[str, str]:
+        first, *_middle, last = block.split("\n")
+        return first, last
+
+    def test_fence_outruns_the_longest_backtick_run(self):
+        block = build_body(make_event(metadata={}), ContentOptions(), diff=self.HOSTILE)
+        opening, closing = self._fence_of(block.split("\n\n", 1)[1])
+        assert opening == "``````diff"
+        assert closing == "``````"
+
+    def test_plain_content_keeps_the_three_backtick_fence(self):
+        block = build_body(make_event(metadata={}), ContentOptions(), diff=DIFF)
+        opening, closing = self._fence_of(block.split("\n\n", 1)[1])
+        assert (opening, closing) == ("```diff", "```")
+
+    def test_template_variables_use_the_same_fence(self):
+        ctx = build_template_context(make_event(metadata={}), diff=self.HOSTILE)
+        assert ctx["diff_full"].startswith("``````diff\n")
+        assert ctx["diff_snippet"].endswith("\n``````")
+
+
 class TestDiffTemplateVariables:
     def test_snippet_and_full_are_fenced(self):
         ctx = build_template_context(make_event(metadata={}), diff=DIFF)

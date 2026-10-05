@@ -1,6 +1,7 @@
 """Notification body builder — resolves ContentOptions and composes custom bodies."""
 
 import os
+import re
 
 from jinja2 import Environment, StrictUndefined, TemplateError
 
@@ -25,6 +26,8 @@ _jinja_env_strict = Environment(autoescape=False, undefined=StrictUndefined)
 # rather than a wall of unified-diff lines. Use `{{ diff_full }}` for the
 # unbounded version.
 _DEFAULT_DIFF_SNIPPET_CAP: int = ContentOptions.model_fields["diff_snippet_lines"].default
+
+_BACKTICK_RUN = re.compile(r"`+")
 
 
 def render_template(template_str: str, context: dict) -> str:
@@ -298,6 +301,9 @@ def _normalize_unified_diff_lines(unified_diff: str) -> list[str]:
 def _render_unified_diff_block(unified_diff: str | None, *, max_lines: int | None) -> str:
     """Wrap a unified-diff text in a Markdown ```diff fenced block.
 
+    The fence is three backticks unless the content holds a run as long, in
+    which case it is one longer (``_fence_for``).
+
     `max_lines=None` means no cap; the entire diff is rendered.
     A positive int caps the number of diff lines included; truncation is
     hunk-boundary aware (`@@ ...` lines mark hunk starts), and a `...
@@ -315,11 +321,25 @@ def _render_unified_diff_block(unified_diff: str | None, *, max_lines: int | Non
     else:
         kept, omitted = _truncate_unified_diff_lines(lines, max_lines)
     body = "\n".join(kept)
-    fenced = "```diff\n" + body + "\n"
+    fence = _fence_for(body)
+    fenced = f"{fence}diff\n{body}\n"
     if omitted > 0:
         fenced += f"... ({omitted} more line{'s' if omitted != 1 else ''})\n"
-    fenced += "```"
+    fenced += fence
     return fenced
+
+
+def _fence_for(body: str) -> str:
+    """A backtick fence no line of ``body`` can close (CR 13).
+
+    The diff is the watched page's own text, and the notifier renders the body
+    as CommonMark: a backtick fence closes on any line holding a run at least
+    as long, indented 0–3 spaces — a diff context line is the page's text
+    behind one space. One backtick longer than the longest run in the content
+    (three at minimum) keeps the page's text inside the block, inert.
+    """
+    longest = max((len(run) for run in _BACKTICK_RUN.findall(body)), default=0)
+    return "`" * max(3, longest + 1)
 
 
 def _truncate_unified_diff_lines(lines: list[str], max_lines: int) -> tuple[list[str], int]:

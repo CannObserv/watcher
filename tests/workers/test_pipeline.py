@@ -26,6 +26,7 @@ from sqlalchemy import select
 from src.core.models.audit_log import AuditLog, EventType
 from src.core.models.change_revision import ChangeRevision
 from src.core.models.pending_archiver_sync import PendingArchiverSync
+from src.core.registry import ServiceRegistry
 from src.core.validators import EXTRACTION_GENERATION, LOCAL_EXTRACTION_GENERATION
 from src.workers.pipeline import (
     BlobProvenance,
@@ -989,8 +990,6 @@ class TestExtractorRegistryWiring:
     """The default registry maps essences to the expected extractor classes."""
 
     def test_default_registry_maps_media_types(self):
-        from src.core.registry import ServiceRegistry
-
         reg = ServiceRegistry()
         assert isinstance(reg.get_extractor("text/html"), HtmlExtractor)
         assert isinstance(reg.get_extractor("application/pdf"), PdfExtractor)

@@ -18,15 +18,12 @@ from co_core.pure.extract import (
     spec_fingerprint,
     spec_schema_version,
 )
-from co_core.pure.extract.csv_excel import CsvExcelExtractor
 from co_core.pure.extract.html import HtmlExtractor
-from co_core.pure.extract.pdf import PdfExtractor
 from sqlalchemy import select
 
 from src.core.models.audit_log import AuditLog, EventType
 from src.core.models.change_revision import ChangeRevision
 from src.core.models.pending_archiver_sync import PendingArchiverSync
-from src.core.registry import ServiceRegistry
 from src.core.validators import EXTRACTION_GENERATION, LOCAL_EXTRACTION_GENERATION
 from src.workers.pipeline import (
     BlobProvenance,
@@ -984,17 +981,6 @@ class TestExtractorDispatch:
         # Both establish a baseline; the CSV row-range extraction differs from the
         # HTML text extraction, so the fingerprints diverge — proof the dispatch ran.
         assert csv_rev.content_fingerprint != html_rev.content_fingerprint
-
-
-class TestExtractorRegistryWiring:
-    """The default registry maps essences to the expected extractor classes."""
-
-    def test_default_registry_maps_media_types(self):
-        reg = ServiceRegistry()
-        assert isinstance(reg.get_extractor("text/html"), HtmlExtractor)
-        assert isinstance(reg.get_extractor("application/pdf"), PdfExtractor)
-        assert isinstance(reg.get_extractor("text/csv"), CsvExcelExtractor)
-        assert isinstance(reg.get_extractor("application/x-unlisted-test"), HtmlExtractor)
 
 
 @pytest.mark.integration

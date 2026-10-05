@@ -9,6 +9,7 @@ exception into dispatch.
 
 import asyncio
 import hashlib
+import logging
 from datetime import UTC, datetime
 from unittest.mock import AsyncMock, patch
 
@@ -116,6 +117,40 @@ class TestLoadChangeDiff:
             result = await load_change_diff(AsyncMock(), meta)
         assert result.unavailable == "previous text failed its hash check"
         assert any("hash check" in r.getMessage() for r in caplog.records)
+
+    @pytest.mark.parametrize(
+        ("setup", "message"),
+        [
+            ("corrupt", "stored text failed its hash check — no diff"),
+            ("unreadable", "stored text unreadable — no diff"),
+            ("missing", "change diff unavailable"),
+            ("broken", "change diff failed — sending without it"),
+        ],
+    )
+    async def test_every_log_line_names_the_item(self, caplog, setup, message):
+        # An operator holding a WARNING must be able to find the item without
+        # reverse-searching revisions by digest (CR 9).
+        caplog.set_level(logging.INFO)
+
+        async def locate(_s, fp):
+            if setup == "broken":
+                raise RuntimeError("db gone")
+            if setup == "missing":
+                return None
+            return StoredText(uri=_uri(fp), size_bytes=8)
+
+        def read(_uri):
+            if setup == "unreadable":
+                raise BlobUnreadable("gone")
+            return b"tampered"
+
+        with (
+            patch.object(loader_mod, "stored_text_location", side_effect=locate),
+            patch.object(loader_mod, "aread_blob", side_effect=read),
+        ):
+            await load_change_diff(AsyncMock(), _meta(), watched_item_id="01ITEM")
+        (record,) = [r for r in caplog.records if r.getMessage() == message]
+        assert record.watched_item_id == "01ITEM"
 
     @pytest.mark.parametrize("error", [BlobUnreadable("gone"), UnsupportedBlobScheme("403")])
     async def test_an_unreadable_text_is_unavailable(self, error):

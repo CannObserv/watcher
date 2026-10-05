@@ -219,7 +219,10 @@ async def dispatch_event_notifications(
                 ):
                     diff_loaded = True
                     diff = await load_change_diff(
-                        session, event.metadata, current_text=current_text
+                        session,
+                        event.metadata,
+                        current_text=current_text,
+                        watched_item_id=event.watched_item_id,
                     )
                 rendered_title = build_title(event, options)
                 rendered_body = build_body(event, options, diff=diff)

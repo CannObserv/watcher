@@ -96,7 +96,9 @@ def _address(text: bytes) -> str:
     return prefixed_sha256(sha256(text))
 
 
-async def _read_stored(session: AsyncSession, fingerprint: str, side: str, cap: int) -> bytes:
+async def _read_stored(
+    session: AsyncSession, fingerprint: str, side: str, cap: int, *, log_extra: dict
+) -> bytes:
     """One side's text, located, size-checked, read and hash-checked."""
     stored = await stored_text_location(session, fingerprint)
     if stored is None:
@@ -109,7 +111,7 @@ async def _read_stored(session: AsyncSession, fingerprint: str, side: str, cap: 
     except BlobReadError as exc:
         logger.warning(
             "stored text unreadable — no diff",
-            extra={"side": side, "fingerprint": fingerprint, "error": str(exc)},
+            extra={**log_extra, "side": side, "fingerprint": fingerprint, "error": str(exc)},
         )
         raise _Unavailable(f"{side} text unreadable") from exc
     if len(text) > cap:
@@ -117,28 +119,34 @@ async def _read_stored(session: AsyncSession, fingerprint: str, side: str, cap: 
     if _address(text) != fingerprint:
         logger.warning(
             "stored text failed its hash check — no diff",
-            extra={"side": side, "fingerprint": fingerprint, "uri": stored.uri},
+            extra={**log_extra, "side": side, "fingerprint": fingerprint, "uri": stored.uri},
         )
         raise _Unavailable(f"{side} text failed its hash check")
     return text
 
 
 async def load_change_diff(
-    session: AsyncSession, metadata: dict, *, current_text: bytes | None = None
+    session: AsyncSession,
+    metadata: dict,
+    *,
+    current_text: bytes | None = None,
+    watched_item_id: str | None = None,
 ) -> ChangeDiff | None:
     """The diff for one ``change_detected`` event; never raises.
 
     ``None`` when the event names no ``previous_fingerprint`` /
     ``current_fingerprint`` pair — nothing to diff, so nothing to say (a test
     notification). Otherwise a ``ChangeDiff``: the diff, or why there is none.
+    ``watched_item_id`` rides every log line, so a WARNING names its item.
     """
     previous_fp = metadata.get("previous_fingerprint")
     current_fp = metadata.get("current_fingerprint")
     if not previous_fp or not current_fp:
         return None
+    log_extra = {"watched_item_id": watched_item_id}
     try:
         cap = diff_max_input_bytes()
-        previous = await _read_stored(session, previous_fp, "previous", cap)
+        previous = await _read_stored(session, previous_fp, "previous", cap, log_extra=log_extra)
         # Cap before hash (CR 3): hashing runs on the event loop, and a text
         # the cap refuses is refused whichever copy is read.
         if current_text is not None and len(current_text) > cap:
@@ -146,18 +154,22 @@ async def load_change_diff(
         if current_text is not None and _address(current_text) == current_fp:
             current = current_text
         else:
-            current = await _read_stored(session, current_fp, "current", cap)
+            current = await _read_stored(session, current_fp, "current", cap, log_extra=log_extra)
         unified = await asyncio.to_thread(compute_unified_diff, previous, current)
     except _Unavailable as exc:
         logger.info(
             "change diff unavailable",
-            extra={"reason": str(exc), "previous_fingerprint": previous_fp},
+            extra={**log_extra, "reason": str(exc), "previous_fingerprint": previous_fp},
         )
         return ChangeDiff(unavailable=str(exc))
     except Exception:
         logger.warning(
             "change diff failed — sending without it",
-            extra={"previous_fingerprint": previous_fp, "current_fingerprint": current_fp},
+            extra={
+                **log_extra,
+                "previous_fingerprint": previous_fp,
+                "current_fingerprint": current_fp,
+            },
             exc_info=True,
         )
         return ChangeDiff(unavailable="error")

@@ -11,6 +11,9 @@ shadow mode compares like with like. A local copy would route the new essence
 to the HTML fallback here while Processor used the new extractor.
 """
 
+from collections.abc import Mapping
+from types import MappingProxyType
+
 from co_core.pure.extract import Extractor
 from co_core.pure.extract.dispatch import DEFAULT_EXTRACTOR, EXTRACTOR_BY_ESSENCE
 
@@ -18,7 +21,7 @@ from co_core.pure.extract.dispatch import DEFAULT_EXTRACTOR, EXTRACTOR_BY_ESSENC
 class ServiceRegistry:
     """Lightweight registry for swappable protocol implementations."""
 
-    def __init__(self, extractor_map: dict[str, type[Extractor]] | None = None) -> None:
+    def __init__(self, extractor_map: Mapping[str, type[Extractor]] | None = None) -> None:
         """Initialise the registry with optional custom implementations.
 
         All parameters default to the production implementations when omitted.
@@ -28,8 +31,10 @@ class ServiceRegistry:
         And no Archiver client: the registry announcement replaced the last call
         that needed one (#254).
         """
-        self._extractor_map: dict[str, type[Extractor]] = (
-            extractor_map if extractor_map is not None else EXTRACTOR_BY_ESSENCE
+        # A read-only live view, not the dict: co-core's table is process-wide,
+        # so a write through the registry would reach every other caller of it.
+        self._extractor_map: Mapping[str, type[Extractor]] = (
+            extractor_map if extractor_map is not None else MappingProxyType(EXTRACTOR_BY_ESSENCE)
         )
 
     def get_extractor(self, media_type_essence: str | None) -> Extractor:

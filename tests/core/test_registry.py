@@ -2,6 +2,7 @@
 
 from unittest.mock import MagicMock
 
+import pytest
 from co_core.pure.extract import dispatch
 from co_core.pure.extract.csv_excel import CsvExcelExtractor
 from co_core.pure.extract.html import HtmlExtractor
@@ -61,6 +62,11 @@ class TestServiceRegistryDispatchesFromCoCore:
         monkeypatch.setitem(dispatch.EXTRACTOR_BY_ESSENCE, "application/x-test-342", added)
         extractor = ServiceRegistry().get_extractor("application/x-test-342")
         assert extractor is added.return_value
+
+    def test_default_map_cannot_write_to_the_co_core_table(self):
+        with pytest.raises(TypeError):
+            ServiceRegistry()._extractor_map["application/x-test-342"] = HtmlExtractor  # type: ignore[index]
+        assert "application/x-test-342" not in dispatch.EXTRACTOR_BY_ESSENCE
 
     def test_fallback_is_the_co_core_default(self):
         extractor = ServiceRegistry().get_extractor("application/json")

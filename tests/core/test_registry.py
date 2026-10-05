@@ -41,9 +41,14 @@ class TestServiceRegistryDefaults:
         assert e1 is not e2
 
     def test_get_extractor_unknown_essence_falls_back_to_html(self):
-        """Total dispatch (#168): open-world media types resolve to HTML, never raise."""
+        """Total dispatch (#168): open-world media types resolve to HTML, never raise.
+
+        The unlisted example is unlisted by construction: a real type such as
+        ``application/json`` is one co-core may add an extractor for
+        (cannobserv#354), which would fail this test on a correct pin bump.
+        """
         registry = ServiceRegistry()
-        assert isinstance(registry.get_extractor("application/json"), HtmlExtractor)
+        assert isinstance(registry.get_extractor("application/x-unlisted-test"), HtmlExtractor)
         assert isinstance(registry.get_extractor(None), HtmlExtractor)
         assert isinstance(registry.get_extractor("application/octet-stream"), HtmlExtractor)
 
@@ -69,7 +74,7 @@ class TestServiceRegistryDispatchesFromCoCore:
         assert "application/x-test-342" not in dispatch.EXTRACTOR_BY_ESSENCE
 
     def test_fallback_is_the_co_core_default(self):
-        extractor = ServiceRegistry().get_extractor("application/json")
+        extractor = ServiceRegistry().get_extractor("application/x-unlisted-test")
         assert type(extractor) is dispatch.DEFAULT_EXTRACTOR
 
     def test_custom_map_ignores_the_shared_table(self, monkeypatch):

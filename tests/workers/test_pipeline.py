@@ -995,7 +995,7 @@ class TestExtractorRegistryWiring:
         assert isinstance(reg.get_extractor("text/html"), HtmlExtractor)
         assert isinstance(reg.get_extractor("application/pdf"), PdfExtractor)
         assert isinstance(reg.get_extractor("text/csv"), CsvExcelExtractor)
-        assert isinstance(reg.get_extractor("application/json"), HtmlExtractor)
+        assert isinstance(reg.get_extractor("application/x-unlisted-test"), HtmlExtractor)
 
 
 @pytest.mark.integration

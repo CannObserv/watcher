@@ -734,39 +734,52 @@ class TestDiffSlot:
 
 
 class TestDiffFenceCannotBeClosedByContent:
-    """CR 13: the diff carries the watched page's own text into a body the
-    notifier renders as Markdown. CommonMark closes a backtick fence on any
-    line of three or more backticks indented 0–3 spaces — and a context line is
-    the page's text behind one space. The fence must outrun every backtick run
-    in the content, or the page writes live Markdown into recipients' email."""
+    """CR 13/14: the diff carries the watched page's own text into a body the
+    notifier renders as Markdown. CommonMark closes a backtick fence on a line
+    that is *only* a run at least as long, indented 0–3 spaces — and a context
+    line is the page's text behind one space. A segment that is exactly three
+    backticks (a chunk boundary or a sentence end produces one) would end a
+    three-backtick block and let the next line render as live Markdown in
+    recipients' email. The fence must outrun every backtick run in the content.
+    """
 
     HOSTILE = ChangeDiff(
         unified=(
-            "--- previous\n+++ current\n@@ -1,3 +1,3 @@\n"
-            " ````` then ![x](https://tracker.example/p.png)\n"
+            "--- previous\n+++ current\n@@ -1,4 +1,4 @@\n"
+            " ```\n"
+            " ![x](https://tracker.example/p.png)\n"
             "-old\n+new"
         )
     )
 
-    def _fence_of(self, block: str) -> tuple[str, str]:
-        first, *_middle, last = block.split("\n")
-        return first, last
+    def _block(self, body: str) -> list[str]:
+        return body.split("\n\n", 1)[1].split("\n")
 
-    def test_fence_outruns_the_longest_backtick_run(self):
-        block = build_body(make_event(metadata={}), ContentOptions(), diff=self.HOSTILE)
-        opening, closing = self._fence_of(block.split("\n\n", 1)[1])
-        assert opening == "``````diff"
-        assert closing == "``````"
+    def test_a_content_line_that_would_close_three_backticks_cannot_close_the_fence(self):
+        lines = self._block(
+            build_body(make_event(metadata={}), ContentOptions(), diff=self.HOSTILE)
+        )
+        fence = lines[-1]
+        assert lines[0] == f"{fence}diff"
+        assert fence == "````"
+        # CommonMark's closing rule: up to three spaces, then a run at least
+        # as long as the opening fence, then nothing but spaces.
+        inner = lines[1:-1]
+        assert not any(
+            line.lstrip(" ").rstrip(" ").startswith(fence)
+            and set(line.strip(" ")) == {"`"}
+            and len(line) - len(line.lstrip(" ")) <= 3
+            for line in inner
+        )
 
     def test_plain_content_keeps_the_three_backtick_fence(self):
-        block = build_body(make_event(metadata={}), ContentOptions(), diff=DIFF)
-        opening, closing = self._fence_of(block.split("\n\n", 1)[1])
-        assert (opening, closing) == ("```diff", "```")
+        lines = self._block(build_body(make_event(metadata={}), ContentOptions(), diff=DIFF))
+        assert (lines[0], lines[-1]) == ("```diff", "```")
 
     def test_template_variables_use_the_same_fence(self):
         ctx = build_template_context(make_event(metadata={}), diff=self.HOSTILE)
-        assert ctx["diff_full"].startswith("``````diff\n")
-        assert ctx["diff_snippet"].endswith("\n``````")
+        assert ctx["diff_full"].startswith("````diff\n")
+        assert ctx["diff_snippet"].endswith("\n````")
 
 
 class TestDiffTemplateVariables:

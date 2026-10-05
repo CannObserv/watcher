@@ -333,10 +333,12 @@ def _fence_for(body: str) -> str:
     """A backtick fence no line of ``body`` can close (CR 13).
 
     The diff is the watched page's own text, and the notifier renders the body
-    as CommonMark: a backtick fence closes on any line holding a run at least
-    as long, indented 0–3 spaces — a diff context line is the page's text
-    behind one space. One backtick longer than the longest run in the content
-    (three at minimum) keeps the page's text inside the block, inert.
+    as CommonMark: a backtick fence closes on a line that is only a run at
+    least as long (indented 0–3 spaces, trailing spaces allowed) — and a diff
+    context line is the page's text behind one space, so a segment that is
+    exactly three backticks would end the block and the page's next line would
+    render as live Markdown (CR 14). One backtick longer than the longest run
+    in the content (three at minimum) means no line can close it.
     """
     longest = max((len(run) for run in _BACKTICK_RUN.findall(body)), default=0)
     return "`" * max(3, longest + 1)

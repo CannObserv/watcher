@@ -1,6 +1,6 @@
 # Observo-derived extraction and the change diff — design
 
-**Status:** approved 2026-09-24; cannobserv#486 shipped in co-core 0.19.4 and step 0 (#324) shipped the same day; #325 (shadow) shipped 2026-10-02; #326's processor-decided path built 2026-10-03, switch pending — read **Amendments** first. **Issue:** #222 (retitled and
+**Status:** approved 2026-09-24; cannobserv#486 shipped in co-core 0.19.4 and step 0 (#324) shipped the same day; #325 (shadow) shipped 2026-10-02; #326's processor-decided path built 2026-10-03, switch pending; #222 (the diff) built 2026-10-05 — read **Amendments** first. **Issue:** #222 (retitled and
 split — see **#222 disposition**). **Cross-repo work:** filed 2026-09-24 as issues
 in co-core, broker, Observo and Archiver (numbers in **Section 6**); none of it is
 implemented from a Watcher session.
@@ -61,6 +61,34 @@ Where they conflict, these win over the sections below.
 - **"Processing delayed"** is a reaper log line naming the items, plus the
   check-now 409 wording; no new health status (`info.watch-status` carries
   three values).
+
+## Amendments (2026-10-05, #222 build)
+
+Where they conflict, these win over Section 4.
+
+- **The location comes from the processor's answer**, not a configured
+  bucket: `process_commands.output_uri` on a completed row whose
+  `output_digest` is the fingerprint. No Watcher-side bucket knob; a digest the
+  processor never answered for (any revision older than shadow) has no diff.
+- **The current text is in hand under local/shadow extraction.** The change
+  notifies before the processor has answered for that occasion, so the
+  pipeline passes the canonical bytes it just fingerprinted
+  (`ExtractionOutcome.content`, never persisted); they are trusted only if
+  they hash to `current_fingerprint`. Processor-decided, both sides are reads.
+- **`content_fingerprint` left the event** for `current_fingerprint`; nothing
+  but the preview fixture read it.
+- **The diff unit is a sentence**, long runs wrapped at 400 characters. All
+  four live items extract to a single 8–17 KB line, so a line diff would print
+  the page twice and the snippet cap would bound nothing.
+- **Computed lazily, once**: the first recipient whose options would show it
+  loads it; the rest reuse it. A custom body asks only by naming
+  `diff_snippet` / `diff_full`.
+- **"Unavailable" is a list item** (`DIFF: unavailable (<reason>)`), and the
+  diff block follows the list as its own fenced block — the #225 list
+  contract holds for every list line.
+- **Stored pre-#221 diff keys are honoured again**: both production templates
+  still carried `include_diff_snippet` / `include_diff_full` /
+  `diff_snippet_lines`, and they now take effect as saved.
 
 **Context read for this design (all 2026-09-24):** archiver#179 (`content.process`,
 open, no comments), replicator#69 (closed; the boundaries charter's *Asked and

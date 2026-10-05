@@ -323,6 +323,24 @@ one run-on line on HTML clients (the #224 regression). Guarded by
 `tests/core/notifications/test_content.py::TestMarkdownListContract`; keep it that
 way when editing the composer.
 
+## Change diff (#222)
+
+A `change_detected` event names both texts by storage address —
+`previous_fingerprint`, `current_fingerprint` — because the processor stores
+the canonical extracted text permanently under that digest
+(`src/core/notifications/diff.py`). Dispatch loads the diff **once per event**,
+only when a recipient's options would show it: location from the processor's
+own answer (`process_commands.output_uri`), each read hash-checked, each side
+capped (`WATCHER_DIFF_MAX_INPUT_BYTES`), `difflib` in a thread. Local/shadow
+extraction notifies before the processor answers, so the pipeline hands over
+the current text it holds. The unit is a **sentence**, not a line: every live
+item extracts to one whitespace-collapsed line, which a line diff would print
+whole. Nothing persists a diff. **Failure never blocks a notification**: the
+body says `DIFF: unavailable (<reason>)` — `previous text not stored` for any
+revision older than shadow mode. Defaults: snippet on (25 lines, hunk-aware),
+full off; templates saved before #221 get their stored diff choices back.
+`significance` and chunk counts stay retired (design D8).
+
 ## WatchEvent identity fields
 
 **WatchEvent identity fields** are `watched_item_id`, `item_name`, `item_url`

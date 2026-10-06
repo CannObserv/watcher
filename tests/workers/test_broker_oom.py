@@ -17,8 +17,8 @@ allowed``*). Two observations from that run are what the tests below encode:
   ``ConnectionError``/``TimeoutError`` alone would call it permanent, which is
   exactly the failure mode broker#6 asked about.
 * Of the commands Watcher issues, only ``XADD`` and ``XGROUP CREATE`` are
-  ``denyoom``. ``XREADGROUP``, ``XACK``, ``XAUTOCLAIM``, ``XREAD``, ``XLEN`` and
-  ``PING`` all keep working, so the consumers drain their backlog throughout.
+  ``denyoom``. ``XREADGROUP``, ``XACK``, ``XAUTOCLAIM``, ``XREAD`` and ``PING``
+  all keep working, so the consumers drain their backlog throughout.
 
 The message string is the broker's own, verbatim, so a test reading as a
 simulation still names the thing that was observed.

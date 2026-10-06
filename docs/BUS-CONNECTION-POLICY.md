@@ -57,7 +57,7 @@ The broker runs `maxmemory-policy noeviction` under an explicit `maxmemory 512mb
 | `XGROUP CREATE` | `ensure_group` at consumer boot | **refused** — `denyoom`, even where the group already exists (the `BUSYGROUP` reply never happens; the OOM check runs first) |
 | `XREADGROUP` / `XACK` / `XAUTOCLAIM` | the `content.blobs` loop | allowed |
 | `XREAD` | the `info.registry` tail reader | allowed (`readonly`) |
-| `XLEN` / `PING` | health, probe | allowed |
+| `PING` | the startup reachability probe (`probe_bus_reachable`) | allowed |
 
 So the `content.blobs` consumer keeps draining its backlog throughout — it reads, processes and acks normally — and the groupless `info.registry` reader is untouched. **Neither loop wedges.** The one path that does fire is `ensure_group`, and only on a **boot** that lands inside the cap: it sits inside the backoff guard (#287 CR-12), so the loop logs, waits 5 s and retries until the cap clears rather than dying before its first read. The cost is that the fact inbox stalls for the duration of a restart-during-OOM — bounded, visible, and self-healing, but worth knowing before diagnosing a quiet Watcher as idle.
 

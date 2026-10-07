@@ -21,11 +21,11 @@ suffix are trimmed first. Level 1 aligns content-defined segments of the rest:
 one ends after a token whose own hash says so, so an edit moves no natural
 boundary but its own. A run of ``MAX_SEGMENT_TOKENS`` with no natural boundary
 is cut by position, and those cuts shift up to the run's next natural boundary
-— bounded realignment, never the page's (CR 5). Level 2 refines each changed
-block word by word, up to ``REFINE_MAX_TOKENS`` a side; a bigger block is
-shown whole, bounded by the renderer's byte cap. On a repetitive page (a
-schedule's identical rows), two edits further apart than that show the stretch
-between them whole (CR 1).
+— bounded realignment, never the page's (CR 5). Level 2 refines changed
+blocks word by word while their summed work (``len(a) × len(b)``) stays within
+``REFINE_BUDGET``; a block past it is shown whole, bounded by the renderer's
+byte cap (CR 7). On a repetitive page (a schedule's identical rows), two edits
+far enough apart show the stretch between them whole (CR 1).
 """
 
 import difflib
@@ -51,8 +51,10 @@ WRAP_WIDTH = 72
 SEGMENT_MODULUS = 16
 #: A run with no such token is still cut, so no segment outgrows this.
 MAX_SEGMENT_TOKENS = 64
-#: Either side of a changed block above this is shown whole, not refined.
-REFINE_MAX_TOKENS = 4000
+#: Word-level work, summed over every refined block (``len(a) × len(b)``),
+#: one diff may spend: about one 4 000-word block of a small vocabulary, ~1 s
+#: (CR 7). A block that would overrun it is shown whole, not refined.
+REFINE_BUDGET = 4000 * 4000
 
 _TOKEN = re.compile(r"\n|[^\s]+")
 _NEWLINE = "\n"
@@ -148,8 +150,11 @@ def _changed_spans(before: list[str], after: list[str]) -> Iterator[_Span]:
     worst case — 69 s for one edit in 10 000 rows. Trimmed, one edit costs a
     scan however repetitive the page. What remains is aligned with autojunk
     on, so a segment that recurs throughout it cannot anchor the alignment:
-    a repetitive stretch between two edits becomes one changed block, refined
-    below ``REFINE_MAX_TOKENS`` and shown whole above it.
+    a repetitive stretch between two edits becomes one changed block.
+
+    Refining costs about ``len(a) × len(b)`` a block, so the budget is for the
+    whole diff, not per block (CR 7): capped per block only, 42 blocks of a
+    small vocabulary took 35 s. Blocks past ``REFINE_BUDGET`` are shown whole.
     """
     head, tail = _common_ends(before, after)
     middle_before = before[head : len(before) - tail]
@@ -158,13 +163,16 @@ def _changed_spans(before: list[str], after: list[str]) -> Iterator[_Span]:
     at_before = [head + offset for offset in _offsets(seg_before)]
     at_after = [head + offset for offset in _offsets(seg_after)]
     matcher = difflib.SequenceMatcher(None, seg_before, seg_after)
+    budget = REFINE_BUDGET
     for tag, s1, s2, t1, t2 in matcher.get_opcodes():
         if tag == "equal":
             continue
         i1, i2, j1, j2 = at_before[s1], at_before[s2], at_after[t1], at_after[t2]
-        if i2 - i1 > REFINE_MAX_TOKENS or j2 - j1 > REFINE_MAX_TOKENS:
+        work = (i2 - i1) * (j2 - j1)
+        if work > budget:
             yield i1, i2, j1, j2
             continue
+        budget -= work
         words = difflib.SequenceMatcher(None, before[i1:i2], after[j1:j2], autojunk=False)
         for wtag, a1, a2, b1, b2 in words.get_opcodes():
             if wtag != "equal":

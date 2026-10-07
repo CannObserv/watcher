@@ -250,13 +250,31 @@ class TestCost:
         assert compute_change_diff(before.encode(), after.encode()).hunks
         assert time.perf_counter() - started < 5
 
-    def test_a_block_over_the_refine_budget_is_shown_whole(self, monkeypatch):
+    def test_many_refinable_blocks_share_one_budget(self):
+        """CR 7: a refine costs about len(a) × len(b) — 0.94 s for one
+        3 999-word block of a small vocabulary. Capped per block only, a page of
+        such blocks between unique lines took 35 s; the budget is in total."""
+        rng = random.Random(349)
+        # No word here ends a segment (crc32 % 16 != 0), so level 1 cannot
+        # split a block: each is refined whole, or shown whole.
+        vocab = ["Board", "Caucus", "Agenda", "Meeting", "TVW", "10", "-", "11,", "Teams"]
+        before, after = [], []
+        for month in range(42):
+            before += [f"Month{month} heading{month}", " ".join(rng.choices(vocab, k=3_900))]
+            after += [f"Month{month} heading{month}", " ".join(rng.choices(vocab, k=3_900))]
+        started = time.perf_counter()
+        diff = compute_change_diff("\n".join(before).encode(), "\n".join(after).encode())
+        assert time.perf_counter() - started < 5
+        context = {line for hunk in diff.hunks for line in hunk if line.startswith("  ")}
+        assert {f"  Month{month} heading{month}" for month in range(42)} <= context
+
+    def test_a_block_past_the_refine_budget_is_shown_whole(self, monkeypatch):
         # Two edits, so the trimmed middle still holds changed segments.
         words = _words(200)
         edited = [*words[:50], "X", *words[51:150], "Y", *words[151:]]
         before, after = " ".join(words).encode(), " ".join(edited).encode()
         assert _changed(compute_change_diff(before, after)) == ["- w50", "+ X", "- w150", "+ Y"]
-        monkeypatch.setattr(diff_mod, "REFINE_MAX_TOKENS", 1)
+        monkeypatch.setattr(diff_mod, "REFINE_BUDGET", 1)
         minus = [line for line in _changed(compute_change_diff(before, after)) if line[0] == "-"]
         assert "w50" in " ".join(minus).split()
         assert len(" ".join(minus).split()) > 4

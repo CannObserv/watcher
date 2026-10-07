@@ -7,6 +7,7 @@ Last changed, Check interval, Description, Tags) as one Markdown list, then the
 diff as a fenced block. The header link is labelled ITEM (was WATCH).
 """
 
+import re
 from datetime import UTC, datetime
 
 import pytest
@@ -789,6 +790,18 @@ class TestRenderedSizeBackstop:
         diff = ChangeDiff(hunks=(("+ " + "x" * 100_000,),))
         ctx = build_template_context(make_event(metadata={}), diff=diff)
         assert len(ctx["diff_snippet"].encode()) <= MAX_RENDERED_DIFF_BYTES + 64
+
+    def test_the_fence_counts_against_the_cap(self):
+        """CR 2: the fence outruns the longest backtick run in the body, so a
+        page holding a huge run would add it twice more outside the budget."""
+        diff = ChangeDiff(hunks=(("+ " + "`" * 40_000,),))
+        for options in (ContentOptions(), ContentOptions(include_diff_full=True)):
+            block = build_body(make_event(metadata={}), options, diff=diff).split("\n\n", 1)[1]
+            assert len(block.encode()) <= MAX_RENDERED_DIFF_BYTES
+            lines = block.split("\n")
+            assert lines[0] == f"{lines[-1]}diff"
+            runs = re.findall(r"`+", "\n".join(lines[1:-1]))
+            assert len(lines[-1]) > max(len(run) for run in runs)
 
     def test_a_diff_within_the_cap_is_untouched(self):
         body = build_body(

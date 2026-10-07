@@ -26,7 +26,8 @@ _jinja_env_strict = Environment(autoescape=False, undefined=StrictUndefined)
 # rather than every change. Use `{{ diff_full }}` for all of them.
 _DEFAULT_DIFF_SNIPPET_CAP: int = ContentOptions.model_fields["diff_snippet_lines"].default
 
-#: The most a rendered diff body may be, footer included (#346, built in #349).
+#: The most a rendered diff block may be, fences and footer included (#346,
+#: built in #349; fences since CR 2).
 #: A word diff scales with the change, but a rewrite is a big change and one
 #: huge token defeats a line cap; an oversized body the notifier or a channel
 #: rejects would cost the recipient the whole notification. Under Slack's
@@ -310,15 +311,35 @@ def _render_diff_block(hunks: tuple[Hunk, ...], *, max_lines: int | None) -> str
     which case it is one longer (``_fence_for``).
 
     `max_lines=None` means every hunk; a positive int caps the rendered lines,
-    cut on a hunk boundary (``_truncate_hunks``). Either way the block's body
-    stays within ``MAX_RENDERED_DIFF_BYTES``. A `... (N more lines)` footer
-    is appended inside the fence when anything was cut.
+    cut on a hunk boundary (``_truncate_hunks``). Either way the whole block,
+    fences included, stays within ``MAX_RENDERED_DIFF_BYTES``. A `... (N more
+    lines)` footer is appended inside the fence when anything was cut.
+
+    The fence outruns the body's longest backtick run, so its size depends on
+    the cut (CR 2): a page holding a 30 KB run would add it twice outside a
+    body-only budget. The body is cut once against a minimal fence; if the
+    real one overflows, once more to a third of the cap — a fence is at most
+    one longer than the body, so body and both fences then fit whatever the
+    body holds.
 
     Returns empty string when there are no hunks.
     """
     if not hunks:
         return ""
-    kept, omitted = _truncate_hunks(hunks, max_lines=max_lines, max_bytes=MAX_RENDERED_DIFF_BYTES)
+    block = _fenced_block(hunks, max_lines, MAX_RENDERED_DIFF_BYTES - _fence_bytes("```"))
+    if len(block.encode()) > MAX_RENDERED_DIFF_BYTES:
+        budget = (MAX_RENDERED_DIFF_BYTES - _fence_bytes("") - 2) // 3
+        block = _fenced_block(hunks, max_lines, budget)
+    return block
+
+
+def _fence_bytes(fence: str) -> int:
+    """What a fence adds around a body: both fences, the info string, two newlines."""
+    return 2 * len(fence) + len("diff") + 2
+
+
+def _fenced_block(hunks: tuple[Hunk, ...], max_lines: int | None, max_bytes: int) -> str:
+    kept, omitted = _truncate_hunks(hunks, max_lines=max_lines, max_bytes=max_bytes)
     if omitted:
         kept = [*kept, f"... ({omitted} more line{'s' if omitted != 1 else ''})"]
     body = "\n".join(kept)

@@ -619,6 +619,10 @@ async def apply_extraction_outcome(
         )
         return WatchedItemResult(rebaselined=True, **_local_answer(outcome))
 
+    # #349: the change before this one, for the email's PREVIOUS CHANGE —
+    # read before it is overwritten, since `last_changed_at` is about to be
+    # this change. None on an item's first change: a baseline never sets it.
+    previous_changed_at = watched_item.last_changed_at
     watched_item.last_changed_at = now
 
     # #191: dispatch CHANGE_DETECTED once for the WatchedItem (the monitored entity).
@@ -635,6 +639,8 @@ async def apply_extraction_outcome(
         "extraction_changed": change.value if change is not None else None,
         **watched_item_event_base_metadata(watched_item),
     }
+    if previous_changed_at is not None:
+        change_meta["previous_changed_at"] = format_utc_iso(previous_changed_at)
 
     event = WatchEvent(
         event_type=WatchEventType.CHANGE_DETECTED,

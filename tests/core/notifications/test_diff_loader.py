@@ -21,7 +21,7 @@ from src.core.fetch_commands import create_fetch_command
 from src.core.models.process_command import LocalOutcome, ProcessCommandStatus
 from src.core.models.watched_item import WatchedItem
 from src.core.notifications import diff_loader as loader_mod
-from src.core.notifications.diff import ChangeDiff, compute_unified_diff
+from src.core.notifications.diff import ChangeDiff, compute_change_diff
 from src.core.notifications.diff_loader import (
     DIFF_MAX_INPUT_BYTES_ENV,
     StoredText,
@@ -73,10 +73,11 @@ class TestLoadChangeDiff:
         locate, read = _store(PREVIOUS, CURRENT)
         with locate, read:
             result = await load_change_diff(AsyncMock(), _meta())
-        assert result == ChangeDiff(unified=compute_unified_diff(PREVIOUS, CURRENT))
+        assert result == compute_change_diff(PREVIOUS, CURRENT)
+        assert result.hunks
 
     async def test_a_whitespace_only_change_says_so(self):
-        # The fingerprints differ but the sentence segmentation collapses the
+        # The fingerprints differ but the word split collapses the
         # difference: an empty diff must explain itself, never render as nothing.
         before, after = b"Board meets.  Quorum is two.", b"Board meets. Quorum is two."
         locate, read = _store(before)
@@ -90,20 +91,20 @@ class TestLoadChangeDiff:
         locate, read = _store(PREVIOUS)
         with locate as located, read:
             result = await load_change_diff(AsyncMock(), _meta(), current_text=CURRENT)
-        assert result.unified == compute_unified_diff(PREVIOUS, CURRENT)
+        assert result == compute_change_diff(PREVIOUS, CURRENT)
         assert [c.args[1] for c in located.call_args_list] == [_fp(PREVIOUS)]
 
     async def test_current_text_in_hand_that_does_not_hash_is_not_trusted(self):
         locate, read = _store(PREVIOUS, CURRENT)
         with locate, read:
             result = await load_change_diff(AsyncMock(), _meta(), current_text=b"something else")
-        assert result.unified == compute_unified_diff(PREVIOUS, CURRENT)
+        assert result == compute_change_diff(PREVIOUS, CURRENT)
 
     async def test_previous_not_stored_is_unavailable(self):
         locate, read = _store(CURRENT)
         with locate, read:
             result = await load_change_diff(AsyncMock(), _meta())
-        assert result.unified == ""
+        assert result.hunks == ()
         assert result.unavailable == "previous text not stored"
 
     async def test_current_not_stored_is_unavailable(self):
@@ -229,7 +230,7 @@ class TestLoadChangeDiff:
 
         with locate, read, patch.object(loader_mod.asyncio, "to_thread", side_effect=spy):
             await load_change_diff(AsyncMock(), _meta())
-        assert compute_unified_diff in calls
+        assert compute_change_diff in calls
 
 
 @pytest.mark.integration

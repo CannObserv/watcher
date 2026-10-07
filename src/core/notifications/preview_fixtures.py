@@ -15,7 +15,7 @@ guards this against drift.
 **Diff parity (#222).** The diff is never event metadata — the dispatcher
 computes it from the two stored canonical texts the event's fingerprints name.
 The preview stands in two canned texts, names them by their real digests, and
-diffs them with the dispatcher's own ``compute_unified_diff`` (``preview_diff``),
+diffs them with the dispatcher's own ``compute_change_diff`` (``preview_diff``),
 so the preview shows exactly what a delivered notification would.
 `test_preview_fixtures.TestPreviewDispatchParity` drives the dispatcher over
 this fixture and compares bodies.
@@ -25,7 +25,7 @@ from datetime import UTC, datetime
 
 from co_core.pure.util.hashing import prefixed_sha256, sha256
 
-from src.core.notifications.diff import ChangeDiff, compute_unified_diff
+from src.core.notifications.diff import ChangeDiff, compute_change_diff
 from src.core.notifications.events import WatchEvent, WatchEventType
 
 _PREVIEW_WATCH_ID = "01KPPFATBNYQGBB38SQ06DN9HY"
@@ -48,28 +48,65 @@ _SHARED_CONTEXT = {
 # Canonical extracted text — chunk texts joined by "\n" (cannobserv#486), the
 # shape the processor stores and the dispatcher diffs. Not HTML: the diff is
 # over what the fingerprint hashes, never the raw page.
-PREVIEW_PREVIOUS_TEXT = b"""\
+#
+# The hearing schedule is one chunk with no sentence end — the shape of most
+# live pages (#349) — and the current text inserts a recording link in its
+# first entry. #222's fixed-width wrap realigned the rest of such a run after
+# an insertion; the preview shows that it no longer does.
+_PREVIOUS_SCHEDULE = (
+    b"Hearing Schedule "
+    b"Monday, April 6, 10:00 - 11:00, Licensing Hearing Agenda "
+    b"Tuesday, April 7, 13:30 - 15:00, Rules Hearing Agenda "
+    b"Monday, April 13, 10:00 - 11:00, Licensing Hearing Agenda "
+    b"Tuesday, April 14, 13:30 - 15:00, Rules Hearing Agenda "
+    b"Wednesday, April 15, 09:00 - 10:00, Enforcement Hearing Agenda "
+    b"Monday, April 20, 10:00 - 11:00, Licensing Hearing Agenda "
+    b"Tuesday, April 21, 13:30 - 15:00, Rules Hearing Agenda "
+    b"Wednesday, April 22, 09:00 - 10:00, Enforcement Hearing Agenda "
+    b"Monday, April 27, 10:00 - 11:00, Licensing Hearing Agenda "
+    b"Tuesday, April 28, 13:30 - 15:00, Rules Hearing Agenda "
+    b"Monday, May 4, 10:00 - 11:00, Licensing Hearing Agenda "
+    b"Tuesday, May 5, 13:30 - 15:00, Rules Hearing Agenda "
+    b"Wednesday, May 6, 09:00 - 10:00, Enforcement Hearing Agenda "
+    b"Monday, May 11, 10:00 - 11:00, Licensing Hearing Agenda"
+)
+_CURRENT_SCHEDULE = _PREVIOUS_SCHEDULE.replace(
+    b"Licensing Hearing Agenda Tuesday, April 7",
+    b"Licensing Hearing Agenda Recording: April 6 hearing video Tuesday, April 7",
+)
+
+PREVIEW_PREVIOUS_TEXT = (
+    b"""\
 Regulatory Filings
 Last updated: 2026-04-10
 Hours
 Mon-Fri: 9:00 - 17:00
 Contact
 contact@example.com
+"""
+    + _PREVIOUS_SCHEDULE
+    + b"""
 Recent filings
 Application 2026-04-08
 Renewal 2026-04-09"""
+)
 
-PREVIEW_CURRENT_TEXT = b"""\
+PREVIEW_CURRENT_TEXT = (
+    b"""\
 Regulatory Filings
 Last updated: 2026-04-15
 New licensing program
 Apply for a license at https://example.com/apply
 Contact
 support@example.com
+"""
+    + _CURRENT_SCHEDULE
+    + b"""
 Recent filings
 Application 2026-04-08
 Renewal 2026-04-12
 Renewal 2026-04-15"""
+)
 
 
 MOCK_EVENT_FIXTURES: dict[str, dict] = {
@@ -77,6 +114,7 @@ MOCK_EVENT_FIXTURES: dict[str, dict] = {
         **_SHARED_CONTEXT,
         # Layered by pipeline.py on change detection.
         "change_revision_id": "01KPPFATBNYQGBB38SQ06DN9HZ",
+        "previous_changed_at": "2026-04-09T17:45:00Z",
         "previous_fingerprint": prefixed_sha256(sha256(PREVIEW_PREVIOUS_TEXT)),
         "current_fingerprint": prefixed_sha256(sha256(PREVIEW_CURRENT_TEXT)),
     },
@@ -116,4 +154,4 @@ def preview_diff(event_type: str) -> ChangeDiff | None:
     """
     if event_type != WatchEventType.CHANGE_DETECTED.value:
         return None
-    return ChangeDiff(unified=compute_unified_diff(PREVIEW_PREVIOUS_TEXT, PREVIEW_CURRENT_TEXT))
+    return compute_change_diff(PREVIEW_PREVIOUS_TEXT, PREVIEW_CURRENT_TEXT)

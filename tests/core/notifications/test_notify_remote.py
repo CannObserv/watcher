@@ -298,7 +298,7 @@ class TestChangeDiff:
     """#222: the diff is computed once per event, before the recipient loop,
     and only when some recipient's options ask for one."""
 
-    DIFF = ChangeDiff(unified="--- previous\n+++ current\n@@ -1 +1 @@\n-old\n+new")
+    DIFF = ChangeDiff(hunks=(("- old", "+ new"),))
 
     def _templates(self, *configs):
         out = []
@@ -328,7 +328,7 @@ class TestChangeDiff:
         client, load = await self._dispatch(monkeypatch, self._templates(None))
         load.assert_awaited_once()
         assert "```diff" in client.dispatch.call_args.kwargs["body_template"]
-        assert "+new" in client.dispatch.call_args.kwargs["body_template"]
+        assert "+ new" in client.dispatch.call_args.kwargs["body_template"]
 
     async def test_computed_once_for_many_recipients(self, monkeypatch):
         _client, load = await self._dispatch(monkeypatch, self._templates(None, None, None))

@@ -1080,6 +1080,30 @@ class TestChangeEventCarriesTheDiffAddresses:
         assert meta["current_fingerprint"] == change.content_fingerprint
         assert "content_fingerprint" not in meta
 
+    async def test_a_first_change_has_no_previous_change(self, db_session):
+        """#349: a baseline never sets ``last_changed_at``, so there is none."""
+        dispatch, _baseline, _change = await self._changed(db_session, "First change")
+        meta = dispatch.call_args.kwargs["event"].metadata
+        assert "previous_changed_at" not in meta
+
+    async def test_a_later_change_names_the_one_before_it(self, db_session):
+        """#349: ``last_changed_at`` is this change by the time the event is
+        built; the email's PREVIOUS CHANGE needs the value it replaced."""
+        wi = await make_watched_item(
+            db_session, name="Second change", source_specs=[_SPEC_FULL_PAGE]
+        )
+        await process_watched_item(db_session, wi, raw_content=_HTML, blob=_BLOB)
+        first = datetime(2026, 10, 6, 21, 7, tzinfo=UTC)
+        wi.last_changed_at = first
+        await db_session.flush()
+        with patch(
+            "src.workers.pipeline.dispatch_event_notifications", new_callable=AsyncMock
+        ) as dispatch:
+            await process_watched_item(db_session, wi, raw_content=_HTML_CHANGED, blob=_BLOB)
+        meta = dispatch.call_args.kwargs["event"].metadata
+        assert meta["previous_changed_at"] == "2026-10-06T21:07:00Z"
+        assert wi.last_changed_at > first
+
     async def test_local_extraction_hands_over_the_current_text(self, db_session):
         dispatch, _baseline, change = await self._changed(db_session, "Diff in hand")
         current = dispatch.call_args.kwargs["current_text"]
@@ -1170,9 +1194,7 @@ class TestChangeDiffEndToEnd:
         assert result.changed is True
         body = client.dispatch.call_args.kwargs["body_template"]
         fenced = body.split("\n\n", 1)[1]
-        assert fenced.startswith("```diff\n--- previous\n+++ current\n")
-        assert "-Hello world" in fenced
-        assert "+Content changed" in fenced
+        assert fenced == "```diff\n- Hello world\n+ Content changed\n```"
         assert "DIFF: unavailable" not in body
         (dispatched,) = await _audits_of(db_session, EventType.NOTIFICATION_DISPATCHED, wi)
         assert dispatched.payload["results"][0]["success"] is True

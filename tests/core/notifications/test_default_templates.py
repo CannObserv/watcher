@@ -135,6 +135,13 @@ class TestTemplateVariables:
         assert var is not None, "TEMPLATE_VARIABLES missing extraction_changed"
         assert var.scope == "change_detected"
 
+    def test_previous_changed_at_is_change_detected_scoped(self):
+        """#349: the change before this one, which the default body shows as
+        PREVIOUS CHANGE; a custom template can show it too."""
+        var = next((v for v in TEMPLATE_VARIABLES if v.name == "previous_changed_at"), None)
+        assert var is not None, "TEMPLATE_VARIABLES missing previous_changed_at"
+        assert var.scope == "change_detected"
+
     @pytest.mark.parametrize(
         "name", ["diff_snippet", "diff_full", "previous_fingerprint", "current_fingerprint"]
     )

@@ -18,7 +18,7 @@ class TestContentOptions:
 
     def test_diff_snippet_on_full_off_by_default(self):
         """#222: the diff is real again, so the capped snippet is on by default
-        and the verbose full diff is opt-in."""
+        and the full diff (every change, #349) is opt-in."""
         opts = ContentOptions()
         assert opts.include_diff_snippet is True
         assert opts.diff_snippet_lines == 25

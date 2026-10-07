@@ -23,7 +23,8 @@
   {% if _offers_diff %}
   {# ────── Changes: the diff (#222) ──────
      Restored from 89d64eb over the processor-stored canonical text. The
-     snippet is on by default (capped); full is verbose and opt-in.
+     snippet is on by default (capped); full is every change and opt-in.
+     #349: both are the changed words with context, not the page.
      Significance stays retired (#222 D8). #}
   <fieldset>
     <legend class="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400 mb-2">Changes</legend>
@@ -45,7 +46,7 @@
         <input type="checkbox" name="{{ prefix }}include_diff_full" value="1"
                {% if _shown.include_diff_full %}checked{% endif %}
                class="rounded border-gray-300 dark:border-gray-600">
-        Full diff <span class="text-xs text-gray-500 dark:text-gray-400">(verbose)</span>
+        Full diff <span class="text-xs text-gray-500 dark:text-gray-400">(every change)</span>
       </label>
     </div>
   </fieldset>

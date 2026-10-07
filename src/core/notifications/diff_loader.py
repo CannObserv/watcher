@@ -33,7 +33,7 @@ from src.core.blobs import BlobReadError, aread_blob
 from src.core.fetch_commands import env_number
 from src.core.logging import get_logger
 from src.core.models.process_command import ProcessCommand, ProcessCommandStatus
-from src.core.notifications.diff import ChangeDiff, compute_unified_diff
+from src.core.notifications.diff import ChangeDiff, compute_change_diff
 
 logger = get_logger(__name__)
 
@@ -155,9 +155,9 @@ async def load_change_diff(
             current = current_text
         else:
             current = await _read_stored(session, current_fp, "current", cap, log_extra=log_extra)
-        unified = await asyncio.to_thread(compute_unified_diff, previous, current)
-        if not unified:
-            # The fingerprints differ, so the bytes do; the segmentation
+        diff = await asyncio.to_thread(compute_change_diff, previous, current)
+        if not diff.hunks:
+            # The fingerprints differ, so the bytes do; the word split
             # collapsed whitespace the difference lived in (CR 11). Say so —
             # an empty diff would render as nothing at all.
             raise _Unavailable("whitespace-only change")
@@ -178,4 +178,4 @@ async def load_change_diff(
             exc_info=True,
         )
         return ChangeDiff(unavailable="error")
-    return ChangeDiff(unified=unified)
+    return diff

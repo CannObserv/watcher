@@ -18,15 +18,17 @@ class ContentOptions(BaseModel):
     """
 
     include_diff_snippet: bool = True
-    """Include the first `diff_snippet_lines` lines of the unified diff in the body.
-    On by default (#222): capped, so safe for chat channels."""
+    """Include the first `diff_snippet_lines` lines of the change diff in the body.
+    On by default (#222): capped, so safe for chat channels. #349: the diff is
+    the changed words with context, not the page."""
 
     diff_snippet_lines: int = Field(default=25, ge=1, le=200)
-    """Max number of unified-diff lines to include in snippet mode.
-    Truncation is hunk-boundary aware — never mid-hunk."""
+    """Max number of rendered diff lines to include in snippet mode.
+    Truncation is hunk-boundary aware — never mid-hunk unless the first
+    hunk alone is over the cap."""
 
     include_diff_full: bool = False
-    """Include the full unified diff. Supersedes include_diff_snippet if both set."""
+    """Include every change (#349). Supersedes include_diff_snippet if both set."""
 
     include_temporal_context: bool = False
     """Include check interval in the body."""

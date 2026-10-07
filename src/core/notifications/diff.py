@@ -1,16 +1,33 @@
-"""The change diff (#222): what it is and how it is computed — pure.
+"""The change diff (#222, #349): what it is and how it is computed — pure.
 
 The diff target is the canonical extracted text (cannobserv#486) — the exact
 bytes a ``ChangeRevision.content_fingerprint`` hashes. This module holds the
-value the renderer consumes (``ChangeDiff``), the computation (``difflib`` by
-sentence) and the question of whether a recipient wants one. It touches no
-database, store or bus: loading the two texts is ``diff_loader``'s job, so the
-renderer and the preview can import this without the I/O stack (CR 2).
+value the renderer consumes (``ChangeDiff``), the computation and the question
+of whether a recipient wants one. It touches no database, store or bus:
+loading the two texts is ``diff_loader``'s job, so the renderer and the preview
+can import this without the I/O stack (CR 2).
+
+**The unit is the word (#349).** Every live item extracts to one long line, and
+a schedule or list page has almost no sentence ends, so #222's sentence split
+fell back to a fixed-width wrap whose boundaries all shifted after an edit —
+a three-word change on 2026-10-06 rendered as 11 KB of ``-``/``+``. Here the
+text is words plus ``\\n`` (a chunk boundary), and a diff reads as the changed
+words with ``CONTEXT_WORDS`` either side.
+
+**Aligned in two levels.** A flat word ``difflib`` without autojunk is
+quadratic, and pure Python holds the GIL in the one process that serves
+everything (63 s for one edit in a 150k-word page). Level 1 aligns
+content-defined segments: one ends after a token whose own hash says so, so an
+edit moves no boundary but its own. Level 2 refines each changed block word by
+word, up to ``REFINE_MAX_TOKENS`` a side; a bigger block is a rewrite, shown
+whole, and bounded by the renderer's byte cap.
 """
 
 import difflib
 import re
 import textwrap
+import zlib
+from collections.abc import Iterator
 from dataclasses import dataclass
 
 from src.api.schemas.content_config import ContentOptions
@@ -19,26 +36,37 @@ from src.api.schemas.content_config import ContentOptions
 # no use for one.
 DIFF_TEMPLATE_VARIABLES = ("diff_snippet", "diff_full")
 
-# The diff's unit is a sentence, not a line. A chunk's text is one
-# whitespace-collapsed line, and a spec usually selects one element — every
-# live item extracted to a single 8–17 KB line on 2026-10-05 — so a line diff
-# would print the whole page as one `-` and one `+` line, and the snippet's
-# line cap would bound nothing. A sentence end is `.`/`!`/`?` before
-# whitespace; a run with none is wrapped at word boundaries so no diff line
-# outgrows MAX_SEGMENT_CHARS.
-_SENTENCE_END = re.compile(r"(?<=[.!?])\s+")
-MAX_SEGMENT_CHARS = 400
+#: Unchanged words shown either side of a change.
+CONTEXT_WORDS = 8
+#: Changes this few unchanged words apart read as one replacement.
+FOLD_WORDS = 3
+#: Text columns per rendered line, after the two-character prefix.
+WRAP_WIDTH = 72
+#: A segment ends after a token whose crc32 is 0 modulo this — about 16 words.
+SEGMENT_MODULUS = 16
+#: A run with no such token is still cut, so no segment outgrows this.
+MAX_SEGMENT_TOKENS = 64
+#: Either side of a changed block above this is shown whole, not refined.
+REFINE_MAX_TOKENS = 4000
+
+_TOKEN = re.compile(r"\n|[^\s]+")
+_NEWLINE = "\n"
+
+#: One hunk: rendered lines, each prefixed ``"- "``, ``"+ "`` or ``"  "``.
+Hunk = tuple[str, ...]
+# A change: (i1, i2, j1, j2) — previous[i1:i2] became current[j1:j2].
+_Span = tuple[int, int, int, int]
 
 
 @dataclass(frozen=True)
 class ChangeDiff:
     """One event's diff, or why there is none.
 
-    ``unified`` is ``difflib``'s unified diff over the two canonical texts;
-    ``unavailable`` is set exactly when it could not be produced.
+    ``hunks`` are the changes in page order, each with its context;
+    ``unavailable`` is set exactly when no diff could be produced.
     """
 
-    unified: str = ""
+    hunks: tuple[Hunk, ...] = ()
     unavailable: str | None = None
 
 
@@ -53,35 +81,128 @@ def diff_requested(options: ContentOptions) -> bool:
     return options.include_diff_snippet or options.include_diff_full
 
 
-def _segments(text: str) -> list[str]:
-    """The text as diff lines: chunk lines, split into sentences, long ones wrapped.
+def compute_change_diff(previous: bytes, current: bytes) -> ChangeDiff:
+    """The word diff of two canonical texts. Pure CPU — callers off the loop
+    use a thread.
 
-    Chunk boundaries (the canonical ``\\n``) always end a segment. Wrapping
-    shifts after an edit, so a change inside a long unpunctuated run shows that
-    whole run — bounded by the run, never the page.
+    No hunks means no difference a reader could see: the texts differ only in
+    whitespace (``"\\n"`` included).
     """
-    out: list[str] = []
-    for line in text.splitlines():
-        for sentence in _SENTENCE_END.split(line):
-            if len(sentence) <= MAX_SEGMENT_CHARS:
-                out.append(sentence)
-            else:
-                out.extend(
-                    textwrap.wrap(sentence, MAX_SEGMENT_CHARS, break_on_hyphens=False) or [sentence]
-                )
+    before = _TOKEN.findall(previous.decode("utf-8", errors="replace"))
+    after = _TOKEN.findall(current.decode("utf-8", errors="replace"))
+    spans = [
+        span for span in _changed_spans(before, after) if not _whitespace_only(span, before, after)
+    ]
+    groups = _group(_fold(spans, before), gap=2 * CONTEXT_WORDS)
+    return ChangeDiff(hunks=tuple(_render_hunk(group, before, after) for group in groups))
+
+
+def _segments(tokens: list[str]) -> list[tuple[str, ...]]:
+    """Content-defined segments: a boundary depends only on the token before it."""
+    out: list[tuple[str, ...]] = []
+    start = 0
+    for index, token in enumerate(tokens):
+        if (
+            token == _NEWLINE
+            or zlib.crc32(token.encode()) % SEGMENT_MODULUS == 0
+            or index + 1 - start >= MAX_SEGMENT_TOKENS
+        ):
+            out.append(tuple(tokens[start : index + 1]))
+            start = index + 1
+    if start < len(tokens):
+        out.append(tuple(tokens[start:]))
     return out
 
 
-def compute_unified_diff(previous: bytes, current: bytes) -> str:
-    """Unified diff of two canonical texts, by sentence. Pure CPU — callers off
-    the loop use a thread.
+def _offsets(segments: list[tuple[str, ...]]) -> list[int]:
+    offsets = [0]
+    for segment in segments:
+        offsets.append(offsets[-1] + len(segment))
+    return offsets
 
-    ``lineterm=""`` and a ``\\n`` join: every line carries its own prefix, so
-    no empty line ever appears between content lines. Hunk ranges count
-    segments (``_segments``), not lines of the stored text.
+
+def _changed_spans(before: list[str], after: list[str]) -> Iterator[_Span]:
+    """Every non-equal opcode, in token positions: segments first, then words."""
+    seg_before, seg_after = _segments(before), _segments(after)
+    at_before, at_after = _offsets(seg_before), _offsets(seg_after)
+    matcher = difflib.SequenceMatcher(None, seg_before, seg_after, autojunk=False)
+    for tag, s1, s2, t1, t2 in matcher.get_opcodes():
+        if tag == "equal":
+            continue
+        i1, i2, j1, j2 = at_before[s1], at_before[s2], at_after[t1], at_after[t2]
+        if i2 - i1 > REFINE_MAX_TOKENS or j2 - j1 > REFINE_MAX_TOKENS:
+            yield i1, i2, j1, j2
+            continue
+        words = difflib.SequenceMatcher(None, before[i1:i2], after[j1:j2], autojunk=False)
+        for wtag, a1, a2, b1, b2 in words.get_opcodes():
+            if wtag != "equal":
+                yield i1 + a1, i1 + a2, j1 + b1, j1 + b2
+
+
+def _whitespace_only(span: _Span, before: list[str], after: list[str]) -> bool:
+    i1, i2, j1, j2 = span
+    return all(token == _NEWLINE for token in (*before[i1:i2], *after[j1:j2]))
+
+
+def _fold(spans: list[_Span], before: list[str]) -> list[_Span]:
+    """Merge changes at most ``FOLD_WORDS`` apart on one line, the words
+    between included: a reworded phrase reads as one replacement. An
+    unchanged line between two changes stays context."""
+    out: list[_Span] = []
+    for span in spans:
+        gap = before[out[-1][1] : span[0]] if out else []
+        if out and len(gap) <= FOLD_WORDS and _NEWLINE not in gap:
+            out[-1] = (out[-1][0], span[1], out[-1][2], span[3])
+        else:
+            out.append(span)
+    return out
+
+
+def _group(spans: list[_Span], *, gap: int) -> list[list[_Span]]:
+    """Changes close enough that their contexts would overlap share a hunk."""
+    groups: list[list[_Span]] = []
+    for span in spans:
+        if groups and span[0] - groups[-1][-1][1] <= gap:
+            groups[-1].append(span)
+        else:
+            groups.append([span])
+    return groups
+
+
+def _render_hunk(group: list[_Span], before: list[str], after: list[str]) -> Hunk:
+    """Context, then each change as ``-``/``+`` lines, then context."""
+    first, last = group[0], group[-1]
+    start = max(0, first[0] - CONTEXT_WORDS)
+    lead = before[start : first[0]]
+    lines = _lines("  ", lead, cut_before=start > 0 and before[start - 1] != _NEWLINE)
+    for index, (i1, i2, j1, j2) in enumerate(group):
+        lines += _lines("- ", before[i1:i2]) + _lines("+ ", after[j1:j2])
+        if index + 1 < len(group):
+            lines += _lines("  ", before[i2 : group[index + 1][0]])
+    end = min(len(before), last[1] + CONTEXT_WORDS)
+    trail = before[last[1] : end]
+    lines += _lines("  ", trail, cut_after=end < len(before) and before[end] != _NEWLINE)
+    return tuple(lines)
+
+
+def _lines(
+    prefix: str, tokens: list[str], *, cut_before: bool = False, cut_after: bool = False
+) -> list[str]:
+    """Tokens as wrapped, prefixed lines: one per chunk line, none for an empty one.
+
+    ``…`` marks context cut short mid-line.
     """
-    before = _segments(previous.decode("utf-8", errors="replace"))
-    after = _segments(current.decode("utf-8", errors="replace"))
-    return "\n".join(
-        difflib.unified_diff(before, after, fromfile="previous", tofile="current", lineterm="")
-    )
+    pieces = " ".join(tokens).split(_NEWLINE)
+    if cut_before:
+        pieces[0] = f"… {pieces[0]}"
+    if cut_after:
+        pieces[-1] = f"{pieces[-1]} …"
+    out: list[str] = []
+    for piece in pieces:
+        text = piece.strip()
+        if text and text != "…":
+            for line in textwrap.wrap(
+                text, WRAP_WIDTH, break_long_words=False, break_on_hyphens=False
+            ):
+                out.append(f"{prefix}{line}")
+    return out

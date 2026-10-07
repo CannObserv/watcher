@@ -9,7 +9,7 @@ For most events the dispatcher renders `DEFAULT_BODY_TEMPLATES[event_type]`
 directly through Jinja. The `change_detected` body is the exception:
 `src.core.notifications.content.build_body` composes it line-by-line in
 Python from the shared `CHANGE_DETECTED_HEADER_LINES` tuple (single source of
-truth) and interleaves optional toggle-driven sections (DOMAIN, LAST CHANGED,
+truth) and interleaves optional toggle-driven sections (DOMAIN, PREVIOUS CHANGE,
 INTERVAL in the header; DESCRIPTION, TAGS as trailing list items), then the
 diff as a fenced block after the list (#222).
 `DEFAULT_BODY_TEMPLATES['change_detected']` is derived from the same tuple
@@ -71,13 +71,19 @@ TEMPLATE_VARIABLES: list[TemplateVariable] = [
     TemplateVariable(
         "diff_snippet",
         "str",
-        "Unified diff in a Markdown ```diff block, capped (hunk-boundary aware)",
+        "The changed words with context in a Markdown ```diff block, capped (hunk-boundary aware)",
         "change_detected",
     ),
     TemplateVariable(
         "diff_full",
         "str",
-        "Unified diff in a Markdown ```diff block, no cap",
+        "Every change, with context, in a Markdown ```diff block",
+        "change_detected",
+    ),
+    TemplateVariable(
+        "previous_changed_at",
+        "str",
+        "UTC timestamp of the change before this one; empty on an item's first change",
         "change_detected",
     ),
     TemplateVariable(
@@ -98,7 +104,10 @@ TEMPLATE_VARIABLES: list[TemplateVariable] = [
     TemplateVariable("domain_name", "str", "Resolved domain of the watch URL", "contextual"),
     TemplateVariable("check_interval", "str", 'Check cadence (e.g. "1h")', "contextual"),
     TemplateVariable(
-        "last_changed_at", "str", "UTC timestamp of last detected change", "contextual"
+        "last_changed_at",
+        "str",
+        "UTC timestamp of last detected change (on a change, this one)",
+        "contextual",
     ),
     TemplateVariable("tags", "list[str]", "Watch tags", "contextual"),
     TemplateVariable("description", "str", "Watch description", "contextual"),
@@ -146,7 +155,7 @@ CHANGE_DETECTED_ITEM_LINE = "ITEM: {{ app_url }}/watched-items/{{ watched_item_i
 
 # Composer insertion anchors in HEADER (see `_build_change_detected_body`):
 #   - DOMAIN: immediately after item_name (index 1)
-#   - LAST CHANGED, INTERVAL: immediately before TIMESTAMP (in that order)
+#   - PREVIOUS CHANGE, INTERVAL: immediately before TIMESTAMP (in that order)
 # Reorder this tuple and the composer's index calls must follow.
 CHANGE_DETECTED_HEADER_LINES: tuple[str, ...] = (
     "{{ item_name }}",

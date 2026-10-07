@@ -325,10 +325,18 @@ way when editing the composer.
 
 ## Change diff (#222)
 
-A `change_detected` body ends with a unified diff of the previous and current
-canonical text, by **sentence** (live items extract to one long line). Defaults:
-snippet on (25 lines, hunk-aware), full off; templates saved before #221 get
-their stored diff choices back. **Failure never blocks a notification** — the
+A `change_detected` body ends with a diff of the previous and current canonical
+text, by **word** (#349): each change as `-`/`+` lines with 8 words of context,
+wrapped at 72 columns, in a fenced block with no unified-diff header. Live items
+extract to one long line, mostly without sentence ends, so #222's sentence split
+and fixed-width wrap realigned everything after an edit; segments are now
+content-defined, so an edit moves no boundary but its own. Page text stays
+inside the fence (`_fence_for`, CR 13), never inline marks. Defaults: snippet on
+(25 rendered lines, hunk-aware), full off (every change); both are bounded by
+`MAX_RENDERED_DIFF_BYTES` (32 KiB, #346). Templates saved before #221 get their
+stored diff choices back. On a change, the `include_last_changed_at` toggle
+shows `PREVIOUS CHANGE` (`previous_changed_at`): `last_changed_at` is already
+this change when the event is built. **Failure never blocks a notification** — the
 body says `DIFF: unavailable (<reason>)`, `previous text not stored` for any
 revision older than shadow mode. Each side is capped by
 `WATCHER_DIFF_MAX_INPUT_BYTES`. Mechanism (lookup via the processor's

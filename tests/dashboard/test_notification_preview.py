@@ -55,14 +55,16 @@ class TestPreviewEndpoint:
 
     async def test_default_change_preview_carries_the_diff_snippet(self, client: AsyncClient):
         """#222: the preview diffs canned texts through the dispatcher's own
-        ``compute_unified_diff`` — the snippet is on by default."""
+        ``compute_change_diff`` — the snippet is on by default. #349: it shows
+        the changed words, with no unified-diff header."""
         resp = await client.post(
             "/notifications/preview",
             data={"preview_event": "change_detected", "content_config__include_diff_snippet": "1"},
         )
         assert resp.status_code == 200
         assert "```diff" in resp.text
-        assert "@@" in resp.text
+        assert "+ Recording: April 6 hearing video" in resp.text
+        assert "@@" not in resp.text
 
     async def test_no_diff_when_the_snippet_is_unchecked(self, client: AsyncClient):
         resp = await client.post(

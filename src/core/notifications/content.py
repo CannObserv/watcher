@@ -12,7 +12,7 @@ from src.core.notifications.default_templates import (
     DEFAULT_BODY_TEMPLATES,
     DEFAULT_TITLE_TEMPLATES,
 )
-from src.core.notifications.diff import ChangeDiff
+from src.core.notifications.diff import ChangeDiff, Hunk
 from src.core.notifications.events import EVENT_TITLES, WatchEvent, WatchEventType
 from src.core.public_base_url import PublicBaseUrlInvalid, public_base_url
 from src.core.utils import format_utc_iso
@@ -23,9 +23,19 @@ _jinja_env_strict = Environment(autoescape=False, undefined=StrictUndefined)
 # Default cap for the `diff_snippet` template variable. Lifted from the
 # Pydantic field default so the two stay in lockstep — when a custom user
 # template references `{{ diff_snippet }}`, they get a sensibly-bounded slice
-# rather than a wall of unified-diff lines. Use `{{ diff_full }}` for the
-# unbounded version.
+# rather than every change. Use `{{ diff_full }}` for all of them.
 _DEFAULT_DIFF_SNIPPET_CAP: int = ContentOptions.model_fields["diff_snippet_lines"].default
+
+#: The most a rendered diff body may be, footer included (#346, built in #349).
+#: A word diff scales with the change, but a rewrite is a big change and one
+#: huge token defeats a line cap; an oversized body the notifier or a channel
+#: rejects would cost the recipient the whole notification. Under Slack's
+#: 40 000-character message text limit and Gmail's 102 KB clip, with room for
+#: the header and HTML escaping. Notifier's own request limit is not visible
+#: from here; if it publishes one, this is the number to revisit.
+MAX_RENDERED_DIFF_BYTES = 32 * 1024
+# Room kept for the `... (N more lines)` footer and its newline.
+_FOOTER_BYTES = 32
 
 _BACKTICK_RUN = re.compile(r"`+")
 
@@ -76,9 +86,10 @@ def build_template_context(
         #296 D6); empty when not configured
       - `change_url` — WatchedItem dashboard URL when `change_revision_id` is in
         metadata and a base is configured; empty otherwise
-      - `diff_snippet` — Markdown ```diff fenced unified diff, capped at
-        `diff_snippet_cap` lines (hunk-boundary aware)
-      - `diff_full` — the same, uncapped
+      - `diff_snippet` — Markdown ```diff fenced change diff (#349: the
+        changed words with context), capped at `diff_snippet_cap` lines
+        (hunk-boundary aware)
+      - `diff_full` — every change; only the byte backstop applies
 
     Both diff fields are empty without a `diff` (none computed: not a change,
     or no recipient asked) and read `(diff unavailable: <reason>)` when one was
@@ -205,8 +216,13 @@ def _build_change_detected_body(
     was retired in #221 (see default_templates.py).
 
     Fact order (canonical); `?` items are toggle- and metadata-gated:
-      item_name, DOMAIN?, URL, LAST CHANGED?, INTERVAL?, TIMESTAMP, ITEM,
+      item_name, DOMAIN?, URL, PREVIOUS CHANGE?, INTERVAL?, TIMESTAMP, ITEM,
       NOTE?, DESCRIPTION?, TAGS?, DIFF?
+
+    PREVIOUS CHANGE is the `include_last_changed_at` toggle on a change (#349):
+    `last_changed_at` is *this* change by the time the event is built, so it
+    only repeated TIMESTAMP; `previous_changed_at` is the change before it,
+    absent on an item's first.
 
     NOTE is metadata-gated only (``extraction_changed == "spec"``, #326): it
     qualifies the change itself, so no toggle hides it. DIFF is the one-line
@@ -217,7 +233,7 @@ def _build_change_detected_body(
 
     Insertion anchors:
       - DOMAIN: after item_name
-      - LAST CHANGED, INTERVAL: before TIMESTAMP (in that order)
+      - PREVIOUS CHANGE, INTERVAL: before TIMESTAMP (in that order)
       - DESCRIPTION, TAGS: appended after the header (trailing list items)
     """
     ctx = build_template_context(event)
@@ -239,11 +255,11 @@ def _build_change_detected_body(
     except StopIteration as exc:
         raise RuntimeError(
             "CHANGE_DETECTED_HEADER_LINES missing TIMESTAMP — composer requires "
-            "this anchor for LAST CHANGED / INTERVAL insertion"
+            "this anchor for PREVIOUS CHANGE / INTERVAL insertion"
         ) from exc
     pre_timestamp: list[str] = []
-    if options.include_last_changed_at and metadata.get("last_changed_at"):
-        pre_timestamp.append(f"LAST CHANGED: {metadata['last_changed_at']}")
+    if options.include_last_changed_at and metadata.get("previous_changed_at"):
+        pre_timestamp.append(f"PREVIOUS CHANGE: {metadata['previous_changed_at']}")
     if options.include_temporal_context and metadata.get("check_interval"):
         pre_timestamp.append(f"INTERVAL: {metadata['check_interval']}")
     for offset, line in enumerate(pre_timestamp):
@@ -272,10 +288,10 @@ def _build_diff_text(diff: ChangeDiff | None, options: ContentOptions) -> str:
     """
     if not (options.include_diff_snippet or options.include_diff_full):
         return ""
-    if diff is None or diff.unavailable or not diff.unified:
+    if diff is None or diff.unavailable:
         return ""
     cap = None if options.include_diff_full else options.diff_snippet_lines
-    return _render_unified_diff_block(diff.unified, max_lines=cap)
+    return _render_diff_block(diff.hunks, max_lines=cap)
 
 
 def _render_diff_variable(diff: ChangeDiff | None, *, max_lines: int | None) -> str:
@@ -284,49 +300,30 @@ def _render_diff_variable(diff: ChangeDiff | None, *, max_lines: int | None) -> 
         return ""
     if diff.unavailable:
         return f"(diff unavailable: {diff.unavailable})"
-    return _render_unified_diff_block(diff.unified, max_lines=max_lines)
+    return _render_diff_block(diff.hunks, max_lines=max_lines)
 
 
-def _normalize_unified_diff_lines(unified_diff: str) -> list[str]:
-    """Split unified-diff text into non-empty lines.
-
-    Real unified-diff output has no empty lines (content lines always carry a
-    leading ` `, `+`, or `-` prefix), so dropping them is safe. The diff this
-    module is fed (`diff.compute_unified_diff`) has none; the drop guards a
-    trailing newline from becoming an empty line inside the fence.
-    """
-    return [line for line in unified_diff.split("\n") if line]
-
-
-def _render_unified_diff_block(unified_diff: str | None, *, max_lines: int | None) -> str:
-    """Wrap a unified-diff text in a Markdown ```diff fenced block.
+def _render_diff_block(hunks: tuple[Hunk, ...], *, max_lines: int | None) -> str:
+    """The hunks in a Markdown ```diff fenced block, an empty line between two.
 
     The fence is three backticks unless the content holds a run as long, in
     which case it is one longer (``_fence_for``).
 
-    `max_lines=None` means no cap; the entire diff is rendered.
-    A positive int caps the number of diff lines included; truncation is
-    hunk-boundary aware (`@@ ...` lines mark hunk starts), and a `...
-    (N more lines)` footer is appended inside the fence when truncated.
+    `max_lines=None` means every hunk; a positive int caps the rendered lines,
+    cut on a hunk boundary (``_truncate_hunks``). Either way the block's body
+    stays within ``MAX_RENDERED_DIFF_BYTES``. A `... (N more lines)` footer
+    is appended inside the fence when anything was cut.
 
-    Returns empty string when `unified_diff` is None or empty.
+    Returns empty string when there are no hunks.
     """
-    if not unified_diff:
+    if not hunks:
         return ""
-    lines = _normalize_unified_diff_lines(unified_diff)
-    if not lines:
-        return ""
-    if max_lines is None:
-        kept, omitted = lines, 0
-    else:
-        kept, omitted = _truncate_unified_diff_lines(lines, max_lines)
+    kept, omitted = _truncate_hunks(hunks, max_lines=max_lines, max_bytes=MAX_RENDERED_DIFF_BYTES)
+    if omitted:
+        kept = [*kept, f"... ({omitted} more line{'s' if omitted != 1 else ''})"]
     body = "\n".join(kept)
     fence = _fence_for(body)
-    fenced = f"{fence}diff\n{body}\n"
-    if omitted > 0:
-        fenced += f"... ({omitted} more line{'s' if omitted != 1 else ''})\n"
-    fenced += fence
-    return fenced
+    return f"{fence}diff\n{body}\n{fence}"
 
 
 def _fence_for(body: str) -> str:
@@ -335,7 +332,7 @@ def _fence_for(body: str) -> str:
     The diff is the watched page's own text, and the notifier renders the body
     as CommonMark: a backtick fence closes on a line that is only a run at
     least as long (indented 0–3 spaces, trailing spaces allowed) — and a diff
-    context line is the page's text behind one space, so a segment that is
+    context line is the page's text behind two spaces, so a page line that is
     exactly three backticks would end the block and the page's next line would
     render as live Markdown (CR 14). One backtick longer than the longest run
     in the content (three at minimum) means no line can close it.
@@ -344,46 +341,57 @@ def _fence_for(body: str) -> str:
     return "`" * max(3, longest + 1)
 
 
-def _truncate_unified_diff_lines(lines: list[str], max_lines: int) -> tuple[list[str], int]:
-    """Truncate diff lines to at most `max_lines` on a hunk boundary.
+def _joined_size(lines: list[str]) -> int:
+    return len("\n".join(lines).encode())
 
-    The two file-header lines (`---` / `+++`) are always preserved when
-    present. Each hunk is included whole or not at all — never truncated
-    mid-hunk — except when even the first hunk doesn't fit, in which case
-    only the file header + the first `@@` header line is included so the
-    user can at least see where the diff begins.
 
-    Returns `(kept_lines, omitted_line_count)`. `omitted_line_count == 0`
-    means no truncation occurred.
+def _truncate_hunks(
+    hunks: tuple[Hunk, ...], *, max_lines: int | None, max_bytes: int
+) -> tuple[list[str], int]:
+    """The hunks' lines, cut to fit, and how many lines were not shown in full.
+
+    Hunks are separated by an empty line, which counts toward ``max_lines``
+    but never as an omitted line. When everything fits it is returned whole.
+    Otherwise one line and ``_FOOTER_BYTES`` are kept back for the footer, and
+    whole hunks are kept while they fit. If not even the first does, its
+    leading lines are kept instead (each is readable page text, #349), the
+    last of them cut within the line when one alone outgrows the bytes.
+
+    Returns `(kept_lines, omitted_line_count)`; `0` means nothing was cut.
     """
-    if len(lines) <= max_lines:
-        return lines, 0
+    every = [line for index, hunk in enumerate(hunks) for line in (*([""] if index else []), *hunk)]
+    if (max_lines is None or len(every) <= max_lines) and _joined_size(every) <= max_bytes:
+        return every, 0
 
-    header_end = 0
-    if len(lines) >= 2 and lines[0].startswith("---") and lines[1].startswith("+++"):
-        header_end = 2
+    line_budget = None if max_lines is None else max_lines - 1
+    byte_budget = max_bytes - _FOOTER_BYTES
 
-    hunk_starts = [i for i, line in enumerate(lines) if line.startswith("@@") and i >= header_end]
-    if not hunk_starts:
-        # No hunks; just truncate at line boundary, reserving room for footer.
-        end = max(0, max_lines - 1)
-        return lines[:end], len(lines) - end
+    def fits(lines: list[str]) -> bool:
+        within_lines = line_budget is None or len(lines) <= line_budget
+        return within_lines and _joined_size(lines) <= byte_budget
 
-    hunk_starts.append(len(lines))  # sentinel
-    budget = max_lines - 1  # reserve one line for the footer
-    end = header_end
-    for i in range(len(hunk_starts) - 1):
-        next_end = hunk_starts[i + 1]
-        if next_end <= budget:
-            end = next_end
-        else:
+    kept: list[str] = []
+    for hunk in hunks:
+        candidate = [*kept, *([""] if kept else []), *hunk]
+        if not fits(candidate):
             break
-    if end <= header_end:
-        # Even the first hunk doesn't fit; include header + the first @@
-        # header line so the user at least sees where the diff starts.
-        end = min(hunk_starts[0] + 1, budget)
-        end = max(end, header_end)
-    return lines[:end], len(lines) - end
+        kept = candidate
+    shown = sum(1 for line in kept if line)
+    if not kept:
+        for line in hunks[0]:
+            if line_budget is not None and len(kept) >= line_budget:
+                break
+            if fits([*kept, line]):
+                kept.append(line)
+                shown += 1
+                continue
+            room = byte_budget - _joined_size([*kept, ""])
+            if room > len("…".encode()):
+                cut = line.encode()[: room - len("…".encode())].decode(errors="ignore")
+                kept.append(f"{cut}…")
+            break
+    total = sum(len(hunk) for hunk in hunks)
+    return kept, total - shown
 
 
 def _dashboard_base() -> str:

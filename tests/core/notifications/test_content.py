@@ -14,8 +14,9 @@ from jinja2 import TemplateError, UndefinedError
 
 from src.api.schemas.content_config import ContentConfig, ContentOptions
 from src.core.notifications.content import (
+    MAX_RENDERED_DIFF_BYTES,
     SPEC_CHANGED_NOTE,
-    _truncate_unified_diff_lines,
+    _truncate_hunks,
     build_body,
     build_template_context,
     build_title,
@@ -27,7 +28,7 @@ from src.core.notifications.default_templates import (
     DEFAULT_BODY_TEMPLATES,
     compose_body_prefill,
 )
-from src.core.notifications.diff import ChangeDiff
+from src.core.notifications.diff import ChangeDiff, compute_change_diff
 from src.core.notifications.events import EVENT_TITLES, WatchEvent, WatchEventType
 from src.core.public_base_url import PUBLIC_BASE_URL_ENV
 
@@ -141,8 +142,8 @@ class TestChangeDetectedDefaultBody:
 
     def test_full_layout_with_every_toggle_on(self):
         """With every surviving toggle on and full metadata, the body is one
-        Markdown bullet list in canonical order: item_name, DOMAIN, URL, LAST
-        CHANGED, INTERVAL, TIMESTAMP, ITEM, DESCRIPTION, TAGS. DESCRIPTION and
+        Markdown bullet list in canonical order: item_name, DOMAIN, URL, PREVIOUS
+        CHANGE, INTERVAL, TIMESTAMP, ITEM, DESCRIPTION, TAGS. DESCRIPTION and
         TAGS are trailing list items (#225 folded them from separate paragraphs
         into the single list so every fact renders identically on HTML email)."""
         event = make_event(
@@ -150,7 +151,7 @@ class TestChangeDetectedDefaultBody:
                 "change_revision_id": "01HV0000000000000000000099",
                 "domain_name": "example.com",
                 "check_interval": "1h",
-                "last_changed_at": "2026-04-09",
+                "previous_changed_at": "2026-04-09",
                 "description": "Watch for license renewals",
                 "tags": ["cannabis", "license"],
             }
@@ -167,7 +168,7 @@ class TestChangeDetectedDefaultBody:
             "- Test Watch\n"
             "- DOMAIN: example.com\n"
             "- URL: https://example.com\n"
-            "- LAST CHANGED: 2026-04-09\n"
+            "- PREVIOUS CHANGE: 2026-04-09\n"
             "- INTERVAL: 1h\n"
             "- TIMESTAMP: 2026-04-14T12:00:00Z\n"
             f"- ITEM: {BASE}/watched-items/{WATCH_ID}\n"
@@ -243,30 +244,42 @@ class TestStatsSlots:
         body = build_body(event, ContentOptions(include_temporal_context=True))
         assert "INTERVAL: 1h" in body
 
-    def test_last_changed_renders_with_label_when_toggle_on(self):
-        event = make_event(metadata={"last_changed_at": "2026-04-09"})
+    def test_previous_change_renders_with_label_when_toggle_on(self):
+        event = make_event(metadata={"previous_changed_at": "2026-04-09"})
         body = build_body(event, ContentOptions(include_last_changed_at=True))
-        assert "LAST CHANGED: 2026-04-09" in body
+        assert "PREVIOUS CHANGE: 2026-04-09" in body
 
-    def test_last_changed_and_interval_render_between_url_and_timestamp(self):
-        """LAST CHANGED + INTERVAL sit between URL and TIMESTAMP in the header,
-        with LAST CHANGED first."""
-        event = make_event(metadata={"check_interval": "1h", "last_changed_at": "2026-04-09"})
+    def test_this_change_is_not_repeated_as_last_changed(self):
+        """#349: on a change, ``last_changed_at`` *is* this change — the
+        pipeline sets it before the event is built — so it only ever repeated
+        TIMESTAMP. The toggle shows the change before this one instead."""
+        event = make_event(metadata={"last_changed_at": "2026-04-14T12:00:00Z"})
+        body = build_body(event, ContentOptions(include_last_changed_at=True))
+        assert "LAST CHANGED" not in body
+        assert "PREVIOUS CHANGE" not in body
+
+    def test_previous_change_and_interval_render_between_url_and_timestamp(self):
+        """PREVIOUS CHANGE + INTERVAL sit between URL and TIMESTAMP in the
+        header, with PREVIOUS CHANGE first."""
+        event = make_event(metadata={"check_interval": "1h", "previous_changed_at": "2026-04-09"})
         body = build_body(
             event,
             ContentOptions(include_temporal_context=True, include_last_changed_at=True),
         )
         assert (
-            "- URL: https://example.com\n- LAST CHANGED: 2026-04-09\n- INTERVAL: 1h\n- TIMESTAMP: "
+            "- URL: https://example.com\n- PREVIOUS CHANGE: 2026-04-09\n- INTERVAL: 1h\n"
+            "- TIMESTAMP: "
         ) in body
 
     def test_stats_omitted_when_toggles_off(self):
-        event = make_event(metadata={"check_interval": "1h", "last_changed_at": "2026-04-09"})
+        event = make_event(metadata={"check_interval": "1h", "previous_changed_at": "2026-04-09"})
         body = build_body(event, ContentOptions())
         assert "INTERVAL" not in body
-        assert "LAST CHANGED" not in body
+        assert "PREVIOUS CHANGE" not in body
 
     def test_stats_omitted_when_metadata_missing(self):
+        """An item's first change has no previous one: a baseline never sets
+        ``last_changed_at``."""
         event = make_event(metadata={})
         body = build_body(
             event,
@@ -276,7 +289,7 @@ class TestStatsSlots:
             ),
         )
         assert "INTERVAL" not in body
-        assert "LAST CHANGED" not in body
+        assert "PREVIOUS CHANGE" not in body
 
 
 class TestDescriptionSlot:
@@ -363,7 +376,7 @@ class TestMarkdownListContract:
             metadata={
                 "domain_name": "example.com",
                 "check_interval": "1h",
-                "last_changed_at": "2026-04-09",
+                "previous_changed_at": "2026-04-09",
                 "description": "Watch for license renewals",
                 "tags": ["cannabis", "license"],
             }
@@ -640,25 +653,22 @@ class TestRenderTemplateStrict:
             render_template_strict("{{ unknown_var }}", {})
 
 
-_SAMPLE_UNIFIED_DIFF = (
-    "--- previous\n"
-    "+++ current\n"
-    "@@ -1,4 +1,4 @@\n"
-    " alpha\n"
-    "-beta\n"
-    "+beta-changed\n"
-    " gamma\n"
-    " delta\n"
-    "@@ -9,2 +9,3 @@\n"
-    " epsilon\n"
-    "+zeta"
+#: Two hunks: four lines, then two. Rendered, an empty line separates them.
+DIFF = ChangeDiff(
+    hunks=(
+        ("  alpha", "- beta", "+ beta-changed", "  gamma delta"),
+        ("  epsilon", "+ zeta"),
+    )
 )
-DIFF = ChangeDiff(unified=_SAMPLE_UNIFIED_DIFF)
 
 
 def _long_diff(n: int = 30) -> ChangeDiff:
-    hunk = "\n".join(f"-old-{i}\n+new-{i}" for i in range(n))
-    return ChangeDiff(unified=f"--- previous\n+++ current\n@@ -1,{n} +1,{n} @@\n{hunk}")
+    return ChangeDiff(hunks=tuple((f"- old-{i}", f"+ new-{i}") for i in range(n)))
+
+
+def _fenced(body: str) -> list[str]:
+    """The diff block's lines, fences included."""
+    return body.split("\n\n", 1)[1].split("\n")
 
 
 class TestDiffSlot:
@@ -671,29 +681,41 @@ class TestDiffSlot:
         assert all(line.startswith("- ") for line in listing.split("\n"))
         assert fenced.startswith("```diff\n")
         assert fenced.endswith("```")
-        assert "-beta" in fenced
-        assert "+zeta" in fenced
+        assert "- beta" in fenced
+        assert "+ zeta" in fenced
+
+    def test_no_unified_diff_header(self):
+        """#349: ``---``/``+++``/``@@`` counted internal segments, not anything
+        a reader could find on the page."""
+        lines = _fenced(build_body(make_event(metadata={}), ContentOptions(), diff=DIFF))
+        assert not any(line.startswith(("---", "+++", "@@")) for line in lines)
+
+    def test_hunks_are_separated_by_an_empty_line(self):
+        lines = _fenced(build_body(make_event(metadata={}), ContentOptions(), diff=DIFF))
+        assert lines[1:-1] == [*DIFF.hunks[0], "", *DIFF.hunks[1]]
 
     def test_snippet_is_capped_at_a_hunk_boundary(self):
         body = build_body(
             make_event(metadata={}),
-            ContentOptions(diff_snippet_lines=9),
+            ContentOptions(diff_snippet_lines=6),
             diff=DIFF,
         )
-        # Header (2) + first hunk (6) fit beside the footer; the second is cut whole.
-        assert "+beta-changed" in body
-        assert "+zeta" not in body
-        assert "... (3 more lines)" in body
+        # The first hunk (4) fits beside the footer; the second is cut whole.
+        assert "+ beta-changed" in body
+        assert "+ zeta" not in body
+        assert "... (2 more lines)" in body
 
-    def test_cap_below_the_first_hunk_keeps_its_header(self):
-        body = build_body(make_event(metadata={}), ContentOptions(diff_snippet_lines=4), diff=DIFF)
-        assert "@@ -1,4 +1,4 @@" in body
-        assert "more lines)" in body
+    def test_cap_below_the_first_hunk_keeps_its_first_lines(self):
+        """#349: every line is now readable page text, so a cut first hunk
+        keeps what fits rather than a bare position marker."""
+        body = build_body(make_event(metadata={}), ContentOptions(diff_snippet_lines=3), diff=DIFF)
+        lines = _fenced(body)
+        assert lines[1:-1] == ["  alpha", "- beta", "... (4 more lines)"]
 
     def test_full_supersedes_the_snippet_cap(self):
         opts = ContentOptions(include_diff_full=True, diff_snippet_lines=1)
         body = build_body(make_event(metadata={}), opts, diff=DIFF)
-        assert "+zeta" in body
+        assert "+ zeta" in body
         assert "more line" not in body
 
     def test_omitted_when_both_toggles_off(self):
@@ -725,7 +747,7 @@ class TestDiffSlot:
 
     def test_the_spec_note_stays_in_the_list_above_the_diff(self):
         event = make_event(metadata={"extraction_changed": "spec"})
-        listing, _fenced = build_body(event, ContentOptions(), diff=DIFF).split("\n\n", 1)
+        listing, _fenced_block = build_body(event, ContentOptions(), diff=DIFF).split("\n\n", 1)
         assert listing.split("\n")[-1] == f"- {SPEC_CHANGED_NOTE}"
 
     def test_non_change_events_never_carry_a_diff(self):
@@ -733,47 +755,104 @@ class TestDiffSlot:
         assert "```" not in build_body(event, ContentOptions(include_diff_full=True), diff=DIFF)
 
 
+class TestRenderedSizeBackstop:
+    """#346, built in #349: a word diff scales with the change, but a rewrite
+    is a big change, and one huge token defeats a line cap. Every rendering is
+    bounded in bytes, so an oversized body can never cost a recipient their
+    notification."""
+
+    def _inner(self, body: str) -> str:
+        return "\n".join(_fenced(body)[1:-1])
+
+    def test_a_rewrite_is_cut_on_a_hunk_boundary(self):
+        hunk = tuple(f"+ {'word ' * 12}{i}" for i in range(20))
+        diff = ChangeDiff(hunks=(hunk,) * 100)
+        body = build_body(
+            make_event(metadata={}), ContentOptions(include_diff_full=True), diff=diff
+        )
+        inner = self._inner(body)
+        assert len(inner.encode()) <= MAX_RENDERED_DIFF_BYTES
+        kept = inner.split("\n... (")[0].split("\n")
+        assert len([line for line in kept if line]) % len(hunk) == 0
+        assert inner.endswith(" more lines)")
+
+    def test_one_enormous_line_is_cut_within_the_line(self):
+        diff = ChangeDiff(hunks=(("  before", "+ " + "é" * MAX_RENDERED_DIFF_BYTES),))
+        body = build_body(
+            make_event(metadata={}), ContentOptions(include_diff_full=True), diff=diff
+        )
+        inner = self._inner(body)
+        assert len(inner.encode()) <= MAX_RENDERED_DIFF_BYTES
+        assert inner.split("\n")[1].endswith("é…")
+
+    def test_the_snippet_is_bounded_too(self):
+        diff = ChangeDiff(hunks=(("+ " + "x" * 100_000,),))
+        ctx = build_template_context(make_event(metadata={}), diff=diff)
+        assert len(ctx["diff_snippet"].encode()) <= MAX_RENDERED_DIFF_BYTES + 64
+
+    def test_a_diff_within_the_cap_is_untouched(self):
+        body = build_body(
+            make_event(metadata={}), ContentOptions(include_diff_full=True), diff=DIFF
+        )
+        assert "more line" not in body
+
+
 class TestDiffFenceCannotBeClosedByContent:
     """CR 13/14: the diff carries the watched page's own text into a body the
     notifier renders as Markdown. CommonMark closes a backtick fence on a line
     that is *only* a run at least as long, indented 0–3 spaces — and a context
-    line is the page's text behind one space. A segment that is exactly three
-    backticks (a chunk boundary or a sentence end produces one) would end a
-    three-backtick block and let the next line render as live Markdown in
-    recipients' email. The fence must outrun every backtick run in the content.
+    line is the page's text behind two spaces. A page line that is exactly
+    three backticks would end a three-backtick block and let the next line
+    render as live Markdown in recipients' email. The fence must outrun every
+    backtick run in the content. #349 kept the page's text inside the fence
+    (line pairs, not inline marks) so this stays the one boundary.
     """
 
     HOSTILE = ChangeDiff(
-        unified=(
-            "--- previous\n+++ current\n@@ -1,4 +1,4 @@\n"
-            " ```\n"
-            " ![x](https://tracker.example/p.png)\n"
-            "-old\n+new"
-        )
+        hunks=(("  ```", "  ![x](https://tracker.example/p.png)", "- old", "+ new"),)
     )
 
-    def _block(self, body: str) -> list[str]:
-        return body.split("\n\n", 1)[1].split("\n")
+    @staticmethod
+    def _closes(line: str, fence: str) -> bool:
+        """CommonMark's closing rule: up to three spaces, then a run at least
+        as long as the opening fence, then nothing but spaces."""
+        stripped = line.strip(" ")
+        return (
+            len(line) - len(line.lstrip(" ")) <= 3
+            and stripped.startswith(fence)
+            and set(stripped) == {"`"}
+        )
 
     def test_a_content_line_that_would_close_three_backticks_cannot_close_the_fence(self):
-        lines = self._block(
-            build_body(make_event(metadata={}), ContentOptions(), diff=self.HOSTILE)
-        )
+        lines = _fenced(build_body(make_event(metadata={}), ContentOptions(), diff=self.HOSTILE))
         fence = lines[-1]
         assert lines[0] == f"{fence}diff"
         assert fence == "````"
-        # CommonMark's closing rule: up to three spaces, then a run at least
-        # as long as the opening fence, then nothing but spaces.
-        inner = lines[1:-1]
-        assert not any(
-            line.lstrip(" ").rstrip(" ").startswith(fence)
-            and set(line.strip(" ")) == {"`"}
-            and len(line) - len(line.lstrip(" ")) <= 3
-            for line in inner
+        assert not any(self._closes(line, fence) for line in lines[1:-1])
+
+    def test_a_hostile_page_stays_inside_the_fence_end_to_end(self):
+        """Hostile page text through the real diff: a chunk that is a bare
+        fence, an image beacon, raw HTML, and a longer run in the change."""
+        previous = (
+            b"intro\n```\n![x](https://tracker.example/p.png)\n<script>alert(1)</script>\nold tail"
         )
+        current = previous.replace(b"old tail", b"`````\n# heading\nnew tail")
+        body = build_body(
+            make_event(metadata={}),
+            ContentOptions(include_diff_full=True),
+            diff=compute_change_diff(previous, current),
+        )
+        lines = _fenced(body)
+        fence = lines[-1]
+        assert lines[0] == f"{fence}diff"
+        assert fence == "``````"
+        inner = lines[1:-1]
+        assert not any(self._closes(line, fence) for line in inner)
+        assert "+ # heading" in inner
+        assert "  <script>alert(1)</script>" in inner
 
     def test_plain_content_keeps_the_three_backtick_fence(self):
-        lines = self._block(build_body(make_event(metadata={}), ContentOptions(), diff=DIFF))
+        lines = _fenced(build_body(make_event(metadata={}), ContentOptions(), diff=DIFF))
         assert (lines[0], lines[-1]) == ("```diff", "```")
 
     def test_template_variables_use_the_same_fence(self):
@@ -787,7 +866,7 @@ class TestDiffTemplateVariables:
         ctx = build_template_context(make_event(metadata={}), diff=DIFF)
         assert ctx["diff_snippet"].startswith("```diff\n")
         assert ctx["diff_full"].startswith("```diff\n")
-        assert "+zeta" in ctx["diff_full"]
+        assert "+ zeta" in ctx["diff_full"]
 
     def test_snippet_capped_at_the_default_full_never(self):
         ctx = build_template_context(make_event(metadata={}), diff=_long_diff())
@@ -817,24 +896,32 @@ class TestDiffTemplateVariables:
         assert ctx["diff_full"].startswith("```diff")
 
 
-class TestTruncateUnifiedDiffLines:
-    LINES = _SAMPLE_UNIFIED_DIFF.split("\n")
+class TestTruncateHunks:
+    HUNKS = DIFF.hunks  # 4 lines, separator, 2 lines
 
     def test_fits_untouched(self):
-        assert _truncate_unified_diff_lines(self.LINES, len(self.LINES)) == (self.LINES, 0)
+        assert _truncate_hunks(self.HUNKS, max_lines=7, max_bytes=1000) == (
+            [*self.HUNKS[0], "", *self.HUNKS[1]],
+            0,
+        )
 
     def test_whole_hunks_only(self):
-        kept, omitted = _truncate_unified_diff_lines(self.LINES, 10)
-        assert kept == self.LINES[:8]
-        assert omitted == 3
+        assert _truncate_hunks(self.HUNKS, max_lines=6, max_bytes=1000) == (
+            list(self.HUNKS[0]),
+            2,
+        )
 
-    def test_first_hunk_too_big_keeps_headers_and_its_at_line(self):
-        kept, omitted = _truncate_unified_diff_lines(self.LINES, 4)
-        assert kept == self.LINES[:3]
-        assert omitted == len(self.LINES) - 3
+    def test_first_hunk_too_big_keeps_its_first_lines(self):
+        assert _truncate_hunks(self.HUNKS, max_lines=3, max_bytes=1000) == (
+            ["  alpha", "- beta"],
+            4,
+        )
 
-    def test_no_hunks_truncates_on_lines(self):
-        lines = [f"line {i}" for i in range(10)]
-        kept, omitted = _truncate_unified_diff_lines(lines, 5)
-        assert kept == lines[:4]
-        assert omitted == 6
+    def test_a_one_line_cap_keeps_only_the_footer(self):
+        assert _truncate_hunks(self.HUNKS, max_lines=1, max_bytes=1000) == ([], 6)
+
+    def test_bytes_bound_without_a_line_cap(self):
+        """The footer counts against the budget: the cut body plus its footer
+        stays within ``max_bytes``."""
+        hunks = (("+ " + "a" * 40,), ("+ " + "b" * 40,))
+        assert _truncate_hunks(hunks, max_lines=None, max_bytes=80) == ([hunks[0][0]], 1)

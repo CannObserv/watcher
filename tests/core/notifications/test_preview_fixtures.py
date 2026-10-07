@@ -1,6 +1,7 @@
 """Tests for the notification preview mock-event fixtures."""
 
 import hashlib
+import re
 from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -11,7 +12,7 @@ from ulid import ULID
 from src.api.schemas.content_config import ContentConfig
 from src.core.notifications import diff_loader as loader_mod
 from src.core.notifications.content import build_body, resolve_options
-from src.core.notifications.diff import ChangeDiff, compute_unified_diff
+from src.core.notifications.diff import compute_change_diff
 from src.core.notifications.diff_loader import StoredText
 from src.core.notifications.events import WatchEvent, WatchEventType
 from src.core.notifications.notify import dispatch_event_notifications
@@ -54,6 +55,7 @@ def _real_change_detected_keys() -> set[str]:
         "previous_fingerprint",
         "current_fingerprint",
         "extraction_changed",
+        "previous_changed_at",
     }
 
 
@@ -126,9 +128,28 @@ class TestBuildPreviewEvent:
 
 class TestPreviewDiff:
     def test_change_detected_diffs_the_canned_texts(self):
-        assert preview_diff("change_detected") == ChangeDiff(
-            unified=compute_unified_diff(PREVIEW_PREVIOUS_TEXT, PREVIEW_CURRENT_TEXT)
+        assert preview_diff("change_detected") == compute_change_diff(
+            PREVIEW_PREVIOUS_TEXT, PREVIEW_CURRENT_TEXT
         )
+
+    def test_the_canned_texts_hold_an_unpunctuated_list_run(self):
+        """#349: the common live shape — a schedule or list page with no
+        sentence end — is the one #222's segmentation realigned on. The preview
+        carries one, so a regression shows in the preview too."""
+        run = max(PREVIEW_PREVIOUS_TEXT.split(b"\n"), key=len)
+        assert len(run) > 800
+        assert not re.search(rb"[.!?]\s", run)
+
+    def test_an_early_insertion_in_the_run_marks_none_of_its_tail(self):
+        """Everything after April is the run's tail: none of it is a change."""
+        changed = [
+            line
+            for hunk in preview_diff("change_detected").hunks
+            for line in hunk
+            if line[:1] in "+-"
+        ]
+        assert "+ Recording: April 6 hearing video" in changed
+        assert not any("May" in line for line in changed)
 
     def test_other_events_have_none(self):
         assert preview_diff("watch_error") is None

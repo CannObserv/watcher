@@ -197,15 +197,46 @@ class TestCost:
         assert compute_change_diff(before.encode(), after.encode()).hunks
         assert time.perf_counter() - started < 5
 
+    ROW = "Tuesday, October 6, 10 - 11, Board Caucus Agenda Meeting Recordings: MS Teams TVW"
+
+    def test_a_repetitive_page_with_one_edit_diffs_quickly(self):
+        """CR 1: a schedule's rows make identical segments — SequenceMatcher's
+        worst case without autojunk (69 s for one edit in 10 000 rows)."""
+        words = " ".join([self.ROW] * 10_000).split()
+        edited = [*words[:80_000], "inserted", *words[80_000:]]
+        started = time.perf_counter()
+        diff = compute_change_diff(" ".join(words).encode(), " ".join(edited).encode())
+        assert time.perf_counter() - started < 5
+        assert _changed(diff) == ["+ inserted"]
+
+    def test_a_repetitive_page_with_scattered_edits_diffs_quickly(self):
+        words = " ".join([self.ROW] * 10_000).split()
+        edited = list(words)
+        for at in range(1_000, len(words), 16_000):
+            edited[at] = "X"
+        started = time.perf_counter()
+        assert compute_change_diff(" ".join(words).encode(), " ".join(edited).encode()).hunks
+        assert time.perf_counter() - started < 5
+
+    def test_a_small_vocabulary_rewrite_diffs_quickly(self):
+        rng = random.Random(349)
+        vocab = ["Board", "Caucus", "Agenda", "Meeting", "TVW", "Tuesday,", "10", "-", "11,"]
+        before = " ".join(rng.choice(vocab) for _ in range(100_000))
+        after = " ".join(rng.choice(vocab) for _ in range(100_000))
+        started = time.perf_counter()
+        assert compute_change_diff(before.encode(), after.encode()).hunks
+        assert time.perf_counter() - started < 5
+
     def test_a_block_over_the_refine_budget_is_shown_whole(self, monkeypatch):
+        # Two edits, so the trimmed middle still holds changed segments.
         words = _words(200)
-        edited = [*words[:100], "X", *words[101:]]
+        edited = [*words[:50], "X", *words[51:150], "Y", *words[151:]]
         before, after = " ".join(words).encode(), " ".join(edited).encode()
-        assert _changed(compute_change_diff(before, after)) == ["- w100", "+ X"]
+        assert _changed(compute_change_diff(before, after)) == ["- w50", "+ X", "- w150", "+ Y"]
         monkeypatch.setattr(diff_mod, "REFINE_MAX_TOKENS", 1)
         minus = [line for line in _changed(compute_change_diff(before, after)) if line[0] == "-"]
-        assert "w100" in " ".join(minus).split()
-        assert len(" ".join(minus).split()) > 2
+        assert "w50" in " ".join(minus).split()
+        assert len(" ".join(minus).split()) > 4
 
 
 class TestDiffRequested:

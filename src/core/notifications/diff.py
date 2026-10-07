@@ -16,11 +16,13 @@ words with ``CONTEXT_WORDS`` either side.
 
 **Aligned in two levels.** A flat word ``difflib`` without autojunk is
 quadratic, and pure Python holds the GIL in the one process that serves
-everything (63 s for one edit in a 150k-word page). Level 1 aligns
-content-defined segments: one ends after a token whose own hash says so, so an
-edit moves no boundary but its own. Level 2 refines each changed block word by
-word, up to ``REFINE_MAX_TOKENS`` a side; a bigger block is a rewrite, shown
-whole, and bounded by the renderer's byte cap.
+everything (63 s for one edit in a 150k-word page). The shared prefix and
+suffix are trimmed first. Level 1 aligns content-defined segments of the rest:
+one ends after a token whose own hash says so, so an edit moves no boundary but
+its own. Level 2 refines each changed block word by word, up to
+``REFINE_MAX_TOKENS`` a side; a bigger block is shown whole, bounded by the
+renderer's byte cap. On a repetitive page (a schedule's identical rows), two
+edits further apart than that show the stretch between them whole (CR 1).
 """
 
 import difflib
@@ -121,11 +123,36 @@ def _offsets(segments: list[tuple[str, ...]]) -> list[int]:
     return offsets
 
 
+def _common_ends(before: list[str], after: list[str]) -> tuple[int, int]:
+    """Lengths of the shared token prefix and suffix, never overlapping."""
+    limit = min(len(before), len(after))
+    head = 0
+    while head < limit and before[head] == after[head]:
+        head += 1
+    tail = 0
+    while tail < limit - head and before[-1 - tail] == after[-1 - tail]:
+        tail += 1
+    return head, tail
+
+
 def _changed_spans(before: list[str], after: list[str]) -> Iterator[_Span]:
-    """Every non-equal opcode, in token positions: segments first, then words."""
-    seg_before, seg_after = _segments(before), _segments(after)
-    at_before, at_after = _offsets(seg_before), _offsets(seg_after)
-    matcher = difflib.SequenceMatcher(None, seg_before, seg_after, autojunk=False)
+    """Every non-equal opcode, in token positions: segments first, then words.
+
+    The shared prefix and suffix are trimmed first (CR 1): a schedule's rows
+    make identical segments, and identical items are ``SequenceMatcher``'s
+    worst case — 69 s for one edit in 10 000 rows. Trimmed, one edit costs a
+    scan however repetitive the page. What remains is aligned with autojunk
+    on, so a segment that recurs throughout it cannot anchor the alignment:
+    a repetitive stretch between two edits becomes one changed block, refined
+    below ``REFINE_MAX_TOKENS`` and shown whole above it.
+    """
+    head, tail = _common_ends(before, after)
+    middle_before = before[head : len(before) - tail]
+    middle_after = after[head : len(after) - tail]
+    seg_before, seg_after = _segments(middle_before), _segments(middle_after)
+    at_before = [head + offset for offset in _offsets(seg_before)]
+    at_after = [head + offset for offset in _offsets(seg_after)]
+    matcher = difflib.SequenceMatcher(None, seg_before, seg_after)
     for tag, s1, s2, t1, t2 in matcher.get_opcodes():
         if tag == "equal":
             continue

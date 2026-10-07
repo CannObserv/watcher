@@ -143,6 +143,29 @@ class TestWordDiff:
         (hunk,) = compute_change_diff(before, after).hunks
         assert hunk == ("  Hours", "  Mon-Fri", "- 9-5", "+ 9-6", "  Contact a@example.com")
 
+    def test_context_counts_words_not_chunk_boundaries(self):
+        """CR 3: a ``\\n`` is not a word; on a line-structured page it must not
+        eat into the context."""
+        before = b"a1 a2 a3\nb1 b2 b3\nc1 c2 c3\nd1 d2 X d4 d5 d6\ne1 e2 e3\nf1 f2 f3"
+        (hunk,) = compute_change_diff(before, before.replace(b"X", b"Y")).hunks
+        assert hunk == (
+            "  b1 b2 b3",
+            "  c1 c2 c3",
+            "  d1 d2",
+            "- X",
+            "+ Y",
+            "  d4 d5 d6",
+            "  e1 e2 e3",
+            "  f1 f2 …",
+        )
+
+    def test_changes_within_twice_the_context_words_share_a_hunk_across_lines(self):
+        lines = [" ".join(f"r{row}w{i}" for i in range(3)) for row in range(20)]
+        edited = list(lines)
+        edited[5], edited[10] = "X r5w1 r5w2", "Y r10w1 r10w2"
+        diff = compute_change_diff("\n".join(lines).encode(), "\n".join(edited).encode())
+        assert len(diff.hunks) == 1
+
     def test_a_change_spanning_a_chunk_boundary_keeps_its_lines(self):
         diff = compute_change_diff(b"a\nb c\nd", b"a\nx\ny\nd")
         assert _changed(diff) == ["- b c", "+ x", "+ y"]

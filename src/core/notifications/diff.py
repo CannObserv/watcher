@@ -95,7 +95,7 @@ def compute_change_diff(previous: bytes, current: bytes) -> ChangeDiff:
     spans = [
         span for span in _changed_spans(before, after) if not _whitespace_only(span, before, after)
     ]
-    groups = _group(_fold(spans, before), gap=2 * CONTEXT_WORDS)
+    groups = _group(_fold(spans, before), before, gap=2 * CONTEXT_WORDS)
     return ChangeDiff(hunks=tuple(_render_hunk(group, before, after) for group in groups))
 
 
@@ -185,11 +185,18 @@ def _fold(spans: list[_Span], before: list[str]) -> list[_Span]:
     return out
 
 
-def _group(spans: list[_Span], *, gap: int) -> list[list[_Span]]:
-    """Changes close enough that their contexts would overlap share a hunk."""
+def _words_in(tokens: list[str]) -> int:
+    return sum(1 for token in tokens if token != _NEWLINE)
+
+
+def _group(spans: list[_Span], before: list[str], *, gap: int) -> list[list[_Span]]:
+    """Changes close enough that their contexts would overlap share a hunk.
+
+    ``gap`` counts words: a chunk boundary is not one (CR 3).
+    """
     groups: list[list[_Span]] = []
     for span in spans:
-        if groups and span[0] - groups[-1][-1][1] <= gap:
+        if groups and _words_in(before[groups[-1][-1][1] : span[0]]) <= gap:
             groups[-1].append(span)
         else:
             groups.append([span])
@@ -199,17 +206,35 @@ def _group(spans: list[_Span], *, gap: int) -> list[list[_Span]]:
 def _render_hunk(group: list[_Span], before: list[str], after: list[str]) -> Hunk:
     """Context, then each change as ``-``/``+`` lines, then context."""
     first, last = group[0], group[-1]
-    start = max(0, first[0] - CONTEXT_WORDS)
+    start = _context_start(before, first[0])
     lead = before[start : first[0]]
     lines = _lines("  ", lead, cut_before=start > 0 and before[start - 1] != _NEWLINE)
     for index, (i1, i2, j1, j2) in enumerate(group):
         lines += _lines("- ", before[i1:i2]) + _lines("+ ", after[j1:j2])
         if index + 1 < len(group):
             lines += _lines("  ", before[i2 : group[index + 1][0]])
-    end = min(len(before), last[1] + CONTEXT_WORDS)
+    end = _context_end(before, last[1])
     trail = before[last[1] : end]
     lines += _lines("  ", trail, cut_after=end < len(before) and before[end] != _NEWLINE)
     return tuple(lines)
+
+
+def _context_start(tokens: list[str], at: int) -> int:
+    """Where ``CONTEXT_WORDS`` words before ``at`` begin (CR 3: ``\\n`` is no word)."""
+    words = 0
+    while at > 0 and words < CONTEXT_WORDS:
+        at -= 1
+        words += tokens[at] != _NEWLINE
+    return at
+
+
+def _context_end(tokens: list[str], at: int) -> int:
+    """Where ``CONTEXT_WORDS`` words after ``at`` end (CR 3: ``\\n`` is no word)."""
+    words = 0
+    while at < len(tokens) and words < CONTEXT_WORDS:
+        words += tokens[at] != _NEWLINE
+        at += 1
+    return at
 
 
 def _lines(

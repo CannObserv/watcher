@@ -23,7 +23,7 @@ from src.core.notifications.preview_fixtures import (
     build_preview_event,
     preview_diff,
 )
-from src.core.utils import watched_item_event_base_metadata
+from src.core.utils import format_utc_iso, watched_item_event_base_metadata
 
 
 class _FakeWatchedItem:
@@ -94,6 +94,14 @@ class TestMockEventFixtures:
         curr = hashlib.sha256(PREVIEW_CURRENT_TEXT).hexdigest()
         assert fx["previous_fingerprint"] == f"sha256:{prev}"
         assert fx["current_fingerprint"] == f"sha256:{curr}"
+
+    def test_change_detected_dates_are_a_real_changes(self):
+        """CR 4: on a real change ``last_changed_at`` *is* this change (the
+        pipeline sets it before building the event), and
+        ``previous_changed_at`` is earlier."""
+        event = build_preview_event("change_detected")
+        assert event.metadata["last_changed_at"] == format_utc_iso(event.occurred_at)
+        assert event.metadata["previous_changed_at"] < event.metadata["last_changed_at"]
 
     def test_watch_error_has_status_code(self):
         fx = MOCK_EVENT_FIXTURES["watch_error"]

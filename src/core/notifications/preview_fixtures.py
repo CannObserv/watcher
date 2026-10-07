@@ -27,6 +27,7 @@ from co_core.pure.util.hashing import prefixed_sha256, sha256
 
 from src.core.notifications.diff import ChangeDiff, compute_change_diff
 from src.core.notifications.events import WatchEvent, WatchEventType
+from src.core.utils import format_utc_iso
 
 _PREVIEW_WATCH_ID = "01KPPFATBNYQGBB38SQ06DN9HY"
 _PREVIEW_WATCH_NAME = "Example Watch"
@@ -114,6 +115,10 @@ MOCK_EVENT_FIXTURES: dict[str, dict] = {
         **_SHARED_CONTEXT,
         # Layered by pipeline.py on change detection.
         "change_revision_id": "01KPPFATBNYQGBB38SQ06DN9HZ",
+        # On a change, `last_changed_at` is this change: the pipeline sets it
+        # before building the event (#349). The one before is
+        # `previous_changed_at`.
+        "last_changed_at": format_utc_iso(_PREVIEW_OCCURRED_AT),
         "previous_changed_at": "2026-04-09T17:45:00Z",
         "previous_fingerprint": prefixed_sha256(sha256(PREVIEW_PREVIOUS_TEXT)),
         "current_fingerprint": prefixed_sha256(sha256(PREVIEW_CURRENT_TEXT)),

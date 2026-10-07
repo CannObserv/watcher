@@ -18,11 +18,14 @@ words with ``CONTEXT_WORDS`` either side.
 quadratic, and pure Python holds the GIL in the one process that serves
 everything (63 s for one edit in a 150k-word page). The shared prefix and
 suffix are trimmed first. Level 1 aligns content-defined segments of the rest:
-one ends after a token whose own hash says so, so an edit moves no boundary but
-its own. Level 2 refines each changed block word by word, up to
-``REFINE_MAX_TOKENS`` a side; a bigger block is shown whole, bounded by the
-renderer's byte cap. On a repetitive page (a schedule's identical rows), two
-edits further apart than that show the stretch between them whole (CR 1).
+one ends after a token whose own hash says so, so an edit moves no natural
+boundary but its own. A run of ``MAX_SEGMENT_TOKENS`` with no natural boundary
+is cut by position, and those cuts shift up to the run's next natural boundary
+— bounded realignment, never the page's (CR 5). Level 2 refines each changed
+block word by word, up to ``REFINE_MAX_TOKENS`` a side; a bigger block is
+shown whole, bounded by the renderer's byte cap. On a repetitive page (a
+schedule's identical rows), two edits further apart than that show the stretch
+between them whole (CR 1).
 """
 
 import difflib
@@ -100,7 +103,9 @@ def compute_change_diff(previous: bytes, current: bytes) -> ChangeDiff:
 
 
 def _segments(tokens: list[str]) -> list[tuple[str, ...]]:
-    """Content-defined segments: a boundary depends only on the token before it."""
+    """Content-defined segments: a natural boundary depends only on the token
+    before it. A positional cut every ``MAX_SEGMENT_TOKENS`` of a run with none
+    can shift after an edit, but only until the run's next natural boundary."""
     out: list[tuple[str, ...]] = []
     start = 0
     for index, token in enumerate(tokens):

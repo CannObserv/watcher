@@ -330,7 +330,9 @@ text, by **word** (#349): each change as `-`/`+` lines with 8 words of context,
 wrapped at 72 columns, in a fenced block with no unified-diff header. Live items
 extract to one long line, mostly without sentence ends, so #222's sentence split
 and fixed-width wrap realigned everything after an edit; segments are now
-content-defined, so an edit moves no boundary but its own. Page text stays
+content-defined, so an edit moves no natural boundary but its own (a positional
+cut in a 64-word run without one can shift, up to the next natural boundary).
+Page text stays
 inside the fence (`_fence_for`, CR 13), never inline marks. Defaults: snippet on
 (25 rendered lines, hunk-aware), full off (every change); both are bounded by
 `MAX_RENDERED_DIFF_BYTES` (32 KiB, #346). Templates saved before #221 get their

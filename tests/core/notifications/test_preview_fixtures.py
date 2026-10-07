@@ -95,7 +95,7 @@ class TestMockEventFixtures:
         assert fx["previous_fingerprint"] == f"sha256:{prev}"
         assert fx["current_fingerprint"] == f"sha256:{curr}"
 
-    def test_change_detected_dates_are_a_real_changes(self):
+    def test_change_detected_dates_are_a_real_changes_dates(self):
         """CR 4: on a real change ``last_changed_at`` *is* this change (the
         pipeline sets it before building the event), and
         ``previous_changed_at`` is earlier."""

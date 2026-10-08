@@ -416,10 +416,10 @@ class TestNonChangeDetectedDefaultBody:
         body = build_body(event, ContentOptions(include_domain=True))
         assert body == "https://example.com returned HTTP 500"
 
-    def test_watch_paused_renders_default_template(self):
-        event = make_event(event_type=WatchEventType.WATCH_PAUSED, metadata={})
+    def test_watch_recovered_renders_default_template(self):
+        event = make_event(event_type=WatchEventType.WATCH_RECOVERED, metadata={})
         body = build_body(event, ContentOptions())
-        assert body == "Watch paused: https://example.com"
+        assert body == "https://example.com is responding normally again"
 
 
 class TestRenderTemplate:

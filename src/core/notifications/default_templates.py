@@ -126,11 +126,6 @@ DEFAULT_TITLE_TEMPLATES: dict[str, str] = {
     WatchEventType.CHANGE_DETECTED.value: _TITLE,
     WatchEventType.WATCH_ERROR.value: _TITLE,
     WatchEventType.WATCH_RECOVERED.value: _TITLE,
-    WatchEventType.WATCH_CREATED.value: _TITLE,
-    WatchEventType.WATCH_PAUSED.value: _TITLE,
-    WatchEventType.WATCH_RESUMED.value: _TITLE,
-    WatchEventType.WATCH_ARCHIVED.value: _TITLE,
-    WatchEventType.WATCH_DELETED.value: _TITLE,
 }
 
 
@@ -197,11 +192,6 @@ DEFAULT_BODY_TEMPLATES: dict[str, str] = {
         "{{ item_url }} returned HTTP {{ status_code | default('unknown') }}"
     ),
     WatchEventType.WATCH_RECOVERED.value: "{{ item_url }} is responding normally again",
-    WatchEventType.WATCH_CREATED.value: "Now monitoring {{ item_url }}",
-    WatchEventType.WATCH_PAUSED.value: "Watch paused: {{ item_url }}",
-    WatchEventType.WATCH_RESUMED.value: "Watch resumed: {{ item_url }}",
-    WatchEventType.WATCH_ARCHIVED.value: "Watch archived: {{ item_url }}",
-    WatchEventType.WATCH_DELETED.value: "Watch deleted: {{ item_url }}",
 }
 
 

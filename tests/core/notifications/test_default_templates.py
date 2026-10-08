@@ -20,6 +20,10 @@ class TestDefaultTitleTemplates:
                 f"DEFAULT_TITLE_TEMPLATES missing entry for {et.value}"
             )
 
+    def test_no_entry_for_a_non_event(self):
+        """#166: a default for a value that cannot fire lets the preview vouch for it."""
+        assert set(DEFAULT_TITLE_TEMPLATES) == {et.value for et in WatchEventType}
+
     def test_values_are_jinja_strings(self):
         for value in DEFAULT_TITLE_TEMPLATES.values():
             assert isinstance(value, str)
@@ -44,6 +48,10 @@ class TestDefaultBodyTemplates:
             assert et.value in DEFAULT_BODY_TEMPLATES, (
                 f"DEFAULT_BODY_TEMPLATES missing entry for {et.value}"
             )
+
+    def test_no_entry_for_a_non_event(self):
+        """#166: a default for a value that cannot fire lets the preview vouch for it."""
+        assert set(DEFAULT_BODY_TEMPLATES) == {et.value for et in WatchEventType}
 
     def test_values_are_nonempty_strings(self):
         for value in DEFAULT_BODY_TEMPLATES.values():

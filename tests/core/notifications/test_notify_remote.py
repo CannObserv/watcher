@@ -175,7 +175,7 @@ class TestRemoteDispatchPath:
         monkeypatch.setenv("WATCHER_NOTIFIER_API_KEY", "nk_test")
 
         template = _fake_template("watched_item", remote_channel_id=str(ULID()))
-        event = _make_event(WatchEventType.WATCH_CREATED)
+        event = _make_event(WatchEventType.WATCH_ERROR)
 
         session = _setup_session(templates=[template])
         mock_client = _mock_notifier_client(dispatch_return=_make_dispatch_out("succeeded"))
@@ -188,7 +188,7 @@ class TestRemoteDispatchPath:
 
         call_kwargs = mock_client.dispatch.call_args.kwargs
         metadata = call_kwargs["metadata"]
-        assert metadata["event_type"] == "watch_created"
+        assert metadata["event_type"] == "watch_error"
         assert metadata["source"] == "watched_item"
 
     async def test_notifier_failed_status_recorded_as_failure(self, monkeypatch):

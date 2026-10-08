@@ -15,7 +15,16 @@ class TestValidateEventList:
             validate_event_list([])
 
     def test_single_valid_event(self):
-        assert validate_event_list(["watch_created"]) == ["watch_created"]
+        assert validate_event_list(["watch_recovered"]) == ["watch_recovered"]
+
+    @pytest.mark.parametrize(
+        "dropped",
+        ["watch_created", "watch_paused", "watch_resumed", "watch_archived", "watch_deleted"],
+    )
+    def test_never_firing_event_rejected(self, dropped):
+        """#166: no surface may subscribe a template to an event that cannot fire."""
+        with pytest.raises(ValueError, match="Unknown event type"):
+            validate_event_list(["change_detected", dropped])
 
     def test_unknown_event_raises(self):
         with pytest.raises(ValueError, match="Unknown event type"):

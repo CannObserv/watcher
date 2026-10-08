@@ -81,12 +81,12 @@ class TestBuildIdempotencyKey:
         assert key == f"watcher:change_detected:{source_id}:{event.watched_item_id}:{occurred_ms}"
 
     def test_non_change_event_uses_watched_item_id_and_timestamp(self):
-        event = _make_event(WatchEventType.WATCH_CREATED)
+        event = _make_event(WatchEventType.WATCH_ERROR)
         source_id = str(ULID())
 
         key = build_idempotency_key(event, source_id)
         occurred_ms = int(event.occurred_at.timestamp() * 1000)
-        assert key == f"watcher:watch_created:{source_id}:{event.watched_item_id}:{occurred_ms}"
+        assert key == f"watcher:watch_error:{source_id}:{event.watched_item_id}:{occurred_ms}"
 
     def test_key_is_stable_for_same_inputs(self):
         change_revision_id = str(ULID())

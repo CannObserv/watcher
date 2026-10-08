@@ -128,11 +128,6 @@ MOCK_EVENT_FIXTURES: dict[str, dict] = {
         "status_code": 503,
     },
     WatchEventType.WATCH_RECOVERED.value: {**_SHARED_CONTEXT},
-    WatchEventType.WATCH_CREATED.value: {**_SHARED_CONTEXT},
-    WatchEventType.WATCH_PAUSED.value: {**_SHARED_CONTEXT},
-    WatchEventType.WATCH_RESUMED.value: {**_SHARED_CONTEXT},
-    WatchEventType.WATCH_ARCHIVED.value: {**_SHARED_CONTEXT},
-    WatchEventType.WATCH_DELETED.value: {**_SHARED_CONTEXT},
 }
 
 

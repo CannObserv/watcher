@@ -26,16 +26,23 @@ def make_event(event_type, metadata=None):
 
 
 class TestWatchEventType:
-    def test_all_expected_types_exist(self):
-        codes = {e.value for e in WatchEventType}
-        assert "change_detected" in codes
-        assert "watch_error" in codes
-        assert "watch_recovered" in codes
-        assert "watch_created" in codes
-        assert "watch_paused" in codes
-        assert "watch_resumed" in codes
-        assert "watch_archived" in codes
-        assert "watch_deleted" in codes
+    def test_exactly_the_dispatched_types_exist(self):
+        """Only events with a dispatch site are members (#166) — the guard
+        tying each to its call site is `tests/test_notification_dispatch_sites.py`."""
+        assert {e.value for e in WatchEventType} == {
+            "change_detected",
+            "watch_error",
+            "watch_recovered",
+        }
+
+    @pytest.mark.parametrize(
+        "dropped",
+        ["watch_created", "watch_paused", "watch_resumed", "watch_archived", "watch_deleted"],
+    )
+    def test_never_firing_types_are_gone(self, dropped):
+        """#166: five members were subscribable but never dispatched."""
+        with pytest.raises(ValueError):
+            WatchEventType(dropped)
 
     def test_is_str_enum(self):
         assert WatchEventType.CHANGE_DETECTED == "change_detected"
@@ -62,14 +69,9 @@ class TestEventTitles:
         (templates iterate `event_titles.items()`).
         """
         assert list(EVENT_TITLES.keys()) == [
-            "watch_created",
             "change_detected",
             "watch_error",
             "watch_recovered",
-            "watch_paused",
-            "watch_resumed",
-            "watch_archived",
-            "watch_deleted",
         ]
 
     def test_watch_event_type_iteration_order_matches(self):

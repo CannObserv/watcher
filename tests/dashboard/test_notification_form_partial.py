@@ -198,12 +198,25 @@ class TestPreviewEventSelectorFiltering:
         self, client: AsyncClient, db_session
     ):
         """When change_detected is NOT subscribed, the first subscribed event is selected."""
-        tpl = await _make_template(db_session, "NoCD", events=["watch_error", "watch_archived"])
+        tpl = await _make_template(db_session, "NoCD", events=["watch_error", "watch_recovered"])
         resp = await client.get(f"/notifications/{tpl.id}/edit")
         assert resp.status_code == 200
         options = _extract_preview_select_options(resp.text)
-        assert options == ["watch_error", "watch_archived"]
+        assert options == ["watch_error", "watch_recovered"]
         assert _extract_preview_selected(resp.text) == "watch_error"
+
+    async def test_template_edit_ignores_a_dropped_event_still_on_the_row(
+        self, client: AsyncClient, db_session
+    ):
+        """#166: a row the data migration has not reached (a rollback, an
+        unmigrated copy) still holds a dropped value. The edit page renders, and
+        neither the Subscribe checkboxes nor the preview offer it — so a save
+        drops it rather than failing on it."""
+        tpl = await _make_template(db_session, "Stale", events=["change_detected", "watch_paused"])
+        resp = await client.get(f"/notifications/{tpl.id}/edit")
+        assert resp.status_code == 200
+        assert _extract_preview_select_options(resp.text) == ["change_detected"]
+        assert 'value="watch_paused"' not in resp.text
 
     async def test_new_template_page_preview_select_falls_back_to_change_detected_only(
         self, client: AsyncClient

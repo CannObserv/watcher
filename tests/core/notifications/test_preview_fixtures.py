@@ -64,6 +64,10 @@ class TestMockEventFixtures:
         for et in WatchEventType:
             assert et.value in MOCK_EVENT_FIXTURES, f"MOCK_EVENT_FIXTURES missing {et.value}"
 
+    def test_no_fixture_for_a_non_event(self):
+        """#166: a fixture for a value that cannot fire lets the preview vouch for it."""
+        assert set(MOCK_EVENT_FIXTURES) == {et.value for et in WatchEventType}
+
     def test_change_detected_matches_pipeline_metadata(self):
         """#221 fidelity invariant: the fixture must not advertise keys a real
         change email never carries. Its keys must be a subset of what

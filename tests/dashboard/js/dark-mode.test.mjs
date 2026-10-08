@@ -128,10 +128,6 @@ function makeWorld({ stored, prefersDark = false, mqListener = true } = {}) {
   if (mqListener) mq.addEventListener = function (type, fn) { if (type === "change") this._change = fn; };
   const window = { matchMedia: () => mq };
 
-  class CustomEvent {
-    constructor(type, init) { this.type = type; this.detail = init && init.detail; }
-  }
-
   const document = {
     documentElement: html,
     addEventListener(type, fn) { (listeners[type] = listeners[type] || []).push(fn); },
@@ -149,7 +145,7 @@ function makeWorld({ stored, prefersDark = false, mqListener = true } = {}) {
   // Mimic the FOUC <head> script: .dark if forced dark, or system+OS-dark.
   if (stored === "dark" || (stored === undefined && prefersDark)) html.classList.add("dark");
 
-  vm.runInNewContext(source, { document, window, localStorage, CustomEvent });
+  vm.runInNewContext(source, { document, window, localStorage });
 
   return {
     html, store, localStorage, mq, desktop, mobile, dispatched,

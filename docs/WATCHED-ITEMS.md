@@ -296,6 +296,16 @@ row once), and multiple templates may target the same `remote_channel_id` with
 no suppression (ratified F2). `channel_hint` is display-only; `remote_channel_id`
 is the notifier-owned delivery handle — nothing dispatches off the hint.
 
+**Subscribable events (#166).** Three: `change_detected` (`src/workers/pipeline.py`),
+`watch_error` and `watch_recovered` (`src/workers/fetch_commands.py`) — each
+`WatchEventType` member is a Subscribe checkbox, so each must have a
+`dispatch_event_notifications` site, and `tests/test_notification_dispatch_sites.py`
+fails on one that does not. Created, paused, resumed, archived and deleted were
+subscribable and never fired; #166 dropped them and migration `78606286a887`
+stripped them from saved templates. Their **audits** (`EventType.WATCHED_ITEM_*`)
+are a separate enum and stay. Pause is registry-owned in production
+(the reconcile writes `is_active` directly), so if anyone notifies on it, Archiver does.
+
 Template mutations (create/update/delete/duplicate + their audit events) go
 through one service — `src/core/notifications/templates.py` (#228) — used by
 every surface below; routes stay transport adapters and own the commit.

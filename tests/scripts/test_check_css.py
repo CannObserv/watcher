@@ -4,9 +4,13 @@ The gate runs in the pre-commit hook and the CI ``css`` job, both against a
 tree where ``build-css.sh`` may never have run. ``vendor/*.layered.css`` is a
 git-ignored build product, so its absence is a clean checkout, not staleness;
 only a present-but-different one is stale. Each test copies ``src/dashboard``
-and the scripts into a temp root and runs the real script there. Needs the
-pinned Tailwind CLI, so it skips where ``tailwindcss`` is absent; the fake-CLI
-tests stand a stub on ``PATH`` and need only bash, npm and python3.
+and the scripts into a temp root and runs the real script there.
+
+The real-build tests need the pinned Tailwind CLI and skip without it, so **CI
+never runs them**: the ``test`` job has no CLI, and the ``css`` job runs
+``check-css.sh`` itself rather than pytest. They run on co-watcher. The
+fake-CLI tests stand a stub on ``PATH``, need only bash and npm, and do run in
+the ``test`` job.
 """
 
 import os

@@ -68,6 +68,27 @@ jobs:
         working-directory: watcher
         run: uv run ruff format --check .
 
+  # output.css gate (#352): nothing else runs scripts/check-css.sh once a clone
+  # skips `pre-commit install`. Node and the pinned CLI only — no OIDC token,
+  # no wheelhouse, no uv. Keep the pin equal to scripts/build-css.sh's.
+  css:
+    name: css
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install Tailwind CLI (pinned)
+        run: npm install -g @tailwindcss/cli@4.2.4
+
+      - name: check-css
+        run: bash scripts/check-css.sh
+
   test:
     name: test
     runs-on: ubuntu-latest

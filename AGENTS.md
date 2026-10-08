@@ -104,6 +104,7 @@ source scripts/load-env.sh
 
 ```bash
 uv sync                                      # install deps
+uv run pre-commit install                    # once per clone: ruff + check-css.sh hook
 uv run pytest                                # tests
 uv run pytest -m integration                 # integration tests (needs PostgreSQL)
 uv run ruff check .                          # lint

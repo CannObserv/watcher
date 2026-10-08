@@ -5,7 +5,17 @@
 ```bash
 # Install dependencies (creates .venv automatically)
 uv sync
+
+# Install the git pre-commit hook — once per clone; worktrees share .git/hooks
+uv run pre-commit install
 ```
+
+The hook (`.pre-commit-config.yaml`, #352) runs `ruff check`, `ruff format
+--check` (Python and Markdown) and `scripts/check-css.sh`. The CSS check fires
+on any Tailwind source (`src/dashboard/**` templates, JS, Python, CSS) or CSS
+build script, and needs the pinned Tailwind CLI (*Tailwind CSS* below). Nothing
+installs it for you: `.git/hooks/` is per clone, which is why CI also runs every
+check (*CI* below).
 
 ## Environment
 
@@ -302,13 +312,15 @@ are the rework when xdist is actually adopted.
 ## CI (#220)
 
 GitHub Actions (`.github/workflows/ci.yml`) runs on push/PR to `main`: a
-**lint** job (`ruff check` + `ruff format --check`), a **test** job
+**lint** job (`ruff check` + `ruff format --check`), a **css** job
+(`scripts/check-css.sh` with `@tailwindcss/cli@4.2.4` from npm — Node only, no
+uv, no cloud credentials; #352), a **test** job
 (`pytest -m "not integration"` against a `postgres:16` service), and a
 **migrations** job (independent migration-chain smoke-check, #234 — `alembic
 upgrade head` from an empty `postgres:16` then `alembic check` for drift). No
 job checks out a sibling repo — #254 removed the `archiver-client` path dep
 that `lint` and `migrations` needed, and #311 the `test` job's archiver alembic
-run. All three jobs authenticate to GCS **keyless via WIF**
+run. The three Python jobs authenticate to GCS **keyless via WIF**
 (`vars.GCP_WIF_PROVIDER` → `co-pypi-reader` SA) and sync the wheelhouse before
 `uv sync`; `notifier-client` installs as written, from
 its public HTTPS tag source — no URL rewrite (#284). The migrations job needs

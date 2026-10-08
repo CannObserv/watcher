@@ -33,17 +33,16 @@ if ! diff -q "$OUTPUT" "$TMPFILE" > /dev/null 2>&1; then
 fi
 
 # Verify each vendor/*.layered.css matches a fresh wrap of its *.min.css
-# source. See docs/STYLE.md §11 (Overriding Vendored CSS).
+# source. See docs/STYLE.md §11 (Overriding Vendored CSS). The layered files
+# are git-ignored build products: a clean checkout (CI, a fresh clone) has none
+# yet, which is not staleness (#352). Only a present-but-different one fails.
 shopt -s nullglob
 for src in "$VENDOR_DIR"/*.min.css; do
   base="$(basename "$src" .min.css)"
   layered="$VENDOR_DIR/$base.layered.css"
   fresh="$TMPDIR_LAYERED/$base.layered.css"
+  [ -f "$layered" ] || continue
   python3 "$SCRIPT_DIR/wrap-vendor-css.py" "$src" "$fresh"
-  if [ ! -f "$layered" ]; then
-    echo "❌ $layered missing. Run: bash scripts/build-css.sh"
-    exit 1
-  fi
   if ! diff -q "$layered" "$fresh" > /dev/null 2>&1; then
     echo "❌ $layered is stale. Run: bash scripts/build-css.sh"
     exit 1

@@ -57,6 +57,9 @@ dev = [
     "pytest>=9.1.1,<10",
     "pytest-asyncio>=1.4.0,<2",
     "pytest-cov>=7.1.0,<8",
+    # Imported directly by tests/dashboard/test_css_sources.py to read the
+    # pre-commit and CI configs (#352); declared, not relied on via pre-commit.
+    "pyyaml>=6,<7",
     "ruff>=0.16.8,<0.17",
 ]
 

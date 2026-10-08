@@ -6,13 +6,17 @@ from a submodule bump) became a CSS rule and left ``output.css`` stale.
 ``input.css`` therefore turns auto-detection off with ``source(none)`` and
 lists every class-bearing source explicitly. These tests fail when a file under
 ``src/`` starts emitting class names without an ``@source`` that covers it.
-See docs/STYLE.md §10. Pure file scans, no Tailwind CLI needed.
+See docs/STYLE.md §10. The second half pins the gates that run
+``scripts/check-css.sh`` (#352): the pre-commit hook's ``files`` filter and
+the CI ``css`` job. Pure file scans, no Tailwind CLI needed.
 """
 
 import glob
 import os
 import re
 from pathlib import Path
+
+import yaml
 
 _ROOT = Path(__file__).resolve().parents[2]
 SRC_DIR = _ROOT / "src"
@@ -95,3 +99,57 @@ def test_vendored_files_are_not_scanned():
     """Third-party JS contributes no utilities."""
     vendored = sorted(str(p.relative_to(_ROOT)) for p in _scanned() if _is_vendored(p))
     assert not vendored, f"@source covers vendored files: {vendored}"
+
+
+# --- The gate that runs check-css.sh (#352) ---------------------------------
+
+PRE_COMMIT_CONFIG = _ROOT / ".pre-commit-config.yaml"
+CI_WORKFLOW = _ROOT / ".github" / "workflows" / "ci.yml"
+BUILD_CSS = _ROOT / "scripts" / "build-css.sh"
+_CLI_PIN = re.compile(r"@tailwindcss/cli@(\d+\.\d+\.\d+)")
+
+
+def _css_hook_files() -> re.Pattern[str]:
+    config = yaml.safe_load(PRE_COMMIT_CONFIG.read_text(encoding="utf-8"))
+    hooks = [h for repo in config["repos"] for h in repo["hooks"]]
+    (hook,) = [h for h in hooks if h["id"] == "tailwind-css"]
+    assert hook["entry"] == "bash scripts/check-css.sh"
+    return re.compile(hook["files"])
+
+
+def test_css_hook_fires_on_every_build_input():
+    """A commit touching any scanned source, the CSS or the build scripts runs the check."""
+    files = _css_hook_files()
+    inputs = _scanned() | {
+        INPUT_CSS,
+        CSS_DIR / "output.css",
+        BUILD_CSS,
+        _ROOT / "scripts" / "check-css.sh",
+    }
+    silent = sorted(
+        rel for rel in (str(p.relative_to(_ROOT)) for p in inputs) if not files.search(rel)
+    )
+    assert not silent, f"tailwind-css hook skips: {silent}"
+
+
+def _css_ci_job() -> dict:
+    jobs = yaml.safe_load(CI_WORKFLOW.read_text(encoding="utf-8"))["jobs"]
+    runs = [(job, step.get("run", "")) for job in jobs.values() for step in job["steps"]]
+    (job,) = {id(j): j for j, run in runs if "scripts/check-css.sh" in run}.values()
+    return job
+
+
+def test_ci_runs_check_css_with_the_pinned_cli():
+    """CI gates output.css, installing the same CLI version build-css.sh pins."""
+    (pin,) = set(_CLI_PIN.findall(BUILD_CSS.read_text(encoding="utf-8")))
+    installs = {v for step in _css_ci_job()["steps"] for v in _CLI_PIN.findall(step.get("run", ""))}
+    assert installs == {pin}
+
+
+def test_ci_css_job_holds_no_cloud_credentials():
+    """The CSS job needs Node and the CLI only: no OIDC token, no wheelhouse."""
+    job = _css_ci_job()
+    assert job.get("permissions") == {"contents": "read"}
+    text = yaml.safe_dump(job)
+    assert "google-github-actions" not in text
+    assert "sync_wheelhouse" not in text

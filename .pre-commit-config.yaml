@@ -19,5 +19,7 @@ repos:
         name: tailwind CSS up to date
         entry: bash scripts/check-css.sh
         language: system
-        files: '(\.html|input\.css)$'
+        # Every Tailwind @source (templates, authored JS, dashboard Python),
+        # the CSS itself and its build scripts (#352).
+        files: '^(src/dashboard/.*\.(html|js|py|css)|scripts/(build|check)-css\.sh|scripts/wrap-vendor-css\.py)$'
         pass_filenames: false

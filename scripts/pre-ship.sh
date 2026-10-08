@@ -28,6 +28,16 @@ DELEGATE="skills/shipping-work-python-fastapi/scripts/pre-ship.sh"
   exit 2
 }
 
+# The vendored gate inserts .skills/pre-ship-uv-args after every `uv run`; the
+# integration run below does not (watcher has no such file — docs/SKILLS.md,
+# #318). Its arrival would split the two runs into different environments
+# without a word, so it stops the gate until this wrapper honours it (#353 CR 3).
+if [[ -e .skills/pre-ship-uv-args || -L .skills/pre-ship-uv-args ]]; then
+  echo "ERROR: .skills/pre-ship-uv-args exists, but this wrapper's integration run" >&2
+  echo "       ignores it. Teach scripts/pre-ship.sh to pass the same arguments first." >&2
+  exit 2
+fi
+
 # --help: the gate's own text, then what this wrapper adds. Runs nothing.
 if [[ "${1:-}" == "--help" ]]; then
   bash "$DELEGATE" "$@"

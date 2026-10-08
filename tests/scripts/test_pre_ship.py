@@ -140,3 +140,15 @@ def test_a_missing_delegate_is_a_tooling_error(sandbox: Path) -> None:
     result, calls = run(sandbox)
     assert result.returncode == 2
     assert calls == []
+
+
+def test_uv_args_file_stops_the_wrapper_before_anything_runs(sandbox: Path) -> None:
+    """CR 3: the vendored gate reads ``.skills/pre-ship-uv-args``; the wrapper's
+    integration run does not. Rather than let the two environments drift
+    silently, the file's arrival stops the gate until the wrapper honours it."""
+    (sandbox / "repo" / ".skills").mkdir()
+    (sandbox / "repo" / ".skills" / "pre-ship-uv-args").write_text("--group seed\n")
+    result, calls = run(sandbox)
+    assert result.returncode == 2
+    assert calls == []
+    assert ".skills/pre-ship-uv-args" in result.stderr

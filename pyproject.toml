@@ -71,7 +71,8 @@ asyncio_default_fixture_loop_scope = "session"
 asyncio_default_test_loop_scope = "session"
 markers = [
     # #353: run with nothing but TEST_DATABASE_URL and no outbound network,
-    # every integration test passed. CI runs them in the `integration` job.
+    # every integration test passed. CI runs them in the `integration` job;
+    # conftest's network_guard keeps "nothing external" true for every non-live test.
     "integration: connects to the test database (TEST_DATABASE_URL) and nothing external; excluded by default, run with -m integration (CI: integration job)",
     "live: needs a real external service or credential (GCS); excluded by default and from every gate, run by hand with -m live",
 ]

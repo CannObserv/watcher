@@ -176,6 +176,13 @@ goes under `live`, never `integration`. Both are excluded from the default run
 `test` job runs it with no database, so an unmarked test that connects fails there.
 `tests/test_integration_gate.py` pins the marks and the CI jobs.
 
+**Nothing external is enforced, not just measured.** An autouse fixture
+(`network_guard`, `tests/conftest.py` → `tests/network_guard.py`) refuses every
+`connect` except loopback, unix sockets and `TEST_DATABASE_URL`'s host, with
+`ENETUNREACH` — what the `unshare -n` run saw — and fails the test at teardown even
+if the code swallowed the refusal. `live` tests are exempt. A test that provokes a
+refusal on purpose clears `network_guard.attempts`.
+
 ## Linting
 
 ```bash

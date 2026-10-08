@@ -48,6 +48,7 @@ from src.core.models.domain import Domain
 from src.core.models.watched_item import WatchedItem
 from src.core.probe import ProbeResult
 from src.dashboard.deps import get_dashboard_user
+from tests.network_guard import NetworkGuard, database_hosts, guards
 
 TEST_DATABASE_URL = os.environ.get("TEST_DATABASE_URL")
 if not TEST_DATABASE_URL:
@@ -184,6 +185,29 @@ def _make_mock_probe():
 @pytest.fixture(scope="session")
 def anyio_backend():
     return "asyncio"
+
+
+@pytest.fixture(autouse=True)
+def network_guard(request, monkeypatch):
+    """Refuse every connect that leaves this machine, except to the test database.
+
+    The scrubs above stop a test *finding* the bus, the notifier or production;
+    this stops one *reaching* anything external whatever URL it found, and
+    makes the #353 mark contract continuous — ``integration`` is the test
+    database and nothing else, the default suite is less. A refused connect
+    raises ``ENETUNREACH`` (what #353's ``unshare -n`` run saw) and still fails
+    the test here at teardown if the code swallowed it. ``live`` tests are
+    exempt. A test that means to provoke a refusal clears ``attempts``.
+    """
+    guard = NetworkGuard(database_hosts(make_url(TEST_DATABASE_URL).host))
+    if guards(request.node):
+        guard.install(monkeypatch)
+    yield guard
+    if guard.attempts:
+        pytest.fail(
+            f"tried to reach {[a for _, a in guard.attempts]} — outside the test "
+            "database. A test that needs an external service is `live` (#353)."
+        )
 
 
 @pytest.fixture(scope="session")

@@ -130,10 +130,10 @@ jobs:
         working-directory: watcher
         run: uv sync --group dev
 
-      # The migration chain is smoke-checked in the dedicated `migrations` job
-      # below (#234). This job builds schema via Base.metadata.create_all
-      # (conftest), not migrations. Integration-marked tests run in the
-      # `integration` job below (#353); `live` ones (real GCS) run in no job.
+      # This job builds no schema — it has no database (see above). The
+      # `integration` job below builds it with Base.metadata.create_all
+      # (conftest); the migration chain is smoke-checked in the `migrations`
+      # job (#234). `live` tests (real GCS) run in no job (#353).
       - name: pytest (default, excludes integration and live)
         working-directory: watcher
         run: uv run pytest -m "not integration and not live"
@@ -142,6 +142,8 @@ jobs:
   # external — checked by running them with only TEST_DATABASE_URL set and no
   # outbound network. Its own job so a red X says which half broke. Setup is
   # the `test` job's, step for step (tests/test_integration_gate.py pins it).
+  # Schema comes from Base.metadata.create_all (conftest), not migrations —
+  # the `migrations` job below covers the chain (#234).
   integration:
     name: integration
     runs-on: ubuntu-latest

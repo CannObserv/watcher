@@ -146,6 +146,29 @@ def test_ci_runs_check_css_with_the_pinned_cli():
     assert installs == {pin}
 
 
+# Every file that tells a reader which CLI to install. An unpinned hint installs
+# the latest CLI, whose build check-css.sh then calls stale.
+_CLI_HINTS = (
+    BUILD_CSS,
+    _ROOT / "scripts" / "check-css.sh",
+    CI_WORKFLOW,
+    _ROOT / "AGENTS.md",
+    _ROOT / "docs" / "COMMANDS.md",
+)
+
+
+def test_every_cli_install_hint_carries_the_one_pin():
+    """``@tailwindcss/cli`` is installed at one version wherever it is named."""
+    pins: dict[str, set[str]] = {}
+    for path in _CLI_HINTS:
+        text = path.read_text(encoding="utf-8")
+        unpinned = re.findall(r"install -g @tailwindcss/cli(?!@)", text)
+        assert not unpinned, f"{path.relative_to(_ROOT)} names the CLI without a pin"
+        pins[str(path.relative_to(_ROOT))] = set(_CLI_PIN.findall(text))
+    assert all(pins.values()), f"a hint file names no pinned CLI: {pins}"
+    assert len(set().union(*pins.values())) == 1, f"CLI pins disagree: {pins}"
+
+
 def test_ci_css_job_holds_no_cloud_credentials():
     """The CSS job needs Node and the CLI only: no OIDC token, no wheelhouse."""
     job = _css_ci_job()

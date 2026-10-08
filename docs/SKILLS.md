@@ -100,8 +100,11 @@ detection at all.
 is watcher's wrapper, in the location upstream's Step 1 resolution loop probes first for that script. It sources
 [scripts/load-env.sh](../scripts/load-env.sh) — the shared loader the whole repo now uses, which
 parses each env file rather than sourcing it, so a secrets file cannot execute and a malformed
-line cannot decide whether the gate runs — then `exec`s the vendored gate through the `skills/`
-symlink. Forking the gate to add those lines is the failure mode this replaced: the fork stops
+line cannot decide whether the gate runs — then runs the vendored gate through the `skills/`
+symlink and, once it passes, `pytest -m integration` plus `scripts/check_no_skips.py`
+(#353): the vendored gate deselects that mark, and here the local gate is the last one before
+deploy. A wrapper-side addition, not a gate change — a gate change belongs in
+gregoryfoster/skills. Forking the gate to add those lines is the failure mode this replaced: the fork stops
 receiving upstream fixes without saying so.
 
 **No `.skills/pre-ship-uv-args`, deliberately** (#318). Vendor 1.5 reads extra `uv run`

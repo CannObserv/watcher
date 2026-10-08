@@ -106,7 +106,7 @@ source scripts/load-env.sh
 uv sync                                      # install deps
 uv run pre-commit install                    # once per clone: ruff + check-css.sh hook
 uv run pytest                                # tests
-uv run pytest -m integration                 # integration tests (needs PostgreSQL)
+uv run pytest -m integration                 # integration tests (test DB only; CI + pre-ship run them)
 uv run ruff check .                          # lint
 uv run alembic upgrade head                  # apply migrations
 ```

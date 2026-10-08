@@ -375,7 +375,8 @@ exact. This is the form steps 16, 19 and 23 used; `-f -` is required.
 
 ## Rehearsals
 
-- **Every integration run**: `tests/ops/test_backup_restore_rehearsal.py` seeds a
+- **Every integration run** (CI's `integration` job and `scripts/pre-ship.sh`, where
+  a skip fails the gate — #353): `tests/ops/test_backup_restore_rehearsal.py` seeds a
   scratch database with the two-role grants, ships it through the real
   `pg_dump` and the SDK-faithful bucket fake, restores it with the real
   `pg_restore`, and asserts the gates above; a second test proves a failed

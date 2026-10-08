@@ -48,14 +48,17 @@ containing spaces. Paths are overridable via `WATCHER_SYSTEM_ENV_FILE` /
 ## Shipping
 
 ```bash
-# Full ship gate: ruff check, ruff format --check, pytest (non-integration)
+# Full ship gate: ruff check, ruff format --check, pytest (default), pytest -m integration
 bash scripts/pre-ship.sh
 ```
 
-This is watcher's thin wrapper — it loads the env files above, then delegates to the
-vendored gate in `shipping-work-python-fastapi`. Run it from the repo root; it exits
-non-zero on any failure and 2 on tooling/infra problems (including an uninitialized
-`skills-vendor/` submodule). See [SKILLS.md](SKILLS.md) for why the gate itself is not
+This is watcher's thin wrapper — it loads the env files above, delegates to the
+vendored gate in `shipping-work-python-fastapi`, and once that passes runs
+`pytest -m integration` (~25 s against the local test DB), failing on a skip as well
+as a failure (#353). The vendored gate deselects the mark; watcher runs it here
+because merging to `main` locally and restarting means CI reports only after the code
+is live. Run it from the repo root; it exits non-zero on any failure and 2 on
+tooling/infra problems (including an uninitialized `skills-vendor/` submodule). See [SKILLS.md](SKILLS.md) for why the gate itself is not
 forked.
 
 ## Service Management
@@ -145,7 +148,7 @@ bash scripts/dev_server.sh   # same guard rails as the repo-root dev server
 ## Testing
 
 ```bash
-# Run all tests (excludes integration)
+# Run the default suite (excludes integration and live)
 uv run pytest
 
 # Run with coverage
@@ -154,9 +157,22 @@ uv run pytest --cov
 # Run a specific file
 uv run pytest tests/path/to/test_file.py --no-cov
 
-# Run integration tests (hits live external services)
+# Run integration tests (need TEST_DATABASE_URL, nothing external)
 uv run pytest -m integration
+
+# Run live tests (real GCS; need GCS_BLOB_CREDENTIALS, skip without it)
+uv run pytest -m live
 ```
+
+**What the marks mean (#353).** `integration` = needs the test database and nothing
+else: run with only `TEST_DATABASE_URL` set and outbound network denied, every one
+passed. CI runs them in the `integration` job and `scripts/pre-ship.sh` runs them
+locally; both fail on a skip (`scripts/check_no_skips.py`), so a test that skips
+itself for want of a tool or credential cannot pass as "ran". `live` = needs a real
+external service or credential; no gate selects it. A new test that reaches outside
+the test database goes under `live`, never `integration`. Both are excluded from the
+default run (`addopts`); `tests/test_integration_gate.py` pins the marks and the CI
+jobs.
 
 ## Linting
 
@@ -316,12 +332,14 @@ GitHub Actions (`.github/workflows/ci.yml`) runs on push/PR to `main`: a
 **lint** job (`ruff check` + `ruff format --check`), a **css** job
 (`scripts/check-css.sh` with `@tailwindcss/cli@4.2.4` from npm — Node only, no
 uv, no cloud credentials; #352), a **test** job
-(`pytest -m "not integration"` against a `postgres:16` service), and a
+(`pytest -m "not integration and not live"` against a `postgres:16` service), an
+**integration** job (`pytest -m integration` against its own `postgres:16`, then
+`scripts/check_no_skips.py` on the JUnit report — #353), and a
 **migrations** job (independent migration-chain smoke-check, #234 — `alembic
 upgrade head` from an empty `postgres:16` then `alembic check` for drift). No
 job checks out a sibling repo — #254 removed the `archiver-client` path dep
 that `lint` and `migrations` needed, and #311 the `test` job's archiver alembic
-run. The three Python jobs authenticate to GCS **keyless via WIF**
+run. The four Python jobs authenticate to GCS **keyless via WIF**
 (`vars.GCP_WIF_PROVIDER` → `co-pypi-reader` SA) and sync the wheelhouse before
 `uv sync`; `notifier-client` installs as written, from
 its public HTTPS tag source — no URL rewrite (#284). The migrations job needs
@@ -331,8 +349,8 @@ no `information` schema, so `upgrade head` from empty is fully standalone (no
 archiver seeding, no cross-service ordering).
 **Squash cutover:** already-migrated DBs need a one-time `alembic
 stamp 2addddea0b03 --purge` before their next upgrade — see `docs/MIGRATIONS.md`
-→ "Migration baseline (squash)". Integration tests hit live external services
-and are excluded in CI. **One-time GCP grant** (operator, for WIF) — bind watcher's repo
+→ "Migration baseline (squash)". Only `live` tests (real GCS) run in no CI
+job. **One-time GCP grant** (operator, for WIF) — bind watcher's repo
 to the read-only SA; the org-scoped `github-ci` provider needs no change:
 ```bash
 gcloud iam service-accounts add-iam-policy-binding \

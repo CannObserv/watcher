@@ -6,8 +6,19 @@ INPUT="$ROOT_DIR/src/dashboard/static/css/input.css"
 OUTPUT="$ROOT_DIR/src/dashboard/static/css/output.css"
 VENDOR_DIR="$ROOT_DIR/src/dashboard/static/css/vendor"
 
+# The pinned CLI: one version with build-css.sh, ci.yml and AGENTS.md
+# (tests/dashboard/test_css_sources.py holds them together).
+TAILWIND_CLI_VERSION="4.2.4"
+
 if ! command -v tailwindcss &>/dev/null; then
   echo "Error: tailwindcss not found. Run: sudo npm install -g @tailwindcss/cli@4.2.4"
+  exit 1
+fi
+# Another version builds a different output.css; say so rather than "stale",
+# which would send the reader to rebuild with the wrong CLI.
+found="$(tailwindcss --help 2>&1 | sed -n '1s/.*tailwindcss v\([0-9][0-9.]*\).*/\1/p')" || true
+if [ "$found" != "$TAILWIND_CLI_VERSION" ]; then
+  echo "❌ tailwindcss v${found:-unknown} found, pinned v$TAILWIND_CLI_VERSION. Run: sudo npm install -g @tailwindcss/cli@$TAILWIND_CLI_VERSION"
   exit 1
 fi
 if [ ! -f "$INPUT" ]; then

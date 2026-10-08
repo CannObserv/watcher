@@ -97,3 +97,35 @@ def test_an_unparsable_report_is_a_tooling_error(tmp_path: Path) -> None:
 def test_no_argument_is_a_usage_error() -> None:
     result = run()
     assert result.returncode == 2
+
+
+def _collection_skip(file: str, reason: str) -> str:
+    """A module-level skip as pytest writes it: no classname, reason in the text."""
+    return (
+        f'<testcase classname="" name="{file.removesuffix(".py").replace("/", ".")}" time="0">'
+        f"<skipped message=\"collection skipped\">('/abs/{file}', 3, "
+        f'"Skipped: {reason}")</skipped></testcase>'
+    )
+
+
+def test_a_collection_skip_names_its_file_and_real_reason(tmp_path: Path) -> None:
+    """CR 6a: pytest records only "collection skipped" as the message."""
+    report = _junit(tmp_path, _passed(), _collection_skip("tests/x/test_c.py", "no module foo"))
+    result = run(str(report))
+    assert result.returncode == 1
+    assert "SKIPPED tests.x.test_c (collection):" in result.stdout
+    assert "no module foo" in result.stdout
+
+
+def test_a_collection_skip_fails_with_its_own_hint(tmp_path: Path) -> None:
+    """CR 6b: a module skips before -m selection, so its marks are unknown — fail
+    closed, but don't send the operator to `live` for a default-suite module."""
+    result = run(str(_junit(tmp_path, _passed(), _collection_skip("tests/test_c.py", "x"))))
+    assert result.returncode == 1
+    assert "before marker selection" in result.stdout
+
+
+def test_an_xfail_is_labelled_as_one(tmp_path: Path) -> None:
+    """CR 6c."""
+    result = run(str(_junit(tmp_path, _passed(), _skipped("test_x", "known", "pytest.xfail"))))
+    assert "XFAIL tests.ops.test_y::test_x" in result.stdout

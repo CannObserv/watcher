@@ -280,7 +280,9 @@ class TestGcsArm:
         assert built == [str(tmp_path / "key.json")]
 
 
-@pytest.mark.integration
+# `live`, not `integration` (#353): it reads the real co-gcs-blobs bucket with a
+# real credential, so no gate can run it; it skips without one.
+@pytest.mark.live
 class TestGcsLive:
     async def test_the_binding_answers_404_not_403(self):
         """A bogus key must come back NotFound, not Forbidden.

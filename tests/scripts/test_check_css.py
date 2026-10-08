@@ -151,3 +151,21 @@ def test_banner_after_a_warning_line_still_reads(tree: Path, tmp_path: Path):
     result = _check(tree, env)
     assert "found, pinned" not in result.stdout
     assert "reached-build" in result.stdout
+
+
+def test_missing_cli_hint_installs_the_pin(tree: Path, tmp_path: Path):
+    """With no ``tailwindcss`` on PATH, the hint names the pinned install."""
+    bin_dir = tmp_path / "bare"
+    bin_dir.mkdir()
+    (bin_dir / "dirname").symlink_to(
+        shutil.which("dirname")
+    )  # the script's only tool before the check
+    result = subprocess.run(
+        [shutil.which("bash"), str(tree / "scripts" / "check-css.sh")],
+        capture_output=True,
+        text=True,
+        check=False,
+        env={"PATH": str(bin_dir)},
+    )
+    assert result.returncode == 1
+    assert f"npm install -g @tailwindcss/cli@{PINNED}" in result.stdout

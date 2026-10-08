@@ -28,24 +28,26 @@ DELEGATE="skills/shipping-work-python-fastapi/scripts/pre-ship.sh"
   exit 2
 }
 
-# The vendored gate inserts .skills/pre-ship-uv-args after every `uv run`; the
-# integration run below does not (watcher has no such file — docs/SKILLS.md,
-# #318). Its arrival would split the two runs into different environments
-# without a word, so it stops the gate until this wrapper honours it (#353 CR 3).
-if [[ -e .skills/pre-ship-uv-args || -L .skills/pre-ship-uv-args ]]; then
-  echo "ERROR: .skills/pre-ship-uv-args exists, but this wrapper's integration run" >&2
-  echo "       ignores it. Teach scripts/pre-ship.sh to pass the same arguments first." >&2
-  exit 2
-fi
-
 # --help: the gate's own text, then what this wrapper adds. Runs nothing.
 if [[ "${1:-}" == "--help" ]]; then
   bash "$DELEGATE" "$@"
   echo ""
   echo "watcher wrapper (scripts/pre-ship.sh): loads the env files, runs the gate"
   echo "above, then 'uv run pytest -m integration' and fails on any failure or"
-  echo "skip (scripts/check_no_skips.py). Exit code: the first failing step's."
+  echo "skip or xfail (scripts/check_no_skips.py). Exits 2 while .skills/pre-ship-uv-args"
+  echo "exists (the integration run would ignore it). Exit code: the first failing step's."
   exit 0
+fi
+
+# The vendored gate inserts .skills/pre-ship-uv-args after every `uv run`; the
+# integration run below does not (watcher has no such file — docs/SKILLS.md,
+# #318). Its arrival would split the two runs into different environments
+# without a word, so it stops the gate until this wrapper honours it (#353 CR 3).
+# After --help, which must keep working (CR 7).
+if [[ -e .skills/pre-ship-uv-args || -L .skills/pre-ship-uv-args ]]; then
+  echo "ERROR: .skills/pre-ship-uv-args exists, but this wrapper's integration run" >&2
+  echo "       ignores it. Teach scripts/pre-ship.sh to pass the same arguments first." >&2
+  exit 2
 fi
 
 # Load secrets through the shared loader — it parses each file rather than

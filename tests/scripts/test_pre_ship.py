@@ -152,3 +152,12 @@ def test_uv_args_file_stops_the_wrapper_before_anything_runs(sandbox: Path) -> N
     assert result.returncode == 2
     assert calls == []
     assert ".skills/pre-ship-uv-args" in result.stderr
+
+
+def test_help_still_works_beside_the_uv_args_file(sandbox: Path) -> None:
+    """CR 7: --help is where an operator looks to learn why the gate stopped."""
+    (sandbox / "repo" / ".skills").mkdir()
+    (sandbox / "repo" / ".skills" / "pre-ship-uv-args").write_text("--group seed\n")
+    result, calls = run(sandbox, "--help")
+    assert result.returncode == 0
+    assert len(calls) == 1 and calls[0].endswith("args=--help")

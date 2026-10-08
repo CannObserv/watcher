@@ -16,6 +16,7 @@ import os
 import re
 from pathlib import Path
 
+import pytest
 import yaml
 
 _ROOT = Path(__file__).resolve().parents[2]
@@ -31,7 +32,9 @@ VENDORED = (
 )
 
 # A class attribute (templates, HTML built in Python) or a DOM class write (JS).
-_CLASS_BEARING = re.compile(r"""\bclass\s*=\s*["']|\.className\b|\.classList\.""")
+_CLASS_BEARING = re.compile(
+    r"""\bclass\s*=\s*["']|\.className\b|\.classList\.|setAttribute\(\s*["']class["']"""
+)
 _SOURCE = re.compile(r'@source\s+(not\s+)?"([^"]+)"\s*;')
 
 
@@ -80,6 +83,20 @@ def test_every_class_bearing_file_is_scanned():
     """A file under ``src/`` that names classes is covered by an ``@source``."""
     missing = sorted(str(p.relative_to(_ROOT)) for p in _class_bearing_files() - _scanned())
     assert not missing, f"class-bearing files no @source covers: {missing}"
+
+
+@pytest.mark.parametrize(
+    "snippet",
+    [
+        '<p class="text-red-600">',
+        "el.className = 'flash';",
+        'el.classList.add("hidden");',
+        'el.setAttribute("class", "hidden");',
+    ],
+)
+def test_class_bearing_pattern_sees_every_form(snippet: str):
+    """Attribute, ``className``, ``classList`` and ``setAttribute`` all name classes."""
+    assert _CLASS_BEARING.search(snippet)
 
 
 def test_python_class_emitter_is_detected():

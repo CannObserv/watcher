@@ -12,7 +12,7 @@ TDD required. Red → Green → Refactor. No production code without a failing t
 
 ## Environment & Tooling
 
-Python ≥3.12, uv, pytest, ruff; Node.js + npm (Tailwind CLI — `sudo npm install -g @tailwindcss/cli@4.2.4`; the pin is load-bearing, a newer CLI rebuilds `output.css` and `check-css.sh` calls it stale).
+Python ≥3.12, uv, pytest, ruff; Node.js + npm (Tailwind CLI — `sudo npm install -g @tailwindcss/cli@4.2.4`; the pin is load-bearing, another CLI builds a different `output.css`, so `check-css.sh` refuses it).
 
 **Cannobserv wheelhouse.** Populate it before any `uv` command — `[tool.uv]
 find-links` makes every invocation require the directory:

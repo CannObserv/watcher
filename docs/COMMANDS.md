@@ -265,8 +265,9 @@ WATCHER_ALLOW_PRODUCTION_DB=1 uv run python -m src.ops.prune_job_history --dry-r
 
 ```bash
 # VM setup (tailwindcss CLI — global npm). Already installed on co-watcher.
-# Keep the pin: output.css carries its builder's version in the banner, and a
-# newer CLI rebuilds it differently, which check-css.sh reads as stale.
+# Keep the pin: output.css carries its builder's version in the banner, and
+# another CLI builds it differently, so check-css.sh refuses any other version
+# by name ("tailwindcss vX found, pinned vY") before it builds.
 sudo npm install -g @tailwindcss/cli@4.2.4
 
 # Build Tailwind CSS

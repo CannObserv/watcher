@@ -14,6 +14,7 @@ the ``test`` job.
 """
 
 import os
+import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -25,7 +26,12 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 needs_cli = pytest.mark.skipif(
     shutil.which("tailwindcss") is None, reason="needs the Tailwind CLI (scripts/build-css.sh)"
 )
-PINNED = "4.2.4"
+# The pin, read from the script under test so a bump needs no edit here.
+(PINNED,) = re.findall(
+    r'^TAILWIND_CLI_VERSION="([^"]+)"$',
+    (REPO_ROOT / "scripts" / "check-css.sh").read_text(encoding="utf-8"),
+    re.MULTILINE,
+)
 
 
 @pytest.fixture

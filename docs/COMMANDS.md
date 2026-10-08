@@ -164,9 +164,11 @@ uv run pytest -m integration
 uv run pytest -m live
 ```
 
-**What the marks mean (#353).** `integration` = needs the test database and nothing
-else: run with only `TEST_DATABASE_URL` set and outbound network denied, every one
-passed. CI runs them in the `integration` job and `scripts/pre-ship.sh` runs them
+**What the marks mean (#353).** `integration` = connects to the test database and
+needs nothing else: run with only `TEST_DATABASE_URL` set and outbound network
+denied, every one passed. The default suite needs the variable set, never a server —
+CI's `test` job runs it with no database, so an unmarked test that connects fails
+there. CI runs them in the `integration` job and `scripts/pre-ship.sh` runs them
 locally; both fail on a skip (`scripts/check_no_skips.py`), so a test that skips
 itself for want of a tool or credential cannot pass as "ran". `live` = needs a real
 external service or credential; no gate selects it. A new test that reaches outside
@@ -332,7 +334,9 @@ GitHub Actions (`.github/workflows/ci.yml`) runs on push/PR to `main`: a
 **lint** job (`ruff check` + `ruff format --check`), a **css** job
 (`scripts/check-css.sh` with `@tailwindcss/cli@4.2.4` from npm — Node only, no
 uv, no cloud credentials; #352), a **test** job
-(`pytest -m "not integration and not live"` against a `postgres:16` service), an
+(`pytest -m "not integration and not live"` with **no database** — its
+`TEST_DATABASE_URL` points at port 1, so an unmarked test that connects fails there),
+an
 **integration** job (`pytest -m integration` against its own `postgres:16`, then
 `scripts/check_no_skips.py` on the JUnit report — #353), and a
 **migrations** job (independent migration-chain smoke-check, #234 — `alembic

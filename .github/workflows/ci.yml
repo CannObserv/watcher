@@ -96,23 +96,12 @@ jobs:
     permissions:
       contents: read
       id-token: write
-    services:
-      postgres:
-        image: postgres:16
-        env:
-          POSTGRES_USER: postgres
-          POSTGRES_PASSWORD: postgres
-          POSTGRES_DB: watcher_test
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U postgres"
-          --health-interval 5s
-          --health-timeout 3s
-          --health-retries 10
-
+    # No database, deliberately (#353 CR 2). conftest needs the variable set and
+    # _test-suffixed, never a server; port 1 points at nothing, so an unmarked
+    # test that connects fails HERE — the job that names the wrong half —
+    # instead of passing in the default suite. DB-backed tests are `integration`.
     env:
-      TEST_DATABASE_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/watcher_test
+      TEST_DATABASE_URL: postgresql+asyncpg://nobody:nothing@127.0.0.1:1/watcher_test
 
     steps:
       - uses: actions/checkout@v5

@@ -4,7 +4,7 @@
 excluded from every gate, so about 40% of the suite ran only when someone typed
 ``-m integration`` by hand. Run with nothing but ``TEST_DATABASE_URL`` and no
 outbound network, every integration test but one passed: the mark means
-*needs the test database*. The one exception reads real GCS, so it carries
+*connects to the test database*. The one exception reads real GCS, so it carries
 ``live`` instead — excluded by default and from CI.
 
 So: CI runs ``integration`` in its own job against a ``postgres:16`` service,
@@ -16,6 +16,7 @@ reads — no CI, no database.
 import shlex
 import tomllib
 from pathlib import Path
+from urllib.parse import urlsplit
 
 import pytest
 import yaml
@@ -79,6 +80,16 @@ class TestCiJobs:
     def test_the_test_job_excludes_integration_and_live(self, jobs: dict) -> None:
         _, argv = _pytest_step(jobs["test"])
         assert _marker_expression(argv) == "not integration and not live"
+
+    def test_the_test_job_has_no_database(self, jobs: dict) -> None:
+        """CR 2: the boundary enforces itself. conftest needs the variable set
+        (and ``_test``-suffixed), never a server — so an unmarked test that
+        connects fails here, in the job that names the wrong half."""
+        job = jobs["test"]
+        assert "services" not in job
+        url = urlsplit(job["env"]["TEST_DATABASE_URL"])
+        assert url.path == "/watcher_test"
+        assert (url.hostname, url.port) == ("127.0.0.1", 1), "must point at nothing"
 
     def test_an_integration_job_exists_with_a_postgres_16_service(self, jobs: dict) -> None:
         job = jobs["integration"]

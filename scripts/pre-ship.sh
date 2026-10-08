@@ -13,8 +13,8 @@
 # Then it runs what the vendored gate deselects: `pytest -m integration`
 # (#353). watcher merges to main locally and restarts from it, so CI reports
 # after the code is live and this is the last gate before deploy. The mark
-# needs only the local test database (~25 s); a skip fails it like a failure
-# does (scripts/check_no_skips.py). Guarded by tests/scripts/test_pre_ship.py.
+# needs only the local test database (~20 s); a skip or xfail fails it like a
+# failure does (scripts/check_no_skips.py). Guarded by tests/scripts/test_pre_ship.py.
 set -euo pipefail
 PROJECT_ROOT=$(git rev-parse --show-toplevel)
 cd "$PROJECT_ROOT"

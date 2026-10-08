@@ -54,7 +54,7 @@ bash scripts/pre-ship.sh
 
 This is watcher's thin wrapper — it loads the env files above, delegates to the
 vendored gate in `shipping-work-python-fastapi`, and once that passes runs
-`pytest -m integration` (~25 s against the local test DB), failing on a skip as well
+`pytest -m integration` (~20 s against the local test DB), failing on a skip or xfail as well
 as a failure (#353). The vendored gate deselects the mark; watcher runs it here
 because merging to `main` locally and restarting means CI reports only after the code
 is live. Run it from the repo root; it exits non-zero on any failure and 2 on
@@ -166,15 +166,15 @@ uv run pytest -m live
 
 **What the marks mean (#353).** `integration` = connects to the test database and
 needs nothing else: run with only `TEST_DATABASE_URL` set and outbound network
-denied, every one passed. The default suite needs the variable set, never a server —
-CI's `test` job runs it with no database, so an unmarked test that connects fails
-there. CI runs them in the `integration` job and `scripts/pre-ship.sh` runs them
-locally; both fail on a skip (`scripts/check_no_skips.py`), so a test that skips
-itself for want of a tool or credential cannot pass as "ran". `live` = needs a real
-external service or credential; no gate selects it. A new test that reaches outside
-the test database goes under `live`, never `integration`. Both are excluded from the
-default run (`addopts`); `tests/test_integration_gate.py` pins the marks and the CI
-jobs.
+denied, every one passed. CI runs them in the `integration` job and
+`scripts/pre-ship.sh` runs them locally; both fail on a skip or an xfail
+(`scripts/check_no_skips.py`), so a test that skips itself for want of a tool or
+credential cannot pass as "ran". `live` = needs a real external service or
+credential; no gate selects it. A new test that reaches outside the test database
+goes under `live`, never `integration`. Both are excluded from the default run
+(`addopts`). The default suite needs `TEST_DATABASE_URL` set, never a server: CI's
+`test` job runs it with no database, so an unmarked test that connects fails there.
+`tests/test_integration_gate.py` pins the marks and the CI jobs.
 
 ## Linting
 

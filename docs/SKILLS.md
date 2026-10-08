@@ -111,7 +111,9 @@ receiving upstream fixes without saying so.
 arguments from that file ([gregoryfoster/skills#304](https://github.com/gregoryfoster/skills/issues/304))
 for a project whose tests need a non-default group (`--group seed`). Watcher's only
 `[dependency-groups]` entry is `dev`, which uv includes by default, so the file would be empty.
-Add one only when a test starts importing from a group uv does not install by default.
+Add one only when a test starts importing from a group uv does not install by default —
+and teach `scripts/pre-ship.sh` to pass the same arguments to its integration run first:
+until it does, the wrapper exits 2 while the file exists (#353).
 
 **The doc spot-check is tailored, not forked** (#281). `doc-check.sh` matches its
 sensitive-path entries against whole path *segments* at any depth

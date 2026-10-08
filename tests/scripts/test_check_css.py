@@ -55,15 +55,24 @@ def _check(root: Path, env: dict[str, str] | None = None) -> subprocess.Complete
     )
 
 
-def _fake_cli(tmp_path: Path, version: str, build: str) -> dict[str, str]:
-    """Env with a stub ``tailwindcss`` first on PATH: ``--help`` reports ``version``,
-    anything else runs the shell snippet ``build``."""
+# The banner as the CLI prints it when ``CI`` is set (GitHub Actions): colour
+# escapes between "tailwindcss " and the version, even off a TTY.
+_ANSI_BANNER = (
+    "\\033[3m\\033[1m\\033[34m≈\\033[39m\\033[22m\\033[23m tailwindcss \\033[34mv{}\\033[39m"
+)
+
+
+def _fake_cli(
+    tmp_path: Path, version: str, build: str, banner: str = "≈ tailwindcss v{}"
+) -> dict[str, str]:
+    """Env with a stub ``tailwindcss`` first on PATH: ``--help`` prints ``banner``
+    filled with ``version``, anything else runs the shell snippet ``build``."""
     bin_dir = tmp_path / "fakebin"
     bin_dir.mkdir()
     cli = bin_dir / "tailwindcss"
     cli.write_text(
         "#!/bin/sh\n"
-        f'if [ "$1" = --help ]; then echo "≈ tailwindcss v{version}"; exit 0; fi\n'
+        f"if [ \"$1\" = --help ]; then printf '{banner.format(version)}\\n'; exit 0; fi\n"
         f"{build}\n"
     )
     cli.chmod(0o755)
@@ -104,3 +113,41 @@ def test_build_failure_prints_its_error(tree: Path, tmp_path: Path):
     assert result.returncode == 1
     assert "tailwindcss build failed" in result.stdout
     assert "Can't resolve tailwindcss" in result.stdout + result.stderr
+
+
+def test_unpinned_cli_is_named_not_called_stale(tree: Path, tmp_path: Path):
+    """Another CLI version fails as a version mismatch before building: its build
+    would differ, and "output.css is stale" would send the reader to rebuild with it."""
+    built = tmp_path / "built"
+    env = _fake_cli(tmp_path, "9.9.9", f"touch {built}; exit 0")
+    result = _check(tree, env)
+    assert result.returncode == 1
+    assert f"tailwindcss v9.9.9 found, pinned v{PINNED}" in result.stdout
+    assert "stale" not in result.stdout
+    assert not built.exists()
+
+
+def test_coloured_banner_still_reads_the_version(tree: Path, tmp_path: Path):
+    """Under ``CI`` the banner carries colour escapes; the pinned version still passes
+    the version check (the build then runs, and this stub fails it on purpose)."""
+    env = _fake_cli(tmp_path, PINNED, "echo reached-build >&2; exit 1", banner=_ANSI_BANNER)
+    result = _check(tree, env)
+    assert "found, pinned" not in result.stdout
+    assert "reached-build" in result.stdout
+
+
+def test_coloured_banner_names_the_wrong_version(tree: Path, tmp_path: Path):
+    """A coloured banner with another version is named, not read as "unknown"."""
+    env = _fake_cli(tmp_path, "9.9.9", "exit 0", banner=_ANSI_BANNER)
+    result = _check(tree, env)
+    assert result.returncode == 1
+    assert f"tailwindcss v9.9.9 found, pinned v{PINNED}" in result.stdout
+
+
+def test_banner_after_a_warning_line_still_reads(tree: Path, tmp_path: Path):
+    """Node can print a warning ahead of the banner (e.g. NO_COLOR with FORCE_COLOR set)."""
+    banner = "(node:1) Warning: NO_COLOR is ignored\\n≈ tailwindcss v{}"
+    env = _fake_cli(tmp_path, PINNED, "echo reached-build >&2; exit 1", banner=banner)
+    result = _check(tree, env)
+    assert "found, pinned" not in result.stdout
+    assert "reached-build" in result.stdout

@@ -123,7 +123,7 @@ def test_vendored_files_are_not_scanned():
 PRE_COMMIT_CONFIG = _ROOT / ".pre-commit-config.yaml"
 CI_WORKFLOW = _ROOT / ".github" / "workflows" / "ci.yml"
 BUILD_CSS = _ROOT / "scripts" / "build-css.sh"
-_CLI_PIN = re.compile(r"@tailwindcss/cli@(\d+\.\d+\.\d+)")
+_CLI_PIN = re.compile(r'(?:@tailwindcss/cli@|TAILWIND_CLI_VERSION=")(\d+\.\d+\.\d+)')
 
 
 def _css_hook_files() -> re.Pattern[str]:

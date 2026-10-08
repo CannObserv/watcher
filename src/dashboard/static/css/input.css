@@ -2,9 +2,16 @@
    match LAYER_NAME in scripts/wrap-vendor-css.py. */
 @layer vendor;
 
-@import "tailwindcss";
+/* source(none): no repo-wide auto-detection, so a string in tests/, docs/ or
+   skills-vendor/ can't become a utility (#351). Every authored file that names
+   classes is listed below; tests/dashboard/test_css_sources.py fails when one
+   isn't. Vendored JS is excluded. See docs/STYLE.md §10. */
+@import "tailwindcss" source(none);
 
 @source "../../templates/**/*.html";
+@source "../js/*.js";
+@source not "../js/*.min.js";
+@source "../../**/*.py";
 
 @custom-variant dark (&:where(.dark, .dark *));
 

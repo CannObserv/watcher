@@ -75,7 +75,7 @@ Status badges and flashes use **Tailwind defaults only** — never brand purple/
 - **Tailwind v4** with `@theme` block in `src/dashboard/static/css/input.css`.
 - Custom tokens use `--color-co-purple-*` naming (prefix `co-` = Cannabis Observer).
 - Spacing, sizing, border-radius, shadows: **Tailwind defaults** — no custom tokens.
-- Template source scanning: `@source "../../templates/**/*.html";` ensures Tailwind picks up classes from all templates.
+- Source scanning: explicit `@source` lines only (templates, authored JS, dashboard Python); auto-detection is off. See §10.
 - Compiled output: `src/dashboard/static/css/output.css`.
 
 ---
@@ -197,6 +197,16 @@ pytest` suite) and `scripts/check-touch-targets.sh` fail on redundant
 - **System font stack**: No custom fonts loaded. Tailwind default font stack.
 - **Explicit image dimensions**: All `<img>` tags include `width` and `height` attributes to prevent layout shift.
 - **Pre-built Tailwind**: Compile CSS before deploy. Source: `src/dashboard/static/css/input.css` → Output: `src/dashboard/static/css/output.css`.
+- **Scanned sources are explicit (#351)**: `input.css` imports Tailwind with
+  `source(none)`, so auto-detection is off and only its `@source` lines are
+  scanned: templates (`templates/**/*.html`), authored JS (`static/js/*.js`,
+  minus `*.min.js`) and Python under `src/dashboard/` (routes build HTML
+  fragments, e.g. `domains.py`). Why: auto-detection scans the whole repo, so a
+  string in `tests/`, `docs/` or a `skills-vendor/` submodule bump
+  (`[tool:pytest]`) became a utility and left `output.css` stale. A new file
+  that emits class names outside these globs needs its own `@source`;
+  `tests/dashboard/test_css_sources.py` fails until it has one. Vendored JS is
+  never scanned.
 
 ---
 

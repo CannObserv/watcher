@@ -62,7 +62,7 @@ Status badges and flashes use **Tailwind defaults only** — never brand purple/
   | `"dark"` | Force dark (`.dark` on `<html>`) |
   | absent | **System** — follow OS `prefers-color-scheme`; the third state, written by *clearing* the key (`removeItem`), not a `"system"` literal |
 
-- **Three-state toggle**: clicking a theme-toggle cycles the *stored* preference **light → system → dark → light**. The cycle is driven off the stored value, not the rendered class — `system` (OS light) and explicit `light` both render classless and are indistinguishable by class alone. Reaching **system** clears the key, so the FOUC script needs no extra case (absent already means follow-OS). Because the dark variant is class-only, `dark-mode.js` resolves system → `.dark` via `matchMedia` at apply time and re-resolves on OS theme changes while system is active; it dispatches `watcher:theme-changed` when the rendered scheme flips (consumed by `diff-viewer.js`).
+- **Three-state toggle**: clicking a theme-toggle cycles the *stored* preference **light → system → dark → light**. The cycle is driven off the stored value, not the rendered class — `system` (OS light) and explicit `light` both render classless and are indistinguishable by class alone. Reaching **system** clears the key, so the FOUC script needs no extra case (absent already means follow-OS). Because the dark variant is class-only, `dark-mode.js` resolves system → `.dark` via `matchMedia` at apply time and re-resolves on OS theme changes while system is active.
 - **FOUC prevention**: Inline `<script>` in `<head>` (before stylesheet) reads localStorage + `prefers-color-scheme` and adds `.dark` to `<html>` synchronously when stored `"dark"` or absent-and-OS-dark.
 - **`<noscript>` fallback**: `<style>` block applies `color-scheme: dark` via `prefers-color-scheme` media query when JS is disabled.
 - **Toggle buttons**: `button#theme-toggle` (desktop sidebar) and `button#theme-toggle-mobile` (mobile topbar). Both render a neutral default (empty `[data-theme-icon]` span + `aria-label="Color theme"`); `dark-mode.js` (via its `META` map — the single source of truth) populates the **current-state** affordance on load and after each `htmx:afterSettle`: ☀ Light · ◑ System · ☽ Dark, with an `aria-label` naming the state and the next action. A CSS placeholder (`[data-theme-icon]:empty::before { content: "◑" }`) shows the neutral system glyph until JS fills the span, so the button never renders blank pre-/no-JS.
@@ -216,13 +216,15 @@ Tailwind v4 emits author rules inside cascade layers (`theme`, `base`, `componen
 
 **Pattern: place vendor CSS in a low-priority `vendor` layer.**
 
+**No vendored CSS ships today.** diff2html, the pattern's only user, was removed in #273 (recoverable from `89d64eb`); its examples below are historical. The pattern stays the house rule: `@layer vendor;` is still declared and `build-css.sh`/`check-css.sh` still wrap and verify any `vendor/*.min.css`.
+
 1. **Layer order is established by `input.css`.** The first directive is `@layer vendor;`, declared *before* `@import "tailwindcss";`. CSS layer order follows first-appearance, so `vendor` becomes the lowest-priority layer; Tailwind's own layers (and our `@layer components` overrides) all sort above it.
 
 2. **`scripts/build-css.sh` wraps each vendor file in `@layer vendor { … }`.** For every `src/dashboard/static/css/vendor/*.min.css`, the build emits a `*.layered.css` sibling with the contents wrapped in a `vendor` layer block. Any leading `@charset` / `@import` directives are hoisted above the wrapper (CSS spec requires them at the top of the file); `@import` directives get a `layer(vendor)` suffix so the imported sheet sorts in the vendor layer. The wrapping is regenerated on every build — never edit the `*.layered.css` files by hand. **Note:** `--watch` mode only runs the wrap step once at startup; rerun `bash scripts/build-css.sh` after updating a vendor file mid-watch.
 
-3. **Page templates load the `*.layered.css` variant**, not `*.min.css`. Example: `change_detail.html` loads `vendor/diff2html.layered.css`. The original minified file stays in `vendor/` as the source of truth and is checked into git as-is.
+3. **Page templates load the `*.layered.css` variant**, not `*.min.css`. Example (historical): `change_detail.html` loaded `vendor/diff2html.layered.css`. The original minified file stays in `vendor/` as the source of truth and is checked into git as-is.
 
-4. **Override rules go in `@layer components`** in `input.css`, with normal specificity and no `!important`. Example:
+4. **Override rules go in `@layer components`** in `input.css`, with normal specificity and no `!important`. Example (historical):
 
    ```css
    @layer components {

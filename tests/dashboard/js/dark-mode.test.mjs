@@ -65,7 +65,7 @@ function makeClassList() {
 function makeWorld({ stored, prefersDark = false, mqListener = true } = {}) {
   const all = [];
   const listeners = {};
-  const themeEvents = [];
+  const dispatched = [];
 
   function makeEl(opts = {}) {
     const el = {
@@ -140,7 +140,7 @@ function makeWorld({ stored, prefersDark = false, mqListener = true } = {}) {
     querySelector(sel) { return all.find((e) => matchesSel(e, sel)) || null; },
     querySelectorAll(sel) { return all.filter((e) => matchesSel(e, sel)); },
     dispatchEvent(ev) {
-      if (ev.type === "watcher:theme-changed") themeEvents.push(ev);
+      dispatched.push(ev);
       (listeners[ev.type] || []).forEach((fn) => fn(ev));
       return true;
     },
@@ -152,7 +152,7 @@ function makeWorld({ stored, prefersDark = false, mqListener = true } = {}) {
   vm.runInNewContext(source, { document, window, localStorage, CustomEvent });
 
   return {
-    html, store, localStorage, mq, desktop, mobile, themeEvents,
+    html, store, localStorage, mq, desktop, mobile, dispatched,
     isDark: () => html.classList.contains("dark"),
     click: (target) => (listeners.click || []).forEach((fn) => fn({ target })),
     afterSettle: () => (listeners["htmx:afterSettle"] || []).forEach((fn) => fn({})),
@@ -261,19 +261,13 @@ test("treats an unknown stored value as system", () => {
   assert.equal(w.store[KEY], "dark");
 });
 
-// --- diff-viewer.js contract: theme-changed fires when the scheme flips ---
+// --- No theme-changed event: its only listener, diff-viewer.js, is gone (#273) ---
 
-test("dispatches watcher:theme-changed when the rendered scheme changes", () => {
+test("dispatches no document event when the rendered scheme flips", () => {
   const w = makeWorld(); // system, OS light → currently light
   w.click(w.desktop); // → dark
-  assert.equal(w.themeEvents.length, 1);
-  assert.equal(w.themeEvents[0].detail.theme, "dark");
-});
-
-test("does not dispatch theme-changed when the rendered scheme is unchanged", () => {
-  const w = makeWorld({ stored: "light", prefersDark: false });
-  w.click(w.desktop); // light → system, both render light
-  assert.equal(w.themeEvents.length, 0);
+  assert.equal(w.isDark(), true);
+  assert.equal(w.dispatched.length, 0);
 });
 
 // --- Degraded storage: cycle keeps advancing off the in-memory fallback ---

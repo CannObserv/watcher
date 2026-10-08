@@ -29,9 +29,7 @@
  * htmx:afterSettle. The toggle buttons live in base.html's persistent chrome
  * (sidebar + mobile topbar), so they are never replaced by an HTMX partial swap
  * (watcher uses no hx-boost); delegation is defensive — it survives any future
- * swap/boost and keeps the handler registered exactly once. Dispatches
- * 'watcher:theme-changed' whenever the rendered scheme flips so diff-viewer.js
- * can re-render.
+ * swap/boost and keeps the handler registered exactly once.
  */
 (function () {
   var KEY = "watcher-color-scheme";
@@ -91,16 +89,10 @@
 
   function applyState(state) {
     var html = document.documentElement;
-    var was = html.classList.contains("dark");
     var dark = resolveDark(state);
     html.classList.toggle("dark", dark);
     persist(state);
     syncBtns();
-    if (dark !== was) {
-      document.dispatchEvent(
-        new CustomEvent("watcher:theme-changed", { detail: { theme: dark ? "dark" : "light" } })
-      );
-    }
   }
 
   /* Sync every theme-toggle button's icon + label with the stored preference.

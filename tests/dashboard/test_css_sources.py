@@ -150,9 +150,13 @@ def test_css_hook_fires_on_every_build_input():
 
 
 def _css_ci_job() -> dict:
-    jobs = yaml.safe_load(CI_WORKFLOW.read_text(encoding="utf-8"))["jobs"]
-    runs = [(job, step.get("run", "")) for job in jobs.values() for step in job["steps"]]
-    (job,) = {id(j): j for j, run in runs if "scripts/check-css.sh" in run}.values()
+    """Return the one CI job that runs ``scripts/check-css.sh``."""
+    jobs = yaml.safe_load(CI_WORKFLOW.read_text(encoding="utf-8"))["jobs"].values()
+    (job,) = [
+        job
+        for job in jobs
+        if any("scripts/check-css.sh" in step.get("run", "") for step in job["steps"])
+    ]
     return job
 
 

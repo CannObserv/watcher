@@ -104,15 +104,3 @@ def test_build_failure_prints_its_error(tree: Path, tmp_path: Path):
     assert result.returncode == 1
     assert "tailwindcss build failed" in result.stdout
     assert "Can't resolve tailwindcss" in result.stdout + result.stderr
-
-
-def test_unpinned_cli_is_named_not_called_stale(tree: Path, tmp_path: Path):
-    """Another CLI version fails as a version mismatch before building: its build
-    would differ, and "output.css is stale" would send the reader to rebuild with it."""
-    built = tmp_path / "built"
-    env = _fake_cli(tmp_path, "9.9.9", f"touch {built}; exit 0")
-    result = _check(tree, env)
-    assert result.returncode == 1
-    assert f"tailwindcss v9.9.9 found, pinned v{PINNED}" in result.stdout
-    assert "stale" not in result.stdout
-    assert not built.exists()

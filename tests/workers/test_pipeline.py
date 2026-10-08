@@ -1131,6 +1131,7 @@ async def _audits_of(db_session, event_type, wi) -> list[AuditLog]:
     return list((await db_session.execute(stmt)).scalars())
 
 
+@pytest.mark.integration
 class TestChangeDiffEndToEnd:
     """#222 acceptance: a change with Full diff enabled delivers the diff.
 
@@ -1200,6 +1201,7 @@ class TestChangeDiffEndToEnd:
         assert dispatched.payload["results"][0]["success"] is True
 
 
+@pytest.mark.integration
 class TestOptionA:
     """D6: a fingerprint move the extractor caused is not a content change (#326).
 

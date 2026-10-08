@@ -130,6 +130,7 @@ class TestDivergenceWarning:
         assert caplog.records == []
 
 
+@pytest.mark.integration
 class TestSharedEnginePool:
     """The shared engine survives connections that died in the pool (#335).
 

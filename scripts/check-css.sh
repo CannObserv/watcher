@@ -19,9 +19,15 @@ _npm_global="$(npm root -g)" || { echo "Error: 'npm root -g' failed. Is npm inst
 export NODE_PATH="$_npm_global/@tailwindcss/cli/node_modules${NODE_PATH:+:$NODE_PATH}"
 
 TMPFILE=$(mktemp)
+ERRFILE=$(mktemp)
 TMPDIR_LAYERED=$(mktemp -d)
-trap 'rm -f "$TMPFILE"; rm -rf "$TMPDIR_LAYERED"' EXIT
-tailwindcss -i "$INPUT" -o "$TMPFILE" --minify 2>/dev/null
+trap 'rm -f "$TMPFILE" "$ERRFILE"; rm -rf "$TMPDIR_LAYERED"' EXIT
+# stderr carries the CLI's banner on success, so keep it only for a failure.
+if ! tailwindcss -i "$INPUT" -o "$TMPFILE" --minify 2>"$ERRFILE"; then
+  echo "❌ tailwindcss build failed:"
+  cat "$ERRFILE"
+  exit 1
+fi
 
 if [ ! -f "$OUTPUT" ]; then
   echo "❌ output.css missing. Run: bash scripts/build-css.sh"

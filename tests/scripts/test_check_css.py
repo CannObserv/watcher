@@ -5,9 +5,11 @@ tree where ``build-css.sh`` may never have run. ``vendor/*.layered.css`` is a
 git-ignored build product, so its absence is a clean checkout, not staleness;
 only a present-but-different one is stale. Each test copies ``src/dashboard``
 and the scripts into a temp root and runs the real script there. Needs the
-pinned Tailwind CLI, so it skips where ``tailwindcss`` is absent.
+pinned Tailwind CLI, so it skips where ``tailwindcss`` is absent; the fake-CLI
+tests stand a stub on ``PATH`` and need only bash, npm and python3.
 """
 
+import os
 import shutil
 import subprocess
 from pathlib import Path
@@ -16,9 +18,10 @@ import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
-pytestmark = pytest.mark.skipif(
+needs_cli = pytest.mark.skipif(
     shutil.which("tailwindcss") is None, reason="needs the Tailwind CLI (scripts/build-css.sh)"
 )
+PINNED = "4.2.4"
 
 
 @pytest.fixture
@@ -38,21 +41,39 @@ def tree(tmp_path: Path) -> Path:
     return tmp_path
 
 
-def _check(root: Path) -> subprocess.CompletedProcess[str]:
+def _check(root: Path, env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         ["bash", str(root / "scripts" / "check-css.sh")],
         capture_output=True,
         text=True,
         check=False,
+        env=env,
     )
 
 
+def _fake_cli(tmp_path: Path, version: str, build: str) -> dict[str, str]:
+    """Env with a stub ``tailwindcss`` first on PATH: ``--help`` reports ``version``,
+    anything else runs the shell snippet ``build``."""
+    bin_dir = tmp_path / "fakebin"
+    bin_dir.mkdir()
+    cli = bin_dir / "tailwindcss"
+    cli.write_text(
+        "#!/bin/sh\n"
+        f'if [ "$1" = --help ]; then echo "≈ tailwindcss v{version}"; exit 0; fi\n'
+        f"{build}\n"
+    )
+    cli.chmod(0o755)
+    return {**os.environ, "PATH": f"{bin_dir}:{os.environ['PATH']}"}
+
+
+@needs_cli
 def test_clean_checkout_passes(tree: Path):
     """No ``*.layered.css`` on disk (git-ignored, never built) is not a failure."""
     result = _check(tree)
     assert result.returncode == 0, result.stdout + result.stderr
 
 
+@needs_cli
 def test_stale_layered_css_fails(tree: Path):
     """A layered file that no longer matches its ``*.min.css`` source is stale."""
     vendor = tree / "src" / "dashboard" / "static" / "css" / "vendor"
@@ -62,6 +83,7 @@ def test_stale_layered_css_fails(tree: Path):
     assert "widget.layered.css is stale" in result.stdout
 
 
+@needs_cli
 def test_stale_output_css_fails(tree: Path):
     """The main gate still holds: an edited output.css is stale."""
     output = tree / "src" / "dashboard" / "static" / "css" / "output.css"
@@ -69,3 +91,12 @@ def test_stale_output_css_fails(tree: Path):
     result = _check(tree)
     assert result.returncode == 1
     assert "output.css is stale" in result.stdout
+
+
+def test_build_failure_prints_its_error(tree: Path, tmp_path: Path):
+    """A failed Tailwind build says so and shows the CLI's error, not a bare exit 1."""
+    env = _fake_cli(tmp_path, PINNED, 'echo "Error: Can\'t resolve tailwindcss" >&2; exit 1')
+    result = _check(tree, env)
+    assert result.returncode == 1
+    assert "tailwindcss build failed" in result.stdout
+    assert "Can't resolve tailwindcss" in result.stdout + result.stderr

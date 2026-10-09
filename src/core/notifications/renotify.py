@@ -71,12 +71,13 @@ def error_renotify_due(
 def error_renotify_metadata(*, repeat: bool, previously_notified_at: datetime | None) -> dict:
     """The keys a ``WATCH_ERROR`` carries to say whether it is a repeat.
 
-    ``renotify`` is on every one, so a template can branch on it under the
-    preview's strict rendering. ``previously_notified_at`` is the last time
-    anyone was told — on the first repeat, roughly when the failure began. It is
-    omitted rather than invented when there is no record.
+    Both are on every one, so a template may use either unguarded under the
+    preview's strict rendering (CR 8). ``previously_notified_at`` is the last
+    time anyone was told — on the first repeat, roughly when the failure began —
+    and empty on a first alert, or when there is no record rather than invent one.
     """
-    meta: dict = {"renotify": repeat}
-    if repeat and previously_notified_at is not None:
-        meta["previously_notified_at"] = format_utc_iso(previously_notified_at)
-    return meta
+    told = repeat and previously_notified_at is not None
+    return {
+        "renotify": repeat,
+        "previously_notified_at": format_utc_iso(previously_notified_at) if told else "",
+    }

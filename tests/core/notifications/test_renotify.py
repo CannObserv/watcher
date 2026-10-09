@@ -58,7 +58,8 @@ class TestErrorRenotifyDue:
 class TestErrorRenotifyMetadata:
     def test_first_notification_says_it_is_not_a_repeat(self):
         assert error_renotify_metadata(repeat=False, previously_notified_at=None) == {
-            "renotify": False
+            "renotify": False,
+            "previously_notified_at": "",
         }
 
     def test_repeat_names_when_it_last_told_anyone(self):
@@ -68,7 +69,15 @@ class TestErrorRenotifyMetadata:
             "previously_notified_at": format_utc_iso(told),
         }
 
-    def test_repeat_without_a_record_omits_the_time_rather_than_invent_one(self):
+    def test_repeat_without_a_record_leaves_the_time_empty_rather_than_invent_one(self):
         assert error_renotify_metadata(repeat=True, previously_notified_at=None) == {
-            "renotify": True
+            "renotify": True,
+            "previously_notified_at": "",
         }
+
+    def test_a_first_alert_never_carries_a_previous_time(self):
+        """The stamp of a closed episode is cleared on recovery, but a first
+        alert must say "empty" whatever it is handed."""
+        told = NOW - timedelta(days=3)
+        meta = error_renotify_metadata(repeat=False, previously_notified_at=told)
+        assert meta["previously_notified_at"] == ""

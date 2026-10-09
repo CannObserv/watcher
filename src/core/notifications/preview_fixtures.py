@@ -129,6 +129,7 @@ MOCK_EVENT_FIXTURES: dict[str, dict] = {
         # Every emitted watch_error says whether it is a reminder (#71); the
         # preview shows the first alert, the common case.
         "renotify": False,
+        "previously_notified_at": "",
     },
     WatchEventType.WATCH_RECOVERED.value: {**_SHARED_CONTEXT},
 }

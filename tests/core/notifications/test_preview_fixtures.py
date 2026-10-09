@@ -9,7 +9,7 @@ import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 from ulid import ULID
 
-from src.api.schemas.content_config import ContentConfig
+from src.api.schemas.content_config import ContentConfig, ContentOptions
 from src.core.notifications import diff_loader as loader_mod
 from src.core.notifications.content import build_body, resolve_options
 from src.core.notifications.diff import compute_change_diff
@@ -133,9 +133,18 @@ class TestMockEventFixtures:
         assert fx_keys <= real_keys, f"fixture has phantom keys: {fx_keys - real_keys}"
 
     def test_watch_error_previews_the_first_notification(self):
-        """Every emitted watch_error carries ``renotify``; the preview shows the
-        common case, so a template branching on it previews the first form."""
-        assert MOCK_EVENT_FIXTURES["watch_error"]["renotify"] is False
+        """Every emitted watch_error carries both repeat keys; the preview shows
+        the common case, so a template using them previews the first form."""
+        fx = MOCK_EVENT_FIXTURES["watch_error"]
+        assert fx["renotify"] is False
+        assert fx["previously_notified_at"] == ""
+
+    def test_an_unguarded_repeat_variable_previews_as_it_dispatches(self):
+        """CR 8: the strict preview must not reject a template that dispatches
+        fine — the variable is documented as empty on a first alert."""
+        event = build_preview_event("watch_error")
+        options = ContentOptions(body_template="last told: {{ previously_notified_at }}")
+        assert build_body(event, options, strict=True) == "last told: "
 
 
 class TestBuildPreviewEvent:
@@ -266,8 +275,8 @@ class TestWatchErrorPreviewDispatchParity:
             {
                 "default": {
                     "body_template": (
-                        "{{ item_name }}{% if renotify %} (still failing since "
-                        "{{ previously_notified_at }}){% endif %}"
+                        "{{ item_name }}{% if renotify %} (still failing){% endif %}"
+                        " last told: {{ previously_notified_at }}"
                     )
                 }
             },
@@ -311,6 +320,5 @@ class TestWatchErrorPreviewDispatchParity:
         preview = build_body(event, resolve_options(cfg, "watch_error"), strict=True)
         dispatched = client.dispatch.call_args.kwargs["body_template"]
         assert dispatched == preview
-        assert ("previously notified" in dispatched or "still failing since" in dispatched) is bool(
-            extra
-        )
+        repeat_said = "previously notified" in dispatched or "(still failing)" in dispatched
+        assert repeat_said is bool(extra)

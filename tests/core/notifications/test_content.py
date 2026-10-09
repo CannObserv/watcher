@@ -419,7 +419,7 @@ class TestNonChangeDetectedDefaultBody:
     def test_a_first_watch_error_carries_no_reminder(self):
         event = make_event(
             event_type=WatchEventType.WATCH_ERROR,
-            metadata={"status_code": 500, "renotify": False},
+            metadata={"status_code": 500, "renotify": False, "previously_notified_at": ""},
         )
         body = build_body(event, ContentOptions(), strict=True)
         assert body == "https://example.com returned HTTP 500"
@@ -443,7 +443,7 @@ class TestNonChangeDetectedDefaultBody:
     def test_a_repeat_without_a_previous_time_still_says_it_is_one(self):
         event = make_event(
             event_type=WatchEventType.WATCH_ERROR,
-            metadata={"status_code": 500, "renotify": True},
+            metadata={"status_code": 500, "renotify": True, "previously_notified_at": ""},
         )
         body = build_body(event, ContentOptions(), strict=True)
         assert body == "https://example.com returned HTTP 500\n\nStill failing."

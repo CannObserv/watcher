@@ -946,7 +946,7 @@ class TestErrorRenotify:
         [event] = self._events()
         assert event.event_type == WatchEventType.WATCH_ERROR
         assert event.metadata["renotify"] is False
-        assert "previously_notified_at" not in event.metadata
+        assert event.metadata["previously_notified_at"] == ""
         assert wi.last_error_notified_at == event.occurred_at
         # The window measures from the check clock (CR 4): next due is
         # last_checked_at + cadence, so a 1d cadence never misses a 24h window.
@@ -1004,7 +1004,7 @@ class TestErrorRenotify:
 
         [event] = self._events()
         assert event.metadata["renotify"] is True
-        assert "previously_notified_at" not in event.metadata
+        assert event.metadata["previously_notified_at"] == ""
         assert wi.last_error_notified_at == event.occurred_at
 
     async def test_a_repeat_restarts_the_window(self, db_session):

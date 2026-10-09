@@ -1,0 +1,25 @@
+# Proposes the action bumps nothing else does (#283): every `uses:` in
+# .github/workflows/ pins a major, and a pinned major goes stale silently.
+# Each PR is gated by ci.yml like any other; a Dependabot run reads its own
+# credential context, so the WIF jobs' auth step is the first thing to read on
+# a red one. How one lands — fast-forwarded onto main locally, like every other
+# change — is docs/COMMANDS.md -> "Dependabot PRs".
+#
+# github-actions only. `uv` waits on #283's blocker 2 — co-core resolves only
+# from the private wheelhouse, which Dependabot's updater cannot sync — and
+# co-core's exact pins move in lockstep with Processor (#342), not weekly.
+# Guarded by tests/ci/test_dependabot.py: a mistyped config stops producing
+# PRs without erroring anywhere a person looks.
+version: 2
+updates:
+  - package-ecosystem: "github-actions"
+    directory: "/" # scans .github/workflows/
+    schedule:
+      interval: "weekly"
+    # The default is 5, and past it Dependabot opens nothing and says so
+    # nowhere (notifier#103). One PR per action; the test derives the bound.
+    open-pull-requests-limit: 10
+    # The PR's commit lands on main as-is, so it takes AGENTS.md's form:
+    # "chore: bump actions/checkout from 5 to 6".
+    commit-message:
+      prefix: "chore"

@@ -369,3 +369,37 @@ gcloud iam service-accounts add-iam-policy-binding \
   --role=roles/iam.workloadIdentityUser \
   --member="principalSet://iam.googleapis.com/projects/912903030445/locations/global/workloadIdentityPools/github/attribute.repository/CannObserv/watcher"
 ```
+
+### Dependabot PRs (#283)
+
+`.github/dependabot.yml` proposes **action bumps only** (`github-actions`, weekly,
+one PR per action); `tests/ci/test_dependabot.py` pins it, because a broken
+config goes quiet rather than red. `uv` is out until the private wheelhouse is
+reachable from Dependabot's updater and co-core's lockstep pins (#342) have a
+story — #283 → *Two blockers*.
+
+**A Dependabot run reads its own credential context.** Its `GITHUB_TOKEN` is
+read-only and only *Dependabot* secrets reach it, so the four WIF jobs depend on
+`vars.GCP_WIF_PROVIDER` resolving and on GitHub issuing the OIDC token there;
+`css` needs neither. On a red PR read the **Authenticate to Google Cloud** step
+first: an empty `workload_identity_provider` means the variable did not reach the
+run, a token-exchange error means OIDC or the provider's attribute condition.
+Neither is the bump's fault.
+
+**How one lands — locally, like everything else.** Dependabot only opens PRs;
+watcher merges to `main` on the VM, behind the ship gate:
+
+```bash
+gh pr checks <N>                               # all five jobs green
+# Read the action's release notes, not just the diff: a major bump can change inputs.
+gh pr comment <N> --body "@dependabot rebase"  # only if main moved since it opened
+git fetch origin <dependabot/branch> && git merge --ff-only FETCH_HEAD
+bash scripts/pre-ship.sh
+git push origin main                           # GitHub marks the PR merged
+```
+
+Fast-forward only: the commit CI tested is the commit that lands, and its subject
+already takes the repo's form (`chore: bump …`, the `commit-message` prefix). One
+PR at a time — after each push the next may need `@dependabot rebase`. **Restart**
+(`sudo systemctl restart watcher`) only when the diff touches something outside
+`.github/`; an action bump never does.

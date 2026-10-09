@@ -62,11 +62,24 @@ _TRANSITIVE_BY_DESIGN: dict[str, tuple[str, str]] = {
     ),
 }
 
-# Declared, but reached by name rather than by import: distribution -> why.
-_NEEDED_WITHOUT_IMPORT: dict[str, str] = {
-    "asyncpg": "SQLAlchemy loads the driver the `postgresql+asyncpg` URL scheme names.",
-    "uvicorn": "The server: deploy/watcher.service and scripts/dev_server.sh run it.",
-    "python-multipart": "FastAPI parses every dashboard `Form(...)` body with it.",
+# Declared, but reached by name rather than by import:
+# distribution -> (glob, witness text one match must contain, why).
+_NEEDED_WITHOUT_IMPORT: dict[str, tuple[str, str, str]] = {
+    "asyncpg": (
+        "src/**/*.py",
+        "postgresql+asyncpg",
+        "SQLAlchemy loads the driver the `postgresql+asyncpg` URL scheme names.",
+    ),
+    "uvicorn": (
+        "deploy/watcher.service",
+        "uvicorn src.api.main:app",
+        "The server: deploy/watcher.service and scripts/dev_server.sh run it.",
+    ),
+    "python-multipart": (
+        "src/dashboard/**/*.py",
+        "Form(",
+        "FastAPI parses every dashboard `Form(...)` body with it.",
+    ),
 }
 
 
@@ -362,3 +375,17 @@ class TestDeclarationsAreImported:
         """An entry the sweep already satisfies hides nothing — drop it."""
         imported = _imported_distributions(_SCOPES["src+alembic"][0])
         assert dist not in imported, f"src/ imports {dist} now; drop its allowlist entry"
+
+    @pytest.mark.parametrize("dist", list(_NEEDED_WITHOUT_IMPORT))
+    def test_allowlist_reason_still_holds(self, dist: str):
+        """Each reason names a witness — the text that reaches *dist* by name.
+
+        Without one, the entry outlives its reason: drop the dashboard's last
+        ``Form(...)`` and python-multipart stays declared for nothing, the very
+        staleness this class exists to catch.
+        """
+        pattern, witness, reason = _NEEDED_WITHOUT_IMPORT[dist]
+        assert any(witness in path.read_text() for path in sorted(_REPO_ROOT.glob(pattern))), (
+            f"no {pattern} contains {witness!r}, so this no longer holds: {reason} "
+            f"Drop {dist}, or its allowlist entry if something else now needs it."
+        )

@@ -116,6 +116,10 @@ async def record_check_failure(
     # last_observed_at deliberately NOT stamped: a failure is an attempt, never
     # an observation (#264) — the registry must not claim content was verified.
     if transition or renotify:
+        # The same `now` as last_checked_at, deliberately: the next check is due
+        # at last_checked_at + cadence, so on a 1d cadence the next failure lands
+        # >= 24h after this stamp. A different clock could miss the default
+        # window by seconds and push every reminder to 48h.
         watched_item.last_error_notified_at = now
     await session.commit()
 

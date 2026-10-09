@@ -948,6 +948,9 @@ class TestErrorRenotify:
         assert event.metadata["renotify"] is False
         assert "previously_notified_at" not in event.metadata
         assert wi.last_error_notified_at == event.occurred_at
+        # The window measures from the check clock (CR 4): next due is
+        # last_checked_at + cadence, so a 1d cadence never misses a 24h window.
+        assert wi.last_error_notified_at == wi.last_checked_at
         assert self.republish.await_count == 1  # the OK -> ERROR transition
 
     async def test_silent_inside_the_window(self, db_session):

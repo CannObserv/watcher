@@ -35,7 +35,7 @@ Both are separate repos, and **nothing in this repo reads either checkout** — 
 
 ## No cross-repo mirror discipline
 
-**No cross-repo mirror discipline (#159, #236).** Content acquisition is co-core's (see **Cannobserv wheelhouse** above); `src/core/logging.py` is service-local. Nothing in `src/` needs mirroring to Archiver — don't reintroduce a sync obligation.
+**No cross-repo mirror discipline (#159, #236).** Content acquisition is co-core's (see [DEPENDENCIES.md](DEPENDENCIES.md)); `src/core/logging.py` is service-local. Nothing in `src/` needs mirroring to Archiver — don't reintroduce a sync obligation.
 
 ## Archiver checkout location
 

@@ -150,6 +150,13 @@ class TestTemplateVariables:
         assert var is not None, "TEMPLATE_VARIABLES missing previous_changed_at"
         assert var.scope == "change_detected"
 
+    @pytest.mark.parametrize("name", ["renotify", "previously_notified_at"])
+    def test_repeat_variables_are_watch_error_scoped(self, name):
+        """#71: a custom error template can tell a reminder from a first alert."""
+        var = next((v for v in TEMPLATE_VARIABLES if v.name == name), None)
+        assert var is not None, f"TEMPLATE_VARIABLES missing {name}"
+        assert var.scope == "watch_error"
+
     @pytest.mark.parametrize(
         "name", ["diff_snippet", "diff_full", "previous_fingerprint", "current_fingerprint"]
     )

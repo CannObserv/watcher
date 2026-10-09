@@ -100,6 +100,18 @@ TEMPLATE_VARIABLES: list[TemplateVariable] = [
     ),
     # watch_error-only
     TemplateVariable("status_code", "int", "HTTP status code returned", "watch_error"),
+    TemplateVariable(
+        "renotify",
+        "bool",
+        "True when this is a reminder that the item is still failing, false on the first alert",
+        "watch_error",
+    ),
+    TemplateVariable(
+        "previously_notified_at",
+        "str",
+        "On a reminder, UTC timestamp of the last error notification; empty otherwise",
+        "watch_error",
+    ),
     # Contextual — populated when relevant metadata exists on the watch
     TemplateVariable("domain_name", "str", "Resolved domain of the watch URL", "contextual"),
     TemplateVariable("check_interval", "str", 'Check cadence (e.g. "1h")', "contextual"),
@@ -188,8 +200,15 @@ _CHANGE_DETECTED_BODY = _seed_bullets(CHANGE_DETECTED_HEADER_LINES)
 
 DEFAULT_BODY_TEMPLATES: dict[str, str] = {
     WatchEventType.CHANGE_DETECTED.value: _CHANGE_DETECTED_BODY,
+    # A reminder (#71) says so after a blank line, so an HTML-email channel
+    # renders it as its own paragraph. `is defined` guards keep the seed
+    # renderable under the preview's StrictUndefined whatever a caller carries.
     WatchEventType.WATCH_ERROR.value: (
         "{{ item_url }} returned HTTP {{ status_code | default('unknown') }}"
+        "{% if renotify is defined and renotify %}\n\nStill failing"
+        "{% if previously_notified_at is defined %}"
+        " — previously notified {{ previously_notified_at }}{% endif %}."
+        "{% endif %}"
     ),
     WatchEventType.WATCH_RECOVERED.value: "{{ item_url }} is responding normally again",
 }

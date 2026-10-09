@@ -77,7 +77,9 @@ unsendable stored validator would therefore be re-snapshotted and refused every
 cycle, forever, each one an ERROR health transition and a `WATCH_ERROR`. So
 `apply_fetch_failure` clears the item's validators on that reason alone — the
 next command is unconditional, and the item self-heals. Every other reason says
-nothing about our request options and leaves the pair alone.
+nothing about our request options and leaves the pair alone. While it is wedged,
+the item stays in ERROR, so it reminds at most once per
+`WATCHER_ERROR_RENOTIFY_INTERVAL` (#71) — the stamp commits before the dispatch.
 
 **The extraction generation is derived, not declared.** `EXTRACTION_GENERATION`
 is co-core's `processor_version(LOCAL_EXTRACTION_GENERATION)` —

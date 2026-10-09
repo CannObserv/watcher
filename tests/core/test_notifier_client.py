@@ -1,6 +1,6 @@
 """Tests for src.core.notifier_client — config factory and idempotency key builder."""
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from notifier_client import NotifierClient
@@ -9,14 +9,19 @@ from ulid import ULID
 from src.core.notifications.events import WatchEvent, WatchEventType
 from src.core.notifier_client.client import build_idempotency_key, get_notifier_client
 
+_OCCURRED_AT = datetime(2026, 5, 1, 12, 0, 0, tzinfo=UTC)
+_ITEM_ID = str(ULID())
 
-def _make_event(event_type=WatchEventType.CHANGE_DETECTED, *, metadata=None):
+
+def _make_event(
+    event_type=WatchEventType.CHANGE_DETECTED, *, metadata=None, occurred_at=_OCCURRED_AT
+):
     return WatchEvent(
         event_type=event_type,
-        watched_item_id=str(ULID()),
+        watched_item_id=_ITEM_ID,
         item_name="Test Watch",
         item_url="https://example.com",
-        occurred_at=datetime(2026, 5, 1, 12, 0, 0, tzinfo=UTC),
+        occurred_at=occurred_at,
         metadata=metadata or {},
     )
 
@@ -87,6 +92,20 @@ class TestBuildIdempotencyKey:
         key = build_idempotency_key(event, source_id)
         occurred_ms = int(event.occurred_at.timestamp() * 1000)
         assert key == f"watcher:watch_error:{source_id}:{event.watched_item_id}:{occurred_ms}"
+
+    def test_a_repeat_watch_error_gets_a_key_of_its_own(self):
+        """#71: a re-notify is the same event type for the same item from the
+        same template — only ``occurred_at`` tells it from the first. If the key
+        ignored it, the notifier would suppress every repeat as a duplicate."""
+        source_id = str(ULID())
+        first = _make_event(WatchEventType.WATCH_ERROR)
+        repeat = _make_event(
+            WatchEventType.WATCH_ERROR,
+            occurred_at=first.occurred_at + timedelta(hours=24),
+            metadata={"renotify": True},
+        )
+        assert first.watched_item_id == repeat.watched_item_id
+        assert build_idempotency_key(first, source_id) != build_idempotency_key(repeat, source_id)
 
     def test_key_is_stable_for_same_inputs(self):
         change_revision_id = str(ULID())

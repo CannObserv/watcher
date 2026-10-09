@@ -126,6 +126,9 @@ MOCK_EVENT_FIXTURES: dict[str, dict] = {
     WatchEventType.WATCH_ERROR.value: {
         **_SHARED_CONTEXT,
         "status_code": 503,
+        # Every emitted watch_error says whether it is a reminder (#71); the
+        # preview shows the first alert, the common case.
+        "renotify": False,
     },
     WatchEventType.WATCH_RECOVERED.value: {**_SHARED_CONTEXT},
 }

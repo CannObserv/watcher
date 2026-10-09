@@ -416,6 +416,38 @@ class TestNonChangeDetectedDefaultBody:
         body = build_body(event, ContentOptions(include_domain=True))
         assert body == "https://example.com returned HTTP 500"
 
+    def test_a_first_watch_error_carries_no_reminder(self):
+        event = make_event(
+            event_type=WatchEventType.WATCH_ERROR,
+            metadata={"status_code": 500, "renotify": False},
+        )
+        body = build_body(event, ContentOptions(), strict=True)
+        assert body == "https://example.com returned HTTP 500"
+
+    def test_a_repeat_watch_error_says_it_is_one(self):
+        """#71: a re-notify must not read as a fresh failure."""
+        event = make_event(
+            event_type=WatchEventType.WATCH_ERROR,
+            metadata={
+                "status_code": 500,
+                "renotify": True,
+                "previously_notified_at": "2026-10-08T12:00:00Z",
+            },
+        )
+        body = build_body(event, ContentOptions(), strict=True)
+        assert body == (
+            "https://example.com returned HTTP 500\n\n"
+            "Still failing — previously notified 2026-10-08T12:00:00Z."
+        )
+
+    def test_a_repeat_without_a_previous_time_still_says_it_is_one(self):
+        event = make_event(
+            event_type=WatchEventType.WATCH_ERROR,
+            metadata={"status_code": 500, "renotify": True},
+        )
+        body = build_body(event, ContentOptions(), strict=True)
+        assert body == "https://example.com returned HTTP 500\n\nStill failing."
+
     def test_watch_recovered_renders_default_template(self):
         event = make_event(event_type=WatchEventType.WATCH_RECOVERED, metadata={})
         body = build_body(event, ContentOptions())

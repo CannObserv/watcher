@@ -23,6 +23,7 @@ from src.core.notifications.preview_fixtures import (
     build_preview_event,
     preview_diff,
 )
+from src.core.notifications.renotify import error_renotify_metadata
 from src.core.utils import format_utc_iso, watched_item_event_base_metadata
 
 
@@ -57,6 +58,20 @@ def _real_change_detected_keys() -> set[str]:
         "extraction_changed",
         "previous_changed_at",
     }
+
+
+def _real_watch_error_keys() -> set[str]:
+    """The metadata keys a real watch_error can carry: the base, the failure
+    paths' ``error_metadata`` (``reason`` / ``status_code`` / ``error``), and
+    the #71 repeat keys — derived from the emitter's own helper."""
+    base = set(watched_item_event_base_metadata(_FakeWatchedItem()).keys())
+    repeat = error_renotify_metadata(repeat=True, previously_notified_at=datetime.now(UTC))
+    return base | {"reason", "status_code", "error"} | set(repeat)
+
+
+_REPEAT_ERROR_METADATA = error_renotify_metadata(
+    repeat=True, previously_notified_at=datetime(2026, 4, 14, 12, 0, 0, tzinfo=UTC)
+)
 
 
 class TestMockEventFixtures:
@@ -110,6 +125,17 @@ class TestMockEventFixtures:
     def test_watch_error_has_status_code(self):
         fx = MOCK_EVENT_FIXTURES["watch_error"]
         assert "status_code" in fx
+
+    def test_watch_error_matches_emitted_metadata(self):
+        """#221's fidelity invariant, for the event #71 added keys to."""
+        fx_keys = set(MOCK_EVENT_FIXTURES["watch_error"])
+        real_keys = _real_watch_error_keys()
+        assert fx_keys <= real_keys, f"fixture has phantom keys: {fx_keys - real_keys}"
+
+    def test_watch_error_previews_the_first_notification(self):
+        """Every emitted watch_error carries ``renotify``; the preview shows the
+        common case, so a template branching on it previews the first form."""
+        assert MOCK_EVENT_FIXTURES["watch_error"]["renotify"] is False
 
 
 class TestBuildPreviewEvent:
@@ -225,3 +251,66 @@ class TestPreviewDispatchParity:
         dispatched = client.dispatch.call_args.kwargs["body_template"]
         assert dispatched == preview
         assert "```diff" in dispatched
+
+
+class TestWatchErrorPreviewDispatchParity:
+    """#71: the watch_error preview renders what the dispatcher sends, for the
+    first notification and for a repeat, under the default body and a user
+    template that branches on the repeat variables."""
+
+    @pytest.mark.parametrize("extra", [{}, _REPEAT_ERROR_METADATA], ids=["first", "repeat"])
+    @pytest.mark.parametrize(
+        "content_config",
+        [
+            None,
+            {
+                "default": {
+                    "body_template": (
+                        "{{ item_name }}{% if renotify %} (still failing since "
+                        "{{ previously_notified_at }}){% endif %}"
+                    )
+                }
+            },
+        ],
+        ids=["default", "user-template"],
+    )
+    async def test_dispatched_body_equals_the_preview(self, monkeypatch, extra, content_config):
+        monkeypatch.setenv("WATCHER_NOTIFIER_BASE_URL", "http://notifier.invalid:9000")
+        monkeypatch.setenv("WATCHER_NOTIFIER_API_KEY", "nk_test")
+        preview_event = build_preview_event("watch_error")
+        event = WatchEvent(
+            event_type=preview_event.event_type,
+            watched_item_id=preview_event.watched_item_id,
+            item_name=preview_event.item_name,
+            item_url=preview_event.item_url,
+            occurred_at=preview_event.occurred_at,
+            metadata={**preview_event.metadata, **extra},
+        )
+
+        template = MagicMock()
+        template.id = ULID()
+        template.visibility = "global"
+        template.content_config = content_config
+        template.remote_channel_id = str(ULID())
+        result = MagicMock()
+        result.scalars.return_value.all.return_value = [template]
+        session = AsyncMock(spec=AsyncSession)
+        session.get = AsyncMock(return_value=MagicMock(domain_name=None))
+        session.execute = AsyncMock(return_value=result)
+        client = AsyncMock()
+        client.__aenter__ = AsyncMock(return_value=client)
+        client.__aexit__ = AsyncMock(return_value=False)
+
+        with (
+            patch("src.core.notifications.notify.get_notifier_client", return_value=client),
+            patch("src.core.notifications.notify.audit"),
+        ):
+            await dispatch_event_notifications(session=session, event=event)
+
+        cfg = ContentConfig.model_validate(content_config) if content_config else None
+        preview = build_body(event, resolve_options(cfg, "watch_error"), strict=True)
+        dispatched = client.dispatch.call_args.kwargs["body_template"]
+        assert dispatched == preview
+        assert ("previously notified" in dispatched or "still failing since" in dispatched) is bool(
+            extra
+        )

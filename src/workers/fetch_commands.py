@@ -8,7 +8,8 @@
 * ``apply_fetch_blob`` / ``apply_fetch_failure`` / ``apply_fetch_not_modified``
   — deferred by the content.blobs consumer (``src/workers/fetch_facts.py``)
   after it upserts a fact; they restore the exact bookkeeping the local fetch
-  path performs (health, ``last_checked_at``, audits, WATCH_ERROR/RECOVERED).
+  path performs (health, ``last_checked_at``, audits, WATCH_ERROR/RECOVERED,
+  and #71's re-notify of a persistent ERROR).
   Processor-decided (#326), the blob apply hands the check on instead, and the
   derived leg closes it through ``close_succeeded`` / ``fail_extraction`` here.
   Two of the three are success paths: a 304 is a check that found no change, not
@@ -52,6 +53,11 @@ from src.core.models.watched_item import (
     WatchHealthStatus,
 )
 from src.core.notifications.events import WatchEvent, WatchEventType
+from src.core.notifications.renotify import (
+    error_renotify_due,
+    error_renotify_interval,
+    error_renotify_metadata,
+)
 from src.core.process_commands import LocalExtraction, UnsendableProcessCommand
 from src.core.registry import ServiceRegistry, get_registry
 from src.core.utils import watched_item_event_base_metadata
@@ -86,34 +92,54 @@ async def record_check_failure(
     error_metadata: dict,
 ) -> None:
     """Record a failed check: ERROR health + stamped ``last_checked_at`` + audit,
-    and dispatch ``WATCH_ERROR`` once on the OK→ERROR transition.
+    and dispatch ``WATCH_ERROR`` on the OK→ERROR transition — and again, as a
+    reminder, once per ``WATCHER_ERROR_RENOTIFY_INTERVAL`` while it stays in
+    ERROR (#71).
 
     Shared by the fetch-failure and extraction-failure paths so both surface a
     health signal and a fresh ``last_checked_at`` — the latter stops a persistent
     failure from being re-enqueued every ``schedule_tick`` (#168).
+
+    ``last_error_notified_at`` is stamped in the same commit as the failure,
+    *before* the dispatch: a dispatch that raises, or an apply that is retried,
+    must not re-send inside the window — #269's wedged item fails every cycle.
     """
     audit(session, audit_event, watched_item_id=str(watched_item.id), **audit_kwargs)
     previous_health = watched_item.health_status
+    previously_notified_at = watched_item.last_error_notified_at
+    transition = previous_health != WatchHealthStatus.ERROR
+    renotify = not transition and error_renotify_due(
+        previously_notified_at, now=now, interval=error_renotify_interval()
+    )
     watched_item.health_status = WatchHealthStatus.ERROR
     watched_item.last_checked_at = now
     # last_observed_at deliberately NOT stamped: a failure is an attempt, never
     # an observation (#264) — the registry must not claim content was verified.
+    if transition or renotify:
+        watched_item.last_error_notified_at = now
     await session.commit()
 
-    if previous_health != WatchHealthStatus.ERROR:
+    if transition:
         # Health transition: level signal changed, so the watch-status stream
         # republishes (#264). Post-commit, best-effort; steady-state failures
         # never publish — that keeps the stream off the activity-rate curve.
+        # A re-notify is not a transition and stays outside this guard.
         await defer_status_republish()
 
-    if previous_health != WatchHealthStatus.ERROR:
+    if transition or renotify:
         error_event = WatchEvent(
             event_type=WatchEventType.WATCH_ERROR,
             watched_item_id=str(watched_item.id),
             item_name=watched_item.name,
             item_url=watched_item.effective_url or url,
             occurred_at=now,
-            metadata={**error_metadata, **watched_item_event_base_metadata(watched_item)},
+            metadata={
+                **error_metadata,
+                **watched_item_event_base_metadata(watched_item),
+                **error_renotify_metadata(
+                    repeat=renotify, previously_notified_at=previously_notified_at
+                ),
+            },
         )
         await dispatch_event_notifications(session=session, event=error_event)
         await session.commit()
@@ -162,6 +188,8 @@ async def _record_check_success(
     # audit's `source` key is what keeps those two apart downstream.
     # Published on info.watch-status; Archiver records it durably.
     watched_item.last_observed_at = now
+    # Recovery ends the episode (#71): a later failure is a first alert again.
+    watched_item.last_error_notified_at = None
     await session.commit()
 
     if previous_health != WatchHealthStatus.OK:

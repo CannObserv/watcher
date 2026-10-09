@@ -22,7 +22,7 @@ uv run --no-project --with 'google-cloud-storage>=2,<4' python scripts/sync_whee
 uv sync
 ```
 
-Auth, upgrade procedure and the pinned version: [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) → *Cannobserv wheelhouse*.
+Auth, upgrade procedure and the pinned version: [docs/DEPENDENCIES.md](docs/DEPENDENCIES.md).
 `co-core` owns fetch → extract → fingerprint; watcher no longer fetches at all —
 [docs/CONTENT-PIPELINE.md](docs/CONTENT-PIPELINE.md).
 
@@ -57,9 +57,9 @@ The exe.dev proxy forwards 3000–9999; dev server at `https://co-watcher.exe.xy
 
 **Host memory is the shared resource (#307).** SocratiCode is **pinned pre-installed** (`~/.socraticode/pin`): never let a launch install a server. The unit takes a **reservation, never a cap** (#309). Session `oom_score_adj` (#337), slices, verify, re-pin: [docs/HOST-MEMORY.md](docs/HOST-MEMORY.md).
 
-**The bus.** The broker is its own VM (`broker`, CannObserv/broker); watcher publishes five streams and consumes three — `content.blobs` and `content.derived` (groups `watcher.blobs`, `watcher.derived`) and `info.registry` (**groupless**, replayed from `0-0` every boot). `WATCHER_BUS_REDIS_URL` unset → publish tasks skip loudly. Inventory, ownership, contracts: [docs/BUS.md](docs/BUS.md).
+**The bus.** The broker is its own VM (`broker`, CannObserv/broker); watcher publishes five streams and consumes three — `info.registry` **groupless**, replayed from `0-0` every boot. Inventory, groups, ownership: [docs/BUS.md](docs/BUS.md).
 
-**Connection policy (#287, #288, #290).** `socket_timeout` is a **floor** derived from `src/core/read_windows.py`, never transcribed; retries are an explicit **zero** (a retry re-sends the command). `OutOfMemoryError` (full broker) and `NoPermissionError` (ACL) are `ResponseError`s, **not** connection errors — keep both transient in every producer: [docs/BUS-CONNECTION-POLICY.md](docs/BUS-CONNECTION-POLICY.md).
+**Connection policy (#287, #288, #290).** `socket_timeout` is derived, never transcribed; retries are **zero**; a full broker and an ACL denial are `ResponseError`s that every producer keeps transient: [docs/BUS-CONNECTION-POLICY.md](docs/BUS-CONNECTION-POLICY.md).
 
 ## Server Lifecycle
 
@@ -75,11 +75,9 @@ bash scripts/dev_server.sh
 
 **Never launch uvicorn by hand with the prod env loaded** — it shares the prod DB and runs a second worker on the prod queue (#233). `scripts/dev_server.sh` and `src/core/db_safety.py` both refuse any DB whose name lacks a `_test`/`_dev` suffix. Full rationale: [docs/COMMANDS.md](docs/COMMANDS.md) → *Development*.
 
-**Archiver owns the canonical registry**; watcher consumes it over the bus, makes **no HTTP calls to Archiver at all** and reads no Archiver checkout (#311) — re-adding an SDK is a design regression, and Archiver code does not belong in this repo: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) → *Sibling services*.
+**Archiver owns the canonical registry**; watcher consumes it over the bus, makes **no HTTP calls to Archiver at all** and reads no Archiver checkout (#311) — re-adding an SDK is a design regression, and neither Archiver code nor a sync obligation to it belongs in `src/` (#159, #236): [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) → *Sibling services*.
 
 **Cross-repo policy.** Never edit sibling repos (`archiver`, `notifier`) from a watcher conversation. Identify the gap, recommend it, get approval, then file a GH issue in that repo; implementation is a separate session scoped to it.
-
-**Nothing in `src/` mirrors to Archiver** (#159, #236) — don't reintroduce a sync obligation: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) → *No cross-repo mirror discipline*.
 
 ## Environment Files
 
@@ -130,15 +128,12 @@ authoritative for a named set of columns, everything else survives
 reconciliation, and **a local pause is not sticky** — every announcement-owned
 field 409s locally on a reconciled item.
 
-**Empty extraction is a failure, not a change (#258)** — a `source_spec`
-yielding empty chunks raises `ExtractionError` and writes nothing, either side
-of a baseline. **An unchanged fingerprint still announces (#293)** after a full
-fetch — never a 304, never the baseline — and a renewal may only improve a
-queued row:
+**Empty extraction is a failure, not a change (#258)**, and **an unchanged
+fingerprint still announces (#293)**:
 [docs/CONTENT-PIPELINE.md](docs/CONTENT-PIPELINE.md),
 [docs/CONTENT-REVISIONS.md](docs/CONTENT-REVISIONS.md).
 
-What each 409 is, where pause does live, the authoritative column list: [docs/WATCHED-ITEMS.md](docs/WATCHED-ITEMS.md).
+What each 409 is, where pause does live, the authoritative column list: [docs/REGISTRY.md](docs/REGISTRY.md).
 
 ## Conventions
 
@@ -167,7 +162,7 @@ JSON records with a four-key floor pinned by `tests/core/test_logging.py`; why u
 - Test structure mirrors source (`src/foo.py` → `tests/test_foo.py`)
 - Optional JSONB columns: declare as `JSONB(none_as_null=True)` so Python `None` persists as SQL `NULL`, not a JSONB `'null'` literal (otherwise `WHERE col IS NULL` silently misses those rows — #198)
 
-**ULID format errors:** path parameter → 404 (`parse_ulid`), filter query parameter → 400 (`parse_filter_ulid`). **DB triggers:** currently none; one added in a migration must also be recreated in `tests/conftest.py`'s `test_engine` fixture (integration tests build the schema with `create_all`). Both: [docs/CONVENTIONS.md](docs/CONVENTIONS.md).
+**ULID format errors:** path → 404, filter → 400. **DB triggers:** none; one added in a migration is also recreated in `tests/conftest.py`. Both: [docs/CONVENTIONS.md](docs/CONVENTIONS.md).
 
 ## Style & UI
 
@@ -193,15 +188,18 @@ A skill is symlinked into both `skills/` and `.claude/skills/`; overrides in `sk
 - [docs/CONTENT-REVISIONS.md](docs/CONTENT-REVISIONS.md) — the revisions producer: outbox, drain, #293 renewal
 - [docs/CONDITIONAL-GET.md](docs/CONDITIONAL-GET.md) — #269 validators: gate, snapshot, invalidation
 - [docs/CONVENTIONS.md](docs/CONVENTIONS.md) — logging configuration, ULID errors, DB triggers
-- [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) — systemd units, the install runbook, timers, wheelhouse auth
+- [docs/DEPENDENCIES.md](docs/DEPENDENCIES.md) — the private wheelhouse and the notifier SDK's git tag: auth, pins, upgrades
+- [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) — systemd units, the install runbook, timers
 - [docs/ENVIRONMENT.md](docs/ENVIRONMENT.md) — every env file and variable, load order, the unit-only credentials
 - [docs/HOST-MEMORY.md](docs/HOST-MEMORY.md) — #307/#309: reservations, slices, earlyoom, the SocratiCode pin
 - [docs/RECOVERY.md](docs/RECOVERY.md) — nightly DB backup to GCS, restore, go/no-go gates; dated [rehearsals](docs/RECOVERY-REHEARSALS.md)
 - [docs/MIGRATIONS.md](docs/MIGRATIONS.md) — the manual upgrade step, the two-role grants, one-time orderings
 - [docs/reference/tailscale.md](docs/reference/tailscale.md) — this node: identity, peers, the cold-boot race, ACL rules
 - [docs/SKILLS.md](docs/SKILLS.md) — skill triggers, vendored skill repos, the SessionStart hooks
-- [docs/SOCRATICODE.md](docs/SOCRATICODE.md) — tool table, index scope, the co-index client contract, green-failing traps, link stubs
+- [docs/SOCRATICODE.md](docs/SOCRATICODE.md) — tool table, index scope, green-failing traps, link stubs
+- [docs/CO-INDEX.md](docs/CO-INDEX.md) — the shared store on `co-index`: the client contract, verifying it before trusting a miss
 - [docs/STYLE.md](docs/STYLE.md) — the design system: brand, color, dark mode, tokens, layout, touch targets, accessibility
 - [docs/UI.md](docs/UI.md) — the component library, the HTMX/flash patterns
-- [docs/WATCHED-ITEMS.md](docs/WATCHED-ITEMS.md) — the entity: fields, schedule resolution, reconciliation, domain keying, media-type dispatch, template CRUD, notifications
+- [docs/WATCHED-ITEMS.md](docs/WATCHED-ITEMS.md) — the entity: fields, schedule resolution, domain keying, media-type dispatch, template CRUD, notifications
+- [docs/REGISTRY.md](docs/REGISTRY.md) — `info.registry` reconciliation: what an announcement owns, every 409, linkage
 - [docs/WATCHED-ITEMS-DASHBOARD.md](docs/WATCHED-ITEMS-DASHBOARD.md) — the operator surface: routes, lifecycle guards, views, audit parity

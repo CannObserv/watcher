@@ -411,5 +411,5 @@ PR at a time — after each push the next may need `@dependabot rebase`. **Resta
 **`context-cadence.yml` is generated** (`install-cadence.sh`, vendored in
 `skills-vendor/`), and Dependabot bumps its `actions/checkout` with `ci.yml`'s.
 Take the bump; a later re-run of the generator reverts it to the generator's
-own pin until that moves upstream — so after a regeneration, diff its `uses:`
+own pin until that moves upstream (gregoryfoster/skills#373) — so after a regeneration, diff its `uses:`
 lines before committing.

@@ -39,6 +39,8 @@ from src.core.models.process_command import (
     ShadowVerdict,
 )
 from src.core.models.watched_item import WatchedItem, WatchHealthStatus
+from src.core.notifications.events import WatchEventType
+from src.core.notifications.renotify import ERROR_RENOTIFY_INTERVAL_ENV
 from src.core.process_commands import (
     PROCESS_COMMAND_HARD_LIMIT_ENV,
     PROCESS_COMMAND_TIMEOUT_ENV,
@@ -46,6 +48,7 @@ from src.core.process_commands import (
     create_process_command,
 )
 from src.core.registry import ServiceRegistry
+from src.core.utils import format_utc_iso
 from src.workers.derived_facts import process_derived_message
 from src.workers.fetch_commands import apply_fetch_blob
 from src.workers.pipeline import _extract_and_fingerprint
@@ -760,6 +763,35 @@ class TestDecisiveApply:
         assert item.etag is None  # #269: the next fetch is in full
         assert await _revisions(db_session, item.id) == []
         assert len(await _audits(db_session, EventType.CHECK_EXTRACTION_FAILED)) == 1
+
+    async def test_a_persistent_failure_re_notifies_without_republishing(
+        self, db_session, monkeypatch
+    ):
+        """#71 on the path production runs: a processor-decided failure of an
+        item already in ERROR past the window reminds, and is no transition."""
+        monkeypatch.delenv(ERROR_RENOTIFY_INTERVAL_ENV, raising=False)
+        told = datetime.now(UTC) - timedelta(hours=25)
+        row = await _decisive(
+            db_session,
+            specs=(SPEC_A,),
+            item_over={"health_status": WatchHealthStatus.ERROR, "last_error_notified_at": told},
+            **_empty(),
+        )
+        _wire(db_session, monkeypatch)
+        _quiet(monkeypatch)
+        dispatch = AsyncMock(return_value=0)
+        monkeypatch.setattr(fc_mod, "dispatch_event_notifications", dispatch)
+        republish = AsyncMock()
+        monkeypatch.setattr(fc_mod, "defer_status_republish", republish)
+
+        await apply_process_fact(row.command_id)
+
+        event = dispatch.await_args.kwargs["event"]
+        assert event.event_type == WatchEventType.WATCH_ERROR
+        assert event.metadata["renotify"] is True
+        assert event.metadata["previously_notified_at"] == format_utc_iso(told)
+        assert (await self._item(db_session, row)).last_error_notified_at == event.occurred_at
+        republish.assert_not_awaited()
 
     @pytest.mark.parametrize(
         "reason", ["extraction_error", "unsupported_media_type", "invalid_input"]

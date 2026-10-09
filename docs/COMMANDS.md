@@ -405,3 +405,9 @@ already takes the repo's form (`chore: bump …`, the `commit-message` prefix). 
 PR at a time — after each push the next may need `@dependabot rebase`. **Restart**
 (`sudo systemctl restart watcher`) only when the diff touches something outside
 `.github/`; an action bump never does.
+
+**`context-cadence.yml` is generated** (`install-cadence.sh`, vendored in
+`skills-vendor/`), and Dependabot bumps its `actions/checkout` with `ci.yml`'s.
+Take the bump; a later re-run of the generator reverts it to the generator's
+own pin until that moves upstream — so after a regeneration, diff its `uses:`
+lines before committing.

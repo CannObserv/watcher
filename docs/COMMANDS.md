@@ -381,7 +381,8 @@ story — #283 → *Two blockers*.
 **A Dependabot run reads its own credential context.** Its `GITHUB_TOKEN` is
 read-only and only *Dependabot* secrets reach it, so the four WIF jobs depend on
 `vars.GCP_WIF_PROVIDER` resolving and on GitHub issuing the OIDC token there;
-`css` needs neither. On a red PR read the **Authenticate to Google Cloud** step
+`css` needs neither. Both held on the first batch (#354–#357, 2026-10-09: every
+job green, WIF auth and wheelhouse sync included, actor `dependabot[bot]`). On a red PR read the **Authenticate to Google Cloud** step
 first, and match its error. *"must specify exactly one of
 workload_identity_provider or credentials_json"* — the variable did not reach the
 run. *"did not inject $ACTIONS_ID_TOKEN_REQUEST_TOKEN"* — no OIDC token was

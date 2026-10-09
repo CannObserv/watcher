@@ -30,7 +30,7 @@ jobs:
       # No sibling checkout, in this job or any other: #254 removed the
       # `archiver-client` path dep, and #311 the `test` job's subprocess run of
       # archiver's alembic.
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           path: watcher
 
@@ -77,7 +77,7 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - uses: actions/setup-node@v6
         with:
@@ -104,7 +104,7 @@ jobs:
       TEST_DATABASE_URL: postgresql+asyncpg://nobody:nothing@127.0.0.1:1/watcher_test
 
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           path: watcher
 
@@ -170,7 +170,7 @@ jobs:
       TEST_DATABASE_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/watcher_test
 
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           path: watcher
 
@@ -236,7 +236,7 @@ jobs:
       DATABASE_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/watcher_migration
 
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           path: watcher
       # No sibling checkout (#254 removed the `archiver-client` path dep that was

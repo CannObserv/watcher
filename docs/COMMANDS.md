@@ -382,9 +382,11 @@ story — #283 → *Two blockers*.
 read-only and only *Dependabot* secrets reach it, so the four WIF jobs depend on
 `vars.GCP_WIF_PROVIDER` resolving and on GitHub issuing the OIDC token there;
 `css` needs neither. On a red PR read the **Authenticate to Google Cloud** step
-first: an empty `workload_identity_provider` means the variable did not reach the
-run, a token-exchange error means OIDC or the provider's attribute condition.
-Neither is the bump's fault.
+first, and match its error. *"must specify exactly one of
+workload_identity_provider or credentials_json"* — the variable did not reach the
+run. *"did not inject $ACTIONS_ID_TOKEN_REQUEST_TOKEN"* — no OIDC token was
+granted. Past both, a token-exchange failure — the `github-ci` provider's
+attribute condition or the SA binding (*CI* above). None is the bump's fault.
 
 **How one lands — locally, like everything else.** Dependabot only opens PRs;
 watcher merges to `main` on the VM, behind the ship gate:

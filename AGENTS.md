@@ -57,7 +57,7 @@ The exe.dev proxy forwards 3000–9999; dev server at `https://co-watcher.exe.xy
 
 **Host memory is the shared resource (#307).** SocratiCode is **pinned pre-installed** (`~/.socraticode/pin`): never let a launch install a server. The unit takes a **reservation, never a cap** (#309). Session `oom_score_adj` (#337), slices, verify, re-pin: [docs/HOST-MEMORY.md](docs/HOST-MEMORY.md).
 
-**The bus.** The broker is its own VM (`broker`, CannObserv/broker); watcher publishes five streams and consumes three — `info.registry` **groupless**, replayed from `0-0` every boot. Inventory, groups, ownership: [docs/BUS.md](docs/BUS.md).
+**The bus.** The broker is its own VM (`broker`, CannObserv/broker); watcher publishes five streams and consumes three — `info.registry` is **groupless**, replayed from `0-0` every boot. Inventory, groups, ownership: [docs/BUS.md](docs/BUS.md).
 
 **Connection policy (#287, #288, #290).** `socket_timeout` is derived, never transcribed; retries are **zero**; a full broker and an ACL denial are `ResponseError`s that every producer keeps transient: [docs/BUS-CONNECTION-POLICY.md](docs/BUS-CONNECTION-POLICY.md).
 

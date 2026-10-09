@@ -153,7 +153,9 @@ jobs:
       id-token: write
     services:
       postgres:
-        image: postgres:16
+        # Docker Hub's official image via Google's mirror: GitHub's shared runners
+        # exhaust Docker Hub's anonymous pull limit (tests/ci/test_service_images.py).
+        image: mirror.gcr.io/library/postgres:16
         env:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
@@ -215,7 +217,9 @@ jobs:
       id-token: write
     services:
       postgres:
-        image: postgres:16
+        # Docker Hub's official image via Google's mirror: GitHub's shared runners
+        # exhaust Docker Hub's anonymous pull limit (tests/ci/test_service_images.py).
+        image: mirror.gcr.io/library/postgres:16
         env:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres

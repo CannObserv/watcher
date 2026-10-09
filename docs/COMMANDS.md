@@ -358,6 +358,9 @@ nothing from archiver either — the #234 squash collapsed the pre-existing
 chain into a self-contained genesis baseline (`2addddea0b03`) that references
 no `information` schema, so `upgrade head` from empty is fully standalone (no
 archiver seeding, no cross-service ordering).
+Both database jobs pull `postgres:16` as `mirror.gcr.io/library/postgres:16`:
+GitHub's shared runners exhaust Docker Hub's anonymous pull limit, and the mirror
+needs no credential (`tests/ci/test_service_images.py`).
 **Squash cutover:** already-migrated DBs need a one-time `alembic
 stamp 2addddea0b03 --purge` before their next upgrade — see `docs/MIGRATIONS.md`
 → "Migration baseline (squash)". Only `live` tests (real GCS) run in no CI

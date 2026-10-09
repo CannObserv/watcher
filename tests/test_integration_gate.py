@@ -93,7 +93,7 @@ class TestCiJobs:
 
     def test_an_integration_job_exists_with_a_postgres_16_service(self, jobs: dict) -> None:
         job = jobs["integration"]
-        assert job["services"]["postgres"]["image"] == "postgres:16"
+        assert job["services"]["postgres"]["image"] == "mirror.gcr.io/library/postgres:16"
         assert job["env"]["TEST_DATABASE_URL"].endswith("/watcher_test")
         assert job["services"]["postgres"]["env"]["POSTGRES_DB"] == "watcher_test"
 

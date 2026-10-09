@@ -11,3 +11,7 @@ AGENTS.md :: duplicate :: MemoryLow=
 AGENTS.md :: duplicate :: OOMScoreAdjust=
 # The DEPLOYMENT.md pointer into the moved section now links HOST-MEMORY.md.
 docs/DEPLOYMENT.md :: retarget :: #host-memory-posture-307
+# #283: BUS-CONNECTION-POLICY.md's lead pointed at ARCHITECTURE.md for the topology; it now names BUS.md.
+docs/BUS-CONNECTION-POLICY.md :: retarget :: ARCHITECTURE.md
+docs/ENVIRONMENT.md :: retarget :: ARCHITECTURE.md
+docs/WATCHED-ITEMS.md :: retarget :: ARCHITECTURE.md

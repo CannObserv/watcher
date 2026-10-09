@@ -1,6 +1,6 @@
 # Bus connection policy
 
-What `src/core/bus.py` hands every caller a client with, and why each value is what it is (#287, closing CannObserv/broker#1 R7). Split out of [ARCHITECTURE.md](ARCHITECTURE.md) — the bus *topology* stays there; this is the transport underneath it.
+What `src/core/bus.py` hands every caller a client with, and why each value is what it is (#287, closing CannObserv/broker#1 R7). The bus *topology* is [BUS.md](BUS.md)'s; this is the transport underneath it.
 
 Three of the values rest on measurements that contradicted the intuition going in, so each is quoted where it applies rather than summarised here. Archiver's half of R7 landed in CannObserv/archiver#193 Phase 1 (`src/core/changes/bus_client.py`), where all three were taken.
 

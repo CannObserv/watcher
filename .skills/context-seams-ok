@@ -170,3 +170,20 @@ docs/ARCHITECTURE.md :: Reference docs (index: AGENTS.md → Detail Docs)
 docs/CONTENT-PIPELINE.md :: The fingerprint's bytes are co-core's (#324)
 docs/CONTENT-PIPELINE.md :: Reporting revisions on `content.revisions` (#253, #293)
 docs/CONTENT-REVISIONS.md :: A renewed blob reference is re-announced (#293)
+
+# --- #283 curation (2026-10-09). Provenance headings following the convention
+# above: COMMANDS.md's is this branch's own, the other three predate it and were
+# unjudged.
+docs/COMMANDS.md :: Dependabot PRs (#283)
+docs/CONTENT-PIPELINE.md :: Shadow extraction on `content.process` (#325)
+docs/CONTENT-PIPELINE.md :: Processor-decided extraction (#326)
+docs/WATCHED-ITEMS.md :: Change diff (#222)
+# SOCRATICODE.md orients a reader against the AGENTS.md block of the same name,
+# which is still there; none of these points at moved content.
+docs/SOCRATICODE.md :: Detail doc for the `## Code Exploration Policy` block in `AGENTS.md`. That
+docs/SOCRATICODE.md :: heading down there, not in `AGENTS.md`.
+docs/SOCRATICODE.md :: `AGENTS.md` block should be on its degraded variant.
+docs/SOCRATICODE.md :: it. That rule does not need to live in your `AGENTS.md` — the once-per-day hook
+# BUS-CONNECTION-POLICY.md's own title shares the moved section's name; the
+# section it names now sits in BUS.md and points here.
+docs/BUS-CONNECTION-POLICY.md :: # Bus connection policy

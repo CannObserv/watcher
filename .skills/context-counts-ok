@@ -3,10 +3,11 @@
 # All four predate this run; judged rather than rewritten, since each already
 # takes one of the three forms the check accepts.
 
-# Gated by tests/test_bus_stream_kinds.py::test_the_stream_inventory_is_complete
-# (L369-382), which asserts the referenced set equals WATCHER_STREAMS and whose
-# failure message names this AGENTS.md sentence by its wording.
-AGENTS.md :: gated :: watcher publishes four streams and consumes two
+# Gated by tests/test_bus_stream_kinds.py::test_the_inventory_is_exactly_what_the_docs_describe,
+# which asserts the referenced set equals WATCHER_STREAMS and whose failure
+# message names this AGENTS.md sentence by its wording. Re-judged in the #283
+# curation: the wording moved to five/three with the streams, the gate with it.
+AGENTS.md :: gated :: watcher publishes five streams and consumes three
 
 # Gated by tests/core/test_logging.py::test_log_record_includes_structured_fields
 # (L79-89), which asserts message, level, logger and timestamp by name.

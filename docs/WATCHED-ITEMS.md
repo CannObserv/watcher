@@ -86,7 +86,7 @@ post-action throttles to 1d only when the effective cadence is faster than 1d
 `info.registry` announcements are the authority on cadence and active state.
 `src/workers/registry_reconcile.py` makes `watched_items` match them; the stream
 mechanics (groupless tail, replay from `0-0`, no DLQ, `generation` ordering) are in
-[ARCHITECTURE.md](ARCHITECTURE.md) → *Redis and the bus*.
+[BUS.md](BUS.md).
 
 **What an announcement owns**, and nothing else: `archiver_info_source_id`,
 `effective_url`, `source_specs`, `announced_schedule_config`, `is_active` — plus

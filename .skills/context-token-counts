@@ -3,24 +3,25 @@
 # The offline estimators prefer a file's own last exact measurement to the
 # repo-wide figure in .skills/context-token-ratio, falling back to it for a
 # file never counted exactly or since drifted far from the size recorded here.
-13744 5992 AGENTS.md
-27569 10112 docs/ARCHITECTURE.md
-24916 9063 docs/BUS-CONNECTION-POLICY.md
-13475 5629 docs/COMMANDS.md
-8551 3090 docs/CONDITIONAL-GET.md
-23549 9179 docs/CONTENT-PIPELINE.md
+13639 5932 AGENTS.md
+14042 5122 docs/ARCHITECTURE.md
+24874 9046 docs/BUS-CONNECTION-POLICY.md
+13934 5154 docs/BUS.md
+18720 7681 docs/COMMANDS.md
+8710 3163 docs/CONDITIONAL-GET.md
+23569 9186 docs/CONTENT-PIPELINE.md
 10213 3725 docs/CONTENT-REVISIONS.md
 5564 2178 docs/CONVENTIONS.md
 24187 9983 docs/DEPLOYMENT.md
-23527 9359 docs/ENVIRONMENT.md
+23845 9514 docs/ENVIRONMENT.md
 15039 6062 docs/HOST-MEMORY.md
 18616 7101 docs/MIGRATIONS.md
 5869 2395 docs/RECOVERY-REHEARSALS.md
-22838 9197 docs/RECOVERY.md
-14597 5508 docs/SKILLS.md
+22929 9236 docs/RECOVERY.md
+15024 5663 docs/SKILLS.md
 27056 9940 docs/SOCRATICODE.md
-16280 6457 docs/STYLE.md
+17208 6828 docs/STYLE.md
 18843 7561 docs/UI.md
 13965 5257 docs/WATCHED-ITEMS-DASHBOARD.md
-25341 9460 docs/WATCHED-ITEMS.md
+26617 9961 docs/WATCHED-ITEMS.md
 5030 1961 docs/reference/tailscale.md

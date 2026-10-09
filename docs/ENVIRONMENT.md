@@ -74,7 +74,7 @@ unprefixed name (`REDIS_URL`) is silently inherited from `/etc/watcher/.env` by
 anything that sources it, which is exactly how a dev process ends up pointed at
 a production resource (the #233 hazard, in env-var form). Watcher's own
 `WATCHER_BUS_REDIS_URL` / `WATCHER_DEV_BUS_REDIS_URL` split (#245) follows the
-pattern — see **Redis and the bus**.
+pattern — see [BUS.md](BUS.md).
 
 | Variable | Location | Required | Purpose |
 |---|---|---|---|
@@ -180,6 +180,6 @@ older than the republish period while the service is up; `XREVRANGE` is not in
 watcher's ACL, so use `XINFO STREAM` or `XRANGE` (broker#77). An aging stream with a
 live service means the publish task is failing (check Procrastinate job errors),
 and Archiver's panel renders drift from exactly this staleness. All queued work
-stays on Procrastinate over Postgres. See [ARCHITECTURE.md](ARCHITECTURE.md) §
-*Redis and the bus* for the ownership split.
+stays on Procrastinate over Postgres. See [BUS.md](BUS.md) for the ownership
+split.
 

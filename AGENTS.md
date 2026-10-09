@@ -55,9 +55,9 @@ The exe.dev proxy forwards 3000–9999; dev server at `https://co-watcher.exe.xy
 
 **Single process is load-bearing.** One uvicorn process runs everything — API, embedded Procrastinate worker, fact consumers, cache sweeper. **Never `uvicorn --workers N`, never a second worker unit against prod.** Why, and the escalation path that is *not built*: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) → *Single process*.
 
-**Host memory is the shared resource (#307).** No swap; agent sessions sit at `oom_score_adj` 0 (#337), ahead of the service's -500 — `tests/deploy/test_earlyoom_decline.py` fails if exe.dev's old -1000 returns. SocratiCode is **pinned pre-installed** (`~/.socraticode/pin`): never let a launch install a server. The unit takes a **reservation, never a cap** (`MemoryHigh=` stalls it while it still reports `active`), holding only while **every slice above grants as much** (#309). Verify, re-pin, the drop-ins: [docs/HOST-MEMORY.md](docs/HOST-MEMORY.md).
+**Host memory is the shared resource (#307).** SocratiCode is **pinned pre-installed** (`~/.socraticode/pin`): never let a launch install a server. The unit takes a **reservation, never a cap** (#309). Session `oom_score_adj` (#337), slices, verify, re-pin: [docs/HOST-MEMORY.md](docs/HOST-MEMORY.md).
 
-**The bus.** The broker is its own VM (`broker`, CannObserv/broker); watcher publishes five streams and consumes three — `content.blobs` and `content.derived` (groups `watcher.blobs`, `watcher.derived`) and `info.registry` (**groupless**, replayed from `0-0` every boot). `WATCHER_BUS_REDIS_URL` unset → publish tasks skip loudly. Inventory, ownership, contracts: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) → *Redis and the bus*.
+**The bus.** The broker is its own VM (`broker`, CannObserv/broker); watcher publishes five streams and consumes three — `content.blobs` and `content.derived` (groups `watcher.blobs`, `watcher.derived`) and `info.registry` (**groupless**, replayed from `0-0` every boot). `WATCHER_BUS_REDIS_URL` unset → publish tasks skip loudly. Inventory, ownership, contracts: [docs/BUS.md](docs/BUS.md).
 
 **Connection policy (#287, #288, #290).** `socket_timeout` is a **floor** derived from `src/core/read_windows.py`, never transcribed; retries are an explicit **zero** (a retry re-sends the command). `OutOfMemoryError` (full broker) and `NoPermissionError` (ACL) are `ResponseError`s, **not** connection errors — keep both transient in every producer: [docs/BUS-CONNECTION-POLICY.md](docs/BUS-CONNECTION-POLICY.md).
 
@@ -185,7 +185,8 @@ A skill is symlinked into both `skills/` and `.claude/skills/`; overrides in `sk
 
 ## Detail Docs
 
-- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — module layout, sibling services, bus topology, fetch contracts, the probe destination guard
+- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — module layout, sibling services, fetch contracts, the probe destination guard
+- [docs/BUS.md](docs/BUS.md) — the broker, stream inventory and retention, consumer groups
 - [docs/BUS-CONNECTION-POLICY.md](docs/BUS-CONNECTION-POLICY.md) — #287 timeouts, retries, redaction, startup PING; #288 the `noeviction` cap
 - [docs/COMMANDS.md](docs/COMMANDS.md) — every runnable command, the test database, CI
 - [docs/CONTENT-PIPELINE.md](docs/CONTENT-PIPELINE.md) — fetch → extract → fingerprint, the `fetch_commands` outbox

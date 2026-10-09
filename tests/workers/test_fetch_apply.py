@@ -1024,6 +1024,7 @@ class TestErrorRenotify:
         wi = await self._item(
             db_session, health=WatchHealthStatus.ERROR, notified_ago=timedelta(hours=25)
         )
+        previous = wi.last_error_notified_at
         self.dispatch.side_effect = RuntimeError("notifier misconfigured")
 
         with pytest.raises(RuntimeError):
@@ -1031,7 +1032,9 @@ class TestErrorRenotify:
         await db_session.rollback()
         await db_session.refresh(wi)
 
-        assert wi.last_error_notified_at > datetime.now(UTC) - timedelta(minutes=1)
+        # This failure's own stamp, committed: the same `now` as the check.
+        assert wi.last_error_notified_at != previous
+        assert wi.last_error_notified_at == wi.last_checked_at
 
     async def test_a_wedged_invalid_request_options_item_does_not_storm(self, db_session):
         """#269: each refusal clears validators and fails again — one repeat

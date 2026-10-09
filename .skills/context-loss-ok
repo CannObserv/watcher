@@ -333,3 +333,5 @@ docs/ENVIRONMENT.md :: retarget :: *Redis and the bus* for the ownership split.
 docs/WATCHED-ITEMS.md :: retarget :: [ARCHITECTURE.md](ARCHITECTURE.md) → *Redis and the bus*.
 # The bus topology moved to BUS.md in this run; the lead's pointer follows it.
 docs/BUS-CONNECTION-POLICY.md :: retarget :: What `src/core/bus.py` hands every caller a client with, and why each value is what it is (#287, closing CannObserv/broker#1 R7). Split out of [ARCHITECTURE.md](ARCHITECTURE.md) — the bus *topology* stays there; this is the transport underneath it.
+# CR 7: ARCHITECTURE.md's lead promised the bus topology the split moved; it now names BUS.md.
+docs/ARCHITECTURE.md :: retarget :: Module layout, the sibling-service topology, the message-bus topology, the

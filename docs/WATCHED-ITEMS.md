@@ -308,23 +308,13 @@ are a separate enum and stay. Pause is registry-owned in production
 (the reconcile writes `is_active` directly), so if anyone notifies on it, Archiver does.
 
 **Persistent errors re-notify (#71).** `watch_error` fires on the OK→ERROR
-transition, then again on the first failed check at least
-`WATCHER_ERROR_RENOTIFY_INTERVAL` (default `24h`) after the last one, for as
-long as the item stays in ERROR — both failure paths share
-`record_check_failure`. `last_error_notified_at` is stamped on every dispatch,
-in the same commit as the failure and **before** the dispatch, so a crashed or
-retried apply cannot re-send inside the window (#269's wedged item fails every
-cycle); recovery clears it, so the next failure is a first alert again. A
-reminder is not a health transition and never republishes watch-status (#264).
-Every `watch_error` carries `renotify` (false on the first); a reminder adds
-`previously_notified_at` — the last time anyone was told, which on the first
-reminder is roughly when the failure began — and the default body says
-"Still failing". Distinct idempotency keys come free: non-change events key on
-`occurred_at` (`build_idempotency_key`). The interval is a service-wide knob,
-**not** `schedule_config`: resolution returns a whole tier, and announced
-configs are registry-owned. Migration `36358e2f5ad4` stamped the items already in
-ERROR so the deploy did not burst; parked #63 (digests) is the other reader the
-column was named for.
+transition, then on the first failed check at least
+`WATCHER_ERROR_RENOTIFY_INTERVAL` (default `24h`) after the last one.
+`last_error_notified_at` is stamped in the failure's commit, before the dispatch
+(a retried apply cannot re-send); recovery clears it. A reminder never
+republishes watch-status (#264), carries `renotify: true` plus
+`previously_notified_at`, and says "Still failing". Why not `schedule_config`,
+and the backfill: `src/core/notifications/renotify.py`, migration `36358e2f5ad4`.
 
 Template mutations (create/update/delete/duplicate + their audit events) go
 through one service — `src/core/notifications/templates.py` (#228) — used by

@@ -22,6 +22,10 @@ none of its scripts runs in the project environment; each names its own
 interpreter and requirements where it is invoked (``uv run --no-project
 --with …``, or the system ``python3``).
 
+**And the converse** (``TestDeclarationsAreImported``, #283): a runtime
+declaration nothing under ``src/`` or ``alembic/`` imports is stale, unless
+``_NEEDED_WITHOUT_IMPORT`` names why it is reached by name instead.
+
 **Precondition:** the environment is synced from ``uv.lock``, as for
 ``tests/test_dependency_extras.py``.
 """
@@ -56,6 +60,13 @@ _TRANSITIVE_BY_DESIGN: dict[str, tuple[str, str]] = {
         "procrastinate evaluates it with. Declared, croniter would outlive procrastinate "
         "swapping parsers and keep approving expressions for a parser nothing uses.",
     ),
+}
+
+# Declared, but reached by name rather than by import: distribution -> why.
+_NEEDED_WITHOUT_IMPORT: dict[str, str] = {
+    "asyncpg": "SQLAlchemy loads the driver the `postgresql+asyncpg` URL scheme names.",
+    "uvicorn": "The server: deploy/watcher.service and scripts/dev_server.sh run it.",
+    "python-multipart": "FastAPI parses every dashboard `Form(...)` body with it.",
 }
 
 
@@ -312,3 +323,42 @@ class TestTransitiveByDesign:
             for owner in owners
         }
         assert dist in imported, f"nothing imports {dist} any more; drop its allowlist entry"
+
+
+def _imported_distributions(directories: tuple[str, ...]) -> frozenset[str]:
+    """Every distribution an import under *directories* resolves to."""
+    return frozenset(
+        owner
+        for directory in directories
+        for _, owners, _ in _third_party_imports(directory)
+        for owner in owners
+    )
+
+
+class TestDeclarationsAreImported:
+    """The converse sweep (#283): a runtime declaration nothing imports is stale.
+
+    Eight sat in ``[project.dependencies]`` for months after the code using them
+    moved out — the extraction stack to co-core (#236), html5lib with ``diff/``
+    (#156), the notification channels to notifier. Each kept a bound in force
+    over a package watcher no longer chose, and read as a reason to keep it.
+    """
+
+    def test_every_runtime_dependency_is_imported(self):
+        unused = _RUNTIME - _imported_distributions(_SCOPES["src+alembic"][0])
+        stale = sorted(unused - _NEEDED_WITHOUT_IMPORT.keys())
+        assert not stale, (
+            f"Declared in [project.dependencies] but imported nowhere under src/ or "
+            f"alembic/: {stale}. Drop each — or, if it is reached by name rather than "
+            "by import, add it to _NEEDED_WITHOUT_IMPORT with the reason."
+        )
+
+    @pytest.mark.parametrize("dist", list(_NEEDED_WITHOUT_IMPORT))
+    def test_allowlist_entry_is_still_declared(self, dist: str):
+        assert dist in _RUNTIME, f"{dist} is no longer declared; drop its allowlist entry"
+
+    @pytest.mark.parametrize("dist", list(_NEEDED_WITHOUT_IMPORT))
+    def test_allowlist_entry_is_still_unimported(self, dist: str):
+        """An entry the sweep already satisfies hides nothing — drop it."""
+        imported = _imported_distributions(_SCOPES["src+alembic"][0])
+        assert dist not in imported, f"src/ imports {dist} now; drop its allowlist entry"

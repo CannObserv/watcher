@@ -15,20 +15,12 @@ dependencies = [
     "asyncpg>=0.30.0,<1",
     "alembic>=1.15.0,<2",
     "python-ulid>=3.0.0,<4",
-    "beautifulsoup4>=4.12.0,<5",
-    "lxml>=5.0,<7",
-    "pypdf>=5.0,<7",
-    "openpyxl>=3.1.0,<4",
     # No `[psycopg]` extra — procrastinate never published one; psycopg[pool] is
     # a base requirement, and PsycopgConnector uses it internally (#242).
     "procrastinate>=3.0,<4",
-    "jsonschema>=4.21.0,<5",
     "httpx>=0.28.0,<1",
-    "aiosmtplib>=5.1.0,<6",
-    "email-validator>=2.0,<3",
     "jinja2>=3.1.6,<4",
     "python-multipart>=0.0.22,<1",
-    "html5lib>=1.1",
     "notifier-client",
     # Exact, through shadow (#325): both sides of content.process must report the
     # same processor_version, and Processor pins ==0.19.7 too. Bump in lockstep
@@ -46,6 +38,9 @@ dependencies = [
 [dependency-groups]
 dev = [
     "anyio>=4.12.1,<5",
+    # tests/dashboard parses HTMX responses; production parses no HTML itself —
+    # co-core[extract] owns the extraction stack (#236).
+    "beautifulsoup4>=4.12.0,<5",
     # In-memory Redis for the fetch-policy producer tests (#245); mirrors
     # replicator's test harness so the two ends of the stream test alike.
     "fakeredis>=2.26,<3",

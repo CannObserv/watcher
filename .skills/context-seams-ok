@@ -192,7 +192,7 @@ docs/BUS-CONNECTION-POLICY.md :: # Bus connection policy
 # Provenance heading, moved verbatim (the convention above).
 docs/CO-INDEX.md :: Shared index on `co-index` (#300)
 # The new docs' leads orient a reader toward the doc they were split from.
-docs/DEPENDENCIES.md :: The two runtime dependencies that resolve from somewhere other than PyPI: co-core and co-core-aio from the private wheelhouse, and the notifier SDK from a git tag. How each is fetched, authenticated, pinned and upgraded. Deployment itself is [DEPLOYMENT.md](DEPLOYMENT.md).
+docs/DEPENDENCIES.md :: The runtime dependencies that resolve from somewhere other than PyPI: co-core and co-core-aio from the private wheelhouse, and the notifier SDK from a git tag. How each is fetched, authenticated, pinned and upgraded. Deployment itself is [DEPLOYMENT.md](DEPLOYMENT.md).
 docs/REGISTRY.md :: How the `info.registry` announcements Archiver publishes become WatchedItems: what an announcement owns, what survives reconciliation, every 409 a reconciled item answers, and the linkage lifecycle. The entity itself is [WATCHED-ITEMS.md](WATCHED-ITEMS.md).
 docs/CO-INDEX.md :: How this repo's SocratiCode index lives in the cohort's shared store on `co-index` (#300): the client contract, what is and is not indexed there, and how to verify the store before trusting a miss. The tool reference is [SOCRATICODE.md](SOCRATICODE.md).
 # Each points at content that stayed where it says: the scratch-cluster check

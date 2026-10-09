@@ -187,7 +187,7 @@ A skill is symlinked into both `skills/` and `.claude/skills/`; overrides in `sk
 
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — module layout, sibling services, bus topology, fetch contracts, the probe destination guard
 - [docs/BUS-CONNECTION-POLICY.md](docs/BUS-CONNECTION-POLICY.md) — #287 timeouts, retries, redaction, startup PING; #288 the `noeviction` cap
-- [docs/COMMANDS.md](docs/COMMANDS.md) — every runnable command, the test database, CI, landing Dependabot PRs
+- [docs/COMMANDS.md](docs/COMMANDS.md) — every runnable command, the test database, CI
 - [docs/CONTENT-PIPELINE.md](docs/CONTENT-PIPELINE.md) — fetch → extract → fingerprint, the `fetch_commands` outbox
 - [docs/CONTENT-REVISIONS.md](docs/CONTENT-REVISIONS.md) — the revisions producer: outbox, drain, #293 renewal
 - [docs/CONDITIONAL-GET.md](docs/CONDITIONAL-GET.md) — #269 validators: gate, snapshot, invalidation

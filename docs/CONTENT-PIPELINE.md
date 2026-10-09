@@ -83,8 +83,8 @@ decision:
 
 Both end `FAILED` with `failure_reason="blob_unreadable"` (distinct from
 `fetch_timeout` — the remedy is the blob store, not the origin),
-`CHECK_FETCH_FAILED`, ERROR health, one `WATCH_ERROR` on the transition, and the
-gate lifts so the item re-enters normal scheduling. Neither `stamp_full_fetch`
+`CHECK_FETCH_FAILED`, ERROR health, one `WATCH_ERROR` on the transition (reminders
+per #71), and the gate lifts so the item re-enters normal scheduling. Neither `stamp_full_fetch`
 nor `clear_validators` fires: no bytes arrived, and being unable to read a blob
 says nothing about the stored pair.
 

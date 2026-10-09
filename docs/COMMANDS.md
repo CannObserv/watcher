@@ -392,10 +392,11 @@ attribute condition or the SA binding (*CI* above). None is the bump's fault.
 watcher merges to `main` on the VM, behind the ship gate:
 
 ```bash
-gh pr checks <N>                               # every job green
 # Read the action's release notes, not just the diff: a major bump can change inputs.
-gh pr comment <N> --body "@dependabot rebase"  # only if main moved since it opened
-git fetch origin <dependabot/branch> && git merge --ff-only FETCH_HEAD
+gh pr comment <N> --body "@dependabot rebase"  # only if main moved; wait for its force-push
+gh pr checks <N> --watch                       # every job green, on the commit that lands
+git fetch origin "$(gh pr view <N> --json headRefName -q .headRefName)"
+git merge --ff-only FETCH_HEAD
 bash scripts/pre-ship.sh
 git push origin main                           # GitHub marks the PR merged
 ```

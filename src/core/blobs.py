@@ -1,36 +1,29 @@
-"""Reading the bytes a ``content.blobs`` fact points at (#275).
+"""Reading the bytes a ``gs://`` or ``file://`` URI names (#275).
 
-Replicator hands Watcher a claim check — ``blob_uri`` — not the bytes, so
-reading it is the one place Watcher parses that URI. The scheme dispatch lives
-here rather than in the apply worker: a new backend (replicator#7's object
-store) becomes an arm of ``read_blob``, not a second branch in
-``apply_fetch_blob``.
+Since #350 the one caller is the change diff (``diff_loader``), reading the
+processor's stored canonical text: Watcher never opens a fetched raw blob —
+the processor does, and answers ``input_unreadable`` when it cannot. The
+scheme dispatch lives here so a new backend is an arm of ``read_blob``.
 
-The two error types are the point, because the caller's remedy differs:
+Two error types under ``BlobReadError``, which is what the diff catches:
 
-* ``UnsupportedBlobScheme`` is **deterministic**. A re-issued command's fact
-  carries the same scheme, so every re-fetch is a real origin request spent
-  learning the same thing — the caller must fail on the first occasion.
-* ``BlobUnreadable`` may be transient (the blob reaped between fact and apply,
-  a mount blip), so the caller re-issues — under a cap, because a systematic
-  cause is indistinguishable from a transient one at this level (#275).
-
-Neither is a subclass of the other: the apply path branches on both, and an
-inheritance relationship would make the ``except`` ordering load-bearing.
+* ``UnsupportedBlobScheme`` is **permanent** — an unknown scheme, a refused
+  grant, an unset credential; no retry can help.
+* ``BlobUnreadable`` may be transient — the object gone, a mount blip.
 
 **Await ``aread_blob``, never ``read_blob``, from the worker** (CR-2). One
-uvicorn process runs the API, the fact consumer and the apply tasks, so a
-multi-MB blob read inline stalls all three.
+uvicorn process runs the API, the fact consumers and the tasks, so a
+multi-MB blob read inline stalls all of them.
 
 **Non-local backends spool through a temp file** (CR-5). ``blob_file`` yields a
 local path and removes anything it created; a ``file://`` blob is Replicator's
-own file and is yielded in place, never copied and never deleted. What this
-does *not* do is cap memory end to end: co-core's extractor takes ``bytes``, so
-one full copy is materialised whatever the backend. The spool keeps a remote
-download from being a *second* one.
+own file and is yielded in place, never copied and never deleted. The caller
+takes ``bytes``, so one full copy is materialised whatever the backend (the
+diff caps its input first, from the processor's recorded size); the spool keeps
+a remote download from being a *second* one.
 
-**The ``gs://`` arm** (#275 item 1, replicator#7) reads Replicator's object
-store: bucket from the authority, key from the path **verbatim** — the key is
+**The ``gs://`` arm** (#275 item 1, replicator#7) reads an object store — the
+processor's, now: bucket from the authority, key from the path **verbatim** — the key is
 flat (``blobs/<sha256>.bin``), and the ``file://`` shard rule must never be
 carried over. Identity comes from ``GCS_BLOB_CREDENTIALS`` (singular BLOB), a
 key file for the ``co-gcs-blob-reader`` SA — deliberately NOT
@@ -38,8 +31,8 @@ key file for the ``co-gcs-blob-reader`` SA — deliberately NOT
 two jobs must not share a principal. The client is built once per process (the
 SDK is blocking; a download inside ``asyncio.to_thread`` is beyond cancellation,
 so it lands in the shutdown budget). A 404 is the bucket lifecycle rule having
-reaped the blob — re-issuable, a fresh fetch repairs it; a 401/403 is a missing
-or revoked grant — permanent until an operator acts, and must not burn the cap.
+reaped the object; a 401/403 is a missing or revoked grant — permanent until
+an operator acts.
 """
 
 import asyncio

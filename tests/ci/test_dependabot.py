@@ -166,7 +166,11 @@ def test_every_uses_line_is_read() -> None:
         for path in sorted(WORKFLOWS.glob("*.y*ml"))
         for u in _uses(yaml.safe_load(path.read_text(encoding="utf-8")))
     )
-    assert sorted(ref for _, _, ref, _ in _uses_lines()) == parsed
+    assert sorted(ref for _, _, ref, _ in _uses_lines()) == parsed, (
+        "the line scan and the YAML parser disagree on the `uses:` refs: a quoted "
+        "ref, a flow-style step or a `uses:` line inside a `run:` block. Write each "
+        "step's `uses:` unquoted, on its own line, so the pin rule can read it"
+    )
 
 
 def test_every_action_is_sha_pinned_with_its_version() -> None:

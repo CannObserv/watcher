@@ -459,6 +459,30 @@ async def _revisions(db_session, watched_item_id) -> list[ChangeRevision]:
     return list((await db_session.execute(stmt)).scalars().all())
 
 
+async def _seed_replayable_pair(db_session, monkeypatch, row) -> WatchedItem:
+    """The blob leg stamped ``row``'s item as fetched, and the pair from the
+    last success still matches its key; the gate is on for this item alone
+    (#361, #362, #363)."""
+    item = await db_session.get(WatchedItem, row.watched_item_id)
+    item.etag = 'W/"old"'
+    item.last_modified = "Wed, 13 Aug 2026 10:00:00 GMT"
+    item.processor_version = "0.19.7+1"
+    item.validator_source_key = validator_source_key(
+        effective_url=item.effective_url, source_specs=item.source_specs, generation="0.19.7+1"
+    )
+    # Real clock: the next command resolves validators against datetime.now.
+    item.last_full_fetch_at = datetime.now(UTC)
+    item.blob_expires_at = item.last_full_fetch_at + timedelta(days=7)
+    await db_session.flush()
+    monkeypatch.setenv(CONDITIONAL_GET_ENV, str(item.id))
+    # Not vacuous: an unforced occasion would replay this pair.
+    assert replayable_validators(item, now=datetime.now(UTC)) == (
+        'W/"old"',
+        "Wed, 13 Aug 2026 10:00:00 GMT",
+    )
+    return item
+
+
 class TestDecisiveApply:
     """The derived fact decides and closes the check (#326).
 
@@ -735,10 +759,9 @@ class TestDecisiveApply:
     async def _unreadable_with_a_replayable_pair(
         self, db_session, monkeypatch, **fields
     ) -> ProcessCommand:
-        """#361: the blob leg stamped the item as fetched; the processor then
-        could not read the bytes. The pair from the last success still matches
-        its key, and the gate is on for this item alone. ``fields`` go to the
-        process row — the #362 cap test sets its ``reissue_count``."""
+        """#361: a replayable pair (``_seed_replayable_pair``), and the
+        processor could not read the bytes behind its stamp. ``fields`` go to
+        the process row — the #362 cap test sets its ``reissue_count``."""
         row = await _decisive(
             db_session,
             status=ProcessCommandStatus.FAILED,
@@ -747,23 +770,7 @@ class TestDecisiveApply:
             failure_detail="blob gone",
             **fields,
         )
-        item = await self._item(db_session, row)
-        item.etag = 'W/"old"'
-        item.last_modified = "Wed, 13 Aug 2026 10:00:00 GMT"
-        item.processor_version = "0.19.7+1"
-        item.validator_source_key = validator_source_key(
-            effective_url=item.effective_url, source_specs=item.source_specs, generation="0.19.7+1"
-        )
-        # Real clock: the re-issue resolves validators against datetime.now.
-        item.last_full_fetch_at = datetime.now(UTC)
-        item.blob_expires_at = item.last_full_fetch_at + timedelta(days=7)
-        await db_session.flush()
-        monkeypatch.setenv(CONDITIONAL_GET_ENV, str(item.id))
-        # Not vacuous: an unforced occasion would replay this pair.
-        assert replayable_validators(item, now=datetime.now(UTC)) == (
-            'W/"old"',
-            "Wed, 13 Aug 2026 10:00:00 GMT",
-        )
+        await _seed_replayable_pair(db_session, monkeypatch, row)
         _wire(db_session, monkeypatch)
         _quiet(monkeypatch)
         return row
@@ -910,6 +917,26 @@ class TestDecisiveReaper:
         assert item.health_status == WatchHealthStatus.ERROR
         (event,) = await _audits(db_session, EventType.CHECK_EXTRACTION_FAILED)
         assert event.payload["reason"] == "processing_timeout"
+
+    async def test_the_hard_limit_forgets_the_pair(self, db_session, monkeypatch):
+        # #363: the blob leg stamped the item and the processor never judged
+        # the bytes — a replayed pair's 304 would flip ERROR to OK with no
+        # #293 renewal. One branch is enough: all three share _end_lineage.
+        monkeypatch.setenv(PROCESS_COMMAND_HARD_LIMIT_ENV, "7200")
+        row = await _decisive(db_session, issued_at=datetime.now(UTC) - timedelta(hours=3))
+        item = await _seed_replayable_pair(db_session, monkeypatch, row)
+        _quiet(monkeypatch)
+
+        result = await reap_process_commands(
+            session=db_session, bus_client=fakeredis.FakeAsyncRedis()
+        )
+
+        assert result["hard_limited"] == 1
+        # What committed: the clear must precede record_check_failure's commit.
+        await db_session.refresh(item)
+        assert (item.etag, item.last_modified, item.validator_source_key) == (None, None, None)
+        nxt = await create_fetch_command(db_session, item, now=datetime.now(UTC))
+        assert (nxt.request_etag, nxt.request_last_modified) == (None, None)
 
     async def test_the_re_issue_cap_fails_the_check(self, db_session, monkeypatch):
         monkeypatch.setenv(FETCH_MAX_REISSUES_ENV, "2")

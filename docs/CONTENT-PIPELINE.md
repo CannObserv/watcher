@@ -202,7 +202,8 @@ already closed decides nothing.
   branched on). `input_unreadable` → forced re-fetch under the #275 cap,
   counted across both legs.
 - **Downtime** is delay: the reaper logs `processing delayed` with item ids;
-  the hard limit or re-issue cap fails the check (`processing_timeout`).
+  the hard limit or re-issue cap fails the check (`processing_timeout`) and
+  clears the pair (#363).
 
 **Option A** (D6, `extraction_change`) runs on every change.
 Bound spec moved → notify with a `NOTE:` line (`extraction_changed = "spec"`).

@@ -53,6 +53,7 @@ from src.core.process_commands import (
     select_pending_process_publish,
 )
 from src.core.utils import format_utc_iso
+from src.core.validators import clear_validators
 from src.workers import bp
 from src.workers.fetch_commands import (
     close_succeeded,
@@ -335,8 +336,10 @@ async def _end_lineage(
         await session.commit()
         return
     watched_item = await session.get(WatchedItem, fetch.watched_item_id)
-    # A timeout says nothing about the stored validators: the pair is the last
-    # *extracted* 200's, and a 304 against it is still a true answer.
+    # The blob leg stamped bytes the processor never judged, and those can't
+    # vouch for a pair: kept, the next unforced check could replay it and a
+    # 304 would flip ERROR to OK with no #293 renewal (#362, #363).
+    clear_validators(watched_item)
     await record_check_failure(
         session,
         watched_item,

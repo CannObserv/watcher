@@ -35,7 +35,7 @@ one pure predicate. Listed by subject; evaluation order is not a contract:
 | Rule | Why |
 |---|---|
 | The gate (`WATCHER_CONDITIONAL_GET_ENABLED`) is off for this item | Off by default; a ULID list is the canary position, `true` the fleet |
-| The caller forced a full fetch | Check-now is a real re-read; so is the re-fetch after `input_unreadable` (#361), whose cap clears the pair (#362) |
+| The caller forced a full fetch | Check-now is a real re-read; so is the re-fetch after `input_unreadable` (#361) |
 | Nothing stored, or nothing **sendable** | The send-side guard mirrors Replicator's refusal list (printable US-ASCII, ≤1024, non-blank). A command it would refuse costs an ERROR health transition before any request goes out |
 | `validator_source_key` disagrees with the item's current key | The URL moved, `source_specs` were re-announced, or the extraction generation changed. One key rather than a clear scattered across every writer of those fields |
 | No `last_full_fetch_at` | Unknown provenance is not replayable |
@@ -97,12 +97,12 @@ leg stamps `last_full_fetch_at` before the processor reads the bytes, so a
 replay would measure rule 7 from a fetch that renewed nothing; the forced
 re-fetch re-stamps when its bytes arrive.
 
-**An extraction failure also clears the pair.** Bytes arrived and could not be
-extracted (#258/#260), so the item is in ERROR with no new fingerprint — and a
-304 apply records a *successful* check. Kept, the validators would let the next
-304 flip a broken item back to OK health with nothing extracted. Forgetting them
-makes the next command a full fetch, re-asserting the failure until the spec is
-fixed.
+**A check that ends with bytes but no text clears the pair**: an extraction
+failure (#258/#260), the `input_unreadable` cap (#362), a processing timeout
+(#363). The item is in ERROR with no new fingerprint, and a 304 apply records a
+*successful* check. Kept, the validators would let the next 304 flip it back to
+OK health with nothing extracted. Forgotten, the next command fetches in full
+and re-asserts the failure.
 
 **Freshness now reads as a triple**: `last_checked_at` (we tried),
 `last_observed_at` (the content was confirmed current — a 304 counts), and

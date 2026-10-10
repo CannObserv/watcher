@@ -316,18 +316,19 @@ async def fail_blob_unreadable(
     normal scheduling; recovery is automatic once the cause is fixed — under its
     own ``failure_reason``.
 
-    Neither validator helper fires here. The caller is the derived leg at the
-    ``input_unreadable`` cap: the blob leg already stamped the fetch, which is
-    true — Replicator did return bytes — and this adds no stamp of its own
-    (CR-13). Being unable to *read* a blob says nothing about the stored pair,
-    so it survives exactly as it does under every ``apply_fetch_failure``
-    reason but ``invalid_request_options``.
+    The caller is the derived leg at the ``input_unreadable`` cap: the blob
+    leg already stamped the fetch, which is true — Replicator did return
+    bytes — and this adds no stamp of its own (CR-13). But unread bytes can't
+    vouch for a pair: kept, the next unforced check could replay it and a 304
+    would flip ERROR to OK with nothing read (#361, #362). Forget it, as
+    ``fail_extraction`` does.
     """
     reissues = row.reissue_count if reissues is None else reissues
     row.status = FetchCommandStatus.FAILED
     row.failure_reason = BLOB_UNREADABLE_REASON
     row.failure_detail = detail
     row.applied_at = now
+    clear_validators(watched_item)
     await record_check_failure(
         session,
         watched_item,

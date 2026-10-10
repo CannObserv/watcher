@@ -732,7 +732,9 @@ class TestDecisiveApply:
         item = await self._item(db_session, row)
         assert item.health_status != WatchHealthStatus.ERROR
 
-    async def _unreadable_with_a_replayable_pair(self, db_session, monkeypatch) -> ProcessCommand:
+    async def _unreadable_with_a_replayable_pair(
+        self, db_session, monkeypatch, **fields
+    ) -> ProcessCommand:
         """#361: the blob leg stamped the item as fetched; the processor then
         could not read the bytes. The pair from the last success still matches
         its key, and the gate is on for this item alone."""
@@ -742,6 +744,7 @@ class TestDecisiveApply:
             fact_at=datetime.now(UTC),
             failure_reason="input_unreadable",
             failure_detail="blob gone",
+            **fields,
         )
         item = await self._item(db_session, row)
         item.etag = 'W/"old"'
@@ -816,6 +819,24 @@ class TestDecisiveApply:
         assert fetch.failure_reason == "blob_unreadable"
         assert (await self._item(db_session, row)).health_status == WatchHealthStatus.ERROR
         assert await client.xlen("content.fetch") == 0
+
+    async def test_input_unreadable_at_the_cap_forgets_the_pair(self, db_session, monkeypatch):
+        # #362: the item re-enters normal scheduling unforced, and the stamp
+        # names bytes nobody could read — a replayed pair's 304 would flip
+        # ERROR to OK with no bytes and no #293 renewal.
+        monkeypatch.setenv(FETCH_MAX_REISSUES_ENV, "1")
+        row = await self._unreadable_with_a_replayable_pair(
+            db_session, monkeypatch, reissue_count=1
+        )
+
+        result = await apply_process_fact(row.command_id, bus_client=fakeredis.FakeAsyncRedis())
+
+        assert result["error"] == "blob_unreadable"
+        item = await self._item(db_session, row)
+        assert (item.etag, item.last_modified, item.validator_source_key) == (None, None, None)
+        nxt = await create_fetch_command(db_session, item, now=datetime.now(UTC))
+        assert nxt.forced_full_fetch is False
+        assert (nxt.request_etag, nxt.request_last_modified) == (None, None)
 
     async def test_a_superseded_occasion_writes_nothing(self, db_session, monkeypatch):
         row = await _decisive(db_session, **_completed())

@@ -700,19 +700,13 @@ class TestOptionA:
     revision, so the revision's own version can be stale.
     """
 
-    SPEC_FP = SPEC_FP
     OTHER_SPEC_FP = "spec1:sha256:" + "22" * 32
-    BASE_FP = BASE_FP
-    NEXT_FP = NEXT_FP
-
-    def _outcome(self, fingerprint, **kwargs):
-        return _outcome(fingerprint, **kwargs)
 
     async def _baselined(self, db_session, name, **outcome_kwargs):
         wi = await make_watched_item(db_session, name=name, source_specs=[_SPEC_FULL_PAGE])
         await db_session.flush()
         await apply_extraction_outcome(
-            db_session, wi, self._outcome(self.BASE_FP, **outcome_kwargs), blob=_BLOB
+            db_session, wi, _outcome(BASE_FP, **outcome_kwargs), blob=_BLOB
         )
         await db_session.flush()
         return wi
@@ -742,7 +736,7 @@ class TestOptionA:
         before = wi.last_changed_at
 
         result = await apply_extraction_outcome(
-            db_session, wi, self._outcome(self.NEXT_FP, version="0.20.0+1"), blob=_BLOB
+            db_session, wi, _outcome(NEXT_FP, version="0.20.0+1"), blob=_BLOB
         )
         await db_session.flush()
 
@@ -751,7 +745,7 @@ class TestOptionA:
         assert result.notifications_dispatched == 0
         dispatch.assert_not_awaited()
         _baseline, rebaseline = await self._revisions(db_session, wi)
-        assert rebaseline.content_fingerprint == self.NEXT_FP
+        assert rebaseline.content_fingerprint == NEXT_FP
         assert rebaseline.processor_version == "0.20.0+1"
         assert wi.processor_version == "0.20.0+1"
         # Not a content change: the item's change clock does not move.
@@ -767,7 +761,7 @@ class TestOptionA:
         # only the notification is withheld.
         wi = await self._baselined(db_session, "OptionA outbox")
         await apply_extraction_outcome(
-            db_session, wi, self._outcome(self.NEXT_FP, version="0.20.0+1"), blob=_BLOB
+            db_session, wi, _outcome(NEXT_FP, version="0.20.0+1"), blob=_BLOB
         )
         await db_session.flush()
         _baseline, rebaseline = await self._revisions(db_session, wi)
@@ -781,7 +775,7 @@ class TestOptionA:
         wi = await self._baselined(db_session, "OptionA spec")
 
         result = await apply_extraction_outcome(
-            db_session, wi, self._outcome(self.NEXT_FP, spec=self.OTHER_SPEC_FP), blob=_BLOB
+            db_session, wi, _outcome(NEXT_FP, spec=self.OTHER_SPEC_FP), blob=_BLOB
         )
 
         assert result.changed is True
@@ -798,7 +792,7 @@ class TestOptionA:
         result = await apply_extraction_outcome(
             db_session,
             wi,
-            self._outcome(self.NEXT_FP, spec=self.OTHER_SPEC_FP, version="0.20.0+1"),
+            _outcome(NEXT_FP, spec=self.OTHER_SPEC_FP, version="0.20.0+1"),
             blob=_BLOB,
         )
 
@@ -810,9 +804,7 @@ class TestOptionA:
     async def test_a_content_change_carries_no_label(self, dispatch, db_session):
         wi = await self._baselined(db_session, "OptionA content")
 
-        result = await apply_extraction_outcome(
-            db_session, wi, self._outcome(self.NEXT_FP), blob=_BLOB
-        )
+        result = await apply_extraction_outcome(db_session, wi, _outcome(NEXT_FP), blob=_BLOB)
 
         assert result.changed is True
         assert dispatch.call_args.kwargs["event"].metadata["extraction_changed"] is None
@@ -826,7 +818,7 @@ class TestOptionA:
         result = await apply_extraction_outcome(
             db_session,
             wi,
-            self._outcome(self.NEXT_FP, spec=self.OTHER_SPEC_FP, version="0.20.0+1"),
+            _outcome(NEXT_FP, spec=self.OTHER_SPEC_FP, version="0.20.0+1"),
             blob=_BLOB,
         )
 
@@ -838,7 +830,7 @@ class TestOptionA:
         wi = await self._baselined(db_session, "OptionA refresh")
 
         result = await apply_extraction_outcome(
-            db_session, wi, self._outcome(self.BASE_FP, version="0.20.0+1"), blob=_BLOB
+            db_session, wi, _outcome(BASE_FP, version="0.20.0+1"), blob=_BLOB
         )
         await db_session.flush()
 
@@ -854,12 +846,12 @@ class TestOptionA:
         # version the item already knows is content, not the upgrade.
         wi = await self._baselined(db_session, "OptionA base")
         await apply_extraction_outcome(
-            db_session, wi, self._outcome(self.BASE_FP, version="0.20.0+1"), blob=_BLOB
+            db_session, wi, _outcome(BASE_FP, version="0.20.0+1"), blob=_BLOB
         )
         await db_session.flush()
 
         result = await apply_extraction_outcome(
-            db_session, wi, self._outcome(self.NEXT_FP, version="0.20.0+1"), blob=_BLOB
+            db_session, wi, _outcome(NEXT_FP, version="0.20.0+1"), blob=_BLOB
         )
 
         assert result.changed is True

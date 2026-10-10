@@ -87,7 +87,7 @@ class TestApplyExtractionOutcome:
             .all()
         )
         assert len(revs) == 1
-        assert revs[0].content_fingerprint.startswith("sha256:")
+        assert revs[0].content_fingerprint == BASE_FP
 
     async def test_same_fingerprint_is_cache_hit_no_new_revision(self, db_session):
         """Second run with same content: cache hit, no new ChangeRevision."""

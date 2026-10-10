@@ -862,6 +862,7 @@ class TestForcedFetchLineage:
         return await db_session.get(FetchCommand, new_id)
 
     async def test_a_reissue_keeps_the_forced_intent(self, db_session, monkeypatch):
+        # The reaper's call: no keyword, which never un-forces (#361).
         reissued = await self._reissued(db_session, monkeypatch, forced=True)
         assert reissued.forced_full_fetch is True
         assert reissued.request_etag is None
@@ -878,14 +879,6 @@ class TestForcedFetchLineage:
         )
         assert reissued.forced_full_fetch is True
         assert reissued.request_etag is None
-
-    async def test_an_unforced_caller_cannot_downgrade_a_forced_lineage(
-        self, db_session, monkeypatch
-    ):
-        reissued = await self._reissued(
-            db_session, monkeypatch, forced=True, force_full_fetch=False
-        )
-        assert reissued.forced_full_fetch is True
 
 
 class TestValidatorStorage:

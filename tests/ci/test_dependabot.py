@@ -1,4 +1,5 @@
-"""Pin ``.github/dependabot.yml`` — the bot that proposes action bumps (#283).
+"""Pin ``.github/dependabot.yml`` — the bot that proposes action bumps (#283) —
+and the workflow pins it moves (#360).
 
 Dependabot's config fails silently: a mistyped ecosystem, a bad directory or a
 missing schedule stops producing PRs without erroring anywhere a person looks,
@@ -21,6 +22,7 @@ and a quiet bot reads like "no updates available". Notifier's pattern
   silent once upstream stops tagging majors (setup-uv after v7), and a moved
   tag is the tj-actions attack. The comment is what Dependabot reads and
   rewrites alongside the SHA.
+* **setup-uv states ``prune-cache: true``**, since v9 flipped its default.
 
 Pure file reads — no network, no database.
 """

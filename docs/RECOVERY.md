@@ -141,7 +141,7 @@ not here. The monitor:
 |---|---|---|
 | `interval_seconds` | `86400` | one run a night |
 | `grace_seconds` | `7200` | the timer's 10-minute jitter, plus the unit's one-hour timeout — a run killed by it cannot check in |
-| `renotify_seconds` | `86400` | repeat the alarm daily for as long as it is missing |
+| `renotify_seconds` | `86400` | spaces repeat reports, missing or `alert`; every failed night still reports, and the next `ok` sends *"has cleared"* (status#28) |
 | `channel_ids` | the watcher tenant's default Mailgun and Slack channels | |
 | `title_template` / `body_template` | `watcher backup {{ outcome }} on {{ source_host }}` / `{{ error }}` | rendered for an `alert` only |
 | `enabled` | `true`, stated | the first trap below |

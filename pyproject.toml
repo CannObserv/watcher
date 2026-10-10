@@ -23,9 +23,9 @@ dependencies = [
     "python-multipart>=0.0.22,<1",
     "notifier-client",
     # No [extract]: the processor extracts (#350); watcher needs the models, the
-    # bus contract and the stdlib-only media-type rule. Still exact, lockstep with
-    # CannObserv/processor, though its reason (#325's shared processor_version)
-    # left with local extraction — loosening it is #342's call.
+    # bus contract and the stdlib-only media-type rule. Exact, because both sides
+    # must run the same media-type function: bumped when CannObserv/processor
+    # coordinates a contract change, not on a schedule.
     "co-core==0.19.7",
     "co-core-aio[bus]==0.19.7",
     # Imported directly by the bus layer; docs/BUS-CONNECTION-POLICY.md was

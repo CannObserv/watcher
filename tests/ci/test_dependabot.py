@@ -7,8 +7,8 @@ and a quiet bot reads like "no updates available". Notifier's pattern
 
 * **``github-actions`` only.** The ``uv`` ecosystem waits on two things #283
   names: co-core resolves only from the private wheelhouse, which
-  Dependabot's updater cannot sync, and its exact pins move in lockstep with
-  Processor (#342), not on a bot's schedule. Adding a ``uv`` block here is a
+  Dependabot's updater cannot sync, and its exact pins move when Processor
+  coordinates a contract change, not on a bot's schedule. A ``uv`` block here is a
   decision for its own issue, so this file fails it.
 * **The open-PR limit outlasts a full batch.** Past the limit (default 5)
   Dependabot opens nothing and says so nowhere (notifier#103). One PR per
@@ -16,6 +16,11 @@ and a quiet bot reads like "no updates available". Notifier's pattern
 * **Commits match AGENTS.md's convention**, because a Dependabot PR lands by
   fast-forwarding its commit onto ``main`` (docs/COMMANDS.md → *Dependabot
   PRs*).
+* **Every ``uses:`` pins a commit SHA with its version comment** (#360).
+  Dependabot proposes refs in the pin's own form, so a floating major goes
+  silent once upstream stops tagging majors (setup-uv after v7), and a moved
+  tag is the tj-actions attack. The comment is what Dependabot reads and
+  rewrites alongside the SHA.
 
 Pure file reads — no network, no database.
 """
@@ -35,6 +40,12 @@ COMMIT_TYPES = {"feat", "fix", "refactor", "docs", "test", "chore"}
 
 # `owner/repo@ref` or `owner/repo/path@ref`: what the github-actions updater bumps.
 _ACTION = re.compile(r"^([\w.-]+/[\w.-]+)(?:/[^@]*)?@.+$")
+
+# A `uses:` line as written, comment included — the parsed YAML drops comments.
+_USES_LINE = re.compile(r"^\s*(?:-\s+)?uses:\s*(\S+)(.*)$")
+# `<40-hex SHA> # vX.Y.Z`, the form Dependabot keeps in step.
+_SHA_PIN = re.compile(r"^[^@]+@[0-9a-f]{40}$")
+_VERSION_COMMENT = re.compile(r"^\s+# v\d+\.\d+\.\d+$")
 
 
 def _load() -> dict:
@@ -77,6 +88,16 @@ def _actions() -> set[str]:
     return {m.group(1) for ref in refs if (m := _ACTION.match(ref))}
 
 
+def _uses_lines() -> list[tuple[str, int, str, str]]:
+    """Every ``uses:`` line in the workflows: (file, line, ref, rest of line)."""
+    return [
+        (path.name, n, m.group(1), m.group(2))
+        for path in sorted(WORKFLOWS.glob("*.y*ml"))
+        for n, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1)
+        if (m := _USES_LINE.match(line))
+    ]
+
+
 def test_config_exists() -> None:
     assert CONFIG.is_file(), (
         "no .github/dependabot.yml — nothing proposes the action bumps the "
@@ -94,7 +115,7 @@ def test_only_github_actions_is_configured() -> None:
     assert ecosystems == ["github-actions"], (
         f"ecosystems {ecosystems}: #283 ships github-actions alone. A `uv` block "
         "needs the private wheelhouse reachable from Dependabot's updater and a "
-        "story for co-core's lockstep pins — its own issue, not this file's"
+        "story for co-core's Processor-coordinated pins — its own issue, not this file's"
     )
 
 
@@ -134,3 +155,46 @@ def test_commits_follow_the_repo_convention(actions_block: dict) -> None:
         f"commit-message.prefix {prefix!r}: Dependabot's default 'Bump …' subject "
         f"matches none of AGENTS.md's types {sorted(COMMIT_TYPES)}"
     )
+
+
+def test_every_uses_line_is_read() -> None:
+    """The line scan sees every ``uses:`` the parser does, so none escapes the pin rule."""
+    parsed = sorted(
+        u
+        for path in sorted(WORKFLOWS.glob("*.y*ml"))
+        for u in _uses(yaml.safe_load(path.read_text(encoding="utf-8")))
+    )
+    assert sorted(ref for _, _, ref, _ in _uses_lines()) == parsed
+
+
+def test_every_action_is_sha_pinned_with_its_version() -> None:
+    bad = [
+        f"{name}:{n}: {ref}{rest}"
+        for name, n, ref, rest in _uses_lines()
+        if not (_SHA_PIN.match(ref) and _VERSION_COMMENT.match(rest))
+    ]
+    assert not bad, (
+        "pin each action as `owner/action@<40-hex sha> # vX.Y.Z` (#360): a tag "
+        "moves, and a floating major goes stale once upstream stops publishing "
+        "it. A re-rendered context-cadence.yml reverts its pin (skills#373). "
+        "Offending lines:\n  " + "\n  ".join(bad)
+    )
+
+
+def _steps_using(action: str) -> list[dict]:
+    """Every workflow step whose ``uses:`` names ``action``."""
+    return [
+        step
+        for path in sorted(WORKFLOWS.glob("*.y*ml"))
+        for job in yaml.safe_load(path.read_text(encoding="utf-8")).get("jobs", {}).values()
+        for step in job.get("steps", [])
+        if step.get("uses", "").split("@")[0] == action
+    ]
+
+
+def test_setup_uv_keeps_pruning_its_cache() -> None:
+    """setup-uv v9 flipped ``prune-cache`` to ``false``; stating it keeps v5–v7's
+    behaviour, so the Actions cache doesn't grow on a bump nobody read (#360)."""
+    steps = _steps_using("astral-sh/setup-uv")
+    assert steps, "no setup-uv step found — the derivation broke"
+    assert all(s.get("with", {}).get("prune-cache") is True for s in steps)

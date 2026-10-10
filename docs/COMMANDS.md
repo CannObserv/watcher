@@ -378,8 +378,9 @@ gcloud iam service-accounts add-iam-policy-binding \
 `.github/dependabot.yml` proposes **action bumps only** (`github-actions`, weekly,
 one PR per action); `tests/ci/test_dependabot.py` pins it, because a broken
 config goes quiet rather than red. `uv` is out until the private wheelhouse is
-reachable from Dependabot's updater and co-core's lockstep pins (#342) have a
-story — #283 → *Two blockers*.
+reachable from Dependabot's updater and co-core's pins, bumped when Processor
+coordinates a contract change, have a story — #283 → *Two blockers*. Every
+`uses:` is `@<sha> # vX.Y.Z` (#360); the same test fails any other form.
 
 **A Dependabot run reads its own credential context.** Its `GITHUB_TOKEN` is
 read-only and only *Dependabot* secrets reach it, so the four WIF jobs depend on
@@ -414,5 +415,5 @@ PR at a time — after each push the next may need `@dependabot rebase`. **Resta
 **`context-cadence.yml` is generated** (`install-cadence.sh`, vendored in
 `skills-vendor/`), and Dependabot bumps its `actions/checkout` with `ci.yml`'s.
 Take the bump; a later re-run of the generator reverts it to the generator's
-own pin until that moves upstream (gregoryfoster/skills#373) — so after a regeneration, diff its `uses:`
-lines before committing.
+own `@v5` (gregoryfoster/skills#373), which the pin test fails — so after a
+regeneration, restore its `uses:` line before committing.

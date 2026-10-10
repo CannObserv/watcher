@@ -11,8 +11,8 @@ The **`WatchedItem` is the single monitored entity** (#191): one row = one URL =
 fingerprint = one change signal. It owns its `effective_url`, `source_specs`, schedule
 (`default_schedule_config` + an optional 1:1 `TemporalProfile`), `domain_name` /
 `domain_suspended`, health/timestamps, and its notification surface. A periodic
-`schedule_tick` enqueues `check_watched_item` for each due item; the pipeline extracts,
-fingerprints, writes a `ChangeRevision`, and dispatches `CHANGE_DETECTED` once per item.
+`schedule_tick` enqueues `check_watched_item` for each due item; the processor extracts and
+fingerprints, and Watcher writes a `ChangeRevision` and dispatches `CHANGE_DETECTED` once per item.
 
 Canonical content provenance (InfoItem / InfoSource / SourceRevision) lives in the sibling
 **Archiver service** (separate repo, its own VM), consumed over the bus via `info.registry`

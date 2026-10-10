@@ -51,9 +51,9 @@ logger = get_logger(__name__)
 PROCESSOR = "extract"
 
 # The one terminal reason that says the *input* is gone, not that the bytes
-# were judged: the raw blob expired or was never readable. Processor-decided,
-# it re-fetches under the #275 cap (#326); every other terminal reason is the
-# extraction-failure path.
+# were judged: the raw blob expired or was never readable. It re-fetches under
+# the #275 cap (#326); every other terminal reason is the extraction-failure
+# path.
 INPUT_UNREADABLE_REASON = "input_unreadable"
 
 PROCESS_COMMAND_TIMEOUT_ENV = "WATCHER_PROCESS_COMMAND_TIMEOUT_SECONDS"

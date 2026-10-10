@@ -330,7 +330,8 @@ async def _give_up(
 async def _end_lineage(
     session: AsyncSession, row: ProcessCommand, *, now: datetime, why: str
 ) -> None:
-    """``_give_up``, committed — with the ERROR surface when it closed a check."""
+    """``_give_up``, committed — with the ERROR surface, and the pair cleared,
+    when it closed a check."""
     fetch = await _give_up(session, row, now=now, why=why)
     if fetch is None:
         await session.commit()

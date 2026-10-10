@@ -23,7 +23,7 @@ uv sync
 ```
 
 Auth, upgrade procedure and the pinned version: [docs/DEPENDENCIES.md](docs/DEPENDENCIES.md).
-`co-core` owns fetch → extract → fingerprint; watcher no longer fetches at all —
+`co-core` owns fetch → extract → fingerprint; watcher does none of it —
 [docs/CONTENT-PIPELINE.md](docs/CONTENT-PIPELINE.md).
 
 <!-- BEGIN socraticode-policy -->

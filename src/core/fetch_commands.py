@@ -180,7 +180,7 @@ def env_number[T: (int, float)](
     An unparseable value falls back to the default rather than raising, for the
     same reason ``validator_max_age`` does: **a knob must not be able to wedge
     the path it governs**. Both of these are read while handling a failure — the
-    cap from inside ``except BlobUnreadable``, the timeout once per reaper pass
+    cap on the derived leg's ``input_unreadable``, the timeout once per reaper pass
     — so a ``ValueError`` there escapes the handler, leaves the row exactly as
     it was, and the next pass repeats it. A typo would reinstate the very loop
     #275 removed.

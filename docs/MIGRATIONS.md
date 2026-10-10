@@ -191,6 +191,13 @@ values are destroyed by design (#261): Archiver identifies a SourceRevision by
 local copy was redundant rather than unique. Subsequent deploys use the standard
 order above.
 
+## Restart-before-migrate — one-time, `89e0c7725367` (#350)
+
+Drops the five shadow-leg columns on `process_commands` the previous release
+still maps (and adds #345's partial index) — #261's shape, #261's order:
+restart, then `alembic upgrade head`. The new code never names the columns
+(all nullable) and is correct without the index.
+
 ## Restart-before-migrate — one-time, `10783d8a2405` (#272)
 
 `10783d8a2405` **drops** the four inert `domains` columns the retired

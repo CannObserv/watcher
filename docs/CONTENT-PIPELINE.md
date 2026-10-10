@@ -68,8 +68,7 @@ sees it, and an uncapped loop runs at Replicator's round-trip, each turn a real
 origin request. At the cap the check ends `FAILED`,
 `failure_reason="blob_unreadable"` (the remedy is the blob store, not the
 origin), `CHECK_FETCH_FAILED`, ERROR health, one `WATCH_ERROR` (reminders per
-#71), and the gate lifts. `clear_validators` fires (#362): unread bytes
-can't vouch for a pair.
+#71), and the gate lifts. `clear_validators` fires (#362).
 [`src/core/blobs.py`](../src/core/blobs.py) still reads one kind of blob — the
 processor's stored canonical text, for the change diff.
 

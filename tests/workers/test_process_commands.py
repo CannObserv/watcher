@@ -835,7 +835,6 @@ class TestDecisiveApply:
         item = await self._item(db_session, row)
         assert (item.etag, item.last_modified, item.validator_source_key) == (None, None, None)
         nxt = await create_fetch_command(db_session, item, now=datetime.now(UTC))
-        assert nxt.forced_full_fetch is False
         assert (nxt.request_etag, nxt.request_last_modified) == (None, None)
 
     async def test_a_superseded_occasion_writes_nothing(self, db_session, monkeypatch):

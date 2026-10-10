@@ -212,8 +212,8 @@ async def _decide(
     * derived text → the history comparison and Option A
       (``apply_extraction_outcome``), with the raw blob's provenance from the
       fetch fact; the row closes ``SUCCEEDED``;
-    * ``input_unreadable`` → the bytes are gone, not judged: re-fetch, capped
-      at ``WATCHER_FETCH_MAX_REISSUES`` across both legs (#275);
+    * ``input_unreadable`` → the bytes are gone, not judged: re-fetch in full
+      (#361), capped at ``WATCHER_FETCH_MAX_REISSUES`` across both legs (#275);
     * anything else — empty on the last spec (D5, the #258 rule), any other
       terminal reason, ``extraction_error`` from a give-up (processor#17)
       included — is the extraction-failure path. ``detail`` is recorded, never

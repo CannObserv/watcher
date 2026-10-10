@@ -158,6 +158,9 @@ class TestApplyProcessFact:
         assert nxt.source_spec == SPEC_B
         assert nxt.status == ProcessCommandStatus.IN_FLIGHT
         assert await client.xlen("content.process") == 1
+        # The check stays open for the chain's answer.
+        fetch = await db_session.get(FetchCommand, row.fetch_command_id)
+        assert fetch.status == FetchCommandStatus.PROCESSING
 
     @pytest.mark.parametrize(
         "fact",
@@ -620,16 +623,6 @@ class TestDecisiveApply:
         assert len(await _audits(db_session, EventType.CHECK_REBASELINED)) == 1
         (event,) = await _audits(db_session, EventType.CHECK_SNAPSHOT_CREATED)
         assert event.payload["rebaselined"] is True
-
-    async def test_empty_with_a_spec_left_chains_and_stays_open(self, db_session, monkeypatch):
-        row = await _decisive(db_session, **_empty())
-        _wire(db_session, monkeypatch)
-        client = fakeredis.FakeAsyncRedis()
-
-        result = await apply_process_fact(row.command_id, bus_client=client)
-
-        assert result["spec_index"] == 1
-        assert (await self._fetch(db_session, row)).status == FetchCommandStatus.PROCESSING
 
     async def test_empty_on_the_last_spec_is_an_extraction_failure(self, db_session, monkeypatch):
         row = await _decisive(

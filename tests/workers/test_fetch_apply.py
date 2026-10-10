@@ -842,7 +842,7 @@ class TestForcedFetchLineage:
     ``input_unreadable`` alike.
     """
 
-    async def _reissued(self, db_session, monkeypatch, *, forced: bool) -> FetchCommand:
+    async def _reissued(self, db_session, monkeypatch, *, forced: bool, **kwargs) -> FetchCommand:
         monkeypatch.setenv(CONDITIONAL_GET_ENV, "true")
         wi, row = await _row_with_fact(db_session)
         wi.etag = 'W/"v2"'
@@ -858,7 +858,7 @@ class TestForcedFetchLineage:
         row.status = FetchCommandStatus.EXPIRED
         await db_session.flush()
 
-        new_id = await reissue_fetch_command(db_session, wi, row, AsyncMock())
+        new_id = await reissue_fetch_command(db_session, wi, row, AsyncMock(), **kwargs)
         return await db_session.get(FetchCommand, new_id)
 
     async def test_a_reissue_keeps_the_forced_intent(self, db_session, monkeypatch):
@@ -870,6 +870,22 @@ class TestForcedFetchLineage:
         reissued = await self._reissued(db_session, monkeypatch, forced=False)
         assert reissued.forced_full_fetch is False
         assert reissued.request_etag == 'W/"v2"'
+
+    async def test_the_caller_can_force_an_ordinary_lineage(self, db_session, monkeypatch):
+        # #361: input_unreadable forces, OR-ed with the inherited intent.
+        reissued = await self._reissued(
+            db_session, monkeypatch, forced=False, force_full_fetch=True
+        )
+        assert reissued.forced_full_fetch is True
+        assert reissued.request_etag is None
+
+    async def test_an_unforced_caller_cannot_downgrade_a_forced_lineage(
+        self, db_session, monkeypatch
+    ):
+        reissued = await self._reissued(
+            db_session, monkeypatch, forced=True, force_full_fetch=False
+        )
+        assert reissued.forced_full_fetch is True
 
 
 class TestValidatorStorage:

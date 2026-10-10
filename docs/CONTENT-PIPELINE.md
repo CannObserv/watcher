@@ -61,15 +61,15 @@ What that leaves in the code:
 Watcher never opens a raw blob (#350); the processor does, and answers
 `input_unreadable` when the blob is gone or its download fails the checksum (a
 refused grant is transient there: no fact, so `processing_timeout`). That
-re-fetches under a fresh `command_id`, **capped** at
+re-fetches unconditionally (#361) under a fresh `command_id`, **capped** at
 `WATCHER_FETCH_MAX_REISSUES` across both legs' re-issue counts. The cap is
 load-bearing: a re-issue publishes immediately, so the scheduling gate never
 sees it, and an uncapped loop runs at Replicator's round-trip, each turn a real
 origin request. At the cap the check ends `FAILED`,
 `failure_reason="blob_unreadable"` (the remedy is the blob store, not the
 origin), `CHECK_FETCH_FAILED`, ERROR health, one `WATCH_ERROR` (reminders per
-#71), and the gate lifts. `clear_validators` does not fire; the blob leg's
-stamp stands, and the re-issue may replay the pair (#361).
+#71), and the gate lifts. `clear_validators` does not fire; the forced
+re-fetch re-stamps.
 [`src/core/blobs.py`](../src/core/blobs.py) still reads one kind of blob — the
 processor's stored canonical text, for the change diff.
 
@@ -199,8 +199,8 @@ already closed decides nothing.
   `apply_extraction_outcome` (history, #293 renewal, Option A), `SUCCEEDED`,
   validators recorded with the outcome. Empty on the last spec or any terminal
   reason → extraction failure, `processing_failed` (detail audited, never
-  branched on). `input_unreadable` → re-fetch under the #275 cap, counted
-  across both legs.
+  branched on). `input_unreadable` → forced re-fetch under the #275 cap,
+  counted across both legs.
 - **Downtime** is delay: the reaper logs `processing delayed` with item ids;
   the hard limit or re-issue cap fails the check (`processing_timeout`).
 

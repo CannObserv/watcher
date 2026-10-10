@@ -274,8 +274,10 @@ async def _decide(
             extra={"command_id": row.command_id, "fetch_command_id": fetch.command_id},
         )
         fetch.status = FetchCommandStatus.EXPIRED
+        # Forced (#361): the blob leg's stamp vouches for bytes nobody could
+        # read, so a replayed pair could close the check on a 304 with none.
         new_id = await reissue_fetch_command(
-            session, watched_item, fetch, bus_client, lineage_count=lineage
+            session, watched_item, fetch, bus_client, lineage_count=lineage, force_full_fetch=True
         )
         return {"reissued": new_id}
 

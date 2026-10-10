@@ -40,9 +40,13 @@ from src.core.process_commands import (
     create_process_command,
 )
 from src.core.utils import format_utc_iso
-from src.core.validators import validator_source_key
+from src.core.validators import (
+    CONDITIONAL_GET_ENV,
+    replayable_validators,
+    validator_source_key,
+)
 from src.workers.derived_facts import process_derived_message
-from src.workers.fetch_commands import apply_fetch_blob
+from src.workers.fetch_commands import apply_fetch_blob, reissue_fetch_command
 from src.workers.process_commands import (
     apply_process_fact,
     publish_pending_process_commands,
@@ -727,6 +731,63 @@ class TestDecisiveApply:
         assert await client.xlen("content.fetch") == 1
         item = await self._item(db_session, row)
         assert item.health_status != WatchHealthStatus.ERROR
+
+    async def _unreadable_with_a_replayable_pair(self, db_session, monkeypatch) -> ProcessCommand:
+        """#361: the blob leg stamped the item as fetched; the processor then
+        could not read the bytes. The pair from the last success still matches
+        its key, and the gate is on for this item alone."""
+        row = await _decisive(
+            db_session,
+            status=ProcessCommandStatus.FAILED,
+            fact_at=datetime.now(UTC),
+            failure_reason="input_unreadable",
+            failure_detail="blob gone",
+        )
+        item = await self._item(db_session, row)
+        item.etag = 'W/"old"'
+        item.processor_version = "0.19.7+1"
+        item.validator_source_key = validator_source_key(
+            effective_url=item.effective_url, source_specs=item.source_specs, generation="0.19.7+1"
+        )
+        # Real clock: the re-issue resolves validators against datetime.now.
+        item.last_full_fetch_at = datetime.now(UTC)
+        item.blob_expires_at = item.last_full_fetch_at + timedelta(days=7)
+        await db_session.flush()
+        monkeypatch.setenv(CONDITIONAL_GET_ENV, str(item.id))
+        # Not vacuous: an unforced occasion would replay this pair.
+        assert replayable_validators(item, now=datetime.now(UTC))[0] == 'W/"old"'
+        _wire(db_session, monkeypatch)
+        _quiet(monkeypatch)
+        return row
+
+    async def test_input_unreadable_re_fetches_without_validators(self, db_session, monkeypatch):
+        # The stamp vouches for bytes nobody could read: a 304 would close the
+        # check with no bytes and no #293 renewal.
+        row = await self._unreadable_with_a_replayable_pair(db_session, monkeypatch)
+
+        result = await apply_process_fact(row.command_id, bus_client=fakeredis.FakeAsyncRedis())
+
+        reissued = await db_session.get(FetchCommand, result["reissued"])
+        assert reissued.forced_full_fetch is True
+        assert reissued.request_etag is None
+        assert reissued.request_last_modified is None
+
+    async def test_the_forced_re_fetch_stays_forced_down_its_lineage(self, db_session, monkeypatch):
+        # A lineage that has already lost its bytes: the reaper's re-issue of
+        # the forced re-fetch inherits the intent (CR-1) rather than replaying.
+        row = await self._unreadable_with_a_replayable_pair(db_session, monkeypatch)
+        client = fakeredis.FakeAsyncRedis()
+        result = await apply_process_fact(row.command_id, bus_client=client)
+        reissued = await db_session.get(FetchCommand, result["reissued"])
+        reissued.status = FetchCommandStatus.EXPIRED
+
+        again_id = await reissue_fetch_command(
+            db_session, await self._item(db_session, row), reissued, client
+        )
+
+        again = await db_session.get(FetchCommand, again_id)
+        assert again.forced_full_fetch is True
+        assert again.request_etag is None
 
     async def test_input_unreadable_at_the_cap_fails_the_check(self, db_session, monkeypatch):
         monkeypatch.setenv(FETCH_MAX_REISSUES_ENV, "2")

@@ -30,8 +30,7 @@ validator earned it is undiagnosable. Values go out **verbatim and unparsed**:
 `W/` prefix, quotes, and the origin's own date spelling.
 
 **Seven rules decide whether an occasion may replay** — `src/core/validators.py`,
-one pure predicate. Listed by subject; the predicate short-circuits, and the
-order it happens to evaluate them in is not a contract:
+one pure predicate. Listed by subject; evaluation order is not a contract:
 
 | Rule | Why |
 |---|---|
@@ -91,11 +90,12 @@ learned on the item's next full fetch, so a 304-ing item inherits its
 fingerprint until rule 6 or 7 forces one.
 
 **A forced full fetch is lineage.** `fetch_commands.forced_full_fetch` records
-that an occasion was asked for as an unconditional re-read, and `_reissue`
-carries it onto the replacement alongside `intent_id`. Without it, a check-now
-that stalled past the reaper's timeout came back as a conditional GET the origin
-could answer 304 — the operator's forced re-read producing no bytes, with nothing
-saying it had been downgraded.
+an unconditional re-read; `reissue_fetch_command` carries it onto the
+replacement with `intent_id` (else a stalled check-now could be answered 304,
+no bytes), and a caller may force but never un-force. **`input_unreadable`
+forces (#361):** the blob leg stamps `last_full_fetch_at` before the processor
+reads the bytes, so a replay would measure rule 7 from a fetch that renewed
+nothing; the forced re-fetch re-stamps on success.
 
 **An extraction failure also clears the pair.** Bytes arrived and could not be
 extracted (#258/#260), so the item is in ERROR with no new fingerprint — and a
@@ -106,8 +106,8 @@ re-asserts the failure until the spec is fixed.
 
 **Freshness now reads as a triple**: `last_checked_at` (we tried),
 `last_observed_at` (the content was confirmed current — a 304 counts), and
-`last_full_fetch_at` (bytes actually arrived — stamped by every blob apply,
-including one whose extraction then failed, because it records the fetch and not
-its outcome; `blob_expires_at` is stamped with it, from the same fact). The gap between the last two is
+`last_full_fetch_at` (bytes actually arrived — stamped by every blob apply
+whatever its outcome, since it records the fetch; `blob_expires_at` is stamped
+with it, from the same fact). The gap between the last two is
 how long a fingerprint has been inherited rather than recomputed; the WatchedItem
 detail page renders it as *Last Full Fetch*.

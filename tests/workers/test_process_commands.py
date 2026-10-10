@@ -737,7 +737,8 @@ class TestDecisiveApply:
     ) -> ProcessCommand:
         """#361: the blob leg stamped the item as fetched; the processor then
         could not read the bytes. The pair from the last success still matches
-        its key, and the gate is on for this item alone."""
+        its key, and the gate is on for this item alone. ``fields`` go to the
+        process row — the #362 cap test sets its ``reissue_count``."""
         row = await _decisive(
             db_session,
             status=ProcessCommandStatus.FAILED,

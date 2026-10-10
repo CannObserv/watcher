@@ -100,6 +100,11 @@ def _uses_lines() -> list[tuple[str, int, str, str]]:
     ]
 
 
+def _is_pinned(ref: str, rest: str) -> bool:
+    """A SHA pin with its version comment, or a ``./`` action in this repo."""
+    return ref.startswith("./") or bool(_SHA_PIN.match(ref) and _VERSION_COMMENT.match(rest))
+
+
 def test_config_exists() -> None:
     assert CONFIG.is_file(), (
         "no .github/dependabot.yml — nothing proposes the action bumps the "
@@ -177,7 +182,7 @@ def test_every_action_is_sha_pinned_with_its_version() -> None:
     bad = [
         f"{name}:{n}: {ref}{rest}"
         for name, n, ref, rest in _uses_lines()
-        if not (_SHA_PIN.match(ref) and _VERSION_COMMENT.match(rest))
+        if not _is_pinned(ref, rest)
     ]
     assert not bad, (
         "pin each action as `owner/action@<40-hex sha> # vX.Y.Z` (#360): a tag "
@@ -204,3 +209,10 @@ def test_setup_uv_keeps_pruning_its_cache() -> None:
     steps = _steps_using("astral-sh/setup-uv")
     assert steps, "no setup-uv step found — the derivation broke"
     assert all(s.get("with", {}).get("prune-cache") is True for s in steps)
+
+
+def test_a_local_action_needs_no_sha() -> None:
+    """``./`` actions live in this repo: no tag to move, nothing to pin."""
+    assert _is_pinned("./.github/actions/setup", "")
+    assert not _is_pinned("actions/checkout@v7", "")
+    assert _is_pinned("actions/checkout@" + "0" * 40, " # v7.0.1")

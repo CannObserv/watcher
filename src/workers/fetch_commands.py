@@ -308,10 +308,12 @@ async def fail_blob_unreadable(
     normal scheduling; recovery is automatic once the cause is fixed — under its
     own ``failure_reason``.
 
-    Neither validator helper fires here. No bytes arrived, so ``stamp_full_fetch``
-    would be a lie (CR-13); and being unable to *read* a blob says nothing about
-    the stored pair, so it survives exactly as it does under every
-    ``apply_fetch_failure`` reason but ``invalid_request_options``.
+    Neither validator helper fires here. The caller is the derived leg at the
+    ``input_unreadable`` cap: the blob leg already stamped the fetch, which is
+    true — Replicator did return bytes — and this adds no stamp of its own
+    (CR-13). Being unable to *read* a blob says nothing about the stored pair,
+    so it survives exactly as it does under every ``apply_fetch_failure``
+    reason but ``invalid_request_options``.
     """
     reissues = row.reissue_count if reissues is None else reissues
     row.status = FetchCommandStatus.FAILED

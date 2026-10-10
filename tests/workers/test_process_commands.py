@@ -745,6 +745,7 @@ class TestDecisiveApply:
         )
         item = await self._item(db_session, row)
         item.etag = 'W/"old"'
+        item.last_modified = "Wed, 13 Aug 2026 10:00:00 GMT"
         item.processor_version = "0.19.7+1"
         item.validator_source_key = validator_source_key(
             effective_url=item.effective_url, source_specs=item.source_specs, generation="0.19.7+1"
@@ -755,7 +756,10 @@ class TestDecisiveApply:
         await db_session.flush()
         monkeypatch.setenv(CONDITIONAL_GET_ENV, str(item.id))
         # Not vacuous: an unforced occasion would replay this pair.
-        assert replayable_validators(item, now=datetime.now(UTC))[0] == 'W/"old"'
+        assert replayable_validators(item, now=datetime.now(UTC)) == (
+            'W/"old"',
+            "Wed, 13 Aug 2026 10:00:00 GMT",
+        )
         _wire(db_session, monkeypatch)
         _quiet(monkeypatch)
         return row

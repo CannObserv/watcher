@@ -464,14 +464,16 @@ async def _seed_replayable_pair(db_session, monkeypatch, row) -> WatchedItem:
     last success still matches its key; the gate is on for this item alone
     (#361, #362, #363)."""
     item = await db_session.get(WatchedItem, row.watched_item_id)
+    fetch = await db_session.get(FetchCommand, row.fetch_command_id)
     item.etag = 'W/"old"'
     item.last_modified = "Wed, 13 Aug 2026 10:00:00 GMT"
     item.processor_version = "0.19.7+1"
     item.validator_source_key = validator_source_key(
         effective_url=item.effective_url, source_specs=item.source_specs, generation="0.19.7+1"
     )
-    # Real clock: the next command resolves validators against datetime.now.
-    item.last_full_fetch_at = datetime.now(UTC)
+    # Stamped when the blob fact arrived, as the blob leg does — before the
+    # process command was issued. Replay is judged against datetime.now.
+    item.last_full_fetch_at = fetch.fact_at
     item.blob_expires_at = item.last_full_fetch_at + timedelta(days=7)
     await db_session.flush()
     monkeypatch.setenv(CONDITIONAL_GET_ENV, str(item.id))

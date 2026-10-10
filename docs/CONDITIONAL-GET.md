@@ -35,7 +35,7 @@ one pure predicate. Listed by subject; evaluation order is not a contract:
 | Rule | Why |
 |---|---|
 | The gate (`WATCHER_CONDITIONAL_GET_ENABLED`) is off for this item | Off by default; a ULID list is the canary position, `true` the fleet |
-| The caller forced a full fetch | The check-now button is always a real re-read |
+| The caller forced a full fetch | Check-now is a real re-read; so is the re-fetch after `input_unreadable` (#361) |
 | Nothing stored, or nothing **sendable** | The send-side guard mirrors Replicator's refusal list (printable US-ASCII, ≤1024, non-blank). A command it would refuse costs an ERROR health transition before any request goes out |
 | `validator_source_key` disagrees with the item's current key | The URL moved, `source_specs` were re-announced, or the extraction generation changed. One key rather than a clear scattered across every writer of those fields |
 | No `last_full_fetch_at` | Unknown provenance is not replayable |
@@ -91,11 +91,11 @@ fingerprint until rule 6 or 7 forces one.
 
 **A forced full fetch is lineage.** `fetch_commands.forced_full_fetch` records
 an unconditional re-read; `reissue_fetch_command` carries it onto the
-replacement with `intent_id` (else a stalled check-now could be answered 304,
-no bytes), and a caller may force but never un-force. **`input_unreadable`
-forces (#361):** the blob leg stamps `last_full_fetch_at` before the processor
-reads the bytes, so a replay would measure rule 7 from a fetch that renewed
-nothing; the forced re-fetch re-stamps when its bytes arrive.
+replacement with `intent_id` (else a stalled check-now could get a 304), and a
+caller may force, never un-force. `input_unreadable` forces because the blob
+leg stamps `last_full_fetch_at` before the processor reads the bytes, so a
+replay would measure rule 7 from a fetch that renewed nothing; the forced
+re-fetch re-stamps when its bytes arrive.
 
 **An extraction failure also clears the pair.** Bytes arrived and could not be
 extracted (#258/#260), so the item is in ERROR with no new fingerprint — and a

@@ -833,6 +833,9 @@ class TestDecisiveApply:
 
         assert result["error"] == "blob_unreadable"
         item = await self._item(db_session, row)
+        # What committed, not the identity map: the clear must precede
+        # record_check_failure's commit, and nothing on this path commits after.
+        await db_session.refresh(item)
         assert (item.etag, item.last_modified, item.validator_source_key) == (None, None, None)
         nxt = await create_fetch_command(db_session, item, now=datetime.now(UTC))
         assert (nxt.request_etag, nxt.request_last_modified) == (None, None)

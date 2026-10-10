@@ -59,17 +59,19 @@ What that leaves in the code:
 ### An unreadable blob is capped, not retried forever (#275)
 
 Watcher never opens a raw blob (#350); the processor does, and answers
-`input_unreadable` when it cannot — reaped, or a `gs` 404 (`blob_expires_at`
-is a floor, not a promise). That re-fetches under a fresh `command_id`,
-**capped** at `WATCHER_FETCH_MAX_REISSUES` across both legs' re-issue counts.
-The cap is load-bearing: a re-issue publishes immediately, so the scheduling
-gate never sees it, and an uncapped loop runs at Replicator's round-trip, each
-turn a real origin request. At the cap the check ends `FAILED`,
+`input_unreadable` when the blob is gone or its download fails the checksum (a
+refused grant is transient there: no fact, so `processing_timeout`). That
+re-fetches under a fresh `command_id`, **capped** at
+`WATCHER_FETCH_MAX_REISSUES` across both legs' re-issue counts. The cap is
+load-bearing: a re-issue publishes immediately, so the scheduling gate never
+sees it, and an uncapped loop runs at Replicator's round-trip, each turn a real
+origin request. At the cap the check ends `FAILED`,
 `failure_reason="blob_unreadable"` (the remedy is the blob store, not the
 origin), `CHECK_FETCH_FAILED`, ERROR health, one `WATCH_ERROR` (reminders per
-#71), and the gate lifts. Neither `stamp_full_fetch` nor `clear_validators`
-fires. [`src/core/blobs.py`](../src/core/blobs.py) still reads one kind of
-blob — the processor's stored canonical text, for the change diff.
+#71), and the gate lifts. `clear_validators` does not fire; the blob leg's
+stamp stands, and the re-issue may replay the pair (#361).
+[`src/core/blobs.py`](../src/core/blobs.py) still reads one kind of blob — the
+processor's stored canonical text, for the change diff.
 
 ### `not_modified` is a success, not a failure (#249)
 

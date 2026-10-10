@@ -46,9 +46,9 @@ What that leaves in the code:
   `apply_fetch_not_modified` in
   [`src/workers/fetch_commands.py`](../src/workers/fetch_commands.py):
   status-guarded against duplicates, supersession-guarded against out-of-order
-  facts, blob-unreadable → **capped** re-issue (#275, below). They own all check
-  bookkeeping via the shared `_record_check_success` / `_record_check_failure`,
-  which live in that same module.
+  facts. The blob apply hands the check to the processor (#326, below); the
+  derived leg closes it through the shared `_record_check_success` /
+  `record_check_failure` in that same module.
 - **The reaper** — `reap_fetch_commands`, every 5 minutes, keyed on signal age
   `coalesce(fact_at, published_at)`. A stale row holding a blob fact gets its
   apply **re-deferred**; anything else is expired and re-issued with `intent_id`
@@ -58,35 +58,18 @@ What that leaves in the code:
 
 ### An unreadable blob is capped, not retried forever (#275)
 
-Reading `blob_uri` is the one place Watcher parses that URI, so the scheme
-dispatch lives in [`src/core/blobs.py`](../src/core/blobs.py), not in the
-worker: a backend registers a spooler there. Non-local backends stream onto a
-temp file `blob_file` removes on the way out; a `file://` blob is Replicator's
-own and is yielded in place. Async callers await `aread_blob` — the apply task
-shares its process with the API. The `gs://` arm (CannObserv/replicator#7)
-reads `gs://co-gcs-blobs` as the `GCS_BLOB_CREDENTIALS` identity, key used
-verbatim — flat, never the `file://` shard rule. The two error types are the
-decision:
-
-- **`BlobUnreadable`** — backend understood, blob missing: reaped between fact
-  and apply, or a `gs` 404 (the lifecycle rule ran — `blob_expires_at` is a
-  floor, not a promise). Re-issue, **capped** at
-  `WATCHER_FETCH_MAX_REISSUES` against the same `reissue_count` the reaper
-  reads. The cap is load-bearing because the re-issue publishes immediately: the
-  scheduling gate never sees it, so an uncapped loop runs at Replicator's fetch
-  round-trip rather than the item's interval, each turn a real origin request.
-  Systematic causes today: a permissions or mount change under Replicator's
-  blob dir, or a blob dir moved without both services updated.
-- **`UnsupportedBlobScheme`** — re-fetching buys nothing: an unknown scheme, a
-  `gs` 401/403 (the grant is an operator's to fix), an unset credential.
-  Terminal on the first occasion, zero re-issues.
-
-Both end `FAILED` with `failure_reason="blob_unreadable"` (distinct from
-`fetch_timeout` — the remedy is the blob store, not the origin),
-`CHECK_FETCH_FAILED`, ERROR health, one `WATCH_ERROR` on the transition (reminders
-per #71), and the gate lifts so the item re-enters normal scheduling. Neither `stamp_full_fetch`
-nor `clear_validators` fires: no bytes arrived, and being unable to read a blob
-says nothing about the stored pair.
+Watcher never opens a raw blob (#350); the processor does, and answers
+`input_unreadable` when it cannot — reaped, or a `gs` 404 (`blob_expires_at`
+is a floor, not a promise). That re-fetches under a fresh `command_id`,
+**capped** at `WATCHER_FETCH_MAX_REISSUES` across both legs' re-issue counts.
+The cap is load-bearing: a re-issue publishes immediately, so the scheduling
+gate never sees it, and an uncapped loop runs at Replicator's round-trip, each
+turn a real origin request. At the cap the check ends `FAILED`,
+`failure_reason="blob_unreadable"` (the remedy is the blob store, not the
+origin), `CHECK_FETCH_FAILED`, ERROR health, one `WATCH_ERROR` (reminders per
+#71), and the gate lifts. Neither `stamp_full_fetch` nor `clear_validators`
+fires. [`src/core/blobs.py`](../src/core/blobs.py) still reads one kind of
+blob — the processor's stored canonical text, for the change diff.
 
 ### `not_modified` is a success, not a failure (#249)
 
@@ -116,17 +99,18 @@ invalidation rules (`validator_source_key`, the age ceiling), and the
 
 ### Extraction outcomes: empty is a failure (#258, #260)
 
-`source_specs` are tried in order and the first yielding non-empty chunks wins.
+`source_specs` are tried in order — one command per spec — and the first
+yielding non-empty text wins.
 
 **A spec-less item is unextractable, not a whole-page watch (#260).** The
 synthetic `[{}]` full-page default — inherited unremarked from #185's pipeline
 rewrite, never ratified — is gone, and with it the "optional at create"
 affordance: `WatchedItemCreate.source_specs` is required and non-empty, `PATCH`
-holds the same floor, and `process_watched_item` raises `ExtractionError` before
-dispatching an extractor when a row carries none. Settled that way because
-Archiver, the only caller, always has specs in hand: its registry refuses to
-announce a source as live without non-empty `source_specs`, and provisioning
-always sends them. Production carried 0 spec-less items of 4.
+holds the same floor, and a row that carries none is unsendable at the blob
+apply (`UnsendableProcessCommand`) and fails the check there. Settled that way
+because Archiver, the only caller, always has specs in hand: its registry
+refuses to announce a source as live without non-empty `source_specs`, and
+provisioning always sends them.
 
 **The residual, stated rather than gated.** The `info.registry` reconcile writes
 `list(payload.source_specs or [])` and co-core's announcement still declares the
@@ -135,57 +119,37 @@ API door closed. That path is deliberately **not** gated a second time: an
 announcement is authoritative for `source_specs`, and refusing one would break
 the cold-start convergence #254 exists to provide. Such a row can only come from
 a source Archiver would not announce as live, which therefore never schedules —
-and if one ever does check, the pipeline guard is exactly what makes it loud
-(ERROR health, no revision) instead of silent.
+and if one ever does check, the unsendable guard is what makes it loud.
 
-When **every** spec yields empty, `process_watched_item` raises `ExtractionError`
-and writes nothing — no `ChangeRevision`, no `PendingArchiverSync`, no notification. It
-lands on the same path a raising extractor takes: `CHECK_EXTRACTION_FAILED` +
-ERROR health, dispatched once on the OK→ERROR transition.
-
-Unconditional, on both sides of a baseline. The rule exists because empty
-content fingerprints *consistently*: without it, selector rot presented as a
-**content change** — a zero-byte revision POSTed to Archiver, a
-`CHANGE_DETECTED` notification, health still OK — and an item broken from its
-first check baselined on the empty digest and never reported again. A false
-ERROR on a legitimately-emptied source is recoverable at an operator's glance; a
-false "content changed" is silent. The guard is in `process_watched_item`, not
-`_extract_and_fingerprint` — the extractor reports what it found, the caller
-judges it.
+When **every** spec comes back empty, the check fails (`_decide`) and writes
+nothing — no `ChangeRevision`, no `PendingArchiverSync`, no notification:
+`CHECK_EXTRACTION_FAILED` + ERROR health, dispatched once on the OK→ERROR
+transition. Unconditional, on both sides of a baseline. Empty content
+fingerprints *consistently*: without the rule, selector rot presented as a
+**content change** — a zero-byte revision, a `CHANGE_DETECTED`, health still
+OK — and an item broken from its first check baselined on the empty digest and
+never reported again. A false ERROR on a legitimately-emptied source is
+recoverable at a glance; a false "content changed" is silent.
 
 ### The fingerprint's bytes are co-core's (#324)
 
-Step 0 of the Observo-derived extraction design
-([design doc](plans/2026-09-24-observo-extraction-and-diff-design.md)).
 `content_fingerprint` is `co_core.pure.extract.canonical_text_fingerprint` over
-the chunks — byte-identical to the local join it replaced, so every stored
-fingerprint is already the address derived text will be stored under; co-core's
-per-extractor goldens trip on a fingerprint-moving change.
+the chunks, so every fingerprint is the address the processor stores the text
+under ([design](plans/2026-09-24-observo-extraction-and-diff-design.md)).
+`ChangeRevision` carries two **nullable** columns (`ccc7de7cabf8`):
+`spec_fingerprint` and `processor_version`, both as the derived fact reports
+them. NULL means *unknown*, and Option A (#326, below) treats unknown as
+neither a spec label nor a re-baseline. `src/core/media_type.py` re-exports
+`co_core.pure.extract.media_type`; its test pins *identity*, because the issuer
+resolves the dispatch essence onto the command and the processor may
+re-resolve it.
 
-`ChangeRevision` gained two **nullable** columns (`ccc7de7cabf8`):
-`spec_fingerprint` (previously discarded with the outbox row) and
-`processor_version` (`EXTRACTION_GENERATION`, spelled through co-core's
-`processor_version()` so a revision from a `content.derived` fact compares
-alike). NULL means *unknown* — pre-migration rows, or a spec co-core cannot
-derive from — and Option A (#326, below) treats unknown as neither a spec
-label nor a re-baseline.
+### `content.process` (#325)
 
-`src/core/media_type.py` re-exports `co_core.pure.extract.media_type`; its test
-pins *identity*, because the issuer resolves the dispatch essence onto the
-`content.process` command and the processor may re-resolve it. One behaviour
-change: `spec_schema_version` replaces `int(...)`, so a boolean `schema_version`
-raises `ExtractionError` where it read as `1`.
-
-### Shadow extraction on `content.process` (#325)
-
-The processor (CannObserv/processor, on `co-processor`) runs the same co-core
+The processor (CannObserv/processor, on `co-processor`) runs co-core's
 extraction behind the `content.process` / `content.derived` pair
 (cannobserv#486; [design](plans/2026-09-24-observo-extraction-and-diff-design.md)
-Sections 1, 2, 5). **`WATCHER_EXTRACT_MODE`**: `local` (default) issues
-nothing; `shadow` sends every applied blob to the processor *after* local
-extraction has decided and committed — including a local extraction failure,
-since the processor must fail on the same bytes; `processor` lets it decide
-(below). An unrecognised value reads as `local`, with a warning.
+Sections 1, 2, 5). Watcher extracts nothing itself (#350).
 
 **`process_commands`** (`2bc94dabe269`) is `fetch_commands`' discipline again:
 persist-before-publish, the every-minute `publish_pending_process_commands`
@@ -195,9 +159,8 @@ one `source_spec` per command (D3), so the fallback loop is a **chain**: an
 from the item's *current* specs. The row snapshots the whole wire command; the
 dispatch essence is resolved by Watcher (cannobserv#486 D1), `None` when nothing
 is informative; `input_digest` is the blob fact's bare hex, refused at the
-occasion when it is not. It also carries local's answer (`local_outcome`,
-`local_fingerprint`, `local_spec_fingerprint`) — shadow's columns, deleted with
-the local path.
+occasion when it is not. `ix_process_commands_output_digest` (#345) serves the
+change diff's text lookup.
 
 **The `watcher.derived` consumer settles a row on its first terminal fact.** A
 lost ack makes the processor publish the same outcome again under a fresh
@@ -205,16 +168,7 @@ lost ack makes the processor publish the same outcome again under a fresh
 follow a success it could not ack, so any later fact for a settled row is
 logged and dropped; a fact for an expired row is late and dropped. A
 non-terminal `transient` only refreshes `fact_at`. It runs on the same loop as
-`content.blobs` (`run_fact_consumer`), in every mode.
-
-**The comparator** (`judge_shadow`) runs on the row that ends a lineage and
-writes `shadow_verdict`: **match** — the digest equals local's fingerprint
-(and, where both know it, the same spec bound), or nothing was derived on
-either side; **mismatch** — anything else the two extractors could disagree
-on, `extraction_error` against a local success included; **uncompared** — the
-processor never judged the bytes (`input_unreadable`, `invalid_input`,
-`input_digest_mismatch`, `unsupported_*`, or a timeout). A mismatch logs
-`shadow extraction mismatch` and audits `check.shadow_mismatch`.
+`content.blobs` (`run_fact_consumer`).
 
 **Downtime is delay, never failure** (`reap_process_commands`, every 5 min).
 In-flight past `WATCHER_PROCESS_COMMAND_TIMEOUT_SECONDS` (1800) is re-issued
@@ -223,27 +177,18 @@ In-flight past `WATCHER_PROCESS_COMMAND_TIMEOUT_SECONDS` (1800) is re-issued
 command in `processor.process` is not lost, and a processor draining its
 backlog in order has simply not reached it; a duplicate would sit in a stream
 nothing trims) and one warning per pass says `processor has not reached held process commands`. Past
-`WATCHER_PROCESS_COMMAND_HARD_LIMIT_SECONDS` (86400) the lineage ends
-uncompared either way: a refused failure fact leaves one command with no reply,
-and a quiet period has no other fact to go on. A settled row whose apply never
-ran is re-deferred once per window, touching `updated_at` — never `fact_at`,
-the processor\'s own answer time. **The shadow leg is a side lineage**: nothing here touches a fetch row,
-an item's health, or the fetch re-issue lineage.
-
-**The switch gate (#326)** is zero mismatches across a window that contains a
-real change:
-
-```sql
-SELECT shadow_verdict, local_outcome, count(*) FROM process_commands
-WHERE issued_at > :window_start AND shadow_verdict IS NOT NULL GROUP BY 1, 2;
-```
+`WATCHER_PROCESS_COMMAND_HARD_LIMIT_SECONDS` (86400) the lineage ends either
+way: a refused failure fact leaves one command with no reply, and a quiet
+period has no other fact to go on. A settled row whose apply never ran is
+re-deferred once per window, touching `updated_at` — never `fact_at`, the
+processor's own answer time.
 
 ### Processor-decided extraction (#326)
 
-**`WATCHER_EXTRACT_MODE=processor`** — built, **not yet switched on** (the gate
-above needs a window with a real change); rollback is `shadow`, then `local`.
-A lineage is **decisive iff its fetch row is `PROCESSING`**, fixed when the
-blob applies, whatever the mode reads when the fact lands.
+Switched on 2026-10-06 after #325's shadow window (87/87 matched); the local
+path, the mode and the shadow leg were deleted after the soak (#350). A lineage
+is **decisive iff its fetch row is `PROCESSING`**; an answer for a check that
+already closed decides nothing.
 
 - **Blob leg** (`_hand_to_processor`): the raw blob is never opened; the row
   goes `PROCESSING` (open, so the gate holds) in **one commit** with the
@@ -257,7 +202,7 @@ blob applies, whatever the mode reads when the fact lands.
 - **Downtime** is delay: the reaper logs `processing delayed` with item ids;
   the hard limit or re-issue cap fails the check (`processing_timeout`).
 
-**Option A** (D6, `extraction_change`) runs on every change in every mode.
+**Option A** (D6, `extraction_change`) runs on every change.
 Bound spec moved → notify with a `NOTE:` line (`extraction_changed = "spec"`).
 Only the extractor moved — against **`WatchedItem.processor_version`**, read
 before the outcome refreshes it → the revision is written and announced,

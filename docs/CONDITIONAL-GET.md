@@ -81,28 +81,14 @@ nothing about our request options and leaves the pair alone. While it is wedged,
 the item stays in ERROR, so it reminds at most once per
 `WATCHER_ERROR_RENOTIFY_INTERVAL` (#71) — the stamp commits before the dispatch.
 
-**The extraction generation is derived, not declared.** `EXTRACTION_GENERATION`
-is co-core's `processor_version(LOCAL_EXTRACTION_GENERATION)` —
-`"{co-core version}+{LOCAL_EXTRACTION_GENERATION}"`, the same string a
-`content.derived` fact reports, so the two compare alike (#324). co-core owns
-extraction and arrives through the wheelhouse with no human in the loop, so a
-hand-bumped constant reproduced the `WATCHER_USER_AGENT` hazard one step
-quieter: an extractor change nobody bumped for would leave every 304-ing item
-inheriting a fingerprint the *old* extractor computed, invisible until the
-origin's bytes happened to change. Reading the version makes an upgrade
-invalidate every stored validator by itself — one full fetch per item. Bump
-`LOCAL_EXTRACTION_GENERATION` by hand only for a watcher-side extraction change
-(how chunks are joined, media-type dispatch, spec fallback order), which
-co-core's version cannot see.
-
-**Processor-decided, the generation is the item's** (#326, `item_generation`):
-with `WATCHER_EXTRACT_MODE=processor` Watcher runs no extractor, so the key's
-generation half is `WatchedItem.processor_version` — what the processor last
-reported for the item. The pair is recorded when the derived fact closes the
-check, keyed to the extractor that produced the fingerprint it vouches for.
-Residual (the design's): a processor upgrade is learned on the item's next full
-fetch, so a 304-ing item inherits its fingerprint until rule 6 or 7 forces one.
-Switching modes moves every key once — one full fetch per item.
+**The extraction generation is the processor's** (#326, #350,
+`item_generation`): Watcher runs no extractor, so the key's generation half is
+`WatchedItem.processor_version` — what the processor last reported for the
+item, the same string a `content.derived` fact carries. The pair is recorded
+when the derived fact closes the check, keyed to the extractor that produced
+the fingerprint it vouches for. Residual (the design's): a processor upgrade is
+learned on the item's next full fetch, so a 304-ing item inherits its
+fingerprint until rule 6 or 7 forces one.
 
 **A forced full fetch is lineage.** `fetch_commands.forced_full_fetch` records
 that an occasion was asked for as an unconditional re-read, and `_reissue`

@@ -1,7 +1,7 @@
 """The content.process issue path — Watcher as the processor's command issuer (#325).
 
-Extraction is moving out of Watcher's process to the cohort's processor
-(CannObserv/processor) over the ``content.process`` / ``content.derived`` pair
+Extraction runs in the cohort's processor (CannObserv/processor), never in
+Watcher's process (#350), over the ``content.process`` / ``content.derived`` pair
 (cannobserv#486; design ``docs/plans/2026-09-24-observo-extraction-and-diff-design.md``).
 This module is the issuer half, built to ``fetch_commands``' discipline:
 
@@ -22,14 +22,9 @@ This module is the issuer half, built to ``fetch_commands``' discipline:
   (``UnsendableProcessCommand``) rather than at publish, where an unbuildable
   row would fail the sweep every minute forever.
 
-``WATCHER_EXTRACT_MODE`` (``src/core/extract_mode.py``) decides whether any
-of this runs. ``local`` (the default) issues nothing; ``shadow`` issues a
-command for every applied blob while local extraction keeps deciding, and the
-comparator judges the processor's answers against it; ``processor`` issues one
-in place of local extraction, and its answer decides (#326).
+Every applied blob is issued, and the processor's answer decides (#326).
 """
 
-from dataclasses import dataclass
 from datetime import UTC, datetime
 
 from co_core.effects.bus import BusPublish
@@ -47,23 +42,13 @@ from src.core.fetch_commands import env_number
 from src.core.logging import get_logger
 from src.core.media_type import resolve_dispatch_essence
 from src.core.models.fetch_command import FetchCommand
-from src.core.models.process_command import (
-    LocalOutcome,
-    ProcessCommand,
-    ProcessCommandStatus,
-    ShadowVerdict,
-)
+from src.core.models.process_command import ProcessCommand, ProcessCommandStatus
 from src.core.models.watched_item import WatchedItem
 
 logger = get_logger(__name__)
 
 # The only processor Watcher asks for: the transform a change fingerprint covers.
 PROCESSOR = "extract"
-
-# The one ``ProcessingFailedEvent`` reason that is a verdict on the bytes rather
-# than on the input or the plumbing: the parser raised. Every other terminal
-# reason means the processor never judged what local extraction judged.
-EXTRACTION_ERROR_REASON = "extraction_error"
 
 # The one terminal reason that says the *input* is gone, not that the bytes
 # were judged: the raw blob expired or was never readable. Processor-decided,
@@ -113,16 +98,6 @@ class UnsendableProcessCommand(ValueError):
     """The occasion cannot produce a command the contract accepts."""
 
 
-@dataclass(frozen=True)
-class LocalExtraction:
-    """What local extraction concluded for an occasion (shadow mode's yardstick)."""
-
-    outcome: LocalOutcome
-    # ``None`` exactly when local extraction failed.
-    fingerprint: str | None = None
-    spec_fingerprint: str | None = None
-
-
 def _command_emit(row: ProcessCommand) -> ContentProcessCommandEmit:
     """The wire command for ``row`` — through the strict Emit class, never hand-rolled."""
     return ContentProcessCommandEmit(
@@ -152,16 +127,13 @@ async def create_process_command(
     watched_item: WatchedItem,
     *,
     now: datetime,
-    local: LocalExtraction | None,
     reissue_count: int = 0,
 ) -> ProcessCommand:
     """Persist the spec[0] command for a fetch occasion (caller commits before publishing).
 
     A new intent. The essence is resolved **here**, from the item as the apply
-    path left it (the media type is seeded from this occasion's header before
-    local extraction runs), so local and processor dispatch on the same value.
+    path left it (the media type is seeded from this occasion's header first).
 
-    ``local`` is shadow mode's yardstick; a decisive command (#326) has none.
     ``reissue_count`` seeds the lineage's counter: a decisive lineage spans
     both legs, so it starts where the fetch leg's left off and the shared
     ``WATCHER_FETCH_MAX_REISSUES`` caps the whole of it.
@@ -192,9 +164,6 @@ async def create_process_command(
             status=ProcessCommandStatus.PENDING_PUBLISH,
             issued_at=now,
             reissue_count=reissue_count,
-            local_outcome=local.outcome if local else None,
-            local_fingerprint=local.fingerprint if local else None,
-            local_spec_fingerprint=local.spec_fingerprint if local else None,
         )
     )
     session.add(row)
@@ -220,9 +189,6 @@ def _successor(
             status=ProcessCommandStatus.PENDING_PUBLISH,
             issued_at=now,
             reissue_count=reissue_count,
-            local_outcome=prior.local_outcome,
-            local_fingerprint=prior.local_fingerprint,
-            local_spec_fingerprint=prior.local_spec_fingerprint,
         )
     )
 
@@ -288,55 +254,3 @@ async def select_pending_process_publish(
         .limit(limit)
     )
     return list((await session.execute(stmt)).scalars().all())
-
-
-def judge_shadow(row: ProcessCommand) -> tuple[ShadowVerdict, str | None]:
-    """The processor's settled answer against local extraction's, for one lineage.
-
-    Called on the row that ends a lineage: a non-empty outcome, an empty outcome
-    on the last spec, or a terminal failure. The switch (#326) is gated on zero
-    mismatches, so the rules lean towards *mismatch* wherever the two
-    extractors could have disagreed about the same bytes:
-
-    * derived text — a match only when the digest equals local's fingerprint
-      and, where both sides know it, the spec that bound is the same one;
-    * nothing derived (empty on every spec, or ``extraction_error``) — a match
-      only when local extraction failed too. Local cannot tell its two failures
-      apart (#258 raises the same ``ExtractionError``), so either counts;
-    * any other failure — **uncompared**: the input was unreadable or refused,
-      so the processor never judged the bytes. Coverage lost, not agreement.
-    """
-    if row.local_outcome is None:
-        return ShadowVerdict.UNCOMPARED, "no local answer recorded"
-    local = row.local_fingerprint
-    if row.status == ProcessCommandStatus.COMPLETED and not row.empty:
-        if local is None:
-            return (
-                ShadowVerdict.MISMATCH,
-                f"local extraction failed; processor derived {row.output_digest}",
-            )
-        if row.output_digest != local:
-            return ShadowVerdict.MISMATCH, f"digest: local {local}, processor {row.output_digest}"
-        if (
-            row.local_spec_fingerprint is not None
-            and row.spec_fingerprint is not None
-            and row.local_spec_fingerprint != row.spec_fingerprint
-        ):
-            return (
-                ShadowVerdict.MISMATCH,
-                f"spec: local bound {row.local_spec_fingerprint}, "
-                f"processor bound {row.spec_fingerprint}",
-            )
-        return ShadowVerdict.MATCH, None
-    if row.status == ProcessCommandStatus.COMPLETED:
-        if local is None:
-            return ShadowVerdict.MATCH, None
-        return ShadowVerdict.MISMATCH, f"processor empty on every spec; local {local}"
-    if row.failure_reason == EXTRACTION_ERROR_REASON:
-        if local is None:
-            return ShadowVerdict.MATCH, None
-        return (
-            ShadowVerdict.MISMATCH,
-            f"processor {EXTRACTION_ERROR_REASON} ({row.failure_detail}); local {local}",
-        )
-    return ShadowVerdict.UNCOMPARED, row.failure_reason

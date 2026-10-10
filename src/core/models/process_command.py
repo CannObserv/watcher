@@ -18,12 +18,6 @@ lost ack makes the processor publish the same outcome again under a fresh
 a give-up after three escaping exceptions may follow a success it could not
 ack. The consumer settles the row on the first terminal fact and logs the rest.
 
-**The ``local_*`` and ``shadow_*`` columns are shadow mode's**
-(``WATCHER_EXTRACT_MODE=shadow``): local extraction still decides, and each
-lineage carries what local extraction concluded for the same occasion so the
-comparator can judge the processor's answer against it. They go with the local
-path when the switch deletes it (#326).
-
 ``input_digest`` is Replicator's **raw-bytes** identity (bare hex), copied from
 the blob fact; ``output_digest`` is the derived text's (``sha256:<hex>``), the
 spelling of ``ChangeRevision.content_fingerprint`` it is compared against.
@@ -68,28 +62,6 @@ OPEN_PROCESS_STATUSES = (ProcessCommandStatus.PENDING_PUBLISH, ProcessCommandSta
 SETTLED_PROCESS_STATUSES = (ProcessCommandStatus.COMPLETED, ProcessCommandStatus.FAILED)
 
 
-class LocalOutcome(enum.StrEnum):
-    """What local extraction concluded for the occasion (shadow mode)."""
-
-    BASELINE = "baseline"
-    UNCHANGED = "unchanged"
-    CHANGED = "changed"
-    # Local extraction raised: the parser failed, or every spec was empty
-    # (#258). The processor's matching answers are ``extraction_error`` and an
-    # empty outcome on the last spec — the local path cannot tell them apart.
-    EXTRACTION_FAILED = "extraction_failed"
-
-
-class ShadowVerdict(enum.StrEnum):
-    """The comparator's judgement of one lineage."""
-
-    MATCH = "match"
-    MISMATCH = "mismatch"
-    # The processor never judged the bytes — its input was unreadable or
-    # refused, or the lineage timed out. Coverage lost, not disagreement.
-    UNCOMPARED = "uncompared"
-
-
 class ProcessCommand(Base, TimestampMixin):
     """One issued content.process command and the fact that settled it."""
 
@@ -111,6 +83,14 @@ class ProcessCommand(Base, TimestampMixin):
             "ix_process_commands_read_past",
             "published_at",
             postgresql_where=text("fact_at IS NOT NULL"),
+        ),
+        # Serves the change diff's text lookup (#345, ``stored_text_location``):
+        # partial on that query's own predicate, so it holds only answers it
+        # can return.
+        Index(
+            "ix_process_commands_output_digest",
+            "output_digest",
+            postgresql_where=text("status = 'completed' AND output_uri IS NOT NULL"),
         ),
     )
 
@@ -166,11 +146,3 @@ class ProcessCommand(Base, TimestampMixin):
     applied_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True, default=None
     )
-
-    # --- shadow mode: local extraction's answer, and the comparator's verdict ---
-    local_outcome: Mapped[str | None] = mapped_column(String(20), nullable=True, default=None)
-    # NULL exactly when local extraction failed.
-    local_fingerprint: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
-    local_spec_fingerprint: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
-    shadow_verdict: Mapped[str | None] = mapped_column(String(20), nullable=True, default=None)
-    shadow_detail: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)

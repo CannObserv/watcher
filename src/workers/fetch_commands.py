@@ -8,13 +8,11 @@
 * ``apply_fetch_blob`` / ``apply_fetch_failure`` / ``apply_fetch_not_modified``
   — deferred by the content.blobs consumer (``src/workers/fetch_facts.py``)
   after it upserts a fact; they restore the exact bookkeeping the local fetch
-  path performs (health, ``last_checked_at``, audits, WATCH_ERROR/RECOVERED,
-  and #71's re-notify of a persistent ERROR).
-  Processor-decided (#326), the blob apply hands the check on instead, and the
-  derived leg closes it through ``close_succeeded`` / ``fail_extraction`` here.
-  Two of the three are success paths: a 304 is a check that found no change, not
-  a failed check (#249). An unreadable blob re-issues, capped — every turn of
-  that loop is a real origin request (#275).
+  path performed (health, ``last_checked_at``, audits, WATCH_ERROR/RECOVERED,
+  and #71's re-notify of a persistent ERROR). The blob apply hands the check to
+  the processor (#326), and the derived leg closes it through
+  ``close_succeeded`` / ``fail_extraction`` here. A 304 is a check that found
+  no change, not a failed check (#249).
 * ``reap_fetch_commands`` — MUST-6's backstop for the still-silent outcomes
   (stalls, undecodable frames): expire + re-issue with intent lineage, cap with
   an ERROR surface.
@@ -25,11 +23,9 @@ from datetime import UTC, datetime, timedelta
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.core.blobs import BlobUnreadable, UnsupportedBlobScheme, aread_blob
 from src.core.bus import BUS_REDIS_URL_ENV, get_shared_bus_client
 from src.core.database import get_session_factory
 from src.core.domains import domain_name_for_url, ensure_domain_and_resolve_suspension
-from src.core.extract_mode import ExtractMode, extract_mode
 from src.core.fetch_commands import (
     create_fetch_command,
     fetch_command_timeout_seconds,
@@ -46,7 +42,6 @@ from src.core.models.fetch_command import (
     FetchCommand,
     FetchCommandStatus,
 )
-from src.core.models.process_command import LocalOutcome
 from src.core.models.watched_item import (
     CONTENT_MEDIA_TYPE_MAX_LEN,
     WatchedItem,
@@ -58,23 +53,13 @@ from src.core.notifications.renotify import (
     error_renotify_interval,
     error_renotify_metadata,
 )
-from src.core.process_commands import LocalExtraction, UnsendableProcessCommand
-from src.core.registry import ServiceRegistry, get_registry
+from src.core.process_commands import UnsendableProcessCommand
 from src.core.utils import watched_item_event_base_metadata
 from src.core.validators import clear_validators, record_validators, stamp_full_fetch
 from src.workers import bp
 from src.workers.notify import dispatch_event_notifications
-from src.workers.pipeline import (
-    BlobProvenance,
-    ExtractionError,
-    WatchedItemResult,
-    process_watched_item,
-)
-from src.workers.process_issue import (
-    issue_process_command,
-    issue_shadow_process_command,
-    local_extraction_of,
-)
+from src.workers.pipeline import WatchedItemResult
+from src.workers.process_issue import issue_process_command
 from src.workers.retry import APPLY_RETRY
 from src.workers.watch_status import defer_status_republish
 
@@ -357,10 +342,10 @@ async def fail_extraction(
 ) -> dict:
     """Close a check whose bytes arrived and could not be made into text.
 
-    One path for both deciders: local extraction raising (#168, #258, #260),
-    and the processor answering empty on every spec or failing terminally
-    (#326, with ``reason`` / ``detail`` saying which). ERROR health, a fresh
-    ``last_checked_at``, ``CHECK_EXTRACTION_FAILED``.
+    An occasion with nothing to send (#260), or the processor answering empty
+    on every spec (#258) or failing terminally (#326) — ``reason`` /
+    ``detail`` say which. ERROR health, a fresh ``last_checked_at``,
+    ``CHECK_EXTRACTION_FAILED``.
 
     #269: keeping the stored pair would let the next cycle answer 304 — and a
     304 apply records a *successful* check, so a broken extraction would flip
@@ -404,7 +389,7 @@ async def close_succeeded(
     guard is what makes that true), so its validators are the pair the next
     command may replay. Always an overwrite, NULLs included — the pair must
     describe the latest 200. Recorded **with** the outcome rather than when the
-    bytes arrived: processor-decided, those are minutes apart, and the key
+    bytes arrived: those are minutes apart, and the key
     then names the extractor that produced the fingerprint the pair vouches
     for (#326).
 
@@ -444,7 +429,7 @@ def _audit_redirect(session, watched_item, row) -> None:
 async def _hand_to_processor(
     session, row: FetchCommand, watched_item: WatchedItem, *, now: datetime, bus_client
 ) -> dict:
-    """The blob leg of a processor-decided check (#326): record the fetch, issue spec[0].
+    """The blob leg of a check (#326): record the fetch, issue spec[0].
 
     What the fetch fact says is recorded now — bytes arrived (the stamp and its
     horizon), the redirect breadcrumb. What the *outcome* says — health, the
@@ -485,10 +470,8 @@ async def _hand_to_processor(
     # fact recorded — retry here first; the reaper's re-defer is the backstop.
     retry=APPLY_RETRY,
 )
-async def apply_fetch_blob(
-    command_id: str, registry: ServiceRegistry | None = None, bus_client=None
-) -> dict:
-    """Run the check pipeline over a returned blob (#241 apply path).
+async def apply_fetch_blob(command_id: str, bus_client=None) -> dict:
+    """Hand a returned blob's check to the processor (#241 apply path).
 
     Deferred by the content.blobs consumer after it upserts the fact onto the
     ``fetch_commands`` row. Applies at most once per command (status guard —
@@ -497,18 +480,11 @@ async def apply_fetch_blob(
     ``superseded`` (the bus guarantees no ordering; an A→B→A fingerprint flap
     would fire a phantom CHANGE_DETECTED).
 
-    A blob that cannot be read (reaped, or a cross-host ``blob_uri``) is a
-    re-issue under a fresh ``command_id`` — MUST-7's clock runs from last fetch,
-    not last read, so waiting cannot help — but **capped** at
-    ``WATCHER_FETCH_MAX_REISSUES``, the same lineage counter the reaper caps
-    (#275). A backend this build cannot read at all skips the re-issues
-    entirely: see ``fail_blob_unreadable``.
-
-    Processor-decided (``WATCHER_EXTRACT_MODE=processor``, #326) none of that
-    runs: the blob is never opened here, and the check is handed to the
-    processor with the row left ``PROCESSING`` (``_hand_to_processor``).
+    The blob is never opened here (#326, #350): the processor reads it, and an
+    unreadable one comes back as ``input_unreadable`` on the derived leg, which
+    re-fetches under the #275 cap. The check is handed on with the row left
+    ``PROCESSING`` (``_hand_to_processor``).
     """
-    reg = registry if registry is not None else get_registry()
     async with get_session_factory()() as session:
         row = await session.get(FetchCommand, command_id)
         if row is None:
@@ -537,53 +513,6 @@ async def apply_fetch_blob(
             row.status = FetchCommandStatus.SUPERSEDED
             await session.commit()
             return {"skipped": True, "reason": "superseded"}
-
-        # #326: processor-decided, Watcher never opens the raw blob — the
-        # processor reads it, and an unreadable one comes back as
-        # `input_unreadable` on the derived leg.
-        decisive = extract_mode() is ExtractMode.PROCESSOR
-        if not decisive:
-            try:
-                # Off the event loop (CR-2): this task shares its process with the
-                # API and the content.blobs consumer, and a blob is not small.
-                raw_content = await aread_blob(row.blob_uri)
-            except UnsupportedBlobScheme as exc:
-                # Deterministic (#275): a re-issue's fact would name the same
-                # backend, so each turn of the loop is a real origin request spent
-                # learning the same thing. Terminal on the first occasion.
-                logger.error(
-                    "blob_uri names an unreadable backend — failing the intent",
-                    extra={"command_id": command_id, "blob_uri": row.blob_uri, "error": str(exc)},
-                )
-                return await fail_blob_unreadable(
-                    session, watched_item, row, now=now, detail=str(exc)
-                )
-            except BlobUnreadable as exc:
-                # May be transient (blob reaped between fact and apply), so re-issue
-                # — but under the SAME lineage cap the reaper applies to stalls
-                # (#275). Without it a systematic cause (a permissions change under
-                # the blob dir, a cross-host blob_uri) loops forever, each turn a
-                # real origin fetch, with health still reading OK.
-                if row.reissue_count >= fetch_max_reissues():
-                    logger.error(
-                        "blob still unreadable at the re-issue cap — failing the intent",
-                        extra={
-                            "command_id": command_id,
-                            "blob_uri": row.blob_uri,
-                            "reissues": row.reissue_count,
-                            "error": str(exc),
-                        },
-                    )
-                    return await fail_blob_unreadable(
-                        session, watched_item, row, now=now, detail=str(exc)
-                    )
-                logger.warning(
-                    "blob unreadable — re-issuing the intent",
-                    extra={"command_id": command_id, "blob_uri": row.blob_uri, "error": str(exc)},
-                )
-                row.status = FetchCommandStatus.EXPIRED
-                new_id = await reissue_fetch_command(session, watched_item, row, bus_client)
-                return {"reissued": new_id}
 
         # Async-probe resolution (#241 step 3): a PROBING item's first fact is
         # its probe. When the origin redirected, final_url becomes the
@@ -619,64 +548,7 @@ async def apply_fetch_blob(
         if row.content_type_raw and not watched_item.content_media_type:
             watched_item.content_media_type = row.content_type_raw[:CONTENT_MEDIA_TYPE_MAX_LEN]
 
-        if decisive:
-            return await _hand_to_processor(
-                session, row, watched_item, now=now, bus_client=bus_client
-            )
-
-        try:
-            result = await process_watched_item(
-                session=session,
-                watched_item=watched_item,
-                raw_content=raw_content,
-                registry=reg,
-                # Both nullable columns, carried through as-is: media_type is
-                # required on the blob fact and the blob has already been read
-                # by here, so in practice both are set — but "" would be a lie
-                # and the publisher's dead-letter path is where a missing value
-                # belongs, not a silent substitution here (CR-2).
-                blob=BlobProvenance(
-                    command_id=row.command_id,
-                    blob_uri=row.blob_uri,
-                    source_media_type=row.media_type,
-                    blob_expires_at=row.blob_expires_at,
-                    blob_fingerprint=row.content_fingerprint,
-                ),
-            )
-        except ExtractionError as exc:
-            logger.warning(
-                "extraction failed on applied blob",
-                extra={"command_id": command_id, "error": str(exc)},
-            )
-            # Bytes DID arrive, and that is what this stamp records (CR-2).
-            stamp_full_fetch(watched_item, now=now, blob_expires_at=row.blob_expires_at)
-            await fail_extraction(session, watched_item, row, now=now, error=str(exc))
-            # #325: the processor should fail on the same bytes too — the
-            # comparator can only check that if the occasion is sent.
-            await issue_shadow_process_command(
-                session,
-                row,
-                watched_item,
-                LocalExtraction(outcome=LocalOutcome.EXTRACTION_FAILED),
-                bus_client=bus_client,
-            )
-            return {"error": "extraction_failed"}
-
-        _audit_redirect(session, watched_item, row)
-        stamp_full_fetch(watched_item, now=now, blob_expires_at=row.blob_expires_at)
-        await close_succeeded(session, watched_item, row, result, now=now)
-        # #325: local has decided and committed; in shadow mode the processor
-        # now derives the same occasion for the comparator. Never raises.
-        await issue_shadow_process_command(
-            session, row, watched_item, local_extraction_of(result), bus_client=bus_client
-        )
-
-    return {
-        "applied": True,
-        "changed": result.changed,
-        "baseline_established": result.baseline_established,
-        "renewal_enqueued": result.renewal_enqueued,
-    }
+        return await _hand_to_processor(session, row, watched_item, now=now, bus_client=bus_client)
 
 
 @bp.task(name="apply_fetch_failure", queue="default", retry=APPLY_RETRY)

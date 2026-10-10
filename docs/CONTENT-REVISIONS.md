@@ -10,14 +10,14 @@ fingerprint and the change decision that enqueues the rows described here.
 
 `SourceRevisionObservedEvent` carries values the outbox row never held, so
 `pending_archiver_sync` gained six columns (and a seventh in #329), written at enqueue time by
-`process_watched_item`:
+`apply_extraction_outcome`:
 
 | Column | Source |
 |---|---|
 | `command_id`, `blob_uri`, `blob_expires_at` | the correlated `content.blobs` fact, via `BlobProvenance` |
 | `source_media_type` | that fact's normalized `media_type` — what the origin served |
 | `content_media_type` | the **extracted** content's type (`text/plain; charset=utf-8`) — a different thing, which is why the wire keeps both |
-| `spec_fingerprint` | co-core's derivation over the spec the fallback loop actually bound |
+| `spec_fingerprint` | the derived fact's, for the spec that bound |
 | `blob_fingerprint` (#329) | that fact's `content_fingerprint` — Replicator's **raw-bytes** sha256, via `fetch_commands.content_fingerprint` |
 
 `fetch_commands.blob_expires_at` was added to feed the first row: the fact has
@@ -114,7 +114,7 @@ at the first observation, and its replication issuance refused every occasion
 once that horizon passed. archiver#201 is the consumer half: a re-observation
 refreshes the two cache columns together, forward-only, and emits nothing.
 
-The producer half is the cache-hit branch of `process_watched_item`. An
+The producer half is the cache-hit branch of `apply_extraction_outcome`. An
 unchanged fingerprint still writes no `ChangeRevision` and dispatches nothing,
 but it **upserts** a `PendingArchiverSync` for the item's latest revision
 carrying this cycle's provenance — the same seven columns the change path

@@ -11,7 +11,6 @@ contract:
   essence (cannobserv#486 D1), and ``input_digest`` is the blob fact's bare hex.
 """
 
-import logging
 from datetime import UTC, datetime, timedelta
 
 import fakeredis
@@ -19,27 +18,21 @@ import pytest
 from co_core.pure.adapters.bus import streams
 from co_core.pure.adapters.bus.envelope import from_wire
 from co_core.pure.models.changes import ContentProcessCommand
+from sqlalchemy import text
 
-from src.core.extract_mode import EXTRACT_MODE_ENV, ExtractMode, extract_mode
 from src.core.fetch_commands import create_fetch_command
 from src.core.models.fetch_command import FetchCommand
-from src.core.models.process_command import (
-    LocalOutcome,
-    ProcessCommand,
-    ProcessCommandStatus,
-    ShadowVerdict,
-)
+from src.core.models.process_command import ProcessCommand, ProcessCommandStatus
+from src.core.notifications.diff_loader import stored_text_location
 from src.core.process_commands import (
     DEFAULT_PROCESS_COMMAND_HARD_LIMIT_SECONDS,
     DEFAULT_PROCESS_COMMAND_TIMEOUT_SECONDS,
     PROCESS_COMMAND_HARD_LIMIT_ENV,
     PROCESS_COMMAND_TIMEOUT_ENV,
     PROCESSOR,
-    LocalExtraction,
     UnsendableProcessCommand,
     chain_process_command,
     create_process_command,
-    judge_shadow,
     process_command_hard_limit_seconds,
     process_command_timeout_seconds,
     publish_process_command,
@@ -54,11 +47,6 @@ NOW = datetime(2026, 10, 2, 16, 0, 0, tzinfo=UTC)
 RAW_DIGEST = "61" * 32
 SPEC_A = {"extraction": {"selector": "div.content", "algorithm": "css"}, "schema_version": 1}
 SPEC_B = {"extraction": {"selector": "main", "algorithm": "css"}, "schema_version": 1}
-LOCAL = LocalExtraction(
-    outcome=LocalOutcome.UNCHANGED,
-    fingerprint="sha256:" + "ab" * 32,
-    spec_fingerprint="spec1:sha256:" + "cd" * 32,
-)
 
 
 async def _occasion(db_session, *, specs=(SPEC_A, SPEC_B), **item_kwargs):
@@ -82,34 +70,6 @@ async def _decode_commands(client):
         }
         decoded.append(from_wire(frame, topic=streams.CONTENT_PROCESS))
     return decoded
-
-
-class TestExtractMode:
-    def test_defaults_to_local(self, monkeypatch):
-        monkeypatch.delenv(EXTRACT_MODE_ENV, raising=False)
-        assert extract_mode() is ExtractMode.LOCAL
-
-    @pytest.mark.parametrize("raw", ["shadow", "SHADOW", " shadow "])
-    def test_reads_shadow(self, monkeypatch, raw):
-        monkeypatch.setenv(EXTRACT_MODE_ENV, raw)
-        assert extract_mode() is ExtractMode.SHADOW
-
-    @pytest.mark.parametrize("raw", ["processor", "PROCESSOR", " processor "])
-    def test_reads_processor(self, monkeypatch, raw):
-        # #326: the decisive mode. The design called it `observo`; Processor
-        # replaced Observo, and the value names the service that decides.
-        monkeypatch.setenv(EXTRACT_MODE_ENV, raw)
-        assert extract_mode() is ExtractMode.PROCESSOR
-
-    @pytest.mark.parametrize("raw", ["observo", "shdaow", ""])
-    def test_unknown_value_falls_back_to_local_loudly(self, monkeypatch, caplog, raw):
-        # A knob must not wedge the path it governs: an unrecognised value —
-        # the design's retired `observo` included — keeps local extraction
-        # deciding, and says so.
-        monkeypatch.setenv(EXTRACT_MODE_ENV, raw)
-        with caplog.at_level(logging.WARNING):
-            assert extract_mode() is ExtractMode.LOCAL
-        assert EXTRACT_MODE_ENV in caplog.text
 
 
 class TestKnobs:
@@ -137,7 +97,7 @@ class TestKnobs:
 class TestCreateProcessCommand:
     async def test_persists_pending_publish_row_for_spec_zero(self, db_session):
         wi, fetch = await _occasion(db_session)
-        row = await create_process_command(db_session, fetch, wi, now=NOW, local=LOCAL)
+        row = await create_process_command(db_session, fetch, wi, now=NOW)
         await db_session.flush()
 
         assert row.status == ProcessCommandStatus.PENDING_PUBLISH
@@ -154,28 +114,12 @@ class TestCreateProcessCommand:
     async def test_snapshots_what_the_sweep_needs(self, db_session):
         # The sweep holds only this row: the wire's every field comes off it.
         wi, fetch = await _occasion(db_session)
-        row = await create_process_command(db_session, fetch, wi, now=NOW, local=LOCAL)
+        row = await create_process_command(db_session, fetch, wi, now=NOW)
 
         assert row.info_source_id == wi.archiver_info_source_id
         assert row.input_uri == fetch.blob_uri
         # Bare hex, verbatim from the blob fact — the Emit refuses a prefix.
         assert row.input_digest == RAW_DIGEST
-
-    async def test_carries_the_local_answer(self, db_session):
-        wi, fetch = await _occasion(db_session)
-        row = await create_process_command(db_session, fetch, wi, now=NOW, local=LOCAL)
-
-        assert row.local_outcome == LocalOutcome.UNCHANGED
-        assert row.local_fingerprint == LOCAL.fingerprint
-        assert row.local_spec_fingerprint == LOCAL.spec_fingerprint
-
-    async def test_a_decisive_command_carries_no_local_answer(self, db_session):
-        # #326: in processor mode nothing ran locally, so nothing is recorded.
-        wi, fetch = await _occasion(db_session)
-        row = await create_process_command(db_session, fetch, wi, now=NOW, local=None)
-
-        assert row.local_outcome is None
-        assert row.local_fingerprint is None
 
     async def test_a_decisive_lineage_inherits_the_fetch_re_issue_count(self, db_session):
         # The cap is per lineage, and a decisive lineage spans both legs: a
@@ -183,7 +127,7 @@ class TestCreateProcessCommand:
         wi, fetch = await _occasion(db_session)
         fetch.reissue_count = 2
         row = await create_process_command(
-            db_session, fetch, wi, now=NOW, local=None, reissue_count=fetch.reissue_count
+            db_session, fetch, wi, now=NOW, reissue_count=fetch.reissue_count
         )
         assert row.reissue_count == 2
 
@@ -195,19 +139,19 @@ class TestCreateProcessCommand:
             primary_url="https://lcb.wa.gov/rules.pdf",
             content_media_type="application/octet-stream",
         )
-        row = await create_process_command(db_session, fetch, wi, now=NOW, local=LOCAL)
+        row = await create_process_command(db_session, fetch, wi, now=NOW)
         assert row.media_type == "application/pdf"
 
     async def test_essence_with_nothing_informative_is_none(self, db_session):
         # None is a real resolution (the HTML fallback), stated explicitly.
         wi, fetch = await _occasion(db_session, primary_url="https://lcb.wa.gov/notices")
-        row = await create_process_command(db_session, fetch, wi, now=NOW, local=LOCAL)
+        row = await create_process_command(db_session, fetch, wi, now=NOW)
         assert row.media_type is None
 
     async def test_fresh_ids_per_occasion(self, db_session):
         wi, fetch = await _occasion(db_session)
-        first = await create_process_command(db_session, fetch, wi, now=NOW, local=LOCAL)
-        second = await create_process_command(db_session, fetch, wi, now=NOW, local=LOCAL)
+        first = await create_process_command(db_session, fetch, wi, now=NOW)
+        second = await create_process_command(db_session, fetch, wi, now=NOW)
         assert first.command_id != second.command_id
         assert first.intent_id != second.intent_id
 
@@ -217,22 +161,22 @@ class TestCreateProcessCommand:
         wi, fetch = await _occasion(db_session)
         fetch.content_fingerprint = "sha256:" + RAW_DIGEST
         with pytest.raises(UnsendableProcessCommand):
-            await create_process_command(db_session, fetch, wi, now=NOW, local=LOCAL)
+            await create_process_command(db_session, fetch, wi, now=NOW)
 
     async def test_no_spec_is_unsendable(self, db_session):
         wi, fetch = await _occasion(db_session, specs=())
         with pytest.raises(UnsendableProcessCommand):
-            await create_process_command(db_session, fetch, wi, now=NOW, local=LOCAL)
+            await create_process_command(db_session, fetch, wi, now=NOW)
 
     async def test_no_blob_is_unsendable(self, db_session):
         wi, fetch = await _occasion(db_session)
         fetch.blob_uri = None
         with pytest.raises(UnsendableProcessCommand):
-            await create_process_command(db_session, fetch, wi, now=NOW, local=LOCAL)
+            await create_process_command(db_session, fetch, wi, now=NOW)
 
     async def test_cascades_with_the_fetch_row(self, db_session):
         wi, fetch = await _occasion(db_session)
-        row = await create_process_command(db_session, fetch, wi, now=NOW, local=LOCAL)
+        row = await create_process_command(db_session, fetch, wi, now=NOW)
         await db_session.flush()
         command_id = row.command_id
 
@@ -247,7 +191,7 @@ class TestCreateProcessCommand:
 class TestSuccessors:
     async def test_chain_runs_the_next_spec_under_the_same_intent(self, db_session):
         wi, fetch = await _occasion(db_session)
-        first = await create_process_command(db_session, fetch, wi, now=NOW, local=LOCAL)
+        first = await create_process_command(db_session, fetch, wi, now=NOW)
         first.reissue_count = 1
         later = NOW + timedelta(minutes=1)
 
@@ -268,15 +212,12 @@ class TestSuccessors:
             "input_uri",
             "input_digest",
             "media_type",
-            "local_outcome",
-            "local_fingerprint",
-            "local_spec_fingerprint",
         ):
             assert getattr(nxt, field) == getattr(first, field), field
 
     async def test_reissue_repeats_the_spec_and_counts(self, db_session):
         wi, fetch = await _occasion(db_session)
-        first = await create_process_command(db_session, fetch, wi, now=NOW, local=LOCAL)
+        first = await create_process_command(db_session, fetch, wi, now=NOW)
 
         again = await reissue_process_command(db_session, first, now=NOW)
 
@@ -295,7 +236,7 @@ class TestPublishProcessCommand:
             primary_url="https://lcb.wa.gov/rules.pdf",
             content_media_type="application/octet-stream",
         )
-        row = await create_process_command(db_session, fetch, wi, now=NOW, local=LOCAL)
+        row = await create_process_command(db_session, fetch, wi, now=NOW)
         client = fakeredis.FakeAsyncRedis()
 
         await publish_process_command(client, row, now=NOW)
@@ -313,7 +254,7 @@ class TestPublishProcessCommand:
 
     async def test_none_media_type_is_stated_on_the_wire(self, db_session):
         wi, fetch = await _occasion(db_session, primary_url="https://lcb.wa.gov/notices")
-        row = await create_process_command(db_session, fetch, wi, now=NOW, local=LOCAL)
+        row = await create_process_command(db_session, fetch, wi, now=NOW)
         client = fakeredis.FakeAsyncRedis()
 
         await publish_process_command(client, row, now=NOW)
@@ -323,7 +264,7 @@ class TestPublishProcessCommand:
 
     async def test_publish_marks_in_flight(self, db_session):
         wi, fetch = await _occasion(db_session)
-        row = await create_process_command(db_session, fetch, wi, now=NOW, local=LOCAL)
+        row = await create_process_command(db_session, fetch, wi, now=NOW)
 
         await publish_process_command(fakeredis.FakeAsyncRedis(), row, now=NOW)
 
@@ -332,11 +273,9 @@ class TestPublishProcessCommand:
 
     async def test_select_pending_returns_only_unpublished_oldest_first(self, db_session):
         wi, fetch = await _occasion(db_session)
-        late = await create_process_command(
-            db_session, fetch, wi, now=NOW + timedelta(minutes=2), local=LOCAL
-        )
-        early = await create_process_command(db_session, fetch, wi, now=NOW, local=LOCAL)
-        sent = await create_process_command(db_session, fetch, wi, now=NOW, local=LOCAL)
+        late = await create_process_command(db_session, fetch, wi, now=NOW + timedelta(minutes=2))
+        early = await create_process_command(db_session, fetch, wi, now=NOW)
+        sent = await create_process_command(db_session, fetch, wi, now=NOW)
         await publish_process_command(fakeredis.FakeAsyncRedis(), sent, now=NOW)
         await db_session.flush()
 
@@ -346,106 +285,77 @@ class TestPublishProcessCommand:
         assert sent.command_id not in ids
 
 
-LOCAL_DIGEST = "sha256:" + "ab" * 32
-OTHER_DIGEST = "sha256:" + "ef" * 32
-LOCAL_SPEC = "spec1:sha256:" + "cd" * 32
+@_integration
+class TestSchema:
+    """What the table holds once the shadow leg is gone (#350), and #345's index."""
 
+    async def test_the_shadow_columns_are_gone(self, db_session):
+        columns = set(
+            (
+                await db_session.execute(
+                    text(
+                        "SELECT column_name FROM information_schema.columns "
+                        "WHERE table_name = 'process_commands'"
+                    )
+                )
+            ).scalars()
+        )
+        assert columns, "process_commands has no columns — wrong table name?"
+        shadow = {
+            "local_outcome",
+            "local_fingerprint",
+            "local_spec_fingerprint",
+            "shadow_verdict",
+            "shadow_detail",
+        }
+        assert not columns & shadow
 
-def _settled(*, local_fingerprint=LOCAL_DIGEST, local_spec=LOCAL_SPEC, **fact) -> ProcessCommand:
-    """An in-memory row as the consumer leaves it; no database needed to judge it."""
-    outcome = LocalOutcome.EXTRACTION_FAILED if local_fingerprint is None else LocalOutcome.CHANGED
-    return ProcessCommand(
-        local_outcome=outcome,
-        local_fingerprint=local_fingerprint,
-        local_spec_fingerprint=local_spec if local_fingerprint else None,
-        **fact,
-    )
+    async def test_the_diff_lookup_has_its_partial_index(self, db_session):
+        """#345: ``stored_text_location`` finds a text by ``output_digest``.
 
+        Partial on the lookup's own predicate, so the index holds only rows it
+        can return: an answered, stored text.
+        """
+        indexdef = (
+            await db_session.execute(
+                text(
+                    "SELECT indexdef FROM pg_indexes "
+                    "WHERE indexname = 'ix_process_commands_output_digest'"
+                )
+            )
+        ).scalar_one_or_none()
+        assert indexdef is not None, "ix_process_commands_output_digest missing"
+        assert "(output_digest)" in indexdef
+        assert "status" in indexdef and "'completed'" in indexdef
+        assert "output_uri IS NOT NULL" in indexdef
 
-def _complete(**over):
-    fact = {
-        "status": ProcessCommandStatus.COMPLETED,
-        "empty": False,
-        "output_digest": LOCAL_DIGEST,
-        "spec_fingerprint": LOCAL_SPEC,
-    }
-    return {**fact, **over}
+    async def test_the_planner_can_answer_the_lookup_from_it(self, db_session):
+        """The lookup's predicate implies the index's, so the index is usable.
 
+        Seq scans off, because on a test-sized table the planner rightly
+        prefers one; what this pins is that the partial predicate matches.
+        """
+        wi, fetch = await _occasion(db_session)
+        row = await create_process_command(db_session, fetch, wi, now=NOW)
+        row.status = ProcessCommandStatus.COMPLETED
+        row.output_digest = "sha256:" + "aa" * 32
+        row.output_uri = "gs://co-gcs-processor/blobs/aa.bin"
+        await db_session.flush()
 
-def _failed(reason, **over):
-    return {"status": ProcessCommandStatus.FAILED, "failure_reason": reason, **over}
-
-
-class TestJudgeShadow:
-    """The comparator: the processor's answer against local extraction's, per lineage.
-
-    The switch (#326) is gated on zero mismatches, so a mismatch must mean the
-    two extractors disagreed about the same bytes — and nothing else may be
-    allowed to read as agreement.
-    """
-
-    def test_equal_digest_and_spec_is_a_match(self):
-        assert judge_shadow(_settled(**_complete())) == (ShadowVerdict.MATCH, None)
-
-    def test_different_digest_is_a_mismatch(self):
-        verdict, detail = judge_shadow(_settled(**_complete(output_digest=OTHER_DIGEST)))
-        assert verdict is ShadowVerdict.MISMATCH
-        assert LOCAL_DIGEST in detail and OTHER_DIGEST in detail
-
-    def test_different_spec_is_a_mismatch_even_with_equal_digest(self):
-        # The fallback loop bound a different spec than local's did: the chain
-        # disagrees with the loop it replaces, whatever the bytes say.
-        verdict, detail = judge_shadow(_settled(**_complete(spec_fingerprint="spec1:other")))
-        assert verdict is ShadowVerdict.MISMATCH
-        assert "spec" in detail
-
-    def test_unknown_spec_identity_on_either_side_judges_the_digest_alone(self):
-        # co-core reports None when the derivation raises; unknown is not a disagreement.
-        assert judge_shadow(_settled(**_complete(spec_fingerprint=None)))[0] is ShadowVerdict.MATCH
-        assert judge_shadow(_settled(local_spec=None, **_complete()))[0] is ShadowVerdict.MATCH
-
-    def test_processor_derived_text_where_local_failed_is_a_mismatch(self):
-        verdict, _ = judge_shadow(_settled(local_fingerprint=None, **_complete()))
-        assert verdict is ShadowVerdict.MISMATCH
-
-    def test_empty_on_the_last_spec_matches_a_local_failure(self):
-        # #258: local raises on all-empty; the chain ends on an empty outcome.
-        row = _settled(local_fingerprint=None, **_complete(empty=True, output_digest=None))
-        assert judge_shadow(row) == (ShadowVerdict.MATCH, None)
-
-    def test_empty_on_the_last_spec_where_local_derived_text_is_a_mismatch(self):
-        row = _settled(**_complete(empty=True, output_digest=None))
-        assert judge_shadow(row)[0] is ShadowVerdict.MISMATCH
-
-    def test_extraction_error_matches_a_local_failure(self):
-        row = _settled(local_fingerprint=None, **_failed("extraction_error"))
-        assert judge_shadow(row) == (ShadowVerdict.MATCH, None)
-
-    def test_extraction_error_where_local_derived_text_is_a_mismatch(self):
-        # Includes processor#17's give-up (`dead-lettered: …` in detail): a
-        # processor that cannot finish what local finished blocks the switch.
-        row = _settled(**_failed("extraction_error", failure_detail="dead-lettered: boom"))
-        verdict, detail = judge_shadow(row)
-        assert verdict is ShadowVerdict.MISMATCH
-        assert "extraction_error" in detail
-
-    @pytest.mark.parametrize(
-        "reason",
-        [
-            "input_unreadable",
-            "invalid_input",
-            "input_digest_mismatch",
-            "unsupported_media_type",
-            "unsupported_processor",
-            "a_reason_from_the_future",
-        ],
-    )
-    def test_input_and_plumbing_failures_are_uncompared(self, reason):
-        # The processor never judged the bytes: coverage lost, not disagreement.
-        verdict, detail = judge_shadow(_settled(**_failed(reason)))
-        assert verdict is ShadowVerdict.UNCOMPARED
-        assert detail == reason
-
-    def test_a_row_without_a_local_answer_is_uncompared(self):
-        row = ProcessCommand(**_complete())
-        assert judge_shadow(row)[0] is ShadowVerdict.UNCOMPARED
+        await db_session.execute(text("SET LOCAL enable_seqscan = off"))
+        plan = "\n".join(
+            (
+                await db_session.execute(
+                    text(
+                        "EXPLAIN SELECT output_uri, output_size_bytes FROM process_commands "
+                        "WHERE output_digest = :fp AND status = 'completed' "
+                        "AND output_uri IS NOT NULL "
+                        "ORDER BY fact_at DESC NULLS LAST LIMIT 1"
+                    ),
+                    {"fp": row.output_digest},
+                )
+            ).scalars()
+        )
+        assert "ix_process_commands_output_digest" in plan
+        stored = await stored_text_location(db_session, row.output_digest)
+        assert stored is not None and stored.uri == row.output_uri

@@ -46,7 +46,7 @@ def _real_change_detected_keys() -> set[str]:
 
     The base half is derived from live code, but the per-event additions below
     are hard-coded — keep them synced with the ``change_meta`` dict built in
-    ``src/workers/pipeline.py`` (``process_watched_item``). Because the parity
+    ``src/workers/pipeline.py`` (``apply_extraction_outcome``). Because the parity
     assertion is a subset check (permissive), a new key added to ``change_meta``
     but omitted here would NOT fail this test; it would only weaken the guard.
     """

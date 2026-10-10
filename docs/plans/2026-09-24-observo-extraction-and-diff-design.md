@@ -1,6 +1,6 @@
 # Observo-derived extraction and the change diff — design
 
-**Status:** approved 2026-09-24; cannobserv#486 shipped in co-core 0.19.4 and step 0 (#324) shipped the same day; #325 (shadow) shipped 2026-10-02; #326's processor-decided path built 2026-10-03, switch pending; #222 (the diff) built 2026-10-05 — read **Amendments** first. **Issue:** #222 (retitled and
+**Status:** approved 2026-09-24; cannobserv#486 shipped in co-core 0.19.4 and step 0 (#324) shipped the same day; #325 (shadow) shipped 2026-10-02; #326 switched to the processor 2026-10-06 and soaked clean; #350 deleted local extraction, the mode and the shadow leg 2026-10-10; #222 (the diff) built 2026-10-05 — read **Amendments** first. **Issue:** #222 (retitled and
 split — see **#222 disposition**). **Cross-repo work:** filed 2026-09-24 as issues
 in co-core, broker, Observo and Archiver (numbers in **Section 6**); none of it is
 implemented from a Watcher session.

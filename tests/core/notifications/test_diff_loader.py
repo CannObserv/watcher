@@ -18,7 +18,7 @@ from sqlalchemy import select
 
 from src.core.blobs import BlobUnreadable, UnsupportedBlobScheme
 from src.core.fetch_commands import create_fetch_command
-from src.core.models.process_command import LocalOutcome, ProcessCommandStatus
+from src.core.models.process_command import ProcessCommandStatus
 from src.core.models.watched_item import WatchedItem
 from src.core.notifications import diff_loader as loader_mod
 from src.core.notifications.diff import ChangeDiff, compute_change_diff
@@ -28,7 +28,7 @@ from src.core.notifications.diff_loader import (
     load_change_diff,
     stored_text_location,
 )
-from src.core.process_commands import LocalExtraction, create_process_command
+from src.core.process_commands import create_process_command
 from tests.conftest import make_watched_item
 
 PREVIOUS = b"Hours\nMon-Fri 9-5\nContact: a@example.com"
@@ -80,25 +80,10 @@ class TestLoadChangeDiff:
         # The fingerprints differ but the word split collapses the
         # difference: an empty diff must explain itself, never render as nothing.
         before, after = b"Board meets.  Quorum is two.", b"Board meets. Quorum is two."
-        locate, read = _store(before)
+        locate, read = _store(before, after)
         with locate, read:
-            result = await load_change_diff(AsyncMock(), _meta(before, after), current_text=after)
+            result = await load_change_diff(AsyncMock(), _meta(before, after))
         assert result == ChangeDiff(unavailable="whitespace-only change")
-
-    async def test_current_text_in_hand_is_used_without_a_lookup(self):
-        # Local/shadow extraction notifies before the processor has answered,
-        # so the current text is not stored yet — but it is in memory.
-        locate, read = _store(PREVIOUS)
-        with locate as located, read:
-            result = await load_change_diff(AsyncMock(), _meta(), current_text=CURRENT)
-        assert result == compute_change_diff(PREVIOUS, CURRENT)
-        assert [c.args[1] for c in located.call_args_list] == [_fp(PREVIOUS)]
-
-    async def test_current_text_in_hand_that_does_not_hash_is_not_trusted(self):
-        locate, read = _store(PREVIOUS, CURRENT)
-        with locate, read:
-            result = await load_change_diff(AsyncMock(), _meta(), current_text=b"something else")
-        assert result == compute_change_diff(PREVIOUS, CURRENT)
 
     async def test_previous_not_stored_is_unavailable(self):
         locate, read = _store(CURRENT)
@@ -194,31 +179,6 @@ class TestLoadChangeDiff:
         assert result.unavailable == "content too large"
         read.assert_not_awaited()
 
-    async def test_too_large_in_hand_is_unavailable(self, monkeypatch):
-        monkeypatch.setenv(DIFF_MAX_INPUT_BYTES_ENV, str(len(PREVIOUS)))
-        big = CURRENT + b"\n" + b"x" * 64
-        locate, read = _store(PREVIOUS)
-        with locate, read:
-            result = await load_change_diff(AsyncMock(), _meta(current=big), current_text=big)
-        assert result.unavailable == "content too large"
-
-    async def test_oversized_text_in_hand_is_refused_before_it_is_hashed(self, monkeypatch):
-        # Hashing is CPU on the event loop; a text the cap refuses anyway
-        # must not pay for it.
-        monkeypatch.setenv(DIFF_MAX_INPUT_BYTES_ENV, str(len(PREVIOUS)))
-        big = CURRENT + b"\n" + b"x" * 64
-        hashed = []
-        real = loader_mod._address
-        locate, read = _store(PREVIOUS)
-        with (
-            locate,
-            read,
-            patch.object(loader_mod, "_address", side_effect=lambda t: hashed.append(t) or real(t)),
-        ):
-            result = await load_change_diff(AsyncMock(), _meta(current=big), current_text=big)
-        assert result.unavailable == "content too large"
-        assert big not in hashed
-
     async def test_difflib_runs_off_the_event_loop(self):
         locate, read = _store(PREVIOUS, CURRENT)
         real = asyncio.to_thread
@@ -243,13 +203,7 @@ class TestStoredTextLocation:
         fetch.blob_uri = f"gs://co-gcs-blobs/blobs/{'61' * 32}.bin"
         fetch.content_fingerprint = "61" * 32
         await db_session.flush()
-        row = await create_process_command(
-            db_session,
-            fetch,
-            wi,
-            now=datetime.now(UTC),
-            local=LocalExtraction(outcome=LocalOutcome.CHANGED, fingerprint=digest),
-        )
+        row = await create_process_command(db_session, fetch, wi, now=datetime.now(UTC))
         row.status = status
         row.output_digest = digest
         row.output_uri = uri
@@ -278,7 +232,6 @@ class TestStoredTextLocation:
         result = await load_change_diff(
             db_session,
             {"previous_fingerprint": "sha256:\x00", "current_fingerprint": _fp(CURRENT)},
-            current_text=CURRENT,
         )
         assert result.unavailable == "error"
         # The item written before the error is still there, in a usable transaction.

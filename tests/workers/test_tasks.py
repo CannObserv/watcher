@@ -595,7 +595,9 @@ class TestForcedFullFetch:
         wi.last_full_fetch_at = datetime.now(UTC) - timedelta(hours=1)
         wi.blob_expires_at = wi.last_full_fetch_at + timedelta(days=7)
         wi.validator_source_key = validator_source_key(
-            effective_url=wi.effective_url, source_specs=wi.source_specs
+            effective_url=wi.effective_url,
+            source_specs=wi.source_specs,
+            generation=wi.processor_version,
         )
         await db_session.commit()
         return wi

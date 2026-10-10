@@ -118,9 +118,7 @@ async def lifespan(application: FastAPI):
         application.state.bus_reachability_task = reachability_task
         consumer_task = start_blobs_consumer(bus_client, get_session_factory(), stop=consumer_stop)
         logger.info("content.blobs consumer started")
-        # #325: the processing leg's fact inbox. Started whatever
-        # WATCHER_EXTRACT_MODE says, so facts for commands issued before the
-        # mode went back to `local` still settle and are judged.
+        # #325: the processing leg's fact inbox — every check closes through it.
         derived_task = start_derived_consumer(bus_client, get_session_factory(), stop=consumer_stop)
         logger.info("content.derived consumer started")
         # #254: the info.registry reconcile — Watcher's registry inbox. Groupless

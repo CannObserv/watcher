@@ -6,7 +6,6 @@ from src.core import media_type as watcher_media_type
 from src.core.media_type import (
     AMBIGUOUS_MEDIA_TYPES,
     extension_media_type,
-    extraction_overrides_for_essence,
     media_type_essence_of,
     resolve_dispatch_essence,
 )
@@ -27,7 +26,6 @@ class TestDispatchIsCoCores:
         for name in (
             "AMBIGUOUS_MEDIA_TYPES",
             "extension_media_type",
-            "extraction_overrides_for_essence",
             "media_type_essence_of",
             "resolve_dispatch_essence",
         ):
@@ -83,7 +81,7 @@ class TestResolveDispatchEssence:
         assert resolve_dispatch_essence(None, "https://x.gov/a.pdf") == "application/pdf"
 
     def test_ambiguous_header_no_extension_returns_header_essence(self):
-        # Resolves to the ambiguous essence -> registry maps it to the HTML fallback.
+        # Resolves to the ambiguous essence; the processor maps it to the HTML fallback.
         assert (
             resolve_dispatch_essence("application/octet-stream", "https://x.gov/page")
             == "application/octet-stream"
@@ -91,14 +89,3 @@ class TestResolveDispatchEssence:
 
     def test_nothing_informative_returns_none(self):
         assert resolve_dispatch_essence(None, "https://x.gov/page") is None
-
-
-class TestExtractionOverrides:
-    def test_csv_and_xlsx_set_content_type(self):
-        assert extraction_overrides_for_essence("text/csv") == {"content_type": "csv"}
-        assert extraction_overrides_for_essence(_XLSX) == {"content_type": "xlsx"}
-
-    def test_html_pdf_and_unknown_have_no_overrides(self):
-        assert extraction_overrides_for_essence("text/html") == {}
-        assert extraction_overrides_for_essence("application/pdf") == {}
-        assert extraction_overrides_for_essence(None) == {}

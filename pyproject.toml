@@ -22,10 +22,11 @@ dependencies = [
     "jinja2>=3.1.6,<4",
     "python-multipart>=0.0.22,<1",
     "notifier-client",
-    # Exact, through shadow (#325): both sides of content.process must report the
-    # same processor_version, and Processor pins ==0.19.7 too. Bump in lockstep
-    # with CannObserv/processor, after the parity corpus passes on the new version.
-    "co-core[extract]==0.19.7",
+    # No [extract]: the processor extracts (#350); watcher needs the models, the
+    # bus contract and the stdlib-only media-type rule. Still exact, lockstep with
+    # CannObserv/processor, though its reason (#325's shared processor_version)
+    # left with local extraction — loosening it is #342's call.
+    "co-core==0.19.7",
     "co-core-aio[bus]==0.19.7",
     # Imported directly by the bus layer; docs/BUS-CONNECTION-POLICY.md was
     # measured on redis-py 7.4.1, so a major is ours to adopt, not co-core-aio's (#294).
@@ -39,7 +40,7 @@ dependencies = [
 dev = [
     "anyio>=4.12.1,<5",
     # tests/dashboard parses HTMX responses; production parses no HTML itself —
-    # co-core[extract] owns the extraction stack (#236).
+    # the processor owns the extraction stack (#350).
     "beautifulsoup4>=4.12.0,<5",
     # In-memory Redis for the fetch-policy producer tests (#245); mirrors
     # replicator's test harness so the two ends of the stream test alike.

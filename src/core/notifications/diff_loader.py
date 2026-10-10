@@ -8,13 +8,8 @@ per recipient, and handed to the notifier. What a diff *is* lives in ``diff``.
 **Where the text lives** comes from the processor's own answer:
 ``process_commands.output_uri`` on a completed row whose ``output_digest`` is
 the fingerprint. No bucket is configured on this side, and a fingerprint the
-processor never answered for (a revision older than shadow mode) has no
-location — the diff is then unavailable, never guessed.
-
-**The current text may be in hand.** Local and shadow extraction notify before
-the processor has answered for this occasion, so its text is not stored yet;
-the pipeline passes the bytes it just fingerprinted instead. They are trusted
-only if they hash to the event's ``current_fingerprint``.
+processor never answered for (a revision older than shadow mode, #325) has
+no location — the diff is then unavailable, never guessed.
 
 **Every read is hash-checked, every input capped, ``difflib`` runs in a
 thread** (one process serves the API, the consumers and the tasks), and
@@ -129,7 +124,6 @@ async def load_change_diff(
     session: AsyncSession,
     metadata: dict,
     *,
-    current_text: bytes | None = None,
     watched_item_id: str | None = None,
 ) -> ChangeDiff | None:
     """The diff for one ``change_detected`` event; never raises.
@@ -147,14 +141,7 @@ async def load_change_diff(
     try:
         cap = diff_max_input_bytes()
         previous = await _read_stored(session, previous_fp, "previous", cap, log_extra=log_extra)
-        # Cap before hash (CR 3): hashing runs on the event loop, and a text
-        # the cap refuses is refused whichever copy is read.
-        if current_text is not None and len(current_text) > cap:
-            raise _Unavailable("content too large")
-        if current_text is not None and _address(current_text) == current_fp:
-            current = current_text
-        else:
-            current = await _read_stored(session, current_fp, "current", cap, log_extra=log_extra)
+        current = await _read_stored(session, current_fp, "current", cap, log_extra=log_extra)
         diff = await asyncio.to_thread(compute_change_diff, previous, current)
         if not diff.hunks:
             # The fingerprints differ, so the bytes do; the word split

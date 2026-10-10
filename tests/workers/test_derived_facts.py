@@ -30,8 +30,8 @@ from sqlalchemy import event
 
 import src.workers.derived_facts as df_mod
 from src.core.fetch_commands import create_fetch_command
-from src.core.models.process_command import LocalOutcome, ProcessCommandStatus
-from src.core.process_commands import LocalExtraction, create_process_command
+from src.core.models.process_command import ProcessCommandStatus
+from src.core.process_commands import create_process_command
 from src.workers.derived_facts import (
     CONSUMER_GROUP,
     process_derived_message,
@@ -97,13 +97,7 @@ async def _issued(db_session, *, status=ProcessCommandStatus.IN_FLIGHT):
     fetch.content_fingerprint = "61" * 32
     fetch.blob_uri = f"gs://co-gcs-blobs/blobs/{'61' * 32}.bin"
     await db_session.flush()
-    row = await create_process_command(
-        db_session,
-        fetch,
-        wi,
-        now=NOW,
-        local=LocalExtraction(outcome=LocalOutcome.UNCHANGED, fingerprint=DIGEST),
-    )
+    row = await create_process_command(db_session, fetch, wi, now=NOW)
     row.status = status
     await db_session.flush()
     return row

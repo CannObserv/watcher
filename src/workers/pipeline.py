@@ -1,47 +1,29 @@
-"""Per-WatchedItem pipeline: fetch once, extract, fingerprint, dispatch.
+"""Per-WatchedItem history: compare an outcome, record it, dispatch the change.
 
-#185 Phase A. The pipeline reads effective_url and source_specs directly from
-the WatchedItem (set at Watch-create time), removing the per-cycle Archiver SDK
-call. ChangeRevision rows serve as the local fingerprint history; the first row
-is a baseline (no notification); subsequent changes dispatch CHANGE_DETECTED
-once for the WatchedItem (the single monitored entity, #191).
+The processor extracts and fingerprints (#326, #350); this module holds what
+happens to its answer. ChangeRevision rows serve as the local fingerprint
+history; the first row is a baseline (no notification); subsequent changes
+dispatch CHANGE_DETECTED once for the WatchedItem (the single monitored
+entity, #191).
 """
 
 import enum
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 
-from co_core.pure.extract import (
-    CANONICAL_TEXT_MEDIA_TYPE,
-    ExtractionResult,
-    Extractor,
-    canonical_text,
-    spec_fingerprint,
-    spec_schema_version,
-)
-from co_core.pure.extract import (
-    extraction_config_from_spec as _extraction_config_from_spec,
-)
-from co_core.pure.extract.html import HtmlExtractor
-from co_core.pure.util.hashing import prefixed_sha256, sha256
+from co_core.pure.extract import CANONICAL_TEXT_MEDIA_TYPE
 from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.logging import get_logger
-from src.core.media_type import (
-    extraction_overrides_for_essence,
-    resolve_dispatch_essence,
-)
 from src.core.models.audit_log import EventType, audit
 from src.core.models.change_revision import ChangeRevision
 from src.core.models.pending_archiver_sync import PendingArchiverSync
 from src.core.models.watched_item import WatchedItem
 from src.core.notifications.events import WatchEvent, WatchEventType
 from src.core.notifications.notify import dispatch_event_notifications
-from src.core.registry import ServiceRegistry, get_registry
 from src.core.utils import format_utc_iso, watched_item_event_base_metadata
-from src.core.validators import EXTRACTION_GENERATION
 
 logger = get_logger(__name__)
 
@@ -53,43 +35,6 @@ logger = get_logger(__name__)
 # model, so promoting a field to required there fails the suite rather than
 # silently reopening the vector (CR 9).
 WIRE_REQUIRED_PROVENANCE_FIELDS = ("blob_uri", "source_media_type", "content_media_type")
-
-
-class ExtractionError(Exception):
-    """Raised when the dispatched extractor cannot process the fetched bytes.
-
-    Post-#168 the pipeline dispatches PDF/CSV extractors that can raise on bytes
-    that don't match the declared/observed type (a mislabeled origin, an HTML
-    error page served under a `.pdf` URL, or an operator override mismatch).
-    The caller (`check_watched_item`) treats this like a fetch failure so the item
-    surfaces a health signal instead of silently re-failing every tick.
-    """
-
-
-# ---------------------------------------------------------------------------
-# Extraction helpers.
-# ---------------------------------------------------------------------------
-
-
-def _extract_with_spec(
-    raw_content: bytes,
-    document: dict,
-    *,
-    extractor: Extractor | None = None,
-    extra_config: dict | None = None,
-) -> ExtractionResult:
-    """Run an extractor with config derived from a source_spec document.
-
-    Defaults to the HTML extractor (the historical behaviour) when no extractor is
-    supplied. ``extra_config`` carries media-type-implied knobs (e.g. the CSV/Excel
-    ``content_type`` mode) merged over the spec-derived config. Synchronous:
-    co-core extractors are pure (#236).
-    """
-    extractor = extractor or HtmlExtractor()
-    config = _extraction_config_from_spec(document)
-    if extra_config:
-        config = {**config, **extra_config}
-    return extractor.extract(raw_content, config=config)
 
 
 @dataclass(frozen=True)
@@ -120,28 +65,22 @@ class BlobProvenance:
 
 @dataclass
 class ExtractionOutcome:
-    """Result of extracting and fingerprinting raw content."""
+    """What a ``content.derived`` fact reports about one occasion's text."""
 
     content_fingerprint: str
     content_size_bytes: int
     schema_version: int
-    # Identity of the spec the fallback loop actually bound — per-spec, so a
-    # fallback from spec[0] to spec[1] moves it (cannobserv#309). ``None`` when
-    # co-core cannot derive one; a diagnostic must never fail the pipeline.
+    # Identity of the spec the chain actually bound — per-spec, so a fallback
+    # from spec[0] to spec[1] moves it (cannobserv#309). ``None`` when the
+    # processor could not derive one; a diagnostic must never fail a check.
     spec_fingerprint: str | None = None
     # The media type of the EXTRACTED text, not of what the origin served; the
     # wire keeps it beside ``source_media_type`` because they differ for one
-    # revision. co-core's constant (#324): a derived fact reports the same one.
+    # revision. co-core's constant (#324).
     content_media_type: str = CANONICAL_TEXT_MEDIA_TYPE
-    # Identity of the extraction itself (#324): the same string a processor
-    # reports as ``processor_version`` on a derived fact, so a revision written
-    # by local extraction and one written from Observo's fact compare alike.
-    processor_version: str | None = EXTRACTION_GENERATION
-    # The canonical text itself, when this process extracted it (#222): a
-    # change notifies before the processor has stored it, so the diff needs
-    # the bytes in hand. Never persisted; ``None`` for a derived outcome,
-    # whose text the processor already holds.
-    content: bytes | None = field(default=None, repr=False, compare=False)
+    # Identity of the extraction itself (#324), as the processor reports it;
+    # ``None`` is unknown, and Option A then triggers on nothing.
+    processor_version: str | None = None
 
 
 def _provenance_columns(blob: BlobProvenance, outcome: ExtractionOutcome) -> dict[str, object]:
@@ -163,82 +102,8 @@ def _provenance_columns(blob: BlobProvenance, outcome: ExtractionOutcome) -> dic
     }
 
 
-def _extract_and_fingerprint(
-    raw_content: bytes,
-    source_specs: list[dict],
-    *,
-    extractor: Extractor | None = None,
-    extra_config: dict | None = None,
-    spec_id: str | None = None,
-) -> ExtractionOutcome:
-    """Extract content and fingerprint, trying source_specs in order until non-empty.
-
-    Falls back to the next spec if the current one yields no chunks. If all
-    specs yield empty chunks, uses the last result — reporting what it found
-    rather than judging it; the caller rejects the all-empty outcome (#258).
-    ``extractor``/``extra_config`` select and tune the
-    media-type-appropriate extractor (defaults to HTML). Synchronous: extraction
-    and hashing are pure CPU (#236).
-
-    Nothing is substituted for an absent spec (#260): an empty ``source_specs``
-    extracts nothing and names no spec, rather than silently watching the whole
-    page under a synthetic ``[{}]``. Callers reject the spec-less item before
-    reaching here; the honest empty outcome is the backstop, since
-    ``spec_fingerprint({})`` would name a spec present in no registry and
-    Archiver's index lookup would flag the revision as superseded.
-    ``spec_id`` identifies the item for the warning path (#253 CR-7).
-    """
-    result = ExtractionResult(chunks=[])
-    used_spec: dict = {}
-    for spec in source_specs:
-        result = _extract_with_spec(
-            raw_content, spec, extractor=extractor, extra_config=extra_config
-        )
-        used_spec = spec
-        if result.chunks:
-            break
-    # The bytes the fingerprint covers are co-core's to define (#324,
-    # cannobserv#486): the derived text is stored permanently by hash and
-    # compared across services, so the join is not spelled here. Byte-identical
-    # to the local join it replaces, which is what keeps every stored
-    # fingerprint valid. Built once and hashed the way co-core's
-    # `canonical_text_fingerprint` does; a test pins the two equal.
-    content_bytes = canonical_text(result.chunks)
-    return ExtractionOutcome(
-        content_fingerprint=prefixed_sha256(sha256(content_bytes)),
-        content_size_bytes=len(content_bytes),
-        schema_version=spec_schema_version(used_spec),
-        spec_fingerprint=(
-            _spec_fingerprint_or_none(used_spec, spec_id=spec_id) if source_specs else None
-        ),
-        content=content_bytes,
-    )
-
-
-def _spec_fingerprint_or_none(spec: dict, *, spec_id: str | None = None) -> str | None:
-    """co-core's derivation over the spec that produced the bytes, or ``None``.
-
-    ``SpecFingerprintError`` subclasses ``ValueError``; co-core rejects a spec
-    carrying a float, an explicit null, a non-ASCII key, or any non-JSON type.
-    Every one of those is a reason to report no spec identity rather than to
-    lose the revision — the field is a diagnostic, and Archiver's policy is
-    record-and-flag, never reject (archiver#139).
-
-    ``spec_id`` names the WatchedItem in the warning: an operator who learns only
-    that *a* spec somewhere is malformed cannot go fix one (#253 CR-7).
-    """
-    try:
-        return spec_fingerprint(spec)
-    except ValueError as exc:
-        logger.warning(
-            "spec_fingerprint underivable",
-            extra={"error": str(exc), "watched_item_id": spec_id},
-        )
-        return None
-
-
 # ---------------------------------------------------------------------------
-# Per-WatchedItem pipeline.
+# Per-WatchedItem history.
 # ---------------------------------------------------------------------------
 
 
@@ -260,10 +125,6 @@ class WatchedItemResult:
     # a revision was written and announced but nobody was notified. Never set
     # beside `changed`.
     rebaselined: bool = False
-    # What extraction concluded, on every branch that extracted (#325): shadow
-    # mode's comparator judges the processor's `output_digest` against it.
-    content_fingerprint: str | None = None
-    spec_fingerprint: str | None = None
 
 
 class ExtractionChange(enum.StrEnum):
@@ -309,14 +170,6 @@ def extraction_change(
     return None
 
 
-def _local_answer(outcome: ExtractionOutcome) -> dict[str, str | None]:
-    """The result fields that report what extraction concluded (#325)."""
-    return {
-        "content_fingerprint": outcome.content_fingerprint,
-        "spec_fingerprint": outcome.spec_fingerprint,
-    }
-
-
 async def _renew_blob_reference(
     session: AsyncSession,
     watched_item: WatchedItem,
@@ -352,9 +205,9 @@ async def _renew_blob_reference(
     a refresh, where the change path's equivalent gap costs only an observation
     that never existed. Declining also keeps a row that could only dead-letter
     out of the outbox when there is nothing there to protect. Unreachable
-    today: ``aread_blob`` raises before the pipeline on a null ``blob_uri``,
-    and the consumer writes ``media_type`` in the same upsert — but nothing
-    else enforces it, and the asymmetry is what makes it worth a guard.
+    today: a command is unsendable without a ``blob_uri``, and the consumer
+    writes ``media_type`` in the same upsert — but nothing else enforces it,
+    and the asymmetry is what makes it worth a guard.
     """
     provenance = _provenance_columns(blob, outcome)
     missing = [name for name in WIRE_REQUIRED_PROVENANCE_FIELDS if provenance[name] is None]
@@ -402,95 +255,6 @@ async def _renew_blob_reference(
     return True
 
 
-async def process_watched_item(
-    session: AsyncSession,
-    watched_item: WatchedItem,
-    *,
-    raw_content: bytes,
-    registry: ServiceRegistry | None = None,
-    blob: BlobProvenance,
-) -> WatchedItemResult:
-    """Run one check cycle for a WatchedItem.
-
-    1. No `source_specs`: raise `ExtractionError` — nothing to extract (#260).
-    2. Extract content using `watched_item.source_specs`; fingerprint.
-    3. Empty extraction: raise `ExtractionError` — never a revision (#258).
-    4. `apply_extraction_outcome` — the history comparison:
-       a. Query `change_revisions` for the last fingerprint.
-       b. First run: insert baseline ChangeRevision, no notification.
-       c. Same fingerprint: cache hit — no revision, no notification. If the
-          latest revision has already been announced (it has an older sibling,
-          so the change path enqueued it), upsert a PendingArchiverSync for it
-          carrying this cycle's blob reference (#293). The baseline is never
-          announced here.
-       d. Changed: insert new ChangeRevision, enqueue PendingArchiverSync, then
-          Option A (#326): an extractor-only move writes `CHECK_REBASELINED`
-          and notifies nobody; anything else dispatches CHANGE_DETECTED once
-          for the WatchedItem, labelled when the bound spec moved.
-
-    `watched_item.last_changed_at` is updated on change.
-    `last_checked_at` and `health_status` are managed by the caller (tasks.py).
-    `registry` selects the extractor; defaults to the process singleton. The caller
-    (`check_watched_item`) threads its own registry so the extractor and fetcher
-    come from the same place (honouring the `ServiceRegistry` injection seam).
-    `blob` carries the correlated `content.blobs` fact onto the outbox row (#253);
-    the apply path always supplies it, and the publisher requires it.
-    """
-    reg = registry if registry is not None else get_registry()
-    source_specs: list[dict] = watched_item.source_specs or []
-
-    # #260: a spec-less item is unextractable, not a whole-page watch. The API
-    # refuses to create one, but the `info.registry` reconcile writes whatever an
-    # announcement carries and co-core still declares `source_specs` optional
-    # there — so the state stays reachable over the wire, for a source Archiver
-    # would not announce as live and therefore never schedules. Raising here is
-    # what makes that residual loud (ERROR health, no revision) rather than
-    # silent: the retired synthetic `[{}]` extracted the full page under a
-    # config nobody authored, and reported no spec identity for the revision it
-    # produced. Ahead of the extractor dispatch so the message names the cause
-    # rather than an extraction failure it would be wrapped as.
-    if not source_specs:
-        raise ExtractionError("watched item has no source_specs; nothing to extract")
-
-    # Dispatch the extractor on the observed/overridden media type (#168 slice 2).
-    # Derived in Python from content_media_type (seeded by the caller from this
-    # cycle's response header) + a URL-extension tiebreaker; unknown types fall
-    # back to the HTML extractor.
-    essence = resolve_dispatch_essence(watched_item.content_media_type, watched_item.effective_url)
-    extractor = reg.get_extractor(essence)
-    extra_config = extraction_overrides_for_essence(essence)
-    try:
-        outcome = _extract_and_fingerprint(
-            raw_content,
-            source_specs,
-            extractor=extractor,
-            extra_config=extra_config,
-            spec_id=str(watched_item.id),
-        )
-    except Exception as exc:
-        # PDF/CSV extractors raise on mismatched bytes; surface as a typed error so
-        # the caller records a health signal rather than dead-letter-looping (#168).
-        raise ExtractionError(f"extraction failed (essence={essence!r}): {exc}") from exc
-
-    # #258: every spec yielded empty. Not an exception from the extractor, but not
-    # a content observation either — the fallback loop exhausted, and its terminal
-    # case left `used_spec` pointing at the last spec rather than a chosen one.
-    # Treated as a failure unconditionally, on both sides of a baseline: an item
-    # whose extraction yields nothing is a broken watch either way, and the
-    # alternative is worse in the silent direction. Empty content fingerprints
-    # consistently, so before this guard rot presented as a *content change* —
-    # zero-byte revision, POST to Archiver, CHANGE_DETECTED notification, health
-    # still OK — and an item broken from its first check baselined on the empty
-    # digest and never reported anything again.
-    if outcome.content_size_bytes == 0:
-        raise ExtractionError(
-            f"every source_spec yielded empty content (essence={essence!r}, "
-            f"authored_specs={len(source_specs)})"
-        )
-
-    return await apply_extraction_outcome(session, watched_item, outcome, blob=blob)
-
-
 async def apply_extraction_outcome(
     session: AsyncSession,
     watched_item: WatchedItem,
@@ -500,10 +264,22 @@ async def apply_extraction_outcome(
 ) -> WatchedItemResult:
     """Compare one outcome against the item's history and act on it.
 
-    The half of a check cycle that never sees bytes: local extraction calls it
-    with what it computed, and processor mode (#326) with what a
-    ``content.derived`` fact reported. Baseline, cache hit (#293 renewal), or
-    change — and a change goes through Option A (``extraction_change``) first.
+    Called with what a ``content.derived`` fact reported (#326):
+
+    a. First run: insert a baseline ChangeRevision, no notification.
+    b. Same fingerprint: cache hit — no revision, no notification. If the
+       latest revision has already been announced (it has an older sibling,
+       so the change path enqueued it), upsert a PendingArchiverSync for it
+       carrying this cycle's blob reference (#293). The baseline is never
+       announced here.
+    c. Changed: insert a new ChangeRevision, enqueue PendingArchiverSync, then
+       Option A (``extraction_change``): an extractor-only move writes
+       ``CHECK_REBASELINED`` and notifies nobody; anything else dispatches
+       CHANGE_DETECTED once for the WatchedItem, labelled when the spec moved.
+
+    ``last_changed_at`` is updated on a notified change; ``last_checked_at``
+    and ``health_status`` are the caller's (``close_succeeded``). ``blob``
+    carries the correlated ``content.blobs`` fact onto the outbox row (#253).
 
     ``watched_item.processor_version`` is read as the comparison base and then
     set to the outcome's, on every branch: an unchanged outcome under a new
@@ -547,7 +323,7 @@ async def apply_extraction_outcome(
                 processor_version=outcome.processor_version,
             )
         )
-        return WatchedItemResult(baseline_established=True, **_local_answer(outcome))
+        return WatchedItemResult(baseline_established=True)
 
     if last_rev.content_fingerprint == outcome.content_fingerprint:
         # Cache hit. Bytes arrived, so Replicator renewed the blob reference
@@ -555,11 +331,11 @@ async def apply_extraction_outcome(
         # the first observation (#293). Bounded by full fetches — a 304 never
         # reaches this function.
         if not latest_is_announced:
-            return WatchedItemResult(cache_hit=True, **_local_answer(outcome))
+            return WatchedItemResult(cache_hit=True)
         renewed = await _renew_blob_reference(
             session, watched_item, last_rev, blob=blob, outcome=outcome, now=now
         )
-        return WatchedItemResult(cache_hit=True, renewal_enqueued=renewed, **_local_answer(outcome))
+        return WatchedItemResult(cache_hit=True, renewal_enqueued=renewed)
 
     # Fingerprint changed: insert new ChangeRevision.
     rev = ChangeRevision(
@@ -617,7 +393,7 @@ async def apply_extraction_outcome(
                 "processor_version": outcome.processor_version,
             },
         )
-        return WatchedItemResult(rebaselined=True, **_local_answer(outcome))
+        return WatchedItemResult(rebaselined=True)
 
     # #349: the change before this one, for the email's PREVIOUS CHANGE —
     # read before it is overwritten, since `last_changed_at` is about to be
@@ -650,6 +426,6 @@ async def apply_extraction_outcome(
         occurred_at=now,
         metadata=change_meta,
     )
-    await dispatch_event_notifications(session=session, event=event, current_text=outcome.content)
+    await dispatch_event_notifications(session=session, event=event)
 
-    return WatchedItemResult(changed=True, notifications_dispatched=1, **_local_answer(outcome))
+    return WatchedItemResult(changed=True, notifications_dispatched=1)

@@ -351,12 +351,9 @@ class TestChangeDiff:
         bodies = [c.kwargs["body_template"] for c in client.dispatch.call_args_list]
         assert ["```diff" in b for b in bodies] == [True, False]
 
-    async def test_current_text_and_item_reach_the_loader(self, monkeypatch):
+    async def test_the_item_reaches_the_loader(self, monkeypatch):
         event = _make_event(change_revision_id=str(ULID()))
-        _client, load = await self._dispatch(
-            monkeypatch, self._templates(None), event=event, current_text=b"in hand"
-        )
-        assert load.call_args.kwargs["current_text"] == b"in hand"
+        _client, load = await self._dispatch(monkeypatch, self._templates(None), event=event)
         assert load.call_args.kwargs["watched_item_id"] == event.watched_item_id
 
     async def test_unavailable_still_sends(self, monkeypatch):

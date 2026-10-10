@@ -110,12 +110,7 @@ async def dispatch_via_notifier(
         return DispatchResult(success=False, reason=f"notifier error: {exc}")
 
 
-async def dispatch_event_notifications(
-    session: AsyncSession,
-    event: WatchEvent,
-    *,
-    current_text: bytes | None = None,
-) -> None:
+async def dispatch_event_notifications(session: AsyncSession, event: WatchEvent) -> None:
     """Dispatch a WatchEvent to all active, opted-in notification templates.
 
     Post-#200 every notification target is a single ``NotificationTemplate`` row
@@ -140,11 +135,8 @@ async def dispatch_event_notifications(
 
     **The change diff (#222)** is loaded at most once per event, by the first
     candidate whose options would show it, and reused for the rest — a
-    recipient that never asks costs nothing. ``current_text`` is the canonical
-    text local extraction already holds (the processor has not stored it yet);
-    ``load_change_diff`` trusts it only if it hashes to the event's fingerprint.
-    The loader never raises: an unavailable diff is said in the body, and the
-    notification still goes out.
+    recipient that never asks costs nothing. The loader never raises: an
+    unavailable diff is said in the body, and the notification still goes out.
     """
     # #191: the event identifies a WatchedItem (the single monitored entity).
     watched_item_id = ULID.from_str(event.watched_item_id)
@@ -219,10 +211,7 @@ async def dispatch_event_notifications(
                 ):
                     diff_loaded = True
                     diff = await load_change_diff(
-                        session,
-                        event.metadata,
-                        current_text=current_text,
-                        watched_item_id=event.watched_item_id,
+                        session, event.metadata, watched_item_id=event.watched_item_id
                     )
                 rendered_title = build_title(event, options)
                 rendered_body = build_body(event, options, diff=diff)

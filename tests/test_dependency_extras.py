@@ -86,3 +86,30 @@ class TestRequestedExtrasExist:
             f"available: {sorted(published) or '(none)'}. "
             "An unknown extra resolves to nothing — drop it or use the real name."
         )
+
+
+_LOCK = _REPO_ROOT / "uv.lock"
+
+# What `co-core[extract]` brought in, beyond what the dev group declares itself
+# (beautifulsoup4 parses HTMX responses in tests/dashboard).
+_EXTRACTION_STACK = ("html5lib", "lxml", "openpyxl", "pypdf")
+
+
+class TestNoExtractionStack:
+    """Watcher extracts nothing since #350: the processor decides every check.
+
+    The parsers were the #307 memory cost of a path that no longer exists, and
+    nothing may pull them back in by the lock — not the extra, not a transitive.
+    Read off ``uv.lock`` rather than the venv, so an unsynced environment cannot
+    answer for the manifest.
+    """
+
+    def test_co_core_is_required_without_the_extract_extra(self):
+        co_core = [req for req in _declared_requirements() if req.name == "co-core"]
+        assert co_core, "co-core is no longer declared"
+        assert all("extract" not in req.extras for req in co_core)
+
+    @pytest.mark.parametrize("dist", _EXTRACTION_STACK)
+    def test_the_lock_resolves_no_parser(self, dist: str):
+        locked = {pkg["name"] for pkg in tomllib.loads(_LOCK.read_text())["package"]}
+        assert dist not in locked, f"{dist} is locked again; something pulls it back in"

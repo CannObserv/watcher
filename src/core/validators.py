@@ -39,8 +39,7 @@ implementation detail):
 3. Nothing stored, or nothing sendable once guarded.
 4. ``validator_source_key`` disagrees with the item's current key: the URL
    moved, the ``source_specs`` were re-announced, or the extraction generation
-   changed (a co-core upgrade, or a bump of ``LOCAL_EXTRACTION_GENERATION``;
-   processor-decided, the processor's reported version — ``item_generation``).
+   changed (the processor's reported version — ``item_generation``).
    One key rather than a clear scattered across every writer of those fields —
    a path that forgets to call a clear is the failure mode that ends in a
    silently stale fingerprint.
@@ -61,9 +60,6 @@ import json
 import os
 from datetime import datetime, timedelta
 
-from co_core.pure.extract import processor_version
-
-from src.core.extract_mode import ExtractMode, extract_mode
 from src.core.logging import get_logger
 
 logger = get_logger(__name__)
@@ -82,59 +78,20 @@ DEFAULT_VALIDATOR_MAX_AGE_HOURS = 168.0
 # over the bound came from somewhere else and is not replayable either.
 MAX_VALIDATOR_LENGTH = 1024
 
-# Bumped by hand when *watcher's* own extraction changes in a way co-core's
-# version cannot see — how chunks are joined, which extractor a media type
-# dispatches to, the spec fallback order.
-LOCAL_EXTRACTION_GENERATION = 1
-
-
-def extraction_generation() -> str:
-    """Identity of the extraction that produced a fingerprint (CR-3).
-
-    Two halves. The co-core version arrives through the wheelhouse with no
-    human in the loop, so pinning a hand-bumped integer here reproduced the
-    ``WATCHER_USER_AGENT`` hazard one step quieter: an extractor change nobody
-    bumped for would leave every 304-ing item inheriting a fingerprint the *old*
-    extractor computed, invisible until the origin's bytes happened to change.
-    Reading the installed version makes an upgrade invalidate every stored
-    validator by itself — one full fetch per item, which at this fleet size is
-    free. The local half stays for watcher-side extraction changes, which
-    co-core's version cannot see.
-
-    **Over-invalidating is the point, not a rough edge.** Any co-core release
-    moves this value, including one that never touched extraction — co-core
-    publishes no extraction-specific marker to narrow it to, and inventing one
-    would put the human step back exactly where it failed. A wasted full fetch
-    costs a page; a missed one costs an inherited fingerprint nobody can see.
-
-    Spelled through co-core's ``processor_version`` (#324, cannobserv#486): the
-    identical string a processor reports on a ``content.derived`` fact, so the
-    shadow comparator and the diff design's Option A compare like with like.
-    The format is co-core's to define, not transcribed here.
-    """
-    return processor_version(LOCAL_EXTRACTION_GENERATION)
-
-
-EXTRACTION_GENERATION = extraction_generation()
-
 
 def item_generation(watched_item) -> str | None:
-    """The extraction generation an item's validator key is held to (#326).
+    """The extraction generation an item's validator key is held to (#326, #350).
 
-    While Watcher extracts (``local``, ``shadow``) it is the installed
-    co-core's: an upgrade invalidates every pair with no human step. Once the
-    processor decides, Watcher has no extractor to read a version from, so it
-    is the version the processor last reported for this item
-    (``WatchedItem.processor_version``). The residual is the design's: a
-    processor upgrade is learned on the item's next full fetch, so a 304-ing
-    item inherits its fingerprint until rule 6 or 7 forces one.
+    The version the processor last reported for this item
+    (``WatchedItem.processor_version``): Watcher has no extractor of its own to
+    read one from. The residual is the design's: a processor upgrade is learned
+    on the item's next full fetch, so a 304-ing item inherits its fingerprint
+    until rule 6 or 7 forces one.
 
     ``None`` before the processor has answered for the item — a real value,
     which a later report then moves.
     """
-    if extract_mode() is ExtractMode.PROCESSOR:
-        return watched_item.processor_version
-    return EXTRACTION_GENERATION
+    return watched_item.processor_version
 
 
 # Printable US-ASCII and SP. Narrower than RFC 9110 permits, matching the
@@ -178,7 +135,7 @@ def canonical_specs(source_specs: list | None) -> str:
     Extracted so the reconcile's spec-change detection (#274) and the validator
     key below cannot drift apart. The key itself is *not* reusable for that
     comparison: it also folds in the URL and the extraction generation, so it
-    moves on a co-core upgrade over byte-identical specs.
+    moves on a processor upgrade over byte-identical specs.
     """
     return json.dumps(source_specs or [], sort_keys=True, separators=(",", ":"), default=str)
 
@@ -187,7 +144,7 @@ def validator_source_key(
     *,
     effective_url: str,
     source_specs: list | None,
-    generation: str | None = EXTRACTION_GENERATION,
+    generation: str | None,
 ) -> str:
     """Identity of "what these bytes were going to mean" when a pair was stored.
 

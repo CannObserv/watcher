@@ -98,18 +98,11 @@ schema, and the detection truncation. The **media-type essence** (lowercased
 `type/subtype`, params stripped, with a URL-extension tiebreaker for
 octet-stream/text-plain/absent headers) is **not stored** — it's a pure function,
 `media_type.resolve_dispatch_essence(content_media_type, effective_url)`, the single
-source of truth used by **both** the pipeline (`process_watched_item` picks the
-extractor) **and** the API (`WatchedItemResponse.media_type_essence` is a computed
-field). `ServiceRegistry.get_extractor` maps essence → extractor from co-core's
-`EXTRACTOR_BY_ESSENCE` — the same object Processor dispatches from, held by
-reference so a co-core release that adds an essence reaches both sides at once
-(#342) — and is total: anything unlisted falls back to co-core's
-`DEFAULT_EXTRACTOR` (HTML). Read the table in co-core
-(`co_core.pure.extract.dispatch`), not here. A dispatched
-extractor that raises on mismatched bytes is caught as `ExtractionError` and
-recorded like a fetch failure (ERROR health + `CHECK_EXTRACTION_FAILED` audit +
-`WATCH_ERROR`), so a mislabeled non-HTML target surfaces a signal instead of
-re-firing every `schedule_tick`.
+source of truth used by **both** the issuer (the `content.process` command
+carries it; the processor picks the extractor, #350) **and** the API
+(`WatchedItemResponse.media_type_essence` is a computed field). An extractor
+that fails on mismatched bytes comes back as a terminal failure and is recorded
+like a fetch failure (ERROR health + `CHECK_EXTRACTION_FAILED` + `WATCH_ERROR`).
 
 ## Domain keying
 
@@ -207,7 +200,7 @@ this change when the event is built. **Failure never blocks a notification** —
 body says `DIFF: unavailable (<reason>)`, `previous text not stored` for any
 revision older than shadow mode. Each side is capped by
 `WATCHER_DIFF_MAX_INPUT_BYTES`. Mechanism (lookup via the processor's
-`output_uri`, hash check, the in-hand current text): `src/core/notifications/diff_loader.py`.
+`output_uri`, hash check): `src/core/notifications/diff_loader.py`.
 
 ## WatchEvent identity fields
 

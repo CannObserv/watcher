@@ -10,24 +10,18 @@ The rules under test, and why each exists, are in
 
 import logging
 from datetime import UTC, datetime, timedelta
-from importlib.metadata import version
 from types import SimpleNamespace
 
 import pytest
-from co_core.pure.extract import processor_version
 
-from src.core.extract_mode import EXTRACT_MODE_ENV
 from src.core.validators import (
     CONDITIONAL_GET_ENV,
     DEFAULT_VALIDATOR_MAX_AGE_HOURS,
-    EXTRACTION_GENERATION,
-    LOCAL_EXTRACTION_GENERATION,
     MAX_VALIDATOR_LENGTH,
     VALIDATOR_MAX_AGE_ENV,
     canonical_specs,
     clear_validators,
     conditional_get_enabled,
-    extraction_generation,
     item_generation,
     record_validators,
     replayable_validators,
@@ -44,10 +38,15 @@ OTHER_ID = "01K2ZQWERTYUIOPASDFGHJKLZY"
 
 SPECS = [{"selector": "#content", "schema_version": 1}]
 URL = "https://lcb.wa.gov/notices"
+VERSION = "0.19.7+1"
 
 # Replicator's temp horizon as observed in production — an example, not a
 # contract: the rule under test must scale with whatever the fact carries.
 HORIZON = timedelta(days=7)
+
+
+def _key(url=URL, specs=SPECS, generation=VERSION):
+    return validator_source_key(effective_url=url, source_specs=specs, generation=generation)
 
 
 def _item(**kwargs):
@@ -58,10 +57,10 @@ def _item(**kwargs):
         "source_specs": SPECS,
         "etag": 'W/"abc"',
         "last_modified": "Wed, 13 Aug 2026 10:00:00 GMT",
-        "validator_source_key": validator_source_key(effective_url=URL, source_specs=SPECS),
+        "validator_source_key": _key(),
         "last_full_fetch_at": NOW - timedelta(hours=1),
         "blob_expires_at": NOW - timedelta(hours=1) + HORIZON,
-        "processor_version": None,
+        "processor_version": VERSION,
     }
     base.update(kwargs)
     return SimpleNamespace(**base)
@@ -156,9 +155,7 @@ class TestCanonicalSpecs:
         verdict alone. This is the property the extraction exists to guarantee.
         """
         specs_same = canonical_specs(left) == canonical_specs(right)
-        key_same = validator_source_key(
-            effective_url=URL, source_specs=left
-        ) == validator_source_key(effective_url=URL, source_specs=right)
+        key_same = _key(specs=left) == _key(specs=right)
         assert specs_same == key_same
 
 
@@ -171,96 +168,53 @@ class TestValidatorSourceKey:
     """
 
     def test_is_stable_across_key_ordering(self):
-        a = validator_source_key(effective_url=URL, source_specs=[{"a": 1, "b": 2}])
-        b = validator_source_key(effective_url=URL, source_specs=[{"b": 2, "a": 1}])
-        assert a == b
+        assert _key(specs=[{"a": 1, "b": 2}]) == _key(specs=[{"b": 2, "a": 1}])
 
     def test_moves_when_the_url_moves(self):
-        assert validator_source_key(effective_url=URL, source_specs=SPECS) != validator_source_key(
-            effective_url="https://lcb.wa.gov/other", source_specs=SPECS
-        )
+        assert _key() != _key(url="https://lcb.wa.gov/other")
 
     def test_moves_when_the_specs_move(self):
-        assert validator_source_key(effective_url=URL, source_specs=SPECS) != validator_source_key(
-            effective_url=URL, source_specs=[{"selector": "main"}]
-        )
+        assert _key() != _key(specs=[{"selector": "main"}])
 
     def test_moves_when_the_extraction_generation_moves(self):
-        assert validator_source_key(effective_url=URL, source_specs=SPECS) != validator_source_key(
-            effective_url=URL, source_specs=SPECS, generation=f"{EXTRACTION_GENERATION}+next"
-        )
+        assert _key() != _key(generation="0.19.8+1")
 
     def test_spec_order_is_significant(self):
         # The fallback loop tries specs in order, so [a, b] and [b, a] can
         # extract different bytes from the same page.
-        first = validator_source_key(effective_url=URL, source_specs=[{"a": 1}, {"b": 2}])
-        second = validator_source_key(effective_url=URL, source_specs=[{"b": 2}, {"a": 1}])
-        assert first != second
+        assert _key(specs=[{"a": 1}, {"b": 2}]) != _key(specs=[{"b": 2}, {"a": 1}])
 
     def test_no_specs_still_derives_a_key(self):
-        assert validator_source_key(effective_url=URL, source_specs=None)
+        assert _key(specs=None)
 
+    def test_the_spelling_is_pinned(self):
+        """Every stored pair was keyed by this exact function (#350).
 
-_CO_CORE_DISTRIBUTION = "co-core"
-
-
-class TestExtractionGeneration:
-    """CR-3: a co-core upgrade must invalidate stored validators on its own.
-
-    The hand-bumped constant was the same hazard `WATCHER_USER_AGENT` is guarded
-    against, one step quieter: an extractor change nobody bumps for leaves every
-    304-ing item inheriting a fingerprint the old extractor computed. Deriving
-    the generation from the installed distribution removes the human step; the
-    local half stays for a watcher-side extraction change, which co-core's
-    version cannot see.
-    """
-
-    def test_carries_the_installed_co_core_version(self):
-        # The version is read off the imported package (`co_core.__version__`);
-        # pinning it against the installed distribution's metadata catches the
-        # two ever disagreeing, e.g. a stale editable install.
-        assert version(_CO_CORE_DISTRIBUTION) in EXTRACTION_GENERATION
-
-    def test_carries_the_local_generation(self):
-        assert str(LOCAL_EXTRACTION_GENERATION) in EXTRACTION_GENERATION
-
-    def test_is_spelled_through_co_core_processor_version(self):
-        # #324: the same string Observo reports as `processor_version` on a
-        # derived fact, so the shadow comparator and Option A compare like with
-        # like. The format is co-core's to define, not transcribed here.
-        assert EXTRACTION_GENERATION == processor_version(LOCAL_EXTRACTION_GENERATION)
-        assert extraction_generation() == EXTRACTION_GENERATION
+        A key that moves silently invalidates the fleet's pairs at best, and at
+        worst replays a pair against bytes it no longer names — the wedge #269
+        exists to prevent. Moving it is allowed; doing so unnoticed is not.
+        """
+        assert _key() == ("sha256:5d558dd861a6172c18b212972454d1677cfb486200b32d8258d7e417cb679232")
+        assert _key(generation=None) == (
+            "sha256:96acaf40039e62c13181bb083f9cdaf0f2c305d79c2d664f4f8bccefbd7ac4fc"
+        )
 
 
 class TestItemGeneration:
-    """Which extraction a stored pair is keyed to (#326).
+    """Which extraction a stored pair is keyed to: the processor's (#326, #350).
 
-    Locally decided, it is the installed co-core's — an upgrade invalidates
-    every pair with no human step. Processor-decided, Watcher has no extractor
-    of its own: the generation is the version the processor last reported for
-    the item, so a processor upgrade invalidates once the next full fetch
-    reports it (the design's accepted residual).
+    Watcher has no extractor of its own, so the generation is the version the
+    processor last reported for the item. A processor upgrade invalidates once
+    the next full fetch reports it (the design's accepted residual).
     """
 
-    @pytest.mark.parametrize("mode", [None, "local", "shadow"])
-    def test_locally_decided_is_the_installed_generation(self, monkeypatch, mode):
-        if mode is None:
-            monkeypatch.delenv(EXTRACT_MODE_ENV, raising=False)
-        else:
-            monkeypatch.setenv(EXTRACT_MODE_ENV, mode)
-        item = _item(processor_version="9.9.9+9")
-        assert item_generation(item) == EXTRACTION_GENERATION
-
-    def test_processor_decided_is_the_items_reported_version(self, monkeypatch):
-        monkeypatch.setenv(EXTRACT_MODE_ENV, "processor")
+    def test_is_the_items_reported_version(self):
         assert item_generation(_item(processor_version="0.19.8+1")) == "0.19.8+1"
 
-    def test_processor_decided_with_no_report_yet_is_none(self, monkeypatch):
-        monkeypatch.setenv(EXTRACT_MODE_ENV, "processor")
+    def test_with_no_report_yet_is_none(self):
         assert item_generation(_item(processor_version=None)) is None
 
     def test_a_processor_upgrade_stops_the_replay(self, monkeypatch):
-        monkeypatch.setenv(EXTRACT_MODE_ENV, "processor")
         monkeypatch.setenv(CONDITIONAL_GET_ENV, "true")
         item = _item(processor_version="0.19.7+1")
         record_validators(item, etag='"x"', last_modified=None, now=NOW)
@@ -435,9 +389,8 @@ class TestRecordAndClear:
 
         assert item.etag == '"xyz"'
         assert item.last_modified is None
-        assert item.validator_source_key == validator_source_key(
-            effective_url=URL, source_specs=SPECS
-        )
+        # Keyed to the item's processor version (#269, #350).
+        assert item.validator_source_key == _key(generation=VERSION)
 
     def test_record_does_not_own_the_fetch_stamp(self):
         # CR-2: "bytes arrived" is a fetch fact, not a validator fact — an

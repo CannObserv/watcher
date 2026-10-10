@@ -1,22 +1,16 @@
 """content.process worker tasks (#325, #326): sweep, apply, reaper.
 
-The processing leg of a fetch occasion. Each lineage is one of two kinds,
-fixed when its blob applied (``src/workers/process_issue.py`` issues both):
-
-* **shadow** (``WATCHER_EXTRACT_MODE=shadow``, #325) — local extraction
-  decided and closed the fetch row; the leg is a **side lineage** that touches
-  no fetch row, health or fetch re-issue lineage, and ends in the comparator's
-  verdict. A processor outage costs comparator coverage and nothing else.
-* **decisive** (``processor``, #326) — the fetch row waits ``PROCESSING`` and
-  the lineage's end closes it: the derived text goes through the history
-  comparison and Option A, a failure is the extraction-failure path, an
-  unreadable input re-fetches, and a timeout fails the check.
+The processing leg of a fetch occasion (#326): the fetch row waits
+``PROCESSING`` and the lineage's end closes it — the derived text goes through
+the history comparison and Option A, a failure is the extraction-failure path,
+an unreadable input re-fetches, and a timeout fails the check. A lineage whose
+check has already closed (superseded, or given up on) decides nothing.
 
 * ``publish_pending_process_commands`` — the second half of persist-before-
   publish, every minute, ``publish_pending_fetch_commands``' shape.
 * ``apply_process_fact`` — deferred by the ``content.derived`` consumer once a
   terminal fact has settled a row: an empty outcome with a spec left chains
-  the next spec (D3); anything else ends the lineage — judged, or decided.
+  the next spec (D3); anything else ends the lineage.
 * ``reap_process_commands`` — the backstop for silence, under #325's downtime
   rule: **no re-issue until the processor has read past a command** (one in the
   processor's group is not lost, and a re-issue only adds a duplicate to a
@@ -35,7 +29,7 @@ from src.core.bus import BUS_REDIS_URL_ENV, get_shared_bus_client
 from src.core.database import get_session_factory
 from src.core.fetch_commands import fetch_max_reissues
 from src.core.logging import get_logger
-from src.core.models.audit_log import EventType, audit
+from src.core.models.audit_log import EventType
 from src.core.models.fetch_command import (
     PROCESSING_FAILED_REASON,
     PROCESSING_TIMEOUT_REASON,
@@ -46,14 +40,12 @@ from src.core.models.process_command import (
     SETTLED_PROCESS_STATUSES,
     ProcessCommand,
     ProcessCommandStatus,
-    ShadowVerdict,
 )
 from src.core.models.watched_item import WatchedItem
 from src.core.process_commands import (
     INPUT_UNREADABLE_REASON,
     UnsendableProcessCommand,
     chain_process_command,
-    judge_shadow,
     process_command_hard_limit_seconds,
     process_command_timeout_seconds,
     publish_process_command,
@@ -122,62 +114,21 @@ async def publish_pending_process_commands(
             await ctx.__aexit__(None, None, None)
 
 
-def _record_verdict(
-    session: AsyncSession, row: ProcessCommand, verdict: ShadowVerdict, detail: str | None
-) -> None:
-    """Write the comparator's verdict on the row that ended the lineage, and say it.
-
-    A mismatch is the switch's gate (#326), so it is audited as well as logged:
-    the audit trail is what an operator counts across the shadow window.
-    """
-    row.shadow_verdict = verdict
-    row.shadow_detail = detail
-    fields = {
-        "command_id": row.command_id,
-        "intent_id": row.intent_id,
-        "fetch_command_id": row.fetch_command_id,
-        "watched_item_id": str(row.watched_item_id),
-        "spec_index": row.spec_index,
-        "detail": detail,
-    }
-    if verdict is ShadowVerdict.MISMATCH:
-        logger.warning("shadow extraction mismatch", extra=fields)
-        audit(
-            session,
-            EventType.CHECK_SHADOW_MISMATCH,
-            watched_item_id=str(row.watched_item_id),
-            command_id=row.command_id,
-            fetch_command_id=row.fetch_command_id,
-            spec_index=row.spec_index,
-            local_outcome=row.local_outcome,
-            local_fingerprint=row.local_fingerprint,
-            output_digest=row.output_digest,
-            processor_version=row.processor_version,
-            failure_reason=row.failure_reason,
-            detail=detail,
-        )
-    elif verdict is ShadowVerdict.UNCOMPARED:
-        logger.warning("shadow lineage ended uncompared", extra=fields)
-    else:
-        logger.info("shadow extraction match", extra=fields)
-
-
 @bp.task(name="apply_process_fact", queue="default", retry=APPLY_RETRY)
 async def apply_process_fact(command_id: str, bus_client=None) -> dict:
     """Act on a settled process command: chain the next spec, or end the lineage.
 
     Deferred by the ``content.derived`` consumer after the first terminal fact
-    settled the row; guarded on ``applied_at`` so a re-defer is a no-op. Runs in
-    any mode, and the lineage's own kind decides what ending it means: a
-    decisive lineage (its fetch row ``PROCESSING``, #326) closes the check
-    (``_decide``); a shadow one is judged — still, after the mode is turned
-    back to ``local`` or on to ``processor``.
+    settled the row; guarded on ``applied_at`` so a re-defer is a no-op. The
+    lineage's end closes the check while its fetch row waits ``PROCESSING``
+    (``_decide``); once anything else has closed it — the reaper gave up, a
+    newer occasion superseded it, the row is gone — a late answer is recorded
+    as applied, chains nothing and decides nothing.
 
     An empty outcome with a spec left is the fallback loop's next turn (D3):
     a fresh command for spec[i+1] under the same intent, from the item's
-    *current* specs — the residual is a spec edit landing mid-chain, which the
-    comparator reports rather than hides. Empty on the last spec ends the
-    lineage like any other answer.
+    *current* specs — the residual is a spec edit landing mid-chain. Empty on
+    the last spec ends the lineage like any other answer.
     """
     async with get_session_factory()() as session:
         row = await session.get(ProcessCommand, command_id)
@@ -189,10 +140,20 @@ async def apply_process_fact(command_id: str, bus_client=None) -> dict:
             return {"skipped": True, "reason": f"status_{row.status}"}
         now = datetime.now(UTC)
         row.applied_at = now
-        # Decisive iff the blob apply left the fetch row open for this answer
-        # (#326) — fixed at issue, whatever the mode reads now.
+        # Only an open check is waiting on this answer: the blob apply leaves
+        # its fetch row PROCESSING, and nothing else does.
         fetch = await session.get(FetchCommand, row.fetch_command_id)
-        decisive = fetch is not None and fetch.status == FetchCommandStatus.PROCESSING
+        if fetch is None or fetch.status != FetchCommandStatus.PROCESSING:
+            logger.info(
+                "processor answered a check that has already closed — nothing to decide",
+                extra={
+                    "command_id": command_id,
+                    "fetch_command_id": row.fetch_command_id,
+                    "fetch_status": fetch.status if fetch is not None else None,
+                },
+            )
+            await session.commit()
+            return {"skipped": True, "reason": "check_closed"}
 
         if row.status == ProcessCommandStatus.COMPLETED and row.empty:
             watched_item = await session.get(WatchedItem, row.watched_item_id)
@@ -210,21 +171,14 @@ async def apply_process_fact(command_id: str, bus_client=None) -> dict:
                     await persist_and_publish(session, nxt, bus_client)
                     return {"chained": nxt.command_id, "spec_index": next_index}
 
-        if decisive:
-            return await _decide(session, row, fetch, now=now, bus_client=bus_client)
-
-        verdict, detail = judge_shadow(row)
-        _record_verdict(session, row, verdict, detail)
-        await session.commit()
-    return {"verdict": verdict.value, "detail": detail}
+        return await _decide(session, row, fetch, now=now, bus_client=bus_client)
 
 
 def derived_outcome(row: ProcessCommand) -> ExtractionOutcome:
     """The outcome a non-empty ``processing_complete`` fact reports (#326).
 
-    ``output_digest`` is ``canonical_text``'s fingerprint — the same bytes,
-    hashed the same way, local extraction stores (cannobserv#486) — so it *is*
-    the ``ChangeRevision.content_fingerprint``. The fallbacks cover only a
+    ``output_digest`` is ``canonical_text``'s fingerprint (cannobserv#486), so
+    it *is* the ``ChangeRevision.content_fingerprint``. The fallbacks cover only a
     column the consumer always writes; the wire requires every one.
     """
     return ExtractionOutcome(
@@ -249,7 +203,7 @@ async def _decide(
     now: datetime,
     bus_client,
 ) -> dict:
-    """Close a processor-decided check from the fact that ended its lineage (#326).
+    """Close a check from the fact that ended its lineage (#326).
 
     The design's apply table, Section 2:
 
@@ -347,10 +301,10 @@ async def _decide(
 async def _give_up(
     session: AsyncSession, row: ProcessCommand, *, now: datetime, why: str
 ) -> FetchCommand | None:
-    """End a lineage the processor never answered.
+    """End a lineage the processor never answered: the row expires.
 
-    A shadow lineage ends expired and uncompared. A decisive one (#326) also
-    fails its check: the fetch row closes ``processing_timeout`` and the item
+    While its check is still open (the fetch row ``PROCESSING``, #326) the
+    check fails too: the fetch row closes ``processing_timeout`` and the item
     goes ERROR, so the one-open-command gate lifts — returned for the caller,
     which owns the commit and the failure bookkeeping.
     """
@@ -367,7 +321,6 @@ async def _give_up(
             extra={"command_id": row.command_id, "fetch_command_id": fetch.command_id, "why": why},
         )
         return fetch
-    _record_verdict(session, row, ShadowVerdict.UNCOMPARED, f"{PROCESSING_TIMEOUT_REASON}: {why}")
     return None
 
 
@@ -407,18 +360,18 @@ async def reap_process_commands(
 
     * read past → this one command is stuck: expire it and re-issue under a
       fresh ``command_id``, capped at ``WATCHER_FETCH_MAX_REISSUES``; at the cap
-      the lineage ends uncompared;
+      the lineage ends (``_give_up``);
     * not read past → hold it. It waits in the processor's group: either the
       processor is down, or it is back and draining the backlog in stream order
       — and "any recent fact" would read that recovery as license to re-issue
       everything still queued (CR 1). One warning per pass is the
       service-level signal;
     * either way, past ``WATCHER_PROCESS_COMMAND_HARD_LIMIT_SECONDS`` since it
-      was issued, the lineage ends — uncompared, or for a decisive one with
-      the check failed — because the command whose failure fact was refused
-      gets no fact at all, and in a quiet period nothing else arrives to say
-      the processor is up. A command still ``pending_publish`` past it ends
-      the same way: the bus never accepted it (CR 6).
+      was issued, the lineage ends, failing its check if still open, because
+      the command whose failure fact was refused gets no fact at all, and in a
+      quiet period nothing else arrives to say the processor is up. A command
+      still ``pending_publish`` past it ends the same way: the bus never
+      accepted it (CR 6).
 
     A settled row whose apply never ran (job lost, retries exhausted) gets the
     apply re-deferred, once per window: ``updated_at`` is touched to start the

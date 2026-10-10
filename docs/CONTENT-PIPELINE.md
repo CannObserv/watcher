@@ -61,15 +61,15 @@ What that leaves in the code:
 Watcher never opens a raw blob (#350); the processor does, and answers
 `input_unreadable` when the blob is gone or its download fails the checksum (a
 refused grant is transient there: no fact, so `processing_timeout`). That
-re-fetches unconditionally (#361) under a fresh `command_id`, **capped** at
+re-fetches in full (#361) under a fresh `command_id`, **capped** at
 `WATCHER_FETCH_MAX_REISSUES` across both legs' re-issue counts. The cap is
 load-bearing: a re-issue publishes immediately, so the scheduling gate never
 sees it, and an uncapped loop runs at Replicator's round-trip, each turn a real
 origin request. At the cap the check ends `FAILED`,
 `failure_reason="blob_unreadable"` (the remedy is the blob store, not the
 origin), `CHECK_FETCH_FAILED`, ERROR health, one `WATCH_ERROR` (reminders per
-#71), and the gate lifts. `clear_validators` does not fire; the forced
-re-fetch re-stamps.
+#71), and the gate lifts. `clear_validators` does not fire; a forced
+re-fetch re-stamps once bytes arrive.
 [`src/core/blobs.py`](../src/core/blobs.py) still reads one kind of blob — the
 processor's stored canonical text, for the change diff.
 

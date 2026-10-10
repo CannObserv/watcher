@@ -95,7 +95,7 @@ replacement with `intent_id` (else a stalled check-now could be answered 304,
 no bytes), and a caller may force but never un-force. **`input_unreadable`
 forces (#361):** the blob leg stamps `last_full_fetch_at` before the processor
 reads the bytes, so a replay would measure rule 7 from a fetch that renewed
-nothing; the forced re-fetch re-stamps on success.
+nothing; the forced re-fetch re-stamps when its bytes arrive.
 
 **An extraction failure also clears the pair.** Bytes arrived and could not be
 extracted (#258/#260), so the item is in ERROR with no new fingerprint — and a

@@ -839,7 +839,7 @@ class TestForcedFetchLineage:
     ``If-None-Match``, so the operator's forced check could be answered 304 and
     produce no bytes at all, with nothing saying the request had been downgraded.
     ``reissue_fetch_command`` serves the reaper and the processor's
-    ``input_unreadable`` alike.
+    ``input_unreadable`` alike; the latter also forces an unforced lineage (#361).
     """
 
     async def _reissued(self, db_session, monkeypatch, *, forced: bool, **kwargs) -> FetchCommand:

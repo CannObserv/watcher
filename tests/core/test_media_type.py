@@ -17,9 +17,10 @@ class TestDispatchIsCoCores:
     """#324: the dispatch rule lives in co-core; this module only re-exports it.
 
     cannobserv#486 D1: the issuer resolves the essence and puts it on the
-    ``content.process`` command, and the processor may re-resolve it. That is
-    safe only if both run the *same* function — a byte-identical copy drifts
-    the first time either side edits it. Identity, not equality of results.
+    ``content.process`` command; the processor dispatches on it and never
+    re-resolves (#366). So watcher must run co-core's function at the pinned
+    version — a byte-identical copy drifts the first time co-core edits it, and
+    the bump would not reach it. Identity, not equality of results.
     """
 
     def test_every_public_name_is_the_co_core_object(self):

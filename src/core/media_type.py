@@ -5,11 +5,13 @@ selection: the lowercased ``type/subtype`` essence, and a URL-extension tiebreak
 when the header is missing or uninformative.
 
 The rule itself lives in ``co_core.pure.extract.media_type`` since cannobserv#486
-lifted it byte-for-byte, because two services now run it: watcher resolves the
-essence and puts it on the ``content.process`` command, and the processor may
-re-resolve it (the tiebreaker needs the origin URL, which only the issuer holds).
-That is safe only while both run the *same* function, so this module keeps no
-copy — ``tests/core/test_media_type.py`` pins identity, not equal results.
+lifted it byte-for-byte: watcher resolves the essence and puts it on the
+``content.process`` command, and the processor dispatches on that essence and
+never re-resolves it (the tiebreaker needs the origin URL, which only the issuer
+holds). So a change to the rule reaches the processor only through watcher's
+co-core pin, which moves in step with the processor's (#366). This module keeps
+no copy that could drift from that pin — ``tests/core/test_media_type.py`` pins
+identity, not equal results.
 
 ``resolve_dispatch_essence`` is still the single source of truth for the dispatch
 essence: the issuer puts it on the command, and ``WatchedItemResponse`` surfaces

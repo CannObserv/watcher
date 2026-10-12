@@ -26,8 +26,8 @@ dependencies = [
     # bus contract and the stdlib-only media-type rule. Exact, because both sides
     # must run the same media-type function: bumped when CannObserv/processor
     # coordinates a contract change, not on a schedule.
-    "co-core==0.19.7",
-    "co-core-aio[bus]==0.19.7",
+    "co-core==0.32.0",
+    "co-core-aio[bus]==0.32.0",
     # Imported directly by the bus layer; docs/BUS-CONNECTION-POLICY.md was
     # measured on redis-py 7.4.1, so a major is ours to adopt, not co-core-aio's (#294).
     "redis>=7.4,<8",

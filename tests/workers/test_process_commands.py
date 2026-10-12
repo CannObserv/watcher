@@ -528,6 +528,17 @@ class TestDecisiveApply:
         assert baseline.content_fingerprint == DIGEST
         assert baseline.spec_fingerprint == "spec1:x"
         assert baseline.processor_version == "0.19.7+1"
+        # #367: the baseline is announced, carrying the fetch fact's provenance.
+        sync = (
+            await db_session.execute(
+                select(PendingArchiverSync).where(PendingArchiverSync.watched_item_id == item.id)
+            )
+        ).scalar_one()
+        assert sync.change_revision_id == baseline.id
+        assert sync.blob_uri == fetch.blob_uri
+        assert sync.blob_fingerprint == RAW_DIGEST
+        assert sync.source_media_type == "text/html"
+        assert sync.spec_fingerprint == "spec1:x"
         change.assert_not_awaited()
         (event,) = await _audits(db_session, EventType.CHECK_SNAPSHOT_CREATED)
         assert event.payload["source"] == "processor"

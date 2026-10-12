@@ -420,13 +420,46 @@ class TestBlobReferenceRenewal:
         assert row.spec_fingerprint == SPEC_FP
         assert row.dead_lettered_at is None
 
-    async def test_a_baseline_is_never_announced_by_a_cache_hit(self, db_session):
-        """The baseline is the one revision the change path never enqueued.
-        Announcing it here would be a *first* observation of the pair — a
-        registry insert and an ``info.changes`` event — not a renewal."""
+    async def test_first_run_announces_the_baseline(self, db_session):
+        """#367: the baseline is an observation like any other. Archiver has no
+        baseline concept — a source it never hears of is never persisted, and a
+        stable source never reaches it at all — so the first run enqueues the
+        baseline with this cycle's provenance."""
         wi = await self._item(db_session)
-        await apply_extraction_outcome(db_session, wi, _outcome(BASE_FP), blob=_FIRST_BLOB)
+
+        result = await apply_extraction_outcome(db_session, wi, _outcome(BASE_FP), blob=_FIRST_BLOB)
         await db_session.flush()
+
+        assert result.baseline_established is True
+        (baseline,) = await self._revisions(db_session, wi)
+        (row,) = await self._outbox_rows(db_session, wi)
+        assert row.change_revision_id == baseline.id
+        assert row.command_id == _FIRST_BLOB.command_id
+        assert row.blob_uri == _FIRST_BLOB.blob_uri
+        assert row.blob_expires_at == _FIRST_BLOB.blob_expires_at
+        assert row.blob_fingerprint == _FIRST_BLOB.blob_fingerprint
+        assert row.source_media_type == "text/html"
+        assert row.content_media_type == "text/plain; charset=utf-8"
+        assert row.spec_fingerprint == SPEC_FP
+
+    async def test_a_never_announced_baseline_is_announced_by_the_next_full_fetch(self, db_session):
+        """#367 backfill: a baseline recorded before the first run announced it
+        reaches Archiver on the item's next full fetch, under that cycle's fresh
+        blob reference — never a replay of the original, long past Replicator's
+        temp window."""
+        wi = await self._item(db_session)
+        legacy = ChangeRevision(
+            watched_item_id=wi.id,
+            content_fingerprint=BASE_FP,
+            captured_at=datetime(2026, 6, 21, tzinfo=UTC),
+            content_size_bytes=10,
+            schema_version=1,
+            spec_fingerprint=SPEC_FP,
+            processor_version=VERSION,
+        )
+        db_session.add(legacy)
+        await db_session.flush()
+        assert await self._outbox_rows(db_session, wi) == []
 
         result = await apply_extraction_outcome(
             db_session, wi, _outcome(BASE_FP), blob=_RENEWED_BLOB
@@ -434,8 +467,32 @@ class TestBlobReferenceRenewal:
         await db_session.flush()
 
         assert result.cache_hit is True
-        assert result.renewal_enqueued is False
-        assert await self._outbox_rows(db_session, wi) == []
+        assert result.renewal_enqueued is True
+        assert len(await self._revisions(db_session, wi)) == 1
+        (row,) = await self._outbox_rows(db_session, wi)
+        assert row.change_revision_id == legacy.id
+        assert row.command_id == _RENEWED_BLOB.command_id
+        assert row.blob_expires_at == _RENEWED_BLOB.blob_expires_at
+        assert row.blob_fingerprint == _RENEWED_BLOB.blob_fingerprint
+
+    async def test_a_published_baseline_is_renewed_like_any_revision(self, db_session):
+        """Once announced, the baseline is an ordinary revision to Archiver:
+        a later full fetch of unchanged bytes refreshes its horizon (#293)."""
+        wi = await self._item(db_session)
+        await apply_extraction_outcome(db_session, wi, _outcome(BASE_FP), blob=_FIRST_BLOB)
+        await db_session.flush()
+        (queued,) = await self._outbox_rows(db_session, wi)
+        await db_session.delete(queued)  # the drain published it
+        await db_session.flush()
+
+        result = await apply_extraction_outcome(
+            db_session, wi, _outcome(BASE_FP), blob=_RENEWED_BLOB
+        )
+        await db_session.flush()
+
+        assert result.renewal_enqueued is True
+        (row,) = await self._outbox_rows(db_session, wi)
+        assert row.command_id == _RENEWED_BLOB.command_id
 
     async def test_renewal_upserts_a_still_queued_row(self, db_session):
         """``change_revision_id`` is unique: a renewal of a row the drain has not

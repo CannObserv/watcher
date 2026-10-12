@@ -55,6 +55,13 @@ class TestExtensionMediaType:
         assert extension_media_type("https://x.gov/sheet.xlsx") == _XLSX
         assert extension_media_type("https://x.gov/page.html") == "text/html"
 
+    def test_feed_extensions(self):
+        # #366: co-core 0.32.0 (cannobserv#523) adds the XML essences Processor's
+        # XmlExtractor takes; watcher must resolve them too, as Processor never re-resolves.
+        assert extension_media_type("https://x.gov/feed.xml") == "application/xml"
+        assert extension_media_type("https://x.gov/feed.rss") == "application/rss+xml"
+        assert extension_media_type("https://x.gov/feed.atom") == "application/atom+xml"
+
     def test_query_string_ignored(self):
         assert extension_media_type("https://x.gov/a.pdf?v=2") == "application/pdf"
 
@@ -76,6 +83,26 @@ class TestResolveDispatchEssence:
             == "application/pdf"
         )
         assert resolve_dispatch_essence("text/plain", "https://x.gov/data.csv") == "text/csv"
+
+    def test_ambiguous_header_falls_back_to_feed_extension(self):
+        # #366: before 0.32.0 these resolved to the header's essence and Processor
+        # extracted them as HTML.
+        assert (
+            resolve_dispatch_essence("application/octet-stream", "https://x.gov/feed.xml")
+            == "application/xml"
+        )
+        assert (
+            resolve_dispatch_essence("binary/octet-stream", "https://x.gov/feed.rss")
+            == "application/rss+xml"
+        )
+        assert resolve_dispatch_essence("text/plain", "https://x.gov/feed.atom") == (
+            "application/atom+xml"
+        )
+        assert resolve_dispatch_essence(None, "https://x.gov/feed.xml") == "application/xml"
+
+    def test_informative_xml_header_wins_over_feed_extension(self):
+        # Tailscale's feed: served as text/xml, so it resolves the same on 0.19.7 and 0.32.0.
+        assert resolve_dispatch_essence("text/xml", "https://x.gov/feed.rss") == "text/xml"
 
     def test_missing_header_uses_extension(self):
         assert resolve_dispatch_essence(None, "https://x.gov/a.pdf") == "application/pdf"

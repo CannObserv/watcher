@@ -14,13 +14,13 @@ class PendingArchiverSync(Base):
 
     Inserted for an item's baseline (#367) and on every detected fingerprint
     change (#251 — every WatchedItem carries an `archiver_info_source_id` to
-    post against), and upserted for the
-    item's latest revision when a full fetch renews the blob reference behind
-    it (#293) — `change_revision_id` is unique, so a renewal of a row still
-    waiting to publish updates its provenance in place rather than queueing a
-    second observation. The drain worker builds a `source_revision_observed`
-    payload from the provenance columns below and publishes it to
-    `content.revisions`, then deletes the row.
+    post against), and upserted for the item's latest revision when a full
+    fetch renews the blob reference behind it (#293) — `change_revision_id` is
+    unique, so a renewal of a row still waiting to publish updates its
+    provenance in place rather than queueing a second observation. The drain
+    worker builds a `source_revision_observed` payload from the provenance
+    columns below and publishes it to `content.revisions`, then deletes the
+    row.
     """
 
     __tablename__ = "pending_archiver_sync"

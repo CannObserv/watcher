@@ -1,8 +1,8 @@
 # Content revisions
 
-The producer half of the content pipeline: how a detected change becomes a
-`source_revision_observed` frame on `content.revisions`, and how an unchanged
-fingerprint re-announces a renewed blob reference. Split out of
+The producer half of the content pipeline: how a baseline or a detected change
+becomes a `source_revision_observed` frame on `content.revisions`, and how an
+unchanged fingerprint re-announces a renewed blob reference. Split out of
 [CONTENT-PIPELINE.md](CONTENT-PIPELINE.md), which covers fetch → extract →
 fingerprint and the change decision that enqueues the rows described here.
 
@@ -143,13 +143,25 @@ Unreachable today (`aread_blob` raises before the pipeline on a null URI, and
 the consumer writes `media_type` in the same upsert); the guard is there
 because the asymmetry is not otherwise enforced.
 
-**The baseline is never renewed.** The first revision is the one the change
-path never enqueued, so re-announcing it would be Archiver's *first*
-observation of the pair — a registry insert and a `source_revision_captured`
-on `info.changes`, not a horizon refresh. The rule is "the latest revision has
-an older sibling", the same test the dashboard uses to keep baselines out of
-`changes_today`. That a stable item's baseline never reaches Archiver at all
-is a separate gap, not closed here.
+**The baseline is announced (#367).** Archiver has no baseline concept: a new
+`(info_source_id, extracted_fingerprint)` pair inserts a `SourceRevision`, emits
+`source_revision_captured` on `info.changes` and issues `content.persist`, in
+one transaction. A baseline it never hears of is never persisted — its bytes
+are lost when Replicator's temp window passes — and a stable source never
+reaches it at all. So the first-run branch enqueues the baseline with this
+cycle's provenance like any revision, plain: no first-sight marker, on the
+Archiver operator's decision (archiver#317). Nobody is notified; that is
+Watcher's own `CHANGE_DETECTED`, unchanged.
+
+The renewal is therefore **unconditional**: the latest revision, whether the
+baseline or not. Watcher keeps no "announced" marker — the drain deletes a
+row once published — and needs none, since Archiver dedupes on the pair: a
+renewal is a horizon refresh for a revision it holds and a first observation
+for one it does not. That second case is the backfill for every baseline
+recorded before #367: it reaches Archiver at the item's next full fetch under
+that cycle's live reference, never a replay of the original blob, which is
+long past the temp window. The dashboard's "has an older sibling" test keeps
+baselines out of `changes_today`; it no longer gates anything here.
 
 Traffic is bounded by full fetches, each of which already produced a
 `content.blobs` fact; a 304 touches no blob and correctly announces nothing.

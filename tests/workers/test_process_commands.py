@@ -564,22 +564,24 @@ class TestDecisiveApply:
 
     async def test_an_unchanged_answer_names_a_renewal_in_its_audit(self, db_session, monkeypatch):
         """#293: the audit is the operator-visible surface, so a renewal is
-        legible there; an ordinary unchanged check leaves the key absent."""
+        legible there; an unchanged check that renewed nothing leaves the key
+        absent. Since #367 every full fetch of an unchanged page renews, a lone
+        baseline included, so the one that does not is a declined renewal: a
+        reference missing a wire-required field (CR 1)."""
         renewed = await _decisive(db_session, **_completed())
-        plain = await _decisive(db_session, **_completed())
-        for row, revisions in ((renewed, 2), (plain, 1)):
+        plain = await _decisive(db_session, fetch_over={"media_type": None}, **_completed())
+        for row in (renewed, plain):
             item = await self._item(db_session, row)
             item.processor_version = "0.19.7+1"
-            for age in range(revisions):
-                db_session.add(
-                    ChangeRevision(
-                        watched_item_id=item.id,
-                        content_fingerprint=OTHER_DIGEST if age else DIGEST,
-                        captured_at=datetime.now(UTC) - timedelta(days=1 + age),
-                        content_size_bytes=10,
-                        schema_version=1,
-                    )
+            db_session.add(
+                ChangeRevision(
+                    watched_item_id=item.id,
+                    content_fingerprint=DIGEST,
+                    captured_at=datetime.now(UTC) - timedelta(days=1),
+                    content_size_bytes=10,
+                    schema_version=1,
                 )
+            )
         await db_session.flush()
         _wire(db_session, monkeypatch)
         _quiet(monkeypatch)

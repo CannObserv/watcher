@@ -2,9 +2,9 @@
 
 The processor extracts and fingerprints (#326, #350); this module holds what
 happens to its answer. ChangeRevision rows serve as the local fingerprint
-history; the first row is a baseline (no notification); subsequent changes
-dispatch CHANGE_DETECTED once for the WatchedItem (the single monitored
-entity, #191).
+history; the first row is a baseline (announced to Archiver, no
+notification, #367); subsequent changes dispatch CHANGE_DETECTED once for the
+WatchedItem (the single monitored entity, #191).
 """
 
 import enum
@@ -117,7 +117,8 @@ class WatchedItemResult:
     notifications_dispatched: int = 0
     errors: list[str] = field(default_factory=list)
     # `changed` implies an outbox row since #251 (a detected change always
-    # enqueues one). This is the other writer: a cache hit that re-announced
+    # enqueues one), and `baseline_established` since #367. This is the other
+    # writer: a cache hit that re-announced
     # the latest revision because this cycle's full fetch renewed the blob
     # reference behind it (#293). Never set beside `changed`.
     renewal_enqueued: bool = False
@@ -266,12 +267,12 @@ async def apply_extraction_outcome(
 
     Called with what a ``content.derived`` fact reported (#326):
 
-    a. First run: insert a baseline ChangeRevision, no notification.
-    b. Same fingerprint: cache hit — no revision, no notification. If the
-       latest revision has already been announced (it has an older sibling,
-       so the change path enqueued it), upsert a PendingArchiverSync for it
-       carrying this cycle's blob reference (#293). The baseline is never
-       announced here.
+    a. First run: insert a baseline ChangeRevision and enqueue a
+       PendingArchiverSync for it (#367), no notification.
+    b. Same fingerprint: cache hit — no revision, no notification. Upsert a
+       PendingArchiverSync for the latest revision carrying this cycle's blob
+       reference (#293). For a baseline recorded before #367 this is
+       Archiver's first observation of it, under a fresh reference.
     c. Changed: insert a new ChangeRevision, enqueue PendingArchiverSync, then
        Option A (``extraction_change``): an extractor-only move writes
        ``CHECK_REBASELINED`` and notifies nobody; anything else dispatches
@@ -289,38 +290,36 @@ async def apply_extraction_outcome(
     known_processor_version = watched_item.processor_version
     watched_item.processor_version = outcome.processor_version
 
-    # Two rows, not one: the second answers whether the latest revision is the
-    # baseline. The baseline is the one revision the change branch never
-    # enqueued, and the renewal below must not be Archiver's *first*
-    # observation of a pair — that is a registry insert plus an `info.changes`
-    # event, not a horizon refresh. "Has an older sibling" is the same test the
-    # dashboard uses to keep baselines out of `changes_today`.
-    latest_revs = (
-        (
-            await session.execute(
-                select(ChangeRevision)
-                .where(ChangeRevision.watched_item_id == watched_item.id)
-                .order_by(ChangeRevision.captured_at.desc())
-                .limit(2)
-            )
+    last_rev = (
+        await session.execute(
+            select(ChangeRevision)
+            .where(ChangeRevision.watched_item_id == watched_item.id)
+            .order_by(ChangeRevision.captured_at.desc())
+            .limit(1)
         )
-        .scalars()
-        .all()
-    )
-    last_rev = latest_revs[0] if latest_revs else None
-    latest_is_announced = len(latest_revs) > 1
+    ).scalar_one_or_none()
 
     if last_rev is None:
-        # First run: establish baseline — no notification.
+        # First run: establish baseline — announced, nobody notified. Archiver
+        # has no baseline concept: a source it never hears of is never
+        # persisted, and a stable one never reaches it at all (#367).
+        baseline = ChangeRevision(
+            watched_item_id=watched_item.id,
+            content_fingerprint=outcome.content_fingerprint,
+            captured_at=now,
+            content_size_bytes=outcome.content_size_bytes,
+            schema_version=outcome.schema_version,
+            spec_fingerprint=outcome.spec_fingerprint,
+            processor_version=outcome.processor_version,
+        )
+        session.add(baseline)
+        await session.flush()  # populate baseline.id before the outbox row references it
         session.add(
-            ChangeRevision(
+            PendingArchiverSync(
+                change_revision_id=baseline.id,
                 watched_item_id=watched_item.id,
-                content_fingerprint=outcome.content_fingerprint,
-                captured_at=now,
-                content_size_bytes=outcome.content_size_bytes,
-                schema_version=outcome.schema_version,
-                spec_fingerprint=outcome.spec_fingerprint,
-                processor_version=outcome.processor_version,
+                next_attempt_at=now,
+                **_provenance_columns(blob, outcome),
             )
         )
         return WatchedItemResult(baseline_established=True)
@@ -329,9 +328,9 @@ async def apply_extraction_outcome(
         # Cache hit. Bytes arrived, so Replicator renewed the blob reference
         # behind this revision; tell Archiver, or its stored horizon freezes at
         # the first observation (#293). Bounded by full fetches — a 304 never
-        # reaches this function.
-        if not latest_is_announced:
-            return WatchedItemResult(cache_hit=True)
+        # reaches this function. Unconditional: Archiver dedupes on the pair,
+        # so for a baseline recorded before #367 this is its first observation
+        # under a live reference, and a horizon refresh for everything else.
         renewed = await _renew_blob_reference(
             session, watched_item, last_rev, blob=blob, outcome=outcome, now=now
         )

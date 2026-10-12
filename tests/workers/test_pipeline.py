@@ -174,8 +174,9 @@ class TestApplyExtractionOutcome:
         assert wi.last_changed_at is not None
         assert wi.last_changed_at >= before
 
-    async def test_archiver_sync_enqueued_on_every_change(self, db_session):
+    async def test_archiver_sync_enqueued_on_every_revision(self, db_session):
         """#251: every detected change enqueues a PendingArchiverSync — no guard.
+        #367: so does the baseline.
 
         archiver_info_source_id is NOT NULL, so the old conditional could only
         ever drop a captured revision on the floor.
@@ -200,9 +201,10 @@ class TestApplyExtractionOutcome:
             .scalars()
             .all()
         )
-        assert len(syncs) == 1
+        # One per revision: the baseline is announced too (#367).
+        assert len(syncs) == 2
         # No scratch copy since the cutover: the row points at Replicator's blob.
-        assert syncs[0].blob_uri == _BLOB.blob_uri
+        assert all(sync.blob_uri == _BLOB.blob_uri for sync in syncs)
 
     async def test_dispatches_once_per_watched_item(self, db_session):
         """#191: CHANGE_DETECTED fires exactly once for the WatchedItem (the entity)."""
@@ -286,7 +288,7 @@ class TestRevisionExtractionIdentity:
 class TestOutboxProvenance:
     """#253: the outbox row is the observation, so it carries where it came from."""
 
-    async def test_change_records_blob_provenance_and_spec_identity(self, db_session):
+    async def test_every_revision_records_blob_provenance_and_spec_identity(self, db_session):
         wi = await make_watched_item(db_session, name="Provenance")
         wi.effective_url = "https://example.com"
         wi.source_specs = [_SPEC_FULL_PAGE]
@@ -305,22 +307,24 @@ class TestOutboxProvenance:
         await apply_extraction_outcome(db_session, wi, _outcome(NEXT_FP), blob=blob)
         await db_session.flush()
 
-        row = (
+        rows = (
             (
                 await db_session.execute(
                     select(PendingArchiverSync).where(PendingArchiverSync.watched_item_id == wi.id)
                 )
             )
             .scalars()
-            .one()
+            .all()
         )
-        assert row.command_id == blob.command_id
-        assert row.blob_uri == blob.blob_uri
-        assert row.source_media_type == "text/html"
-        assert row.blob_expires_at == blob.blob_expires_at
-        assert row.blob_fingerprint == blob.blob_fingerprint
-        assert row.spec_fingerprint == SPEC_FP
-        assert row.content_media_type == "text/plain; charset=utf-8"
+        assert len(rows) == 2  # the baseline and the change (#367)
+        for row in rows:
+            assert row.command_id == blob.command_id
+            assert row.blob_uri == blob.blob_uri
+            assert row.source_media_type == "text/html"
+            assert row.blob_expires_at == blob.blob_expires_at
+            assert row.blob_fingerprint == blob.blob_fingerprint
+            assert row.spec_fingerprint == SPEC_FP
+            assert row.content_media_type == "text/plain; charset=utf-8"
 
 
 # Two full fetches of the same bytes: Replicator re-references the blob on the
@@ -383,12 +387,21 @@ class TestBlobReferenceRenewal:
         )
         return list(result.scalars().all())
 
+    async def _baseline_then_change(self, db_session, wi) -> None:
+        """A baseline the drain has published (#367), then a change whose row
+        is the only one queued."""
+        await apply_extraction_outcome(db_session, wi, _outcome(BASE_FP), blob=_FIRST_BLOB)
+        await db_session.flush()
+        for row in await self._outbox_rows(db_session, wi):
+            await db_session.delete(row)
+        await db_session.flush()
+        await apply_extraction_outcome(db_session, wi, _outcome(NEXT_FP), blob=_FIRST_BLOB)
+
     async def test_cache_hit_after_a_change_re_announces_the_latest_revision(self, db_session):
         """The drained case: the change's row is gone, the renewal enqueues a new
         one for the same revision, carrying the fresh fact's provenance."""
         wi = await self._item(db_session)
-        await apply_extraction_outcome(db_session, wi, _outcome(BASE_FP), blob=_FIRST_BLOB)
-        await apply_extraction_outcome(db_session, wi, _outcome(NEXT_FP), blob=_FIRST_BLOB)
+        await self._baseline_then_change(db_session, wi)
         await db_session.flush()
         (queued,) = await self._outbox_rows(db_session, wi)
         await db_session.delete(queued)  # the drain published it
@@ -498,8 +511,7 @@ class TestBlobReferenceRenewal:
         """``change_revision_id`` is unique: a renewal of a row the drain has not
         published yet updates its provenance in place, never adds a second."""
         wi = await self._item(db_session)
-        await apply_extraction_outcome(db_session, wi, _outcome(BASE_FP), blob=_FIRST_BLOB)
-        await apply_extraction_outcome(db_session, wi, _outcome(NEXT_FP), blob=_FIRST_BLOB)
+        await self._baseline_then_change(db_session, wi)
         await db_session.flush()
         (queued,) = await self._outbox_rows(db_session, wi)
         queued_id = queued.id
@@ -522,8 +534,7 @@ class TestBlobReferenceRenewal:
         values*; a renewal replaces those values, so the verdict no longer
         applies. The attempt history stays — it is still true."""
         wi = await self._item(db_session)
-        await apply_extraction_outcome(db_session, wi, _outcome(BASE_FP), blob=_FIRST_BLOB)
-        await apply_extraction_outcome(db_session, wi, _outcome(NEXT_FP), blob=_FIRST_BLOB)
+        await self._baseline_then_change(db_session, wi)
         await db_session.flush()
         (queued,) = await self._outbox_rows(db_session, wi)
         queued.attempts = 1
@@ -557,8 +568,7 @@ class TestBlobReferenceRenewal:
         this pins the invariant rather than a live path.
         """
         wi = await self._item(db_session)
-        await apply_extraction_outcome(db_session, wi, _outcome(BASE_FP), blob=_FIRST_BLOB)
-        await apply_extraction_outcome(db_session, wi, _outcome(NEXT_FP), blob=_FIRST_BLOB)
+        await self._baseline_then_change(db_session, wi)
         await db_session.flush()
         (queued,) = await self._outbox_rows(db_session, wi)
         queued_id = queued.id
@@ -584,8 +594,7 @@ class TestBlobReferenceRenewal:
         """The same guard with no row to protect: a renewal that could only
         dead-letter is not worth queueing."""
         wi = await self._item(db_session)
-        await apply_extraction_outcome(db_session, wi, _outcome(BASE_FP), blob=_FIRST_BLOB)
-        await apply_extraction_outcome(db_session, wi, _outcome(NEXT_FP), blob=_FIRST_BLOB)
+        await self._baseline_then_change(db_session, wi)
         await db_session.flush()
         (queued,) = await self._outbox_rows(db_session, wi)
         await db_session.delete(queued)

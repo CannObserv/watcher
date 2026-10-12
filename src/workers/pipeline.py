@@ -188,7 +188,9 @@ async def _renew_blob_reference(
     became unreplicable once it passed — while the bytes sat alive. The renewal
     is the same row shape for the same revision: the drain publishes it under
     the same envelope key, and Archiver dedupes on the pair and moves the
-    horizon forward-only (archiver#201).
+    horizon forward-only (archiver#201). For a baseline recorded before #367,
+    which was never announced, this is Archiver's *first* observation of the
+    pair — the backfill, under this cycle's live reference.
 
     An upsert on ``change_revision_id``, which is unique, rather than an ORM
     add: a row the drain has not published yet takes the newer provenance in

@@ -117,10 +117,10 @@ class WatchedItemResult:
     notifications_dispatched: int = 0
     errors: list[str] = field(default_factory=list)
     # `changed` implies an outbox row since #251 (a detected change always
-    # enqueues one), and `baseline_established` since #367. This is the other
-    # writer: a cache hit that re-announced
-    # the latest revision because this cycle's full fetch renewed the blob
-    # reference behind it (#293). Never set beside `changed`.
+    # enqueues one), and `baseline_established` since #367. This is the third
+    # writer: a cache hit that re-announced the latest revision because this
+    # cycle's full fetch renewed the blob reference behind it (#293). Never set
+    # beside `changed`.
     renewal_enqueued: bool = False
     # Option A (D6, #326): the fingerprint moved because the extractor did, so
     # a revision was written and announced but nobody was notified. Never set

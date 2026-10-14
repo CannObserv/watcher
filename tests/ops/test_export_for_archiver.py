@@ -423,3 +423,34 @@ def test_main_runs_end_to_end_against_a_database(monkeypatch, tmp_path, capsys) 
     printed = capsys.readouterr().out
     assert f"sha256: {hashlib.sha256(out.read_bytes()).hexdigest()}" in printed
     assert stat.S_IMODE(out.stat().st_mode) == 0o600
+
+
+@pytest.mark.integration
+async def test_reads_only_the_columns_it_exports(db_session) -> None:
+    """A checkout ahead of the database's migrations — or a flip's migration
+    that drops a column the file never carried — must not break the export.
+    Reproduced against an un-migrated ``watcher_dev`` (CR 11). The DDL is rolled
+    back with the test's transaction."""
+    info_item_id = ULID()
+    wi = await make_watched_item(
+        db_session, archiver_info_item_id=info_item_id, domain_name="x.example"
+    )
+    db_session.add(
+        TemporalProfile(watched_item_id=wi.id, profile_type="event", post_action="archive")
+    )
+    db_session.add(NotificationTemplate(title="t", channel_hint="slack", visibility="global"))
+    await db_session.flush()
+    db_session.expunge_all()
+    for table, column in (
+        ("watched_items", "blob_expires_at"),
+        ("temporal_profiles", "created_at"),
+        ("domains", "created_at"),
+        ("notification_templates", "updated_at"),
+    ):
+        await db_session.execute(text(f"ALTER TABLE {table} DROP COLUMN {column}"))
+
+    data = await export_for_archiver.collect(db_session)
+
+    assert data["items"][str(info_item_id)]["temporal_profile"]["profile_type"] == "event"
+    assert "x.example" in data["domains"]
+    assert data["notification_templates"]

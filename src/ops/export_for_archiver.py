@@ -69,45 +69,73 @@ def _date(value: date | None) -> str | None:
     return value.isoformat() if value is not None else None
 
 
-def _profile(profile: TemporalProfile | None) -> dict | None:
-    if profile is None:
+def _profile(row) -> dict | None:
+    if row.profile_type is None:  # the outer join found no profile
         return None
     return {
-        "profile_type": str(profile.profile_type),
-        "reference_date": _date(profile.reference_date),
-        "date_range_start": _date(profile.date_range_start),
-        "date_range_end": _date(profile.date_range_end),
-        "rules": profile.rules,
-        "post_action": str(profile.post_action),
-        "is_active": profile.is_active,
+        "profile_type": str(row.profile_type),
+        "reference_date": _date(row.reference_date),
+        "date_range_start": _date(row.date_range_start),
+        "date_range_end": _date(row.date_range_end),
+        "rules": row.rules,
+        "post_action": str(row.post_action),
+        "is_active": row.profile_is_active,
     }
 
 
 async def collect(session: AsyncSession) -> dict:
     """Read the three slices, every row, archived and inactive included.
 
-    Archiver decides what to import; the file does not filter.
+    Archiver decides what to import; the file does not filter. Only the
+    exported columns are selected, never whole entities: a checkout ahead of
+    the database's migrations, or a flip that drops a column the file never
+    carried, must not break a re-run (CR 11).
     """
-    rows = await session.execute(
-        select(WatchedItem, TemporalProfile).outerjoin(
-            TemporalProfile, TemporalProfile.watched_item_id == WatchedItem.id
-        )
+    item_rows = await session.execute(
+        select(
+            WatchedItem.id,
+            WatchedItem.archiver_info_item_id,
+            WatchedItem.name,
+            WatchedItem.description,
+            WatchedItem.default_tags,
+            WatchedItem.default_schedule_config,
+            WatchedItem.announced_schedule_config,
+            WatchedItem.throttle_floor_interval,
+            WatchedItem.archived_at,
+            TemporalProfile.profile_type,
+            TemporalProfile.reference_date,
+            TemporalProfile.date_range_start,
+            TemporalProfile.date_range_end,
+            TemporalProfile.rules,
+            TemporalProfile.post_action,
+            TemporalProfile.is_active.label("profile_is_active"),
+        ).outerjoin(TemporalProfile, TemporalProfile.watched_item_id == WatchedItem.id)
     )
     items: dict[str, dict] = {}
     info_item_by_watched_item: dict[str, str] = {}
-    for wi, profile in rows.all():
-        info_item_by_watched_item[str(wi.id)] = str(wi.archiver_info_item_id)
-        items[str(wi.archiver_info_item_id)] = {
-            "name": wi.name,
-            "description": wi.description,
-            "default_tags": wi.default_tags,
-            "default_schedule_config": wi.default_schedule_config,
-            "announced_schedule_config": wi.announced_schedule_config,
-            "throttle_floor_interval": wi.throttle_floor_interval,
-            "archived_at": _timestamp(wi.archived_at),
-            "temporal_profile": _profile(profile),
+    for row in item_rows:
+        info_item_by_watched_item[str(row.id)] = str(row.archiver_info_item_id)
+        items[str(row.archiver_info_item_id)] = {
+            "name": row.name,
+            "description": row.description,
+            "default_tags": row.default_tags,
+            "default_schedule_config": row.default_schedule_config,
+            "announced_schedule_config": row.announced_schedule_config,
+            "throttle_floor_interval": row.throttle_floor_interval,
+            "archived_at": _timestamp(row.archived_at),
+            "temporal_profile": _profile(row),
         }
 
+    domain_rows = await session.execute(
+        select(
+            Domain.name,
+            Domain.min_interval,
+            Domain.default_schedule_config,
+            Domain.notes,
+            Domain.is_active,
+            Domain.archived_at,
+        )
+    )
     domains = {
         d.name: {
             "min_interval": d.min_interval,
@@ -116,9 +144,23 @@ async def collect(session: AsyncSession) -> dict:
             "is_active": d.is_active,
             "archived_at": _timestamp(d.archived_at),
         }
-        for d in (await session.execute(select(Domain))).scalars()
+        for d in domain_rows
     }
 
+    template_rows = await session.execute(
+        select(
+            NotificationTemplate.id,
+            NotificationTemplate.title,
+            NotificationTemplate.channel_hint,
+            NotificationTemplate.events,
+            NotificationTemplate.visibility,
+            NotificationTemplate.domain_name,
+            NotificationTemplate.watched_item_id,
+            NotificationTemplate.is_active,
+            NotificationTemplate.content_config,
+            NotificationTemplate.remote_channel_id,
+        ).order_by(NotificationTemplate.id)
+    )
     templates = [
         {
             "id": str(t.id),
@@ -136,9 +178,7 @@ async def collect(session: AsyncSession) -> dict:
             "content_config": t.content_config,
             "remote_channel_id": t.remote_channel_id,
         }
-        for t in (
-            await session.execute(select(NotificationTemplate).order_by(NotificationTemplate.id))
-        ).scalars()
+        for t in template_rows
     ]
 
     return {"items": items, "domains": domains, "notification_templates": templates}

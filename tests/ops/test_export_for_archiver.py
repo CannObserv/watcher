@@ -6,6 +6,7 @@ service, so two properties outrank the shape: it is read-only by construction
 file — never stdout, where they would land in a terminal or a transcript.
 """
 
+import hashlib
 import json
 import os
 import stat
@@ -333,3 +334,63 @@ async def test_exported_at_names_the_snapshot(monkeypatch, test_engine) -> None:
     monkeypatch.setattr(export_for_archiver, "collect", collect)
     document = await export_for_archiver._export(TEST_DATABASE_URL)
     assert document["exported_at"] == seen[0].astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+
+
+@pytest.mark.integration
+async def test_every_shape_the_database_returns_renders(db_session) -> None:
+    """``render`` meets real column types — JSONB, ARRAY, float, dates — here,
+    not first on the production run (CR 5)."""
+    info_item_id = ULID()
+    name = f"{ULID()}.example".lower()
+    wi = await make_watched_item(
+        db_session,
+        archiver_info_item_id=info_item_id,
+        domain_name=name,
+        default_tags=["ünïcode"],
+        default_schedule_config={"interval": "6h"},
+        archived_at=datetime(2026, 9, 1, tzinfo=UTC),
+    )
+    db_session.add(
+        TemporalProfile(
+            watched_item_id=wi.id,
+            profile_type="seasonal",
+            date_range_start=date(2026, 1, 1),
+            date_range_end=date(2026, 2, 1),
+            post_action="archive",
+        )
+    )
+    db_session.add(
+        NotificationTemplate(
+            title="Domain",
+            channel_hint="slack",
+            visibility="domain",
+            domain_name=name,
+            content_config={"default": {"diff_snippet_lines": 10}},
+        )
+    )
+    db_session.add(
+        NotificationTemplate(
+            title="Item", channel_hint="mailto", visibility="watched_item", watched_item_id=wi.id
+        )
+    )
+    await db_session.flush()
+
+    data = await export_for_archiver.collect(db_session)
+    doc = export_for_archiver.build_document(data, exported_at=EXPORTED_AT)
+
+    assert json.loads(export_for_archiver.render(doc)) == doc
+
+
+@pytest.mark.integration
+def test_main_runs_end_to_end_against_a_database(monkeypatch, tmp_path, capsys) -> None:
+    monkeypatch.setattr(export_for_archiver, "configure_logging", MagicMock())
+    out = tmp_path / "export.json"
+    environ = {"DATABASE_URL": TEST_DATABASE_URL}
+
+    assert export_for_archiver.main(["--output", str(out)], environ=environ) == 0
+
+    doc = json.loads(out.read_text())
+    assert doc["schema_version"] == export_for_archiver.SCHEMA_VERSION
+    printed = capsys.readouterr().out
+    assert f"sha256: {hashlib.sha256(out.read_bytes()).hexdigest()}" in printed
+    assert stat.S_IMODE(out.stat().st_mode) == 0o600

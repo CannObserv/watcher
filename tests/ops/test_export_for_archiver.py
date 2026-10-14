@@ -102,6 +102,8 @@ def test_an_output_directory_it_cannot_write_is_refused_before_reading(
     """``/root/…`` as the operator, or a directory that exists but is not
     theirs: refused up front with a message, not a traceback before or a failed
     write after the production read (CR 8)."""
+    if os.geteuid() == 0:
+        pytest.skip("running as root: os.access ignores mode bits (CR 10)")
     collect = AsyncMock()
     monkeypatch.setattr(export_for_archiver, "_export", collect)
     locked = tmp_path / "locked"

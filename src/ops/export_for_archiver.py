@@ -229,6 +229,10 @@ def main(argv: list[str] | None = None, *, environ: Mapping[str, str] = os.envir
         )
         return 2
 
+    if not args.output.parent.is_dir():
+        print(f"{args.output.parent} is not a directory", file=sys.stderr)
+        return 2
+
     document = asyncio.run(_export(url))
     body = render(document)
     write_private(args.output, body)

@@ -84,6 +84,16 @@ def test_output_is_required(capsys) -> None:
     assert "--output" in capsys.readouterr().err
 
 
+def test_a_missing_output_directory_is_refused_before_reading(monkeypatch, tmp_path, capsys):
+    """Fail before production is read, not with a traceback after (CR 4)."""
+    collect = AsyncMock()
+    monkeypatch.setattr(export_for_archiver, "_export", collect)
+    out = tmp_path / "absent" / "x.json"
+    assert export_for_archiver.main(["--output", str(out)], environ={"DATABASE_URL": DEV_URL}) == 2
+    assert "absent" in capsys.readouterr().err
+    collect.assert_not_awaited()
+
+
 # --- main: the file, and only the file, holds the contents ----------------
 
 

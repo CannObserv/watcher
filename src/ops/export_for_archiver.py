@@ -19,8 +19,9 @@ change data in between. Keys and rows are sorted, so two runs differ only in
 Read-only by construction: one ``REPEATABLE READ, READ ONLY`` transaction, so
 the three tables come from one snapshot and Postgres refuses any write. The
 file holds notifier channel ids and channel hints, and both repos are public:
-it is written owner-only, its contents never reach stdout (only counts and a
-sha256 do), and it is never attached to an issue. Deleted in the jump (#380).
+it is written owner-only, its contents never reach stdout (counts,
+``exported_at``, the sha256 and the path do), and it is never attached to an
+issue. Deleted in the jump (#380).
 """
 
 import argparse

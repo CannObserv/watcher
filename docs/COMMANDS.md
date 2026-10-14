@@ -284,6 +284,12 @@ sudo bash -c "set -a; . /etc/watcher/backup.env; set +a; export GOOGLE_APPLICATI
 # (docs/DEPLOYMENT.md → Job history). The opt-in covers the dry run too:
 source scripts/load-env.sh
 WATCHER_ALLOW_PRODUCTION_DB=1 uv run python -m src.ops.prune_job_history --dry-run
+
+# Export for Archiver's migration (#373; deleted in the jump, #380). Read-only
+# transaction; writes the file 0600 and prints only counts and a sha256. Holds
+# notifier channel ids: carry it to Archiver yourself, never attach it to an issue.
+# Re-run before each flip (#374–#376) and diff — only exported_at should move:
+WATCHER_ALLOW_PRODUCTION_DB=1 uv run python -m src.ops.export_for_archiver --output PATH
 ```
 
 ## Tailwind CSS

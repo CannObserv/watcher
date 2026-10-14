@@ -29,6 +29,7 @@ import hashlib
 import json
 import os
 import sys
+import tempfile
 from collections.abc import AsyncIterator, Mapping
 from contextlib import asynccontextmanager
 from datetime import UTC, date, datetime
@@ -159,19 +160,23 @@ def sha256_hex(body: str) -> str:
 
 
 def write_private(path: Path, body: str) -> None:
-    """Write ``body`` owner-only (``0600``), tightening a file that already exists.
+    """Write ``body`` owner-only (``0600``), atomically.
 
-    ``O_CREAT``'s mode applies only to a file it creates, so a re-run onto a
-    file someone loosened is chmodded before a byte is written.
+    A fresh ``mkstemp`` file (``0600``, ``O_EXCL``) beside ``path`` is renamed
+    over it, so a re-run that fails part way leaves the previous export whole —
+    it is the one that may be carried — and a symlink at ``path`` is replaced
+    rather than written through. A loosened file is replaced by a tight one.
     """
-    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.", suffix=".tmp")
     try:
-        os.fchmod(fd, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(body)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, path)
     except BaseException:
-        os.close(fd)
+        os.unlink(tmp)
         raise
-    with os.fdopen(fd, "w", encoding="utf-8") as f:
-        f.write(body)
 
 
 @asynccontextmanager

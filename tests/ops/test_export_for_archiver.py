@@ -108,14 +108,35 @@ def test_the_file_is_owner_only(monkeypatch, tmp_path) -> None:
 
 
 def test_a_rerun_over_a_readable_file_makes_it_owner_only(tmp_path) -> None:
-    """``O_CREAT``'s mode applies only to a file it creates; a re-run onto one an
-    operator loosened must tighten it, not inherit it."""
+    """A re-run onto a file an operator loosened must tighten it, not inherit it."""
     out = tmp_path / "export.json"
     out.write_text("old, longer than the new contents")
     os.chmod(out, 0o644)
     export_for_archiver.write_private(out, "new\n")
     assert stat.S_IMODE(out.stat().st_mode) == 0o600
     assert out.read_text() == "new\n"
+
+
+def test_a_failed_rerun_keeps_the_previous_export(tmp_path) -> None:
+    """The previous file is the one that may be carried: a write that fails part
+    way must leave it whole, and leave no partial file beside it (CR 2)."""
+    out = tmp_path / "export.json"
+    out.write_text("previous export\n")
+    with pytest.raises(UnicodeEncodeError):
+        export_for_archiver.write_private(out, "partial \ud800 unencodable")
+    assert out.read_text() == "previous export\n"
+    assert [p.name for p in tmp_path.iterdir()] == ["export.json"]
+
+
+def test_a_symlinked_output_is_replaced_not_written_through(tmp_path) -> None:
+    target = tmp_path / "elsewhere.txt"
+    target.write_text("not the export\n")
+    out = tmp_path / "export.json"
+    out.symlink_to(target)
+    export_for_archiver.write_private(out, "new\n")
+    assert not out.is_symlink()
+    assert out.read_text() == "new\n"
+    assert target.read_text() == "not the export\n"
 
 
 # --- the document ---------------------------------------------------------

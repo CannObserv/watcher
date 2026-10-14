@@ -1,6 +1,8 @@
 # Headless Watcher and cohort boundaries — design
 
-**Date:** 2026-10-14 · **Status:** approved in brainstorming, pending doc review
+**Date:** 2026-10-14 · **Status:** approved; filed as #368 (parent epic) with child epics
+CannObserv/cannobserv#561, CannObserv/archiver#359, CannObserv/broker#92,
+CannObserv/replicator#135, CannObserv/notifier#116
 **Repos touched:** watcher (parent epic), cannobserv, archiver, broker, replicator, notifier
 
 ## Goal
@@ -327,15 +329,14 @@ Rules for this stream:
 **Phase 4 — hygiene, in parallel, non-blocking**
 
 - cannobserv: the DLQ wording contradiction (config/state has "no DLQ" vs. "the DLQ is its
-  terminal state").
+  terminal state"); the `streams.py` group roster is missing the live
+  `provisioner.revisions` group.
 - archiver:
   - the schemas' `$id` URLs, which still point at the released `watcher.exe.xyz`
   - `rep_spec` lacks `schema_version`
   - `source_spec` "cross-check" vs. co-core "fallback" wording
   - `info.registry` 50k cap → size it against the set (the #292 lesson)
-- broker:
-  - `STREAMS.md` "event" → "fact"
-  - the roster is missing the live `provisioner.revisions` group
+- broker: `STREAMS.md` "event" → "fact".
 
 ## Failure modes
 
@@ -370,7 +371,8 @@ The break-glass works with Archiver down. That is the reason it stays host-local
 
 ## Issue breakdown
 
-Epics are cross-linked. Dependencies are in brackets.
+Epics are cross-linked. Dependencies are in brackets. Filed issue numbers and their
+dependency links are tracked on the epics, starting from #368.
 
 ### watcher — parent epic: "Headless Watcher and cohort boundaries"
 
@@ -396,7 +398,7 @@ Epics are cross-linked. Dependencies are in brackets.
 - **C3** `info.watch-check` stream and `WatchCheckCommand`
 - **C4** `WatchStatusState` new levels
 - **C5** Optional `FetchPolicyState.generation`
-- **C6** DLQ wording fix
+- **C6** DLQ wording fix; `provisioner.revisions` missing from the `streams.py` group roster
 - **C7** co-core release carrying C2–C5
 
 ### archiver — epic: "Control plane absorbs Watcher's operator surface"
@@ -423,7 +425,7 @@ Epics are cross-linked. Dependencies are in brackets.
 - **B1** Additive ACLs + `STREAMS.md` inventory + probes for both new streams
 - **B2** `FullSetFloor` mirror sourced from Archiver (at F1)
 - **B3** Revoke Watcher's `content.fetch-policy` grant (Phase 3)
-- **B4** Hygiene: "event" → "fact", `provisioner.revisions` in the roster
+- **B4** Hygiene: "event" → "fact"
 
 ### replicator — epic: "Fetch-policy producer moves to Archiver"
 

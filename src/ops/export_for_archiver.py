@@ -40,7 +40,7 @@ from contextlib import asynccontextmanager
 from datetime import UTC, date, datetime
 from pathlib import Path
 
-from sqlalchemy import func, select
+from sqlalchemy import Row, func, select
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 
 from src.core.db_safety import (
@@ -69,7 +69,7 @@ def _date(value: date | None) -> str | None:
     return value.isoformat() if value is not None else None
 
 
-def _profile(row) -> dict | None:
+def _profile(row: Row) -> dict | None:
     if row.profile_type is None:  # the outer join found no profile
         return None
     return {

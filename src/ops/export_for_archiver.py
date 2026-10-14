@@ -9,8 +9,12 @@ the InfoItem rather than Watcher's own id. Item ``name`` and ``description`` are
 retired, not ported (design D6): they travel for reference only.
 
     source scripts/load-env.sh
+    d=$(mktemp -d)   # 0700, yours: the command cannot write a root-only path itself
     WATCHER_ALLOW_PRODUCTION_DB=1 uv run python -m src.ops.export_for_archiver \\
-        --output /path/to/watcher-export-YYYY-MM-DD.json
+        --output "$d/watcher-export-YYYY-MM-DD.json"
+    sudo install -D -m 600 -o root -g root "$d/watcher-export-YYYY-MM-DD.json" \\
+        /root/archiver-export/watcher-export-YYYY-MM-DD.json
+    shred -u "$d"/watcher-export-*.json && rmdir "$d"   # leave no second copy
 
 Re-run it before each flip that consumes it (#374, #375, #376): the operator can
 change data in between. Keys and rows are sorted, so two runs differ only in
@@ -236,8 +240,9 @@ def main(argv: list[str] | None = None, *, environ: Mapping[str, str] = os.envir
     parent = args.output.parent
     if not (os.path.isdir(parent) and os.access(parent, os.W_OK | os.X_OK)):
         print(
-            f"{parent} is not a directory you can write. Write to one you own, then "
-            "move it into place: sudo install -m 600 -o root -g root FILE DEST",
+            f"{parent} is not a directory you can write. Write to one you own, move "
+            "it into place with sudo install -m 600 -o root -g root, then shred your "
+            "copy (see this module's docstring)",
             file=sys.stderr,
         )
         return 2

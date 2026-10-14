@@ -296,17 +296,20 @@ async def test_an_item_scoped_template_names_the_info_item(db_session) -> None:
 
 @pytest.mark.integration
 async def test_templates_are_ordered_by_id(db_session) -> None:
-    for title in ("b", "a", "c"):
+    """Inserted newest id first, so heap order is the reverse of id order and
+    only an ``ORDER BY`` returns them sorted (CR 7)."""
+    ids = sorted(ULID() for _ in range(3))
+    for tid in reversed(ids):
         db_session.add(
-            NotificationTemplate(title=title, channel_hint="mailto", visibility="global")
+            NotificationTemplate(id=tid, title="t", channel_hint="mailto", visibility="global")
         )
         await db_session.flush()
 
     data = await export_for_archiver.collect(db_session)
 
-    ids = [t["id"] for t in data["notification_templates"]]
-    assert ids == sorted(ids)
-    assert len(ids) >= 3
+    exported = [t["id"] for t in data["notification_templates"]]
+    assert [i for i in exported if i in {str(t) for t in ids}] == [str(t) for t in ids]
+    assert exported == sorted(exported)
 
 
 @pytest.mark.integration

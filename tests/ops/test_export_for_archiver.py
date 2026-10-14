@@ -95,6 +95,30 @@ def test_a_missing_output_directory_is_refused_before_reading(monkeypatch, tmp_p
     collect.assert_not_awaited()
 
 
+@pytest.mark.parametrize("make_dir", ["unwritable", "untraversable"])
+def test_an_output_directory_it_cannot_write_is_refused_before_reading(
+    make_dir, monkeypatch, tmp_path, capsys
+):
+    """``/root/…`` as the operator, or a directory that exists but is not
+    theirs: refused up front with a message, not a traceback before or a failed
+    write after the production read (CR 8)."""
+    collect = AsyncMock()
+    monkeypatch.setattr(export_for_archiver, "_export", collect)
+    locked = tmp_path / "locked"
+    locked.mkdir()
+    out = locked / "x.json" if make_dir == "unwritable" else locked / "inner" / "x.json"
+    if make_dir == "untraversable":
+        (locked / "inner").mkdir()
+    os.chmod(locked, 0o500 if make_dir == "unwritable" else 0o000)
+    try:
+        code = export_for_archiver.main(["--output", str(out)], environ={"DATABASE_URL": DEV_URL})
+    finally:
+        os.chmod(locked, 0o700)
+    assert code == 2
+    assert "sudo install -m 600" in capsys.readouterr().err
+    collect.assert_not_awaited()
+
+
 # --- main: the file, and only the file, holds the contents ----------------
 
 

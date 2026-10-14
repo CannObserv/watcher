@@ -230,8 +230,16 @@ def main(argv: list[str] | None = None, *, environ: Mapping[str, str] = os.envir
         )
         return 2
 
-    if not args.output.parent.is_dir():
-        print(f"{args.output.parent} is not a directory", file=sys.stderr)
+    # Before the read, not after it. os.access, not Path.is_dir: is_dir raises
+    # on a directory the operator cannot traverse (``/root/…``), and passes one
+    # they cannot write.
+    parent = args.output.parent
+    if not (os.path.isdir(parent) and os.access(parent, os.W_OK | os.X_OK)):
+        print(
+            f"{parent} is not a directory you can write. Write to one you own, then "
+            "move it into place: sudo install -m 600 -o root -g root FILE DEST",
+            file=sys.stderr,
+        )
         return 2
 
     document = asyncio.run(_export(url))

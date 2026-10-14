@@ -35,7 +35,7 @@ from contextlib import asynccontextmanager
 from datetime import UTC, date, datetime
 from pathlib import Path
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 
 from src.core.db_safety import (
@@ -197,8 +197,10 @@ async def read_only_session(url: str) -> AsyncIterator[AsyncSession]:
 
 async def _export(url: str) -> dict:
     async with read_only_session(url) as session:
+        # Transaction start, on the database's clock: the moment the data is as of.
+        snapshot_at = (await session.execute(select(func.now()))).scalar_one()
         data = await collect(session)
-    return build_document(data, exported_at=datetime.now(UTC))
+    return build_document(data, exported_at=snapshot_at)
 
 
 def main(argv: list[str] | None = None, *, environ: Mapping[str, str] = os.environ) -> int:

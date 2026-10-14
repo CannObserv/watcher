@@ -308,3 +308,18 @@ async def test_the_export_transaction_refuses_writes(test_engine) -> None:
         assert isolation == "repeatable read"
         with pytest.raises(DBAPIError, match="read-only transaction"):
             await session.execute(text("CREATE TEMP TABLE t373 (x int)"))
+
+
+@pytest.mark.integration
+async def test_exported_at_names_the_snapshot(monkeypatch, test_engine) -> None:
+    """The stamp is the read transaction's ``now()``, the moment the data is as
+    of — not the app clock after the read finished (CR 3)."""
+    seen = []
+
+    async def collect(session):
+        seen.append((await session.execute(text("SELECT now()"))).scalar_one())
+        return {"items": {}, "domains": {}, "notification_templates": []}
+
+    monkeypatch.setattr(export_for_archiver, "collect", collect)
+    document = await export_for_archiver._export(TEST_DATABASE_URL)
+    assert document["exported_at"] == seen[0].astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%S.%fZ")

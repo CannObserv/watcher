@@ -14,7 +14,7 @@ retired, not ported (design D6): they travel for reference only.
         --output "$d/watcher-export-YYYY-MM-DD.json"
     sudo install -D -m 600 -o root -g root "$d/watcher-export-YYYY-MM-DD.json" \\
         /root/archiver-export/watcher-export-YYYY-MM-DD.json
-    shred -u "$d"/watcher-export-*.json && rmdir "$d"   # leave no second copy
+    shred -u "$d"/watcher-export-*.json; rmdir "$d"   # leave no second copy
 
 Re-run it before each flip that consumes it (#374, #375, #376): the operator can
 change data in between. Keys and rows are sorted, so two runs differ only in

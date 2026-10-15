@@ -90,7 +90,7 @@ async def backfill_domain_schedule_config(
 ) -> None:
     """Propagate a domain's cadence to every WatchedItem on it (#205).
 
-    Mirrors the ``domain_suspended`` back-fill (``domain_toggle_active``): the
+    Mirrors the ``domain_suspended`` back-fill (``set_domain_active``): the
     denormalized ``WatchedItem.domain_default_schedule_config`` is kept in sync
     when an operator edits the domain cadence, so the resolver never needs a live
     Domain join. One bounded UPDATE on a rare operator action. Does not commit.

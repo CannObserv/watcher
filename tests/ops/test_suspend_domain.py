@@ -122,6 +122,7 @@ def test_the_outcome_is_printed_and_returned(code, stream, monkeypatch, capsys) 
     "error",
     [
         OSError("[Errno 111] Connect call failed ('127.0.0.1', 5432)"),
+        TimeoutError(),  # CR 5: asyncpg's connect timeout carries no message
         ProgrammingError("SELECT 1", {}, Exception('relation "domains" does not exist')),
     ],
 )

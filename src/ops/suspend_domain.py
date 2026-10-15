@@ -131,8 +131,11 @@ def main(argv: list[str] | None = None, *, environ: Mapping[str, str] = os.envir
     except (SQLAlchemyError, OSError) as e:
         # Not 1: that means the host was refused, and a runbook must be able to
         # tell refused from never ran (CR 2). The first line only — SQLAlchemy
-        # appends the statement and its parameters.
-        print(f"could not use the database: {str(e).splitlines()[0]}", file=sys.stderr)
+        # appends the statement and its parameters — and the type always, since
+        # a connect timeout carries no message at all (CR 5).
+        detail = next(iter(str(e).splitlines()), "")
+        reason = f"{type(e).__name__}: {detail}" if detail else type(e).__name__
+        print(f"could not use the database: {reason}", file=sys.stderr)
         return 2
     print(outcome.message, file=sys.stdout if outcome.code == 0 else sys.stderr)
     return outcome.code

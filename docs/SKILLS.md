@@ -11,7 +11,7 @@ Two directories serve different discovery systems:
 | `skills/` | agentskills.io | Committed overrides + symlinks → `skills-vendor/` |
 | `.claude/skills/` | Claude Code | Symlinks → `../../skills/<name>` |
 
-Local overrides in `skills/` automatically shadow vendor skills in both systems. When adding a skill, always create both the `skills/<name>` entry and `.claude/skills/<name>` symlink.
+Local overrides in `skills/` automatically shadow vendor skills in both systems. When adding a skill, always create both the `skills/<name>` entry and `.claude/skills/<name>` symlink — [tests/test_skill_links.py](../tests/test_skill_links.py) fails on either half missing; the doctor sees only links that dangle.
 
 ## External Skill Repos (Git Submodules)
 

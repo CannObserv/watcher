@@ -12,8 +12,9 @@ needs on nearly every task; the detail is here.
 A `WatchedItem` owns everything: the canonical `effective_url` and `source_specs`
 used by the pipeline; `default_schedule_config`, `default_tags`;
 `content_media_type` (#168); `domain_name` (FK → `Domain.name`, set at create time);
-`domain_suspended` (set True/False by domain deactivation/reactivation — it
-gates scheduling directly, no live Domain join); `domain_default_schedule_config`
+`domain_suspended` (set True/False by domain deactivation/reactivation, through
+`set_domain_active` — the dashboard toggle and the `src.ops.suspend_domain`
+break-glass, #372 — it gates scheduling directly, no live Domain join); `domain_default_schedule_config`
 (denormalized copy of the parent Domain's cadence — the Domain tier of schedule
 resolution; #205); a single optional
 `TemporalProfile` (1:1, `temporal_profiles.watched_item_id`); `health_status`,

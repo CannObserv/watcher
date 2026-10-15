@@ -89,7 +89,7 @@ def is_suspended(domain: Domain) -> bool:
     items, so a live policy for the host asserts configuration Watcher no longer
     acts on. Two mechanisms write the ``WatchedItem.domain_suspended`` that does
     the stopping: ``ensure_domain_and_resolve_suspension`` *resolves* it for an
-    item being created (its caller writes the field), and ``domain_toggle_active``
+    item being created (its caller writes the field), and ``set_domain_active``
     back-fills every existing item when an operator flips the domain.
 
     Delegates to :attr:`Domain.is_suspended` so the predicate has exactly one

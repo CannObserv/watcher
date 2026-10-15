@@ -29,6 +29,7 @@ from co_core.pure.models.changes import RegistryAnnouncementEmit
 from sqlalchemy import select
 from ulid import ULID
 
+from src.core.domain_suspension import set_domain_active
 from src.core.models.audit_log import AuditLog, EventType
 from src.core.models.revoked_info_item import RevokedInfoItem
 from src.core.models.watched_item import WatchedItem, WatchHealthStatus
@@ -587,6 +588,47 @@ class TestDomainMovement:
         wi = await _get(db_session, info_item_id)
         assert wi.effective_url == "https://lcb.wa.gov/b"
         assert wi.domain_suspended is True
+
+
+class TestBreakGlassSurvivesTheRegistry:
+    """#372: once the dashboard goes (#377) the CLI is the only control, and a
+    re-announcement — or a new item on the host — must not undo it."""
+
+    async def test_a_cli_suspension_holds_across_announcements(self, db_session):
+        existing_id = ULID()
+        await reconcile_announcement(
+            db_session, _announcement(existing_id, generation=1, url="https://brk.example/a")
+        )
+        await set_domain_active(db_session, "brk.example", active=False, source="cli")
+        await db_session.commit()
+
+        newcomer_id = ULID()
+        await reconcile_announcement(
+            db_session, _announcement(existing_id, generation=2, url="https://brk.example/b")
+        )
+        await reconcile_announcement(
+            db_session, _announcement(newcomer_id, generation=1, url="https://brk.example/c")
+        )
+
+        assert (await _get(db_session, existing_id)).domain_suspended is True
+        assert (await _get(db_session, newcomer_id)).domain_suspended is True
+
+    async def test_moving_onto_a_suspended_host_suspends_the_item(self, db_session):
+        info_item_id = ULID()
+        await reconcile_announcement(
+            db_session, _announcement(info_item_id, generation=1, url="https://free.example/a")
+        )
+        await reconcile_announcement(
+            db_session, _announcement(ULID(), generation=1, url="https://held.example/a")
+        )
+        await set_domain_active(db_session, "held.example", active=False, source="cli")
+        await db_session.commit()
+
+        await reconcile_announcement(
+            db_session, _announcement(info_item_id, generation=2, url="https://held.example/b")
+        )
+
+        assert (await _get(db_session, info_item_id)).domain_suspended is True
 
 
 class TestMalformedIdentity:

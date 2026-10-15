@@ -14,6 +14,7 @@ from src.api.deps import get_db_session, get_probe_fn
 from src.api.routes.helpers import parse_ulid
 from src.api.schemas.content_config import ContentConfig
 from src.api.schemas.validators import validate_event_list
+from src.core.domain_suspension import DomainArchived, DomainNotFound, set_domain_active
 from src.core.domains import (
     backfill_domain_schedule_config,
 )
@@ -263,27 +264,15 @@ async def domain_toggle_active(
     Deactivating suspends every WatchedItem on the domain (``domain_suspended``);
     reactivating clears the flag. ``domain_suspended`` gates scheduling and the
     pause/resume toggle directly — the WatchedItem is the single monitored entity.
+    The write is ``set_domain_active``'s, shared with the break-glass CLI (#372).
     """
-    result = await session.execute(select(Domain).where(Domain.name == name))
-    domain = result.scalar_one_or_none()
-    if not domain:
-        raise HTTPException(status_code=404, detail="Domain not found")
-
-    if domain.archived_at is not None:
-        raise HTTPException(status_code=409, detail="Cannot toggle archived domain")
-
-    new_active = active == "true"
-    domain.is_active = new_active
-
-    wi_result = await session.execute(select(WatchedItem).where(WatchedItem.domain_name == name))
-    for wi in wi_result.scalars().all():
-        wi.domain_suspended = not new_active
-    audit(
-        session,
-        EventType.DOMAIN_ACTIVATED if new_active else EventType.DOMAIN_DEACTIVATED,
-        domain_name=name,
-        source="dashboard",
-    )
+    try:
+        result = await set_domain_active(session, name, active=active == "true", source="dashboard")
+    except DomainNotFound:
+        raise HTTPException(status_code=404, detail="Domain not found") from None
+    except DomainArchived:
+        raise HTTPException(status_code=409, detail="Cannot toggle archived domain") from None
+    domain = result.domain
 
     await session.commit()
     await session.refresh(domain)

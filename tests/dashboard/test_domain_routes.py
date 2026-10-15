@@ -8,6 +8,7 @@ from sqlalchemy import select
 from src.api.deps import get_probe_fn
 from src.api.main import app
 from src.core.egress import DestinationRefused
+from src.core.models.audit_log import AuditLog, EventType
 from src.core.models.domain import Domain
 from tests.conftest import make_watched_item
 
@@ -799,6 +800,35 @@ class TestDomainToggleActive:
             "/domains/nope-toggle.com/toggle-active", data={"active": "false"}
         )
         assert response.status_code == 404
+
+    async def test_toggle_audits_with_the_dashboard_as_source(self, client, db_session):
+        db_session.add(Domain(name="audit-toggle.com"))
+        await db_session.flush()
+
+        await client.post("/domains/audit-toggle.com/toggle-active", data={"active": "false"})
+
+        rows = (await db_session.execute(select(AuditLog))).scalars().all()
+        mine = [r for r in rows if r.payload.get("domain_name") == "audit-toggle.com"]
+        assert [(r.event_type, r.payload["source"]) for r in mine] == [
+            (EventType.DOMAIN_DEACTIVATED, "dashboard")
+        ]
+
+    async def test_reposting_the_current_state_writes_no_second_audit_row(self, client, db_session):
+        """#372: the toggle delegates to ``set_domain_active``, which audits a
+        change, not a click."""
+        db_session.add(Domain(name="repost-toggle.com"))
+        await db_session.flush()
+
+        for _ in range(2):
+            response = await client.post(
+                "/domains/repost-toggle.com/toggle-active",
+                data={"active": "false"},
+                follow_redirects=False,
+            )
+            assert response.status_code == 303
+
+        rows = (await db_session.execute(select(AuditLog))).scalars().all()
+        assert len([r for r in rows if r.payload.get("domain_name") == "repost-toggle.com"]) == 1
 
     async def test_toggle_archived_domain_returns_409(self, client, db_session):
         db_session.add(Domain(name="archived-toggle.com", archived_at=datetime.now(UTC)))

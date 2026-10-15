@@ -14,7 +14,7 @@ mechanics (groupless tail, replay from `0-0`, no DLQ, `generation` ordering) are
 `domain_name` and its two denormalized facts, and **only when the host actually
 moves**. Re-deriving the domain on every announcement would clear a
 `domain_suspended` an operator set, which is host-level mechanism the registry has
-no opinion on.
+no opinion on — the `src.ops.suspend_domain` break-glass (#372) relies on it.
 
 **What an announcement records (#274).** Every applied announcement leaves an
 audit row. A create emits `watched_item.created` with `source: "registry"` —

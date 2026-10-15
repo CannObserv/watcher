@@ -46,7 +46,7 @@ To add a new external skill repo: follow the `managing-skills` skill.
 | `managing-skills` | add skill repo, manage external skills |
 | `orchestrating-issue-backlog` | orchestrate backlog, prioritize issues, plan issue execution, clear backlog — parallel agent team; serial burn-downs are `coordinating-epics` |
 | `curating-context` | curate context, context budget, hone AGENTS.md, trim AGENTS.md, prune context |
-| `coordinating-epics` | coordinate the epic, burn down, check-in, I finished #N, next issue, what's next on the epic. Every epic body edit goes through its `epic-edit.sh`, each check-in starts with `scan.sh` (#384). `scan.sh` scans one repo, so a cross-repo parent's (#368) other repos are still re-scanned by hand |
+| `coordinating-epics` | coordinate the epic, burn down, check-in, I finished #N, next issue, what's next on the epic. Every epic body edit goes through its `epic-edit.sh`, each check-in starts with `scan.sh` (#384). v1's hand steps: a cross-repo parent's (#368) other repos, since `scan.sh` scans one (gregoryfoster/skills#400), and CI by job on the final SHA (gregoryfoster/skills#394) |
 | `using-mayfly-chat` | mayfly, open a channel, join the channel, chat with `<repo>`, agent chat, a mayfly.chat URL handed over. Needs Node.js 18+. **Never commit a channel URL** — it is read, write and delete access, and this repo has no structural test for it; run the leak check in the skill's `references/security.md` before committing anything a session produced |
 | `init-socraticode` | init socraticode, set up code search, index this project, audit the SocratiCode install |
 | `socraticode` (codebase MCP) | see **Code Exploration Policy** above |

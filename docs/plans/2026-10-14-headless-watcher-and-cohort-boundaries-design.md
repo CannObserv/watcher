@@ -97,6 +97,13 @@ the registry-announcement design, notifier `AGENTS.md`). This work makes them a 
 - Specs travel untyped; co-core models envelopes, not grammars.
 - Where a consumer must interpret a grammar, the interpretation lives in co-core `pure`
   and is declared as a **mirror obligation**.
+- **Secrets never travel on the bus.** A frame carries a **reference name**, never a
+  secret value (API key, cookie, token, password). The service that executes the frame
+  resolves the name from its own credentials. RepSpec's `credentials_alias` is the
+  precedent, and co-core's alias rule (`co_core/pure/util/aliases.py`) is the naming
+  convention. Retained streams and the registry are readable by every consumer, and
+  replayed from `0-0`, so they can never carry a secret. Added 2026-10-15 (operator
+  decision on #368, prompted by CannObserv/archiver#376's per-host headers).
 - Glossary (for the charter):
 
   | Spec | What it is | Where it lives on the consumer |

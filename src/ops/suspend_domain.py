@@ -20,8 +20,9 @@ tick, not by this command. A suspension survives re-announcement: the registry
 reconcile re-derives the domain only when an item's host moves.
 
 Exit 0 on a change or a no-op (it says which), 1 for an unknown or archived
-host, 2 for a configuration or usage error. The opt-in is the service's own
-(``src.core.db_safety``, #233), given for this one command, never in an env file.
+host, 2 when it could not run: a configuration or usage error, or a database it
+could not use. The opt-in is the service's own (``src.core.db_safety``, #233),
+given for this one command, never in an env file.
 """
 
 import argparse
@@ -31,6 +32,7 @@ import sys
 from collections.abc import Mapping
 from typing import NamedTuple
 
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 
 from src.core.db_safety import (
@@ -124,7 +126,14 @@ def main(argv: list[str] | None = None, *, environ: Mapping[str, str] = os.envir
         )
         return 2
 
-    outcome = asyncio.run(_run(url, args.host, resume=args.resume))
+    try:
+        outcome = asyncio.run(_run(url, args.host, resume=args.resume))
+    except (SQLAlchemyError, OSError) as e:
+        # Not 1: that means the host was refused, and a runbook must be able to
+        # tell refused from never ran (CR 2). The first line only — SQLAlchemy
+        # appends the statement and its parameters.
+        print(f"could not use the database: {str(e).splitlines()[0]}", file=sys.stderr)
+        return 2
     print(outcome.message, file=sys.stdout if outcome.code == 0 else sys.stderr)
     return outcome.code
 

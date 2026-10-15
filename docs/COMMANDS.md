@@ -295,8 +295,9 @@ WATCHER_ALLOW_PRODUCTION_DB=1 uv run python -m src.ops.export_for_archiver --out
 
 # Break-glass: stop checking every item on one host (#372), Archiver up or down.
 # Database only — no bus, no Archiver. Audited `source: "cli"`; exit 0 on a change
-# or a no-op (it says which), 1 for an unknown or archived host. The service acts on
-# it from its next tick; until F1 (#374) that tick also publishes the host `revoked`:
+# or a no-op (it says which), 1 for an unknown or archived host, 2 if it could not run
+# (config, usage, database). The service acts on it from its next tick; until F1
+# (#374) that tick also publishes the host `revoked`:
 WATCHER_ALLOW_PRODUCTION_DB=1 uv run python -m src.ops.suspend_domain HOST
 WATCHER_ALLOW_PRODUCTION_DB=1 uv run python -m src.ops.suspend_domain HOST --resume
 ```

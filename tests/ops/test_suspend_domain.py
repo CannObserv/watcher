@@ -14,6 +14,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from sqlalchemy import delete, select
+from sqlalchemy.exc import ProgrammingError
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 
 from src.core.models.audit_log import AuditLog, EventType
@@ -115,6 +116,24 @@ def test_the_outcome_is_printed_and_returned(code, stream, monkeypatch, capsys) 
     monkeypatch.setattr(suspend_domain, "configure_logging", MagicMock())
     assert suspend_domain.main(["example.com"], environ={"DATABASE_URL": DEV_URL}) == code
     assert getattr(capsys.readouterr(), stream) == "said\n"
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        OSError("[Errno 111] Connect call failed ('127.0.0.1', 5432)"),
+        ProgrammingError("SELECT 1", {}, Exception('relation "domains" does not exist')),
+    ],
+)
+def test_a_database_failure_exits_2_in_one_line(error, monkeypatch, capsys) -> None:
+    """CR 2: exit 1 means the host was refused. A database the command could
+    not use is "never ran" — 2, one line, no traceback."""
+    monkeypatch.setattr(suspend_domain, "_run", AsyncMock(side_effect=error))
+    monkeypatch.setattr(suspend_domain, "configure_logging", MagicMock())
+    assert suspend_domain.main(["example.com"], environ={"DATABASE_URL": DEV_URL}) == 2
+    err = capsys.readouterr().err
+    assert err.startswith("could not use the database")
+    assert err.count("\n") == 1
 
 
 # --- apply: against the database -------------------------------------------

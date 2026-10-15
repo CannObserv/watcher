@@ -160,8 +160,8 @@ class TestRefusals:
 
     @pytest.mark.parametrize("active", [False, True])
     async def test_an_archived_host_raises_and_writes_nothing(self, db_session, active):
-        """Archived already suspends; flipping ``is_active`` under it would make
-        restore resurrect a state nobody chose."""
+        """Flipping ``is_active`` under an archive would make restore resurrect a
+        state nobody chose; the caller restores first."""
         name = f"arch-{active}.example".lower()
         db_session.add(Domain(name=name, is_active=True, archived_at=datetime.now(UTC)))
         wi = await _item(db_session, name, domain_suspended=True)

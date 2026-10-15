@@ -30,7 +30,12 @@ class DomainNotFound(LookupError):
 
 
 class DomainArchived(ValueError):
-    """The domain is archived, which already suspends it; ``is_active`` is not toggled."""
+    """The domain is archived; ``is_active`` is not toggled under an archive.
+
+    Archiving makes ``Domain.is_suspended`` true — the host publishes ``revoked``
+    — but back-fills no ``domain_suspended``, so the items already on it are
+    still scheduled. To stop them: restore, then deactivate.
+    """
 
 
 class DomainActivation(NamedTuple):

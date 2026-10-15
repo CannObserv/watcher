@@ -74,8 +74,12 @@ async def apply(session: AsyncSession, host: str, *, resume: bool) -> Outcome:
             1, f"no domain named {host!r} — nothing to {'resume' if resume else 'suspend'}"
         )
     except DomainArchived:
+        # Archiving revokes the host's fetch policy but flags no item, so its
+        # live items are still scheduled: say how to stop them (CR 1).
         return Outcome(
-            1, f"{host} is archived, which already stops watching it — suspension does not apply"
+            1,
+            f"{host} is archived: suspension does not apply to an archived domain, and "
+            "archiving does not stop its items — restore it, then suspend it",
         )
     if result.changed:
         verb = "resumed" if resume else "suspended"

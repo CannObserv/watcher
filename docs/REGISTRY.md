@@ -51,7 +51,8 @@ a cadence re-announcement does **not** raise it, because
 means — a prompt firing for both would be trained away, taking the one that
 matters with it.
 
-**What survives reconciliation**: `health_status`, `last_checked_at`,
+**What survives reconciliation**: `health_status`, `health_reason`,
+`health_status_code`, `last_checked_at`,
 `last_observed_at`, `last_changed_at`, `last_reviewed_at`, `last_error_notified_at`,
 `domain_suspended`, `archived_at`,
 `throttle_floor_interval`, `default_schedule_config`, `content_media_type`,

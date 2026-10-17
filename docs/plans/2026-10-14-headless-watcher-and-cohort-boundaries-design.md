@@ -140,18 +140,33 @@ Rules for this stream:
 - **Rejected alternative:** folding change into `content.revisions`. That stream's key
   identifies a slot (#293 re-announces under it); notification needs an occurrence key.
 - `*Emit` twins; DLQ permitted (fact stream); Archiver group `archiver.watch-events`.
+- As released in cannobserv v0.37.0 (2026-10-17):
+  - The envelope key is `event_id`.
+  - The extraction-failure path sends the reason `processing_failed`.
+  - `error_since` is required but nullable.
+  - A processor dead-letter is reported as `dead_lettered` and blames the processor, not
+    the spec (#386).
 
 ### C-b. New command stream `info.watch-check` (Archiver → Watcher)
 
 - `WatchCheckCommand{command_id, info_item_id, requested_at}`. It always forces a full
   fetch, the #269 semantics of check-now. Group `watcher.watch-check`; DLQ permitted.
-- Success is observed as a level: watch-status `last_attempt_at` passes `requested_at`,
-  plus a `ChangeDetectedEvent` if the content changed.
+- Success is observed as levels: watch-status **`last_full_fetch_at` passes
+  `requested_at`**, plus `health`, plus a `ChangeDetectedEvent` if the content changed.
+  `last_attempt_at` alone is not enough, because a scheduled 304 can move it.
+  Watcher **republishes the item's watch-status when a commanded check completes**,
+  which is a publish trigger beyond the transitions and the periodic tick.
+  (Corrected 2026-10-17 by the released contract, cannobserv v0.37.0,
+  `docs/change_bus/watch.md`.)
 - Rejection is `CheckRejectedEvent`.
 
 ### C-c. `WatchStatusState` gains three levels
 
-`last_full_fetch_at` (closes archiver#172), `health_reason`, `health_status_code`.
+`last_full_fetch_at` (closes archiver#172), `health_reason`, `health_status_code`. As released:
+- All three are optional.
+- The Emit refuses a reason unless `health == "error"`, and a code without a reason.
+- `last_full_fetch_at` advances only when bytes arrive.
+- A change of reason within one error episode is not a publish trigger.
 
 ### C-d. `content.fetch-policy` changes producer, Watcher → Archiver
 
@@ -198,8 +213,9 @@ Rules for this stream:
   - The error-reminder timer, preview and test-send.
   - Message links point at Archiver's item page.
   - A notifier credential behind a unit-only enable flag (the watcher #277/#278 pattern).
-- **Check-now:** publish `info.watch-check`. The UI shows "pending" until `last_attempt_at`
-  passes `requested_at`, or shows the rejection reason.
+- **Check-now:** publish `info.watch-check`. The UI shows "pending" until
+  `last_full_fetch_at` passes `requested_at` (corrected 2026-10-17; see C-b), or shows the
+  rejection reason.
 - **Watch panel:** `last_full_fetch_at`, health reason and code.
 - **Docs:**
   - Fix the stale "remove the WatchedItem in Watcher by hand"

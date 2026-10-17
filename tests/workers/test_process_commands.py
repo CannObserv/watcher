@@ -967,6 +967,155 @@ class TestDecisiveReaper:
         assert (await self._fetch(db_session, row)).failure_reason == "processing_timeout"
 
 
+def _failed(reason: str, detail: str = "boom") -> dict:
+    return {
+        "status": ProcessCommandStatus.FAILED,
+        "fact_at": datetime.now(UTC),
+        "failure_reason": reason,
+        "failure_detail": detail,
+    }
+
+
+class TestHealthReasons:
+    """#370: each derived-leg ending writes its Watcher-owned
+    ``WatchHealthReason`` (cannobserv#565) — never a status code, which only a
+    fetch failure carries — and a success clears both levels."""
+
+    async def _item(self, db_session, row) -> WatchedItem:
+        item = await db_session.get(WatchedItem, row.watched_item_id)
+        await db_session.refresh(item)  # what committed
+        return item
+
+    @pytest.mark.parametrize(
+        "fields",
+        [_empty(), _failed("extraction_error"), _failed("invalid_input")],
+        ids=["empty", "extraction_error", "invalid_input"],
+    )
+    async def test_an_extraction_failure_is_processing_failed(
+        self, db_session, monkeypatch, fields
+    ):
+        row = await _decisive(
+            db_session,
+            specs=(SPEC_A,),
+            item_over={"health_reason": "http_status", "health_status_code": 503},
+            **fields,
+        )
+        _wire(db_session, monkeypatch)
+        _quiet(monkeypatch)
+
+        await apply_process_fact(row.command_id, bus_client=fakeredis.FakeAsyncRedis())
+
+        item = await self._item(db_session, row)
+        assert (item.health_reason, item.health_status_code) == ("processing_failed", None)
+
+    async def test_input_unreadable_at_the_cap_is_blob_unreadable(self, db_session, monkeypatch):
+        monkeypatch.setenv(FETCH_MAX_REISSUES_ENV, "1")
+        row = await _decisive(db_session, reissue_count=1, **_failed("input_unreadable"))
+        _wire(db_session, monkeypatch)
+        _quiet(monkeypatch)
+
+        await apply_process_fact(row.command_id, bus_client=fakeredis.FakeAsyncRedis())
+
+        assert (await self._item(db_session, row)).health_reason == "blob_unreadable"
+
+    async def test_a_give_up_is_processing_timeout(self, db_session, monkeypatch):
+        monkeypatch.setenv(PROCESS_COMMAND_HARD_LIMIT_ENV, "7200")
+        row = await _decisive(db_session, issued_at=datetime.now(UTC) - timedelta(hours=3))
+        _quiet(monkeypatch)
+
+        await reap_process_commands(session=db_session, bus_client=fakeredis.FakeAsyncRedis())
+
+        assert (await self._item(db_session, row)).health_reason == "processing_timeout"
+
+    async def test_a_success_clears_both(self, db_session, monkeypatch):
+        row = await _decisive(
+            db_session,
+            item_over={
+                "health_status": WatchHealthStatus.ERROR,
+                "health_reason": "http_status",
+                "health_status_code": 503,
+            },
+            **_completed(),
+        )
+        _wire(db_session, monkeypatch)
+        _quiet(monkeypatch)
+
+        await apply_process_fact(row.command_id)
+
+        item = await self._item(db_session, row)
+        assert item.health_status == WatchHealthStatus.OK
+        assert (item.health_reason, item.health_status_code) == (None, None)
+
+
+class TestDeadLettered:
+    """#386: Processor's two caps blame different parties (cannobserv#536).
+
+    The **strike cap** — every attempt timed out, crashed or raised outside the
+    parser, caught by the handler — still sends ``extraction_error``: it can't
+    be told from a document that defeats the parser, so it stays the
+    extraction-failure path. The **escape cap** — the attempt at the cap raised
+    past the handler, and the command goes to ``content.process.dlq`` — sends
+    ``dead_lettered``. That one judged nothing and is the processor's fault: a
+    processor-fault failure that clears the validators and never re-fetches,
+    the shape a processing timeout already takes.
+    """
+
+    async def _decide(self, db_session, monkeypatch, fields):
+        row = await _decisive(
+            db_session,
+            item_over={"etag": '"old"', "validator_source_key": "sha256:k"},
+            **fields,
+        )
+        _wire(db_session, monkeypatch)
+        _quiet(monkeypatch)
+        self.dispatch = AsyncMock(return_value=0)
+        monkeypatch.setattr(fc_mod, "dispatch_event_notifications", self.dispatch)
+        self.client = fakeredis.FakeAsyncRedis()
+        result = await apply_process_fact(row.command_id, bus_client=self.client)
+        fetch = await db_session.get(FetchCommand, row.fetch_command_id)
+        item = await db_session.get(WatchedItem, row.watched_item_id)
+        await db_session.refresh(item)
+        return result, fetch, item
+
+    async def test_the_strike_cap_is_still_an_extraction_failure(self, db_session, monkeypatch):
+        result, fetch, item = await self._decide(
+            db_session,
+            monkeypatch,
+            _failed("extraction_error", "gave up on attempt 3: timed out"),
+        )
+
+        assert result == {"error": "extraction_failed"}
+        assert fetch.failure_reason == "processing_failed"
+        assert item.health_reason == "processing_failed"
+        assert item.etag is None
+        (event,) = await _audits(db_session, EventType.CHECK_EXTRACTION_FAILED)
+        assert event.payload["reason"] == "processing_failed"
+
+    async def test_the_escape_cap_blames_the_processor(self, db_session, monkeypatch):
+        detail = "dead-lettered: gave up on attempt 3: KeyError('x')"
+        result, fetch, item = await self._decide(
+            db_session, monkeypatch, _failed("dead_lettered", detail)
+        )
+
+        assert result == {"error": "dead_lettered"}
+        assert fetch.status == FetchCommandStatus.FAILED
+        assert fetch.failure_reason == "dead_lettered"
+        assert fetch.failure_detail == detail
+        assert fetch.applied_at is not None
+        assert item.health_status == WatchHealthStatus.ERROR
+        assert (item.health_reason, item.health_status_code) == ("dead_lettered", None)
+        assert item.last_observed_at is None  # nothing was verified
+        # A dead-letter judged nothing: the pair can't vouch for the bytes.
+        assert (item.etag, item.validator_source_key) == (None, None)
+        # Terminal, no re-fetch (only input_unreadable re-fetches).
+        assert await self.client.xlen("content.fetch") == 0
+        (event,) = await _audits(db_session, EventType.CHECK_EXTRACTION_FAILED)
+        assert (event.payload["reason"], event.payload["detail"]) == ("dead_lettered", detail)
+        (error,) = [c.kwargs["event"] for c in self.dispatch.await_args_list]
+        assert error.event_type == WatchEventType.WATCH_ERROR
+        assert error.metadata["reason"] == "dead_lettered"
+
+
 class TestUnpublishedPastTheHardLimit:
     """CR 6: a command the bus never accepted still ends at the hard limit.
 

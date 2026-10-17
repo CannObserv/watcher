@@ -99,7 +99,7 @@ re-fetch re-stamps when its bytes arrive.
 
 **A check that ends with bytes but no text clears the pair**: an extraction
 failure (#258/#260), the `input_unreadable` cap (#362), a processing timeout
-(#363). The item is in ERROR with no new fingerprint, and a 304 apply records a
+(#363), a dead-letter (#386). The item is in ERROR with no new fingerprint, and a 304 apply records a
 *successful* check. Kept, the validators would let the next 304 flip it back to
 OK health with nothing extracted. Forgotten, the next command fetches in full
 and re-asserts the failure.

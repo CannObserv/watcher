@@ -622,6 +622,9 @@ async def watched_item_update_url(
     wi.domain_default_schedule_config = domain_state.default_schedule_config
     if health_status == WatchHealthStatus.PROBING:
         wi.health_status = WatchHealthStatus.PROBING
+        # Out of ERROR, if it was there (#370): nothing failed to explain.
+        wi.health_reason = None
+        wi.health_status_code = None
     audit(
         session,
         EventType.WATCHED_ITEM_UPDATED,

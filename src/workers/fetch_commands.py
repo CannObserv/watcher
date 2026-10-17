@@ -75,7 +75,7 @@ async def record_check_failure(
     audit_event: str,
     audit_kwargs: dict,
     error_metadata: dict,
-    health_reason: str,
+    health_reason: str | None,
     health_status_code: int | None = None,
 ) -> None:
     """Record a failed check: ERROR health + stamped ``last_checked_at`` + audit,
@@ -88,7 +88,8 @@ async def record_check_failure(
     relayed verbatim — and the origin's status, which only a fetch failure has.
     Overwritten on every failure, the code included, so the latest check's
     pair is the one ``info.watch-status`` carries; a change inside an episode
-    is not a republish trigger (cannobserv#565).
+    is not a republish trigger (cannobserv#565). ``None`` is no recorded
+    reason — a fetch row whose fact carried none — and publishes as such.
 
     Shared by the fetch-failure and extraction-failure paths so both surface a
     health signal and a fresh ``last_checked_at`` — the latter stops a persistent

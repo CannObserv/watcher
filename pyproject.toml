@@ -27,8 +27,8 @@ dependencies = [
     # resolves the essence Processor dispatches on and Processor never re-resolves
     # it: bumped when CannObserv/processor coordinates a contract change, not on a
     # schedule (#366).
-    "co-core==0.32.0",
-    "co-core-aio[bus]==0.32.0",
+    "co-core==0.37.0",
+    "co-core-aio[bus]==0.37.0",
     # Imported directly by the bus layer; docs/BUS-CONNECTION-POLICY.md was
     # measured on redis-py 7.4.1, so a major is ours to adopt, not co-core-aio's (#294).
     "redis>=7.4,<8",

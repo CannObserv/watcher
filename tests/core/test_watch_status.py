@@ -20,7 +20,11 @@ consumer cannot check for us:
   every boot, and the first mutation bumps past 0;
 * tombstones (``revoked=True``) ride ``revoked_info_items`` into every full
   set, and an unpublishable row is skipped with a warning, never allowed to
-  fail the batch.
+  fail the batch;
+* the three #565 levels: ``last_full_fetch_at`` is the item's own stamp, and
+  ``health_reason`` / ``health_status_code`` travel only in ``"error"`` — a
+  stale or malformed pair is dropped before construction, so ``WatchStatusEmit``'s
+  refusal never costs the frame (#370).
 """
 
 from datetime import UTC, datetime
@@ -29,7 +33,8 @@ import fakeredis
 import pytest
 from co_core.pure.adapters.bus import streams
 from co_core.pure.adapters.bus.envelope import from_wire
-from co_core.pure.models.changes import WatchStatusState
+from co_core.pure.models.changes import WatchStatusEmit, WatchStatusState
+from pydantic import ValidationError
 from ulid import ULID
 
 from src.core.bus import RETAINED_FULL_SETS
@@ -46,6 +51,7 @@ from src.core.watch_status import (
 NOW = datetime(2026, 8, 14, 12, 0, 0, tzinfo=UTC)
 CHECKED = datetime(2026, 8, 14, 11, 0, 0, tzinfo=UTC)
 OBSERVED = datetime(2026, 8, 14, 10, 30, 0, tzinfo=UTC)
+FULL_FETCH = datetime(2026, 8, 14, 10, 0, 0, tzinfo=UTC)
 
 
 def _item(**overrides) -> WatchedItem:
@@ -118,6 +124,114 @@ class TestHealthMapping:
     def test_null_health_maps_to_unknown(self):
         events = build_status_events([_item(health_status=None)], [], now=NOW)
         assert events[0].health == "unknown"
+
+
+class TestLastFullFetch:
+    def test_publishes_the_items_own_stamp(self):
+        # Bytes arrived (#565): the column stamp_full_fetch moves on a 200 only,
+        # before extraction — a check command's outcome is read from it.
+        events = build_status_events([_item(last_full_fetch_at=FULL_FETCH)], [], now=NOW)
+        assert events[0].last_full_fetch_at == FULL_FETCH
+
+    def test_never_fetched_is_none(self):
+        events = build_status_events([_item()], [], now=NOW)
+        assert events[0].last_full_fetch_at is None
+
+    def test_travels_outside_error_too(self):
+        # A level of the fetch, not of the failure: no health gates it.
+        events = build_status_events(
+            [_item(health_status=WatchHealthStatus.UNKNOWN, last_full_fetch_at=FULL_FETCH)],
+            [],
+            now=NOW,
+        )
+        assert events[0].last_full_fetch_at == FULL_FETCH
+
+
+class TestFailureLevels:
+    def test_error_carries_reason_and_status_code(self):
+        item = _item(
+            health_status=WatchHealthStatus.ERROR,
+            health_reason="http_status",
+            health_status_code=503,
+        )
+        events = build_status_events([item], [], now=NOW)
+        assert events[0].health == "error"
+        assert events[0].health_reason == "http_status"
+        assert events[0].health_status_code == 503
+
+    def test_error_without_a_code_carries_the_reason_alone(self):
+        item = _item(health_status=WatchHealthStatus.ERROR, health_reason="dead_lettered")
+        events = build_status_events([item], [], now=NOW)
+        assert events[0].health_reason == "dead_lettered"
+        assert events[0].health_status_code is None
+
+    def test_error_from_before_reasons_were_recorded_has_none(self):
+        # An episode opened before #370 deployed: allowed, and still published.
+        events = build_status_events([_item(health_status=WatchHealthStatus.ERROR)], [], now=NOW)
+        assert events[0].health == "error"
+        assert events[0].health_reason is None
+        assert events[0].health_status_code is None
+
+    @pytest.mark.parametrize(
+        "status", [WatchHealthStatus.OK, WatchHealthStatus.UNKNOWN, WatchHealthStatus.PROBING, None]
+    )
+    def test_stale_levels_outside_error_are_dropped_not_the_frame(self, status):
+        # The Emit refuses a reason or code unless health is "error"; a row that
+        # left error without clearing them must still publish, minus the pair.
+        item = _item(health_status=status, health_reason="http_status", health_status_code=404)
+        events = build_status_events([item], [], now=NOW)
+        assert len(events) == 1
+        assert events[0].health_reason is None
+        assert events[0].health_status_code is None
+        assert events[0].applied_interval == "15m"
+
+    def test_code_without_a_reason_is_dropped(self):
+        item = _item(health_status=WatchHealthStatus.ERROR, health_status_code=500)
+        events = build_status_events([item], [], now=NOW)
+        assert len(events) == 1
+        assert events[0].health == "error"
+        assert events[0].health_status_code is None
+
+    def test_empty_reason_is_none_and_takes_its_code_with_it(self):
+        item = _item(
+            health_status=WatchHealthStatus.ERROR, health_reason="", health_status_code=500
+        )
+        events = build_status_events([item], [], now=NOW)
+        assert len(events) == 1
+        assert events[0].health_reason is None
+        assert events[0].health_status_code is None
+
+
+class TestEmitRefusals:
+    """Pin the co-core contract the builder cleans for (cannobserv#565)."""
+
+    BASE = {
+        "occurred_at": NOW,
+        "info_item_id": "x",
+        "applied_generation": 1,
+        "applied_active": True,
+    }
+
+    @pytest.mark.parametrize("health", ["ok", "unknown"])
+    def test_reason_outside_error(self, health):
+        with pytest.raises(ValidationError, match="must be None unless health is 'error'"):
+            WatchStatusEmit(**self.BASE, health=health, health_reason="http_status")
+
+    @pytest.mark.parametrize("health", ["ok", "unknown"])
+    def test_code_outside_error(self, health):
+        with pytest.raises(ValidationError, match="must be None unless health is 'error'"):
+            WatchStatusEmit(**self.BASE, health=health, health_status_code=404)
+
+    def test_code_without_a_reason(self):
+        with pytest.raises(ValidationError, match="needs a health_reason"):
+            WatchStatusEmit(**self.BASE, health="error", health_status_code=404)
+
+    def test_empty_reason(self):
+        with pytest.raises(ValidationError, match="at least 1 character"):
+            WatchStatusEmit(**self.BASE, health="error", health_reason="")
+
+    def test_error_needs_neither(self):
+        WatchStatusEmit(**self.BASE, health="error")
 
 
 class TestAppliedActive:
@@ -240,6 +354,22 @@ class TestPublishStatusEvents:
         assert by_revoked[False].health == "ok"
         assert by_revoked[True].applied_generation == 3
 
+    async def test_the_565_levels_survive_the_wire(self):
+        client = fakeredis.FakeAsyncRedis()
+        item = _item(
+            health_status=WatchHealthStatus.ERROR,
+            health_reason="http_status",
+            health_status_code=503,
+            last_full_fetch_at=FULL_FETCH,
+        )
+        await publish_status_events(client, build_status_events([item], [], now=NOW))
+        ((_message_id, fields),) = await client.xrange(streams.INFO_WATCH_STATUS)
+        frame = {k.decode(): v.decode() for k, v in fields.items()}
+        payload = from_wire(frame, topic=streams.INFO_WATCH_STATUS).payload
+        assert payload.last_full_fetch_at == FULL_FETCH
+        assert payload.health_reason == "http_status"
+        assert payload.health_status_code == 503
+
 
 @pytest.mark.integration
 class TestPublishFullStatusSet:
@@ -302,6 +432,19 @@ class TestBuilderHardening:
             r for r in caplog.records if "publishing without applied_interval" in r.getMessage()
         ]
         assert len(degraded) == 1
+
+    def test_corrupt_interval_keeps_the_failure_levels(self):
+        # The interval fallback drops the interval, nothing else.
+        item = _item(
+            announced_schedule_config={"interval": 123},
+            health_status=WatchHealthStatus.ERROR,
+            health_reason="fetch_timeout",
+            last_full_fetch_at=FULL_FETCH,
+        )
+        events = build_status_events([item], [], now=NOW)
+        assert events[0].applied_interval is None
+        assert events[0].health_reason == "fetch_timeout"
+        assert events[0].last_full_fetch_at == FULL_FETCH
 
 
 class TestStreamRetention:

@@ -17,8 +17,11 @@ used by the pipeline; `default_schedule_config`, `default_tags`;
 break-glass, #372 — it gates scheduling directly, no live Domain join); `domain_default_schedule_config`
 (denormalized copy of the parent Domain's cadence — the Domain tier of schedule
 resolution; #205); a single optional
-`TemporalProfile` (1:1, `temporal_profiles.watched_item_id`); `health_status`,
-`last_checked_at`, `last_changed_at`, `last_observed_at` (#264 — advances when the
+`TemporalProfile` (1:1, `temporal_profiles.watched_item_id`); `health_status`;
+`health_reason` / `health_status_code` (#370 — why it is in ERROR now: the latest
+failed check's `WatchHealthReason` token and, for `http_status`, the origin's
+status; written on every failure, cleared on leaving ERROR, published on
+`info.watch-status` beside `last_full_fetch_at`); `last_checked_at`, `last_changed_at`, `last_observed_at` (#264 — advances when the
 content was verified current: a successful check, changed or unchanged alike, **and**
 an origin 304 where no extraction ran at all (#249); `last_checked_at` advances
 on *every* outcome because it is the anti-thrash scheduling stamp (#168), so the

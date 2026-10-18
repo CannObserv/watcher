@@ -56,6 +56,14 @@ PROCESSOR = "extract"
 # path.
 INPUT_UNREADABLE_REASON = "input_unreadable"
 
+# The processor's escape cap (cannobserv#536, co-core 0.37.0): the attempt at
+# its cap raised past its own error handling, and the command went to
+# content.process.dlq. Terminal, no re-fetch, and the processor's fault — not
+# the spec's or the bytes' — so it fails the check as a processor fault (#386)
+# and is relayed verbatim as the item's health reason. The strike cap, which
+# the handler caught, still arrives as extraction_error.
+DEAD_LETTERED_REASON = "dead_lettered"
+
 PROCESS_COMMAND_TIMEOUT_ENV = "WATCHER_PROCESS_COMMAND_TIMEOUT_SECONDS"
 DEFAULT_PROCESS_COMMAND_TIMEOUT_SECONDS = 1800.0
 PROCESS_COMMAND_HARD_LIMIT_ENV = "WATCHER_PROCESS_COMMAND_HARD_LIMIT_SECONDS"

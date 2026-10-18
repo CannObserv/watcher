@@ -75,11 +75,21 @@ async def record_check_failure(
     audit_event: str,
     audit_kwargs: dict,
     error_metadata: dict,
+    health_reason: str | None,
+    health_status_code: int | None = None,
 ) -> None:
     """Record a failed check: ERROR health + stamped ``last_checked_at`` + audit,
     and dispatch ``WATCH_ERROR`` on the OK→ERROR transition — and again, as a
     reminder, once per ``WATCHER_ERROR_RENOTIFY_INTERVAL`` while it stays in
     ERROR (#71).
+
+    ``health_reason`` / ``health_status_code`` say why, as levels (#370): a
+    ``WatchHealthReason`` token — Watcher's own, or Replicator's fetch reason
+    relayed verbatim — and the origin's status, which only a fetch failure has.
+    Overwritten on every failure, the code included, so the latest check's
+    pair is the one ``info.watch-status`` carries; a change inside an episode
+    is not a republish trigger (cannobserv#565). ``None`` is no recorded
+    reason — a fetch row whose fact carried none — and publishes as such.
 
     Shared by the fetch-failure and extraction-failure paths so both surface a
     health signal and a fresh ``last_checked_at`` — the latter stops a persistent
@@ -97,6 +107,8 @@ async def record_check_failure(
         previously_notified_at, now=now, interval=error_renotify_interval()
     )
     watched_item.health_status = WatchHealthStatus.ERROR
+    watched_item.health_reason = health_reason
+    watched_item.health_status_code = health_status_code
     watched_item.last_checked_at = now
     # last_observed_at deliberately NOT stamped: a failure is an attempt, never
     # an observation (#264) — the registry must not claim content was verified.
@@ -169,6 +181,9 @@ async def _record_check_success(
 
     previous_health = watched_item.health_status
     watched_item.health_status = WatchHealthStatus.OK
+    # Leaving ERROR (#370): the Emit refuses a reason outside it.
+    watched_item.health_reason = None
+    watched_item.health_status_code = None
     watched_item.last_checked_at = now
     # Observation freshness (#264): "content was verified current", where
     # last_checked_at only says "we tried". Both callers qualify — a successful
@@ -337,6 +352,7 @@ async def fail_blob_unreadable(
         audit_event=EventType.CHECK_FETCH_FAILED,
         audit_kwargs={"reason": BLOB_UNREADABLE_REASON, "reissues": reissues},
         error_metadata={"reason": BLOB_UNREADABLE_REASON},
+        health_reason=BLOB_UNREADABLE_REASON,
     )
     return {"error": BLOB_UNREADABLE_REASON, "reissues": reissues}
 
@@ -381,6 +397,8 @@ async def fail_extraction(
         audit_event=EventType.CHECK_EXTRACTION_FAILED,
         audit_kwargs=audit_kwargs,
         error_metadata={"error": "extraction_failed"},
+        # The vocabulary's token for this path, whatever the row records.
+        health_reason=PROCESSING_FAILED_REASON,
     )
     return {"error": "extraction_failed"}
 
@@ -614,6 +632,8 @@ async def apply_fetch_failure(command_id: str) -> dict:
             audit_event=EventType.CHECK_FETCH_FAILED,
             audit_kwargs=audit_kwargs,
             error_metadata=error_metadata,
+            health_reason=row.failure_reason,
+            health_status_code=row.status_code,
         )
     return {"applied": True, "reason": row.failure_reason}
 
@@ -760,6 +780,7 @@ async def reap_fetch_commands(
                     audit_event=EventType.CHECK_FETCH_FAILED,
                     audit_kwargs={"reason": "fetch_timeout", "reissues": row.reissue_count},
                     error_metadata={"reason": "fetch_timeout"},
+                    health_reason="fetch_timeout",
                 )
                 capped += 1
                 continue

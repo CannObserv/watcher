@@ -3,7 +3,7 @@
 import enum
 from datetime import datetime
 
-from sqlalchemy import BigInteger, Boolean, DateTime, ForeignKey, Index, String, Text, text
+from sqlalchemy import BigInteger, Boolean, DateTime, ForeignKey, Index, Integer, String, Text, text
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 from ulid import ULID
@@ -197,6 +197,14 @@ class WatchedItem(Base, TimestampMixin):
         default=WatchHealthStatus.UNKNOWN,
         server_default="unknown",
     )
+    # Why the item is in ERROR now (#370): the latest failed check's
+    # WatchHealthReason token — Watcher's own, or Replicator's fetch reason
+    # relayed verbatim — and, for http_status, the origin's status. Written on
+    # every failed check, cleared whenever health leaves ERROR. Published as
+    # levels on info.watch-status; NULL in ERROR means an episode opened before
+    # reasons were recorded.
+    health_reason: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
+    health_status_code: Mapped[int | None] = mapped_column(Integer, nullable=True, default=None)
     # When anyone was last told this item is failing (#71): stamped on every
     # WATCH_ERROR dispatch, the transition's and each re-notify's, and cleared
     # on ERROR→OK. Watcher-owned, so it survives reconciliation like

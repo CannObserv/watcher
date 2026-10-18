@@ -198,11 +198,23 @@ already closed decides nothing.
   `apply_extraction_outcome` (history, #293 renewal, Option A), `SUCCEEDED`,
   validators recorded with the outcome. Empty on the last spec or any terminal
   reason → extraction failure, `processing_failed` (detail audited, never
-  branched on). `input_unreadable` → forced re-fetch under the #275 cap,
-  counted across both legs.
+  branched on); the processor's strike cap (`extraction_error`) is one of them.
+  `input_unreadable` → forced re-fetch under the #275 cap, counted across both
+  legs. `dead_lettered` — the processor's escape cap, the command quarantined
+  in `content.process.dlq` (#386) — blames the processor, not the spec: the
+  check fails under that reason, the pair is cleared, nothing re-fetches.
 - **Downtime** is delay: the reaper logs `processing delayed` with item ids;
   the hard limit or re-issue cap fails the check (`processing_timeout`) and
-  clears the pair (#363).
+  clears the pair (#363) — the same processor-fault closer as `dead_lettered`.
+- **Audit names the party at fault** (#386): a spec or bytes failure is
+  `CHECK_EXTRACTION_FAILED`; a processor fault (`processing_timeout`,
+  `dead_lettered`) is `CHECK_PROCESSING_FAILED`, `reason` saying which. Timeouts
+  audited before #386 kept the extraction event.
+- **Health reason** (#370): every failed check writes its token to
+  `health_reason` — the fetch failure's Replicator reason verbatim (plus
+  `health_status_code`), else `fetch_timeout`, `blob_unreadable`,
+  `processing_failed`, `processing_timeout` or `dead_lettered` — and leaving
+  ERROR clears both. `info.watch-status` carries them in `"error"` only.
 
 **Option A** (D6, `extraction_change`) runs on every change.
 Bound spec moved → notify with a `NOTE:` line (`extraction_changed = "spec"`).

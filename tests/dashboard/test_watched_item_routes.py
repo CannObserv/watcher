@@ -1756,6 +1756,25 @@ class TestWatchedItemUrlReprobe:
         await db_session.refresh(wi)
         assert wi.health_status == WatchHealthStatus.PROBING
 
+    async def test_reprobe_out_of_error_clears_the_failure_levels(self, client, db_session):
+        """#370: PROBING leaves ERROR, and the reason no longer explains it."""
+        wi = await _make_wi(
+            db_session,
+            name="ErrorWI",
+            effective_url="https://old.example/page",
+            health_status=WatchHealthStatus.ERROR,
+            health_reason="http_status",
+            health_status_code=404,
+        )
+        await client.post(
+            f"/watched-items/{wi.id}/effective-url",
+            data={"url": "https://probe.example/page"},
+            follow_redirects=False,
+        )
+        await db_session.refresh(wi)
+        assert wi.health_status == WatchHealthStatus.PROBING
+        assert (wi.health_reason, wi.health_status_code) == (None, None)
+
     async def test_reprobe_leaves_source_specs_untouched(self, client, db_session):
         wi = await _make_wi(
             db_session,

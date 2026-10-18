@@ -611,6 +611,77 @@ class TestObservationFreshness:
         assert wi.last_observed_at is None
 
 
+class TestHealthLevels:
+    """#370: why the item is in ERROR, as levels for info.watch-status.
+
+    Written on every failed check, the latest one winning; cleared on the way
+    out of ERROR. A reason change inside an episode republishes nothing — it
+    rides the next periodic tick (cannobserv#565). The derived leg's reasons are
+    ``tests/workers/test_process_commands.py``'s.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _wired(self, db_session, monkeypatch):
+        _wire(db_session, monkeypatch)
+        monkeypatch.setattr(fc_mod, "dispatch_event_notifications", AsyncMock(return_value=0))
+        self.republish = AsyncMock()
+        monkeypatch.setattr(fc_mod, "defer_status_republish", self.republish)
+
+    async def _fail(self, db_session, wi, *, reason, status_code=None):
+        row = await create_fetch_command(db_session, wi, now=NOW)
+        row.status = FetchCommandStatus.FAILED
+        row.failure_reason = reason
+        row.status_code = status_code
+        await db_session.flush()
+        await apply_fetch_failure(row.command_id)
+
+    async def test_a_fetch_failure_records_replicators_reason_and_the_status(self, db_session):
+        wi = await make_watched_item(db_session, primary_url="https://lcb.wa.gov/notices")
+
+        await self._fail(db_session, wi, reason="http_status", status_code=503)
+
+        await db_session.refresh(wi)  # what committed
+        assert (wi.health_reason, wi.health_status_code) == ("http_status", 503)
+
+    async def test_the_latest_failure_wins_without_a_republish(self, db_session):
+        wi = await make_watched_item(db_session, primary_url="https://lcb.wa.gov/notices")
+        await self._fail(db_session, wi, reason="http_status", status_code=503)
+
+        await self._fail(db_session, wi, reason="not_fetchable")
+
+        # The code went with its reason: a stale 503 must not qualify the new one.
+        assert (wi.health_reason, wi.health_status_code) == ("not_fetchable", None)
+        assert self.republish.await_count == 1  # the transition only
+
+    async def test_the_reapers_cap_records_fetch_timeout(self, db_session):
+        wi = await make_watched_item(db_session, primary_url="https://lcb.wa.gov/notices")
+        wi.health_status = WatchHealthStatus.ERROR
+        wi.health_reason, wi.health_status_code = "http_status", 503
+        row = await create_fetch_command(db_session, wi, now=NOW, reissue_count=3)
+        row.status = FetchCommandStatus.IN_FLIGHT
+        row.published_at = datetime.now(UTC) - timedelta(hours=1)
+        await db_session.flush()
+
+        await reap_fetch_commands(session=db_session, bus_client=fakeredis.FakeAsyncRedis())
+
+        assert (wi.health_reason, wi.health_status_code) == ("fetch_timeout", None)
+
+    async def test_recovery_clears_both(self, db_session):
+        wi = await make_watched_item(db_session, primary_url="https://lcb.wa.gov/notices")
+        await self._fail(db_session, wi, reason="http_status", status_code=503)
+        ok = await create_fetch_command(db_session, wi, now=NOW)
+        ok.status = FetchCommandStatus.NOT_MODIFIED
+        ok.status_code = 304
+        ok.fact_at = NOW
+        await db_session.flush()
+
+        await apply_fetch_not_modified(ok.command_id)
+
+        await db_session.refresh(wi)
+        assert wi.health_status == WatchHealthStatus.OK
+        assert (wi.health_reason, wi.health_status_code) == (None, None)
+
+
 class TestStatusRepublishOnTransition:
     """#264: level-not-edge publishing — a health transition defers a
     watch-status republish; a steady state never does (the periodic tick

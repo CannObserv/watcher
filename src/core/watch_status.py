@@ -48,6 +48,14 @@ Field mappings the consumer cannot check for us:
 * ``health`` — ``"ok"`` / ``"error"`` / ``"unknown"`` (#328); both
   pre-first-check states (UNKNOWN, PROBING) map to ``"unknown"`` because the
   probe/first-fact distinction is producer mechanism, not registry state.
+* ``last_full_fetch_at`` — the item's own column (#370): ``stamp_full_fetch``
+  moves it on a 200 only, before extraction, which is the contract's "bytes
+  arrived" (cannobserv#565).
+* ``health_reason`` / ``health_status_code`` — the latest failed check's
+  ``WatchHealthReason`` and HTTP status, written by ``record_check_failure``
+  on every failure and cleared whenever health leaves ERROR (#370). They publish only in
+  ``"error"``; a reason change inside an episode is not a trigger, so it shows
+  at the next periodic republish.
 * Tombstones ride ``revoked_info_items`` into every full set. A never-
   reconciled item deleted locally gets **no tombstone** — it was never
   announced, so Archiver holds no entry to retire (and the DELETE route 409s
@@ -108,6 +116,19 @@ def _health_wire_value(status: WatchHealthStatus | None) -> str:
     return _HEALTH_WIRE.get(status, "unknown")
 
 
+def _failure_levels(item: WatchedItem, health: str) -> dict:
+    """``health_reason`` / ``health_status_code``, cleaned to what the Emit accepts.
+
+    Both travel only in ``"error"``; an empty reason is no reason, and a code
+    without one is dropped (cannobserv#565). Cleaned here rather than caught
+    after a refused construction, so a row that left error with its pair still
+    set — or one written badly — costs those two levels, never the frame.
+    """
+    if health != "error" or not item.health_reason:
+        return {}
+    return {"health_reason": item.health_reason, "health_status_code": item.health_status_code}
+
+
 def build_status_events(
     items: Sequence[WatchedItem],
     tombstones: Sequence[RevokedInfoItem],
@@ -122,6 +143,7 @@ def build_status_events(
     """
     events: list[WatchStatusEmit] = []
     for item in items:
+        health = _health_wire_value(item.health_status)
         base = dict(
             occurred_at=now,
             info_item_id=str(item.archiver_info_item_id),
@@ -131,9 +153,11 @@ def build_status_events(
             applied_active=(
                 item.is_active and item.archived_at is None and not item.domain_suspended
             ),
-            health=_health_wire_value(item.health_status),
+            health=health,
             last_attempt_at=item.last_checked_at,
             last_observed_at=item.last_observed_at,
+            last_full_fetch_at=item.last_full_fetch_at,
+            **_failure_levels(item, health),
         )
         try:
             events.append(

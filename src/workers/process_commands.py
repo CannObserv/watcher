@@ -10,7 +10,8 @@ check has already closed (superseded, or given up on) decides nothing.
   publish, every minute, ``publish_pending_fetch_commands``' shape.
 * ``apply_process_fact`` — deferred by the ``content.derived`` consumer once a
   terminal fact has settled a row: an empty outcome with a spec left chains
-  the next spec (D3); anything else ends the lineage.
+  the next spec (D3); anything else ends the lineage. A dead-letter fails the
+  check as the processor's fault, not the spec's (#386).
 * ``reap_process_commands`` — the backstop for silence, under #325's downtime
   rule: **no re-issue until the processor has read past a command** (one in the
   processor's group is not lost, and a re-issue only adds a duplicate to a
@@ -43,6 +44,7 @@ from src.core.models.process_command import (
 )
 from src.core.models.watched_item import WatchedItem
 from src.core.process_commands import (
+    DEAD_LETTERED_REASON,
     INPUT_UNREADABLE_REASON,
     UnsendableProcessCommand,
     chain_process_command,
@@ -215,9 +217,14 @@ async def _decide(
       fetch fact; the row closes ``SUCCEEDED``;
     * ``input_unreadable`` → the bytes are gone, not judged: re-fetch in full
       (#361), capped at ``WATCHER_FETCH_MAX_REISSUES`` across both legs (#275);
+    * ``dead_lettered`` → the processor's escape cap (#386): nothing was
+      judged and the fault is the processor's, so a processor-fault failure —
+      the pair cleared, no re-fetch — under that reason, not the spec's;
     * anything else — empty on the last spec (D5, the #258 rule), any other
-      terminal reason, ``extraction_error`` from a give-up (processor#17)
-      included — is the extraction-failure path. ``detail`` is recorded, never
+      terminal reason, ``extraction_error`` from the processor's strike cap
+      (processor#17) included — is the extraction-failure path. The strike cap
+      stays here because a timeout or crash can't be told from a document that
+      defeats the parser (cannobserv#536). ``detail`` is recorded, never
       branched on.
     """
     watched_item = await session.get(WatchedItem, row.watched_item_id)
@@ -282,6 +289,16 @@ async def _decide(
         )
         return {"reissued": new_id}
 
+    if row.failure_reason == DEAD_LETTERED_REASON:
+        detail = row.failure_detail or DEAD_LETTERED_REASON
+        logger.error(
+            "processor dead-lettered the command — failing the check",
+            extra={"command_id": row.command_id, "detail": detail},
+        )
+        return await _fail_processor_fault(
+            session, watched_item, fetch, now=now, reason=DEAD_LETTERED_REASON, detail=detail
+        )
+
     if row.status == ProcessCommandStatus.COMPLETED:
         detail = f"empty on every source_spec ({row.spec_index + 1} tried)"
     else:
@@ -306,19 +323,13 @@ async def _give_up(
 ) -> FetchCommand | None:
     """End a lineage the processor never answered: the row expires.
 
-    While its check is still open (the fetch row ``PROCESSING``, #326) the
-    check fails too: the fetch row closes ``processing_timeout`` and the item
-    goes ERROR, so the one-open-command gate lifts — returned for the caller,
-    which owns the commit and the failure bookkeeping.
+    Returns its fetch row while the check is still open (``PROCESSING``,
+    #326), for the caller to fail — so the one-open-command gate lifts.
     """
     row.status = ProcessCommandStatus.EXPIRED
     row.applied_at = now
     fetch = await session.get(FetchCommand, row.fetch_command_id)
     if fetch is not None and fetch.status == FetchCommandStatus.PROCESSING:
-        fetch.status = FetchCommandStatus.FAILED
-        fetch.failure_reason = PROCESSING_TIMEOUT_REASON
-        fetch.failure_detail = why
-        fetch.applied_at = now
         logger.error(
             "processor never answered — failing the check",
             extra={"command_id": row.command_id, "fetch_command_id": fetch.command_id, "why": why},
@@ -330,13 +341,40 @@ async def _give_up(
 async def _end_lineage(
     session: AsyncSession, row: ProcessCommand, *, now: datetime, why: str
 ) -> None:
-    """``_give_up``, committed — with the ERROR surface, and the pair cleared,
-    when it closed a check."""
+    """``_give_up``, committed — failing the check, ``processing_timeout``,
+    when it closed one."""
     fetch = await _give_up(session, row, now=now, why=why)
     if fetch is None:
         await session.commit()
         return
     watched_item = await session.get(WatchedItem, fetch.watched_item_id)
+    await _fail_processor_fault(
+        session, watched_item, fetch, now=now, reason=PROCESSING_TIMEOUT_REASON, detail=why
+    )
+
+
+async def _fail_processor_fault(
+    session: AsyncSession,
+    watched_item: WatchedItem,
+    fetch: FetchCommand,
+    *,
+    now: datetime,
+    reason: str,
+    detail: str,
+) -> dict:
+    """Close a check the processor failed, not the spec: it timed out (#363)
+    or dead-lettered the command (#386).
+
+    The fetch row fails under ``reason``, which is also the item's health
+    reason; ERROR + ``WATCH_ERROR`` as any failed check. No re-fetch — the
+    bytes were never the problem. Audited ``CHECK_PROCESSING_FAILED``, so the
+    activity trail never reads a processor fault as a bad spec; ``reason``
+    says which fault.
+    """
+    fetch.status = FetchCommandStatus.FAILED
+    fetch.failure_reason = reason
+    fetch.failure_detail = detail
+    fetch.applied_at = now
     # The blob leg stamped bytes the processor never judged, and those can't
     # vouch for a pair: kept, the next unforced check could replay it and a
     # 304 would flip ERROR to OK with no #293 renewal (#362, #363).
@@ -346,10 +384,12 @@ async def _end_lineage(
         watched_item,
         now=now,
         url=fetch.url,
-        audit_event=EventType.CHECK_EXTRACTION_FAILED,
-        audit_kwargs={"reason": PROCESSING_TIMEOUT_REASON, "detail": why},
-        error_metadata={"reason": PROCESSING_TIMEOUT_REASON},
+        audit_event=EventType.CHECK_PROCESSING_FAILED,
+        audit_kwargs={"reason": reason, "detail": detail},
+        error_metadata={"reason": reason},
+        health_reason=reason,
     )
+    return {"error": reason}
 
 
 @bp.periodic(cron="*/5 * * * *", periodic_id="reap_process_commands")

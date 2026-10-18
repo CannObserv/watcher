@@ -206,6 +206,10 @@ already closed decides nothing.
 - **Downtime** is delay: the reaper logs `processing delayed` with item ids;
   the hard limit or re-issue cap fails the check (`processing_timeout`) and
   clears the pair (#363) — the same processor-fault closer as `dead_lettered`.
+- **Audit names the party at fault** (#386): a spec or bytes failure is
+  `CHECK_EXTRACTION_FAILED`; a processor fault (`processing_timeout`,
+  `dead_lettered`) is `CHECK_PROCESSING_FAILED`, `reason` saying which. Timeouts
+  audited before #386 kept the extraction event.
 - **Health reason** (#370): every failed check writes its token to
   `health_reason` — the fetch failure's Replicator reason verbatim (plus
   `health_status_code`), else `fetch_timeout`, `blob_unreadable`,

@@ -930,8 +930,10 @@ class TestDecisiveReaper:
         assert fetch.applied_at is not None
         item = await db_session.get(WatchedItem, row.watched_item_id)
         assert item.health_status == WatchHealthStatus.ERROR
-        (event,) = await _audits(db_session, EventType.CHECK_EXTRACTION_FAILED)
+        # The processor's fault, not the spec's: its own event (#386).
+        (event,) = await _audits(db_session, EventType.CHECK_PROCESSING_FAILED)
         assert event.payload["reason"] == "processing_timeout"
+        assert await _audits(db_session, EventType.CHECK_EXTRACTION_FAILED) == []
 
     async def test_the_hard_limit_forgets_the_pair(self, db_session, monkeypatch):
         # #363: the blob leg stamped the item and the processor never judged
@@ -1057,7 +1059,8 @@ class TestDeadLettered:
     past the handler, and the command goes to ``content.process.dlq`` — sends
     ``dead_lettered``. That one judged nothing and is the processor's fault: a
     processor-fault failure that clears the validators and never re-fetches,
-    the shape a processing timeout already takes.
+    the shape a processing timeout already takes, audited
+    ``CHECK_PROCESSING_FAILED`` rather than ``CHECK_EXTRACTION_FAILED``.
     """
 
     async def _decide(self, db_session, monkeypatch, fields):
@@ -1090,6 +1093,7 @@ class TestDeadLettered:
         assert item.etag is None
         (event,) = await _audits(db_session, EventType.CHECK_EXTRACTION_FAILED)
         assert event.payload["reason"] == "processing_failed"
+        assert await _audits(db_session, EventType.CHECK_PROCESSING_FAILED) == []
 
     async def test_the_escape_cap_blames_the_processor(self, db_session, monkeypatch):
         detail = "dead-lettered: gave up on attempt 3: KeyError('x')"
@@ -1109,8 +1113,9 @@ class TestDeadLettered:
         assert (item.etag, item.validator_source_key) == (None, None)
         # Terminal, no re-fetch (only input_unreadable re-fetches).
         assert await self.client.xlen("content.fetch") == 0
-        (event,) = await _audits(db_session, EventType.CHECK_EXTRACTION_FAILED)
+        (event,) = await _audits(db_session, EventType.CHECK_PROCESSING_FAILED)
         assert (event.payload["reason"], event.payload["detail"]) == ("dead_lettered", detail)
+        assert await _audits(db_session, EventType.CHECK_EXTRACTION_FAILED) == []
         (error,) = [c.kwargs["event"] for c in self.dispatch.await_args_list]
         assert error.event_type == WatchEventType.WATCH_ERROR
         assert error.metadata["reason"] == "dead_lettered"

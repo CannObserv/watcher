@@ -367,9 +367,9 @@ async def _fail_processor_fault(
 
     The fetch row fails under ``reason``, which is also the item's health
     reason; ERROR + ``WATCH_ERROR`` as any failed check. No re-fetch — the
-    bytes were never the problem. The audit stays ``CHECK_EXTRACTION_FAILED``,
-    the processing leg's event, and ``reason`` names the cause, as
-    ``CHECK_FETCH_FAILED`` does for ``fetch_timeout``.
+    bytes were never the problem. Audited ``CHECK_PROCESSING_FAILED``, so the
+    activity trail never reads a processor fault as a bad spec; ``reason``
+    says which fault.
     """
     fetch.status = FetchCommandStatus.FAILED
     fetch.failure_reason = reason
@@ -384,7 +384,7 @@ async def _fail_processor_fault(
         watched_item,
         now=now,
         url=fetch.url,
-        audit_event=EventType.CHECK_EXTRACTION_FAILED,
+        audit_event=EventType.CHECK_PROCESSING_FAILED,
         audit_kwargs={"reason": reason, "detail": detail},
         error_metadata={"reason": reason},
         health_reason=reason,

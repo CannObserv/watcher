@@ -21,6 +21,11 @@ class EventType:
     CHECK_NO_CHANGE = "check.no_change"
     CHECK_FETCH_FAILED = "check.fetch_failed"
     CHECK_EXTRACTION_FAILED = "check.extraction_failed"
+    # #386: the processor failed the check, not the spec — it never answered
+    # (processing_timeout) or dead-lettered the command (dead_lettered). The
+    # payload's ``reason`` says which. Rows from before #386 record a timeout
+    # as check.extraction_failed.
+    CHECK_PROCESSING_FAILED = "check.processing_failed"
     # Phase 4 (#241): the fact's final_url differed from the requested url —
     # recorded for the #157 succession workflow; effective_url is never
     # auto-rewritten (Archiver stays authoritative).

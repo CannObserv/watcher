@@ -23,7 +23,9 @@ Archiver provisions it. Every detected change is reported to Archiver as a
 `source_revision_observed` fact on the `content.revisions` bus stream (#253), and the
 latest revision is re-announced when a full fetch renews the blob reference behind it
 (#293), with a local `pending_archiver_sync` outbox + drain worker guaranteeing delivery
-across broker outages. Notifications dispatch through the sibling **Notifier service** via the
+across broker outages. Its change, error and recovery edges go to Archiver as facts on
+`info.watch-events` through a second outbox (#369; [docs/WATCH-EVENTS.md](docs/WATCH-EVENTS.md)).
+Notifications dispatch through the sibling **Notifier service** via the
 `NotifierClient` SDK.
 
 Operate WatchedItems at `/api/v1/watched-items` (API) and `/watched-items` (dashboard).

@@ -31,7 +31,7 @@ from co_core.pure.adapters.bus import streams
 from co_core.pure.adapters.bus.envelope import to_wire
 from co_core_aio.bus import AsyncBusPublisher
 from redis.asyncio import Redis
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from src.core.bus import (
     BUS_REDIS_URL_ENV,
@@ -47,6 +47,14 @@ from src.core.watch_events import WATCH_EVENT_EMITS
 from src.workers import bp
 
 logger = get_logger(__name__)
+
+# Head-of-line order holds only with one drain at a time (CR 1), so a pass
+# takes this transaction-scoped advisory lock first and yields when another
+# holds it — rather than SKIP LOCKED, which would step past a locked head and
+# publish the rows behind it. Procrastinate's concurrency of 1 makes overlap
+# unlikely today; the lock makes it impossible. The value is arbitrary, unique
+# within this database ("WEVT" in ASCII).
+DRAIN_LOCK_KEY = 0x57455654
 
 
 def _build_fields(row: PendingWatchEvent) -> dict[str, str]:
@@ -73,6 +81,11 @@ async def drain_pending_watch_events(
     published = failed = dead_lettered = 0
     idle = {"published": 0, "failed": 0, "dead_lettered": 0}
     async with get_session_factory()() as session:
+        locked = (
+            await session.execute(select(func.pg_try_advisory_xact_lock(DRAIN_LOCK_KEY)))
+        ).scalar_one()
+        if not locked:
+            return {**idle, "skipped": "drain_running"}
         rows = list(
             (
                 await session.execute(
@@ -80,7 +93,6 @@ async def drain_pending_watch_events(
                     .where(PendingWatchEvent.dead_lettered_at.is_(None))
                     .order_by(PendingWatchEvent.id)
                     .limit(batch_size)
-                    .with_for_update(skip_locked=True)
                 )
             )
             .scalars()

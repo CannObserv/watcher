@@ -19,12 +19,16 @@ from co_core.pure.adapters.bus.envelope import from_wire
 from co_core.pure.models.changes import WatchErrorEvent, WatchRecoveredEvent
 from redis.exceptions import ConnectionError as RedisConnectionError
 from redis.exceptions import NoPermissionError, ResponseError
-from sqlalchemy import select
+from sqlalchemy import select, text
 
 import src.workers.watch_events_drain as drain_mod
 from src.core.models.pending_watch_event import PendingWatchEvent
 from src.core.watch_events import enqueue_watch_error, enqueue_watch_recovered
-from src.workers.watch_events_drain import MAX_PUBLISH_ATTEMPTS, drain_pending_watch_events
+from src.workers.watch_events_drain import (
+    DRAIN_LOCK_KEY,
+    MAX_PUBLISH_ATTEMPTS,
+    drain_pending_watch_events,
+)
 from tests.conftest import make_watched_item
 from tests.workers.bus_helpers import mock_session_factory, refusing_client
 
@@ -201,6 +205,28 @@ class TestOrdering:
         assert result["dead_lettered"] == 1
         await db_session.refresh(row)
         assert row.dead_lettered_at is not None
+
+
+class TestSingleDrain:
+    """CR 1: head-of-line order holds only if one drain runs at a time. A
+    second pass while one holds the lock publishes nothing — it never skips
+    a locked head to send the rows behind it."""
+
+    async def test_a_held_drain_lock_skips_the_pass(self, db_session, test_engine, monkeypatch):
+        await _episode(db_session)
+        _wire(db_session, monkeypatch)
+        client = fakeredis.FakeAsyncRedis()
+
+        async with test_engine.connect() as other:
+            await other.execute(text("SELECT pg_advisory_lock(:k)"), {"k": DRAIN_LOCK_KEY})
+            try:
+                result = await drain_pending_watch_events(bus_client=client)
+            finally:
+                await other.execute(text("SELECT pg_advisory_unlock(:k)"), {"k": DRAIN_LOCK_KEY})
+
+        assert result["skipped"] == "drain_running"
+        assert await client.xlen(streams.INFO_WATCH_EVENTS) == 0
+        assert len(await _rows(db_session)) == 2
 
 
 class TestDeadLetter:

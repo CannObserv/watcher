@@ -68,6 +68,9 @@ order**, with no `maxlen` (#327).
   (60 s doubling to 1 h, `mark_failure`) is the whole queue's. Once the head
   publishes, the rest follow in the same pass, so `clear_backoffs` (#291) has
   no counterpart here.
+- **One drain at a time.** A pass takes a transaction-scoped advisory lock
+  (`DRAIN_LOCK_KEY`) and skips the pass if another drain holds it. It does not
+  use `SKIP LOCKED`, which would step past a locked head.
 - **Failure classes** match `content.revisions`. A payload its Emit refuses,
   or an unknown kind, dead-letters at once and the queue moves past it. A
   broker refusal (down, full, or `NOPERM`) is transient and never

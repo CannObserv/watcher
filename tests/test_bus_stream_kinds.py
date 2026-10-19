@@ -76,7 +76,8 @@ GROUP_NAME_DERIVERS = frozenset({"group_name"})
 # a complete one. That is the silent failure the taxonomy exists to prevent (CR-28).
 BOUNDED_MAXLEN_RESOLVERS = frozenset({"resolve_stream_maxlen"})
 
-# Every stream Watcher touches: five published, three consumed. AGENTS.md and
+# Every stream Watcher touches: six published, three consumed — six until F1
+# (#374) retires `content.fetch-policy`, then five again. AGENTS.md and
 # BUS.md say exactly that in prose; asserting the set — not just each
 # kind — is what makes an *addition* fail here rather than drift silently (CR-29).
 WATCHER_STREAMS = frozenset(
@@ -88,6 +89,7 @@ WATCHER_STREAMS = frozenset(
         streams.CONTENT_FETCH_POLICY,
         streams.CONTENT_PROCESS,
         streams.INFO_REGISTRY,
+        streams.INFO_WATCH_EVENTS,
         streams.INFO_WATCH_STATUS,
     }
 )
@@ -430,7 +432,7 @@ class TestConfigStatePublishesAreTrimmed:
 
 
 class TestUncappedStreamsStayUncapped:
-    """``content.fetch`` and ``content.revisions`` have no retention, by decision (#327).
+    """The command and fact streams Watcher publishes have no retention, by decision (#327).
 
     ``maxmemory`` is their only bound — the same call as archiver#267 and
     replicator#119 — until a trigger in ``docs/BUS.md`` fires. Two ways
@@ -439,8 +441,9 @@ class TestUncappedStreamsStayUncapped:
     * **A cap on the publish.** ``content.fetch`` is a command stream: ``MAXLEN``
       deletes commands ``replicator.fetch`` has not been delivered and orphans the
       pending entries naming them, which replicator drops with no fact published.
-      ``content.revisions`` is a fact stream: a length cap loses facts some group
-      has not read. The broker's ACL cannot refuse this — ``MAXLEN`` rides ``+xadd``.
+      ``content.revisions`` and ``info.watch-events`` (#369) are fact streams: a
+      length cap loses facts some group has not read. The broker's ACL cannot
+      refuse this — ``MAXLEN`` rides ``+xadd``.
     * **An out-of-band trim.** Watcher issues no ``XTRIM`` or ``XDEL`` (#317), and
       CannObserv/broker#41 withdraws the grant on that answer. A new call would
       fail ``NOPERM`` in production only; the planned remedies (``XDEL`` on
@@ -451,8 +454,15 @@ class TestUncappedStreamsStayUncapped:
     # ``content.process`` (#325) for ``content.fetch``'s reason: a cap deletes
     # commands ``processor.process`` has not been delivered. broker#62 grants no
     # ``+xtrim`` on it at all, so a cap there is a contract change, not a knob.
+    # ``info.watch-events`` (#369) for ``content.revisions``' reason: a fact
+    # stream, and a cap loses facts ``archiver.watch-events`` has not read.
     UNCAPPED = frozenset(
-        {streams.CONTENT_FETCH, streams.CONTENT_PROCESS, streams.CONTENT_REVISIONS}
+        {
+            streams.CONTENT_FETCH,
+            streams.CONTENT_PROCESS,
+            streams.CONTENT_REVISIONS,
+            streams.INFO_WATCH_EVENTS,
+        }
     )
     TRIM_COMMANDS = frozenset({"xtrim", "xdel"})
 
@@ -485,7 +495,8 @@ class TestUncappedStreamsStayUncapped:
                 f"{path.relative_to(ROOT)}:{call.lineno}: {topic!r} published with maxlen. "
                 "Retention on this stream is maxmemory alone by decision (#327); a length "
                 "cap deletes undelivered commands or unread facts. See docs/BUS.md "
-                "→ 'No retention on content.fetch, content.process or content.revisions'."
+                "→ 'No retention on content.fetch, content.process, content.revisions or "
+                "info.watch-events'."
             )
         assert found == self.UNCAPPED, f"publishes found only for {found} — renamed?"
 
@@ -654,7 +665,7 @@ class TestTaxonomyCoverage:
             assert stream_kind(topic) in {"command", "fact", "config_state"}
 
     def test_the_inventory_is_exactly_what_the_docs_describe(self):
-        """AGENTS.md and BUS.md say five published and three consumed.
+        """AGENTS.md and BUS.md say six published and three consumed.
         Pinning each stream's *kind* catches a co-core reclassification but not
         an addition, and the prose is wrong either way (CR-29)."""
         referenced = set()
@@ -667,7 +678,7 @@ class TestTaxonomyCoverage:
                         referenced.add(topic)
         assert referenced == WATCHER_STREAMS, (
             "the set of streams Watcher touches changed — update the inventory here and "
-            "the 'publishes five streams and consumes three' prose in AGENTS.md and "
+            "the 'publishes six streams and consumes three' prose in AGENTS.md and "
             "docs/BUS.md, which this set exists to keep honest"
         )
 
@@ -677,6 +688,7 @@ class TestTaxonomyCoverage:
             (streams.CONTENT_BLOBS, "fact"),
             (streams.CONTENT_DERIVED, "fact"),
             (streams.CONTENT_REVISIONS, "fact"),
+            (streams.INFO_WATCH_EVENTS, "fact"),
             (streams.CONTENT_FETCH, "command"),
             (streams.CONTENT_PROCESS, "command"),
             (streams.CONTENT_FETCH_POLICY, "config_state"),
@@ -686,7 +698,7 @@ class TestTaxonomyCoverage:
     )
     def test_watchers_inventory_has_the_kinds_the_docs_claim(self, topic, kind):
         """AGENTS.md and BUS.md describe this inventory in prose —
-        five published streams and three consumed, one of the consumed three
+        six published streams and three consumed, one of the consumed three
         groupless. If co-core reclassifies one, that prose is wrong and this
         fails rather than the description quietly drifting."""
         assert stream_kind(topic) == kind

@@ -13,6 +13,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import fakeredis
 import pytest
+from co_core.pure.models.changes import WatchErrorEmit, WatchRecoveredEmit
 from sqlalchemy import select
 
 import src.workers.fetch_commands as fc_mod
@@ -27,6 +28,7 @@ from src.core.models.fetch_command import (
     FetchCommandStatus,
 )
 from src.core.models.pending_archiver_sync import PendingArchiverSync
+from src.core.models.pending_watch_event import PendingWatchEvent
 from src.core.models.process_command import ProcessCommand, ProcessCommandStatus
 from src.core.models.watched_item import WatchHealthStatus
 from src.core.notifications.events import WatchEventType
@@ -41,6 +43,7 @@ from src.workers.fetch_commands import (
     reissue_fetch_command,
 )
 from tests.conftest import make_watched_item
+from tests.workers.watch_event_helpers import log_commits
 
 pytestmark = pytest.mark.integration
 
@@ -1041,3 +1044,149 @@ class TestValidatorStorage:
         await apply_fetch_failure(row.command_id)
 
         assert wi.etag == 'W/"v2"'
+
+
+class TestWatchEventFacts:
+    """#369: the error edge and the recovery stage their ``info.watch-events``
+    fact in the commit that records the health change — never a commit later,
+    and never on a failure inside an episode, a #71 reminder included
+    (re-notify cadence is Archiver's)."""
+
+    @pytest.fixture(autouse=True)
+    def _wired(self, db_session, monkeypatch):
+        monkeypatch.delenv(ERROR_RENOTIFY_INTERVAL_ENV, raising=False)
+        monkeypatch.setattr(
+            fc_mod, "get_session_factory", lambda: _mock_session_factory(db_session)
+        )
+        monkeypatch.setattr(fc_mod, "dispatch_event_notifications", AsyncMock(return_value=0))
+        monkeypatch.setattr(fc_mod, "defer_status_republish", AsyncMock())
+
+    async def _item(self, db_session, health=WatchHealthStatus.OK, **over):
+        wi = await make_watched_item(db_session, primary_url="https://lcb.wa.gov/notices", **over)
+        wi.health_status = health
+        await db_session.flush()
+        return wi
+
+    async def _fail(self, db_session, wi, *, reason="http_status", status_code=503):
+        row = await create_fetch_command(db_session, wi, now=NOW)
+        row.status = FetchCommandStatus.FAILED
+        row.failure_reason = reason
+        row.status_code = status_code
+        await db_session.flush()
+        await apply_fetch_failure(row.command_id)
+
+    async def _recover(self, db_session, wi):
+        ok = await create_fetch_command(db_session, wi, now=NOW)
+        ok.status = FetchCommandStatus.NOT_MODIFIED
+        ok.status_code = 304
+        ok.fact_at = NOW
+        await db_session.flush()
+        await apply_fetch_not_modified(ok.command_id)
+
+    async def _facts(self, db_session) -> list[PendingWatchEvent]:
+        stmt = select(PendingWatchEvent).order_by(PendingWatchEvent.id)
+        return list((await db_session.execute(stmt)).scalars().all())
+
+    @pytest.mark.parametrize(
+        "previous",
+        [WatchHealthStatus.OK, WatchHealthStatus.UNKNOWN, WatchHealthStatus.PROBING],
+    )
+    async def test_the_edge_into_error_commits_its_fact(self, db_session, previous):
+        """From any other health, ``unknown`` included: a new item whose first
+        check fails is reported."""
+        wi = await self._item(db_session, previous)
+        commits = log_commits(db_session, wi)
+
+        await self._fail(db_session, wi)
+
+        assert commits.first_commit_with(WatchHealthStatus.ERROR) == ["watch_error"]
+        [row] = await self._facts(db_session)
+        emit = WatchErrorEmit.model_validate(row.payload)
+        assert (emit.reason, emit.status_code) == ("http_status", 503)
+        assert emit.occurred_at == wi.last_checked_at
+        assert wi.error_since == wi.last_checked_at
+
+    async def test_a_failure_inside_the_episode_stages_nothing(self, db_session):
+        wi = await self._item(db_session)
+        await self._fail(db_session, wi)
+        started = wi.error_since
+
+        await self._fail(db_session, wi, reason="not_fetchable", status_code=None)
+
+        assert [r.event_type for r in await self._facts(db_session)] == ["watch_error"]
+        assert wi.error_since == started  # the episode's start, not the latest failure
+
+    async def test_a_renotify_reminder_stages_nothing(self, db_session):
+        wi = await self._item(db_session)
+        await self._fail(db_session, wi)
+        wi.last_error_notified_at = datetime.now(UTC) - timedelta(days=2)
+        await db_session.flush()
+
+        await self._fail(db_session, wi)
+
+        assert [r.event_type for r in await self._facts(db_session)] == ["watch_error"]
+
+    async def test_recovery_commits_its_fact_with_the_episode_start(self, db_session):
+        wi = await self._item(db_session)
+        await self._fail(db_session, wi)
+        started = wi.error_since
+        commits = log_commits(db_session, wi)
+
+        await self._recover(db_session, wi)
+
+        assert commits.first_commit_with(WatchHealthStatus.OK) == ["watch_recovered"]
+        _error, recovered = await self._facts(db_session)
+        assert WatchRecoveredEmit.model_validate(recovered.payload).error_since == started
+        assert wi.error_since is None
+
+    async def test_an_episode_opened_before_the_column_recovers_with_null(self, db_session):
+        """No backfill: an item already in ERROR at deploy has no recorded
+        start, and the fact states that rather than omitting it."""
+        wi = await self._item(db_session, WatchHealthStatus.ERROR)
+        assert wi.error_since is None
+
+        await self._recover(db_session, wi)
+
+        [row] = await self._facts(db_session)
+        assert row.event_type == "watch_recovered"
+        assert row.payload["error_since"] is None
+
+    async def test_a_steady_success_stages_nothing(self, db_session):
+        wi = await self._item(db_session, WatchHealthStatus.OK)
+
+        await self._recover(db_session, wi)
+
+        assert await self._facts(db_session) == []
+
+    async def test_probing_to_ok_is_not_a_recovery(self, db_session):
+        wi = await self._item(db_session, WatchHealthStatus.PROBING)
+
+        await self._recover(db_session, wi)
+
+        assert await self._facts(db_session) == []
+
+    async def test_a_dispatch_that_raises_leaves_the_fact_committed(self, db_session, monkeypatch):
+        """The fact is the state change's, not the notification's: a notifier
+        outage after the commit costs the email, never the fact."""
+        wi = await self._item(db_session)
+        monkeypatch.setattr(
+            fc_mod, "dispatch_event_notifications", AsyncMock(side_effect=RuntimeError("down"))
+        )
+
+        with pytest.raises(RuntimeError):
+            await self._fail(db_session, wi)
+
+        await db_session.rollback()
+        assert [r.event_type for r in await self._facts(db_session)] == ["watch_error"]
+
+    async def test_the_reapers_cap_is_a_fetch_timeout_edge(self, db_session):
+        wi = await self._item(db_session)
+        row = await create_fetch_command(db_session, wi, now=NOW, reissue_count=3)
+        row.status = FetchCommandStatus.IN_FLIGHT
+        row.published_at = datetime.now(UTC) - timedelta(hours=1)
+        await db_session.flush()
+
+        await reap_fetch_commands(session=db_session, bus_client=fakeredis.FakeAsyncRedis())
+
+        [fact] = await self._facts(db_session)
+        assert (fact.payload["reason"], fact.payload["status_code"]) == ("fetch_timeout", None)

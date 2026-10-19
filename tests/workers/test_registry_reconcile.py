@@ -485,6 +485,7 @@ class TestLocalColumnsSurvive:
         wi.last_reviewed_at = NOW - timedelta(days=5)
         wi.last_error_notified_at = NOW - timedelta(hours=3)  # #71
         wi.health_reason, wi.health_status_code = "http_status", 503  # #370
+        wi.error_since = NOW - timedelta(hours=4)  # #369
         wi.content_media_type = "application/pdf"
         wi.default_tags = ["lcb", "notices"]
         wi.description = "Operator's note"
@@ -499,6 +500,7 @@ class TestLocalColumnsSurvive:
         assert wi.last_reviewed_at == NOW - timedelta(days=5)
         assert wi.last_error_notified_at == NOW - timedelta(hours=3)
         assert (wi.health_reason, wi.health_status_code) == ("http_status", 503)
+        assert wi.error_since == NOW - timedelta(hours=4)
         assert wi.content_media_type == "application/pdf"
         assert wi.default_tags == ["lcb", "notices"]
         assert wi.description == "Operator's note"

@@ -623,8 +623,11 @@ async def watched_item_update_url(
     if health_status == WatchHealthStatus.PROBING:
         wi.health_status = WatchHealthStatus.PROBING
         # Out of ERROR, if it was there (#370): nothing failed to explain.
+        # The episode ends with no recovery fact (#369) — the contract allows
+        # it — so the next failure is a fresh error edge with a fresh start.
         wi.health_reason = None
         wi.health_status_code = None
+        wi.error_since = None
     audit(
         session,
         EventType.WATCHED_ITEM_UPDATED,

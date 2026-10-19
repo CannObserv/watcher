@@ -205,6 +205,13 @@ class WatchedItem(Base, TimestampMixin):
     # reasons were recorded.
     health_reason: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
     health_status_code: Mapped[int | None] = mapped_column(Integer, nullable=True, default=None)
+    # When the current error episode began (#369): stamped on the edge into
+    # ERROR, cleared whenever health leaves it. WatchRecoveredEvent.error_since
+    # reads it; NULL in ERROR means an episode opened before it was recorded,
+    # which the fact sends as null.
+    error_since: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, default=None
+    )
     # When anyone was last told this item is failing (#71): stamped on every
     # WATCH_ERROR dispatch, the transition's and each re-notify's, and cleared
     # on ERROR→OK. Watcher-owned, so it survives reconciliation like

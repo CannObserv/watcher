@@ -21,9 +21,11 @@ from src.core.models.audit_log import EventType, audit
 from src.core.models.change_revision import ChangeRevision
 from src.core.models.pending_archiver_sync import PendingArchiverSync
 from src.core.models.watched_item import WatchedItem
+from src.core.notifications.diff_loader import stored_text_location
 from src.core.notifications.events import WatchEvent, WatchEventType
 from src.core.notifications.notify import dispatch_event_notifications
 from src.core.utils import format_utc_iso, watched_item_event_base_metadata
+from src.core.watch_events import enqueue_change_detected
 
 logger = get_logger(__name__)
 
@@ -81,6 +83,9 @@ class ExtractionOutcome:
     # Identity of the extraction itself (#324), as the processor reports it;
     # ``None`` is unknown, and Option A then triggers on nothing.
     processor_version: str | None = None
+    # Where the processor stored this text (its ``output_uri``) — the change
+    # fact's ``current_text_uri`` (#369).
+    text_uri: str | None = None
 
 
 def _provenance_columns(blob: BlobProvenance, outcome: ExtractionOutcome) -> dict[str, object]:
@@ -418,6 +423,22 @@ async def apply_extraction_outcome(
     }
     if previous_changed_at is not None:
         change_meta["previous_changed_at"] = format_utc_iso(previous_changed_at)
+
+    # #369: the fact Archiver will notify from, staged beside the revision so
+    # the caller's commit records both or neither. The previous text is found
+    # the way the diff finds it; one stored before shadow mode has no location.
+    previous_text = await stored_text_location(session, last_rev.content_fingerprint)
+    enqueue_change_detected(
+        session,
+        watched_item,
+        now=now,
+        previous_fingerprint=last_rev.content_fingerprint,
+        current_fingerprint=outcome.content_fingerprint,
+        previous_text_uri=previous_text.uri if previous_text is not None else None,
+        current_text_uri=outcome.text_uri,
+        extraction_changed=change.value if change is not None else None,
+        previous_changed_at=previous_changed_at,
+    )
 
     event = WatchEvent(
         event_type=WatchEventType.CHANGE_DETECTED,

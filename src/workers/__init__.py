@@ -54,6 +54,7 @@ def get_app() -> procrastinate.App:
         import src.workers.source_revisions_drain  # noqa: F401
         import src.workers.stalled_jobs  # noqa: F401
         import src.workers.tasks  # noqa: F401
+        import src.workers.watch_events_drain  # noqa: F401
         import src.workers.watch_status  # noqa: F401
 
         _app = procrastinate.App(

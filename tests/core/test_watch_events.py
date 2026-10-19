@@ -18,7 +18,9 @@ from co_core.pure.models.changes import (
     WatchRecoveredEmit,
 )
 from sqlalchemy import select
+from ulid import ULID
 
+import src.core.watch_events as watch_events_mod
 from src.core.models.pending_watch_event import PendingWatchEvent
 from src.core.watch_events import (
     WATCH_EVENT_EMITS,
@@ -162,3 +164,41 @@ class TestStaging:
         second = enqueue_watch_error(db_session, wi, now=NOW, reason="a", status_code=None)
 
         assert first.payload["event_id"] != second.payload["event_id"]
+
+
+class TestMintOrder:
+    """CR 2: the drain publishes in id order, so ids must sort in staging
+    order. A check that recovers *and* changes stages two facts in one commit,
+    usually in one millisecond, where a random ULID sorts either way."""
+
+    async def test_a_same_millisecond_id_still_sorts_after(self, db_session, monkeypatch):
+        wi = await make_watched_item(db_session)
+        fixed = ULID()
+        monkeypatch.setattr(watch_events_mod, "generate_ulid", lambda: fixed)
+
+        first = enqueue_change_detected(
+            db_session,
+            wi,
+            now=NOW,
+            previous_fingerprint=FP_A,
+            current_fingerprint=FP_B,
+            previous_text_uri=None,
+            current_text_uri="gs://t/b",
+            extraction_changed=None,
+            previous_changed_at=None,
+        )
+        second = enqueue_watch_recovered(db_session, wi, now=NOW, error_since=None)
+
+        assert first.id < second.id
+        assert second.payload["event_id"] == str(second.id)
+
+    async def test_an_earlier_random_id_still_sorts_after(self, db_session, monkeypatch):
+        wi = await make_watched_item(db_session)
+        late, early = sorted([ULID(), ULID()], reverse=True)
+        ids = iter([late, early])
+        monkeypatch.setattr(watch_events_mod, "generate_ulid", lambda: next(ids))
+
+        first = enqueue_watch_error(db_session, wi, now=NOW, reason="a", status_code=None)
+        second = enqueue_watch_recovered(db_session, wi, now=NOW, error_since=None)
+
+        assert first.id < second.id

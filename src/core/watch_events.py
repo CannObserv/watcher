@@ -30,6 +30,7 @@ from co_core.pure.models.changes import (
 )
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
+from ulid import ULID
 
 from src.core.models.base import generate_ulid
 from src.core.models.pending_watch_event import PendingWatchEvent
@@ -42,6 +43,25 @@ WATCH_EVENT_EMITS: dict[str, type[BaseModel]] = {
     "watch_error": WatchErrorEmit,
     "watch_recovered": WatchRecoveredEmit,
 }
+
+
+# The last event id this process minted (CR 2). The drain publishes in id
+# order, so ids must sort in staging order — and a check that recovers *and*
+# changes stages two facts in one commit, usually inside one millisecond,
+# where a random ULID sorts either way. One process stages every fact
+# (AGENTS.md → *Single process is load-bearing*), so a process-local floor is
+# the whole guarantee.
+_last_event_id: ULID | None = None
+
+
+def _mint_event_id() -> ULID:
+    """A fresh ULID that sorts after every id this process minted before."""
+    global _last_event_id
+    event_id = generate_ulid()
+    if _last_event_id is not None and event_id <= _last_event_id:
+        event_id = ULID.from_int(int(_last_event_id) + 1)
+    _last_event_id = event_id
+    return event_id
 
 
 def _iso(value: datetime | None) -> str | None:
@@ -57,7 +77,7 @@ def _stage(
     fields: dict,
 ) -> PendingWatchEvent:
     """Add one outbox row; the minted id is the fact's ``event_id``."""
-    event_id = generate_ulid()
+    event_id = _mint_event_id()
     info_item_id = str(watched_item.archiver_info_item_id)
     row = PendingWatchEvent(
         id=event_id,

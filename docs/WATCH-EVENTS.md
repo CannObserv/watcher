@@ -68,6 +68,12 @@ order**, with no `maxlen` (#327).
   (60 s doubling to 1 h, `mark_failure`) is the whole queue's. Once the head
   publishes, the rest follow in the same pass, so `clear_backoffs` (#291) has
   no counterpart here.
+- **What the order covers.** Ids are minted monotonically in the one process
+  that stages facts, so the stream follows **mint order**, and two facts from
+  one commit (a check that recovers and changes) go out in staging order. Mint
+  order is commit order **per item**, because one item's applies run one at a
+  time on the single worker. Across items, two edges that commit out of mint
+  order can publish out of commit order. No consumer orders across items.
 - **One drain at a time.** A pass takes a transaction-scoped advisory lock
   (`DRAIN_LOCK_KEY`) and skips the pass if another drain holds it. It does not
   use `SKIP LOCKED`, which would step past a locked head.

@@ -72,7 +72,7 @@ def _build_fields(row: PendingWatchEvent) -> dict[str, str]:
 async def drain_pending_watch_events(
     *, batch_size: int = 100, bus_client: Redis | None = None, **periodic_kwargs
 ) -> dict:
-    """Publish queued facts to ``info.watch-events`` in commit order.
+    """Publish queued facts to ``info.watch-events`` in mint order (per item, commit order).
 
     ``bus_client`` is a test seam; "no bus configured" is
     ``get_shared_bus_client()`` returning ``None``, and is said only when a

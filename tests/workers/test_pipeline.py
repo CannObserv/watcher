@@ -10,6 +10,7 @@ from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from co_core.pure.models.changes import ChangeDetectedEmit
 from notifier_client.types import DispatchOutStatus
 from sqlalchemy import select
 from ulid import ULID
@@ -19,6 +20,7 @@ from src.core.models.audit_log import AuditLog, EventType
 from src.core.models.change_revision import ChangeRevision
 from src.core.models.notification_template import VISIBILITY_GLOBAL, NotificationTemplate
 from src.core.models.pending_archiver_sync import PendingArchiverSync
+from src.core.models.pending_watch_event import PendingWatchEvent
 from src.core.models.process_command import ProcessCommandStatus
 from src.core.process_commands import create_process_command
 from src.workers.pipeline import (
@@ -923,3 +925,117 @@ class TestOptionA:
         assert result.changed is True
         assert result.rebaselined is False
         dispatch.assert_awaited_once()
+
+
+@pytest.mark.integration
+class TestChangeFact:
+    """#369: a notified change stages exactly one ``change_detected`` fact in
+    the session that records it, and nothing else this function decides does —
+    a baseline, a cache hit (#293 renewal) and an Option A re-baseline are not
+    changes in the content (cannobserv ``docs/change_bus/watch.md``)."""
+
+    CURRENT_URI = "gs://co-gcs-processor/blobs/current.bin"
+    OTHER_SPEC_FP = "spec1:sha256:" + "22" * 32
+
+    @pytest.fixture(autouse=True)
+    def _quiet(self):
+        with patch("src.workers.pipeline.dispatch_event_notifications", new_callable=AsyncMock):
+            yield
+
+    async def _baselined(self, db_session, **outcome_kwargs):
+        wi = await make_watched_item(db_session, name="Fact", source_specs=[_SPEC_FULL_PAGE])
+        await apply_extraction_outcome(
+            db_session, wi, _outcome(BASE_FP, **outcome_kwargs), blob=_BLOB
+        )
+        await db_session.flush()
+        return wi
+
+    async def _facts(self, db_session) -> list[PendingWatchEvent]:
+        await db_session.flush()
+        stmt = select(PendingWatchEvent).order_by(PendingWatchEvent.id)
+        return list((await db_session.execute(stmt)).scalars().all())
+
+    def _changed(self, fingerprint=NEXT_FP, **kwargs) -> ExtractionOutcome:
+        outcome = _outcome(fingerprint, **kwargs)
+        outcome.text_uri = self.CURRENT_URI
+        return outcome
+
+    async def test_a_baseline_stages_nothing(self, db_session):
+        await self._baselined(db_session)
+        assert await self._facts(db_session) == []
+
+    async def test_a_cache_hit_renewal_stages_nothing(self, db_session):
+        wi = await self._baselined(db_session)
+
+        result = await apply_extraction_outcome(db_session, wi, _outcome(BASE_FP), blob=_BLOB)
+
+        assert result.renewal_enqueued is True
+        assert await self._facts(db_session) == []
+
+    async def test_a_re_baseline_stages_nothing(self, db_session):
+        wi = await self._baselined(db_session)
+
+        result = await apply_extraction_outcome(
+            db_session, wi, self._changed(version="0.20.0+1"), blob=_BLOB
+        )
+
+        assert result.rebaselined is True
+        assert await self._facts(db_session) == []
+
+    async def test_a_change_stages_one_fact_in_the_session(self, db_session):
+        wi = await self._baselined(db_session)
+
+        await apply_extraction_outcome(db_session, wi, self._changed(), blob=_BLOB)
+
+        [row] = [r for r in db_session.new if isinstance(r, PendingWatchEvent)]
+        emit = ChangeDetectedEmit.model_validate(row.payload)
+        assert emit.info_item_id == str(wi.archiver_info_item_id)
+        assert emit.info_source_id == str(wi.archiver_info_source_id)
+        assert (emit.previous_fingerprint, emit.current_fingerprint) == (BASE_FP, NEXT_FP)
+        assert emit.current_text_uri == self.CURRENT_URI
+        assert emit.occurred_at == wi.last_changed_at
+        assert emit.extraction_changed is None
+        assert emit.previous_changed_at is None  # the item's first change
+
+    async def test_the_previous_text_is_located_through_process_commands(self, db_session):
+        previous = b"Hello world"
+        wi = await make_watched_item(db_session, name="Fact uri", source_specs=[_SPEC_FULL_PAGE])
+        await apply_extraction_outcome(db_session, wi, _outcome(_address(previous)), blob=_BLOB)
+        stored_uri = await TestChangeDiffEndToEnd()._stored(db_session, wi, previous)
+
+        await apply_extraction_outcome(db_session, wi, self._changed(), blob=_BLOB)
+
+        [row] = await self._facts(db_session)
+        assert row.payload["previous_text_uri"] == stored_uri
+
+    async def test_a_previous_text_never_stored_is_null(self, db_session):
+        wi = await self._baselined(db_session)
+
+        await apply_extraction_outcome(db_session, wi, self._changed(), blob=_BLOB)
+
+        [row] = await self._facts(db_session)
+        assert row.payload["previous_text_uri"] is None
+
+    async def test_a_spec_change_is_labelled(self, db_session):
+        wi = await self._baselined(db_session)
+
+        await apply_extraction_outcome(
+            db_session, wi, self._changed(spec=self.OTHER_SPEC_FP), blob=_BLOB
+        )
+
+        [row] = await self._facts(db_session)
+        assert row.payload["extraction_changed"] == "spec"
+
+    async def test_a_later_change_names_the_one_before_it(self, db_session):
+        wi = await self._baselined(db_session)
+        await apply_extraction_outcome(db_session, wi, self._changed(), blob=_BLOB)
+        first_change = wi.last_changed_at
+
+        await apply_extraction_outcome(
+            db_session, wi, self._changed("sha256:" + "cc" * 32), blob=_BLOB
+        )
+
+        _first, second = await self._facts(db_session)
+        assert ChangeDetectedEmit.model_validate(second.payload).previous_changed_at == (
+            first_change
+        )

@@ -1,4 +1,8 @@
-"""Helpers for the pending_archiver_sync outbox."""
+"""Helpers for the pending_archiver_sync outbox.
+
+``dead_letter`` and ``mark_failure`` also serve ``pending_watch_events``
+(#369): both outboxes share the backoff and the dead-letter columns.
+"""
 
 from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta
@@ -8,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ulid import ULID
 
 from src.core.models.pending_archiver_sync import PendingArchiverSync
+from src.core.models.pending_watch_event import PendingWatchEvent
 
 _BACKOFF_CAP_SECONDS = 3600
 
@@ -96,7 +101,7 @@ async def clear_backoffs(session: AsyncSession, *, exclude_ids: Sequence[ULID] =
 
 async def dead_letter(
     session: AsyncSession,
-    row: PendingArchiverSync,
+    row: PendingArchiverSync | PendingWatchEvent,
     *,
     error: str,
     reason: str,
@@ -114,7 +119,7 @@ async def dead_letter(
 
 async def mark_failure(
     session: AsyncSession,
-    row: PendingArchiverSync,
+    row: PendingArchiverSync | PendingWatchEvent,
     *,
     error: str,
 ) -> None:

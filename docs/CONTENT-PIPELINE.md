@@ -214,7 +214,9 @@ already closed decides nothing.
   `health_reason` — the fetch failure's Replicator reason verbatim (plus
   `health_status_code`), else `fetch_timeout`, `blob_unreadable`,
   `processing_failed`, `processing_timeout` or `dead_lettered` — and leaving
-  ERROR clears both. `info.watch-status` carries them in `"error"` only.
+  ERROR clears both. `info.watch-status` carries them in `"error"` only, and
+  the edge into ERROR sends the token as `WatchErrorEvent.reason` on
+  `info.watch-events` (#369, [WATCH-EVENTS.md](WATCH-EVENTS.md)).
 
 **Option A** (D6, `extraction_change`) runs on every change.
 Bound spec moved → notify with a `NOTE:` line (`extraction_changed = "spec"`).

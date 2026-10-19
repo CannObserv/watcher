@@ -43,12 +43,12 @@ from sqlalchemy import select
 import src.workers.fetch_policy as fetch_policy_mod
 import src.workers.tasks as tasks_mod
 import src.workers.watch_status as watch_status_mod
+from src.core.bus import TRANSIENT_PUBLISH_ERRORS
 from src.core.fetch_commands import create_fetch_command
 from src.core.models.domain import Domain
 from src.core.models.fetch_command import FetchCommand, FetchCommandStatus
 from src.workers.fetch_commands import publish_pending_fetch_commands, reap_fetch_commands
 from src.workers.fetch_policy import publish_fetch_policy
-from src.workers.source_revisions_drain import _TRANSIENT_PUBLISH_ERRORS
 from src.workers.tasks import check_watched_item
 from src.workers.watch_status import publish_watch_status
 from tests.conftest import make_watched_item
@@ -79,7 +79,7 @@ class TestTheErrorIsNotAConnectionError:
         assert not isinstance(exc, (ConnectionError, TimeoutError))
 
     def test_the_revisions_drain_classifies_it_transient_anyway(self):
-        assert OutOfMemoryError in _TRANSIENT_PUBLISH_ERRORS
+        assert OutOfMemoryError in TRANSIENT_PUBLISH_ERRORS
 
 
 @pytest.mark.integration

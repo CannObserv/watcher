@@ -195,6 +195,7 @@ def derived_outcome(row: ProcessCommand) -> ExtractionOutcome:
         spec_fingerprint=row.spec_fingerprint,
         content_media_type=row.output_media_type or CANONICAL_TEXT_MEDIA_TYPE,
         processor_version=row.processor_version,
+        text_uri=row.output_uri,
     )
 
 

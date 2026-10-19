@@ -54,6 +54,12 @@ class TestGetAppRegistration:
         task_keys = {name for name, _ in app.periodic_registry.periodic_tasks}
         assert "schedule_tick" in task_keys
 
+    def test_the_watch_events_drain_is_periodic(self):
+        """#369: a fact staged at an edge reaches the bus only through this."""
+        app = get_app()
+        task_keys = {name for name, _ in app.periodic_registry.periodic_tasks}
+        assert "drain_pending_watch_events" in task_keys
+
     def test_every_task_is_a_coroutine_function(self):
         """#334: a stop that outlives ``SHUTDOWN_GRACEFUL_SECONDS`` aborts the
         running jobs by cancelling them, and only an ``async def`` task can be

@@ -15,7 +15,12 @@ import pytest
 from co_core.pure.adapters.bus import streams
 from co_core.pure.adapters.bus.envelope import from_wire, to_wire
 from co_core.pure.extract import CANONICAL_TEXT_MEDIA_TYPE
-from co_core.pure.models.changes import ProcessingCompleteEmit
+from co_core.pure.models.changes import (
+    ChangeDetectedEmit,
+    ProcessingCompleteEmit,
+    WatchErrorEmit,
+    WatchRecoveredEmit,
+)
 from sqlalchemy import event, select
 
 import src.workers.fetch_commands as fc_mod
@@ -30,6 +35,7 @@ from src.core.models.audit_log import AuditLog, EventType
 from src.core.models.change_revision import ChangeRevision
 from src.core.models.fetch_command import FetchCommand, FetchCommandStatus
 from src.core.models.pending_archiver_sync import PendingArchiverSync
+from src.core.models.pending_watch_event import PendingWatchEvent
 from src.core.models.process_command import ProcessCommand, ProcessCommandStatus
 from src.core.models.watched_item import WatchedItem, WatchHealthStatus
 from src.core.notifications.events import WatchEventType
@@ -1278,3 +1284,114 @@ class TestProcessorEndToEnd:
             source_specs=self.SPECS,
             generation="0.19.7+1",
         )
+
+
+class TestWatchEventFacts:
+    """#369 on the derived leg, end to end through ``apply_process_fact``:
+    every way a check ends here either commits the one fact its edge owes —
+    with the reason the item's health records — or commits none."""
+
+    async def _decide(self, db_session, monkeypatch, *, item_over=None, prior=None, **fields):
+        row = await _decisive(db_session, specs=(SPEC_A,), item_over=item_over, **fields)
+        item = await db_session.get(WatchedItem, row.watched_item_id)
+        if prior is not None:
+            db_session.add(
+                ChangeRevision(
+                    watched_item_id=item.id,
+                    content_fingerprint=prior,
+                    captured_at=datetime.now(UTC) - timedelta(days=1),
+                    content_size_bytes=10,
+                    schema_version=1,
+                    processor_version="0.19.7+1",
+                )
+            )
+            item.processor_version = "0.19.7+1"
+            await db_session.flush()
+        _wire(db_session, monkeypatch)
+        _quiet(monkeypatch)
+        await apply_process_fact(row.command_id, bus_client=fakeredis.FakeAsyncRedis())
+        await db_session.refresh(item)
+        return row, item
+
+    async def _facts(self, db_session) -> list[PendingWatchEvent]:
+        stmt = select(PendingWatchEvent).order_by(PendingWatchEvent.id)
+        return list((await db_session.execute(stmt)).scalars().all())
+
+    async def test_a_change_commits_its_fact_with_the_stored_text(self, db_session, monkeypatch):
+        row, item = await self._decide(
+            db_session, monkeypatch, prior=DIGEST, **_completed(output_digest=OTHER_DIGEST)
+        )
+
+        [fact] = await self._facts(db_session)
+        emit = ChangeDetectedEmit.model_validate(fact.payload)
+        assert (emit.previous_fingerprint, emit.current_fingerprint) == (DIGEST, OTHER_DIGEST)
+        assert emit.current_text_uri == row.output_uri
+
+    @pytest.mark.parametrize(
+        ("fields", "prior"),
+        [
+            pytest.param(_completed(), None, id="baseline"),
+            pytest.param(_completed(), DIGEST, id="renewal"),
+            pytest.param(
+                _completed(output_digest=OTHER_DIGEST, processor_version="0.20.0+1"),
+                DIGEST,
+                id="rebaseline",
+            ),
+        ],
+    )
+    async def test_no_content_change_commits_no_fact(self, db_session, monkeypatch, fields, prior):
+        await self._decide(db_session, monkeypatch, prior=prior, **fields)
+
+        assert await self._facts(db_session) == []
+
+    @pytest.mark.parametrize(
+        ("fields", "reason"),
+        [
+            pytest.param(_empty(), "processing_failed", id="empty"),
+            pytest.param(_failed("extraction_error"), "processing_failed", id="extraction_error"),
+            pytest.param(_failed("dead_lettered"), "dead_lettered", id="dead_lettered"),
+        ],
+    )
+    async def test_a_failed_check_sends_the_items_health_reason(
+        self, db_session, monkeypatch, fields, reason
+    ):
+        """The extraction-failure path sends ``processing_failed``, whatever
+        the notification's metadata calls it (``extraction_failed``)."""
+        _row, item = await self._decide(db_session, monkeypatch, **fields)
+
+        [fact] = await self._facts(db_session)
+        emit = WatchErrorEmit.model_validate(fact.payload)
+        assert emit.reason == item.health_reason == reason
+        assert emit.status_code is None
+
+    async def test_input_unreadable_at_the_cap_is_blob_unreadable(self, db_session, monkeypatch):
+        monkeypatch.setenv(FETCH_MAX_REISSUES_ENV, "1")
+
+        await self._decide(db_session, monkeypatch, reissue_count=1, **_failed("input_unreadable"))
+
+        [fact] = await self._facts(db_session)
+        assert fact.payload["reason"] == "blob_unreadable"
+
+    async def test_a_give_up_is_processing_timeout(self, db_session, monkeypatch):
+        monkeypatch.setenv(PROCESS_COMMAND_HARD_LIMIT_ENV, "7200")
+        await _decisive(db_session, issued_at=datetime.now(UTC) - timedelta(hours=3))
+        _quiet(monkeypatch)
+
+        await reap_process_commands(session=db_session, bus_client=fakeredis.FakeAsyncRedis())
+
+        [fact] = await self._facts(db_session)
+        assert fact.payload["reason"] == "processing_timeout"
+
+    async def test_a_processor_success_out_of_error_recovers(self, db_session, monkeypatch):
+        started = datetime.now(UTC) - timedelta(hours=2)
+        _row, item = await self._decide(
+            db_session,
+            monkeypatch,
+            item_over={"health_status": WatchHealthStatus.ERROR, "error_since": started},
+            **_completed(),
+        )
+
+        [fact] = await self._facts(db_session)
+        assert fact.event_type == "watch_recovered"
+        assert WatchRecoveredEmit.model_validate(fact.payload).error_since == started
+        assert item.error_since is None

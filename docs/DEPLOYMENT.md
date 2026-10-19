@@ -222,6 +222,13 @@ A non-empty backlog with an oldest row older than a few minutes means the drain
 is failing, not merely busy — check `journalctl -u watcher -f` for
 `drain attempt failed` and confirm Archiver is reachable.
 
+## Watch events
+
+`drain_pending_watch_events` publishes `pending_watch_events` to
+`info.watch-events` every minute, on the same embedded worker (#369). Its
+backlog and dead-letter queries, and the CannObserv/broker#93 grant it needs
+before its first deploy: [WATCH-EVENTS.md](WATCH-EVENTS.md) → *Operating it*.
+
 ## BUILD_ID
 
 The systemd unit automatically sets `BUILD_ID` to the current git short SHA before each start via `ExecStartPre`. This value is used for:

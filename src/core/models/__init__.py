@@ -16,6 +16,7 @@ from src.core.models.notification_template import (
     NotificationTemplate,
 )
 from src.core.models.pending_archiver_sync import PendingArchiverSync
+from src.core.models.pending_watch_event import PendingWatchEvent
 from src.core.models.process_command import ProcessCommand, ProcessCommandStatus
 from src.core.models.revoked_info_item import RevokedInfoItem
 from src.core.models.temporal_profile import PostAction, ProfileType, TemporalProfile
@@ -33,6 +34,7 @@ __all__ = [
     "FetchCommandStatus",
     "FetchPolicyTombstone",
     "PendingArchiverSync",
+    "PendingWatchEvent",
     "ProcessCommand",
     "ProcessCommandStatus",
     "RevokedInfoItem",

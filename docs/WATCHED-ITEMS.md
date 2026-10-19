@@ -21,7 +21,10 @@ resolution; #205); a single optional
 `health_reason` / `health_status_code` (#370 — why it is in ERROR now: the latest
 failed check's `WatchHealthReason` token and, for `http_status`, the origin's
 status; written on every failure, cleared on leaving ERROR, published on
-`info.watch-status` beside `last_full_fetch_at`); `last_checked_at`, `last_changed_at`, `last_observed_at` (#264 — advances when the
+`info.watch-status` beside `last_full_fetch_at`); `error_since` (#369 — when the
+current error episode began: stamped on the edge into ERROR, cleared on leaving it,
+sent as `WatchRecoveredEvent.error_since` on `info.watch-events`, NULL for an
+episode opened before it existed — [WATCH-EVENTS.md](WATCH-EVENTS.md)); `last_checked_at`, `last_changed_at`, `last_observed_at` (#264 — advances when the
 content was verified current: a successful check, changed or unchanged alike, **and**
 an origin 304 where no extraction ran at all (#249); `last_checked_at` advances
 on *every* outcome because it is the anti-thrash scheduling stamp (#168), so the

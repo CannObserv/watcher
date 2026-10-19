@@ -56,6 +56,7 @@ from src.core.notifications.renotify import (
 from src.core.process_commands import UnsendableProcessCommand
 from src.core.utils import watched_item_event_base_metadata
 from src.core.validators import clear_validators, record_validators, stamp_full_fetch
+from src.core.watch_events import enqueue_watch_error, enqueue_watch_recovered
 from src.workers import bp
 from src.workers.notify import dispatch_event_notifications
 from src.workers.pipeline import WatchedItemResult
@@ -98,6 +99,10 @@ async def record_check_failure(
     ``last_error_notified_at`` is stamped in the same commit as the failure,
     *before* the dispatch: a dispatch that raises, or an apply that is retried,
     must not re-send inside the window — #269's wedged item fails every cycle.
+
+    The transition also opens the episode (#369): ``error_since`` is stamped
+    and a ``watch_error`` fact staged in that same commit, its reason the
+    ``health_reason`` above. A reminder is not an edge and stages nothing.
     """
     audit(session, audit_event, watched_item_id=str(watched_item.id), **audit_kwargs)
     previous_health = watched_item.health_status
@@ -110,6 +115,14 @@ async def record_check_failure(
     watched_item.health_reason = health_reason
     watched_item.health_status_code = health_status_code
     watched_item.last_checked_at = now
+    if transition:
+        # The edge into error (#369): the episode starts, and its fact is
+        # staged in this commit. A failure inside the episode — a #71 reminder
+        # included — is no edge: re-notify cadence is Archiver's.
+        watched_item.error_since = now
+        enqueue_watch_error(
+            session, watched_item, now=now, reason=health_reason, status_code=health_status_code
+        )
     # last_observed_at deliberately NOT stamped: a failure is an attempt, never
     # an observation (#264) — the registry must not claim content was verified.
     if transition or renotify:
@@ -167,6 +180,10 @@ async def _record_check_success(
     ``audit_extra`` adds payload keys to that audit without changing which event
     fires — the 304 path uses it to stay distinguishable from an unchanged
     *extraction*, which is a materially different observation (#249).
+
+    Out of ERROR, a ``watch_recovered`` fact carrying the episode's
+    ``error_since`` is staged in the commit that records OK (#369); leaving any
+    health clears ``error_since``.
     """
     # A re-baseline wrote a revision too (#326) — a snapshot nobody was told of.
     snapshot = result.baseline_established or result.changed or result.rebaselined
@@ -180,10 +197,17 @@ async def _record_check_success(
     )
 
     previous_health = watched_item.health_status
+    if previous_health == WatchHealthStatus.ERROR:
+        # error → ok (#369), staged in this commit with the episode's start;
+        # None for one opened before error_since was recorded.
+        enqueue_watch_recovered(
+            session, watched_item, now=now, error_since=watched_item.error_since
+        )
     watched_item.health_status = WatchHealthStatus.OK
     # Leaving ERROR (#370): the Emit refuses a reason outside it.
     watched_item.health_reason = None
     watched_item.health_status_code = None
+    watched_item.error_since = None
     watched_item.last_checked_at = now
     # Observation freshness (#264): "content was verified current", where
     # last_checked_at only says "we tried". Both callers qualify — a successful

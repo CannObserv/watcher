@@ -136,7 +136,7 @@ async def drain_pending_watch_events(
             # At-least-once boundary: a crash between the XADD and the commit
             # republishes this row under the same key.
             try:
-                await publisher.execute(BusPublish(streams.INFO_WATCH_EVENTS, fields))
+                sent = await publisher.execute(BusPublish(streams.INFO_WATCH_EVENTS, fields))
             except Exception as exc:
                 transient = isinstance(exc, TRANSIENT_PUBLISH_ERRORS)
                 if not transient and row.attempts + 1 >= MAX_PUBLISH_ATTEMPTS:
@@ -157,6 +157,18 @@ async def drain_pending_watch_events(
                 )
                 break
 
+            # The row is deleted below, so this line is watcher's only record of
+            # which fact went out and where: what a read-back (broker#115) or a
+            # consumer's report is matched against. Edges are rare; INFO is cheap.
+            logger.info(
+                "drain: watch event published",
+                extra={
+                    "event_id": str(row.id),
+                    "event_type": row.event_type,
+                    "info_item_id": row.info_item_id,
+                    "bus_message_id": sent.bus_message_id,
+                },
+            )
             await session.delete(row)
             published += 1
 

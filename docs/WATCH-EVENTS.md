@@ -84,10 +84,16 @@ order**, with no `maxlen` (#327).
 - **No bus** is logged at WARNING, and only while a fact is waiting.
 
 **Deploy gate.** Watcher's ACL user needs `+xadd` on `~info.watch-events`
-(CannObserv/broker#93). If the drain is deployed without it, every edge becomes
-one `NOPERM` per backoff step in the broker's `ACL LOG`, and each one needs
-attributing (#387). Verify a live publish with a granted read: `XINFO STREAM`,
-or `XRANGE` with an explicit start. Never use `XREVRANGE`, which is refused.
+(CannObserv/broker#93, live 2026-10-19). If the drain is deployed without it,
+every edge becomes one `NOPERM` per backoff step in the broker's `ACL LOG`, and
+each one needs attributing (#387).
+
+**Watcher cannot read this stream back.** The grant is `+xadd` only, so an
+`XINFO` or `XRANGE` run as watcher is a denial too. Broker reads it as
+`acladmin` (CannObserv/broker#115). Watcher's side of a check is the journal:
+each publish logs `drain: watch event published` with the `event_id` (the
+envelope key) and the `bus_message_id` (the stream entry id), because the row
+itself is deleted on publish.
 
 ## Operating it
 
@@ -98,6 +104,8 @@ source scripts/load-env.sh
 psql "${DATABASE_URL/+asyncpg/}" -c \
   "SELECT count(*), min(created_at) AS oldest, max(attempts) AS max_attempts
    FROM pending_watch_events WHERE dead_lettered_at IS NULL;"
+# What went out, and where: the event_id and the stream entry id per fact.
+sudo journalctl -u watcher --since today -o cat | grep 'watch event published'
 # Facts that will never publish on their own.
 psql "${DATABASE_URL/+asyncpg/}" -c \
   "SELECT id, event_type, info_item_id, last_error FROM pending_watch_events

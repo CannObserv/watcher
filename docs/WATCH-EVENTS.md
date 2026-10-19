@@ -81,7 +81,7 @@ order**, with no `maxlen` (#327).
   or an unknown kind, dead-letters at once and the queue moves past it. A
   broker refusal (down, full, or `NOPERM`) is transient and never
   dead-letters. `TRANSIENT_PUBLISH_ERRORS` is shared (`src/core/bus.py`).
-- **No bus** is logged at ERROR only while a fact is waiting.
+- **No bus** is logged at WARNING, and only while a fact is waiting.
 
 **Deploy gate.** Watcher's ACL user needs `+xadd` on `~info.watch-events`
 (CannObserv/broker#93). If the drain is deployed without it, every edge becomes

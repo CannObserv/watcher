@@ -298,4 +298,8 @@ class TestNoBus:
 
         assert result["skipped"] == "no_bus"
         assert len(await _rows(db_session)) == 2
-        assert any(r.levelname == "ERROR" for r in caplog.records)
+        # WARNING, the content.revisions drain's level for the same state (CR 4):
+        # a dev server with no bus queues facts indefinitely by design.
+        assert [r.levelname for r in caplog.records if "stay queued" in r.getMessage()] == [
+            "WARNING"
+        ]

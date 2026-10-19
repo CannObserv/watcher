@@ -103,7 +103,7 @@ async def drain_pending_watch_events(
 
         client = bus_client if bus_client is not None else get_shared_bus_client()
         if client is None:
-            logger.error(
+            logger.warning(
                 "bus not configured — watch events stay queued",
                 extra={"queued": len(rows), "env": BUS_REDIS_URL_ENV},
             )

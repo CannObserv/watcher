@@ -82,6 +82,35 @@ class TestPublish:
         assert p2.error_since == NOW
         assert await _rows(db_session) == []
 
+    async def test_each_publish_logs_its_event_id_and_entry_id(
+        self, db_session, monkeypatch, caplog
+    ):
+        """The row is deleted on publish, so the journal is watcher's only record
+        of which fact went out: the go-live read-back (broker#115) matches the
+        stream entry against the event_id watcher names."""
+        wi, error, recovered = await _episode(db_session)
+        _wire(db_session, monkeypatch)
+        client = fakeredis.FakeAsyncRedis()
+
+        with caplog.at_level("INFO", logger=drain_mod.logger.name):
+            await drain_pending_watch_events(bus_client=client)
+
+        published = [r for r in caplog.records if r.getMessage() == "drain: watch event published"]
+        entry_ids = [m.decode() for m, _ in await client.xrange(streams.INFO_WATCH_EVENTS)]
+        assert [
+            (r.levelname, r.event_id, r.event_type, r.info_item_id, r.bus_message_id)
+            for r in published
+        ] == [
+            ("INFO", str(error.id), "watch_error", str(wi.archiver_info_item_id), entry_ids[0]),
+            (
+                "INFO",
+                str(recovered.id),
+                "watch_recovered",
+                str(wi.archiver_info_item_id),
+                entry_ids[1],
+            ),
+        ]
+
     async def test_a_redelivery_carries_the_stored_event_id(self, db_session, monkeypatch):
         """A crash between XADD and commit republishes the row: the key is the
         one minted at the edge, so the consumer's dedupe sees one fact."""

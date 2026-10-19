@@ -4,7 +4,8 @@ The processor extracts and fingerprints (#326, #350); this module holds what
 happens to its answer. ChangeRevision rows serve as the local fingerprint
 history; the first row is a baseline (announced to Archiver, no
 notification, #367); subsequent changes dispatch CHANGE_DETECTED once for the
-WatchedItem (the single monitored entity, #191).
+WatchedItem (the single monitored entity, #191) and stage its
+``change_detected`` fact for ``info.watch-events`` (#369).
 """
 
 import enum
@@ -283,7 +284,9 @@ async def apply_extraction_outcome(
     c. Changed: insert a new ChangeRevision, enqueue PendingArchiverSync, then
        Option A (``extraction_change``): an extractor-only move writes
        ``CHECK_REBASELINED`` and notifies nobody; anything else dispatches
-       CHANGE_DETECTED once for the WatchedItem, labelled when the spec moved.
+       CHANGE_DETECTED once for the WatchedItem, labelled when the spec moved,
+       and stages one ``change_detected`` fact (#369). Only this branch stages
+       one: a baseline, a cache hit and a re-baseline are not content changes.
 
     ``last_changed_at`` is updated on a notified change; ``last_checked_at``
     and ``health_status`` are the caller's (``close_succeeded``). ``blob``

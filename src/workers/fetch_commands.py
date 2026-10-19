@@ -99,6 +99,10 @@ async def record_check_failure(
     ``last_error_notified_at`` is stamped in the same commit as the failure,
     *before* the dispatch: a dispatch that raises, or an apply that is retried,
     must not re-send inside the window — #269's wedged item fails every cycle.
+
+    The transition also opens the episode (#369): ``error_since`` is stamped
+    and a ``watch_error`` fact staged in that same commit, its reason the
+    ``health_reason`` above. A reminder is not an edge and stages nothing.
     """
     audit(session, audit_event, watched_item_id=str(watched_item.id), **audit_kwargs)
     previous_health = watched_item.health_status
@@ -176,6 +180,10 @@ async def _record_check_success(
     ``audit_extra`` adds payload keys to that audit without changing which event
     fires — the 304 path uses it to stay distinguishable from an unchanged
     *extraction*, which is a materially different observation (#249).
+
+    Out of ERROR, a ``watch_recovered`` fact carrying the episode's
+    ``error_since`` is staged in the commit that records OK (#369); leaving any
+    health clears ``error_since``.
     """
     # A re-baseline wrote a revision too (#326) — a snapshot nobody was told of.
     snapshot = result.baseline_established or result.changed or result.rebaselined

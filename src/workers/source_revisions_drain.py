@@ -31,11 +31,13 @@ from co_core.pure.models.changes import SourceRevisionObservedEmit
 from co_core.pure.util.blobstore import validate_fingerprint
 from co_core_aio.bus import AsyncBusPublisher
 from redis.asyncio import Redis
-from redis.exceptions import BusyLoadingError, NoPermissionError, OutOfMemoryError
-from redis.exceptions import ConnectionError as RedisConnectionError
-from redis.exceptions import TimeoutError as RedisTimeoutError
 
-from src.core.bus import BUS_REDIS_URL_ENV, get_shared_bus_client
+from src.core.bus import (
+    BUS_REDIS_URL_ENV,
+    MAX_PUBLISH_ATTEMPTS,
+    TRANSIENT_PUBLISH_ERRORS,
+    get_shared_bus_client,
+)
 from src.core.database import get_session_factory
 from src.core.logging import get_logger
 from src.core.models.change_revision import ChangeRevision
@@ -51,29 +53,6 @@ from src.core.sources.outbox import (
 from src.workers import bp
 
 logger = get_logger(__name__)
-
-# A broker that is unreachable, loading, or out of memory recovers on its own;
-# one denying the command recovers when an operator widens the ACL rule
-# (broker#1 D3, #290). Both of the last two are ``ResponseError`` subclasses
-# rather than connection errors, and both are an outage rather than poison: the
-# event is valid and publishes unchanged once the condition clears. Anything
-# else that escapes the publish call is treated as non-transient and counts
-# toward the backstop ceiling below.
-_TRANSIENT_PUBLISH_ERRORS: tuple[type[BaseException], ...] = (
-    ConnectionError,  # builtin
-    TimeoutError,  # builtin
-    RedisConnectionError,
-    RedisTimeoutError,
-    BusyLoadingError,
-    OutOfMemoryError,
-    NoPermissionError,
-)
-
-# Backstop only, for a non-transient publish error that somehow persists. Set
-# absurdly high on purpose: the ceiling exists so a genuinely stuck row is
-# eventually visible, not as a retry budget. Deterministic failures never reach
-# it — they dead-letter on the first pass.
-MAX_PUBLISH_ATTEMPTS = 100_000
 
 
 def _wire_blob_fingerprint(row: PendingArchiverSync) -> str | None:
@@ -218,7 +197,7 @@ async def drain_pending_archiver_sync(
             try:
                 await publisher.execute(BusPublish(streams.CONTENT_REVISIONS, fields))
             except Exception as exc:
-                transient = isinstance(exc, _TRANSIENT_PUBLISH_ERRORS)
+                transient = isinstance(exc, TRANSIENT_PUBLISH_ERRORS)
                 if not transient and row.attempts + 1 >= MAX_PUBLISH_ATTEMPTS:
                     # mark_failure owns the counter on the retry branch; this
                     # branch is terminal, so it increments for itself.

@@ -44,7 +44,13 @@ from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 from redis.asyncio import Redis
 from redis.asyncio.retry import Retry
 from redis.backoff import ExponentialBackoff
-from redis.exceptions import AuthenticationError, AuthorizationError
+from redis.exceptions import (
+    AuthenticationError,
+    AuthorizationError,
+    BusyLoadingError,
+    NoPermissionError,
+    OutOfMemoryError,
+)
 from redis.exceptions import ConnectionError as RedisConnectionError
 from redis.exceptions import TimeoutError as RedisTimeoutError
 
@@ -57,6 +63,34 @@ BUS_REDIS_URL_ENV = "WATCHER_BUS_REDIS_URL"
 
 #: Unit-only opt-in gating every bus client this process can build (#262).
 BUS_ENABLED_ENV = "WATCHER_BUS_ENABLED"
+
+# --- Outbox publish classification (#253, #288, #290) ------------------------
+#
+# Shared by both outbox drains, ``content.revisions`` and ``info.watch-events``
+# (#369), so neither can sort an outage differently from the other.
+#
+# A broker that is unreachable, loading, or out of memory recovers on its own;
+# one denying the command recovers when an operator widens the ACL rule
+# (broker#1 D3, #290). Both of the last two are ``ResponseError`` subclasses
+# rather than connection errors, and both are an outage rather than poison: the
+# event is valid and publishes unchanged once the condition clears. Anything
+# else that escapes the publish call is treated as non-transient and counts
+# toward the backstop ceiling below.
+TRANSIENT_PUBLISH_ERRORS: tuple[type[BaseException], ...] = (
+    ConnectionError,  # builtin
+    TimeoutError,  # builtin
+    RedisConnectionError,
+    RedisTimeoutError,
+    BusyLoadingError,
+    OutOfMemoryError,
+    NoPermissionError,
+)
+
+# Backstop only, for a non-transient publish error that somehow persists. Set
+# absurdly high on purpose: the ceiling exists so a genuinely stuck row is
+# eventually visible, not as a retry budget. Deterministic failures never reach
+# it — they dead-letter on the first pass.
+MAX_PUBLISH_ATTEMPTS = 100_000
 
 # --- Connection policy (#287, CannObserv/broker#1 R7) --------------------------
 #

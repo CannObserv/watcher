@@ -186,7 +186,7 @@ A skill is symlinked into both `skills/` and `.claude/skills/`; overrides in `sk
 - [docs/COMMANDS.md](docs/COMMANDS.md) — every runnable command, the test database, CI
 - [docs/CONTENT-PIPELINE.md](docs/CONTENT-PIPELINE.md) — fetch → extract → fingerprint, the `fetch_commands` outbox
 - [docs/CONTENT-REVISIONS.md](docs/CONTENT-REVISIONS.md) — the revisions producer: outbox, drain, #293 renewal
-- [docs/WATCH-EVENTS.md](docs/WATCH-EVENTS.md) — #369 `info.watch-events`: the three edges, the outbox, the head-of-line drain, the broker#93 gate
+- [docs/WATCH-EVENTS.md](docs/WATCH-EVENTS.md) — #369 edge facts: outbox, ordered drain, broker#93 gate
 - [docs/CONDITIONAL-GET.md](docs/CONDITIONAL-GET.md) — #269 validators: gate, snapshot, invalidation
 - [docs/CONVENTIONS.md](docs/CONVENTIONS.md) — logging configuration, ULID errors, DB triggers
 - [docs/DEPENDENCIES.md](docs/DEPENDENCIES.md) — the private wheelhouse and the notifier SDK's git tag: auth, pins, upgrades

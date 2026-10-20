@@ -91,6 +91,7 @@ async def create_fetch_command(
     intent_id: str | None = None,
     reissue_count: int = 0,
     force_full_fetch: bool = False,
+    check_command_id: str | None = None,
 ) -> FetchCommand:
     """Persist the pending command row (MUST-2: caller commits before publishing).
 
@@ -101,7 +102,8 @@ async def create_fetch_command(
     stored on the row (#269): the pending-publish sweep republishes from the row
     alone, so a value re-read at publish time could differ from what the command
     was minted to ask. ``force_full_fetch`` is the operator's "check now" — an
-    unconditional re-read, whatever is stored.
+    unconditional re-read, whatever is stored. ``check_command_id`` names the
+    ``watch_check`` command the occasion answers (#371).
     """
     request_etag, request_last_modified = replayable_validators(
         watched_item, now=now, force_full_fetch=force_full_fetch
@@ -120,6 +122,7 @@ async def create_fetch_command(
         request_etag=request_etag,
         request_last_modified=request_last_modified,
         forced_full_fetch=force_full_fetch,
+        check_command_id=check_command_id,
     )
     session.add(row)
     return row

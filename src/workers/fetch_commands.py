@@ -305,7 +305,8 @@ async def reissue_fetch_command(
     """Re-issue an intent under a fresh ``command_id`` (MUST-6: a timeout or a
     lost blob is grounds to re-issue, never to conclude failure).
 
-    Same ``intent_id``, ``reissue_count + 1``, same forced-fetch intent.
+    Same ``intent_id``, ``reissue_count + 1``, same forced-fetch intent, same
+    commanding ``watch_check`` (#371).
     ``lineage_count`` overrides the count being incremented — a decisive
     lineage's process leg may have re-issued since the fetch did (#326).
     ``force_full_fetch`` forces a lineage that was not; it never un-forces one
@@ -326,6 +327,9 @@ async def reissue_fetch_command(
         # was reaped must not come back as a conditional GET the origin can
         # answer 304, leaving the operator with no bytes and no signal.
         force_full_fetch=force_full_fetch or prior.forced_full_fetch,
+        # The commanding watch_check is lineage too (#371): its completion
+        # republishes, whichever command in the lineage completes it.
+        check_command_id=prior.check_command_id,
     )
     await session.commit()
     # Shared, lifespan-owned client (CR-4) — never closed here.

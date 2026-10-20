@@ -955,6 +955,22 @@ class TestForcedFetchLineage:
         assert reissued.request_etag is None
 
 
+class TestWatchCheckLineage:
+    """#371: the commanding ``watch_check`` is lineage, like the forced intent.
+    A reaped commanded fetch that came back unmarked would complete with no
+    republish, and Archiver would wait for the periodic tick to see it."""
+
+    async def test_a_reissue_keeps_the_watch_check(self, db_session):
+        wi, row = await _row_with_fact(db_session)
+        row.check_command_id = "01CHECK"
+        row.status = FetchCommandStatus.EXPIRED
+        await db_session.flush()
+
+        new_id = await reissue_fetch_command(db_session, wi, row, AsyncMock())
+
+        assert (await db_session.get(FetchCommand, new_id)).check_command_id == "01CHECK"
+
+
 class TestValidatorStorage:
     """#269 part 2: the item's replayable pair, written from the closing fact.
 

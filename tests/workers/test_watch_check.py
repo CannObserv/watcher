@@ -32,9 +32,12 @@ from co_core.pure.models.changes import (
     WatchCheckCommandEmit,
     WatchErrorEmit,
 )
+from redis.exceptions import ResponseError
 from sqlalchemy import select
+from sqlalchemy.exc import OperationalError
 from ulid import ULID
 
+import src.workers.fetch_facts as ff_mod
 import src.workers.watch_check as wc_mod
 from src.core.check_now import CheckRefusal
 from src.core.fetch_commands import create_fetch_command
@@ -357,3 +360,164 @@ class TestRunWatchCheckConsumer:
         fetch = from_wire(fields, topic=streams.CONTENT_FETCH, message_id=entry_id.decode())
         assert isinstance(fetch.payload, ContentFetchCommand)
         assert "if-none-match" not in (fetch.payload.headers or {})
+
+
+@asynccontextmanager
+async def _rolling_back_session_ctx(db_session):
+    """Production's session factory: a failed ``process`` leaves no open
+    transaction behind for the next message to trip over."""
+    try:
+        yield db_session
+    except BaseException:
+        await db_session.rollback()
+        raise
+
+
+def _poison_command():
+    """#371's example: a NUL in ``info_item_id`` decodes, and is no ULID, so it
+    is rejected ``unknown_item`` — and JSONB refuses it at the outbox write."""
+    return _command("01POISON\x00COMMANDXXXXXXXXX")
+
+
+class TestDeliveryThreshold:
+    """#389: a decodable command that fails deterministically goes to
+    ``info.watch-check.dlq`` after ``MAX_DELIVERY_ATTEMPTS`` and stops blocking
+    the commands behind it. Before #389 it was reclaimed forever."""
+
+    async def _run(self, db_session, client, stop):
+        return asyncio.create_task(
+            run_watch_check_consumer(
+                client,
+                lambda: _rolling_back_session_ctx(db_session),
+                stop=stop,
+                block_ms=10,
+                error_backoff_seconds=0.01,
+            )
+        )
+
+    def _count_attempts(self, monkeypatch, *, fail=None):
+        """Wrap the real processor; ``fail(message, attempt)`` may raise first.
+
+        Returns ``(attempts, outcomes)`` by ``command_id``. The tests wait on
+        these and on Redis, never on ``db_session``: the loop is using it, and
+        a concurrent read from the test is an asyncpg ``InterfaceError``.
+        """
+        attempts: dict[str, int] = {}
+        outcomes: dict[str, str] = {}
+        real = wc_mod.process_watch_check_message
+
+        async def _counted(session, message, *, bus_client):
+            key = message.payload.command_id
+            attempts[key] = attempts.get(key, 0) + 1
+            if fail is not None:
+                fail(message, attempts[key])
+            outcomes[key] = await real(session, message, bus_client=bus_client)
+            return outcomes[key]
+
+        monkeypatch.setattr(wc_mod, "process_watch_check_message", _counted)
+        return attempts, outcomes
+
+    async def test_a_poison_command_is_dead_lettered_and_the_one_behind_it_answered(
+        self, db_session, monkeypatch
+    ):
+        client = fakeredis.FakeAsyncRedis()
+        poison = _poison_command()
+        poison_wire = to_wire(poison.payload)
+        poison_id = await client.xadd(streams.INFO_WATCH_CHECK, poison_wire)
+        behind = _command(ULID())
+        await client.xadd(streams.INFO_WATCH_CHECK, to_wire(behind.payload))
+        attempts, outcomes = self._count_attempts(monkeypatch)
+        stop = asyncio.Event()
+
+        task = await self._run(db_session, client, stop)
+
+        async def _both_handled():
+            return (
+                behind.payload.command_id in outcomes
+                and await client.xlen(dlq_name(streams.INFO_WATCH_CHECK)) == 1
+            )
+
+        await _until(_both_handled)
+        stop.set()
+        await asyncio.wait_for(task, timeout=5)
+
+        (rejection,) = await _rejections(db_session)
+        assert rejection.payload["command_id"] == behind.payload.command_id
+        assert attempts[poison.payload.command_id] == ff_mod.MAX_DELIVERY_ATTEMPTS
+        ((_id, raw),) = await client.xrange(dlq_name(streams.INFO_WATCH_CHECK))
+        fields = {k.decode(): v.decode() for k, v in raw.items()}
+        original, provenance = split_dead_letter(fields)
+        assert original == poison_wire
+        assert provenance.source_id == poison_id.decode()
+        assert provenance.group == CONSUMER_GROUP
+        # The class only: an error's text can quote the payload.
+        assert provenance.reason == (f"failed {ff_mod.MAX_DELIVERY_ATTEMPTS} attempts: DBAPIError")
+        pending = await client.xpending(streams.INFO_WATCH_CHECK, CONSUMER_GROUP)
+        assert pending["pending"] == 0
+
+    async def test_an_unreachable_database_never_dead_letters_a_command(
+        self, db_session, monkeypatch
+    ):
+        """A Postgres restart outlasting the threshold must not cost Archiver
+        an answer: connection-class errors are not attempts."""
+        outage = 3 * ff_mod.MAX_DELIVERY_ATTEMPTS
+
+        def _db_down(message, attempt):
+            if attempt <= outage:
+                raise OperationalError("SELECT 1", {}, ConnectionRefusedError("db down"))
+
+        attempts, outcomes = self._count_attempts(monkeypatch, fail=_db_down)
+        client = fakeredis.FakeAsyncRedis()
+        command = _command(ULID())
+        await client.xadd(streams.INFO_WATCH_CHECK, to_wire(command.payload))
+        stop = asyncio.Event()
+
+        task = await self._run(db_session, client, stop)
+
+        async def _answered():
+            return command.payload.command_id in outcomes
+
+        await _until(_answered)
+        stop.set()
+        await asyncio.wait_for(task, timeout=5)
+
+        assert outcomes[command.payload.command_id] == "rejected_unknown_item"
+        assert attempts[command.payload.command_id] == outage + 1
+        assert await client.xlen(dlq_name(streams.INFO_WATCH_CHECK)) == 0
+
+    async def test_a_refused_dead_letter_is_retried_without_reprocessing(
+        self, db_session, monkeypatch
+    ):
+        """A full broker refuses the DLQ ``XADD`` (``denyoom``). The command
+        stays pending and the retirement is retried; the failing ``process`` —
+        whose side effects are the problem — is not run again."""
+        client = fakeredis.FakeAsyncRedis()
+        real_xadd = client.xadd
+        refused: list[str] = []
+
+        async def _xadd(name, fields, *args, **kwargs):
+            stream = name.decode() if isinstance(name, bytes) else name
+            if stream == dlq_name(streams.INFO_WATCH_CHECK) and not refused:
+                refused.append(stream)
+                raise ResponseError("OOM command not allowed when used memory > 'maxmemory'.")
+            return await real_xadd(name, fields, *args, **kwargs)
+
+        monkeypatch.setattr(client, "xadd", _xadd)
+        poison = _poison_command()
+        await client.xadd(streams.INFO_WATCH_CHECK, to_wire(poison.payload))
+        attempts, _outcomes = self._count_attempts(monkeypatch)
+        stop = asyncio.Event()
+
+        task = await self._run(db_session, client, stop)
+
+        async def _dead_lettered():
+            return await client.xlen(dlq_name(streams.INFO_WATCH_CHECK)) == 1
+
+        await _until(_dead_lettered)
+        stop.set()
+        await asyncio.wait_for(task, timeout=5)
+
+        assert refused, "the DLQ write was never attempted under refusal"
+        assert attempts[poison.payload.command_id] == ff_mod.MAX_DELIVERY_ATTEMPTS
+        pending = await client.xpending(streams.INFO_WATCH_CHECK, CONSUMER_GROUP)
+        assert pending["pending"] == 0

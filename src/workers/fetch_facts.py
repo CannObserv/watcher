@@ -44,7 +44,9 @@ from co_core.pure.adapters.bus.exceptions import BusMessageAnomaly
 from co_core.pure.adapters.bus.streams import group_name
 from co_core.pure.models.changes import BlobAvailableEvent, FetchFailedEvent
 from co_core_aio.bus import AsyncBusConsumer
+from redis import exceptions as redis_errors
 from redis.asyncio import Redis
+from sqlalchemy import exc as sa_exc
 from sqlalchemy import select
 
 from src.core import read_windows
@@ -86,6 +88,21 @@ IDLE_SLEEP_SECONDS = 0.05
 # Reclaim our own PEL this often — entries left unacked by a crash mid-process.
 CLAIM_INTERVAL_SECONDS = 60.0
 ERROR_BACKOFF_SECONDS = 5.0
+# Attempts at one message before the loop retires it (#389): dead-lettered on the
+# command inbox, acked past on a fact inbox. Five at the 5 s backoff is ~20 s of
+# retrying an error that is not a connection error. A constant until someone
+# needs to tune it.
+MAX_DELIVERY_ATTEMPTS = 5
+
+# The dependency is unreachable, so every message fails alike: not an attempt.
+# ``InterfaceError`` is absent on purpose — asyncpg raises it for session-state
+# misuse ("another operation is in progress"), which recurs on every attempt.
+_CONNECTION_ERRORS = (
+    OSError,  # ConnectionRefusedError, ConnectionResetError, builtin TimeoutError
+    sa_exc.OperationalError,
+    redis_errors.ConnectionError,
+    redis_errors.TimeoutError,
+)
 
 
 class DeferFn(Protocol):
@@ -285,25 +302,84 @@ async def _back_off(stop: asyncio.Event, seconds: float) -> None:
         pass
 
 
-async def _claim_dead_lettering_poison(consumer: AsyncBusConsumer, topic: str) -> list[BusMessage]:
-    """Reclaim our pending entries; route each undecodable one to the DLQ.
+def is_connection_error(exc: BaseException) -> bool:
+    """Whether ``exc`` says a dependency is unreachable rather than that this
+    message cannot be processed (#389).
 
-    The reason names the anomaly's class only: the DLQ is readable by anything
-    with DLQ access, and a decode error's text can quote the payload.
+    Walks ``__cause__``, so a wrapped one is still recognised. Anything not
+    recognised counts as an attempt: misclassifying a transient costs one
+    retired message, misclassifying a deterministic failure a stuck inbox.
     """
+    seen: set[int] = set()
+    current: BaseException | None = exc
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        if isinstance(current, _CONNECTION_ERRORS):
+            return True
+        if isinstance(current, sa_exc.DBAPIError) and current.connection_invalidated:
+            return True
+        current = current.__cause__
+    return False
+
+
+async def _dead_letter(
+    consumer: AsyncBusConsumer, topic: str, message_id: str, fields, *, reason: str
+) -> None:
+    """Route one frame to ``<topic>.dlq`` (which acks it), and log it.
+
+    The one writer for both causes — undecodable, and out of attempts (#389) —
+    which is what ``tests/test_bus_stream_kinds.py`` pins. ``reason`` names an
+    exception class only: the DLQ is readable by anything with DLQ access, and
+    an error's text can quote the payload.
+    """
+    dlq_id = await consumer.dead_letter(message_id, dict(fields), reason=reason)
+    logger.error(
+        "%s frame dead-lettered",
+        topic,
+        extra={"message_id": message_id, "dlq_id": dlq_id, "reason": reason},
+    )
+
+
+async def _claim_dead_lettering_poison(consumer: AsyncBusConsumer, topic: str) -> list[BusMessage]:
+    """Reclaim our pending entries; route each undecodable one to the DLQ."""
     page = await consumer.claim_stale_page(min_idle_ms=0, count=10)
     for frame in page.poison:
-        dlq_id = await consumer.dead_letter(
+        await _dead_letter(
+            consumer,
+            topic,
             frame.message_id,
-            dict(frame.fields),
+            frame.fields,
             reason=f"undecodable: {type(frame.anomaly).__name__}",
         )
-        logger.error(
-            "undecodable frame on %s dead-lettered",
-            topic,
-            extra={"message_id": frame.message_id, "dlq_id": dlq_id},
-        )
     return list(page.messages)
+
+
+async def _retire(
+    consumer: AsyncBusConsumer,
+    topic: str,
+    message: BusMessage,
+    *,
+    attempts: int,
+    error: str,
+    dead_letter: bool,
+) -> None:
+    """Stop retrying a message that failed ``attempts`` times (#389).
+
+    The command inbox dead-letters it; a fact inbox acks it past, its policy for
+    an undecodable frame too — the reaper re-issues the fetch whose fact never
+    landed (MUST-6). A failure here propagates to the loop's backoff, and the
+    next pass retires it again without re-running ``process``.
+    """
+    reason = f"failed {attempts} attempts: {error}"
+    if dead_letter:
+        await _dead_letter(consumer, topic, message.message_id, message.fields, reason=reason)
+        return
+    await consumer.ack(message.message_id)
+    logger.error(
+        "%s message acked past",
+        topic,
+        extra={"message_id": message.message_id, "reason": reason},
+    )
 
 
 class ProcessFn(Protocol):
@@ -348,6 +424,15 @@ async def run_fact_consumer(
     fields, so the frame is left in our PEL and the very next pass reclaims it
     through ``claim_stale_page``, which hands poison back with its fields.
 
+    **A message that keeps failing is retired** (#389): once ``process`` has
+    raised on it ``MAX_DELIVERY_ATTEMPTS`` times, the next pass dead-letters it
+    (``dead_letter_poison``) or acks it past, without processing it again.
+    Before #389 it was reclaimed forever and blocked every message behind it.
+    Only ``process`` raising counts, and not with a connection error
+    (``is_connection_error``): an outage fails every message alike. The count
+    lives in this loop, so a restart resets it — co-core reports no delivery
+    count, and the server's needs an ``XPENDING`` grant nobody has checked.
+
     **Every fallible step is inside the backoff guard** (CR-1): a transient DB
     error while processing must park-and-retry, never escape and kill the task
     — the message stays unacked, and resetting ``next_claim`` makes the next
@@ -365,6 +450,9 @@ async def run_fact_consumer(
     next_claim = loop.time()  # first pass drains any crash leftovers immediately
     group_ready = False  # created inside the guard: a broker outage racing our
     # boot must back off and retry, not kill the task before the loop starts (CR-12)
+    # message_id → (attempts that counted, the last one's exception class). An
+    # entry leaves on ack or retirement, so it holds only messages now failing.
+    failures: dict[str, tuple[int, str]] = {}
 
     while not stop.is_set():
         try:
@@ -387,9 +475,27 @@ async def run_fact_consumer(
                 continue
 
             for message in messages:
-                async with session_factory() as session:
-                    outcome = await process(session, message)
+                attempts, error = failures.get(message.message_id, (0, ""))
+                if attempts >= MAX_DELIVERY_ATTEMPTS:
+                    await _retire(
+                        consumer,
+                        topic,
+                        message,
+                        attempts=attempts,
+                        error=error,
+                        dead_letter=dead_letter_poison,
+                    )
+                    del failures[message.message_id]
+                    continue
+                try:
+                    async with session_factory() as session:
+                        outcome = await process(session, message)
+                except Exception as exc:
+                    if not is_connection_error(exc):
+                        failures[message.message_id] = (attempts + 1, type(exc).__name__)
+                    raise
                 await consumer.ack(message.message_id)
+                failures.pop(message.message_id, None)
                 logger.info(
                     "%s message processed",
                     topic,

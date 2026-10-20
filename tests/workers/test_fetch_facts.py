@@ -18,6 +18,8 @@ from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
 
 import fakeredis
+import psycopg
+import psycopg_pool
 import pytest
 from co_core.effects.bus import BusPublish
 from co_core.pure.adapters.bus import streams
@@ -29,6 +31,7 @@ from co_core.pure.models.changes import (
     RegistryAnnouncementEmit,
 )
 from co_core_aio.bus import AsyncBusPublisher
+from procrastinate.exceptions import ConnectorException
 from redis import exceptions as redis_errors
 from sqlalchemy import exc as sa_exc
 
@@ -667,6 +670,19 @@ class TestConnectionErrorsAreNotAttempts:
     )
     def test_unreachable_dependencies_do_not_count(self, exc):
         assert is_connection_error(exc)
+
+    def test_procrastinates_wrapped_psycopg_outage_does_not_count(self):
+        """The fact inboxes commit, then defer the apply over Procrastinate's own
+        psycopg pool, which re-raises a psycopg error as ``ConnectorException``.
+        Counted, a pool outage after the commit acks the fact past with the row
+        recorded and no apply deferred — and nothing re-defers it (CR 1)."""
+        try:
+            try:
+                raise psycopg_pool.PoolTimeout("couldn't get a connection after 30.00 sec")
+            except psycopg.OperationalError as inner:
+                raise ConnectorException() from inner
+        except ConnectorException as exc:
+            assert is_connection_error(exc)
 
     def test_a_wrapped_connection_error_does_not_count(self):
         try:

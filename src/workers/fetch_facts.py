@@ -41,6 +41,7 @@ second run a no-op — at-least-once ends at the row, exactly-once at the apply.
 import asyncio
 from typing import Protocol
 
+import psycopg
 from co_core.effects.bus import BusMessage
 from co_core.pure.adapters.bus import streams
 from co_core.pure.adapters.bus.exceptions import BusMessageAnomaly
@@ -103,6 +104,9 @@ MAX_DELIVERY_ATTEMPTS = 5
 _CONNECTION_ERRORS = (
     OSError,  # ConnectionRefusedError, ConnectionResetError, builtin TimeoutError
     sa_exc.OperationalError,
+    # Procrastinate's pool, under the defer that follows a fact's commit; it
+    # arrives as the cause of a ``ConnectorException``. Includes ``PoolTimeout``.
+    psycopg.OperationalError,
     redis_errors.ConnectionError,
     redis_errors.TimeoutError,
 )

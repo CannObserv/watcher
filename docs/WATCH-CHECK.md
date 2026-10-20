@@ -25,10 +25,10 @@ until F4 (#376), and Watcher holds group read only, so it cannot `XADD` one.
     with no message text, because an error's text can quote the payload.
     #371's example is a NUL in `info_item_id`: JSONB refuses it at the outbox
     write, as `DBAPIError`. A connection error is not an attempt (DB or broker
-    unreachable: `OSError`, `OperationalError` from SQLAlchemy or psycopg, an
-    invalidated connection, Postgres refusing service by SQLSTATE — class 08,
-    class 53, 57P01–57P03, which is how a restart arrives — and redis
-    connection or timeout). An outage therefore retires nothing.
+    unreachable: an `OSError` other than a filesystem one, `OperationalError`
+    from SQLAlchemy or psycopg, an invalidated connection, Postgres refusing
+    service by SQLSTATE — class 08, class 53, 57P01–57P03, which is how a
+    restart arrives — and redis connection or timeout). An outage therefore retires nothing.
     `InterfaceError` counts, because asyncpg raises it for session-state
     misuse, which recurs. The count lives in the process, so a restart resets
     it. A dead-lettered command gets **no** `check_rejected`, and Archiver

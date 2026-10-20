@@ -22,7 +22,7 @@ from src.core.fetch_commands import fetch_command_timeout_seconds
 from src.core.logging import get_logger
 from src.core.models.audit_log import EventType, audit
 from src.core.models.change_revision import ChangeRevision
-from src.core.models.fetch_command import FetchCommandStatus
+from src.core.models.fetch_command import FetchCommand, FetchCommandStatus
 from src.core.models.watched_item import WatchedItem
 from src.core.watched_items import (
     ArchivedItemActivationError,
@@ -421,7 +421,7 @@ async def mark_reviewed(watched_item_id: str, session: AsyncSession = Depends(ge
     return wi
 
 
-def _open_command_detail(open_command) -> str:
+def _open_command_detail(open_command: FetchCommand) -> str:
     """The fetch_open 409's text: where the open check is, and when it clears."""
     age = int((datetime.now(UTC) - open_command.issued_at).total_seconds())
     if open_command.status == FetchCommandStatus.PROCESSING:

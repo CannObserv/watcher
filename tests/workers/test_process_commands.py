@@ -1470,3 +1470,26 @@ class TestCommandedCheckRepublish:
 
         assert (await db_session.get(FetchCommand, row.fetch_command_id)).applied_at is not None
         republish.assert_awaited_once()
+
+    async def test_a_superseded_commanded_check_republishes(self, db_session, monkeypatch):
+        """CR 2: the newer check that superseded it may not republish itself."""
+        row = await _decisive(
+            db_session, fetch_over={"check_command_id": "01CHECK"}, **_completed()
+        )
+        item = await db_session.get(WatchedItem, row.watched_item_id)
+        fetch = await db_session.get(FetchCommand, row.fetch_command_id)
+        newer = await create_fetch_command(
+            db_session, item, now=fetch.issued_at + timedelta(minutes=5)
+        )
+        newer.status = FetchCommandStatus.SUCCEEDED
+        newer.applied_at = newer.issued_at
+        await db_session.flush()
+        _wire(db_session, monkeypatch)
+        _quiet(monkeypatch)
+        republish = AsyncMock()
+        monkeypatch.setattr(fc_mod, "defer_status_republish", republish)
+
+        result = await apply_process_fact(row.command_id)
+
+        assert result["reason"] == "superseded"
+        republish.assert_awaited_once()

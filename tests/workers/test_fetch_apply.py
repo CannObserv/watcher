@@ -784,6 +784,22 @@ class TestCommandedCheckRepublish:
         assert result["capped"] == 1
         republish.assert_awaited_once()
 
+    async def test_a_superseded_commanded_blob_republishes(self, db_session, monkeypatch):
+        """CR 2: the newer check that superseded it may not republish itself."""
+        wi, older = await _row_with_fact(db_session, check_command_id="01CHECK")
+        newer = await create_fetch_command(db_session, wi, now=NOW + timedelta(minutes=5))
+        newer.status = FetchCommandStatus.SUCCEEDED
+        newer.applied_at = NOW + timedelta(minutes=6)
+        await db_session.flush()
+        _wire(db_session, monkeypatch)
+        republish = AsyncMock()
+        monkeypatch.setattr(fc_mod, "defer_status_republish", republish)
+
+        result = await apply_fetch_blob(older.command_id, bus_client=fakeredis.FakeAsyncRedis())
+
+        assert result["reason"] == "superseded"
+        republish.assert_awaited_once()
+
     async def test_a_scheduled_failure_inside_an_episode_still_does_not(
         self, db_session, monkeypatch
     ):

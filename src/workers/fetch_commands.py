@@ -67,7 +67,7 @@ from src.workers.watch_status import defer_status_republish
 logger = get_logger(__name__)
 
 
-async def _republish_status(
+async def republish_status(
     watched_item: WatchedItem, *, transition: bool, check_command_id: str | None
 ) -> None:
     """Defer a watch-status republish on a health transition, or when a
@@ -76,7 +76,9 @@ async def _republish_status(
     The command's outcome is a level on ``info.watch-status``
     (``last_full_fetch_at`` past its ``requested_at``, plus ``health``), and a
     steady item publishes nothing of its own, so without this the outcome
-    waits for the periodic tick. Every outcome counts, a 304 included.
+    waits for the periodic tick. Every outcome counts, a 304 included, and so
+    does supersession (CR 2): the newer check that closed first may be a
+    scheduled one, which publishes nothing of its own.
     """
     if check_command_id is not None:
         logger.info(
@@ -130,7 +132,7 @@ async def record_check_failure(
     ``health_reason`` above. A reminder is not an edge and stages nothing.
 
     ``check_command_id`` is the fetch row's: a commanded check republishes
-    whatever the outcome (``_republish_status``).
+    whatever the outcome (``republish_status``).
     """
     audit(session, audit_event, watched_item_id=str(watched_item.id), **audit_kwargs)
     previous_health = watched_item.health_status
@@ -165,7 +167,7 @@ async def record_check_failure(
     # republishes (#264). Post-commit, best-effort; steady-state failures
     # never publish — that keeps the stream off the activity-rate curve.
     # A re-notify is not a transition and stays outside this guard.
-    await _republish_status(watched_item, transition=transition, check_command_id=check_command_id)
+    await republish_status(watched_item, transition=transition, check_command_id=check_command_id)
 
     if transition or renotify:
         error_event = WatchEvent(
@@ -252,7 +254,7 @@ async def _record_check_success(
 
     # Health transition (#264): post-commit, best-effort. A steady OK cycle
     # never publishes — its timestamps converge at the periodic republish.
-    await _republish_status(
+    await republish_status(
         watched_item,
         transition=previous_health != WatchHealthStatus.OK,
         check_command_id=check_command_id,
@@ -610,6 +612,9 @@ async def apply_fetch_blob(command_id: str, bus_client=None) -> dict:
         if newest_applied is not None and newest_applied > row.issued_at:
             row.status = FetchCommandStatus.SUPERSEDED
             await session.commit()
+            await republish_status(
+                watched_item, transition=False, check_command_id=row.check_command_id
+            )
             return {"skipped": True, "reason": "superseded"}
 
         # Async-probe resolution (#241 step 3): a PROBING item's first fact is

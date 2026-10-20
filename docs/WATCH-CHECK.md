@@ -53,9 +53,11 @@ because a scheduled 304 can move it.
 That stream publishes only on transitions and its periodic tick. So **a
 commanded check's completion republishes it, whatever the outcome**, a 304
 included. Every terminal path takes the fetch row's `check_command_id` into
-`record_check_failure` or `_record_check_success`, and `_republish_status`
+`record_check_failure` or `_record_check_success`, and `republish_status`
 defers one republish when either a health transition or a command asks for one
-(`src/workers/fetch_commands.py`).
+(`src/workers/fetch_commands.py`). A commanded fetch that is **superseded**
+republishes too: the newer check that closed first may be a scheduled one,
+which publishes nothing of its own.
 
 **`fetch_commands.check_command_id` is lineage**, like `forced_full_fetch`:
 the reaper's re-issue and the processor's `input_unreadable` re-fetch carry it,

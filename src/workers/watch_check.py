@@ -28,7 +28,7 @@ Per command (``WatchCheckCommand``, cannobserv ``docs/change_bus/watch.md``):
   pre-flight makes it skip, and the command is rejected ``fetch_open``. There is no
   success fact: the outcome is a level on ``info.watch-status``, and the fetch's
   completion republishes it whatever the outcome
-  (``src.workers.fetch_commands._republish_status``).
+  (``src.workers.fetch_commands.republish_status``).
 
 Nobody issues to this stream until F4 (#376); Watcher holds group read on it
 and cannot ``XADD`` there.

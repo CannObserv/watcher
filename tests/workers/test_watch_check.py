@@ -15,6 +15,7 @@ What Watcher owes Archiver's ``watch_check`` command (cannobserv
 """
 
 import asyncio
+import contextlib
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from typing import get_args
@@ -384,8 +385,13 @@ class TestDeliveryThreshold:
     ``info.watch-check.dlq`` after ``MAX_DELIVERY_ATTEMPTS`` and stops blocking
     the commands behind it. Before #389 it was reclaimed forever."""
 
-    async def _run(self, db_session, client, stop):
-        return asyncio.create_task(
+    @asynccontextmanager
+    async def _running(self, db_session, client):
+        """Run the loop for the block. A clean pass stops it and asserts it
+        exits; a failing one cancels it, so teardown never closes the session
+        under a live loop and buries the real failure (CR 8)."""
+        stop = asyncio.Event()
+        task = asyncio.create_task(
             run_watch_check_consumer(
                 client,
                 lambda: _rolling_back_session_ctx(db_session),
@@ -394,6 +400,15 @@ class TestDeliveryThreshold:
                 error_backoff_seconds=0.01,
             )
         )
+        try:
+            yield
+        except BaseException:
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError, Exception):
+                await task
+            raise
+        stop.set()
+        await asyncio.wait_for(task, timeout=5)
 
     def _count_attempts(self, monkeypatch, *, fail=None):
         """Wrap the real processor; ``fail(message, attempt)`` may raise first.
@@ -427,9 +442,6 @@ class TestDeliveryThreshold:
         behind = _command(ULID())
         await client.xadd(streams.INFO_WATCH_CHECK, to_wire(behind.payload))
         attempts, outcomes = self._count_attempts(monkeypatch)
-        stop = asyncio.Event()
-
-        task = await self._run(db_session, client, stop)
 
         async def _both_handled():
             return (
@@ -438,9 +450,8 @@ class TestDeliveryThreshold:
             )
 
         with caplog.at_level("ERROR", logger="src.workers.fetch_facts"):
-            await _until(_both_handled)
-        stop.set()
-        await asyncio.wait_for(task, timeout=5)
+            async with self._running(db_session, client):
+                await _until(_both_handled)
 
         # The command_id is what an operator tells Archiver (CR 2).
         (logged,) = [r for r in caplog.records if "dead-lettered" in r.getMessage()]
@@ -475,16 +486,12 @@ class TestDeliveryThreshold:
         client = fakeredis.FakeAsyncRedis()
         command = _command(ULID())
         await client.xadd(streams.INFO_WATCH_CHECK, to_wire(command.payload))
-        stop = asyncio.Event()
-
-        task = await self._run(db_session, client, stop)
 
         async def _answered():
             return command.payload.command_id in outcomes
 
-        await _until(_answered)
-        stop.set()
-        await asyncio.wait_for(task, timeout=5)
+        async with self._running(db_session, client):
+            await _until(_answered)
 
         assert outcomes[command.payload.command_id] == "rejected_unknown_item"
         assert attempts[command.payload.command_id] == outage + 1
@@ -511,16 +518,12 @@ class TestDeliveryThreshold:
         poison = _poison_command()
         await client.xadd(streams.INFO_WATCH_CHECK, to_wire(poison.payload))
         attempts, _outcomes = self._count_attempts(monkeypatch)
-        stop = asyncio.Event()
-
-        task = await self._run(db_session, client, stop)
 
         async def _dead_lettered():
             return await client.xlen(dlq_name(streams.INFO_WATCH_CHECK)) == 1
 
-        await _until(_dead_lettered)
-        stop.set()
-        await asyncio.wait_for(task, timeout=5)
+        async with self._running(db_session, client):
+            await _until(_dead_lettered)
 
         assert refused, "the DLQ write was never attempted under refusal"
         assert attempts[poison.payload.command_id] == ff_mod.MAX_DELIVERY_ATTEMPTS

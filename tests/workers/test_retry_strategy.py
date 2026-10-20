@@ -4,7 +4,7 @@ Post-cutover (#241 step 5) the task makes no origin request, so the httpx
 exceptions it used to retry on are unreachable. What remains retryable is the
 transient infrastructure underneath the issue itself — the DB read and the
 persist-before-publish write. A broker failure is deliberately NOT retried
-here: ``_issue_fetch_command`` swallows it and leaves the row
+here: ``issue_fetch_command`` swallows it and leaves the row
 ``pending_publish`` for the every-minute sweep, which is the durable path.
 """
 

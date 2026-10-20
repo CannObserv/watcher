@@ -76,7 +76,7 @@ GROUP_NAME_DERIVERS = frozenset({"group_name"})
 # a complete one. That is the silent failure the taxonomy exists to prevent (CR-28).
 BOUNDED_MAXLEN_RESOLVERS = frozenset({"resolve_stream_maxlen"})
 
-# Every stream Watcher touches: six published, three consumed — six until F1
+# Every stream Watcher touches: six published, four consumed — six until F1
 # (#374) retires `content.fetch-policy`, then five again. AGENTS.md and
 # BUS.md say exactly that in prose; asserting the set — not just each
 # kind — is what makes an *addition* fail here rather than drift silently (CR-29).
@@ -89,6 +89,7 @@ WATCHER_STREAMS = frozenset(
         streams.CONTENT_FETCH_POLICY,
         streams.CONTENT_PROCESS,
         streams.INFO_REGISTRY,
+        streams.INFO_WATCH_CHECK,
         streams.INFO_WATCH_EVENTS,
         streams.INFO_WATCH_STATUS,
     }
@@ -569,24 +570,24 @@ class TestUncappedStreamsStayUncapped:
         assert not self._is_trim(ast.parse("client.xadd('s', {})").body[0].value)
 
 
-class TestNoDeadLetterWriterExistsYet:
-    """Watcher writes no dead letter today, and broker#2's ACL grant is for a
-    path with no caller (#288).
+class TestTheOnlyDeadLetterWriter:
+    """Watcher writes exactly one dead letter: an undecodable command on
+    ``info.watch-check`` goes to ``info.watch-check.dlq`` (#371).
 
-    ``content.blobs.dlq`` becomes Watcher's under CannObserv/broker#1 Phase 5,
-    but the blobs loop's current poison-frame policy is to *ack past* an
-    undecodable frame: on a fact stream read with our own group there is no
-    correlation obligation to discharge and no DLQ of ours to route to
-    (``src/workers/fetch_facts.py``). That sentence is load-bearing for
-    CannObserv/broker#2 — the ACL user for Watcher is being drafted from what a
-    ``MONITOR`` capture saw, and it saw no ``XADD content.blobs.dlq`` because
-    nothing issues one. This is what stops that staying true silently.
+    That DLQ is Watcher's by CannObserv/broker#93's grant: Watcher writes it,
+    audits it (``XLEN``/``XRANGE``) and ``XDEL``\\ s from it. The fact inboxes
+    keep their policy of acking past an undecodable frame — on a fact stream
+    read with our own group there is no correlation obligation to discharge
+    (``src/workers/fetch_facts.py``) — and ``content.blobs.dlq`` stays
+    ungranted. A second writer means a DLQ the broker's ACL user does not
+    grant, which is why this pins *where* the one writer is and *which stream*
+    turns it on.
 
-    The observed command form, when the seam is finally wired, is two commands
-    and the ack lands on the **original** stream::
+    The observed command form is two commands, and the ack lands on the
+    **original** stream::
 
-        "XADD" "content.blobs.dlq" "*" <fields…>
-        "XACK" "content.blobs" "watcher.blobs" "<id>"
+        "XADD" "info.watch-check.dlq" "*" <fields…>
+        "XACK" "info.watch-check" "watcher.watch-check" "<id>"
 
     Two spellings reach a ``.dlq`` stream and both are matched: the co-core seam
     ``consumer.dead_letter(...)``, and a hand-rolled ``xadd(dlq_name(topic), …)``
@@ -601,22 +602,47 @@ class TestNoDeadLetterWriterExistsYet:
     of not silently excusing the call that matters.
     """
 
-    def test_no_module_under_the_scanned_roots_writes_a_dead_letter(self):
-        writers = [
-            f"{path.relative_to(ROOT)}:{call.lineno} ({_callee(call)})"
+    WRITER = "src/workers/fetch_facts.py"
+    # The loop writes only when a caller turns it on; this is the one that does.
+    ENABLER = "src/workers/watch_check.py"
+
+    def test_the_shared_loop_is_the_only_dead_letter_writer(self):
+        writers = {
+            f"{path.relative_to(ROOT)} ({_callee(call)})"
             for name in ("dead_letter", "dlq_name")
             for path, _tree, call in _calls(name)
             if name == "dlq_name" or isinstance(call.func, ast.Attribute)
-        ]
-        assert writers == [], (
-            f"a dead-letter writer appeared: {writers}.\n"
+        }
+        assert writers == {f"{self.WRITER} (dead_letter)"}, (
+            f"the dead-letter writers changed: {sorted(writers)}.\n"
             "  If it is AsyncBusConsumer.dead_letter or a dlq_name() call, Watcher now "
-            "issues XADD <topic>.dlq and CannObserv/broker#2's ACL user must grant it — "
-            "update docs/BUS-CONNECTION-POLICY.md and this test together.\n"
+            "issues XADD to another <topic>.dlq and CannObserv/broker's ACL user must grant "
+            "it — update docs/BUS-CONNECTION-POLICY.md and this test together.\n"
             "  If it is the unrelated dead_letter() in src/core/sources/outbox.py (a "
             "Postgres column stamp, no Redis command) reached through a module alias, "
             "add that receiver to this rule's exclusion instead."
         )
+
+    def test_only_the_watch_check_inbox_turns_it_on(self):
+        enablers = {
+            str(path.relative_to(ROOT))
+            for path, _tree, call in _calls("run_fact_consumer")
+            for kw in call.keywords
+            if kw.arg == "dead_letter_poison"
+            and not (isinstance(kw.value, ast.Constant) and kw.value.value is False)
+        }
+        assert enablers == {self.ENABLER}, (
+            f"dead_letter_poison is enabled by {sorted(enablers)}; the broker grants only "
+            f"{dlq_name(streams.INFO_WATCH_CHECK)}"
+        )
+        topics = {
+            _resolve_topic(kw.value, _stream_aliases(tree), _module_aliases(tree))
+            for path, tree, call in _calls("run_fact_consumer")
+            if str(path.relative_to(ROOT)) == self.ENABLER
+            for kw in call.keywords
+            if kw.arg == "topic"
+        }
+        assert topics == {streams.INFO_WATCH_CHECK}
 
     def test_the_rule_still_has_something_to_look_for(self):
         """Every other rule here ends in ``assert found, "…been renamed?"``. A
@@ -665,7 +691,7 @@ class TestTaxonomyCoverage:
             assert stream_kind(topic) in {"command", "fact", "config_state"}
 
     def test_the_inventory_is_exactly_what_the_docs_describe(self):
-        """AGENTS.md and BUS.md say six published and three consumed.
+        """AGENTS.md and BUS.md say six published and four consumed.
         Pinning each stream's *kind* catches a co-core reclassification but not
         an addition, and the prose is wrong either way (CR-29)."""
         referenced = set()
@@ -678,7 +704,7 @@ class TestTaxonomyCoverage:
                         referenced.add(topic)
         assert referenced == WATCHER_STREAMS, (
             "the set of streams Watcher touches changed — update the inventory here and "
-            "the 'publishes six streams and consumes three' prose in AGENTS.md and "
+            "the 'publishes six streams and consumes four' prose in AGENTS.md and "
             "docs/BUS.md, which this set exists to keep honest"
         )
 
@@ -691,6 +717,7 @@ class TestTaxonomyCoverage:
             (streams.INFO_WATCH_EVENTS, "fact"),
             (streams.CONTENT_FETCH, "command"),
             (streams.CONTENT_PROCESS, "command"),
+            (streams.INFO_WATCH_CHECK, "command"),
             (streams.CONTENT_FETCH_POLICY, "config_state"),
             (streams.INFO_REGISTRY, "config_state"),
             (streams.INFO_WATCH_STATUS, "config_state"),
@@ -698,7 +725,7 @@ class TestTaxonomyCoverage:
     )
     def test_watchers_inventory_has_the_kinds_the_docs_claim(self, topic, kind):
         """AGENTS.md and BUS.md describe this inventory in prose —
-        six published streams and three consumed, one of the consumed three
+        six published streams and four consumed, one of the consumed four
         groupless. If co-core reclassifies one, that prose is wrong and this
         fails rather than the description quietly drifting."""
         assert stream_kind(topic) == kind

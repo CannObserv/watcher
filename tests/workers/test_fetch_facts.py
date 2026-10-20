@@ -691,7 +691,10 @@ class TestConnectionErrorsAreNotAttempts:
         """The fact inboxes commit, then defer the apply over Procrastinate's own
         psycopg pool, which re-raises a psycopg error as ``ConnectorException``.
         Counted, a pool outage after the commit acks the fact past with the row
-        recorded and no apply deferred — and nothing re-defers it (CR 1)."""
+        recorded and no apply deferred (CR 1). A blob fact's apply then waits for
+        the reaper's re-defer, ``WATCHER_FETCH_COMMAND_TIMEOUT_SECONDS`` later;
+        a failure or 304 fact has already moved its row off ``in_flight``, out of
+        the reaper's sight, and its apply never runs (CR 10)."""
         try:
             try:
                 raise psycopg.OperationalError("connection failed: Connection refused")

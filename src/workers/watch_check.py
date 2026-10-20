@@ -23,7 +23,9 @@ Per command (``WatchCheckCommand``, cannobserv ``docs/change_bus/watch.md``):
   inactive, so it is ``paused`` (operator decision on #371). ``unknown_item``
   is the one reason that names no ``info_source_id``.
 * **Accepted** — a forced full fetch, issued inline through the same path as
-  ``check_watched_item``, its row carrying ``check_command_id``. There is no
+  ``check_watched_item``, its row carrying ``check_command_id``. That path
+  re-reads the open-command gate; a scheduled check that committed after
+  pre-flight makes it skip, and the command is rejected ``fetch_open``. There is no
   success fact: the outcome is a level on ``info.watch-status``, and the fetch's
   completion republishes it whatever the outcome
   (``src.workers.fetch_commands._republish_status``).
@@ -170,6 +172,13 @@ async def process_watch_check_message(
     result = await issue_fetch_command(
         session, item, bus_client, force_full_fetch=True, check_command_id=command.command_id
     )
+    if result.get("skipped"):
+        # CR 1: the issue path re-reads the gate, and a scheduled check that
+        # committed after pre-flight shuts it. Nothing was issued, so the audit
+        # goes and the command is answered like any other open fetch.
+        info_source_id = item.archiver_info_source_id
+        await session.rollback()
+        return await _reject(session, command, "fetch_open", info_source_id=info_source_id)
     logger.info(
         "watch_check accepted",
         extra={

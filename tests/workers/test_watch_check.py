@@ -33,6 +33,7 @@ from co_core.pure.models.changes import (
 from sqlalchemy import select
 from ulid import ULID
 
+import src.workers.watch_check as wc_mod
 from src.core.fetch_commands import create_fetch_command
 from src.core.models.audit_log import AuditLog, EventType
 from src.core.models.fetch_command import FetchCommand, FetchCommandStatus
@@ -169,6 +170,29 @@ class TestRejected:
 
         assert outcome == "rejected_fetch_open"
         assert len(await _fetches(db_session, wi)) == 1  # nothing new issued
+
+    async def test_a_command_issued_after_pre_flight_still_rejects(self, db_session, monkeypatch):
+        """CR 1: pre-flight and the issue read the gate separately. A scheduled
+        check that commits between them makes the issue skip; the command must
+        still be answered, and the staged audit must not claim a check."""
+        wi = await make_watched_item(db_session)
+        await db_session.commit()
+        real_issue = wc_mod.issue_fetch_command
+
+        async def _scheduled_first(session, item, bus_client, **kwargs):
+            await create_fetch_command(session, item, now=NOW)  # the scheduler's
+            await session.flush()
+            return await real_issue(session, item, bus_client, **kwargs)
+
+        monkeypatch.setattr(wc_mod, "issue_fetch_command", _scheduled_first)
+
+        outcome = await _process(db_session, _command(wi.archiver_info_item_id))
+
+        assert outcome == "rejected_fetch_open"
+        (row,) = await _rejections(db_session)
+        assert row.payload["reason"] == "fetch_open"
+        stmt = select(AuditLog).where(AuditLog.event_type == EventType.WATCHED_ITEM_CHECK_REQUESTED)
+        assert (await db_session.execute(stmt)).scalars().all() == []
 
     async def test_an_unknown_item_names_no_source(self, db_session):
         item_id = ULID()

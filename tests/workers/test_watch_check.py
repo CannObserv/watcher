@@ -17,6 +17,7 @@ What Watcher owes Archiver's ``watch_check`` command (cannobserv
 import asyncio
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
+from typing import get_args
 
 import fakeredis
 import pytest
@@ -26,6 +27,7 @@ from co_core.pure.adapters.bus.envelope import from_wire, to_wire
 from co_core.pure.adapters.bus.streams import dlq_name, group_name
 from co_core.pure.models.changes import (
     CheckRejectedEmit,
+    CheckRejectionReason,
     ContentFetchCommand,
     WatchCheckCommandEmit,
     WatchErrorEmit,
@@ -34,6 +36,7 @@ from sqlalchemy import select
 from ulid import ULID
 
 import src.workers.watch_check as wc_mod
+from src.core.check_now import CheckRefusal
 from src.core.fetch_commands import create_fetch_command
 from src.core.models.audit_log import AuditLog, EventType
 from src.core.models.fetch_command import FetchCommand, FetchCommandStatus
@@ -41,6 +44,7 @@ from src.core.models.pending_watch_event import PendingWatchEvent
 from src.workers.watch_check import (
     CONSUMER_GROUP,
     CONSUMER_NAME,
+    REJECTION_REASONS,
     process_watch_check_message,
     run_watch_check_consumer,
 )
@@ -222,6 +226,17 @@ class TestRejected:
         await db_session.rollback()
 
         assert len(await _rejections(db_session)) == 1
+
+
+class TestRejectionVocabulary:
+    """CR 5: a refusal with no token raises ``KeyError`` inside ``process``,
+    and the loop reclaims that command forever, wedging every one behind it."""
+
+    def test_every_refusal_has_a_token(self):
+        assert set(REJECTION_REASONS) == set(CheckRefusal)
+
+    def test_every_token_is_in_the_closed_vocabulary(self):
+        assert set(REJECTION_REASONS.values()) <= set(get_args(CheckRejectionReason))
 
 
 class TestForeignPayloads:

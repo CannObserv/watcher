@@ -6,6 +6,13 @@ contract `docs/change_bus/watch.md` at cannobserv v0.37.0, consumer group
 this one carries what happened. Watcher's own notification dispatch runs beside
 it until F3 (#376) moves composition to Archiver.
 
+A fourth fact, `check_rejected`, shares the stream and the outbox but is not an
+edge: it answers an Archiver `watch_check` command Watcher will not run (#371,
+[WATCH-CHECK.md](WATCH-CHECK.md)). `enqueue_check_rejected` takes the ids
+rather than an item, since `unknown_item` has none; the outbox's
+`info_item_id` column is clipped to its 26 characters for an id that is not a
+ULID, and the payload keeps it verbatim.
+
 ## The three edges
 
 | Fact | Staged in | When |
@@ -48,7 +55,7 @@ in its new health contains the fact.
   the edge, so a redelivery (a crash between `XADD` and the drain's commit)
   carries the same key.
 - **`payload` is the fact's field map.** A new kind is an entry in
-  `WATCH_EVENT_EMITS` and needs no migration (#371's `check_rejected`).
+  `WATCH_EVENT_EMITS` and needs no migration (#371's `check_rejected` was).
 - **No FK to the item.** A fact outlives a revoke, because the edge happened.
   Archiver closes an open episode on the revoke itself.
 - **Validated at drain time, never at the edge.** An Emit refusal at the edge

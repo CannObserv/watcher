@@ -110,6 +110,22 @@ _CONNECTION_ERRORS = (
     redis_errors.ConnectionError,
     redis_errors.TimeoutError,
 )
+# Postgres refusing service, by SQLSTATE — on asyncpg, psycopg and SQLAlchemy's
+# translated errors alike. Needed because asyncpg's connect raises these raw:
+# SQLAlchemy neither translates nor flags them, so while the server restarts every
+# lazy connect inside ``process`` raises ``CannotConnectNowError`` (CR 6). Class
+# 08 is connection exception, 53 insufficient resources (slots, disk, memory);
+# 57P01–57P03 are admin shutdown, crash shutdown, cannot connect now. 57014
+# (a statement timeout) is absent: it can be the message's own fault.
+_UNAVAILABLE_SQLSTATE_CLASSES = ("08", "53")
+_UNAVAILABLE_SQLSTATES = frozenset({"57P01", "57P02", "57P03"})
+
+
+def _is_unavailable_sqlstate(exc: BaseException) -> bool:
+    sqlstate = getattr(exc, "sqlstate", None)
+    if not isinstance(sqlstate, str):
+        return False
+    return sqlstate in _UNAVAILABLE_SQLSTATES or sqlstate[:2] in _UNAVAILABLE_SQLSTATE_CLASSES
 
 
 class DeferFn(Protocol):
@@ -324,6 +340,8 @@ def is_connection_error(exc: BaseException) -> bool:
         if isinstance(current, _CONNECTION_ERRORS):
             return True
         if isinstance(current, sa_exc.DBAPIError) and current.connection_invalidated:
+            return True
+        if _is_unavailable_sqlstate(current):
             return True
         current = current.__cause__
     return False

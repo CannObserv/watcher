@@ -21,6 +21,7 @@ from typing import get_args
 
 import fakeredis
 import pytest
+from asyncpg.exceptions import CannotConnectNowError
 from co_core.pure.adapters.bus import streams
 from co_core.pure.adapters.bus.dead_letter import split_dead_letter
 from co_core.pure.adapters.bus.envelope import from_wire, to_wire
@@ -34,7 +35,6 @@ from co_core.pure.models.changes import (
 )
 from redis.exceptions import ResponseError
 from sqlalchemy import select
-from sqlalchemy.exc import OperationalError
 from ulid import ULID
 
 import src.workers.fetch_facts as ff_mod
@@ -463,12 +463,13 @@ class TestDeliveryThreshold:
         self, db_session, monkeypatch
     ):
         """A Postgres restart outlasting the threshold must not cost Archiver
-        an answer: connection-class errors are not attempts."""
+        an answer: connection-class errors are not attempts. While the server
+        starts, asyncpg's connect raises this raw — untranslated, unflagged."""
         outage = 3 * ff_mod.MAX_DELIVERY_ATTEMPTS
 
         def _db_down(message, attempt):
             if attempt <= outage:
-                raise OperationalError("SELECT 1", {}, ConnectionRefusedError("db down"))
+                raise CannotConnectNowError("the database system is starting up")
 
         attempts, outcomes = self._count_attempts(monkeypatch, fail=_db_down)
         client = fakeredis.FakeAsyncRedis()

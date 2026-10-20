@@ -17,6 +17,7 @@ import asyncio
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
 
+import asyncpg.exceptions as pg_errors
 import fakeredis
 import psycopg
 import pytest
@@ -671,6 +672,16 @@ class TestConnectionErrorsAreNotAttempts:
             pytest.param(redis_errors.TimeoutError("slow"), id="redis-timeout"),
             pytest.param(ConnectionRefusedError("refused"), id="os-refused"),
             pytest.param(TimeoutError(), id="builtin-timeout"),
+            # Postgres refusing service, raised raw by asyncpg's connect —
+            # SQLAlchemy neither translates nor flags it (CR 6).
+            pytest.param(
+                pg_errors.CannotConnectNowError("the database system is starting up"),
+                id="pg-57P03-starting-up",
+            ),
+            pytest.param(pg_errors.AdminShutdownError("terminating"), id="pg-57P01-admin"),
+            pytest.param(pg_errors.CrashShutdownError("crash"), id="pg-57P02-crash"),
+            pytest.param(pg_errors.TooManyConnectionsError("slots"), id="pg-53300-slots"),
+            pytest.param(pg_errors.ConnectionFailureError("lost"), id="pg-08006-failure"),
         ],
     )
     def test_unreachable_dependencies_do_not_count(self, exc):
@@ -708,6 +719,9 @@ class TestConnectionErrorsAreNotAttempts:
             # operation is in progress"), which recurs on every attempt.
             pytest.param(_sa_error(sa_exc.InterfaceError), id="sa-interface"),
             pytest.param(redis_errors.ResponseError("NOPERM"), id="redis-response"),
+            # A statement timeout can be the message's own fault: it counts.
+            pytest.param(pg_errors.QueryCanceledError("timeout"), id="pg-57014-canceled"),
+            pytest.param(pg_errors.UniqueViolationError("dup"), id="pg-23505-unique"),
             pytest.param(ValueError("bad"), id="value-error"),
         ],
     )

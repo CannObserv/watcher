@@ -389,6 +389,7 @@ async def _fail_processor_fault(
         audit_kwargs={"reason": reason, "detail": detail},
         error_metadata={"reason": reason},
         health_reason=reason,
+        check_command_id=fetch.check_command_id,
     )
     return {"error": reason}
 

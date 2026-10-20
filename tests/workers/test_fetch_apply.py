@@ -718,6 +718,89 @@ class TestStatusRepublishOnTransition:
         assert spy.await_count == 1  # only the OK -> ERROR transition
 
 
+class TestCommandedCheckRepublish:
+    """#371: a ``watch_check``'s completion republishes watch-status whatever
+    the outcome, a 304 included; the item is held steady so the republish is
+    the command's, not a transition's. The success leg is the derived one's
+    (``tests/workers/test_process_commands.py``)."""
+
+    async def _commanded(self, db_session, monkeypatch, *, health, **row_fields):
+        wi = await make_watched_item(
+            db_session, primary_url="https://lcb.wa.gov/notices", health_status=health
+        )
+        row = await create_fetch_command(
+            db_session, wi, now=NOW, force_full_fetch=True, check_command_id="01CHECK"
+        )
+        for key, value in row_fields.items():
+            setattr(row, key, value)
+        await db_session.flush()
+        _wire(db_session, monkeypatch)
+        monkeypatch.setattr(fc_mod, "dispatch_event_notifications", AsyncMock(return_value=0))
+        republish = AsyncMock()
+        monkeypatch.setattr(fc_mod, "defer_status_republish", republish)
+        return row, republish
+
+    async def test_a_fetch_failure_republishes(self, db_session, monkeypatch):
+        row, republish = await self._commanded(
+            db_session,
+            monkeypatch,
+            health=WatchHealthStatus.ERROR,
+            status=FetchCommandStatus.FAILED,
+            failure_reason="http_status",
+            status_code=503,
+        )
+
+        await apply_fetch_failure(row.command_id)
+
+        republish.assert_awaited_once()
+
+    async def test_a_not_modified_republishes(self, db_session, monkeypatch):
+        row, republish = await self._commanded(
+            db_session,
+            monkeypatch,
+            health=WatchHealthStatus.OK,
+            status=FetchCommandStatus.NOT_MODIFIED,
+            status_code=304,
+        )
+
+        await apply_fetch_not_modified(row.command_id)
+
+        republish.assert_awaited_once()
+
+    async def test_the_reaper_cap_republishes(self, db_session, monkeypatch):
+        row, republish = await self._commanded(
+            db_session,
+            monkeypatch,
+            health=WatchHealthStatus.ERROR,
+            status=FetchCommandStatus.IN_FLIGHT,
+            reissue_count=3,
+            published_at=datetime.now(UTC) - timedelta(hours=1),
+        )
+
+        result = await reap_fetch_commands(
+            session=db_session, bus_client=fakeredis.FakeAsyncRedis()
+        )
+
+        assert result["capped"] == 1
+        republish.assert_awaited_once()
+
+    async def test_a_scheduled_failure_inside_an_episode_still_does_not(
+        self, db_session, monkeypatch
+    ):
+        row, republish = await self._commanded(
+            db_session,
+            monkeypatch,
+            health=WatchHealthStatus.ERROR,
+            status=FetchCommandStatus.FAILED,
+            failure_reason="http_status",
+            check_command_id=None,
+        )
+
+        await apply_fetch_failure(row.command_id)
+
+        republish.assert_not_awaited()
+
+
 class TestErrorRenotify:
     """#71: a persistent ERROR re-sends ``WATCH_ERROR`` once per
     ``WATCHER_ERROR_RENOTIFY_INTERVAL``, stamping ``last_error_notified_at`` on

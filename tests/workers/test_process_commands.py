@@ -1395,3 +1395,78 @@ class TestWatchEventFacts:
         assert fact.event_type == "watch_recovered"
         assert WatchRecoveredEmit.model_validate(fact.payload).error_since == started
         assert item.error_since is None
+
+
+class TestCommandedCheckRepublish:
+    """#371: a ``watch_check``'s completion republishes ``info.watch-status``,
+    whatever the outcome. The outcome is a level there (``last_full_fetch_at``
+    past ``requested_at``, plus ``health``), and the stream otherwise publishes
+    only on a health transition, so a steady item's check would show at the
+    next periodic tick. Each test holds the item steady, so a republish is the
+    command's and not a transition's."""
+
+    async def _run(self, db_session, monkeypatch, *, commanded, health, **fields) -> AsyncMock:
+        row = await _decisive(
+            db_session,
+            fetch_over={"check_command_id": "01CHECK" if commanded else None},
+            item_over={"health_status": health},
+            **fields,
+        )
+        _wire(db_session, monkeypatch)
+        _quiet(monkeypatch)
+        republish = AsyncMock()
+        monkeypatch.setattr(fc_mod, "defer_status_republish", republish)
+        await apply_process_fact(row.command_id, bus_client=fakeredis.FakeAsyncRedis())
+        return republish
+
+    async def test_a_commanded_success_republishes(self, db_session, monkeypatch):
+        republish = await self._run(
+            db_session, monkeypatch, commanded=True, health=WatchHealthStatus.OK, **_completed()
+        )
+        republish.assert_awaited_once()
+
+    async def test_a_scheduled_success_still_does_not(self, db_session, monkeypatch):
+        republish = await self._run(
+            db_session, monkeypatch, commanded=False, health=WatchHealthStatus.OK, **_completed()
+        )
+        republish.assert_not_awaited()
+
+    async def test_a_commanded_extraction_failure_republishes(self, db_session, monkeypatch):
+        republish = await self._run(
+            db_session,
+            monkeypatch,
+            commanded=True,
+            health=WatchHealthStatus.ERROR,
+            **_failed("extraction_error"),
+        )
+        republish.assert_awaited_once()
+
+    async def test_a_commanded_unreadable_blob_at_the_cap_republishes(
+        self, db_session, monkeypatch
+    ):
+        monkeypatch.setenv(FETCH_MAX_REISSUES_ENV, "0")
+        republish = await self._run(
+            db_session,
+            monkeypatch,
+            commanded=True,
+            health=WatchHealthStatus.ERROR,
+            **_failed("input_unreadable"),
+        )
+        republish.assert_awaited_once()
+
+    async def test_a_commanded_processor_timeout_republishes(self, db_session, monkeypatch):
+        monkeypatch.setenv(PROCESS_COMMAND_HARD_LIMIT_ENV, "7200")
+        row = await _decisive(
+            db_session,
+            issued_at=datetime.now(UTC) - timedelta(hours=3),
+            fetch_over={"check_command_id": "01CHECK"},
+            item_over={"health_status": WatchHealthStatus.ERROR},
+        )
+        _quiet(monkeypatch)
+        republish = AsyncMock()
+        monkeypatch.setattr(fc_mod, "defer_status_republish", republish)
+
+        await reap_process_commands(session=db_session, bus_client=fakeredis.FakeAsyncRedis())
+
+        assert (await db_session.get(FetchCommand, row.fetch_command_id)).applied_at is not None
+        republish.assert_awaited_once()

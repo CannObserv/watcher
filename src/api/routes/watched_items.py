@@ -16,12 +16,13 @@ from src.api.schemas.watched_item import (
     WatchedItemPatch,
     WatchedItemResponse,
 )
+from src.core.check_now import CheckRefusal, preflight_check
 from src.core.domains import domain_name_for_url, ensure_domain_and_resolve_suspension
-from src.core.fetch_commands import fetch_command_timeout_seconds, get_open_command
+from src.core.fetch_commands import fetch_command_timeout_seconds
 from src.core.logging import get_logger
 from src.core.models.audit_log import EventType, audit
 from src.core.models.change_revision import ChangeRevision
-from src.core.models.fetch_command import FetchCommandStatus
+from src.core.models.fetch_command import FetchCommand, FetchCommandStatus
 from src.core.models.watched_item import WatchedItem
 from src.core.watched_items import (
     ArchivedItemActivationError,
@@ -420,13 +421,38 @@ async def mark_reviewed(watched_item_id: str, session: AsyncSession = Depends(ge
     return wi
 
 
+def _open_command_detail(open_command: FetchCommand) -> str:
+    """The fetch_open 409's text: where the open check is, and when it clears."""
+    age = int((datetime.now(UTC) - open_command.issued_at).total_seconds())
+    if open_command.status == FetchCommandStatus.PROCESSING:
+        # #326: the bytes are in and the processor has them. Its own reaper —
+        # not the fetch timeout — decides when an unanswered check ends.
+        return (
+            f"A check for this WatchedItem is awaiting the processor (issued {age}s "
+            f"ago). It completes when the processor answers, or fails automatically "
+            f"if it never does; no action needed."
+        )
+    # Say when it clears (CR-25). The normal round-trip is under a second,
+    # so an operator who sees this is looking at a stalled command — and
+    # "already in flight" alone gives them no idea whether to wait 2 seconds
+    # or 30 minutes. The reaper expires an unanswered command after
+    # WATCHER_FETCH_COMMAND_TIMEOUT_SECONDS and re-issues it automatically.
+    timeout = int(fetch_command_timeout_seconds())
+    return (
+        f"A fetch command for this WatchedItem is already in flight "
+        f"(issued {age}s ago). It is retried or expired automatically "
+        f"within {timeout}s of its last signal; no action needed."
+    )
+
+
 @router.post("/{watched_item_id}/check-now", response_model=WatchedItemResponse, status_code=202)
 async def check_now(watched_item_id: str, session: AsyncSession = Depends(get_db_session)):
     """Enqueue an immediate ``check_watched_item`` task for a WatchedItem.
 
     Pre-flight guards mirror **every** short-circuit in the task, so a request
     that cannot do anything is rejected up front instead of returning 202 over
-    a silent no-op (and writing a check_requested audit row that never happened):
+    a silent no-op (and writing a check_requested audit row that never happened).
+    The verdict is ``src.core.check_now.preflight_check`` (#371); this maps it:
 
     - 409 if the WatchedItem is archived.
     - 409 if the WatchedItem is paused (``is_active=False``).
@@ -440,54 +466,26 @@ async def check_now(watched_item_id: str, session: AsyncSession = Depends(get_db
     """
     wi = await _get_or_404(session, watched_item_id)
 
-    if wi.archived_at is not None:
-        raise HTTPException(status_code=409, detail="WatchedItem is archived")
-
-    if not wi.is_active:
-        raise HTTPException(
-            status_code=409,
-            detail=(
-                "WatchedItem is paused; resume it in Archiver"
-                if wi.applied_generation is not None
-                else "WatchedItem is paused"
-            ),
-        )
-
-    if wi.domain_suspended:
-        raise HTTPException(status_code=409, detail="WatchedItem's domain is suspended")
-
-    if not wi.effective_url:
-        raise HTTPException(status_code=422, detail="WatchedItem has no effective url")
-
-    open_command = await get_open_command(session, wi.id)
-    if open_command is not None and open_command.status == FetchCommandStatus.PROCESSING:
-        # #326: the bytes are in and the processor has them. Its own reaper —
-        # not the fetch timeout — decides when an unanswered check ends.
-        age = int((datetime.now(UTC) - open_command.issued_at).total_seconds())
-        raise HTTPException(
-            status_code=409,
-            detail=(
-                f"A check for this WatchedItem is awaiting the processor (issued {age}s "
-                f"ago). It completes when the processor answers, or fails automatically "
-                f"if it never does; no action needed."
-            ),
-        )
-    if open_command is not None:
-        # Say when it clears (CR-25). The normal round-trip is under a second,
-        # so an operator who sees this is looking at a stalled command — and
-        # "already in flight" alone gives them no idea whether to wait 2 seconds
-        # or 30 minutes. The reaper expires an unanswered command after
-        # WATCHER_FETCH_COMMAND_TIMEOUT_SECONDS and re-issues it automatically.
-        age = int((datetime.now(UTC) - open_command.issued_at).total_seconds())
-        timeout = int(fetch_command_timeout_seconds())
-        raise HTTPException(
-            status_code=409,
-            detail=(
-                f"A fetch command for this WatchedItem is already in flight "
-                f"(issued {age}s ago). It is retried or expired automatically "
-                f"within {timeout}s of its last signal; no action needed."
-            ),
-        )
+    # The verdict is core's (#371): the info.watch-check consumer shares it.
+    verdict = await preflight_check(session, wi)
+    match verdict.refusal:
+        case CheckRefusal.ARCHIVED:
+            raise HTTPException(status_code=409, detail="WatchedItem is archived")
+        case CheckRefusal.PAUSED:
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    "WatchedItem is paused; resume it in Archiver"
+                    if wi.applied_generation is not None
+                    else "WatchedItem is paused"
+                ),
+            )
+        case CheckRefusal.DOMAIN_SUSPENDED:
+            raise HTTPException(status_code=409, detail="WatchedItem's domain is suspended")
+        case CheckRefusal.NO_URL:
+            raise HTTPException(status_code=422, detail="WatchedItem has no effective url")
+        case CheckRefusal.FETCH_OPEN:
+            raise HTTPException(status_code=409, detail=_open_command_detail(verdict.open_command))
 
     # force_full_fetch (#269): an operator asking for a check now wants bytes,
     # not a 304 that confirms what we already believe. Conditional GET is the

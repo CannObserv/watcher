@@ -14,6 +14,7 @@ from unittest.mock import AsyncMock
 import pytest
 from co_core.pure.models.changes import (
     ChangeDetectedEmit,
+    CheckRejectedEmit,
     WatchErrorEmit,
     WatchRecoveredEmit,
 )
@@ -25,6 +26,7 @@ from src.core.models.pending_watch_event import PendingWatchEvent
 from src.core.watch_events import (
     WATCH_EVENT_EMITS,
     enqueue_change_detected,
+    enqueue_check_rejected,
     enqueue_watch_error,
     enqueue_watch_recovered,
 )
@@ -116,6 +118,70 @@ class TestChangeDetected:
         assert row.event_type == "change_detected"
 
 
+class TestCheckRejected:
+    """#371: the outcome of a ``watch_check`` command Watcher will not run.
+    Takes the ids rather than an item: an ``unknown_item`` has no row."""
+
+    async def test_the_payload_is_a_valid_rejection_fact(self, db_session):
+        wi = await make_watched_item(db_session)
+        command_id = str(ULID())
+
+        row = enqueue_check_rejected(
+            db_session,
+            info_item_id=str(wi.archiver_info_item_id),
+            info_source_id=wi.archiver_info_source_id,
+            command_id=command_id,
+            reason="paused",
+            now=NOW,
+        )
+
+        emit = CheckRejectedEmit.model_validate(row.payload)
+        assert emit.event_id == str(row.id)
+        assert emit.occurred_at == NOW
+        assert emit.info_item_id == str(wi.archiver_info_item_id)
+        assert emit.info_source_id == wi.archiver_info_source_id
+        assert (emit.command_id, emit.reason) == (command_id, "paused")
+        assert row.event_type == "check_rejected"
+        assert row.info_item_id == str(wi.archiver_info_item_id)
+
+    async def test_an_unknown_item_names_no_source(self, db_session):
+        item_id = str(ULID())
+
+        row = enqueue_check_rejected(
+            db_session,
+            info_item_id=item_id,
+            info_source_id=None,
+            command_id=str(ULID()),
+            reason="unknown_item",
+            now=NOW,
+        )
+        await db_session.flush()
+
+        assert "info_source_id" in row.payload  # required-but-nullable: stated
+        assert CheckRejectedEmit.model_validate(row.payload).info_source_id is None
+        assert row.info_item_id == item_id
+
+    async def test_an_id_too_long_for_the_query_column_is_kept_verbatim_in_the_fact(
+        self, db_session
+    ):
+        """A non-ULID id is answered ``unknown_item``, and must stage: the
+        column is a query aid sized for a ULID, the payload is the fact."""
+        item_id = "not-a-ulid-" + "x" * 40
+
+        row = enqueue_check_rejected(
+            db_session,
+            info_item_id=item_id,
+            info_source_id=None,
+            command_id=str(ULID()),
+            reason="unknown_item",
+            now=NOW,
+        )
+        await db_session.flush()
+
+        assert row.payload["info_item_id"] == item_id
+        assert len(row.info_item_id) == 26
+
+
 class TestStaging:
     async def test_writers_stage_and_never_commit(self, db_session, monkeypatch):
         """The edge's own commit carries the row; a writer that committed would
@@ -152,6 +218,14 @@ class TestStaging:
                 current_text_uri="gs://t/b",
                 extraction_changed=None,
                 previous_changed_at=None,
+            ),
+            enqueue_check_rejected(
+                db_session,
+                info_item_id=str(wi.archiver_info_item_id),
+                info_source_id=wi.archiver_info_source_id,
+                command_id=str(ULID()),
+                reason="fetch_open",
+                now=NOW,
             ),
         ]
         for row in staged:

@@ -718,6 +718,105 @@ class TestStatusRepublishOnTransition:
         assert spy.await_count == 1  # only the OK -> ERROR transition
 
 
+class TestCommandedCheckRepublish:
+    """#371: a ``watch_check``'s completion republishes watch-status whatever
+    the outcome, a 304 included; the item is held steady so the republish is
+    the command's, not a transition's. The success leg is the derived one's
+    (``tests/workers/test_process_commands.py``)."""
+
+    async def _commanded(self, db_session, monkeypatch, *, health, **row_fields):
+        wi = await make_watched_item(
+            db_session, primary_url="https://lcb.wa.gov/notices", health_status=health
+        )
+        row = await create_fetch_command(
+            db_session, wi, now=NOW, force_full_fetch=True, check_command_id="01CHECK"
+        )
+        for key, value in row_fields.items():
+            setattr(row, key, value)
+        await db_session.flush()
+        _wire(db_session, monkeypatch)
+        monkeypatch.setattr(fc_mod, "dispatch_event_notifications", AsyncMock(return_value=0))
+        republish = AsyncMock()
+        monkeypatch.setattr(fc_mod, "defer_status_republish", republish)
+        return row, republish
+
+    async def test_a_fetch_failure_republishes(self, db_session, monkeypatch):
+        row, republish = await self._commanded(
+            db_session,
+            monkeypatch,
+            health=WatchHealthStatus.ERROR,
+            status=FetchCommandStatus.FAILED,
+            failure_reason="http_status",
+            status_code=503,
+        )
+
+        await apply_fetch_failure(row.command_id)
+
+        republish.assert_awaited_once()
+
+    async def test_a_not_modified_republishes(self, db_session, monkeypatch):
+        row, republish = await self._commanded(
+            db_session,
+            monkeypatch,
+            health=WatchHealthStatus.OK,
+            status=FetchCommandStatus.NOT_MODIFIED,
+            status_code=304,
+        )
+
+        await apply_fetch_not_modified(row.command_id)
+
+        republish.assert_awaited_once()
+
+    async def test_the_reaper_cap_republishes(self, db_session, monkeypatch):
+        row, republish = await self._commanded(
+            db_session,
+            monkeypatch,
+            health=WatchHealthStatus.ERROR,
+            status=FetchCommandStatus.IN_FLIGHT,
+            reissue_count=3,
+            published_at=datetime.now(UTC) - timedelta(hours=1),
+        )
+
+        result = await reap_fetch_commands(
+            session=db_session, bus_client=fakeredis.FakeAsyncRedis()
+        )
+
+        assert result["capped"] == 1
+        republish.assert_awaited_once()
+
+    async def test_a_superseded_commanded_blob_republishes(self, db_session, monkeypatch):
+        """CR 2: the newer check that superseded it may not republish itself."""
+        wi, older = await _row_with_fact(db_session, check_command_id="01CHECK")
+        newer = await create_fetch_command(db_session, wi, now=NOW + timedelta(minutes=5))
+        newer.status = FetchCommandStatus.SUCCEEDED
+        newer.applied_at = NOW + timedelta(minutes=6)
+        await db_session.flush()
+        _wire(db_session, monkeypatch)
+        republish = AsyncMock()
+        monkeypatch.setattr(fc_mod, "defer_status_republish", republish)
+
+        result = await apply_fetch_blob(older.command_id, bus_client=fakeredis.FakeAsyncRedis())
+
+        assert result["reason"] == "superseded"
+        republish.assert_awaited_once()
+
+    async def test_a_scheduled_failure_inside_an_episode_still_does_not(
+        self, db_session, monkeypatch
+    ):
+        row, republish = await self._commanded(
+            db_session,
+            monkeypatch,
+            health=WatchHealthStatus.ERROR,
+            status=FetchCommandStatus.FAILED,
+            failure_reason="http_status",
+            check_command_id=None,
+        )
+
+        await apply_fetch_failure(row.command_id)
+
+        republish.assert_not_awaited()
+
+
 class TestErrorRenotify:
     """#71: a persistent ERROR re-sends ``WATCH_ERROR`` once per
     ``WATCHER_ERROR_RENOTIFY_INTERVAL``, stamping ``last_error_notified_at`` on
@@ -953,6 +1052,22 @@ class TestForcedFetchLineage:
         )
         assert reissued.forced_full_fetch is True
         assert reissued.request_etag is None
+
+
+class TestWatchCheckLineage:
+    """#371: the commanding ``watch_check`` is lineage, like the forced intent.
+    A reaped commanded fetch that came back unmarked would complete with no
+    republish, and Archiver would wait for the periodic tick to see it."""
+
+    async def test_a_reissue_keeps_the_watch_check(self, db_session):
+        wi, row = await _row_with_fact(db_session)
+        row.check_command_id = "01CHECK"
+        row.status = FetchCommandStatus.EXPIRED
+        await db_session.flush()
+
+        new_id = await reissue_fetch_command(db_session, wi, row, AsyncMock())
+
+        assert (await db_session.get(FetchCommand, new_id)).check_command_id == "01CHECK"
 
 
 class TestValidatorStorage:

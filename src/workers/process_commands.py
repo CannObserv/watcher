@@ -63,6 +63,7 @@ from src.workers.fetch_commands import (
     fail_extraction,
     record_check_failure,
     reissue_fetch_command,
+    republish_status,
 )
 from src.workers.pipeline import BlobProvenance, ExtractionOutcome, apply_extraction_outcome
 from src.workers.process_issue import persist_and_publish
@@ -240,6 +241,9 @@ async def _decide(
     if newest_applied is not None and newest_applied > fetch.issued_at:
         fetch.status = FetchCommandStatus.SUPERSEDED
         await session.commit()
+        await republish_status(
+            watched_item, transition=False, check_command_id=fetch.check_command_id
+        )
         return {"skipped": True, "reason": "superseded"}
 
     if row.status == ProcessCommandStatus.COMPLETED and not row.empty:
@@ -389,6 +393,7 @@ async def _fail_processor_fault(
         audit_kwargs={"reason": reason, "detail": detail},
         error_metadata={"reason": reason},
         health_reason=reason,
+        check_command_id=fetch.check_command_id,
     )
     return {"error": reason}
 

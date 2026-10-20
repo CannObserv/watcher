@@ -17,14 +17,18 @@ cadence is Archiver's, timed from the error edge plus the
 would raise inside the transaction that records the health change and roll it
 back — the hazard co-core's ``WatchHealthReason`` comment names. The drain
 dead-letters a payload its Emit refuses instead, and the row survives for
-post-mortem. ``WATCH_EVENT_EMITS`` is that validation's lookup; #371's
-``check_rejected`` joins it with no schema change.
+post-mortem. ``WATCH_EVENT_EMITS`` is that validation's lookup.
+
+**``check_rejected`` is the one fact that is not an edge** (#371): the outcome
+of a ``watch_check`` command Watcher will not run, staged in the consumer's
+commit. It takes the ids rather than an item, since ``unknown_item`` has none.
 """
 
 from datetime import UTC, datetime
 
 from co_core.pure.models.changes import (
     ChangeDetectedEmit,
+    CheckRejectedEmit,
     WatchErrorEmit,
     WatchRecoveredEmit,
 )
@@ -40,6 +44,7 @@ from src.core.utils import format_utc_iso
 #: ``PendingWatchEvent.event_type`` → the Emit twin the drain validates with.
 WATCH_EVENT_EMITS: dict[str, type[BaseModel]] = {
     "change_detected": ChangeDetectedEmit,
+    "check_rejected": CheckRejectedEmit,
     "watch_error": WatchErrorEmit,
     "watch_recovered": WatchRecoveredEmit,
 }
@@ -52,6 +57,9 @@ WATCH_EVENT_EMITS: dict[str, type[BaseModel]] = {
 # (AGENTS.md → *Single process is load-bearing*), so a process-local floor is
 # the whole guarantee.
 _last_event_id: ULID | None = None
+
+#: ``pending_watch_events.info_item_id``'s width: a ULID.
+INFO_ITEM_ID_COLUMN_LEN = 26
 
 
 def _mint_event_id() -> ULID:
@@ -68,6 +76,39 @@ def _iso(value: datetime | None) -> str | None:
     return None if value is None else format_utc_iso(value)
 
 
+def _stage_row(
+    session: AsyncSession,
+    event_type: str,
+    *,
+    info_item_id: str,
+    info_source_id: str | None,
+    now: datetime,
+    fields: dict,
+) -> PendingWatchEvent:
+    """Add one outbox row; the minted id is the fact's ``event_id``.
+
+    The ``info_item_id`` column is a query aid sized for a ULID; the payload
+    carries the id verbatim. Only a ``check_rejected`` for an id Watcher could
+    never hold exceeds it (#371), and that row is clipped, not refused.
+    """
+    event_id = _mint_event_id()
+    row = PendingWatchEvent(
+        id=event_id,
+        event_type=event_type,
+        info_item_id=info_item_id[:INFO_ITEM_ID_COLUMN_LEN],
+        payload={
+            "occurred_at": format_utc_iso(now),
+            "event_id": str(event_id),
+            "info_item_id": info_item_id,
+            "info_source_id": info_source_id,
+            **fields,
+        },
+        next_attempt_at=datetime.now(UTC),
+    )
+    session.add(row)
+    return row
+
+
 def _stage(
     session: AsyncSession,
     watched_item: WatchedItem,
@@ -76,24 +117,15 @@ def _stage(
     now: datetime,
     fields: dict,
 ) -> PendingWatchEvent:
-    """Add one outbox row; the minted id is the fact's ``event_id``."""
-    event_id = _mint_event_id()
-    info_item_id = str(watched_item.archiver_info_item_id)
-    row = PendingWatchEvent(
-        id=event_id,
-        event_type=event_type,
-        info_item_id=info_item_id,
-        payload={
-            "occurred_at": format_utc_iso(now),
-            "event_id": str(event_id),
-            "info_item_id": info_item_id,
-            "info_source_id": str(watched_item.archiver_info_source_id),
-            **fields,
-        },
-        next_attempt_at=datetime.now(UTC),
+    """Stage an edge of ``watched_item``: its own ids name the fact."""
+    return _stage_row(
+        session,
+        event_type,
+        info_item_id=str(watched_item.archiver_info_item_id),
+        info_source_id=str(watched_item.archiver_info_source_id),
+        now=now,
+        fields=fields,
     )
-    session.add(row)
-    return row
 
 
 def enqueue_watch_error(
@@ -161,4 +193,28 @@ def enqueue_change_detected(
             "extraction_changed": extraction_changed,
             "previous_changed_at": _iso(previous_changed_at),
         },
+    )
+
+
+def enqueue_check_rejected(
+    session: AsyncSession,
+    *,
+    info_item_id: str,
+    info_source_id: str | None,
+    command_id: str,
+    reason: str,
+    now: datetime,
+) -> PendingWatchEvent:
+    """Stage the rejection of ``watch_check`` command ``command_id`` (#371).
+
+    ``info_item_id`` is the command's, verbatim; ``info_source_id`` is ``None``
+    exactly when ``reason`` is ``unknown_item``, which the Emit checks at drain.
+    """
+    return _stage_row(
+        session,
+        "check_rejected",
+        info_item_id=info_item_id,
+        info_source_id=info_source_id,
+        now=now,
+        fields={"command_id": command_id, "reason": reason},
     )

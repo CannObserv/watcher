@@ -67,6 +67,32 @@ from src.workers.watch_status import defer_status_republish
 logger = get_logger(__name__)
 
 
+async def republish_status(
+    watched_item: WatchedItem, *, transition: bool, check_command_id: str | None
+) -> None:
+    """Defer a watch-status republish on a health transition, or when a
+    ``watch_check`` command's check completes (#371) — one republish for both.
+
+    The command's outcome is a level on ``info.watch-status``
+    (``last_full_fetch_at`` past its ``requested_at``, plus ``health``), and a
+    steady item publishes nothing of its own, so without this the outcome
+    waits for the periodic tick. Every outcome counts, a 304 included, and so
+    does supersession (CR 2): the newer check that closed first may be a
+    scheduled one, which publishes nothing of its own.
+    """
+    if check_command_id is not None:
+        logger.info(
+            "commanded check complete — republishing watch-status",
+            extra={
+                "check_command_id": check_command_id,
+                "watched_item_id": str(watched_item.id),
+                "health": watched_item.health_status,
+            },
+        )
+    if transition or check_command_id is not None:
+        await defer_status_republish()
+
+
 async def record_check_failure(
     session: AsyncSession,
     watched_item: WatchedItem,
@@ -78,6 +104,7 @@ async def record_check_failure(
     error_metadata: dict,
     health_reason: str | None,
     health_status_code: int | None = None,
+    check_command_id: str | None = None,
 ) -> None:
     """Record a failed check: ERROR health + stamped ``last_checked_at`` + audit,
     and dispatch ``WATCH_ERROR`` on the OK→ERROR transition — and again, as a
@@ -103,6 +130,9 @@ async def record_check_failure(
     The transition also opens the episode (#369): ``error_since`` is stamped
     and a ``watch_error`` fact staged in that same commit, its reason the
     ``health_reason`` above. A reminder is not an edge and stages nothing.
+
+    ``check_command_id`` is the fetch row's: a commanded check republishes
+    whatever the outcome (``republish_status``).
     """
     audit(session, audit_event, watched_item_id=str(watched_item.id), **audit_kwargs)
     previous_health = watched_item.health_status
@@ -133,12 +163,11 @@ async def record_check_failure(
         watched_item.last_error_notified_at = now
     await session.commit()
 
-    if transition:
-        # Health transition: level signal changed, so the watch-status stream
-        # republishes (#264). Post-commit, best-effort; steady-state failures
-        # never publish — that keeps the stream off the activity-rate curve.
-        # A re-notify is not a transition and stays outside this guard.
-        await defer_status_republish()
+    # Health transition: level signal changed, so the watch-status stream
+    # republishes (#264). Post-commit, best-effort; steady-state failures
+    # never publish — that keeps the stream off the activity-rate curve.
+    # A re-notify is not a transition and stays outside this guard.
+    await republish_status(watched_item, transition=transition, check_command_id=check_command_id)
 
     if transition or renotify:
         error_event = WatchEvent(
@@ -167,6 +196,7 @@ async def _record_check_success(
     now: datetime,
     url: str,
     audit_extra: dict | None = None,
+    check_command_id: str | None = None,
 ) -> None:
     """Record a successful check: audit trail + OK health + ``last_checked_at``,
     and dispatch ``WATCH_RECOVERED`` once on the ERROR→OK transition.
@@ -184,6 +214,8 @@ async def _record_check_success(
     Out of ERROR, a ``watch_recovered`` fact carrying the episode's
     ``error_since`` is staged in the commit that records OK (#369); leaving any
     health clears ``error_since``.
+
+    ``check_command_id`` is the fetch row's, as on ``record_check_failure``.
     """
     # A re-baseline wrote a revision too (#326) — a snapshot nobody was told of.
     snapshot = result.baseline_established or result.changed or result.rebaselined
@@ -220,10 +252,13 @@ async def _record_check_success(
     watched_item.last_error_notified_at = None
     await session.commit()
 
-    if previous_health != WatchHealthStatus.OK:
-        # Health transition (#264): post-commit, best-effort. A steady OK cycle
-        # never publishes — its timestamps converge at the periodic republish.
-        await defer_status_republish()
+    # Health transition (#264): post-commit, best-effort. A steady OK cycle
+    # never publishes — its timestamps converge at the periodic republish.
+    await republish_status(
+        watched_item,
+        transition=previous_health != WatchHealthStatus.OK,
+        check_command_id=check_command_id,
+    )
 
     # Recovery: dispatch WATCH_RECOVERED once when the WatchedItem
     # transitions ERROR → OK (#191).
@@ -305,7 +340,8 @@ async def reissue_fetch_command(
     """Re-issue an intent under a fresh ``command_id`` (MUST-6: a timeout or a
     lost blob is grounds to re-issue, never to conclude failure).
 
-    Same ``intent_id``, ``reissue_count + 1``, same forced-fetch intent.
+    Same ``intent_id``, ``reissue_count + 1``, same forced-fetch intent, same
+    commanding ``watch_check`` (#371).
     ``lineage_count`` overrides the count being incremented — a decisive
     lineage's process leg may have re-issued since the fetch did (#326).
     ``force_full_fetch`` forces a lineage that was not; it never un-forces one
@@ -326,6 +362,9 @@ async def reissue_fetch_command(
         # was reaped must not come back as a conditional GET the origin can
         # answer 304, leaving the operator with no bytes and no signal.
         force_full_fetch=force_full_fetch or prior.forced_full_fetch,
+        # The commanding watch_check is lineage too (#371): its completion
+        # republishes, whichever command in the lineage completes it.
+        check_command_id=prior.check_command_id,
     )
     await session.commit()
     # Shared, lifespan-owned client (CR-4) — never closed here.
@@ -377,6 +416,7 @@ async def fail_blob_unreadable(
         audit_kwargs={"reason": BLOB_UNREADABLE_REASON, "reissues": reissues},
         error_metadata={"reason": BLOB_UNREADABLE_REASON},
         health_reason=BLOB_UNREADABLE_REASON,
+        check_command_id=row.check_command_id,
     )
     return {"error": BLOB_UNREADABLE_REASON, "reissues": reissues}
 
@@ -423,6 +463,7 @@ async def fail_extraction(
         error_metadata={"error": "extraction_failed"},
         # The vocabulary's token for this path, whatever the row records.
         health_reason=PROCESSING_FAILED_REASON,
+        check_command_id=row.check_command_id,
     )
     return {"error": "extraction_failed"}
 
@@ -462,7 +503,13 @@ async def close_succeeded(
     if result.rebaselined:
         extra["rebaselined"] = True
     await _record_check_success(
-        session, watched_item, result, now=now, url=row.url, audit_extra=extra or None
+        session,
+        watched_item,
+        result,
+        now=now,
+        url=row.url,
+        audit_extra=extra or None,
+        check_command_id=row.check_command_id,
     )
 
 
@@ -565,6 +612,9 @@ async def apply_fetch_blob(command_id: str, bus_client=None) -> dict:
         if newest_applied is not None and newest_applied > row.issued_at:
             row.status = FetchCommandStatus.SUPERSEDED
             await session.commit()
+            await republish_status(
+                watched_item, transition=False, check_command_id=row.check_command_id
+            )
             return {"skipped": True, "reason": "superseded"}
 
         # Async-probe resolution (#241 step 3): a PROBING item's first fact is
@@ -658,6 +708,7 @@ async def apply_fetch_failure(command_id: str) -> dict:
             error_metadata=error_metadata,
             health_reason=row.failure_reason,
             health_status_code=row.status_code,
+            check_command_id=row.check_command_id,
         )
     return {"applied": True, "reason": row.failure_reason}
 
@@ -725,6 +776,7 @@ async def apply_fetch_not_modified(command_id: str) -> dict:
             # Keeps a 304 distinguishable from an unchanged extraction in the
             # audit trail — same outcome for the item, different evidence.
             audit_extra={"source": "not_modified"},
+            check_command_id=row.check_command_id,
         )
     return {"applied": True, "not_modified": True}
 
@@ -805,6 +857,7 @@ async def reap_fetch_commands(
                     audit_kwargs={"reason": "fetch_timeout", "reissues": row.reissue_count},
                     error_metadata={"reason": "fetch_timeout"},
                     health_reason="fetch_timeout",
+                    check_command_id=row.check_command_id,
                 )
                 capped += 1
                 continue

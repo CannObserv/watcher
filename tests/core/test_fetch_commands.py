@@ -98,6 +98,18 @@ class TestCreateFetchCommand:
         assert reissued.intent_id == first.intent_id
         assert reissued.reissue_count == 1
 
+    async def test_records_the_watch_check_it_answers(self, db_session):
+        """#371: the commanding ``watch_check``'s id, ``None`` for any other check."""
+        wi = await make_watched_item(db_session)
+        commanded = await create_fetch_command(
+            db_session, wi, now=NOW, force_full_fetch=True, check_command_id="01CHECK"
+        )
+        scheduled = await create_fetch_command(db_session, wi, now=NOW)
+        await db_session.flush()
+
+        assert commanded.check_command_id == "01CHECK"
+        assert scheduled.check_command_id is None
+
 
 @_integration
 class TestPublishFetchCommand:

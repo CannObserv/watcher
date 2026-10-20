@@ -285,6 +285,27 @@ async def _back_off(stop: asyncio.Event, seconds: float) -> None:
         pass
 
 
+async def _claim_dead_lettering_poison(consumer: AsyncBusConsumer, topic: str) -> list[BusMessage]:
+    """Reclaim our pending entries; route each undecodable one to the DLQ.
+
+    The reason names the anomaly's class only: the DLQ is readable by anything
+    with DLQ access, and a decode error's text can quote the payload.
+    """
+    page = await consumer.claim_stale_page(min_idle_ms=0, count=10)
+    for frame in page.poison:
+        dlq_id = await consumer.dead_letter(
+            frame.message_id,
+            dict(frame.fields),
+            reason=f"undecodable: {type(frame.anomaly).__name__}",
+        )
+        logger.error(
+            "undecodable frame on %s dead-lettered",
+            topic,
+            extra={"message_id": frame.message_id, "dlq_id": dlq_id},
+        )
+    return list(page.messages)
+
+
 class ProcessFn(Protocol):
     """One decoded fact → an outcome tag; commits before the loop acks."""
 
@@ -300,21 +321,32 @@ async def run_fact_consumer(
     process: ProcessFn,
     block_ms: int = BLOCK_MS,
     error_backoff_seconds: float = ERROR_BACKOFF_SECONDS,
+    group_start_id: str = "$",
+    dead_letter_poison: bool = False,
 ) -> None:
-    """Poll → process → ack on one fact stream, until ``stop`` is set.
+    """Poll → process → ack on one grouped stream, until ``stop`` is set.
 
-    The loop both fact inboxes run — ``content.blobs`` here and
-    ``content.derived`` (``src/workers/derived_facts.py``, #325) — so the error
-    handling below exists once: a second copy is how a later fix reaches only
-    one of the paths that needs it (see ``_back_off``). Each caller builds its
-    own ``AsyncBusConsumer`` from a streams constant and a ``group_name``
-    binding, because ``tests/test_bus_stream_kinds.py`` reads exactly that call
-    site; ``topic`` only labels the log lines.
+    The loop every grouped inbox runs — ``content.blobs`` here,
+    ``content.derived`` (``src/workers/derived_facts.py``, #325) and the
+    ``info.watch-check`` command inbox (``src/workers/watch_check.py``, #371) —
+    so the error handling below exists once: a second copy is how a later fix
+    reaches only one of the paths that needs it (see ``_back_off``). Each
+    caller builds its own ``AsyncBusConsumer`` from a streams constant and a
+    ``group_name`` binding, because ``tests/test_bus_stream_kinds.py`` reads
+    exactly that call site; ``topic`` only labels the log lines.
 
-    ``ensure_group(start_id="$")``: facts published before our group existed
-    predate any command Watcher issued and can never correlate. After a crash,
-    our own unacked entries come back via ``claim_stale`` (a same-name consumer
-    does NOT re-see its PEL on ``>`` reads).
+    ``group_start_id`` defaults to ``"$"`` for the fact inboxes: facts
+    published before our group existed predate any command Watcher issued and
+    can never correlate. A command inbox passes ``"0"`` — a command issued
+    before the group existed is still owed an answer. After a crash, our own
+    unacked entries come back via ``claim_stale`` (a same-name consumer does
+    NOT re-see its PEL on ``>`` reads).
+
+    ``dead_letter_poison`` is the command inbox's policy for an undecodable
+    frame: it goes to ``<topic>.dlq`` (``AsyncBusConsumer.dead_letter``, which
+    acks it) instead of being acked past. ``read`` raises without the raw
+    fields, so the frame is left in our PEL and the very next pass reclaims it
+    through ``claim_stale_page``, which hands poison back with its fields.
 
     **Every fallible step is inside the backoff guard** (CR-1): a transient DB
     error while processing must park-and-retry, never escape and kill the task
@@ -337,12 +369,15 @@ async def run_fact_consumer(
     while not stop.is_set():
         try:
             if not group_ready:
-                await consumer.ensure_group(start_id="$")
+                await consumer.ensure_group(start_id=group_start_id)
                 group_ready = True
             messages: list[BusMessage] = []
             if loop.time() >= next_claim:
                 next_claim = loop.time() + CLAIM_INTERVAL_SECONDS
-                messages = await consumer.claim_stale(min_idle_ms=0, count=10)
+                if dead_letter_poison:
+                    messages = await _claim_dead_lettering_poison(consumer, topic)
+                else:
+                    messages = await consumer.claim_stale(min_idle_ms=0, count=10)
             if not messages:
                 messages = await consumer.read(count=1, block_ms=block_ms)
 
@@ -356,13 +391,23 @@ async def run_fact_consumer(
                     outcome = await process(session, message)
                 await consumer.ack(message.message_id)
                 logger.info(
-                    "%s fact processed",
+                    "%s message processed",
                     topic,
                     extra={"message_id": message.message_id, "outcome": outcome},
                 )
         except BusMessageAnomaly as exc:
-            # Undecodable frame: ack past it (see module docstring).
             message_id = getattr(exc, "message_id", None)
+            if dead_letter_poison:
+                # Left pending: the next pass's claim returns it with its raw
+                # fields, which is what the dead letter copies.
+                logger.warning(
+                    "undecodable frame on %s — dead-lettering on the next claim",
+                    topic,
+                    extra={"message_id": message_id, "error": str(exc)},
+                )
+                next_claim = loop.time()
+                continue
+            # Undecodable frame: ack past it (see module docstring).
             logger.warning(
                 "undecodable frame on %s — skipping",
                 topic,

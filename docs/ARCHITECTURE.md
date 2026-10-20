@@ -13,7 +13,7 @@ Top-level directories. Read the code for per-file detail.
 src/api/         FastAPI app (ASGI routes, schemas, deps)
 src/core/        Shared domain logic (models, probe, scheduling, notifications, diff, fetch commands, storage, crypto)
 src/dashboard/   Server-rendered UI (Jinja2 + HTMX + Tailwind)
-src/workers/     Procrastinate task queue (check_watched_item, schedule_tick, pipeline, fetch apply/consumer)
+src/workers/     Procrastinate task queue (check_watched_item, schedule_tick, pipeline, fetch apply/consumer, watch-check consumer)
 src/ops/         Operator entry points beside the service: nightly backup, restore, backup check-in, job-history prune (#296), Archiver migration export (#373), break-glass host suspension (#372)
 tools/           Operational scripts
 tests/           Mirrors src/ structure
@@ -48,7 +48,7 @@ A test that seems to need a real Archiver row is testing Archiver. Exercise the 
 
 ## Single process
 
-**Single process is load-bearing.** One uvicorn process runs everything: the API, the embedded Procrastinate worker, the `content.blobs` and `content.derived` fact consumers, and the cache sweeper (started in the `src/api/main.py` lifespan — there is no separate worker unit). The reason is now the **fact consumer**, not politeness: `src/workers/fetch_facts.py` joins consumer group `watcher.blobs` as a single member (`watcher-blobs-1`; `watcher.derived` likewise, #325), and a second process would need its own consumer name *and* an apply-ordering story across members — the supersession guard is per-row, not a cross-process lock. (Until #241 step 5 the reason was the in-process `DomainRateLimiter`, retired with the local fetch path; per-host pacing is Replicator's now, fed over `content.fetch-policy`, and no longer constrains the topology.) Worker restarts and stop bound: `src/workers/supervisor.py` (#340, #334). Never run `uvicorn --workers N` or a second worker unit against prod. Escalation path, only once one process is not enough: a separate `watcher-worker.service` plus a multi-member consumer-group design — **not built**.
+**Single process is load-bearing.** One uvicorn process runs everything: the API, the embedded Procrastinate worker, the `content.blobs` and `content.derived` fact consumers, the `info.watch-check` command consumer (#371), and the cache sweeper (started in the `src/api/main.py` lifespan — there is no separate worker unit). The reason is now the **fact consumer**, not politeness: `src/workers/fetch_facts.py` joins consumer group `watcher.blobs` as a single member (`watcher-blobs-1`; `watcher.derived` likewise, #325), and a second process would need its own consumer name *and* an apply-ordering story across members — the supersession guard is per-row, not a cross-process lock. (Until #241 step 5 the reason was the in-process `DomainRateLimiter`, retired with the local fetch path; per-host pacing is Replicator's now, fed over `content.fetch-policy`, and no longer constrains the topology.) Worker restarts and stop bound: `src/workers/supervisor.py` (#340, #334). Never run `uvicorn --workers N` or a second worker unit against prod. Escalation path, only once one process is not enough: a separate `watcher-worker.service` plus a multi-member consumer-group design — **not built**.
 
 ## Probe destination guard
 

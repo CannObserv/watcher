@@ -36,8 +36,13 @@ from src.workers.watch_status import defer_status_republish
 logger = get_logger(__name__)
 
 
-async def _issue_fetch_command(
-    session: AsyncSession, watched_item, bus_client, *, force_full_fetch: bool = False
+async def issue_fetch_command(
+    session: AsyncSession,
+    watched_item,
+    bus_client,
+    *,
+    force_full_fetch: bool = False,
+    check_command_id: str | None = None,
 ) -> dict:
     """Issue one ``content.fetch`` command for the item (#241, MUST-1/MUST-2).
 
@@ -50,6 +55,10 @@ async def _issue_fetch_command(
     The open-command gate keeps ``schedule_tick`` from re-issuing every tick
     against a silently failed command (the contract's most expensive
     issuer-side hazard).
+
+    Shared with the ``info.watch-check`` consumer (#371), which passes the
+    command's id as ``check_command_id``. Anything the caller staged on
+    ``session`` commits with the row.
     """
     if await has_open_command(session, watched_item.id):
         logger.info(
@@ -60,7 +69,11 @@ async def _issue_fetch_command(
 
     now = datetime.now(UTC)
     row = await create_fetch_command(
-        session, watched_item, now=now, force_full_fetch=force_full_fetch
+        session,
+        watched_item,
+        now=now,
+        force_full_fetch=force_full_fetch,
+        check_command_id=check_command_id,
     )
     # Operator breadcrumb on the item's Recent Activity: the check is now a
     # command in flight; the apply-side events pick the story up (#241 CR-8).
@@ -104,7 +117,7 @@ async def _issue_fetch_command(
     # No origin request happens here any more (#241 step 5), so the httpx
     # exceptions are unreachable; what is left retryable is the DB read and the
     # persist-before-publish write. Broker failures are deliberately absent —
-    # _issue_fetch_command swallows them and the sweep republishes.
+    # issue_fetch_command swallows them and the sweep republishes.
     retry=procrastinate.RetryStrategy(
         max_attempts=3,
         exponential_wait=5,
@@ -151,7 +164,7 @@ async def check_watched_item(
             )
             return {"skipped": True, "reason": "no_effective_url"}
 
-        return await _issue_fetch_command(
+        return await issue_fetch_command(
             session, watched_item, bus_client, force_full_fetch=force_full_fetch
         )
 

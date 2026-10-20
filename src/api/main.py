@@ -44,6 +44,7 @@ from src.workers.derived_facts import start_derived_consumer
 from src.workers.fetch_facts import start_blobs_consumer
 from src.workers.registry_reconcile import start_registry_consumer
 from src.workers.supervisor import start_worker
+from src.workers.watch_check import start_watch_check_consumer
 
 configure_logging()
 logger = get_logger(__name__)
@@ -100,6 +101,7 @@ async def lifespan(application: FastAPI):
     consumer_task = None
     derived_task = None
     registry_task = None
+    watch_check_task = None
     reachability_task = None
     if bus_client is not None:
         # #287: ``from_url`` is lazy, so nothing above can tell a reachable
@@ -129,12 +131,19 @@ async def lifespan(application: FastAPI):
             bus_client, get_session_factory(), stop=consumer_stop
         )
         logger.info("info.registry consumer started")
+        # #371: Archiver's check-now commands. A command inbox: group at 0,
+        # poison to info.watch-check.dlq. Same stop event and shutdown story.
+        watch_check_task = start_watch_check_consumer(
+            bus_client, get_session_factory(), stop=consumer_stop
+        )
+        logger.info("info.watch-check consumer started")
     else:
         # Not a degraded mode any more: with no fact inbox, issued commands
         # can never be applied and every one of them will be reaped.
         logger.error(
-            "content.blobs, content.derived and info.registry consumers NOT started: "
-            "%s is not set — no check can complete and the registry cannot reconcile",
+            "content.blobs, content.derived, info.registry and info.watch-check consumers "
+            "NOT started: %s is not set — no check can complete, the registry cannot "
+            "reconcile and no watch_check command is answered",
             BUS_REDIS_URL_ENV,
         )
 
@@ -165,6 +174,11 @@ async def lifespan(application: FastAPI):
         # returns and the generation guard makes a re-read a no-op, so a cancel
         # mid-read costs at most one replayed announcement at next boot.
         registry_task.cancel()
+    if watch_check_task is not None:
+        # Commit-then-ack, like the fact inboxes: a cancelled ack redelivers,
+        # and the redelivery finds its fetch row (``duplicate``) or re-rejects,
+        # which Archiver closes by command_id.
+        watch_check_task.cancel()
     if reachability_task is not None:
         # The startup PING (and its bounded cold-boot retries, #296) should have
         # finished long ago; cancelling a straggler matters only when the broker
@@ -172,7 +186,14 @@ async def lifespan(application: FastAPI):
         reachability_task.cancel()
     tasks = [
         t
-        for t in (worker_task, consumer_task, derived_task, registry_task, reachability_task)
+        for t in (
+            worker_task,
+            consumer_task,
+            derived_task,
+            registry_task,
+            watch_check_task,
+            reachability_task,
+        )
         if t is not None
     ]
     await asyncio.gather(*tasks, return_exceptions=True)

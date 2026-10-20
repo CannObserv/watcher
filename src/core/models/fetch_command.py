@@ -116,6 +116,13 @@ class FetchCommand(Base, TimestampMixin):
             "watched_item_id",
             postgresql_where=text("status IN ('pending_publish', 'in_flight', 'processing')"),
         ),
+        # The watch-check consumer's redelivery lookup (#371). Partial: almost
+        # every check is scheduled and carries none.
+        Index(
+            "ix_fetch_commands_check_command_id",
+            "check_command_id",
+            postgresql_where=text("check_command_id IS NOT NULL"),
+        ),
     )
 
     command_id: Mapped[str] = mapped_column(String(26), primary_key=True)
@@ -153,6 +160,13 @@ class FetchCommand(Base, TimestampMixin):
     forced_full_fetch: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False, server_default=text("false")
     )
+    # The ``watch_check`` command this occasion answers (#371), ``None`` for
+    # every other check. Lineage like ``forced_full_fetch``, which a commanded
+    # check always is: its completion republishes ``info.watch-status``
+    # whatever the outcome, and the consumer finds a redelivered command here
+    # rather than refusing it as ``fetch_open``. Archiver's id, so ``Text``:
+    # nothing promises it is a ULID.
+    check_command_id: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
 
     # --- fact fields (upserted by the content.blobs consumer) ---
     fact_at: Mapped[datetime | None] = mapped_column(

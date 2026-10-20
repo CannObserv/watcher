@@ -2,8 +2,9 @@
 
 One consumer group, ``watcher.derived`` (derived, never written), one member —
 the single-process topology. It runs on ``fetch_facts.run_fact_consumer``, the
-loop the ``content.blobs`` inbox runs on, so ack-past for an undecodable frame,
-the backoff guard and the PEL reclaim are the same code.
+loop the ``content.blobs`` inbox runs on, so ack-past for an undecodable frame
+or one that keeps failing (#389), the backoff guard and the PEL reclaim are the
+same code.
 
 Per message, correlate on ``command_id`` only — ``content.derived`` is
 broadcast, so a fact for a command Watcher did not issue is discarded:

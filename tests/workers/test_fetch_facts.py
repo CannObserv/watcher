@@ -17,18 +17,23 @@ import asyncio
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
 
+import asyncpg.exceptions as pg_errors
 import fakeredis
+import psycopg
 import pytest
 from co_core.effects.bus import BusPublish
 from co_core.pure.adapters.bus import streams
 from co_core.pure.adapters.bus.envelope import from_wire, to_wire
-from co_core.pure.adapters.bus.streams import group_name
+from co_core.pure.adapters.bus.streams import dlq_name, group_name
 from co_core.pure.models.changes import (
     BlobAvailableEmit,
     FetchFailedEmit,
     RegistryAnnouncementEmit,
 )
 from co_core_aio.bus import AsyncBusPublisher
+from procrastinate.exceptions import ConnectorException
+from redis import exceptions as redis_errors
+from sqlalchemy import exc as sa_exc
 
 import src.workers.fetch_facts as ff_mod
 from src.core.fetch_commands import create_fetch_command
@@ -36,6 +41,7 @@ from src.core.models.fetch_command import FetchCommandStatus
 from src.workers.fetch_facts import (
     CONSUMER_GROUP,
     CONSUMER_NAME,
+    is_connection_error,
     process_fact_message,
     run_blobs_consumer,
 )
@@ -585,6 +591,149 @@ class TestRunBlobsConsumer:
         assert len(calls) == 2  # failed once, retried via reclaim, succeeded
         pending = await client.xpending(streams.CONTENT_BLOBS, CONSUMER_GROUP)
         assert pending["pending"] == 0  # retried message was acked
+
+    async def test_a_fact_that_always_fails_is_acked_past_and_stops_blocking(
+        self, db_session, monkeypatch, caplog
+    ):
+        """#389: past ``MAX_DELIVERY_ATTEMPTS`` a fact inbox acks the fact past,
+        its undecodable-frame policy — no DLQ of ours (``content.blobs.dlq`` is
+        ungranted), and the reaper re-issues the fetch whose fact never lands.
+        Before #389 the fact was reclaimed forever and every fact behind it
+        waited."""
+        client = fakeredis.FakeAsyncRedis()
+        stop = asyncio.Event()
+        poison_id, behind_id = "01POISONFACTCOMMANDXXXXXXX", "01BEHINDFACTCOMMANDXXXXXXX"
+        attempts: dict[str, int] = {}
+        outcomes: dict[str, str] = {}
+        real_process = ff_mod.process_fact_message
+
+        async def _poisoned(session, message, **kwargs):
+            key = message.payload.command_id
+            attempts[key] = attempts.get(key, 0) + 1
+            if key == poison_id:
+                raise ValueError("deterministic")
+            outcomes[key] = await real_process(session, message, **kwargs)
+            return outcomes[key]
+
+        monkeypatch.setattr(ff_mod, "process_fact_message", _poisoned)
+
+        @asynccontextmanager
+        async def _ctx():
+            yield db_session
+
+        task = asyncio.create_task(
+            run_blobs_consumer(
+                client, lambda: _ctx(), stop=stop, block_ms=10, error_backoff_seconds=0.01
+            )
+        )
+        await asyncio.sleep(0.1)  # the group starts at '$'
+        publisher = AsyncBusPublisher(client)
+        for command_id in (poison_id, behind_id):
+            event = _blob_message(command_id).payload
+            await publisher.execute(BusPublish(streams.CONTENT_BLOBS, to_wire(event)))
+
+        async def _behind_processed():
+            while behind_id not in outcomes:
+                await asyncio.sleep(0.02)
+
+        with caplog.at_level("ERROR", logger="src.workers.fetch_facts"):
+            await asyncio.wait_for(_behind_processed(), timeout=5)
+        stop.set()
+        await asyncio.wait_for(task, timeout=5)
+
+        # No DLQ on a fact inbox: the journal is the only record of the drop,
+        # so it names the command whose fetch the reaper must re-issue (CR 2).
+        (retired,) = [r for r in caplog.records if "acked past" in r.getMessage()]
+        assert retired.command_id == poison_id
+        assert retired.reason == f"failed {ff_mod.MAX_DELIVERY_ATTEMPTS} attempts: ValueError"
+        assert attempts[poison_id] == ff_mod.MAX_DELIVERY_ATTEMPTS
+        assert outcomes[behind_id] == "unmatched"
+        pending = await client.xpending(streams.CONTENT_BLOBS, CONSUMER_GROUP)
+        assert pending["pending"] == 0
+        assert await client.exists(dlq_name(streams.CONTENT_BLOBS)) == 0
+
+
+def _sa_error(cls=sa_exc.DBAPIError, *, invalidated=False):
+    return cls("SELECT 1", {}, Exception("orig"), connection_invalidated=invalidated)
+
+
+class TestConnectionErrorsAreNotAttempts:
+    """#389: what the delivery threshold refuses to count. An unreachable DB or
+    broker fails every message alike, so counting it would retire whatever is at
+    the head of the stream during an outage. Anything else counts — an
+    unrecognised transient costs one retired message, not a stuck inbox."""
+
+    @pytest.mark.parametrize(
+        "exc",
+        [
+            pytest.param(_sa_error(sa_exc.OperationalError), id="sa-operational"),
+            pytest.param(_sa_error(invalidated=True), id="sa-connection-invalidated"),
+            pytest.param(redis_errors.ConnectionError("down"), id="redis-connection"),
+            pytest.param(redis_errors.TimeoutError("slow"), id="redis-timeout"),
+            pytest.param(ConnectionRefusedError("refused"), id="os-refused"),
+            pytest.param(TimeoutError(), id="builtin-timeout"),
+            # Postgres refusing service, raised raw by asyncpg's connect —
+            # SQLAlchemy neither translates nor flags it (CR 6).
+            pytest.param(
+                pg_errors.CannotConnectNowError("the database system is starting up"),
+                id="pg-57P03-starting-up",
+            ),
+            pytest.param(pg_errors.AdminShutdownError("terminating"), id="pg-57P01-admin"),
+            pytest.param(pg_errors.CrashShutdownError("crash"), id="pg-57P02-crash"),
+            pytest.param(pg_errors.TooManyConnectionsError("slots"), id="pg-53300-slots"),
+            pytest.param(pg_errors.ConnectionFailureError("lost"), id="pg-08006-failure"),
+        ],
+    )
+    def test_unreachable_dependencies_do_not_count(self, exc):
+        assert is_connection_error(exc)
+
+    def test_procrastinates_wrapped_psycopg_outage_does_not_count(self):
+        """The fact inboxes commit, then defer the apply over Procrastinate's own
+        psycopg pool, which re-raises a psycopg error as ``ConnectorException``.
+        Counted, a pool outage after the commit acks the fact past with the row
+        recorded and no apply deferred (CR 1). A blob fact's apply then waits for
+        the reaper's re-defer, ``WATCHER_FETCH_COMMAND_TIMEOUT_SECONDS`` later;
+        a failure or 304 fact has already moved its row off ``in_flight``, out of
+        the reaper's sight, and its apply never runs (CR 10)."""
+        try:
+            try:
+                raise psycopg.OperationalError("connection failed: Connection refused")
+            except psycopg.OperationalError as inner:
+                raise ConnectorException() from inner
+        except ConnectorException as exc:
+            assert is_connection_error(exc)
+
+    def test_a_wrapped_connection_error_does_not_count(self):
+        try:
+            try:
+                raise ConnectionResetError("peer reset")
+            except ConnectionResetError as inner:
+                raise RuntimeError("wrapped") from inner
+        except RuntimeError as exc:
+            assert is_connection_error(exc)
+
+    @pytest.mark.parametrize(
+        "exc",
+        [
+            # #371's NUL in JSONB arrives as asyncpg's generic Error.
+            pytest.param(_sa_error(), id="sa-dbapi-data"),
+            pytest.param(_sa_error(sa_exc.IntegrityError), id="sa-integrity"),
+            # asyncpg raises InterfaceError for session-state misuse ("another
+            # operation is in progress"), which recurs on every attempt.
+            pytest.param(_sa_error(sa_exc.InterfaceError), id="sa-interface"),
+            pytest.param(redis_errors.ResponseError("NOPERM"), id="redis-response"),
+            # A statement timeout can be the message's own fault: it counts.
+            pytest.param(pg_errors.QueryCanceledError("timeout"), id="pg-57014-canceled"),
+            pytest.param(pg_errors.UniqueViolationError("dup"), id="pg-23505-unique"),
+            # OSError, but the filesystem's: as deterministic as a bad payload (CR 7).
+            pytest.param(FileNotFoundError("/var/lib/x"), id="os-file-not-found"),
+            pytest.param(PermissionError("/var/lib/x"), id="os-permission"),
+            pytest.param(IsADirectoryError("/var/lib"), id="os-is-a-directory"),
+            pytest.param(ValueError("bad"), id="value-error"),
+        ],
+    )
+    def test_everything_else_counts(self, exc):
+        assert not is_connection_error(exc)
 
 
 class TestForeignPayloadTypes:

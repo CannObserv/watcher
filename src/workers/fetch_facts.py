@@ -29,6 +29,9 @@ Per message, branch on payload type and **correlate on ``command_id`` only**
 * An undecodable frame is acked past with a warning: on a fact stream we read
   with our own group there is no correlation obligation to discharge and no
   DLQ of ours to route to (mirrors Replicator's policy-reader posture).
+* A fact whose processing keeps failing is acked past the same way, after
+  ``MAX_DELIVERY_ATTEMPTS`` (#389; ``run_fact_consumer``), instead of blocking
+  every fact behind it. Its fetch is the reaper's to re-issue.
 
 Duplicate facts (redelivery, or Replicator's crash-window re-emit) re-run the
 upsert and re-defer the apply task; the apply task's status guard makes the
@@ -38,13 +41,16 @@ second run a no-op — at-least-once ends at the row, exactly-once at the apply.
 import asyncio
 from typing import Protocol
 
+import psycopg
 from co_core.effects.bus import BusMessage
 from co_core.pure.adapters.bus import streams
 from co_core.pure.adapters.bus.exceptions import BusMessageAnomaly
 from co_core.pure.adapters.bus.streams import group_name
 from co_core.pure.models.changes import BlobAvailableEvent, FetchFailedEvent
 from co_core_aio.bus import AsyncBusConsumer
+from redis import exceptions as redis_errors
 from redis.asyncio import Redis
+from sqlalchemy import exc as sa_exc
 from sqlalchemy import select
 
 from src.core import read_windows
@@ -86,6 +92,55 @@ IDLE_SLEEP_SECONDS = 0.05
 # Reclaim our own PEL this often — entries left unacked by a crash mid-process.
 CLAIM_INTERVAL_SECONDS = 60.0
 ERROR_BACKOFF_SECONDS = 5.0
+# Attempts at one message before the loop retires it (#389): dead-lettered on the
+# command inbox, acked past on a fact inbox. Five at the 5 s backoff is ~20 s of
+# retrying an error that is not a connection error. A constant until someone
+# needs to tune it.
+MAX_DELIVERY_ATTEMPTS = 5
+
+# The dependency is unreachable, so every message fails alike: not an attempt.
+# ``InterfaceError`` is absent on purpose — asyncpg raises it for session-state
+# misuse ("another operation is in progress"), which recurs on every attempt.
+_CONNECTION_ERRORS = (
+    # ConnectionRefusedError, ConnectionResetError, builtin TimeoutError, and the
+    # bare OSError asyncio raises when every address of a host refuses.
+    OSError,
+    sa_exc.OperationalError,
+    # Procrastinate's pool, under the defer that follows a fact's commit; it
+    # arrives as the cause of a ``ConnectorException``. Includes ``PoolTimeout``.
+    psycopg.OperationalError,
+    redis_errors.ConnectionError,
+    redis_errors.TimeoutError,
+)
+# OSError, but the filesystem's: as deterministic as a bad payload (CR 7).
+_FILESYSTEM_ERRORS = (
+    FileNotFoundError,
+    FileExistsError,
+    PermissionError,
+    IsADirectoryError,
+    NotADirectoryError,
+)
+# Postgres refusing service, by SQLSTATE — on asyncpg, psycopg and SQLAlchemy's
+# translated errors alike. Needed because asyncpg's connect raises these raw:
+# SQLAlchemy neither translates nor flags them, so while the server restarts every
+# lazy connect inside ``process`` raises ``CannotConnectNowError`` (CR 6). Class
+# 08 is connection exception, 53 insufficient resources (slots, disk, memory);
+# 57P01–57P03 are admin shutdown, crash shutdown, cannot connect now. 57014
+# (a statement timeout) is absent: on asyncpg it can be the message's own fault,
+# so it counts. psycopg files 57014 — and 40001, 40P01, 55P03 — under
+# ``OperationalError``, above, so on Procrastinate's defer path they are outages.
+# That is right there: the defer inserts a job row naming a ``command_id``, which
+# no payload can make fail, and an attempt counted after the commit retires a fact
+# that is already recorded.
+_UNAVAILABLE_SQLSTATE_CLASSES = ("08", "53")
+_UNAVAILABLE_SQLSTATES = frozenset({"57P01", "57P02", "57P03"})
+
+
+def _is_unavailable_sqlstate(exc: BaseException) -> bool:
+    sqlstate = getattr(exc, "sqlstate", None)
+    if not isinstance(sqlstate, str):
+        return False
+    return sqlstate in _UNAVAILABLE_SQLSTATES or sqlstate[:2] in _UNAVAILABLE_SQLSTATE_CLASSES
 
 
 class DeferFn(Protocol):
@@ -285,25 +340,109 @@ async def _back_off(stop: asyncio.Event, seconds: float) -> None:
         pass
 
 
-async def _claim_dead_lettering_poison(consumer: AsyncBusConsumer, topic: str) -> list[BusMessage]:
-    """Reclaim our pending entries; route each undecodable one to the DLQ.
+def is_connection_error(exc: BaseException) -> bool:
+    """Whether ``exc`` says a dependency is unreachable rather than that this
+    message cannot be processed (#389).
 
-    The reason names the anomaly's class only: the DLQ is readable by anything
-    with DLQ access, and a decode error's text can quote the payload.
+    Walks ``__cause__``, so a wrapped one is still recognised. Anything not
+    recognised counts as an attempt: misclassifying a transient costs one
+    retired message, misclassifying a deterministic failure a stuck inbox.
     """
+    seen: set[int] = set()
+    current: BaseException | None = exc
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        if isinstance(current, _CONNECTION_ERRORS) and not isinstance(current, _FILESYSTEM_ERRORS):
+            return True
+        if isinstance(current, sa_exc.DBAPIError) and current.connection_invalidated:
+            return True
+        if _is_unavailable_sqlstate(current):
+            return True
+        current = current.__cause__
+    return False
+
+
+async def _dead_letter(
+    consumer: AsyncBusConsumer,
+    topic: str,
+    message_id: str,
+    fields,
+    *,
+    reason: str,
+    command_id: str | None = None,
+) -> None:
+    """Route one frame to ``<topic>.dlq`` (which acks it), and log it.
+
+    The one writer for both causes — undecodable, and out of attempts (#389) —
+    which is what ``tests/test_bus_stream_kinds.py`` pins. ``reason`` names an
+    exception class only: the DLQ is readable by anything with DLQ access, and
+    an error's text can quote the payload. ``command_id`` is ``None`` for an
+    undecodable frame, which has no payload to read it from.
+    """
+    dlq_id = await consumer.dead_letter(message_id, dict(fields), reason=reason)
+    logger.error(
+        "%s frame dead-lettered",
+        topic,
+        extra={
+            "message_id": message_id,
+            "command_id": command_id,
+            "dlq_id": dlq_id,
+            "reason": reason,
+        },
+    )
+
+
+async def _claim_dead_lettering_poison(consumer: AsyncBusConsumer, topic: str) -> list[BusMessage]:
+    """Reclaim our pending entries; route each undecodable one to the DLQ."""
     page = await consumer.claim_stale_page(min_idle_ms=0, count=10)
     for frame in page.poison:
-        dlq_id = await consumer.dead_letter(
+        await _dead_letter(
+            consumer,
+            topic,
             frame.message_id,
-            dict(frame.fields),
+            frame.fields,
             reason=f"undecodable: {type(frame.anomaly).__name__}",
         )
-        logger.error(
-            "undecodable frame on %s dead-lettered",
-            topic,
-            extra={"message_id": frame.message_id, "dlq_id": dlq_id},
-        )
     return list(page.messages)
+
+
+async def _retire(
+    consumer: AsyncBusConsumer,
+    topic: str,
+    message: BusMessage,
+    *,
+    attempts: int,
+    error: str,
+    dead_letter: bool,
+) -> None:
+    """Stop retrying a message that failed ``attempts`` times (#389).
+
+    The command inbox dead-letters it; a fact inbox acks it past, its policy for
+    an undecodable frame too — the reaper re-issues the command whose fact never
+    landed (MUST-6). A failure here propagates to the loop's backoff, and the
+    next pass retires it again without re-running ``process``.
+
+    Both log lines name the ``command_id``: on a fact inbox the journal is the
+    only record of the drop, and on the command inbox it is what Archiver keys on.
+    """
+    reason = f"failed {attempts} attempts: {error}"
+    command_id = getattr(message.payload, "command_id", None)
+    if dead_letter:
+        await _dead_letter(
+            consumer,
+            topic,
+            message.message_id,
+            message.fields,
+            reason=reason,
+            command_id=command_id,
+        )
+        return
+    await consumer.ack(message.message_id)
+    logger.error(
+        "%s message acked past",
+        topic,
+        extra={"message_id": message.message_id, "command_id": command_id, "reason": reason},
+    )
 
 
 class ProcessFn(Protocol):
@@ -348,6 +487,15 @@ async def run_fact_consumer(
     fields, so the frame is left in our PEL and the very next pass reclaims it
     through ``claim_stale_page``, which hands poison back with its fields.
 
+    **A message that keeps failing is retired** (#389): once ``process`` has
+    raised on it ``MAX_DELIVERY_ATTEMPTS`` times, the next pass dead-letters it
+    (``dead_letter_poison``) or acks it past, without processing it again.
+    Before #389 it was reclaimed forever and blocked every message behind it.
+    Only ``process`` raising counts, and not with a connection error
+    (``is_connection_error``): an outage fails every message alike. The count
+    lives in this loop, so a restart resets it — co-core reports no delivery
+    count, and the server's needs an ``XPENDING`` grant nobody has checked.
+
     **Every fallible step is inside the backoff guard** (CR-1): a transient DB
     error while processing must park-and-retry, never escape and kill the task
     — the message stays unacked, and resetting ``next_claim`` makes the next
@@ -365,6 +513,9 @@ async def run_fact_consumer(
     next_claim = loop.time()  # first pass drains any crash leftovers immediately
     group_ready = False  # created inside the guard: a broker outage racing our
     # boot must back off and retry, not kill the task before the loop starts (CR-12)
+    # message_id → (attempts that counted, the last one's exception class). An
+    # entry leaves on ack or retirement, so it holds only messages now failing.
+    failures: dict[str, tuple[int, str]] = {}
 
     while not stop.is_set():
         try:
@@ -387,9 +538,27 @@ async def run_fact_consumer(
                 continue
 
             for message in messages:
-                async with session_factory() as session:
-                    outcome = await process(session, message)
+                attempts, error = failures.get(message.message_id, (0, ""))
+                if attempts >= MAX_DELIVERY_ATTEMPTS:
+                    await _retire(
+                        consumer,
+                        topic,
+                        message,
+                        attempts=attempts,
+                        error=error,
+                        dead_letter=dead_letter_poison,
+                    )
+                    del failures[message.message_id]
+                    continue
+                try:
+                    async with session_factory() as session:
+                        outcome = await process(session, message)
+                except Exception as exc:
+                    if not is_connection_error(exc):
+                        failures[message.message_id] = (attempts + 1, type(exc).__name__)
+                    raise
                 await consumer.ack(message.message_id)
+                failures.pop(message.message_id, None)
                 logger.info(
                     "%s message processed",
                     topic,

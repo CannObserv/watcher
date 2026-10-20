@@ -60,6 +60,13 @@ _TRANSITIVE_BY_DESIGN: dict[str, tuple[str, str]] = {
         "procrastinate evaluates it with. Declared, croniter would outlive procrastinate "
         "swapping parsers and keep approving expressions for a parser nothing uses.",
     ),
+    "psycopg": (
+        "procrastinate",
+        "src/workers/fetch_facts.py recognises a connection error from procrastinate's "
+        "PsycopgConnector, the driver it defers over, by psycopg.OperationalError (#389). "
+        "Declared, psycopg would outlive procrastinate swapping drivers and keep "
+        "classifying errors nothing raises.",
+    ),
 }
 
 # Declared, but reached by name rather than by import:

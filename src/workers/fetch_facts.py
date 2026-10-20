@@ -102,13 +102,23 @@ MAX_DELIVERY_ATTEMPTS = 5
 # ``InterfaceError`` is absent on purpose — asyncpg raises it for session-state
 # misuse ("another operation is in progress"), which recurs on every attempt.
 _CONNECTION_ERRORS = (
-    OSError,  # ConnectionRefusedError, ConnectionResetError, builtin TimeoutError
+    # ConnectionRefusedError, ConnectionResetError, builtin TimeoutError, and the
+    # bare OSError asyncio raises when every address of a host refuses.
+    OSError,
     sa_exc.OperationalError,
     # Procrastinate's pool, under the defer that follows a fact's commit; it
     # arrives as the cause of a ``ConnectorException``. Includes ``PoolTimeout``.
     psycopg.OperationalError,
     redis_errors.ConnectionError,
     redis_errors.TimeoutError,
+)
+# OSError, but the filesystem's: as deterministic as a bad payload (CR 7).
+_FILESYSTEM_ERRORS = (
+    FileNotFoundError,
+    FileExistsError,
+    PermissionError,
+    IsADirectoryError,
+    NotADirectoryError,
 )
 # Postgres refusing service, by SQLSTATE — on asyncpg, psycopg and SQLAlchemy's
 # translated errors alike. Needed because asyncpg's connect raises these raw:
@@ -337,7 +347,7 @@ def is_connection_error(exc: BaseException) -> bool:
     current: BaseException | None = exc
     while current is not None and id(current) not in seen:
         seen.add(id(current))
-        if isinstance(current, _CONNECTION_ERRORS):
+        if isinstance(current, _CONNECTION_ERRORS) and not isinstance(current, _FILESYSTEM_ERRORS):
             return True
         if isinstance(current, sa_exc.DBAPIError) and current.connection_invalidated:
             return True

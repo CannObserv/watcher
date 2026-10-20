@@ -722,6 +722,10 @@ class TestConnectionErrorsAreNotAttempts:
             # A statement timeout can be the message's own fault: it counts.
             pytest.param(pg_errors.QueryCanceledError("timeout"), id="pg-57014-canceled"),
             pytest.param(pg_errors.UniqueViolationError("dup"), id="pg-23505-unique"),
+            # OSError, but the filesystem's: as deterministic as a bad payload (CR 7).
+            pytest.param(FileNotFoundError("/var/lib/x"), id="os-file-not-found"),
+            pytest.param(PermissionError("/var/lib/x"), id="os-permission"),
+            pytest.param(IsADirectoryError("/var/lib"), id="os-is-a-directory"),
             pytest.param(ValueError("bad"), id="value-error"),
         ],
     )

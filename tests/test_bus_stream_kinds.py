@@ -572,11 +572,13 @@ class TestUncappedStreamsStayUncapped:
 
 class TestTheOnlyDeadLetterWriter:
     """Watcher writes exactly one dead letter: an undecodable command on
-    ``info.watch-check`` goes to ``info.watch-check.dlq`` (#371).
+    ``info.watch-check`` goes to ``info.watch-check.dlq`` (#371), and so does
+    one that failed ``MAX_DELIVERY_ATTEMPTS`` times (#389). Two causes, one
+    writer: both go through ``fetch_facts._dead_letter``.
 
     That DLQ is Watcher's by CannObserv/broker#93's grant: Watcher writes it,
     audits it (``XLEN``/``XRANGE``) and ``XDEL``\\ s from it. The fact inboxes
-    keep their policy of acking past an undecodable frame — on a fact stream
+    keep their policy of acking past an undecodable frame, or a failing one — on a fact stream
     read with our own group there is no correlation obligation to discharge
     (``src/workers/fetch_facts.py``) — and ``content.blobs.dlq`` stays
     ungranted. A second writer means a DLQ the broker's ACL user does not

@@ -9,6 +9,10 @@ like the two fact inboxes, with the command stream's two differences:
 * **An undecodable command is dead-lettered** to ``info.watch-check.dlq``,
   which belongs to Watcher — it writes, audits (``XLEN``/``XRANGE``) and
   ``XDEL``\\ s it — rather than acked past.
+* **So is a command that keeps failing** (#389): after
+  ``fetch_facts.MAX_DELIVERY_ATTEMPTS`` failed attempts that were not connection
+  errors — #371's example is a NUL in ``info_item_id``, which JSONB refuses at
+  the outbox write. Archiver gets no ``check_rejected`` for it.
 
 Per command (``WatchCheckCommand``, cannobserv ``docs/change_bus/watch.md``):
 

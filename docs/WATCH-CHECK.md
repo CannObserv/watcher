@@ -18,6 +18,19 @@ until F4 (#376), and Watcher holds group read only, so it cannot `XADD` one.
     which returns its raw fields, and `dead_letter` copies them there and acks
     the original. The DLQ is Watcher's: it writes, audits (`XLEN`/`XRANGE`)
     and `XDEL`s it, and nothing trims it.
+  - **So is a command that keeps failing** (#389). The shared loop counts the
+    times `process` raises on a message. After `MAX_DELIVERY_ATTEMPTS` (5,
+    `src/workers/fetch_facts.py`), the next pass dead-letters it without
+    processing it again. The reason is `failed 5 attempts: <ExceptionClass>`,
+    with no message text, because an error's text can quote the payload.
+    #371's example is a NUL in `info_item_id`: JSONB refuses it at the outbox
+    write, as `DBAPIError`. A connection error is not an attempt (DB or broker
+    unreachable: `OSError`, `OperationalError`, an invalidated connection,
+    redis connection or timeout). An outage therefore retires nothing.
+    `InterfaceError` counts, because asyncpg raises it for session-state
+    misuse, which recurs. The count lives in the process, so a restart resets
+    it. A dead-lettered command gets **no** `check_rejected`, and Archiver
+    hears nothing back for that `command_id`.
 - **Already accepted** (a `fetch_commands` row has this `check_command_id`)
   → `duplicate`, and nothing is done. A crash between the commit and the ack
   redelivers the command while its fetch is open, and pre-flight alone would
@@ -77,6 +90,11 @@ New code against an unmigrated schema fails every load of a `FetchCommand`.
 # rejected_<reason>):
 sudo journalctl -u watcher --since today -o cat | grep -E 'info.watch-check|watch_check'
 ```
+
+A dead letter logs `info.watch-check frame dead-lettered` at ERROR, with
+`message_id`, `dlq_id` and `reason`. The attempts before it each log
+`info.watch-check consumer error — backing off` with the traceback. broker
+probes the DLQ's length and age.
 
 The rejections are queued in `pending_watch_events`; see
 [WATCH-EVENTS.md](WATCH-EVENTS.md) → *Operating it*.

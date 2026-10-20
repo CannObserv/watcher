@@ -29,6 +29,9 @@ Per message, branch on payload type and **correlate on ``command_id`` only**
 * An undecodable frame is acked past with a warning: on a fact stream we read
   with our own group there is no correlation obligation to discharge and no
   DLQ of ours to route to (mirrors Replicator's policy-reader posture).
+* A fact whose processing keeps failing is acked past the same way, after
+  ``MAX_DELIVERY_ATTEMPTS`` (#389; ``run_fact_consumer``), instead of blocking
+  every fact behind it. Its fetch is the reaper's to re-issue.
 
 Duplicate facts (redelivery, or Replicator's crash-window re-emit) re-run the
 upsert and re-defer the apply task; the apply task's status guard makes the
@@ -366,7 +369,7 @@ async def _retire(
     """Stop retrying a message that failed ``attempts`` times (#389).
 
     The command inbox dead-letters it; a fact inbox acks it past, its policy for
-    an undecodable frame too — the reaper re-issues the fetch whose fact never
+    an undecodable frame too — the reaper re-issues the command whose fact never
     landed (MUST-6). A failure here propagates to the loop's backoff, and the
     next pass retires it again without re-running ``process``.
     """

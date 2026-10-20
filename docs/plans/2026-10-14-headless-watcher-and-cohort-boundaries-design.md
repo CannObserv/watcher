@@ -228,6 +228,16 @@ Rules for this stream:
 - Provision an Archiver tenant and API key.
 - Recreate the 3 production channels under it, or move them between tenants if notifier
   supports that; the issue asks.
+- **As done (2026-10-19, CannObserv/notifier#117):**
+  - **Copied, not moved or recreated.** Notifier has no move between tenants. The copy
+    carried the stored ciphertext, so no URL was handled.
+  - **2 channels, not 3.** Slack and Mailgun were copied with new ids. Watcher's third channel
+    (`sdk-eval-sink`) stays with Watcher. Archiver's `remote_channel_id` values must use the
+    new ids.
+  - **A missing prerequisite was added:** the tailnet ACL rule
+    `tag:archiver` → `tag:notifier:9000,9001`.
+  - **N2 revokes Watcher's keys at the jump and keeps the tenants.** CannObserv/notifier#127
+    deletes them about 30 days after F3.
 - After F3 and the jump, revoke Watcher's tenant and keys.
 
 ### Replicator
@@ -335,7 +345,7 @@ Rules for this stream:
 
 | Flip | Steps |
 |---|---|
-| **F1 fetch-policy** | Import the 4 `min_interval`s into Archiver → Watcher's producer stops → Archiver's producer starts with a full-set republish. The gap between the two runs on Replicator's conservative default, which is benign. |
+| **F1 fetch-policy** | Import the 4 `min_interval`s into Archiver → Watcher's producer stops → Archiver's producer starts with a full-set republish. The gap between the two runs on Replicator's conservative default, which is benign. Both services hold `+xadd` from 2026-10-19 until the jump (CannObserv/broker#95), so **no ACL enforces one producer**: the order of the flip does. |
 | **F2 cadence / profiles** | Migrate the 1 item cadence → Archiver announces concrete intervals → Watcher drops the domain tier and profile code. There are 0 profiles to lose, and this also removes the unguarded `is_active` write in `src/workers/tasks.py` post-actions. |
 | **F3 notifications** | Migrate the 2 templates → set a **cutover instant T** in both services. Watcher dispatches events with `occurred_at` < T; Archiver dispatches events at or after T. No gap and no double-send, because the events persist in Archiver's consumer group. |
 | **F4 check-now** | Enable Archiver's button. |

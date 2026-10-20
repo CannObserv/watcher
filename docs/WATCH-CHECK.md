@@ -23,7 +23,8 @@ until F4 (#376), and Watcher holds group read only, so it cannot `XADD` one.
   redelivers the command while its fetch is open, and pre-flight alone would
   refuse a running check as `fetch_open`.
 - **Rejected** → a `check_rejected` fact through the
-  [watch-events outbox](WATCH-EVENTS.md), committed before the ack.
+  [watch-events outbox](WATCH-EVENTS.md), committed before the ack. It reaches
+  the stream on the drain's next pass, within about a minute.
 - **Accepted** → a forced full fetch issued inline (`issue_fetch_command`,
   the path `check_watched_item` uses) and audited
   `watched_item.check_requested` with `source: bus`.
@@ -62,6 +63,12 @@ which publishes nothing of its own.
 **`fetch_commands.check_command_id` is lineage**, like `forced_full_fetch`:
 the reaper's re-issue and the processor's `input_unreadable` re-fetch carry it,
 so whichever command in the lineage completes the check republishes.
+
+## Deploying it
+
+Migration `5580ec57b7aa` adds `fetch_commands.check_command_id` (nullable, no
+backfill). Use the repo default: `uv run alembic upgrade head`, then restart.
+New code against an unmigrated schema fails every load of a `FetchCommand`.
 
 ## Operating it
 

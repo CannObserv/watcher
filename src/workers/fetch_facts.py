@@ -330,20 +330,32 @@ def is_connection_error(exc: BaseException) -> bool:
 
 
 async def _dead_letter(
-    consumer: AsyncBusConsumer, topic: str, message_id: str, fields, *, reason: str
+    consumer: AsyncBusConsumer,
+    topic: str,
+    message_id: str,
+    fields,
+    *,
+    reason: str,
+    command_id: str | None = None,
 ) -> None:
     """Route one frame to ``<topic>.dlq`` (which acks it), and log it.
 
     The one writer for both causes — undecodable, and out of attempts (#389) —
     which is what ``tests/test_bus_stream_kinds.py`` pins. ``reason`` names an
     exception class only: the DLQ is readable by anything with DLQ access, and
-    an error's text can quote the payload.
+    an error's text can quote the payload. ``command_id`` is ``None`` for an
+    undecodable frame, which has no payload to read it from.
     """
     dlq_id = await consumer.dead_letter(message_id, dict(fields), reason=reason)
     logger.error(
         "%s frame dead-lettered",
         topic,
-        extra={"message_id": message_id, "dlq_id": dlq_id, "reason": reason},
+        extra={
+            "message_id": message_id,
+            "command_id": command_id,
+            "dlq_id": dlq_id,
+            "reason": reason,
+        },
     )
 
 
@@ -376,16 +388,27 @@ async def _retire(
     an undecodable frame too — the reaper re-issues the command whose fact never
     landed (MUST-6). A failure here propagates to the loop's backoff, and the
     next pass retires it again without re-running ``process``.
+
+    Both log lines name the ``command_id``: on a fact inbox the journal is the
+    only record of the drop, and on the command inbox it is what Archiver keys on.
     """
     reason = f"failed {attempts} attempts: {error}"
+    command_id = getattr(message.payload, "command_id", None)
     if dead_letter:
-        await _dead_letter(consumer, topic, message.message_id, message.fields, reason=reason)
+        await _dead_letter(
+            consumer,
+            topic,
+            message.message_id,
+            message.fields,
+            reason=reason,
+            command_id=command_id,
+        )
         return
     await consumer.ack(message.message_id)
     logger.error(
         "%s message acked past",
         topic,
-        extra={"message_id": message.message_id, "reason": reason},
+        extra={"message_id": message.message_id, "command_id": command_id, "reason": reason},
     )
 
 

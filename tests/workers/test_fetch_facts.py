@@ -593,7 +593,7 @@ class TestRunBlobsConsumer:
         assert pending["pending"] == 0  # retried message was acked
 
     async def test_a_fact_that_always_fails_is_acked_past_and_stops_blocking(
-        self, db_session, monkeypatch
+        self, db_session, monkeypatch, caplog
     ):
         """#389: past ``MAX_DELIVERY_ATTEMPTS`` a fact inbox acks the fact past,
         its undecodable-frame policy — no DLQ of ours (``content.blobs.dlq`` is
@@ -636,10 +636,16 @@ class TestRunBlobsConsumer:
             while behind_id not in outcomes:
                 await asyncio.sleep(0.02)
 
-        await asyncio.wait_for(_behind_processed(), timeout=5)
+        with caplog.at_level("ERROR", logger="src.workers.fetch_facts"):
+            await asyncio.wait_for(_behind_processed(), timeout=5)
         stop.set()
         await asyncio.wait_for(task, timeout=5)
 
+        # No DLQ on a fact inbox: the journal is the only record of the drop,
+        # so it names the command whose fetch the reaper must re-issue (CR 2).
+        (retired,) = [r for r in caplog.records if "acked past" in r.getMessage()]
+        assert retired.command_id == poison_id
+        assert retired.reason == f"failed {ff_mod.MAX_DELIVERY_ATTEMPTS} attempts: ValueError"
         assert attempts[poison_id] == ff_mod.MAX_DELIVERY_ATTEMPTS
         assert outcomes[behind_id] == "unmatched"
         pending = await client.xpending(streams.CONTENT_BLOBS, CONSUMER_GROUP)

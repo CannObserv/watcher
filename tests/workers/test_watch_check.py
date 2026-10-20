@@ -418,7 +418,7 @@ class TestDeliveryThreshold:
         return attempts, outcomes
 
     async def test_a_poison_command_is_dead_lettered_and_the_one_behind_it_answered(
-        self, db_session, monkeypatch
+        self, db_session, monkeypatch, caplog
     ):
         client = fakeredis.FakeAsyncRedis()
         poison = _poison_command()
@@ -437,10 +437,14 @@ class TestDeliveryThreshold:
                 and await client.xlen(dlq_name(streams.INFO_WATCH_CHECK)) == 1
             )
 
-        await _until(_both_handled)
+        with caplog.at_level("ERROR", logger="src.workers.fetch_facts"):
+            await _until(_both_handled)
         stop.set()
         await asyncio.wait_for(task, timeout=5)
 
+        # The command_id is what an operator tells Archiver (CR 2).
+        (logged,) = [r for r in caplog.records if "dead-lettered" in r.getMessage()]
+        assert logged.command_id == poison.payload.command_id
         (rejection,) = await _rejections(db_session)
         assert rejection.payload["command_id"] == behind.payload.command_id
         assert attempts[poison.payload.command_id] == ff_mod.MAX_DELIVERY_ATTEMPTS

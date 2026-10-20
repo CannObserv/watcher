@@ -92,7 +92,7 @@ sudo journalctl -u watcher --since today -o cat | grep -E 'info.watch-check|watc
 ```
 
 A dead letter logs `info.watch-check frame dead-lettered` at ERROR, with
-`message_id`, `dlq_id` and `reason`. The attempts before it each log
+`message_id`, `command_id` (null for an undecodable frame), `dlq_id` and `reason`. The attempts before it each log
 `info.watch-check consumer error — backing off` with the traceback. broker
 probes the DLQ's length and age.
 

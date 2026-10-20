@@ -126,7 +126,12 @@ _FILESYSTEM_ERRORS = (
 # lazy connect inside ``process`` raises ``CannotConnectNowError`` (CR 6). Class
 # 08 is connection exception, 53 insufficient resources (slots, disk, memory);
 # 57P01–57P03 are admin shutdown, crash shutdown, cannot connect now. 57014
-# (a statement timeout) is absent: it can be the message's own fault.
+# (a statement timeout) is absent: on asyncpg it can be the message's own fault,
+# so it counts. psycopg files 57014 — and 40001, 40P01, 55P03 — under
+# ``OperationalError``, above, so on Procrastinate's defer path they are outages.
+# That is right there: the defer inserts a job row naming a ``command_id``, which
+# no payload can make fail, and an attempt counted after the commit retires a fact
+# that is already recorded.
 _UNAVAILABLE_SQLSTATE_CLASSES = ("08", "53")
 _UNAVAILABLE_SQLSTATES = frozenset({"57P01", "57P02", "57P03"})
 

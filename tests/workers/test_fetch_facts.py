@@ -19,7 +19,6 @@ from datetime import UTC, datetime, timedelta
 
 import fakeredis
 import psycopg
-import psycopg_pool
 import pytest
 from co_core.effects.bus import BusPublish
 from co_core.pure.adapters.bus import streams
@@ -684,7 +683,7 @@ class TestConnectionErrorsAreNotAttempts:
         recorded and no apply deferred — and nothing re-defers it (CR 1)."""
         try:
             try:
-                raise psycopg_pool.PoolTimeout("couldn't get a connection after 30.00 sec")
+                raise psycopg.OperationalError("connection failed: Connection refused")
             except psycopg.OperationalError as inner:
                 raise ConnectorException() from inner
         except ConnectorException as exc:

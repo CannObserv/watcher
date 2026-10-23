@@ -4,6 +4,8 @@ The one-time setup behind the nightly backup (#296 D8/D9): what the GCP project
 owner creates, the host's three files, and the co-status dead-man monitor. The
 backup's design, its sandbox, install and restore: [RECOVERY.md](RECOVERY.md).
 
+## GCP resources
+
 The node has no `gcloud` and no credential that can create any of this. Mirrors
 broker#4 with `broker` → `watcher`:
 
@@ -26,6 +28,8 @@ gcloud iam service-accounts keys create co-watcher-backup.json \
     --iam-account="$SA@$PROJECT.iam.gserviceaccount.com"
 ```
 
+## The host's files
+
 On the host — three files. The two keys are `0400 root:root` and read only by
 systemd, which hands the run its own copies; `backup.env` holds no secret. The
 check-in key file is created **empty** now, because the unit will not start
@@ -46,6 +50,8 @@ steps put one there; this unit sets its own. It points at the run's private copy
 original. Left to the SDK that fails `Permission denied` on the key, which reads
 as a reason to loosen its mode — so the job refuses first: exit 2 and an `alert`
 naming this file, before any client is built.
+
+## The dead-man monitor
 
 **The dead-man monitor is co-status's** (#330, CannObserv/status#2):
 `co-watcher-backup` in tenant `co-watcher`, at `http://status:9000`. It began

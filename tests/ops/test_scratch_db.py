@@ -258,6 +258,18 @@ def dead_pid() -> int:
     return child.pid
 
 
+class Recording:
+    """A real connection that also records what it was sent."""
+
+    def __init__(self, conn) -> None:
+        self._conn = conn
+        self.sent: list[str] = []
+
+    async def execute(self, statement, params=None):
+        self.sent.append(str(statement))
+        return await self._conn.execute(statement, params)
+
+
 async def _exists(conn, name: str) -> bool:
     found = await conn.execute(text("SELECT 1 FROM pg_database WHERE datname = :n"), {"n": name})
     return found.scalar() is not None
@@ -277,7 +289,9 @@ async def test_drop_ends_the_roles_own_stray_connection() -> None:
         held = await stray.connect()
         await held.execute(text("SELECT 1"))
         async with admin.connect() as conn:
-            assert await scratch_db.drop(conn, name) is True
+            recorded = Recording(conn)
+            assert await scratch_db.drop(recorded, name) is True
+            assert recorded.sent == [forced(name)], "FORCE alone should have ended it"
             assert not await _exists(conn, name)
     finally:
         if held is not None:

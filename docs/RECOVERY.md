@@ -380,7 +380,11 @@ exact. This is the form steps 16, 19 and 23 used; `-f -` is required.
   scratch database with the two-role grants, ships it through the real
   `pg_dump` and the SDK-faithful bucket fake, restores it with the real
   `pg_restore`, and asserts the gates above; a second test proves a failed
-  restore leaves the target untouched.
+  restore leaves the target untouched. Its scratch databases
+  (`watcher_rh<pidns>_<pid>_{src,dst}_test`) are dropped by `tests/ops/scratch_db.py`:
+  FORCE, then a plain `DROP` when FORCE refuses an autovacuum worker it cannot
+  signal (#383). A drop that still fails warns `ScratchDatabaseLeaked` naming the
+  database; the next run's setup sweeps it.
 - **By hand, dated, with what each run proved**:
   [RECOVERY-REHEARSALS.md](RECOVERY-REHEARSALS.md), from the first sandboxed
   dump (2026-09-11) on.

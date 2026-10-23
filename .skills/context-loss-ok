@@ -367,3 +367,4 @@ docs/ARCHITECTURE.md :: retarget :: **No cross-repo mirror discipline (#159, #23
 docs/RECOVERY.md :: retarget :: without it (see *The sandbox* above), and filled in when the monitor exists.
 docs/DEPLOYMENT.md :: retarget :: Provisioning (the role script and the three files), install, why its sandbox has this shape
 docs/ENVIRONMENT.md :: retarget :: see RECOVERY.md for why a port typo still alarms rather than inverts
+docs/ENVIRONMENT.md :: retarget :: **The backup unit loads one env file of its own, and neither of the service's** (#296 D8/D9, #297)

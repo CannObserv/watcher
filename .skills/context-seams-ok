@@ -223,3 +223,4 @@ docs/RECOVERY-PROVISIONING.md :: backup's design, its sandbox, install and resto
 docs/RECOVERY-PROVISIONING.md :: without it (see [*The sandbox*](RECOVERY.md#the-sandbox-and-why-it-is-this-shape)), and filled in when the monitor exists.
 docs/reference/tailscale.md :: (`docs/RECOVERY.md` → *Restore*). A rename is survivable — `WATCHER_BACKUP_PREFIX`
 tests/scripts/test_dev_server.py :: user on the box — the argv hazard docs/RECOVERY.md documents for the
+docs/RECOVERY-PROVISIONING.md :: The variables the templates can use: [What a check-in carries](RECOVERY.md#provisioning--needs-the-gcp-project-owner).

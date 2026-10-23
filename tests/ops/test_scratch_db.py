@@ -135,6 +135,10 @@ class TestIsAlive:
         child.wait()
         assert not scratch_db.is_alive(child.pid)
 
+    def test_a_pid_no_process_could_have_is_not(self) -> None:
+        """A hand-made name can carry one; setup's sweep must not crash on it."""
+        assert not scratch_db.is_alive(10**30)
+
     def test_a_process_we_may_not_signal_still_is(self, monkeypatch) -> None:
         def kill(pid: int, sig: int) -> None:
             raise PermissionError(1, "Operation not permitted")

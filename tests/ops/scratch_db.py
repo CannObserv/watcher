@@ -71,7 +71,7 @@ def is_alive(pid: int) -> bool:
     """Whether ``pid`` names a live process in this pid namespace."""
     try:
         os.kill(pid, 0)
-    except ProcessLookupError:
+    except (ProcessLookupError, OverflowError):  # gone, or no pid could be this
         return False
     except PermissionError:
         return True  # someone else's process, but alive

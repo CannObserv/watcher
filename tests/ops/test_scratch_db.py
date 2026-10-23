@@ -269,13 +269,6 @@ class TestSweep:
 # --- Against the test server -------------------------------------------------
 
 
-def dead_pid() -> int:
-    """A pid that was alive a moment ago and is not now (reaped)."""
-    child = subprocess.Popen(["true"])
-    child.wait()
-    return child.pid
-
-
 class Recording:
     """A real connection that also records what it was sent."""
 
@@ -297,7 +290,7 @@ async def _exists(conn, name: str) -> bool:
 async def test_drop_ends_the_roles_own_stray_connection() -> None:
     """A test that fails before ``dispose()`` leaves this role connected; the
     forced drop is what ends it (a plain one would wait 5 s and fail)."""
-    name = scratch_db.names(pid=dead_pid())[0]
+    name = scratch_db.names(pid=scratch_db.dead_pid())[0]
     admin = create_async_engine(TEST_DATABASE_URL, isolation_level="AUTOCOMMIT")
     stray = create_async_engine(with_database(TEST_DATABASE_URL, name))
     held = None
@@ -322,9 +315,9 @@ async def test_drop_ends_the_roles_own_stray_connection() -> None:
 
 @pytest.mark.integration
 async def test_sweep_drops_a_dead_runs_databases_and_spares_the_rest() -> None:
-    dead = scratch_db.names(pid=dead_pid())
+    dead = scratch_db.names(pid=scratch_db.dead_pid())
     live = scratch_db.names(pid=os.getpid())[1:]  # this run's own: spared
-    legacy = (f"watcher_rh{dead_pid()}_src_test",)  # the pre-#383 shape: spared
+    legacy = (f"watcher_rh{scratch_db.dead_pid()}_src_test",)  # the pre-#383 shape: spared
     admin = create_async_engine(TEST_DATABASE_URL, isolation_level="AUTOCOMMIT")
     try:
         async with admin.connect() as conn:

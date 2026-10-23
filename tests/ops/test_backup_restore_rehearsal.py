@@ -27,7 +27,6 @@ from tests.conftest import TEST_DATABASE_URL
 from tests.ops import scratch_db
 from tests.ops.gcs_fakes import FakeBucket, FakeClient
 from tests.ops.scratch_db import with_database
-from tests.ops.test_scratch_db import dead_pid
 
 pytestmark = pytest.mark.integration
 
@@ -87,7 +86,7 @@ async def databases():
 @pytest.fixture
 async def leaked():
     """A dead run's scratch database, already there when ``databases`` sets up."""
-    name = scratch_db.names(pid=dead_pid())[0]
+    name = scratch_db.names(pid=scratch_db.dead_pid())[0]
     admin = create_async_engine(TEST_DATABASE_URL, isolation_level="AUTOCOMMIT")
     async with admin.connect() as conn:
         await conn.execute(text(f"CREATE DATABASE {name}"))

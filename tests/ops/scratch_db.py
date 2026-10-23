@@ -21,6 +21,7 @@ Nothing here names a role: whoever runs the suite owns, drops and sweeps (#388).
 import asyncio
 import os
 import re
+import subprocess
 import warnings
 from collections.abc import Awaitable, Callable, Iterable
 
@@ -76,6 +77,13 @@ def is_alive(pid: int) -> bool:
     except PermissionError:
         return True  # someone else's process, but alive
     return True
+
+
+def dead_pid() -> int:
+    """A pid that was alive a moment ago and is not now (a reaped child), for tests."""
+    child = subprocess.Popen(["true"])
+    child.wait()
+    return child.pid
 
 
 def stale(

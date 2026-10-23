@@ -99,7 +99,10 @@ async def leaked():
 
 
 async def test_setup_names_this_runs_databases_and_sweeps_a_dead_runs(leaked, databases) -> None:
-    """#383: a teardown that loses to autovacuum leaks; the next setup reclaims."""
+    """#383: a teardown that loses to autovacuum leaks; the next setup reclaims.
+
+    ``leaked`` is listed first so pytest creates it before ``databases`` sweeps.
+    """
     assert tuple(make_url(url).database for url in databases) == scratch_db.names()
     engine = create_async_engine(TEST_DATABASE_URL)
     async with engine.connect() as conn:

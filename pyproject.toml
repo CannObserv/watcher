@@ -115,6 +115,11 @@ packages = ["src"]
 # is anchored by uv.lock (it pins the exact resolved version to a named wheelhouse
 # artifact; find-links locks by filename, not hash), not by wheelhouse contents.
 find-links = ["./.wheelhouse"]
+# certifi is transitive (httpx, requests) and nothing imports it, so its floor is
+# a constraint, not a dependency: 2026.10.19 drops emSign ECC Root CA - G3, the
+# root the leaked eMudhra intermediates chain to (#391, GHSA-6q48-6c7w-9gw2).
+# Gate: tests/test_dependency_certifi_floor.py.
+constraint-dependencies = ["certifi>=2026.10.19"]
 
 [tool.uv.sources]
 # Public repo over HTTPS, pinned by release tag (#284). The tag is the pin — uv

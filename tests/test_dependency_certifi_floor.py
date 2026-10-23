@@ -41,6 +41,8 @@ def test_manifest_floors_certifi() -> None:
     constraints = _certifi_constraints()
     assert constraints, "pyproject.toml declares no certifi constraint-dependency"
     for req in constraints:
+        # A marker would floor some platforms only.
+        assert req.marker is None, f"{req} is conditional; the floor must hold everywhere"
         # The release #391 measured trusting G3, and the boundary below the floor.
         for vulnerable in ("2026.2.25", "2026.10.18"):
             assert not req.specifier.contains(vulnerable, prereleases=True), (

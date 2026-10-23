@@ -1,1 +1,0 @@
-../../skills-vendor/obra-superpowers/skills/brainstorming/spec-document-reviewer-prompt.md

@@ -194,7 +194,7 @@ A skill is symlinked into both `skills/` and `.claude/skills/`; overrides in `sk
 - [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) — systemd units, the install runbook, timers
 - [docs/ENVIRONMENT.md](docs/ENVIRONMENT.md) — every env file and variable, load order, the unit-only credentials
 - [docs/HOST-MEMORY.md](docs/HOST-MEMORY.md) — #307/#309: reservations, slices, earlyoom, the SocratiCode pin
-- [docs/RECOVERY.md](docs/RECOVERY.md) — nightly DB backup to GCS, restore, go/no-go gates; dated [rehearsals](docs/RECOVERY-REHEARSALS.md)
+- [docs/RECOVERY.md](docs/RECOVERY.md) — nightly DB backup to GCS, restore, go/no-go gates; dated [rehearsals](docs/RECOVERY-REHEARSALS.md), one-time [provisioning](docs/RECOVERY-PROVISIONING.md)
 - [docs/MIGRATIONS.md](docs/MIGRATIONS.md) — the manual upgrade step, the two-role grants, one-time orderings
 - [docs/reference/tailscale.md](docs/reference/tailscale.md) — this node: identity, peers, the cold-boot race, ACL rules
 - [docs/SKILLS.md](docs/SKILLS.md) — skill triggers, vendored skill repos, the SessionStart hooks

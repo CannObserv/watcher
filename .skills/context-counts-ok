@@ -7,7 +7,8 @@
 # which asserts the referenced set equals WATCHER_STREAMS and whose failure
 # message names this AGENTS.md sentence by its wording. Re-judged in the #283
 # curation: the wording moved to five/three with the streams, the gate with it.
-AGENTS.md :: gated :: watcher publishes five streams and consumes three
+# Re-judged in the #383 curation: six/four now, still pinned by test_the_inventory_is_exactly_what_the_docs_describe.
+AGENTS.md :: gated :: watcher publishes six streams and consumes four
 
 # Gated by tests/core/test_logging.py::test_log_record_includes_structured_fields
 # (L79-89), which asserts message, level, logger and timestamp by name.

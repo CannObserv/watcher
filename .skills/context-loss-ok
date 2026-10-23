@@ -363,3 +363,7 @@ docs/SKILLS.md :: retarget :: traps are all in **[SOCRATICODE.md](SOCRATICODE.md
 docs/SKILLS.md :: retarget :: above its END marker, this repo's own notes below it. The prefetch query is not copied
 # CR 12: ARCHITECTURE.md named a wheelhouse section "above" it never had; it now links DEPENDENCIES.md.
 docs/ARCHITECTURE.md :: retarget :: **No cross-repo mirror discipline (#159, #236).** Content acquisition is co-core's (see **Cannobserv wheelhouse** above); `src/core/logging.py` is service-local. Nothing in `src/` needs mirroring to Archiver — don't reintroduce a sync obligation.
+# #383 curation: Provisioning moved to RECOVERY-PROVISIONING.md; pointers into it re-aimed.
+docs/RECOVERY.md :: retarget :: without it (see *The sandbox* above), and filled in when the monitor exists.
+docs/DEPLOYMENT.md :: retarget :: Provisioning (the role script and the three files), install, why its sandbox has this shape
+docs/ENVIRONMENT.md :: retarget :: see RECOVERY.md for why a port typo still alarms rather than inverts

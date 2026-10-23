@@ -12,7 +12,6 @@ first write fails, so this asserts what #296's go/no-go gate asserts: DML
 granted, DDL refused, ``alembic_version`` read-only, future tables covered.
 """
 
-import os
 import re
 import shutil
 import subprocess
@@ -20,21 +19,20 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
-from sqlalchemy import text
+from sqlalchemy import make_url, text
 from sqlalchemy.ext.asyncio import create_async_engine
 
 from src.ops import backup, restore
 from tests.conftest import TEST_DATABASE_URL
+from tests.ops import scratch_db
 from tests.ops.gcs_fakes import FakeBucket, FakeClient
+from tests.ops.scratch_db import with_database
+from tests.ops.test_scratch_db import dead_pid
 
 pytestmark = pytest.mark.integration
 
 APP_ROLE = "watcher_app"
 BUCKET = "rehearsal-bucket"
-
-
-def _with_database(url: str, name: str) -> str:
-    return re.sub(r"/[^/?]+(\?|$)", f"/{name}\\1", url, count=1)
 
 
 def _libpq(url: str) -> str:
@@ -49,14 +47,16 @@ def _major(version_text: str) -> int:
 async def databases():
     """Two scratch databases on the test server, created and always dropped.
 
-    ``_test``-suffixed so ``db_safety`` would treat them as non-production, and
-    named per process so parallel suites cannot collide.
+    Named per pid namespace and pid (``scratch_db.names``), so parallel suites
+    cannot collide. Setup first sweeps what dead runs leaked; a teardown drop
+    that loses to a backend it cannot end warns rather than erroring a test
+    that passed, and the next run's sweep reclaims it (#383).
     """
     for binary in ("pg_dump", "pg_restore", "psql"):
         if shutil.which(binary) is None:
             pytest.skip(f"{binary} not installed")
     admin = create_async_engine(TEST_DATABASE_URL, isolation_level="AUTOCOMMIT")
-    names = (f"watcher_rh{os.getpid()}_src_test", f"watcher_rh{os.getpid()}_dst_test")
+    names = scratch_db.names()
     async with admin.connect() as conn:
         server_major = int((await conn.execute(text("SHOW server_version_num"))).scalar()) // 10000
         dump_version = subprocess.run(["pg_dump", "--version"], capture_output=True, text=True)
@@ -70,16 +70,44 @@ async def databases():
                 await conn.execute(text(f"CREATE ROLE {APP_ROLE} NOLOGIN"))
             except Exception as exc:  # noqa: BLE001 — no CREATEROLE here: nothing to rehearse
                 pytest.skip(f"{APP_ROLE} absent and cannot be created: {exc}")
+        await scratch_db.sweep(conn)
         for name in names:
-            await conn.execute(text(f"DROP DATABASE IF EXISTS {name} WITH (FORCE)"))
+            await scratch_db.drop(conn, name)
             await conn.execute(text(f"CREATE DATABASE {name}"))
     try:
-        yield tuple(_with_database(TEST_DATABASE_URL, name) for name in names)
+        yield tuple(with_database(TEST_DATABASE_URL, name) for name in names)
     finally:
         async with admin.connect() as conn:
             for name in names:
-                await conn.execute(text(f"DROP DATABASE IF EXISTS {name} WITH (FORCE)"))
+                await scratch_db.drop(conn, name)
         await admin.dispose()
+
+
+@pytest.fixture
+async def leaked():
+    """A dead run's scratch database, already there when ``databases`` sets up."""
+    name = scratch_db.names(pid=dead_pid())[0]
+    admin = create_async_engine(TEST_DATABASE_URL, isolation_level="AUTOCOMMIT")
+    async with admin.connect() as conn:
+        await conn.execute(text(f"CREATE DATABASE {name}"))
+    try:
+        yield name
+    finally:
+        async with admin.connect() as conn:
+            await conn.execute(text(f"DROP DATABASE IF EXISTS {name} WITH (FORCE)"))
+        await admin.dispose()
+
+
+async def test_setup_names_this_runs_databases_and_sweeps_a_dead_runs(leaked, databases) -> None:
+    """#383: a teardown that loses to autovacuum leaks; the next setup reclaims."""
+    assert tuple(make_url(url).database for url in databases) == scratch_db.names()
+    engine = create_async_engine(TEST_DATABASE_URL)
+    async with engine.connect() as conn:
+        found = await conn.execute(
+            text("SELECT 1 FROM pg_database WHERE datname = :n"), {"n": leaked}
+        )
+        assert found.scalar() is None, "the setup sweep left a dead run's database"
+    await engine.dispose()
 
 
 SEED = [

@@ -77,10 +77,11 @@ async def databases():
     try:
         yield tuple(with_database(TEST_DATABASE_URL, name) for name in names)
     finally:
-        async with admin.connect() as conn:
-            for name in names:
-                await scratch_db.drop(conn, name)
-        await admin.dispose()
+        try:
+            async with admin.connect() as conn:
+                await scratch_db.drop_all(conn, names)
+        finally:
+            await admin.dispose()
 
 
 @pytest.fixture

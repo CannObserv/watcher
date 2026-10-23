@@ -148,6 +148,18 @@ async def drop(
     return False
 
 
+async def drop_all(conn, scratch: Iterable[str]) -> None:
+    """:func:`drop` each name, all of them even when one raises; then raise the first."""
+    first: BaseException | None = None
+    for name in scratch:
+        try:
+            await drop(conn, name)
+        except Exception as exc:  # noqa: BLE001 — re-raised below, after the rest
+            first = first or exc
+    if first is not None:
+        raise first
+
+
 async def sweep(
     conn,
     *,

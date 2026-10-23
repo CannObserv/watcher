@@ -237,6 +237,20 @@ class TestDrop:
         assert conn.sent == []
 
 
+class TestDropAll:
+    async def test_tries_every_name_then_raises_the_first_error(self) -> None:
+        """One broken drop must not leak the other database too."""
+        other = f"watcher_rh{NS}_{PID}_dst_test"
+
+        def syntax(statement: str) -> ProgrammingError:
+            return ProgrammingError(statement, None, PgError("42601", "syntax error"))
+
+        conn = FakeConn(syntax, None)
+        with pytest.raises(ProgrammingError):
+            await scratch_db.drop_all(conn, (NAME, other))
+        assert conn.sent == [forced(NAME), forced(other)]
+
+
 class TestSweep:
     async def test_drops_the_stale_and_returns_their_names(self) -> None:
         stale = f"watcher_rh{NS}_111_src_test"

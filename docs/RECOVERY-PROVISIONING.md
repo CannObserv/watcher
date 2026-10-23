@@ -73,6 +73,8 @@ not here. The monitor:
 | `title_template` / `body_template` | `watcher backup {{ outcome }} on {{ source_host }}` / `{{ error }}` | rendered for an `alert` only |
 | `enabled` | `true`, stated | the first trap below |
 
+The variables the templates can use: [What a check-in carries](RECOVERY.md#provisioning--needs-the-gcp-project-owner).
+
 Then the key into its file — read at a prompt, so it reaches neither shell
 history nor argv, and through `tee`, so the file keeps its `0400 root:root` —
 and the other two into `backup.env`:

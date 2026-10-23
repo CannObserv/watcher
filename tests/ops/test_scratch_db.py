@@ -46,7 +46,7 @@ def refused(statement: str) -> ProgrammingError:
 
 def in_use(statement: str) -> OperationalError:
     """A plain DROP that waited ~5 s and still found another backend."""
-    message = f'database "{statement.split()[-1]}" is being accessed by other users'
+    message = f'database "{statement.split()[4]}" is being accessed by other users'
     return OperationalError(statement, None, PgError("55006", message))
 
 
@@ -169,6 +169,18 @@ class TestDrop:
         conn = FakeConn(refused, in_use, None)
         assert await scratch_db.drop(conn, NAME, sleep=sleep) is True
         assert conn.sent == [forced(NAME), plain(NAME), forced(NAME)]
+        assert sleeps == [scratch_db.BACKOFF_SECONDS]
+
+    async def test_a_terminated_backend_slow_to_exit_is_retried_not_raised(self) -> None:
+        """FORCE's own 55006: it signalled everyone, but one outlived the ~5 s wait."""
+        sleeps: list[float] = []
+
+        async def sleep(seconds: float) -> None:
+            sleeps.append(seconds)
+
+        conn = FakeConn(in_use, None)
+        assert await scratch_db.drop(conn, NAME, sleep=sleep) is True
+        assert conn.sent == [forced(NAME), forced(NAME)]
         assert sleeps == [scratch_db.BACKOFF_SECONDS]
 
     async def test_a_database_that_stays_in_use_warns_naming_it_and_who_holds_it(self) -> None:

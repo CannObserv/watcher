@@ -110,7 +110,7 @@ async def drop(
     """Drop scratch database ``name`` on an AUTOCOMMIT connection; ``True`` once gone.
 
     FORCE first; on ``42501`` (a backend this role cannot signal) a plain
-    ``DROP``; on ``55006`` (still in use after that) both again, with backoff.
+    ``DROP``; on ``55006`` from either (still in use) both again, with backoff.
     When every attempt ends in use, warn :class:`ScratchDatabaseLeaked` naming
     the database and what ``pg_stat_activity`` shows on it, and return
     ``False``. Any other error is raised: that is a broken drop, not a race.
@@ -124,6 +124,9 @@ async def drop(
             await conn.execute(text(f"DROP DATABASE IF EXISTS {name} WITH (FORCE)"))
             return True
         except DBAPIError as exc:
+            if _sqlstate(exc) == OBJECT_IN_USE:  # signalled, but outlived the ~5 s wait
+                last = exc
+                continue
             if _sqlstate(exc) != INSUFFICIENT_PRIVILEGE:
                 raise
         try:

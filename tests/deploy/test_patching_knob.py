@@ -59,6 +59,17 @@ FOLLOWED = {
 }
 
 
+#: Every Exec directive besides ExecStart= that a service unit can carry.
+_OTHER_EXEC = (
+    "ExecCondition",
+    "ExecStartPre",
+    "ExecStartPost",
+    "ExecReload",
+    "ExecStop",
+    "ExecStopPost",
+)
+
+
 def _on_host() -> bool:
     return INSTALLED_UNIT.exists()
 
@@ -214,6 +225,11 @@ def test_each_timer_service_is_an_unprivileged_non_restarter(unit: str, user: st
     assert directive_values(text, "User") == [user]
     starts = directive_values(text, "ExecStart")
     assert all(not start.startswith("+") for start in starts), f"{unit}: a root ExecStart"
+    # The other Exec lines may run as root (cleanup's ExecStartPre= makes its
+    # log directory), so none of them may start anything either.
+    for directive in _OTHER_EXEC:
+        for line in directive_values(text, directive):
+            assert "systemctl" not in line, f"{unit}: {directive}= calls systemctl"
     for start in starts:
         target = start.split()[0]
         if target.endswith(".sh"):

@@ -19,13 +19,15 @@ everywhere; the installed and live checks skip on a host that does not run the
 service, like the other drift checks in this package.
 """
 
-import shutil
-import subprocess
 from pathlib import Path
 
 import pytest
 
-from tests.deploy.systemd_units import directive_values, memory_size_to_bytes
+from tests.deploy.systemd_units import (
+    directive_values,
+    live_main_pid_adj,
+    memory_size_to_bytes,
+)
 
 REPO = Path(__file__).resolve().parents[2]
 DROPINS = REPO / "deploy" / "dropins"
@@ -225,18 +227,10 @@ def _assert_reservation_survives_every_ancestor(cgroup: Path) -> None:
 
 
 def _live_oom_score_adj(unit: str) -> int:
-    systemctl = shutil.which("systemctl")
-    if systemctl is None:
-        pytest.skip("systemctl not available")
-    pid = subprocess.run(
-        [systemctl, "show", unit, "--property=MainPID", "--value"],
-        capture_output=True,
-        text=True,
-        check=False,
-    ).stdout.strip()
-    if not pid or pid == "0":
+    adj = live_main_pid_adj(unit)
+    if adj is None:
         pytest.skip(f"{unit} is not running")
-    return int(Path(f"/proc/{pid}/oom_score_adj").read_text())
+    return adj
 
 
 def test_live_oom_order() -> None:

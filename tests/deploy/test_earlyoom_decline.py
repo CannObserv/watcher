@@ -26,11 +26,15 @@ import re
 import shutil
 import subprocess
 from pathlib import Path
+from typing import NamedTuple
 
 import pytest
 
+from tests.deploy.systemd_units import live_main_pid_adj
+
 INSTALLED_UNIT = Path("/etc/systemd/system/watcher.service")
 EARLYOOM = "earlyoom.service"
+WATCHER = "watcher.service"
 
 # What exe.dev starts a session from; the session's adj is theirs to set.
 SESSION_PARENTS = frozenset({"exe-init", "sshd"})
@@ -39,14 +43,28 @@ SESSION_PARENTS = frozenset({"exe-init", "sshd"})
 SESSION_CGROUP = "/init.scope"
 # What exe-init 14fd603 starts a session at (#337).
 SESSION_ADJ = 0
+# exe.dev's Shelley agent: each conversation's shell runs inside this unit (#399).
+SHELLEY_CGROUP = "/system.slice/shelley.service"
 
 
 def _on_host() -> bool:
     return INSTALLED_UNIT.exists()
 
 
-def _session_root_adj(proc: Path, pid: int) -> int | None:
-    """``oom_score_adj`` of the process exe.dev started ``pid``'s session from.
+class SessionRoot(NamedTuple):
+    """The process exe.dev started a session from, and what the kernel sees."""
+
+    pid: int
+    adj: int
+    cgroup: str
+
+
+def _cgroup(proc: Path, pid: int) -> str:
+    return (proc / str(pid) / "cgroup").read_text().strip().removeprefix("0::")
+
+
+def _session_root(proc: Path, pid: int) -> SessionRoot | None:
+    """The process exe.dev started ``pid``'s session from.
 
     Walks the ancestry to the first process whose parent is in
     ``SESSION_PARENTS`` and reads that one, not ``pid`` itself: a leaf can be
@@ -59,12 +77,11 @@ def _session_root_adj(proc: Path, pid: int) -> int | None:
         ppid = int(re.search(r"^PPid:\s*(\d+)", status, flags=re.MULTILINE).group(1))
         if ppid < 1:
             return None
-        if (proc / str(ppid) / "comm").read_text().strip() in SESSION_PARENTS:
-            return int((proc / str(pid) / "oom_score_adj").read_text())
-        if ppid == 1:
-            cgroup = (proc / str(pid) / "cgroup").read_text().strip()
-            if cgroup == f"0::{SESSION_CGROUP}":
-                return int((proc / str(pid) / "oom_score_adj").read_text())
+        if (proc / str(ppid) / "comm").read_text().strip() in SESSION_PARENTS or (
+            ppid == 1 and _cgroup(proc, pid) == SESSION_CGROUP
+        ):
+            adj = int((proc / str(pid) / "oom_score_adj").read_text())
+            return SessionRoot(pid, adj, _cgroup(proc, pid))
         pid = ppid
     return None
 
@@ -84,7 +101,7 @@ def test_a_session_under_exe_init_reports_its_root(tmp_path: Path) -> None:
     _fake_process(tmp_path, 217, 1, "exe-init", -1000)
     _fake_process(tmp_path, 540, 217, "bash", 0)
     _fake_process(tmp_path, 900, 540, "npm install", 500)
-    assert _session_root_adj(tmp_path, 900) == 0
+    assert _session_root(tmp_path, 900) == SessionRoot(540, 0, SESSION_CGROUP)
 
 
 def test_a_session_under_sshd_reports_its_root(tmp_path: Path) -> None:
@@ -92,7 +109,7 @@ def test_a_session_under_sshd_reports_its_root(tmp_path: Path) -> None:
     _fake_process(tmp_path, 217, 1, "sshd", -1000)
     _fake_process(tmp_path, 700, 217, "bash", 0)
     _fake_process(tmp_path, 701, 700, "python3", 0)
-    assert _session_root_adj(tmp_path, 701) == 0
+    assert _session_root(tmp_path, 701) == SessionRoot(700, 0, SESSION_CGROUP)
 
 
 def test_an_orphaned_session_reports_its_root(tmp_path: Path) -> None:
@@ -104,7 +121,7 @@ def test_an_orphaned_session_reports_its_root(tmp_path: Path) -> None:
     _fake_process(tmp_path, 1, 0, "systemd", 0)
     _fake_process(tmp_path, 645, 1, "sh", -1000)
     _fake_process(tmp_path, 649, 645, "MainThread", -1000)
-    assert _session_root_adj(tmp_path, 649) == -1000
+    assert _session_root(tmp_path, 649) == SessionRoot(645, -1000, SESSION_CGROUP)
 
 
 def test_a_service_under_pid_1_is_not_a_session(tmp_path: Path) -> None:
@@ -112,7 +129,45 @@ def test_a_service_under_pid_1_is_not_a_session(tmp_path: Path) -> None:
     _fake_process(tmp_path, 1, 0, "systemd", 0)
     _fake_process(tmp_path, 400, 1, "uv", -500, "/system.slice/watcher.service")
     _fake_process(tmp_path, 401, 400, "uvicorn", -500, "/system.slice/watcher.service")
-    assert _session_root_adj(tmp_path, 401) is None
+    assert _session_root(tmp_path, 401) is None
+
+
+def test_a_shelley_session_reports_its_root(tmp_path: Path) -> None:
+    """#399: exe.dev's Shelley agent runs each conversation's shell in its unit.
+
+    Measured on co-watcher 2026-10-24: ``bash`` → ``bash`` → ``shelley`` (PID 1
+    child), every process in ``/system.slice/shelley.service`` at -1. The root
+    is the server, not the leaf, for the same reason as under ``exe-init``.
+    """
+    _fake_process(tmp_path, 1, 0, "systemd", 0)
+    _fake_process(tmp_path, 573, 1, "shelley", -1, SHELLEY_CGROUP)
+    _fake_process(tmp_path, 652, 573, "bash", -1, SHELLEY_CGROUP)
+    _fake_process(tmp_path, 653, 652, "npm install", 500, SHELLEY_CGROUP)
+    assert _session_root(tmp_path, 653) == SessionRoot(573, -1, SHELLEY_CGROUP)
+
+
+def test_an_orphaned_shelley_session_reports_its_root(tmp_path: Path) -> None:
+    """The unit is ``KillMode=process``: a Shelley restart kills only the server.
+
+    Its sessions' shells are reparented to PID 1 and stay in the unit's cgroup —
+    #333's orphan, inside a unit instead of ``/init.scope``.
+    """
+    _fake_process(tmp_path, 1, 0, "systemd", 0)
+    _fake_process(tmp_path, 652, 1, "bash", -1, SHELLEY_CGROUP)
+    _fake_process(tmp_path, 653, 652, "python3", 0, SHELLEY_CGROUP)
+    assert _session_root(tmp_path, 653) == SessionRoot(652, -1, SHELLEY_CGROUP)
+
+
+def test_another_service_named_like_a_session_is_not_one(tmp_path: Path) -> None:
+    """Only the named unit counts — never "any system service" (#399).
+
+    A process called ``shelley`` in some other unit is that unit's, and its adj
+    is that unit's choice, not a session's.
+    """
+    _fake_process(tmp_path, 1, 0, "systemd", 0)
+    _fake_process(tmp_path, 800, 1, "shelley", -1, "/system.slice/shelley-dev.service")
+    _fake_process(tmp_path, 801, 800, "bash", -1, "/system.slice/shelley-dev.service")
+    assert _session_root(tmp_path, 801) is None
 
 
 def test_no_session_ancestor_is_none(tmp_path: Path) -> None:
@@ -127,30 +182,47 @@ def test_no_session_ancestor_is_none(tmp_path: Path) -> None:
     _fake_process(
         tmp_path, 316, 315, "python3", 0, "/user.slice/user-1000.slice/user@1000.service/app.slice"
     )
-    assert _session_root_adj(tmp_path, 316) is None
+    assert _session_root(tmp_path, 316) is None
 
 
 def test_sessions_here_are_killable() -> None:
     """The premise of the decline, read off this session's own root.
+
+    The property #337 protects: the kernel can pick the session (above -1000),
+    and picks it before watcher (above watcher's live adj). Both read off the
+    host, never off what a harness is assumed to be. Sessions exe-init starts
+    must also read exactly 0 — that build's premise; Shelley's adj is its unit's.
 
     Fails rather than skips on the host (#333): gate on the host, never on the
     thing under test.
     """
     if not _on_host():
         pytest.skip(f"{INSTALLED_UNIT} not present — not a host running the service")
-    adj = _session_root_adj(Path("/proc"), os.getpid())
-    assert adj is not None, (
+    root = _session_root(Path("/proc"), os.getpid())
+    assert root is not None, (
         "no exe.dev session root above this process — neither a child of "
-        f"{sorted(SESSION_PARENTS)} nor a PID 1 child in {SESSION_CGROUP}. Run it "
-        "from an agent or SSH session; if it was run from one, exe.dev changed how "
-        "a session starts and this walk needs to learn it (#333)"
+        f"{sorted(SESSION_PARENTS)} nor a PID 1 child in {SESSION_CGROUP} or "
+        f"{SHELLEY_CGROUP}. Run it from an agent or SSH session; if it was run from "
+        "one, exe.dev changed how a session starts and this walk needs to learn it "
+        "(#333, #399)"
     )
-    assert adj == SESSION_ADJ, (
-        f"this session's root reads oom_score_adj={adj}, not {SESSION_ADJ}: exe.dev "
-        "starts sessions exempt again, so the kernel can no longer pick one and "
-        "watcher is the largest candidate left. Check `exe-init --version` against "
-        "#337 and revisit the earlyoom decline in docs/HOST-MEMORY.md §3"
+    watcher = live_main_pid_adj(WATCHER)
+    assert watcher is not None, f"{WATCHER} is not running — start it, then rerun"
+    assert -1000 < root.adj and watcher < root.adj, (
+        f"this session's root (pid {root.pid}, {root.cgroup}) reads "
+        f"oom_score_adj={root.adj}; watcher reads {watcher}. The kernel can no "
+        "longer pick the session ahead of watcher, which is the largest candidate "
+        "left. Check `/exe.dev/bin/exe-init --version` against #337 (and, for "
+        f"{SHELLEY_CGROUP}, the unit's OOMScoreAdjust — exe.dev's, never patched "
+        "here, #399), then revisit the earlyoom decline in docs/HOST-MEMORY.md §3"
     )
+    if root.cgroup != SHELLEY_CGROUP:
+        assert root.adj == SESSION_ADJ, (
+            f"this session's root reads oom_score_adj={root.adj}, not {SESSION_ADJ}: "
+            "exe-init no longer starts sessions where #337 measured them. Check "
+            "`/exe.dev/bin/exe-init --version` against #337 and revisit the earlyoom "
+            "decline in docs/HOST-MEMORY.md §3"
+        )
 
 
 def _systemctl(*args: str) -> str:

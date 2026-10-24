@@ -44,7 +44,10 @@ SESSION_CGROUP = "/init.scope"
 # What exe-init 14fd603 starts a session at (#337).
 SESSION_ADJ = 0
 # exe.dev's Shelley agent: each conversation's shell runs inside this unit (#399).
+# Named exactly — a PID 1 child in any other system.slice unit is a service.
 SHELLEY_CGROUP = "/system.slice/shelley.service"
+# The cgroups whose PID 1 children are session roots.
+SESSION_ROOT_CGROUPS = frozenset({SESSION_CGROUP, SHELLEY_CGROUP})
 
 
 def _on_host() -> bool:
@@ -70,7 +73,9 @@ def _session_root(proc: Path, pid: int) -> SessionRoot | None:
     ``SESSION_PARENTS`` and reads that one, not ``pid`` itself: a leaf can be
     ``choom``'d (HOST-MEMORY.md step 1's capped installs are), the session root
     cannot. A PID 1 child in ``SESSION_CGROUP`` is a root too — a session whose
-    ``exe-init`` ancestor exited (#333). ``None`` when no ancestor is a session.
+    ``exe-init`` ancestor exited (#333) — and so is one in ``SHELLEY_CGROUP``:
+    the Shelley server, or a session shell its restart orphaned (#399).
+    ``None`` when no ancestor is a session.
     """
     while pid > 1:
         status = (proc / str(pid) / "status").read_text()
@@ -78,7 +83,7 @@ def _session_root(proc: Path, pid: int) -> SessionRoot | None:
         if ppid < 1:
             return None
         if (proc / str(ppid) / "comm").read_text().strip() in SESSION_PARENTS or (
-            ppid == 1 and _cgroup(proc, pid) == SESSION_CGROUP
+            ppid == 1 and _cgroup(proc, pid) in SESSION_ROOT_CGROUPS
         ):
             adj = int((proc / str(pid) / "oom_score_adj").read_text())
             return SessionRoot(pid, adj, _cgroup(proc, pid))

@@ -1,9 +1,10 @@
 # Host memory posture
 
 How this host keeps its production service alive with no swap, sharing memory
-with agent sessions the OOM killer cannot pick (#307, #309). Part of the
-install, not tuning done later: [DEPLOYMENT.md](DEPLOYMENT.md) → *Installation*
-points here.
+with agent sessions the OOM killer could not pick until #337 (#307, #309) — two
+kinds now: exe-init's in `init.scope`, Shelley's in `shelley.service` (#399).
+Part of the install, not tuning done later: [DEPLOYMENT.md](DEPLOYMENT.md) →
+*Installation* points here.
 
 **Measured 2026-09-23 on `co-watcher`: 7.75 GiB total (resized from 3.8 GiB,
 #309), no swap, one active production unit.** `preflight.sh --check` no longer
@@ -23,8 +24,10 @@ On CannObserv/broker's VM on 2026-09-16 nothing that spiked was killed: the
 kernel failed atomic allocations in `tailscaled` and `ksoftirqd`, the bus was
 down 57m 48s, and a downstream consumer never reconnected. exe-init 14fd603,
 swapped in on 2026-09-29, starts sessions at **0** (`exe-init` itself stays at
--1000), so the kernel can now take the session. The steps below were built for
-the -1000 host and all stay: the premise is exe.dev's, a rebuilt VM can bring
+-1000), so the kernel can now take the session. Sessions from exe.dev's Shelley
+agent are a second kind: they run inside `system.slice/shelley.service` at that
+unit's `OOMScoreAdjust=-1` (#399), still far ahead of watcher's -500. The steps
+below were built for the -1000 host and all stay: the premise is exe.dev's, a rebuilt VM can bring
 the old build back, and at 0 a spiking session still competes with watcher for
 reclaim. None substitutes for another.
 
@@ -179,11 +182,16 @@ from installing a server at all, and a deliberate install runs under `choom -n
 
 `tests/deploy/test_earlyoom_decline.py` pins both halves live: earlyoom is not
 running (`apt install earlyoom` starts it at once, on stock arguments), and this
-session's root reads 0. That check fails rather than skips on the host when it
-finds no session root, and counts a session orphaned under PID 1 in
-`/init.scope` as one (#333). A host set up from the old runbook: `sudo systemctl
-disable --now earlyoom`. If sessions read -1000 again, check `exe-init
---version` against #337 before anything else: that is exe.dev's old build, and
+session's root ranks ahead of watcher's live adj — and reads exactly 0 when
+`exe-init` started it. That check fails rather than skips on the host when it
+finds no session root. A root is a child of `exe-init`/`sshd`, or a PID 1 child
+in `/init.scope` (a session orphaned there, #333) or in
+`/system.slice/shelley.service` (the Shelley server, or a session shell its
+`KillMode=process` restart orphaned, #399) — that unit by exact cgroup, never
+any service. So the ship gate runs from a Shelley, SSH or VS Code session alike.
+A host set up from the old runbook: `sudo systemctl disable --now earlyoom`. If
+sessions read -1000 again, check `/exe.dev/bin/exe-init --version` (it is not
+on `PATH`) against #337 before anything else: that is exe.dev's old build, and
 the kernel can then pick nothing a session launches. If earlyoom is ever
 revisited, never `$`-anchor `--prefer`: `comm` is truncated to 15 characters, so
 the server is `npm exec socrat` and `^npm$` misses it (gregoryfoster/skills'
@@ -218,6 +226,7 @@ another route. Measured 2026-09-23, after the resize:
 |---|---|---|---|---|
 | `init.scope` (agent sessions) | 3093M | — | -1000 (0 since #337) | exe-init / sshd |
 | `system.slice` | 644M | **1G** | — | `deploy/dropins/system.slice.d/` |
+| └ `shelley.service` (Shelley sessions, #399) | 351M¹ | 0 | -1 | exe.dev's unit — never patched here |
 | └ `watcher.service` | 282M | 512M | -500 (`uv`, `uvicorn`) | `deploy/watcher.service` |
 | └ `system-postgresql.slice` | 122M | **384M** | — | `deploy/dropins/system-postgresql.slice.d/` |
 | &nbsp;&nbsp;└ `postgresql@16-main.service` | 122M | **384M** | -900 postmaster, **0** backends | `deploy/dropins/postgresql@.service.d/` (the template); OOM from Debian's unit |
@@ -230,6 +239,18 @@ anyway). With `system.slice` at 0, watcher's 512M showed in `systemctl show` and
 protected nothing. The competitor is `init.scope` — the agent sessions — so the
 slice's 1G (its children's sum, ~13% of the host) deliberately moves reclaim onto
 them.
+
+¹ Measured 2026-10-24; `system.slice` read 1.72G then, Shelley's included.
+**Shelley's sessions compete from inside the slice (#399)**, and the 1G still
+holds: protection is handed to children by their own `memory.low`, so a child
+at 0 takes no share and dilutes nobody's — watcher keeps its 512M and Shelley's
+memory reclaims like `init.scope`'s. The 1G covers the *reserved* children, not
+the slice's usage. If exe.dev ever gives that unit a `MemoryLow`, the live
+ancestor check in `test_memory_dropins.py` (it sums every child) goes red;
+raise the slice's grant or file it, never override exe.dev's unit. The
+comments in `deploy/watcher.service` and `deploy/dropins/system.slice.d/`
+still name only `init.scope`: they are installed verbatim, so this section is
+the authority.
 
 **Postgres's -900 is the postmaster's alone**: Debian resets backends to 0, so a
 killed backend costs a crash recovery, not the database, and at 0 they rank

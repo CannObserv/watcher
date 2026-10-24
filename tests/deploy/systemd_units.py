@@ -1,9 +1,16 @@
-"""Parse systemd unit text the way the deploy tests need it.
+"""Parse systemd unit text, and read a running unit, the way the deploy tests need.
 
 Shared by ``test_installed_unit_matches_repo`` and ``test_memory_dropins``: both
 read ``deploy/`` unit files, and a sign or suffix parsed differently in each
-would let one assert what the other contradicts.
+would let one assert what the other contradicts. ``test_memory_dropins`` and
+``test_earlyoom_decline`` both read a unit's live ``oom_score_adj``.
 """
+
+import shutil
+import subprocess
+from pathlib import Path
+
+import pytest
 
 
 def directive_values(unit_text: str, directive: str) -> list[str]:
@@ -51,3 +58,24 @@ def time_span_to_seconds(value: str) -> float:
     if not number.isdigit():
         raise ValueError(f"unsupported time span {value!r}: write it in seconds")
     return float(number)
+
+
+def live_main_pid_adj(unit: str) -> int | None:
+    """``oom_score_adj`` of ``unit``'s running main process; ``None`` when it is down.
+
+    The process, not the unit: ``OOMScoreAdjust=`` applies at exec, so after a
+    ``daemon-reload`` the unit reports the new value while the running process
+    keeps the old one until it restarts. Skips where there is no ``systemctl``.
+    """
+    systemctl = shutil.which("systemctl")
+    if systemctl is None:
+        pytest.skip("systemctl not available")
+    pid = subprocess.run(
+        [systemctl, "show", unit, "--property=MainPID", "--value"],
+        capture_output=True,
+        text=True,
+        check=False,
+    ).stdout.strip()
+    if not pid or pid == "0":
+        return None
+    return int(Path(f"/proc/{pid}/oom_score_adj").read_text())

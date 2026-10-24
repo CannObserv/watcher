@@ -11,7 +11,11 @@ every ancestor. ``system.slice`` shipped at 0 and ``cgroup2`` here is mounted by
 written, reported by ``systemctl show``, and protected nothing. The competitor
 is ``init.scope`` — exe.dev's agent sessions, a root-level sibling of
 ``system.slice`` — so the slice's reservation is what actually moves reclaim
-pressure onto the sessions.
+pressure onto the sessions. Shelley's sessions sit *inside* the slice, in
+``shelley.service`` at ``MemoryLow=0`` (#399): a child with no ``memory.low``
+takes no share of the slice's, so its memory reclaims like ``init.scope``'s.
+The live ancestor check sums every child, so a reservation exe.dev gives that
+unit shows up as a slice that no longer covers its children.
 
 The drop-ins live in ``deploy/dropins/`` as ``<unit>.d/<file>``, installed to
 ``/etc/systemd/system/`` under the same relative path. The repo-side checks run
@@ -19,13 +23,15 @@ everywhere; the installed and live checks skip on a host that does not run the
 service, like the other drift checks in this package.
 """
 
-import shutil
-import subprocess
 from pathlib import Path
 
 import pytest
 
-from tests.deploy.systemd_units import directive_values, memory_size_to_bytes
+from tests.deploy.systemd_units import (
+    directive_values,
+    live_main_pid_adj,
+    memory_size_to_bytes,
+)
 
 REPO = Path(__file__).resolve().parents[2]
 DROPINS = REPO / "deploy" / "dropins"
@@ -225,18 +231,10 @@ def _assert_reservation_survives_every_ancestor(cgroup: Path) -> None:
 
 
 def _live_oom_score_adj(unit: str) -> int:
-    systemctl = shutil.which("systemctl")
-    if systemctl is None:
-        pytest.skip("systemctl not available")
-    pid = subprocess.run(
-        [systemctl, "show", unit, "--property=MainPID", "--value"],
-        capture_output=True,
-        text=True,
-        check=False,
-    ).stdout.strip()
-    if not pid or pid == "0":
+    adj = live_main_pid_adj(unit)
+    if adj is None:
         pytest.skip(f"{unit} is not running")
-    return int(Path(f"/proc/{pid}/oom_score_adj").read_text())
+    return adj
 
 
 def test_live_oom_order() -> None:

@@ -13,7 +13,8 @@ notification form, about 41 fields (title, channel, hint, the event checkboxes,
 the default card, the per-event override cards, ``preview_event``); its only
 free text is the title and body templates. So the boundary sits far above any
 legitimate submission. These tests pin it on one route of each kind: the field
-count at 1000 and 1001, and one field just over 1 MiB.
+count at 1000 and 1001, and a field whose value alone is 1 MiB (its name's
+bytes put it over).
 """
 
 from urllib.parse import urlencode
@@ -63,7 +64,8 @@ class TestRequestFormRoute:
         assert resp.status_code == 400
 
     async def test_rejects_a_field_over_max_part_size(self, client: AsyncClient):
-        # The limit counts the raw name and value bytes: "x" is one byte encoded.
+        # The limit counts the raw name and value bytes together: "x" encodes to
+        # one byte, so the value is exactly 1 MiB and the name tips it over.
         resp = await client.post(
             "/notifications/preview",
             data={

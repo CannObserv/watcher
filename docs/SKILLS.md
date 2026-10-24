@@ -48,6 +48,7 @@ To add a new external skill repo: follow the `managing-skills` skill.
 | `curating-context` | curate context, context budget, hone AGENTS.md, trim AGENTS.md, prune context |
 | `coordinating-epics` | coordinate the epic, burn down, check-in, I finished #N, next issue, what's next on the epic. Every epic body edit goes through its `epic-edit.sh`, each check-in starts with `scan.sh` (#384). v1's hand steps: a cross-repo parent's (#368) other repos, since `scan.sh` scans one (gregoryfoster/skills#400), and CI by job on the final SHA (gregoryfoster/skills#394) |
 | `using-mayfly-chat` | mayfly, open a channel, join the channel, chat with `<repo>`, agent chat, a mayfly.chat URL handed over. Needs Node.js 18+. **Never commit a channel URL** — it is read, write and delete access, and this repo has no structural test for it; run the leak check in the skill's `references/security.md` before committing anything a session produced |
+| `patching-hosts` | patch the host, OS updates, security updates, apply updates, unattended-upgrades, needrestart, is this host patched. Reads `.skills/patching-hosts` (#382). **Never from a Shelley session for an apply or a reboot**: `shelley.service` is `KillMode=process`, so `reboot-chain.sh` ends the session driving it (#399) — use SSH or VS Code |
 | `init-socraticode` | init socraticode, set up code search, index this project, audit the SocratiCode install |
 | `socraticode` (codebase MCP) | see **Code Exploration Policy** above |
 

@@ -98,6 +98,15 @@ class TestMain:
         assert out == ""
         assert "absent" in err
 
+    def test_an_env_file_that_isnt_utf8_exits_2_not_1(self, tmp_path, capsys) -> None:
+        """1 means the database; a file it can't decode is configuration."""
+        path = tmp_path / "latin1.env"
+        path.write_bytes(b"DATABASE_URL=postgresql://u:p\xe9@localhost/watcher_test\n")
+        assert inflight.main(["--env-file", str(path)], environ={}) == 2
+        out, err = capsys.readouterr()
+        assert out == ""
+        assert "latin1.env" in err
+
     def test_a_file_without_a_database_url_exits_2(self, env_file, capsys) -> None:
         assert inflight.main(["--env-file", str(env_file("A=1\n"))], environ={}) == 2
         out, err = capsys.readouterr()

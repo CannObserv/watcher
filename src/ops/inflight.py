@@ -126,6 +126,9 @@ def main(argv: list[str] | None = None, *, environ: Mapping[str, str] = os.envir
     except OSError as e:
         print(f"cannot read {args.env_file}: {e.strerror}", file=sys.stderr)
         return 2
+    except UnicodeDecodeError:
+        print(f"cannot read {args.env_file}: not UTF-8", file=sys.stderr)
+        return 2
     env = {k: v for k, v in environ.items() if k not in _URL_KEYS}
     env.update({k: v for k, v in from_file.items() if k in _URL_KEYS})
     if not env.get("DATABASE_URL"):

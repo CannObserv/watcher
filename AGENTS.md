@@ -190,7 +190,7 @@ A skill is symlinked into both `skills/` and `.claude/skills/`; overrides in `sk
 - [docs/WATCH-CHECK.md](docs/WATCH-CHECK.md) — #371 `info.watch-check`: shared pre-flight, rejections, DLQ, the completion republish
 - [docs/CONDITIONAL-GET.md](docs/CONDITIONAL-GET.md) — #269 validators: gate, snapshot, invalidation
 - [docs/CONVENTIONS.md](docs/CONVENTIONS.md) — logging configuration, ULID errors, DB triggers
-- [docs/DEPENDENCIES.md](docs/DEPENDENCIES.md) — the private wheelhouse, the notifier SDK's git tag and the certifi floor: auth, pins, upgrades
+- [docs/DEPENDENCIES.md](docs/DEPENDENCIES.md) — the private wheelhouse, the notifier SDK's git tag, the certifi and advisory floors: auth, pins, upgrades
 - [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) — systemd units, the install runbook, timers
 - [docs/ENVIRONMENT.md](docs/ENVIRONMENT.md) — every env file and variable, load order, the unit-only credentials
 - [docs/HOST-MEMORY.md](docs/HOST-MEMORY.md) — #307/#309: reservations, slices, earlyoom, the SocratiCode pin

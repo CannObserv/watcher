@@ -1,6 +1,6 @@
 # Dependency sources
 
-The runtime dependencies that resolve from somewhere other than PyPI: co-core and co-core-aio from the private wheelhouse, and the notifier SDK from a git tag. How each is fetched, authenticated, pinned and upgraded. Plus the one transitive dependency floored by constraint: certifi. Deployment itself is [DEPLOYMENT.md](DEPLOYMENT.md).
+The runtime dependencies that resolve from somewhere other than PyPI: co-core and co-core-aio from the private wheelhouse, and the notifier SDK from a git tag. How each is fetched, authenticated, pinned and upgraded. Plus certifi, the one transitive floored by constraint, and the advisory fixes whose floor is the lock. Deployment itself is [DEPLOYMENT.md](DEPLOYMENT.md).
 
 ## Cannobserv wheelhouse
 
@@ -15,3 +15,7 @@ Auth is ADC: on the VM/deploy the `co-pypi-reader` SA key at `GOOGLE_APPLICATION
 ## certifi floor
 
 **certifi (#391).** httpx and requests trust certifi's bundle **instead of** the OS store, so an OS-level distrust (apt, exe.dev's remediation) never reaches the GCS calls (backup, restore, blobs) or the operator probe. certifi is transitive — under httpx and `google-cloud-storage` → requests — and nothing imports it, so its floor is `[tool.uv] constraint-dependencies = ["certifi>=2026.10.19"]`, not a dependency line; it resolves from PyPI. 2026.10.19 drops **emSign ECC Root CA - G3**, the root the leaked eMudhra intermediates chain to (GHSA-6q48-6c7w-9gw2); it deliberately keeps emSign G1, C1 and C3, so check for G3, not for "no emSign". `tests/test_dependency_certifi_floor.py` fails if the constraint is dropped or admits an older release, if the installed certifi is below it, or if its bundle still carries G3. **Raise the floor** the same way for a future distrust: bump the constraint and the test's `_FLOOR`, `uv lock`, `uv sync`, then `sudo systemctl restart watcher` — the running process keeps the bundle it loaded until it restarts; `watcher-backup.service` and a restore are fresh processes and pick it up on their own. The alternative, `truststore` (defer to the OS store), touches every client construction site including co-core's and the GCS client's, and was not taken.
+
+## Advisory floors
+
+**Lock-only advisory fixes (#392).** A runtime advisory fixed by moving the lock alone (`uv lock --upgrade-package <pkg>`) keeps its floor in `uv.lock`, not in `pyproject.toml`: no declared bound moves, and `tests/test_dependency_advisory_floors.py` fails if the *installed* release of any row drops below the one that fixed its advisories. It never asks OSV — `uv audit --frozen --no-dev` does that, and needs the network. **Fix the next one** the same way: `--upgrade-package` (one package per commit, so a bisect lands on it), add its row, `uv sync`, then `sudo systemctl restart watcher` after the merge. A transitive that needs a floor no lock bump can hold takes a constraint, as certifi does above. **Ordering trap:** anyio ≥ 4.15 deprecates an alias starlette < 1.7 imports in `TestClient`, and the suite's `error::DeprecationWarning` filter makes that a collection error — move starlette first.

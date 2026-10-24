@@ -60,6 +60,12 @@ origin deb.nodesource.com follow
 origin pkgs.tailscale.com follow
 hold tailscale tailscale-archive-keyring tailscale
 
+# --- language dependencies -----------------------------------------------
+# The service's venv is built from this repo's uv.lock, and the repo updates
+# it. Named, because the remote is the deploy key's SSH alias, which the
+# probe can't read as a GitHub repo.
+owner /home/exedev/watcher self
+
 # --- callers --------------------------------------------------------------
 # None: nothing calls this host's API (the operator's dashboard aside), and
 # every sibling reaches watcher over the bus (docs/ARCHITECTURE.md).
@@ -68,5 +74,7 @@ hold tailscale tailscale-archive-keyring tailscale
 exception database:watcher_test 2027-04-30 the suite's database (tests/conftest.py), rebuilt every session; nothing in it to recover
 exception database:watcher_dev 2027-04-30 a dev server's and the restore rehearsals' target (docs/RECOVERY-REHEARSALS.md); rebuilt from a production dump on demand
 exception setup-script:redelivered 2027-04-30 contained in place, 600 root and exe-setup.service disabled, key revoked (watcher#331, watcher#347); delivery still re-runs at every boot (CannObserv/provisioner#4)
+exception not-restarter:watcher-backup.service 2027-04-30 a DynamicUser running pg_dump, pg_restore and the GCS upload (src.ops.backup); starts nothing
+exception not-restarter:watcher-cleanup.service 2027-04-30 runs as exedev, deleting caches (scripts/cleanup.sh); starts nothing
 # No image-owner line: this repo is public and the image repo is not
 # (gregoryfoster/skills#350).

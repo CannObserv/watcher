@@ -24,6 +24,12 @@ tracked files, run everywhere, plus the installed apt pins on the host:
   500 and its packages above (the skill's ``policy.md``, Two lanes).
 - **A comment can't cut an exception short.** ``#`` after whitespace opens a
   comment, so ``(#331, #347)`` in a reason silently ends it at ``(#331,``.
+- **Neither timer's service is a restarter**: each runs unprivileged and
+  starts nothing, which the probe can't read through a Python module or a
+  script, so each is a ``not-restarter`` exception, pinned here to the unit
+  facts that make it true.
+- **The tree's owner is named**: the remote is the deploy key's SSH alias
+  (``github-watcher:``), which the probe can't read as a GitHub repo.
 - **No ``image-owner`` and no private ``caller``**: this repo is public
   (gregoryfoster/skills#350).
 """
@@ -192,6 +198,34 @@ def test_the_backup_stands_in_for_the_watcher_database_alone() -> None:
     assert start.endswith("-m src.ops.backup --database watcher")
     excepted = {words[0] for words in _named("exception")}
     assert {"database:watcher_dev", "database:watcher_test"} <= excepted
+
+
+@pytest.mark.parametrize(
+    ("unit", "user"),
+    [("watcher-backup.service", "watcher_backup"), ("watcher-cleanup.service", "exedev")],
+)
+def test_each_timer_service_is_an_unprivileged_non_restarter(unit: str, user: str) -> None:
+    """The exception is the owner's word; these are the facts it rests on.
+    A unit that gains root, or a script that gains ``systemctl``, fails here
+    before the knob goes on vouching for it."""
+    excepted = {words[0] for words in _named("exception")}
+    assert f"not-restarter:{unit}" in excepted
+    text = (REPO_ROOT / "deploy" / unit).read_text()
+    assert directive_values(text, "User") == [user]
+    starts = directive_values(text, "ExecStart")
+    assert all(not start.startswith("+") for start in starts), f"{unit}: a root ExecStart"
+    for start in starts:
+        target = start.split()[0]
+        if target.endswith(".sh"):
+            source = (REPO_ROOT / "scripts" / Path(target).name).read_text()
+        else:
+            module = start.split("-m ", 1)[1].split()[0]
+            source = (REPO_ROOT / Path(*module.split("."))).with_suffix(".py").read_text()
+        assert "systemctl" not in source, f"{unit} runs something that calls systemctl"
+
+
+def test_the_repo_owns_its_own_tree() -> None:
+    assert ["/home/exedev/watcher", "self"] in _named("owner")
 
 
 def test_the_service_is_the_runbook_service() -> None:

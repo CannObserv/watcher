@@ -11,7 +11,11 @@ every ancestor. ``system.slice`` shipped at 0 and ``cgroup2`` here is mounted by
 written, reported by ``systemctl show``, and protected nothing. The competitor
 is ``init.scope`` — exe.dev's agent sessions, a root-level sibling of
 ``system.slice`` — so the slice's reservation is what actually moves reclaim
-pressure onto the sessions.
+pressure onto the sessions. Shelley's sessions sit *inside* the slice, in
+``shelley.service`` at ``MemoryLow=0`` (#399): a child with no ``memory.low``
+takes no share of the slice's, so its memory reclaims like ``init.scope``'s.
+The live ancestor check sums every child, so a reservation exe.dev gives that
+unit shows up as a slice that no longer covers its children.
 
 The drop-ins live in ``deploy/dropins/`` as ``<unit>.d/<file>``, installed to
 ``/etc/systemd/system/`` under the same relative path. The repo-side checks run

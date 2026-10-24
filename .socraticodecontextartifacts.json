@@ -33,7 +33,7 @@
     {
       "name": "host-memory-doc",
       "path": "./docs/HOST-MEMORY.md",
-      "description": "Host memory posture for co-watcher (#307, #309): no swap, agent sessions at oom_score_adj 0 since exe-init 14fd603 (#337; -1000 before, unkillable). The watcher.service MemoryLow reservation and why it is not a cap; the slice drop-ins in deploy/dropins/ (system.slice, system-postgresql.slice, postgresql@ template, tailscaled) and the rule that a unit keeps no more memory.low than every slice above it grants; the dependency-chain table; vm.min_free_kbytes, why earlyoom stays declined now that sessions are killable (#323, #337), and the pinned SocratiCode install."
+      "description": "Host memory posture for co-watcher (#307, #309): no swap, agent sessions at oom_score_adj 0 since exe-init 14fd603 (#337; -1000 before, unkillable). Shelley's sessions run in system.slice/shelley.service at -1 (#399), a MemoryLow=0 sibling inside the slice. The watcher.service MemoryLow reservation and why it is not a cap; the slice drop-ins in deploy/dropins/ (system.slice, system-postgresql.slice, postgresql@ template, tailscaled) and the rule that a unit keeps no more memory.low than every slice above it grants; the dependency-chain table; vm.min_free_kbytes, why earlyoom stays declined now that sessions are killable (#323, #337), and the pinned SocratiCode install."
     },
     {
       "name": "environment-doc",

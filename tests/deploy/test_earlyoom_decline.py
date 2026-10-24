@@ -11,11 +11,13 @@ Measured after the restart: a tuned ``--prefer`` picks the editor's extension
 host the agent session runs under. CannObserv/replicator#112 declined it too.
 
 Both halves are pinned live, on the host only. earlyoom must not be running:
-``apt install earlyoom`` starts it at once, on stock arguments. And sessions
-must read 0, because that premise is exe.dev's, not this repo's: the -1000
-came from their ``exe-init`` build and a rebuilt VM could bring it back. If a
-session here reads -1000 again, the kernel can no longer pick it and watcher
-is the largest candidate left (docs/HOST-MEMORY.md).
+``apt install earlyoom`` starts it at once, on stock arguments. And a session
+must rank ahead of watcher, because that premise is exe.dev's, not this repo's:
+the -1000 came from their ``exe-init`` build and a rebuilt VM could bring it
+back. If a session here reads -1000 again, the kernel can no longer pick it and
+watcher is the largest candidate left (docs/HOST-MEMORY.md). Sessions exe-init
+starts must read exactly 0; exe.dev's Shelley agent runs its sessions in
+``shelley.service`` at that unit's -1, which still ranks ahead (#399).
 
 On the host the premise check fails rather than skips when it cannot find a
 session root (#333): a skip there asserts nothing on the one host it exists for.

@@ -102,13 +102,17 @@ def _premise_failure(root: SessionRoot, watcher_adj: int) -> str | None:
     build's premise; Shelley's adj is its unit's.
     """
     if root.adj <= watcher_adj:
+        suspect = (
+            "`systemctl show shelley -p OOMScoreAdjust` — exe.dev's unit, never "
+            "patched here; file it (#399)"
+            if root.cgroup == SHELLEY_CGROUP
+            else "`/exe.dev/bin/exe-init --version` against #337"
+        )
         return (
             f"this session's root (pid {root.pid}, {root.cgroup}) reads "
             f"oom_score_adj={root.adj}; watcher reads {watcher_adj}. The kernel can "
             "no longer pick the session ahead of watcher, which is the largest "
-            "candidate left. Check `/exe.dev/bin/exe-init --version` against #337 "
-            f"(and, for {SHELLEY_CGROUP}, the unit's OOMScoreAdjust — exe.dev's, "
-            "never patched here, #399), then revisit the earlyoom decline in "
+            f"candidate left. Check {suspect}, then revisit the earlyoom decline in "
             "docs/HOST-MEMORY.md §3"
         )
     if root.cgroup != SHELLEY_CGROUP and root.adj != SESSION_ADJ:
@@ -245,6 +249,22 @@ def test_premise_holds_only_for_a_session_the_kernel_takes_before_watcher(
 ) -> None:
     """Every root above watcher, so above -1000; exe-init's at exactly 0."""
     assert (_premise_failure(root, WATCHER_ADJ) is None) is holds
+
+
+@pytest.mark.parametrize(
+    ("root", "suspect", "not_suspect"),
+    [
+        (SessionRoot(540, -1000, SESSION_CGROUP), "exe-init --version", "shelley"),
+        (SessionRoot(573, -1000, SHELLEY_CGROUP), "systemctl show shelley", "exe-init"),
+    ],
+    ids=["exe-init", "shelley"],
+)
+def test_a_root_behind_watcher_names_its_own_suspect(
+    root: SessionRoot, suspect: str, not_suspect: str
+) -> None:
+    """The message is the runbook at failure time: it points at who set the adj."""
+    failure = _premise_failure(root, WATCHER_ADJ)
+    assert suspect in failure and not_suspect not in failure
 
 
 def test_sessions_here_are_killable() -> None:

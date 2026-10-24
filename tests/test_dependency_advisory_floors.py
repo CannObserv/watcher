@@ -2,9 +2,10 @@
 
 ``uv audit --frozen --no-dev`` on ``223eac7`` reported 20 unique advisories in
 six runtime packages. Each was fixed by moving the lock alone
-(``uv lock --upgrade-package <pkg>``): python-multipart is the only direct
-dependency among them, and its declared floor (``>=0.0.22``) stays where it is,
-as do fastapi's — fastapi 0.135.1 already admits starlette 1.x.
+(``uv lock --upgrade-package <pkg>``). python-multipart is the only direct
+dependency among them, and its declared floor (``>=0.0.22``) stays where it is.
+fastapi does not move: 0.135.1 declares ``starlette>=0.46.0``, uncapped, so
+starlette 1.x needs nothing from it.
 
 So the floor lives in ``uv.lock``, and this test is what keeps it: it fails if
 the *installed* version of any row drops below the release that fixed its

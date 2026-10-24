@@ -91,6 +91,34 @@ def _session_root(proc: Path, pid: int) -> SessionRoot | None:
     return None
 
 
+def _premise_failure(root: SessionRoot, watcher_adj: int) -> str | None:
+    """Why ``root`` breaks the decline's premise, or ``None`` when it holds.
+
+    The property #337 protects: the kernel picks the session before watcher.
+    Above watcher's adj implies above -1000 — the floor, where the kernel cannot
+    pick it at all. Sessions exe-init starts must also read exactly 0, that
+    build's premise; Shelley's adj is its unit's.
+    """
+    if root.adj <= watcher_adj:
+        return (
+            f"this session's root (pid {root.pid}, {root.cgroup}) reads "
+            f"oom_score_adj={root.adj}; watcher reads {watcher_adj}. The kernel can "
+            "no longer pick the session ahead of watcher, which is the largest "
+            "candidate left. Check `/exe.dev/bin/exe-init --version` against #337 "
+            f"(and, for {SHELLEY_CGROUP}, the unit's OOMScoreAdjust — exe.dev's, "
+            "never patched here, #399), then revisit the earlyoom decline in "
+            "docs/HOST-MEMORY.md §3"
+        )
+    if root.cgroup != SHELLEY_CGROUP and root.adj != SESSION_ADJ:
+        return (
+            f"this session's root reads oom_score_adj={root.adj}, not {SESSION_ADJ}: "
+            "exe-init no longer starts sessions where #337 measured them. Check "
+            "`/exe.dev/bin/exe-init --version` against #337 and revisit the earlyoom "
+            "decline in docs/HOST-MEMORY.md §3"
+        )
+    return None
+
+
 def _fake_process(
     proc: Path, pid: int, ppid: int, comm: str, adj: int, cgroup: str = SESSION_CGROUP
 ) -> None:
@@ -190,13 +218,39 @@ def test_no_session_ancestor_is_none(tmp_path: Path) -> None:
     assert _session_root(tmp_path, 316) is None
 
 
+WATCHER_ADJ = -500  # deploy/watcher.service's OOMScoreAdjust
+
+
+@pytest.mark.parametrize(
+    ("root", "holds"),
+    [
+        (SessionRoot(540, 0, SESSION_CGROUP), True),
+        (SessionRoot(573, -1, SHELLEY_CGROUP), True),
+        (SessionRoot(573, 0, SHELLEY_CGROUP), True),
+        # exe-init 8579326's sessions: the kernel cannot pick them at all.
+        (SessionRoot(540, -1000, SESSION_CGROUP), False),
+        (SessionRoot(573, -1000, SHELLEY_CGROUP), False),
+        # Killable, but behind watcher: the kernel takes watcher first.
+        (SessionRoot(573, -600, SHELLEY_CGROUP), False),
+        (SessionRoot(573, WATCHER_ADJ, SHELLEY_CGROUP), False),
+        # Ahead of watcher, but exe-init moved off what #337 measured.
+        (SessionRoot(540, -1, SESSION_CGROUP), False),
+    ],
+    ids=lambda v: f"{v.cgroup}@{v.adj}" if isinstance(v, SessionRoot) else str(v),
+)
+def test_premise_holds_only_for_a_session_the_kernel_takes_before_watcher(
+    root: SessionRoot, holds: bool
+) -> None:
+    """Every root above watcher, so above -1000; exe-init's at exactly 0."""
+    assert (_premise_failure(root, WATCHER_ADJ) is None) is holds
+
+
 def test_sessions_here_are_killable() -> None:
     """The premise of the decline, read off this session's own root.
 
-    The property #337 protects: the kernel can pick the session (above -1000),
-    and picks it before watcher (above watcher's live adj). Both read off the
-    host, never off what a harness is assumed to be. Sessions exe-init starts
-    must also read exactly 0 — that build's premise; Shelley's adj is its unit's.
+    Both sides of ``_premise_failure`` come off the host — the root's adj from
+    ``/proc``, watcher's from its running process — never from what a harness
+    is assumed to be.
 
     Fails rather than skips on the host (#333): gate on the host, never on the
     thing under test.
@@ -213,21 +267,8 @@ def test_sessions_here_are_killable() -> None:
     )
     watcher = live_main_pid_adj(WATCHER)
     assert watcher is not None, f"{WATCHER} is not running — start it, then rerun"
-    assert -1000 < root.adj and watcher < root.adj, (
-        f"this session's root (pid {root.pid}, {root.cgroup}) reads "
-        f"oom_score_adj={root.adj}; watcher reads {watcher}. The kernel can no "
-        "longer pick the session ahead of watcher, which is the largest candidate "
-        "left. Check `/exe.dev/bin/exe-init --version` against #337 (and, for "
-        f"{SHELLEY_CGROUP}, the unit's OOMScoreAdjust — exe.dev's, never patched "
-        "here, #399), then revisit the earlyoom decline in docs/HOST-MEMORY.md §3"
-    )
-    if root.cgroup != SHELLEY_CGROUP:
-        assert root.adj == SESSION_ADJ, (
-            f"this session's root reads oom_score_adj={root.adj}, not {SESSION_ADJ}: "
-            "exe-init no longer starts sessions where #337 measured them. Check "
-            "`/exe.dev/bin/exe-init --version` against #337 and revisit the earlyoom "
-            "decline in docs/HOST-MEMORY.md §3"
-        )
+    failure = _premise_failure(root, watcher)
+    assert failure is None, failure
 
 
 def _systemctl(*args: str) -> str:

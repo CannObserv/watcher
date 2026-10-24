@@ -1,9 +1,10 @@
 # Host memory posture
 
 How this host keeps its production service alive with no swap, sharing memory
-with agent sessions the OOM killer cannot pick (#307, #309). Part of the
-install, not tuning done later: [DEPLOYMENT.md](DEPLOYMENT.md) → *Installation*
-points here.
+with agent sessions the OOM killer could not pick until #337 (#307, #309) — two
+kinds now: exe-init's in `init.scope`, Shelley's in `shelley.service` (#399).
+Part of the install, not tuning done later: [DEPLOYMENT.md](DEPLOYMENT.md) →
+*Installation* points here.
 
 **Measured 2026-09-23 on `co-watcher`: 7.75 GiB total (resized from 3.8 GiB,
 #309), no swap, one active production unit.** `preflight.sh --check` no longer

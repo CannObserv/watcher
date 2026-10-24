@@ -83,6 +83,10 @@ sudo install -D -m 644 deploy/needrestart.conf.d/watcher.conf \
 sudo install -m 644 deploy/apt-preferences.d/tailscale.pref deploy/apt-preferences.d/nodesource.pref \
      /etc/apt/preferences.d/
 sudo rm -f /etc/apt/preferences.d/nodejs
+
+# Tailscale moves only in a patch run (#382): its auto-update is off for the
+# tailnet (admin console), and off on the node too.
+sudo tailscale set --auto-update=false
 ```
 
 ### OS patching (#382)

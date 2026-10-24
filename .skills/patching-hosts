@@ -55,9 +55,9 @@ origin deb.nodesource.com follow
 # Tailscale carries the bus and notifier paths (docs/reference/tailscale.md).
 # Its postinst restarts tailscaled; watcher.service orders After= it with no
 # Wants=, so the restart is a bus outage, not a service stop: its own step.
-# Its own auto-update goes off on the node in #382's host steps; the tailnet's
-# default is the owner's call, and re-applies at a boot. The probe reads both
-# at every run, so it moves only here once both are off.
+# Its own auto-update is off for the tailnet (the owner, 2026-10-24) and goes
+# off on the node in #382's host steps; the tailnet's default re-applies at a
+# boot. The probe reads the node's at every run, so it moves only here.
 origin pkgs.tailscale.com follow
 hold tailscale tailscale-archive-keyring tailscale
 

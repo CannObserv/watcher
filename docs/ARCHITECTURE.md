@@ -14,7 +14,7 @@ src/api/         FastAPI app (ASGI routes, schemas, deps)
 src/core/        Shared domain logic (models, probe, scheduling, notifications, diff, fetch commands, storage, crypto)
 src/dashboard/   Server-rendered UI (Jinja2 + HTMX + Tailwind)
 src/workers/     Procrastinate task queue (check_watched_item, schedule_tick, pipeline, fetch apply/consumer, watch-check consumer)
-src/ops/         Operator entry points beside the service: nightly backup, restore, backup check-in, job-history prune (#296), Archiver migration export (#373), break-glass host suspension (#372)
+src/ops/         Operator entry points beside the service: nightly backup, restore, backup check-in, job-history prune (#296), Archiver migration export (#373), break-glass host suspension (#372), the patching `inflight` gate (#382)
 tools/           Operational scripts
 tests/           Mirrors src/ structure
 deploy/          Systemd units and deployment config

@@ -300,6 +300,11 @@ WATCHER_ALLOW_PRODUCTION_DB=1 uv run python -m src.ops.export_for_archiver --out
 # (#374) that tick also publishes the host `revoked`:
 WATCHER_ALLOW_PRODUCTION_DB=1 uv run python -m src.ops.suspend_domain HOST
 WATCHER_ALLOW_PRODUCTION_DB=1 uv run python -m src.ops.suspend_domain HOST --resume
+
+# The patching gate (#382; docs/DEPLOYMENT.md → OS patching): Procrastinate jobs
+# in `doing`, read-only, stdout the count alone; 1 database, 2 config or usage.
+# The venv's interpreter, as the knob runs it — `uv run` syncs the service's venv:
+WATCHER_ALLOW_PRODUCTION_DB=1 .venv/bin/python -m src.ops.inflight --env-file /etc/watcher/.env
 ```
 
 ## Tailwind CSS

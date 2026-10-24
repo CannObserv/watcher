@@ -1,0 +1,13 @@
+# #382: scope NodeSource's apt origin to nodejs, for the Tailwind CLI
+# (AGENTS.md). Installed as /etc/apt/preferences.d/nodesource.pref, replacing
+# the `nodejs` file NodeSource's setup script wrote, which pinned the package
+# but left the origin at 500: an unpinned NodeSource replaced Ubuntu's nodejs
+# on noble (patching-hosts references/policy.md, Two lanes).
+
+Package: *
+Pin: origin deb.nodesource.com
+Pin-Priority: 100
+
+Package: nodejs
+Pin: origin deb.nodesource.com
+Pin-Priority: 600

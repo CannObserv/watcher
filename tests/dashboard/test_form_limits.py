@@ -26,11 +26,10 @@ from src.core.models import ApiKey
 
 _MAX_FIELDS = 1000
 _MAX_PART_SIZE = 1024 * 1024
+_FORM = {"Content-Type": "application/x-www-form-urlencoded"}
 # Counted by label, not table-wide: the test database is also the dev server's.
 _LABEL = "form-limits-392"
-
-
-_FORM = {"Content-Type": "application/x-www-form-urlencoded"}
+_LABEL_COUNT = select(func.count()).select_from(ApiKey).where(ApiKey.label == _LABEL)
 
 
 def _padded(fields: dict[str, str], total: int) -> str:
@@ -73,9 +72,6 @@ class TestRequestFormRoute:
             },
         )
         assert resp.status_code == 400
-
-
-_LABEL_COUNT = select(func.count()).select_from(ApiKey).where(ApiKey.label == _LABEL)
 
 
 @pytest.mark.integration

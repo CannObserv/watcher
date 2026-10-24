@@ -32,9 +32,10 @@ from typing import NamedTuple
 
 import pytest
 
-from tests.deploy.systemd_units import live_main_pid_adj
+from tests.deploy.systemd_units import directive_values, live_main_pid_adj
 
 INSTALLED_UNIT = Path("/etc/systemd/system/watcher.service")
+REPO_UNIT = Path(__file__).resolve().parents[2] / "deploy" / "watcher.service"
 EARLYOOM = "earlyoom.service"
 WATCHER = "watcher.service"
 
@@ -224,7 +225,9 @@ def test_no_session_ancestor_is_none(tmp_path: Path) -> None:
     assert _session_root(tmp_path, 316) is None
 
 
-WATCHER_ADJ = -500  # deploy/watcher.service's OOMScoreAdjust
+# The repo unit's, so the fixture moves when the unit does.
+(_WATCHER_ADJ_TEXT,) = directive_values(REPO_UNIT.read_text(), "OOMScoreAdjust")
+WATCHER_ADJ = int(_WATCHER_ADJ_TEXT)
 
 
 @pytest.mark.parametrize(
@@ -237,7 +240,7 @@ WATCHER_ADJ = -500  # deploy/watcher.service's OOMScoreAdjust
         (SessionRoot(540, -1000, SESSION_CGROUP), False),
         (SessionRoot(573, -1000, SHELLEY_CGROUP), False),
         # Killable, but behind watcher: the kernel takes watcher first.
-        (SessionRoot(573, -600, SHELLEY_CGROUP), False),
+        (SessionRoot(573, WATCHER_ADJ - 100, SHELLEY_CGROUP), False),
         (SessionRoot(573, WATCHER_ADJ, SHELLEY_CGROUP), False),
         # Ahead of watcher, but exe-init moved off what #337 measured.
         (SessionRoot(540, -1, SESSION_CGROUP), False),

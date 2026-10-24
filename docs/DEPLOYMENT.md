@@ -76,7 +76,35 @@ sudo systemctl start watcher
 # but the worker stops and restarts (#340): *Managing the Service*.
 sudo install -D -m 644 deploy/needrestart.conf.d/watcher.conf \
      /etc/needrestart/conf.d/watcher.conf
+
+# Scope each third-party apt origin the patching knob follows (#382): catch-all
+# at 100, the packages it was added for at 600. The first replaces the `nodejs`
+# file NodeSource's setup script writes. Read the effect with `apt-cache policy`.
+sudo install -m 644 deploy/apt-preferences.d/tailscale.pref deploy/apt-preferences.d/nodesource.pref \
+     /etc/apt/preferences.d/
+sudo rm -f /etc/apt/preferences.d/nodejs
 ```
+
+### OS patching (#382)
+
+Patched by the vendored `patching-hosts` skill, `posture scheduled`: a monthly
+owner-approved run, the apt timers masked. **What only this repo knows is in
+`.skills/patching-hosts`**: the window (Mon 01:00–03:00 UTC, the owner's Sun
+17:00–19:00 Pacific in winter), the backup that stands in for a dump, the
+`inflight` and `health` commands, the Tailscale hold. `tests/deploy/test_patching_knob.py`
+pins each decision; change it there first. The run itself, every gate and
+trap: the skill's `SKILL.md` → *The run*.
+
+- **`inflight`** is `python -m src.ops.inflight --env-file /etc/watcher/.env`:
+  the Procrastinate jobs in `doing`, read-only, as `exedev`, and stdout is the
+  count alone. It must print `0` before each step and in the reboot chain.
+- **Never drive an apply or a reboot from a Shelley session** — use SSH or VS
+  Code. `shelley.service` is `KillMode=process`: `reboot-chain.sh` would end
+  the session running it (#399).
+- **After any reboot**, re-read the setup-script containment: `/exe.dev/setup`
+  `600 root:root`, `exe-setup.service` disabled. Delivery re-runs at every boot
+  (CannObserv/provisioner#4); the knob's `setup-script:redelivered` exception
+  records why that isn't a finding.
 
 ### Managing the Service
 

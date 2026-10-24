@@ -1,0 +1,15 @@
+# #382: scope Tailscale's apt origin to the packages it was added for.
+# Installed as /etc/apt/preferences.d/tailscale.pref. The knob follows the
+# origin in the maintenance lane (`origin pkgs.tailscale.com follow`), and a
+# followed origin left at 500 ties Ubuntu's priority: any package it serves
+# under an Ubuntu name at a higher version would replace Ubuntu's. The
+# catch-all goes below 500; each package it was added for, above.
+# Shape: patching-hosts references/environments/exe-dev-exeuntu.md.
+
+Package: *
+Pin: origin pkgs.tailscale.com
+Pin-Priority: 100
+
+Package: tailscale tailscale-archive-keyring
+Pin: origin pkgs.tailscale.com
+Pin-Priority: 600

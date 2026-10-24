@@ -1,0 +1,72 @@
+# patching-hosts host knob (#382). Grammar: skills/patching-hosts/references/knob.md
+# (the vendored skill). The skill reads this file and never writes it. Times
+# are UTC. A malformed line makes the host report-only until it is fixed.
+# Held by tests/deploy/test_patching_knob.py: change a decision there first.
+
+class production
+posture scheduled
+
+# --- when -----------------------------------------------------------------
+# The owner's window, Sun 17:00-19:00 Pacific (decided 2026-10-23, epic #394;
+# address-validator's slot). A knob time is UTC and the weekday is the UTC day
+# the range starts, so it is Monday here: Sun 17:00 PST is Mon 01:00Z. Fixed in
+# UTC, it reads Sun 18:00-20:00 PDT from 2027-03-14; move it then if the slot
+# is meant to hold in Pacific time. Every step's whole span, the bulk's
+# including the reboot, must fit inside it.
+window Mon 01:00-03:00
+
+# watcher-backup.timer: 03:17 UTC daily, RandomizedDelaySec=10min,
+# AccuracySec=1min; the dump and upload take seconds. Outside the window
+# today: kept so that widening the window can't put a step on the backup.
+quiet 03:15-03:45
+# watcher-cleanup.timer: Sun 03:00 (UTC on this host), RandomizedDelaySec=30min.
+quiet 03:00-03:45 Sun
+
+# --- the service ----------------------------------------------------------
+# One process is the whole service: API, embedded Procrastinate worker and
+# the bus consumers (AGENTS.md, Single process). Its restart is a full outage.
+service watcher.service
+
+# Procrastinate jobs in `doing`. A stop aborts what is left at 30 s (#334),
+# well inside TimeoutStopSec, but a job cut off is retried, not finished: gate
+# on none running. Read-only, as exedev; the opt-in names production for this
+# one command, as every src/ops command does (#233).
+inflight cd /home/exedev/watcher && WATCHER_ALLOW_PRODUCTION_DB=1 .venv/bin/python -m src.ops.inflight --env-file /etc/watcher/.env
+
+# Loopback: uvicorn binds 0.0.0.0:8000. Assert the payload, not the status.
+health curl -sf -m5 http://127.0.0.1:8000/health | jq -e '.status == "ok"'
+health curl -sf -m5 http://127.0.0.1:8000/ready | jq -e '.status == "ready" and .db and .queue'
+
+# --- the data store -------------------------------------------------------
+# The cluster holds watcher, watcher_dev and watcher_test. Only watcher is
+# production data; the other two are excepted below rather than declared,
+# because the backup line stands in for the whole unit, and
+# watcher-backup.service dumps watcher alone (--database watcher).
+datastore postgres postgresql@16-main watcher
+# The nightly dump to GCS (#296), create-only, checked in to co-status: the
+# recovery point starts it and needs a fresh success instead of a second dump.
+backup watcher-backup.service postgresql@16-main
+
+# --- third-party origins --------------------------------------------------
+# Each followed origin is scoped by a tracked pin file, installed under
+# /etc/apt/preferences.d/ (deploy/apt-preferences.d/, docs/DEPLOYMENT.md).
+# NodeSource: nodejs, for the Tailwind CLI (AGENTS.md).
+origin deb.nodesource.com follow
+# Tailscale carries the bus and notifier paths (docs/reference/tailscale.md).
+# Its postinst restarts tailscaled; watcher.service orders After= it with no
+# Wants=, so the restart is a bus outage, not a service stop: its own step.
+# Its own auto-update goes off, on the node and for the tailnet (#382's host
+# steps), so it moves only here; the probe reads it at every run.
+origin pkgs.tailscale.com follow
+hold tailscale tailscale-archive-keyring tailscale
+
+# --- callers --------------------------------------------------------------
+# None: nothing calls this host's API (the operator's dashboard aside), and
+# every sibling reaches watcher over the bus (docs/ARCHITECTURE.md).
+
+# --- exceptions -----------------------------------------------------------
+exception database:watcher_test 2027-04-30 the suite's database (tests/conftest.py), rebuilt every session; nothing in it to recover
+exception database:watcher_dev 2027-04-30 a dev server's and the restore rehearsals' target (docs/RECOVERY-REHEARSALS.md); rebuilt from a production dump on demand
+exception setup-script:redelivered 2027-04-30 contained in place, 600 root and exe-setup.service disabled, key revoked (watcher#331, watcher#347); delivery still re-runs at every boot (CannObserv/provisioner#4)
+# No image-owner line: this repo is public and the image repo is not
+# (gregoryfoster/skills#350).

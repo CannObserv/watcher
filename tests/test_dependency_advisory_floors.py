@@ -27,6 +27,7 @@ from packaging.version import Version
 _FLOORS: dict[str, tuple[str, str]] = {
     "python-multipart": ("0.0.31", "PYSEC-2026-3036, -3037, -3038, -3039, -3040, -3041"),
     "urllib3": ("2.8.0", "PYSEC-2026-4175, -4176, -4177"),
+    "idna": ("3.15", "PYSEC-2026-215"),
 }
 
 

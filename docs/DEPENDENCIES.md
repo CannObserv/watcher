@@ -1,6 +1,6 @@
 # Dependency sources
 
-The runtime dependencies that resolve from somewhere other than PyPI: co-core and co-core-aio from the private wheelhouse, and the notifier SDK from a git tag. How each is fetched, authenticated, pinned and upgraded. Plus the one transitive dependency floored by constraint, certifi, and the advisory fixes whose floor is the lock. Deployment itself is [DEPLOYMENT.md](DEPLOYMENT.md).
+The runtime dependencies that resolve from somewhere other than PyPI: co-core and co-core-aio from the private wheelhouse, and the notifier SDK from a git tag. How each is fetched, authenticated, pinned and upgraded. Plus certifi, the one transitive floored by constraint, and the advisory fixes whose floor is the lock. Deployment itself is [DEPLOYMENT.md](DEPLOYMENT.md).
 
 ## Cannobserv wheelhouse
 

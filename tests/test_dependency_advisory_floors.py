@@ -16,9 +16,11 @@ rather than on the commit that regressed.
 
 **Both groups (#400).** ``uv audit --frozen`` on ``af791c3`` reported 28
 unique advisories in the ``dev`` group: pre-commit's tree (virtualenv,
-filelock), test HTML parsing (soupsieve) and pytest's pygments. The
-environment this test runs in is synced with ``dev``, as CI's is, so a dev row
-is checked the same way. Each is lock-only; none is declared.
+filelock), test HTML parsing (soupsieve), pytest's pygments, and one in
+openapi-python-client, which has no row: nothing used it, so it was removed
+rather than bumped. The environment this test runs in is synced with ``dev``,
+as CI's is, so a dev row is checked the same way. Each is lock-only; none is
+declared.
 
 Add a row when an advisory is fixed by a lock bump; drop one only with the
 package. **Precondition:** the environment is synced from ``uv.lock``, as for

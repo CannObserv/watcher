@@ -42,6 +42,7 @@ _FLOORS: dict[str, tuple[str, str]] = {
     "virtualenv": ("21.14.9", "PYSEC-2026-4011, -4012, -4013, -4014 and 15 GHSAs"),
     "filelock": ("4.2.1", "GHSA-567q-5qvw-pf92, GHSA-9vhv-jxww-xfm5, GHSA-v4x8-3wr5-3wq8"),
     "soupsieve": ("2.9.0", "PYSEC-2026-3071, -3072, -4170, -4171"),
+    "pygments": ("2.20.0", "PYSEC-2026-2987"),
 }
 
 

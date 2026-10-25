@@ -40,7 +40,11 @@ _FLOORS: dict[str, tuple[str, str]] = {
     "mako": ("1.4.2", "PYSEC-2026-88, -2617, -4243"),
     "starlette": ("1.3.1", "PYSEC-2026-161, -248, -249, -2280, -2281"),
     "anyio": ("4.14.2", "PYSEC-2026-4024, -4025"),
-    # dev group (#400)
+    # dev group (#400). virtualenv's 15 GHSAs, in full so a grep finds them:
+    #   GHSA-394h-qwmc-48pf, GHSA-43mp-35q3-x3fq, GHSA-494p-63j8-28p3, GHSA-558c-9hv2-4prj,
+    #   GHSA-5vjq-rrrf-7h2q, GHSA-6w3r-xr62-4xcp, GHSA-8rjx-v5ww-45pp, GHSA-c947-3pg5-gm8q,
+    #   GHSA-c978-59m8-c77v, GHSA-cw65-gx24-rc82, GHSA-cx28-75q4-x26q, GHSA-fc2g-4w5p-6whm,
+    #   GHSA-hhxq-47xx-j5xx, GHSA-qmx5-4p3x-wvqf, GHSA-vxj4-q4g9-crj7
     "virtualenv": ("21.14.9", "PYSEC-2026-4011, -4012, -4013, -4014 and 15 GHSAs"),
     "filelock": ("4.2.1", "GHSA-567q-5qvw-pf92, GHSA-9vhv-jxww-xfm5, GHSA-v4x8-3wr5-3wq8"),
     "soupsieve": ("2.9.0", "PYSEC-2026-3071, -3072, -4170, -4171"),

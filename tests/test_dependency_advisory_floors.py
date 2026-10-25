@@ -40,6 +40,7 @@ _FLOORS: dict[str, tuple[str, str]] = {
     "anyio": ("4.14.2", "PYSEC-2026-4024, -4025"),
     # dev group (#400)
     "virtualenv": ("21.14.9", "PYSEC-2026-4011, -4012, -4013, -4014 and 15 GHSAs"),
+    "filelock": ("4.2.1", "GHSA-567q-5qvw-pf92, GHSA-9vhv-jxww-xfm5, GHSA-v4x8-3wr5-3wq8"),
 }
 
 

@@ -18,7 +18,7 @@
 
     {# Default Interval (#205, #208) — domain default check cadence; the Domain
        tier of schedule resolution. Distinct from Min Interval, the politeness
-       floor published to Replicator. Sits 2nd, directly below Status. #}
+       floor (inert since F1, #374: Archiver publishes host policy). Sits 2nd, directly below Status. #}
     {% include "partials/domain_cadence_field.html" %}
 
     {# max_concurrency / decay_window went with the in-process rate limiter

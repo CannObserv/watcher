@@ -330,7 +330,8 @@ async def domain_delete(
 DOMAIN_FIELD_META: dict[str, dict] = {
     "min_interval": {
         "label": "Min Interval",
-        "hint": "Minimum seconds between requests to this domain",
+        "hint": "Minimum seconds between requests to this domain. Inert since F1 (#374): "
+        "Archiver publishes host policy",
         "type": "number",
         "step": "0.1",
         "min": "0.1",

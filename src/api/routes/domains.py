@@ -69,8 +69,9 @@ async def upsert_domain(
     updates = data.model_dump(exclude_unset=True)
 
     if domain is None:
-        # The host is live again: its fetch-policy tombstone (if any) must stop
-        # being republished, atomically with the row that supersedes it (#245).
+        # The host is live again: clear its fetch-policy tombstone (if any),
+        # atomically with the row that supersedes it (#245). Nothing republishes
+        # tombstones since F1 (#374); part 2 deletes this bookkeeping.
         await clear_tombstone(session, name)
         domain = Domain(
             name=name,
@@ -127,8 +128,8 @@ async def delete_domain(name: str, session: AsyncSession = Depends(get_db_sessio
             detail=f"Cannot delete: watched items still reference domain '{name}'",
         )
 
-    # LWW streams have no delete: the tombstone row keeps the host's revocation
-    # in every full-set republish, atomically with the Domain delete (#245).
+    # Tombstone the host atomically with the Domain delete (#245). Nothing
+    # republishes it since F1 (#374); part 2 deletes this bookkeeping.
     await record_tombstone(session, name)
     await session.delete(domain)
     await session.commit()

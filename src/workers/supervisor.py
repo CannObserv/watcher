@@ -35,7 +35,8 @@ RESTART_INITIAL_SECONDS = 1.0
 #: Backoff ceiling. A run that lasted at least this long resets the backoff.
 RESTART_MAX_SECONDS = 60.0
 #: How long a stop waits for running jobs before cancelling them. Three times
-#: the longest job measured (10.0 s, ``publish_fetch_policy``, 2026-10-01).
+#: the longest job measured (10.0 s, ``publish_fetch_policy``, 2026-10-01 —
+#: a no-op since F1, #374; the margin is kept).
 SHUTDOWN_GRACEFUL_SECONDS = 30.0
 
 

@@ -16,9 +16,10 @@ class Domain(Base, TimestampMixin):
     """Per-domain politeness floor and check cadence.
 
     Two distinct interval concerns live here: ``min_interval`` is the
-    request-level politeness floor in float seconds — since the Phase-4 cutover
-    it is *published* to Replicator on ``content.fetch-policy`` (#245) rather
-    than enforced in-process — while ``default_schedule_config`` is the
+    request-level politeness floor in float seconds — published to Replicator
+    on ``content.fetch-policy`` from the Phase-4 cutover (#245) until F1 (#374),
+    which stopped Watcher's producer (Archiver publishes host policy now), so
+    the column is inert — while ``default_schedule_config`` is the
     operator's desired check *cadence* for items on this domain (a
     schedule_config interval string), the Domain tier of the 3-tier schedule
     resolution (#205).
@@ -64,10 +65,9 @@ class Domain(Base, TimestampMixin):
 
         One spelling of a predicate that had grown three (#250, CR-1 finding 7):
         it decides ``WatchedItem.domain_suspended`` when an item is created or a
-        domain is toggled, and since #250 it also decides whether the host's
-        fetch policy publishes live or ``revoked=True``. Those must never
-        disagree — a host revoked on the wire but still scheduled locally, or
-        the reverse, is the failure this collapses.
+        domain is toggled; from #250 until F1 (#374) stopped Watcher's
+        fetch-policy producer, it also decided whether the host published live
+        or ``revoked=True``.
 
         Equivalent to ``status != "active"``, but kept as its own predicate:
         ``status`` is a display string whose members may grow, and a suspension

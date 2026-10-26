@@ -45,15 +45,12 @@ from redis.exceptions import (
 from redis.exceptions import ConnectionError as RedisConnectionError
 from sqlalchemy import select
 
-import src.workers.fetch_policy as fetch_policy_mod
 import src.workers.tasks as tasks_mod
 import src.workers.watch_status as watch_status_mod
 from src.core.bus import TRANSIENT_PUBLISH_ERRORS
 from src.core.fetch_commands import create_fetch_command
-from src.core.models.domain import Domain
 from src.core.models.fetch_command import FetchCommand, FetchCommandStatus
 from src.workers.fetch_commands import publish_pending_fetch_commands, reap_fetch_commands
-from src.workers.fetch_policy import publish_fetch_policy
 from src.workers.tasks import check_watched_item
 from src.workers.watch_status import publish_watch_status
 from tests.conftest import make_watched_item
@@ -173,17 +170,6 @@ class TestTheOtherProducersUnderNoPerm:
         )
         assert fresh.status == FetchCommandStatus.PENDING_PUBLISH
         assert fresh.reissue_count == stalled.reissue_count + 1
-
-    async def test_the_fetch_policy_task_lets_the_denial_escape(self, db_session, monkeypatch):
-        """LWW full set, no outbox: the job must fail loudly so the next cron
-        tick republishes everything. A swallowed denial reports a stale set as
-        delivered."""
-        db_session.add(Domain(name="lcb.wa.gov", min_interval=3.0))
-        await db_session.flush()
-        wire_task_bus(fetch_policy_mod, db_session, monkeypatch, _noperm_client)
-
-        with pytest.raises(NoPermissionError):
-            await publish_fetch_policy()
 
     async def test_the_watch_status_task_lets_the_denial_escape(self, db_session, monkeypatch):
         await make_watched_item(db_session, primary_url="https://lcb.wa.gov/notices")

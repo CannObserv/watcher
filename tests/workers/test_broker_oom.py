@@ -40,15 +40,12 @@ from co_core_aio.bus import AsyncBusConsumer
 from redis.exceptions import OutOfMemoryError
 from sqlalchemy import select
 
-import src.workers.fetch_policy as fetch_policy_mod
 import src.workers.tasks as tasks_mod
 import src.workers.watch_status as watch_status_mod
 from src.core.bus import TRANSIENT_PUBLISH_ERRORS
 from src.core.fetch_commands import create_fetch_command
-from src.core.models.domain import Domain
 from src.core.models.fetch_command import FetchCommand, FetchCommandStatus
 from src.workers.fetch_commands import publish_pending_fetch_commands, reap_fetch_commands
-from src.workers.fetch_policy import publish_fetch_policy
 from src.workers.tasks import check_watched_item
 from src.workers.watch_status import publish_watch_status
 from tests.conftest import make_watched_item
@@ -182,24 +179,17 @@ class TestContentFetchUnderOOM:
 
 @pytest.mark.integration
 class TestConfigStateProducersUnderOOM:
-    """``content.fetch-policy`` and ``info.watch-status`` are LWW full sets with
-    no outbox: the correct response to a refusal is to fail the job loudly and
-    let the next periodic tick republish everything. What must NOT happen is a
+    """``info.watch-status`` is an LWW full set with no outbox: the correct
+    response to a refusal is to fail the job loudly and let the next periodic
+    tick republish everything. (``content.fetch-policy``, the other one, lost
+    its Watcher producer in F1, #374.) What must NOT happen is a
     swallowed exception, which would report a stale set as delivered.
 
     Driven through the **Procrastinate tasks**, not the core publish helpers.
     The helpers raising is not the property — "the job is recorded failed and
     the cron tick is the retry" is, and a ``try/except`` added to
-    ``src/workers/fetch_policy.py`` later would leave a helper-level test green
+    ``src/workers/watch_status.py`` later would leave a helper-level test green
     while doing exactly the thing the paragraph above forbids."""
-
-    async def test_the_fetch_policy_task_lets_the_refusal_escape(self, db_session, monkeypatch):
-        db_session.add(Domain(name="lcb.wa.gov", min_interval=3.0))
-        await db_session.flush()
-        wire_task_bus(fetch_policy_mod, db_session, monkeypatch, _oom_client)
-
-        with pytest.raises(OutOfMemoryError):
-            await publish_fetch_policy()
 
     async def test_the_watch_status_task_lets_the_refusal_escape(self, db_session, monkeypatch):
         await make_watched_item(db_session, primary_url="https://lcb.wa.gov/notices")

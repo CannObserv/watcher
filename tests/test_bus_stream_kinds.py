@@ -759,17 +759,6 @@ class TestBrokerMirroredConstants:
     call sites say what they say.
     """
 
-    @staticmethod
-    def _fetch_policy_cron() -> ast.Constant:
-        """The fetch-policy period as written, or a failure naming why it is not
-        readable — a pin that reads source passes vacuously when its target moves."""
-        cron = _periodic_cron("src/workers/fetch_policy.py", "publish_fetch_policy")
-        assert isinstance(cron, ast.Constant), (
-            "the publish_fetch_policy periodic was not found, or its cron stopped being a "
-            "literal — this pin reads it from source and would otherwise pass vacuously"
-        )
-        return cron
-
     def test_the_watch_status_cron_still_derives_from_the_pinned_default(self):
         """Pinning ``DEFAULT_REPUBLISH_CRON`` guards the period only while the
         decorator still reads it.
@@ -805,31 +794,6 @@ class TestBrokerMirroredConstants:
             "computes a live length or age threshold from it (CannObserv/broker#44). "
             "Changing it here alone makes that threshold wrong in silence. File on "
             "CannObserv/broker first, then update both sides and this pin."
-        )
-
-    def test_the_fetch_policy_cron_matches_the_period_broker_holds(self):
-        """The one that is a decorator literal rather than a named constant."""
-        cron = self._fetch_policy_cron()
-        assert cron.value == "*/5 * * * *", (
-            f"this period is mirrored by LWW_REPUBLISH_PERIOD_SECONDS in {BROKER_BUS_HEALTH}, "
-            "which derives LWW_WARN_LAST_ENTRY_AGE_SECONDS from it at 3x. Lengthen it here "
-            "alone and the probe false-WARNs on stream age every tick. File on "
-            "CannObserv/broker first."
-        )
-
-    def test_both_republish_periods_agree(self):
-        """Broker holds **one** ``LWW_REPUBLISH_PERIOD_SECONDS`` for both LWW
-        streams, and these two can move independently — ``content.fetch-policy``
-        by editing a decorator literal, ``info.watch-status`` by setting
-        ``WATCHER_WATCH_STATUS_REPUBLISH_CRON`` on a deploy. While one constant
-        describes both, they have to be the same period, and broker's comment
-        acknowledges only the environment half."""
-        cron = self._fetch_policy_cron()
-        assert cron.value == DEFAULT_REPUBLISH_CRON, (
-            "the two full-set republish periods diverged. Broker models both with one "
-            f"constant ({BROKER_BUS_HEALTH}), so one of its two streams now has the wrong "
-            "age threshold and the wrong set reading. Splitting them is a broker change "
-            "first."
         )
 
 

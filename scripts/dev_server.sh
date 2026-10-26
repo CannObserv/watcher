@@ -297,10 +297,23 @@ if [[ "${WATCHER_DEV_SERVER_DRY_RUN:-}" == "1" ]]; then
   echo "MIGRATE=$MIGRATE_REPORT"
   echo "RESET=$RESET_REPORT"
   echo "PROCRASTINATE_SCHEMA=$SCHEMA_REPORT"
+  echo "WHEELHOUSE_CHECK=run"
   exit 0
 fi
 
 cd "$REPO_ROOT"
+
+# Hold the wheelhouse to its pins before anything else (#401). Every `uv run`
+# below syncs the project venv first, and from the deploy checkout that venv is
+# watcher.service's own: an unchecked sync could install an unverified co-core
+# into production. The unit's ExecStartPre command, so one form is in use
+# (#393); offline and stdlib-only. First, so a refusal leaves no half-done reset.
+# No bypass knob: the unit has none either.
+if ! uv run --no-project python scripts/check_wheelhouse.py; then
+  echo "dev_server: refusing to start — the wheelhouse misses its pins (above)." >&2
+  echo "  Populate it: uv run --no-project --with 'google-cloud-storage>=2,<4' python scripts/sync_wheelhouse.py" >&2
+  exit 1
+fi
 
 # libpq spelling of the dev URL, for psql; the password travels in PGPASSWORD.
 PSQL_URL="${DATABASE_URL/+asyncpg/}"

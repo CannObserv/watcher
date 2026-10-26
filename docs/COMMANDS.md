@@ -272,7 +272,9 @@ uv run procrastinate --app=src.workers.app worker
 
 ## Backup, restore and job history (#296)
 
-Operator entry points in `src/ops/`, each with its runbook:
+Operator entry points in `src/ops/`, each with its runbook. A `uv run` below syncs
+the service's `.venv` without the wheelhouse check (#401,
+[DEPENDENCIES.md](DEPENDENCIES.md) → *Accepted limit*); `.venv/bin/python` doesn't sync:
 
 ```bash
 # The backup's read-only database role — once per cluster, before its first run

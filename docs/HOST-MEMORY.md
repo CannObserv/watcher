@@ -85,9 +85,10 @@ settings block and the machine setting disagree:
 
 ```bash
 npm view socraticode version        # pick a literal; never @latest
-# 1. The driver's pre-install:
+# 1. The driver's pre-install (--save-exact: the manifest records the literal,
+#    not a caret range a later bare `npm install` there would float within):
 systemd-run --user --scope -p MemoryHigh=1200M -p MemoryMax=1536M \
-  choom -n 500 -- npm install --prefix ~/.socraticode/pin socraticode@<version>
+  choom -n 500 -- npm install --save-exact --prefix ~/.socraticode/pin socraticode@<version>
 # 2. The session's npx entry, under the same cap. npx keys its cache directory
 #    on the spec string, so this is the entry the session's launch reuses;
 #    skip it and the first session after the re-pin installs uncapped:

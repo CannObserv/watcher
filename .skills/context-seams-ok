@@ -224,3 +224,5 @@ docs/RECOVERY-PROVISIONING.md :: without it (see [*The sandbox*](RECOVERY.md#the
 docs/reference/tailscale.md :: (`docs/RECOVERY.md` → *Restore*). A rename is survivable — `WATCHER_BACKUP_PREFIX`
 tests/scripts/test_dev_server.py :: user on the box — the argv hazard docs/RECOVERY.md documents for the
 docs/RECOVERY-PROVISIONING.md :: The variables the templates can use: [What a check-in carries](RECOVERY.md#provisioning--needs-the-gcp-project-owner).
+docs/SKILLS.md :: | `brainstorming` | brainstorm, design this, let's design. Vendored as-is
+docs/SKILLS.md :: preferences, not skill logic, so they now live in `AGENTS.md` → *Agent Skills*

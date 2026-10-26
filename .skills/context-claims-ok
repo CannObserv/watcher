@@ -15,3 +15,6 @@ docs/DEPLOYMENT.md :: retarget :: #host-memory-posture-307
 docs/BUS-CONNECTION-POLICY.md :: retarget :: ARCHITECTURE.md
 docs/ENVIRONMENT.md :: retarget :: ARCHITECTURE.md
 docs/WATCHED-ITEMS.md :: retarget :: ARCHITECTURE.md
+# #396: atoms of the retired brainstorming override's row. The commit format is AGENTS.md's Conventions; elements-of-style was a dead pointer v7.0.1 no longer has.
+docs/SKILLS.md :: disproven :: #<n> [type]:
+docs/SKILLS.md :: disproven :: elements-of-style

@@ -45,23 +45,10 @@ from src.dashboard.deps import clamp_pagination, is_htmx
 from src.dashboard.forms import parse_content_config_from_form
 from src.dashboard.templating import templates
 
-# NOTE (#245): dashboard domain mutations do NOT defer a fetch-policy republish
-# — the dashboard is decoupled from the task queue (test_import_decoupling), so
-# policy changes made here travel on the periodic full-set republish instead
-# (publish_fetch_policy, every 5 minutes). Only the tombstone/clear bookkeeping,
-# which must land atomically with the Domain row, happens in-request.
-#
-# #250 widened what that costs, and the trade was re-affirmed rather than
-# inherited. Archive, restore and toggle-active now change what publishes for the
-# host (live interval vs. revoked=True), so the window is no longer "a stale
-# number" but "a host still being paced at its live interval for up to five
-# minutes after the operator stopped watching it". That is bounded, self-healing
-# and in the safe direction — the consumer's fallback is at least as strict as
-# anything we publish (see src/core/fetch_policy's module docstring) — so it does
-# not justify importing the task queue here. The API routes
-# (src/api/routes/domains) do defer, and the delegation seam used by
-# watched_item_check_now is the way to close the gap on this side if the latency
-# ever matters.
+# NOTE (#245; F1, #374): Watcher no longer publishes content.fetch-policy —
+# Archiver does — so a politeness or suspension edit here reaches nothing
+# downstream; Watcher's own scheduling still acts on it. Only the tombstone/clear
+# bookkeeping is left in-request, and F1 part 2 deletes it.
 
 router = APIRouter()
 
@@ -343,7 +330,8 @@ async def domain_delete(
 DOMAIN_FIELD_META: dict[str, dict] = {
     "min_interval": {
         "label": "Min Interval",
-        "hint": "Minimum seconds between requests to this domain",
+        "hint": "Minimum seconds between requests to this domain. Inert since F1 (#374): "
+        "Archiver publishes host policy",
         "type": "number",
         "step": "0.1",
         "min": "0.1",

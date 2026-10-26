@@ -219,7 +219,7 @@ persist. A broker outage self-heals within a minute of Redis returning, and the
 outbox holds the backlog meanwhile.
 
 With `WATCHER_BUS_REDIS_URL` unset the drain skips loudly and rows accumulate
-rather than draining — the same "no bus, no publish" posture as the fetch-policy
+rather than draining — the same "no bus, no publish" posture as the watch-status
 producer, and the reason an unset broker URL shows up as a growing backlog.
 
 The drain runs on the embedded worker inside the single uvicorn process; there

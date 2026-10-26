@@ -65,10 +65,8 @@ async def ensure_domain_and_resolve_suspension(
             async with session.begin_nested():
                 session.add(Domain(name=domain_name, min_interval=DEFAULT_MIN_INTERVAL))
                 # The host is live again: retire its fetch-policy tombstone (if
-                # any) atomically with the row that supersedes it (#245). No
-                # republish defer here — a fresh domain's min_interval equals
-                # the consumer's fallback default, so the periodic tick is soon
-                # enough.
+                # any) atomically with the row that supersedes it (#245). Inert
+                # since F1 (#374) — nothing republishes it; part 2 deletes it.
                 await clear_tombstone(session, domain_name)
         except IntegrityError:
             existing = (
@@ -76,9 +74,8 @@ async def ensure_domain_and_resolve_suspension(
             ).scalar_one_or_none()
     if existing is not None:
         return DomainResolution(
-            # Domain.is_suspended, not an inline repeat of it: since #250 the
-            # same predicate also decides whether the host publishes live policy
-            # or revoked, and the two must not drift (CR-1 finding 7).
+            # Domain.is_suspended, not an inline repeat of it: one spelling of
+            # the suspension predicate (#250, CR-1 finding 7).
             suspended=existing.is_suspended,
             default_schedule_config=existing.default_schedule_config,
         )

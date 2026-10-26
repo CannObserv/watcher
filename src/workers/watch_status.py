@@ -46,8 +46,8 @@ logger = get_logger(__name__)
 # also divides the retained window by the period to read the set size it
 # cannot mirror — lengthen the period and it reads the set low, which drags the
 # length threshold down with it (CannObserv/broker#44). Broker holds one period
-# for both LWW streams, so this must also stay equal to the literal on
-# publish_fetch_policy. Changing either is a broker change first.
+# for both LWW streams (Archiver publishes content.fetch-policy since F1, #374),
+# so changing this is a broker change first.
 REPUBLISH_CRON_ENV = "WATCHER_WATCH_STATUS_REPUBLISH_CRON"
 DEFAULT_REPUBLISH_CRON = "*/5 * * * *"
 

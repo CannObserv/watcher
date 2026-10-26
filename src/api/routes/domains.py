@@ -14,7 +14,6 @@ from src.core.fetch_policy import clear_tombstone, record_tombstone
 from src.core.models.audit_log import EventType, audit
 from src.core.models.domain import DEFAULT_MIN_INTERVAL, Domain
 from src.core.models.watched_item import WatchedItem
-from src.workers.fetch_policy import defer_policy_republish
 
 router = APIRouter(prefix="/domains", tags=["domains"])
 
@@ -70,8 +69,9 @@ async def upsert_domain(
     updates = data.model_dump(exclude_unset=True)
 
     if domain is None:
-        # The host is live again: its fetch-policy tombstone (if any) must stop
-        # being republished, atomically with the row that supersedes it (#245).
+        # The host is live again: clear its fetch-policy tombstone (if any),
+        # atomically with the row that supersedes it (#245). Nothing republishes
+        # tombstones since F1 (#374); part 2 deletes this bookkeeping.
         await clear_tombstone(session, name)
         domain = Domain(
             name=name,
@@ -109,9 +109,6 @@ async def upsert_domain(
 
     await session.commit()
     await session.refresh(domain)
-    # Post-commit so the republished set reads the new numbers; best-effort —
-    # the periodic tick covers a failed defer (#245).
-    await defer_policy_republish()
     return domain
 
 
@@ -131,42 +128,29 @@ async def delete_domain(name: str, session: AsyncSession = Depends(get_db_sessio
             detail=f"Cannot delete: watched items still reference domain '{name}'",
         )
 
-    # LWW streams have no delete: the tombstone row keeps the host's revocation
-    # in every full-set republish, atomically with the Domain delete (#245).
+    # Tombstone the host atomically with the Domain delete (#245). Nothing
+    # republishes it since F1 (#374); part 2 deletes this bookkeeping.
     await record_tombstone(session, name)
     await session.delete(domain)
     await session.commit()
-    await defer_policy_republish()
 
 
 @router.post("/{name}/archive", response_model=DomainResponse)
 async def archive_domain(name: str, session: AsyncSession = Depends(get_db_session)):
-    """Archive a domain — suspends checks for every WatchedItem on it.
-
-    Republishes, because since #250 suspension revokes the host's policy on the
-    wire. Without the defer the revocation waits for the five-minute full set,
-    and Replicator goes on pacing a host Watcher has already stopped watching.
-    """
+    """Archive a domain — suspends checks for every WatchedItem on it."""
     domain = await _get_domain_or_404(name, session)
     if domain.archived_at is None:
         domain.archived_at = datetime.now(UTC)
     await session.commit()
     await session.refresh(domain)
-    await defer_policy_republish()
     return domain
 
 
 @router.post("/{name}/restore", response_model=DomainResponse)
 async def restore_domain(name: str, session: AsyncSession = Depends(get_db_session)):
-    """Restore an archived domain.
-
-    Republishes for the same reason as archive (#250): the live interval should
-    reach Replicator when the operator restores the domain, not up to five
-    minutes later.
-    """
+    """Restore an archived domain."""
     domain = await _get_domain_or_404(name, session)
     domain.archived_at = None
     await session.commit()
     await session.refresh(domain)
-    await defer_policy_republish()
     return domain

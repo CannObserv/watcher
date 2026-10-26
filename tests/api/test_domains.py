@@ -3,6 +3,7 @@
 import pytest
 from ulid import ULID
 
+import src.workers.fetch_policy as fetch_policy_mod
 from src.core.models.fetch_policy_tombstone import FetchPolicyTombstone
 
 pytestmark = pytest.mark.integration
@@ -370,41 +371,42 @@ class TestFetchPolicyTombstoneHooks:
         assert await db_session.get(FetchPolicyTombstone, "ts-back.example") is None
 
 
-class TestSuspensionRepublishesPolicy:
-    """Every mutation that changes published policy must ask for a republish (#250 CR-1).
+class TestNoRouteDefersThePolicyPublish:
+    """F1 (#374): Watcher's ``content.fetch-policy`` producer has stopped.
 
-    Before #250 archive and restore did not affect the wire, so only upsert and
-    delete deferred. Now suspension revokes the host's policy, which makes these
-    routes policy-changing too — and without the defer the change waits up to
-    five minutes for the periodic full set. That window is the wrong direction
-    for a deactivation: Replicator keeps pacing the host at the *live* interval
-    after Watcher has stopped watching it.
+    Before F1 every mutation here deferred ``publish_fetch_policy`` (#245,
+    #250 CR-1). Archiver owns the stream now, and design D8's one-producer rule
+    is held only by sequencing — no ACL refuses a second writer — so no route
+    may queue the task, even though the task itself is a no-op.
     """
 
-    async def test_archive_defers_a_republish(self, client, monkeypatch):
+    @pytest.fixture
+    def defers(self, monkeypatch) -> list[int]:
         calls: list[int] = []
 
-        async def _spy() -> None:
+        def _spy(*_args, **_kwargs):
             calls.append(1)
+            raise AssertionError("publish_fetch_policy was deferred")
 
-        monkeypatch.setattr("src.api.routes.domains.defer_policy_republish", _spy)
-        await client.patch("/api/v1/domains/arch-pub.example", json={})
-        calls.clear()
+        monkeypatch.setattr(fetch_policy_mod.publish_fetch_policy, "configure", _spy)
+        monkeypatch.setattr(fetch_policy_mod.publish_fetch_policy, "defer_async", _spy)
+        return calls
 
-        response = await client.post("/api/v1/domains/arch-pub.example/archive")
+    async def test_upsert_defers_nothing(self, client, defers):
+        response = await client.patch("/api/v1/domains/f1-up.example", json={"min_interval": 2.0})
         assert response.status_code == 200
-        assert calls == [1]
+        assert defers == []
 
-    async def test_restore_defers_a_republish(self, client, monkeypatch):
-        calls: list[int] = []
+    async def test_delete_defers_nothing(self, client, defers):
+        await client.patch("/api/v1/domains/f1-del.example", json={})
+        defers.clear()
+        response = await client.delete("/api/v1/domains/f1-del.example")
+        assert response.status_code == 204
+        assert defers == []
 
-        async def _spy() -> None:
-            calls.append(1)
-
-        await client.patch("/api/v1/domains/rest-pub.example", json={})
-        await client.post("/api/v1/domains/rest-pub.example/archive")
-
-        monkeypatch.setattr("src.api.routes.domains.defer_policy_republish", _spy)
-        response = await client.post("/api/v1/domains/rest-pub.example/restore")
-        assert response.status_code == 200
-        assert calls == [1]
+    async def test_archive_and_restore_defer_nothing(self, client, defers):
+        await client.patch("/api/v1/domains/f1-arch.example", json={})
+        defers.clear()
+        assert (await client.post("/api/v1/domains/f1-arch.example/archive")).status_code == 200
+        assert (await client.post("/api/v1/domains/f1-arch.example/restore")).status_code == 200
+        assert defers == []

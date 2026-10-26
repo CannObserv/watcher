@@ -178,6 +178,8 @@ utilities (UI §4), and `is_htmx(request)` rather than a bare `HX-Request` read
 
 A skill is symlinked into both `skills/` and `.claude/skills/`; overrides in `skills/` shadow `skills-vendor/`: [docs/SKILLS.md](docs/SKILLS.md).
 
+**`brainstorming`, overriding its text (#396):** explicit ask or undesigned feature only; doc → `docs/plans/` → issue → `using-git-worktrees`; `writing-plans` optional. Companion: SKILLS.md *Design work*.
+
 ## Detail Docs
 
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — module layout, sibling services, fetch contracts, the probe destination guard

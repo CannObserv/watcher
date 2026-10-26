@@ -34,7 +34,7 @@ To add a new external skill repo: follow the `managing-skills` skill.
 | `reviewing-architecture` | AR, architecture review |
 | `enforcing-architecture` | add a fitness function, enforce this contract, lock this rule (delegated to by `reviewing-architecture` on a `fitness` directive) |
 | `shipping-work-python-fastapi` | ship it, push GH, close GH, wrap up |
-| `brainstorming` | brainstorm, design this, let's design |
+| `brainstorming` | brainstorm, design this, let's design. Vendored as-is: its own description claims all creative work, and `AGENTS.md` narrows that and overrides its handoff (*Design work* below) |
 | `writing-plans` | write plan, implementation plan |
 | `writing-skills` | write skill, new skill, author skill |
 | `systematic-debugging` | any bug, test failure, unexpected behavior |
@@ -72,7 +72,7 @@ Description-driven skills (`systematic-debugging`, `verification-before-completi
 
 A committed directory in `skills/` completely supersedes the vendor version — there is no
 inheritance, so whatever the directory does not provide, the skill does not have. That does
-**not** mean copying the vendor tree: both overrides fork `SKILL.md` alone and symlink every
+**not** mean copying the vendor tree: the override forks `SKILL.md` alone and symlinks every
 sibling asset back to `skills-vendor/`, so upstream fixes to the parts that were never
 customized arrive with a submodule bump. Each override records its base commit in a
 `<!-- forked from <vendor>@<sha> -->` marker directly under the frontmatter — that marker is
@@ -88,9 +88,8 @@ the reader; `synced-from: "<repo> <tag> (<commit>)"` in the frontmatter metadata
 `.skills/doctor.sh` reads, and it is the doctor's *second* drift comparison — a diff of that
 commit against the vendor now, scoped to the override's own real files. It is the only
 comparison that can see a vendor `SKILL.md` change that carried no `version:` bump, which is
-most of them (gregoryfoster/skills#286). For `brainstorming` it is the only comparison that can
-run at all: `obra/superpowers` ships no `version:`, so the stamp comparison has nothing on the
-vendor side and `version:` there is watcher's own number. Leaving `synced-from:` at the old
+most of them (gregoryfoster/skills#286); an `obra/superpowers` fork would have it alone, since
+that repo ships no `version:`. Leaving `synced-from:` at the old
 commit re-reports drift that was just paid down; dropping it gives up the comparand entirely,
 and the doctor reports an override nothing can compare as the same failure as no drift
 detection at all.
@@ -98,7 +97,6 @@ detection at all.
 | Skill | Override reason |
 |---|---|
 | `shipping-work-python-fastapi` | `SKILL.md` only: watcher commit convention in Step 2 and Step 1.5 naming watcher's `.skills/` tailoring. Step 1's `skill-scripts` block is upstream's, verbatim: it resolves each script on its own, so [scripts/pre-ship.sh](../scripts/pre-ship.sh) wins for `pre-ship.sh` alone and the other five fall through to the skill directory — a one-directory block sent them to `scripts/` and exit 127 (#320), which [tests/test_shipping_work_override.py](../tests/test_shipping_work_override.py) now runs the block to catch. All six `scripts/` entries are vendor symlinks — the ship gate is **not** forked |
-| `brainstorming` | `SKILL.md` only: `docs/plans/` path, `#<n> [type]:` commit format, a GitHub issue on the architectural path, `writing-plans` optional rather than mandatory, `using-git-worktrees` after design approval, TDD as the bounded path's workflow, the exe.dev proxy note for the visual companion's port, and upstream's `elements-of-style` pointer dropped as dead text (that skill is not vendored here). `visual-companion.md` and `scripts/` are vendor symlinks |
 
 **The ship gate's env loading lives outside the skill.** [scripts/pre-ship.sh](../scripts/pre-ship.sh)
 is watcher's wrapper, in the location upstream's Step 1 resolution loop probes first for that script. It sources
@@ -141,6 +139,54 @@ is the under-match #252 fixed. Both files are guarded by
 tracked file fails, as does advice naming a doc that no longer exists, and a differential test
 runs the real `doc-check.sh` over a throwaway repo so the guard's matcher cannot drift from the
 gate's.
+
+## Design work
+
+`brainstorming` is `obra/superpowers`' skill, vendored unmodified (#396). It used to be an
+override, and every upstream rewrite meant re-applying the same few deltas; they are watcher
+preferences, not skill logic, so they now live in `AGENTS.md` → *Agent Skills*, where they hold
+whatever the vendored text says. Upstream defers to them on the doc's location ("Your human
+partner's preferences override both"); the other two rows are overridden outright:
+
+| Upstream (v7.0.1) | Here |
+|---|---|
+| Description: use before *any* creative work, including "modifying behavior" | An explicit ask, or a feature with no design yet. An issue body or coordinator brief is already the approved design |
+| Design doc in `docs/superpowers/specs/` | `docs/plans/YYYY-MM-DD-<topic>-design.md`, committed as `#<n> docs:` on the issue's branch |
+| HARD-GATE: after approval, "invoke superpowers:writing-plans and no other skill" | A project's approved doc → GitHub issue → `using-git-worktrees`; `writing-plans` optional. There is no `superpowers:` namespace here — `writing-plans` is the gregoryfoster skill |
+
+Upstream sizes work as *a small change* (short doc, no builder check) or *a project* (full doc
+plus a builder-check subagent). The issue-and-worktree handoff is for a project; a small change
+goes straight to TDD.
+
+### The visual companion on this VM
+
+The vendored guide, `visual-companion.md`, is written for a local machine. Four things differ
+here: the first fails the launch, the next two leave the tab unreachable, and the last is how
+the user gets in:
+
+1. **Script path.** The guide writes `bash scripts/start-server.sh`; from the repo root that is
+   watcher's own `scripts/` — the cwd trap of
+   [gregoryfoster/skills#63](https://github.com/gregoryfoster/skills/issues/63). Use
+   `skills/brainstorming/scripts/start-server.sh`; it derives `SCRIPT_DIR` from `$0`, so the
+   symlink is safe.
+2. **Bind and port.** The default is `127.0.0.1` on a random port in 49152–65535; the exe.dev
+   proxy forwards only 3000–9999, and not to a loopback bind. Pass `--host 0.0.0.0` and a
+   `BRAINSTORM_PORT` in range — not 8000 (systemd) or 8001 (dev server).
+3. **URL host.** `--url-host co-watcher.exe.xyz`, not the guide's `localhost` example.
+4. **No `--open`** — there is no browser on the VM. Hand the user the emitted `url` verbatim: its
+   `?key=` is the session credential, and the server answers 403 without it, which is what keeps
+   the `0.0.0.0` bind from being an open door.
+
+```bash
+BRAINSTORM_PORT=7391 bash skills/brainstorming/scripts/start-server.sh \
+  --project-dir "$PWD" --host 0.0.0.0 --url-host co-watcher.exe.xyz
+```
+
+`--project-dir` writes the session, `.last-token` included, under `.superpowers/brainstorm/`;
+`.gitignore` covers it, guarded by
+[tests/test_brainstorm_session_is_not_committable.py](../tests/test_brainstorm_session_is_not_committable.py).
+Reachability through the proxy cannot be checked from the VM's own shell — curl fails the same
+way against port 8000, which is serving fine — so confirm with the user that the tab loaded.
 
 ## SocratiCode (Codebase Search)
 

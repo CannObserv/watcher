@@ -368,3 +368,10 @@ docs/RECOVERY.md :: retarget :: without it (see *The sandbox* above), and filled
 docs/DEPLOYMENT.md :: retarget :: Provisioning (the role script and the three files), install, why its sandbox has this shape
 docs/ENVIRONMENT.md :: retarget :: see RECOVERY.md for why a port typo still alarms rather than inverts
 docs/ENVIRONMENT.md :: retarget :: **The backup unit loads one env file of its own, and neither of the service's** (#296 D8/D9, #297)
+# #396: the brainstorming override is retired (skills/brainstorming is a vendor symlink, `test -L` refutes every override claim); its preferences moved to AGENTS.md and SKILLS.md → Design work.
+docs/SKILLS.md :: retarget :: | `brainstorming` | brainstorm, design this, let's design |
+docs/SKILLS.md :: disproven :: **not** mean copying the vendor tree: both overrides fork `SKILL.md` alone and symlink every
+docs/SKILLS.md :: disproven :: most of them (gregoryfoster/skills#286). For `brainstorming` it is the only comparison that can
+docs/SKILLS.md :: disproven :: run at all: `obra/superpowers` ships no `version:`, so the stamp comparison has nothing on the
+docs/SKILLS.md :: disproven :: vendor side and `version:` there is watcher's own number. Leaving `synced-from:` at the old
+docs/SKILLS.md :: disproven :: | `brainstorming` | `SKILL.md` only: `docs/plans/` path

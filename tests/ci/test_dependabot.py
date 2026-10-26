@@ -205,10 +205,13 @@ def _steps_using(action: str) -> list[dict]:
 
 def test_setup_uv_keeps_pruning_its_cache() -> None:
     """setup-uv v9 flipped ``prune-cache`` to ``false``; stating it keeps v5–v7's
-    behaviour, so the Actions cache doesn't grow on a bump nobody read (#360)."""
+    behaviour, so the Actions cache doesn't grow on a bump nobody read (#360).
+    A step that turns the cache off (the lock audit, #397) has none to prune."""
     steps = _steps_using("astral-sh/setup-uv")
     assert steps, "no setup-uv step found — the derivation broke"
-    assert all(s.get("with", {}).get("prune-cache") is True for s in steps)
+    cached = [s for s in steps if s.get("with", {}).get("enable-cache") is not False]
+    assert cached, "no setup-uv step keeps a cache — the derivation broke"
+    assert all(s.get("with", {}).get("prune-cache") is True for s in cached)
 
 
 def test_a_local_action_needs_no_sha() -> None:

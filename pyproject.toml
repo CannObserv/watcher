@@ -26,7 +26,8 @@ dependencies = [
     # bus contract and the stdlib-only media-type rule. Exact, because watcher
     # resolves the essence Processor dispatches on and Processor never re-resolves
     # it: bumped when CannObserv/processor coordinates a contract change, not on a
-    # schedule (#366).
+    # schedule (#366). The locked files' digests move with it:
+    # [tool.watcher.wheelhouse-sha256] (#393).
     "co-core==0.37.0",
     "co-core-aio[bus]==0.37.0",
     # Imported directly by the bus layer; docs/BUS-CONNECTION-POLICY.md was
@@ -107,12 +108,29 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["src"]
 
+# The sha256 of each wheelhouse file uv.lock names (#393, ported from
+# CannObserv/broker#125). uv records none for a find-links path, and a hand-added
+# one is gone at the next `uv lock`. scripts/sync_wheelhouse.py fetches a file
+# that misses its digest again and refuses a download that misses it too;
+# scripts/check_wheelhouse.py, the unit's fail-closed ExecStartPre, stops the
+# start before `uv run` if a file is missing or misses it. A pin change moves
+# these in the same diff (docs/DEPENDENCIES.md → the upgrade). Each digest is of
+# a file fetched over GCS's TLS, so it stops a later swap, local or in transit,
+# not one made at pin time; CannObserv/cannobserv#591 asks for a second channel.
+# 0.37.0's: the operator's `sha256sum` of the files synced 2026-10-17, taken
+# 2026-10-26, each matching its object's size and md5Hash, one generation each.
+[tool.watcher.wheelhouse-sha256]
+"co_core-0.37.0-py3-none-any.whl" = "819f4741c241343e634ad15873f8700948a0e694ae38363d359e50a7f6ce8fbb"
+"co_core-0.37.0.tar.gz" = "b1e24503269456551effdecfa173b984c11f6ac3316e3dde58ebaaaee3b16194"
+"co_core_aio-0.37.0-py3-none-any.whl" = "b53d716938933fbe6bfaaef4f50d0ba41c03e15b87365ec1a975b6347d1e604e"
+"co_core_aio-0.37.0.tar.gz" = "f19a9b874d96bd871480f5b9dac92762503e5e692fdc94dfb7edc62cd17b2521"
+
 [tool.uv]
 # cannobserv workspace packages (co-core, co-core-aio) resolve from the local
 # wheelhouse mirrored from the private GCS index gs://co-gcs-pypi (#220).
-# Populate it before any `uv` command: scripts/sync_wheelhouse.py. Reproducibility
-# is anchored by uv.lock (it pins the exact resolved version to a named wheelhouse
-# artifact; find-links locks by filename, not hash), not by wheelhouse contents.
+# Populate it before any `uv` command: scripts/sync_wheelhouse.py. uv.lock pins the
+# exact resolved version to a named wheelhouse artifact; find-links locks by
+# filename, not hash: the content check is [tool.watcher.wheelhouse-sha256] (#393).
 find-links = ["./.wheelhouse"]
 # certifi is transitive (httpx, requests) and nothing imports it, so its floor is
 # a constraint, not a dependency: 2026.10.19 drops emSign ECC Root CA - G3, the

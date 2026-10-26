@@ -141,10 +141,11 @@ sudo systemctl status watcher
 sudo journalctl -u watcher -f
 
 # Follow WARNING+ only (app records are JSON: timestamp/level/logger/message — #238).
-# `-R` + `fromjson?` is load-bearing: the ExecStartPre wheelhouse sync writes a
-# plain-text line on every start (#247), and bare `jq` aborts on it with a parse
-# error — killing the follow and hiding every record after it. Non-JSON lines are
-# tagged PLAIN rather than dropped, so a failed sync still surfaces here.
+# `-R` + `fromjson?` is load-bearing: the ExecStartPre wheelhouse sync and check
+# write plain-text lines on every start (#247, #393), and bare `jq` aborts on the
+# first with a parse error — killing the follow and hiding every record after
+# it. Non-JSON lines are tagged PLAIN rather than dropped, so a failed sync
+# still surfaces here.
 # Needs jq (present on this VM at /bin/jq); the grep below is the no-jq fallback.
 sudo journalctl -u watcher -f -o cat | jq -R 'fromjson? // {level: "PLAIN", message: .} | select(.level | IN("WARNING","ERROR","CRITICAL","PLAIN"))'
 sudo journalctl -u watcher -f -o cat | grep -E '"level": "(WARNING|ERROR|CRITICAL)"|^error: '
@@ -164,9 +165,11 @@ back as plain text. Same flag is baked into `scripts/dev_server.sh`.
 The unit's `ExecStartPre` steps are the exception (#247): they run before the
 project is importable, so their output is plain text by design — the wheelhouse
 sync writes `wheelhouse in sync: …` on every start and `error: could not sync
-gs://…` when it fails, and the BUILD_ID stamp writes plain text on failure. Any
-pipeline that `json.loads` every `MESSAGE` must tolerate them; reading journald's
-own fields (`_SYSTEMD_UNIT`, `SYSLOG_IDENTIFIER`, `MESSAGE`) is unaffected. See
+gs://…` when it fails, the digest check after it writes `wheelhouse pins hold: …`
+or `error: wheelhouse check failed: …` (#393), and the BUILD_ID stamp writes plain
+text on failure. Any pipeline that `json.loads` every `MESSAGE` must tolerate
+them; reading journald's own fields (`_SYSTEMD_UNIT`, `SYSLOG_IDENTIFIER`,
+`MESSAGE`) is unaffected. See
 [CONVENTIONS.md](CONVENTIONS.md) → *`ExecStartPre` output is plain text*.
 
 ### Host memory posture
